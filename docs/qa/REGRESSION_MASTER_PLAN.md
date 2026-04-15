@@ -31,6 +31,58 @@ This plan defines the phased QA discovery and regression program for the current
 | Player | `cd signage-screen && npm test`; `cd signage-screen && npm run test:integration`; `cd signage-screen && npm run test:fault`; `cd signage-screen && npm run test:performance`; `cd signage-screen && npm run test:default-media` | Provides runtime, reliability, offline, and performance coverage for the device layer. |
 | Deploy/Ops | `bash signhex-platform/scripts/export/package-all.sh --release <tag> --electron-platform linux`; `bash signhex-platform/scripts/bundle/assemble-runtime-bundle.sh <site-name>` | Validates artifact-driven promotion and bundle assembly assumptions used by QA and production. |
 
+## Regression Execution Baseline
+
+This baseline turns the verified repo anchors into an execution order for regression startup. It is additive to the phase tables above and is intended to normalize readiness checks, seed expectations, and tracker handling before feature-by-feature execution begins.
+
+### Environment Status
+
+| Area | Status | Details | Commands |
+| --- | --- | --- | --- |
+| `backend` | `ready` | Evidence: `signhex-server/docker-compose.yml`, `docker-compose.dev.yml`, `.env.qa.example`, `scripts/check-services.ts`, `scripts/seed.ts`, `vitest.config.ts`, `scripts/api-test-report.ts`.<br>Local Postgres and MinIO readiness is repo-backed.<br>`npm test` is a live API smoke wrapper, not the primary unit harness, and it requires admin credentials. | `cd signhex-server && cp .env.qa.example .env`<br>`cd signhex-server && npm install`<br>`cd signhex-server && docker compose up -d postgres minio`<br>`cd signhex-server && npm run check`<br>`cd signhex-server && npm run seed`<br>`cd signhex-server && npx vitest run`<br>`cd signhex-server && npm run test:default-media`<br>`cd signhex-server && npm run dev:watch`<br>`cd signhex-server && API_BASE_URL=http://127.0.0.1:3000 ADMIN_EMAIL=<admin-email> ADMIN_PASSWORD=<admin-password> npm test` |
+| `cms` | `partial` | Evidence: `signhex-nexus-core/vitest.config.ts`, `playwright.config.ts`, `tests/*.e2e.spec.ts`.<br>Unit harness is ready.<br>Playwright is present but depends on browser install plus backend and auth setup for the full suite.<br>`test:chat-e2e` is misnamed and actually runs the Playwright suite via the shared config.<br>`test:default-media` is mock-backed and can run without a live backend. | `cd signhex-nexus-core && npm install`<br>`cd signhex-nexus-core && npm run test:unit`<br>`cd signhex-nexus-core && npx playwright install --with-deps chromium`<br>`cd signhex-nexus-core && VITE_API_BASE_URL=http://127.0.0.1:3000 E2E_ADMIN_EMAIL=<admin-email> E2E_ADMIN_PASSWORD=<admin-password> npm run test:chat-e2e`<br>`cd signhex-nexus-core && npm run test:default-media` |
+| `player` | `ready` | Evidence: `signage-screen/.mocharc.json`, `src/main/services/operator-tools.ts`, `test/unit`, `test/integration`, `test/fault-injection`, `test/performance`.<br>`npm test` covers unit and integration only.<br>Fault and performance remain separate required passes.<br>`npm run doctor` is a real readiness probe for config, pairing, display, cache, and autostart state. | `cd signage-screen && npm install`<br>`cd signage-screen && npm run doctor`<br>`cd signage-screen && npm test`<br>`cd signage-screen && npm run test:default-media`<br>`cd signage-screen && npm run test:fault`<br>`cd signage-screen && npm run test:performance` |
+| `deploy` | `partial` | Evidence: `signhex-platform/scripts/export/package-server.sh`, `package-cms.sh`, `package-all.sh`, `scripts/bundle/assemble-runtime-bundle.sh`, `docs/runbooks/onprem-qa-setup.md`, `deploy/qa`, `manifests/qa/versions.example.yaml`.<br>Artifact and bundle scripts are present.<br>QA deployment depends on external release artifacts and QA VM topology, so it is not locally self-sufficient.<br>The baseline should use the runbook-backed export flow, not only the older generic `package-all.sh` shortcut. | `export RELEASE_ID=<release-id>`<br>`bash signhex-platform/scripts/export/package-server.sh --release "$RELEASE_ID" --deployment-layout production-split`<br>`bash signhex-platform/scripts/export/package-cms.sh --release "$RELEASE_ID"`<br>`export SITE_NAME=<site-name>`<br>`export QA_DATA_HOST=<qa-data-ip>`<br>`export QA_BACKEND_HOST=<qa-backend-ip>`<br>`export QA_BACKEND_DEVICE_HOST=<qa-backend-device-ip>`<br>`export QA_CMS_HOST=<qa-cms-ip>`<br>`export SERVER_PACKAGE_DIR="out/${RELEASE_ID}/server"`<br>`export CMS_PACKAGE_DIR="out/${RELEASE_ID}/cms"`<br>`export PLAYER_ARTIFACTS_DIR=<player-artifacts-dir>`<br>`bash signhex-platform/scripts/bundle/assemble-runtime-bundle.sh --profile qa "$SITE_NAME"` |
+
+### Seed And Data Preconditions
+
+- Backend seed uses `signhex-server/scripts/seed.ts` and must create the admin account from `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+- Non-admin user coverage must exist before `RG-4` because CMS authz and RBAC checks need more than the seeded admin.
+- The media library must include at least one `READY` image, video, document/PDF-like asset, and default-media candidate before `RG-5`.
+- At least one paired screen with valid certificate history is required before `RG-6`.
+- Chat, notification, API key, webhook, and SSO sample data are required before `RG-7`.
+- Player fixtures under `signage-screen/test/fixtures` are harness fixtures only and do not replace backend or CMS seed data.
+
+### Phase Order
+
+| Phase | Goal | Entry Requirements | Exit Requirements |
+| --- | --- | --- | --- |
+| `RG-0` | Workspace And Tracker Baseline | All three QA docs are present.<br>`signhex-server`, `signhex-nexus-core`, `signage-screen`, and `signhex-platform` are available locally.<br>Node 20 and Docker are available. | Environment statuses are recorded.<br>Tracker workflow is locked for execution.<br>Known defects `REG-0001` through `REG-0009` are listed as the starting backlog. |
+| `RG-1` | Backend Local Stack Readiness | `.env` is materialized from `.env.qa.example`.<br>Docker is available. | Postgres and MinIO are healthy.<br>Seed succeeds.<br>Backend Vitest and default-media suites are runnable.<br>Live API smoke command is documented with required auth env. |
+| `RG-2` | CMS Unit/E2E Readiness | `RG-1` is complete.<br>The backend is reachable at `http://127.0.0.1:3000`.<br>Playwright browser installation is complete. | CMS unit suite is runnable.<br>The local dev-server-backed Playwright path is confirmed.<br>Admin credential requirement is documented.<br>Mocked default-media spec and the full Playwright suite are clearly separated. |
+| `RG-3` | Player Harness Readiness | Node and npm are available.<br>Player config and test fixture path are understood. | `doctor`, unit, integration, fault, performance, and default-media commands are all mapped.<br>`npm test` scope is explicitly documented as unit and integration only. |
+| `RG-4` | Phase 1 Access/Admin Regression | `RG-1` and `RG-2` are complete.<br>Seeded admin and non-admin accounts are available. | Auth, session, RBAC, users, departments, and settings smoke coverage is executed.<br>Pre-existing `REG-0001` and `REG-0002` are revalidated instead of duplicated.<br>No open current-phase `blocker` or `critical` issue remains. |
+| `RG-5` | Phase 2 Content/Scheduling Regression | `RG-4` is stable.<br>Media, layout, schedule, and default-media seed set exists. | Media, layouts, scheduling, requests, reservations, emergency, and default-media flows are mapped to runnable tests and manual checks.<br>Pre-existing `REG-0006` is revalidated.<br>No open `blocker` against Phase 2 surfaces remains. |
+| `RG-6` | Phase 3 Fleet/Player Runtime Regression | `RG-3` is complete.<br>At least one paired device or reproducible player fixture path is available.<br>Publish path is stable from `RG-5`. | Pairing, telemetry, playback, commands, screenshots, proof-of-play, and offline recovery are executed across backend, player, and CMS return paths.<br>Pre-existing `REG-0008` and `REG-0009` are revalidated.<br>No open `blocker` against Phase 3 surfaces remains. |
+| `RG-7` | Phase 4 Communications, Reporting, And QA Artifact Readiness | `RG-6` is stable.<br>Report and chat seed data are available.<br>Release artifact inputs are available for QA bundle validation. | Communications, reporting, and ops surfaces are executed.<br>The artifact-driven QA bundle path is verified as runnable from the documented commands.<br>Pre-existing `REG-0003`, `REG-0004`, `REG-0005`, and `REG-0007` are revalidated.<br>Deploy readiness gaps are recorded as environment blockers if unresolved. |
+| `RG-8` | Phase 5 Robustness Revalidation And Closeout | Discovery across `RG-4` through `RG-7` is substantially complete. | Only tracker-backed fixes are retested.<br>Rows move through `fixed-pending-qa` to `verified`.<br>No scope expansion occurs beyond existing tracker items. |
+
+### Tracker Workflow During Regression
+
+- `REG-0001` through `REG-0009` are the known starting defect set and must be revalidated in the matching `RG-*` phase instead of being re-filed.
+- Known defect mapping for baseline execution is: `RG-4` revalidates `REG-0001` and `REG-0002`; `RG-5` revalidates `REG-0006`; `RG-6` revalidates `REG-0008` and `REG-0009`; `RG-7` revalidates `REG-0003`, `REG-0004`, `REG-0005`, and `REG-0007`.
+- New defects discovered during execution continue at `REG-0010`.
+- Use `blocked` only for environment or dependency issues that stop the current `RG-*` phase.
+- Every new defect row must reference canonical IDs from `FEATURE_INVENTORY.md` and the active regression phase.
+- Phase exits must respect the existing plan gates: unresolved `blocker` or `critical` issues in the current phase stop progression.
+- `RG-8` may update only previously logged tracker rows.
+
+### Execution Notes
+
+| Date | RG Phase | Outcome | Notes |
+| --- | --- | --- | --- |
+| `2026-04-15` | `RG-4` | `executed-with-open-defects` | Backend Phase 1 route coverage passed for auth, login throttle, RBAC policy, users, invites, departments, roles/permissions, and backup deletion after test-harness seeding was expanded to include `SUPER_ADMIN`. CMS unit coverage passed for `access` and `authorization` helpers. `REG-0001` and `REG-0002` were revalidated, and `REG-0010` was created for a CMS/backend RBAC contract mismatch in user-target management. No `blocker` or `critical` defect was confirmed in this phase. |
+
 ## Data / Seed Needs
 
 - Backend bootstrap data from `signhex-server/scripts/seed.ts`.
