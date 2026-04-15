@@ -42,6 +42,12 @@ export async function seedTestData() {
     .insert(schema.roles)
     .values([
       {
+        id: testRoles.SUPER_ADMIN.id,
+        name: testRoles.SUPER_ADMIN.name,
+        permissions: SYSTEM_ROLE_DEFAULTS.SUPER_ADMIN,
+        is_system: true,
+      },
+      {
         id: testRoles.ADMIN.id,
         name: testRoles.ADMIN.name,
         permissions: SYSTEM_ROLE_DEFAULTS.ADMIN,
@@ -113,6 +119,10 @@ export const testUser = {
 };
 
 export const testRoles = {
+  SUPER_ADMIN: {
+    id: '00000000-0000-0000-0000-000000000009',
+    name: 'SUPER_ADMIN',
+  },
   ADMIN: {
     id: '00000000-0000-0000-0000-000000000010',
     name: 'ADMIN',

@@ -15,7 +15,7 @@ describe('Auth Routes', () => {
   });
 
   describe('POST /api/v1/auth/login', () => {
-    it('should return 422 for invalid email', async () => {
+    it('should return 400 for invalid email rejected by the route schema', async () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/v1/auth/login',
@@ -25,11 +25,11 @@ describe('Auth Routes', () => {
         },
       });
 
-      expect(response.statusCode).toBe(HTTP_STATUS.UNPROCESSABLE_CONTENT);
+      expect(response.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
       const body = JSON.parse(response.body);
       expect(body.success).toBe(false);
-      expect(body.error.code).toBe('VALIDATION_ERROR');
-      expect(Array.isArray(body.error.details)).toBe(true);
+      expect(body.error.code).toBe('BAD_REQUEST');
+      expect(body.error.message).toBe('Invalid request');
     });
 
     it('should return 401 for invalid credentials', async () => {
@@ -131,13 +131,19 @@ describe('Auth Routes', () => {
   });
 
   describe('POST /api/v1/auth/logout', () => {
-    it('should return 401 without authorization header', async () => {
+    it('should still clear auth cookies and return 200 without authorization header', async () => {
       const response = await server.inject({
         method: 'POST',
         url: '/api/v1/auth/logout',
       });
 
-      expect(response.statusCode).toBe(HTTP_STATUS.UNAUTHORIZED);
+      expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      const body = JSON.parse(response.body);
+      expect(body).toEqual({ message: 'Logged out successfully' });
+      const setCookie = response.headers['set-cookie'];
+      const cookieHeader = Array.isArray(setCookie) ? setCookie.join('\n') : String(setCookie);
+      expect(cookieHeader).toContain('access_token=');
+      expect(cookieHeader).toContain('csrf_token=');
     });
 
     it('should revoke token on logout', async () => {
