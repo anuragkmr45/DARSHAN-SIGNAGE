@@ -113,7 +113,14 @@ const AuthenticatedAppShell = () => {
                     </ProtectedRoute>
                   }
                 />
-                <Route path="/requests" element={<Requests />} />
+                <Route
+                  path="/requests"
+                  element={
+                    <ProtectedRoute requirePermissions={[{ action: "read", subject: "Request" }]}>
+                      <Requests />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route
                   path="/departments"
                   element={
@@ -226,10 +233,43 @@ const AuthenticatedAppShell = () => {
                     </ProtectedRoute>
                   }
                 />
-                <Route path="/api-keys" element={<ApiKeys />} />
-                <Route path="/webhooks" element={<Webhooks />} />
-                <Route path="/sso-config" element={<SsoConfig />} />
-                <Route path="/proof-of-play" element={<ProofOfPlay />} />
+                <Route
+                  path="/api-keys"
+                  element={
+                    <ProtectedRoute requirePermissions={[{ action: "read", subject: "ApiKey" }]}>
+                      <ApiKeys />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/webhooks"
+                  element={
+                    <ProtectedRoute requirePermissions={[{ action: "read", subject: "Webhook" }]}>
+                      <Webhooks />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/sso-config"
+                  element={
+                    <ProtectedRoute requirePermissions={[{ action: "read", subject: "SsoConfig" }]}>
+                      <SsoConfig />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/proof-of-play"
+                  element={
+                    <ProtectedRoute
+                      requirePermissions={[
+                        { action: "read", subject: "ProofOfPlay" },
+                        { action: "read", subject: "Report" },
+                      ]}
+                    >
+                      <ProofOfPlay />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </main>

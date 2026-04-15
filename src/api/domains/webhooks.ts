@@ -1,6 +1,6 @@
 import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
-import type { Webhook } from "../types";
+import type { PaginatedResponse, Webhook } from "../types";
 
 export interface CreateWebhookPayload {
   name: string;
@@ -19,10 +19,12 @@ export const webhooksApi = {
     }),
 
   list: () =>
-    apiClient.request<Webhook[]>({
-      path: endpoints.webhooks.base,
-      method: "GET",
-    }),
+    apiClient
+      .request<{ items: Webhook[] } | PaginatedResponse<Webhook>>({
+        path: endpoints.webhooks.base,
+        method: "GET",
+      })
+      .then((response) => response.items),
 
   update: (webhookId: string, payload: Partial<CreateWebhookPayload>) =>
     apiClient.request<Webhook>({
@@ -38,7 +40,12 @@ export const webhooksApi = {
     }),
 
   test: (webhookId: string) =>
-    apiClient.request<void>({
+    apiClient.request<{
+      success: boolean;
+      attempted: string;
+      status_code: number;
+      sent_at: string;
+    }>({
       path: endpoints.webhooks.test(webhookId),
       method: "POST",
     }),

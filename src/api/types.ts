@@ -147,6 +147,9 @@ export interface Webhook {
   target_url: string;
   headers?: Record<string, string>;
   is_active?: boolean;
+  last_status?: string | null;
+  last_status_at?: string | null;
+  created_at?: string;
 }
 
 export interface SsoConfig {

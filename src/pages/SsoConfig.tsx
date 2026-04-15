@@ -1,5 +1,10 @@
-import { useState } from "react";
-import { Shield, CheckCircle, AlertCircle, Link2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle, Copy, Shield } from "lucide-react";
+import { ApiError } from "@/api/apiClient";
+import { ssoApi } from "@/api/domains/ssoConfig";
+import type { SsoConfig as SsoConfigRecord } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,59 +17,141 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 
-const SsoConfig = () => {
-  const { toast } = useToast();
-  const [provider, setProvider] = useState("google");
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [domain, setDomain] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
+type SsoFormState = {
+  provider: string;
+  issuer: string;
+  client_id: string;
+  client_secret: string;
+  authorization_url: string;
+  token_url: string;
+  jwks_url: string;
+  redirect_uri: string;
+  scopes: string;
+};
 
-  const redirectUrl = `${window.location.origin}/auth/callback`;
+const createDefaultState = (): SsoFormState => ({
+  provider: "oidc",
+  issuer: "",
+  client_id: "",
+  client_secret: "",
+  authorization_url: "",
+  token_url: "",
+  jwks_url: "",
+  redirect_uri:
+    typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : "",
+  scopes: "openid, profile, email",
+});
 
-  const handleTestConnection = () => {
-    setIsTesting(true);
-    
-    setTimeout(() => {
-      setIsTesting(false);
-      setIsConnected(true);
-      toast({
-        title: "Connection Successful",
-        description: "SSO provider has been connected and tested successfully.",
-      });
-    }, 2000);
+const mapConfigToState = (config: SsoConfigRecord | null): SsoFormState => {
+  if (!config) {
+    return createDefaultState();
+  }
+
+  return {
+    provider: config.provider || "oidc",
+    issuer: config.issuer || "",
+    client_id: config.client_id || "",
+    client_secret: config.client_secret || "",
+    authorization_url: config.authorization_url || "",
+    token_url: config.token_url || "",
+    jwks_url: config.jwks_url || "",
+    redirect_uri:
+      config.redirect_uri ||
+      (typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : ""),
+    scopes: (config.scopes ?? []).join(", "),
   };
+};
 
-  const handleSaveConfiguration = () => {
-    if (!clientId.trim() || !clientSecret.trim()) {
+export default function SsoConfig() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [formState, setFormState] = useState<SsoFormState>(createDefaultState);
+
+  const { data: activeConfig, isLoading, error } = useQuery({
+    queryKey: ["sso-config", "active"],
+    queryFn: ssoApi.getActive,
+  });
+
+  useEffect(() => {
+    setFormState(mapConfigToState(activeConfig ?? null));
+  }, [activeConfig]);
+
+  const scopes = useMemo(
+    () =>
+      formState.scopes
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    [formState.scopes],
+  );
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      ssoApi.upsert({
+        provider: formState.provider.trim() || "oidc",
+        issuer: formState.issuer.trim(),
+        client_id: formState.client_id.trim(),
+        client_secret: formState.client_secret.trim(),
+        authorization_url: formState.authorization_url.trim() || undefined,
+        token_url: formState.token_url.trim() || undefined,
+        jwks_url: formState.jwks_url.trim() || undefined,
+        redirect_uri: formState.redirect_uri.trim() || undefined,
+        scopes,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sso-config", "active"] });
       toast({
-        title: "Validation Error",
-        description: "Please provide Client ID and Client Secret.",
+        title: "Configuration saved",
+        description: "The active SSO configuration was persisted through the backend API.",
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: "Save failed",
+        description:
+          mutationError instanceof ApiError
+            ? mutationError.message
+            : "Unable to save SSO configuration.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deactivateMutation = useMutation({
+    mutationFn: (id: string) => ssoApi.deactivate(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sso-config", "active"] });
+      toast({
+        title: "Configuration deactivated",
+        description: "The active SSO configuration was disconnected.",
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: "Disconnect failed",
+        description:
+          mutationError instanceof ApiError
+            ? mutationError.message
+            : "Unable to deactivate SSO configuration.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSave = () => {
+    if (!formState.issuer.trim() || !formState.client_id.trim() || !formState.client_secret.trim()) {
+      toast({
+        title: "Validation error",
+        description: "Issuer, client ID, and client secret are required.",
         variant: "destructive",
       });
       return;
     }
 
-    toast({
-      title: "Configuration Saved",
-      description: "SSO configuration has been updated successfully.",
-    });
-  };
-
-  const handleDisconnect = () => {
-    setIsConnected(false);
-    setClientId("");
-    setClientSecret("");
-    setDomain("");
-    toast({
-      title: "Disconnected",
-      description: "SSO provider has been disconnected.",
-    });
+    saveMutation.mutate();
   };
 
   return (
@@ -73,261 +160,193 @@ const SsoConfig = () => {
         <div className="min-w-0">
           <h1 className="text-3xl font-bold tracking-tight">SSO / OIDC Configuration</h1>
           <p className="text-muted-foreground">
-            Configure Single Sign-On authentication for your organization
+            Persist the active sign-in provider through the existing backend lifecycle.
           </p>
         </div>
-        {isConnected && (
+        {activeConfig ? (
           <Badge variant="default" className="flex items-center gap-2">
             <CheckCircle className="h-3 w-3" />
-            Connected
+            Active
           </Badge>
-        )}
+        ) : null}
       </div>
 
-      <Tabs defaultValue="configuration" className="space-y-4">
-        <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto p-1">
-          <TabsTrigger value="configuration" className="shrink-0">
-            <Shield className="mr-2 h-4 w-4" />
-            Configuration
-          </TabsTrigger>
-          <TabsTrigger value="mapping" className="shrink-0">
-            <Link2 className="mr-2 h-4 w-4" />
-            Attribute Mapping
-          </TabsTrigger>
-        </TabsList>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Active Provider
+          </CardTitle>
+          <CardDescription>
+            Save and deactivate the currently active provider. This page no longer simulates a
+            successful connection test.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {error ? (
+            <div className="text-sm text-destructive">
+              {error instanceof ApiError ? error.message : "Unable to load SSO configuration."}
+            </div>
+          ) : null}
 
-        <TabsContent value="configuration">
-          <Card>
-            <CardHeader>
-              <CardTitle>SSO Provider Setup</CardTitle>
-              <CardDescription>
-                Connect your identity provider using OIDC/SAML protocol
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="provider">Identity Provider</Label>
-                <Select value={provider} onValueChange={setProvider}>
-                  <SelectTrigger id="provider">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="google">Google Workspace</SelectItem>
-                    <SelectItem value="azure">Azure Active Directory</SelectItem>
-                    <SelectItem value="okta">Okta</SelectItem>
-                    <SelectItem value="auth0">Auth0</SelectItem>
-                    <SelectItem value="onelogin">OneLogin</SelectItem>
-                    <SelectItem value="custom">Custom OIDC</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="space-y-2">
+            <Label htmlFor="provider">Provider</Label>
+            <Select
+              value={formState.provider}
+              onValueChange={(value) => setFormState((current) => ({ ...current, provider: value }))}
+              disabled={isLoading}
+            >
+              <SelectTrigger id="provider">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="oidc">Generic OIDC</SelectItem>
+                <SelectItem value="google">Google Workspace</SelectItem>
+                <SelectItem value="azure">Azure Active Directory</SelectItem>
+                <SelectItem value="okta">Okta</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-              <Separator />
+          <Separator />
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="client-id">Client ID</Label>
-                  <Input
-                    id="client-id"
-                    placeholder="your-client-id-here"
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                  />
-                </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field
+              id="issuer"
+              label="Issuer"
+              value={formState.issuer}
+              onChange={(value) => setFormState((current) => ({ ...current, issuer: value }))}
+              placeholder="https://issuer.example.com"
+            />
+            <Field
+              id="client-id"
+              label="Client ID"
+              value={formState.client_id}
+              onChange={(value) => setFormState((current) => ({ ...current, client_id: value }))}
+              placeholder="cms-client-id"
+            />
+            <Field
+              id="client-secret"
+              label="Client Secret"
+              value={formState.client_secret}
+              onChange={(value) => setFormState((current) => ({ ...current, client_secret: value }))}
+              placeholder="super-secret"
+              type="password"
+            />
+            <Field
+              id="authorization-url"
+              label="Authorization URL"
+              value={formState.authorization_url}
+              onChange={(value) =>
+                setFormState((current) => ({ ...current, authorization_url: value }))
+              }
+              placeholder="https://issuer.example.com/authorize"
+            />
+            <Field
+              id="token-url"
+              label="Token URL"
+              value={formState.token_url}
+              onChange={(value) => setFormState((current) => ({ ...current, token_url: value }))}
+              placeholder="https://issuer.example.com/token"
+            />
+            <Field
+              id="jwks-url"
+              label="JWKS URL"
+              value={formState.jwks_url}
+              onChange={(value) => setFormState((current) => ({ ...current, jwks_url: value }))}
+              placeholder="https://issuer.example.com/jwks"
+            />
+          </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="client-secret">Client Secret</Label>
-                  <Input
-                    id="client-secret"
-                    type="password"
-                    placeholder="your-client-secret-here"
-                    value={clientSecret}
-                    onChange={(e) => setClientSecret(e.target.value)}
-                  />
-                </div>
+          <Field
+            id="redirect-uri"
+            label="Redirect URI"
+            value={formState.redirect_uri}
+            onChange={(value) => setFormState((current) => ({ ...current, redirect_uri: value }))}
+            placeholder="https://cms.example.com/auth/callback"
+          />
 
-                {(provider === "azure" || provider === "okta") && (
-                  <div className="space-y-2">
-                    <Label htmlFor="domain">Domain</Label>
-                    <Input
-                      id="domain"
-                      placeholder={provider === "azure" ? "your-tenant.onmicrosoft.com" : "your-domain.okta.com"}
-                      value={domain}
-                      onChange={(e) => setDomain(e.target.value)}
-                    />
-                  </div>
-                )}
-              </div>
+          <div className="space-y-2">
+            <Label htmlFor="scopes">Scopes</Label>
+            <Textarea
+              id="scopes"
+              value={formState.scopes}
+              onChange={(event) =>
+                setFormState((current) => ({ ...current, scopes: event.target.value }))
+              }
+              rows={3}
+              placeholder="openid, profile, email"
+            />
+          </div>
 
-              <Separator />
+          <div className="flex flex-col gap-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">Connection testing</span>
+            <span>
+              The current backend route surface persists configuration and deactivation only. This
+              page intentionally does not simulate a fake successful test connection.
+            </span>
+          </div>
 
-              <div className="space-y-2">
-                <Label>Redirect URL</Label>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    value={redirectUrl}
-                    readOnly
-                    className="font-mono text-sm"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full sm:w-auto"
-                    onClick={() => {
-                      navigator.clipboard.writeText(redirectUrl);
-                      toast({
-                        title: "Copied",
-                        description: "Redirect URL copied to clipboard.",
-                      });
-                    }}
-                  >
-                    Copy
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Add this URL to your identity provider's allowed redirect URLs
-                </p>
-              </div>
-
-              <Separator />
-
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  onClick={handleTestConnection}
-                  disabled={isTesting || !clientId || !clientSecret}
-                  variant="outline"
-                >
-                  {isTesting ? (
-                    <>
-                      <AlertCircle className="mr-2 h-4 w-4 animate-spin" />
-                      Testing...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="mr-2 h-4 w-4" />
-                      Test Connection
-                    </>
-                  )}
-                </Button>
-
-                <Button onClick={handleSaveConfiguration}>
-                  Save Configuration
-                </Button>
-
-                {isConnected && (
-                  <Button variant="destructive" onClick={handleDisconnect}>
-                    Disconnect
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {isConnected && (
-            <Card className="border-green-500/20 bg-green-500/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-green-600">
-                  <CheckCircle className="h-5 w-5" />
-                  Connection Status
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-                  <div>
-                    <p className="text-muted-foreground">Provider</p>
-                    <p className="font-medium capitalize">{provider}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Status</p>
-                    <Badge variant="default">Active</Badge>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Last Tested</p>
-                    <p className="font-medium">{new Date().toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Users Synced</p>
-                    <p className="font-medium">247 users</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="mapping">
-          <Card>
-            <CardHeader>
-              <CardTitle>User Attribute Mapping</CardTitle>
-              <CardDescription>
-                Map SSO provider attributes to application user fields
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Application Field</Label>
-                  <Input value="Email" readOnly className="bg-muted" />
-                </div>
-                <div className="space-y-2">
-                  <Label>SSO Attribute</Label>
-                  <Input placeholder="email" defaultValue="email" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Application Field</Label>
-                  <Input value="First Name" readOnly className="bg-muted" />
-                </div>
-                <div className="space-y-2">
-                  <Label>SSO Attribute</Label>
-                  <Input placeholder="given_name" defaultValue="given_name" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Application Field</Label>
-                  <Input value="Last Name" readOnly className="bg-muted" />
-                </div>
-                <div className="space-y-2">
-                  <Label>SSO Attribute</Label>
-                  <Input placeholder="family_name" defaultValue="family_name" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Application Field</Label>
-                  <Input value="Department" readOnly className="bg-muted" />
-                </div>
-                <div className="space-y-2">
-                  <Label>SSO Attribute</Label>
-                  <Input placeholder="department" defaultValue="department" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Application Field</Label>
-                  <Input value="Role" readOnly className="bg-muted" />
-                </div>
-                <div className="space-y-2">
-                  <Label>SSO Attribute</Label>
-                  <Input placeholder="groups" defaultValue="groups" />
-                </div>
-              </div>
-
-              <Separator />
-
-              <Button>Save Mapping</Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          <div className="flex flex-wrap gap-3">
+            <Button onClick={handleSave} disabled={saveMutation.isPending || isLoading}>
+              {saveMutation.isPending ? "Saving..." : "Save Configuration"}
+            </Button>
+            {activeConfig ? (
+              <Button
+                variant="destructive"
+                onClick={() => deactivateMutation.mutate(activeConfig.id)}
+                disabled={deactivateMutation.isPending}
+              >
+                {deactivateMutation.isPending ? "Disconnecting..." : "Disconnect"}
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (typeof navigator !== "undefined" && navigator.clipboard) {
+                  void navigator.clipboard.writeText(formState.redirect_uri);
+                }
+                toast({
+                  title: "Copied",
+                  description: "Redirect URI copied to clipboard.",
+                });
+              }}
+            >
+              <Copy className="mr-2 h-4 w-4" />
+              Copy Redirect URI
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
-};
+}
 
-export default SsoConfig;
+function Field({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  type?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}

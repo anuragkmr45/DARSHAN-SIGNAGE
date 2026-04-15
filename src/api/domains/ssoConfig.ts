@@ -16,10 +16,12 @@ export const ssoApi = {
     }),
 
   getActive: () =>
-    apiClient.request<SsoConfig | null>({
-      path: endpoints.ssoConfig.base,
-      method: "GET",
-    }),
+    apiClient
+      .request<{ items: SsoConfig[] }>({
+        path: endpoints.ssoConfig.base,
+        method: "GET",
+      })
+      .then((response) => response.items[0] ?? null),
 
   deactivate: (id: string) =>
     apiClient.request<void>({

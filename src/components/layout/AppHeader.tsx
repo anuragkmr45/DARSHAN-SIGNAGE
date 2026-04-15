@@ -59,8 +59,12 @@ export function AppHeader() {
           <div className="order-2 relative w-full min-w-0 lg:order-1 lg:max-w-2xl">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search screens, media, requests..."
+              aria-label="Global search unavailable"
+              title="Global search is not available in this build."
+              placeholder="Global search unavailable in this build"
               className="h-10 pl-9 bg-muted/50"
+              disabled
+              readOnly
             />
           </div>
 

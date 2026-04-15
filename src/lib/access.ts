@@ -101,8 +101,8 @@ export const canManageUserTarget = (
   targetDepartmentId?: string | null,
 ) => {
   if (!actor?.role || !targetRoleName) return false;
-  if (actor.role === "SUPER_ADMIN") return targetRoleName === "ADMIN";
-  if (actor.role === "ADMIN") return targetRoleName === "DEPARTMENT";
+  if (actor.role === "SUPER_ADMIN") return targetRoleName === "ADMIN" || targetRoleName === "OPERATOR";
+  if (actor.role === "ADMIN") return targetRoleName === "DEPARTMENT" || targetRoleName === "OPERATOR";
   if (actor.role === "DEPARTMENT") {
     return targetRoleName === "OPERATOR" && actor.department_id === targetDepartmentId;
   }

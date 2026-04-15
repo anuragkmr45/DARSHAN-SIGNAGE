@@ -1,6 +1,6 @@
 import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
-import type { ApiKey } from "../types";
+import type { ApiKey, PaginatedResponse } from "../types";
 
 export interface CreateApiKeyPayload {
   name: string;
@@ -19,11 +19,13 @@ export const apiKeysApi = {
     }),
 
   list: () =>
-    apiClient.request<ApiKey[]>({
-      path: endpoints.apiKeys.base,
-      method: "GET",
-      useApiKey: true,
-    }),
+    apiClient
+      .request<PaginatedResponse<ApiKey>>({
+        path: endpoints.apiKeys.base,
+        method: "GET",
+        useApiKey: true,
+      })
+      .then((response) => response.items),
 
   rotate: (apiKeyId: string) =>
     apiClient.request<ApiKey>({

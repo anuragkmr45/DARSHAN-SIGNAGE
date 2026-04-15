@@ -14,9 +14,9 @@ const makeUser = (overrides: Partial<User>): User => ({
 describe("access helpers", () => {
   it("limits the Users page targets to the requested system-role ladder", () => {
     expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "ADMIN")).toBe(true);
-    expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "OPERATOR")).toBe(false);
+    expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "OPERATOR")).toBe(true);
     expect(canManageUserTarget(makeUser({ role: "ADMIN" }), "DEPARTMENT")).toBe(true);
-    expect(canManageUserTarget(makeUser({ role: "ADMIN" }), "OPERATOR")).toBe(false);
+    expect(canManageUserTarget(makeUser({ role: "ADMIN" }), "OPERATOR")).toBe(true);
   });
 
   it("allows department users to manage only their own operators in the Users page", () => {

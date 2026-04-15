@@ -1,18 +1,13 @@
-import { useState } from "react";
-import { Webhook, Send, AlertCircle, CheckCircle, XCircle, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertCircle, Plus, Send, Trash2, Webhook } from "lucide-react";
+import { ApiError } from "@/api/apiClient";
+import { webhooksApi } from "@/api/domains/webhooks";
+import type { Webhook as WebhookRecord } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -22,173 +17,162 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 
-interface WebhookConfig {
-  id: string;
-  url: string;
-  events: string[];
-  status: "active" | "inactive";
-  createdAt: string;
-}
+const availableEvents = [
+  { id: "screen.online", label: "Screen Comes Online" },
+  { id: "screen.offline", label: "Screen Goes Offline" },
+  { id: "content.approved", label: "Content Approved" },
+  { id: "content.rejected", label: "Content Rejected" },
+  { id: "content.published", label: "Content Published" },
+  { id: "request.created", label: "Request Created" },
+  { id: "request.completed", label: "Request Completed" },
+  { id: "department.created", label: "Department Created" },
+];
 
-interface DeliveryLog {
-  id: string;
-  webhookId: string;
-  event: string;
-  timestamp: string;
-  status: "success" | "failed" | "pending";
-  statusCode?: number;
-  response?: string;
-}
+const statusLabel = (webhook: WebhookRecord) => {
+  if (webhook.is_active === false) {
+    return "Inactive";
+  }
 
-const Webhooks = () => {
+  if (!webhook.last_status) {
+    return "Never tested";
+  }
+
+  if (webhook.last_status === "SUCCESS") {
+    return "Healthy";
+  }
+
+  return webhook.last_status;
+};
+
+export default function Webhooks() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [webhookName, setWebhookName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
 
-  const [webhooks, setWebhooks] = useState<WebhookConfig[]>([
-    {
-      id: "1",
-      url: "https://api.example.com/webhooks/signhex",
-      events: ["screen.online", "screen.offline", "content.approved"],
-      status: "active",
-      createdAt: "2024-01-15",
-    },
-  ]);
+  const { data: webhooks = [], isLoading, error } = useQuery({
+    queryKey: ["webhooks"],
+    queryFn: webhooksApi.list,
+  });
 
-  const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([
-    {
-      id: "1",
-      webhookId: "1",
-      event: "screen.online",
-      timestamp: "2024-01-20 14:23:15",
-      status: "success",
-      statusCode: 200,
-      response: "OK",
-    },
-    {
-      id: "2",
-      webhookId: "1",
-      event: "content.approved",
-      timestamp: "2024-01-20 13:45:22",
-      status: "success",
-      statusCode: 200,
-      response: "OK",
-    },
-    {
-      id: "3",
-      webhookId: "1",
-      event: "screen.offline",
-      timestamp: "2024-01-20 12:10:05",
-      status: "failed",
-      statusCode: 500,
-      response: "Internal Server Error",
-    },
-  ]);
-
-  const availableEvents = [
-    { id: "screen.online", label: "Screen Comes Online" },
-    { id: "screen.offline", label: "Screen Goes Offline" },
-    { id: "content.approved", label: "Content Approved" },
-    { id: "content.rejected", label: "Content Rejected" },
-    { id: "content.published", label: "Content Published" },
-    { id: "request.created", label: "Request Created" },
-    { id: "request.completed", label: "Request Completed" },
-    { id: "department.created", label: "Department Created" },
-  ];
-
-  const handleCreateWebhook = () => {
-    if (!webhookUrl.trim() || selectedEvents.length === 0) {
+  const createMutation = useMutation({
+    mutationFn: webhooksApi.create,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      setWebhookName("");
+      setWebhookUrl("");
+      setSelectedEvents([]);
+      setIsCreateDialogOpen(false);
       toast({
-        title: "Validation Error",
-        description: "Please provide a URL and select at least one event.",
+        title: "Webhook created",
+        description: "The webhook is now persisted through the backend API.",
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: "Create failed",
+        description:
+          mutationError instanceof ApiError
+            ? mutationError.message
+            : "Unable to create webhook.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: webhooksApi.test,
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      toast({
+        title: "Test delivered",
+        description: `Webhook responded with status ${result.status_code}.`,
+      });
+    },
+    onError: (mutationError) => {
+      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      toast({
+        title: "Test failed",
+        description:
+          mutationError instanceof ApiError
+            ? mutationError.message
+            : "Webhook test delivery failed.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
+      webhooksApi.update(id, { is_active }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: "Update failed",
+        description:
+          mutationError instanceof ApiError
+            ? mutationError.message
+            : "Unable to update webhook.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: webhooksApi.remove,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      toast({
+        title: "Webhook deleted",
+        description: "The webhook was removed from the backend store.",
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: "Delete failed",
+        description:
+          mutationError instanceof ApiError
+            ? mutationError.message
+            : "Unable to delete webhook.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const hasSelection = useMemo(() => selectedEvents.length > 0, [selectedEvents.length]);
+
+  const createWebhook = () => {
+    if (!webhookName.trim() || !webhookUrl.trim() || !hasSelection) {
+      toast({
+        title: "Validation error",
+        description: "Provide a name, URL, and at least one event type.",
         variant: "destructive",
       });
       return;
     }
 
-    const newWebhook: WebhookConfig = {
-      id: String(Date.now()),
-      url: webhookUrl,
-      events: selectedEvents,
-      status: "active",
-      createdAt: new Date().toISOString().split("T")[0],
-    };
-
-    setWebhooks([...webhooks, newWebhook]);
-    setWebhookUrl("");
-    setSelectedEvents([]);
-    setIsCreateDialogOpen(false);
-
-    toast({
-      title: "Webhook Created",
-      description: "Your webhook has been configured successfully.",
+    createMutation.mutate({
+      name: webhookName.trim(),
+      target_url: webhookUrl.trim(),
+      event_types: selectedEvents,
+      is_active: true,
     });
-  };
-
-  const handleTestWebhook = (webhookId: string) => {
-    const testLog: DeliveryLog = {
-      id: String(Date.now()),
-      webhookId,
-      event: "test.event",
-      timestamp: new Date().toLocaleString(),
-      status: "success",
-      statusCode: 200,
-      response: "Test successful",
-    };
-
-    setDeliveryLogs([testLog, ...deliveryLogs]);
-
-    toast({
-      title: "Test Sent",
-      description: "Test webhook has been sent successfully.",
-    });
-  };
-
-  const handleDeleteWebhook = (id: string) => {
-    setWebhooks(webhooks.filter(w => w.id !== id));
-    toast({
-      title: "Webhook Deleted",
-      description: "The webhook configuration has been removed.",
-    });
-  };
-
-  const handleRetryDelivery = (logId: string) => {
-    setDeliveryLogs(logs => logs.map(log => 
-      log.id === logId 
-        ? { ...log, status: "pending" as const }
-        : log
-    ));
-
-    setTimeout(() => {
-      setDeliveryLogs(logs => logs.map(log => 
-        log.id === logId 
-          ? { ...log, status: "success" as const, statusCode: 200, response: "OK" }
-          : log
-      ));
-
-      toast({
-        title: "Retry Successful",
-        description: "The webhook was delivered successfully.",
-      });
-    }, 1500);
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "success":
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case "failed":
-        return <XCircle className="h-4 w-4 text-red-500" />;
-      case "pending":
-        return <AlertCircle className="h-4 w-4 text-yellow-500" />;
-      default:
-        return null;
-    }
   };
 
   return (
@@ -197,7 +181,7 @@ const Webhooks = () => {
         <div className="min-w-0">
           <h1 className="text-3xl font-bold tracking-tight">Webhook Configuration</h1>
           <p className="text-muted-foreground">
-            Configure webhooks to receive real-time event notifications
+            Persist webhook endpoints and trigger a real delivery test through the backend.
           </p>
         </div>
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
@@ -211,18 +195,27 @@ const Webhooks = () => {
             <DialogHeader>
               <DialogTitle>Create New Webhook</DialogTitle>
               <DialogDescription>
-                Configure a webhook endpoint to receive event notifications
+                Configure a persisted webhook endpoint and subscribed event types.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
               <div className="space-y-2">
+                <Label htmlFor="webhook-name">Name</Label>
+                <Input
+                  id="webhook-name"
+                  placeholder="Publishing Alerts"
+                  value={webhookName}
+                  onChange={(event) => setWebhookName(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="webhook-url">Webhook URL</Label>
                 <Input
                   id="webhook-url"
-                  placeholder="https://api.example.com/webhooks"
+                  placeholder="https://api.example.com/webhooks/signhex"
                   value={webhookUrl}
-                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  onChange={(event) => setWebhookUrl(event.target.value)}
                 />
               </div>
 
@@ -235,11 +228,11 @@ const Webhooks = () => {
                         id={event.id}
                         checked={selectedEvents.includes(event.id)}
                         onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedEvents([...selectedEvents, event.id]);
-                          } else {
-                            setSelectedEvents(selectedEvents.filter(e => e !== event.id));
-                          }
+                          setSelectedEvents((current) =>
+                            checked
+                              ? [...current, event.id]
+                              : current.filter((entry) => entry !== event.id),
+                          );
                         }}
                       />
                       <Label htmlFor={event.id} className="text-sm font-normal cursor-pointer">
@@ -251,164 +244,142 @@ const Webhooks = () => {
               </div>
             </div>
 
-            <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setIsCreateDialogOpen(false)}
+                disabled={createMutation.isPending}
+              >
                 Cancel
               </Button>
-              <Button onClick={handleCreateWebhook}>Create Webhook</Button>
+              <Button onClick={createWebhook} disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Creating..." : "Create Webhook"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
-      <Tabs defaultValue="webhooks" className="space-y-4">
-        <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto p-1">
-          <TabsTrigger value="webhooks" className="shrink-0">
-            <Webhook className="mr-2 h-4 w-4" />
-            Webhooks
-          </TabsTrigger>
-          <TabsTrigger value="logs" className="shrink-0">
-            <Send className="mr-2 h-4 w-4" />
-            Delivery Logs
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="webhooks">
-          <Card>
-            <CardHeader>
-              <CardTitle>Configured Webhooks</CardTitle>
-              <CardDescription>
-                Manage your webhook endpoints and subscribed events
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table className="min-w-[760px]">
-                <TableHeader>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Webhook className="h-5 w-5" />
+            Persisted Webhooks
+          </CardTitle>
+          <CardDescription>
+            The table reflects the current backend subscription rows and latest test status.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {error ? (
+            <div className="py-6 text-sm text-destructive">
+              {error instanceof ApiError ? error.message : "Unable to load webhooks."}
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Target URL</TableHead>
+                  <TableHead>Events</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Last Test</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
                   <TableRow>
-                    <TableHead>URL</TableHead>
-                    <TableHead>Events</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                      Loading webhooks...
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {webhooks.map((webhook) => (
+                ) : webhooks.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                      No webhooks configured yet.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  webhooks.map((webhook) => (
                     <TableRow key={webhook.id}>
-                      <TableCell className="max-w-[240px] break-words font-mono text-sm">{webhook.url}</TableCell>
-                      <TableCell>
+                      <TableCell className="font-medium">{webhook.name}</TableCell>
+                      <TableCell className="max-w-[20rem] truncate">{webhook.target_url}</TableCell>
+                      <TableCell className="max-w-[16rem]">
                         <div className="flex flex-wrap gap-1">
-                          {webhook.events.slice(0, 2).map((event) => (
-                            <Badge key={event} variant="secondary" className="text-xs">
-                              {event}
+                          {webhook.event_types.map((eventType) => (
+                            <Badge key={eventType} variant="secondary">
+                              {eventType}
                             </Badge>
                           ))}
-                          {webhook.events.length > 2 && (
-                            <Badge variant="secondary" className="text-xs">
-                              +{webhook.events.length - 2} more
-                            </Badge>
-                          )}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={webhook.status === "active" ? "default" : "secondary"}>
-                          {webhook.status}
+                        <Badge variant={webhook.is_active === false ? "outline" : "default"}>
+                          {statusLabel(webhook)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {webhook.createdAt}
+                      <TableCell>
+                        {webhook.last_status_at
+                          ? new Date(webhook.last_status_at).toLocaleString()
+                          : "Never"}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleTestWebhook(webhook.id)}
+                            onClick={() => testMutation.mutate(webhook.id)}
+                            disabled={testMutation.isPending}
                           >
-                            <Send className="h-3 w-3 mr-1" />
+                            <Send className="mr-2 h-4 w-4" />
                             Test
                           </Button>
                           <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteWebhook(webhook.id)}
-                          >
-                            <Trash2 className="h-3 w-3 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="logs">
-          <Card>
-            <CardHeader>
-              <CardTitle>Delivery Logs</CardTitle>
-              <CardDescription>
-                View webhook delivery history and retry failed deliveries
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Event</TableHead>
-                    <TableHead>Timestamp</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Status Code</TableHead>
-                    <TableHead>Response</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {deliveryLogs.map((log) => (
-                    <TableRow key={log.id}>
-                      <TableCell>
-                        <Badge variant="outline">{log.event}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {log.timestamp}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {getStatusIcon(log.status)}
-                          <span className="capitalize">{log.status}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <code className="text-xs bg-muted px-2 py-1 rounded">
-                          {log.statusCode || "-"}
-                        </code>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {log.response || "-"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {log.status === "failed" && (
-                          <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleRetryDelivery(log.id)}
+                            onClick={() =>
+                              toggleMutation.mutate({
+                                id: webhook.id,
+                                is_active: webhook.is_active === false,
+                              })
+                            }
+                            disabled={toggleMutation.isPending}
                           >
-                            Retry
+                            {webhook.is_active === false ? "Activate" : "Deactivate"}
                           </Button>
-                        )}
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => deleteMutation.mutate(webhook.id)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-amber-500/20 bg-amber-500/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-amber-700">
+            <AlertCircle className="h-5 w-5" />
+            Delivery visibility
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          The backend currently stores the latest delivery status and timestamp per webhook. This
+          page reflects that persisted state instead of simulating a local delivery log.
+        </CardContent>
+      </Card>
     </div>
   );
-};
-
-export default Webhooks;
+}
