@@ -1,0 +1,166 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - generic [ref=e4]:
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]: S
+        - generic [ref=e12]:
+          - generic [ref=e13]: Signhex CMS
+          - generic [ref=e14]: ADMIN
+      - generic [ref=e15]:
+        - generic [ref=e16]: Main Navigation
+        - list [ref=e18]:
+          - listitem [ref=e19]:
+            - link "Dashboard" [ref=e20] [cursor=pointer]:
+              - /url: /dashboard
+              - img [ref=e22]
+              - generic [ref=e27]: Dashboard
+          - listitem [ref=e28]:
+            - link "Media Library" [ref=e29] [cursor=pointer]:
+              - /url: /media
+              - img [ref=e31]
+              - generic [ref=e33]: Media Library
+          - listitem [ref=e34]:
+            - link "Layouts" [ref=e35] [cursor=pointer]:
+              - /url: /layouts
+              - img [ref=e37]
+              - generic [ref=e39]: Layouts
+          - listitem [ref=e40]:
+            - link "Screens" [ref=e41] [cursor=pointer]:
+              - /url: /screens
+              - img [ref=e43]
+              - generic [ref=e45]: Screens
+          - listitem [ref=e46]:
+            - link "Schedule Queue" [ref=e47] [cursor=pointer]:
+              - /url: /schedule
+              - img [ref=e49]
+              - generic [ref=e51]: Schedule Queue
+          - listitem [ref=e52]:
+            - link "Conversations" [ref=e53] [cursor=pointer]:
+              - /url: /chat
+              - img [ref=e55]
+              - generic [ref=e56]: Conversations
+          - listitem [ref=e57]:
+            - link "Notifications" [ref=e58] [cursor=pointer]:
+              - /url: /notifications
+              - img [ref=e60]
+              - generic [ref=e65]: Notifications
+          - listitem [ref=e66]:
+            - link "Operators" [ref=e67] [cursor=pointer]:
+              - /url: /operators
+              - img [ref=e69]
+              - generic [ref=e74]: Operators
+          - listitem [ref=e75]:
+            - link "Departments" [ref=e76] [cursor=pointer]:
+              - /url: /departments
+              - img [ref=e78]
+              - generic [ref=e82]: Departments
+          - listitem [ref=e83]:
+            - link "Users" [ref=e84] [cursor=pointer]:
+              - /url: /users
+              - img [ref=e86]
+              - generic [ref=e91]: Users
+          - listitem [ref=e92]:
+            - link "Reports & Logs" [ref=e93] [cursor=pointer]:
+              - /url: /reports
+              - img [ref=e95]
+              - generic [ref=e98]: Reports & Logs
+          - listitem [ref=e99]:
+            - link "Site Settings" [ref=e100] [cursor=pointer]:
+              - /url: /settings
+              - img [ref=e102]
+              - generic [ref=e105]: Site Settings
+      - list [ref=e108]:
+        - listitem [ref=e109]:
+          - link "Help & Docs" [ref=e110] [cursor=pointer]:
+            - /url: "#"
+            - img [ref=e111]
+            - generic [ref=e114]: Help & Docs
+    - generic [ref=e115]:
+      - banner [ref=e116]:
+        - generic [ref=e117]:
+          - button "Toggle Sidebar" [ref=e118] [cursor=pointer]:
+            - img
+            - generic [ref=e119]: Toggle Sidebar
+          - generic [ref=e120]:
+            - generic [ref=e121]:
+              - img [ref=e122]
+              - textbox "Search screens, media, requests..." [ref=e125]
+            - generic [ref=e126]:
+              - button "Open notifications" [ref=e127] [cursor=pointer]:
+                - img
+              - button "AU Admin User admin@hexmon.local" [ref=e128] [cursor=pointer]:
+                - generic [ref=e130]: AU
+                - generic [ref=e131]:
+                  - generic [ref=e132]: Admin User
+                  - generic [ref=e133]: admin@hexmon.local
+      - main [ref=e134]:
+        - generic [ref=e135]:
+          - generic [ref=e136]:
+            - generic [ref=e137]:
+              - heading "Screens" [level=1] [ref=e138]
+              - paragraph [ref=e139]: Manage and monitor all display screens across locations
+            - button "Pair Device" [ref=e141] [cursor=pointer]:
+              - img
+              - text: Pair Device
+          - generic [ref=e142]:
+            - generic [ref=e144]:
+              - img [ref=e146]
+              - generic [ref=e148]:
+                - paragraph [ref=e149]: Total Screens
+                - paragraph [ref=e150]: "0"
+            - generic [ref=e152]:
+              - img [ref=e154]
+              - generic [ref=e156]:
+                - paragraph [ref=e157]: Online
+                - paragraph [ref=e158]: "0"
+            - generic [ref=e160]:
+              - img [ref=e162]
+              - generic [ref=e164]:
+                - paragraph [ref=e165]: Offline
+                - paragraph [ref=e166]: "0"
+            - generic [ref=e168]:
+              - img [ref=e170]
+              - generic [ref=e172]:
+                - paragraph [ref=e173]: Recovery
+                - paragraph [ref=e174]: "0"
+            - generic [ref=e176]:
+              - img [ref=e178]
+              - generic [ref=e181]:
+                - paragraph [ref=e182]: Stale
+                - paragraph [ref=e183]: "0"
+          - generic [ref=e185]:
+            - generic [ref=e187]:
+              - img [ref=e188]
+              - textbox "Search" [ref=e191]:
+                - /placeholder: Search screens and groups by name, location, description, or ID...
+            - generic [ref=e192]: 0 screens, 0 groups
+          - generic [ref=e194]:
+            - paragraph [ref=e195]: No screens found
+            - paragraph [ref=e196]: Try pairing a device from the player first.
+          - generic [ref=e197]:
+            - generic [ref=e198]:
+              - generic [ref=e199]:
+                - generic [ref=e200]:
+                  - img [ref=e201]
+                  - heading "Screen Groups" [level=2] [ref=e206]
+                - button "Create Group" [ref=e207] [cursor=pointer]:
+                  - img
+                  - text: Create Group
+              - generic [ref=e209]: No groups yet. Create one to organize your screens.
+            - generic [ref=e210]:
+              - generic [ref=e211]:
+                - generic [ref=e212]:
+                  - img [ref=e213]
+                  - heading "Device Pairings" [level=2] [ref=e219]
+                - button "Pair Device" [ref=e220] [cursor=pointer]:
+                  - img
+                  - text: Pair Device
+              - paragraph [ref=e221]: View all device pairing records for first-time pairing and same-screen recovery.
+              - generic [ref=e223]: No pairings yet. Generate a code to pair a new device.
+```
