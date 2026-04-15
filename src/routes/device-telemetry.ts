@@ -147,6 +147,9 @@ const snapshotQuerySchema = z.object({
 
 const ackCommandSchema = z.object({
   delivery_token: z.string().uuid().optional(),
+  success: z.boolean().optional(),
+  error: z.string().min(1).optional(),
+  message: z.string().min(1).optional(),
 }).optional();
 
 const normalizeEtagToken = (value: string) =>
@@ -879,12 +882,23 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         await authenticateDeviceOrThrow(request, deviceId);
 
         const acknowledgedAt = new Date();
+        const executionSucceeded = ackBody?.success !== false;
+        const nextStatus = executionSucceeded ? 'COMPLETED' : 'FAILED';
+        const executionResult = {
+          success: executionSucceeded,
+          error: ackBody?.error ?? null,
+          message: ackBody?.message ?? null,
+          acknowledged_at: acknowledgedAt.toISOString(),
+        };
 
         const [updatedCommand] = await db
           .update(schema.deviceCommands)
           .set({
-            status: 'ACKNOWLEDGED',
+            status: nextStatus,
             acknowledged_at: acknowledgedAt,
+            payload: sql`COALESCE(${schema.deviceCommands.payload}, '{}'::jsonb) || ${JSON.stringify({
+              execution_result: executionResult,
+            })}::jsonb`,
             updated_at: acknowledgedAt,
           })
           .where(
@@ -904,7 +918,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('Command not found');
         }
 
-        logger.info({ deviceId, commandId }, 'Command acknowledged');
+        logger.info({ deviceId, commandId, status: nextStatus, success: executionSucceeded }, 'Command acknowledged');
 
         return reply.send({
           success: true,

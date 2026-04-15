@@ -20,6 +20,47 @@ const webhookSchema = z.object({
   is_active: z.boolean().optional(),
 });
 
+const WEBHOOK_TEST_EVENT = 'webhook.test';
+const WEBHOOK_TEST_TIMEOUT_MS = 5_000;
+
+async function deliverWebhookTest(
+  record:
+    | {
+        id: string;
+        target_url: string;
+        headers?: Record<string, string> | null;
+      }
+    | null
+) {
+  if (!record) {
+    throw AppError.notFound('Webhook not found');
+  }
+
+  const sentAt = new Date().toISOString();
+  const response = await fetch(record.target_url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'user-agent': 'signhex-webhook-test',
+      'x-signhex-event': WEBHOOK_TEST_EVENT,
+      'x-signhex-sent-at': sentAt,
+      'x-signhex-webhook-id': record.id,
+      ...Object.fromEntries(
+        Object.entries(record.headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
+      ),
+    },
+    body: JSON.stringify({
+      type: WEBHOOK_TEST_EVENT,
+      sent_at: sentAt,
+      webhook_id: record.id,
+      target_url: record.target_url,
+    }),
+    signal: AbortSignal.timeout(WEBHOOK_TEST_TIMEOUT_MS),
+  });
+
+  return { response, sentAt };
+}
+
 export async function webhookRoutes(fastify: FastifyInstance) {
   const repo = createWebhookRepository();
 
@@ -150,8 +191,58 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         const record = await repo.findById((request.params as any).id);
         if (!record) throw AppError.notFound('Webhook not found');
 
-        // For now just echo; real delivery queue would be added later
-        return reply.send({ success: true, attempted: record.target_url });
+        const attemptedAt = new Date();
+
+        try {
+          const { response, sentAt } = await deliverWebhookTest(record);
+          const lastStatusAt = new Date();
+          const lastStatus = response.ok ? 'SUCCESS' : `FAILED_HTTP_${response.status}`;
+
+          await repo.update(record.id, {
+            last_status: lastStatus,
+            last_status_at: lastStatusAt,
+          });
+
+          if (!response.ok) {
+            throw new AppError({
+              statusCode: 502,
+              code: 'WEBHOOK_TEST_FAILED',
+              message: `Webhook test delivery failed with status ${response.status}.`,
+              details: {
+                attempted: record.target_url,
+                status_code: response.status,
+                sent_at: sentAt,
+              },
+            });
+          }
+
+          return reply.send({
+            success: true,
+            attempted: record.target_url,
+            status_code: response.status,
+            sent_at: sentAt,
+          });
+        } catch (deliveryError) {
+          const lastStatusAt = new Date();
+          await repo.update(record.id, {
+            last_status: 'FAILED',
+            last_status_at: lastStatusAt,
+          });
+
+          if (deliveryError instanceof AppError) {
+            throw deliveryError;
+          }
+
+          throw new AppError({
+            statusCode: 502,
+            code: 'WEBHOOK_TEST_FAILED',
+            message: 'Webhook test delivery failed before a response was received.',
+            details: {
+              attempted: record.target_url,
+              attempted_at: attemptedAt.toISOString(),
+            },
+          });
+        }
       } catch (error) {
         logger.error(error, 'Test webhook error');
         return respondWithError(reply, error);

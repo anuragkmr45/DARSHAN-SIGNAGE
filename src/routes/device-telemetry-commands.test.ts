@@ -247,6 +247,8 @@ describe('device telemetry command claiming', () => {
       },
       payload: {
         delivery_token: claimedCommand.delivery_token,
+        success: true,
+        message: 'Refresh applied',
       },
     });
 
@@ -256,8 +258,13 @@ describe('device telemetry command claiming', () => {
       .select()
       .from(schema.deviceCommands)
       .where(eq(schema.deviceCommands.id, commandId));
-    expect(stored?.status).toBe('ACKNOWLEDGED');
+    expect(stored?.status).toBe('COMPLETED');
     expect(stored?.acknowledged_at).toBeTruthy();
+    expect((stored?.payload as Record<string, any>)?.execution_result).toMatchObject({
+      success: true,
+      error: null,
+      message: 'Refresh applied',
+    });
   });
 
   it('reclaims stale leases and rejects stale or tokenless acknowledgements', async () => {
@@ -328,6 +335,8 @@ describe('device telemetry command claiming', () => {
       },
       payload: {
         delivery_token: reclaimedCommand.delivery_token,
+        success: false,
+        error: 'Command rate-limited locally',
       },
     });
     expect(matchingAck.statusCode).toBe(HTTP_STATUS.OK);
@@ -348,9 +357,14 @@ describe('device telemetry command claiming', () => {
       .select()
       .from(schema.deviceCommands)
       .where(eq(schema.deviceCommands.id, commandId));
-    expect(stored?.status).toBe('ACKNOWLEDGED');
+    expect(stored?.status).toBe('FAILED');
     expect(stored?.delivery_attempts).toBe(2);
     expect(stored?.acknowledged_at).toBeTruthy();
+    expect((stored?.payload as Record<string, any>)?.execution_result).toMatchObject({
+      success: false,
+      error: 'Command rate-limited locally',
+      message: null,
+    });
   });
 
   it('rolls back a leased update when the transaction fails before commit', async () => {

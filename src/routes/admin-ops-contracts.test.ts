@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { inArray } from 'drizzle-orm';
 import { closeTestServer, createTestServer, generateTestToken, testUser } from '@/test/helpers';
@@ -35,6 +35,11 @@ describe('Admin ops route contracts', () => {
     }
 
     await closeTestServer(server);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it('returns the paginated API key envelope and one-time secrets for create, rotate, and revoke', async () => {
@@ -174,7 +179,7 @@ describe('Admin ops route contracts', () => {
     expect(deactivated.is_active).toBe(false);
   });
 
-  it('returns webhook test success without recording any delivery status side effect', async () => {
+  it('attempts outbound webhook delivery and records the latest delivery status', async () => {
     const createResponse = await server.inject({
       method: 'POST',
       url: '/api/v1/webhooks',
@@ -214,6 +219,16 @@ describe('Admin ops route contracts', () => {
     };
     expect(listed.items.some((item) => item.id === created.id)).toBe(true);
 
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 202,
+        headers: {
+          'content-type': 'application/json',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
     const testResponse = await server.inject({
       method: 'POST',
       url: `/api/v1/webhooks/${created.id}/test`,
@@ -223,10 +238,18 @@ describe('Admin ops route contracts', () => {
     });
 
     expect(testResponse.statusCode).toBe(HTTP_STATUS.OK);
-    expect(JSON.parse(testResponse.body)).toEqual({
-      success: true,
-      attempted: created.target_url,
-    });
+    const testBody = JSON.parse(testResponse.body) as {
+      success: boolean;
+      attempted: string;
+      status_code: number;
+      sent_at: string;
+    };
+    expect(testBody.success).toBe(true);
+    expect(testBody.attempted).toBe(created.target_url);
+    expect(testBody.status_code).toBe(202);
+    expect(testBody.sent_at).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(created.target_url);
 
     const db = getDatabase();
     const [stored] = await db
@@ -239,7 +262,7 @@ describe('Admin ops route contracts', () => {
       .where(inArray(schema.webhookSubscriptions.id, [created.id]));
 
     expect(stored?.id).toBe(created.id);
-    expect(stored?.last_status).toBeNull();
-    expect(stored?.last_status_at).toBeNull();
+    expect(stored?.last_status).toBe('SUCCESS');
+    expect(stored?.last_status_at).toBeTruthy();
   });
 });

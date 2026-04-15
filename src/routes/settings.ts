@@ -632,10 +632,12 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       schema: {
         description: 'Get default media setting',
         tags: ['Settings'],
+        security: [{ bearerAuth: [] }],
       },
     },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       try {
+        await requireAccess(request, 'read', 'OrgSettings');
         const defaultMedia = await getDefaultMedia(db);
         if (!defaultMedia || !defaultMedia.media) {
           return reply.send({
@@ -714,10 +716,12 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       schema: {
         description: 'Get default media variants by aspect ratio',
         tags: ['Settings'],
+        security: [{ bearerAuth: [] }],
       },
     },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       try {
+        await requireAccess(request, 'read', 'OrgSettings');
         return reply.send(await serializeDefaultMediaVariants());
       } catch (error) {
         logger.error(error, 'Get default media variants error');
@@ -791,10 +795,12 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       schema: {
         description: 'Get target-based default media assignments',
         tags: ['Settings'],
+        security: [{ bearerAuth: [] }],
       },
     },
-    async (_request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       try {
+        await requireAccess(request, 'read', 'OrgSettings');
         return reply.send(await serializeDefaultMediaTargets());
       } catch (error) {
         logger.error(error, 'Get default media targets error');
