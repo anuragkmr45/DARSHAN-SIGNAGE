@@ -818,7 +818,7 @@ export const webhookSubscriptions = pgTable(
     event_types: text('event_types').array().notNull(),
     target_url: varchar('target_url', { length: 2048 }).notNull(),
     secret: varchar('secret', { length: 255 }).notNull(),
-    headers: jsonb('headers'),
+    headers: jsonb('headers').$type<Record<string, string> | null>(),
     is_active: boolean('is_active').notNull().default(true),
     last_status: varchar('last_status', { length: 50 }),
     last_status_at: timestamp('last_status_at'),

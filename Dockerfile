@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy package files
 COPY package*.json ./
 COPY tsconfig.json ./
+COPY drizzle.config.ts ./
 
 # Install dependencies
 RUN npm install
