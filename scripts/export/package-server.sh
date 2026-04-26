@@ -242,8 +242,25 @@ set -euo pipefail
 
 [[ -f ".env" ]] || { echo ".env is missing. Run ./init-env.sh first." >&2; exit 1; }
 [[ -f "certs/ca.crt" ]] || { echo "certs/ca.crt is missing." >&2; exit 1; }
+source ./.env
 
-docker compose --env-file .env up -d
+wait_for_postgres() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if docker compose --env-file .env exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "Postgres did not become ready in time." >&2
+  return 1
+}
+
+docker compose --env-file .env up -d postgres minio
+wait_for_postgres
+docker compose --env-file .env run --rm -e DRIZZLE_STRICT=false api npm run db:push
+docker compose --env-file .env up -d api worker
 EOF
 
 cat > "$OUTPUT_DIR/stop.sh" <<'EOF'
@@ -260,8 +277,25 @@ set -euo pipefail
 
 [[ -f ".env" ]] || { echo ".env is missing. Copy it from the previous release or run ./init-env.sh." >&2; exit 1; }
 [[ -f "certs/ca.crt" ]] || { echo "certs/ca.crt is missing." >&2; exit 1; }
+source ./.env
 
-docker compose --env-file .env up -d --remove-orphans
+wait_for_postgres() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    if docker compose --env-file .env exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "Postgres did not become ready in time." >&2
+  return 1
+}
+
+docker compose --env-file .env up -d postgres minio
+wait_for_postgres
+docker compose --env-file .env run --rm -e DRIZZLE_STRICT=false api npm run db:push
+docker compose --env-file .env up -d --remove-orphans api worker
 EOF
 
 cat > "$OUTPUT_DIR/health-check.sh" <<'EOF'

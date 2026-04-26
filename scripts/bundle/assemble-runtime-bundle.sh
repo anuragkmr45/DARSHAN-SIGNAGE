@@ -346,6 +346,17 @@ docker compose --env-file $env_file up -d
 EOF
 }
 
+write_backend_start_script() {
+  local destination="$1"
+  local env_file="$2"
+cat > "$destination" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+docker compose --env-file $env_file run --rm -e DRIZZLE_STRICT=false api npm run db:push
+docker compose --env-file $env_file up -d
+EOF
+}
+
 write_stop_script() {
   local destination="$1"
   local env_file="$2"
@@ -613,7 +624,7 @@ MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}"
 MINIO_USE_SSL="${MINIO_USE_SSL:-false}"
 MINIO_REGION="${MINIO_REGION:-us-east-1}"
-JWT_SECRET="${JWT_SECRET:-replace-with-32-char-secret}"
+JWT_SECRET="${JWT_SECRET:-replace-with-32-char-secret-value}"
 JWT_EXPIRY="${JWT_EXPIRY:-900}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@signhex.invalid}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-ChangeMe123!}"
@@ -1057,7 +1068,7 @@ HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH
 PG_BOSS_SCHEMA=$PG_BOSS_SCHEMA
 RATE_LIMIT_ENABLED=$RATE_LIMIT_ENABLED
 RATE_LIMIT_MAX=$RATE_LIMIT_MAX
-RATE_LIMIT_TIME_WINDOW=$RATE_LIMIT_TIME_WINDOW
+RATE_LIMIT_TIME_WINDOW="$RATE_LIMIT_TIME_WINDOW"
 CORS_ORIGINS=$CMS_QA_ORIGIN
 SOCKET_ALLOWED_ORIGINS=$CMS_QA_ORIGIN
 APP_PUBLIC_BASE_URL=$CMS_QA_ORIGIN
@@ -1166,7 +1177,7 @@ services:
       - "${QA_CMS_HTTP_PORT}:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./www:/usr/share/nginx/html:ro
+      - ./www/www:/usr/share/nginx/html:ro
 EOF
 
   sed \
@@ -1180,7 +1191,7 @@ EOF
   write_load_images_script "$QA_BACKEND_DIR/load-images.sh"
   write_load_images_script "$QA_CMS_DIR/load-images.sh"
   write_start_script "$QA_DATA_DIR/start.sh" ".env.qa"
-  write_start_script "$QA_BACKEND_DIR/start.sh" ".env.qa"
+  write_backend_start_script "$QA_BACKEND_DIR/start.sh" ".env.qa"
   write_start_script "$QA_CMS_DIR/start.sh" ".env.qa"
   write_stop_script "$QA_DATA_DIR/stop.sh" ".env.qa"
   write_stop_script "$QA_BACKEND_DIR/stop.sh" ".env.qa"
@@ -1338,7 +1349,7 @@ HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH
 PG_BOSS_SCHEMA=$PG_BOSS_SCHEMA
 RATE_LIMIT_ENABLED=$RATE_LIMIT_ENABLED
 RATE_LIMIT_MAX=$RATE_LIMIT_MAX
-RATE_LIMIT_TIME_WINDOW=$RATE_LIMIT_TIME_WINDOW
+RATE_LIMIT_TIME_WINDOW="$RATE_LIMIT_TIME_WINDOW"
 CORS_ORIGINS=$CMS_PRODUCTION_ORIGIN
 SOCKET_ALLOWED_ORIGINS=$CMS_PRODUCTION_ORIGIN
 APP_PUBLIC_BASE_URL=$CMS_PRODUCTION_ORIGIN
@@ -1494,7 +1505,7 @@ services:
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./tls:/etc/nginx/tls:ro
-      - ./www:/usr/share/nginx/html:ro
+      - ./www/www:/usr/share/nginx/html:ro
 EOF
 
   cat > "$PROD_CMS_DIR/nginx/default.conf" <<EOF
@@ -1570,7 +1581,7 @@ EOF
     write_load_images_script "$PROD_OBSERVABILITY_DIR/load-images.sh"
   fi
   write_start_script "$PROD_DATA_DIR/start.sh" ".env.production"
-  write_start_script "$PROD_BACKEND_DIR/start.sh" ".env.production"
+  write_backend_start_script "$PROD_BACKEND_DIR/start.sh" ".env.production"
   write_start_script "$PROD_CMS_DIR/start.sh" ".env.production"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     write_start_script "$PROD_OBSERVABILITY_DIR/start.sh" ".env.production"
