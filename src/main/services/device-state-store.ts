@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { EventEmitter } from 'events'
 import { getConfigManager } from '../../common/config'
-import { DeviceStateRecord, PlayerState, RecentCommandRecord } from '../../common/types'
+import { CommandSource, DeviceStateRecord, PlayerState, RecentCommandRecord } from '../../common/types'
 import { atomicWrite, ensureDir } from '../../common/utils'
 import { getLogger } from '../../common/logger'
 
@@ -111,7 +111,7 @@ export class DeviceStateStore {
     })
   }
 
-  async recordCommandSeen(commandId: string, source: 'heartbeat' | 'poll', deliveryToken?: string): Promise<void> {
+  async recordCommandSeen(commandId: string, source: CommandSource, deliveryToken?: string): Promise<void> {
     const now = new Date().toISOString()
     const current = this.state.recentCommands || []
     const existingIndex = current.findIndex(

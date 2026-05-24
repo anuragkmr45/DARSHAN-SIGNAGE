@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { getConfigManager } from '../../../common/config'
 import { getLogger } from '../../../common/logger'
-import { CommandType, PlayerState, type CacheStats, type SystemStats } from '../../../common/types'
+import { CommandSource, CommandType, PlayerState, type CacheStats, type SystemStats } from '../../../common/types'
 import { getCacheManager } from '../cache/cache-manager'
 import { getDeviceStateStore } from '../device-state-store'
 import { getRequestQueue } from '../network/request-queue'
@@ -42,7 +42,6 @@ export type HeartbeatResult =
   | 'failed'
 
 export type CommandOutcome = 'success' | 'error' | 'deduplicated' | 'rate_limited'
-export type CommandSource = 'heartbeat' | 'poll'
 export type CommandAckResult = 'success' | 'queued' | 'auth_failure' | 'skipped_unpaired' | 'failed'
 export type ScreenshotUploadResult = 'success' | 'queued' | 'auth_failure' | 'failed'
 export type CertificateValidationResult = 'x509_valid' | 'compatibility_accepted' | 'strict_rejected'

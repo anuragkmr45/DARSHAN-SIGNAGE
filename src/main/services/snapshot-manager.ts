@@ -240,7 +240,15 @@ export class SnapshotManager extends EventEmitter {
       }
     })
 
-    const prefetchItems: Array<{ mediaId: string; url: string; sha256?: string }> = []
+    const prefetchItems: Array<{
+      mediaId: string
+      url: string
+      sha256?: string
+      source?: 'SNAPSHOT' | 'DEFAULT_MEDIA' | 'EMERGENCY'
+      snapshotId?: string
+      scheduleId?: string
+      playbackMode?: PlaybackMode
+    }> = []
     for (const item of prioritizedItems) {
       if (!item.mediaId) {
         continue
@@ -255,10 +263,21 @@ export class SnapshotManager extends EventEmitter {
         continue
       }
 
+      const source =
+        snapshot.emergencyItem?.mediaId === item.mediaId
+          ? 'EMERGENCY'
+          : snapshot.defaultItem?.mediaId === item.mediaId
+            ? 'DEFAULT_MEDIA'
+            : 'SNAPSHOT'
+
       prefetchItems.push({
         mediaId: item.mediaId,
         url: cacheUrl,
         sha256: item.sha256,
+        source,
+        snapshotId: snapshot.snapshotId,
+        scheduleId: snapshot.scheduleId,
+        playbackMode: source === 'EMERGENCY' ? 'emergency' : source === 'DEFAULT_MEDIA' ? 'default' : 'normal',
       })
     }
 

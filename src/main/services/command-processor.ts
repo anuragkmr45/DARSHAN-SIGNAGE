@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
-import { Command, CommandResult, CommandType, DeviceApiError } from '../../common/types'
+import { Command, CommandResult, CommandSource, CommandType, DeviceApiError } from '../../common/types'
 import { ExponentialBackoff } from '../../common/utils'
 import { getHttpClient } from './network/http-client'
 import { getRequestQueue } from './network/request-queue'
@@ -15,8 +15,6 @@ import { getDefaultMediaService } from './settings/default-media-service'
 import { getPlayerMetrics } from './telemetry/player-metrics'
 
 const logger = getLogger('command-processor')
-
-type CommandSource = 'heartbeat' | 'poll'
 
 const HEARTBEAT_STALE_MULTIPLIER = 2
 const FALLBACK_POLL_JITTER_FACTOR = 0.2
@@ -32,6 +30,7 @@ export class CommandProcessor {
   private rateLimitMap: Map<CommandType, number> = new Map()
   private rateLimitWindowMs = 60000
   private fallbackPollBackoff = this.createFallbackPollBackoff()
+  private realtimeHealthy = false
 
   start(): void {
     if (this.isPolling) {
@@ -66,7 +65,22 @@ export class CommandProcessor {
     }
   }
 
-  private async pollCommands(): Promise<void> {
+  async pollNow(source: CommandSource = 'poll'): Promise<void> {
+    await this.pollCommands(source)
+  }
+
+  setRealtimeHealthy(healthy: boolean): void {
+    this.realtimeHealthy = healthy
+    if (!healthy) {
+      this.fallbackPollBackoff = this.createFallbackPollBackoff()
+    }
+  }
+
+  isRealtimeHealthy(): boolean {
+    return this.realtimeHealthy
+  }
+
+  private async pollCommands(source: CommandSource = 'poll'): Promise<void> {
     const deviceId = getPairingService().getDeviceId()
     if (!deviceId) {
       return
@@ -81,7 +95,7 @@ export class CommandProcessor {
           maxDelayMs: 30000,
         },
       })
-      await this.ingestCommands(response.commands || [], 'poll')
+      await this.ingestCommands(response.commands || [], source)
     } catch (error) {
       if (
         error instanceof DeviceApiError &&
@@ -165,7 +179,11 @@ export class CommandProcessor {
 
   private getHealthyPollDelay(): number {
     const config = getConfigManager().getConfig()
-    const baseDelayMs = Math.max(config.intervals.commandPollMs, 5000)
+    const realtimeSafetyPollMs =
+      config.realtime?.enabled && this.realtimeHealthy
+        ? config.realtime.commandSafetyPollMs
+        : config.intervals.commandPollMs
+    const baseDelayMs = Math.max(realtimeSafetyPollMs, 5000)
     const jitter = baseDelayMs * HEALTHY_POLL_JITTER_FACTOR * (Math.random() * 2 - 1)
     return Math.max(0, Math.round(baseDelayMs + jitter))
   }
@@ -213,6 +231,7 @@ export class CommandProcessor {
           break
         case 'REFRESH':
         case 'REFRESH_SCHEDULE':
+        case 'RESYNC':
           result = await this.handleRefreshSchedule(command)
           break
         case 'SCREENSHOT':
@@ -441,7 +460,7 @@ export class CommandProcessor {
   }
 
   private shouldSkipRateLimit(commandType: CommandType): boolean {
-    return commandType === 'REFRESH' || commandType === 'REFRESH_SCHEDULE'
+    return commandType === 'REFRESH' || commandType === 'REFRESH_SCHEDULE' || commandType === 'RESYNC'
   }
 
   private isRateLimited(commandType: CommandType): boolean {

@@ -82,6 +82,17 @@ export class ConfigManager {
       runtime: {
         mode: runtimeMode,
       },
+      realtime: {
+        enabled: process.env['HEXMON_REALTIME_SYNC_ENABLED'] === 'true',
+        deviceNamespace: process.env['HEXMON_REALTIME_DEVICE_NAMESPACE'] || '/device',
+        commandSafetyPollMs: parseInt(process.env['HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS'] || '60000', 10),
+        desiredStatePollMs: parseInt(process.env['HEXMON_REALTIME_DESIRED_STATE_POLL_MS'] || '300000', 10),
+        reconnectMinMs: parseInt(process.env['HEXMON_REALTIME_RECONNECT_MIN_MS'] || '1000', 10),
+        reconnectMaxMs: parseInt(process.env['HEXMON_REALTIME_RECONNECT_MAX_MS'] || '60000', 10),
+        pingIntervalMs: parseInt(process.env['HEXMON_REALTIME_WS_PING_INTERVAL_MS'] || '25000', 10),
+        notificationMaxBytes: parseInt(process.env['HEXMON_WS_NOTIFICATION_MAX_BYTES'] || '32768', 10),
+        wsUrl: this.normalizeUrl(process.env['HEXMON_REALTIME_WS_URL']),
+      },
       mtls: {
         enabled: process.env['HEXMON_MTLS_ENABLED'] === 'true',
         certPath: defaultCertPath,
@@ -130,6 +141,7 @@ export class ConfigManager {
       observability: {
         enabled: process.env['HEXMON_OBSERVABILITY_ENABLED'] !== 'false',
         metricsEnabled: process.env['HEXMON_OBSERVABILITY_METRICS_ENABLED'] !== 'false',
+        mediaCacheReportingEnabled: process.env['HEXMON_MEDIA_CACHE_REPORTING_ENABLED'] !== 'false',
         bindAddress: process.env['HEXMON_OBSERVABILITY_BIND_ADDRESS'] || buildDefaultObservabilityBindAddress(false),
         port: parseInt(process.env['HEXMON_OBSERVABILITY_PORT'] || '3300', 10),
         allowRemoteAccess: process.env['HEXMON_OBSERVABILITY_ALLOW_REMOTE_ACCESS'] === 'true',
@@ -222,6 +234,20 @@ export class ConfigManager {
       wsUrl: overrides.wsUrl ?? defaults.wsUrl,
       deviceId: overrides.deviceId ?? defaults.deviceId,
       runtime: { ...defaults.runtime, ...overrides.runtime },
+      realtime: {
+        enabled: overrides.realtime?.enabled ?? defaults.realtime?.enabled ?? false,
+        deviceNamespace: overrides.realtime?.deviceNamespace ?? defaults.realtime?.deviceNamespace ?? '/device',
+        commandSafetyPollMs:
+          overrides.realtime?.commandSafetyPollMs ?? defaults.realtime?.commandSafetyPollMs ?? 60000,
+        desiredStatePollMs:
+          overrides.realtime?.desiredStatePollMs ?? defaults.realtime?.desiredStatePollMs ?? 300000,
+        reconnectMinMs: overrides.realtime?.reconnectMinMs ?? defaults.realtime?.reconnectMinMs ?? 1000,
+        reconnectMaxMs: overrides.realtime?.reconnectMaxMs ?? defaults.realtime?.reconnectMaxMs ?? 60000,
+        pingIntervalMs: overrides.realtime?.pingIntervalMs ?? defaults.realtime?.pingIntervalMs ?? 25000,
+        notificationMaxBytes:
+          overrides.realtime?.notificationMaxBytes ?? defaults.realtime?.notificationMaxBytes ?? 32768,
+        wsUrl: overrides.realtime?.wsUrl ?? defaults.realtime?.wsUrl,
+      },
       mtls: { ...defaults.mtls, ...overrides.mtls },
       cache: { ...defaults.cache, ...overrides.cache },
       intervals: { ...defaults.intervals, ...overrides.intervals },
@@ -259,6 +285,18 @@ export class ConfigManager {
       runtime: {
         ...config.runtime,
         mode: runtimeMode,
+      },
+      realtime: {
+        ...config.realtime,
+        enabled: config.realtime?.enabled === true,
+        deviceNamespace: config.realtime?.deviceNamespace || '/device',
+        commandSafetyPollMs: Math.max(config.realtime?.commandSafetyPollMs || 60000, 10000),
+        desiredStatePollMs: Math.max(config.realtime?.desiredStatePollMs || 300000, 30000),
+        reconnectMinMs: Math.max(config.realtime?.reconnectMinMs || 1000, 250),
+        reconnectMaxMs: Math.max(config.realtime?.reconnectMaxMs || 60000, config.realtime?.reconnectMinMs || 1000),
+        pingIntervalMs: Math.max(config.realtime?.pingIntervalMs || 25000, 5000),
+        notificationMaxBytes: Math.max(config.realtime?.notificationMaxBytes || 32768, 1024),
+        wsUrl: this.normalizeUrl(config.realtime?.wsUrl),
       },
       intervals: {
         ...config.intervals,
@@ -308,6 +346,7 @@ export class ConfigManager {
     return {
       ...config,
       runtime: { ...config.runtime },
+      realtime: config.realtime ? { ...config.realtime } : undefined,
       mtls: { ...config.mtls },
       cache: { ...config.cache },
       intervals: { ...config.intervals },
@@ -405,6 +444,19 @@ export class ConfigManager {
 
     if (!this.isRuntimeMode(this.config.runtime.mode)) {
       errors.push(`runtime.mode must be one of: ${RUNTIME_MODES.join(', ')}`)
+    }
+
+    if (this.config.realtime?.enabled) {
+      const namespace = this.config.realtime.deviceNamespace
+      if (!namespace || !namespace.startsWith('/')) {
+        errors.push('realtime.deviceNamespace must start with /')
+      }
+      if (this.config.realtime.commandSafetyPollMs < 10000) {
+        errors.push('realtime.commandSafetyPollMs must be at least 10 seconds')
+      }
+      if (this.config.realtime.notificationMaxBytes > 32768) {
+        errors.push('realtime.notificationMaxBytes must not exceed 32768 bytes')
+      }
     }
 
     if (this.config.cache.maxBytes < 1024 * 1024 * 100) {

@@ -124,6 +124,19 @@ function applyConfigToNetworkClients(nextConfig: AppConfig): void {
   } catch (error) {
     logger.warn({ error }, 'Failed to apply config to WebSocket client')
   }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getRealtimeService } = require('./services/realtime-service')
+    const realtimeService = getRealtimeService()
+    if (nextConfig.realtime?.enabled && realtimeService.getState() === 'disabled') {
+      realtimeService.start()
+    } else if (!nextConfig.realtime?.enabled && realtimeService.getState() !== 'disabled') {
+      realtimeService.stop()
+    }
+  } catch (error) {
+    logger.warn({ error }, 'Failed to apply config to realtime service')
+  }
 }
 
 // Disable hardware acceleration if needed for stability

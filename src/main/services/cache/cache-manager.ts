@@ -5,6 +5,7 @@ import { getConfigManager } from '../../../common/config'
 import { getLogger } from '../../../common/logger'
 import { CacheEntry, CacheStats, CacheError } from '../../../common/types'
 import { atomicWrite, calculateBufferHash, ensureDir, sanitizeFilename } from '../../../common/utils'
+import { reportMediaCacheFailure, type MediaCacheReportSource } from '../media-cache-reporter'
 
 const logger = getLogger('cache-manager')
 
@@ -12,6 +13,19 @@ interface PrefetchItem {
   mediaId: string
   url: string
   sha256?: string
+  source?: MediaCacheReportSource
+  snapshotId?: string
+  scheduleId?: string
+  defaultMediaVersion?: string
+  playbackMode?: 'normal' | 'emergency' | 'default' | 'offline' | 'empty'
+}
+
+export interface CacheAddContext {
+  source?: MediaCacheReportSource
+  snapshotId?: string
+  scheduleId?: string
+  defaultMediaVersion?: string
+  playbackMode?: 'normal' | 'emergency' | 'default' | 'offline' | 'empty'
 }
 
 export class CacheManager {
@@ -152,7 +166,7 @@ export class CacheManager {
     }
   }
 
-  async add(mediaId: string, url: string, sha256?: string): Promise<void> {
+  async add(mediaId: string, url: string, sha256?: string, context: CacheAddContext = {}): Promise<void> {
     if (await this.has(mediaId)) {
       return
     }
@@ -163,7 +177,7 @@ export class CacheManager {
       return
     }
 
-    const operation = this.addInternal(mediaId, url, sha256)
+    const operation = this.addInternal(mediaId, url, sha256, context)
     this.inFlight.set(mediaId, operation)
 
     try {
@@ -173,37 +187,56 @@ export class CacheManager {
     }
   }
 
-  private async addInternal(mediaId: string, url: string, sha256?: string): Promise<void> {
-    const data = await this.download(url)
-    const hash = calculateBufferHash(data)
+  private async addInternal(
+    mediaId: string,
+    url: string,
+    sha256?: string,
+    context: CacheAddContext = {}
+  ): Promise<void> {
+    try {
+      const data = await this.download(url)
+      const hash = calculateBufferHash(data)
 
-    if (sha256 && hash !== sha256) {
-      throw new CacheError('Cache item failed integrity validation', { expected: sha256, actual: hash })
-    }
+      if (sha256 && hash !== sha256) {
+        throw new CacheError('Cache item failed integrity validation', { expected: sha256, actual: hash })
+      }
 
-    const canStore = await this.evictIfNeeded(data.length)
-    if (!canStore) {
-      throw new CacheError('Cache budget exceeded and protected items prevented eviction', {
-        reason: 'INSUFFICIENT_SPACE',
+      const canStore = await this.evictIfNeeded(data.length)
+      if (!canStore) {
+        throw new CacheError('Cache budget exceeded and protected items prevented eviction', {
+          reason: 'INSUFFICIENT_SPACE',
+          mediaId,
+          sizeNeeded: data.length,
+        })
+      }
+
+      const filePath = this.getFilePath(mediaId, url)
+      await atomicWrite(filePath, data)
+
+      const entry: CacheEntry = {
         mediaId,
-        sizeNeeded: data.length,
+        sha256: sha256 || hash,
+        size: data.length,
+        lastUsedAt: Date.now(),
+        localPath: filePath,
+        status: 'ready',
+      }
+
+      this.entries.set(mediaId, entry)
+      logger.info({ mediaId, size: data.length }, 'Cached item added')
+    } catch (error) {
+      void reportMediaCacheFailure({
+        mediaId,
+        url,
+        error,
+        source: context.source || 'CACHE',
+        snapshotId: context.snapshotId,
+        scheduleId: context.scheduleId,
+        defaultMediaVersion: context.defaultMediaVersion,
+        playbackMode: context.playbackMode,
       })
+      throw error
     }
-
-    const filePath = this.getFilePath(mediaId, url)
-    await atomicWrite(filePath, data)
-
-    const entry: CacheEntry = {
-      mediaId,
-      sha256: sha256 || hash,
-      size: data.length,
-      lastUsedAt: Date.now(),
-      localPath: filePath,
-      status: 'ready',
-    }
-
-    this.entries.set(mediaId, entry)
-    logger.info({ mediaId, size: data.length }, 'Cached item added')
   }
 
   async has(mediaId: string): Promise<boolean> {
@@ -266,7 +299,13 @@ export class CacheManager {
 
         try {
           if (!(await this.has(current.mediaId))) {
-            await this.add(current.mediaId, current.url, current.sha256)
+            await this.add(current.mediaId, current.url, current.sha256, {
+              source: current.source || 'PREFETCH',
+              snapshotId: current.snapshotId,
+              scheduleId: current.scheduleId,
+              defaultMediaVersion: current.defaultMediaVersion,
+              playbackMode: current.playbackMode,
+            })
           }
         } catch (error) {
           logger.warn({ mediaId: current.mediaId, error }, 'Failed to prefetch item')

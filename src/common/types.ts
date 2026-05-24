@@ -13,6 +13,7 @@ export interface AppConfig {
   wsUrl: string
   deviceId: string
   runtime: RuntimeConfig
+  realtime?: RealtimeConfig
   mtls: MTLSConfig
   cache: CacheConfig
   intervals: IntervalsConfig
@@ -24,6 +25,18 @@ export interface AppConfig {
 
 export interface RuntimeConfig {
   mode: RuntimeMode
+}
+
+export interface RealtimeConfig {
+  enabled: boolean
+  deviceNamespace: string
+  commandSafetyPollMs: number
+  desiredStatePollMs: number
+  reconnectMinMs: number
+  reconnectMaxMs: number
+  pingIntervalMs: number
+  notificationMaxBytes: number
+  wsUrl?: string
 }
 
 export interface MTLSConfig {
@@ -80,6 +93,7 @@ export interface SecurityConfig {
 export interface ObservabilityConfig {
   enabled: boolean
   metricsEnabled: boolean
+  mediaCacheReportingEnabled: boolean
   bindAddress: string
   port: number
   allowRemoteAccess: boolean
@@ -627,6 +641,7 @@ export type CommandType =
   | 'TEST_PATTERN'
   | 'CLEAR_CACHE'
   | 'PING'
+  | 'RESYNC'
 
 export interface DeviceCommand {
   id: string
@@ -758,12 +773,14 @@ export interface PairingResponse {
 
 export type RecoveryKind = 'AUTH_INVALID' | 'DEVICE_NOT_REGISTERED' | 'PARTIAL_IDENTITY' | 'PAIRING_FAILED' | 'UNKNOWN'
 
+export type CommandSource = 'heartbeat' | 'poll' | 'realtime'
+
 export interface RecentCommandRecord {
   id: string
   deliveryToken?: string
   firstSeenAt: string
   lastSeenAt: string
-  source: 'heartbeat' | 'poll'
+  source: CommandSource
   acknowledgedAt?: string
 }
 
@@ -780,6 +797,13 @@ export interface DeviceStateRecord {
   hardRecoveryDeadlineAt?: string
   pairingRequestInDoubtAt?: string
   recentCommands?: RecentCommandRecord[]
+  lastDesiredStateVersion?: number
+  lastDesiredCommandVersion?: number
+  lastDesiredSnapshotId?: string | null
+  lastDesiredDefaultMediaVersion?: string | null
+  lastDesiredEmergencyVersion?: string | null
+  lastDesiredStateAt?: string
+  lastRealtimeConnectedAt?: string
 }
 
 export type BackendErrorCode =

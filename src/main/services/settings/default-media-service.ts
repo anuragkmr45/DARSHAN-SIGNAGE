@@ -244,7 +244,11 @@ export class DefaultMediaService extends EventEmitter {
 
     try {
       if (cacheUrl) {
-        await cacheManager.add(mediaId, cacheUrl)
+        await cacheManager.add(mediaId, cacheUrl, undefined, {
+          source: 'DEFAULT_MEDIA',
+          defaultMediaVersion: media.id,
+          playbackMode: 'default',
+        })
       }
     } catch (error) {
       logger.warn({ error, mediaId }, 'Failed to cache resolved default media')

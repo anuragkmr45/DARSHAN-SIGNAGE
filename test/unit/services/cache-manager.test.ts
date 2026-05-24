@@ -148,7 +148,12 @@ describe('Cache Manager', () => {
       await cacheManager.add('file1.jpg', 'https://example.com/file1.jpg', calculateHash(file1))
       cacheManager.markNowPlaying('file1.jpg')
 
-      await cacheManager.add('file2.jpg', 'https://example.com/file2.jpg', calculateHash(file2))
+      try {
+        await cacheManager.add('file2.jpg', 'https://example.com/file2.jpg', calculateHash(file2))
+        expect.fail('Should have refused to evict now-playing content')
+      } catch (error: any) {
+        expect(error.message).to.include('Cache budget exceeded')
+      }
 
       // file1 should NOT be evicted because it's now-playing
       const has1 = await cacheManager.has('file1.jpg')

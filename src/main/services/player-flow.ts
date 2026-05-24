@@ -26,6 +26,7 @@ import { getDefaultMediaService } from './settings/default-media-service'
 import { getLifecycleEvents, RuntimeAuthFailureEvent } from './lifecycle-events'
 import { getHttpClient } from './network/http-client'
 import { getPlayerMetrics } from './telemetry/player-metrics'
+import { getRealtimeService } from './realtime-service'
 
 const logger = getLogger('player-flow')
 const PAIRING_POLL_INTERVAL_MS = 5000
@@ -286,6 +287,7 @@ export class PlayerFlow extends EventEmitter {
     await getTelemetryService().start()
     getSnapshotManager().start()
     getDefaultMediaService().start()
+    getRealtimeService().start()
     this.startScreenshotLoop()
   }
 
@@ -294,6 +296,7 @@ export class PlayerFlow extends EventEmitter {
     void getTelemetryService().stop()
     getSnapshotManager().stop()
     getDefaultMediaService().stop()
+    getRealtimeService().stop()
     this.stopScreenshotLoop()
     this.runtimeLoopsStarted = false
 

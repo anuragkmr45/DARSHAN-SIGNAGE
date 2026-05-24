@@ -146,6 +146,52 @@ describe('Command Processor', () => {
     expect(defaultRefreshStub.callCount).to.equal(2)
   })
 
+  it('should handle RESYNC as an authoritative REST refresh alias', async () => {
+    const { resetDeviceStateStore, getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    resetDeviceStateStore()
+    await getDeviceStateStore().clearIdentity()
+
+    const { getCommandProcessor } = require('../../../src/main/services/command-processor')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getDefaultMediaService } = require('../../../src/main/services/settings/default-media-service')
+
+    const commandProcessor = getCommandProcessor()
+    const snapshotManager = getSnapshotManager()
+    const httpClient = getHttpClient()
+    const defaultMediaService = getDefaultMediaService()
+
+    const refreshStub = sandbox.stub(snapshotManager, 'refreshSnapshot').resolves({ mode: 'normal', items: [], scheduleId: 'sched-1' })
+    const defaultRefreshStub = sandbox.stub(defaultMediaService, 'refreshNow').resolves({
+      source: 'NONE',
+      aspect_ratio: null,
+      media_id: null,
+      media: null,
+    })
+    const ackStub = sandbox.stub(httpClient, 'post').resolves({ success: true, timestamp: new Date().toISOString() })
+
+    await commandProcessor.ingestCommands(
+      [
+        {
+          id: 'cmd-resync-1',
+          type: 'RESYNC',
+          deliveryToken: 'delivery-resync-1',
+          payload: { reason: 'DESIRED_STATE_RESYNC' },
+        },
+      ],
+      'poll'
+    )
+
+    expect(refreshStub.calledOnce).to.equal(true)
+    expect(defaultRefreshStub.calledOnceWithExactly('refresh-command')).to.equal(true)
+    expect(ackStub.calledOnce).to.equal(true)
+    expect(ackStub.firstCall.args[1]).to.include({
+      delivery_token: 'delivery-resync-1',
+      success: true,
+      message: 'Schedule refreshed',
+    })
+  })
+
   it('should persist recent command ledger entries for restart safety', async () => {
     const { resetDeviceStateStore, getDeviceStateStore } = require('../../../src/main/services/device-state-store')
     resetDeviceStateStore()
@@ -309,6 +355,45 @@ describe('Command Processor', () => {
     expect(pollStub.callCount).to.equal(1)
 
     await clock.tickAsync(pollDelayMs - 1)
+    expect(pollStub.callCount).to.equal(1)
+
+    await clock.tickAsync(1)
+    expect(pollStub.callCount).to.equal(2)
+
+    commandProcessor.stop()
+  })
+
+  it('should use realtime safety polling when the realtime connection is healthy', async () => {
+    const clock = sandbox.useFakeTimers({
+      now: new Date('2026-04-07T10:00:00.000Z'),
+      shouldAdvanceTime: false,
+    })
+    sandbox.stub(Math, 'random').returns(0.5)
+    const { getCommandProcessor } = require('../../../src/main/services/command-processor')
+    const { getConfigManager } = require('../../../src/common/config')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+
+    getConfigManager().updateConfig({
+      realtime: {
+        ...getConfigManager().getConfig().realtime,
+        enabled: true,
+        commandSafetyPollMs: 60000,
+      },
+    })
+
+    await getDeviceStateStore().update({
+      lastHeartbeatAt: new Date('2026-04-07T09:59:59.000Z').toISOString(),
+    })
+
+    const commandProcessor = getCommandProcessor()
+    const pollStub = sandbox.stub(commandProcessor as any, 'pollCommands').resolves()
+
+    commandProcessor.setRealtimeHealthy(true)
+    commandProcessor.start()
+    await clock.tickAsync(0)
+    expect(pollStub.callCount).to.equal(1)
+
+    await clock.tickAsync(59999)
     expect(pollStub.callCount).to.equal(1)
 
     await clock.tickAsync(1)

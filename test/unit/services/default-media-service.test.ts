@@ -94,7 +94,9 @@ describe('Default Media Service', () => {
     const result = await service.refreshNow('manual')
 
     expect(getDefaultMediaStub.calledOnceWithExactly('device-123')).to.equal(true)
-    expect(addStub.calledOnceWithExactly('media-16-9', 'https://cdn.example.com/lobby-loop.mp4')).to.equal(true)
+    expect(addStub.calledOnce).to.equal(true)
+    expect(addStub.firstCall.args[0]).to.equal('media-16-9')
+    expect(addStub.firstCall.args[1]).to.equal('https://cdn.example.com/lobby-loop.mp4')
     expect(getStub.calledWith('media-16-9')).to.equal(true)
     expect(result.source).to.equal('ASPECT_RATIO')
     expect(result.aspect_ratio).to.equal('16:9')
@@ -186,7 +188,9 @@ describe('Default Media Service', () => {
     const service = new DefaultMediaService()
     const result = await service.refreshNow('manual')
 
-    expect(addStub.calledOnceWithExactly('media-webpage', 'https://cdn.example.com/webpage-fallback.svg')).to.equal(true)
+    expect(addStub.calledOnce).to.equal(true)
+    expect(addStub.firstCall.args[0]).to.equal('media-webpage')
+    expect(addStub.firstCall.args[1]).to.equal('https://cdn.example.com/webpage-fallback.svg')
     expect(getStub.calledWith('media-webpage')).to.equal(true)
     expect(result.media?.local_path).to.equal(cachedPath)
     expect(result.media?.source_url).to.equal('https://status.example.com')
