@@ -1,8 +1,8 @@
 # Platform Neutral Player Contract
 
-Last updated: 2026-05-23
+Last updated: 2026-05-24
 Updated by: Codex
-Status: Phase 0 contract draft
+Status: Phase 4 Electron player contract implementation updated
 
 ## Supported Player Families
 
@@ -40,6 +40,8 @@ Runtime requests must authenticate using the approved device identity mechanism:
 
 REST and WebSocket auth must identify the same device id.
 
+Phase 3 backend implementation exposes the device WebSocket contract through Socket.IO namespace `/device` when `REALTIME_SYNC_ENABLED=true`. Phase 4 Electron implementation consumes that contract when `HEXMON_REALTIME_SYNC_ENABLED=true`. Production signature/token parity and real proxy/runtime compatibility must be reviewed before enabling at fleet scale.
+
 ## Capabilities Negotiation
 
 Players send capabilities during HELLO. Capabilities are used for targeting, diagnostics, and future rendering decisions.
@@ -60,6 +62,8 @@ Capability categories:
 - offline startup support
 
 ## WebSocket Messages
+
+Transport note: Phase 3 backend uses Socket.IO on the isolated `/device` namespace. Phase 4 Electron currently uses the existing `ws` dependency with scoped Socket.IO/Engine.IO framing; this must remain a transport detail and must be validated against the real backend gateway. Message bodies remain platform-neutral JSON and must not depend on Electron.
 
 ### HELLO
 
@@ -192,6 +196,38 @@ Required player REST APIs:
 
 Existing single-event PoP and screenshot endpoints may remain during migration.
 
+## Desired State Response
+
+Phase 2 backend endpoint:
+
+`GET /api/v1/device/:deviceId/desired-state`
+
+This endpoint is authenticated with the same device identity as command polling. It returns reconciliation metadata and REST resource hints only. It must not include full schedule snapshots, media bytes, screenshots, logs, or proof-of-play data.
+
+```json
+{
+  "device_id": "00000000-0000-0000-0000-000000000000",
+  "server_time": "2026-05-24T00:00:00.000Z",
+  "state": {
+    "state_version": 12,
+    "command_version": 8,
+    "snapshot_id": "11111111-1111-1111-1111-111111111111",
+    "default_media_version": "2026-05-24T00:00:00.000Z",
+    "emergency_version": "22222222-2222-2222-2222-222222222222:start",
+    "last_command_id": "33333333-3333-3333-3333-333333333333",
+    "last_command_type": "REFRESH",
+    "last_command_reason": "PUBLISH",
+    "last_changed_reason": "PUBLISH",
+    "updated_at": "2026-05-24T00:00:00.000Z"
+  },
+  "resources": {
+    "commands": "/api/v1/device/00000000-0000-0000-0000-000000000000/commands",
+    "snapshot": "/api/v1/device/00000000-0000-0000-0000-000000000000/snapshot?include_urls=true",
+    "default_media": "/api/v1/device/00000000-0000-0000-0000-000000000000/default-media"
+  }
+}
+```
+
 ## Command ACK Payload
 
 ```json
@@ -277,21 +313,33 @@ Failure example:
 
 ## Cache Failure Payload
 
+Phase 6 implemented this REST contract as `POST /api/v1/device/:deviceId/media-cache-report`. The player must send metadata only. Full media URLs, signed URL query strings, media bytes, screenshots, logs, and snapshots are not allowed in this payload.
+
 ```json
 {
-  "device_id": "00000000-0000-0000-0000-000000000000",
+  "event_type": "DOWNLOAD_FAILED",
+  "severity": "ERROR",
+  "source": "SNAPSHOT",
   "media_id": "media-id",
+  "error_code": "HTTP_503",
+  "http_status": 503,
+  "message": "CDN returned 503",
+  "cache_key": "media-id",
+  "url_host": "cdn.example.com",
+  "url_path_hash": "sha256-of-path-and-query",
   "snapshot_id": "snapshot-id",
-  "source": "snapshot_prefetch",
-  "status": "FAILED",
-  "error": {
-    "code": "URL_EXPIRED",
-    "message": "Media URL returned 403",
+  "schedule_id": "schedule-id",
+  "default_media_version": null,
+  "playback_mode": "normal",
+  "attempt_count": 1,
+  "metadata": {
     "retryable": true
   },
   "reported_at": "2026-05-23T00:03:00.000Z"
 }
 ```
+
+Allowed `event_type` values in Phase 6 are `URL_EXPIRED`, `DOWNLOAD_FAILED`, `CHECKSUM_MISMATCH`, `DISK_FULL`, `CACHE_EVICTION_FAILED`, `CACHE_WRITE_FAILED`, `CACHE_MISS`, `PLAYBACK_ERROR`, and `UNKNOWN`. Electron currently reports cache/download/default/snapshot caching failures; renderer playback error reporting is still a future extension.
 
 ## Snapshot Fetch
 

@@ -99,22 +99,63 @@ Rollback normally means:
 
 ## What Not To Implement Prematurely
 
-- No Phase 2 outbox or desired state until Phase 1 is approved.
-- No Phase 3 WebSocket gateway until Phase 2 is approved.
-- No Phase 4 adaptive polling until backend realtime is stable.
-- No Phase 5 CMS UI until backend status APIs are stable.
+- No Phase 2 outbox or desired state unless Phase 1 is approved or conditionally approved in the approval log.
+- No additional Phase 3 backend gateway/dispatcher work unless it is limited to approval conditions, metrics, or QA hardening.
+- No additional Phase 4 player realtime work unless it is limited to approval conditions, backend compatibility smoke, or QA hardening.
+- No additional Phase 5 CMS UI beyond approval-condition fixes unless Phase 5 scope is reopened.
+- No additional Phase 6 media/cache/log/screenshot observability work beyond approval-condition fixes unless Phase 6 scope is reopened.
+- No Phase 7 QA/prod hardening until Phase 6 conditions are accepted and the status docs say Phase 7 is ready at the gate.
+- No Phase 8 load/chaos work until Phase 7 conditions are accepted and the status docs say Phase 8 is ready at the gate.
 - No mobile push adapters until Electron/backend realtime is production-proven.
+
+Current handoffs:
+
+- Phase 1: `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`
+- Phase 2: `signhex-platform/docs/implementation/realtime-sync-phase-2-handoff.md`
+- Phase 3: `signhex-platform/docs/implementation/realtime-sync-phase-3-handoff.md`
+- Phase 4: `signhex-platform/docs/implementation/realtime-sync-phase-4-handoff.md`
+- Phase 5: `signhex-platform/docs/implementation/realtime-sync-phase-5-handoff.md`
+- Phase 6: `signhex-platform/docs/implementation/realtime-sync-phase-6-handoff.md`
+- Phase 7: `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`
+
+## Phase 7 Deployment Hardening Rules
+
+Phase 7 is a deployment-control phase. It may add or update:
+
+- environment checklists,
+- proxy templates,
+- QA/prod rollout runbooks,
+- rollback drills,
+- static validation scripts,
+- handoff/status docs.
+
+Phase 7 must not add:
+
+- load or chaos test suites,
+- mobile/TV adapters,
+- WebSocket protocol changes,
+- Electron RealtimeService behavior changes,
+- CMS UI changes,
+- DB migrations.
+
+Use:
+
+```bash
+bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh
+```
+
+Record the exact output in the project status and approval log. If real QA proxy/canary tests are unavailable, mark them blocked by environment and carry them as Phase 8/production-readiness prerequisites.
 
 ## Phase 2 Readiness Plan
 
 Phase 2 target: transactional outbox and device desired state.
 
-Phase 2 can start only after:
+Phase 2 can start because Phase 1 is conditionally approved. Carry these conditions:
 
-- Phase 1 backend DB tests pass or are explicitly deferred
-- `RESYNC` compatibility is fixed or explicitly deferred
-- migration `0030_command_lifecycle_normalization.sql` is reviewed
-- approval log marks Phase 1 approved or conditionally approved
+- rerun Phase 1 build/tests under Node 20 before QA signoff
+- review migration/index behavior on QA-like DB volume
+- run DB-mutating backend integration files isolated unless DB isolation is added
+- do not implement WebSocket, Electron realtime/adaptive polling, CMS UI, or mobile work in Phase 2
 
 Likely Phase 2 files:
 
@@ -147,4 +188,3 @@ Phase 2 rollback:
 - leave tables in place
 - disable outbox dispatcher if introduced later
 - keep legacy command polling/heartbeat behavior
-

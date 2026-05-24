@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-24
 Updated by: Codex
-Status: Phase 1 verification updated
+Status: Phase 6 failure observability and media/cache status implementation updated
 
 ## Purpose
 
@@ -20,17 +20,21 @@ The selected architecture is hybrid:
 - device desired state lets players reconcile missed events
 - the same backend contract must support Electron, Android TV, Android, iOS/iPadOS, tvOS, and future signage players
 
-## Phase 1 Verification Guardrail
+## Phase 6 Verification Guardrail
 
-Phase 1 implemented command lifecycle normalization only. It did not implement WebSocket, outbox, device desired state, adaptive polling, CMS UI, or mobile work.
+Phase 6 implemented media/cache failure reporting and per-screen CMS visibility only. It added an additive `media_cache_reports` table, device REST report endpoint, CMS REST listing endpoint, Electron cache failure reporter, and Delivery tab failure card. It did not implement deployment hardening, mobile work, log/screenshot result visibility, production dashboards, Electron realtime changes, or any WebSocket source-of-truth behavior.
 
-Current approval state: `IMPLEMENTED_PENDING_DB_TESTS`.
+Current approval state: `APPROVED_WITH_CONDITIONS`.
 
-Phase 2 must not start until:
+Phase 7 may start only after accepting Phase 6 conditions. QA/prod realtime enablement must not start until:
 
-- backend command DB tests pass or are explicitly deferred by a human reviewer
-- the `RESYNC` backend/player command contract gap is fixed or explicitly deferred
-- migration safety is reviewed on a QA-like database
+- player/backend/CMS build/tests are rerun under Node `>=20 <21` before QA signoff
+- packaged Electron-to-backend realtime smoke is run against the Phase 3 gateway
+- QA WebSocket proxy/sticky-session behavior is reviewed
+- dedicated realtime/outbox/player metrics are planned before production enablement
+- CMS Delivery tab visual/E2E review is completed or explicitly deferred
+- existing CMS lint failures are fixed or explicitly waived
+- `media_cache_reports` retention/partitioning is decided
 - the phase approval log is updated
 
 ## Current Architecture
@@ -44,7 +48,9 @@ Confirmed from repo audit:
 - Electron claims commands through heartbeat and `GET /api/v1/device/:deviceId/commands`.
 - Electron acknowledges commands through `POST /api/v1/device/:deviceId/commands/:commandId/ack`.
 - Electron caches media locally through `signage-screen/src/main/services/cache/cache-manager.ts`.
-- Existing Socket.IO infrastructure is used for CMS screens, chat, and notifications, not for production player wake-up.
+- Existing Socket.IO infrastructure now includes an isolated `/device` namespace for production player wake-up notifications when `REALTIME_SYNC_ENABLED=true`.
+- Electron now includes a feature-flagged RealtimeService that consumes `/device` wake notifications when `HEXMON_REALTIME_SYNC_ENABLED=true`.
+- CMS screen details now includes a feature-flagged Delivery tab backed by `GET /api/v1/screens/:id/delivery-status`.
 - Existing nginx config proxies `/socket.io/`.
 
 Current runtime flow:
@@ -263,11 +269,23 @@ sequenceDiagram
 
 Owns the device realtime endpoint. It sends notification-only messages and never sends media or authoritative snapshots.
 
-Recommended location: `signhex-server/src/realtime/device-namespace.ts` or `signhex-server/src/realtime/device-gateway.ts`.
+Implemented location: `signhex-server/src/realtime/device-gateway.ts`.
+
+Phase 3 implementation:
+
+- Socket.IO namespace: `/device` by default through `REALTIME_DEVICE_NAMESPACE`.
+- Startup flag: `REALTIME_SYNC_ENABLED`.
+- Auth: validates device id plus existing device certificate serial credentials.
+- Messages handled: `HELLO`, `PING`.
+- Messages emitted: `HELLO_ACK`, `PONG`, `COMMAND_AVAILABLE`, `RESYNC_REQUIRED`, `ERROR`.
 
 ### DeviceConnectionRegistry
 
 Tracks connected device sessions, protocol version, app version, last ping, and disconnect reason. It is for observability and best-effort routing only.
+
+Implemented location: `signhex-server/src/realtime/device-connection-registry.ts`.
+
+Phase 3 registry is in-memory and single-process. Multi-instance production requires sticky sessions, Redis/NATS routing, or a distributed registry.
 
 ### CommandNotifier
 
@@ -280,6 +298,17 @@ Transactional table written in the same DB transaction as command/state changes.
 ### OutboxDispatcher
 
 Worker that reads pending outbox rows, dispatches realtime notifications, retries failures, and records dispatch status.
+
+Implemented location: `signhex-server/src/services/outbox-dispatcher.ts`.
+
+Phase 3 behavior:
+
+- Reads from `command_outbox`.
+- Atomically claims rows by setting `status='DISPATCHING'`.
+- Emits notification-only payloads.
+- Marks rows `DISPATCHED` when at least one active connection receives the notification.
+- Returns rows to `PENDING` when the target device is disconnected.
+- Reclaims stale `DISPATCHING` rows after `OUTBOX_DISPATCH_LEASE_MS`.
 
 ### DeviceDesiredState
 
@@ -301,7 +330,22 @@ Central service for command creation, lease, reclaim, processing, ACK success/fa
 
 Connects after authenticated runtime bootstrap. Handles HELLO, HELLO_ACK, reconnect/backoff, pings, and wake messages.
 
+Implemented location: `signage-screen/src/main/services/realtime-service.ts`.
+
+Phase 4 behavior:
+
+- Connects to the backend `/device` Socket.IO namespace when `HEXMON_REALTIME_SYNC_ENABLED=true`.
+- Sends platform-neutral `HELLO` and waits for `HELLO_ACK` before marking realtime healthy.
+- Treats `COMMAND_AVAILABLE` and `RESYNC_REQUIRED` as wake notifications only.
+- Fetches desired state and commands through REST.
+- Rejects WebSocket payloads containing snapshot or media data.
+- Uses existing polling/heartbeat fallback when disabled or disconnected.
+
 ### Adaptive Polling
+
+Implemented location: `signage-screen/src/main/services/command-processor.ts`.
+
+When realtime is healthy, command polling uses the configured safety interval. When realtime is unhealthy, disabled, or disconnected, the existing fallback polling interval is used. Heartbeat remains active in both states.
 
 When WebSocket is healthy:
 
@@ -342,7 +386,7 @@ Show emergency target delivery, active/cleared state, command ACKs, and player h
 
 ### Media/Cache Failure Visibility
 
-Show per-screen media cache failures, URL expiry errors, download failures, disk-full reports, and retry status.
+Phase 6 implements per-screen media cache failures, URL expiry errors, download failures, disk-full/cache write reports, and CMS status visibility through REST. Full signed URLs are sanitized to host plus path hash. Production dashboards, alerting, and retention are still Phase 7/8 hardening work.
 
 ## Deployment Requirements
 
@@ -352,6 +396,9 @@ Show per-screen media cache failures, URL expiry errors, download failures, disk
 - Outbox dispatcher must run as a worker role.
 - DB indexes must support command lease, expiry, outbox dispatch, and desired-state reads.
 - Metrics must include active connections, notification dispatch latency, outbox lag, command lifecycle counters, ACK latency, fallback polling rate, and reconnect storms.
+- Phase 7 deployment hardening assets are documented in `signhex-platform/docs/runbooks/realtime-sync-qa-prod-hardening.md`.
+- QA and production environment checklists live in `signhex-platform/docs/environments/qa/realtime-sync.env.example` and `signhex-platform/docs/environments/production/realtime-sync.env.example`.
+- The explicit REST plus notification-only Socket.IO proxy snippet lives in `signhex-platform/deploy/shared/realtime-sync-nginx.socketio.conf.template`.
 
 ## QA/Prod Rollout Plan
 
@@ -362,9 +409,10 @@ Show per-screen media cache failures, URL expiry errors, download failures, disk
 5. Enable dispatcher in QA.
 6. Enable device realtime in QA for test players.
 7. Enable adaptive polling in QA.
-8. Run E2E, load, and chaos tests.
-9. Roll out production to a canary player group.
-10. Expand by fleet group while monitoring fallback rate, ACK latency, outbox lag, and emergency latency.
+8. Complete Phase 7 QA proxy/canary rollback validation.
+9. Run Phase 8 E2E, load, and chaos tests.
+10. Roll out production to a canary player group.
+11. Expand by fleet group while monitoring fallback rate, ACK latency, outbox lag, and emergency latency.
 
 ## Rollback Plan
 

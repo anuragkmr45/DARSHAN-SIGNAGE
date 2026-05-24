@@ -93,11 +93,11 @@ Updated by: Codex
 
 ## ADR-0012 - Phase Approval Requires Test Evidence
 
-- Context: Phase 1 implementation is present, but backend command DB tests could not run because local Postgres was unavailable, and a `RESYNC` backend/player command contract gap was found.
-- Decision: A phase is not marked approved unless required tests pass or are explicitly deferred with a recorded reason, migration safety is reviewed, docs/status are updated, and no architecture drift is present.
-- Consequences: Phase 1 remains `IMPLEMENTED_PENDING_DB_TESTS` and Phase 2 should not start until the DB tests pass and `RESYNC` compatibility is fixed or explicitly deferred by a human reviewer.
+- Context: Phase 1 initially had blocked backend DB tests and a `RESYNC` backend/player command contract gap. Those blockers were fixed by running the DB tests against local Docker Postgres and adding Electron `RESYNC` handling.
+- Decision: A phase is not marked approved unless required tests pass or are explicitly deferred with a recorded reason, migration safety is reviewed, docs/status are updated, and no architecture drift is present. Phase 1 is marked `APPROVED_WITH_CONDITIONS`.
+- Consequences: Phase 2 may start, but QA/prod rollout still requires Node 20 rerun, QA-sized migration/index review, and isolated DB-mutating backend test execution.
 - Alternatives considered: marking Phase 1 complete after build-only validation; proceeding to Phase 2 with unresolved command contract drift.
-- Follow-up tasks: RT-0103, RT-0201 only after approval.
+- Follow-up tasks: RT-0201 with Phase 1 conditions carried forward.
 
 ## ADR-0013 - Phase 1 Compatibility Status Mapping
 
@@ -106,3 +106,59 @@ Updated by: Codex
 - Consequences: Existing polling/heartbeat behavior remains compatible while future phases can migrate UI and services to normalized lifecycle names.
 - Alternatives considered: immediately writing only new lifecycle statuses; leaving lifecycle mapping undocumented.
 - Follow-up tasks: RT-0102, RT-0501.
+
+## ADR-0014 - Phase 2 Outbox And Desired State Written At Command Creation Boundary
+
+- Context: Existing schedule publish, default media, emergency, screenshot, and manual command routes converge on durable `device_commands`. Phase 2 needs outbox/desired-state data without changing player delivery behavior or implementing WebSocket dispatch.
+- Decision: Write `device_commands`, command status history, `device_desired_state`, desired-state history, and `command_outbox` rows inside the `createDeviceCommands` transaction. Keep source-of-truth REST/polling/heartbeat behavior unchanged. Add `GET /api/v1/device/:deviceId/desired-state` as REST metadata only.
+- Consequences: Every command created through the lifecycle service receives matching desired-state and outbox rows while preserving compatibility. Outbox rows accumulate until Phase 3 implements dispatch/cleanup. Existing source-of-truth route transactions are not restructured in Phase 2.
+- Alternatives considered: implementing outbox dispatcher immediately; wiring WebSocket directly from command creation; restructuring all publish/default/emergency source transactions before adding outbox.
+- Follow-up tasks: RT-0302, RT-0303, RT-0403, RT-0701.
+
+## ADR-0015 - Phase 3 Uses Isolated Socket.IO Device Namespace
+
+- Context: The backend already has Socket.IO infrastructure for CMS/user realtime namespaces. Phase 3 needed a backend device notification gateway without implementing Electron realtime yet and without adding a second WebSocket runtime.
+- Decision: Reuse Socket.IO with an isolated `/device` namespace for device wake notifications. The gateway authenticates device sockets separately from CMS namespaces, accepts `HELLO`, and emits notification-only events sourced from `command_outbox`.
+- Consequences: Phase 3 avoids another network stack and can reuse existing `/socket.io/` proxy behavior. Multi-instance production requires sticky sessions, broker-backed routing, or a distributed connection registry because the Phase 3 registry is in-memory. Socket.IO messages remain wake metadata only; REST remains authoritative.
+- Alternatives considered: raw `ws`; direct emit from command creation; using CMS notification namespace for devices.
+- Follow-up tasks: RT-0401, RT-0402, RT-0701, RT-0801.
+
+## ADR-0016 - Phase 3 Dispatcher Claims Outbox Rows Before Emitting
+
+- Context: Multiple backend workers or overlapping dispatcher ticks must not emit the same outbox row concurrently. Phase 2 outbox rows are durable notification intents, but dispatch is best-effort.
+- Decision: Phase 3 dispatcher atomically claims due rows by moving them to `DISPATCHING` in the DB transaction before emitting. Successful sends mark `DISPATCHED`; no active device connection returns the row to `PENDING` with retry metadata; stale `DISPATCHING` rows are reclaimable by `OUTBOX_DISPATCH_LEASE_MS`.
+- Consequences: Dispatch is idempotent enough for wake notifications, while missed notifications remain safe because polling/heartbeat/desired-state REST recovery remains authoritative. Dedicated cleanup/metrics are still required before production enablement.
+- Alternatives considered: selecting rows with `FOR UPDATE SKIP LOCKED` without marking them; deleting rows after dispatch; direct WebSocket send without DB status.
+- Follow-up tasks: RT-0303, RT-0304, RT-0801.
+
+## ADR-0017 - Phase 4 Electron Uses WebSocket As Wake-Up Only
+
+- Context: Phase 4 needed the Electron player to consume Phase 3 backend wake notifications without allowing WebSocket to become the command, snapshot, media, or telemetry source of truth.
+- Decision: Electron `RealtimeService` treats `COMMAND_AVAILABLE` and `RESYNC_REQUIRED` as wake signals, fetches desired state through `GET /api/v1/device/:deviceId/desired-state`, and pulls commands/snapshots/default media through existing REST services. WebSocket payloads containing `snapshot`, `media`, or `media_bytes` are rejected.
+- Consequences: Player realtime reduces latency while missed or duplicate notifications remain safe because REST, polling, heartbeat, and command idempotency still govern behavior. Phase 5 can build UI on backend status APIs without depending on WebSocket payload contents.
+- Alternatives considered: putting command payloads directly in WebSocket notifications; sending snapshot/media over WebSocket; treating backend notification sequence as authoritative.
+- Follow-up tasks: RT-0401, RT-0403, RT-0501, RT-0801.
+
+## ADR-0018 - Phase 4 Reuses Existing `ws` Dependency With Scoped Socket.IO Framing
+
+- Context: The backend device gateway uses Socket.IO, while the Electron project already had the `ws` package and Phase 4 was scoped to player realtime behavior without dependency churn.
+- Decision: Implement a minimal scoped Socket.IO/Engine.IO transport over the existing `ws` dependency for the `/device` namespace and platform-neutral JSON events. This is not a general-purpose Socket.IO client and must be validated against the real backend gateway.
+- Consequences: Phase 4 avoids adding a new dependency and keeps the implementation narrow, but QA must verify compatibility through the real backend/proxy. If compatibility or maintenance risk is unacceptable, replace this transport with `socket.io-client` before production rollout.
+- Alternatives considered: add `socket.io-client` immediately; switch backend to raw `ws`; defer Electron realtime until dependency choice is approved.
+- Follow-up tasks: RT-0401, RT-0701, RT-0801.
+
+## ADR-0019 - Phase 6 Media/Cache Failure Reports Use REST Metadata Only
+
+- Context: Players need to expose media/cache failures to operators without making WebSocket a telemetry transport or leaking signed media URLs.
+- Decision: Phase 6 uses `POST /api/v1/device/:deviceId/media-cache-report` for device-authenticated REST metadata reports, stores them in `media_cache_reports`, and exposes recent rows through `GET /api/v1/screens/:id/media-cache-reports/recent`. The Electron player sends host plus path hash for media URLs, never the full signed URL or media bytes.
+- Consequences: Operators can see cache/download/default/snapshot caching failures per screen while preserving notification-only WebSocket semantics. Production still needs retention/partitioning and alerting for the new table.
+- Alternatives considered: sending failure reports over WebSocket; embedding full URLs in reports; relying only on local player logs; adding dashboards before durable reports.
+- Follow-up tasks: RT-0601, RT-0604, RT-0701, RT-0801.
+
+## ADR-0020 - Phase 7 Uses Feature-Flagged QA/Prod Hardening Before Load Testing
+
+- Context: Phases 1 through 6 added command lifecycle, outbox/desired state, notification-only backend gateway, Electron wake-up handling, CMS delivery visibility, and media/cache failure reporting. Before load/chaos testing or production canary, QA/prod deployments need explicit env defaults, proxy rules, canary order, and rollback steps.
+- Decision: Phase 7 hardening is deployment-control only. Realtime WebSocket and outbox dispatch remain disabled by default for production. QA/prod rollout must use documented flags, explicit `/api/v1/` REST and `/socket.io/` notification transport proxying, static asset validation, canary enablement, and feature-flag rollback. Multi-instance production must decide sticky sessions or distributed routing/fanout before full-fleet realtime enablement.
+- Consequences: Phase 8 can focus on evidence-producing load, chaos, reconnect storm, emergency fanout, and production readiness validation instead of inventing deployment controls. Production enablement remains blocked until QA runtime smoke, canary rollback drill, Node 20 rerun, migration review, metrics/alerts, and CMS lint waiver/fix are complete.
+- Alternatives considered: start Phase 8 load testing without deployment hardening; enable production realtime with code defaults; implement Redis/NATS or mobile adapters in Phase 7.
+- Follow-up tasks: RT-0701, RT-0702, RT-0703, RT-0704, RT-0801, RT-0802, RT-0803.

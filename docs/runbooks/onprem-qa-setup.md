@@ -138,6 +138,28 @@ Confirm:
 - API calls succeed through the same origin
 - `/grafana/` resolves through the same VM3 reverse proxy path once Grafana is started locally on VM3
 
+### Realtime sync QA validation
+
+Before enabling realtime sync for QA players, complete the Phase 7 checklist in:
+
+```text
+docs/runbooks/realtime-sync-qa-prod-hardening.md
+```
+
+Use the QA environment checklist:
+
+```text
+docs/environments/qa/realtime-sync.env.example
+```
+
+Minimum QA realtime gate:
+
+- keep `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false` until REST/polling/heartbeat command delivery is verified
+- validate `/api/v1/` through the QA proxy
+- validate `/socket.io/` upgrade and idle timeout through the QA proxy before canary
+- keep polling and heartbeat fallback enabled
+- record rollback evidence before enabling more than canary players
+
 ## 7. Player handoff
 
 Provide the device team:
@@ -171,3 +193,4 @@ Check:
 - players use the QA backend device IP, not the CMS IP
 - QA network allows player access to `3000/tcp`
 - VM2 backend health check passes
+- if realtime is enabled, `/socket.io/` upgrade works through the selected QA proxy path; otherwise disable `REALTIME_SYNC_ENABLED` and `HEXMON_REALTIME_SYNC_ENABLED` and verify REST/polling fallback

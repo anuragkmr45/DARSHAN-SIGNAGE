@@ -7,9 +7,11 @@ Branches reviewed: `release-01`
 
 ## Summary
 
-Phase 1 is implemented but not approved. The code compiles and targeted Electron command/heartbeat tests pass. Backend DB command tests are blocked by local Postgres being unavailable. One command contract gap remains: backend accepts `RESYNC`, but Electron does not define or handle `RESYNC`.
+Phase 1 approval blockers are fixed. The code compiles, targeted Electron command/heartbeat tests pass, backend command DB tests pass against local Docker Postgres, `RESYNC` is handled by Electron, and playback refresh command creation now writes status history.
 
-Recommendation: `BLOCKED_PENDING_DB_TESTS`
+Recommendation: `APPROVE_WITH_CONDITIONS`
+
+Latest verification pass: 2026-05-24. No Phase 2, WebSocket, outbox, desired-state, CMS UI, adaptive polling, or mobile work was implemented during this verification.
 
 ## Code Reviewed
 
@@ -67,11 +69,11 @@ Verified:
 - Admin command creation uses the centralized create service.
 - `GET /api/v1/screens/:id/commands/recent` exists and requires CMS bearer auth plus `read Screen`.
 
-Needs review/fix:
+Additional fixes verified:
 
-- `createPlaybackRefreshCommands` inserts rows directly and does not create status history for command creation.
-- Backend accepts `RESYNC`, but Electron does not handle it.
-- DB behavior is not test-passed in this environment because Postgres is unavailable.
+- `createPlaybackRefreshCommands` routes batch refresh command creation through `createDeviceCommands`, so creation history is written.
+- Claim logic normalizes Postgres timestamp strings as UTC before JavaScript expiry/lease comparisons.
+- Backend command DB behavior passed the focused test suite against local Docker Postgres.
 
 ## Electron Verification
 
@@ -83,9 +85,11 @@ Verified:
 - ACK failure still uses the existing request queue fallback.
 - `REFRESH` and `REFRESH_SCHEDULE` remain exempt from local command rate limiting.
 
-Needs review/fix:
+Additional fixes verified:
 
-- `RESYNC` is not present in `signage-screen/src/common/types.ts` or `signage-screen/src/main/services/command-processor.ts`.
+- `RESYNC` is present in `signage-screen/src/common/types.ts`.
+- `CommandProcessor` handles `RESYNC` through the existing REST refresh path.
+- Focused command processor test covers `RESYNC` as a REST refresh alias.
 
 ## API Verification
 
@@ -127,14 +131,19 @@ npx mocha --config .mocharc.json --spec test/unit/services/command-processor.tes
 
 | Command | Result |
 |---|---|
-| `signhex-server npm run build` | Passed |
-| `signhex-server npx vitest run src/routes/device-telemetry-commands.test.ts` | Blocked by Postgres `ECONNREFUSED` before assertions |
-| `signage-screen npm run build` | Passed |
-| `signage-screen npx mocha ...command-processor...heartbeat...` | Passed, 13 tests |
+| `signhex-server npm run build` | Passed on 2026-05-24 |
+| `signhex-server DRIZZLE_STRICT=false npm run db:push` | Passed against local Docker Postgres after sandboxed run hit `EPERM` and was rerun with escalation |
+| `signhex-server npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 11 tests on 2026-05-24 |
+| `signhex-server npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests on 2026-05-24 |
+| `signhex-server npx vitest run src/routes/settings.test.ts` | Passed, 5 tests on 2026-05-24 |
+| `signhex-server npx vitest run src/routes/emergency.test.ts` | Passed, 2 tests on 2026-05-24 |
+| `signhex-server npx vitest run src/services/playback-refresh-dispatch.test.ts src/routes/settings.test.ts src/routes/emergency.test.ts` | Failed in combined parallel run, 8 passed and 1 emergency assertion failed due shared DB cross-test interference; isolated emergency rerun passed |
+| `signage-screen npm run build` | Passed on 2026-05-24 |
+| `signage-screen npx mocha ...command-processor...heartbeat...` | Passed, 14 tests on 2026-05-24 |
 
 ## Blocked Tests
 
-Backend command route tests are blocked by missing local Postgres:
+No Phase 1 approval test is currently blocked. Earlier backend command route tests were blocked by missing local Postgres:
 
 ```text
 connect ECONNREFUSED ::1:5432
@@ -148,6 +157,8 @@ cd signhex-server
 npx vitest run src/routes/device-telemetry-commands.test.ts
 ```
 
+For the latest successful run, local Docker Postgres was started with `docker compose up -d postgres`, and schema was applied with `DRIZZLE_STRICT=false npm run db:push`.
+
 ## Compatibility Review
 
 Compatible:
@@ -158,9 +169,9 @@ Compatible:
 - `TAKE_SCREENSHOT` is normalized to `SCREENSHOT` by Electron.
 - `SCREENSHOT` is accepted by backend.
 
-Not yet compatible:
+Compatible after blocker fix:
 
-- `RESYNC` is backend-accepted but not player-handled.
+- `RESYNC` is backend-accepted and player-handled as a REST refresh/resync alias.
 
 ## Backward Compatibility
 
@@ -179,20 +190,23 @@ The migration is additive. It should be applied first in QA and reviewed for loc
 
 ## Risks
 
-- Backend DB tests are blocked.
-- `RESYNC` contract gap can create failed commands if an operator/API creates `RESYNC`.
-- Direct refresh command inserts do not write creation status history.
+- Local Node differs from declared engines; rerun under Node 20 before QA signoff.
+- Combined backend DB-mutating test files can interfere when run in parallel without DB isolation.
+- Migration lock/index behavior still needs QA-sized review.
 - Node version differs from declared engines.
 
 ## Required Fixes
 
-Before Phase 1 approval:
+Before QA/prod rollout:
 
-- Fix or explicitly defer `RESYNC` compatibility.
-- Rerun backend DB command tests successfully or get explicit human approval to defer.
-- Review whether refresh command creation must write status history.
+- Rerun the passing Phase 1 build/test suite under Node 20.
+- Review migration/index behavior on QA-like database volume.
+- Run backend DB-mutating integration files isolated unless the test harness gains DB isolation.
+
+## Handoff
+
+See `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`.
 
 ## Recommendation
 
-`BLOCKED_PENDING_DB_TESTS`
-
+`APPROVE_WITH_CONDITIONS`

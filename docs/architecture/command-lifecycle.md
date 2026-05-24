@@ -27,8 +27,9 @@ The new statuses are added to the enum for future phases, but Phase 1 continues 
 Phase 1 verification note:
 
 - `TAKE_SCREENSHOT` remains compatible because the Electron command processor normalizes it to `SCREENSHOT` before execution.
-- `RESYNC` is currently a contract gap: backend accepts it as a command type, but the Electron player has no `RESYNC` type/handler. Before Phase 1 approval, either add `RESYNC` as a player alias for authoritative REST refresh/reconciliation or remove/block it from deliverable Phase 1 commands.
-- `createPlaybackRefreshCommands` inserts refresh commands directly and does not currently write `device_command_status_history` creation entries. This is acceptable only if Phase 1 approval explicitly treats creation history for publish refresh commands as deferred.
+- `RESYNC` is now compatible in Phase 1: backend accepts it and Electron handles it as an authoritative REST refresh alias that refreshes schedule/snapshot and default media state through existing REST paths.
+- `createPlaybackRefreshCommands` now routes batch refresh creation through `createDeviceCommands`, so refresh commands receive `device_command_status_history` creation entries.
+- Claim/expiry checks normalize Postgres `timestamp without time zone` values as UTC before JavaScript comparisons to avoid local-timezone false expiry or immediate lease reclaim.
 
 ## Target States
 
@@ -181,7 +182,7 @@ Compatibility note:
 - Phase 1 adds backend enum support for Electron-compatible aliases.
 - `TAKE_SCREENSHOT` remains the preferred backend screenshot command for existing routes.
 - `SCREENSHOT` is accepted as a compatibility alias.
-- `RESYNC` must be implemented in Electron or deferred before Phase 1 can be fully approved.
+- `RESYNC` is handled by Electron as a REST refresh/resync alias in Phase 1.
 
 ## CMS Visibility Requirements
 
@@ -245,6 +246,29 @@ Postgres enum values are intentionally not removed in rollback. If Phase 1 must 
 |---|---|---|
 | Backend build | Passed | `cd signhex-server && npm run build` exited 0 on 2026-05-24. |
 | Electron build | Passed | `cd signage-screen && npm run build` exited 0 on 2026-05-24. |
-| Electron command/heartbeat tests | Passed | `npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` reported 13 passing. |
-| Backend DB command tests | Blocked | `npx vitest run src/routes/device-telemetry-commands.test.ts` failed before assertions with Postgres `ECONNREFUSED` on `localhost:5432`. |
-| Contract compatibility | Needs fix | Backend accepts `RESYNC`; Electron does not handle it. |
+| Electron command/heartbeat tests | Passed | `npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` reported 14 passing after adding `RESYNC` coverage. |
+| Backend DB command tests | Passed | `npx vitest run src/routes/device-telemetry-commands.test.ts` reported 11 passing against local Docker Postgres after schema push. |
+| Playback refresh status history | Passed | `npx vitest run src/services/playback-refresh-dispatch.test.ts` reported 2 passing and verifies creation history entries. |
+| Contract compatibility | Passed | Backend accepts `RESYNC`; Electron handles it as a REST refresh/resync alias. |
+
+## Phase 2 Outbox And Desired State Notes
+
+Phase 2 adds `0031_command_outbox_desired_state.sql`.
+
+The migration is additive:
+
+- adds `command_outbox`
+- adds `device_desired_state`
+- adds `device_desired_state_history`
+- adds indexes for pending outbox dispatch, screen lookup, desired-state update time, and desired-state history lookup
+
+Phase 2 code writes command creation, command status history, desired-state update, desired-state history, and `COMMAND_AVAILABLE` outbox event inside the same `createDeviceCommands` transaction.
+
+Compatibility rules:
+
+- Existing polling and heartbeat claim behavior remains unchanged.
+- Existing command ACK behavior remains unchanged.
+- WebSocket dispatch is not implemented in Phase 2.
+- The outbox row is a notification intent only; authoritative data remains available through REST.
+- `COMMAND_OUTBOX_WRITE_ENABLED=false` stops new outbox rows.
+- `DEVICE_DESIRED_STATE_ENABLED=false` stops desired-state updates.

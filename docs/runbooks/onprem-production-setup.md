@@ -99,6 +99,7 @@ Confirm these paths before deployment:
 - player devices must reach `http://<backend-device-ip>:3000`
 - VM2 Prometheus must reach VM1, VM2, and VM3 exporter ports
 - VM3 nginx must reach local Grafana on the configured upstream port
+- when realtime sync is enabled, player devices or the CMS proxy path must reach the backend `/socket.io/` endpoint with WebSocket upgrade support
 
 When `OBSERVABILITY_PRIVATE_HOST` is set:
 
@@ -132,6 +133,16 @@ Collect these before you build the bundle:
 - optional provided cert files if you are not using generated CMS TLS
 
 No new bundle environment variables are required for the API/worker split. The generated backend compose file starts both containers automatically. `HEXMON_PROCESS_ROLE` is available only as an optional manual override when you run the backend image outside the generated compose files.
+
+Realtime sync production hardening must follow:
+
+```text
+docs/runbooks/realtime-sync-qa-prod-hardening.md
+docs/environments/production/realtime-sync.env.example
+deploy/shared/realtime-sync-nginx.socketio.conf.template
+```
+
+Keep `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false` until QA proxy smoke, canary rollback, migration review, and production readiness review are complete.
 
 `PLAYER_ARTIFACTS_DIR` must contain the Windows and Ubuntu player installers to stage into `production/electron/`.
 
