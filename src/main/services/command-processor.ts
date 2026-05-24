@@ -387,12 +387,14 @@ export class CommandProcessor {
       return
     }
 
-    const payload = {
-      ...(deliveryToken ? { delivery_token: deliveryToken } : {}),
-      success: result.success,
-      ...(typeof result.error === 'string' && result.error.length > 0 ? { error: result.error } : {}),
-      ...(typeof result.message === 'string' && result.message.length > 0 ? { message: result.message } : {}),
-    }
+	    const payload = {
+	      ...(deliveryToken ? { delivery_token: deliveryToken } : {}),
+	      success: result.success,
+	      ...(typeof result.error === 'string' && result.error.length > 0 ? { error: result.error } : {}),
+	      ...(typeof result.message === 'string' && result.message.length > 0 ? { message: result.message } : {}),
+	      ...(result.data ? { result_payload: result.data, data: result.data } : {}),
+	      processed_at: result.timestamp,
+	    }
 
     try {
       const httpClient = getHttpClient()

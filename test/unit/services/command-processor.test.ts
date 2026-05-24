@@ -192,10 +192,11 @@ describe('Command Processor', () => {
     const httpClient = getHttpClient()
     const postStub = sandbox.stub(httpClient, 'post').resolves({ success: true, timestamp: new Date().toISOString() })
 
+    const processedAt = new Date().toISOString()
     await (commandProcessor as any).acknowledgeCommand('cmd-failed', 'delivery-1', {
       success: false,
       error: 'Command rate-limited locally',
-      timestamp: new Date().toISOString(),
+      timestamp: processedAt,
     })
 
     expect(postStub.calledOnce).to.equal(true)
@@ -204,6 +205,7 @@ describe('Command Processor', () => {
       delivery_token: 'delivery-1',
       success: false,
       error: 'Command rate-limited locally',
+      processed_at: processedAt,
     })
   })
 
