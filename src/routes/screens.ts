@@ -19,6 +19,7 @@ import {
   buildResolvedMediaMap,
   buildResolvedMediaRecord,
 } from '@/utils/resolved-media';
+import { createDeviceCommand, listRecentDeviceCommands } from '@/services/command-lifecycle-service';
 import { KNOWN_ASPECT_RATIOS, getAspectRatioName, resolveAspectRatio } from '@/utils/aspect-ratio';
 import {
   buildScreenRecoveryStateMap,
@@ -96,6 +97,10 @@ const nowPlayingQuerySchema = z.object({
 
 const snapshotQuerySchema = z.object({
   include_urls: z.string().optional(),
+});
+
+const recentCommandsQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).default(25),
 });
 
 export async function screenRoutes(fastify: FastifyInstance) {
@@ -513,6 +518,85 @@ export async function screenRoutes(fastify: FastifyInstance) {
     }
   );
 
+  // Recent device commands for a screen
+  fastify.get<{ Params: { id: string }; Querystring: z.infer<typeof recentCommandsQuerySchema> }>(
+    apiEndpoints.screens.recentCommands,
+    {
+      schema: {
+        description: 'List recent device commands for a screen',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) {
+          throw AppError.unauthorized('Missing authorization header');
+        }
+
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
+
+        const screenId = (request.params as any).id;
+        const screen = await screenRepo.findById(screenId);
+        if (!screen) {
+          throw AppError.notFound('Screen not found');
+        }
+
+        const query = recentCommandsQuerySchema.parse(request.query ?? {});
+        const commands = await listRecentDeviceCommands(screenId, query.limit);
+
+        return reply.send({
+          screen_id: screenId,
+          commands: commands.map((command) => ({
+            id: command.id,
+            type: command.type,
+            status: command.status,
+            lifecycle_status: command.lifecycle_status,
+            priority: command.priority,
+            payload: command.payload,
+            result_payload: command.result_payload,
+            last_error: command.last_error,
+            delivery_attempts: command.delivery_attempts,
+            attempt_count: command.attempt_count,
+            max_attempts: command.max_attempts,
+            delivery_token: command.delivery_token,
+            claimed_at: command.claimed_at?.toISOString?.() ?? command.claimed_at,
+            lease_expires_at: command.lease_expires_at?.toISOString?.() ?? command.lease_expires_at,
+            acknowledged_at: command.acknowledged_at?.toISOString?.() ?? command.acknowledged_at,
+            expires_at: command.expires_at?.toISOString?.() ?? command.expires_at,
+            completed_at: command.completed_at?.toISOString?.() ?? command.completed_at,
+            cancelled_at: command.cancelled_at?.toISOString?.() ?? command.cancelled_at,
+            dead_lettered_at: command.dead_lettered_at?.toISOString?.() ?? command.dead_lettered_at,
+            correlation_id: command.correlation_id,
+            idempotency_key: command.idempotency_key,
+            desired_snapshot_id: command.desired_snapshot_id,
+            desired_default_media_version: command.desired_default_media_version,
+            desired_emergency_version: command.desired_emergency_version,
+            created_by: command.created_by,
+            created_at: command.created_at?.toISOString?.() ?? command.created_at,
+            updated_at: command.updated_at?.toISOString?.() ?? command.updated_at,
+            status_history: command.status_history.map((entry) => ({
+              id: entry.id,
+              old_status: entry.old_status,
+              new_status: entry.new_status,
+              reason: entry.reason,
+              attempt_count: entry.attempt_count,
+              delivery_token: entry.delivery_token,
+              metadata: entry.metadata,
+              created_at: entry.created_at?.toISOString?.() ?? entry.created_at,
+            })),
+          })),
+        });
+      } catch (error) {
+        logger.error(error, 'List recent screen commands error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
   // Get screen by ID
   fastify.get<{ Params: { id: string } }>(
     apiEndpoints.screens.get,
@@ -806,16 +890,12 @@ export async function screenRoutes(fastify: FastifyInstance) {
           screenshot_enabled: enabled,
         } as any);
 
-        const [command] = await db
-          .insert(schema.deviceCommands)
-          .values({
-            screen_id: screenId,
-            type: 'SET_SCREENSHOT_INTERVAL',
-            payload: { interval_seconds: intervalSeconds, enabled },
-            status: 'PENDING',
-            created_by: payload.sub,
-          })
-          .returning({ id: schema.deviceCommands.id });
+        const command = await createDeviceCommand({
+          screenId,
+          type: 'SET_SCREENSHOT_INTERVAL',
+          payload: { interval_seconds: intervalSeconds, enabled, reason: 'SCREENSHOT_POLICY' },
+          createdBy: payload.sub,
+        });
 
         return reply.send({
           screen_id: screenId,
@@ -859,16 +939,12 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const data = screenshotTriggerSchema.parse(request.body);
 
-        const [command] = await db
-          .insert(schema.deviceCommands)
-          .values({
-            screen_id: screenId,
-            type: 'TAKE_SCREENSHOT',
-            payload: { reason: data.reason ?? null },
-            status: 'PENDING',
-            created_by: payload.sub,
-          })
-          .returning({ id: schema.deviceCommands.id });
+        const command = await createDeviceCommand({
+          screenId,
+          type: 'TAKE_SCREENSHOT',
+          payload: { reason: data.reason ?? 'SCREENSHOT' },
+          createdBy: payload.sub,
+        });
 
         return reply.send({
           screen_id: screenId,

@@ -1,5 +1,7 @@
 import { and, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
+import { config } from '@/config';
 import { getDatabase, schema } from '@/db';
+import { resolveCommandExpiresAt, resolveCommandPriority } from '@/services/command-lifecycle-service';
 
 export type PlaybackRefreshReason = 'PUBLISH' | 'EMERGENCY' | 'GROUP_MEMBERSHIP' | 'TAKE_DOWN' | 'DEFAULT_MEDIA';
 
@@ -45,13 +47,18 @@ export async function createPlaybackRefreshCommands(params: PlaybackRefreshComma
                     eq(schema.deviceCommands.status, 'PENDING'),
                     gte(schema.deviceCommands.created_at, dedupeCutoff)
                   ),
-                  and(
-                    eq(schema.deviceCommands.status, 'SENT'),
-                    isNull(schema.deviceCommands.acknowledged_at),
-                    gte(schema.deviceCommands.claimed_at, activeLeaseCutoff)
-                  )
-                )
-              )
+	                  and(
+	                    eq(schema.deviceCommands.status, 'SENT'),
+	                    isNull(schema.deviceCommands.acknowledged_at),
+	                    gte(schema.deviceCommands.claimed_at, activeLeaseCutoff)
+	                  ),
+	                  and(
+	                    eq(schema.deviceCommands.status, 'LEASED'),
+	                    isNull(schema.deviceCommands.acknowledged_at),
+	                    gte(schema.deviceCommands.lease_expires_at, activeLeaseCutoff)
+	                  )
+	                )
+	              )
             );
 
           const blockedScreenIds = new Set(existingRefreshes.map((row) => row.screen_id));
@@ -66,17 +73,24 @@ export async function createPlaybackRefreshCommands(params: PlaybackRefreshComma
     };
   }
 
-  const requestedAt = new Date().toISOString();
-  const inserted = await db
-    .insert(schema.deviceCommands)
-    .values(
+	  const requestedAt = new Date().toISOString();
+	  const priority = resolveCommandPriority(params.reason);
+	  const expiresAt = resolveCommandExpiresAt(params.reason);
+	  const inserted = await db
+	    .insert(schema.deviceCommands)
+	    .values(
       screenIdsToQueue.map((screenId) => ({
         screen_id: screenId,
-        type: 'REFRESH' as const,
-        status: 'PENDING' as const,
-        created_by: params.createdBy,
-        payload: {
-          reason: params.reason,
+	        type: 'REFRESH' as const,
+	        status: 'PENDING' as const,
+	        created_by: params.createdBy,
+	        priority,
+	        expires_at: expiresAt,
+	        max_attempts: config.COMMAND_MAX_ATTEMPTS,
+	        correlation_id: params.publishId ?? null,
+	        desired_snapshot_id: params.snapshotId ?? null,
+	        payload: {
+	          reason: params.reason,
           publish_id: params.publishId ?? null,
           snapshot_id: params.snapshotId ?? null,
           requested_at: requestedAt,

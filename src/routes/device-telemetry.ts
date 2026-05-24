@@ -35,11 +35,17 @@ import {
 } from '@/jobs/device-telemetry';
 import { recordDeviceCommandClaim, recordTelemetryIngest } from '@/observability/metrics';
 import { queueScreenStateRefresh } from '@/services/screen-state-refresh';
+import {
+  acknowledgeDeviceCommand,
+  claimDeviceCommands,
+  createDeviceCommand,
+  resolveCommandExpiresAt,
+  resolveCommandPriority,
+} from '@/services/command-lifecycle-service';
 
 const logger = createLogger('device-telemetry-routes');
 const { CREATED } = HTTP_STATUS;
 const DEVICE_SCREENSHOT_BODY_LIMIT_BYTES = 4 * 1024 * 1024;
-const DEVICE_COMMAND_LEASE_MS = 60_000;
 
 const activeSlotSchema = z.object({
   scene_id: z.string().min(1),
@@ -137,8 +143,27 @@ const screenshotSchema = z.object({
 });
 
 const createCommandSchema = z.object({
-  type: z.enum(['REBOOT', 'REFRESH', 'TEST_PATTERN', 'TAKE_SCREENSHOT', 'SET_SCREENSHOT_INTERVAL']),
+  type: z.enum([
+    'REBOOT',
+    'REFRESH',
+    'TEST_PATTERN',
+    'TAKE_SCREENSHOT',
+    'SET_SCREENSHOT_INTERVAL',
+    'REFRESH_SCHEDULE',
+    'SCREENSHOT',
+    'CLEAR_CACHE',
+    'PING',
+    'RESYNC',
+  ]),
   payload: z.record(z.any()).optional(),
+  priority: z.number().int().optional(),
+  expires_at: z.string().datetime().optional(),
+  max_attempts: z.number().int().positive().optional(),
+  correlation_id: z.string().uuid().optional(),
+  idempotency_key: z.string().min(1).max(255).optional(),
+  desired_snapshot_id: z.string().uuid().optional(),
+  desired_default_media_version: z.string().min(1).max(255).optional(),
+  desired_emergency_version: z.string().min(1).max(255).optional(),
 });
 
 const snapshotQuerySchema = z.object({
@@ -150,6 +175,9 @@ const ackCommandSchema = z.object({
   success: z.boolean().optional(),
   error: z.string().min(1).optional(),
   message: z.string().min(1).optional(),
+  result_payload: z.unknown().optional(),
+  data: z.unknown().optional(),
+  processed_at: z.string().datetime().optional(),
 }).optional();
 
 const normalizeEtagToken = (value: string) =>
@@ -237,87 +265,6 @@ async function enqueueTelemetryWithFallback(params: {
 
 export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
   const db = getDatabase();
-
-  const claimPendingCommands = async (deviceId: string) => {
-    return await db.transaction(async (tx) => {
-      const claimedAt = new Date();
-      const reclaimBefore = new Date(claimedAt.getTime() - DEVICE_COMMAND_LEASE_MS);
-      const claimableResult = await tx.execute(sql`
-        SELECT id, created_at
-        FROM device_commands
-        WHERE screen_id = ${deviceId}
-          AND (
-            status = 'PENDING'
-            OR (
-              status = 'SENT'
-              AND acknowledged_at IS NULL
-              AND claimed_at <= ${reclaimBefore}
-            )
-          )
-        ORDER BY created_at ASC, id ASC
-        FOR UPDATE SKIP LOCKED
-      `);
-
-      const claimable = (
-        claimableResult as unknown as {
-          rows?: Array<{
-            id: string;
-            created_at: Date | string;
-          }>;
-        }
-      ).rows ?? [];
-
-      const claimedCommands: Array<{
-        id: string;
-        type: string;
-        payload: unknown;
-        createdAt: Date;
-        deliveryToken: string | null;
-      }> = [];
-
-      for (const candidate of claimable) {
-        const deliveryToken = randomUUID();
-        const [claimed] = await tx
-          .update(schema.deviceCommands)
-          .set({
-            status: 'SENT',
-            delivery_token: deliveryToken,
-            claimed_at: claimedAt,
-            updated_at: claimedAt,
-            delivery_attempts: sql`${schema.deviceCommands.delivery_attempts} + 1`,
-          })
-          .where(
-            and(
-              eq(schema.deviceCommands.id, candidate.id),
-              eq(schema.deviceCommands.screen_id, deviceId),
-              or(
-                eq(schema.deviceCommands.status, 'PENDING'),
-                and(
-                  eq(schema.deviceCommands.status, 'SENT'),
-                  isNull(schema.deviceCommands.acknowledged_at),
-                  lte(schema.deviceCommands.claimed_at, reclaimBefore)
-                )
-              )
-            )
-          )
-          .returning({
-            id: schema.deviceCommands.id,
-            type: schema.deviceCommands.type,
-            payload: schema.deviceCommands.payload,
-            createdAt: schema.deviceCommands.created_at,
-            deliveryToken: schema.deviceCommands.delivery_token,
-          });
-
-        if (claimed) {
-          claimedCommands.push(claimed);
-        }
-      }
-
-      return claimedCommands.sort(
-        (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
-      );
-    });
-  };
 
   const getGroupIdsForScreen = async (screenId: string): Promise<string[]> => {
     const rows = await db
@@ -584,16 +531,25 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, screenId));
         if (!screen) throw AppError.notFound('Screen not found');
 
-        const [command] = await db
-          .insert(schema.deviceCommands)
-          .values({
-            screen_id: screenId,
-            type: data.type as any,
-            payload: data.payload,
-            status: 'PENDING',
-            created_by: payload.sub,
-          })
-          .returning();
+        const command = await createDeviceCommand({
+          screenId,
+          type: data.type,
+          payload: data.payload,
+          priority: resolveCommandPriority(
+            typeof data.payload?.reason === 'string' ? data.payload.reason : null,
+            data.priority ?? null
+          ),
+          expiresAt: data.expires_at
+            ? new Date(data.expires_at)
+            : resolveCommandExpiresAt(typeof data.payload?.reason === 'string' ? data.payload.reason : null),
+          maxAttempts: data.max_attempts,
+          correlationId: data.correlation_id ?? null,
+          idempotencyKey: data.idempotency_key ?? null,
+          desiredSnapshotId: data.desired_snapshot_id ?? null,
+          desiredDefaultMediaVersion: data.desired_default_media_version ?? null,
+          desiredEmergencyVersion: data.desired_emergency_version ?? null,
+          createdBy: payload.sub,
+        });
 
         return reply.status(CREATED).send({
           id: command.id,
@@ -601,6 +557,11 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           type: command.type,
           payload: command.payload,
           status: command.status,
+          priority: command.priority,
+          expires_at: command.expires_at?.toISOString?.() ?? command.expires_at,
+          max_attempts: command.max_attempts,
+          correlation_id: command.correlation_id,
+          idempotency_key: command.idempotency_key,
           created_at: command.created_at?.toISOString?.() ?? command.created_at,
         });
       } catch (error) {
@@ -681,7 +642,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           'Device heartbeat received'
         );
 
-        const pendingCommands = await claimPendingCommands(data.device_id);
+        const pendingCommands = await claimDeviceCommands(data.device_id);
         recordDeviceCommandClaim('heartbeat', pendingCommands.length);
 
         return reply.send({
@@ -692,6 +653,9 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             type: command.type,
             payload: command.payload,
             delivery_token: command.deliveryToken,
+            expires_at: command.expiresAt?.toISOString?.() ?? command.expiresAt ?? null,
+            lease_expires_at: command.leaseExpiresAt?.toISOString?.() ?? command.leaseExpiresAt ?? null,
+            attempt_count: command.attemptCount,
             timestamp: new Date(command.createdAt).toISOString(),
           })),
         });
@@ -845,7 +809,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const deviceId = (request.params as any).deviceId;
         await authenticateDeviceOrThrow(request, deviceId);
 
-        const pendingCommands = await claimPendingCommands(deviceId);
+        const pendingCommands = await claimDeviceCommands(deviceId);
         recordDeviceCommandClaim('poll', pendingCommands.length);
 
         logger.info({ deviceId }, 'Fetching pending commands');
@@ -856,6 +820,9 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             type: command.type,
             payload: command.payload,
             delivery_token: command.deliveryToken,
+            expires_at: command.expiresAt?.toISOString?.() ?? command.expiresAt ?? null,
+            lease_expires_at: command.leaseExpiresAt?.toISOString?.() ?? command.leaseExpiresAt ?? null,
+            attempt_count: command.attemptCount,
             timestamp: new Date(command.createdAt).toISOString(),
           })),
         });
@@ -882,46 +849,17 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         await authenticateDeviceOrThrow(request, deviceId);
 
         const acknowledgedAt = new Date();
-        const executionSucceeded = ackBody?.success !== false;
-        const nextStatus = executionSucceeded ? 'COMPLETED' : 'FAILED';
-        const executionResult = {
-          success: executionSucceeded,
-          error: ackBody?.error ?? null,
-          message: ackBody?.message ?? null,
-          acknowledged_at: acknowledgedAt.toISOString(),
-        };
+        const updatedCommand = await acknowledgeDeviceCommand(deviceId, commandId, ackBody);
 
-        const [updatedCommand] = await db
-          .update(schema.deviceCommands)
-          .set({
-            status: nextStatus,
-            acknowledged_at: acknowledgedAt,
-            payload: sql`COALESCE(${schema.deviceCommands.payload}, '{}'::jsonb) || ${JSON.stringify({
-              execution_result: executionResult,
-            })}::jsonb`,
-            updated_at: acknowledgedAt,
-          })
-          .where(
-            and(
-              eq(schema.deviceCommands.id, commandId),
-              eq(schema.deviceCommands.screen_id, deviceId),
-              eq(schema.deviceCommands.status, 'SENT'),
-              isNull(schema.deviceCommands.acknowledged_at),
-              ackBody?.delivery_token
-                ? eq(schema.deviceCommands.delivery_token, ackBody.delivery_token)
-                : isNull(schema.deviceCommands.delivery_token)
-            )
-          )
-          .returning({ id: schema.deviceCommands.id });
-
-        if (!updatedCommand) {
-          throw AppError.notFound('Command not found');
-        }
-
-        logger.info({ deviceId, commandId, status: nextStatus, success: executionSucceeded }, 'Command acknowledged');
+        logger.info(
+          { deviceId, commandId, status: updatedCommand.status, alreadyAcknowledged: updatedCommand.alreadyAcknowledged },
+          'Command acknowledged'
+        );
 
         return reply.send({
           success: true,
+          status: updatedCommand.status,
+          already_acknowledged: updatedCommand.alreadyAcknowledged,
           timestamp: acknowledgedAt.toISOString(),
         });
       } catch (error) {

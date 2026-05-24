@@ -12,6 +12,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getPresignedUrl } from '@/s3';
 import { AppError } from '@/utils/app-error';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
+import { createDeviceCommand } from '@/services/command-lifecycle-service';
 import {
   buildScreenPlaybackState,
   buildScreenRecoveryStateMap,
@@ -435,16 +436,16 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
             .where(inArray(schema.screens.id, screenIds as any));
         }
 
-        const commands = screenIds.map((screenId) => ({
-          screen_id: screenId,
-          type: 'SET_SCREENSHOT_INTERVAL' as const,
-          payload: { interval_seconds: intervalSeconds, enabled },
-          status: 'PENDING' as const,
-          created_by: payload.sub,
-        }));
-        const inserted = commands.length
-          ? await db.insert(schema.deviceCommands).values(commands).returning({ id: schema.deviceCommands.id, screen_id: schema.deviceCommands.screen_id })
-          : [];
+        const inserted = [];
+        for (const screenId of screenIds) {
+          const command = await createDeviceCommand({
+            screenId,
+            type: 'SET_SCREENSHOT_INTERVAL',
+            payload: { interval_seconds: intervalSeconds, enabled, reason: 'SCREENSHOT_POLICY' },
+            createdBy: payload.sub,
+          });
+          inserted.push({ id: command.id, screen_id: command.screen_id });
+        }
 
         return reply.send({
           group_id: group.id,
@@ -486,16 +487,16 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
         const members = await repo.members(group.id);
         const screenIds = Array.from(new Set(members.map((m: any) => m.screen_id)));
 
-        const commands = screenIds.map((screenId) => ({
-          screen_id: screenId,
-          type: 'TAKE_SCREENSHOT' as const,
-          payload: { reason: data.reason ?? null },
-          status: 'PENDING' as const,
-          created_by: payload.sub,
-        }));
-        const inserted = commands.length
-          ? await db.insert(schema.deviceCommands).values(commands).returning({ id: schema.deviceCommands.id, screen_id: schema.deviceCommands.screen_id })
-          : [];
+        const inserted = [];
+        for (const screenId of screenIds) {
+          const command = await createDeviceCommand({
+            screenId,
+            type: 'TAKE_SCREENSHOT',
+            payload: { reason: data.reason ?? 'SCREENSHOT' },
+            createdBy: payload.sub,
+          });
+          inserted.push({ id: command.id, screen_id: command.screen_id });
+        }
 
         return reply.send({
           group_id: group.id,

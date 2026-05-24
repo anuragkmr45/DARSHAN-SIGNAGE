@@ -96,9 +96,10 @@ export const apiEndpoints = {
     screenshotSettings: withBase('/screens/:id/screenshot-settings'),
     screenshot: withBase('/screens/:id/screenshot'),
     nowPlaying: withBase('/screens/:id/now-playing'),
-    availability: withBase('/screens/:id/availability'),
-    snapshot: withBase('/screens/:id/snapshot'),
-  },
+	    availability: withBase('/screens/:id/availability'),
+	    snapshot: withBase('/screens/:id/snapshot'),
+	    recentCommands: withBase('/screens/:id/commands/recent'),
+	  },
   screenGroups: {
     create: withBase('/screen-groups'),
     list: withBase('/screen-groups'),

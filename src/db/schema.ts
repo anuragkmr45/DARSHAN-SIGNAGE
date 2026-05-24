@@ -44,8 +44,32 @@ export const publishStatusEnum = pgEnum('publish_status', ['ACTIVE', 'TAKEN_DOWN
 export const mediaTypeEnum = pgEnum('media_type', ['IMAGE', 'VIDEO', 'DOCUMENT', 'WEBPAGE']);
 export const mediaStatusEnum = pgEnum('media_status', ['PENDING', 'PROCESSING', 'READY', 'FAILED']);
 export const screenStatusEnum = pgEnum('screen_status', ['ACTIVE', 'INACTIVE', 'OFFLINE']);
-export const commandTypeEnum = pgEnum('command_type', ['REBOOT', 'REFRESH', 'TEST_PATTERN', 'TAKE_SCREENSHOT', 'SET_SCREENSHOT_INTERVAL']);
-export const commandStatusEnum = pgEnum('command_status', ['PENDING', 'SENT', 'ACKNOWLEDGED', 'COMPLETED', 'FAILED']);
+export const commandTypeEnum = pgEnum('command_type', [
+  'REBOOT',
+  'REFRESH',
+  'TEST_PATTERN',
+  'TAKE_SCREENSHOT',
+  'SET_SCREENSHOT_INTERVAL',
+  'REFRESH_SCHEDULE',
+  'SCREENSHOT',
+  'CLEAR_CACHE',
+  'PING',
+  'RESYNC',
+]);
+export const commandStatusEnum = pgEnum('command_status', [
+  'PENDING',
+  'SENT',
+  'ACKNOWLEDGED',
+  'COMPLETED',
+  'FAILED',
+  'LEASED',
+  'PROCESSING',
+  'ACKED_SUCCESS',
+  'ACKED_FAILURE',
+  'EXPIRED',
+  'DEAD_LETTER',
+  'CANCELLED',
+]);
 export const chatConversationTypeEnum = pgEnum('chat_conversation_type', ['DM', 'GROUP_CLOSED', 'FORUM_OPEN']);
 export const chatConversationStateEnum = pgEnum('chat_conversation_state', ['ACTIVE', 'ARCHIVED', 'DELETED']);
 export const chatInvitePolicyEnum = pgEnum('chat_invite_policy', [
@@ -471,20 +495,62 @@ export const deviceCommands = pgTable(
     screen_id: uuid('screen_id').notNull(),
     type: commandTypeEnum('type').notNull(),
     status: commandStatusEnum('status').notNull().default('PENDING'),
-    payload: jsonb('payload'),
-    delivery_token: uuid('delivery_token'),
-    claimed_at: timestamp('claimed_at'),
-    acknowledged_at: timestamp('acknowledged_at'),
-    delivery_attempts: integer('delivery_attempts').notNull().default(0),
-    created_by: uuid('created_by').notNull(),
-    created_at: timestamp('created_at').notNull().defaultNow(),
-    updated_at: timestamp('updated_at').notNull().defaultNow(),
+	    payload: jsonb('payload'),
+	    delivery_token: uuid('delivery_token'),
+	    claimed_at: timestamp('claimed_at'),
+	    acknowledged_at: timestamp('acknowledged_at'),
+	    delivery_attempts: integer('delivery_attempts').notNull().default(0),
+	    priority: integer('priority').notNull().default(0),
+	    expires_at: timestamp('expires_at'),
+	    lease_expires_at: timestamp('lease_expires_at'),
+	    attempt_count: integer('attempt_count').notNull().default(0),
+	    max_attempts: integer('max_attempts').notNull().default(5),
+	    last_error: text('last_error'),
+	    result_payload: jsonb('result_payload'),
+	    correlation_id: uuid('correlation_id'),
+	    idempotency_key: text('idempotency_key'),
+	    desired_snapshot_id: uuid('desired_snapshot_id'),
+	    desired_default_media_version: text('desired_default_media_version'),
+	    desired_emergency_version: text('desired_emergency_version'),
+	    completed_at: timestamp('completed_at'),
+	    cancelled_at: timestamp('cancelled_at'),
+	    dead_lettered_at: timestamp('dead_lettered_at'),
+	    created_by: uuid('created_by').notNull(),
+	    created_at: timestamp('created_at').notNull().defaultNow(),
+	    updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
     screenIdIdx: index('device_commands_screen_id_idx').on(table.screen_id),
-    statusIdx: index('device_commands_status_idx').on(table.status),
-    deliveryTokenIdx: index('device_commands_delivery_token_idx').on(table.delivery_token),
-    claimStateIdx: index('device_commands_claim_state_idx').on(table.screen_id, table.status, table.claimed_at),
+	    statusIdx: index('device_commands_status_idx').on(table.status),
+	    deliveryTokenIdx: index('device_commands_delivery_token_idx').on(table.delivery_token),
+	    claimStateIdx: index('device_commands_claim_state_idx').on(table.screen_id, table.status, table.claimed_at),
+	    lifecycleClaimIdx: index('device_commands_lifecycle_claim_idx').on(table.screen_id, table.status, table.priority, table.created_at),
+	    expiresAtIdx: index('device_commands_expires_at_idx').on(table.expires_at),
+	    leaseExpiresAtIdx: index('device_commands_lease_expires_at_idx').on(table.lease_expires_at),
+	    correlationIdIdx: index('device_commands_correlation_id_idx').on(table.correlation_id),
+	    idempotencyKeyIdx: uniqueIndex('device_commands_screen_idempotency_key_idx')
+	      .on(table.screen_id, table.idempotency_key)
+	      .where(sql`idempotency_key IS NOT NULL`),
+	  })
+	);
+
+export const deviceCommandStatusHistory = pgTable(
+  'device_command_status_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    command_id: uuid('command_id').notNull(),
+    screen_id: uuid('screen_id').notNull(),
+    old_status: commandStatusEnum('old_status'),
+    new_status: commandStatusEnum('new_status').notNull(),
+    reason: text('reason'),
+    attempt_count: integer('attempt_count'),
+    delivery_token: uuid('delivery_token'),
+    metadata: jsonb('metadata'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    commandIdIdx: index('device_command_status_history_command_id_idx').on(table.command_id, table.created_at),
+    screenIdIdx: index('device_command_status_history_screen_id_idx').on(table.screen_id, table.created_at),
   })
 );
 

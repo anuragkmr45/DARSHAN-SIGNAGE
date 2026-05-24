@@ -84,10 +84,14 @@ const envSchema = z.object({
     z.string().url().optional()
   ),
   OBSERVABILITY_PROMETHEUS_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
-  OBSERVABILITY_GRAFANA_ENABLED: optionalBooleanString,
-  OBSERVABILITY_GRAFANA_EMBED_ENABLED: optionalBooleanString,
-  OBSERVABILITY_GRAFANA_BASE_PATH: z.string().default('/grafana'),
-});
+	  OBSERVABILITY_GRAFANA_ENABLED: optionalBooleanString,
+	  OBSERVABILITY_GRAFANA_EMBED_ENABLED: optionalBooleanString,
+	  OBSERVABILITY_GRAFANA_BASE_PATH: z.string().default('/grafana'),
+	  COMMAND_LEASE_MS: z.coerce.number().int().positive().default(60_000),
+	  COMMAND_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+	  COMMAND_DEFAULT_EXPIRES_MS: z.coerce.number().int().positive().default(86_400_000),
+	  COMMAND_EMERGENCY_EXPIRES_MS: z.coerce.number().int().positive().default(300_000),
+	});
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {
   console.error('Invalid environment variables:', parsed.error.flatten());
