@@ -83,6 +83,7 @@ describe('device telemetry command claiming', () => {
       .set({
         status: 'SENT',
         claimed_at: staleClaimedAt,
+        lease_expires_at: staleClaimedAt,
         updated_at: staleClaimedAt,
         acknowledged_at: null,
       })
@@ -574,5 +575,152 @@ describe('device telemetry command claiming', () => {
 	      attempt_count: 1,
 	    });
 	    expect(body.commands[0].status_history.length).toBeGreaterThan(0);
+	  });
+
+	  it('returns aggregated delivery status for CMS screen details', async () => {
+	    const { db, deviceId, serial } = await seedCommandTarget();
+	    await db.delete(schema.deviceCommands).where(eq(schema.deviceCommands.screen_id, deviceId));
+	    const adminToken = await generateTestToken(testUser.id, 'ADMIN');
+
+	    const createResponse = await server.inject({
+	      method: 'POST',
+	      url: `/api/v1/device/${deviceId}/commands`,
+	      headers: {
+	        authorization: `Bearer ${adminToken}`,
+	      },
+	      payload: {
+	        type: 'RESYNC',
+	        payload: { reason: 'EMERGENCY_START' },
+	        priority: 75,
+	        desired_emergency_version: 'emergency-v1',
+	      },
+	    });
+	    expect(createResponse.statusCode).toBe(HTTP_STATUS.CREATED);
+	    const commandId = JSON.parse(createResponse.body).id;
+
+	    const pollResponse = await server.inject({
+	      method: 'GET',
+	      url: `/api/v1/device/${deviceId}/commands`,
+	      headers: {
+	        'x-device-serial': serial,
+	      },
+	    });
+	    expect(pollResponse.statusCode).toBe(HTTP_STATUS.OK);
+	    const claimedCommand = JSON.parse(pollResponse.body).commands[0];
+
+	    const ackResponse = await server.inject({
+	      method: 'POST',
+	      url: `/api/v1/device/${deviceId}/commands/${commandId}/ack`,
+	      headers: {
+	        'x-device-serial': serial,
+	      },
+	      payload: {
+	        delivery_token: claimedCommand.delivery_token,
+	        success: false,
+	        error: 'phase-5-delivery-test',
+	        result_payload: { source: 'delivery-status-test' },
+	      },
+	    });
+	    expect(ackResponse.statusCode).toBe(HTTP_STATUS.OK);
+
+	    const statusResponse = await server.inject({
+	      method: 'GET',
+	      url: `/api/v1/screens/${deviceId}/delivery-status?limit=10`,
+	      headers: {
+	        authorization: `Bearer ${adminToken}`,
+	      },
+	    });
+
+	    expect(statusResponse.statusCode).toBe(HTTP_STATUS.OK);
+	    const body = JSON.parse(statusResponse.body);
+	    expect(body.screen_id).toBe(deviceId);
+	    expect(body.desired_state).toMatchObject({
+	      screen_id: deviceId,
+	      emergency_version: 'emergency-v1',
+	      last_command_id: commandId,
+	      last_command_type: 'RESYNC',
+	    });
+	    expect(body.commands).toMatchObject({
+	      total: 1,
+	      failed: 1,
+	    });
+	    expect(body.commands.by_lifecycle.ACKED_FAILURE).toBe(1);
+	    expect(body.commands.recent[0]).toMatchObject({
+	      id: commandId,
+	      lifecycle_status: 'ACKED_FAILURE',
+	      last_error: 'phase-5-delivery-test',
+	    });
+	    expect(body.outbox.total).toBe(1);
+	    expect(body.emergency.delivery.total_recent).toBe(1);
+	  });
+
+	  it('writes desired state and outbox atomically when creating a command through the admin route', async () => {
+	    const { db, deviceId, serial } = await seedCommandTarget();
+	    await db.delete(schema.deviceCommands).where(eq(schema.deviceCommands.screen_id, deviceId));
+	    const adminToken = await generateTestToken(testUser.id, 'ADMIN');
+	    const snapshotId = randomUUID();
+
+	    const response = await server.inject({
+	      method: 'POST',
+	      url: `/api/v1/device/${deviceId}/commands`,
+	      headers: {
+	        authorization: `Bearer ${adminToken}`,
+	      },
+	      payload: {
+	        type: 'RESYNC',
+	        payload: { reason: 'DESIRED_STATE_RESYNC' },
+	        desired_snapshot_id: snapshotId,
+	      },
+	    });
+
+	    expect(response.statusCode).toBe(HTTP_STATUS.CREATED);
+	    const commandId = JSON.parse(response.body).id;
+
+	    const [state] = await db
+	      .select()
+	      .from(schema.deviceDesiredState)
+	      .where(eq(schema.deviceDesiredState.screen_id, deviceId));
+	    expect(state).toMatchObject({
+	      screen_id: deviceId,
+	      snapshot_id: snapshotId,
+	      command_version: 1,
+	      state_version: 1,
+	      last_command_id: commandId,
+	      last_command_type: 'RESYNC',
+	      last_command_reason: 'DESIRED_STATE_RESYNC',
+	    });
+
+	    const outboxRows = await db
+	      .select()
+	      .from(schema.commandOutbox)
+	      .where(eq(schema.commandOutbox.command_id, commandId));
+	    expect(outboxRows).toHaveLength(1);
+	    expect(outboxRows[0]).toMatchObject({
+	      screen_id: deviceId,
+	      event_type: 'COMMAND_AVAILABLE',
+	      status: 'PENDING',
+	      reason: 'DESIRED_STATE_RESYNC',
+	    });
+
+	    const desiredStateResponse = await server.inject({
+	      method: 'GET',
+	      url: `/api/v1/device/${deviceId}/desired-state`,
+	      headers: {
+	        'x-device-serial': serial,
+	      },
+	    });
+	    expect(desiredStateResponse.statusCode).toBe(HTTP_STATUS.OK);
+	    const desiredStateBody = JSON.parse(desiredStateResponse.body);
+	    expect(desiredStateBody).toMatchObject({
+	      device_id: deviceId,
+	      state: {
+	        state_version: 1,
+	        command_version: 1,
+	        snapshot_id: snapshotId,
+	        last_command_id: commandId,
+	        last_command_type: 'RESYNC',
+	      },
+	    });
+	    expect(desiredStateBody.resources.commands).toBe(`/api/v1/device/${deviceId}/commands`);
 	  });
 	});

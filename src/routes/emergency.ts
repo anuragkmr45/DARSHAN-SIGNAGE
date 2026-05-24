@@ -498,6 +498,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
           groupIds: uniqueGroupIds,
           targetAll,
           createdBy: payload.sub,
+          emergencyVersion: `${emergency.id}:start`,
         });
         logger.warn(
           {
@@ -617,6 +618,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
           groupIds: ((emergency as any).screen_group_ids || []) as string[],
           targetAll: (emergency as any).target_all === true,
           createdBy: payload.sub,
+          emergencyVersion: `${emergency.id}:clear`,
         });
         logger.info(
           {

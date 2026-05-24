@@ -99,6 +99,8 @@ export const apiEndpoints = {
 	    availability: withBase('/screens/:id/availability'),
 	    snapshot: withBase('/screens/:id/snapshot'),
 	    recentCommands: withBase('/screens/:id/commands/recent'),
+	    deliveryStatus: withBase('/screens/:id/delivery-status'),
+	    mediaCacheReports: withBase('/screens/:id/media-cache-reports/recent'),
 	  },
   screenGroups: {
     create: withBase('/screen-groups'),
@@ -153,8 +155,10 @@ export const apiEndpoints = {
     screenshotPolicy: withBase('/device/:deviceId/screenshot-policy'),
     commands: withBase('/device/:deviceId/commands'),
     ackCommand: withBase('/device/:deviceId/commands/:commandId/ack'),
+    desiredState: withBase('/device/:deviceId/desired-state'),
     snapshot: withBase('/device/:deviceId/snapshot'),
     defaultMedia: withBase('/device/:deviceId/default-media'),
+    mediaCacheReport: withBase('/device/:deviceId/media-cache-report'),
   },
   devicePairing: {
     generate: withBase('/device-pairing/generate'),

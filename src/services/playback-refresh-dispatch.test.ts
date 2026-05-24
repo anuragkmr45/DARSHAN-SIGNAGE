@@ -113,5 +113,28 @@ describe('playback refresh dispatch', () => {
     expect(commands).toHaveLength(2);
     expect(commands.every((command) => command.type === 'REFRESH' && command.status === 'PENDING')).toBe(true);
     expect(commands.every((command) => (command.payload as { reason?: string } | null)?.reason === 'EMERGENCY')).toBe(true);
+
+    const history = await db
+      .select()
+      .from(schema.deviceCommandStatusHistory)
+      .where(inArray(schema.deviceCommandStatusHistory.command_id, commands.map((command) => command.id)));
+
+    expect(history).toHaveLength(2);
+    expect(history.every((entry) => entry.new_status === 'PENDING' && entry.reason === 'created')).toBe(true);
+
+    const desiredStates = await db
+      .select()
+      .from(schema.deviceDesiredState)
+      .where(inArray(schema.deviceDesiredState.screen_id, screenIds as string[]));
+    expect(desiredStates).toHaveLength(2);
+    expect(desiredStates.every((state) => state.emergency_version !== null)).toBe(true);
+    expect(desiredStates.every((state) => state.last_command_reason === 'EMERGENCY')).toBe(true);
+
+    const outboxRows = await db
+      .select()
+      .from(schema.commandOutbox)
+      .where(inArray(schema.commandOutbox.command_id, commands.map((command) => command.id)));
+    expect(outboxRows).toHaveLength(2);
+    expect(outboxRows.every((row) => row.event_type === 'COMMAND_AVAILABLE' && row.status === 'PENDING')).toBe(true);
   });
 });

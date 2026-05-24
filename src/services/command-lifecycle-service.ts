@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { config } from '@/config';
 import { getDatabase, schema } from '@/db';
+import { createCommandOutboxEvent } from '@/services/command-outbox-service';
+import { recordDesiredStateForCommand } from '@/services/device-desired-state-service';
 import { AppError } from '@/utils/app-error';
 
 export const COMMAND_PRIORITY_NORMAL = 0;
@@ -108,12 +110,24 @@ function resolveReason(payload: unknown) {
   return typeof reason === 'string' ? reason : null;
 }
 
+function hasOwnValue<T extends object>(input: T, key: keyof T) {
+  return Object.prototype.hasOwnProperty.call(input, key);
+}
+
 function isTerminalStatus(status: string) {
   return (TERMINAL_STATUSES as readonly string[]).includes(status);
 }
 
 function isActiveLeaseStatus(status: string) {
   return (ACTIVE_LEASE_STATUSES as readonly string[]).includes(status);
+}
+
+function parseDbTimestamp(value: Date | string | null | undefined) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return new Date(hasTimezone ? normalized : `${normalized}Z`);
 }
 
 async function insertStatusHistory(
@@ -141,49 +155,112 @@ async function insertStatusHistory(
   });
 }
 
-export async function createDeviceCommand(input: CreateDeviceCommandInput) {
-  const db = getDatabase();
+function buildCreateCommandValues(input: CreateDeviceCommandInput) {
   const reason = resolveReason(input.payload);
   const expiresAt = input.expiresAt === undefined ? resolveCommandExpiresAt(reason) : input.expiresAt;
   const maxAttempts = input.maxAttempts ?? config.COMMAND_MAX_ATTEMPTS;
   const priority = resolveCommandPriority(reason, input.priority);
 
+  return {
+    screen_id: input.screenId,
+    type: normalizeCommandType(input.type),
+    payload: input.payload ?? null,
+    status: 'PENDING' as const,
+    priority,
+    expires_at: expiresAt ?? null,
+    max_attempts: maxAttempts,
+    correlation_id: input.correlationId ?? null,
+    idempotency_key: input.idempotencyKey ?? null,
+    desired_snapshot_id: input.desiredSnapshotId ?? null,
+    desired_default_media_version: input.desiredDefaultMediaVersion ?? null,
+    desired_emergency_version: input.desiredEmergencyVersion ?? null,
+    created_by: input.createdBy,
+  };
+}
+
+export async function createDeviceCommands(inputs: CreateDeviceCommandInput[]) {
+  const db = getDatabase();
+  if (inputs.length === 0) {
+    return [];
+  }
+
   return await db.transaction(async (tx) => {
-    const [command] = await tx
+    const commandValues = inputs.map(buildCreateCommandValues);
+    const commands = await tx
       .insert(schema.deviceCommands)
-      .values({
-        screen_id: input.screenId,
-        type: normalizeCommandType(input.type),
-        payload: input.payload ?? null,
-        status: 'PENDING',
-        priority,
-        expires_at: expiresAt ?? null,
-        max_attempts: maxAttempts,
-        correlation_id: input.correlationId ?? null,
-        idempotency_key: input.idempotencyKey ?? null,
-        desired_snapshot_id: input.desiredSnapshotId ?? null,
-        desired_default_media_version: input.desiredDefaultMediaVersion ?? null,
-        desired_emergency_version: input.desiredEmergencyVersion ?? null,
-        created_by: input.createdBy,
-      })
+      .values(commandValues)
       .returning();
 
-    await insertStatusHistory(tx, {
-      commandId: command.id,
-      screenId: command.screen_id,
-      oldStatus: null,
-      newStatus: 'PENDING',
-      reason: 'created',
-      attemptCount: command.attempt_count,
-      metadata: {
-        type: command.type,
-        priority: command.priority,
-        expires_at: command.expires_at?.toISOString?.() ?? command.expires_at ?? null,
-      },
-    });
+    for (let index = 0; index < commands.length; index += 1) {
+      const command = commands[index];
+      const input = inputs[index];
+      const reason = resolveReason(command.payload);
+      const desiredSnapshotId = hasOwnValue(input, 'desiredSnapshotId') ? input.desiredSnapshotId ?? null : undefined;
+      const desiredDefaultMediaVersion = hasOwnValue(input, 'desiredDefaultMediaVersion')
+        ? input.desiredDefaultMediaVersion ?? null
+        : undefined;
+      const desiredEmergencyVersion = hasOwnValue(input, 'desiredEmergencyVersion')
+        ? input.desiredEmergencyVersion ?? null
+        : undefined;
 
-    return command;
+      await insertStatusHistory(tx, {
+        commandId: command.id,
+        screenId: command.screen_id,
+        oldStatus: null,
+        newStatus: 'PENDING',
+        reason: 'created',
+        attemptCount: command.attempt_count,
+        metadata: {
+          type: command.type,
+          priority: command.priority,
+          expires_at: command.expires_at?.toISOString?.() ?? command.expires_at ?? null,
+        },
+      });
+
+      const desiredState = await recordDesiredStateForCommand(tx, {
+        screenId: command.screen_id,
+        commandId: command.id,
+        commandType: command.type,
+        commandReason: reason,
+        snapshotId: desiredSnapshotId,
+        defaultMediaVersion: desiredDefaultMediaVersion,
+        emergencyVersion: desiredEmergencyVersion,
+        metadata: {
+          command_id: command.id,
+          command_type: command.type,
+          priority: command.priority,
+          desired_snapshot_id: desiredSnapshotId ?? null,
+          desired_default_media_version: desiredDefaultMediaVersion ?? null,
+          desired_emergency_version: desiredEmergencyVersion ?? null,
+        },
+      });
+
+      await createCommandOutboxEvent(tx, {
+        screenId: command.screen_id,
+        commandId: command.id,
+        eventType: 'COMMAND_AVAILABLE',
+        reason,
+        priority: command.priority,
+        payload: {
+          command_id: command.id,
+          command_type: command.type,
+          reason,
+          state_version: desiredState?.state_version ?? null,
+          command_version: desiredState?.command_version ?? null,
+          desired_snapshot_id: desiredSnapshotId ?? null,
+          desired_default_media_version: desiredDefaultMediaVersion ?? null,
+          desired_emergency_version: desiredEmergencyVersion ?? null,
+        },
+      });
+    }
+
+    return commands;
   });
+}
+
+export async function createDeviceCommand(input: CreateDeviceCommandInput) {
+  const [command] = await createDeviceCommands([input]);
+  return command;
 }
 
 export async function claimDeviceCommands(deviceId: string): Promise<ClaimedDeviceCommand[]> {
@@ -237,7 +314,20 @@ export async function claimDeviceCommands(deviceId: string): Promise<ClaimedDevi
       const oldStatus = candidate.status;
       const currentAttemptCount = Number(candidate.attempt_count ?? candidate.delivery_attempts ?? 0);
       const maxAttempts = Number(candidate.max_attempts ?? config.COMMAND_MAX_ATTEMPTS);
-      const expiresAt = candidate.expires_at ? new Date(candidate.expires_at) : null;
+      const expiresAt = parseDbTimestamp(candidate.expires_at);
+
+      if (isActiveLeaseStatus(oldStatus)) {
+        const activeLeaseExpiresAt = parseDbTimestamp(candidate.lease_expires_at);
+        const legacyClaimedAt = parseDbTimestamp(candidate.claimed_at);
+        const leaseIsStillActive =
+          activeLeaseExpiresAt !== null
+            ? activeLeaseExpiresAt.getTime() > now.getTime()
+            : legacyClaimedAt !== null && legacyClaimedAt.getTime() > legacyReclaimBefore.getTime();
+
+        if (leaseIsStillActive) {
+          continue;
+        }
+      }
 
       if (expiresAt && expiresAt.getTime() <= now.getTime()) {
         const [expired] = await tx

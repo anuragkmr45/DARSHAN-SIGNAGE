@@ -54,6 +54,8 @@ import {
 } from '@/utils/settings';
 import { setRuntimeLogLevel } from '@/utils/logger';
 import { getHttpAllowedOrigins, isAllowedOrigin } from '@/realtime/socket-server';
+import { setupDeviceRealtimeGateway } from '@/realtime/device-gateway';
+import { startOutboxDispatcher, stopOutboxDispatcher } from '@/services/outbox-dispatcher';
 import { registerObservabilityHttp } from '@/observability/http';
 import { ensureObservabilityInitialized } from '@/observability/metrics';
 
@@ -404,6 +406,12 @@ export async function createServer() {
   await fastify.register(scheduleReservationRoutes);
   await fastify.register(roleRoutes);
   await fastify.register(permissionRoutes);
+
+  setupDeviceRealtimeGateway(fastify);
+  startOutboxDispatcher();
+  fastify.addHook('onClose', async () => {
+    stopOutboxDispatcher();
+  });
 
   return fastify;
 }

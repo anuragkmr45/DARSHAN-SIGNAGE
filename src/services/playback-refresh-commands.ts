@@ -1,7 +1,6 @@
-import { and, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
-import { config } from '@/config';
+import { and, eq, gte, inArray, isNull, or } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
-import { resolveCommandExpiresAt, resolveCommandPriority } from '@/services/command-lifecycle-service';
+import { createDeviceCommands } from '@/services/command-lifecycle-service';
 
 export type PlaybackRefreshReason = 'PUBLISH' | 'EMERGENCY' | 'GROUP_MEMBERSHIP' | 'TAKE_DOWN' | 'DEFAULT_MEDIA';
 
@@ -11,6 +10,8 @@ export type PlaybackRefreshCommandBatch = {
   createdBy: string;
   publishId?: string | null;
   snapshotId?: string | null;
+  defaultMediaVersion?: string | null;
+  emergencyVersion?: string | null;
 };
 
 export const REFRESH_COMMAND_DEDUPE_MS = 60_000;
@@ -73,31 +74,36 @@ export async function createPlaybackRefreshCommands(params: PlaybackRefreshComma
     };
   }
 
-	  const requestedAt = new Date().toISOString();
-	  const priority = resolveCommandPriority(params.reason);
-	  const expiresAt = resolveCommandExpiresAt(params.reason);
-	  const inserted = await db
-	    .insert(schema.deviceCommands)
-	    .values(
-      screenIdsToQueue.map((screenId) => ({
-        screen_id: screenId,
-	        type: 'REFRESH' as const,
-	        status: 'PENDING' as const,
-	        created_by: params.createdBy,
-	        priority,
-	        expires_at: expiresAt,
-	        max_attempts: config.COMMAND_MAX_ATTEMPTS,
-	        correlation_id: params.publishId ?? null,
-	        desired_snapshot_id: params.snapshotId ?? null,
-	        payload: {
-	          reason: params.reason,
-          publish_id: params.publishId ?? null,
-          snapshot_id: params.snapshotId ?? null,
-          requested_at: requestedAt,
-        },
-      }))
-    )
-    .returning({ id: schema.deviceCommands.id });
+  const requestedAt = new Date().toISOString();
+  const desiredSnapshotId =
+    params.reason === 'PUBLISH'
+      ? params.snapshotId ?? null
+      : params.reason === 'TAKE_DOWN'
+      ? null
+      : undefined;
+  const desiredDefaultMediaVersion =
+    params.reason === 'DEFAULT_MEDIA' ? params.defaultMediaVersion ?? requestedAt : undefined;
+  const desiredEmergencyVersion = params.reason === 'EMERGENCY' ? params.emergencyVersion ?? requestedAt : undefined;
+
+  const inserted = await createDeviceCommands(
+    screenIdsToQueue.map((screenId) => ({
+      screenId,
+      type: 'REFRESH',
+      createdBy: params.createdBy,
+      correlationId: params.publishId ?? null,
+      desiredSnapshotId,
+      desiredDefaultMediaVersion,
+      desiredEmergencyVersion,
+      payload: {
+        reason: params.reason,
+        publish_id: params.publishId ?? null,
+        snapshot_id: params.snapshotId ?? null,
+        default_media_version: desiredDefaultMediaVersion ?? null,
+        emergency_version: desiredEmergencyVersion ?? null,
+        requested_at: requestedAt,
+      },
+    }))
+  );
 
   return {
     resolvedScreenIds,

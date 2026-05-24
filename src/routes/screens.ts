@@ -20,6 +20,7 @@ import {
   buildResolvedMediaRecord,
 } from '@/utils/resolved-media';
 import { createDeviceCommand, listRecentDeviceCommands } from '@/services/command-lifecycle-service';
+import { listRecentMediaCacheReports } from '@/services/media-cache-report-service';
 import { KNOWN_ASPECT_RATIOS, getAspectRatioName, resolveAspectRatio } from '@/utils/aspect-ratio';
 import {
   buildScreenRecoveryStateMap,
@@ -102,6 +103,42 @@ const snapshotQuerySchema = z.object({
 const recentCommandsQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(25),
 });
+
+const deliveryStatusQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(50).default(10),
+});
+
+const mediaCacheReportsQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(100).default(25),
+});
+
+const COMMAND_LIFECYCLE_ALIAS: Record<string, string> = {
+  SENT: 'LEASED',
+  COMPLETED: 'ACKED_SUCCESS',
+  FAILED: 'ACKED_FAILURE',
+};
+
+const isoTimestamp = (value: unknown) => {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'string') return value;
+  return null;
+};
+
+const commandLifecycleStatus = (status: string) => COMMAND_LIFECYCLE_ALIAS[status] ?? status;
+
+const countRowsByKey = (rows: Array<{ key: string | null; count: number | string | null }>) =>
+  rows.reduce<Record<string, number>>((acc, row) => {
+    const key = row.key ?? 'UNKNOWN';
+    acc[key] = Number(row.count ?? 0);
+    return acc;
+  }, {});
+
+const sumCounts = (counts: Record<string, number>) =>
+  Object.values(counts).reduce((total, value) => total + value, 0);
+
+const countAny = (counts: Record<string, number>, keys: string[]) =>
+  keys.reduce((total, key) => total + (counts[key] ?? 0), 0);
 
 export async function screenRoutes(fastify: FastifyInstance) {
   const screenRepo = createScreenRepository();
@@ -592,6 +629,277 @@ export async function screenRoutes(fastify: FastifyInstance) {
         });
       } catch (error) {
         logger.error(error, 'List recent screen commands error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Recent media/cache failure reports for a screen.
+  fastify.get<{ Params: { id: string }; Querystring: z.infer<typeof mediaCacheReportsQuerySchema> }>(
+    apiEndpoints.screens.mediaCacheReports,
+    {
+      schema: {
+        description: 'List recent media/cache failure reports for a screen',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) {
+          throw AppError.unauthorized('Missing authorization header');
+        }
+
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
+
+        const screenId = (request.params as any).id;
+        const screen = await screenRepo.findById(screenId);
+        if (!screen) {
+          throw AppError.notFound('Screen not found');
+        }
+
+        const query = mediaCacheReportsQuerySchema.parse(request.query ?? {});
+        const reports = await listRecentMediaCacheReports(screenId, query.limit);
+
+        return reply.send({
+          screen_id: screenId,
+          reports: reports.map((report) => ({
+            id: report.id,
+            media_id: report.media_id,
+            event_type: report.event_type,
+            severity: report.severity,
+            source: report.source,
+            status: report.status,
+            error_code: report.error_code,
+            http_status: report.http_status,
+            message: report.message,
+            cache_key: report.cache_key,
+            url_host: report.url_host,
+            url_path_hash: report.url_path_hash,
+            snapshot_id: report.snapshot_id,
+            schedule_id: report.schedule_id,
+            default_media_version: report.default_media_version,
+            playback_mode: report.playback_mode,
+            attempt_count: report.attempt_count,
+            metadata: report.metadata,
+            reported_at: isoTimestamp(report.reported_at),
+            received_at: isoTimestamp(report.received_at),
+            resolved_at: isoTimestamp(report.resolved_at),
+            created_at: isoTimestamp(report.created_at),
+            updated_at: isoTimestamp(report.updated_at),
+          })),
+        });
+      } catch (error) {
+        logger.error(error, 'List media/cache reports error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Aggregated command, outbox, publish, and emergency delivery state for a screen.
+  fastify.get<{ Params: { id: string }; Querystring: z.infer<typeof deliveryStatusQuerySchema> }>(
+    apiEndpoints.screens.deliveryStatus,
+    {
+      schema: {
+        description: 'Get realtime command and delivery status for a screen',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) {
+          throw AppError.unauthorized('Missing authorization header');
+        }
+
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
+
+        const screenId = (request.params as any).id;
+        const screen = await screenRepo.findById(screenId);
+        if (!screen) {
+          throw AppError.notFound('Screen not found');
+        }
+
+        const query = deliveryStatusQuerySchema.parse(request.query ?? {});
+        const recentCommands = await listRecentDeviceCommands(screenId, query.limit);
+
+        const commandStatusRows = await db
+          .select({
+            key: schema.deviceCommands.status,
+            count: sql<number>`count(*)`,
+          })
+          .from(schema.deviceCommands)
+          .where(eq(schema.deviceCommands.screen_id, screenId))
+          .groupBy(schema.deviceCommands.status);
+
+        const outboxStatusRows = await db
+          .select({
+            key: schema.commandOutbox.status,
+            count: sql<number>`count(*)`,
+          })
+          .from(schema.commandOutbox)
+          .where(eq(schema.commandOutbox.screen_id, screenId))
+          .groupBy(schema.commandOutbox.status);
+
+        const recentOutbox = await db
+          .select()
+          .from(schema.commandOutbox)
+          .where(eq(schema.commandOutbox.screen_id, screenId))
+          .orderBy(desc(schema.commandOutbox.created_at))
+          .limit(query.limit);
+
+        const [desiredState] = await db
+          .select()
+          .from(schema.deviceDesiredState)
+          .where(eq(schema.deviceDesiredState.screen_id, screenId))
+          .limit(1);
+
+        const latestPublish = await getLatestPublishForScreen(screenId, db);
+        const activeEmergency = await getActiveEmergencyForScreen(screenId, false);
+        const commandCounts = countRowsByKey(commandStatusRows);
+        const outboxCounts = countRowsByKey(outboxStatusRows);
+        const lifecycleCounts = Object.entries(commandCounts).reduce<Record<string, number>>((acc, [status, count]) => {
+          const lifecycle = commandLifecycleStatus(status);
+          acc[lifecycle] = (acc[lifecycle] ?? 0) + count;
+          return acc;
+        }, {});
+
+        const latestSnapshotId = latestPublish?.snapshot_id ?? null;
+        const desiredEmergencyVersion = desiredState?.emergency_version ?? null;
+        const publishCommands = latestSnapshotId
+          ? recentCommands.filter((command) => command.desired_snapshot_id === latestSnapshotId)
+          : [];
+        const emergencyCommands = desiredEmergencyVersion
+          ? recentCommands.filter((command) => command.desired_emergency_version === desiredEmergencyVersion)
+          : recentCommands.filter((command) => {
+              const reason = typeof (command.payload as any)?.reason === 'string' ? (command.payload as any).reason : '';
+              return reason.toUpperCase().startsWith('EMERGENCY');
+            });
+
+        const summarizeRecentSet = (commands: typeof recentCommands) => ({
+          total_recent: commands.length,
+          pending: commands.filter((command) => commandLifecycleStatus(command.status) === 'PENDING').length,
+          leased: commands.filter((command) => ['LEASED', 'PROCESSING'].includes(commandLifecycleStatus(command.status))).length,
+          succeeded: commands.filter((command) => commandLifecycleStatus(command.status) === 'ACKED_SUCCESS').length,
+          failed: commands.filter((command) =>
+            ['ACKED_FAILURE', 'EXPIRED', 'DEAD_LETTER', 'CANCELLED'].includes(commandLifecycleStatus(command.status))
+          ).length,
+          latest_status: commands[0]?.status ?? null,
+          latest_lifecycle_status: commands[0]?.lifecycle_status ?? null,
+          latest_command_id: commands[0]?.id ?? null,
+          latest_error: commands[0]?.last_error ?? null,
+        });
+
+        return reply.send({
+          screen_id: screenId,
+          server_time: new Date().toISOString(),
+          desired_state: desiredState
+            ? {
+                screen_id: desiredState.screen_id,
+                state_version: desiredState.state_version,
+                command_version: desiredState.command_version,
+                snapshot_id: desiredState.snapshot_id,
+                default_media_version: desiredState.default_media_version,
+                emergency_version: desiredState.emergency_version,
+                last_command_id: desiredState.last_command_id,
+                last_command_type: desiredState.last_command_type,
+                last_command_reason: desiredState.last_command_reason,
+                last_changed_reason: desiredState.last_changed_reason,
+                updated_at: isoTimestamp(desiredState.updated_at),
+              }
+            : null,
+          publish: latestPublish
+            ? {
+                publish_id: latestPublish.publish_id,
+                schedule_id: latestPublish.schedule_id,
+                schedule_name: null,
+                snapshot_id: latestPublish.snapshot_id,
+                published_at: isoTimestamp(latestPublish.published_at),
+                delivery: summarizeRecentSet(publishCommands),
+              }
+            : null,
+          emergency: {
+            active: Boolean(activeEmergency),
+            id: activeEmergency?.id ?? null,
+            severity: activeEmergency?.severity ?? null,
+            media_id: activeEmergency?.media_id ?? null,
+            created_at: activeEmergency?.created_at ?? null,
+            delivery: summarizeRecentSet(emergencyCommands),
+          },
+          commands: {
+            total: sumCounts(commandCounts),
+            by_status: commandCounts,
+            by_lifecycle: lifecycleCounts,
+            pending: countAny(commandCounts, ['PENDING']),
+            leased: countAny(commandCounts, ['SENT', 'LEASED', 'PROCESSING']),
+            succeeded: countAny(commandCounts, ['COMPLETED', 'ACKED_SUCCESS']),
+            failed: countAny(commandCounts, ['FAILED', 'ACKED_FAILURE']),
+            expired: countAny(commandCounts, ['EXPIRED']),
+            dead_letter: countAny(commandCounts, ['DEAD_LETTER']),
+            cancelled: countAny(commandCounts, ['CANCELLED']),
+            recent: recentCommands.map((command) => ({
+              id: command.id,
+              type: command.type,
+              status: command.status,
+              lifecycle_status: command.lifecycle_status,
+              reason: typeof (command.payload as any)?.reason === 'string' ? (command.payload as any).reason : null,
+              priority: command.priority,
+              attempt_count: command.attempt_count,
+              max_attempts: command.max_attempts,
+              delivery_attempts: command.delivery_attempts,
+              last_error: command.last_error,
+              result_payload: command.result_payload,
+              desired_snapshot_id: command.desired_snapshot_id,
+              desired_default_media_version: command.desired_default_media_version,
+              desired_emergency_version: command.desired_emergency_version,
+              claimed_at: isoTimestamp(command.claimed_at),
+              lease_expires_at: isoTimestamp(command.lease_expires_at),
+              acknowledged_at: isoTimestamp(command.acknowledged_at),
+              completed_at: isoTimestamp(command.completed_at),
+              expires_at: isoTimestamp(command.expires_at),
+              created_at: isoTimestamp(command.created_at),
+              updated_at: isoTimestamp(command.updated_at),
+              status_history: command.status_history.slice(0, 5).map((entry) => ({
+                old_status: entry.old_status,
+                new_status: entry.new_status,
+                reason: entry.reason,
+                attempt_count: entry.attempt_count,
+                created_at: isoTimestamp(entry.created_at),
+              })),
+            })),
+          },
+          outbox: {
+            total: sumCounts(outboxCounts),
+            by_status: outboxCounts,
+            pending: countAny(outboxCounts, ['PENDING']),
+            dispatching: countAny(outboxCounts, ['DISPATCHING']),
+            dispatched: countAny(outboxCounts, ['DISPATCHED']),
+            failed: countAny(outboxCounts, ['FAILED']),
+            recent: recentOutbox.map((row) => ({
+              id: row.id,
+              command_id: row.command_id,
+              event_type: row.event_type,
+              reason: row.reason,
+              status: row.status,
+              priority: row.priority,
+              attempt_count: row.attempt_count,
+              max_attempts: row.max_attempts,
+              next_attempt_at: isoTimestamp(row.next_attempt_at),
+              dispatched_at: isoTimestamp(row.dispatched_at),
+              last_error: row.last_error,
+              created_at: isoTimestamp(row.created_at),
+              updated_at: isoTimestamp(row.updated_at),
+            })),
+          },
+        });
+      } catch (error) {
+        logger.error(error, 'Get screen delivery status error');
         return respondWithError(reply, error);
       }
     }

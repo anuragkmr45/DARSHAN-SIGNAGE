@@ -42,6 +42,8 @@ import {
   resolveCommandExpiresAt,
   resolveCommandPriority,
 } from '@/services/command-lifecycle-service';
+import { getDeviceDesiredState } from '@/services/device-desired-state-service';
+import { createMediaCacheReport } from '@/services/media-cache-report-service';
 
 const logger = createLogger('device-telemetry-routes');
 const { CREATED } = HTTP_STATUS;
@@ -140,6 +142,36 @@ const screenshotSchema = z.object({
   timestamp: z.string().datetime(),
   image_data: z.string(), // base64 encoded
   mime_type: z.string().optional(),
+});
+
+const mediaCacheReportSchema = z.object({
+  event_type: z.enum([
+    'URL_EXPIRED',
+    'DOWNLOAD_FAILED',
+    'CHECKSUM_MISMATCH',
+    'DISK_FULL',
+    'CACHE_EVICTION_FAILED',
+    'CACHE_WRITE_FAILED',
+    'CACHE_MISS',
+    'PLAYBACK_ERROR',
+    'UNKNOWN',
+  ]),
+  severity: z.enum(['INFO', 'WARN', 'ERROR', 'CRITICAL']).default('ERROR'),
+  source: z.enum(['SNAPSHOT', 'DEFAULT_MEDIA', 'EMERGENCY', 'PLAYBACK', 'PREFETCH', 'CACHE', 'RENDERER']).optional(),
+  media_id: z.string().min(1).max(255).optional(),
+  error_code: z.string().min(1).max(80).optional(),
+  http_status: z.number().int().positive().optional(),
+  message: z.string().max(2000).optional(),
+  cache_key: z.string().max(512).optional(),
+  url_host: z.string().max(255).optional(),
+  url_path_hash: z.string().max(128).optional(),
+  snapshot_id: z.string().uuid().optional(),
+  schedule_id: z.string().uuid().optional(),
+  default_media_version: z.string().max(255).optional(),
+  playback_mode: z.enum(['normal', 'emergency', 'default', 'offline', 'empty']).optional(),
+  attempt_count: z.number().int().positive().max(1000).optional(),
+  metadata: z.record(z.any()).optional(),
+  reported_at: z.string().datetime().optional(),
 });
 
 const createCommandSchema = z.object({
@@ -790,6 +822,140 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         });
       } catch (error) {
         logger.error(error, 'Screenshot upload error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Device media/cache failure report (device auth required)
+  fastify.post<{ Params: { deviceId: string }; Body: z.infer<typeof mediaCacheReportSchema> }>(
+    apiEndpoints.deviceTelemetry.mediaCacheReport,
+    {
+      schema: {
+        description: 'Report media/cache failure metadata for an authenticated device',
+        tags: ['Device Telemetry'],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const deviceId = (request.params as any).deviceId;
+        const data = mediaCacheReportSchema.parse(request.body);
+        await authenticateDeviceOrThrow(request, deviceId);
+
+        if (!appConfig.MEDIA_CACHE_REPORTING_ENABLED) {
+          return reply.status(HTTP_STATUS.ACCEPTED).send({
+            success: true,
+            accepted: false,
+            disabled: true,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const [screen] = await db
+          .select({ id: schema.screens.id })
+          .from(schema.screens)
+          .where(eq(schema.screens.id, deviceId))
+          .limit(1);
+        if (!screen) {
+          throw AppError.notFound('Device not registered');
+        }
+
+        const report = await createMediaCacheReport({
+          screenId: deviceId,
+          mediaId: data.media_id ?? null,
+          eventType: data.event_type,
+          severity: data.severity,
+          source: data.source ?? null,
+          errorCode: data.error_code ?? null,
+          httpStatus: data.http_status ?? null,
+          message: data.message ?? null,
+          cacheKey: data.cache_key ?? null,
+          urlHost: data.url_host ?? null,
+          urlPathHash: data.url_path_hash ?? null,
+          snapshotId: data.snapshot_id ?? null,
+          scheduleId: data.schedule_id ?? null,
+          defaultMediaVersion: data.default_media_version ?? null,
+          playbackMode: data.playback_mode ?? null,
+          attemptCount: data.attempt_count ?? null,
+          metadata: data.metadata ?? null,
+          reportedAt: data.reported_at ? new Date(data.reported_at) : null,
+        });
+
+        logger.warn(
+          {
+            deviceId,
+            reportId: report.id,
+            eventType: report.event_type,
+            severity: report.severity,
+            mediaId: report.media_id,
+          },
+          'Device media/cache failure report received'
+        );
+
+        return reply.status(CREATED).send({
+          success: true,
+          id: report.id,
+          received_at: report.received_at?.toISOString?.() ?? report.received_at,
+        });
+      } catch (error) {
+        logger.error(error, 'Media/cache report error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Get desired state for device reconciliation (device auth required)
+  fastify.get<{ Params: { deviceId: string } }>(
+    apiEndpoints.deviceTelemetry.desiredState,
+    {
+      schema: {
+        description: 'Get desired state versions for device reconciliation',
+        tags: ['Device Telemetry'],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const deviceId = (request.params as any).deviceId;
+        await authenticateDeviceOrThrow(request, deviceId);
+
+        const state = await getDeviceDesiredState(deviceId);
+
+        return reply.send({
+          device_id: deviceId,
+          server_time: new Date().toISOString(),
+          state: state
+            ? {
+                state_version: Number(state.state_version ?? 0),
+                command_version: Number(state.command_version ?? 0),
+                snapshot_id: state.snapshot_id ?? null,
+                default_media_version: state.default_media_version ?? null,
+                emergency_version: state.emergency_version ?? null,
+                last_command_id: state.last_command_id ?? null,
+                last_command_type: state.last_command_type ?? null,
+                last_command_reason: state.last_command_reason ?? null,
+                last_changed_reason: state.last_changed_reason ?? null,
+                updated_at: state.updated_at?.toISOString?.() ?? state.updated_at ?? null,
+              }
+            : {
+                state_version: 0,
+                command_version: 0,
+                snapshot_id: null,
+                default_media_version: null,
+                emergency_version: null,
+                last_command_id: null,
+                last_command_type: null,
+                last_command_reason: null,
+                last_changed_reason: null,
+                updated_at: null,
+              },
+          resources: {
+            commands: apiEndpoints.deviceTelemetry.commands.replace(':deviceId', deviceId),
+            snapshot: `${apiEndpoints.deviceTelemetry.snapshot.replace(':deviceId', deviceId)}?include_urls=true`,
+            default_media: apiEndpoints.deviceTelemetry.defaultMedia.replace(':deviceId', deviceId),
+          },
+        });
+      } catch (error) {
+        logger.error(error, 'Get desired state error');
         return respondWithError(reply, error);
       }
     }

@@ -91,6 +91,16 @@ const envSchema = z.object({
 	  COMMAND_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
 	  COMMAND_DEFAULT_EXPIRES_MS: z.coerce.number().int().positive().default(86_400_000),
 	  COMMAND_EMERGENCY_EXPIRES_MS: z.coerce.number().int().positive().default(300_000),
+	  COMMAND_OUTBOX_WRITE_ENABLED: optionalBooleanString,
+	  DEVICE_DESIRED_STATE_ENABLED: optionalBooleanString,
+	  REALTIME_SYNC_ENABLED: optionalBooleanString,
+	  REALTIME_DEVICE_NAMESPACE: z.string().default('/device'),
+	  WS_NOTIFICATION_MAX_BYTES: z.coerce.number().int().positive().default(32_768),
+	  OUTBOX_DISPATCH_ENABLED: optionalBooleanString,
+	  OUTBOX_DISPATCH_BATCH_SIZE: z.coerce.number().int().positive().default(100),
+	  OUTBOX_DISPATCH_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
+	  OUTBOX_DISPATCH_LEASE_MS: z.coerce.number().int().positive().default(60_000),
+	  MEDIA_CACHE_REPORTING_ENABLED: optionalBooleanString,
 	});
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {
@@ -107,5 +117,10 @@ export const config = Object.freeze({
     (parsed.data.NODE_ENV === 'production' ? 'production' : 'development'),
   OBSERVABILITY_GRAFANA_ENABLED: parsed.data.OBSERVABILITY_GRAFANA_ENABLED ?? true,
   OBSERVABILITY_GRAFANA_EMBED_ENABLED: parsed.data.OBSERVABILITY_GRAFANA_EMBED_ENABLED ?? true,
+  COMMAND_OUTBOX_WRITE_ENABLED: parsed.data.COMMAND_OUTBOX_WRITE_ENABLED ?? true,
+  DEVICE_DESIRED_STATE_ENABLED: parsed.data.DEVICE_DESIRED_STATE_ENABLED ?? true,
+  REALTIME_SYNC_ENABLED: parsed.data.REALTIME_SYNC_ENABLED ?? false,
+  OUTBOX_DISPATCH_ENABLED: parsed.data.OUTBOX_DISPATCH_ENABLED ?? false,
+  MEDIA_CACHE_REPORTING_ENABLED: parsed.data.MEDIA_CACHE_REPORTING_ENABLED ?? true,
 });
 export type Config = typeof config;

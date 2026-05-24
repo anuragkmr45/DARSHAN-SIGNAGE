@@ -22,6 +22,8 @@ export type DispatchPlaybackRefreshParams = {
   createdBy: string;
   publishId?: string | null;
   snapshotId?: string | null;
+  defaultMediaVersion?: string | null;
+  emergencyVersion?: string | null;
 };
 
 export const PLAYBACK_REFRESH_JOB_CHUNK_SIZE = 100;
@@ -65,6 +67,8 @@ function buildPlaybackRefreshJob(
     createdBy: params.createdBy,
     publishId: params.publishId ?? null,
     snapshotId: params.snapshotId ?? null,
+    defaultMediaVersion: params.defaultMediaVersion ?? null,
+    emergencyVersion: params.emergencyVersion ?? null,
   };
 }
 
@@ -114,6 +118,8 @@ export async function dispatchPlaybackRefresh(
       createdBy: params.createdBy,
       publishId: params.publishId ?? null,
       snapshotId: params.snapshotId ?? null,
+      defaultMediaVersion: params.defaultMediaVersion ?? null,
+      emergencyVersion: params.emergencyVersion ?? null,
     });
 
     return {
@@ -167,6 +173,8 @@ export async function dispatchPlaybackRefresh(
       createdBy: params.createdBy,
       publishId: params.publishId ?? null,
       snapshotId: params.snapshotId ?? null,
+      defaultMediaVersion: params.defaultMediaVersion ?? null,
+      emergencyVersion: params.emergencyVersion ?? null,
     });
 
     return {

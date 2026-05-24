@@ -554,6 +554,119 @@ export const deviceCommandStatusHistory = pgTable(
   })
 );
 
+export const commandOutbox = pgTable(
+  'command_outbox',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    screen_id: uuid('screen_id').notNull(),
+    command_id: uuid('command_id'),
+    event_type: varchar('event_type', { length: 80 }).notNull(),
+    reason: text('reason'),
+    payload: jsonb('payload'),
+    status: varchar('status', { length: 40 }).notNull().default('PENDING'),
+    priority: integer('priority').notNull().default(0),
+    available_at: timestamp('available_at').notNull().defaultNow(),
+    next_attempt_at: timestamp('next_attempt_at'),
+    attempt_count: integer('attempt_count').notNull().default(0),
+    max_attempts: integer('max_attempts').notNull().default(5),
+    dispatched_at: timestamp('dispatched_at'),
+    last_error: text('last_error'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    pendingIdx: index('command_outbox_pending_idx').on(table.status, table.available_at, table.priority, table.created_at),
+    screenIdx: index('command_outbox_screen_id_idx').on(table.screen_id, table.created_at),
+    commandIdx: index('command_outbox_command_id_idx').on(table.command_id),
+    nextAttemptIdx: index('command_outbox_next_attempt_idx').on(table.status, table.next_attempt_at),
+  })
+);
+
+export const deviceDesiredState = pgTable(
+  'device_desired_state',
+  {
+    screen_id: uuid('screen_id').primaryKey(),
+    snapshot_id: uuid('snapshot_id'),
+    default_media_version: text('default_media_version'),
+    emergency_version: text('emergency_version'),
+    command_version: bigint('command_version', { mode: 'number' }).notNull().default(0),
+    state_version: bigint('state_version', { mode: 'number' }).notNull().default(1),
+    last_command_id: uuid('last_command_id'),
+    last_command_type: varchar('last_command_type', { length: 80 }),
+    last_command_reason: text('last_command_reason'),
+    last_changed_reason: text('last_changed_reason'),
+    metadata: jsonb('metadata'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    updatedAtIdx: index('device_desired_state_updated_at_idx').on(table.updated_at),
+    snapshotIdx: index('device_desired_state_snapshot_id_idx').on(table.snapshot_id),
+  })
+);
+
+export const deviceDesiredStateHistory = pgTable(
+  'device_desired_state_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    screen_id: uuid('screen_id').notNull(),
+    state_version: bigint('state_version', { mode: 'number' }).notNull(),
+    command_version: bigint('command_version', { mode: 'number' }).notNull(),
+    snapshot_id: uuid('snapshot_id'),
+    default_media_version: text('default_media_version'),
+    emergency_version: text('emergency_version'),
+    command_id: uuid('command_id'),
+    reason: text('reason'),
+    metadata: jsonb('metadata'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    screenVersionIdx: index('device_desired_state_history_screen_version_idx').on(table.screen_id, table.state_version),
+    commandIdx: index('device_desired_state_history_command_id_idx').on(table.command_id),
+    createdAtIdx: index('device_desired_state_history_created_at_idx').on(table.created_at),
+  })
+);
+
+export const mediaCacheReports = pgTable(
+  'media_cache_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    screen_id: uuid('screen_id').notNull(),
+    media_id: text('media_id'),
+    event_type: varchar('event_type', { length: 80 }).notNull(),
+    severity: varchar('severity', { length: 20 }).notNull().default('ERROR'),
+    source: varchar('source', { length: 80 }),
+    status: varchar('status', { length: 40 }).notNull().default('OPEN'),
+    error_code: varchar('error_code', { length: 80 }),
+    http_status: integer('http_status'),
+    message: text('message'),
+    cache_key: text('cache_key'),
+    url_host: text('url_host'),
+    url_path_hash: text('url_path_hash'),
+    snapshot_id: uuid('snapshot_id'),
+    schedule_id: uuid('schedule_id'),
+    default_media_version: text('default_media_version'),
+    playback_mode: varchar('playback_mode', { length: 40 }),
+    attempt_count: integer('attempt_count').notNull().default(1),
+    metadata: jsonb('metadata'),
+    reported_at: timestamp('reported_at').notNull(),
+    received_at: timestamp('received_at').notNull().defaultNow(),
+    resolved_at: timestamp('resolved_at'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    screenReportedIdx: index('media_cache_reports_screen_reported_idx').on(table.screen_id, table.reported_at),
+    mediaReportedIdx: index('media_cache_reports_media_reported_idx').on(table.media_id, table.reported_at),
+    statusSeverityReportedIdx: index('media_cache_reports_status_severity_reported_idx').on(
+      table.status,
+      table.severity,
+      table.reported_at
+    ),
+    eventReportedIdx: index('media_cache_reports_event_reported_idx').on(table.event_type, table.reported_at),
+  })
+);
+
 // Heartbeats (device telemetry)
 export const heartbeats = pgTable(
   'heartbeats',
