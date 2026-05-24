@@ -26,7 +26,8 @@ Updated by: Codex
 | Phase 7 static hardening is not runtime QA validation | High | Open | Phase 7 adds env/proxy/runbook/static validation assets only | Run actual QA proxy smoke, canary rollback drill, and backend/player realtime smoke before production enablement. |
 | Sticky-session versus distributed registry decision still open | High | Open | Phase 3 connection registry is process-local; Phase 7 docs require a decision | Choose sticky sessions for single-instance/canary or implement Redis/NATS/distributed routing before multi-instance production. |
 | Phase 8 real load/chaos execution missing | High | Open | Phase 8 added load model and chaos plan, but no QA/staging target was available for execution | Execute 1k/10k/50k load profiles and chaos suite before production readiness. |
-| Production readiness not approved | Critical | Open | `realtime-sync-production-readiness-checklist.md` state is `NOT_PRODUCTION_READY` | Do not start production canary or Phase 9 mobile adapters without accepted Phase 8 runtime evidence or explicit human deferral. |
+| Production readiness not approved | Critical | Open | `realtime-sync-production-readiness-checklist.md` state is `NOT_PRODUCTION_READY`; runtime evidence attempt is blocked by missing QA/staging target | Do not start production canary or Phase 9 mobile adapters without accepted Phase 8 runtime evidence or explicit human deferral. |
+| QA/staging runtime evidence unavailable | Critical | Open | Packaged QA server health check reports `postgres` not running; localhost backend/socket checks cannot connect; no QA/staging endpoint env vars are present | Provide QA/staging endpoints, simulator credentials, and approved load/chaos window. |
 
 Latest Phase 1 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`.
 Latest Phase 2 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-2-handoff.md`.
@@ -36,6 +37,7 @@ Latest Phase 5 handoff: `signhex-platform/docs/implementation/realtime-sync-phas
 Latest Phase 6 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-6-handoff.md`.
 Latest Phase 7 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`.
 Latest Phase 8 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`.
+Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
 
 ## Architecture Risks For Later Phases
 

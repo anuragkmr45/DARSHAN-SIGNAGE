@@ -324,6 +324,18 @@ Phase 8 tests still required before production readiness:
 - QA canary rollback drill.
 - Dedicated realtime/outbox/media-cache/fallback metrics and alert rule tests.
 
+## Phase 8 Runtime Evidence Attempt
+
+Latest runtime-evidence attempt from 2026-05-24:
+
+- QA/staging endpoint discovery: blocked; no QA/STAGING/SIGNHEX/HEXMON/REALTIME/BACKEND/CMS endpoint variables were present in the local environment, except `COMMAND_MODE`.
+- Packaged QA server health check: blocked; `postgres` service is not running.
+- Packaged QA CMS health check: blocked; returned HTTP 404.
+- Local backend health check at `http://127.0.0.1:3000/api/v1/health`: blocked; no listener on port 3000.
+- Local Socket.IO smoke at `http://127.0.0.1:3000/socket.io/?EIO=4&transport=polling`: blocked; no listener on port 3000.
+
+Evidence file: `signhex-platform/docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
+
 ## Production Readiness Checklist
 
 - feature flags documented

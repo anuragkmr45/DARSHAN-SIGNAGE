@@ -7,7 +7,7 @@ Updated by: Codex
 
 Current state: NOT_PRODUCTION_READY
 
-Reason: Phase 8 tooling and checklists exist, but real QA load/chaos execution, Node 20 rerun, QA proxy smoke, canary rollback evidence, migration review, and dedicated metrics/alerts are still required.
+Reason: Phase 8 tooling and checklists exist, but real QA load/chaos execution is blocked by missing QA/staging target and simulator credentials. Node 20 rerun, QA proxy smoke, canary rollback evidence, migration review, and dedicated metrics/alerts are still required.
 
 ## Required Gates
 
@@ -29,6 +29,21 @@ Reason: Phase 8 tooling and checklists exist, but real QA load/chaos execution, 
 | Metrics and alerts | required realtime/failure alerts configured and tested | Open |
 | CMS lint | fixed or explicitly waived | Open |
 | Operator UI smoke | Delivery tab command/media-cache status reviewed | Open |
+
+## Latest Runtime Evidence Attempt
+
+Date: 2026-05-24
+
+Result: BLOCKED_BY_ENV
+
+Evidence:
+
+- no QA/staging endpoint environment variables available in the local shell,
+- packaged QA server health check reports `postgres` service is not running,
+- packaged QA CMS health check returns HTTP 404,
+- local backend and `/socket.io/` checks cannot connect to `127.0.0.1:3000`.
+
+See `realtime-sync-phase-8-runtime-evidence.md`.
 
 ## Production Canary Rule
 

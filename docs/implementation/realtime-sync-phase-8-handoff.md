@@ -3,7 +3,7 @@
 Last updated: 2026-05-24
 Updated by: Codex
 Phase: Phase 8 - Load, chaos, and production readiness
-Approval state: APPROVED_WITH_CONDITIONS
+Approval state: BLOCKED_BY_ENV
 Production readiness state: NOT_PRODUCTION_READY
 
 ## Summary
@@ -67,6 +67,14 @@ Blocked local results:
 - Chaos execution: blocked by unavailable QA/staging target.
 - QA canary rollback drill: blocked by unavailable QA deployment target.
 - Node 20 validation: blocked because local Node is `v24.12.0`.
+
+Runtime evidence attempt:
+
+- Recorded in `signhex-platform/docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
+- Packaged QA server health check is blocked because `postgres` is not running.
+- Packaged QA CMS health check is blocked by HTTP 404.
+- Local backend and Socket.IO smoke checks are blocked because nothing is listening on `127.0.0.1:3000`.
+- No QA/staging endpoint variables or simulator credentials are available in the local environment.
 
 ## Conditions Carried Forward
 

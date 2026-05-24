@@ -585,11 +585,11 @@ Latest handoff: `signhex-platform/docs/implementation/realtime-sync-phase-7-hand
 
 ## Phase 8: Load, Chaos, and Production Readiness
 
-Status: Implemented at tooling/docs level, conditionally approved
+Status: Runtime evidence attempted, blocked by environment
 Reviewer: Codex implementation and verification pass
 Date: 2026-05-24
 Commit/Branch: `release-01`, uncommitted working tree
-Approval state: `APPROVED_WITH_CONDITIONS`
+Approval state: `BLOCKED`
 Production readiness state: `NOT_PRODUCTION_READY`
 
 ### Implemented Scope
@@ -635,6 +635,11 @@ Production readiness state: `NOT_PRODUCTION_READY`
 
 ### Tests Blocked
 
+- QA/staging target discovery found no endpoint variables in the local environment; only `COMMAND_MODE` matched the QA/STAGING/SIGNHEX/HEXMON/REALTIME/BACKEND/CMS scan.
+- Packaged QA server health check is blocked because `postgres` is not running.
+- Packaged QA CMS health check is blocked by HTTP 404.
+- Local backend health check is blocked because no service is listening on `127.0.0.1:3000`.
+- Local `/socket.io/` smoke is blocked because no service is listening on `127.0.0.1:3000`.
 - Real 1k/10k/50k player load execution is blocked by unavailable QA/staging target and simulator credential set.
 - Chaos execution is blocked by unavailable QA/staging target.
 - QA canary rollback drill is blocked by unavailable QA deployment target in this local session.
@@ -671,9 +676,10 @@ no
 
 ### Approval Notes
 
-Phase 8 tooling/docs are conditionally approved, but production readiness is not approved. Phase 9 mobile/TV adapters must not start unless these Phase 8 runtime evidence conditions are accepted for deferral by a human approver.
+Phase 8 tooling/docs are conditionally approved, but the requested runtime evidence is blocked by environment and production readiness is not approved. Phase 9 mobile/TV adapters must not start unless these Phase 8 runtime evidence conditions are satisfied or explicitly deferred by a human approver.
 
 Latest handoff: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`.
+Latest runtime evidence attempt: `signhex-platform/docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
 
 ## Phase 9: Mobile/TV Player Contract Adapters
 

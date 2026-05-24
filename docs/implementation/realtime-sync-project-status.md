@@ -5,7 +5,7 @@ Updated by: Codex
 Repo path: `/Users/anuragkumar/Desktop/signhex`
 Current branch: `release-01` in `signhex-server`, `signage-screen`, `signhex-nexus-core`, and `signhex-platform`
 Current phase: Phase 8 - Load, chaos, and production readiness
-Overall status: Phase 8 load/chaos/readiness plans, load model, observability validation, and handoff are implemented and conditionally approved; production readiness is not approved and Phase 9 remains blocked
+Overall status: Phase 8 runtime evidence was attempted and is blocked by missing QA/staging environment; production readiness is not approved and Phase 9 remains blocked
 
 ## Architecture Decision
 
@@ -75,7 +75,7 @@ CMS/API transaction
 | 5 | CMS command/delivery status UI | APPROVED_WITH_CONDITIONS | Conditions accepted by user for Phase 6 start; lint/visual review conditions carried forward |
 | 6 | Failure observability and media/cache status | APPROVED_WITH_CONDITIONS | Media/cache report schema/API/player reporter/CMS visibility implemented and tested; dashboards/log-screenshot result visibility deferred |
 | 7 | QA/prod deployment hardening | APPROVED_WITH_CONDITIONS | Deployment templates, proxy guidance, static validator, and rollback/canary docs added; actual QA runtime validation remains required |
-| 8 | Load, chaos, and production readiness | APPROVED_WITH_CONDITIONS | Local load model/static/observability validation added and passed; real QA load/chaos execution remains required |
+| 8 | Load, chaos, and production readiness | BLOCKED_BY_ENV | Local model/static/observability validation passed; real QA load/chaos/canary/proxy runtime execution blocked by missing QA/staging target |
 | 9 | Mobile/TV player contract adapters | BLOCKED | Requires accepted Phase 8 runtime evidence or explicit human deferral |
 
 Phase control details are maintained in `signhex-platform/docs/implementation/realtime-sync-remaining-phase-control-plan.md`.
@@ -696,14 +696,19 @@ Production readiness is not approved. Real 1k/10k/50k load execution, QA proxy c
 | `cd signhex-server && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | `tsc && tsc-alias` exited 0 | Node 20 rerun still required before QA signoff. |
 | `cd signage-screen && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | main/renderer builds and asset copy exited 0 | Node 20 rerun still required before QA signoff. |
 | `cd signhex-nexus-core && npm run build` | Local Node `v24.12.0` | Passed | Vite build exited 0 with existing chunk-size warnings | Node 20 rerun still required before QA signoff. |
+| `printenv` QA/staging variable-name scan | Local shell, values not printed | Blocked | Only `COMMAND_MODE` matched; no QA/STAGING/SIGNHEX/HEXMON/REALTIME/BACKEND/CMS endpoint variables present | No QA/staging target available. |
+| `./health-check.sh` in packaged QA server bundle | Local Docker/package folder | Blocked | `service "postgres" is not running` | Old artifact bundle is not active QA evidence. |
+| `./health-check.sh` in packaged QA CMS bundle | Local package folder | Blocked | `curl: (22) The requested URL returned error: 404` | Old artifact bundle is not active QA evidence. |
+| `curl -fsS -i http://127.0.0.1:3000/api/v1/health` | Localhost | Blocked | `Failed to connect to 127.0.0.1 port 3000` | No local backend listener. |
+| `curl -fsS -i 'http://127.0.0.1:3000/socket.io/?EIO=4&transport=polling'` | Localhost | Blocked | `Failed to connect to 127.0.0.1 port 3000` | No local gateway listener. |
 | Real 1k/10k/50k load execution | QA/staging infrastructure | Blocked | No QA deployment target or simulator credential set in local session | Required before production readiness. |
 | Chaos execution | QA/staging infrastructure | Blocked | No QA deployment target in local session | Required before production readiness. |
 
 ### Phase 8 Approval State
 
-APPROVED_WITH_CONDITIONS
+BLOCKED_BY_ENV
 
-Phase 8 tooling/docs are implemented and locally validated. Production readiness is not approved. Phase 9 mobile/TV adapter implementation remains blocked until Phase 8 runtime evidence is executed and accepted, or a human approver explicitly defers that gate.
+Phase 8 tooling/docs are implemented and locally validated. Runtime evidence was attempted and blocked by the missing QA/staging deployment target and simulator credentials. Production readiness is not approved. Phase 9 mobile/TV adapter implementation remains blocked until Phase 8 runtime evidence is executed and accepted, or a human approver explicitly defers that gate.
 
 ### Phase 8 Known Risks
 
@@ -726,6 +731,7 @@ Phase 8 tooling/docs are implemented and locally validated. Production readiness
 - Add or explicitly waive missing dedicated realtime/media-cache/fallback metrics and alerts.
 - Complete QA canary evidence and rollback drill.
 - Decide whether Phase 9 may proceed before production-proven runtime evidence.
+- Provide QA/staging endpoints, proxy route, device/simulator credentials, and permission to run load/chaos.
 
 ## Completed
 
@@ -752,19 +758,19 @@ Phase 8 tooling/docs are implemented and locally validated. Production readiness
 
 ## In Progress
 
-- Phase 8 is conditionally approved at the tooling/docs level; implementation has stopped before the Phase 9 gate because production readiness evidence is incomplete.
+- Phase 8 runtime evidence is blocked by environment; implementation has stopped before the Phase 9 gate because production readiness evidence is incomplete.
 
 ## Blocked
 
 - QA/prod rollout is blocked until Node 20 rerun, QA-sized migration/index review, QA WebSocket proxy/sticky-session review, and dedicated realtime metrics are complete.
-- Full Phase 8 production readiness approval is blocked until real QA load/chaos execution, QA canary rollback drill, Node 20 rerun, migration review, CMS lint fix/waiver, and dedicated realtime/media-cache metrics/alerts are complete.
+- Full Phase 8 production readiness approval is blocked until QA/staging endpoints and simulator credentials are provided, real QA load/chaos execution runs, QA canary rollback drill runs, Node 20 rerun, migration review, CMS lint fix/waiver, and dedicated realtime/media-cache metrics/alerts are complete.
 
 ## Next
 
 Immediate next action:
 
-1. Accept or reject Phase 8 conditions.
-2. If accepted, decide whether to execute real QA load/chaos next or explicitly defer runtime evidence before Phase 9.
+1. Provide QA/staging endpoints and simulator/device credentials, then rerun Phase 8 runtime evidence.
+2. If runtime evidence cannot be provided, explicitly decide whether to defer Phase 8 and keep Phase 9 blocked.
 3. Before production signoff, rerun Phase 1 through Phase 8 build/tests under Node 20, execute QA load/chaos, validate WebSocket proxy/sticky-session behavior, run a QA canary rollback drill, and define media/cache report retention.
 
 ## Risks
@@ -937,6 +943,9 @@ Current test state:
 - Phase 8 load model dry-runs passed for 1k current, 10k hybrid healthy, and 50k fallback profiles
 - Observability asset validation passed after Docker escalation and image pulls
 - Phase 8 server, player, and CMS builds passed under local Node `v24.12.0`
+- Phase 8 runtime evidence attempt is documented in `realtime-sync-phase-8-runtime-evidence.md`
+- Local QA artifact/server health checks are blocked because packaged QA services are not running
+- Local backend and `/socket.io/` smoke checks are blocked because no listener is active on `127.0.0.1:3000`
 - CMS lint currently fails due pre-existing files outside Phase 5/6 changed paths
 - combined backend regression command has known DB cross-test interference and should not be used as approval evidence until isolation is added
 

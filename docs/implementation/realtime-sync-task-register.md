@@ -6,7 +6,7 @@ Repo path: `/Users/anuragkumar/Desktop/signhex`
 
 Allowed statuses: `NOT_STARTED`, `READY`, `BLOCKED`, `IN_PROGRESS`, `IMPLEMENTED`, `TESTED`, `APPROVED`, `NEEDS_FIX`, `DEFERRED`.
 
-Current gate: Phase 8 is conditionally approved at the tooling/docs level, but production readiness is not approved. Phase 9 mobile/TV adapters remain blocked until Phase 8 runtime evidence is accepted or explicitly deferred by a human approver. Phase 1 through Phase 8 conditions carried forward: rerun under Node 20 before QA signoff, review migration/index behavior on QA-sized data, validate QA WebSocket proxy/sticky-session behavior, validate full player-to-backend realtime compatibility in QA, clean up or waive current CMS lint failures, define media/cache report retention, add dedicated realtime/failure metrics before production enablement, run QA canary rollback drill, decide sticky sessions versus Redis/NATS/distributed registry for multi-instance production, execute real 1k/10k/50k load profiles or document a lower certified capacity cap, and run DB-mutating backend integration files isolated unless DB isolation is added.
+Current gate: Phase 8 runtime evidence is blocked by environment. Phase 9 mobile/TV adapters remain blocked until Phase 8 runtime evidence is accepted or explicitly deferred by a human approver. Phase 1 through Phase 8 conditions carried forward: provide QA/staging endpoints and simulator credentials, rerun under Node 20 before QA signoff, review migration/index behavior on QA-sized data, validate QA WebSocket proxy/sticky-session behavior, validate full player-to-backend realtime compatibility in QA, clean up or waive current CMS lint failures, define media/cache report retention, add dedicated realtime/failure metrics before production enablement, run QA canary rollback drill, decide sticky sessions versus Redis/NATS/distributed registry for multi-instance production, execute real 1k/10k/50k load profiles or document a lower certified capacity cap, and run DB-mutating backend integration files isolated unless DB isolation is added.
 
 Latest Phase 1 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`.
 Latest Phase 2 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-2-handoff.md`.
@@ -16,6 +16,7 @@ Latest Phase 5 handoff: `signhex-platform/docs/implementation/realtime-sync-phas
 Latest Phase 6 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-6-handoff.md`.
 Latest Phase 7 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`.
 Latest Phase 8 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`.
+Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
 
 ## Phase 0: Discovery And Docs
 
@@ -527,7 +528,7 @@ Latest Phase 8 handoff: `signhex-platform/docs/implementation/realtime-sync-phas
 - Dependencies: Phase 7 QA topology
 - Implementation notes: Added deterministic load model script and load/chaos plan. The script models heartbeat, command polling, desired-state fetch, snapshot/default media polling, PoP volume, command fanout, emergency fanout, and media egress without touching a live backend. Real fleet execution remains a QA/staging requirement.
 - Test requirements: 1k, 10k, and 50k simulated player profiles. Local model dry-runs passed for 1k current, 10k hybrid healthy, and 50k fallback profiles.
-- Acceptance criteria: capacity numbers and bottlenecks are documented before production rollout. Met at model/tooling level; real runtime bottleneck evidence remains required.
+- Acceptance criteria: capacity numbers and bottlenecks are documented before production rollout. Met at model/tooling level only; real runtime bottleneck evidence is blocked by missing QA/staging target and simulator credentials.
 - Rollback notes: test-only assets
 - Approval required: yes
 
@@ -542,7 +543,7 @@ Latest Phase 8 handoff: `signhex-platform/docs/implementation/realtime-sync-phas
 - Files expected: chaos scripts, reports, remediation register
 - Dependencies: RT-0801
 - Implementation notes: Added chaos scenario matrix covering backend restart, DB unavailable, broker/proxy unavailable, WS gateway restart, reconnect storm, media URL expiry, disk full, emergency fanout, missed WebSocket notifications, and rollback. Actual chaos execution remains blocked until QA/staging infrastructure is available.
-- Test requirements: chaos tests and manual operator validation. Static Phase 8 validation passed; real chaos execution remains required.
+- Test requirements: chaos tests and manual operator validation. Static Phase 8 validation passed; real chaos execution is blocked by missing QA/staging target.
 - Acceptance criteria: critical failure modes recover or have documented mitigations. Met at plan level only; runtime evidence remains required before production.
 - Rollback notes: test-only assets
 - Approval required: yes
@@ -552,14 +553,14 @@ Latest Phase 8 handoff: `signhex-platform/docs/implementation/realtime-sync-phas
 - Task id: RT-0803
 - Phase: Phase 8
 - Title: Production readiness review
-- Status: IMPLEMENTED
+- Status: BLOCKED
 - Owner placeholder: TBD
 - Folder: `signhex-platform/docs/implementation`
 - Files expected: production readiness checklist and approval entry
 - Dependencies: RT-0801, RT-0802
 - Implementation notes: Added production readiness checklist, QA canary evidence template, metrics/alert validation document, and Phase 8 handoff. Current production readiness state is `NOT_PRODUCTION_READY`.
 - Test requirements: signoff on load/chaos/QA evidence; observability asset validation passed, but dedicated realtime/outbox/media-cache/fallback metrics and alerts are still required or must be waived.
-- Acceptance criteria: approval log marks production readiness for canary. Not met; production readiness remains blocked by missing runtime evidence and alert gaps.
+- Acceptance criteria: approval log marks production readiness for canary. Not met; production readiness remains blocked by missing runtime evidence, missing QA/staging target, and alert gaps.
 - Rollback notes: do not enable production without approval
 - Approval required: yes
 

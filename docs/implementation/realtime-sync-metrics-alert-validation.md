@@ -23,6 +23,12 @@ Dedicated realtime sync metrics still needed before production enablement:
 - media/cache report ingest failure count,
 - player ACK/PoP/cache-report local queue depth.
 
+Latest validation attempt:
+
+- `bash signhex-platform/scripts/verify/validate-observability-assets.sh` passed after Docker escalation.
+- This validates existing Prometheus/Alertmanager/dashboard assets only.
+- It does not close the dedicated realtime/outbox/media-cache/fallback metric gaps above.
+
 ## Existing Alert Coverage
 
 | Area | Current coverage | Gap |

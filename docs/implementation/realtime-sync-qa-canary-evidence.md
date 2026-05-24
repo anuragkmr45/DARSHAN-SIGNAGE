@@ -5,15 +5,28 @@ Updated by: Codex
 
 ## Environment
 
-- QA site:
+- QA site: BLOCKED - not provided in local session
 - Release:
 - Backend commit:
 - Player version:
 - CMS version:
-- Node version:
+- Node version: local `v24.12.0`; required Node 20 rerun still open
 - Database migration state:
-- Proxy/LB topology:
-- Sticky-session or distributed registry decision:
+- Proxy/LB topology: BLOCKED - no active QA/proxy target
+- Sticky-session or distributed registry decision: BLOCKED - not decided/provided
+
+## Latest Attempt
+
+Date: 2026-05-24
+
+Result: BLOCKED_BY_ENV
+
+Evidence:
+
+- no QA/staging endpoint environment variables were available,
+- packaged QA server health check failed because `postgres` is not running,
+- packaged QA CMS health check returned HTTP 404,
+- local backend and Socket.IO smoke checks could not connect to `127.0.0.1:3000`.
 
 ## Feature Flags
 
