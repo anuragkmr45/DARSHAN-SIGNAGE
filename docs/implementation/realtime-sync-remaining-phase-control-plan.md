@@ -162,20 +162,21 @@ The sections below are a control plan only. They do not approve implementation.
 - Objective: Validate scale, failure recovery, and production readiness.
 - Non-goals: No new product features.
 - Prerequisites: QA deployment stable.
-- Files likely to change: load scripts, reports, runbooks, task/status docs.
-- DB migrations required: possible index/partitioning migrations discovered by load tests.
-- APIs required: none unless load testing exposes gaps.
+- Status: Implemented at tooling/docs level and conditionally approved on 2026-05-24; production readiness is not approved.
+- Files changed: load model script, Phase 8 asset validator, load/chaos plan, production readiness checklist, QA canary evidence template, metrics/alert validation, Phase 8 handoff, task/status docs.
+- DB migrations required: none in Phase 8 local pass; possible index/partitioning migrations may be required later only if real load tests prove a bottleneck.
+- APIs required: none in Phase 8 local pass unless future load testing exposes gaps.
 - Env vars required: load profile configuration.
-- Backend work: performance fixes only if test evidence requires.
-- Electron work: performance/backoff fixes only if test evidence requires.
-- CMS work: status page performance fixes only if needed.
-- Platform/docs work: load/chaos reports and production checklist.
-- Tests required: 1k/10k/50k simulated players, command fanout, emergency fanout, PoP flood.
-- Load/chaos tests required: this phase owns them.
+- Backend work: none in Phase 8 local pass; performance fixes only if real test evidence requires.
+- Electron work: none in Phase 8 local pass; performance/backoff fixes only if real test evidence requires.
+- CMS work: none in Phase 8 local pass; status page performance fixes only if needed.
+- Platform/docs work: load/chaos reports and production checklist completed at template/tooling level.
+- Tests required: static validator, load model dry-runs, observability asset validation, product builds passed. Real 1k/10k/50k simulated players, command fanout, emergency fanout, and PoP flood remain required in QA/staging.
+- Load/chaos tests required: defined and blocked by missing QA/staging target.
 - QA/prod rollout notes: production canary only after approval.
 - Rollback notes: do not expand production if load/chaos gates fail.
-- Acceptance criteria: documented capacity, alerts, dashboards, rollback evidence.
-- Approval gate: production readiness review.
+- Acceptance criteria: documented capacity, alerts, dashboards, rollback evidence. Met only for local models/templates; runtime evidence remains required.
+- Approval gate: production readiness review remains blocked.
 - Risks: DB write pressure, reconnect storm, object storage/CDN egress, PoP volume.
 - Edge cases: emergency during reconnect storm, publish storm during DB failover, player offline for days.
 - Estimated complexity: high.

@@ -4,8 +4,8 @@ Last updated: 2026-05-24
 Updated by: Codex
 Repo path: `/Users/anuragkumar/Desktop/signhex`
 Current branch: `release-01` in `signhex-server`, `signage-screen`, `signhex-nexus-core`, and `signhex-platform`
-Current phase: Phase 7 - QA/prod deployment hardening
-Overall status: Phase 7 deployment hardening docs/templates/static validation are implemented and conditionally approved; stopped at the Phase 8 gate
+Current phase: Phase 8 - Load, chaos, and production readiness
+Overall status: Phase 8 load/chaos/readiness plans, load model, observability validation, and handoff are implemented and conditionally approved; production readiness is not approved and Phase 9 remains blocked
 
 ## Architecture Decision
 
@@ -26,10 +26,10 @@ Fixed architecture:
 
 Current verification scope:
 
-- Implement Phase 7 only.
-- Add QA/prod deployment hardening controls, env checklists, proxy template, static validation, rollout/rollback runbook, and handoff/status docs.
+- Implement Phase 8 only.
+- Add load modeling, chaos validation plan, production readiness checklist, metrics/alert validation, QA canary evidence template, static validation, and handoff/status docs.
 - Preserve existing polling, heartbeat, command ACK, snapshot, default media, emergency, cache, notification-only WebSocket gateway, and Electron realtime behavior.
-- Do not implement Phase 8 load/chaos work, Phase 9 mobile player adapters, WebSocket semantic changes, Electron realtime/adaptive polling changes, CMS UI changes, backend runtime feature changes, or migrations.
+- Do not implement Phase 9 mobile player adapters, WebSocket semantic changes, Electron realtime/adaptive polling changes, CMS UI changes, backend runtime feature changes, or migrations.
 - Record latest build/test evidence from actual command execution.
 - Update status, approval, task, risk, test, and handoff docs.
 
@@ -41,11 +41,11 @@ Current verification scope:
 - No log/screenshot result visibility.
 - No mobile/native player implementation.
 - No WebSocket protocol changes.
-- No production rollout of realtime before QA proxy/runtime validation, canary rollback drill, Node 20 rerun, migration review, and production readiness approval.
+- No production rollout of realtime before real QA load/chaos/runtime validation, canary rollback drill, Node 20 rerun, migration review, and production readiness approval.
 
 ## Current System Summary
 
-The repo contains Phase 1 through Phase 6 realtime sync runtime implementation changes across `signhex-server`, `signage-screen`, and `signhex-nexus-core`, plus Phase 7 deployment hardening changes in `signhex-platform`. The top-level `/Users/anuragkumar/Desktop/signhex` directory is not a git repo; the product folders are separate working trees on branch `release-01`.
+The repo contains Phase 1 through Phase 6 realtime sync runtime implementation changes across `signhex-server`, `signage-screen`, and `signhex-nexus-core`, plus Phase 7 and Phase 8 platform deployment/readiness changes in `signhex-platform`. The top-level `/Users/anuragkumar/Desktop/signhex` directory is not a git repo; the product folders are separate working trees on branch `release-01`.
 
 ## Target Architecture
 
@@ -75,8 +75,8 @@ CMS/API transaction
 | 5 | CMS command/delivery status UI | APPROVED_WITH_CONDITIONS | Conditions accepted by user for Phase 6 start; lint/visual review conditions carried forward |
 | 6 | Failure observability and media/cache status | APPROVED_WITH_CONDITIONS | Media/cache report schema/API/player reporter/CMS visibility implemented and tested; dashboards/log-screenshot result visibility deferred |
 | 7 | QA/prod deployment hardening | APPROVED_WITH_CONDITIONS | Deployment templates, proxy guidance, static validator, and rollback/canary docs added; actual QA runtime validation remains required |
-| 8 | Load, chaos, and production readiness | READY_AT_GATE | May start only after accepting Phase 7 conditions; must not implement mobile adapters |
-| 9 | Mobile/TV player contract adapters | BLOCKED | Requires stable Electron/backend realtime contract |
+| 8 | Load, chaos, and production readiness | APPROVED_WITH_CONDITIONS | Local load model/static/observability validation added and passed; real QA load/chaos execution remains required |
+| 9 | Mobile/TV player contract adapters | BLOCKED | Requires accepted Phase 8 runtime evidence or explicit human deferral |
 
 Phase control details are maintained in `signhex-platform/docs/implementation/realtime-sync-remaining-phase-control-plan.md`.
 
@@ -645,6 +645,88 @@ Phase 7 may proceed to Phase 8 planning/implementation only after accepting thes
 - Define `media_cache_reports` retention/partitioning and dedicated metrics/alerts.
 - Decide sticky-session-only versus Redis/NATS/distributed registry for multi-instance production.
 
+## Phase 8 Load, Chaos, And Production Readiness Status
+
+### Phase 8 Summary
+
+Phase 8 added deterministic load modeling, load/chaos execution plans, production readiness checklist, QA canary evidence template, metrics/alert validation documentation, static validation, and a Phase 8 handoff. It did not implement runtime code, migrations, WebSocket protocol changes, Electron changes, CMS changes, or mobile/TV adapters.
+
+Production readiness is not approved. Real 1k/10k/50k load execution, QA proxy chaos, canary rollback evidence, and dedicated realtime/media-cache alert implementation remain blocked by the absence of a QA/staging deployment target in this local session.
+
+### Phase 8 Files Changed
+
+- `signhex-platform/scripts/load/realtime-sync-load-model.mjs`
+- `signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`
+- `signhex-platform/docs/implementation/realtime-sync-load-and-chaos-plan.md`
+- `signhex-platform/docs/implementation/realtime-sync-production-readiness-checklist.md`
+- `signhex-platform/docs/implementation/realtime-sync-qa-canary-evidence.md`
+- `signhex-platform/docs/implementation/realtime-sync-metrics-alert-validation.md`
+- `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`
+- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
+- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
+- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
+- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
+- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
+- `signhex-platform/docs/implementation/realtime-sync-implementation-runbook.md`
+- `signhex-platform/docs/implementation/realtime-sync-decision-log.md`
+- `signhex-platform/docs/implementation/realtime-sync-remaining-phase-control-plan.md`
+- `signhex-platform/docs/architecture/scaling-and-payload-limits.md`
+- `signhex-platform/docs/architecture/failure-modes.md`
+
+### Phase 8 Verification Matrix
+
+| Item | Expected | Verified? | Status | Evidence | Notes |
+|---|---|---:|---|---|---|
+| Load model | Deterministic model for current, hybrid healthy, and fallback profiles | yes | VERIFIED_COMPLETE | `scripts/load/realtime-sync-load-model.mjs`; dry-run commands passed | Model only; not live fleet load. |
+| Load/chaos plan | 1k/10k/50k load and chaos scenarios defined | yes | VERIFIED_COMPLETE | `realtime-sync-load-and-chaos-plan.md` | Execution blocked without QA target. |
+| Production checklist | Production readiness gates explicit | yes | VERIFIED_COMPLETE | `realtime-sync-production-readiness-checklist.md` | State is `NOT_PRODUCTION_READY`. |
+| QA canary evidence | Canary and rollback evidence template | yes | VERIFIED_COMPLETE | `realtime-sync-qa-canary-evidence.md` | Actual QA evidence remains open. |
+| Metrics/alert validation | Current coverage and gaps documented | yes | VERIFIED_COMPLETE | `realtime-sync-metrics-alert-validation.md`; observability validator passed | Dedicated realtime/outbox/media-cache alerts still missing. |
+| Architecture guardrails | No snapshots/media over WS; REST remains authoritative; polling fallback remains | yes | VERIFIED_COMPLETE | Phase 8 changed platform docs/scripts only | No runtime feature code changed in Phase 8. |
+
+### Phase 8 Test Evidence
+
+| Test/Command | Environment | Result | Evidence | Related Risk |
+|---|---|---|---|---|
+| `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh` | Local shell | Passed | Output: `[phase8] realtime sync load/chaos/readiness assets validated from /Users/anuragkumar/Desktop/signhex` | Static validation only. |
+| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `240`; requests in 60s: `14400` | Model only. |
+| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `566.67`; requests in 60s: `34000` | Includes desired-state safety polling. |
+| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `12000`; requests in 60s: `720000` | Shows fallback capacity requirement. |
+| `bash signhex-platform/scripts/verify/validate-observability-assets.sh` | Docker after escalation | Passed | Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed | Existing assets only; dedicated realtime alerts still needed. |
+| `cd signhex-server && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | `tsc && tsc-alias` exited 0 | Node 20 rerun still required before QA signoff. |
+| `cd signage-screen && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | main/renderer builds and asset copy exited 0 | Node 20 rerun still required before QA signoff. |
+| `cd signhex-nexus-core && npm run build` | Local Node `v24.12.0` | Passed | Vite build exited 0 with existing chunk-size warnings | Node 20 rerun still required before QA signoff. |
+| Real 1k/10k/50k load execution | QA/staging infrastructure | Blocked | No QA deployment target or simulator credential set in local session | Required before production readiness. |
+| Chaos execution | QA/staging infrastructure | Blocked | No QA deployment target in local session | Required before production readiness. |
+
+### Phase 8 Approval State
+
+APPROVED_WITH_CONDITIONS
+
+Phase 8 tooling/docs are implemented and locally validated. Production readiness is not approved. Phase 9 mobile/TV adapter implementation remains blocked until Phase 8 runtime evidence is executed and accepted, or a human approver explicitly defers that gate.
+
+### Phase 8 Known Risks
+
+- Real load/chaos results are not available from this local session.
+- Dedicated metrics/alerts for outbox lag, dispatch failures, media/cache failure rate, fallback polling, and command ACK latency remain missing.
+- Node 20 rerun remains required.
+- CMS lint remains failed in pre-existing files unless fixed or waived.
+- Multi-instance realtime still needs sticky-session-only versus Redis/NATS/distributed routing decision.
+
+### Phase 8 Rollback Notes
+
+- No runtime changes were made in Phase 8.
+- For deployment rollback, disable outbox dispatcher, backend realtime, player realtime, and optional media/cache reporting flags.
+- Keep REST, polling, heartbeat, command claim/ACK, snapshot/default/emergency fetch, and media cache active.
+
+### Phase 8 Follow-up Required
+
+- Execute 1k/10k/50k load profiles in QA/staging or document a lower certified capacity cap.
+- Execute chaos scenarios in `realtime-sync-load-and-chaos-plan.md`.
+- Add or explicitly waive missing dedicated realtime/media-cache/fallback metrics and alerts.
+- Complete QA canary evidence and rollback drill.
+- Decide whether Phase 9 may proceed before production-proven runtime evidence.
+
 ## Completed
 
 - Phase 0 docs baseline.
@@ -666,23 +748,24 @@ Phase 7 may proceed to Phase 8 planning/implementation only after accepting thes
 - Phase 5 backend delivery status API and CMS Delivery tab implemented and tested with build/API coverage.
 - Phase 6 media/cache report schema, backend APIs, Electron reporter/cache integration, and CMS Delivery tab failure visibility implemented and tested with focused coverage.
 - Phase 7 QA/prod deployment hardening docs/templates/static validation assets implemented.
+- Phase 8 load model, load/chaos plan, production readiness checklist, QA canary evidence template, metrics/alert validation, static validation, and handoff implemented.
 
 ## In Progress
 
-- Phase 7 is conditionally approved; implementation has stopped at the Phase 8 gate.
+- Phase 8 is conditionally approved at the tooling/docs level; implementation has stopped before the Phase 9 gate because production readiness evidence is incomplete.
 
 ## Blocked
 
 - QA/prod rollout is blocked until Node 20 rerun, QA-sized migration/index review, QA WebSocket proxy/sticky-session review, and dedicated realtime metrics are complete.
-- Full Phase 7 QA approval is blocked until actual QA proxy/runtime smoke, canary rollback drill, media/cache report retention, CMS visual/E2E smoke, and metrics/alerting scope are resolved.
+- Full Phase 8 production readiness approval is blocked until real QA load/chaos execution, QA canary rollback drill, Node 20 rerun, migration review, CMS lint fix/waiver, and dedicated realtime/media-cache metrics/alerts are complete.
 
 ## Next
 
 Immediate next action:
 
-1. Accept or reject Phase 7 conditions.
-2. If accepted, start Phase 8 load, chaos, and production readiness validation.
-3. Before QA signoff, rerun Phase 1 through Phase 7 build/tests under Node 20, review migrations on QA-like data, validate WebSocket proxy/sticky-session behavior, run a QA canary rollback drill, and define media/cache report retention.
+1. Accept or reject Phase 8 conditions.
+2. If accepted, decide whether to execute real QA load/chaos next or explicitly defer runtime evidence before Phase 9.
+3. Before production signoff, rerun Phase 1 through Phase 8 build/tests under Node 20, execute QA load/chaos, validate WebSocket proxy/sticky-session behavior, run a QA canary rollback drill, and define media/cache report retention.
 
 ## Risks
 
@@ -782,11 +865,11 @@ Later APIs:
 
 ## Backend Status
 
-Phase 6 backend media/cache report storage and read APIs are implemented and tested. Approval is conditional pending Node 20 rerun, QA-sized migration/index review, report retention/partitioning decision, QA WebSocket proxy/sticky-session review, dedicated metrics, and isolated DB-mutating test execution.
+Phase 6 backend media/cache report storage and read APIs are implemented and tested. Phase 8 made no backend runtime changes. Approval is conditional pending Node 20 rerun, QA-sized migration/index review, report retention/partitioning decision, QA WebSocket proxy/sticky-session review, dedicated metrics, and isolated DB-mutating test execution.
 
 ## Electron Status
 
-Phase 6 Electron media/cache reporting is implemented in the cache/default/snapshot caching paths with request-queue fallback. Phase 4 realtime remains disabled by default until QA smoke; polling/heartbeat fallback is unchanged.
+Phase 6 Electron media/cache reporting is implemented in the cache/default/snapshot caching paths with request-queue fallback. Phase 4 realtime remains disabled by default until QA smoke; polling/heartbeat fallback is unchanged. Phase 8 made no Electron runtime changes.
 
 ## CMS Status
 
@@ -816,14 +899,21 @@ Updated:
 - `docs/environments/production/realtime-sync.env.example`
 - `deploy/shared/realtime-sync-nginx.socketio.conf.template`
 - `scripts/verify/validate-realtime-sync-phase7-assets.sh`
+- `realtime-sync-phase-8-handoff.md`
+- `realtime-sync-load-and-chaos-plan.md`
+- `realtime-sync-production-readiness-checklist.md`
+- `realtime-sync-qa-canary-evidence.md`
+- `realtime-sync-metrics-alert-validation.md`
+- `scripts/load/realtime-sync-load-model.mjs`
+- `scripts/verify/validate-realtime-sync-phase8-assets.sh`
 
 ## QA Status
 
-QA rollout has not started. Phase 7 adds QA deployment checklists and rollback/canary runbook coverage. Phases 1 through 7 require Node 20 rerun, QA-sized migration/index review, QA WebSocket proxy/sticky-session review, backend/player realtime integration smoke, CMS Delivery tab review, media/cache report retention decision, and dedicated metrics before QA signoff.
+QA rollout has not started. Phase 7 adds QA deployment checklists and rollback/canary runbook coverage. Phase 8 adds load/chaos/readiness plans and canary evidence templates. Phases 1 through 8 require Node 20 rerun, QA-sized migration/index review, QA WebSocket proxy/sticky-session review, backend/player realtime integration smoke, CMS Delivery tab review, media/cache report retention decision, dedicated metrics, load execution, and chaos execution before QA signoff.
 
 ## Production Readiness
 
-Not production-ready. Production canary requires Phases 1-8 approval.
+Not production-ready. Phase 8 local tooling/docs validation passed, but production canary requires real QA load/chaos evidence, proxy/runtime smoke, canary rollback evidence, Node 20 rerun, migration review, and dedicated metrics/alerts.
 
 ## Test Status
 
@@ -843,6 +933,10 @@ Current test state:
 - Phase 6 player media-cache reporter/cache/default-media tests passed
 - Phase 7 static deployment asset validation passed
 - Phase 7 server, player, and CMS builds passed under local Node `v24.12.0`
+- Phase 8 static load/chaos/readiness asset validation passed
+- Phase 8 load model dry-runs passed for 1k current, 10k hybrid healthy, and 50k fallback profiles
+- Observability asset validation passed after Docker escalation and image pulls
+- Phase 8 server, player, and CMS builds passed under local Node `v24.12.0`
 - CMS lint currently fails due pre-existing files outside Phase 5/6 changed paths
 - combined backend regression command has known DB cross-test interference and should not be used as approval evidence until isolation is added
 

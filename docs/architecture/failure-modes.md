@@ -16,6 +16,10 @@ Phase 6 adds durable media/cache failure reports through REST and CMS per-screen
 
 Phase 7 adds deployment hardening docs/templates only: QA/prod env examples, an explicit REST plus `/socket.io/` proxy snippet, a canary/rollback runbook, static asset validation, and handoff/status updates. Runtime QA proxy smoke, canary rollback drill, Node 20 rerun, migration review, dedicated metrics/alerts, and load/chaos validation remain required before production enablement.
 
+## Phase 8 Verification Addendum
+
+Phase 8 adds load modeling, chaos planning, production readiness gates, QA canary evidence templates, metrics/alert validation, static validation, and handoff/status updates. Static validation, load model dry-runs, observability asset validation, and compile gates passed locally. Real 1k/10k/50k load tests, reconnect storm tests, emergency fanout tests, and QA chaos execution remain blocked until a QA/staging target and simulator credentials are available. Production readiness is not approved.
+
 ## Failure Matrix
 
 | Failure mode | Current behavior | Target behavior | Risk | Detection | Mitigation | Test case |

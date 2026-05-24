@@ -162,3 +162,11 @@ Updated by: Codex
 - Consequences: Phase 8 can focus on evidence-producing load, chaos, reconnect storm, emergency fanout, and production readiness validation instead of inventing deployment controls. Production enablement remains blocked until QA runtime smoke, canary rollback drill, Node 20 rerun, migration review, metrics/alerts, and CMS lint waiver/fix are complete.
 - Alternatives considered: start Phase 8 load testing without deployment hardening; enable production realtime with code defaults; implement Redis/NATS or mobile adapters in Phase 7.
 - Follow-up tasks: RT-0701, RT-0702, RT-0703, RT-0704, RT-0801, RT-0802, RT-0803.
+
+## ADR-0021 - Phase 8 Blocks Production And Mobile Until Runtime Evidence Exists
+
+- Context: Phase 8 can create local load models, chaos plans, readiness checklists, and observability validation, but the local Codex session does not have a QA/staging deployment target, player credential pool, or production-like proxy/broker topology for real 1k/10k/50k execution.
+- Decision: Phase 8 tooling/docs may be conditionally approved after static validation, load model dry-runs, observability asset validation, and compile gates. Production readiness remains `NOT_PRODUCTION_READY`, and Phase 9 mobile/TV adapters remain blocked until real QA load/chaos/canary evidence is accepted or explicitly deferred by a human approver.
+- Consequences: The project avoids treating modeled capacity as production evidence. The architecture remains stable and rollback-safe while QA/staging runtime tests are prepared.
+- Alternatives considered: mark production ready from formulas only; start Phase 9 mobile adapters before fleet/runtime evidence; implement runtime metric or load-test fixes without measured bottlenecks.
+- Follow-up tasks: RT-0801, RT-0802, RT-0803, RT-0804, RT-0901.

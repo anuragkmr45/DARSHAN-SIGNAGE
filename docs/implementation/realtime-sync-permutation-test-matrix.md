@@ -7,7 +7,7 @@ Status values: `NOT_STARTED`, `BLOCKED`, `READY`, `IN_PROGRESS`, `PASSED`, `FAIL
 
 This matrix covers meaningful combinations of connection, command, playback, scale, and platform states. It is not a claim of exhaustive mathematical coverage.
 
-Current gate: Phase 4 is conditionally approved. Unit-level Phase 4 cases and raw backend gateway smoke coverage are marked `PASSED`; e2e/backend-proxy integration cases remain `BLOCKED` until QA smoke.
+Current gate: Phase 8 tooling/docs are conditionally approved. Load model dry-runs and observability asset validation are marked `PASSED`; real e2e/load/chaos/backend-proxy integration cases remain `BLOCKED` until QA/staging execution.
 
 ## Phase 1 Gate Tests
 
@@ -76,6 +76,8 @@ Current gate: Phase 4 is conditionally approved. Unit-level Phase 4 cases and ra
 | PM-095 | Emergency fanout | Trigger emergency to large fleet | Critical command priority and notification dispatch meet SLO | emergency latency exceeds SLO | load/e2e | Phase 8 | BLOCKED |
 | PM-096 | Publish storm | Multiple publishes to overlapping groups | Dedup/idempotency keeps command volume bounded | duplicate command flood | load | Phase 8 | BLOCKED |
 | PM-097 | PoP flood | Simulate high-frequency playback completions | Batch ingest and partitioning keep DB healthy | write queue backlog unbounded | load | Phase 8 | BLOCKED |
+| PM-098 | Load model dry-runs | Run current 1k, hybrid healthy 10k, and fallback 50k model commands | Model outputs RPS, request volume, daily writes, fanout, and media egress without violating architecture guardrails | model script fails or reports media over WebSocket | validation | Phase 8 | PASSED |
+| PM-099 | Observability asset validation | Run observability validator with Docker access | Prometheus config/rules, Alertmanager config, dashboards, compose config, and helper smoke checks pass | invalid alert/dashboard config | validation | Phase 8 | PASSED |
 
 ## Platform State Permutations
 

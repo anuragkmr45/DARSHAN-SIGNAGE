@@ -585,10 +585,97 @@ Latest handoff: `signhex-platform/docs/implementation/realtime-sync-phase-7-hand
 
 ## Phase 8: Load, Chaos, and Production Readiness
 
-Status: Ready at gate after Phase 7 condition acceptance
-Approval state: Not reviewed
+Status: Implemented at tooling/docs level, conditionally approved
+Reviewer: Codex implementation and verification pass
+Date: 2026-05-24
+Commit/Branch: `release-01`, uncommitted working tree
+Approval state: `APPROVED_WITH_CONDITIONS`
+Production readiness state: `NOT_PRODUCTION_READY`
+
+### Implemented Scope
+
+- Added deterministic load model script for current, fallback, and hybrid-healthy profiles.
+- Added load and chaos validation plan for 1,000, 10,000, and 50,000 player profiles.
+- Added production readiness checklist.
+- Added QA canary evidence template.
+- Added metrics/alert validation document with current coverage and gaps.
+- Added static Phase 8 asset validation script.
+- Added Phase 8 handoff and status/tracking updates.
+
+### Out of Scope
+
+- Phase 9 mobile/TV adapters.
+- WebSocket protocol changes.
+- Electron realtime/adaptive polling changes.
+- CMS UI changes.
+- Backend runtime feature changes.
+- DB migrations.
+- Real production canary.
+
+### Evidence
+
+- `signhex-platform/scripts/load/realtime-sync-load-model.mjs`
+- `signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`
+- `signhex-platform/docs/implementation/realtime-sync-load-and-chaos-plan.md`
+- `signhex-platform/docs/implementation/realtime-sync-production-readiness-checklist.md`
+- `signhex-platform/docs/implementation/realtime-sync-qa-canary-evidence.md`
+- `signhex-platform/docs/implementation/realtime-sync-metrics-alert-validation.md`
+- `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`
+
+### Tests Passed
+
+- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`
+- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json`
+- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json`
+- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json`
+- `bash signhex-platform/scripts/verify/validate-observability-assets.sh` after Docker escalation and image pulls
+- `cd signhex-server && npm run build`
+- `cd signage-screen && npm run build`
+- `cd signhex-nexus-core && npm run build`
+
+### Tests Blocked
+
+- Real 1k/10k/50k player load execution is blocked by unavailable QA/staging target and simulator credential set.
+- Chaos execution is blocked by unavailable QA/staging target.
+- QA canary rollback drill is blocked by unavailable QA deployment target in this local session.
+- Node `>=20 <21` rerun remains required before QA signoff; local environment is Node `v24.12.0`.
+
+### Tests Failed
+
+- `cd signhex-nexus-core && npm run lint` remains failed from Phase 7 with existing issues outside Phase 8 changed files unless fixed or waived.
+
+### Risks
+
+- Production readiness is not approved because real load/chaos evidence is missing.
+- Dedicated realtime/outbox/media-cache/fallback metrics and alerts remain missing or require explicit waiver.
+- Multi-instance production realtime still requires sticky sessions or distributed registry/fanout decision.
+- `media_cache_reports` retention/partitioning remains undefined.
+- CMS lint failures remain unresolved or unwaived.
+
+### Conditions Before QA/Prod Rollout
+
+- Execute real 1k/10k/50k load profiles or document a lower certified capacity cap.
+- Execute chaos scenarios from `realtime-sync-load-and-chaos-plan.md`.
+- Complete QA canary rollback evidence.
+- Rerun backend, Electron, and CMS builds/tests under Node `>=20 <21`.
+- Review migrations `0030`, `0031`, and `0032` on QA-sized data.
+- Validate QA `/api/v1/` and `/socket.io/` proxy behavior, idle timeouts, and sticky sessions.
+- Run packaged backend/player realtime smoke through QA proxy.
+- Resolve or explicitly waive CMS lint failures.
+- Add or explicitly waive dedicated realtime/outbox/media-cache/fallback metrics and alerts.
+- Define retention/partitioning for `media_cache_reports`.
+
+### Approved For Next Phase?
+
+no
+
+### Approval Notes
+
+Phase 8 tooling/docs are conditionally approved, but production readiness is not approved. Phase 9 mobile/TV adapters must not start unless these Phase 8 runtime evidence conditions are accepted for deferral by a human approver.
+
+Latest handoff: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`.
 
 ## Phase 9: Mobile/TV Player Contract Adapters
 
-Status: Blocked by stable Electron/backend contract
+Status: Blocked by missing accepted Phase 8 runtime evidence
 Approval state: Not reviewed

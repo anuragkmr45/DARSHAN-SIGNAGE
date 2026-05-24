@@ -106,7 +106,7 @@ Rollback normally means:
 - No additional Phase 6 media/cache/log/screenshot observability work beyond approval-condition fixes unless Phase 6 scope is reopened.
 - No Phase 7 QA/prod hardening until Phase 6 conditions are accepted and the status docs say Phase 7 is ready at the gate.
 - No Phase 8 load/chaos work until Phase 7 conditions are accepted and the status docs say Phase 8 is ready at the gate.
-- No mobile push adapters until Electron/backend realtime is production-proven.
+- No Phase 9 mobile push or mobile/TV adapters until Phase 8 runtime evidence is accepted or explicitly deferred by a human approver.
 
 Current handoffs:
 
@@ -117,6 +117,7 @@ Current handoffs:
 - Phase 5: `signhex-platform/docs/implementation/realtime-sync-phase-5-handoff.md`
 - Phase 6: `signhex-platform/docs/implementation/realtime-sync-phase-6-handoff.md`
 - Phase 7: `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`
+- Phase 8: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`
 
 ## Phase 7 Deployment Hardening Rules
 
@@ -145,6 +146,39 @@ bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh
 ```
 
 Record the exact output in the project status and approval log. If real QA proxy/canary tests are unavailable, mark them blocked by environment and carry them as Phase 8/production-readiness prerequisites.
+
+## Phase 8 Load, Chaos, And Readiness Rules
+
+Phase 8 may add or update:
+
+- deterministic load models,
+- load and chaos plans,
+- production readiness checklists,
+- QA canary evidence templates,
+- metrics/alert validation notes,
+- static validation scripts,
+- handoff/status docs.
+
+Phase 8 must not add:
+
+- mobile/TV adapters,
+- WebSocket protocol changes,
+- Electron realtime behavior changes,
+- CMS UI changes,
+- backend source-of-truth changes,
+- DB migrations unless a measured load test proves an index/partitioning fix is required and the phase is explicitly reopened.
+
+Use:
+
+```bash
+bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh
+node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json
+node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json
+node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json
+bash signhex-platform/scripts/verify/validate-observability-assets.sh
+```
+
+If real load/chaos execution is unavailable, mark production readiness as not approved and block Phase 9 unless a human explicitly defers the runtime evidence gate.
 
 ## Phase 2 Readiness Plan
 

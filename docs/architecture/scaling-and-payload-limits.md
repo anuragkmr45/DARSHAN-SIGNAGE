@@ -13,6 +13,16 @@ Current default player loops:
 - snapshot poll: 300 seconds
 - default media poll: 300 seconds
 
+Phase 8 adds a deterministic local model for these formulas:
+
+```bash
+node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json
+node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json
+node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json
+```
+
+The script is a capacity model, not a substitute for real QA/staging load execution.
+
 Formula:
 
 ```text

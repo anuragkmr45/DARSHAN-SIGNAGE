@@ -295,6 +295,35 @@ Phase 7 tests still required before full QA approval:
 - Migration review for `0030`, `0031`, and `0032` on QA-sized data.
 - `media_cache_reports` retention/partitioning verification and metrics/alert review.
 
+## Phase 8 Test Evidence
+
+Phase 8 added validation/readiness tooling and documents. It did not add runtime source code, migrations, WebSocket protocol changes, Electron changes, CMS changes, or mobile adapters.
+
+Latest Phase 8 focused evidence from 2026-05-24:
+
+- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`: passed, output `[phase8] realtime sync load/chaos/readiness assets validated from /Users/anuragkumar/Desktop/signhex`.
+- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json`: passed; modeled total RPS `240`.
+- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json`: passed; modeled total RPS `566.67`.
+- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json`: passed; modeled total RPS `12000`.
+- `bash signhex-platform/scripts/verify/validate-observability-assets.sh`: passed after Docker escalation and image pulls; Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed.
+- `cd signhex-server && npm run build`: passed under local Node `v24.12.0`.
+- `cd signage-screen && npm run build`: passed under local Node `v24.12.0`.
+- `cd signhex-nexus-core && npm run build`: passed under local Node `v24.12.0` with existing chunk-size warnings.
+
+Phase 8 tests still required before production readiness:
+
+- Real 1k, 10k, and 50k player load execution in QA/staging, or documented lower capacity cap.
+- WebSocket reconnect storm test.
+- Emergency start/clear fanout under load.
+- Fallback polling load with WebSocket disabled.
+- Backend restart during publish.
+- DB unavailable recovery.
+- Object storage/CDN slow or unavailable scenario.
+- Player offline during publish and reconnect after command expiry.
+- Media URL expiry and disk-full/cache-failure scenarios.
+- QA canary rollback drill.
+- Dedicated realtime/outbox/media-cache/fallback metrics and alert rule tests.
+
 ## Production Readiness Checklist
 
 - feature flags documented

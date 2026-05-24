@@ -25,6 +25,8 @@ Updated by: Codex
 | CMS media/cache failure card lacks visual/E2E verification | Medium | Open | CMS build passed, but no browser smoke was run for the new card | Run screen details Delivery tab visual/E2E smoke with seeded failure rows. |
 | Phase 7 static hardening is not runtime QA validation | High | Open | Phase 7 adds env/proxy/runbook/static validation assets only | Run actual QA proxy smoke, canary rollback drill, and backend/player realtime smoke before production enablement. |
 | Sticky-session versus distributed registry decision still open | High | Open | Phase 3 connection registry is process-local; Phase 7 docs require a decision | Choose sticky sessions for single-instance/canary or implement Redis/NATS/distributed routing before multi-instance production. |
+| Phase 8 real load/chaos execution missing | High | Open | Phase 8 added load model and chaos plan, but no QA/staging target was available for execution | Execute 1k/10k/50k load profiles and chaos suite before production readiness. |
+| Production readiness not approved | Critical | Open | `realtime-sync-production-readiness-checklist.md` state is `NOT_PRODUCTION_READY` | Do not start production canary or Phase 9 mobile adapters without accepted Phase 8 runtime evidence or explicit human deferral. |
 
 Latest Phase 1 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`.
 Latest Phase 2 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-2-handoff.md`.
@@ -33,6 +35,7 @@ Latest Phase 4 handoff: `signhex-platform/docs/implementation/realtime-sync-phas
 Latest Phase 5 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-5-handoff.md`.
 Latest Phase 6 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-6-handoff.md`.
 Latest Phase 7 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`.
+Latest Phase 8 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`.
 
 ## Architecture Risks For Later Phases
 
@@ -57,3 +60,4 @@ Latest Phase 7 handoff: `signhex-platform/docs/implementation/realtime-sync-phas
 | Phase 4 not independently approved | Closed by independent verification pass on 2026-05-24; player build/tests, backend gateway test, and raw gateway smoke passed. |
 | Media/cache failures invisible to CMS | Closed by Phase 6 `media_cache_reports`, device/CMS REST APIs, Electron reporter, and CMS Delivery tab failure card; focused tests passed. |
 | QA/prod realtime flag and proxy guidance missing | Closed at documentation-control level by Phase 7 env examples, Nginx snippet, hardening runbook, static validator, and handoff; runtime QA smoke remains open. |
+| Load/chaos/readiness plan missing | Closed at tooling/docs level by Phase 8 load model, load/chaos plan, production readiness checklist, QA canary evidence template, metrics/alert validation, static validator, and handoff; real runtime evidence remains open. |
