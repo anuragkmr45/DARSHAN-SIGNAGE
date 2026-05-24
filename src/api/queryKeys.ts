@@ -70,6 +70,8 @@ export const queryKeys = {
       Boolean(filters?.includeSummary),
     ] as const,
   screenSnapshot: (screenId?: string) => ["screens", "snapshot", screenId] as const,
+  screenDeliveryStatus: (screenId?: string) => ["screens", "delivery-status", screenId] as const,
+  screenMediaCacheReports: (screenId?: string) => ["screens", "media-cache-reports", screenId] as const,
   screenGroupSnapshot: (groupId?: string) => ["screen-groups", "snapshot", groupId] as const,
   media: ["media"] as const,
   mediaById: (mediaId?: string) => ["media", "by-id", mediaId] as const,

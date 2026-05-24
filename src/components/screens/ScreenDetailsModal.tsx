@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Battery,
+  CheckCircle2,
   Clock,
   Cpu,
   Edit2,
@@ -15,8 +16,10 @@ import {
   RadioTower,
   RefreshCcw,
   Save,
+  Send,
   ShieldAlert,
   ShieldCheck,
+  XCircle,
   X,
 } from "lucide-react";
 import {
@@ -104,6 +107,46 @@ function TelemetryField({
   );
 }
 
+function getDeliveryBadgeClass(status?: string | null) {
+  const normalized = status?.toUpperCase();
+  if (normalized === "ACKED_SUCCESS" || normalized === "COMPLETED" || normalized === "DISPATCHED") {
+    return "border-emerald-500 text-emerald-700";
+  }
+  if (["ACKED_FAILURE", "FAILED", "DEAD_LETTER", "EXPIRED", "CANCELLED"].includes(normalized || "")) {
+    return "border-red-500 text-red-700";
+  }
+  if (normalized === "LEASED" || normalized === "SENT" || normalized === "PROCESSING" || normalized === "DISPATCHING") {
+    return "border-blue-500 text-blue-700";
+  }
+  return "border-amber-500 text-amber-700";
+}
+
+function getFailureSeverityBadgeClass(severity?: string | null) {
+  const normalized = severity?.toUpperCase();
+  if (normalized === "CRITICAL" || normalized === "ERROR") {
+    return "border-red-500 text-red-700";
+  }
+  if (normalized === "WARN") {
+    return "border-amber-500 text-amber-700";
+  }
+  return "border-blue-500 text-blue-700";
+}
+
+function DeliveryMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: number | string;
+}) {
+  return (
+    <div className="rounded border p-3">
+      <Label className="text-muted-foreground">{label}</Label>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
 export function ScreenDetailsModal({
   screenId,
   screenName,
@@ -150,6 +193,21 @@ export function ScreenDetailsModal({
     queryKey: queryKeys.screenSnapshot(screenId),
     queryFn: () => screensApi.getSnapshot(screenId, true),
     enabled: open,
+  });
+
+  const deliveryStatusUiEnabled = import.meta.env.VITE_REALTIME_DELIVERY_STATUS_UI !== "false";
+  const mediaCacheStatusUiEnabled = import.meta.env.VITE_MEDIA_CACHE_STATUS_UI !== "false";
+  const deliveryStatusQuery = useQuery({
+    queryKey: queryKeys.screenDeliveryStatus(screenId),
+    queryFn: () => screensApi.getDeliveryStatus(screenId, 10),
+    enabled: open && deliveryStatusUiEnabled,
+    refetchInterval: open && deliveryStatusUiEnabled ? 15_000 : false,
+  });
+  const mediaCacheReportsQuery = useQuery({
+    queryKey: queryKeys.screenMediaCacheReports(screenId),
+    queryFn: () => screensApi.getMediaCacheReports(screenId, 10),
+    enabled: open && deliveryStatusUiEnabled && mediaCacheStatusUiEnabled,
+    refetchInterval: open && deliveryStatusUiEnabled && mediaCacheStatusUiEnabled ? 30_000 : false,
   });
 
   useEffect(() => {
@@ -217,6 +275,8 @@ export function ScreenDetailsModal({
   const nowPlayingError = nowPlayingQuery.error instanceof ApiError ? nowPlayingQuery.error : null;
   const availability = availabilityQuery.data;
   const snapshot = snapshotQuery.data;
+  const deliveryStatus = deliveryStatusQuery.data;
+  const mediaCacheReports = mediaCacheReportsQuery.data?.reports ?? [];
   const snapshotRefetch = snapshotQuery.refetch;
   const latestPreview = snapshot?.preview ?? nowPlaying?.preview ?? null;
   const activeItemSummaries = nowPlaying?.active_item_summaries ?? [];
@@ -415,6 +475,11 @@ export function ScreenDetailsModal({
               <TabsTrigger value="observability" className="shrink-0">
                 Observability
               </TabsTrigger>
+              {deliveryStatusUiEnabled ? (
+                <TabsTrigger value="delivery" className="shrink-0">
+                  Delivery
+                </TabsTrigger>
+              ) : null}
               <TabsTrigger value="playing" className="shrink-0">
                 Now Playing
               </TabsTrigger>
@@ -749,6 +814,252 @@ export function ScreenDetailsModal({
             <TabsContent value="observability">
               <ScreenHealthDashboard screenId={screenId} screenName={screenName || screen?.name || "Screen"} />
             </TabsContent>
+
+            {deliveryStatusUiEnabled ? (
+              <TabsContent value="delivery" className="space-y-4">
+                {deliveryStatusQuery.isLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-24 w-full" />
+                    <Skeleton className="h-48 w-full" />
+                  </div>
+                ) : deliveryStatusQuery.error ? (
+                  <Card className="border-amber-200 bg-amber-50 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-2 text-amber-800">
+                        <AlertTriangle className="h-4 w-4" />
+                        <p className="text-sm">Delivery status is unavailable.</p>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => deliveryStatusQuery.refetch()}>
+                        <RefreshCcw className="h-3 w-3 mr-1" />
+                        Retry
+                      </Button>
+                    </div>
+                  </Card>
+                ) : deliveryStatus ? (
+                  <>
+                    <Card className="p-4 space-y-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Send className="h-4 w-4 text-primary" />
+                            <h3 className="font-semibold">Command delivery</h3>
+                          </div>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Desired state v{deliveryStatus.desired_state?.state_version ?? "N/A"} · Command v{deliveryStatus.desired_state?.command_version ?? "N/A"}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className={getDeliveryBadgeClass(deliveryStatus.commands.recent[0]?.lifecycle_status)}>
+                          {deliveryStatus.commands.recent[0]?.lifecycle_status || "NO_COMMANDS"}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                        <DeliveryMetric label="Pending" value={deliveryStatus.commands.pending} />
+                        <DeliveryMetric label="Leased" value={deliveryStatus.commands.leased} />
+                        <DeliveryMetric label="Succeeded" value={deliveryStatus.commands.succeeded} />
+                        <DeliveryMetric label="Failed" value={deliveryStatus.commands.failed + deliveryStatus.commands.dead_letter + deliveryStatus.commands.expired} />
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3 text-sm">
+                        <div>
+                          <Label className="text-muted-foreground">Snapshot</Label>
+                          <p className="font-mono text-xs">{deliveryStatus.desired_state?.snapshot_id || "N/A"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-muted-foreground">Default media version</Label>
+                          <p className="font-mono text-xs">{deliveryStatus.desired_state?.default_media_version || "N/A"}</p>
+                        </div>
+                        <div>
+                          <Label className="text-muted-foreground">Emergency version</Label>
+                          <p className="font-mono text-xs">{deliveryStatus.desired_state?.emergency_version || "N/A"}</p>
+                        </div>
+                      </div>
+                    </Card>
+
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <Card className="p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="font-semibold">Publish delivery</h3>
+                          <Badge variant="outline" className={getDeliveryBadgeClass(deliveryStatus.publish?.delivery.latest_lifecycle_status)}>
+                            {deliveryStatus.publish?.delivery.latest_lifecycle_status || "NO_PUBLISH_COMMAND"}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <Label className="text-muted-foreground">Published</Label>
+                            <p>{formatDateTime(deliveryStatus.publish?.published_at)}</p>
+                          </div>
+                          <div>
+                            <Label className="text-muted-foreground">Recent commands</Label>
+                            <p>{deliveryStatus.publish?.delivery.total_recent ?? 0}</p>
+                          </div>
+                          <div className="col-span-2">
+                            <Label className="text-muted-foreground">Snapshot</Label>
+                            <p className="font-mono text-xs">{deliveryStatus.publish?.snapshot_id || "N/A"}</p>
+                          </div>
+                        </div>
+                      </Card>
+
+                      <Card className="p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="font-semibold">Emergency delivery</h3>
+                          <Badge variant="outline" className={getDeliveryBadgeClass(deliveryStatus.emergency?.delivery.latest_lifecycle_status)}>
+                            {deliveryStatus.emergency?.active ? deliveryStatus.emergency.delivery.latest_lifecycle_status || "ACTIVE" : "INACTIVE"}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <Label className="text-muted-foreground">State</Label>
+                            <p>{deliveryStatus.emergency?.active ? "Active" : "Inactive"}</p>
+                          </div>
+                          <div>
+                            <Label className="text-muted-foreground">Recent commands</Label>
+                            <p>{deliveryStatus.emergency?.delivery.total_recent ?? 0}</p>
+                          </div>
+                          <div>
+                            <Label className="text-muted-foreground">Failures</Label>
+                            <p>{deliveryStatus.emergency?.delivery.failed ?? 0}</p>
+                          </div>
+                          <div>
+                            <Label className="text-muted-foreground">Created</Label>
+                            <p>{formatDateTime(deliveryStatus.emergency?.created_at)}</p>
+                          </div>
+                        </div>
+                      </Card>
+                    </div>
+
+                    <Card className="p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-semibold">Recent commands</h3>
+                        <Button variant="outline" size="sm" onClick={() => deliveryStatusQuery.refetch()}>
+                          <RefreshCcw className="h-3 w-3 mr-1" />
+                          Refresh
+                        </Button>
+                      </div>
+                      {deliveryStatus.commands.recent.length ? (
+                        <div className="space-y-2">
+                          {deliveryStatus.commands.recent.map((command) => (
+                            <div key={command.id} className="rounded border p-3 text-sm">
+                              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge variant="outline">{command.type}</Badge>
+                                    <Badge variant="outline" className={getDeliveryBadgeClass(command.lifecycle_status)}>
+                                      {command.lifecycle_status}
+                                    </Badge>
+                                    {command.priority ? <Badge variant="outline">P{command.priority}</Badge> : null}
+                                  </div>
+                                  <p className="mt-2 font-mono text-xs text-muted-foreground break-all">{command.id}</p>
+                                  {command.last_error ? (
+                                    <p className="mt-1 flex items-center gap-1 text-red-700">
+                                      <XCircle className="h-3 w-3" />
+                                      {command.last_error}
+                                    </p>
+                                  ) : command.lifecycle_status === "ACKED_SUCCESS" ? (
+                                    <p className="mt-1 flex items-center gap-1 text-emerald-700">
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      ACK received
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground md:text-right">
+                                  <span>Attempts</span>
+                                  <span>{command.attempt_count ?? 0}/{command.max_attempts ?? "N/A"}</span>
+                                  <span>Created</span>
+                                  <span>{formatDateTime(command.created_at)}</span>
+                                  <span>ACK</span>
+                                  <span>{formatDateTime(command.acknowledged_at)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No recent commands.</p>
+                      )}
+                    </Card>
+
+                    {mediaCacheStatusUiEnabled ? (
+                      <Card className="p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <HardDrive className="h-4 w-4 text-primary" />
+                            <h3 className="font-semibold">Media/cache failures</h3>
+                          </div>
+                          <Button variant="outline" size="sm" onClick={() => mediaCacheReportsQuery.refetch()}>
+                            <RefreshCcw className="h-3 w-3 mr-1" />
+                            Refresh
+                          </Button>
+                        </div>
+                        {mediaCacheReportsQuery.isLoading ? (
+                          <div className="space-y-2">
+                            <Skeleton className="h-16 w-full" />
+                            <Skeleton className="h-16 w-full" />
+                          </div>
+                        ) : mediaCacheReportsQuery.error ? (
+                          <div className="flex items-center gap-2 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                            <AlertTriangle className="h-4 w-4" />
+                            Media/cache status is unavailable.
+                          </div>
+                        ) : mediaCacheReports.length ? (
+                          <div className="space-y-2">
+                            {mediaCacheReports.map((report) => (
+                              <div key={report.id} className="rounded border p-3 text-sm">
+                                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Badge variant="outline" className={getFailureSeverityBadgeClass(report.severity)}>
+                                        {report.severity}
+                                      </Badge>
+                                      <Badge variant="outline">{report.event_type}</Badge>
+                                      {report.source ? <Badge variant="outline">{report.source}</Badge> : null}
+                                    </div>
+                                    {report.message ? (
+                                      <p className="mt-2 text-red-700">{report.message}</p>
+                                    ) : null}
+                                    <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                                      {report.media_id || report.cache_key || "No media id"}
+                                    </p>
+                                    {report.url_host ? (
+                                      <p className="mt-1 text-xs text-muted-foreground">Host: {report.url_host}</p>
+                                    ) : null}
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground md:text-right">
+                                    <span>Status</span>
+                                    <span>{report.status}</span>
+                                    <span>HTTP</span>
+                                    <span>{report.http_status ?? "N/A"}</span>
+                                    <span>Reported</span>
+                                    <span>{formatDateTime(report.reported_at)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No media/cache failures reported.</p>
+                        )}
+                      </Card>
+                    ) : null}
+
+                    <Card className="p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-semibold">Notification outbox</h3>
+                        <Badge variant="outline" className={deliveryStatus.outbox.failed > 0 ? "border-red-500 text-red-700" : "border-emerald-500 text-emerald-700"}>
+                          {deliveryStatus.outbox.failed > 0 ? `${deliveryStatus.outbox.failed} failed` : `${deliveryStatus.outbox.dispatched} dispatched`}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                        <DeliveryMetric label="Pending" value={deliveryStatus.outbox.pending} />
+                        <DeliveryMetric label="Dispatching" value={deliveryStatus.outbox.dispatching} />
+                        <DeliveryMetric label="Dispatched" value={deliveryStatus.outbox.dispatched} />
+                        <DeliveryMetric label="Failed" value={deliveryStatus.outbox.failed} />
+                      </div>
+                    </Card>
+                  </>
+                ) : (
+                  <p className="text-center text-muted-foreground py-8">No delivery status available</p>
+                )}
+              </TabsContent>
+            ) : null}
 
             <TabsContent value="playing" className="space-y-4">
               {nowPlaying ? (

@@ -18,6 +18,8 @@ import type {
   ScreenFleetSummary,
   ScreenGroupListSummaryResponse,
   ScreenListSummaryResponse,
+  ScreenDeliveryStatus,
+  ScreenMediaCacheReportsResponse,
 } from "../types";
 
 export const screensApi = {
@@ -131,6 +133,20 @@ export const screensApi = {
       path: endpoints.screens.snapshot(screenId),
       method: "GET",
       query: { include_urls: includeUrls },
+    }),
+
+  getDeliveryStatus: (screenId: string, limit = 10) =>
+    apiClient.request<ScreenDeliveryStatus>({
+      path: endpoints.screens.deliveryStatus(screenId),
+      method: "GET",
+      query: { limit },
+    }),
+
+  getMediaCacheReports: (screenId: string, limit = 10) =>
+    apiClient.request<ScreenMediaCacheReportsResponse>({
+      path: endpoints.screens.mediaCacheReports(screenId),
+      method: "GET",
+      query: { limit },
     }),
 
   triggerScreenshot: (screenId: string, payload?: { reason?: string }) =>

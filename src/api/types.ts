@@ -754,6 +754,154 @@ export interface ScreenStatus {
   uptime_seconds?: number;
 }
 
+export interface ScreenCommandHistoryEntry {
+  old_status?: string | null;
+  new_status: string;
+  reason?: string | null;
+  attempt_count?: number | null;
+  created_at?: string | null;
+}
+
+export interface ScreenCommandDeliveryItem {
+  id: string;
+  type: string;
+  status: string;
+  lifecycle_status: string;
+  reason?: string | null;
+  priority?: number | null;
+  attempt_count?: number | null;
+  max_attempts?: number | null;
+  delivery_attempts?: number | null;
+  last_error?: string | null;
+  result_payload?: unknown;
+  desired_snapshot_id?: string | null;
+  desired_default_media_version?: string | null;
+  desired_emergency_version?: string | null;
+  claimed_at?: string | null;
+  lease_expires_at?: string | null;
+  acknowledged_at?: string | null;
+  completed_at?: string | null;
+  expires_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  status_history?: ScreenCommandHistoryEntry[];
+}
+
+export interface ScreenOutboxDeliveryItem {
+  id: string;
+  command_id?: string | null;
+  event_type: string;
+  reason?: string | null;
+  status: string;
+  priority?: number | null;
+  attempt_count?: number | null;
+  max_attempts?: number | null;
+  next_attempt_at?: string | null;
+  dispatched_at?: string | null;
+  last_error?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ScreenDeliverySummary {
+  total_recent: number;
+  pending: number;
+  leased: number;
+  succeeded: number;
+  failed: number;
+  latest_status?: string | null;
+  latest_lifecycle_status?: string | null;
+  latest_command_id?: string | null;
+  latest_error?: string | null;
+}
+
+export interface ScreenDeliveryStatus {
+  screen_id: string;
+  server_time?: string;
+  desired_state?: {
+    screen_id: string;
+    state_version: number;
+    command_version: number;
+    snapshot_id?: string | null;
+    default_media_version?: string | null;
+    emergency_version?: string | null;
+    last_command_id?: string | null;
+    last_command_type?: string | null;
+    last_command_reason?: string | null;
+    last_changed_reason?: string | null;
+    updated_at?: string | null;
+  } | null;
+  publish?: {
+    publish_id?: string | null;
+    schedule_id?: string | null;
+    schedule_name?: string | null;
+    snapshot_id?: string | null;
+    published_at?: string | null;
+    delivery: ScreenDeliverySummary;
+  } | null;
+  emergency?: {
+    active: boolean;
+    id?: string | null;
+    severity?: string | null;
+    media_id?: string | null;
+    created_at?: string | null;
+    delivery: ScreenDeliverySummary;
+  };
+  commands: {
+    total: number;
+    by_status: Record<string, number>;
+    by_lifecycle: Record<string, number>;
+    pending: number;
+    leased: number;
+    succeeded: number;
+    failed: number;
+    expired: number;
+    dead_letter: number;
+    cancelled: number;
+    recent: ScreenCommandDeliveryItem[];
+  };
+  outbox: {
+    total: number;
+    by_status: Record<string, number>;
+    pending: number;
+    dispatching: number;
+    dispatched: number;
+    failed: number;
+    recent: ScreenOutboxDeliveryItem[];
+  };
+}
+
+export interface ScreenMediaCacheReport {
+  id: string;
+  media_id?: string | null;
+  event_type: string;
+  severity: "INFO" | "WARN" | "ERROR" | "CRITICAL" | string;
+  source?: string | null;
+  status: string;
+  error_code?: string | null;
+  http_status?: number | null;
+  message?: string | null;
+  cache_key?: string | null;
+  url_host?: string | null;
+  url_path_hash?: string | null;
+  snapshot_id?: string | null;
+  schedule_id?: string | null;
+  default_media_version?: string | null;
+  playback_mode?: string | null;
+  attempt_count?: number | null;
+  metadata?: Record<string, unknown> | null;
+  reported_at?: string | null;
+  received_at?: string | null;
+  resolved_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ScreenMediaCacheReportsResponse {
+  screen_id: string;
+  reports: ScreenMediaCacheReport[];
+}
+
 export type ScreenPlaybackSource =
   | "EMERGENCY"
   | "HEARTBEAT"
