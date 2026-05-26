@@ -1,6 +1,6 @@
 # Signhex QA Setup Guide
 
-This is the primary QA deployment runbook for the approved multi-VM QA topology.
+This is the primary QA deployment runbook for the approved air-gapped on-prem multi-VM QA topology.
 
 QA uses the same machine-role split as production:
 
@@ -8,6 +8,8 @@ QA uses the same machine-role split as production:
 - VM2 backend: `signhex-server` and Prometheus
 - VM3 CMS: `signhex-nexus-core` and Grafana behind `/grafana/`
 - separate wired player machines: `signage-screen`
+
+No public internet, public DNS, public endpoint, public media CDN, public S3, public broker, FCM, or APNs service is assumed. Valkey, if used, is an internal on-prem service.
 
 ## 1. Required inputs
 
@@ -24,6 +26,7 @@ QA uses the same machine-role split as production:
   - `BACKEND_IMAGE_ARCHIVE`
   - `CMS_BUNDLE_SOURCE`
 - `PLAYER_ARTIFACTS_DIR`
+- optional `VALKEY_URL` and Valkey topology inputs when QA validates multi-node realtime fanout
 
 Use the split server export layout for QA:
 
@@ -157,8 +160,19 @@ Minimum QA realtime gate:
 - keep `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false` until REST/polling/heartbeat command delivery is verified
 - validate `/api/v1/` through the QA proxy
 - validate `/socket.io/` upgrade and idle timeout through the QA proxy before canary
+- validate Valkey connectivity and fanout before multi-node realtime canary
 - keep polling and heartbeat fallback enabled
 - record rollback evidence before enabling more than canary players
+
+Phase 8B on-prem runtime evidence must use internal QA endpoints:
+
+- `ONPREM_QA_BACKEND_BASE_URL`
+- `ONPREM_QA_CMS_BASE_URL`
+- `ONPREM_QA_SOCKET_IO_URL`
+- `VALKEY_URL`
+- `ONPREM_DEVICE_SIMULATOR_CREDENTIAL_POOL_PATH`
+- `ONPREM_PROMETHEUS_URL`
+- `ONPREM_GRAFANA_URL`
 
 ## 7. Player handoff
 
@@ -194,3 +208,4 @@ Check:
 - QA network allows player access to `3000/tcp`
 - VM2 backend health check passes
 - if realtime is enabled, `/socket.io/` upgrade works through the selected QA proxy path; otherwise disable `REALTIME_SYNC_ENABLED` and `HEXMON_REALTIME_SYNC_ENABLED` and verify REST/polling fallback
+- for multi-node realtime, Valkey is reachable from every backend node and Pub/Sub fanout wakes the node that owns the player socket

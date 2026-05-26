@@ -24,7 +24,7 @@ Phase status: `APPROVED_WITH_CONDITIONS`
 - CMS UI.
 - Mobile/TV player work.
 - Sending snapshots, media, screenshots, logs, PoP, or authoritative state over WebSocket.
-- Distributed registry or Redis/NATS fanout.
+- Distributed registry or Valkey fanout.
 
 ## Code Evidence
 
@@ -61,9 +61,9 @@ Defaults keep QA/prod behavior unchanged until explicitly enabled.
 ## Approval Conditions
 
 - Rerun Phase 1 through Phase 3 backend tests under Node `>=20 <21` before QA signoff.
-- Validate Socket.IO `/device` namespace through QA nginx/load-balancer upgrade headers, origin policy, idle timeout, and sticky sessions.
+- Validate Socket.IO `/device` namespace through on-prem QA nginx/load-balancer upgrade headers, origin policy, idle timeout, selected transport, and sticky sessions only if HTTP polling is enabled.
 - Add dedicated realtime/outbox metrics before production enablement.
-- Decide sticky-session-only versus Redis/NATS/distributed routing before multi-instance production.
+- Implement and validate Valkey-backed fanout before multi-instance production.
 - Keep DB-mutating backend tests isolated unless the test harness gets DB isolation.
 
 ## Rollback

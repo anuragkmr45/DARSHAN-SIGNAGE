@@ -45,6 +45,30 @@ tests:
         values: "0+0x21"
       - series: 'signhex_fleet_latest_heartbeat_age_seconds{site="dev"}'
         values: "700+0x21"
+      - series: 'signhex_server_command_outbox_oldest_pending_age_seconds{site="dev"}'
+        values: "180+0x21"
+      - series: 'signhex_server_command_outbox_rows{status="PENDING",site="dev"}'
+        values: "25+0x21"
+      - series: 'signhex_server_command_outbox_dispatch_total{result="failed",event_type="COMMAND_AVAILABLE",site="dev"}'
+        values: "0+1x21"
+      - series: 'signhex_server_websocket_notification_payload_too_large_total{type="COMMAND_AVAILABLE",site="dev"}'
+        values: "0+1x21"
+      - series: 'signhex_server_device_commands_claimed_total{source="poll",site="dev"}'
+        values: "0+2x21"
+      - series: 'signhex_server_device_realtime_auth_total{result="failure",reason="Missing device identity",site="dev"}'
+        values: "0+60x21"
+      - series: 'signhex_server_device_command_acks_total{result="success",site="dev"}'
+        values: "0+100x21"
+      - series: 'signhex_server_device_command_acks_total{result="failure",site="dev"}'
+        values: "0+20x21"
+      - series: 'signhex_server_device_commands_rows{status="DEAD_LETTER",site="dev"}'
+        values: "1+0x21"
+      - series: 'signhex_server_device_commands_rows{status="EXPIRED",site="dev"}'
+        values: "0+0x21"
+      - series: 'signhex_server_media_cache_reports_total{result="accepted",severity="ERROR",event_type="DOWNLOAD_FAILED",site="dev"}'
+        values: "0+10x21"
+      - series: 'signhex_server_media_cache_reports_unresolved{severity="CRITICAL",event_type="DISK_FULL",site="dev"}'
+        values: "1+0x21"
     promql_expr_test:
       - expr: 'signhex:host_memory_utilization:ratio{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
         eval_time: 5m
@@ -56,6 +80,16 @@ tests:
         exp_samples:
           - labels: '{__name__="signhex:fleet_offline_players_ratio",site="dev"}'
             value: 0.4
+      - expr: 'signhex:realtime_outbox_pending_rows{site="dev"}'
+        eval_time: 5m
+        exp_samples:
+          - labels: '{__name__="signhex:realtime_outbox_pending_rows",site="dev"}'
+            value: 25
+      - expr: 'signhex:device_command_ack_failure_ratio{site="dev"}'
+        eval_time: 5m
+        exp_samples:
+          - labels: '{__name__="signhex:device_command_ack_failure_ratio",site="dev"}'
+            value: 0.16666666666666666
     alert_rule_test:
       - eval_time: 20m
         alertname: SignhexBackendMetricsUnavailable
@@ -121,3 +155,91 @@ tests:
             exp_annotations:
               summary: "Offline player ratio is elevated"
               description: "More than 25% of the known player fleet has been marked OFFLINE for 15 minutes."
+      - eval_time: 20m
+        alertname: SignhexRealtimeOutboxLagHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: SignhexRealtimeOutboxLagHigh
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Realtime outbox lag is elevated"
+              description: "The oldest pending realtime outbox row has been waiting for more than 2 minutes."
+      - eval_time: 20m
+        alertname: SignhexRealtimeOutboxDispatchFailures
+        exp_alerts:
+          - exp_labels:
+              alertname: SignhexRealtimeOutboxDispatchFailures
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Realtime outbox dispatch failures detected"
+              description: "The outbox dispatcher has recorded failed notification dispatch attempts."
+      - eval_time: 20m
+        alertname: SignhexRealtimePayloadTooLarge
+        exp_alerts:
+          - exp_labels:
+              alertname: SignhexRealtimePayloadTooLarge
+              severity: critical
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Realtime notification payload rejected"
+              description: "One or more websocket notification payloads exceeded the configured hard limit."
+      - eval_time: 20m
+        alertname: SignhexRealtimeAuthFailuresHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: SignhexRealtimeAuthFailuresHigh
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Realtime device authentication failures are elevated"
+              description: "Device websocket authentication failures exceed 0.5 attempts per second."
+      - eval_time: 20m
+        alertname: SignhexCommandAckFailuresHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: SignhexCommandAckFailuresHigh
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Device command ACK failures are elevated"
+              description: "More than 10% of command acknowledgements are failing or returning error."
+      - eval_time: 20m
+        alertname: SignhexDeviceCommandDeadLettersPresent
+        exp_alerts:
+          - exp_labels:
+              alertname: SignhexDeviceCommandDeadLettersPresent
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Terminal failed device commands are present"
+              description: "Device commands have reached DEAD_LETTER or EXPIRED status and need operator review."
+      - eval_time: 20m
+        alertname: SignhexMediaCacheFailuresHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: SignhexMediaCacheFailuresHigh
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Media/cache failures are elevated"
+              description: "Players are reporting ERROR or CRITICAL media/cache failures above the warning threshold."
+      - eval_time: 20m
+        alertname: SignhexCriticalMediaCacheReportsUnresolved
+        exp_alerts:
+          - exp_labels:
+              alertname: SignhexCriticalMediaCacheReportsUnresolved
+              severity: critical
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Critical media/cache failures remain unresolved"
+              description: "At least one critical player media/cache failure report is still open."

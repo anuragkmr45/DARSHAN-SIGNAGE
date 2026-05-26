@@ -1,12 +1,12 @@
 # Enterprise Realtime Sync Task Register
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 Updated by: Codex
 Repo path: `/Users/anuragkumar/Desktop/signhex`
 
 Allowed statuses: `NOT_STARTED`, `READY`, `BLOCKED`, `IN_PROGRESS`, `IMPLEMENTED`, `TESTED`, `APPROVED`, `NEEDS_FIX`, `DEFERRED`.
 
-Current gate: Phase 8 runtime evidence is blocked by environment. Phase 9 mobile/TV adapters remain blocked until Phase 8 runtime evidence is accepted or explicitly deferred by a human approver. Phase 1 through Phase 8 conditions carried forward: provide QA/staging endpoints and simulator credentials, rerun under Node 20 before QA signoff, review migration/index behavior on QA-sized data, validate QA WebSocket proxy/sticky-session behavior, validate full player-to-backend realtime compatibility in QA, clean up or waive current CMS lint failures, define media/cache report retention, add dedicated realtime/failure metrics before production enablement, run QA canary rollback drill, decide sticky sessions versus Redis/NATS/distributed registry for multi-instance production, execute real 1k/10k/50k load profiles or document a lower certified capacity cap, and run DB-mutating backend integration files isolated unless DB isolation is added.
+Current gate: Phase 8 runtime evidence is blocked by environment. Phase 9 mobile/TV adapters remain blocked until Phase 8 runtime evidence is accepted or explicitly deferred by a human approver. All dev, QA, and production rollout assumptions are air-gapped on-prem unless explicitly waived. Phase 1 through Phase 8 conditions carried forward: provide on-prem dev/QA/prod endpoints, Valkey topology, on-prem media endpoint, and simulator credentials; rerun under Node 20 before QA signoff; review migration/index behavior on QA-sized data; validate QA WebSocket proxy/transport behavior; implement and validate Valkey-backed node A/node B fanout before multi-instance production; validate fallback when Valkey is unavailable; validate full player-to-backend realtime compatibility in QA; run CMS visual/E2E review; approve media/cache report retention; tune dedicated realtime/failure metrics under QA traffic; run QA canary rollback drill; execute real 1k/10k/50k load profiles or document a lower certified capacity cap; and run DB-mutating backend integration files isolated unless DB isolation is added.
 
 Latest Phase 1 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`.
 Latest Phase 2 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-2-handoff.md`.
@@ -255,14 +255,14 @@ Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/r
 - Task id: RT-0304
 - Phase: Phase 3
 - Title: Add realtime metrics and health
-- Status: DEFERRED
+- Status: TESTED
 - Owner placeholder: TBD
 - Folder: `signhex-server/src/observability`
-- Files expected: metrics, health checks, docs
+- Files expected: metrics, health checks, docs, Prometheus rules
 - Dependencies: RT-0302, RT-0303
-- Implementation notes: Basic structured logs and registry stats exist. Dedicated metrics for active device connections, auth failures, notification size, outbox lag, dispatch attempts, and fallback indicators are deferred and must be completed before QA/prod enablement.
-- Test requirements: metrics unit tests and scrape output tests
-- Acceptance criteria: operators can detect gateway and outbox health. Not yet met for production; tracked as Phase 3 condition and Phase 6/7 hardening item.
+- Implementation notes: Phase 8 continuation added dedicated backend metrics and Prometheus rules for outbox rows/lag/dispatch outcomes, realtime auth/notifications, websocket payload-size rejections, command ACK latency/failures, terminal command rows, fallback poll claim rate, and media/cache reports.
+- Test requirements: metrics unit tests, gateway regression tests, Prometheus rule validation. Latest `metrics.test.ts`, `device-gateway.test.ts`, and observability asset validator passed.
+- Acceptance criteria: operators can detect gateway and outbox health. Met at local/static validation level; QA threshold tuning remains required before production.
 - Rollback notes: metrics are additive
 - Approval required: yes
 
@@ -526,9 +526,9 @@ Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/r
 - Folder: `signhex-platform/scripts/load`, `signhex-platform/docs/implementation`
 - Files expected: load scripts, load report template, metrics checklist
 - Dependencies: Phase 7 QA topology
-- Implementation notes: Added deterministic load model script and load/chaos plan. The script models heartbeat, command polling, desired-state fetch, snapshot/default media polling, PoP volume, command fanout, emergency fanout, and media egress without touching a live backend. Real fleet execution remains a QA/staging requirement.
+- Implementation notes: Added deterministic load model script and load/chaos plan. The script models heartbeat, command polling, desired-state fetch, snapshot/default media polling, PoP volume, command fanout, emergency fanout, and media egress without touching a live backend. Real fleet execution remains a on-prem QA requirement.
 - Test requirements: 1k, 10k, and 50k simulated player profiles. Local model dry-runs passed for 1k current, 10k hybrid healthy, and 50k fallback profiles.
-- Acceptance criteria: capacity numbers and bottlenecks are documented before production rollout. Met at model/tooling level only; real runtime bottleneck evidence is blocked by missing QA/staging target and simulator credentials.
+- Acceptance criteria: capacity numbers and bottlenecks are documented before production rollout. Met at model/tooling level only; real runtime bottleneck evidence is blocked by missing on-prem QA target and simulator credentials.
 - Rollback notes: test-only assets
 - Approval required: yes
 
@@ -542,8 +542,8 @@ Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/r
 - Folder: `signhex-platform/docs/implementation`
 - Files expected: chaos scripts, reports, remediation register
 - Dependencies: RT-0801
-- Implementation notes: Added chaos scenario matrix covering backend restart, DB unavailable, broker/proxy unavailable, WS gateway restart, reconnect storm, media URL expiry, disk full, emergency fanout, missed WebSocket notifications, and rollback. Actual chaos execution remains blocked until QA/staging infrastructure is available.
-- Test requirements: chaos tests and manual operator validation. Static Phase 8 validation passed; real chaos execution is blocked by missing QA/staging target.
+- Implementation notes: Added chaos scenario matrix covering backend restart, DB unavailable, broker/proxy unavailable, WS gateway restart, reconnect storm, media URL expiry, disk full, emergency fanout, missed WebSocket notifications, and rollback. Actual chaos execution remains blocked until on-prem QA infrastructure is available.
+- Test requirements: chaos tests and manual operator validation. Static Phase 8 validation passed; real chaos execution is blocked by missing on-prem QA target.
 - Acceptance criteria: critical failure modes recover or have documented mitigations. Met at plan level only; runtime evidence remains required before production.
 - Rollback notes: test-only assets
 - Approval required: yes
@@ -558,9 +558,9 @@ Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/r
 - Folder: `signhex-platform/docs/implementation`
 - Files expected: production readiness checklist and approval entry
 - Dependencies: RT-0801, RT-0802
-- Implementation notes: Added production readiness checklist, QA canary evidence template, metrics/alert validation document, and Phase 8 handoff. Current production readiness state is `NOT_PRODUCTION_READY`.
-- Test requirements: signoff on load/chaos/QA evidence; observability asset validation passed, but dedicated realtime/outbox/media-cache/fallback metrics and alerts are still required or must be waived.
-- Acceptance criteria: approval log marks production readiness for canary. Not met; production readiness remains blocked by missing runtime evidence, missing QA/staging target, and alert gaps.
+- Implementation notes: Added production readiness checklist, QA canary evidence template, metrics/alert validation document, Phase 8 handoff, dedicated metrics/alerts, and media/cache retention decision plan. Current production readiness state is `NOT_PRODUCTION_READY`.
+- Test requirements: signoff on load/chaos/QA evidence; observability asset validation passed with dedicated realtime/outbox/media-cache/fallback rules, but real traffic tuning remains required.
+- Acceptance criteria: approval log marks production readiness for canary. Not met; production readiness remains blocked by missing runtime evidence, missing on-prem QA target, Node 20 validation, retention approval, and alert tuning.
 - Rollback notes: do not enable production without approval
 - Approval required: yes
 
@@ -574,10 +574,26 @@ Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/r
 - Folder: `signhex-platform`
 - Files expected: load model, load/chaos plan, production readiness checklist, QA canary evidence template, metrics/alert validation, validation script, phase handoff, status updates
 - Dependencies: RT-0801, RT-0802, RT-0803
-- Implementation notes: Phase 8 is intentionally validation/readiness only. It does not implement mobile adapters, WebSocket protocol changes, Electron realtime changes, CMS UI, backend runtime changes, source-of-truth changes, or migrations.
+- Implementation notes: Phase 8 does not implement mobile adapters, WebSocket protocol changes, Electron realtime changes, CMS UI, source-of-truth changes, or migrations. Runtime additions are additive observability counters/gauges and the notification-only Valkey fanout backfill tracked separately in RT-0805.
 - Test requirements: `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`; `bash signhex-platform/scripts/verify/validate-observability-assets.sh`; load model dry-runs
 - Acceptance criteria: Phase 8 assets validate locally, observability assets validate, approval log is updated, and Phase 9 gate is explicit. Met with runtime evidence conditions carried forward.
 - Rollback notes: docs/scripts only; remove or supersede if validation strategy changes
+- Approval required: yes
+
+### RT-0805 - Implement Valkey Fanout Backfill
+
+- Task id: RT-0805
+- Phase: Phase 8
+- Title: Implement Valkey fanout backfill
+- Status: TESTED
+- Owner placeholder: TBD
+- Folder: `signhex-server`, `signhex-platform/docs/implementation`
+- Files expected: realtime bus, Valkey-compatible Pub/Sub client, device-node registry, gateway wiring, outbox dispatcher wiring, metrics, tests, implementation docs, handoff
+- Dependencies: ADR-0022, Phase 3 gateway, Phase 2 command outbox
+- Implementation notes: Implemented notification-only Valkey Pub/Sub fanout and short-lived device-to-node registry. `VALKEY_URL` is preferred; `REDIS_URL` remains an explicit compatibility alias only. Valkey publish does not ACK commands and does not replace DB outbox/polling fallback.
+- Test requirements: backend build, realtime bus unit tests, gateway regression, metrics tests, playback refresh dispatch regression, local Valkey Pub/Sub integration smoke. All passed locally under Node `v24.12.0`; Node 20 rerun and on-prem runtime evidence remain required.
+- Acceptance criteria: local node A/node B Pub/Sub smoke passes; payload hard max enforced; Valkey unavailable path falls back without throwing; REST/polling source of truth remains unchanged. Met locally; on-prem production evidence remains blocked.
+- Rollback notes: set `REALTIME_BUS_PROVIDER=memory`, `OUTBOX_DISPATCH_ENABLED=false`, `REALTIME_SYNC_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false`; leave DB and REST/polling paths active.
 - Approval required: yes
 
 ## Phase 9: Mobile/TV Player Contract Adapters
@@ -598,19 +614,19 @@ Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/r
 - Rollback notes: docs/tests only until native clients start
 - Approval required: yes
 
-### RT-0902 - Design Mobile Push Adapter
+### RT-0902 - Design Optional Mobile Wake Adapter
 
 - Task id: RT-0902
 - Phase: Phase 9
-- Title: Design mobile push adapter
+- Title: Design optional mobile wake adapter
 - Status: BLOCKED
 - Owner placeholder: TBD
 - Folder: `signhex-server`, `signhex-platform/docs/architecture`
-- Files expected: FCM/APNs design, env plan, outbox adapter plan
+- Files expected: on-prem private push/MDM plan if available, non-air-gapped exception plan if public push is allowed, env plan, outbox adapter plan
 - Dependencies: OutboxDispatcher stable, platform priorities
-- Implementation notes: Push remains wake-up only. Mobile apps still use REST for truth.
-- Test requirements: design review and future push simulator tests
-- Acceptance criteria: push adapter uses outbox notification intents without changing source-of-truth model
+- Implementation notes: Public FCM/APNs is not baseline for fully air-gapped deployments. Mobile/TV players must rely on foreground/kiosk WebSocket plus REST and polling/heartbeat fallback unless the customer provides an approved private push/MDM mechanism or non-air-gapped exception. Any wake adapter remains notification-only.
+- Test requirements: design review, private-push simulator if applicable, and fallback tests when push is unavailable
+- Acceptance criteria: optional wake adapter uses outbox notification intents without changing source-of-truth model; air-gapped deployments remain functional without public push
 - Rollback notes: leave push disabled
 - Approval required: yes
 

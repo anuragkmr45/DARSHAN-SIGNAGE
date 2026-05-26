@@ -26,7 +26,7 @@ Phase 7 adds deployment controls for QA/prod rollout of the existing enterprise 
 - Emergency fanout validation.
 - Mobile/TV player implementation.
 - Production enablement.
-- Distributed registry or Redis/NATS fanout implementation.
+- Distributed registry or Valkey fanout implementation.
 
 ## Files Added
 
@@ -83,7 +83,7 @@ Additional compile evidence from 2026-05-24:
 - Run packaged player/backend realtime smoke through QA proxy.
 - Resolve or explicitly waive existing CMS lint failures.
 - Define `media_cache_reports` retention/partitioning and dedicated metrics/alerts.
-- Decide sticky-session-only versus Redis/NATS/distributed registry before multi-instance production realtime enablement.
+- Decide Valkey/distributed registry before multi-instance production realtime enablement.
 
 ## Rollback
 

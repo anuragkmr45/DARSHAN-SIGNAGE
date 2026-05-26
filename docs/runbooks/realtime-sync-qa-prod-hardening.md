@@ -6,7 +6,7 @@ Phase: Phase 7 - QA/prod deployment hardening
 
 ## Purpose
 
-This runbook hardens deployment controls for the enterprise realtime sync architecture before Phase 8 load/chaos testing and production readiness work.
+This runbook hardens deployment controls for the enterprise realtime sync architecture before Phase 8 load/chaos testing and production readiness work. All dev, QA, and production targets are assumed to be air-gapped on-prem/internal networks unless a human records an explicit exception.
 
 It does not introduce new runtime semantics. The approved architecture remains:
 
@@ -16,6 +16,8 @@ It does not introduce new runtime semantics. The approved architecture remains:
 - Media is delivered through HTTP/object storage/CDN/local cache, never WebSocket.
 - Polling and heartbeat fallback remain mandatory.
 - QA/prod enablement must be feature-flagged and rollback-safe.
+- On-prem object storage or MinIO is the media egress layer; no public media CDN is assumed.
+- Valkey is the approved on-prem cross-node realtime fanout/coordination layer for multi-instance production.
 
 ## Non-Goals
 
@@ -48,6 +50,7 @@ Realtime behavior must be enabled in layers. Never enable all flags for the full
 | Outbox dispatcher | `OUTBOX_DISPATCH_ENABLED` | none | Disabled until gateway health and rollback are verified |
 | Delivery UI | backend APIs | `VITE_REALTIME_DELIVERY_STATUS_UI` | Enabled for QA operators first |
 | Media/cache reporting | `MEDIA_CACHE_REPORTING_ENABLED` | `HEXMON_MEDIA_CACHE_REPORTING_ENABLED`, `VITE_MEDIA_CACHE_STATUS_UI` | Enabled in QA; production requires retention/alerts |
+| Realtime bus | `REALTIME_BUS_PROVIDER=valkey`, `VALKEY_URL` | none | Required before multi-instance production realtime |
 
 ## QA Recommended Values
 
@@ -71,7 +74,7 @@ Use `docs/environments/production/realtime-sync.env.example` as the deployment c
 
 ## Proxy And TLS Requirements
 
-REST and WebSocket paths can share the same backend origin, but they must remain semantically separate.
+REST and WebSocket paths can share the same internal backend origin, but they must remain semantically separate.
 
 Required reverse-proxy paths:
 
@@ -90,12 +93,30 @@ Use `deploy/shared/realtime-sync-nginx.socketio.conf.template` as the explicit s
 
 ## Multi-Instance Backend Rule
 
-The current Phase 3 device connection registry is process-local. A multi-instance backend deployment must use one of:
+The current Phase 3 device connection registry is process-local. A multi-instance on-prem backend deployment must use Valkey-backed fanout/distributed coordination. Do not approve sticky-session-only production realtime.
 
-- sticky sessions for `/socket.io/` plus an outbox dispatcher topology that can reach the process holding the target socket, or
-- a distributed registry/fanout layer such as Redis or NATS before production scale.
+Required production direction:
 
-Do not enable full-fleet realtime sync across multiple backend instances until this decision is recorded and tested.
+- `REALTIME_BUS_PROVIDER=valkey`
+- `VALKEY_URL`
+- `VALKEY_PUBSUB_ENABLED=true`
+- DB `command_outbox`, `device_commands`, `schedule_snapshots`, and `device_desired_state` remain durable source of truth
+- Valkey Pub/Sub is non-durable wake fanout only
+- Valkey Streams are optional later only if broker-side persisted fanout is explicitly required
+
+Sticky sessions:
+
+- may be enabled for load-balancer compatibility if Socket.IO HTTP polling transport is enabled
+- are not sufficient for cross-node notification routing
+- must not be the only production multi-instance routing/fanout mechanism
+
+Preferred transport:
+
+- validate WebSocket-only device realtime where possible
+- keep `REALTIME_SOCKET_ALLOW_POLLING=false` after validation
+- if polling remains enabled, set `REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS=true` and still keep Valkey fanout for multi-node routing
+
+Do not enable full-fleet realtime sync across multiple backend instances until Valkey fanout and fallback behavior are recorded and tested.
 
 ## QA Canary Procedure
 
@@ -108,13 +129,48 @@ Do not enable full-fleet realtime sync across multiple backend instances until t
 7. Enable backend `REALTIME_SYNC_ENABLED=true` for the QA environment.
 8. Enable one canary player with `HEXMON_REALTIME_SYNC_ENABLED=true`.
 9. Verify the player receives notification-only events and fetches commands/state through REST.
-10. Enable `OUTBOX_DISPATCH_ENABLED=true` for the QA backend.
-11. Publish schedule/default/emergency changes and confirm:
+10. For multi-node QA, validate Valkey connectivity and fanout before enabling dispatcher.
+11. Enable `OUTBOX_DISPATCH_ENABLED=true` for the QA backend.
+12. Publish schedule/default/emergency changes and confirm:
     - `command_outbox` rows are dispatched or retryable.
     - player still claims commands through REST.
     - ACKs are stored.
     - fallback polling catches missed notifications.
-12. Expand canary only after the smoke checklist passes.
+13. Expand canary only after the smoke checklist passes.
+
+## Phase 8B Air-Gapped On-Prem Runtime Evidence
+
+Phase 8B must use internal/on-prem endpoints and must not require public endpoints or cloud services.
+
+Required evidence:
+
+1. On-prem dev smoke.
+2. On-prem QA proxy smoke.
+3. On-prem Socket.IO `/device` or `/socket.io/` smoke.
+4. On-prem Valkey connectivity and fanout smoke.
+5. Multi-node backend/gateway fanout test:
+   - player socket connected to node A
+   - CMS/API command created on node B
+   - Valkey fanout wakes node A
+   - player receives `COMMAND_AVAILABLE`
+   - player fetches command via REST
+   - player ACKs via REST
+6. Valkey outage fallback:
+   - Valkey unavailable
+   - `command_outbox` remains durable
+   - player gets command by polling/heartbeat
+   - no source-of-truth loss
+7. Reconnect storm.
+8. Emergency fanout.
+9. Publish storm.
+10. PoP/media-cache report flood.
+11. Canary rollback:
+   - disable `OUTBOX_DISPATCH_ENABLED`
+   - disable `REALTIME_SYNC_ENABLED`
+   - disable `HEXMON_REALTIME_SYNC_ENABLED`
+   - keep REST/polling/heartbeat/snapshot/default/emergency active.
+
+Production readiness must remain `NOT_PRODUCTION_READY` until these pass or are explicitly waived by a human approver.
 
 ## Rollback Procedure
 
@@ -139,7 +195,9 @@ Rollback must not require DB rollback.
 | Additive migrations reviewed on QA-sized DB | yes | migration review note |
 | `/api/v1/` through proxy | yes | curl/browser result |
 | `/socket.io/` upgrade through proxy | yes | gateway smoke result |
-| Sticky-session or distributed registry decision | yes | decision log |
+| Valkey fanout decision and connectivity | yes | decision log and Valkey smoke |
+| Multi-node node A/node B fanout | yes | command delivery evidence |
+| Sticky-session setting if Socket.IO polling is enabled | yes | proxy/LB config evidence |
 | Polling/heartbeat fallback with realtime disabled | yes | command delivery evidence |
 | Fallback catches missed WebSocket notification | yes | command delivery evidence |
 | Media/cache report retention defined | yes | retention note |

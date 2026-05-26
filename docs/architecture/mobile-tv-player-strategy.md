@@ -23,6 +23,20 @@ All players must implement:
 - desired-state reconciliation
 - media/cache failure reporting
 
+## Air-Gapped On-Prem Constraint
+
+In fully air-gapped deployments, public FCM/APNs and cloud push services cannot be assumed.
+
+Baseline player behavior for on-prem environments:
+
+- foreground/kiosk WebSocket wake-up where the app is active
+- REST authoritative fetch for commands, snapshots, default media, emergency, ACK, heartbeat, and telemetry
+- polling/heartbeat fallback when WebSocket or Valkey fanout is unavailable
+- on-prem/internal media delivery through MinIO, internal S3-compatible storage, file server, or another approved intranet endpoint
+- no media, full snapshots, screenshots, logs, or PoP batches over WebSocket or Valkey
+
+Push notification support is optional and environment-specific. It requires an approved on-prem MDM/private push mechanism or a documented non-air-gapped exception.
+
 ## Electron Strategy
 
 Electron is the first production runtime.
@@ -49,7 +63,7 @@ Android TV should behave like a foreground signage device.
 Recommended behavior:
 
 - foreground WebSocket when app is active
-- FCM for wake-up where platform/device policy supports it
+- on-prem private push only if the customer provides an approved mechanism; otherwise rely on foreground WebSocket plus REST/polling fallback
 - WorkManager or foreground service for background sync only where allowed
 - local media cache in app-private storage or external storage if managed
 - renderer based on ExoPlayer/WebView/native image views
@@ -67,7 +81,7 @@ Android mobile/tablet may not always be foreground signage.
 Recommended behavior:
 
 - WebSocket when foreground
-- FCM data notification for background wake-up
+- on-prem private push only if available; public FCM is not baseline for air-gapped deployments
 - WorkManager for deferred fetch/cache tasks
 - foreground service only for active signage playback mode
 - storage quota must be capability-reported
@@ -85,7 +99,7 @@ iOS/iPadOS has strict background limits.
 Recommended behavior:
 
 - WebSocket only while foreground/active
-- APNs silent push where entitlement and OS policy allow
+- APNs only when the deployment has an approved non-air-gapped exception or private push mechanism; not baseline in fully air-gapped mode
 - background fetch is best-effort, not guaranteed
 - media downloads use URLSession background downloads where possible
 - local cache uses app sandbox
@@ -103,7 +117,7 @@ tvOS may be relevant for Apple TV signage, but background and management constra
 Recommended behavior:
 
 - WebSocket while foreground
-- APNs for wake-up if app model supports it
+- APNs only when the deployment has an approved non-air-gapped exception or private push mechanism
 - REST desired-state reconciliation on foreground/resume
 - cache only within tvOS storage limits
 
@@ -142,7 +156,7 @@ Foreground players should:
 
 ## Background Push Behavior
 
-Mobile push adapters should consume the same outbox event types as WebSocket dispatch:
+Mobile push adapters are optional and environment-specific. When available, they should consume the same outbox event types as WebSocket dispatch:
 
 - `COMMAND_AVAILABLE`
 - `SNAPSHOT_CHANGED`
@@ -151,6 +165,8 @@ Mobile push adapters should consume the same outbox event types as WebSocket dis
 - `DESIRED_STATE_CHANGED`
 
 Push payloads must be small and contain no media or authoritative snapshot payload.
+
+In fully air-gapped deployments, Phase 9 must assume no public push service and must keep foreground WebSocket, REST reconciliation, and polling/heartbeat fallback as the baseline.
 
 ## Background Downloads
 

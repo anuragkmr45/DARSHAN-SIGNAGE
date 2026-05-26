@@ -374,9 +374,13 @@ On reconnect:
 
 ## Mobile Background Push Strategy
 
-Foreground mobile players should use WebSocket where allowed. Background mobile players should use push notifications:
+Foreground mobile and TV players should use WebSocket where allowed. In fully air-gapped on-prem deployments, public FCM/APNs cannot be assumed and are not part of the baseline player contract.
 
-- FCM for Android and Android TV where supported
-- APNs for iOS/iPadOS/tvOS where supported
+Baseline for air-gapped mode:
 
-Push payloads follow the same notification-only principle and instruct the app to wake and REST-fetch authoritative state.
+- kiosk/foreground WebSocket wake-up
+- REST authoritative fetch
+- polling/heartbeat fallback
+- local cache/offline startup
+
+Push payloads are optional and environment-specific. If an on-prem MDM/private push mechanism or documented non-air-gapped exception exists, push payloads still follow the same notification-only principle and instruct the app to wake and REST-fetch authoritative state.

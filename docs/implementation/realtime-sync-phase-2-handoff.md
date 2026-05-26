@@ -82,6 +82,6 @@ Phase 3 may be planned conditionally. It must:
 Required before Phase 3 implementation:
 
 - choose Socket.IO device namespace or raw `ws`
-- decide Redis/NATS or single-process dispatch topology
+- decide Valkey or single-process dispatch topology
 - define dispatcher cleanup/retention policy
 - confirm tenant/org scoping requirements

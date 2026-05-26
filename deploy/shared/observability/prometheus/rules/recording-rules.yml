@@ -61,3 +61,54 @@ groups:
             ),
             1
           )
+
+  - name: signhex_realtime_sync
+    interval: 1m
+    rules:
+      - record: signhex:realtime_outbox_pending_rows
+        expr: |
+          sum by (site) (
+            signhex_server_command_outbox_rows{status="PENDING"}
+          )
+      - record: signhex:realtime_outbox_dispatch_failure_rate_per_second
+        expr: |
+          sum by (site) (
+            rate(signhex_server_command_outbox_dispatch_total{result="failed"}[5m])
+          )
+      - record: signhex:realtime_payload_too_large_rate_per_second
+        expr: |
+          sum by (site) (
+            rate(signhex_server_websocket_notification_payload_too_large_total[5m])
+          )
+      - record: signhex:realtime_valkey_publish_failure_rate_per_second
+        expr: |
+          sum by (site) (
+            rate(signhex_server_realtime_bus_publish_total{provider="valkey",result=~"failed|unavailable"}[5m])
+          )
+      - record: signhex:realtime_valkey_fallback_rate_per_second
+        expr: |
+          sum by (site) (
+            rate(signhex_server_realtime_bus_fallback_total[5m])
+          )
+      - record: signhex:realtime_fallback_poll_claim_rate_per_second
+        expr: |
+          sum by (site) (
+            rate(signhex_server_device_commands_claimed_total{source="poll"}[5m])
+          )
+      - record: signhex:device_command_ack_failure_ratio
+        expr: |
+          sum by (site) (
+            rate(signhex_server_device_command_acks_total{result=~"failure|error"}[5m])
+          )
+          /
+          clamp_min(
+            sum by (site) (
+              rate(signhex_server_device_command_acks_total[5m])
+            ),
+            1
+          )
+      - record: signhex:media_cache_failure_rate_per_second
+        expr: |
+          sum by (site) (
+            rate(signhex_server_media_cache_reports_total{result="accepted",severity=~"ERROR|CRITICAL"}[5m])
+          )

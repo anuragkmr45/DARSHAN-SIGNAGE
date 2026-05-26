@@ -1,13 +1,13 @@
 # Enterprise Realtime Sync Permutation Test Matrix
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 Updated by: Codex
 
 Status values: `NOT_STARTED`, `BLOCKED`, `READY`, `IN_PROGRESS`, `PASSED`, `FAILED`, `DEFERRED`.
 
 This matrix covers meaningful combinations of connection, command, playback, scale, and platform states. It is not a claim of exhaustive mathematical coverage.
 
-Current gate: Phase 8 tooling/docs are conditionally approved. Load model dry-runs and observability asset validation are marked `PASSED`; real e2e/load/chaos/backend-proxy integration cases remain `BLOCKED` until QA/staging execution.
+Current gate: Phase 8 tooling/docs are conditionally approved. Load model dry-runs and observability asset validation are marked `PASSED`; real e2e/load/chaos/backend-proxy integration cases remain `BLOCKED` until on-prem QA execution.
 
 ## Phase 1 Gate Tests
 
@@ -27,7 +27,8 @@ Current gate: Phase 8 tooling/docs are conditionally approved. Load model dry-ru
 | PM-011 | WebSocket disconnected, command available | Disable WS while command is pending | Player fallback poll/heartbeat catches command | command remains pending past fallback SLA | e2e | Phase 4 | BLOCKED |
 | PM-012 | Backend API unavailable during command wake | WS notification delivered, REST API returns 5xx | Player retries/backoff; cached playback continues; command not executed twice | crash, spin loop, duplicated command execution | chaos | Phase 4 | BLOCKED |
 | PM-013 | DB unavailable during heartbeat/command poll | Temporarily block DB | Backend returns controlled error; player keeps cached content and queues ACK/telemetry | player blanks screen or loses command ledger | chaos | Phase 8 | BLOCKED |
-| PM-014 | Redis/NATS unavailable | Broker selected and stopped while API/DB remain up | Outbox dispatch delayed; polling fallback catches commands | API writes fail because broker is down | chaos | Phase 8 | BLOCKED |
+| PM-014 | Valkey unavailable | Valkey fanout selected and stopped while API/DB remain up | `command_outbox` remains durable; outbox dispatch is delayed; polling/heartbeat catches commands; schedule/default/emergency delivery still works | API writes fail because Valkey is down or player never receives fallback command | chaos | Phase 8 | BLOCKED; local unavailable-endpoint unit coverage passed |
+| PM-019 | Multi-node Valkey fanout | Player socket connected to node A; CMS/API command created on node B | Valkey wake reaches node A; player fetches authoritative command by REST and ACKs | notification only reaches node B, command is not fetched, or payload contains state/media | e2e/chaos | Phase 8 | BLOCKED; local simulated node A/node B Pub/Sub smoke passed |
 | PM-015 | Player offline during publish | Disconnect player, publish schedule, reconnect later | Desired state shows stale local state; player fetches commands/snapshot | player remains stale after reconnect | e2e | Phase 4 | BLOCKED |
 | PM-016 | Player reconnecting after days | Expired commands, newer snapshot/default/emergency state | Expired commands skipped; desired state drives current fetch | old command executes or stale emergency remains | e2e | Phase 4 | BLOCKED |
 | PM-017 | Duplicate player connection | Same device opens two realtime sessions | Registry selects active policy; no duplicate command side effects | command executes twice or old session keeps receiving notifications | integration | Phase 3 | BLOCKED |
@@ -78,6 +79,8 @@ Current gate: Phase 8 tooling/docs are conditionally approved. Load model dry-ru
 | PM-097 | PoP flood | Simulate high-frequency playback completions | Batch ingest and partitioning keep DB healthy | write queue backlog unbounded | load | Phase 8 | BLOCKED |
 | PM-098 | Load model dry-runs | Run current 1k, hybrid healthy 10k, and fallback 50k model commands | Model outputs RPS, request volume, daily writes, fanout, and media egress without violating architecture guardrails | model script fails or reports media over WebSocket | validation | Phase 8 | PASSED |
 | PM-099 | Observability asset validation | Run observability validator with Docker access | Prometheus config/rules, Alertmanager config, dashboards, compose config, and helper smoke checks pass | invalid alert/dashboard config | validation | Phase 8 | PASSED |
+| PM-100 | Dedicated realtime metrics static validation | Run backend metrics tests and Prometheus rule validation | Outbox, realtime auth/notification, payload-too-large, command ACK, fallback polling, and media/cache metrics are registered and rule-tested | metric missing from scrape output or promtool failure | unit/validation | Phase 8 | PASSED |
+| PM-101 | Dedicated realtime alert threshold tuning | Run on-prem QA load/chaos traffic and inspect alert firing/noise | Alerts fire on real outbox lag, payload rejection, ACK failures, media/cache failures, and auth failure spikes without unacceptable noise | alert misses incident or creates noisy false positives | load/chaos/manual | Phase 8 | BLOCKED |
 
 ## Platform State Permutations
 
@@ -86,6 +89,6 @@ Current gate: Phase 8 tooling/docs are conditionally approved. Load model dry-ru
 | PM-120 | Electron foreground WS | Electron player running normally | WS connected when enabled; REST pull remains authoritative | WS carries snapshot/media | e2e | Phase 4 | BLOCKED |
 | PM-121 | Electron WS disabled | Realtime flag off | Current heartbeat/polling behavior works | publish/default/emergency no longer reach player | unit/e2e | Phase 4 | PASSED |
 | PM-122 | Android TV future contract | Contract fixture for Android TV capabilities | Backend accepts HELLO/capabilities and REST workflow | contract requires Electron-only fields | contract/manual | Phase 9 | BLOCKED |
-| PM-123 | Android mobile background future | Push wake-up design with REST pull | Push only wakes; app fetches authoritative state | push contains full command/snapshot/media | contract/manual | Phase 9 | BLOCKED |
-| PM-124 | iOS/iPadOS future background | APNs wake-up design with restricted background runtime | App handles delayed push by desired-state reconciliation | state relies on persistent background WS | contract/manual | Phase 9 | BLOCKED |
+| PM-123 | Android mobile background future | Air-gapped baseline with foreground/kiosk WebSocket plus REST/polling; optional private push only if provided | Wake path is notification-only; app fetches authoritative state; deployment works without public FCM | push contains full command/snapshot/media or public push is required in air-gapped mode | contract/manual | Phase 9 | BLOCKED |
+| PM-124 | iOS/iPadOS future background | Air-gapped baseline without public APNs; optional private push/non-air-gapped exception only if approved | App handles delayed/no push by desired-state reconciliation and polling fallback where platform allows | state relies on persistent background WS or public APNs is mandatory | contract/manual | Phase 9 | BLOCKED |
 | PM-125 | Mixed player versions | Old polling-only Electron plus new realtime Electron | Both receive commands via supported paths | backend requires realtime-only behavior | e2e/load | Phase 7 | BLOCKED |

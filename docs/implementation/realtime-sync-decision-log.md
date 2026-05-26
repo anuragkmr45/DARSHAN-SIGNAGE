@@ -1,6 +1,6 @@
 # Enterprise Realtime Sync Decision Log
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 Updated by: Codex
 
 ## ADR-0001 - WebSocket Notification Only
@@ -21,9 +21,9 @@ Updated by: Codex
 
 ## ADR-0003 - Media Never Over WebSocket
 
-- Context: Media payloads are large and should use HTTP/object storage/CDN/cache.
+- Context: Media payloads are large and should use HTTP/on-prem object storage/MinIO/internal S3/file-server/cache.
 - Decision: WebSocket and command payloads must never carry media bytes.
-- Consequences: Notifications stay small; CDN/object storage remains the egress layer.
+- Consequences: Notifications stay small; on-prem media/object storage remains the egress layer.
 - Alternatives considered: embedding small media in commands.
 - Follow-up tasks: RT-0601, RT-0801.
 
@@ -62,9 +62,9 @@ Updated by: Codex
 ## ADR-0008 - Future Push Adapter For Mobile Background
 
 - Context: iOS/Android background WebSockets are unreliable or restricted.
-- Decision: Future FCM/APNs adapters consume the same notification outbox as WebSocket dispatcher.
-- Consequences: Mobile players use push as wake-up and REST for truth.
-- Alternatives considered: mobile background WebSocket only.
+- Decision: Future push adapters are optional and environment-specific. In fully air-gapped on-prem deployments, public FCM/APNs cannot be assumed. Android TV/signage and other kiosk players must rely on foreground WebSocket plus REST and polling fallback unless an approved on-prem/private push mechanism exists.
+- Consequences: Mobile players still use wake-up only and REST for truth, but Phase 9 must not require public cloud push as baseline.
+- Alternatives considered: mobile background WebSocket only; public FCM/APNs as mandatory baseline.
 - Follow-up tasks: RT-0902.
 
 ## ADR-0009 - Payload Limits
@@ -119,7 +119,7 @@ Updated by: Codex
 
 - Context: The backend already has Socket.IO infrastructure for CMS/user realtime namespaces. Phase 3 needed a backend device notification gateway without implementing Electron realtime yet and without adding a second WebSocket runtime.
 - Decision: Reuse Socket.IO with an isolated `/device` namespace for device wake notifications. The gateway authenticates device sockets separately from CMS namespaces, accepts `HELLO`, and emits notification-only events sourced from `command_outbox`.
-- Consequences: Phase 3 avoids another network stack and can reuse existing `/socket.io/` proxy behavior. Multi-instance production requires sticky sessions, broker-backed routing, or a distributed connection registry because the Phase 3 registry is in-memory. Socket.IO messages remain wake metadata only; REST remains authoritative.
+- Consequences: Phase 3 avoids another network stack and can reuse existing `/socket.io/` proxy behavior. Multi-instance production requires Valkey-backed fanout/distributed coordination because the Phase 3 registry is in-memory. Socket.IO messages remain wake metadata only; REST remains authoritative.
 - Alternatives considered: raw `ws`; direct emit from command creation; using CMS notification namespace for devices.
 - Follow-up tasks: RT-0401, RT-0402, RT-0701, RT-0801.
 
@@ -158,15 +158,31 @@ Updated by: Codex
 ## ADR-0020 - Phase 7 Uses Feature-Flagged QA/Prod Hardening Before Load Testing
 
 - Context: Phases 1 through 6 added command lifecycle, outbox/desired state, notification-only backend gateway, Electron wake-up handling, CMS delivery visibility, and media/cache failure reporting. Before load/chaos testing or production canary, QA/prod deployments need explicit env defaults, proxy rules, canary order, and rollback steps.
-- Decision: Phase 7 hardening is deployment-control only. Realtime WebSocket and outbox dispatch remain disabled by default for production. QA/prod rollout must use documented flags, explicit `/api/v1/` REST and `/socket.io/` notification transport proxying, static asset validation, canary enablement, and feature-flag rollback. Multi-instance production must decide sticky sessions or distributed routing/fanout before full-fleet realtime enablement.
+- Decision: Phase 7 hardening is deployment-control only. Realtime WebSocket and outbox dispatch remain disabled by default for production. On-prem QA/prod rollout must use documented flags, explicit `/api/v1/` REST and `/socket.io/` notification transport proxying, static asset validation, canary enablement, and feature-flag rollback. Multi-instance production must use Valkey-backed fanout/distributed coordination before full-fleet realtime enablement.
 - Consequences: Phase 8 can focus on evidence-producing load, chaos, reconnect storm, emergency fanout, and production readiness validation instead of inventing deployment controls. Production enablement remains blocked until QA runtime smoke, canary rollback drill, Node 20 rerun, migration review, metrics/alerts, and CMS lint waiver/fix are complete.
-- Alternatives considered: start Phase 8 load testing without deployment hardening; enable production realtime with code defaults; implement Redis/NATS or mobile adapters in Phase 7.
+- Alternatives considered: start Phase 8 load testing without deployment hardening; enable production realtime with code defaults; implement Valkey fanout or mobile adapters in Phase 7.
 - Follow-up tasks: RT-0701, RT-0702, RT-0703, RT-0704, RT-0801, RT-0802, RT-0803.
 
 ## ADR-0021 - Phase 8 Blocks Production And Mobile Until Runtime Evidence Exists
 
-- Context: Phase 8 can create local load models, chaos plans, readiness checklists, and observability validation, but the local Codex session does not have a QA/staging deployment target, player credential pool, or production-like proxy/broker topology for real 1k/10k/50k execution.
+- Context: Phase 8 can create local load models, chaos plans, readiness checklists, and observability validation, but the local Codex session does not have an on-prem QA deployment target, player credential pool, or production-like proxy/Valkey topology for real 1k/10k/50k execution.
 - Decision: Phase 8 tooling/docs may be conditionally approved after static validation, load model dry-runs, observability asset validation, and compile gates. Production readiness remains `NOT_PRODUCTION_READY`, and Phase 9 mobile/TV adapters remain blocked until real QA load/chaos/canary evidence is accepted or explicitly deferred by a human approver.
-- Consequences: The project avoids treating modeled capacity as production evidence. The architecture remains stable and rollback-safe while QA/staging runtime tests are prepared.
+- Consequences: The project avoids treating modeled capacity as production evidence. The architecture remains stable and rollback-safe while on-prem QA runtime tests are prepared.
 - Alternatives considered: mark production ready from formulas only; start Phase 9 mobile adapters before fleet/runtime evidence; implement runtime metric or load-test fixes without measured bottlenecks.
 - Follow-up tasks: RT-0801, RT-0802, RT-0803, RT-0804, RT-0901.
+
+## ADR-0022 - Air-Gapped On-Prem Realtime Fanout Uses Valkey, Not Sticky-Session-Only
+
+- Context: All dev, QA, and production deployments are expected to run on an air-gapped on-prem/internal network. The current Phase 3 device connection registry is process-local, so an API node that creates a command may not be the same backend node that owns the target player's socket. Sticky sessions only keep a connected Socket.IO session on one node; they do not route notifications from another API node to that socket-owning node.
+- Decision: For on-prem multi-instance production, use Valkey-backed cross-node realtime fanout/distributed coordination. Use Valkey Pub/Sub for non-durable wake notification fanout while DB `device_commands`, `command_outbox`, `schedule_snapshots`, and `device_desired_state` remain durable source of truth. Do not use sticky-session-only as the production architecture. Consider Valkey Streams later only if broker-side persisted fanout is explicitly required.
+- Alternatives considered:
+  1. Sticky-session-only: rejected for multi-instance production because it does not route wake notifications across nodes.
+  2. Valkey Pub/Sub plus DB outbox: selected because the DB remains durable truth and Pub/Sub only wakes the gateway node.
+  3. Valkey Streams plus DB outbox: deferred; useful only if the team wants broker-side persisted fanout in addition to DB durability.
+  4. NATS: not selected for this on-prem baseline; Valkey is preferred for operational simplicity and compatibility with Redis-like clients.
+  5. Direct DB polling only: safe but higher latency and higher steady-state polling load.
+- Consequences: `VALKEY_URL` is the preferred new env var. If current code uses `REDIS_URL`, docs treat it as a backward-compatible alias until code migrates to `VALKEY_URL`. Valkey outage must not block schedule/default/emergency delivery because polling/heartbeat and DB outbox remain mandatory. Media and full snapshots must never go over Valkey.
+- Implementation tasks: Valkey bus config/adapter, outbox dispatcher fanout, gateway node subscriber, device-node registry, and local metrics were implemented as a Phase 8 backfill on 2026-05-25. Remaining tasks are real on-prem node A/node B fanout, Valkey outage fallback, HA topology validation, and alert threshold tuning.
+- Rollout plan: keep realtime disabled, validate REST/polling fallback, validate Valkey connectivity, run on-prem QA node A/node B fanout, run Valkey outage fallback, then canary enable backend realtime and player realtime.
+- Rollback plan: set `OUTBOX_DISPATCH_ENABLED=false`, set `REALTIME_SYNC_ENABLED=false`, set `HEXMON_REALTIME_SYNC_ENABLED=false`, leave Valkey unused, and rely on REST/polling/heartbeat with DB source of truth.
+- Follow-up tasks: Phase 8B on-prem runtime evidence, future Valkey adapter implementation before multi-instance production, Phase 9 remains blocked.

@@ -1,6 +1,6 @@
 # Enterprise Realtime Sync Implementation Runbook
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 Updated by: Codex
 
 ## Architecture Rules
@@ -13,6 +13,10 @@ Updated by: Codex
 - Do not mark a phase approved without evidence.
 - Do not change QA/prod behavior without feature flag or rollout note.
 - Do not implement later phases until the current phase approval state permits it.
+- Treat dev, QA, and production realtime rollout as air-gapped on-prem unless a human approver records an exception.
+- Prefer Valkey for multi-instance realtime fanout; do not approve sticky-session-only production realtime.
+- Do not send media, full snapshots, screenshots, logs, or PoP batches over Valkey.
+- Do not require public FCM/APNs/cloud push for fully air-gapped mobile/TV strategy.
 
 ## Starting A Phase
 
@@ -71,8 +75,9 @@ Before adding a new realtime behavior, confirm:
 - DB is still the source of truth.
 - WebSocket only carries wake/notification metadata.
 - Player still uses REST pull for commands/state.
-- Media is still HTTP/object storage/CDN/cache only.
+- Media is still HTTP/on-prem object storage/MinIO/internal S3/file-server/cache only.
 - Polling/heartbeat still recover missed notifications.
+- Valkey fanout, if enabled, carries wake notifications only and DB outbox remains durable truth.
 
 ## Handoff Notes
 
@@ -156,6 +161,7 @@ Phase 8 may add or update:
 - production readiness checklists,
 - QA canary evidence templates,
 - metrics/alert validation notes,
+- additive observability counters/gauges and Prometheus rules for existing backend paths,
 - static validation scripts,
 - handoff/status docs.
 

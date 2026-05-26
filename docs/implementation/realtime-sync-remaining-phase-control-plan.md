@@ -45,11 +45,11 @@ The sections below are a control plan only. They do not approve implementation.
 
 - Objective: Add authenticated notification-only player gateway and outbox dispatcher.
 - Non-goals: No full snapshot/media over WS, no player adaptive polling yet, no mobile push.
-- Prerequisites: Phase 2 conditionally approved; WS runtime decision. Broker/topology decision is deferred for multi-instance production.
+- Prerequisites: Phase 2 conditionally approved; WS runtime decision. Valkey fanout/topology implementation is required before multi-instance production.
 - Files likely to change: `signhex-server/src/realtime/*`, `src/jobs/*`, `src/config/index.ts`, env examples, observability files.
 - DB migrations required: optional `device_realtime_sessions` if persistent session audit is needed; otherwise none beyond outbox.
 - APIs required: WebSocket HELLO/HELLO_ACK protocol, health/metrics endpoints.
-- Env vars required: `REALTIME_SYNC_ENABLED`, `REALTIME_DEVICE_NAMESPACE`, `WS_NOTIFICATION_MAX_BYTES`, `OUTBOX_DISPATCH_ENABLED`, `OUTBOX_DISPATCH_BATCH_SIZE`, `OUTBOX_DISPATCH_INTERVAL_MS`, `OUTBOX_DISPATCH_LEASE_MS`, `REDIS_URL` or `NATS_URL` later if selected.
+- Env vars required: `REALTIME_SYNC_ENABLED`, `REALTIME_DEVICE_NAMESPACE`, `WS_NOTIFICATION_MAX_BYTES`, `OUTBOX_DISPATCH_ENABLED`, `OUTBOX_DISPATCH_BATCH_SIZE`, `OUTBOX_DISPATCH_INTERVAL_MS`, `OUTBOX_DISPATCH_LEASE_MS`, `REALTIME_BUS_PROVIDER=valkey`, `VALKEY_URL`, `VALKEY_MODE`, `VALKEY_NAMESPACE`, `VALKEY_TLS_ENABLED`, and `VALKEY_AUTH_REQUIRED` before multi-instance production.
 - Backend work: auth, connection registry, duplicate connection handling, payload validation, outbox dispatch, metrics.
 - Electron work: none in this phase.
 - CMS work: none.
@@ -161,7 +161,7 @@ The sections below are a control plan only. They do not approve implementation.
 
 - Objective: Validate scale, failure recovery, and production readiness.
 - Non-goals: No new product features.
-- Prerequisites: QA deployment stable.
+- Prerequisites: on-prem QA deployment stable.
 - Status: Implemented at tooling/docs level and conditionally approved on 2026-05-24; production readiness is not approved.
 - Files changed: load model script, Phase 8 asset validator, load/chaos plan, production readiness checklist, QA canary evidence template, metrics/alert validation, Phase 8 handoff, task/status docs.
 - DB migrations required: none in Phase 8 local pass; possible index/partitioning migrations may be required later only if real load tests prove a bottleneck.
@@ -171,26 +171,26 @@ The sections below are a control plan only. They do not approve implementation.
 - Electron work: none in Phase 8 local pass; performance/backoff fixes only if real test evidence requires.
 - CMS work: none in Phase 8 local pass; status page performance fixes only if needed.
 - Platform/docs work: load/chaos reports and production checklist completed at template/tooling level.
-- Tests required: static validator, load model dry-runs, observability asset validation, product builds passed. Real 1k/10k/50k simulated players, command fanout, emergency fanout, and PoP flood remain required in QA/staging.
-- Load/chaos tests required: defined and blocked by missing QA/staging target.
+- Tests required: static validator, load model dry-runs, observability asset validation, product builds passed. Real 1k/10k/50k simulated players, command fanout, emergency fanout, and PoP flood remain required in on-prem QA.
+- Load/chaos tests required: defined and blocked by missing on-prem QA target.
 - QA/prod rollout notes: production canary only after approval.
 - Rollback notes: do not expand production if load/chaos gates fail.
 - Acceptance criteria: documented capacity, alerts, dashboards, rollback evidence. Met only for local models/templates; runtime evidence remains required.
 - Approval gate: production readiness review remains blocked.
-- Risks: DB write pressure, reconnect storm, object storage/CDN egress, PoP volume.
+- Risks: DB write pressure, reconnect storm, on-prem object storage/media egress, Valkey fanout outage, PoP volume.
 - Edge cases: emergency during reconnect storm, publish storm during DB failover, player offline for days.
 - Estimated complexity: high.
 
 ## Phase 9: Mobile/TV Player Contract Adapters
 
 - Objective: Prepare future platform adapters using the same backend contract.
-- Non-goals: No mobile push before Electron/backend realtime is stable.
+- Non-goals: No mobile/TV adapters before Phase 8 runtime evidence is accepted. No public push dependency in fully air-gapped deployments.
 - Prerequisites: Electron/backend contract stable and production-proven.
 - Files likely to change: player contract docs, mobile/TV strategy docs, optional shared fixtures.
 - DB migrations required: none unless push token registration is added.
 - APIs required: optional push token registration later; same REST/player contract otherwise.
-- Env vars required: `PUSH_NOTIFICATIONS_ENABLED`, `FCM_PROJECT_ID`, `APNS_TEAM_ID` when push is implemented.
-- Backend work: contract fixtures and later push outbox adapters.
+- Env vars required: optional private-push or non-air-gapped exception variables only if an approved wake mechanism exists.
+- Backend work: contract fixtures and later optional wake outbox adapters.
 - Electron work: none.
 - CMS work: platform capability visibility later.
 - Platform/docs work: Android TV, Android, iOS/iPadOS, tvOS capability matrix.

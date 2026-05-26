@@ -4,7 +4,7 @@
 #
 # Architecture guardrails:
 # - /api/v1/ is authoritative REST.
-# - /socket.io/ is notification-only WebSocket/Engine.IO transport.
+# - /socket.io/ is notification-only WebSocket/Engine.IO transport on the on-prem/internal network.
 # - Do not cache device command, desired-state, heartbeat, ACK, or status APIs.
 # - Do not send snapshots, media, screenshots, logs, or PoP over WebSocket.
 
@@ -37,6 +37,7 @@ location /socket.io/ {
 }
 
 # Multi-instance note:
-# Phase 3 uses a process-local device connection registry. Multi-instance deployments
-# require sticky sessions for /socket.io/ or a distributed registry/fanout layer before
-# full-fleet realtime enablement.
+# Phase 3 uses a process-local device connection registry. Multi-instance on-prem
+# deployments require Valkey-backed fanout/distributed coordination before full-fleet
+# realtime enablement. Sticky sessions are optional only for Socket.IO HTTP polling
+# compatibility and must not be the only production routing/fanout mechanism.

@@ -141,3 +141,103 @@ groups:
         annotations:
           summary: "Offline player ratio is elevated"
           description: "More than 25% of the known player fleet has been marked OFFLINE for 15 minutes."
+
+      - alert: SignhexRealtimeOutboxLagHigh
+        expr: signhex_server_command_outbox_oldest_pending_age_seconds > 120
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Realtime outbox lag is elevated"
+          description: "The oldest pending realtime outbox row has been waiting for more than 2 minutes."
+
+      - alert: SignhexRealtimeOutboxDispatchFailures
+        expr: signhex:realtime_outbox_dispatch_failure_rate_per_second > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Realtime outbox dispatch failures detected"
+          description: "The outbox dispatcher has recorded failed notification dispatch attempts."
+
+      - alert: SignhexRealtimePayloadTooLarge
+        expr: signhex:realtime_payload_too_large_rate_per_second > 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Realtime notification payload rejected"
+          description: "One or more websocket notification payloads exceeded the configured hard limit."
+
+      - alert: SignhexRealtimeValkeyPublishFailures
+        expr: signhex:realtime_valkey_publish_failure_rate_per_second > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Valkey realtime fanout publish failures detected"
+          description: "Valkey wake notification fanout is failing. DB outbox, REST, polling, and heartbeat fallback must remain active."
+
+      - alert: SignhexRealtimeValkeyFallbackHigh
+        expr: signhex:realtime_valkey_fallback_rate_per_second > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Realtime fanout fallback rate is elevated"
+          description: "Players are relying on durable DB/REST/polling fallback because Valkey fanout is unavailable or device-node mappings are missing."
+
+      - alert: SignhexRealtimeAuthFailuresHigh
+        expr: sum by (site) (rate(signhex_server_device_realtime_auth_total{result="failure"}[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Realtime device authentication failures are elevated"
+          description: "Device websocket authentication failures exceed 0.5 attempts per second."
+
+      - alert: SignhexCommandAckFailuresHigh
+        expr: signhex:device_command_ack_failure_ratio > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Device command ACK failures are elevated"
+          description: "More than 10% of command acknowledgements are failing or returning error."
+
+      - alert: SignhexDeviceCommandDeadLettersPresent
+        expr: sum by (site) (signhex_server_device_commands_rows{status=~"DEAD_LETTER|EXPIRED"}) > 0
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Terminal failed device commands are present"
+          description: "Device commands have reached DEAD_LETTER or EXPIRED status and need operator review."
+
+      - alert: SignhexMediaCacheFailuresHigh
+        expr: signhex:media_cache_failure_rate_per_second > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Media/cache failures are elevated"
+          description: "Players are reporting ERROR or CRITICAL media/cache failures above the warning threshold."
+
+      - alert: SignhexCriticalMediaCacheReportsUnresolved
+        expr: sum by (site) (signhex_server_media_cache_reports_unresolved{severity="CRITICAL"}) > 0
+        for: 15m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Critical media/cache failures remain unresolved"
+          description: "At least one critical player media/cache failure report is still open."

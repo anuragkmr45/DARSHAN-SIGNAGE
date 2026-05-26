@@ -1,6 +1,6 @@
 # Enterprise Realtime Sync Test Plan
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 Updated by: Codex
 Status: Phase 5 CMS command/delivery status verification updated
 
@@ -10,15 +10,15 @@ Latest Phase 1 handoff: `signhex-platform/docs/implementation/realtime-sync-phas
 
 | Command | Result | Evidence | Follow-up |
 |---|---|---|---|
-| `cd signhex-server && npm run build` | Passed | TypeScript build exited 0 on 2026-05-24 under Node `v24.12.0` | Re-run under Node `>=20 <21` before QA signoff. |
+| `cd signhex-server && npm run build` | Passed | TypeScript build exited 0 on 2026-05-24 under Node `v24.12.0` | Re-run under Node `>=20 <21` before on-prem QA signoff. |
 | `cd signhex-server && DRIZZLE_STRICT=false npm run db:push` | Passed | Applied schema to local Docker Postgres after sandboxed connection was blocked by `EPERM` and rerun with escalation | Local test setup only; use reviewed migrations for QA/prod. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed | 11 passing on 2026-05-24 against local Docker Postgres | Re-run under Node `>=20 <21` before QA signoff. |
+| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed | 11 passing on 2026-05-24 against local Docker Postgres | Re-run under Node `>=20 <21` before on-prem QA signoff. |
 | `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed | 2 passing on 2026-05-24; verifies refresh creation history | Keep as Phase 1 regression coverage. |
 | `cd signhex-server && npx vitest run src/routes/settings.test.ts` | Passed | 5 passing on 2026-05-24 in isolated run | Keep isolated unless DB test isolation is added. |
 | `cd signhex-server && npx vitest run src/routes/emergency.test.ts` | Passed | 2 passing on 2026-05-24 in isolated run | Keep isolated unless DB test isolation is added. |
 | `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts src/routes/settings.test.ts src/routes/emergency.test.ts` | Failed due shared DB interference | 8 passed, 1 emergency assertion failed; isolated emergency rerun passed | Do not use parallel DB-mutating file run as Phase 1 approval evidence until isolation is added. |
-| `cd signage-screen && npm run build` | Passed | Main build, renderer build, bundle, and asset copy exited 0 on 2026-05-24 | Re-run under Node `>=20 <21` before QA signoff. |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Passed | 14 passing on 2026-05-24, including `RESYNC` coverage | Re-run under Node `>=20 <21` before QA signoff. |
+| `cd signage-screen && npm run build` | Passed | Main build, renderer build, bundle, and asset copy exited 0 on 2026-05-24 | Re-run under Node `>=20 <21` before on-prem QA signoff. |
+| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Passed | 14 passing on 2026-05-24, including `RESYNC` coverage | Re-run under Node `>=20 <21` before on-prem QA signoff. |
 
 ## Phase 1 Required Rerun
 
@@ -38,7 +38,7 @@ Latest Phase 2 backend verification, run on 2026-05-24:
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signhex-server && npm run build` | Passed | Run under Node `v24.12.0`; rerun under Node `>=20 <21` before QA signoff. |
+| `cd signhex-server && npm run build` | Passed | Run under Node `v24.12.0`; rerun under Node `>=20 <21` before on-prem QA signoff. |
 | `cd signhex-server && DRIZZLE_STRICT=false npm run db:push` | Passed after escalation | Local Docker Postgres only; sandboxed attempt hit `connect EPERM`. Production must use reviewed migration. |
 | `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 12 tests | Includes desired-state endpoint and command/outbox assertions. |
 | `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests | Includes refresh command desired-state/outbox assertions. |
@@ -59,7 +59,7 @@ Latest Phase 3 backend verification, run on 2026-05-24:
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signhex-server && npm run build` | Passed | Run under Node `v24.12.0`; rerun under Node `>=20 <21` before QA signoff. |
+| `cd signhex-server && npm run build` | Passed | Run under Node `v24.12.0`; rerun under Node `>=20 <21` before on-prem QA signoff. |
 | `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` | Passed, 4 tests | Covers device Socket.IO auth/HELLO, notification-only `COMMAND_AVAILABLE`, disconnected-device retry, and bad credential rejection. |
 | `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 12 tests | Confirms REST polling/heartbeat command path still works after gateway/dispatcher wiring. |
 | `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests | Confirms Phase 2 command/outbox write path still works after dispatcher implementation. |
@@ -67,9 +67,26 @@ Latest Phase 3 backend verification, run on 2026-05-24:
 Required before QA/prod rollout:
 
 - Rerun Phase 1 through Phase 3 backend tests under Node `>=20 <21`.
-- Validate Socket.IO `/device` namespace through the QA reverse proxy/load balancer.
+- Validate Socket.IO `/device` namespace through the on-prem QA reverse proxy/load balancer.
+- Validate Valkey connectivity, Pub/Sub fanout, node A/node B notification routing, and Valkey outage fallback before multi-instance production.
 - Add dedicated realtime/outbox metrics for active device connections, auth failures, notification size rejects, outbox lag, dispatch attempts, and failed rows.
 - Run reconnect storm, emergency fanout, and fallback polling tests before production canary.
+
+Phase 8 Valkey fanout backfill evidence from 2026-05-25:
+
+| Command | Result | Notes |
+|---|---|---|
+| `cd signhex-server && npm run build` | Passed | Run under Node `v24.12.0`; Node 20 rerun remains required. |
+| `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts` | Passed, 8 tests | Covers memory/Valkey bus behavior, alias resolution, payload max enforcement, registry behavior, node missing fallback, and local fanout. |
+| `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts` | Passed, 19 tests | Focused backend realtime/metrics/outbox-dispatch regression. |
+| `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests | Confirms refresh/outbox path still works. |
+| `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Passed, 2 tests | Local Docker Valkey smoke; first attempt was blocked by sandbox `EPERM`, escalated rerun passed. |
+
+Still required before production:
+
+- real on-prem node A/node B backend/player fanout
+- Valkey outage fallback with real players/simulators
+- on-prem Valkey HA topology validation
 
 ## Phase 4 Test Evidence
 
@@ -77,7 +94,7 @@ Latest Phase 4 player verification, run on 2026-05-24:
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signage-screen && npm run build` | Passed | Run under Node `v24.12.0`; rerun under Node `>=20 <21` before QA signoff. |
+| `cd signage-screen && npm run build` | Passed | Run under Node `v24.12.0`; rerun under Node `>=20 <21` before on-prem QA signoff. |
 | `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/realtime-service.test.ts --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Passed, 18 tests | Covers `HELLO`/`HELLO_ACK`, notification-only REST pulls, state-bearing WS payload rejection, adaptive safety polling, command idempotency regressions, and heartbeat regressions. |
 | `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` | Passed, 4 tests | Covers backend `/device` auth/HELLO, notification-only dispatch, no-connection retry, and bad credential rejection. |
 | `cd signhex-server && npx tsx /private/tmp/signhex-phase4-raw-ws-smoke.ts` | Passed | Temporary raw WebSocket smoke completed `/device` auth and `HELLO_ACK`; response had no `snapshot` or `media` fields. |
@@ -85,7 +102,7 @@ Latest Phase 4 player verification, run on 2026-05-24:
 Required before Phase 5 approval or QA rollout:
 
 - Run full packaged backend/player integration smoke with Phase 3 gateway enabled.
-- Validate Socket.IO `/device` through QA reverse proxy/load balancer with idle timeout and sticky-session settings.
+- Validate Socket.IO `/device` through on-prem QA reverse proxy/load balancer with idle timeout, selected transport, and sticky-session settings only if Socket.IO HTTP polling is enabled.
 - Rerun Phase 4 build/tests under Node `>=20 <21`.
 - Keep `HEXMON_REALTIME_SYNC_ENABLED=false` until integration smoke passes.
 
@@ -95,7 +112,7 @@ Latest Phase 5 backend/CMS verification, run on 2026-05-24:
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signhex-server && npm run build` | Passed | Run under Node `v24.12.0`; rerun under Node `>=20 <21` before QA signoff. |
+| `cd signhex-server && npm run build` | Passed | Run under Node `v24.12.0`; rerun under Node `>=20 <21` before on-prem QA signoff. |
 | `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 13 tests | Includes `GET /api/v1/screens/:id/delivery-status` aggregation coverage. |
 | `cd signhex-nexus-core && npm ci` | Passed after escalation | Installed lockfile dependencies; reported 18 existing audit findings. |
 | `cd signhex-nexus-core && npm run build` | Passed | Vite production build succeeded; emitted existing large chunk and browser data warnings. |
@@ -221,7 +238,7 @@ Metrics to capture:
 
 - restart backend API during publish
 - restart outbox dispatcher during emergency
-- stop Redis/NATS if selected
+- stop Valkey if selected
 - temporarily block DB
 - restart WebSocket gateway
 - disconnect player during publish and reconnect later
@@ -288,16 +305,17 @@ Phase 7 tests still required before full QA approval:
 
 - Backend, Electron, and CMS build/focused test rerun under Node `>=20 <21`.
 - QA `/api/v1/` reverse-proxy smoke.
-- QA `/socket.io/` upgrade, idle timeout, origin policy, and sticky-session smoke.
-- Packaged backend/player realtime smoke through QA proxy.
-- QA canary rollback drill with `OUTBOX_DISPATCH_ENABLED=false`, `REALTIME_SYNC_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false`.
+- On-prem QA `/socket.io/` upgrade, idle timeout, origin policy, selected transport, and sticky-session smoke only if Socket.IO HTTP polling is enabled.
+- On-prem Valkey connectivity/fanout smoke and node A/node B wake notification routing.
+- Packaged backend/player realtime smoke through on-prem QA proxy.
+- on-prem QA canary rollback drill with `OUTBOX_DISPATCH_ENABLED=false`, `REALTIME_SYNC_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false`.
 - CMS Delivery tab browser visual/E2E smoke.
 - Migration review for `0030`, `0031`, and `0032` on QA-sized data.
 - `media_cache_reports` retention/partitioning verification and metrics/alert review.
 
 ## Phase 8 Test Evidence
 
-Phase 8 added validation/readiness tooling and documents. It did not add runtime source code, migrations, WebSocket protocol changes, Electron changes, CMS changes, or mobile adapters.
+Phase 8 added validation/readiness tooling, documents, and additive backend observability metrics. It did not add migrations, WebSocket protocol changes, Electron realtime changes, CMS UI changes, source-of-truth changes, or mobile adapters.
 
 Latest Phase 8 focused evidence from 2026-05-24:
 
@@ -306,13 +324,18 @@ Latest Phase 8 focused evidence from 2026-05-24:
 - `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json`: passed; modeled total RPS `566.67`.
 - `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json`: passed; modeled total RPS `12000`.
 - `bash signhex-platform/scripts/verify/validate-observability-assets.sh`: passed after Docker escalation and image pulls; Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed.
+- `cd signhex-server && npx vitest run src/observability/metrics.test.ts`: passed; 5 tests.
+- `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts`: passed; 4 tests.
+- `cd signhex-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts`: passed; 1 test.
+- `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts`: passed; 2 tests.
+- `cd signhex-nexus-core && npm run lint`: passed.
 - `cd signhex-server && npm run build`: passed under local Node `v24.12.0`.
 - `cd signage-screen && npm run build`: passed under local Node `v24.12.0`.
 - `cd signhex-nexus-core && npm run build`: passed under local Node `v24.12.0` with existing chunk-size warnings.
 
 Phase 8 tests still required before production readiness:
 
-- Real 1k, 10k, and 50k player load execution in QA/staging, or documented lower capacity cap.
+- Real 1k, 10k, and 50k player load execution in on-prem QA, or documented lower capacity cap.
 - WebSocket reconnect storm test.
 - Emergency start/clear fanout under load.
 - Fallback polling load with WebSocket disabled.
@@ -321,14 +344,15 @@ Phase 8 tests still required before production readiness:
 - Object storage/CDN slow or unavailable scenario.
 - Player offline during publish and reconnect after command expiry.
 - Media URL expiry and disk-full/cache-failure scenarios.
-- QA canary rollback drill.
-- Dedicated realtime/outbox/media-cache/fallback metrics and alert rule tests.
+- on-prem QA canary rollback drill.
+- QA traffic validation and threshold tuning for dedicated realtime/outbox/media-cache/fallback metrics and alert rules.
+- Node 20 rerun for backend, player, CMS, and CMS lint.
 
 ## Phase 8 Runtime Evidence Attempt
 
 Latest runtime-evidence attempt from 2026-05-24:
 
-- QA/staging endpoint discovery: blocked; no QA/STAGING/SIGNHEX/HEXMON/REALTIME/BACKEND/CMS endpoint variables were present in the local environment, except `COMMAND_MODE`.
+- on-prem QA endpoint discovery: blocked; no ONPREM_QA/SIGNHEX/HEXMON/REALTIME/BACKEND/CMS endpoint variables were present in the local environment, except `COMMAND_MODE`.
 - Packaged QA server health check: blocked; `postgres` service is not running.
 - Packaged QA CMS health check: blocked; returned HTTP 404.
 - Local backend health check at `http://127.0.0.1:3000/api/v1/health`: blocked; no listener on port 3000.
@@ -350,7 +374,7 @@ Evidence file: `signhex-platform/docs/implementation/realtime-sync-phase-8-runti
 - cache/CDN load test passed
 - operator UI shows delivery failures
 - runbooks updated
-- QA signoff recorded
+- on-prem QA signoff recorded
 
 ## Rollback Tests
 

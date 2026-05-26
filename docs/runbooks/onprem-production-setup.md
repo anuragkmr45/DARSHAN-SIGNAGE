@@ -21,6 +21,7 @@ This guide assumes:
 - CMS served at `https://<cms-ip>`
 - backend and player traffic on `http://<backend-ip>:3000`
 - all hosts can reach each other over the same Wi-Fi, LAN, or private routed network
+- no public internet, public DNS, public CDN, public object storage, public broker, FCM, or APNs dependency. Valkey, if used, is an internal on-prem service
 - production layout:
   - `production/data/`
   - `production/backend/`
@@ -100,6 +101,7 @@ Confirm these paths before deployment:
 - VM2 Prometheus must reach VM1, VM2, and VM3 exporter ports
 - VM3 nginx must reach local Grafana on the configured upstream port
 - when realtime sync is enabled, player devices or the CMS proxy path must reach the backend `/socket.io/` endpoint with WebSocket upgrade support
+- when multiple backend instances are used for realtime sync, every backend instance must reach the on-prem Valkey service for cross-node wake notification fanout
 
 When `OBSERVABILITY_PRIVATE_HOST` is set:
 
@@ -130,6 +132,7 @@ Collect these before you build the bundle:
   - `BACKEND_IMAGE_ARCHIVE`
   - `CMS_BUNDLE_SOURCE`
 - `PLAYER_ARTIFACTS_DIR`
+- `VALKEY_URL` and Valkey HA topology inputs before multi-instance realtime enablement
 - optional provided cert files if you are not using generated CMS TLS
 
 No new bundle environment variables are required for the API/worker split. The generated backend compose file starts both containers automatically. `HEXMON_PROCESS_ROLE` is available only as an optional manual override when you run the backend image outside the generated compose files.
@@ -142,7 +145,15 @@ docs/environments/production/realtime-sync.env.example
 deploy/shared/realtime-sync-nginx.socketio.conf.template
 ```
 
-Keep `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false` until QA proxy smoke, canary rollback, migration review, and production readiness review are complete.
+Keep `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false` until on-prem QA proxy smoke, Valkey fanout smoke, canary rollback, migration review, and production readiness review are complete.
+
+Production multi-instance realtime rule:
+
+- Use Valkey-backed fanout; do not approve sticky-session-only production realtime.
+- Sticky sessions are allowed only as a load-balancer compatibility setting when Socket.IO HTTP polling transport is enabled.
+- Prefer validated WebSocket-only transport for device realtime.
+- DB `device_commands`, `command_outbox`, `schedule_snapshots`, and `device_desired_state` remain source of truth.
+- Valkey Pub/Sub is non-durable wake fanout only; polling and heartbeat fallback remain mandatory.
 
 `PLAYER_ARTIFACTS_DIR` must contain the Windows and Ubuntu player installers to stage into `production/electron/`.
 

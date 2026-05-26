@@ -1,8 +1,8 @@
 # Scaling And Payload Limits
 
-Last updated: 2026-05-23
+Last updated: 2026-05-25
 Updated by: Codex
-Status: Phase 0 sizing baseline
+Status: Phase 8 Valkey fanout backfill implemented locally; on-prem capacity evidence blocked
 
 ## Current Polling Model
 
@@ -21,7 +21,11 @@ node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid
 node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json
 ```
 
-The script is a capacity model, not a substitute for real QA/staging load execution.
+The script is a capacity model, not a substitute for real air-gapped on-prem QA load execution.
+
+Valkey is not a payload carrier. In multi-instance on-prem deployments, Valkey Pub/Sub may carry only small wake notifications derived from durable `command_outbox` rows. Media, screenshots, logs, PoP batches, and full snapshots must stay on REST/HTTP/on-prem object-storage paths and never traverse WebSocket or Valkey.
+
+Phase 8 backfill implements Valkey Pub/Sub fanout locally and enforces the WebSocket notification hard max before publish. This proves local node-channel behavior only; it does not replace required on-prem load, reconnect storm, emergency fanout, and Valkey outage tests.
 
 Formula:
 

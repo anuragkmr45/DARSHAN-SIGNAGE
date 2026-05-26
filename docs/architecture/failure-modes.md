@@ -1,31 +1,31 @@
 # Realtime Sync Failure Modes
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 Updated by: Codex
-Status: Phase 6 media/cache failure reporting updated
+Status: Phase 8 Valkey fanout backfill implemented locally; on-prem runtime evidence blocked
 
 ## Phase 4 Verification Addendum
 
-Phase 4 adds Electron realtime wake-up handling, desired-state reconciliation, and adaptive command safety polling. Focused local player tests pass, but real backend gateway/proxy integration is not yet verified. Treat gateway compatibility and QA proxy/sticky-session behavior as open failure-mode risks until Phase 4 is independently approved.
+Phase 4 adds Electron realtime wake-up handling, desired-state reconciliation, and adaptive command safety polling. Focused local player tests pass, but real backend gateway/proxy integration is not yet verified. Treat gateway compatibility, on-prem QA proxy behavior, transport settings, and Valkey fanout as open failure-mode risks until on-prem runtime evidence passes.
 
 ## Phase 6 Verification Addendum
 
-Phase 6 adds durable media/cache failure reports through REST and CMS per-screen visibility. Electron cache/download/default/snapshot caching failures are reported with sanitized URL host/path hash and queued if REST is unavailable. Production retention, dashboards, alerts, and renderer playback error reporting remain open hardening work.
+Phase 6 adds durable media/cache failure reports through REST and CMS per-screen visibility. Electron cache/download/default/snapshot caching failures are reported with sanitized URL host/path hash and queued if REST is unavailable. Phase 8 local continuation adds media/cache failure metrics and alerts. Production retention, dashboard tuning, and renderer playback error reporting remain open hardening work.
 
 ## Phase 7 Verification Addendum
 
-Phase 7 adds deployment hardening docs/templates only: QA/prod env examples, an explicit REST plus `/socket.io/` proxy snippet, a canary/rollback runbook, static asset validation, and handoff/status updates. Runtime QA proxy smoke, canary rollback drill, Node 20 rerun, migration review, dedicated metrics/alerts, and load/chaos validation remain required before production enablement.
+Phase 7 adds deployment hardening docs/templates only: QA/prod env examples, an explicit REST plus `/socket.io/` proxy snippet, a canary/rollback runbook, static asset validation, and handoff/status updates. Runtime on-prem QA proxy smoke, canary rollback drill, Node 20 rerun, migration review, dedicated metrics/alerts, and load/chaos validation remain required before production enablement.
 
 ## Phase 8 Verification Addendum
 
-Phase 8 adds load modeling, chaos planning, production readiness gates, QA canary evidence templates, metrics/alert validation, static validation, and handoff/status updates. Static validation, load model dry-runs, observability asset validation, and compile gates passed locally. Real 1k/10k/50k load tests, reconnect storm tests, emergency fanout tests, and QA chaos execution remain blocked until a QA/staging target and simulator credentials are available. Production readiness is not approved.
+Phase 8 adds load modeling, chaos planning, production readiness gates, on-prem QA canary evidence templates, metrics/alert validation, static validation, dedicated observability metrics/alerts, Valkey Pub/Sub fanout implementation, and handoff/status updates. Static validation, load model dry-runs, observability asset validation, focused metrics tests, compile gates, and local Docker Valkey Pub/Sub smoke tests passed locally. Real 1k/10k/50k load tests, reconnect storm tests, emergency fanout tests, on-prem node A/node B fanout tests, Valkey outage fallback tests, and on-prem QA chaos execution remain blocked until an on-prem QA target, Valkey topology, and simulator credentials are available. Production readiness is not approved.
 
 ## Failure Matrix
 
 | Failure mode | Current behavior | Target behavior | Risk | Detection | Mitigation | Test case |
 |---|---|---|---|---|---|---|
 | WebSocket unavailable | Phase 4 player marks realtime unhealthy and keeps existing polling/heartbeat fallback. CMS realtime may degrade. | Player falls back to command safety poll/fallback poll and heartbeat; CMS shows WS unhealthy. | Medium | WS connection metrics, fallback polling rate | Keep polling mandatory; adaptive intervals | Disable WS and verify publish/default/emergency catch-up. |
-| Redis/NATS unavailable | No confirmed device realtime broker path. | API continues REST/DB operations; outbox marks dispatch delayed; players use polling. | Medium | broker health, outbox lag | Do not depend on broker for truth; alert on lag | Stop broker during fanout and verify fallback. |
+| Valkey unavailable | Valkey fanout is implemented locally with graceful publish/registry failure handling; real on-prem outage behavior is not yet validated. | API continues REST/DB operations; `command_outbox` remains durable; players use polling/heartbeat fallback; alerts show fanout unavailable. | Medium | Valkey health, outbox lag, fallback polling rate, realtime bus fallback metrics | Do not depend on Valkey for truth; keep polling mandatory; alert on lag | Stop Valkey during on-prem node A/node B fanout and verify polling/heartbeat catch-up. |
 | Backend restart | Players retry HTTP; CMS sockets reconnect. | Players keep cached playback, reconnect WS, fetch desired state, retry ACK/PoP queues. | Medium | restart events, reconnect spikes | Backoff, jitter, idempotent APIs | Restart API during active publish. |
 | DB unavailable | REST and command delivery fail. | Player keeps cached playback; queues ACK/PoP/cache reports; backend returns clear errors. | High | DB health, 5xx, queue failures | DB HA, circuit breakers, cached playback | Block DB for 60s and recover. |
 | Player offline during publish | Player misses immediate commands but later polls/heartbeats. | Desired-state reconciliation detects stale snapshot and fetches commands/snapshot on reconnect. | Medium | heartbeat gap, stale desired state | Keep commands durable and desired state current | Publish while player offline, reconnect after 1 hour. |

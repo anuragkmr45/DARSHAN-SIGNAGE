@@ -1,8 +1,8 @@
 # Enterprise Realtime Sync Architecture
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 Updated by: Codex
-Status: Phase 6 failure observability and media/cache status implementation updated
+Status: Phase 8 Valkey fanout backfill implemented locally; on-prem runtime evidence blocked
 
 ## Purpose
 
@@ -14,11 +14,13 @@ The selected architecture is hybrid:
 - `device_commands` remains the durable command queue
 - WebSocket is notification and wake-up only
 - players fetch authoritative state through REST APIs
-- media files are delivered by HTTP/object storage/CDN/local cache
+- media files are delivered by HTTP/on-prem object storage/MinIO/internal media endpoints/local cache
 - polling and heartbeat remain mandatory fallback paths
 - transactional outbox bridges DB commits to realtime notifications
 - device desired state lets players reconcile missed events
 - the same backend contract must support Electron, Android TV, Android, iOS/iPadOS, tvOS, and future signage players
+- all dev, QA, and production deployments are air-gapped on-prem/internal networks unless explicitly documented otherwise
+- Valkey-backed fanout is required before multi-instance production realtime; sticky-session-only is not approved
 
 ## Phase 6 Verification Guardrail
 
@@ -28,13 +30,14 @@ Current approval state: `APPROVED_WITH_CONDITIONS`.
 
 Phase 7 may start only after accepting Phase 6 conditions. QA/prod realtime enablement must not start until:
 
-- player/backend/CMS build/tests are rerun under Node `>=20 <21` before QA signoff
+- player/backend/CMS build/tests are rerun under Node `>=20 <21` before on-prem QA signoff
 - packaged Electron-to-backend realtime smoke is run against the Phase 3 gateway
-- QA WebSocket proxy/sticky-session behavior is reviewed
-- dedicated realtime/outbox/player metrics are planned before production enablement
+- on-prem QA WebSocket proxy behavior and Valkey fanout are reviewed
+- dedicated realtime/outbox/media-cache metrics are validated under QA traffic before production enablement
 - CMS Delivery tab visual/E2E review is completed or explicitly deferred
-- existing CMS lint failures are fixed or explicitly waived
+- CMS lint is rerun under Node 20
 - `media_cache_reports` retention/partitioning is decided
+- public cloud push, public CDN, or public endpoint dependencies are not assumed
 - the phase approval log is updated
 
 ## Current Architecture
@@ -49,6 +52,7 @@ Confirmed from repo audit:
 - Electron acknowledges commands through `POST /api/v1/device/:deviceId/commands/:commandId/ack`.
 - Electron caches media locally through `signage-screen/src/main/services/cache/cache-manager.ts`.
 - Existing Socket.IO infrastructure now includes an isolated `/device` namespace for production player wake-up notifications when `REALTIME_SYNC_ENABLED=true`.
+- Backend realtime fanout now supports a Valkey Pub/Sub-backed node bus and short-lived device-to-node mapping for on-prem multi-instance wake notification routing when `REALTIME_BUS_PROVIDER=valkey`.
 - Electron now includes a feature-flagged RealtimeService that consumes `/device` wake notifications when `HEXMON_REALTIME_SYNC_ENABLED=true`.
 - CMS screen details now includes a feature-flagged Delivery tab backed by `GET /api/v1/screens/:id/delivery-status`.
 - Existing nginx config proxies `/socket.io/`.
@@ -120,11 +124,12 @@ flowchart TD
   DB --> Desired[device_desired_state]
   DB --> Outbox[command_outbox]
   Outbox --> Dispatcher[OutboxDispatcher]
-  Dispatcher --> Gateway[RealtimeGateway]
+  Dispatcher --> Bus[Valkey Pub/Sub fanout]
+  Bus --> Gateway[RealtimeGateway]
   Gateway --> Player[Player RealtimeService]
   Player --> REST[REST Pull APIs]
   REST --> DB
-  Player --> Media[HTTP/Object Storage/CDN]
+  Player --> Media[HTTP/MinIO/Internal Media Endpoint]
   Player --> Cache[Local Media Cache]
   Player --> Telemetry[Heartbeat/PoP/ACK APIs]
   Telemetry --> DB
@@ -281,11 +286,24 @@ Phase 3 implementation:
 
 ### DeviceConnectionRegistry
 
-Tracks connected device sessions, protocol version, app version, last ping, and disconnect reason. It is for observability and best-effort routing only.
+Tracks connected device sessions, protocol version, app version, last ping, and disconnect reason. It is for observability and best-effort local routing only.
 
 Implemented location: `signhex-server/src/realtime/device-connection-registry.ts`.
 
-Phase 3 registry is in-memory and single-process. Multi-instance production requires sticky sessions, Redis/NATS routing, or a distributed registry.
+The socket registry remains local in-memory state. Phase 8 backfill adds Valkey-backed fanout/distributed coordination through `signhex-server/src/realtime/realtime-fanout.ts`, `signhex-server/src/realtime/realtime-bus.ts`, and `signhex-server/src/realtime/device-node-registry.ts`. Local unit and Docker Valkey integration tests pass, but on-prem node A/node B fanout and outage fallback evidence are still required before production readiness.
+
+### On-Prem Multi-Instance Fanout
+
+Required behavior:
+
+- API node writes DB source-of-truth rows and `command_outbox`.
+- Outbox dispatcher publishes a small wake event through Valkey Pub/Sub.
+- Gateway node that owns the player socket emits `COMMAND_AVAILABLE` or `RESYNC_REQUIRED`.
+- Player fetches authoritative commands/state/snapshots/default/emergency through REST.
+- If Valkey is unavailable, DB outbox remains durable and polling/heartbeat fallback still catches commands.
+- Media and full snapshots never go over Valkey.
+
+Valkey Streams may be considered later only if broker-side persisted fanout is required; the DB outbox remains the durability layer.
 
 ### CommandNotifier
 
@@ -386,13 +404,15 @@ Show emergency target delivery, active/cleared state, command ACKs, and player h
 
 ### Media/Cache Failure Visibility
 
-Phase 6 implements per-screen media cache failures, URL expiry errors, download failures, disk-full/cache write reports, and CMS status visibility through REST. Full signed URLs are sanitized to host plus path hash. Production dashboards, alerting, and retention are still Phase 7/8 hardening work.
+Phase 6 implements per-screen media cache failures, URL expiry errors, download failures, disk-full/cache write reports, and CMS status visibility through REST. Full signed URLs are sanitized to host plus path hash. Phase 8 local continuation added media/cache metrics and alert rules; production dashboard tuning and retention approval remain open.
 
 ## Deployment Requirements
 
 - Backend API and WebSocket gateway must share auth and device identity rules.
 - `/socket.io/` or the selected raw WebSocket path must be proxied with upgrade headers.
-- API nodes must share realtime routing through Redis, NATS, or another adapter if horizontally scaled.
+- API nodes must share realtime routing through Valkey-backed fanout if horizontally scaled.
+- Sticky sessions are optional only when Socket.IO HTTP polling transport is enabled.
+- Prefer validated WebSocket-only transport for device realtime on on-prem networks.
 - Outbox dispatcher must run as a worker role.
 - DB indexes must support command lease, expiry, outbox dispatch, and desired-state reads.
 - Metrics must include active connections, notification dispatch latency, outbox lag, command lifecycle counters, ACK latency, fallback polling rate, and reconnect storms.
@@ -409,7 +429,7 @@ Phase 6 implements per-screen media cache failures, URL expiry errors, download 
 5. Enable dispatcher in QA.
 6. Enable device realtime in QA for test players.
 7. Enable adaptive polling in QA.
-8. Complete Phase 7 QA proxy/canary rollback validation.
+8. Complete Phase 7 on-prem QA proxy/canary rollback validation.
 9. Run Phase 8 E2E, load, and chaos tests.
 10. Roll out production to a canary player group.
 11. Expand by fleet group while monitoring fallback rate, ACK latency, outbox lag, and emergency latency.

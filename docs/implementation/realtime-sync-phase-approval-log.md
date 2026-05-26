@@ -204,7 +204,7 @@ Approval state: `APPROVED_WITH_CONDITIONS`
 - CMS command/delivery UI.
 - Mobile/TV player work.
 - Sending snapshots, media, screenshots, logs, or PoP over WebSocket.
-- Distributed registry or Redis/NATS fanout.
+- Distributed registry or Valkey fanout.
 
 ### Evidence
 
@@ -232,8 +232,8 @@ None for focused Phase 3 backend validation after local Postgres was available.
 
 - Dedicated realtime/outbox Prometheus metrics and health checks.
 - Distributed connection registry or broker-backed fanout for multi-instance production.
-- QA proxy/sticky-session validation.
-- Node 20 rerun before QA signoff.
+- on-prem QA proxy/transport and Valkey fanout validation.
+- Node 20 rerun before on-prem QA signoff.
 
 ### Risks
 
@@ -245,9 +245,9 @@ None for focused Phase 3 backend validation after local Postgres was available.
 ### Conditions Before QA/Prod Rollout
 
 - Rerun Phase 1 through Phase 3 backend tests under Node `>=20 <21`.
-- Validate `/socket.io/` upgrade, origin policy, and sticky-session behavior in QA.
+- Validate `/socket.io/` upgrade, origin policy, and transport behavior in QA; validate sticky sessions only if Socket.IO polling is enabled.
 - Add dedicated realtime/outbox metrics and alerting before production enablement.
-- Decide Redis/NATS or sticky-session-only topology before multi-instance production.
+- Use Valkey-backed fanout for multi-instance production; do not approve sticky-session-only.
 
 ### Approved For Next Phase?
 
@@ -307,12 +307,12 @@ Approval state: `APPROVED_WITH_CONDITIONS`
 ### Tests Blocked
 
 - Full packaged Electron runtime against backend Socket.IO gateway was not run in this local pass.
-- QA reverse-proxy/sticky-session WebSocket behavior was not exercised.
-- Node 20 rerun is still required before QA signoff because local Node is `v24.12.0` and package engines require `>=20 <21`.
+- QA reverse-proxy/transport behavior and Valkey fanout were not exercised.
+- Node 20 rerun is still required before on-prem QA signoff because local Node is `v24.12.0` and package engines require `>=20 <21`.
 
 ### Risks
 
-- The player currently uses the existing `ws` dependency with scoped Socket.IO/Engine.IO framing instead of adding `socket.io-client`; raw backend gateway smoke passed, but full QA runtime/proxy smoke is still required before production rollout.
+- The player currently uses the existing `ws` dependency with scoped Socket.IO/Engine.IO framing instead of adding `socket.io-client`; raw backend gateway smoke passed, but full on-prem QA runtime/proxy smoke is still required before production rollout.
 - Dedicated realtime/outbox/player metrics remain incomplete.
 - Reconnect storm, emergency fanout, and long-offline catch-up remain Phase 8 validation items.
 
@@ -320,7 +320,7 @@ Approval state: `APPROVED_WITH_CONDITIONS`
 
 - Rerun Phase 4 build/tests under Node `>=20 <21`.
 - Run backend/player realtime integration smoke with Phase 3 gateway enabled.
-- Validate QA proxy/load-balancer Socket.IO upgrade, idle timeout, and sticky-session behavior.
+- Validate on-prem QA proxy/load-balancer Socket.IO upgrade, idle timeout, selected transport, and sticky-session setting if polling is enabled.
 - Keep `HEXMON_REALTIME_SYNC_ENABLED=false` until QA smoke passes.
 
 ### Approved For Next Phase?
@@ -329,7 +329,7 @@ conditionally
 
 ### Approval Notes
 
-Phase 5 may start with an explicit Phase 5 prompt. Polling and heartbeat fallback remain active and are the rollback path. QA/prod realtime enablement remains blocked until Node 20 rerun, QA proxy/runtime smoke, and dedicated realtime/outbox/player metrics are complete.
+Phase 5 may start with an explicit Phase 5 prompt. Polling and heartbeat fallback remain active and are the rollback path. QA/prod realtime enablement remains blocked until Node 20 rerun, on-prem QA proxy/runtime smoke, and dedicated realtime/outbox/player metrics are complete.
 
 ## Phase 5: CMS Command/Delivery Status UI
 
@@ -383,7 +383,7 @@ Approval state: `APPROVED_WITH_CONDITIONS`
   - `src/components/requests/EmergencyTakeoverModal.tsx` hook dependency warnings.
   - `tests/settings-default-media.e2e.spec.ts` two `no-explicit-any` errors.
 - No browser E2E or visual review was run for the new Delivery tab.
-- Node 20 rerun remains required before QA signoff; local Node is `v24.12.0`.
+- Node 20 rerun remains required before on-prem QA signoff; local Node is `v24.12.0`.
 
 ### Risks
 
@@ -472,7 +472,7 @@ Approval state: `APPROVED_WITH_CONDITIONS`
   - `src/components/requests/EmergencyTakeoverModal.tsx` hook dependency warnings.
   - `tests/settings-default-media.e2e.spec.ts` two `no-explicit-any` errors.
 - No browser E2E or visual review was run for the CMS media/cache failure card.
-- Node 20 rerun remains required before QA signoff; local Node is `v24.12.0`.
+- Node 20 rerun remains required before on-prem QA signoff; local Node is `v24.12.0`.
 
 ### Risks
 
@@ -540,12 +540,15 @@ Approval state: `APPROVED_WITH_CONDITIONS`
 - `cd signhex-server && npm run build`
 - `cd signage-screen && npm run build`
 - `cd signhex-nexus-core && npm run build`
+- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh` after on-prem/Valkey documentation update (`passed` on 2026-05-25)
+- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh` after on-prem/Valkey documentation update (`passed` on 2026-05-25)
+- `bash signhex-platform/scripts/verify/validate-observability-assets.sh` after Docker escalation (`passed` on 2026-05-25)
 
 ### Tests Blocked
 
-- QA `/socket.io/` reverse-proxy smoke is blocked by unavailable QA deployment target in this local session.
-- QA canary rollback drill is blocked by unavailable QA deployment target in this local session.
-- Node `>=20 <21` rerun remains required before QA signoff; local environment is Node `v24.12.0`.
+- QA `/socket.io/` reverse-proxy smoke is blocked by unavailable on-prem QA deployment target in this local session.
+- on-prem QA canary rollback drill is blocked by unavailable on-prem QA deployment target in this local session.
+- Node `>=20 <21` rerun remains required before on-prem QA signoff; local environment is Node `v24.12.0`.
 
 ### Tests Failed
 
@@ -557,7 +560,7 @@ Approval state: `APPROVED_WITH_CONDITIONS`
 ### Risks
 
 - Deployment docs/templates are not a substitute for runtime QA validation.
-- Multi-instance production realtime requires sticky sessions or distributed routing/fanout decision.
+- Multi-instance production realtime requires Valkey-backed fanout implementation and validation.
 - Dedicated realtime/media-cache metrics and alerts remain required before production enablement.
 - CMS lint failures remain unresolved or unwaived.
 - `media_cache_reports` retention/partitioning remains undefined.
@@ -566,12 +569,12 @@ Approval state: `APPROVED_WITH_CONDITIONS`
 
 - Rerun backend, Electron, and CMS builds/tests under Node `>=20 <21`.
 - Review migrations `0030`, `0031`, and `0032` on QA-sized data.
-- Validate QA `/api/v1/` and `/socket.io/` proxy behavior, idle timeouts, and sticky sessions.
-- Run packaged backend/player realtime smoke through QA proxy.
-- Run QA canary rollback drill.
+- Validate on-prem QA `/api/v1/` and `/socket.io/` proxy behavior, idle timeouts, selected transport, and sticky sessions only if polling is enabled.
+- Run packaged backend/player realtime smoke through on-prem QA proxy.
+- Run on-prem QA canary rollback drill.
 - Resolve or explicitly waive CMS lint failures.
 - Define retention/partitioning and metrics/alerts for media/cache reports.
-- Decide sticky-session-only versus Redis/NATS/distributed registry before multi-instance production realtime enablement.
+- Implement and validate Valkey-backed fanout before multi-instance production realtime enablement.
 
 ### Approved For Next Phase?
 
@@ -585,11 +588,11 @@ Latest handoff: `signhex-platform/docs/implementation/realtime-sync-phase-7-hand
 
 ## Phase 8: Load, Chaos, and Production Readiness
 
-Status: Runtime evidence attempted, blocked by environment
+Status: Valkey fanout backfill implemented and locally tested; on-prem runtime evidence blocked
 Reviewer: Codex implementation and verification pass
-Date: 2026-05-24
+Date: 2026-05-25
 Commit/Branch: `release-01`, uncommitted working tree
-Approval state: `BLOCKED`
+Approval state: `IMPLEMENTED_LOCAL_TESTED_BLOCKED_BY_ONPREM_RUNTIME`
 Production readiness state: `NOT_PRODUCTION_READY`
 
 ### Implemented Scope
@@ -597,8 +600,10 @@ Production readiness state: `NOT_PRODUCTION_READY`
 - Added deterministic load model script for current, fallback, and hybrid-healthy profiles.
 - Added load and chaos validation plan for 1,000, 10,000, and 50,000 player profiles.
 - Added production readiness checklist.
-- Added QA canary evidence template.
-- Added metrics/alert validation document with current coverage and gaps.
+- Added on-prem QA canary evidence template.
+- Added metrics/alert validation document.
+- Added dedicated backend metrics and Prometheus alerts for outbox lag/dispatch, realtime auth/notifications, payload-size rejections, command ACK latency/failures, fallback polling, device command terminal rows, and media/cache failures.
+- Added Valkey-backed fanout backfill: realtime bus, Valkey Pub/Sub adapter, device-node registry, gateway/outbox wiring, metrics, tests, and handoff docs.
 - Added static Phase 8 asset validation script.
 - Added Phase 8 handoff and status/tracking updates.
 
@@ -608,7 +613,8 @@ Production readiness state: `NOT_PRODUCTION_READY`
 - WebSocket protocol changes.
 - Electron realtime/adaptive polling changes.
 - CMS UI changes.
-- Backend runtime feature changes.
+- Backend source-of-truth changes.
+- Media/snapshot/log/screenshot/PoP payloads over WebSocket or Valkey.
 - DB migrations.
 - Real production canary.
 
@@ -621,6 +627,21 @@ Production readiness state: `NOT_PRODUCTION_READY`
 - `signhex-platform/docs/implementation/realtime-sync-qa-canary-evidence.md`
 - `signhex-platform/docs/implementation/realtime-sync-metrics-alert-validation.md`
 - `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`
+- `signhex-server/src/observability/metrics.ts`
+- `signhex-server/src/realtime/device-gateway.ts`
+- `signhex-server/src/realtime/realtime-bus.ts`
+- `signhex-server/src/realtime/device-node-registry.ts`
+- `signhex-server/src/realtime/realtime-fanout.ts`
+- `signhex-server/src/realtime/valkey-resp-client.ts`
+- `signhex-server/src/realtime/realtime-node.ts`
+- `signhex-server/src/services/outbox-dispatcher.ts`
+- `signhex-server/src/routes/device-telemetry.ts`
+- `signhex-platform/deploy/shared/observability/prometheus/rules/alerts.yml`
+- `signhex-platform/deploy/shared/observability/prometheus/rules/recording-rules.yml`
+- `signhex-platform/deploy/shared/observability/prometheus/tests/rules.test.yml`
+- `signhex-platform/docs/implementation/realtime-sync-media-cache-report-retention-plan.md`
+- `signhex-platform/docs/implementation/realtime-sync-valkey-fanout-implementation.md`
+- `signhex-platform/docs/implementation/realtime-sync-phase-8-valkey-fanout-handoff.md`
 
 ### Tests Passed
 
@@ -629,46 +650,60 @@ Production readiness state: `NOT_PRODUCTION_READY`
 - `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json`
 - `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json`
 - `bash signhex-platform/scripts/verify/validate-observability-assets.sh` after Docker escalation and image pulls
+- `cd signhex-server && npx vitest run src/observability/metrics.test.ts` (`5 passing`)
+- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts` (`8 passing`)
+- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts` (`19 passing`)
+- `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` (`2 passing`)
+- `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` (`2 passing`) after starting a temporary local `valkey/valkey:9.0.3-alpine` container and rerunning with sandbox network escalation
+- `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` (`4 passing`)
+- `cd signhex-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` (`1 passing`)
+- `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts` (`2 passing`)
+- `cd signhex-nexus-core && npm run lint`
 - `cd signhex-server && npm run build`
 - `cd signage-screen && npm run build`
 - `cd signhex-nexus-core && npm run build`
 
 ### Tests Blocked
 
-- QA/staging target discovery found no endpoint variables in the local environment; only `COMMAND_MODE` matched the QA/STAGING/SIGNHEX/HEXMON/REALTIME/BACKEND/CMS scan.
+- on-prem QA target discovery found no endpoint variables in the local environment; only `COMMAND_MODE` matched the ONPREM_DEV/ONPREM_QA/ONPREM_PROD/VALKEY/SIGNHEX/HEXMON/REALTIME/BACKEND/CMS scan.
+- A first unprivileged local Valkey integration attempt was blocked by sandbox loopback TCP denial (`connect EPERM 127.0.0.1:6381`); rerun with explicit sandbox network escalation passed.
 - Packaged QA server health check is blocked because `postgres` is not running.
 - Packaged QA CMS health check is blocked by HTTP 404.
 - Local backend health check is blocked because no service is listening on `127.0.0.1:3000`.
 - Local `/socket.io/` smoke is blocked because no service is listening on `127.0.0.1:3000`.
-- Real 1k/10k/50k player load execution is blocked by unavailable QA/staging target and simulator credential set.
-- Chaos execution is blocked by unavailable QA/staging target.
-- QA canary rollback drill is blocked by unavailable QA deployment target in this local session.
-- Node `>=20 <21` rerun remains required before QA signoff; local environment is Node `v24.12.0`.
+- On-prem Valkey connectivity/fanout smoke is blocked because on-prem `VALKEY_URL` and HA topology inputs are not available; local Docker Valkey smoke passed.
+- Multi-node node A/node B fanout is blocked because no multi-node on-prem QA target is available; local simulated node A/node B Pub/Sub smoke passed.
+- Valkey outage fallback drill is blocked because no on-prem Valkey target and player/API fleet are available.
+- Real 1k/10k/50k player load execution is blocked by unavailable on-prem QA target and simulator credential set.
+- Chaos execution is blocked by unavailable on-prem QA target.
+- on-prem QA canary rollback drill is blocked by unavailable on-prem QA deployment target in this local session.
+- Node `>=20 <21` rerun remains required before on-prem QA signoff; local environment is Node `v24.12.0`.
 
 ### Tests Failed
 
-- `cd signhex-nexus-core && npm run lint` remains failed from Phase 7 with existing issues outside Phase 8 changed files unless fixed or waived.
+- None from the focused local Phase 8 continuation pass.
 
 ### Risks
 
 - Production readiness is not approved because real load/chaos evidence is missing.
-- Dedicated realtime/outbox/media-cache/fallback metrics and alerts remain missing or require explicit waiver.
-- Multi-instance production realtime still requires sticky sessions or distributed registry/fanout decision.
-- `media_cache_reports` retention/partitioning remains undefined.
-- CMS lint failures remain unresolved or unwaived.
+- Dedicated realtime/outbox/media-cache/fallback metrics and alerts are locally implemented and statically validated, but production thresholds are not tuned under on-prem QA load.
+- Multi-instance production realtime has local Valkey fanout implementation, but sticky sessions alone are not approved and on-prem node A/node B validation remains required.
+- `media_cache_reports` retention/partitioning requires a human/product decision.
+- CMS lint passes locally under Node `v24.12.0`; Node 20 validation remains blocked.
 
 ### Conditions Before QA/Prod Rollout
 
 - Execute real 1k/10k/50k load profiles or document a lower certified capacity cap.
 - Execute chaos scenarios from `realtime-sync-load-and-chaos-plan.md`.
-- Complete QA canary rollback evidence.
+- Complete on-prem QA canary rollback evidence.
 - Rerun backend, Electron, and CMS builds/tests under Node `>=20 <21`.
 - Review migrations `0030`, `0031`, and `0032` on QA-sized data.
-- Validate QA `/api/v1/` and `/socket.io/` proxy behavior, idle timeouts, and sticky sessions.
-- Run packaged backend/player realtime smoke through QA proxy.
-- Resolve or explicitly waive CMS lint failures.
-- Add or explicitly waive dedicated realtime/outbox/media-cache/fallback metrics and alerts.
-- Define retention/partitioning for `media_cache_reports`.
+- Validate on-prem QA `/api/v1/` and `/socket.io/` proxy behavior, idle timeouts, selected transport, and sticky sessions only if polling is enabled.
+- Validate Valkey connectivity, Pub/Sub namespace fanout, node A/node B notification routing, and Valkey outage fallback.
+- Run packaged backend/player realtime smoke through on-prem QA proxy.
+- Rerun CMS lint/build under Node `>=20 <21`.
+- Validate and tune dedicated realtime/outbox/media-cache/fallback metrics and alerts against on-prem QA traffic.
+- Approve retention/partitioning for `media_cache_reports`.
 
 ### Approved For Next Phase?
 
@@ -676,7 +711,7 @@ no
 
 ### Approval Notes
 
-Phase 8 tooling/docs are conditionally approved, but the requested runtime evidence is blocked by environment and production readiness is not approved. Phase 9 mobile/TV adapters must not start unless these Phase 8 runtime evidence conditions are satisfied or explicitly deferred by a human approver.
+Phase 8 tooling/docs and Valkey fanout backfill are locally tested, but the requested on-prem runtime evidence is blocked by environment and production readiness is not approved. Phase 9 mobile/TV adapters must not start unless these Phase 8 runtime evidence conditions are satisfied or explicitly deferred by a human approver.
 
 Latest handoff: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`.
 Latest runtime evidence attempt: `signhex-platform/docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
