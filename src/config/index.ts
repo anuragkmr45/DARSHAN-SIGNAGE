@@ -66,6 +66,20 @@ const envSchema = z.object({
   ),
   CSRF_ENABLED: z.enum(['true', 'false']).transform((v) => v === 'true').default('true'),
   REDIS_URL: z.string().url().optional(),
+  REDIS_URL_ALIAS_FOR_VALKEY: optionalBooleanString,
+  REALTIME_BUS_PROVIDER: z.enum(['memory', 'valkey']).default('memory'),
+  VALKEY_URL: z.string().url().optional(),
+  VALKEY_MODE: z.enum(['standalone', 'sentinel', 'cluster']).default('standalone'),
+  VALKEY_TLS_ENABLED: optionalBooleanString,
+  VALKEY_AUTH_REQUIRED: optionalBooleanString,
+  VALKEY_CA_CERT_PATH: optionalTrimmedString,
+  VALKEY_NAMESPACE: z.string().default('signhex:realtime'),
+  VALKEY_PUBSUB_ENABLED: optionalBooleanString,
+  REALTIME_NODE_ID: optionalTrimmedString,
+  REALTIME_DEVICE_NODE_TTL_MS: z.coerce.number().int().positive().default(120_000),
+  REALTIME_VALKEY_RECONNECT_MIN_MS: z.coerce.number().int().positive().default(500),
+  REALTIME_VALKEY_RECONNECT_MAX_MS: z.coerce.number().int().positive().default(30_000),
+  REALTIME_VALKEY_PUBLISH_TIMEOUT_MS: z.coerce.number().int().positive().default(1_000),
   PASSWORD_MIN_LENGTH: z.coerce.number().int().min(8).default(12),
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOGIN_LOCKOUT_WINDOW_SECONDS: z.coerce.number().int().positive().default(15 * 60),
@@ -84,24 +98,33 @@ const envSchema = z.object({
     z.string().url().optional()
   ),
   OBSERVABILITY_PROMETHEUS_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
-	  OBSERVABILITY_GRAFANA_ENABLED: optionalBooleanString,
-	  OBSERVABILITY_GRAFANA_EMBED_ENABLED: optionalBooleanString,
-	  OBSERVABILITY_GRAFANA_BASE_PATH: z.string().default('/grafana'),
-	  COMMAND_LEASE_MS: z.coerce.number().int().positive().default(60_000),
-	  COMMAND_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
-	  COMMAND_DEFAULT_EXPIRES_MS: z.coerce.number().int().positive().default(86_400_000),
-	  COMMAND_EMERGENCY_EXPIRES_MS: z.coerce.number().int().positive().default(300_000),
-	  COMMAND_OUTBOX_WRITE_ENABLED: optionalBooleanString,
-	  DEVICE_DESIRED_STATE_ENABLED: optionalBooleanString,
-	  REALTIME_SYNC_ENABLED: optionalBooleanString,
-	  REALTIME_DEVICE_NAMESPACE: z.string().default('/device'),
-	  WS_NOTIFICATION_MAX_BYTES: z.coerce.number().int().positive().default(32_768),
-	  OUTBOX_DISPATCH_ENABLED: optionalBooleanString,
-	  OUTBOX_DISPATCH_BATCH_SIZE: z.coerce.number().int().positive().default(100),
-	  OUTBOX_DISPATCH_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
-	  OUTBOX_DISPATCH_LEASE_MS: z.coerce.number().int().positive().default(60_000),
-	  MEDIA_CACHE_REPORTING_ENABLED: optionalBooleanString,
-	});
+  OBSERVABILITY_GRAFANA_ENABLED: optionalBooleanString,
+  OBSERVABILITY_GRAFANA_EMBED_ENABLED: optionalBooleanString,
+  OBSERVABILITY_GRAFANA_BASE_PATH: z.string().default('/grafana'),
+  COMMAND_LEASE_MS: z.coerce.number().int().positive().default(60_000),
+  COMMAND_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  COMMAND_DEFAULT_EXPIRES_MS: z.coerce.number().int().positive().default(86_400_000),
+  COMMAND_EMERGENCY_EXPIRES_MS: z.coerce.number().int().positive().default(300_000),
+  COMMAND_OUTBOX_WRITE_ENABLED: optionalBooleanString,
+  DEVICE_DESIRED_STATE_ENABLED: optionalBooleanString,
+  REALTIME_SYNC_ENABLED: optionalBooleanString,
+  REALTIME_DEVICE_NAMESPACE: z.string().default('/device'),
+  WS_NOTIFICATION_MAX_BYTES: z.coerce.number().int().positive().default(32_768),
+  OUTBOX_DISPATCH_ENABLED: optionalBooleanString,
+  OUTBOX_DISPATCH_BATCH_SIZE: z.coerce.number().int().positive().default(100),
+  OUTBOX_DISPATCH_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
+  OUTBOX_DISPATCH_LEASE_MS: z.coerce.number().int().positive().default(60_000),
+  MEDIA_CACHE_REPORTING_ENABLED: optionalBooleanString,
+});
+
+export function resolveValkeyUrl(input: {
+  VALKEY_URL?: string;
+  REDIS_URL?: string;
+  REDIS_URL_ALIAS_FOR_VALKEY?: boolean;
+}) {
+  return input.VALKEY_URL ?? (input.REDIS_URL_ALIAS_FOR_VALKEY ? input.REDIS_URL : undefined);
+}
+
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {
   console.error('Invalid environment variables:', parsed.error.flatten());
@@ -120,6 +143,10 @@ export const config = Object.freeze({
   COMMAND_OUTBOX_WRITE_ENABLED: parsed.data.COMMAND_OUTBOX_WRITE_ENABLED ?? true,
   DEVICE_DESIRED_STATE_ENABLED: parsed.data.DEVICE_DESIRED_STATE_ENABLED ?? true,
   REALTIME_SYNC_ENABLED: parsed.data.REALTIME_SYNC_ENABLED ?? false,
+  VALKEY_URL: resolveValkeyUrl(parsed.data),
+  VALKEY_TLS_ENABLED: parsed.data.VALKEY_TLS_ENABLED ?? false,
+  VALKEY_AUTH_REQUIRED: parsed.data.VALKEY_AUTH_REQUIRED ?? Boolean(parsed.data.VALKEY_URL),
+  VALKEY_PUBSUB_ENABLED: parsed.data.VALKEY_PUBSUB_ENABLED ?? parsed.data.REALTIME_BUS_PROVIDER === 'valkey',
   OUTBOX_DISPATCH_ENABLED: parsed.data.OUTBOX_DISPATCH_ENABLED ?? false,
   MEDIA_CACHE_REPORTING_ENABLED: parsed.data.MEDIA_CACHE_REPORTING_ENABLED ?? true,
 });

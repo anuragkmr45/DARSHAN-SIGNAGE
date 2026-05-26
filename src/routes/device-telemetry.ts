@@ -33,7 +33,12 @@ import {
   processProofOfPlayTelemetry,
   processScreenshotTelemetry,
 } from '@/jobs/device-telemetry';
-import { recordDeviceCommandClaim, recordTelemetryIngest } from '@/observability/metrics';
+import {
+  recordDeviceCommandAck,
+  recordDeviceCommandClaim,
+  recordMediaCacheReport,
+  recordTelemetryIngest,
+} from '@/observability/metrics';
 import { queueScreenStateRefresh } from '@/services/screen-state-refresh';
 import {
   acknowledgeDeviceCommand,
@@ -837,12 +842,21 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      let mediaReportEventType = 'UNKNOWN';
+      let mediaReportSeverity = 'ERROR';
       try {
         const deviceId = (request.params as any).deviceId;
         const data = mediaCacheReportSchema.parse(request.body);
+        mediaReportEventType = data.event_type;
+        mediaReportSeverity = data.severity;
         await authenticateDeviceOrThrow(request, deviceId);
 
         if (!appConfig.MEDIA_CACHE_REPORTING_ENABLED) {
+          recordMediaCacheReport({
+            eventType: mediaReportEventType,
+            severity: mediaReportSeverity,
+            result: 'disabled',
+          });
           return reply.status(HTTP_STATUS.ACCEPTED).send({
             success: true,
             accepted: false,
@@ -892,12 +906,23 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           'Device media/cache failure report received'
         );
 
+        recordMediaCacheReport({
+          eventType: mediaReportEventType,
+          severity: mediaReportSeverity,
+          result: 'accepted',
+        });
+
         return reply.status(CREATED).send({
           success: true,
           id: report.id,
           received_at: report.received_at?.toISOString?.() ?? report.received_at,
         });
       } catch (error) {
+        recordMediaCacheReport({
+          eventType: mediaReportEventType,
+          severity: mediaReportSeverity,
+          result: 'error',
+        });
         logger.error(error, 'Media/cache report error');
         return respondWithError(reply, error);
       }
@@ -1009,6 +1034,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      const ackStart = process.hrtime.bigint();
       try {
         const { deviceId, commandId } = request.params as any;
         const ackBody = ackCommandSchema.parse(request.body);
@@ -1022,6 +1048,11 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           'Command acknowledged'
         );
 
+        recordDeviceCommandAck(
+          updatedCommand.status === 'COMPLETED' || updatedCommand.status === 'ACKED_SUCCESS' ? 'success' : 'failure',
+          Number(process.hrtime.bigint() - ackStart) / 1_000_000_000
+        );
+
         return reply.send({
           success: true,
           status: updatedCommand.status,
@@ -1029,6 +1060,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           timestamp: acknowledgedAt.toISOString(),
         });
       } catch (error) {
+        recordDeviceCommandAck('error', Number(process.hrtime.bigint() - ackStart) / 1_000_000_000);
         logger.error(error, 'Acknowledge command error');
         return respondWithError(reply, error);
       }

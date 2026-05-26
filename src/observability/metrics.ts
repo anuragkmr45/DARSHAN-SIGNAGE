@@ -23,6 +23,33 @@ const OBSERVED_QUEUE_NAMES = [
 
 const OBSERVED_QUEUE_STATES = ['created', 'retry', 'active'] as const;
 const FLEET_STATES = ['ACTIVE', 'INACTIVE', 'OFFLINE'] as const;
+const DEVICE_COMMAND_STATUSES = [
+  'PENDING',
+  'SENT',
+  'ACKNOWLEDGED',
+  'COMPLETED',
+  'FAILED',
+  'LEASED',
+  'PROCESSING',
+  'ACKED_SUCCESS',
+  'ACKED_FAILURE',
+  'EXPIRED',
+  'DEAD_LETTER',
+  'CANCELLED',
+] as const;
+const COMMAND_OUTBOX_STATUSES = ['PENDING', 'DISPATCHING', 'DISPATCHED', 'FAILED', 'CANCELLED'] as const;
+const MEDIA_CACHE_EVENT_TYPES = [
+  'URL_EXPIRED',
+  'DOWNLOAD_FAILED',
+  'CHECKSUM_MISMATCH',
+  'DISK_FULL',
+  'CACHE_EVICTION_FAILED',
+  'CACHE_WRITE_FAILED',
+  'CACHE_MISS',
+  'PLAYBACK_ERROR',
+  'UNKNOWN',
+] as const;
+const MEDIA_CACHE_SEVERITIES = ['INFO', 'WARN', 'ERROR', 'CRITICAL'] as const;
 
 type TelemetryType = 'heartbeat' | 'proof_of_play' | 'screenshot';
 type TelemetryPersistMode = 'queue' | 'inline' | 'fallback';
@@ -42,6 +69,17 @@ type DeviceAuthMode = 'legacy' | 'dual' | 'signature';
 type DeviceAuthMethod = 'legacy_serial' | 'signature' | 'user_token' | 'missing_identity';
 type DeviceAuthResult = 'success' | 'failure';
 type DeviceCommandClaimSource = 'heartbeat' | 'poll';
+type DeviceCommandAckResult = 'success' | 'failure' | 'error';
+type OutboxDispatchResult = 'dispatched' | 'deferred' | 'failed' | 'skipped_disabled';
+type RealtimeAuthResult = 'success' | 'failure';
+type RealtimeNotificationResult = 'delivered' | 'deferred' | 'payload_too_large' | 'error';
+type RealtimeBusProvider = 'memory' | 'valkey';
+type RealtimeBusPublishResult = 'published' | 'failed' | 'unavailable' | 'payload_too_large';
+type RealtimeBusNodeMessageResult = 'received' | 'delivered' | 'socket_missing' | 'error';
+type DeviceNodeRegistryOperation = 'register' | 'refresh' | 'unregister';
+type DeviceNodeRegistryResult = 'success' | 'error' | 'unavailable';
+type RealtimeBusFallbackReason = 'valkey_unavailable' | 'device_node_missing';
+type MediaCacheReportResult = 'accepted' | 'disabled' | 'error';
 
 type JobResult = 'success' | 'error';
 
@@ -119,6 +157,123 @@ const deviceCommandClaimCounter = new Counter({
   name: 'signhex_server_device_commands_claimed_total',
   help: 'Device commands claimed for delivery by source.',
   labelNames: ['source'],
+  registers: [registry],
+});
+
+const deviceCommandAckCounter = new Counter({
+  name: 'signhex_server_device_command_acks_total',
+  help: 'Device command acknowledgements handled by the backend.',
+  labelNames: ['result'],
+  registers: [registry],
+});
+
+const deviceCommandAckDurationHistogram = new Histogram({
+  name: 'signhex_server_device_command_ack_duration_seconds',
+  help: 'Duration of backend device command acknowledgement handling.',
+  labelNames: ['result'],
+  buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+  registers: [registry],
+});
+
+const deviceCommandRowsGauge = new Gauge({
+  name: 'signhex_server_device_commands_rows',
+  help: 'Device command rows by lifecycle status.',
+  labelNames: ['status'],
+  registers: [registry],
+  collect: async function collectDeviceCommandRows() {
+    for (const status of DEVICE_COMMAND_STATUSES) {
+      this.set({ status }, 0);
+    }
+
+    const pool = getDatabasePool();
+    if (!pool) return;
+
+    try {
+      const result = await pool.query<{ status: string; count: string }>(
+        `
+          SELECT status::text AS status, COUNT(*)::bigint AS count
+          FROM device_commands
+          GROUP BY status
+        `
+      );
+
+      for (const row of result.rows) {
+        this.set({ status: row.status }, Number(row.count));
+      }
+    } catch (error) {
+      recordCollectionError('device_commands');
+      void error;
+    }
+  },
+});
+
+const commandOutboxRowsGauge = new Gauge({
+  name: 'signhex_server_command_outbox_rows',
+  help: 'Command outbox rows by dispatch status.',
+  labelNames: ['status'],
+  registers: [registry],
+  collect: async function collectCommandOutboxRows() {
+    for (const status of COMMAND_OUTBOX_STATUSES) {
+      this.set({ status }, 0);
+    }
+
+    const pool = getDatabasePool();
+    if (!pool) return;
+
+    try {
+      const result = await pool.query<{ status: string; count: string }>(
+        `
+          SELECT status, COUNT(*)::bigint AS count
+          FROM command_outbox
+          GROUP BY status
+        `
+      );
+
+      for (const row of result.rows) {
+        this.set({ status: row.status }, Number(row.count));
+      }
+    } catch (error) {
+      recordCollectionError('command_outbox');
+      void error;
+    }
+  },
+});
+
+const commandOutboxOldestPendingAgeGauge = new Gauge({
+  name: 'signhex_server_command_outbox_oldest_pending_age_seconds',
+  help: 'Age in seconds of the oldest pending command outbox row.',
+  registers: [registry],
+  collect: async function collectCommandOutboxOldestPendingAge() {
+    const pool = getDatabasePool();
+    if (!pool) {
+      this.set(0);
+      return;
+    }
+
+    try {
+      const result = await pool.query<{ age_seconds: number | null }>(
+        `
+          SELECT EXTRACT(EPOCH FROM (NOW() - MIN(available_at)))::double precision AS age_seconds
+          FROM command_outbox
+          WHERE status = 'PENDING'
+            AND available_at <= NOW()
+            AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+        `
+      );
+      const ageSeconds = result.rows[0]?.age_seconds;
+      this.set(Number.isFinite(ageSeconds) && ageSeconds !== null ? Math.max(ageSeconds, 0) : 0);
+    } catch (error) {
+      recordCollectionError('command_outbox');
+      this.set(0);
+      void error;
+    }
+  },
+});
+
+const commandOutboxDispatchCounter = new Counter({
+  name: 'signhex_server_command_outbox_dispatch_total',
+  help: 'Command outbox dispatch outcomes.',
+  labelNames: ['result', 'event_type'],
   registers: [registry],
 });
 
@@ -240,6 +395,118 @@ const websocketConnectionsGauge = new Gauge({
   registers: [registry],
 });
 
+const deviceRealtimeAuthCounter = new Counter({
+  name: 'signhex_server_device_realtime_auth_total',
+  help: 'Device realtime socket authentication outcomes.',
+  labelNames: ['result', 'reason'],
+  registers: [registry],
+});
+
+const deviceRealtimeNotificationCounter = new Counter({
+  name: 'signhex_server_device_realtime_notifications_total',
+  help: 'Device realtime notification delivery outcomes. Notifications are wake-up only; REST remains authoritative.',
+  labelNames: ['type', 'result'],
+  registers: [registry],
+});
+
+const websocketNotificationPayloadTooLargeCounter = new Counter({
+  name: 'signhex_server_websocket_notification_payload_too_large_total',
+  help: 'Rejected websocket notification payloads that exceeded the configured byte limit.',
+  labelNames: ['type'],
+  registers: [registry],
+});
+
+const realtimeBusConnectionGauge = new Gauge({
+  name: 'signhex_server_realtime_bus_connection_status',
+  help: 'Realtime bus connection status by provider. 1 means configured and available from the last observed operation, 0 means unavailable.',
+  labelNames: ['provider'],
+  registers: [registry],
+});
+
+const realtimeBusPublishCounter = new Counter({
+  name: 'signhex_server_realtime_bus_publish_total',
+  help: 'Realtime bus wake notification publish attempts. Valkey is wake-only; DB outbox remains durable truth.',
+  labelNames: ['provider', 'result', 'type'],
+  registers: [registry],
+});
+
+const realtimeBusSubscribeFailureCounter = new Counter({
+  name: 'signhex_server_realtime_bus_subscribe_failures_total',
+  help: 'Realtime bus subscribe failures by provider and reason.',
+  labelNames: ['provider', 'reason'],
+  registers: [registry],
+});
+
+const realtimeBusNodeMessageCounter = new Counter({
+  name: 'signhex_server_realtime_bus_node_messages_total',
+  help: 'Realtime bus node messages received and local socket delivery outcomes.',
+  labelNames: ['result', 'type'],
+  registers: [registry],
+});
+
+const deviceNodeRegistryWritesCounter = new Counter({
+  name: 'signhex_server_device_node_registry_writes_total',
+  help: 'Device-to-realtime-node mapping write attempts.',
+  labelNames: ['provider', 'operation', 'result'],
+  registers: [registry],
+});
+
+const deviceNodeRegistryMissCounter = new Counter({
+  name: 'signhex_server_device_node_registry_misses_total',
+  help: 'Device-to-realtime-node mapping lookup misses.',
+  labelNames: ['provider'],
+  registers: [registry],
+});
+
+const realtimeBusFallbackCounter = new Counter({
+  name: 'signhex_server_realtime_bus_fallback_total',
+  help: 'Realtime wake attempts that relied on DB/REST/polling fallback because fanout was unavailable or no device node was known.',
+  labelNames: ['reason'],
+  registers: [registry],
+});
+
+const mediaCacheReportsCounter = new Counter({
+  name: 'signhex_server_media_cache_reports_total',
+  help: 'Media/cache reports received from players.',
+  labelNames: ['event_type', 'severity', 'result'],
+  registers: [registry],
+});
+
+const unresolvedMediaCacheReportsGauge = new Gauge({
+  name: 'signhex_server_media_cache_reports_unresolved',
+  help: 'Open media/cache reports by event type and severity.',
+  labelNames: ['event_type', 'severity'],
+  registers: [registry],
+  collect: async function collectUnresolvedMediaCacheReports() {
+    for (const eventType of MEDIA_CACHE_EVENT_TYPES) {
+      for (const severity of MEDIA_CACHE_SEVERITIES) {
+        this.set({ event_type: eventType, severity }, 0);
+      }
+    }
+
+    const pool = getDatabasePool();
+    if (!pool) return;
+
+    try {
+      const result = await pool.query<{ event_type: string; severity: string; count: string }>(
+        `
+          SELECT event_type, severity, COUNT(*)::bigint AS count
+          FROM media_cache_reports
+          WHERE status = 'OPEN'
+          GROUP BY event_type, severity
+        `
+      );
+
+      for (const row of result.rows) {
+        this.set({ event_type: row.event_type, severity: row.severity }, Number(row.count));
+      }
+    } catch (error) {
+      recordCollectionError('media_cache_reports');
+      void error;
+    }
+  },
+});
+
 const fleetPlayersGauge = new Gauge({
   name: 'signhex_fleet_players_total',
   help: 'Current screen fleet totals derived from backend state.',
@@ -318,7 +585,16 @@ const collectionErrorsCounter = new Counter({
   registers: [registry],
 });
 
-const registeredCollectors = [pgBossQueueStateGauge, dbPoolConnectionsGauge, dbPoolWaitingGauge, fleetPlayersGauge];
+const registeredCollectors = [
+  pgBossQueueStateGauge,
+  dbPoolConnectionsGauge,
+  dbPoolWaitingGauge,
+  deviceCommandRowsGauge,
+  commandOutboxRowsGauge,
+  commandOutboxOldestPendingAgeGauge,
+  unresolvedMediaCacheReportsGauge,
+  fleetPlayersGauge,
+];
 void registeredCollectors;
 
 let defaultMetricsInitialized = false;
@@ -336,7 +612,9 @@ function quoteIdentifier(identifier: string) {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
 
-function recordCollectionError(collector: 'pg_boss' | 'fleet_rollups') {
+function recordCollectionError(
+  collector: 'pg_boss' | 'fleet_rollups' | 'device_commands' | 'command_outbox' | 'media_cache_reports'
+) {
   try {
     collectionErrorsCounter.inc({ collector });
   } catch {
@@ -464,6 +742,103 @@ export function recordDeviceCommandClaim(source: DeviceCommandClaimSource, count
     if (count > 0) {
       deviceCommandClaimCounter.inc({ source }, count);
     }
+  });
+}
+
+export function recordDeviceCommandAck(result: DeviceCommandAckResult, durationSeconds: number) {
+  safeRecord(() => {
+    deviceCommandAckCounter.inc({ result });
+    deviceCommandAckDurationHistogram.observe({ result }, durationSeconds);
+  });
+}
+
+export function recordOutboxDispatch(result: OutboxDispatchResult, eventType = 'unknown', count = 1) {
+  safeRecord(() => {
+    commandOutboxDispatchCounter.inc({ result, event_type: eventType }, Math.max(count, 0));
+  });
+}
+
+export function recordDeviceRealtimeAuth(result: RealtimeAuthResult, reason: string) {
+  safeRecord(() => {
+    deviceRealtimeAuthCounter.inc({ result, reason });
+  });
+}
+
+export function recordDeviceRealtimeNotification(type: string, result: RealtimeNotificationResult) {
+  safeRecord(() => {
+    deviceRealtimeNotificationCounter.inc({ type, result });
+  });
+}
+
+export function recordWebsocketNotificationPayloadTooLarge(type: string) {
+  safeRecord(() => {
+    websocketNotificationPayloadTooLargeCounter.inc({ type });
+  });
+}
+
+export function setRealtimeBusConnectionStatus(provider: RealtimeBusProvider, connected: boolean) {
+  safeRecord(() => {
+    realtimeBusConnectionGauge.set({ provider }, connected ? 1 : 0);
+  });
+}
+
+export function recordRealtimeBusPublish(provider: RealtimeBusProvider, result: RealtimeBusPublishResult, type: string) {
+  safeRecord(() => {
+    realtimeBusPublishCounter.inc({ provider, result, type });
+    if (provider === 'valkey') {
+      realtimeBusConnectionGauge.set({ provider }, result === 'published' ? 1 : 0);
+    }
+  });
+}
+
+export function recordRealtimeBusSubscribeFailure(provider: RealtimeBusProvider, reason: string) {
+  safeRecord(() => {
+    realtimeBusSubscribeFailureCounter.inc({ provider, reason });
+    if (provider === 'valkey') {
+      realtimeBusConnectionGauge.set({ provider }, 0);
+    }
+  });
+}
+
+export function recordRealtimeBusNodeMessage(result: RealtimeBusNodeMessageResult, type: string) {
+  safeRecord(() => {
+    realtimeBusNodeMessageCounter.inc({ result, type });
+  });
+}
+
+export function recordDeviceNodeRegistryWrite(
+  provider: RealtimeBusProvider,
+  operation: DeviceNodeRegistryOperation,
+  result: DeviceNodeRegistryResult
+) {
+  safeRecord(() => {
+    deviceNodeRegistryWritesCounter.inc({ provider, operation, result });
+  });
+}
+
+export function recordDeviceNodeRegistryMiss(provider: RealtimeBusProvider) {
+  safeRecord(() => {
+    deviceNodeRegistryMissCounter.inc({ provider });
+  });
+}
+
+export function recordRealtimeBusFallback(reason: RealtimeBusFallbackReason) {
+  safeRecord(() => {
+    realtimeBusFallbackCounter.inc({ reason });
+  });
+}
+
+export function recordMediaCacheReport(params: {
+  eventType: string;
+  severity: string;
+  result: MediaCacheReportResult;
+}) {
+  safeRecord(() => {
+    mediaCacheReportsCounter.inc({
+      event_type: params.eventType,
+      severity: params.severity,
+      result: params.result,
+    });
   });
 }
 

@@ -3,11 +3,26 @@ import { Socket } from 'socket.io';
 import { desc, eq } from 'drizzle-orm';
 import { config } from '@/config';
 import { getDatabase, schema } from '@/db';
+import {
+  recordDeviceRealtimeAuth,
+  recordDeviceRealtimeNotification,
+  recordWebsocketNotificationPayloadTooLarge,
+} from '@/observability/metrics';
 import { deviceConnectionRegistry } from '@/realtime/device-connection-registry';
+import {
+  handleLocalFanoutDelivery,
+  initializeRealtimeFanout,
+  closeRealtimeFanout,
+  publishWakeToDevice,
+  refreshDeviceForFanout,
+  registerDeviceForFanout,
+  unregisterDeviceForFanout,
+} from '@/realtime/realtime-fanout';
 import { getOrCreateSocketServer } from '@/realtime/socket-server';
 import { createLogger } from '@/utils/logger';
 
 const logger = createLogger('device-realtime-gateway');
+let deviceNodeRefreshTimer: NodeJS.Timeout | null = null;
 
 export const DEVICE_REALTIME_MESSAGE_TYPES = [
   'HELLO',
@@ -113,13 +128,24 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
   const io = getOrCreateSocketServer(fastify);
   const nsp = io.of(config.REALTIME_DEVICE_NAMESPACE);
 
+  void initializeRealtimeFanout((message) => {
+    handleLocalFanoutDelivery(message, (incoming) => {
+      if (!incoming.device_id || typeof incoming.device_id !== 'string') return 0;
+      return deviceConnectionRegistry.emitToDevice(incoming.device_id, incoming.type, incoming);
+    });
+  }, options).catch((error) => {
+    logger.warn({ err: error }, 'Device realtime fanout initialization failed; polling fallback remains authoritative');
+  });
+
   nsp.use(async (socket, next) => {
     try {
       const auth = await authenticateDeviceSocket(socket);
       (socket.data as any).deviceId = auth.deviceId;
       (socket.data as any).deviceSerial = auth.serial;
+      recordDeviceRealtimeAuth('success', 'authorized');
       return next();
     } catch (error) {
+      recordDeviceRealtimeAuth('failure', error instanceof Error ? error.message : 'unauthorized');
       logger.warn({ err: error }, 'Device realtime socket auth failed');
       return next(new Error('Unauthorized'));
     }
@@ -143,6 +169,7 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
           appVersion: typeof payload?.app?.version === 'string' ? payload.app.version : null,
           platformFamily: typeof payload?.platform?.family === 'string' ? payload.platform.family : null,
         });
+        void registerDeviceForFanout(deviceId);
 
         const response = buildHelloAck({
           deviceId,
@@ -154,6 +181,9 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
         socket.emit('HELLO_ACK', response);
         if (ack) ack(response);
       } catch (error) {
+        if (error instanceof Error && error.message.includes('WebSocket notification exceeds')) {
+          recordWebsocketNotificationPayloadTooLarge('HELLO');
+        }
         const response = {
           type: 'ERROR',
           code: 'HELLO_INVALID',
@@ -167,6 +197,10 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
     });
 
     socket.on('PING', (payload: unknown, ack?: (result: unknown) => void) => {
+      const deviceId = (socket.data as any).deviceId as string | undefined;
+      if (deviceId) {
+        void refreshDeviceForFanout(deviceId);
+      }
       const response = {
         type: 'PONG',
         server_time: new Date().toISOString(),
@@ -177,24 +211,74 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
     });
 
     socket.on('disconnect', () => {
+      const deviceId = (socket.data as any).deviceId as string | undefined;
       deviceConnectionRegistry.unregisterSocket(socket.id);
+      if (deviceId) {
+        if (deviceConnectionRegistry.getConnections(deviceId).length > 0) {
+          void refreshDeviceForFanout(deviceId);
+        } else {
+          void unregisterDeviceForFanout(deviceId);
+        }
+      }
     });
   });
 
+  if (!deviceNodeRefreshTimer) {
+    deviceNodeRefreshTimer = setInterval(() => {
+      for (const deviceId of deviceConnectionRegistry.getConnectedDeviceIds()) {
+        void refreshDeviceForFanout(deviceId);
+      }
+    }, Math.max(10_000, Math.floor(config.REALTIME_DEVICE_NODE_TTL_MS / 2)));
+    deviceNodeRefreshTimer.unref?.();
+  }
+
   fastify.addHook('onClose', async () => {
+    if (deviceNodeRefreshTimer) {
+      clearInterval(deviceNodeRefreshTimer);
+      deviceNodeRefreshTimer = null;
+    }
     deviceConnectionRegistry.clear();
+    await closeRealtimeFanout();
   });
 
   (fastify as any)._deviceRealtimeGatewayReady = true;
 }
 
-export function sendDeviceNotification(deviceId: string, type: 'COMMAND_AVAILABLE' | 'RESYNC_REQUIRED' | 'SERVER_TIME', payload: unknown) {
+export async function sendDeviceNotification(deviceId: string, type: 'COMMAND_AVAILABLE' | 'RESYNC_REQUIRED' | 'SERVER_TIME', payload: unknown) {
   const message = {
     ...(payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}),
     type,
     device_id: deviceId,
     sent_at: new Date().toISOString(),
   };
-  assertNotificationPayloadAllowed(message);
-  return deviceConnectionRegistry.emitToDevice(deviceId, type, message);
+  try {
+    assertNotificationPayloadAllowed(message);
+    const deliveredConnections = deviceConnectionRegistry.emitToDevice(deviceId, type, message);
+    if (deliveredConnections > 0) {
+      recordDeviceRealtimeNotification(type, 'delivered');
+      return deliveredConnections;
+    }
+
+    const fanout = await publishWakeToDevice(deviceId, message);
+    if (fanout.status === 'published') {
+      recordDeviceRealtimeNotification(type, 'delivered');
+      return 1;
+    }
+    if (fanout.status === 'payload_too_large') {
+      recordWebsocketNotificationPayloadTooLarge(type);
+      recordDeviceRealtimeNotification(type, 'payload_too_large');
+      throw new Error(fanout.reason);
+    }
+
+    recordDeviceRealtimeNotification(type, 'deferred');
+    return 0;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('WebSocket notification exceeds')) {
+      recordWebsocketNotificationPayloadTooLarge(type);
+      recordDeviceRealtimeNotification(type, 'payload_too_large');
+    } else {
+      recordDeviceRealtimeNotification(type, 'error');
+    }
+    throw error;
+  }
 }

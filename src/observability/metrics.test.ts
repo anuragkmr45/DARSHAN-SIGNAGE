@@ -5,11 +5,23 @@ import {
   observeJobProcessing,
   observeS3Operation,
   recordDeviceAuthAttempt,
+  recordDeviceCommandAck,
   recordDeviceCommandClaim,
+  recordDeviceNodeRegistryMiss,
+  recordDeviceNodeRegistryWrite,
+  recordDeviceRealtimeAuth,
+  recordDeviceRealtimeNotification,
   recordJobEnqueue,
+  recordMediaCacheReport,
+  recordOutboxDispatch,
   recordPairingCodeAllocation,
   recordPairingCsrValidation,
+  recordRealtimeBusFallback,
+  recordRealtimeBusNodeMessage,
+  recordRealtimeBusPublish,
+  recordRealtimeBusSubscribeFailure,
   recordTelemetryIngest,
+  recordWebsocketNotificationPayloadTooLarge,
   resetObservabilityMetricsForTests,
 } from '@/observability/metrics';
 import { closeTestServer, createTestServer } from '@/test/helpers';
@@ -92,6 +104,86 @@ describe('backend observability instrumentation', () => {
     );
     expect(output).toContain('signhex_server_device_commands_claimed_total{source="heartbeat"} 3');
     expect(output).toContain('signhex_server_device_commands_claimed_total{source="poll"} 1');
+  });
+
+  it('records realtime sync readiness metrics for outbox, realtime, ACK, and media-cache paths', async () => {
+    recordOutboxDispatch('dispatched', 'COMMAND_AVAILABLE');
+    recordOutboxDispatch('deferred', 'COMMAND_AVAILABLE');
+    recordOutboxDispatch('failed', 'RESYNC_REQUIRED');
+    recordDeviceRealtimeAuth('success', 'authorized');
+    recordDeviceRealtimeAuth('failure', 'Missing device identity');
+    recordDeviceRealtimeNotification('COMMAND_AVAILABLE', 'delivered');
+    recordDeviceRealtimeNotification('COMMAND_AVAILABLE', 'deferred');
+    recordWebsocketNotificationPayloadTooLarge('COMMAND_AVAILABLE');
+    recordRealtimeBusPublish('valkey', 'published', 'COMMAND_AVAILABLE');
+    recordRealtimeBusPublish('valkey', 'failed', 'COMMAND_AVAILABLE');
+    recordRealtimeBusSubscribeFailure('valkey', 'subscriber_error');
+    recordRealtimeBusNodeMessage('received', 'COMMAND_AVAILABLE');
+    recordRealtimeBusNodeMessage('socket_missing', 'COMMAND_AVAILABLE');
+    recordDeviceNodeRegistryWrite('valkey', 'register', 'success');
+    recordDeviceNodeRegistryWrite('valkey', 'refresh', 'error');
+    recordDeviceNodeRegistryMiss('valkey');
+    recordRealtimeBusFallback('valkey_unavailable');
+    recordDeviceCommandAck('success', 0.025);
+    recordDeviceCommandAck('failure', 0.05);
+    recordMediaCacheReport({ eventType: 'DOWNLOAD_FAILED', severity: 'ERROR', result: 'accepted' });
+    recordMediaCacheReport({ eventType: 'DISK_FULL', severity: 'CRITICAL', result: 'error' });
+
+    const output = await getObservabilityRegistry().metrics();
+
+    expect(output).toContain(
+      'signhex_server_command_outbox_dispatch_total{result="dispatched",event_type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_command_outbox_dispatch_total{result="deferred",event_type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_command_outbox_dispatch_total{result="failed",event_type="RESYNC_REQUIRED"} 1'
+    );
+    expect(output).toContain('signhex_server_device_realtime_auth_total{result="success",reason="authorized"} 1');
+    expect(output).toContain(
+      'signhex_server_device_realtime_auth_total{result="failure",reason="Missing device identity"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_realtime_notifications_total{type="COMMAND_AVAILABLE",result="delivered"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_realtime_notifications_total{type="COMMAND_AVAILABLE",result="deferred"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_websocket_notification_payload_too_large_total{type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_publish_total{provider="valkey",result="published",type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_publish_total{provider="valkey",result="failed",type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_subscribe_failures_total{provider="valkey",reason="subscriber_error"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_node_messages_total{result="received",type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_node_messages_total{result="socket_missing",type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_node_registry_writes_total{provider="valkey",operation="register",result="success"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_node_registry_writes_total{provider="valkey",operation="refresh",result="error"} 1'
+    );
+    expect(output).toContain('signhex_server_device_node_registry_misses_total{provider="valkey"} 1');
+    expect(output).toContain('signhex_server_realtime_bus_fallback_total{reason="valkey_unavailable"} 1');
+    expect(output).toContain('signhex_server_device_command_acks_total{result="success"} 1');
+    expect(output).toContain('signhex_server_device_command_acks_total{result="failure"} 1');
+    expect(output).toContain(
+      'signhex_server_media_cache_reports_total{event_type="DOWNLOAD_FAILED",severity="ERROR",result="accepted"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_media_cache_reports_total{event_type="DISK_FULL",severity="CRITICAL",result="error"} 1'
+    );
   });
 
   it('exposes a Prometheus scrape endpoint and preserves route templates', async () => {

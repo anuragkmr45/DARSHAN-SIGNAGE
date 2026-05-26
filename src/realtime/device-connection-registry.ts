@@ -59,6 +59,10 @@ export class DeviceConnectionRegistry {
     return Array.from(this.byDevice.get(deviceId)?.values() ?? []).map(({ socket: _socket, ...info }) => info);
   }
 
+  getConnectedDeviceIds() {
+    return Array.from(this.byDevice.keys());
+  }
+
   emitToDevice(deviceId: string, event: string, payload: unknown) {
     const deviceConnections = this.byDevice.get(deviceId);
     if (!deviceConnections || deviceConnections.size === 0) {

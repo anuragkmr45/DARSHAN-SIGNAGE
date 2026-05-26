@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { config } from '@/config';
 import { getDatabase, schema } from '@/db';
+import { recordOutboxDispatch } from '@/observability/metrics';
 import { sendDeviceNotification } from '@/realtime/device-gateway';
 import { createLogger } from '@/utils/logger';
 
@@ -120,6 +121,7 @@ async function updateOutboxRetry(row: CommandOutboxRow, errorMessage: string) {
 
 export async function dispatchPendingCommandOutboxBatch(options: { force?: boolean; batchSize?: number } = {}) {
   if (!options.force && (!config.REALTIME_SYNC_ENABLED || !config.OUTBOX_DISPATCH_ENABLED)) {
+    recordOutboxDispatch('skipped_disabled', 'all');
     return {
       skipped: true,
       claimed: 0,
@@ -137,21 +139,25 @@ export async function dispatchPendingCommandOutboxBatch(options: { force?: boole
   for (const row of rows) {
     try {
       const notification = buildNotification(row);
-      const deliveredConnections = sendDeviceNotification(row.screen_id, notification.type, notification.payload);
+      const deliveredConnections = await sendDeviceNotification(row.screen_id, notification.type, notification.payload);
       if (deliveredConnections <= 0) {
         const exhaustedAttempts = await updateOutboxRetry(row, 'No active device realtime connection');
         if (exhaustedAttempts) {
           failed += 1;
+          recordOutboxDispatch('failed', row.event_type);
         } else {
           deferred += 1;
+          recordOutboxDispatch('deferred', row.event_type);
         }
         continue;
       }
 
       dispatched += 1;
+      recordOutboxDispatch('dispatched', row.event_type);
       await updateOutboxSuccess(row, deliveredConnections);
     } catch (error) {
       failed += 1;
+      recordOutboxDispatch('failed', row.event_type);
       const message = error instanceof Error ? error.message : 'Outbox dispatch failed';
       logger.warn({ err: error, outboxId: row.id }, 'Command outbox dispatch failed');
       await updateOutboxRetry(row, message);
