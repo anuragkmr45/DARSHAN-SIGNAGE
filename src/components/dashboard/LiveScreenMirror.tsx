@@ -147,10 +147,7 @@ export function LiveScreenMirror({
     () => getServerClockOffsetMs(snapshot?.server_time),
     [snapshot?.server_time],
   );
-  const nowMs = useMemo(
-    () => getServerNowFromOffset(serverClockOffsetMs),
-    [serverClockOffsetMs, clockTick],
-  );
+  const nowMs = getServerNowFromOffset(serverClockOffsetMs);
 
   const mirror = useMemo(
     () => buildLiveMirrorState(snapshot, nowMs, fallbackAspectRatio),

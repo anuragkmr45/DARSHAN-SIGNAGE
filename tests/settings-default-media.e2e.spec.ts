@@ -30,9 +30,9 @@ const rolesPayload = {
 };
 
 type MockState = {
-  globalMedia: any | null;
+  globalMedia: (typeof mediaCatalog)[number] | null;
   globalMediaId: string | null;
-  variants: Record<string, any>;
+  variants: Record<string, (typeof mediaCatalog)[number] | null>;
 };
 
 const mediaCatalog = [

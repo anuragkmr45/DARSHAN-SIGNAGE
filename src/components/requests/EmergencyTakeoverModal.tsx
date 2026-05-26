@@ -114,8 +114,8 @@ export function EmergencyTakeoverModal({
   });
 
   const activeEmergencies = emergencyStatusQuery.data?.active_emergencies ?? [];
-  const mediaItems = Array.isArray(mediaQuery.data?.items) ? mediaQuery.data.items : [];
-  const screens = screensQuery.data?.items ?? [];
+  const mediaItems = useMemo(() => (Array.isArray(mediaQuery.data?.items) ? mediaQuery.data.items : []), [mediaQuery.data?.items]);
+  const screens = useMemo(() => screensQuery.data?.items ?? [], [screensQuery.data?.items]);
   const groups = groupsQuery.data?.items ?? [];
   const selectedMedia = mediaId !== "none" ? mediaItems.find((media) => media.id === mediaId) ?? null : null;
   const filteredMediaItems = useMemo(() => {
