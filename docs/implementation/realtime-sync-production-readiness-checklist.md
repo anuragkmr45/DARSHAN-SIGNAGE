@@ -52,12 +52,12 @@ See `realtime-sync-phase-8-runtime-evidence.md`.
 
 Latest documentation/static validation after the on-prem/Valkey update on 2026-05-25:
 
-- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh`: passed.
-- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`: passed.
-- `bash signhex-platform/scripts/verify/validate-observability-assets.sh`: passed after Docker escalation.
-- `cd signhex-server && npm run build`: passed after Valkey fanout implementation.
-- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts`: passed, 19 tests.
-- `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts`: passed against temporary local `valkey/valkey:9.0.3-alpine` after sandbox network escalation.
+- `bash scripts/verify/validate-realtime-sync-phase7-assets.sh`: passed.
+- `bash scripts/verify/validate-realtime-sync-phase8-assets.sh`: passed.
+- `bash scripts/verify/validate-observability-assets.sh`: passed after Docker escalation.
+- `cd darshan-server && npm run build`: passed after Valkey fanout implementation.
+- `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts`: passed, 19 tests.
+- `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts`: passed against temporary local `valkey/valkey:9.0.3-alpine` after sandbox network escalation.
 
 ## Production Canary Rule
 
@@ -71,7 +71,7 @@ Rollback order:
 
 1. `OUTBOX_DISPATCH_ENABLED=false`
 2. `REALTIME_SYNC_ENABLED=false`
-3. `HEXMON_REALTIME_SYNC_ENABLED=false`
+3. `DARSHAN_REALTIME_PLAYER_ENABLED=false`
 4. Optional: `MEDIA_CACHE_REPORTING_ENABLED=false`
 5. Keep REST, polling, heartbeat, command claim/ACK, snapshot/default/emergency fetch, and media cache active.
 6. Leave additive DB schema in place.

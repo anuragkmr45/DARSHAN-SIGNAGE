@@ -11,24 +11,24 @@ Existing observability covers general backend HTTP, fleet heartbeat freshness, w
 
 Dedicated realtime sync metrics added locally on 2026-05-24:
 
-- `signhex_server_command_outbox_rows`
-- `signhex_server_command_outbox_oldest_pending_age_seconds`
-- `signhex_server_command_outbox_dispatch_total`
-- `signhex_server_device_realtime_auth_total`
-- `signhex_server_device_realtime_notifications_total`
-- `signhex_server_websocket_notification_payload_too_large_total`
-- `signhex_server_device_command_acks_total`
-- `signhex_server_device_command_ack_duration_seconds`
-- `signhex_server_device_commands_rows`
-- `signhex_server_media_cache_reports_total`
-- `signhex_server_media_cache_reports_unresolved`
-- `signhex_server_realtime_bus_connection_status`
-- `signhex_server_realtime_bus_publish_total`
-- `signhex_server_realtime_bus_subscribe_failures_total`
-- `signhex_server_realtime_bus_node_messages_total`
-- `signhex_server_device_node_registry_writes_total`
-- `signhex_server_device_node_registry_misses_total`
-- `signhex_server_realtime_bus_fallback_total`
+- `darshan_server_command_outbox_rows`
+- `darshan_server_command_outbox_oldest_pending_age_seconds`
+- `darshan_server_command_outbox_dispatch_total`
+- `darshan_server_device_realtime_auth_total`
+- `darshan_server_device_realtime_notifications_total`
+- `darshan_server_websocket_notification_payload_too_large_total`
+- `darshan_server_device_command_acks_total`
+- `darshan_server_device_command_ack_duration_seconds`
+- `darshan_server_device_commands_rows`
+- `darshan_server_media_cache_reports_total`
+- `darshan_server_media_cache_reports_unresolved`
+- `darshan_server_realtime_bus_connection_status`
+- `darshan_server_realtime_bus_publish_total`
+- `darshan_server_realtime_bus_subscribe_failures_total`
+- `darshan_server_realtime_bus_node_messages_total`
+- `darshan_server_device_node_registry_writes_total`
+- `darshan_server_device_node_registry_misses_total`
+- `darshan_server_realtime_bus_fallback_total`
 
 Dedicated Prometheus recording/alert rules added locally:
 
@@ -46,24 +46,24 @@ Dedicated Prometheus recording/alert rules added locally:
 
 Latest validation attempt:
 
-- `bash signhex-platform/scripts/verify/validate-observability-assets.sh` passed after Docker escalation.
-- `cd signhex-server && npx vitest run src/observability/metrics.test.ts` passed with 5 tests.
-- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts` passed with 19 tests.
-- `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` passed with 2 tests against local Docker Valkey after sandbox escalation.
-- `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` passed with 4 tests after metrics wiring.
+- `bash scripts/verify/validate-observability-assets.sh` passed after Docker escalation.
+- `cd darshan-server && npx vitest run src/observability/metrics.test.ts` passed with 5 tests.
+- `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts` passed with 19 tests.
+- `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` passed with 2 tests against local Docker Valkey after sandbox escalation.
+- `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts` passed with 4 tests after metrics wiring.
 - This is static/local validation only. It does not prove alert usefulness under real QA load, reconnect storms, or media/cache failures.
 
 ## Existing Alert Coverage
 
 | Area | Current coverage | Gap |
 |---|---|---|
-| Backend availability | `SignhexBackendMetricsUnavailable` | none |
-| Backend 5xx | `SignhexBackendHttp5xxHigh` | route-specific realtime/API alert absent |
-| PostgreSQL | `SignhexPostgresUnavailable` | DB latency/lock pressure alert absent |
-| MinIO | `SignhexMinioMetricsUnavailable` | media egress/cache-hit alert absent |
-| Fleet heartbeat | `SignhexFleetHeartbeatsStalled`, `SignhexFleetOfflinePlayersHigh` | fallback poll/realtime health split absent |
+| Backend availability | `DARSHANBackendMetricsUnavailable` | none |
+| Backend 5xx | `DARSHANBackendHttp5xxHigh` | route-specific realtime/API alert absent |
+| PostgreSQL | `DARSHANPostgresUnavailable` | DB latency/lock pressure alert absent |
+| MinIO | `DARSHANMinioMetricsUnavailable` | media egress/cache-hit alert absent |
+| Fleet heartbeat | `DARSHANFleetHeartbeatsStalled`, `DARSHANFleetOfflinePlayersHigh` | fallback poll/realtime health split absent |
 | Host resources | CPU, memory, filesystem alerts | none for process-specific memory |
-| WebSocket connections | metric exists: `signhex_server_websocket_connections`; auth and notification counters added | production thresholds need QA tuning |
+| WebSocket connections | metric exists: `darshan_server_websocket_connections`; auth and notification counters added | production thresholds need QA tuning |
 | Outbox | rows, lag, and dispatch outcome metrics plus alerts added | production thresholds need QA tuning |
 | Command ACK | ACK counters/duration and failure ratio alert added | command-type label intentionally omitted to avoid high cardinality |
 | Media/cache reports | report counters, unresolved critical gauge, and alert rules added | retention/partitioning still needs human decision |
@@ -74,7 +74,7 @@ Latest validation attempt:
 Run from repo root:
 
 ```bash
-bash signhex-platform/scripts/verify/validate-observability-assets.sh
+bash scripts/verify/validate-observability-assets.sh
 ```
 
 Expected:

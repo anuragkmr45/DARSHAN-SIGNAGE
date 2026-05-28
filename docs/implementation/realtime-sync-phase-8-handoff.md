@@ -36,69 +36,69 @@ Phase 8 added load modeling, chaos test planning, production readiness gates, on
 
 ## Files Added
 
-- `signhex-platform/scripts/load/realtime-sync-load-model.mjs`
-- `signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`
-- `signhex-platform/docs/implementation/realtime-sync-load-and-chaos-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-production-readiness-checklist.md`
-- `signhex-platform/docs/implementation/realtime-sync-qa-canary-evidence.md`
-- `signhex-platform/docs/implementation/realtime-sync-metrics-alert-validation.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`
-- `signhex-platform/docs/implementation/realtime-sync-media-cache-report-retention-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-valkey-fanout-implementation.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-8-valkey-fanout-handoff.md`
+- `scripts/load/realtime-sync-load-model.mjs`
+- `scripts/verify/validate-realtime-sync-phase8-assets.sh`
+- `docs/implementation/realtime-sync-load-and-chaos-plan.md`
+- `docs/implementation/realtime-sync-production-readiness-checklist.md`
+- `docs/implementation/realtime-sync-qa-canary-evidence.md`
+- `docs/implementation/realtime-sync-metrics-alert-validation.md`
+- `docs/implementation/realtime-sync-phase-8-handoff.md`
+- `docs/implementation/realtime-sync-media-cache-report-retention-plan.md`
+- `docs/implementation/realtime-sync-valkey-fanout-implementation.md`
+- `docs/implementation/realtime-sync-phase-8-valkey-fanout-handoff.md`
 
 ## Files Updated For Observability Continuation
 
-- `signhex-server/src/observability/metrics.ts`
-- `signhex-server/src/observability/index.ts`
-- `signhex-server/src/observability/metrics.test.ts`
-- `signhex-server/src/realtime/device-gateway.ts`
-- `signhex-server/src/services/outbox-dispatcher.ts`
-- `signhex-server/src/routes/device-telemetry.ts`
-- `signhex-platform/deploy/shared/observability/prometheus/rules/alerts.yml`
-- `signhex-platform/deploy/shared/observability/prometheus/rules/recording-rules.yml`
-- `signhex-platform/deploy/shared/observability/prometheus/tests/rules.test.yml`
-- `signhex-server/src/realtime/realtime-node.ts`
-- `signhex-server/src/realtime/valkey-resp-client.ts`
-- `signhex-server/src/realtime/realtime-bus.ts`
-- `signhex-server/src/realtime/device-node-registry.ts`
-- `signhex-server/src/realtime/realtime-fanout.ts`
-- `signhex-server/src/realtime/realtime-bus.test.ts`
-- `signhex-server/src/realtime/valkey-realtime-bus.integration.test.ts`
+- `darshan-server/src/observability/metrics.ts`
+- `darshan-server/src/observability/index.ts`
+- `darshan-server/src/observability/metrics.test.ts`
+- `darshan-server/src/realtime/device-gateway.ts`
+- `darshan-server/src/services/outbox-dispatcher.ts`
+- `darshan-server/src/routes/device-telemetry.ts`
+- `deploy/shared/observability/prometheus/rules/alerts.yml`
+- `deploy/shared/observability/prometheus/rules/recording-rules.yml`
+- `deploy/shared/observability/prometheus/tests/rules.test.yml`
+- `darshan-server/src/realtime/realtime-node.ts`
+- `darshan-server/src/realtime/valkey-resp-client.ts`
+- `darshan-server/src/realtime/realtime-bus.ts`
+- `darshan-server/src/realtime/device-node-registry.ts`
+- `darshan-server/src/realtime/realtime-fanout.ts`
+- `darshan-server/src/realtime/realtime-bus.test.ts`
+- `darshan-server/src/realtime/valkey-realtime-bus.integration.test.ts`
 
 ## Validation
 
 Run:
 
 ```bash
-bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json
+bash scripts/verify/validate-realtime-sync-phase8-assets.sh
+node scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json
+node scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json
+node scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json
 ```
 
 Latest local results from 2026-05-24:
 
-- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`: passed.
-- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json`: passed; modeled total RPS `240`.
-- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json`: passed; modeled total RPS `566.67`.
-- `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json`: passed; modeled total RPS `12000`.
-- `bash signhex-platform/scripts/verify/validate-observability-assets.sh`: passed after Docker escalation and image pulls.
-- `cd signhex-server && npx vitest run src/observability/metrics.test.ts`: passed, 5 tests.
-- `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts`: passed, 4 tests.
-- `cd signhex-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts`: passed, 1 test.
-- `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts`: passed, 2 tests.
-- `cd signhex-nexus-core && npm run lint`: passed.
-- `cd signhex-server && npm run build`: passed under local Node `v24.12.0`.
-- `cd signage-screen && npm run build`: passed under local Node `v24.12.0`.
-- `cd signhex-nexus-core && npm run build`: passed under local Node `v24.12.0`.
-- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts`: passed, 8 tests.
-- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts`: passed, 19 tests.
-- `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts`: passed, 2 tests.
-- `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts`: passed, 2 tests, using temporary local `valkey/valkey:9.0.3-alpine` after sandbox network escalation.
-- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh`: passed again on 2026-05-25 after on-prem/Valkey documentation update.
-- `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`: passed again on 2026-05-25 after on-prem/Valkey documentation update.
-- `bash signhex-platform/scripts/verify/validate-observability-assets.sh`: passed again on 2026-05-25 after Docker escalation.
+- `bash scripts/verify/validate-realtime-sync-phase8-assets.sh`: passed.
+- `node scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json`: passed; modeled total RPS `240`.
+- `node scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json`: passed; modeled total RPS `566.67`.
+- `node scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json`: passed; modeled total RPS `12000`.
+- `bash scripts/verify/validate-observability-assets.sh`: passed after Docker escalation and image pulls.
+- `cd darshan-server && npx vitest run src/observability/metrics.test.ts`: passed, 5 tests.
+- `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts`: passed, 4 tests.
+- `cd darshan-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts`: passed, 1 test.
+- `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts`: passed, 2 tests.
+- `cd darshan-cms && npm run lint`: passed.
+- `cd darshan-server && npm run build`: passed under local Node `v24.12.0`.
+- `cd darshan-player && npm run build`: passed under local Node `v24.12.0`.
+- `cd darshan-cms && npm run build`: passed under local Node `v24.12.0`.
+- `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts`: passed, 8 tests.
+- `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts`: passed, 19 tests.
+- `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts`: passed, 2 tests.
+- `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts`: passed, 2 tests, using temporary local `valkey/valkey:9.0.3-alpine` after sandbox network escalation.
+- `bash scripts/verify/validate-realtime-sync-phase7-assets.sh`: passed again on 2026-05-25 after on-prem/Valkey documentation update.
+- `bash scripts/verify/validate-realtime-sync-phase8-assets.sh`: passed again on 2026-05-25 after on-prem/Valkey documentation update.
+- `bash scripts/verify/validate-observability-assets.sh`: passed again on 2026-05-25 after Docker escalation.
 
 Blocked local results:
 
@@ -109,7 +109,7 @@ Blocked local results:
 
 Runtime evidence attempt:
 
-- Recorded in `signhex-platform/docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
+- Recorded in `docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
 - Packaged QA server health check is blocked because `postgres` is not running.
 - Packaged QA CMS health check is blocked by HTTP 404.
 - Local backend and Socket.IO smoke checks are blocked because nothing is listening on `127.0.0.1:3000`.

@@ -5,7 +5,7 @@
   "graphTooltip": 0,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "id": 1,
@@ -17,7 +17,7 @@
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "id": 2,
@@ -31,10 +31,10 @@
   ],
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["signhex", "players"],
+  "tags": ["darshan", "players"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "Signhex Player Fleet",
-  "uid": "signhex-players-fleet",
+  "title": "DARSHAN Player Fleet",
+  "uid": "darshan-players-fleet",
   "version": 1
 }

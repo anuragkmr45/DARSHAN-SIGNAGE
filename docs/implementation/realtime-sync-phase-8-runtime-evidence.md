@@ -9,7 +9,7 @@ Phase 9 state: BLOCKED
 
 ## Summary
 
-The requested Phase 8 runtime evidence was attempted from `/Users/anuragkumar/Desktop/signhex`. Local Valkey fanout implementation and local Docker Valkey Pub/Sub smoke were completed. Real air-gapped on-prem QA load, chaos, canary rollback, proxy/runtime smoke, on-prem Valkey HA fanout smoke, and production-readiness evidence could not be executed because no active on-prem QA deployment target, on-prem Valkey endpoint/topology, or simulator credential pool is available in this workspace/session.
+The requested Phase 8 runtime evidence was attempted from `/Users/anuragkumar/Desktop/darshan`. Local Valkey fanout implementation and local Docker Valkey Pub/Sub smoke were completed. Real air-gapped on-prem QA load, chaos, canary rollback, proxy/runtime smoke, on-prem Valkey HA fanout smoke, and production-readiness evidence could not be executed because no active on-prem QA deployment target, on-prem Valkey endpoint/topology, or simulator credential pool is available in this workspace/session.
 
 No Phase 9 mobile/TV adapters were implemented. No migrations, Electron realtime behavior, CMS UI, source-of-truth behavior, or deployment behavior was changed. Runtime source changes made during the local continuation pass were additive observability metrics and notification-only Valkey fanout over the existing DB outbox/gateway path.
 
@@ -17,37 +17,37 @@ No Phase 9 mobile/TV adapters were implemented. No migrations, Electron realtime
 
 | Command | Result | Evidence | Classification |
 |---|---|---|---|
-| `find signhex-platform/out -maxdepth 4 -type f` | Passed | Found old QA artifact package folders under `signhex-platform/out/2026-04-15-artifact-qa` | DISCOVERY_ONLY |
+| `find out -maxdepth 4 -type f` | Passed | Found old QA artifact package folders under `out/2026-04-15-artifact-qa` | DISCOVERY_ONLY |
 | `printenv ... rg '^(ONPREM|VALKEY|SIGNHEX|HEXMON|REALTIME|BACKEND|CMS|DATABASE|OUTBOX|COMMAND|DEVICE|MEDIA|VITE)'` | Passed | Only `COMMAND_MODE` was present in the local session; no on-prem endpoint, Valkey, or simulator variables were available | BLOCKED_BY_ENV |
-| `./health-check.sh` in `signhex-platform/out/2026-04-15-artifact-qa/server` | Failed | `service "postgres" is not running` | BLOCKED_BY_ENV |
-| `./health-check.sh` in `signhex-platform/out/2026-04-15-artifact-qa/cms` | Failed | `curl: (22) The requested URL returned error: 404` | BLOCKED_BY_ENV |
+| `./health-check.sh` in `out/2026-04-15-artifact-qa/server` | Failed | `service "postgres" is not running` | BLOCKED_BY_ENV |
+| `./health-check.sh` in `out/2026-04-15-artifact-qa/cms` | Failed | `curl: (22) The requested URL returned error: 404` | BLOCKED_BY_ENV |
 | `curl -fsS -i http://127.0.0.1:3000/api/v1/health` | Failed | `Failed to connect to 127.0.0.1 port 3000` | BLOCKED_BY_ENV |
 | `curl -fsS -i http://127.0.0.1:80/api/v1/health` | Failed | `Failed to connect to 127.0.0.1 port 80` | BLOCKED_BY_ENV |
 | `curl -fsS -i 'http://127.0.0.1:3000/socket.io/?EIO=4&transport=polling'` | Failed | `Failed to connect to 127.0.0.1 port 3000` | BLOCKED_BY_ENV |
-| `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh` | Passed | `[phase8] realtime sync load/chaos/readiness assets validated from /Users/anuragkumar/Desktop/signhex` | LOCAL_STATIC_VALIDATION |
-| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json` | Passed | Modeled total RPS `240` | MODEL_ONLY |
-| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json` | Passed | Modeled total RPS `566.67` | MODEL_ONLY |
-| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json` | Passed | Modeled total RPS `12000` | MODEL_ONLY |
-| `bash signhex-platform/scripts/verify/validate-observability-assets.sh` | Passed after Docker escalation | Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed | LOCAL_STATIC_VALIDATION |
-| `cd signhex-server && npx vitest run src/observability/metrics.test.ts` | Passed | 5 tests passed | LOCAL_STATIC_VALIDATION |
-| `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` | Passed | 4 tests passed after metrics wiring | LOCAL_STATIC_VALIDATION |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` | Passed | 1 test passed after media/cache report metrics wiring | LOCAL_STATIC_VALIDATION |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts` | Passed | 2 tests passed | LOCAL_STATIC_VALIDATION |
-| `cd signhex-nexus-core && npm run lint` | Passed | ESLint exited 0 after local lint fixes | LOCAL_STATIC_VALIDATION |
-| `cd signhex-server && npm run build` | Passed | Backend TypeScript build exited 0 under Node `v24.12.0` | LOCAL_STATIC_VALIDATION |
-| `cd signage-screen && npm run build` | Passed | Player main/renderer build exited 0 under Node `v24.12.0` | LOCAL_STATIC_VALIDATION |
-| `cd signhex-nexus-core && npm run build` | Passed | CMS Vite build exited 0 under Node `v24.12.0` with existing chunk-size warning | LOCAL_STATIC_VALIDATION |
+| `bash scripts/verify/validate-realtime-sync-phase8-assets.sh` | Passed | `[phase8] realtime sync load/chaos/readiness assets validated from /Users/anuragkumar/Desktop/darshan` | LOCAL_STATIC_VALIDATION |
+| `node scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json` | Passed | Modeled total RPS `240` | MODEL_ONLY |
+| `node scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json` | Passed | Modeled total RPS `566.67` | MODEL_ONLY |
+| `node scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json` | Passed | Modeled total RPS `12000` | MODEL_ONLY |
+| `bash scripts/verify/validate-observability-assets.sh` | Passed after Docker escalation | Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed | LOCAL_STATIC_VALIDATION |
+| `cd darshan-server && npx vitest run src/observability/metrics.test.ts` | Passed | 5 tests passed | LOCAL_STATIC_VALIDATION |
+| `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts` | Passed | 4 tests passed after metrics wiring | LOCAL_STATIC_VALIDATION |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` | Passed | 1 test passed after media/cache report metrics wiring | LOCAL_STATIC_VALIDATION |
+| `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts` | Passed | 2 tests passed | LOCAL_STATIC_VALIDATION |
+| `cd darshan-cms && npm run lint` | Passed | ESLint exited 0 after local lint fixes | LOCAL_STATIC_VALIDATION |
+| `cd darshan-server && npm run build` | Passed | Backend TypeScript build exited 0 under Node `v24.12.0` | LOCAL_STATIC_VALIDATION |
+| `cd darshan-player && npm run build` | Passed | Player main/renderer build exited 0 under Node `v24.12.0` | LOCAL_STATIC_VALIDATION |
+| `cd darshan-cms && npm run build` | Passed | CMS Vite build exited 0 under Node `v24.12.0` with existing chunk-size warning | LOCAL_STATIC_VALIDATION |
 | `node -v` | Passed | `v24.12.0` | ENV_RISK |
-| `bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh` | Passed on 2026-05-25 | `[phase7] realtime sync deployment hardening assets validated` | LOCAL_STATIC_VALIDATION |
-| `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh` | Passed on 2026-05-25 | `[phase8] realtime sync load/chaos/readiness assets validated from /Users/anuragkumar/Desktop/signhex` | LOCAL_STATIC_VALIDATION |
-| `bash signhex-platform/scripts/verify/validate-observability-assets.sh` | Passed on 2026-05-25 after Docker escalation | Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed | LOCAL_STATIC_VALIDATION |
-| `cd signhex-server && npm run build` | Passed on 2026-05-25 | `tsc && tsc-alias` exited 0 under local Node `v24.12.0` | LOCAL_STATIC_VALIDATION |
-| `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts` | Passed on 2026-05-25 | 8 tests passed | LOCAL_STATIC_VALIDATION |
-| `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts` | Passed on 2026-05-25 | 19 tests passed | LOCAL_STATIC_VALIDATION |
-| `docker run --rm -d --name signhex-valkey-fanout-test -p 127.0.0.1:6381:6379 valkey/valkey:9.0.3-alpine` | Passed on 2026-05-25 | Temporary local Valkey container started from already available local image | LOCAL_INTEGRATION_SETUP |
-| `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Blocked on first sandboxed attempt | Local sandbox denied loopback TCP with `connect EPERM 127.0.0.1:6381`; rerun with explicit sandbox network escalation passed | BLOCKED_BY_SANDBOX |
-| `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Passed on 2026-05-25 after sandbox network escalation | 2 tests passed; node B wake reached node A subscriber through Valkey Pub/Sub; unavailable endpoint fallback returned null instead of throwing | LOCAL_INTEGRATION_VALIDATION |
-| `docker stop signhex-valkey-fanout-test` | Passed on 2026-05-25 after Docker escalation | Temporary Valkey container stopped | LOCAL_CLEANUP |
+| `bash scripts/verify/validate-realtime-sync-phase7-assets.sh` | Passed on 2026-05-25 | `[phase7] realtime sync deployment hardening assets validated` | LOCAL_STATIC_VALIDATION |
+| `bash scripts/verify/validate-realtime-sync-phase8-assets.sh` | Passed on 2026-05-25 | `[phase8] realtime sync load/chaos/readiness assets validated from /Users/anuragkumar/Desktop/darshan` | LOCAL_STATIC_VALIDATION |
+| `bash scripts/verify/validate-observability-assets.sh` | Passed on 2026-05-25 after Docker escalation | Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed | LOCAL_STATIC_VALIDATION |
+| `cd darshan-server && npm run build` | Passed on 2026-05-25 | `tsc && tsc-alias` exited 0 under local Node `v24.12.0` | LOCAL_STATIC_VALIDATION |
+| `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts` | Passed on 2026-05-25 | 8 tests passed | LOCAL_STATIC_VALIDATION |
+| `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts` | Passed on 2026-05-25 | 19 tests passed | LOCAL_STATIC_VALIDATION |
+| `docker run --rm -d --name darshan-valkey-fanout-test -p 127.0.0.1:6381:6379 valkey/valkey:9.0.3-alpine` | Passed on 2026-05-25 | Temporary local Valkey container started from already available local image | LOCAL_INTEGRATION_SETUP |
+| `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Blocked on first sandboxed attempt | Local sandbox denied loopback TCP with `connect EPERM 127.0.0.1:6381`; rerun with explicit sandbox network escalation passed | BLOCKED_BY_SANDBOX |
+| `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Passed on 2026-05-25 after sandbox network escalation | 2 tests passed; node B wake reached node A subscriber through Valkey Pub/Sub; unavailable endpoint fallback returned null instead of throwing | LOCAL_INTEGRATION_VALIDATION |
+| `docker stop darshan-valkey-fanout-test` | Passed on 2026-05-25 after Docker escalation | Temporary Valkey container stopped | LOCAL_CLEANUP |
 
 ## Runtime Evidence Not Produced
 
@@ -83,7 +83,7 @@ Phase 8B replaces public-staging assumptions with internal on-prem evidence. Pro
 | Emergency fanout | BLOCKED_BY_ENV | emergency start/clear latency and fallback behavior under load |
 | Publish storm | BLOCKED_BY_ENV | outbox lag, REST fetch, command ACK, and player jitter under group publish |
 | PoP/media-cache report flood | BLOCKED_BY_ENV | ingestion, batching/queueing, DB pressure, and alert behavior |
-| Canary rollback | BLOCKED_BY_ENV | disable `OUTBOX_DISPATCH_ENABLED`, `REALTIME_SYNC_ENABLED`, and `HEXMON_REALTIME_SYNC_ENABLED`; REST/polling/heartbeat/snapshot/default/emergency remain active |
+| Canary rollback | BLOCKED_BY_ENV | disable `OUTBOX_DISPATCH_ENABLED`, `REALTIME_SYNC_ENABLED`, and `DARSHAN_REALTIME_PLAYER_ENABLED`; REST/polling/heartbeat/snapshot/default/emergency remain active |
 
 ## Production Readiness Decision
 

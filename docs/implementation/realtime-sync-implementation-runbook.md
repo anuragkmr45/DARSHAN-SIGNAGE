@@ -115,14 +115,14 @@ Rollback normally means:
 
 Current handoffs:
 
-- Phase 1: `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`
-- Phase 2: `signhex-platform/docs/implementation/realtime-sync-phase-2-handoff.md`
-- Phase 3: `signhex-platform/docs/implementation/realtime-sync-phase-3-handoff.md`
-- Phase 4: `signhex-platform/docs/implementation/realtime-sync-phase-4-handoff.md`
-- Phase 5: `signhex-platform/docs/implementation/realtime-sync-phase-5-handoff.md`
-- Phase 6: `signhex-platform/docs/implementation/realtime-sync-phase-6-handoff.md`
-- Phase 7: `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`
-- Phase 8: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`
+- Phase 1: `docs/implementation/realtime-sync-phase-1-handoff.md`
+- Phase 2: `docs/implementation/realtime-sync-phase-2-handoff.md`
+- Phase 3: `docs/implementation/realtime-sync-phase-3-handoff.md`
+- Phase 4: `docs/implementation/realtime-sync-phase-4-handoff.md`
+- Phase 5: `docs/implementation/realtime-sync-phase-5-handoff.md`
+- Phase 6: `docs/implementation/realtime-sync-phase-6-handoff.md`
+- Phase 7: `docs/implementation/realtime-sync-phase-7-handoff.md`
+- Phase 8: `docs/implementation/realtime-sync-phase-8-handoff.md`
 
 ## Phase 7 Deployment Hardening Rules
 
@@ -147,7 +147,7 @@ Phase 7 must not add:
 Use:
 
 ```bash
-bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh
+bash scripts/verify/validate-realtime-sync-phase7-assets.sh
 ```
 
 Record the exact output in the project status and approval log. If real QA proxy/canary tests are unavailable, mark them blocked by environment and carry them as Phase 8/production-readiness prerequisites.
@@ -177,11 +177,11 @@ Phase 8 must not add:
 Use:
 
 ```bash
-bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json
-bash signhex-platform/scripts/verify/validate-observability-assets.sh
+bash scripts/verify/validate-realtime-sync-phase8-assets.sh
+node scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json
+node scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json
+node scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json
+bash scripts/verify/validate-observability-assets.sh
 ```
 
 If real load/chaos execution is unavailable, mark production readiness as not approved and block Phase 9 unless a human explicitly defers the runtime evidence gate.
@@ -199,13 +199,13 @@ Phase 2 can start because Phase 1 is conditionally approved. Carry these conditi
 
 Likely Phase 2 files:
 
-- `signhex-server/src/db/schema.ts`
-- `signhex-server/drizzle/migrations/0031_command_outbox_desired_state.sql`
-- `signhex-server/src/services/device-desired-state-service.ts`
-- `signhex-server/src/services/command-outbox-service.ts`
-- `signhex-server/src/routes/device-telemetry.ts`
+- `darshan-server/src/db/schema.ts`
+- `darshan-server/drizzle/migrations/0031_command_outbox_desired_state.sql`
+- `darshan-server/src/services/device-desired-state-service.ts`
+- `darshan-server/src/services/command-outbox-service.ts`
+- `darshan-server/src/routes/device-telemetry.ts`
 - schedule publish/default media/emergency command creation paths
-- `signhex-platform/docs/implementation/*`
+- `docs/implementation/*`
 
 Likely Phase 2 migrations:
 

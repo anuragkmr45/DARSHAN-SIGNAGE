@@ -5,25 +5,25 @@
   "graphTooltip": 0,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "id": 1,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "sum(rate(signhex_server_http_requests_total[5m])) by (status_class)", "legendFormat": "{{ status_class }}", "refId": "A" }
+        { "expr": "sum(rate(darshan_server_http_requests_total[5m])) by (status_class)", "legendFormat": "{{ status_class }}", "refId": "A" }
       ],
       "title": "Backend HTTP Request Rate",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "id": 2,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "signhex:backend_http_error_rate:ratio", "legendFormat": "5xx ratio", "refId": "A" }
+        { "expr": "darshan:backend_http_error_rate:ratio", "legendFormat": "5xx ratio", "refId": "A" }
       ],
       "title": "Backend HTTP 5xx Ratio",
       "type": "timeseries"
@@ -31,10 +31,10 @@
   ],
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["signhex", "backend", "service"],
+  "tags": ["darshan", "backend", "service"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "Signhex Backend Service",
-  "uid": "signhex-backend-service",
+  "title": "DARSHAN Backend Service",
+  "uid": "darshan-backend-service",
   "version": 1
 }

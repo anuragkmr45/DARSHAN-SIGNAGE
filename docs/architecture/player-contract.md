@@ -40,7 +40,7 @@ Runtime requests must authenticate using the approved device identity mechanism:
 
 REST and WebSocket auth must identify the same device id.
 
-Phase 3 backend implementation exposes the device WebSocket contract through Socket.IO namespace `/device` when `REALTIME_SYNC_ENABLED=true`. Phase 4 Electron implementation consumes that contract when `HEXMON_REALTIME_SYNC_ENABLED=true`. Production signature/token parity and real proxy/runtime compatibility must be reviewed before enabling at fleet scale.
+Phase 3 backend implementation exposes the device WebSocket contract through Socket.IO namespace `/device` when `REALTIME_SYNC_ENABLED=true`. Phase 4 Electron implementation consumes that contract when `DARSHAN_REALTIME_PLAYER_ENABLED=true`. Production signature/token parity and real proxy/runtime compatibility must be reviewed before enabling at fleet scale.
 
 ## Capabilities Negotiation
 
@@ -74,7 +74,7 @@ Transport note: Phase 3 backend uses Socket.IO on the isolated `/device` namespa
   "device_id": "00000000-0000-0000-0000-000000000000",
   "session_id": "player-session-uuid",
   "app": {
-    "name": "signhex-electron",
+    "name": "darshan-electron",
     "version": "1.0.0",
     "build": "2026.05.23"
   },

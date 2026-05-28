@@ -9,7 +9,7 @@ tests:
     input_series:
       - series: 'up{job="prometheus",instance="127.0.0.1:9090",role="observability",site="dev"}'
         values: "1+0x21"
-      - series: 'up{job="signhex-server",instance="10.0.0.20:3000",role="backend",site="dev"}'
+      - series: 'up{job="darshan-server",instance="10.0.0.20:3000",role="backend",site="dev"}'
         values: "0+0x21"
       - series: 'up{job="vm1-postgres",instance="10.0.0.10:9187",role="data",site="dev"}'
         values: "1+0x21"
@@ -37,79 +37,79 @@ tests:
         values: "0+1x21"
       - series: 'pg_up{job="vm1-postgres",instance="10.0.0.10:9187",role="data",site="dev"}'
         values: "0+0x21"
-      - series: 'signhex_fleet_players_total{state="ACTIVE",site="dev"}'
+      - series: 'darshan_fleet_players_total{state="ACTIVE",site="dev"}'
         values: "3+0x21"
-      - series: 'signhex_fleet_players_total{state="OFFLINE",site="dev"}'
+      - series: 'darshan_fleet_players_total{state="OFFLINE",site="dev"}'
         values: "2+0x21"
-      - series: 'signhex_fleet_players_total{state="INACTIVE",site="dev"}'
+      - series: 'darshan_fleet_players_total{state="INACTIVE",site="dev"}'
         values: "0+0x21"
-      - series: 'signhex_fleet_latest_heartbeat_age_seconds{site="dev"}'
+      - series: 'darshan_fleet_latest_heartbeat_age_seconds{site="dev"}'
         values: "700+0x21"
-      - series: 'signhex_server_command_outbox_oldest_pending_age_seconds{site="dev"}'
+      - series: 'darshan_server_command_outbox_oldest_pending_age_seconds{site="dev"}'
         values: "180+0x21"
-      - series: 'signhex_server_command_outbox_rows{status="PENDING",site="dev"}'
+      - series: 'darshan_server_command_outbox_rows{status="PENDING",site="dev"}'
         values: "25+0x21"
-      - series: 'signhex_server_command_outbox_dispatch_total{result="failed",event_type="COMMAND_AVAILABLE",site="dev"}'
+      - series: 'darshan_server_command_outbox_dispatch_total{result="failed",event_type="COMMAND_AVAILABLE",site="dev"}'
         values: "0+1x21"
-      - series: 'signhex_server_websocket_notification_payload_too_large_total{type="COMMAND_AVAILABLE",site="dev"}'
+      - series: 'darshan_server_websocket_notification_payload_too_large_total{type="COMMAND_AVAILABLE",site="dev"}'
         values: "0+1x21"
-      - series: 'signhex_server_device_commands_claimed_total{source="poll",site="dev"}'
+      - series: 'darshan_server_device_commands_claimed_total{source="poll",site="dev"}'
         values: "0+2x21"
-      - series: 'signhex_server_device_realtime_auth_total{result="failure",reason="Missing device identity",site="dev"}'
+      - series: 'darshan_server_device_realtime_auth_total{result="failure",reason="Missing device identity",site="dev"}'
         values: "0+60x21"
-      - series: 'signhex_server_device_command_acks_total{result="success",site="dev"}'
+      - series: 'darshan_server_device_command_acks_total{result="success",site="dev"}'
         values: "0+100x21"
-      - series: 'signhex_server_device_command_acks_total{result="failure",site="dev"}'
+      - series: 'darshan_server_device_command_acks_total{result="failure",site="dev"}'
         values: "0+20x21"
-      - series: 'signhex_server_device_commands_rows{status="DEAD_LETTER",site="dev"}'
+      - series: 'darshan_server_device_commands_rows{status="DEAD_LETTER",site="dev"}'
         values: "1+0x21"
-      - series: 'signhex_server_device_commands_rows{status="EXPIRED",site="dev"}'
+      - series: 'darshan_server_device_commands_rows{status="EXPIRED",site="dev"}'
         values: "0+0x21"
-      - series: 'signhex_server_media_cache_reports_total{result="accepted",severity="ERROR",event_type="DOWNLOAD_FAILED",site="dev"}'
+      - series: 'darshan_server_media_cache_reports_total{result="accepted",severity="ERROR",event_type="DOWNLOAD_FAILED",site="dev"}'
         values: "0+10x21"
-      - series: 'signhex_server_media_cache_reports_unresolved{severity="CRITICAL",event_type="DISK_FULL",site="dev"}'
+      - series: 'darshan_server_media_cache_reports_unresolved{severity="CRITICAL",event_type="DISK_FULL",site="dev"}'
         values: "1+0x21"
     promql_expr_test:
-      - expr: 'signhex:host_memory_utilization:ratio{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
+      - expr: 'darshan:host_memory_utilization:ratio{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
         eval_time: 5m
         exp_samples:
-          - labels: '{__name__="signhex:host_memory_utilization:ratio",job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
+          - labels: '{__name__="darshan:host_memory_utilization:ratio",job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
             value: 0.8
-      - expr: 'signhex:fleet_offline_players_ratio{site="dev"}'
+      - expr: 'darshan:fleet_offline_players_ratio{site="dev"}'
         eval_time: 5m
         exp_samples:
-          - labels: '{__name__="signhex:fleet_offline_players_ratio",site="dev"}'
+          - labels: '{__name__="darshan:fleet_offline_players_ratio",site="dev"}'
             value: 0.4
-      - expr: 'signhex:realtime_outbox_pending_rows{site="dev"}'
+      - expr: 'darshan:realtime_outbox_pending_rows{site="dev"}'
         eval_time: 5m
         exp_samples:
-          - labels: '{__name__="signhex:realtime_outbox_pending_rows",site="dev"}'
+          - labels: '{__name__="darshan:realtime_outbox_pending_rows",site="dev"}'
             value: 25
-      - expr: 'signhex:device_command_ack_failure_ratio{site="dev"}'
+      - expr: 'darshan:device_command_ack_failure_ratio{site="dev"}'
         eval_time: 5m
         exp_samples:
-          - labels: '{__name__="signhex:device_command_ack_failure_ratio",site="dev"}'
+          - labels: '{__name__="darshan:device_command_ack_failure_ratio",site="dev"}'
             value: 0.16666666666666666
     alert_rule_test:
       - eval_time: 20m
-        alertname: SignhexBackendMetricsUnavailable
+        alertname: DARSHANBackendMetricsUnavailable
         exp_alerts:
           - exp_labels:
-              alertname: SignhexBackendMetricsUnavailable
+              alertname: DARSHANBackendMetricsUnavailable
               instance: 10.0.0.20:3000
-              job: signhex-server
+              job: darshan-server
               role: backend
               severity: critical
               site: dev
               team: platform
             exp_annotations:
               summary: "Backend metrics are unavailable"
-              description: "signhex-server on 10.0.0.20:3000 has been unreachable for 5 minutes."
+              description: "darshan-server on 10.0.0.20:3000 has been unreachable for 5 minutes."
       - eval_time: 20m
-        alertname: SignhexHostFilesystemHigh
+        alertname: DARSHANHostFilesystemHigh
         exp_alerts:
           - exp_labels:
-              alertname: SignhexHostFilesystemHigh
+              alertname: DARSHANHostFilesystemHigh
               instance: 10.0.0.20:9100
               job: vm2-node
               role: backend
@@ -120,10 +120,10 @@ tests:
               summary: "Host filesystem utilization is high"
               description: "vm2-node on 10.0.0.20:9100 has a filesystem above 90% utilization."
       - eval_time: 20m
-        alertname: SignhexPostgresUnavailable
+        alertname: DARSHANPostgresUnavailable
         exp_alerts:
           - exp_labels:
-              alertname: SignhexPostgresUnavailable
+              alertname: DARSHANPostgresUnavailable
               instance: 10.0.0.10:9187
               job: vm1-postgres
               role: data
@@ -134,10 +134,10 @@ tests:
               summary: "PostgreSQL is unavailable"
               description: "postgres_exporter can reach 10.0.0.10:9187, but PostgreSQL is reporting down."
       - eval_time: 20m
-        alertname: SignhexFleetHeartbeatsStalled
+        alertname: DARSHANFleetHeartbeatsStalled
         exp_alerts:
           - exp_labels:
-              alertname: SignhexFleetHeartbeatsStalled
+              alertname: DARSHANFleetHeartbeatsStalled
               severity: critical
               site: dev
               team: platform
@@ -145,10 +145,10 @@ tests:
               summary: "Player fleet heartbeats are stalled"
               description: "The backend has not recorded a fresh player heartbeat for more than 10 minutes."
       - eval_time: 20m
-        alertname: SignhexFleetOfflinePlayersHigh
+        alertname: DARSHANFleetOfflinePlayersHigh
         exp_alerts:
           - exp_labels:
-              alertname: SignhexFleetOfflinePlayersHigh
+              alertname: DARSHANFleetOfflinePlayersHigh
               severity: warning
               site: dev
               team: platform
@@ -156,10 +156,10 @@ tests:
               summary: "Offline player ratio is elevated"
               description: "More than 25% of the known player fleet has been marked OFFLINE for 15 minutes."
       - eval_time: 20m
-        alertname: SignhexRealtimeOutboxLagHigh
+        alertname: DARSHANRealtimeOutboxLagHigh
         exp_alerts:
           - exp_labels:
-              alertname: SignhexRealtimeOutboxLagHigh
+              alertname: DARSHANRealtimeOutboxLagHigh
               severity: warning
               site: dev
               team: platform
@@ -167,10 +167,10 @@ tests:
               summary: "Realtime outbox lag is elevated"
               description: "The oldest pending realtime outbox row has been waiting for more than 2 minutes."
       - eval_time: 20m
-        alertname: SignhexRealtimeOutboxDispatchFailures
+        alertname: DARSHANRealtimeOutboxDispatchFailures
         exp_alerts:
           - exp_labels:
-              alertname: SignhexRealtimeOutboxDispatchFailures
+              alertname: DARSHANRealtimeOutboxDispatchFailures
               severity: warning
               site: dev
               team: platform
@@ -178,10 +178,10 @@ tests:
               summary: "Realtime outbox dispatch failures detected"
               description: "The outbox dispatcher has recorded failed notification dispatch attempts."
       - eval_time: 20m
-        alertname: SignhexRealtimePayloadTooLarge
+        alertname: DARSHANRealtimePayloadTooLarge
         exp_alerts:
           - exp_labels:
-              alertname: SignhexRealtimePayloadTooLarge
+              alertname: DARSHANRealtimePayloadTooLarge
               severity: critical
               site: dev
               team: platform
@@ -189,10 +189,10 @@ tests:
               summary: "Realtime notification payload rejected"
               description: "One or more websocket notification payloads exceeded the configured hard limit."
       - eval_time: 20m
-        alertname: SignhexRealtimeAuthFailuresHigh
+        alertname: DARSHANRealtimeAuthFailuresHigh
         exp_alerts:
           - exp_labels:
-              alertname: SignhexRealtimeAuthFailuresHigh
+              alertname: DARSHANRealtimeAuthFailuresHigh
               severity: warning
               site: dev
               team: platform
@@ -200,10 +200,10 @@ tests:
               summary: "Realtime device authentication failures are elevated"
               description: "Device websocket authentication failures exceed 0.5 attempts per second."
       - eval_time: 20m
-        alertname: SignhexCommandAckFailuresHigh
+        alertname: DARSHANCommandAckFailuresHigh
         exp_alerts:
           - exp_labels:
-              alertname: SignhexCommandAckFailuresHigh
+              alertname: DARSHANCommandAckFailuresHigh
               severity: warning
               site: dev
               team: platform
@@ -211,10 +211,10 @@ tests:
               summary: "Device command ACK failures are elevated"
               description: "More than 10% of command acknowledgements are failing or returning error."
       - eval_time: 20m
-        alertname: SignhexDeviceCommandDeadLettersPresent
+        alertname: DARSHANDeviceCommandDeadLettersPresent
         exp_alerts:
           - exp_labels:
-              alertname: SignhexDeviceCommandDeadLettersPresent
+              alertname: DARSHANDeviceCommandDeadLettersPresent
               severity: warning
               site: dev
               team: platform
@@ -222,10 +222,10 @@ tests:
               summary: "Terminal failed device commands are present"
               description: "Device commands have reached DEAD_LETTER or EXPIRED status and need operator review."
       - eval_time: 20m
-        alertname: SignhexMediaCacheFailuresHigh
+        alertname: DARSHANMediaCacheFailuresHigh
         exp_alerts:
           - exp_labels:
-              alertname: SignhexMediaCacheFailuresHigh
+              alertname: DARSHANMediaCacheFailuresHigh
               severity: warning
               site: dev
               team: platform
@@ -233,10 +233,10 @@ tests:
               summary: "Media/cache failures are elevated"
               description: "Players are reporting ERROR or CRITICAL media/cache failures above the warning threshold."
       - eval_time: 20m
-        alertname: SignhexCriticalMediaCacheReportsUnresolved
+        alertname: DARSHANCriticalMediaCacheReportsUnresolved
         exp_alerts:
           - exp_labels:
-              alertname: SignhexCriticalMediaCacheReportsUnresolved
+              alertname: DARSHANCriticalMediaCacheReportsUnresolved
               severity: critical
               site: dev
               team: platform

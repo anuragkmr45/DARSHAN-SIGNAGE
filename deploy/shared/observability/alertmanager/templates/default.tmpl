@@ -1,8 +1,8 @@
-{{ define "signhex.default.title" -}}
+{{ define "darshan.default.title" -}}
 [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
 {{- end }}
 
-{{ define "signhex.default.body" -}}
+{{ define "darshan.default.body" -}}
 Status: {{ .Status }}
 Alert: {{ .CommonLabels.alertname }}
 Severity: {{ .CommonLabels.severity }}

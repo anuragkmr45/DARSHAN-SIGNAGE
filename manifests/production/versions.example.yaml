@@ -1,15 +1,15 @@
 release: production-example
 backend:
-  image_ref: ghcr.io/hexmon/signhex-server:1.2.3
-  image_archive: /artifacts/signhex-server-1.2.3.tar
+  image_ref: ghcr.io/darshan/darshan-server:1.2.3
+  image_archive: /artifacts/darshan-server-1.2.3.tar
 cms:
-  bundle_source: /artifacts/signhex-nexus-core-1.2.3.tgz
+  bundle_source: /artifacts/darshan-cms-1.2.3.tgz
 observability:
   prometheus_image_ref: prom/prometheus:v3.3.1
   grafana_image_ref: grafana/grafana:12.0.2
   alertmanager_image_ref: prom/alertmanager:v0.28.1
   config_bundle_version: 2026-04-08-r1
 player:
-  artifacts_dir: /artifacts/signage-screen/1.2.3
+  artifacts_dir: /artifacts/darshan-player/1.2.3
 notes:
   - Production promotion should be a manifest change, not a source checkout deployment.

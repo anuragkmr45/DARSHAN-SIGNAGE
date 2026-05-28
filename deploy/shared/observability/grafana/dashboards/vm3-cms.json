@@ -5,20 +5,20 @@
   "graphTooltip": 0,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "id": 1,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "signhex:host_cpu_utilization:ratio{role=\"cms\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
-        { "expr": "signhex:host_memory_utilization:ratio{role=\"cms\"}", "legendFormat": "{{ instance }} memory", "refId": "B" }
+        { "expr": "darshan:host_cpu_utilization:ratio{role=\"cms\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
+        { "expr": "darshan:host_memory_utilization:ratio{role=\"cms\"}", "legendFormat": "{{ instance }} memory", "refId": "B" }
       ],
       "title": "VM3 CPU And Memory Utilization",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "id": 2,
@@ -32,10 +32,10 @@
   ],
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["signhex", "vm3", "cms"],
+  "tags": ["darshan", "vm3", "cms"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "Signhex VM3 CMS Machine",
-  "uid": "signhex-vm3-cms",
+  "title": "DARSHAN VM3 CMS Machine",
+  "uid": "darshan-vm3-cms",
   "version": 1
 }

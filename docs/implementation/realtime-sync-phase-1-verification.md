@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-24
 Updated by: Codex
-Repo path: `/Users/anuragkumar/Desktop/signhex`
+Repo path: `/Users/anuragkumar/Desktop/darshan`
 Branches reviewed: `release-01`
 
 ## Summary
@@ -17,34 +17,34 @@ Latest verification pass: 2026-05-24. No Phase 2, WebSocket, outbox, desired-sta
 
 Backend:
 
-- `signhex-server/src/db/schema.ts`
-- `signhex-server/drizzle/migrations/0030_command_lifecycle_normalization.sql`
-- `signhex-server/src/services/command-lifecycle-service.ts`
-- `signhex-server/src/routes/device-telemetry.ts`
-- `signhex-server/src/routes/screens.ts`
-- `signhex-server/src/routes/screen-groups.ts`
-- `signhex-server/src/services/playback-refresh-commands.ts`
-- `signhex-server/src/config/index.ts`
-- `signhex-server/src/config/apiEndpoints.ts`
-- `signhex-server/.env.example`
-- `signhex-server/.env.qa.example`
-- `signhex-server/src/routes/device-telemetry-commands.test.ts`
+- `darshan-server/src/db/schema.ts`
+- `darshan-server/drizzle/migrations/0030_command_lifecycle_normalization.sql`
+- `darshan-server/src/services/command-lifecycle-service.ts`
+- `darshan-server/src/routes/device-telemetry.ts`
+- `darshan-server/src/routes/screens.ts`
+- `darshan-server/src/routes/screen-groups.ts`
+- `darshan-server/src/services/playback-refresh-commands.ts`
+- `darshan-server/src/config/index.ts`
+- `darshan-server/src/config/apiEndpoints.ts`
+- `darshan-server/.env.example`
+- `darshan-server/.env.qa.example`
+- `darshan-server/src/routes/device-telemetry-commands.test.ts`
 
 Electron:
 
-- `signage-screen/src/main/services/command-processor.ts`
-- `signage-screen/src/common/types.ts`
-- `signage-screen/test/unit/services/command-processor.test.ts`
+- `darshan-player/src/main/services/command-processor.ts`
+- `darshan-player/src/common/types.ts`
+- `darshan-player/test/unit/services/command-processor.test.ts`
 
 Platform docs:
 
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/architecture/command-lifecycle.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/architecture/command-lifecycle.md`
 
 ## Migration Reviewed
 
-`signhex-server/drizzle/migrations/0030_command_lifecycle_normalization.sql`:
+`darshan-server/drizzle/migrations/0030_command_lifecycle_normalization.sql`:
 
 - adds command types `REFRESH_SCHEDULE`, `SCREENSHOT`, `CLEAR_CACHE`, `PING`, `RESYNC`
 - adds statuses `LEASED`, `PROCESSING`, `ACKED_SUCCESS`, `ACKED_FAILURE`, `EXPIRED`, `DEAD_LETTER`, `CANCELLED`
@@ -59,7 +59,7 @@ Migration safety: additive. Rollback should leave enum values in place.
 
 Verified:
 
-- `commandTypeEnum` and `commandStatusEnum` include planned values in `signhex-server/src/db/schema.ts`.
+- `commandTypeEnum` and `commandStatusEnum` include planned values in `darshan-server/src/db/schema.ts`.
 - `device_commands` contains planned lifecycle fields and indexes.
 - `device_command_status_history` exists in schema and migration.
 - `CommandLifecycleService` centralizes create, claim, ACK, expiry, dead-letter, and recent listing.
@@ -87,7 +87,7 @@ Verified:
 
 Additional fixes verified:
 
-- `RESYNC` is present in `signage-screen/src/common/types.ts`.
+- `RESYNC` is present in `darshan-player/src/common/types.ts`.
 - `CommandProcessor` handles `RESYNC` through the existing REST refresh path.
 - Focused command processor test covers `RESYNC` as a REST refresh alias.
 
@@ -101,13 +101,13 @@ Verified API:
 - `POST /api/v1/device/heartbeat`
 - `GET /api/v1/screens/:id/commands/recent`
 
-`GET /api/v1/screens/:id/commands/recent` is implemented in `signhex-server/src/routes/screens.ts` and registered in `signhex-server/src/config/apiEndpoints.ts`.
+`GET /api/v1/screens/:id/commands/recent` is implemented in `darshan-server/src/routes/screens.ts` and registered in `darshan-server/src/config/apiEndpoints.ts`.
 
 ## Environment Verification
 
 - Actual Node: `v24.12.0`
-- `signhex-server/package.json` engine: `>=20 <21`
-- `signage-screen/package.json` engine: `>=20 <21`, npm `>=9.0.0`
+- `darshan-server/package.json` engine: `>=20 <21`
+- `darshan-player/package.json` engine: `>=20 <21`, npm `>=9.0.0`
 - HRMS reference folder exists. Matching docs found read-only:
   - `/Users/anuragkumar/Desktop/hrms/docs/implementation/HRMS_PRODUCTION_TASK_SHEET.md`
   - `/Users/anuragkumar/Desktop/hrms/hrms_backend/docs/implementation/HRMS_PRODUCTION_TASK_SHEET.md`
@@ -118,11 +118,11 @@ HRMS was used only as a read-only structural reference for status/task sheet sty
 ## Test Commands Run
 
 ```bash
-cd signhex-server
+cd darshan-server
 npm run build
 npx vitest run src/routes/device-telemetry-commands.test.ts
 
-cd signage-screen
+cd darshan-player
 npm run build
 npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts
 ```
@@ -131,15 +131,15 @@ npx mocha --config .mocharc.json --spec test/unit/services/command-processor.tes
 
 | Command | Result |
 |---|---|
-| `signhex-server npm run build` | Passed on 2026-05-24 |
-| `signhex-server DRIZZLE_STRICT=false npm run db:push` | Passed against local Docker Postgres after sandboxed run hit `EPERM` and was rerun with escalation |
-| `signhex-server npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 11 tests on 2026-05-24 |
-| `signhex-server npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests on 2026-05-24 |
-| `signhex-server npx vitest run src/routes/settings.test.ts` | Passed, 5 tests on 2026-05-24 |
-| `signhex-server npx vitest run src/routes/emergency.test.ts` | Passed, 2 tests on 2026-05-24 |
-| `signhex-server npx vitest run src/services/playback-refresh-dispatch.test.ts src/routes/settings.test.ts src/routes/emergency.test.ts` | Failed in combined parallel run, 8 passed and 1 emergency assertion failed due shared DB cross-test interference; isolated emergency rerun passed |
-| `signage-screen npm run build` | Passed on 2026-05-24 |
-| `signage-screen npx mocha ...command-processor...heartbeat...` | Passed, 14 tests on 2026-05-24 |
+| `darshan-server npm run build` | Passed on 2026-05-24 |
+| `darshan-server DRIZZLE_STRICT=false npm run db:push` | Passed against local Docker Postgres after sandboxed run hit `EPERM` and was rerun with escalation |
+| `darshan-server npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 11 tests on 2026-05-24 |
+| `darshan-server npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests on 2026-05-24 |
+| `darshan-server npx vitest run src/routes/settings.test.ts` | Passed, 5 tests on 2026-05-24 |
+| `darshan-server npx vitest run src/routes/emergency.test.ts` | Passed, 2 tests on 2026-05-24 |
+| `darshan-server npx vitest run src/services/playback-refresh-dispatch.test.ts src/routes/settings.test.ts src/routes/emergency.test.ts` | Failed in combined parallel run, 8 passed and 1 emergency assertion failed due shared DB cross-test interference; isolated emergency rerun passed |
+| `darshan-player npm run build` | Passed on 2026-05-24 |
+| `darshan-player npx mocha ...command-processor...heartbeat...` | Passed, 14 tests on 2026-05-24 |
 
 ## Blocked Tests
 
@@ -153,7 +153,7 @@ connect ECONNREFUSED 127.0.0.1:5432
 Rerun:
 
 ```bash
-cd signhex-server
+cd darshan-server
 npx vitest run src/routes/device-telemetry-commands.test.ts
 ```
 
@@ -205,7 +205,7 @@ Before QA/prod rollout:
 
 ## Handoff
 
-See `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`.
+See `docs/implementation/realtime-sync-phase-1-handoff.md`.
 
 ## Recommendation
 

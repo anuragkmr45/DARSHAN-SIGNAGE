@@ -1,4 +1,4 @@
-# Signhex realtime sync reverse-proxy snippet.
+# DARSHAN realtime sync reverse-proxy snippet.
 # Include these locations in the CMS/backend-facing server block and replace
 # __BACKEND_UPSTREAM_HOST__ and __BACKEND_UPSTREAM_PORT__ during packaging.
 #

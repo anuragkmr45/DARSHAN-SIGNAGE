@@ -5,11 +5,11 @@ services:
     ports:
       - "${ALERTMANAGER_HOST_PORT:-9093}:9093"
     command:
-      - --config.file=/etc/signhex/alertmanager/alertmanager.yml
+      - --config.file=/etc/darshan/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/signhex/alertmanager/alertmanager.yml:ro
-      - ./alertmanager/templates:/etc/signhex/alertmanager/templates:ro
+      - ./alertmanager/alertmanager.yml:/etc/darshan/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/darshan/alertmanager/templates:ro
       - alertmanager_data:/alertmanager
 
 volumes:

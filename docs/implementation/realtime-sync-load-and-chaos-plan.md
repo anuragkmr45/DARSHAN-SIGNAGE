@@ -19,7 +19,7 @@ Architecture rules:
 
 ## Load Profiles
 
-Use `signhex-platform/scripts/load/realtime-sync-load-model.mjs` for deterministic RPS and volume modeling.
+Use `scripts/load/realtime-sync-load-model.mjs` for deterministic RPS and volume modeling.
 
 Required modeled profiles:
 
@@ -36,9 +36,9 @@ Required modeled profiles:
 Example commands:
 
 ```bash
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 300
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 300
-node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 300
+node scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 300
+node scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 300
+node scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 300
 ```
 
 ## Execution Requirements

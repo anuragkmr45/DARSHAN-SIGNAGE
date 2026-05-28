@@ -5,26 +5,26 @@
   "graphTooltip": 0,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "id": 1,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "signhex:host_cpu_utilization:ratio{role=\"backend\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
-        { "expr": "signhex:host_memory_utilization:ratio{role=\"backend\"}", "legendFormat": "{{ instance }} memory", "refId": "B" }
+        { "expr": "darshan:host_cpu_utilization:ratio{role=\"backend\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
+        { "expr": "darshan:host_memory_utilization:ratio{role=\"backend\"}", "legendFormat": "{{ instance }} memory", "refId": "B" }
       ],
       "title": "VM2 CPU And Memory Utilization",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "id": 2,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "sum(up{job=~\"signhex-server|vm2-node\"})", "refId": "A" }
+        { "expr": "sum(up{job=~\"darshan-server|vm2-node\"})", "refId": "A" }
       ],
       "title": "VM2 Core Targets Up",
       "type": "stat"
@@ -32,10 +32,10 @@
   ],
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["signhex", "vm2", "backend"],
+  "tags": ["darshan", "vm2", "backend"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "Signhex VM2 Backend Machine",
-  "uid": "signhex-vm2-backend",
+  "title": "DARSHAN VM2 Backend Machine",
+  "uid": "darshan-vm2-backend",
   "version": 1
 }

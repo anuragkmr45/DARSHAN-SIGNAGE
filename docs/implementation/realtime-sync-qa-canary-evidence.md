@@ -47,7 +47,7 @@ Evidence:
 | `MEDIA_CACHE_REPORTING_ENABLED` |  |  |
 | `REALTIME_SYNC_ENABLED` |  |  |
 | `OUTBOX_DISPATCH_ENABLED` |  |  |
-| `HEXMON_REALTIME_SYNC_ENABLED` |  |  |
+| `DARSHAN_REALTIME_PLAYER_ENABLED` |  |  |
 | `VITE_REALTIME_DELIVERY_STATUS_UI` |  |  |
 | `VITE_MEDIA_CACHE_STATUS_UI` |  |  |
 | `REALTIME_BUS_PROVIDER` | `valkey` before multi-node realtime |  |
@@ -91,7 +91,7 @@ Evidence:
 |---|---|---|---|---|
 | Disable `OUTBOX_DISPATCH_ENABLED` | commands still claimed by polling |  |  |  |
 | Disable `REALTIME_SYNC_ENABLED` | players mark realtime unhealthy |  |  |  |
-| Disable `HEXMON_REALTIME_SYNC_ENABLED` | player remains polling-only |  |  |  |
+| Disable `DARSHAN_REALTIME_PLAYER_ENABLED` | player remains polling-only |  |  |  |
 | Publish after rollback | player still updates |  |  |  |
 | Emergency after rollback | player still receives emergency by fallback |  |  |  |
 

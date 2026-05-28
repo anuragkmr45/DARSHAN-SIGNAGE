@@ -19,7 +19,7 @@ Updated by: Codex
 | Local `db:push` shows unrelated drift statements | Medium | Open | Phase 2 local push included existing Drizzle default/index drift statements | Use reviewed additive migration for QA/prod, not local push output. |
 | CMS lint needs Node 20 rerun | Medium | Open | `npm run lint` now passes locally under Node `v24.12.0`; Node 20 is not available in this workspace | Rerun CMS lint/build under Node `>=20 <21` before on-prem QA signoff. |
 | Phase 5 UI lacks browser/E2E verification | Medium | Open | CMS production build passed, but no browser visual smoke or E2E was run for the new Delivery tab | Run screen details Delivery tab visual review and E2E smoke before on-prem QA signoff. |
-| CMS dependency audit findings | Medium | Open | `npm ci` in `signhex-nexus-core` reported 18 vulnerabilities | Triage in dependency hardening work; do not conflate with Phase 5 code behavior. |
+| CMS dependency audit findings | Medium | Open | `npm ci` in `darshan-cms` reported 18 vulnerabilities | Triage in dependency hardening work; do not conflate with Phase 5 code behavior. |
 | Media/cache report retention undefined | High | Open | Phase 6 adds durable `media_cache_reports` without TTL, partitioning, or archival | Define retention/partitioning before production; validate on QA-like failure volume. |
 | Media/cache failure alert thresholds unproven | Medium | Open | Phase 8 continuation added metrics and alert rules; no QA media/cache failure traffic has tuned thresholds | Validate during on-prem QA chaos/media-failure tests. |
 | CMS media/cache failure card lacks visual/E2E verification | Medium | Open | CMS build passed, but no browser smoke was run for the new card | Run screen details Delivery tab visual/E2E smoke with seeded failure rows. |
@@ -38,15 +38,15 @@ Updated by: Codex
 | Production readiness not approved | Critical | Open | `realtime-sync-production-readiness-checklist.md` state is `NOT_PRODUCTION_READY`; runtime evidence attempt is blocked by missing on-prem QA target | Do not start production canary or Phase 9 mobile adapters without accepted Phase 8 runtime evidence or explicit human deferral. |
 | On-prem QA runtime evidence unavailable | Critical | Open | Packaged QA server health check reports `postgres` not running; localhost backend/socket checks cannot connect; no on-prem QA endpoint env vars are present | Provide on-prem QA endpoints, Valkey topology, simulator credentials, and approved load/chaos window. |
 
-Latest Phase 1 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-1-handoff.md`.
-Latest Phase 2 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-2-handoff.md`.
-Latest Phase 3 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-3-handoff.md`.
-Latest Phase 4 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-4-handoff.md`.
-Latest Phase 5 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-5-handoff.md`.
-Latest Phase 6 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-6-handoff.md`.
-Latest Phase 7 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`.
-Latest Phase 8 handoff: `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`.
-Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
+Latest Phase 1 handoff: `docs/implementation/realtime-sync-phase-1-handoff.md`.
+Latest Phase 2 handoff: `docs/implementation/realtime-sync-phase-2-handoff.md`.
+Latest Phase 3 handoff: `docs/implementation/realtime-sync-phase-3-handoff.md`.
+Latest Phase 4 handoff: `docs/implementation/realtime-sync-phase-4-handoff.md`.
+Latest Phase 5 handoff: `docs/implementation/realtime-sync-phase-5-handoff.md`.
+Latest Phase 6 handoff: `docs/implementation/realtime-sync-phase-6-handoff.md`.
+Latest Phase 7 handoff: `docs/implementation/realtime-sync-phase-7-handoff.md`.
+Latest Phase 8 handoff: `docs/implementation/realtime-sync-phase-8-handoff.md`.
+Latest Phase 8 runtime evidence attempt: `docs/implementation/realtime-sync-phase-8-runtime-evidence.md`.
 
 ## Architecture Risks For Later Phases
 
@@ -72,6 +72,6 @@ Latest Phase 8 runtime evidence attempt: `signhex-platform/docs/implementation/r
 | Media/cache failures invisible to CMS | Closed by Phase 6 `media_cache_reports`, device/CMS REST APIs, Electron reporter, and CMS Delivery tab failure card; focused tests passed. |
 | QA/prod realtime flag and proxy guidance missing | Closed at documentation-control level by Phase 7 env examples, Nginx snippet, hardening runbook, static validator, and handoff; runtime QA smoke remains open. |
 | Load/chaos/readiness plan missing | Closed at tooling/docs level by Phase 8 load model, load/chaos plan, production readiness checklist, on-prem QA canary evidence template, metrics/alert validation, static validator, and handoff; real runtime evidence remains open. |
-| Dedicated realtime/outbox/media-cache metrics missing | Closed at local/static validation level by Phase 8 metrics additions in `signhex-server/src/observability/metrics.ts`, Prometheus rules, and passing `metrics.test.ts` plus `validate-observability-assets.sh`. |
+| Dedicated realtime/outbox/media-cache metrics missing | Closed at local/static validation level by Phase 8 metrics additions in `darshan-server/src/observability/metrics.ts`, Prometheus rules, and passing `metrics.test.ts` plus `validate-observability-assets.sh`. |
 | Valkey fanout implementation missing | Closed at local implementation level by `realtime-bus.ts`, `device-node-registry.ts`, `realtime-fanout.ts`, gateway/outbox wiring, metrics, and passing local Valkey Pub/Sub integration smoke. On-prem runtime evidence remains open. |
 | CMS lint has pre-existing failures | Closed locally by fixing lint issues in `LiveScreenMirror.tsx`, `EmergencyTakeoverModal.tsx`, and `tests/settings-default-media.e2e.spec.ts`; `npm run lint` exits 0 under Node `v24.12.0`. Node 20 rerun remains open. |

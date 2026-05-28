@@ -1,9 +1,9 @@
 # Screen Operations Runbook
 
 ## Source of truth
-- Backend screen lifecycle contract: `signhex-server/docs/DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md`
-- Pairing and recovery API examples: `signhex-server/docs/DEVICE_PAIRING_API_FLOW_WITH_CURLS.md`
-- Live playback/dashboard contract: `signhex-server/docs/SCREENS_REALTIME_PLAYBACK_GUIDE.md`
+- Backend screen lifecycle contract: `darshan-server/docs/DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md`
+- Pairing and recovery API examples: `darshan-server/docs/DEVICE_PAIRING_API_FLOW_WITH_CURLS.md`
+- Live playback/dashboard contract: `darshan-server/docs/SCREENS_REALTIME_PLAYBACK_GUIDE.md`
 
 ## Screen creation
 - Screens are not created manually from CMS.

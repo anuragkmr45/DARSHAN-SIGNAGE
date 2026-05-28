@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-24
 Updated by: Codex
-Repo path: `/Users/anuragkumar/Desktop/signhex`
+Repo path: `/Users/anuragkumar/Desktop/darshan`
 Branch: `release-01`
 Approval state: `APPROVED_WITH_CONDITIONS`
 
@@ -10,7 +10,7 @@ Approval state: `APPROVED_WITH_CONDITIONS`
 
 Phase 4 implemented the Electron player side of enterprise realtime sync. The player now has a feature-flagged `RealtimeService` that connects to the Phase 3 backend Socket.IO `/device` namespace, sends `HELLO`, waits for `HELLO_ACK`, treats WebSocket events as wake notifications only, and pulls authoritative commands and desired state through REST.
 
-Polling and heartbeat fallback remain active. Realtime is disabled by default and can be rolled back with `HEXMON_REALTIME_SYNC_ENABLED=false`.
+Polling and heartbeat fallback remain active. Realtime is disabled by default and can be rolled back with `DARSHAN_REALTIME_PLAYER_ENABLED=false`.
 
 ## Implemented Scope
 
@@ -33,35 +33,35 @@ Polling and heartbeat fallback remain active. Realtime is disabled by default an
 
 ## Files Changed
 
-- `signage-screen/src/common/types.ts`
-- `signage-screen/src/common/config.ts`
-- `signage-screen/src/main/services/realtime-service.ts`
-- `signage-screen/src/main/services/command-processor.ts`
-- `signage-screen/src/main/services/device-state-store.ts`
-- `signage-screen/src/main/services/telemetry/player-metrics.ts`
-- `signage-screen/src/main/services/player-flow.ts`
-- `signage-screen/src/main/index.ts`
-- `signage-screen/test/unit/services/realtime-service.test.ts`
-- `signage-screen/test/unit/services/command-processor.test.ts`
-- `signhex-platform/docs/architecture/enterprise-realtime-sync.md`
-- `signhex-platform/docs/architecture/player-contract.md`
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-decision-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
-- `signhex-platform/docs/implementation/realtime-sync-permutation-test-matrix.md`
-- `signhex-platform/docs/implementation/realtime-sync-implementation-runbook.md`
+- `darshan-player/src/common/types.ts`
+- `darshan-player/src/common/config.ts`
+- `darshan-player/src/main/services/realtime-service.ts`
+- `darshan-player/src/main/services/command-processor.ts`
+- `darshan-player/src/main/services/device-state-store.ts`
+- `darshan-player/src/main/services/telemetry/player-metrics.ts`
+- `darshan-player/src/main/services/player-flow.ts`
+- `darshan-player/src/main/index.ts`
+- `darshan-player/test/unit/services/realtime-service.test.ts`
+- `darshan-player/test/unit/services/command-processor.test.ts`
+- `docs/architecture/enterprise-realtime-sync.md`
+- `docs/architecture/player-contract.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
+- `docs/implementation/realtime-sync-test-plan.md`
+- `docs/implementation/realtime-sync-decision-log.md`
+- `docs/implementation/realtime-sync-open-risks.md`
+- `docs/implementation/realtime-sync-permutation-test-matrix.md`
+- `docs/implementation/realtime-sync-implementation-runbook.md`
 
 ## Tests Run
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signage-screen && npm run build` | Passed | Main/renderer TypeScript builds, renderer bundle, and asset copy completed. |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/realtime-service.test.ts --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Passed, 18 tests | Covers Phase 4 realtime behavior and command/heartbeat fallback regressions. |
-| `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` | Passed, 4 tests | Covers backend `/device` auth/HELLO and notification-only dispatch. |
-| `cd signhex-server && npx tsx /private/tmp/signhex-phase4-raw-ws-smoke.ts` | Passed | Temporary raw WebSocket smoke completed `/device` auth and `HELLO_ACK`; response had no `snapshot` or `media`. |
+| `cd darshan-player && npm run build` | Passed | Main/renderer TypeScript builds, renderer bundle, and asset copy completed. |
+| `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/realtime-service.test.ts --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Passed, 18 tests | Covers Phase 4 realtime behavior and command/heartbeat fallback regressions. |
+| `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts` | Passed, 4 tests | Covers backend `/device` auth/HELLO and notification-only dispatch. |
+| `cd darshan-server && npx tsx /private/tmp/darshan-phase4-raw-ws-smoke.ts` | Passed | Temporary raw WebSocket smoke completed `/device` auth and `HELLO_ACK`; response had no `snapshot` or `media`. |
 
 ## Blocked Or Deferred Tests
 
@@ -87,7 +87,7 @@ Polling and heartbeat fallback remain active. Realtime is disabled by default an
 
 ## Rollback
 
-- Set `HEXMON_REALTIME_SYNC_ENABLED=false`.
+- Set `DARSHAN_REALTIME_PLAYER_ENABLED=false`.
 - Keep existing command polling and heartbeat active.
 - Leave backend Phase 3 feature flags disabled if required: `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`.
 - No Phase 4 migration rollback is needed.

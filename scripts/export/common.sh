@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 export_common_log() {
-  printf '[signhex-export] %s\n' "$*"
+  printf '[darshan-export] %s\n' "$*"
 }
 
 export_require_command() {

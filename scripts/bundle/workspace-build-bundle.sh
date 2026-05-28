@@ -6,11 +6,11 @@ usage() {
 Usage:
   bash scripts/bundle/workspace-build-bundle.sh [--skip-docker] [--profile all|qa|production] <site-name>
 
-This is a transition convenience wrapper for a local workspace that contains:
+This is a transition convenience wrapper for a local monorepo workspace that contains:
 
-- ../signhex-server
-- ../signhex-nexus-core
-- ../signage-screen
+- darshan-server
+- darshan-cms
+- darshan-player
 
 It builds the server and CMS export packages from the sibling repos, then calls
 the canonical artifact-driven assembler:
@@ -66,10 +66,10 @@ esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLATFORM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-WORKSPACE_ROOT="$(cd "$PLATFORM_ROOT/.." && pwd)"
-SERVER_DIR="$WORKSPACE_ROOT/signhex-server"
-CMS_DIR="$WORKSPACE_ROOT/signhex-nexus-core"
-PLAYER_DIR="$WORKSPACE_ROOT/signage-screen"
+WORKSPACE_ROOT="$PLATFORM_ROOT"
+SERVER_DIR="$WORKSPACE_ROOT/darshan-server"
+CMS_DIR="$WORKSPACE_ROOT/darshan-cms"
+PLAYER_DIR="$WORKSPACE_ROOT/darshan-player"
 ASSEMBLER_SCRIPT="$SCRIPT_DIR/assemble-runtime-bundle.sh"
 EXPORT_DIR="$PLATFORM_ROOT/scripts/export"
 PACKAGE_SERVER_SCRIPT="$EXPORT_DIR/package-server.sh"
@@ -102,10 +102,10 @@ require_directory "CMS repo" "$CMS_DIR"
 require_directory "Electron repo" "$PLAYER_DIR"
 
 PLAYER_ARTIFACTS_DIR="${PLAYER_ARTIFACTS_DIR:-$PLAYER_DIR/build}"
-BACKEND_IMAGE_REF="${BACKEND_IMAGE_REF:-signhex-onprem-api:${SITE_NAME}}"
+BACKEND_IMAGE_REF="${BACKEND_IMAGE_REF:-darshan-onprem-api:${SITE_NAME}}"
 EXPORT_RELEASE_ID="${EXPORT_RELEASE_ID:-$SITE_NAME}"
 
-TEMP_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/signhex-workspace-bundle.XXXXXX")"
+TEMP_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/darshan-workspace-bundle.XXXXXX")"
 cleanup_temp_work_dir() {
   rm -rf "$TEMP_WORK_DIR"
 }

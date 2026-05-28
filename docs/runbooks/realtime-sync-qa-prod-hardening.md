@@ -46,10 +46,10 @@ Realtime behavior must be enabled in layers. Never enable all flags for the full
 |---|---|---|---|
 | Outbox writes | `COMMAND_OUTBOX_WRITE_ENABLED` | none | Enabled only after additive migrations are applied and reviewed |
 | Desired state | `DEVICE_DESIRED_STATE_ENABLED` | player desired-state polling config | Enabled after REST endpoint smoke passes |
-| WebSocket gateway | `REALTIME_SYNC_ENABLED` | `HEXMON_REALTIME_SYNC_ENABLED` | Disabled until QA proxy/runtime smoke passes |
+| WebSocket gateway | `REALTIME_SYNC_ENABLED` | `DARSHAN_REALTIME_PLAYER_ENABLED` (`HEXMON_REALTIME_SYNC_ENABLED` legacy alias) | Disabled until QA proxy/runtime smoke passes |
 | Outbox dispatcher | `OUTBOX_DISPATCH_ENABLED` | none | Disabled until gateway health and rollback are verified |
 | Delivery UI | backend APIs | `VITE_REALTIME_DELIVERY_STATUS_UI` | Enabled for QA operators first |
-| Media/cache reporting | `MEDIA_CACHE_REPORTING_ENABLED` | `HEXMON_MEDIA_CACHE_REPORTING_ENABLED`, `VITE_MEDIA_CACHE_STATUS_UI` | Enabled in QA; production requires retention/alerts |
+| Media/cache reporting | `MEDIA_CACHE_REPORTING_ENABLED` | `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`, `VITE_MEDIA_CACHE_STATUS_UI` | Enabled in QA; production requires retention/alerts |
 | Realtime bus | `REALTIME_BUS_PROVIDER=valkey`, `VALKEY_URL` | none | Required before multi-instance production realtime |
 
 ## QA Recommended Values
@@ -127,7 +127,7 @@ Do not enable full-fleet realtime sync across multiple backend instances until V
 5. Validate `GET /api/v1/device/:deviceId/desired-state` with device auth.
 6. Validate CMS delivery and media/cache status cards with seeded or real data.
 7. Enable backend `REALTIME_SYNC_ENABLED=true` for the QA environment.
-8. Enable one canary player with `HEXMON_REALTIME_SYNC_ENABLED=true`.
+8. Enable one canary player with `DARSHAN_REALTIME_PLAYER_ENABLED=true`.
 9. Verify the player receives notification-only events and fetches commands/state through REST.
 10. For multi-node QA, validate Valkey connectivity and fanout before enabling dispatcher.
 11. Enable `OUTBOX_DISPATCH_ENABLED=true` for the QA backend.
@@ -167,7 +167,7 @@ Required evidence:
 11. Canary rollback:
    - disable `OUTBOX_DISPATCH_ENABLED`
    - disable `REALTIME_SYNC_ENABLED`
-   - disable `HEXMON_REALTIME_SYNC_ENABLED`
+   - disable `DARSHAN_REALTIME_PLAYER_ENABLED`
    - keep REST/polling/heartbeat/snapshot/default/emergency active.
 
 Production readiness must remain `NOT_PRODUCTION_READY` until these pass or are explicitly waived by a human approver.
@@ -178,9 +178,9 @@ Rollback must not require DB rollback.
 
 1. Set `OUTBOX_DISPATCH_ENABLED=false`.
 2. Set `REALTIME_SYNC_ENABLED=false`.
-3. Set player `HEXMON_REALTIME_SYNC_ENABLED=false` through config management or next installer/config rollout.
+3. Set player `DARSHAN_REALTIME_PLAYER_ENABLED=false` through config management or next installer/config rollout.
 4. Keep command polling, heartbeat, snapshot fetch, default media fetch, emergency fetch, and media cache active.
-5. Optional: set `MEDIA_CACHE_REPORTING_ENABLED=false` and `HEXMON_MEDIA_CACHE_REPORTING_ENABLED=false` if report ingestion causes unexpected pressure.
+5. Optional: set `MEDIA_CACHE_REPORTING_ENABLED=false` and `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` if report ingestion causes unexpected pressure.
 6. Leave additive tables and enum values in place.
 7. Record rollback evidence in the phase handoff.
 

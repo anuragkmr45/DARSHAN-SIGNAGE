@@ -15,34 +15,34 @@ This work does not implement Phase 9, mobile/TV adapters, source-of-truth change
 
 | Item | Classification | Evidence |
 |---|---|---|
-| Existing gateway before backfill | in-memory only | `signhex-server/src/realtime/device-connection-registry.ts` held sockets only in process memory. |
-| Existing outbox dispatch before backfill | in-memory gateway dispatch | `signhex-server/src/services/outbox-dispatcher.ts` called `sendDeviceNotification` directly. |
+| Existing gateway before backfill | in-memory only | `darshan-server/src/realtime/device-connection-registry.ts` held sockets only in process memory. |
+| Existing outbox dispatch before backfill | in-memory gateway dispatch | `darshan-server/src/services/outbox-dispatcher.ts` called `sendDeviceNotification` directly. |
 | Valkey implementation before backfill | not found | No Valkey fanout code existed; docs were ahead of code. |
 | Redis-named compatibility | partial config only | `REDIS_URL` existed in backend config; new implementation prefers `VALKEY_URL` and keeps `REDIS_URL` only as explicit alias. |
-| Bus abstraction | added | `signhex-server/src/realtime/realtime-bus.ts`. |
-| Device-node registry | added | `signhex-server/src/realtime/device-node-registry.ts`. |
+| Bus abstraction | added | `darshan-server/src/realtime/realtime-bus.ts`. |
+| Device-node registry | added | `darshan-server/src/realtime/device-node-registry.ts`. |
 
 ## Backend Files Added
 
-- `signhex-server/src/realtime/realtime-node.ts`
-- `signhex-server/src/realtime/valkey-resp-client.ts`
-- `signhex-server/src/realtime/realtime-bus.ts`
-- `signhex-server/src/realtime/device-node-registry.ts`
-- `signhex-server/src/realtime/realtime-fanout.ts`
-- `signhex-server/src/realtime/realtime-bus.test.ts`
-- `signhex-server/src/realtime/valkey-realtime-bus.integration.test.ts`
+- `darshan-server/src/realtime/realtime-node.ts`
+- `darshan-server/src/realtime/valkey-resp-client.ts`
+- `darshan-server/src/realtime/realtime-bus.ts`
+- `darshan-server/src/realtime/device-node-registry.ts`
+- `darshan-server/src/realtime/realtime-fanout.ts`
+- `darshan-server/src/realtime/realtime-bus.test.ts`
+- `darshan-server/src/realtime/valkey-realtime-bus.integration.test.ts`
 
 ## Backend Files Updated
 
-- `signhex-server/src/config/index.ts`
-- `signhex-server/src/realtime/device-gateway.ts`
-- `signhex-server/src/realtime/device-connection-registry.ts`
-- `signhex-server/src/services/outbox-dispatcher.ts`
-- `signhex-server/src/observability/metrics.ts`
-- `signhex-server/src/observability/index.ts`
-- `signhex-server/src/observability/metrics.test.ts`
-- `signhex-server/.env.example`
-- `signhex-server/.env.qa.example`
+- `darshan-server/src/config/index.ts`
+- `darshan-server/src/realtime/device-gateway.ts`
+- `darshan-server/src/realtime/device-connection-registry.ts`
+- `darshan-server/src/services/outbox-dispatcher.ts`
+- `darshan-server/src/observability/metrics.ts`
+- `darshan-server/src/observability/index.ts`
+- `darshan-server/src/observability/metrics.test.ts`
+- `darshan-server/.env.example`
+- `darshan-server/.env.qa.example`
 
 ## Runtime Behavior
 
@@ -90,13 +90,13 @@ If Valkey is unavailable or no node mapping exists, command/outbox DB truth rema
 
 ## Metrics Added
 
-- `signhex_server_realtime_bus_connection_status`
-- `signhex_server_realtime_bus_publish_total`
-- `signhex_server_realtime_bus_subscribe_failures_total`
-- `signhex_server_realtime_bus_node_messages_total`
-- `signhex_server_device_node_registry_writes_total`
-- `signhex_server_device_node_registry_misses_total`
-- `signhex_server_realtime_bus_fallback_total`
+- `darshan_server_realtime_bus_connection_status`
+- `darshan_server_realtime_bus_publish_total`
+- `darshan_server_realtime_bus_subscribe_failures_total`
+- `darshan_server_realtime_bus_node_messages_total`
+- `darshan_server_device_node_registry_writes_total`
+- `darshan_server_device_node_registry_misses_total`
+- `darshan_server_realtime_bus_fallback_total`
 
 Prometheus recording/alert rules were extended for Valkey publish failures and fallback rate.
 
@@ -129,13 +129,13 @@ Backward-compatible alias:
 
 Passed locally under Node `v24.12.0`:
 
-- `cd signhex-server && npm run build`
-- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts`
-- `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts`
-- `cd signhex-server && npx vitest run src/observability/metrics.test.ts`
-- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts`
-- `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts`
-- `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` after starting local `valkey/valkey:9.0.3-alpine`
+- `cd darshan-server && npm run build`
+- `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts`
+- `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts`
+- `cd darshan-server && npx vitest run src/observability/metrics.test.ts`
+- `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts`
+- `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts`
+- `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` after starting local `valkey/valkey:9.0.3-alpine`
 
 The first Valkey integration attempt was blocked by local sandbox network permission (`connect EPERM 127.0.0.1:6381`) and passed after escalation.
 
@@ -144,9 +144,9 @@ The first Valkey integration attempt was blocked by local sandbox network permis
 Local-only smoke used:
 
 ```bash
-docker run --rm -d --name signhex-valkey-fanout-test -p 127.0.0.1:6381:6379 valkey/valkey:9.0.3-alpine
-cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts
-docker stop signhex-valkey-fanout-test
+docker run --rm -d --name darshan-valkey-fanout-test -p 127.0.0.1:6381:6379 valkey/valkey:9.0.3-alpine
+cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts
+docker stop darshan-valkey-fanout-test
 ```
 
 Evidence:
@@ -178,6 +178,6 @@ Disable fanout without DB rollback:
 1. `REALTIME_BUS_PROVIDER=memory`
 2. `OUTBOX_DISPATCH_ENABLED=false`
 3. `REALTIME_SYNC_ENABLED=false`
-4. `HEXMON_REALTIME_SYNC_ENABLED=false`
+4. `DARSHAN_REALTIME_PLAYER_ENABLED=false`
 
 Keep REST, polling, heartbeat, command claim/ACK, desired state, snapshot/default/emergency fetch, and local media cache active.

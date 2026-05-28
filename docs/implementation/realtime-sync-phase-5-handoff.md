@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-24
 Updated by: Codex
-Repo path: `/Users/anuragkumar/Desktop/signhex`
+Repo path: `/Users/anuragkumar/Desktop/darshan`
 Branch: `release-01`
 Approval state: `APPROVED_WITH_CONDITIONS`
 
@@ -33,30 +33,30 @@ No WebSocket, Electron realtime, mobile, media/cache failure reporting, outbox w
 
 ## Files Changed
 
-- `signhex-server/src/config/apiEndpoints.ts`
-- `signhex-server/src/routes/screens.ts`
-- `signhex-server/src/routes/device-telemetry-commands.test.ts`
-- `signhex-nexus-core/src/api/endpoints.ts`
-- `signhex-nexus-core/src/api/queryKeys.ts`
-- `signhex-nexus-core/src/api/types.ts`
-- `signhex-nexus-core/src/api/domains/screens.ts`
-- `signhex-nexus-core/src/components/screens/ScreenDetailsModal.tsx`
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-5-handoff.md`
+- `darshan-server/src/config/apiEndpoints.ts`
+- `darshan-server/src/routes/screens.ts`
+- `darshan-server/src/routes/device-telemetry-commands.test.ts`
+- `darshan-cms/src/api/endpoints.ts`
+- `darshan-cms/src/api/queryKeys.ts`
+- `darshan-cms/src/api/types.ts`
+- `darshan-cms/src/api/domains/screens.ts`
+- `darshan-cms/src/components/screens/ScreenDetailsModal.tsx`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
+- `docs/implementation/realtime-sync-test-plan.md`
+- `docs/implementation/realtime-sync-open-risks.md`
+- `docs/implementation/realtime-sync-phase-5-handoff.md`
 
 ## Tests Run
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signhex-server && npm run build` | Passed | TypeScript build completed under Node `v24.12.0`. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 13 tests | Includes delivery status API aggregation coverage. |
-| `cd signhex-nexus-core && npm ci` | Passed after escalation | Required npm cache/log access; reported 18 existing audit findings. |
-| `cd signhex-nexus-core && npm run build` | Passed | Vite production build completed. |
-| `cd signhex-nexus-core && npm run lint` | Failed outside Phase 5 changed files | Existing lint issues in `LiveScreenMirror.tsx`, `EmergencyTakeoverModal.tsx`, and `tests/settings-default-media.e2e.spec.ts`. |
+| `cd darshan-server && npm run build` | Passed | TypeScript build completed under Node `v24.12.0`. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 13 tests | Includes delivery status API aggregation coverage. |
+| `cd darshan-cms && npm ci` | Passed after escalation | Required npm cache/log access; reported 18 existing audit findings. |
+| `cd darshan-cms && npm run build` | Passed | Vite production build completed. |
+| `cd darshan-cms && npm run lint` | Failed outside Phase 5 changed files | Existing lint issues in `LiveScreenMirror.tsx`, `EmergencyTakeoverModal.tsx`, and `tests/settings-default-media.e2e.spec.ts`. |
 
 ## Blocked Or Deferred Tests
 

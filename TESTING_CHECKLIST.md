@@ -1,8 +1,8 @@
 # Testing Checklist
 
-Project name: Signhex / Hexmon Signage  
+Project name: DARSHAN / DARSHAN  
 Date generated: 2026-04-26  
-Short summary: Comprehensive manual regression checklist for the Signhex CMS, Fastify backend, Electron signage player, and platform deployment/operations assets. Payment and subscription flows were searched for and were not detected in the repository, so no payment-specific workflow section is included.  
+Short summary: Comprehensive manual regression checklist for the DARSHAN CMS, Fastify backend, Electron signage player, and platform deployment/operations assets. Payment and subscription flows were searched for and were not detected in the repository, so no payment-specific workflow section is included.  
 Total number of test cases: 561
 
 ## Section Summary
@@ -32,9 +32,9 @@ Total number of test cases: 561
 
 ## Repository Setup, Configuration, And Environment
 
-- [ ] Verify the repository root contains `signhex-nexus-core`, `signhex-server`, `signage-screen`, and `signhex-platform` — all product and platform workspaces are present and readable.
+- [ ] Verify the repository root contains `darshan-cms`, `darshan-server`, `darshan-player`, and `DARSHAN monorepo root` — all product and platform workspaces are present and readable.
 - [ ] Install dependencies in each package using the documented package manager command — dependency installation succeeds without modifying source files unexpectedly.
-- [ ] Compare `signhex-server/.env.example` with backend config validation — every required variable has a documented placeholder and missing required values fail with a clear startup error.
+- [ ] Compare `darshan-server/.env.example` with backend config validation — every required variable has a documented placeholder and missing required values fail with a clear startup error.
 - [ ] Start the backend with invalid `DATABASE_URL` or missing MinIO credentials — startup fails before serving traffic and reports the exact invalid configuration area.
 - [ ] Start the backend with valid local Postgres and MinIO values — `/api/v1/health` returns a healthy response without leaking secrets.
 - [ ] Point the CMS at a backend through `VITE_API_BASE_URL` — API calls use `/api/v1` under the configured origin instead of the browser origin.

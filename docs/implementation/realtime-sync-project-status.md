@@ -1,9 +1,9 @@
 # Enterprise Realtime Sync Project Status
 
-Last updated: 2026-05-25
+Last updated: 2026-05-29
 Updated by: Codex
 Repo path: `/Users/anuragkumar/Desktop/signhex`
-Current branch: `release-01` in `signhex-server`, `signage-screen`, `signhex-nexus-core`, and `signhex-platform`
+Current branch: `rename/darshan-product`
 Current phase: Phase 8 - Load, chaos, and production readiness
 Overall status: Phase 8 runtime evidence was attempted and is blocked by missing air-gapped on-prem QA environment, Valkey topology, and simulator credentials; production readiness is not approved and Phase 9 remains blocked
 
@@ -46,7 +46,7 @@ Current verification scope:
 
 ## Current System Summary
 
-The repo contains Phase 1 through Phase 6 realtime sync runtime implementation changes across `signhex-server`, `signage-screen`, and `signhex-nexus-core`, plus Phase 7 and Phase 8 platform deployment/readiness changes in `signhex-platform`. The top-level `/Users/anuragkumar/Desktop/signhex` directory is not a git repo; the product folders are separate working trees on branch `release-01`.
+The unified monorepo contains Phase 1 through Phase 6 realtime sync runtime implementation changes across `darshan-server`, `darshan-player`, and `darshan-cms`, plus Phase 7 and Phase 8 platform deployment/readiness changes in the root platform folders. The product rename branch changes visible branding and package/folder names from the former development names to DARSHAN while preserving runtime compatibility aliases for one release.
 
 ## Target Architecture
 
@@ -79,7 +79,7 @@ CMS/API transaction
 | 8 | Load, chaos, and production readiness | IMPLEMENTED_LOCAL_TESTED_BLOCKED_BY_ONPREM_RUNTIME | Local model/static/observability validation passed; Valkey fanout backfill implemented and locally tested; real on-prem QA load/chaos/canary/proxy/Valkey runtime execution blocked by missing on-prem QA target |
 | 9 | Mobile/TV player contract adapters | BLOCKED | Requires accepted Phase 8 runtime evidence or explicit human deferral |
 
-Phase control details are maintained in `signhex-platform/docs/implementation/realtime-sync-remaining-phase-control-plan.md`.
+Phase control details are maintained in `docs/implementation/realtime-sync-remaining-phase-control-plan.md`.
 
 ## Phase 1 Command Lifecycle Status
 
@@ -89,53 +89,53 @@ Phase 1 approval blockers are fixed. The implementation now has backend/player `
 
 ### Phase 1 Files Changed
 
-- `signhex-server/drizzle/migrations/0030_command_lifecycle_normalization.sql`
-- `signhex-server/src/db/schema.ts`
-- `signhex-server/src/services/command-lifecycle-service.ts`
-- `signhex-server/src/routes/device-telemetry.ts`
-- `signhex-server/src/routes/screens.ts`
-- `signhex-server/src/routes/screen-groups.ts`
-- `signhex-server/src/services/playback-refresh-commands.ts`
-- `signhex-server/src/config/index.ts`
-- `signhex-server/src/config/apiEndpoints.ts`
-- `signhex-server/.env.example`
-- `signhex-server/.env.qa.example`
-- `signhex-server/src/routes/device-telemetry-commands.test.ts`
-- `signage-screen/src/main/services/command-processor.ts`
-- `signage-screen/test/unit/services/command-processor.test.ts`
-- `signhex-platform/docs/architecture/command-lifecycle.md`
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
+- `darshan-server/drizzle/migrations/0030_command_lifecycle_normalization.sql`
+- `darshan-server/src/db/schema.ts`
+- `darshan-server/src/services/command-lifecycle-service.ts`
+- `darshan-server/src/routes/device-telemetry.ts`
+- `darshan-server/src/routes/screens.ts`
+- `darshan-server/src/routes/screen-groups.ts`
+- `darshan-server/src/services/playback-refresh-commands.ts`
+- `darshan-server/src/config/index.ts`
+- `darshan-server/src/config/apiEndpoints.ts`
+- `darshan-server/.env.example`
+- `darshan-server/.env.qa.example`
+- `darshan-server/src/routes/device-telemetry-commands.test.ts`
+- `darshan-player/src/main/services/command-processor.ts`
+- `darshan-player/test/unit/services/command-processor.test.ts`
+- `docs/architecture/command-lifecycle.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
 
 ### Phase 1 Verification Matrix
 
 | Item | Expected | Verified? | Status | Evidence | Notes |
 |---|---|---:|---|---|---|
-| Command type enum expansion | Add `REFRESH_SCHEDULE`, `SCREENSHOT`, `CLEAR_CACHE`, `PING`, `RESYNC` while keeping existing values | yes | VERIFIED_COMPLETE | `signhex-server/src/db/schema.ts` `commandTypeEnum`; migration `0030_command_lifecycle_normalization.sql` | Backend enum has planned values. |
-| Command status enum expansion | Add lifecycle statuses while keeping existing values | yes | VERIFIED_COMPLETE | `signhex-server/src/db/schema.ts` `commandStatusEnum`; migration | Phase 1 still writes compatibility statuses. |
-| Lifecycle columns/indexes/history | Add lifecycle fields, indexes, and `device_command_status_history` | yes | VERIFIED_COMPLETE | `signhex-server/src/db/schema.ts`; migration | Additive migration. |
-| Central lifecycle service | Centralize create, claim, ACK, expiry, dead-letter, recent listing | yes | VERIFIED_COMPLETE | `signhex-server/src/services/command-lifecycle-service.ts` | Service writes `SENT`/`COMPLETED`/`FAILED` for compatibility. |
-| Heartbeat and poll command paths | Existing paths still claim commands | yes | VERIFIED_COMPLETE | `signhex-server/src/routes/device-telemetry.ts` | Polling and heartbeat remain fallback. |
-| Recent command status API | Add `GET /api/v1/screens/:id/commands/recent` | yes | VERIFIED_COMPLETE | `signhex-server/src/routes/screens.ts`; `src/config/apiEndpoints.ts` | No CMS UI yet. |
-| Electron ACK enrichment | Include result payload/data and processed timestamp | yes | VERIFIED_COMPLETE | `signage-screen/src/main/services/command-processor.ts` | Existing request queue fallback preserved. |
+| Command type enum expansion | Add `REFRESH_SCHEDULE`, `SCREENSHOT`, `CLEAR_CACHE`, `PING`, `RESYNC` while keeping existing values | yes | VERIFIED_COMPLETE | `darshan-server/src/db/schema.ts` `commandTypeEnum`; migration `0030_command_lifecycle_normalization.sql` | Backend enum has planned values. |
+| Command status enum expansion | Add lifecycle statuses while keeping existing values | yes | VERIFIED_COMPLETE | `darshan-server/src/db/schema.ts` `commandStatusEnum`; migration | Phase 1 still writes compatibility statuses. |
+| Lifecycle columns/indexes/history | Add lifecycle fields, indexes, and `device_command_status_history` | yes | VERIFIED_COMPLETE | `darshan-server/src/db/schema.ts`; migration | Additive migration. |
+| Central lifecycle service | Centralize create, claim, ACK, expiry, dead-letter, recent listing | yes | VERIFIED_COMPLETE | `darshan-server/src/services/command-lifecycle-service.ts` | Service writes `SENT`/`COMPLETED`/`FAILED` for compatibility. |
+| Heartbeat and poll command paths | Existing paths still claim commands | yes | VERIFIED_COMPLETE | `darshan-server/src/routes/device-telemetry.ts` | Polling and heartbeat remain fallback. |
+| Recent command status API | Add `GET /api/v1/screens/:id/commands/recent` | yes | VERIFIED_COMPLETE | `darshan-server/src/routes/screens.ts`; `src/config/apiEndpoints.ts` | No CMS UI yet. |
+| Electron ACK enrichment | Include result payload/data and processed timestamp | yes | VERIFIED_COMPLETE | `darshan-player/src/main/services/command-processor.ts` | Existing request queue fallback preserved. |
 | `TAKE_SCREENSHOT` compatibility | Backend wire command handled by Electron | yes | VERIFIED_COMPLETE | Electron normalizes `TAKE_SCREENSHOT` to `SCREENSHOT` | Compatible. |
-| `RESYNC` compatibility | Backend and player support same command aliases | yes | VERIFIED_COMPLETE | `signage-screen/src/common/types.ts`; `signage-screen/src/main/services/command-processor.ts`; command processor test | Electron handles `RESYNC` as a REST refresh/resync alias. |
-| Playback refresh status history | Refresh command creation writes creation history | yes | VERIFIED_COMPLETE | `signhex-server/src/services/playback-refresh-commands.ts`; `src/services/playback-refresh-dispatch.test.ts` | Uses `createDeviceCommands` batch helper. |
+| `RESYNC` compatibility | Backend and player support same command aliases | yes | VERIFIED_COMPLETE | `darshan-player/src/common/types.ts`; `darshan-player/src/main/services/command-processor.ts`; command processor test | Electron handles `RESYNC` as a REST refresh/resync alias. |
+| Playback refresh status history | Refresh command creation writes creation history | yes | VERIFIED_COMPLETE | `darshan-server/src/services/playback-refresh-commands.ts`; `src/services/playback-refresh-dispatch.test.ts` | Uses `createDeviceCommands` batch helper. |
 | Backend DB integration tests | Focused command route tests pass | yes | VERIFIED_COMPLETE | `npx vitest run src/routes/device-telemetry-commands.test.ts` | 11 passing against local Docker Postgres after schema push. |
 
 ### Phase 1 Test Evidence
 
 | Test/Command | Environment | Result | Evidence | Related Risk |
 |---|---|---|---|---|
-| `cd signhex-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Latest rerun on 2026-05-24 exited 0 | Node version mismatch remains an environment risk. |
-| `cd signhex-server && DRIZZLE_STRICT=false npm run db:push` | Local Docker Postgres | Passed | Schema push applied to `hexmon-postgres` after sandboxed run was blocked by `EPERM` and rerun with escalation | Local test setup only; not a production migration method. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Local Docker Postgres | Passed | Latest rerun on 2026-05-24 reported 11 passing | Backend DB command lifecycle verified. |
-| `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Local Docker Postgres | Passed | Latest focused run reported 2 passing | Confirms refresh command creation history. |
-| `cd signhex-server && npx vitest run src/routes/settings.test.ts` | Local Docker Postgres | Passed | Latest isolated run reported 5 passing | Default media regression path passed. |
-| `cd signhex-server && npx vitest run src/routes/emergency.test.ts` | Local Docker Postgres | Passed | Latest isolated run reported 2 passing | Emergency regression path passed. |
-| `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts src/routes/settings.test.ts src/routes/emergency.test.ts` | Local Docker Postgres, parallel files | Failed | 8 passed, 1 failed in emergency due shared DB cross-test interference; isolated emergency rerun passed | Backend integration files should run isolated or with DB isolation. |
-| `cd signage-screen && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Latest rerun on 2026-05-24 exited 0 | Node version mismatch remains. |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Local unit harness | Passed | Latest rerun on 2026-05-24 reported 14 passing | Includes `RESYNC` coverage. |
+| `cd darshan-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Latest rerun on 2026-05-24 exited 0 | Node version mismatch remains an environment risk. |
+| `cd darshan-server && DRIZZLE_STRICT=false npm run db:push` | Local Docker Postgres | Passed | Schema push applied to `darshan-postgres` after sandboxed run was blocked by `EPERM` and rerun with escalation | Local test setup only; not a production migration method. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Local Docker Postgres | Passed | Latest rerun on 2026-05-24 reported 11 passing | Backend DB command lifecycle verified. |
+| `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Local Docker Postgres | Passed | Latest focused run reported 2 passing | Confirms refresh command creation history. |
+| `cd darshan-server && npx vitest run src/routes/settings.test.ts` | Local Docker Postgres | Passed | Latest isolated run reported 5 passing | Default media regression path passed. |
+| `cd darshan-server && npx vitest run src/routes/emergency.test.ts` | Local Docker Postgres | Passed | Latest isolated run reported 2 passing | Emergency regression path passed. |
+| `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts src/routes/settings.test.ts src/routes/emergency.test.ts` | Local Docker Postgres, parallel files | Failed | 8 passed, 1 failed in emergency due shared DB cross-test interference; isolated emergency rerun passed | Backend integration files should run isolated or with DB isolation. |
+| `cd darshan-player && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Latest rerun on 2026-05-24 exited 0 | Node version mismatch remains. |
+| `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Local unit harness | Passed | Latest rerun on 2026-05-24 reported 14 passing | Includes `RESYNC` coverage. |
 
 ### Phase 1 Approval State
 
@@ -173,21 +173,21 @@ The new device endpoint `GET /api/v1/device/:deviceId/desired-state` returns ver
 
 ### Phase 2 Files Changed
 
-- `signhex-server/drizzle/migrations/0031_command_outbox_desired_state.sql`
-- `signhex-server/src/db/schema.ts`
-- `signhex-server/src/services/command-outbox-service.ts`
-- `signhex-server/src/services/device-desired-state-service.ts`
-- `signhex-server/src/services/command-lifecycle-service.ts`
-- `signhex-server/src/services/playback-refresh-commands.ts`
-- `signhex-server/src/services/playback-refresh-dispatch.ts`
-- `signhex-server/src/routes/device-telemetry.ts`
-- `signhex-server/src/routes/emergency.ts`
-- `signhex-server/src/config/index.ts`
-- `signhex-server/src/config/apiEndpoints.ts`
-- `signhex-server/.env.example`
-- `signhex-server/.env.qa.example`
-- `signhex-server/src/routes/device-telemetry-commands.test.ts`
-- `signhex-server/src/services/playback-refresh-dispatch.test.ts`
+- `darshan-server/drizzle/migrations/0031_command_outbox_desired_state.sql`
+- `darshan-server/src/db/schema.ts`
+- `darshan-server/src/services/command-outbox-service.ts`
+- `darshan-server/src/services/device-desired-state-service.ts`
+- `darshan-server/src/services/command-lifecycle-service.ts`
+- `darshan-server/src/services/playback-refresh-commands.ts`
+- `darshan-server/src/services/playback-refresh-dispatch.ts`
+- `darshan-server/src/routes/device-telemetry.ts`
+- `darshan-server/src/routes/emergency.ts`
+- `darshan-server/src/config/index.ts`
+- `darshan-server/src/config/apiEndpoints.ts`
+- `darshan-server/.env.example`
+- `darshan-server/.env.qa.example`
+- `darshan-server/src/routes/device-telemetry-commands.test.ts`
+- `darshan-server/src/services/playback-refresh-dispatch.test.ts`
 
 ### Phase 2 Verification Matrix
 
@@ -205,13 +205,13 @@ The new device endpoint `GET /api/v1/device/:deviceId/desired-state` returns ver
 
 | Test/Command | Environment | Result | Evidence | Related Risk |
 |---|---|---|---|---|
-| `cd signhex-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Exited 0 on 2026-05-24 after Phase 2 code | Node version mismatch remains an environment risk. |
-| `cd signhex-server && DRIZZLE_STRICT=false npm run db:push` | Local Docker Postgres | Passed after escalation | Applied new tables/indexes; sandboxed attempt hit `connect EPERM` | Local push also showed existing Drizzle drift statements; production must use reviewed migration. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Local Docker Postgres | Passed | 12 passing | Includes desired-state endpoint and command/outbox write assertions. |
-| `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Local Docker Postgres | Passed | 2 passing | Includes refresh command desired-state/outbox assertions. |
-| `cd signhex-server && npx vitest run src/routes/settings.test.ts` | Local Docker Postgres | Passed | 5 passing | Default media regression path passed. |
-| `cd signhex-server && npx vitest run src/routes/schedules.publish.test.ts` | Local Docker Postgres | Passed | 2 passing | Publish validation regression path passed. |
-| `cd signhex-server && npx vitest run src/routes/emergency.test.ts` | Local Docker Postgres, isolated | Passed | 2 passing | Emergency regression path passed when isolated. |
+| `cd darshan-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Exited 0 on 2026-05-24 after Phase 2 code | Node version mismatch remains an environment risk. |
+| `cd darshan-server && DRIZZLE_STRICT=false npm run db:push` | Local Docker Postgres | Passed after escalation | Applied new tables/indexes; sandboxed attempt hit `connect EPERM` | Local push also showed existing Drizzle drift statements; production must use reviewed migration. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Local Docker Postgres | Passed | 12 passing | Includes desired-state endpoint and command/outbox write assertions. |
+| `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Local Docker Postgres | Passed | 2 passing | Includes refresh command desired-state/outbox assertions. |
+| `cd darshan-server && npx vitest run src/routes/settings.test.ts` | Local Docker Postgres | Passed | 5 passing | Default media regression path passed. |
+| `cd darshan-server && npx vitest run src/routes/schedules.publish.test.ts` | Local Docker Postgres | Passed | 2 passing | Publish validation regression path passed. |
+| `cd darshan-server && npx vitest run src/routes/emergency.test.ts` | Local Docker Postgres, isolated | Passed | 2 passing | Emergency regression path passed when isolated. |
 | Parallel `settings`, `emergency`, `schedules.publish` run | Local Docker Postgres, parallel files | Failed | Emergency status assertion saw `active_count = 1` | Existing shared DB cross-test interference; isolated emergency rerun passed. |
 
 ### Phase 2 Approval State
@@ -255,23 +255,23 @@ The dispatcher atomically claims due outbox rows by moving them to `DISPATCHING`
 
 ### Phase 3 Files Changed
 
-- `signhex-server/src/realtime/device-connection-registry.ts`
-- `signhex-server/src/realtime/device-gateway.ts`
-- `signhex-server/src/realtime/device-gateway.test.ts`
-- `signhex-server/src/services/outbox-dispatcher.ts`
-- `signhex-server/src/server/index.ts`
-- `signhex-server/src/config/index.ts`
-- `signhex-server/.env.example`
-- `signhex-server/.env.qa.example`
-- `signhex-platform/docs/implementation/realtime-sync-phase-3-handoff.md`
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-decision-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
-- `signhex-platform/docs/architecture/enterprise-realtime-sync.md`
-- `signhex-platform/docs/architecture/player-contract.md`
+- `darshan-server/src/realtime/device-connection-registry.ts`
+- `darshan-server/src/realtime/device-gateway.ts`
+- `darshan-server/src/realtime/device-gateway.test.ts`
+- `darshan-server/src/services/outbox-dispatcher.ts`
+- `darshan-server/src/server/index.ts`
+- `darshan-server/src/config/index.ts`
+- `darshan-server/.env.example`
+- `darshan-server/.env.qa.example`
+- `docs/implementation/realtime-sync-phase-3-handoff.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
+- `docs/implementation/realtime-sync-test-plan.md`
+- `docs/implementation/realtime-sync-decision-log.md`
+- `docs/implementation/realtime-sync-open-risks.md`
+- `docs/architecture/enterprise-realtime-sync.md`
+- `docs/architecture/player-contract.md`
 
 ### Phase 3 Verification Matrix
 
@@ -292,10 +292,10 @@ The dispatcher atomically claims due outbox rows by moving them to `DISPATCHING`
 
 | Test/Command | Environment | Result | Evidence | Related Risk |
 |---|---|---|---|---|
-| `cd signhex-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Exited 0 on 2026-05-24 after Phase 3 code | Node version mismatch remains an environment risk. |
-| `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` | Local test server and DB | Passed | 4 passing | Covers HELLO auth/ack, notification-only dispatch, no-connection retry, bad serial rejection. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Local Docker Postgres | Passed | 12 passing | Confirms polling/heartbeat command path still works. |
-| `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Local Docker Postgres | Passed | 2 passing | Confirms Phase 2 command/outbox write path still works. |
+| `cd darshan-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Exited 0 on 2026-05-24 after Phase 3 code | Node version mismatch remains an environment risk. |
+| `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts` | Local test server and DB | Passed | 4 passing | Covers HELLO auth/ack, notification-only dispatch, no-connection retry, bad serial rejection. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Local Docker Postgres | Passed | 12 passing | Confirms polling/heartbeat command path still works. |
+| `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Local Docker Postgres | Passed | 2 passing | Confirms Phase 2 command/outbox write path still works. |
 
 ### Phase 3 Approval State
 
@@ -335,17 +335,17 @@ Existing polling and heartbeat remain active. When realtime is healthy, command 
 
 ### Phase 4 Files Changed
 
-- `signage-screen/src/common/types.ts`
-- `signage-screen/src/common/config.ts`
-- `signage-screen/src/main/services/realtime-service.ts`
-- `signage-screen/src/main/services/command-processor.ts`
-- `signage-screen/src/main/services/device-state-store.ts`
-- `signage-screen/src/main/services/telemetry/player-metrics.ts`
-- `signage-screen/src/main/services/player-flow.ts`
-- `signage-screen/src/main/index.ts`
-- `signage-screen/test/unit/services/realtime-service.test.ts`
-- `signage-screen/test/unit/services/command-processor.test.ts`
-- `signhex-platform/docs/implementation/realtime-sync-phase-4-handoff.md`
+- `darshan-player/src/common/types.ts`
+- `darshan-player/src/common/config.ts`
+- `darshan-player/src/main/services/realtime-service.ts`
+- `darshan-player/src/main/services/command-processor.ts`
+- `darshan-player/src/main/services/device-state-store.ts`
+- `darshan-player/src/main/services/telemetry/player-metrics.ts`
+- `darshan-player/src/main/services/player-flow.ts`
+- `darshan-player/src/main/index.ts`
+- `darshan-player/test/unit/services/realtime-service.test.ts`
+- `darshan-player/test/unit/services/command-processor.test.ts`
+- `docs/implementation/realtime-sync-phase-4-handoff.md`
 
 ### Phase 4 Verification Matrix
 
@@ -356,7 +356,7 @@ Existing polling and heartbeat remain active. When realtime is healthy, command 
 | State-bearing payload rejection | Ignore snapshots/media over WS | yes | VERIFIED_COMPLETE | `isValidNotification`; realtime test | Rejects `snapshot`, `media`, and `media_bytes` fields. |
 | Desired-state reconciliation | Compare local versions and refresh authoritative REST resources | yes | VERIFIED_COMPLETE | `applyDesiredState`; realtime test | Refreshes commands, snapshot/emergency, and default media as needed. |
 | Adaptive command polling | Healthy realtime uses safety polling, unhealthy path keeps fallback | yes | VERIFIED_COMPLETE | `command-processor.ts`; command processor test | `setRealtimeHealthy` controls poll delay only; heartbeat remains active. |
-| Config and rollback flags | Realtime disabled by default and configurable through env/config | yes | VERIFIED_COMPLETE | `config.ts`; build | `HEXMON_REALTIME_SYNC_ENABLED=false` keeps legacy behavior. |
+| Config and rollback flags | Realtime disabled by default and configurable through env/config | yes | VERIFIED_COMPLETE | `config.ts`; build | `DARSHAN_REALTIME_PLAYER_ENABLED=false` keeps legacy behavior. |
 | Player runtime wiring | Start/stop realtime with player lifecycle and config reload | yes | VERIFIED_COMPLETE | `player-flow.ts`; `index.ts` | Existing runtime loops remain. |
 | Backend/CMS/mobile untouched | Do not implement later phases | yes | VERIFIED_COMPLETE | Code review | No Phase 5+ implementation. |
 | Real backend gateway integration | Validate against actual Phase 3 Socket.IO server/proxy | partial | VERIFIED_PARTIAL | Temporary raw WebSocket smoke against backend test gateway completed `/device` auth and `HELLO_ACK` without snapshot/media fields; on-prem QA proxy not exercised | on-prem QA proxy/load balancer smoke still required before rollout. |
@@ -365,10 +365,10 @@ Existing polling and heartbeat remain active. When realtime is healthy, command 
 
 | Test/Command | Environment | Result | Evidence | Related Risk |
 |---|---|---|---|---|
-| `cd signage-screen && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Main build, renderer build, bundle, and asset copy exited 0 on 2026-05-24 | Node version mismatch remains an environment risk. |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/realtime-service.test.ts --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Local unit harness | Passed | 18 passing on 2026-05-24 | Covers realtime HELLO/ACK, notification-only REST pulls, invalid WS payload rejection, adaptive safety poll, command/heartbeat regressions. |
-| `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` | Local backend test gateway and DB | Passed | 4 passing on 2026-05-24 | Confirms backend `/device` auth, HELLO, notification-only dispatch, disconnected retry, and bad credential rejection. |
-| `cd signhex-server && npx tsx /private/tmp/signhex-phase4-raw-ws-smoke.ts` | Local backend test gateway and raw WebSocket client | Passed | `HELLO_ACK`, one registry connection, no `snapshot` or `media` fields | Smoke script was temporary and outside repo; on-prem QA proxy not exercised. |
+| `cd darshan-player && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Main build, renderer build, bundle, and asset copy exited 0 on 2026-05-24 | Node version mismatch remains an environment risk. |
+| `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/realtime-service.test.ts --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Local unit harness | Passed | 18 passing on 2026-05-24 | Covers realtime HELLO/ACK, notification-only REST pulls, invalid WS payload rejection, adaptive safety poll, command/heartbeat regressions. |
+| `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts` | Local backend test gateway and DB | Passed | 4 passing on 2026-05-24 | Confirms backend `/device` auth, HELLO, notification-only dispatch, disconnected retry, and bad credential rejection. |
+| `cd darshan-server && npx tsx /private/tmp/darshan-phase4-raw-ws-smoke.ts` | Local backend test gateway and raw WebSocket client | Passed | `HELLO_ACK`, one registry connection, no `snapshot` or `media` fields | Smoke script was temporary and outside repo; on-prem QA proxy not exercised. |
 
 ### Phase 4 Approval State
 
@@ -386,7 +386,7 @@ Phase 4 is independently verified and approved to start Phase 5 with conditions.
 
 ### Phase 4 Rollback Notes
 
-- Set `HEXMON_REALTIME_SYNC_ENABLED=false` or remove the player realtime config to disable Electron realtime.
+- Set `DARSHAN_REALTIME_PLAYER_ENABLED=false` or remove the player realtime config to disable Electron realtime.
 - Existing command polling, heartbeat command ingestion, snapshot/default/emergency refresh, ACK, cache, and PoP paths remain active.
 - No DB migration is associated with Phase 4.
 - Backend Phase 3 gateway can remain disabled independently with `REALTIME_SYNC_ENABLED=false` and `OUTBOX_DISPATCH_ENABLED=false`.
@@ -409,20 +409,20 @@ No WebSocket behavior, Electron realtime behavior, migrations, outbox write sema
 
 ### Phase 5 Files Changed
 
-- `signhex-server/src/config/apiEndpoints.ts`
-- `signhex-server/src/routes/screens.ts`
-- `signhex-server/src/routes/device-telemetry-commands.test.ts`
-- `signhex-nexus-core/src/api/endpoints.ts`
-- `signhex-nexus-core/src/api/queryKeys.ts`
-- `signhex-nexus-core/src/api/types.ts`
-- `signhex-nexus-core/src/api/domains/screens.ts`
-- `signhex-nexus-core/src/components/screens/ScreenDetailsModal.tsx`
-- `signhex-platform/docs/implementation/realtime-sync-phase-5-handoff.md`
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
+- `darshan-server/src/config/apiEndpoints.ts`
+- `darshan-server/src/routes/screens.ts`
+- `darshan-server/src/routes/device-telemetry-commands.test.ts`
+- `darshan-cms/src/api/endpoints.ts`
+- `darshan-cms/src/api/queryKeys.ts`
+- `darshan-cms/src/api/types.ts`
+- `darshan-cms/src/api/domains/screens.ts`
+- `darshan-cms/src/components/screens/ScreenDetailsModal.tsx`
+- `docs/implementation/realtime-sync-phase-5-handoff.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
+- `docs/implementation/realtime-sync-test-plan.md`
+- `docs/implementation/realtime-sync-open-risks.md`
 
 ### Phase 5 Verification Matrix
 
@@ -433,18 +433,18 @@ No WebSocket behavior, Electron realtime behavior, migrations, outbox write sema
 | CMS API client/types | Typed API client can call delivery endpoint | yes | VERIFIED_COMPLETE | `endpoints.ts`, `queryKeys.ts`, `types.ts`, `domains/screens.ts`; CMS build passed | No API payload contains media/snapshot contents. |
 | CMS screen delivery tab | Operator can inspect command attempts, failures, publish/emergency summaries, and outbox counts | yes | VERIFIED_COMPLETE | `ScreenDetailsModal.tsx`; CMS build passed | Controlled by `VITE_REALTIME_DELIVERY_STATUS_UI`; default visible unless set to `false`. |
 | WebSocket notification-only rule | Phase 5 does not add WS payloads or state push | yes | VERIFIED_COMPLETE | Code review | Backend endpoint is REST read-only. |
-| Polling/heartbeat fallback | Phase 5 does not change player polling or heartbeat | yes | VERIFIED_COMPLETE | No signage-screen changes in Phase 5 | Existing fallback remains. |
+| Polling/heartbeat fallback | Phase 5 does not change player polling or heartbeat | yes | VERIFIED_COMPLETE | No darshan-player changes in Phase 5 | Existing fallback remains. |
 | Media/cache failure visibility | Do not implement Phase 6 early | yes | VERIFIED_COMPLETE | Code review | Phase 6 remains separate. |
 
 ### Phase 5 Test Evidence
 
 | Test/Command | Environment | Result | Evidence | Related Risk |
 |---|---|---|---|---|
-| `cd signhex-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | TypeScript build exited 0 on 2026-05-24 | Node version mismatch remains. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Local Docker Postgres | Passed | 13 passing; includes delivery status aggregation test | DB-mutating backend files should still run isolated. |
-| `cd signhex-nexus-core && npm ci` | Local environment | Passed after escalation | Installed CMS dependencies from lockfile; reported 18 audit findings | Dependency audit is pre-existing and not fixed in Phase 5. |
-| `cd signhex-nexus-core && npm run build` | Node `v24.12.0` | Passed | Vite production build exited 0; emitted existing large chunk/browser data warnings | Re-run in CI/Node target. |
-| `cd signhex-nexus-core && npm run lint` | Local environment | Failed | Existing errors in `tests/settings-default-media.e2e.spec.ts`; warnings in `LiveScreenMirror.tsx` and `EmergencyTakeoverModal.tsx` | Failures are outside Phase 5 changed files but must be cleaned before full approval. |
+| `cd darshan-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | TypeScript build exited 0 on 2026-05-24 | Node version mismatch remains. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Local Docker Postgres | Passed | 13 passing; includes delivery status aggregation test | DB-mutating backend files should still run isolated. |
+| `cd darshan-cms && npm ci` | Local environment | Passed after escalation | Installed CMS dependencies from lockfile; reported 18 audit findings | Dependency audit is pre-existing and not fixed in Phase 5. |
+| `cd darshan-cms && npm run build` | Node `v24.12.0` | Passed | Vite production build exited 0; emitted existing large chunk/browser data warnings | Re-run in CI/Node target. |
+| `cd darshan-cms && npm run lint` | Local environment | Failed | Existing errors in `tests/settings-default-media.e2e.spec.ts`; warnings in `LiveScreenMirror.tsx` and `EmergencyTakeoverModal.tsx` | Failures are outside Phase 5 changed files but must be cleaned before full approval. |
 
 ### Phase 5 Approval State
 
@@ -482,31 +482,31 @@ Large media, screenshots, logs, snapshots, and PoP are still not sent over WebSo
 
 ### Phase 6 Files Changed
 
-- `signhex-server/drizzle/migrations/0032_media_cache_failure_reporting.sql`
-- `signhex-server/src/db/schema.ts`
-- `signhex-server/src/services/media-cache-report-service.ts`
-- `signhex-server/src/routes/device-telemetry.ts`
-- `signhex-server/src/routes/screens.ts`
-- `signhex-server/src/config/apiEndpoints.ts`
-- `signhex-server/src/config/index.ts`
-- `signhex-server/.env.example`
-- `signhex-server/.env.qa.example`
-- `signhex-server/src/routes/device-telemetry-media-cache-report.test.ts`
-- `signage-screen/src/main/services/media-cache-reporter.ts`
-- `signage-screen/src/main/services/cache/cache-manager.ts`
-- `signage-screen/src/main/services/settings/default-media-service.ts`
-- `signage-screen/src/main/services/snapshot-manager.ts`
-- `signage-screen/src/common/config.ts`
-- `signage-screen/src/common/types.ts`
-- `signage-screen/test/unit/services/media-cache-reporter.test.ts`
-- `signage-screen/test/unit/services/cache-manager.test.ts`
-- `signage-screen/test/unit/services/default-media-service.test.ts`
-- `signhex-nexus-core/src/api/endpoints.ts`
-- `signhex-nexus-core/src/api/queryKeys.ts`
-- `signhex-nexus-core/src/api/types.ts`
-- `signhex-nexus-core/src/api/domains/screens.ts`
-- `signhex-nexus-core/src/components/screens/ScreenDetailsModal.tsx`
-- `signhex-platform/docs/implementation/realtime-sync-phase-6-handoff.md`
+- `darshan-server/drizzle/migrations/0032_media_cache_failure_reporting.sql`
+- `darshan-server/src/db/schema.ts`
+- `darshan-server/src/services/media-cache-report-service.ts`
+- `darshan-server/src/routes/device-telemetry.ts`
+- `darshan-server/src/routes/screens.ts`
+- `darshan-server/src/config/apiEndpoints.ts`
+- `darshan-server/src/config/index.ts`
+- `darshan-server/.env.example`
+- `darshan-server/.env.qa.example`
+- `darshan-server/src/routes/device-telemetry-media-cache-report.test.ts`
+- `darshan-player/src/main/services/media-cache-reporter.ts`
+- `darshan-player/src/main/services/cache/cache-manager.ts`
+- `darshan-player/src/main/services/settings/default-media-service.ts`
+- `darshan-player/src/main/services/snapshot-manager.ts`
+- `darshan-player/src/common/config.ts`
+- `darshan-player/src/common/types.ts`
+- `darshan-player/test/unit/services/media-cache-reporter.test.ts`
+- `darshan-player/test/unit/services/cache-manager.test.ts`
+- `darshan-player/test/unit/services/default-media-service.test.ts`
+- `darshan-cms/src/api/endpoints.ts`
+- `darshan-cms/src/api/queryKeys.ts`
+- `darshan-cms/src/api/types.ts`
+- `darshan-cms/src/api/domains/screens.ts`
+- `darshan-cms/src/components/screens/ScreenDetailsModal.tsx`
+- `docs/implementation/realtime-sync-phase-6-handoff.md`
 
 ### Phase 6 Verification Matrix
 
@@ -526,14 +526,14 @@ Large media, screenshots, logs, snapshots, and PoP are still not sent over WebSo
 
 | Test/Command | Environment | Result | Evidence | Related Risk |
 |---|---|---|---|---|
-| `cd signhex-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | TypeScript build exited 0 | Node 20 rerun remains required. |
-| `cd signhex-server && DRIZZLE_STRICT=false npm run db:push` | Local Docker Postgres | Passed after sandbox escalation | Applied `media_cache_reports` table/indexes; local Drizzle also emitted existing drift statements | Production must use reviewed migration, not local push output. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` | Local Docker Postgres | Passed | 1 passing | Covers device ingest and CMS listing. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts src/routes/device-telemetry-media-cache-report.test.ts` | Local Docker Postgres | Passed | 14 passing | Confirms command path still works alongside Phase 6 endpoint. |
-| `cd signage-screen && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Main/renderer build exited 0 | Node 20 rerun remains required. |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts --spec test/unit/services/cache-manager.test.ts --spec test/unit/services/default-media-service.test.ts` | Local unit harness | Passed | 18 passing | Covers sanitized report, queue fallback, cache behavior, default media cache hydration. |
-| `cd signhex-nexus-core && npm run build` | Node `v24.12.0` | Passed | Vite build exited 0; existing chunk/browser-data warnings | Browser visual review still required. |
-| `cd signhex-nexus-core && npm run lint` | Local environment | Failed | Same pre-existing errors in `tests/settings-default-media.e2e.spec.ts` and warnings in two unrelated components | Not Phase 6-related; must be fixed or waived before full on-prem QA signoff. |
+| `cd darshan-server && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | TypeScript build exited 0 | Node 20 rerun remains required. |
+| `cd darshan-server && DRIZZLE_STRICT=false npm run db:push` | Local Docker Postgres | Passed after sandbox escalation | Applied `media_cache_reports` table/indexes; local Drizzle also emitted existing drift statements | Production must use reviewed migration, not local push output. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` | Local Docker Postgres | Passed | 1 passing | Covers device ingest and CMS listing. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts src/routes/device-telemetry-media-cache-report.test.ts` | Local Docker Postgres | Passed | 14 passing | Confirms command path still works alongside Phase 6 endpoint. |
+| `cd darshan-player && npm run build` | Node `v24.12.0`; repo engine `>=20 <21` | Passed | Main/renderer build exited 0 | Node 20 rerun remains required. |
+| `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts --spec test/unit/services/cache-manager.test.ts --spec test/unit/services/default-media-service.test.ts` | Local unit harness | Passed | 18 passing | Covers sanitized report, queue fallback, cache behavior, default media cache hydration. |
+| `cd darshan-cms && npm run build` | Node `v24.12.0` | Passed | Vite build exited 0; existing chunk/browser-data warnings | Browser visual review still required. |
+| `cd darshan-cms && npm run lint` | Local environment | Failed | Same pre-existing errors in `tests/settings-default-media.e2e.spec.ts` and warnings in two unrelated components | Not Phase 6-related; must be fixed or waived before full on-prem QA signoff. |
 
 ### Phase 6 Approval State
 
@@ -552,7 +552,7 @@ Phase 7 may start only if these Phase 6 conditions are accepted: rerun builds/te
 ### Phase 6 Rollback Notes
 
 - Set backend `MEDIA_CACHE_REPORTING_ENABLED=false` to accept but not store new reports.
-- Set player `HEXMON_MEDIA_CACHE_REPORTING_ENABLED=false` to stop sending player cache failure reports.
+- Set player `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` to stop sending player cache failure reports.
 - Set CMS `VITE_MEDIA_CACHE_STATUS_UI=false` to hide the report list in the Delivery tab.
 - Leave the additive table and migration in place if applied.
 - Polling, heartbeat, command ACK, snapshots, default media, emergency, and WebSocket notification behavior are unchanged.
@@ -572,24 +572,24 @@ Phase 7 added QA/prod deployment hardening controls only. It created environment
 
 ### Phase 7 Files Changed
 
-- `signhex-platform/docs/runbooks/realtime-sync-qa-prod-hardening.md`
-- `signhex-platform/docs/environments/qa/realtime-sync.env.example`
-- `signhex-platform/docs/environments/production/realtime-sync.env.example`
-- `signhex-platform/deploy/shared/realtime-sync-nginx.socketio.conf.template`
-- `signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh`
-- `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
-- `signhex-platform/docs/implementation/realtime-sync-implementation-runbook.md`
-- `signhex-platform/docs/implementation/realtime-sync-decision-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-remaining-phase-control-plan.md`
-- `signhex-platform/docs/architecture/enterprise-realtime-sync.md`
-- `signhex-platform/docs/architecture/failure-modes.md`
-- `signhex-platform/docs/runbooks/onprem-qa-setup.md`
-- `signhex-platform/docs/runbooks/onprem-production-setup.md`
+- `docs/runbooks/realtime-sync-qa-prod-hardening.md`
+- `docs/environments/qa/realtime-sync.env.example`
+- `docs/environments/production/realtime-sync.env.example`
+- `deploy/shared/realtime-sync-nginx.socketio.conf.template`
+- `scripts/verify/validate-realtime-sync-phase7-assets.sh`
+- `docs/implementation/realtime-sync-phase-7-handoff.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
+- `docs/implementation/realtime-sync-test-plan.md`
+- `docs/implementation/realtime-sync-open-risks.md`
+- `docs/implementation/realtime-sync-implementation-runbook.md`
+- `docs/implementation/realtime-sync-decision-log.md`
+- `docs/implementation/realtime-sync-remaining-phase-control-plan.md`
+- `docs/architecture/enterprise-realtime-sync.md`
+- `docs/architecture/failure-modes.md`
+- `docs/runbooks/onprem-qa-setup.md`
+- `docs/runbooks/onprem-production-setup.md`
 
 ### Phase 7 Verification Matrix
 
@@ -606,11 +606,11 @@ Phase 7 added QA/prod deployment hardening controls only. It created environment
 
 | Test/Command | Environment | Result | Evidence | Related Risk |
 |---|---|---|---|---|
-| `bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh` | Local shell | Passed | Output: `[phase7] realtime sync deployment hardening assets validated` | Static validation only; not on-prem QA runtime validation. |
-| `cd signhex-server && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | `tsc && tsc-alias` exited 0 | Node 20 rerun remains required before on-prem QA signoff. |
-| `cd signage-screen && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | main/renderer builds and asset copy exited 0 | Node 20 rerun remains required before on-prem QA signoff. |
-| `cd signhex-nexus-core && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | Vite production build exited 0 with chunk-size warnings | Node 20 rerun remains required before on-prem QA signoff. |
-| `cd signhex-nexus-core && npm run lint` | Local Node `v24.12.0` | Failed | Existing lint issues in `LiveScreenMirror.tsx`, `EmergencyTakeoverModal.tsx`, and `tests/settings-default-media.e2e.spec.ts` | Existing Phase 5/6 condition remains. |
+| `bash scripts/verify/validate-realtime-sync-phase7-assets.sh` | Local shell | Passed | Output: `[phase7] realtime sync deployment hardening assets validated` | Static validation only; not on-prem QA runtime validation. |
+| `cd darshan-server && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | `tsc && tsc-alias` exited 0 | Node 20 rerun remains required before on-prem QA signoff. |
+| `cd darshan-player && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | main/renderer builds and asset copy exited 0 | Node 20 rerun remains required before on-prem QA signoff. |
+| `cd darshan-cms && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | Vite production build exited 0 with chunk-size warnings | Node 20 rerun remains required before on-prem QA signoff. |
+| `cd darshan-cms && npm run lint` | Local Node `v24.12.0` | Failed | Existing lint issues in `LiveScreenMirror.tsx`, `EmergencyTakeoverModal.tsx`, and `tests/settings-default-media.e2e.spec.ts` | Existing Phase 5/6 condition remains. |
 | QA `/socket.io/` proxy smoke | QA infrastructure | Blocked | No on-prem QA deployment target in local session | Required before production enablement. |
 | on-prem QA canary rollback drill | QA infrastructure | Blocked | No on-prem QA deployment target in local session | Required before production enablement. |
 
@@ -632,8 +632,8 @@ Phase 7 may proceed to Phase 8 planning/implementation only after accepting thes
 
 - Set `OUTBOX_DISPATCH_ENABLED=false`.
 - Set `REALTIME_SYNC_ENABLED=false`.
-- Set `HEXMON_REALTIME_SYNC_ENABLED=false`.
-- Optionally set `MEDIA_CACHE_REPORTING_ENABLED=false`, `HEXMON_MEDIA_CACHE_REPORTING_ENABLED=false`, and `VITE_MEDIA_CACHE_STATUS_UI=false`.
+- Set `DARSHAN_REALTIME_PLAYER_ENABLED=false`.
+- Optionally set `MEDIA_CACHE_REPORTING_ENABLED=false`, `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`, and `VITE_MEDIA_CACHE_STATUS_UI=false`.
 - Leave additive migrations/tables/enums in place.
 - Keep REST, polling, heartbeat, snapshot/default/emergency fetch, command claim/ACK, and media cache active.
 
@@ -656,32 +656,32 @@ Production readiness is not approved. Local Valkey Pub/Sub fanout smoke passed a
 
 ### Phase 8 Files Changed
 
-- `signhex-platform/scripts/load/realtime-sync-load-model.mjs`
-- `signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh`
-- `signhex-platform/docs/implementation/realtime-sync-load-and-chaos-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-production-readiness-checklist.md`
-- `signhex-platform/docs/implementation/realtime-sync-qa-canary-evidence.md`
-- `signhex-platform/docs/implementation/realtime-sync-metrics-alert-validation.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-8-handoff.md`
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
-- `signhex-platform/docs/implementation/realtime-sync-implementation-runbook.md`
-- `signhex-platform/docs/implementation/realtime-sync-decision-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-remaining-phase-control-plan.md`
-- `signhex-platform/docs/architecture/scaling-and-payload-limits.md`
-- `signhex-platform/docs/architecture/failure-modes.md`
-- `signhex-platform/docs/implementation/realtime-sync-valkey-fanout-implementation.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-8-valkey-fanout-handoff.md`
-- `signhex-server/src/realtime/realtime-node.ts`
-- `signhex-server/src/realtime/valkey-resp-client.ts`
-- `signhex-server/src/realtime/realtime-bus.ts`
-- `signhex-server/src/realtime/device-node-registry.ts`
-- `signhex-server/src/realtime/realtime-fanout.ts`
-- `signhex-server/src/realtime/realtime-bus.test.ts`
-- `signhex-server/src/realtime/valkey-realtime-bus.integration.test.ts`
+- `scripts/load/realtime-sync-load-model.mjs`
+- `scripts/verify/validate-realtime-sync-phase8-assets.sh`
+- `docs/implementation/realtime-sync-load-and-chaos-plan.md`
+- `docs/implementation/realtime-sync-production-readiness-checklist.md`
+- `docs/implementation/realtime-sync-qa-canary-evidence.md`
+- `docs/implementation/realtime-sync-metrics-alert-validation.md`
+- `docs/implementation/realtime-sync-phase-8-handoff.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
+- `docs/implementation/realtime-sync-test-plan.md`
+- `docs/implementation/realtime-sync-open-risks.md`
+- `docs/implementation/realtime-sync-implementation-runbook.md`
+- `docs/implementation/realtime-sync-decision-log.md`
+- `docs/implementation/realtime-sync-remaining-phase-control-plan.md`
+- `docs/architecture/scaling-and-payload-limits.md`
+- `docs/architecture/failure-modes.md`
+- `docs/implementation/realtime-sync-valkey-fanout-implementation.md`
+- `docs/implementation/realtime-sync-phase-8-valkey-fanout-handoff.md`
+- `darshan-server/src/realtime/realtime-node.ts`
+- `darshan-server/src/realtime/valkey-resp-client.ts`
+- `darshan-server/src/realtime/realtime-bus.ts`
+- `darshan-server/src/realtime/device-node-registry.ts`
+- `darshan-server/src/realtime/realtime-fanout.ts`
+- `darshan-server/src/realtime/realtime-bus.test.ts`
+- `darshan-server/src/realtime/valkey-realtime-bus.integration.test.ts`
 
 ### Phase 8 Verification Matrix
 
@@ -694,7 +694,7 @@ Production readiness is not approved. Local Valkey Pub/Sub fanout smoke passed a
 | Metrics/alert validation | Dedicated realtime/outbox/media-cache metrics and alert rules added and validated locally | yes | VERIFIED_COMPLETE | `metrics.ts`; Prometheus rules; `metrics.test.ts`; observability validator passed | Runtime alert tuning still requires QA traffic. |
 | Valkey fanout implementation | Cross-node wake fanout and device-node mapping use Valkey while DB remains durable truth | yes | VERIFIED_COMPLETE | `realtime-bus.ts`; `device-node-registry.ts`; `realtime-fanout.ts`; `device-gateway.ts`; `outbox-dispatcher.ts` | Local implementation uses configured `VALKEY_URL`; Sentinel/cluster discovery is not implemented. |
 | Valkey local integration smoke | Node B publishes via Valkey to node A subscriber | yes | VERIFIED_COMPLETE | `VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Local Docker Valkey only; not on-prem runtime evidence. |
-| CMS lint | Resolve or explicitly waive previous CMS lint blocker | yes | VERIFIED_COMPLETE | `cd signhex-nexus-core && npm run lint` exited 0 | Local Node was `v24.12.0`; Node 20 rerun still required. |
+| CMS lint | Resolve or explicitly waive previous CMS lint blocker | yes | VERIFIED_COMPLETE | `cd darshan-cms && npm run lint` exited 0 | Local Node was `v24.12.0`; Node 20 rerun still required. |
 | Media/cache retention | Retention/partitioning plan documented | yes | VERIFIED_PARTIAL | `realtime-sync-media-cache-report-retention-plan.md` | Human/product decision still required before production. |
 | Architecture guardrails | No snapshots/media over WS; REST remains authoritative; polling fallback remains | yes | VERIFIED_COMPLETE | Observability-only runtime additions do not change sync semantics | No source-of-truth behavior changed. |
 
@@ -702,23 +702,23 @@ Production readiness is not approved. Local Valkey Pub/Sub fanout smoke passed a
 
 | Test/Command | Environment | Result | Evidence | Related Risk |
 |---|---|---|---|---|
-| `bash signhex-platform/scripts/verify/validate-realtime-sync-phase8-assets.sh` | Local shell | Passed | Output: `[phase8] realtime sync load/chaos/readiness assets validated from /Users/anuragkumar/Desktop/signhex` | Static validation only. |
-| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `240`; requests in 60s: `14400` | Model only. |
-| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `566.67`; requests in 60s: `34000` | Includes desired-state safety polling. |
-| `node signhex-platform/scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `12000`; requests in 60s: `720000` | Shows fallback capacity requirement. |
-| `bash signhex-platform/scripts/verify/validate-observability-assets.sh` | Docker after escalation | Passed | Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed | Static validation only; runtime alert tuning still needed. |
-| `cd signhex-server && npx vitest run src/observability/metrics.test.ts` | Local Node `v24.12.0` | Passed | 5 tests passed | Validates new metrics registration/recording locally. |
-| `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts` | Local Node `v24.12.0` | Passed | 8 tests passed | Covers bus provider behavior, Valkey alias resolution, payload max enforcement, device-node registry behavior, node-missing fallback, and local fanout. |
-| `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts` | Local Node `v24.12.0` | Passed | 19 tests passed | Focused backend realtime/metrics/outbox-dispatch regression. |
-| `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Local sandbox without network escalation | Blocked | `connect EPERM 127.0.0.1:6381`; rerun with explicit sandbox network escalation passed | Local sandbox restriction only; not product failure. |
-| `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Local Docker Valkey `valkey/valkey:9.0.3-alpine`; required sandbox escalation for localhost connection | Passed | 2 tests passed | Local Pub/Sub fanout smoke and unavailable endpoint fallback. |
-| `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` | Local Node `v24.12.0`; local DB test harness | Passed | 4 tests passed | Confirms gateway/outbox tests still pass after metrics wiring. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` | Local Node `v24.12.0`; local DB test harness | Passed | 1 test passed | Confirms media/cache report API still works after report metrics wiring. |
-| `cd signhex-server && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | `tsc && tsc-alias` exited 0 | Node 20 rerun still required before on-prem QA signoff. |
-| `cd signage-screen && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | main/renderer builds and asset copy exited 0 | Node 20 rerun still required before on-prem QA signoff. |
-| `cd signhex-nexus-core && npm run build` | Local Node `v24.12.0` | Passed | Vite build exited 0 with existing chunk-size warnings | Node 20 rerun still required before on-prem QA signoff. |
-| `cd signhex-nexus-core && npm run lint` | Local Node `v24.12.0` | Passed | ESLint exited 0 after small local fixes | Node 20 rerun still required before on-prem QA signoff. |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts` | Local Node `v24.12.0` | Passed | 2 tests passed | Confirms player media/cache report queue behavior remains intact. |
+| `bash scripts/verify/validate-realtime-sync-phase8-assets.sh` | Local shell | Passed | Output: `[phase8] realtime sync load/chaos/readiness assets validated from /Users/anuragkumar/Desktop/darshan` | Static validation only. |
+| `node scripts/load/realtime-sync-load-model.mjs --profile current --players 1000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `240`; requests in 60s: `14400` | Model only. |
+| `node scripts/load/realtime-sync-load-model.mjs --profile hybrid-healthy --players 10000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `566.67`; requests in 60s: `34000` | Includes desired-state safety polling. |
+| `node scripts/load/realtime-sync-load-model.mjs --profile fallback --players 50000 --duration-seconds 60 --json` | Local Node `v24.12.0` | Passed | Total modeled RPS: `12000`; requests in 60s: `720000` | Shows fallback capacity requirement. |
+| `bash scripts/verify/validate-observability-assets.sh` | Docker after escalation | Passed | Prometheus config/rules, Alertmanager config, dashboard JSON, compose config, and helper smoke checks passed | Static validation only; runtime alert tuning still needed. |
+| `cd darshan-server && npx vitest run src/observability/metrics.test.ts` | Local Node `v24.12.0` | Passed | 5 tests passed | Validates new metrics registration/recording locally. |
+| `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts` | Local Node `v24.12.0` | Passed | 8 tests passed | Covers bus provider behavior, Valkey alias resolution, payload max enforcement, device-node registry behavior, node-missing fallback, and local fanout. |
+| `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts src/services/playback-refresh-dispatch.test.ts` | Local Node `v24.12.0` | Passed | 19 tests passed | Focused backend realtime/metrics/outbox-dispatch regression. |
+| `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Local sandbox without network escalation | Blocked | `connect EPERM 127.0.0.1:6381`; rerun with explicit sandbox network escalation passed | Local sandbox restriction only; not product failure. |
+| `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts` | Local Docker Valkey `valkey/valkey:9.0.3-alpine`; required sandbox escalation for localhost connection | Passed | 2 tests passed | Local Pub/Sub fanout smoke and unavailable endpoint fallback. |
+| `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts` | Local Node `v24.12.0`; local DB test harness | Passed | 4 tests passed | Confirms gateway/outbox tests still pass after metrics wiring. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` | Local Node `v24.12.0`; local DB test harness | Passed | 1 test passed | Confirms media/cache report API still works after report metrics wiring. |
+| `cd darshan-server && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | `tsc && tsc-alias` exited 0 | Node 20 rerun still required before on-prem QA signoff. |
+| `cd darshan-player && npm run build` | Local Node `v24.12.0`; packages expect Node `>=20 <21` | Passed | main/renderer builds and asset copy exited 0 | Node 20 rerun still required before on-prem QA signoff. |
+| `cd darshan-cms && npm run build` | Local Node `v24.12.0` | Passed | Vite build exited 0 with existing chunk-size warnings | Node 20 rerun still required before on-prem QA signoff. |
+| `cd darshan-cms && npm run lint` | Local Node `v24.12.0` | Passed | ESLint exited 0 after small local fixes | Node 20 rerun still required before on-prem QA signoff. |
+| `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts` | Local Node `v24.12.0` | Passed | 2 tests passed | Confirms player media/cache report queue behavior remains intact. |
 | `printenv` on-prem QA variable-name scan | Local shell, values not printed | Blocked | Only `COMMAND_MODE` matched; no ONPREM_DEV/ONPREM_QA/ONPREM_PROD/VALKEY/SIGNHEX/HEXMON/REALTIME/BACKEND/CMS endpoint variables present | No on-prem QA target available. |
 | `./health-check.sh` in packaged QA server bundle | Local Docker/package folder | Blocked | `service "postgres" is not running` | Old artifact bundle is not active QA evidence. |
 | `./health-check.sh` in packaged QA CMS bundle | Local package folder | Blocked | `curl: (22) The requested URL returned error: 404` | Old artifact bundle is not active QA evidence. |
@@ -785,8 +785,8 @@ Phase 8 tooling/docs and Valkey fanout backfill are implemented and locally vali
 - Phase 8 load model, load/chaos plan, production readiness checklist, on-prem QA canary evidence template, metrics/alert validation, static validation, and handoff implemented.
 - Dedicated realtime/outbox/command ACK/media-cache metrics and Prometheus alert rules implemented and locally validated.
 - CMS lint blocker fixed locally.
-- Air-gapped on-prem/Valkey documentation update recorded in `signhex-platform/docs/implementation/realtime-sync-onprem-valkey-update.md`.
-- Valkey-backed fanout backfill implemented and locally tested; details recorded in `signhex-platform/docs/implementation/realtime-sync-valkey-fanout-implementation.md` and `signhex-platform/docs/implementation/realtime-sync-phase-8-valkey-fanout-handoff.md`.
+- Air-gapped on-prem/Valkey documentation update recorded in `docs/implementation/realtime-sync-onprem-valkey-update.md`.
+- Valkey-backed fanout backfill implemented and locally tested; details recorded in `docs/implementation/realtime-sync-valkey-fanout-implementation.md` and `docs/implementation/realtime-sync-phase-8-valkey-fanout-handoff.md`.
 
 ## In Progress
 
@@ -856,15 +856,15 @@ Top current risks:
 
 Existing Phase 1 migration:
 
-- `signhex-server/drizzle/migrations/0030_command_lifecycle_normalization.sql`
+- `darshan-server/drizzle/migrations/0030_command_lifecycle_normalization.sql`
 
 Implemented Phase 2 migration:
 
-- `signhex-server/drizzle/migrations/0031_command_outbox_desired_state.sql`
+- `darshan-server/drizzle/migrations/0031_command_outbox_desired_state.sql`
 
 Implemented Phase 6 migration:
 
-- `signhex-server/drizzle/migrations/0032_media_cache_failure_reporting.sql`
+- `darshan-server/drizzle/migrations/0032_media_cache_failure_reporting.sql`
 
 Implemented Phase 2 tables:
 
@@ -986,7 +986,7 @@ Current test state:
 - Local backend and `/socket.io/` smoke checks are blocked because no listener is active on `127.0.0.1:3000`
 - combined backend regression command has known DB cross-test interference and should not be used as approval evidence until isolation is added
 
-Permutation matrix is maintained in `signhex-platform/docs/implementation/realtime-sync-permutation-test-matrix.md`.
+Permutation matrix is maintained in `docs/implementation/realtime-sync-permutation-test-matrix.md`.
 
 ## Rollback Plan
 
@@ -995,6 +995,6 @@ Permutation matrix is maintained in `signhex-platform/docs/implementation/realti
 - Keep REST, heartbeat, and polling as fallback.
 - Do not remove enum values.
 - Phase 3 remains feature-flag-safe through `REALTIME_SYNC_ENABLED=false` and `OUTBOX_DISPATCH_ENABLED=false` defaults.
-- Phase 4 remains player-feature-flag-safe through `HEXMON_REALTIME_SYNC_ENABLED=false`; no DB rollback is needed for Phase 4.
-- Phase 6 remains feature-flag-safe through `MEDIA_CACHE_REPORTING_ENABLED=false`, `HEXMON_MEDIA_CACHE_REPORTING_ENABLED=false`, and `VITE_MEDIA_CACHE_STATUS_UI=false`.
+- Phase 4 remains player-feature-flag-safe through `DARSHAN_REALTIME_PLAYER_ENABLED=false`; no DB rollback is needed for Phase 4.
+- Phase 6 remains feature-flag-safe through `MEDIA_CACHE_REPORTING_ENABLED=false`, `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`, and `VITE_MEDIA_CACHE_STATUS_UI=false`.
 - Phase 7 documents QA/prod rollback order: disable outbox dispatcher, disable backend realtime, disable player realtime, and keep REST/polling/heartbeat active.

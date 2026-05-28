@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide covers deploying the HexmonSignage Player to production Ubuntu systems.
+This guide covers deploying the DARSHAN Player to production Ubuntu systems.
 
 ## System Requirements
 
@@ -44,39 +44,39 @@ This guide covers deploying the HexmonSignage Player to production Ubuntu system
 
 #### 1. Download Package
 ```bash
-wget https://releases.hexmon.com/hexmon-signage-player_1.0.0_amd64.deb
+wget https://releases.darshan.com/darshan-player_1.0.0_amd64.deb
 ```
 
 #### 2. Install Package
 ```bash
-sudo dpkg -i hexmon-signage-player_1.0.0_amd64.deb
+sudo dpkg -i darshan-player_1.0.0_amd64.deb
 sudo apt-get install -f  # Fix dependencies if needed
 ```
 
 #### 3. Verify Installation
 ```bash
-which hexmon-signage-player
-hexmon-signage-player --version
+which darshan-player
+darshan-player --version
 ```
 
 ### Method 2: AppImage
 
 #### 1. Download AppImage
 ```bash
-wget https://releases.hexmon.com/HexmonSignage-Player-1.0.0.AppImage
-chmod +x HexmonSignage-Player-1.0.0.AppImage
+wget https://releases.darshan.com/DARSHAN-Player-1.0.0.AppImage
+chmod +x DARSHAN-Player-1.0.0.AppImage
 ```
 
 #### 2. Run AppImage
 ```bash
-./HexmonSignage-Player-1.0.0.AppImage
+./DARSHAN-Player-1.0.0.AppImage
 ```
 
 ### Method 3: Build from Source
 
 #### 1. Clone Repository
 ```bash
-git clone https://github.com/hexmon/signage-player.git
+git clone https://github.com/darshan/signage-player.git
 cd signage-player
 ```
 
@@ -93,24 +93,24 @@ npm run package:deb
 
 #### 4. Install
 ```bash
-sudo dpkg -i build/hexmon-signage-player_1.0.0_amd64.deb
+sudo dpkg -i build/darshan-player_1.0.0_amd64.deb
 ```
 
 ## Configuration
 
 ### 1. Edit Configuration File
 ```bash
-sudo nano /etc/hexmon/config.json
+sudo nano /etc/darshan/config.json
 ```
 
 ### 2. Required Settings
 ```json
 {
-  "apiBase": "https://api.hexmon.com",
-  "wsUrl": "wss://api.hexmon.com/ws",
+  "apiBase": "https://api.darshan.com",
+  "wsUrl": "wss://api.darshan.com/ws",
   "deviceId": "",  // Will be set during pairing
   "cache": {
-    "path": "/var/cache/hexmon",
+    "path": "/var/cache/darshan",
     "maxBytes": 10737418240  // 10GB
   },
   "intervals": {
@@ -127,7 +127,7 @@ sudo nano /etc/hexmon/config.json
   "logLevel": "info",  // debug, info, warn, error
   "mTLS": {
     "enabled": true,
-    "certPath": "/var/lib/hexmon/certs"
+    "certPath": "/var/lib/darshan/certs"
   },
   "display": {
     "width": 1920,
@@ -141,7 +141,7 @@ sudo nano /etc/hexmon/config.json
 
 ### Interactive Pairing
 ```bash
-sudo hexmon-pair-device
+sudo darshan-pair-device
 ```
 
 Follow the prompts:
@@ -153,47 +153,47 @@ Follow the prompts:
 ```bash
 # Generate key pair
 sudo openssl ecparam -name prime256v1 -genkey -noout \
-  -out /var/lib/hexmon/certs/client.key
+  -out /var/lib/darshan/certs/client.key
 
 # Generate CSR
-sudo openssl req -new -key /var/lib/hexmon/certs/client.key \
-  -out /var/lib/hexmon/certs/client.csr \
-  -subj "/CN=$(hostname)/O=HexmonSignage"
+sudo openssl req -new -key /var/lib/darshan/certs/client.key \
+  -out /var/lib/darshan/certs/client.csr \
+  -subj "/CN=$(hostname)/O=DARSHAN"
 
 # Submit to backend (use API or admin dashboard)
-# Save returned certificate to /var/lib/hexmon/certs/client.crt
+# Save returned certificate to /var/lib/darshan/certs/client.crt
 ```
 
 ## Service Management
 
 ### Enable Service
 ```bash
-sudo systemctl enable hexmon-player
+sudo systemctl enable darshan-player
 ```
 
 ### Start Service
 ```bash
-sudo systemctl start hexmon-player
+sudo systemctl start darshan-player
 ```
 
 ### Check Status
 ```bash
-sudo systemctl status hexmon-player
+sudo systemctl status darshan-player
 ```
 
 ### View Logs
 ```bash
-sudo journalctl -u hexmon-player -f
+sudo journalctl -u darshan-player -f
 ```
 
 ### Restart Service
 ```bash
-sudo systemctl restart hexmon-player
+sudo systemctl restart darshan-player
 ```
 
 ### Stop Service
 ```bash
-sudo systemctl stop hexmon-player
+sudo systemctl stop darshan-player
 ```
 
 ## Network Configuration
@@ -211,7 +211,7 @@ sudo ufw enable
 ```
 
 ### Proxy Configuration
-If using a proxy, add to `/etc/hexmon/config.json`:
+If using a proxy, add to `/etc/darshan/config.json`:
 ```json
 {
   "proxy": {
@@ -224,7 +224,7 @@ If using a proxy, add to `/etc/hexmon/config.json`:
 ### DNS Configuration
 Ensure DNS resolution works:
 ```bash
-nslookup api.hexmon.com
+nslookup api.darshan.com
 ```
 
 ## Display Configuration
@@ -276,10 +276,10 @@ Apply that only on management networks where VM2 Prometheus is explicitly allowe
 ### Log Monitoring
 ```bash
 # Real-time logs
-sudo journalctl -u hexmon-player -f
+sudo journalctl -u darshan-player -f
 
 # Application logs
-sudo tail -f /var/cache/hexmon/logs/hexmon-*.log
+sudo tail -f /var/cache/darshan/logs/darshan-*.log
 ```
 
 ### Alerting
@@ -292,7 +292,7 @@ Set up monitoring with:
 Example Prometheus scrape config:
 ```yaml
 scrape_configs:
-  - job_name: 'hexmon-player'
+  - job_name: 'darshan-player'
     static_configs:
       - targets: ['localhost:3300']
 ```
@@ -301,15 +301,15 @@ scrape_configs:
 
 ### Backup Configuration
 ```bash
-sudo tar -czf hexmon-backup.tar.gz \
-  /etc/hexmon/ \
-  /var/lib/hexmon/certs/
+sudo tar -czf darshan-backup.tar.gz \
+  /etc/darshan/ \
+  /var/lib/darshan/certs/
 ```
 
 ### Restore Configuration
 ```bash
-sudo tar -xzf hexmon-backup.tar.gz -C /
-sudo systemctl restart hexmon-player
+sudo tar -xzf darshan-backup.tar.gz -C /
+sudo systemctl restart darshan-player
 ```
 
 ### Disaster Recovery
@@ -326,19 +326,19 @@ sudo systemctl restart hexmon-player
 - hosts: signage_players
   become: yes
   tasks:
-    - name: Install HexmonSignage Player
+    - name: Install DARSHAN Player
       apt:
-        deb: /tmp/hexmon-signage-player_1.0.0_amd64.deb
+        deb: /tmp/darshan-player_1.0.0_amd64.deb
 
     - name: Copy configuration
       template:
         src: config.json.j2
-        dest: /etc/hexmon/config.json
+        dest: /etc/darshan/config.json
         mode: '0640'
 
     - name: Enable and start service
       systemd:
-        name: hexmon-player
+        name: darshan-player
         enabled: yes
         state: started
 ```
@@ -352,31 +352,31 @@ RUN apt-get update && apt-get install -y \
     x11vnc \
     openssl
 
-COPY hexmon-signage-player_1.0.0_amd64.deb /tmp/
-RUN dpkg -i /tmp/hexmon-signage-player_1.0.0_amd64.deb
+COPY darshan-player_1.0.0_amd64.deb /tmp/
+RUN dpkg -i /tmp/darshan-player_1.0.0_amd64.deb
 
-CMD ["hexmon-signage-player"]
+CMD ["darshan-player"]
 ```
 
 ## Security Hardening
 
 ### File Permissions
 ```bash
-sudo chmod 700 /var/lib/hexmon/certs
-sudo chmod 600 /var/lib/hexmon/certs/*
-sudo chmod 640 /etc/hexmon/config.json
+sudo chmod 700 /var/lib/darshan/certs
+sudo chmod 600 /var/lib/darshan/certs/*
+sudo chmod 640 /etc/darshan/config.json
 ```
 
 ### User Isolation
 ```bash
-# Service runs as hexmon user (created during install)
-id hexmon
+# Service runs as darshan user (created during install)
+id darshan
 ```
 
 ### SELinux/AppArmor
 ```bash
 # Enable AppArmor profile
-sudo aa-enforce /etc/apparmor.d/hexmon-player
+sudo aa-enforce /etc/apparmor.d/darshan-player
 ```
 
 ### Automatic Updates
@@ -393,10 +393,10 @@ See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for common issues and solutions.
 ### Quick Diagnostics
 ```bash
 # Collect diagnostic information
-sudo hexmon-collect-logs
+sudo darshan-collect-logs
 
 # Check service status
-sudo systemctl status hexmon-player
+sudo systemctl status darshan-player
 
 # Check health
 curl http://127.0.0.1:3300/healthz
@@ -430,28 +430,28 @@ curl http://127.0.0.1:3300/healthz
 
 1. **Backup current installation**
    ```bash
-   sudo hexmon-collect-logs
-   sudo tar -czf backup.tar.gz /etc/hexmon /var/lib/hexmon/certs
+   sudo darshan-collect-logs
+   sudo tar -czf backup.tar.gz /etc/darshan /var/lib/darshan/certs
    ```
 
 2. **Download new version**
    ```bash
-   wget https://releases.hexmon.com/hexmon-signage-player_1.1.0_amd64.deb
+   wget https://releases.darshan.com/darshan-player_1.1.0_amd64.deb
    ```
 
 3. **Stop service**
    ```bash
-   sudo systemctl stop hexmon-player
+   sudo systemctl stop darshan-player
    ```
 
 4. **Install update**
    ```bash
-   sudo dpkg -i hexmon-signage-player_1.1.0_amd64.deb
+   sudo dpkg -i darshan-player_1.1.0_amd64.deb
    ```
 
 5. **Start service**
    ```bash
-   sudo systemctl start hexmon-player
+   sudo systemctl start darshan-player
    ```
 
 6. **Verify**
@@ -463,25 +463,25 @@ curl http://127.0.0.1:3300/healthz
 
 ### Remove Package
 ```bash
-sudo systemctl stop hexmon-player
-sudo systemctl disable hexmon-player
-sudo dpkg -r hexmon-signage-player
+sudo systemctl stop darshan-player
+sudo systemctl disable darshan-player
+sudo dpkg -r darshan-player
 ```
 
 ### Remove Data (Optional)
 ```bash
-sudo rm -rf /var/lib/hexmon
-sudo rm -rf /var/cache/hexmon
-sudo rm -rf /etc/hexmon
-sudo userdel hexmon
+sudo rm -rf /var/lib/darshan
+sudo rm -rf /var/cache/darshan
+sudo rm -rf /etc/darshan
+sudo userdel darshan
 ```
 
 ## Support
 
 For deployment assistance:
-- Email: support@hexmon.com
-- Documentation: https://docs.hexmon.com
-- Community: https://community.hexmon.com
+- Email: support@darshan.com
+- Documentation: https://docs.darshan.com
+- Community: https://community.darshan.com
 
 ---
 

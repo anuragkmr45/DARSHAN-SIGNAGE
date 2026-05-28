@@ -3,7 +3,7 @@
 **Recommended location in repo root:**
 
 ```txt
-/Users/anuragkumar/Desktop/signhex/ENTERPRISE_REALTIME_SYNC_CODEX_RUNBOOK.md
+/Users/anuragkumar/Desktop/darshan/ENTERPRISE_REALTIME_SYNC_CODEX_RUNBOOK.md
 ```
 
 This file is the source of truth for Codex/dev agents working on the enterprise realtime sync architecture.
@@ -17,22 +17,22 @@ Do not rely on memory from previous chat sessions. Always read this file plus th
 Root repo:
 
 ```txt
-/Users/anuragkumar/Desktop/signhex
+/Users/anuragkumar/Desktop/darshan
 ```
 
 Main folders:
 
 ```txt
-signage-screen
+darshan-player
   Electron signage player app.
 
-signhex-server
+darshan-server
   Backend/API server.
 
-signhex-nexus-core
+darshan-cms
   CMS/admin frontend.
 
-signhex-platform
+DARSHAN monorepo root
   Docs, architecture, deployment notes, status tracking.
 ```
 
@@ -176,20 +176,20 @@ The previous implementation claims Phase 1 only was implemented: **Command lifec
 Claimed changed files:
 
 ```txt
-signhex-server/drizzle/migrations/0030_command_lifecycle_normalization.sql
-signhex-server/src/db/schema.ts
-signhex-server/src/services/command-lifecycle-service.ts
-signhex-server/src/routes/device-telemetry.ts
-signhex-server/src/services/playback-refresh-commands.ts
-signhex-server/src/routes/screens.ts
-signhex-server/src/routes/screen-groups.ts
-signhex-server/src/config/index.ts
-signhex-server/.env.example
-signhex-server/.env.qa.example
-signage-screen/src/main/services/command-processor.ts
-signhex-platform/docs/architecture/command-lifecycle.md
-signhex-platform/docs/implementation/realtime-sync-project-status.md
-signhex-platform/docs/implementation/realtime-sync-task-register.md
+darshan-server/drizzle/migrations/0030_command_lifecycle_normalization.sql
+darshan-server/src/db/schema.ts
+darshan-server/src/services/command-lifecycle-service.ts
+darshan-server/src/routes/device-telemetry.ts
+darshan-server/src/services/playback-refresh-commands.ts
+darshan-server/src/routes/screens.ts
+darshan-server/src/routes/screen-groups.ts
+darshan-server/src/config/index.ts
+darshan-server/.env.example
+darshan-server/.env.qa.example
+darshan-player/src/main/services/command-processor.ts
+docs/architecture/command-lifecycle.md
+docs/implementation/realtime-sync-project-status.md
+docs/implementation/realtime-sync-task-register.md
 ```
 
 Claimed API added:
@@ -210,9 +210,9 @@ PROCESSING exists but is not actively used yet
 Claimed test status:
 
 ```txt
-signhex-server build passed.
+darshan-server build passed.
 Backend DB integration tests were blocked because local Postgres was unavailable.
-signage-screen build passed.
+darshan-player build passed.
 Electron targeted command/heartbeat tests passed.
 Broader Electron suite had some existing/sandbox failures unrelated to Phase 1.
 ```
@@ -223,24 +223,24 @@ Important: **Do not trust these claims blindly. Verify from actual code before m
 
 ## 3. Status and tracking files
 
-Use or create these files under `signhex-platform`:
+Use or create these files under `DARSHAN monorepo root`:
 
 ```txt
-signhex-platform/docs/implementation/realtime-sync-project-status.md
-signhex-platform/docs/implementation/realtime-sync-task-register.md
-signhex-platform/docs/implementation/realtime-sync-decision-log.md
-signhex-platform/docs/implementation/realtime-sync-test-plan.md
-signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md
-signhex-platform/docs/implementation/realtime-sync-implementation-runbook.md
-signhex-platform/docs/implementation/realtime-sync-open-risks.md
-signhex-platform/docs/implementation/realtime-sync-permutation-test-matrix.md
-signhex-platform/docs/implementation/realtime-sync-phase-1-verification.md
-signhex-platform/docs/architecture/enterprise-realtime-sync.md
-signhex-platform/docs/architecture/player-contract.md
-signhex-platform/docs/architecture/command-lifecycle.md
-signhex-platform/docs/architecture/failure-modes.md
-signhex-platform/docs/architecture/scaling-and-payload-limits.md
-signhex-platform/docs/architecture/mobile-tv-player-strategy.md
+docs/implementation/realtime-sync-project-status.md
+docs/implementation/realtime-sync-task-register.md
+docs/implementation/realtime-sync-decision-log.md
+docs/implementation/realtime-sync-test-plan.md
+docs/implementation/realtime-sync-phase-approval-log.md
+docs/implementation/realtime-sync-implementation-runbook.md
+docs/implementation/realtime-sync-open-risks.md
+docs/implementation/realtime-sync-permutation-test-matrix.md
+docs/implementation/realtime-sync-phase-1-verification.md
+docs/architecture/enterprise-realtime-sync.md
+docs/architecture/player-contract.md
+docs/architecture/command-lifecycle.md
+docs/architecture/failure-modes.md
+docs/architecture/scaling-and-payload-limits.md
+docs/architecture/mobile-tv-player-strategy.md
 ```
 
 Create missing files. Update existing files. Do not duplicate.
@@ -248,7 +248,7 @@ Create missing files. Update existing files. Do not duplicate.
 Every phase must produce a handoff file:
 
 ```txt
-signhex-platform/docs/implementation/realtime-sync-phase-<N>-handoff.md
+docs/implementation/realtime-sync-phase-<N>-handoff.md
 ```
 
 ---
@@ -324,7 +324,7 @@ Before any implementation:
 Recommended initial search:
 
 ```bash
-rg -n "schedule|snapshot|publish|published|default_media|default-media|device_commands|commands|REFRESH|heartbeat|poll|polling|server_time|ETag|304|emergency|takeover|priority|reservation|conflict|playlist|layout|region|zone|slot|widget|overlay|renderer|IPC|cache|download|variant|aspect|proof|proof-of-play|playback|offline|sync|settings|target|websocket|socket|ws|sse|mqtt|push|FCM|APNS|outbox|queue|ack|lease|expires|retry|tenant|org|environment|qa|prod|migration|redis|nginx|load balancer|rate limit|health|metrics|logs|screenshot|remote reboot|clear cache" signage-screen signhex-server signhex-nexus-core signhex-platform
+rg -n "schedule|snapshot|publish|published|default_media|default-media|device_commands|commands|REFRESH|heartbeat|poll|polling|server_time|ETag|304|emergency|takeover|priority|reservation|conflict|playlist|layout|region|zone|slot|widget|overlay|renderer|IPC|cache|download|variant|aspect|proof|proof-of-play|playback|offline|sync|settings|target|websocket|socket|ws|sse|mqtt|push|FCM|APNS|outbox|queue|ack|lease|expires|retry|tenant|org|environment|qa|prod|migration|redis|nginx|load balancer|rate limit|health|metrics|logs|screenshot|remote reboot|clear cache" darshan-player darshan-server darshan-cms docs deploy scripts
 ```
 
 ---
@@ -342,26 +342,26 @@ Verify the actual Phase 1 implementation and update status files. Do not impleme
 Inspect:
 
 ```txt
-signhex-server/drizzle/migrations/0030_command_lifecycle_normalization.sql
-signhex-server/src/db/schema.ts
-signhex-server/src/services/command-lifecycle-service.ts
-signhex-server/src/routes/device-telemetry.ts
-signhex-server/src/services/playback-refresh-commands.ts
-signhex-server/src/routes/screens.ts
-signhex-server/src/routes/screen-groups.ts
-signhex-server/src/config/index.ts
-signhex-server/.env.example
-signhex-server/.env.qa.example
-signage-screen/src/main/services/command-processor.ts
-signhex-platform/docs/architecture/command-lifecycle.md
-signhex-platform/docs/implementation/realtime-sync-project-status.md
-signhex-platform/docs/implementation/realtime-sync-task-register.md
+darshan-server/drizzle/migrations/0030_command_lifecycle_normalization.sql
+darshan-server/src/db/schema.ts
+darshan-server/src/services/command-lifecycle-service.ts
+darshan-server/src/routes/device-telemetry.ts
+darshan-server/src/services/playback-refresh-commands.ts
+darshan-server/src/routes/screens.ts
+darshan-server/src/routes/screen-groups.ts
+darshan-server/src/config/index.ts
+darshan-server/.env.example
+darshan-server/.env.qa.example
+darshan-player/src/main/services/command-processor.ts
+docs/architecture/command-lifecycle.md
+docs/implementation/realtime-sync-project-status.md
+docs/implementation/realtime-sync-task-register.md
 ```
 
 Search:
 
 ```bash
-rg -n "device_commands|command_lifecycle|ACKED_SUCCESS|ACKED_FAILURE|LEASED|PROCESSING|DEAD_LETTER|CANCELLED|EXPIRED|REFRESH_SCHEDULE|CLEAR_CACHE|PING|RESYNC|idempotency|correlation|lease_expires|expires_at|result_payload|device_command_status_history|commands/recent" signhex-server signage-screen signhex-platform
+rg -n "device_commands|command_lifecycle|ACKED_SUCCESS|ACKED_FAILURE|LEASED|PROCESSING|DEAD_LETTER|CANCELLED|EXPIRED|REFRESH_SCHEDULE|CLEAR_CACHE|PING|RESYNC|idempotency|correlation|lease_expires|expires_at|result_payload|device_command_status_history|commands/recent" darshan-server darshan-player docs
 ```
 
 Classify each item:
@@ -380,11 +380,11 @@ OUT_OF_SCOPE
 Attempt:
 
 ```bash
-cd signhex-server && npm run build
-cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts
+cd darshan-server && npm run build
+cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts
 
-cd signage-screen && npm run build
-cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts
+cd darshan-player && npm run build
+cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts
 ```
 
 If Postgres is unavailable, mark backend DB tests `BLOCKED_BY_ENV`, record exact error, and add rerun command.
@@ -394,12 +394,12 @@ If Postgres is unavailable, mark backend DB tests `BLOCKED_BY_ENV`, record exact
 Create/update:
 
 ```txt
-signhex-platform/docs/implementation/realtime-sync-phase-1-verification.md
-signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md
-signhex-platform/docs/implementation/realtime-sync-project-status.md
-signhex-platform/docs/implementation/realtime-sync-task-register.md
-signhex-platform/docs/implementation/realtime-sync-test-plan.md
-signhex-platform/docs/implementation/realtime-sync-open-risks.md
+docs/implementation/realtime-sync-phase-1-verification.md
+docs/implementation/realtime-sync-phase-approval-log.md
+docs/implementation/realtime-sync-project-status.md
+docs/implementation/realtime-sync-task-register.md
+docs/implementation/realtime-sync-test-plan.md
+docs/implementation/realtime-sync-open-risks.md
 ```
 
 ### Recommended Phase 1 status logic
@@ -480,9 +480,9 @@ updated_at
 Add services:
 
 ```txt
-signhex-server/src/services/command-outbox-service.ts
-signhex-server/src/services/device-desired-state-service.ts
-signhex-server/src/services/command-creation-service.ts
+darshan-server/src/services/command-outbox-service.ts
+darshan-server/src/services/device-desired-state-service.ts
+darshan-server/src/services/command-creation-service.ts
 ```
 
 Refactor command creation flows to write command + outbox + desired state transactionally where possible:
@@ -853,7 +853,7 @@ disk full
 Create/update:
 
 ```txt
-signhex-platform/docs/implementation/realtime-sync-permutation-test-matrix.md
+docs/implementation/realtime-sync-permutation-test-matrix.md
 ```
 
 Cover combinations of:
@@ -1040,7 +1040,7 @@ Paste this into Codex after saving this file at repo root:
 You are Codex working as a principal enterprise architect, senior backend engineer, senior Electron engineer, senior frontend engineer, and independent verifier.
 
 Repo root:
-/Users/anuragkumar/Desktop/signhex
+/Users/anuragkumar/Desktop/darshan
 
 First, read:
 ENTERPRISE_REALTIME_SYNC_CODEX_RUNBOOK.md
@@ -1088,13 +1088,13 @@ This does **not** mean Codex should skip verification. It means Codex may procee
 You are Codex working as a principal implementation lead and verification engineer.
 
 Repo root:
-/Users/anuragkumar/Desktop/signhex
+/Users/anuragkumar/Desktop/darshan
 
 Read:
 ENTERPRISE_REALTIME_SYNC_CODEX_RUNBOOK.md
-signhex-platform/docs/implementation/realtime-sync-project-status.md
-signhex-platform/docs/implementation/realtime-sync-task-register.md
-signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md
+docs/implementation/realtime-sync-project-status.md
+docs/implementation/realtime-sync-task-register.md
+docs/implementation/realtime-sync-phase-approval-log.md
 
 Goal:
 Implement the enterprise realtime sync architecture phase-by-phase with strict gates.

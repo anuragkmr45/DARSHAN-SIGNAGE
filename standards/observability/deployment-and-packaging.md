@@ -2,7 +2,7 @@
 
 ## Ownership
 
-- Deployable observability assets live in `signhex-platform`.
+- Deployable observability assets live in `DARSHAN monorepo root`.
 - Product repos own only the instrumentation and summary APIs that are specific to their runtime.
 
 ## Packaging

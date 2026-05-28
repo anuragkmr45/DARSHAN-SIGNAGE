@@ -244,8 +244,8 @@ Postgres enum values are intentionally not removed in rollback. If Phase 1 must 
 
 | Area | Status | Evidence |
 |---|---|---|
-| Backend build | Passed | `cd signhex-server && npm run build` exited 0 on 2026-05-24. |
-| Electron build | Passed | `cd signage-screen && npm run build` exited 0 on 2026-05-24. |
+| Backend build | Passed | `cd darshan-server && npm run build` exited 0 on 2026-05-24. |
+| Electron build | Passed | `cd darshan-player && npm run build` exited 0 on 2026-05-24. |
 | Electron command/heartbeat tests | Passed | `npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` reported 14 passing after adding `RESYNC` coverage. |
 | Backend DB command tests | Passed | `npx vitest run src/routes/device-telemetry-commands.test.ts` reported 11 passing against local Docker Postgres after schema push. |
 | Playback refresh status history | Passed | `npx vitest run src/services/playback-refresh-dispatch.test.ts` reported 2 passing and verifies creation history entries. |

@@ -7,8 +7,8 @@ Usage:
   bash scripts/export/package-electron.sh --release <release-id> --platform windows|macos|linux|all-supported
 
 Optional environment overrides:
-  PLAYER_REPO_DIR=/path/to/signage-screen
-  OUTPUT_BASE=/path/to/signhex-platform/out
+  PLAYER_REPO_DIR=/path/to/darshan-player
+  OUTPUT_BASE=/path/to/darshan/out
 EOF
 }
 
@@ -47,7 +47,7 @@ if [[ -z "$RELEASE_ID" ]]; then
   exit 1
 fi
 
-PLAYER_REPO_DIR="${PLAYER_REPO_DIR:-$PLATFORM_ROOT/../signage-screen}"
+PLAYER_REPO_DIR="${PLAYER_REPO_DIR:-$PLATFORM_ROOT/darshan-player}"
 OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
 HOST_PLATFORM="$(export_host_platform)"
 
@@ -146,7 +146,7 @@ cat > "$OUTPUT_DIR/config.example.json" <<EOF
 EOF
 
 cat > "$OUTPUT_DIR/README.md" <<EOF
-# Signhex Electron Package ($TARGET_PLATFORM)
+# DARSHAN Electron Package ($TARGET_PLATFORM)
 
 This folder contains packaged player artifacts only. Do not copy the source repo to the target machine.
 

@@ -11,11 +11,11 @@ Local stack:
 - local retention defaults to 7 days with WAL compression enabled
 - Alertmanager is not started by default in development; local alert validation uses the shared rule files and config checks instead
 
-The local compose file does not require the full Signhex runtime stack. It validates the observability assets themselves.
+The local compose file does not require the full DARSHAN runtime stack. It validates the observability assets themselves.
 
-For an end-to-end local check against a running backend, start a development `signhex-server` instance on `localhost:3002` with:
+For an end-to-end local check against a running backend, start a development `darshan-server` instance on `localhost:3002` with:
 
-- `OBSERVABILITY_METRICS_BEARER_TOKEN=signhex-development-prometheus`
+- `OBSERVABILITY_METRICS_BEARER_TOKEN=darshan-development-prometheus`
 - `OBSERVABILITY_PROMETHEUS_BASE_URL=http://127.0.0.1:9090`
 
 The development Prometheus config scrapes that backend target through `host.docker.internal:3002`.

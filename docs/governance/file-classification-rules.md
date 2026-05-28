@@ -19,9 +19,9 @@ Examples:
 - service-local developer docs
 - service-owned API docs
 
-## Move To `signhex-platform`
+## Move To `DARSHAN monorepo root`
 
-Move a file to `signhex-platform` if it answers:
+Move a file to `DARSHAN monorepo root` if it answers:
 
 - how do multiple services work together?
 - how is an environment deployed?

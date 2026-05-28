@@ -7,8 +7,8 @@ Usage:
   bash scripts/export/package-cms.sh --release <release-id>
 
 Optional environment overrides:
-  CMS_REPO_DIR=/path/to/signhex-nexus-core
-  OUTPUT_BASE=/path/to/signhex-platform/out
+  CMS_REPO_DIR=/path/to/darshan-cms
+  OUTPUT_BASE=/path/to/darshan/out
   NGINX_IMAGE=nginx:1.27-alpine
 EOF
 }
@@ -43,7 +43,7 @@ if [[ -z "$RELEASE_ID" ]]; then
   exit 1
 fi
 
-CMS_REPO_DIR="${CMS_REPO_DIR:-$PLATFORM_ROOT/../signhex-nexus-core}"
+CMS_REPO_DIR="${CMS_REPO_DIR:-$PLATFORM_ROOT/darshan-cms}"
 OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
 NGINX_IMAGE="${NGINX_IMAGE:-nginx:1.27-alpine}"
 
@@ -192,7 +192,7 @@ echo "CMS package healthy."
 EOF
 
 cat > "$OUTPUT_DIR/README.md" <<EOF
-# Signhex CMS Package
+# DARSHAN CMS Package
 
 This folder is a source-free CMS deploy package built as static assets behind Dockerized nginx.
 

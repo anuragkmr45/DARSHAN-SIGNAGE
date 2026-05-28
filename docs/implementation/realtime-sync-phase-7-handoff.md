@@ -30,34 +30,34 @@ Phase 7 adds deployment controls for QA/prod rollout of the existing enterprise 
 
 ## Files Added
 
-- `signhex-platform/docs/runbooks/realtime-sync-qa-prod-hardening.md`
-- `signhex-platform/docs/environments/qa/realtime-sync.env.example`
-- `signhex-platform/docs/environments/production/realtime-sync.env.example`
-- `signhex-platform/deploy/shared/realtime-sync-nginx.socketio.conf.template`
-- `signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh`
-- `signhex-platform/docs/implementation/realtime-sync-phase-7-handoff.md`
+- `docs/runbooks/realtime-sync-qa-prod-hardening.md`
+- `docs/environments/qa/realtime-sync.env.example`
+- `docs/environments/production/realtime-sync.env.example`
+- `deploy/shared/realtime-sync-nginx.socketio.conf.template`
+- `scripts/verify/validate-realtime-sync-phase7-assets.sh`
+- `docs/implementation/realtime-sync-phase-7-handoff.md`
 
 ## Files Updated
 
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
-- `signhex-platform/docs/implementation/realtime-sync-implementation-runbook.md`
-- `signhex-platform/docs/implementation/realtime-sync-decision-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-remaining-phase-control-plan.md`
-- `signhex-platform/docs/architecture/enterprise-realtime-sync.md`
-- `signhex-platform/docs/architecture/failure-modes.md`
-- `signhex-platform/docs/runbooks/onprem-qa-setup.md`
-- `signhex-platform/docs/runbooks/onprem-production-setup.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
+- `docs/implementation/realtime-sync-test-plan.md`
+- `docs/implementation/realtime-sync-open-risks.md`
+- `docs/implementation/realtime-sync-implementation-runbook.md`
+- `docs/implementation/realtime-sync-decision-log.md`
+- `docs/implementation/realtime-sync-remaining-phase-control-plan.md`
+- `docs/architecture/enterprise-realtime-sync.md`
+- `docs/architecture/failure-modes.md`
+- `docs/runbooks/onprem-qa-setup.md`
+- `docs/runbooks/onprem-production-setup.md`
 
 ## Validation
 
 Run:
 
 ```bash
-bash signhex-platform/scripts/verify/validate-realtime-sync-phase7-assets.sh
+bash scripts/verify/validate-realtime-sync-phase7-assets.sh
 ```
 
 Expected:
@@ -70,10 +70,10 @@ Latest result: passed on 2026-05-24.
 
 Additional compile evidence from 2026-05-24:
 
-- `cd signhex-server && npm run build`: passed under local Node `v24.12.0`.
-- `cd signage-screen && npm run build`: passed under local Node `v24.12.0`.
-- `cd signhex-nexus-core && npm run build`: passed under local Node `v24.12.0`.
-- `cd signhex-nexus-core && npm run lint`: failed due existing lint issues outside Phase 7 changed files.
+- `cd darshan-server && npm run build`: passed under local Node `v24.12.0`.
+- `cd darshan-player && npm run build`: passed under local Node `v24.12.0`.
+- `cd darshan-cms && npm run build`: passed under local Node `v24.12.0`.
+- `cd darshan-cms && npm run lint`: failed due existing lint issues outside Phase 7 changed files.
 
 ## Conditions Carried Forward
 
@@ -91,8 +91,8 @@ Rollback is feature-flag based:
 
 1. Set `OUTBOX_DISPATCH_ENABLED=false`.
 2. Set `REALTIME_SYNC_ENABLED=false`.
-3. Set `HEXMON_REALTIME_SYNC_ENABLED=false`.
-4. Optionally set `MEDIA_CACHE_REPORTING_ENABLED=false` and `HEXMON_MEDIA_CACHE_REPORTING_ENABLED=false`.
+3. Set `DARSHAN_REALTIME_PLAYER_ENABLED=false`.
+4. Optionally set `MEDIA_CACHE_REPORTING_ENABLED=false` and `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`.
 5. Leave additive DB schema and enum values in place.
 6. Keep polling, heartbeat, REST command claim/ACK, snapshot/default/emergency fetch, and media cache active.
 

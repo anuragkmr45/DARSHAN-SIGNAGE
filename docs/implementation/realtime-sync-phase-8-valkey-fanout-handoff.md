@@ -38,13 +38,13 @@ Valkey remains notification-only. REST, polling, heartbeat, `device_commands`, `
 
 ## Tests Passed
 
-- `cd signhex-server && npm run build`
-- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts`
-- `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts`
-- `cd signhex-server && npx vitest run src/observability/metrics.test.ts`
-- `cd signhex-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts`
-- `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts`
-- `cd signhex-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts`
+- `cd darshan-server && npm run build`
+- `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts`
+- `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts`
+- `cd darshan-server && npx vitest run src/observability/metrics.test.ts`
+- `cd darshan-server && npx vitest run src/realtime/realtime-bus.test.ts src/realtime/device-gateway.test.ts src/observability/metrics.test.ts`
+- `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts`
+- `cd darshan-server && VALKEY_URL=redis://127.0.0.1:6381 npx vitest run src/realtime/valkey-realtime-bus.integration.test.ts`
 
 Local Valkey smoke used Docker image `valkey/valkey:9.0.3-alpine` and passed after sandbox network escalation.
 
@@ -69,7 +69,7 @@ Local Valkey smoke used Docker image `valkey/valkey:9.0.3-alpine` and passed aft
 - Set `REALTIME_BUS_PROVIDER=memory`.
 - Disable `OUTBOX_DISPATCH_ENABLED`.
 - Disable `REALTIME_SYNC_ENABLED`.
-- Disable player `HEXMON_REALTIME_SYNC_ENABLED`.
+- Disable player `DARSHAN_REALTIME_PLAYER_ENABLED`.
 - Leave additive code and DB schema in place.
 - REST/polling/heartbeat continue to deliver schedule/default/emergency.
 

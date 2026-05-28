@@ -5,20 +5,20 @@
   "graphTooltip": 0,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "id": 1,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "signhex:host_memory_utilization:ratio{role=\"data\"}", "legendFormat": "{{ instance }} memory", "refId": "A" },
-        { "expr": "signhex:host_filesystem_utilization:ratio{role=\"data\"}", "legendFormat": "{{ instance }} filesystem", "refId": "B" }
+        { "expr": "darshan:host_memory_utilization:ratio{role=\"data\"}", "legendFormat": "{{ instance }} memory", "refId": "A" },
+        { "expr": "darshan:host_filesystem_utilization:ratio{role=\"data\"}", "legendFormat": "{{ instance }} filesystem", "refId": "B" }
       ],
       "title": "VM1 Memory And Filesystem Utilization",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "id": 2,
@@ -32,10 +32,10 @@
   ],
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["signhex", "vm1", "data"],
+  "tags": ["darshan", "vm1", "data"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "Signhex VM1 Data Machine",
-  "uid": "signhex-vm1-data",
+  "title": "DARSHAN VM1 Data Machine",
+  "uid": "darshan-vm1-data",
   "version": 1
 }

@@ -1,12 +1,12 @@
 # Project-Wide Doctor, Drill, And Diagnostics Plan
 
 ## Purpose
-This document captures the project-wide feature vision, current implementation baseline, next-phase roadmap, and future scope for an enterprise operational verification and troubleshooting system across the Signhex platform.
+This document captures the project-wide feature vision, current implementation baseline, next-phase roadmap, and future scope for an enterprise operational verification and troubleshooting system across the DARSHAN platform.
 
 Repos in scope:
-- Backend: `signhex-server`
-- CMS: `signhex-nexus-core`
-- Player: `signage-screen`
+- Backend: `darshan-server`
+- CMS: `darshan-cms`
+- Player: `darshan-player`
 
 This is not limited to screens. The intended long-term scope includes:
 - authentication and sessions
@@ -188,7 +188,7 @@ Target outputs:
 - required envs present
 
 Recommended shape:
-- `signhex doctor`
+- `darshan doctor`
 
 Acceptance:
 - no side effects
@@ -206,7 +206,7 @@ Recommended initial drills:
 - `chat-core`
 
 Recommended shape:
-- `signhex drill <scenario>`
+- `darshan drill <scenario>`
 
 Acceptance:
 - controlled cleanup
@@ -217,10 +217,10 @@ Acceptance:
 Build read-only evidence collection for broken live systems.
 
 Recommended shape:
-- `signhex diagnose backend`
-- `signhex diagnose screen --screen-id <id>`
-- `signhex diagnose player --device-id <id>`
-- `signhex diagnose media --media-id <id>`
+- `darshan diagnose backend`
+- `darshan diagnose screen --screen-id <id>`
+- `darshan diagnose player --device-id <id>`
+- `darshan diagnose media --media-id <id>`
 
 Acceptance:
 - safe in production
@@ -333,7 +333,7 @@ A project-wide enterprise-grade operational workflow is possible if it is built 
 - drill
 - diagnose
 
-That is the right long-term model for reliability, troubleshooting, release confidence, and customer support readiness across the full Signhex platform.
+That is the right long-term model for reliability, troubleshooting, release confidence, and customer support readiness across the full DARSHAN platform.
 
 ## Engineering Ticket Breakdown
 This section translates the roadmap into practical implementation batches with repo ownership and acceptance criteria.
@@ -343,7 +343,7 @@ Goal:
 - ship a safe, read-only platform doctor that validates environment readiness and major subsystem availability
 
 #### Backend tickets
-Owner: `signhex-server`
+Owner: `darshan-server`
 - add doctor-facing readiness checks for:
   - API health
   - DB connectivity
@@ -360,7 +360,7 @@ Acceptance criteria:
 - doctor can identify storage/worker failures clearly
 
 #### CMS tickets
-Owner: `signhex-nexus-core`
+Owner: `darshan-cms`
 - no large UI work required in first pass
 - optionally add a lightweight operator page or admin panel entry for doctor summary consumption later
 
@@ -368,7 +368,7 @@ Acceptance criteria:
 - CMS can consume doctor output without guessing field semantics
 
 #### Player tickets
-Owner: `signage-screen`
+Owner: `darshan-player`
 - add local readiness checks for:
   - persisted identity presence
   - certificate/key readability
@@ -386,7 +386,7 @@ Goal:
 - ship synthetic end-to-end workflow drills for the most important business paths
 
 #### Backend tickets
-Owner: `signhex-server`
+Owner: `darshan-server`
 - define safe sandbox/test drill semantics
 - add helper orchestration support where needed for:
   - device pairing/recovery drill
@@ -401,7 +401,7 @@ Acceptance criteria:
 - failures are reported by stage, cause, and suggested action
 
 #### CMS tickets
-Owner: `signhex-nexus-core`
+Owner: `darshan-cms`
 - add optional operator-facing drill launch surface for safe environments
 - add drill result rendering for:
   - pass/fail per stage
@@ -413,7 +413,7 @@ Acceptance criteria:
 - CMS does not treat drill state as production business state by accident
 
 #### Player tickets
-Owner: `signage-screen`
+Owner: `darshan-player`
 - add synthetic player-side participation for drills:
   - simulated boot
   - simulated authenticated bootstrap
@@ -430,7 +430,7 @@ Goal:
 - provide production-safe troubleshooting and support-grade evidence collection
 
 #### Backend tickets
-Owner: `signhex-server`
+Owner: `darshan-server`
 - add diagnostics aggregation endpoints or internal collectors for:
   - auth/session state
   - screen/device recovery state
@@ -444,7 +444,7 @@ Acceptance criteria:
 - output identifies likely failure domain with structured evidence
 
 #### CMS tickets
-Owner: `signhex-nexus-core`
+Owner: `darshan-cms`
 - add downloadable diagnostic reports or operator summaries
 - add runbook links for common failure classes
 - add guided troubleshooting entry points for operators
@@ -454,7 +454,7 @@ Acceptance criteria:
 - runbooks map directly to the current backend/player contract
 
 #### Player tickets
-Owner: `signage-screen`
+Owner: `darshan-player`
 - add support bundle generation for:
   - local identity state
   - cached playback state
@@ -468,17 +468,17 @@ Acceptance criteria:
 - local diagnostics do not expose secrets unnecessarily
 
 ## Repo Ownership Summary
-- `signhex-server`
+- `darshan-server`
   - system-of-record readiness checks
   - diagnostics truth for backend-owned state
   - drill-safe orchestration and validation
   - failure reason normalization
-- `signhex-nexus-core`
+- `darshan-cms`
   - operator workflow
   - drill and diagnostics presentation
   - runbook entry points
   - support-facing summaries
-- `signage-screen`
+- `darshan-player`
   - local machine diagnostics
   - runtime participation in drills
   - local cache/recovery visibility

@@ -1,6 +1,6 @@
 # Observability Standards
 
-These standards govern Signhex observability work across platform, backend, CMS, and player repos.
+These standards govern DARSHAN observability work across platform, backend, CMS, and player repos.
 
 Required policy areas:
 
