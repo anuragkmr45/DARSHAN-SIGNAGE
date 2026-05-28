@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Signhex Nexus Core",
+  "name_for_model": "signhex_nexus_core",
+  "description_for_human": "Example API for Signhex Nexus Core.",
+  "description_for_model": "API for Signhex Nexus Core that allows XYZ.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://signhex-nexus-core.vercel.app/openapi.yaml"
+  },
+  "logo_url": "https://signhex-nexus-core.vercel.app/logo.png",
+  "contact_email": "you@example.com",
+  "legal_info_url": "https://signhex-nexus-core.vercel.app/legal"
+}

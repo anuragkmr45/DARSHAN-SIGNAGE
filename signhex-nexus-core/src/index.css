@@ -1,0 +1,177 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Signhex Brand Colors */
+    --brand-300: 0 34% 69%;
+    --brand-700: 0 100% 25%;
+    --brand-750: 359 79% 29%;
+    --brand-800: 356 71% 21%;
+    
+    /* Base Colors */
+    --background: 20 20% 98%;
+    --foreground: 356 40% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 356 40% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 356 40% 15%;
+
+    /* Primary = Rich Maroon */
+    --primary: 356 72% 28%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary = Warm Rose */
+    --secondary: 0 25% 90%;
+    --secondary-foreground: 356 71% 21%;
+
+    /* Muted = Warm Rose-Gray */
+    --muted: 20 15% 95%;
+    --muted-foreground: 356 20% 35%;
+
+    /* Accent = Soft Maroon Glow */
+    --accent: 356 45% 92%;
+    --accent-foreground: 356 72% 28%;
+
+    /* Semantic Colors */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --success: 152 69% 31%;
+    --success-foreground: 0 0% 100%;
+    
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    
+    --info: 221 83% 53%;
+    --info-foreground: 0 0% 100%;
+
+    /* UI Elements */
+    --border: 20 15% 88%;
+    --input: 20 15% 88%;
+    --ring: 356 72% 45%;
+
+    --radius: 0.625rem;
+
+    /* Sidebar = Dark Maroon */
+    --sidebar-background: 356 65% 22%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 0 34% 75%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 356 60% 28%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 356 50% 30%;
+    --sidebar-ring: 356 72% 45%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, #7A1A22, #942832);
+    --gradient-card: linear-gradient(180deg, #FFFFFF, #FCF9F7);
+    --gradient-surface: linear-gradient(135deg, #FDFCFB, #F9F4F5);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px hsl(356 40% 15% / 0.06);
+    --shadow-md: 0 6px 16px hsl(356 40% 15% / 0.1);
+    --shadow-lg: 0 14px 32px hsl(356 40% 15% / 0.14);
+    --shadow-glow: 0 0 22px hsl(356 72% 45% / 0.28);
+  }
+
+  .dark {
+    --background: 240 10% 8%;
+    --foreground: 0 0% 95%;
+
+    --card: 240 10% 12%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 240 10% 12%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 0 45% 65%;
+    --primary-foreground: 240 10% 8%;
+
+    --secondary: 356 50% 20%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 240 8% 18%;
+    --muted-foreground: 0 0% 65%;
+
+    --accent: 356 50% 22%;
+    --accent-foreground: 0 0% 95%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --success: 152 69% 40%;
+    --success-foreground: 0 0% 100%;
+    
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 100%;
+    
+    --info: 221 83% 60%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 240 8% 22%;
+    --input: 240 8% 22%;
+    --ring: 0 45% 55%;
+    
+    --sidebar-background: 356 65% 18%;
+    --sidebar-foreground: 0 0% 95%;
+    --sidebar-primary: 0 45% 65%;
+    --sidebar-primary-foreground: 240 10% 8%;
+    --sidebar-accent: 356 60% 24%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 356 50% 26%;
+    --sidebar-ring: 0 45% 55%;
+
+    --gradient-primary: linear-gradient(135deg, #C77777, #A85555);
+    --gradient-card: linear-gradient(180deg, #1F1F24, #18181C);
+    --gradient-surface: linear-gradient(135deg, #1C1C22, #1F1418);
+
+    --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.25);
+    --shadow-md: 0 8px 18px hsl(0 0% 0% / 0.35);
+    --shadow-lg: 0 16px 36px hsl(0 0% 0% / 0.4);
+    --shadow-glow: 0 0 20px hsl(0 45% 60% / 0.18);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    background: hsl(var(--card) / 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid hsl(var(--border));
+  }
+
+  .gradient-surface {
+    background: var(--gradient-surface);
+  }
+
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  .text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
