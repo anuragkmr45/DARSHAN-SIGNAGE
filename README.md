@@ -1,128 +1,100 @@
-# Signhex Platform
+# Signhex Monorepo
 
-`signhex-platform` is the master repository for platform operations, deployment, support, architecture, and release orchestration across the Signhex product suite.
+This repository is the unified source and platform workspace for the Signhex digital signage system.
 
-## Scope
+It contains:
 
-This repo owns:
+- `signhex-server/` - backend/API server, database schema, migrations, device APIs, CMS APIs, command lifecycle, realtime notification gateway, telemetry, proof-of-play, default media, emergency/takeover, and reservations/conflicts.
+- `signhex-nexus-core/` - CMS/admin frontend for schedules, presentations, layouts, media assignment, default media, emergency/takeover, publish, monitoring, and screen operations.
+- `signage-screen/` - Electron signage player used on physical screens.
+- `docs/`, `deploy/`, `scripts/`, `standards/`, `manifests/`, and `assets/` - platform architecture, on-prem deployment, observability, release, QA, support, and implementation tracking material formerly maintained in `signhex-platform`.
 
-- QA and production deployment runbooks
-- support runbooks and troubleshooting playbooks
-- environment topology and architecture docs
-- release manifests
-- shared operational scripts
-- repository and access-control standards
-- observability standards, dashboards, rules, and deployment assets
-- non-product-code assets
+## Architecture Guardrails
 
-This repo does **not** own product source code. Product code remains in:
+The enterprise realtime sync architecture is documented in:
 
-- `signhex-server`
-- `signhex-nexus-core`
-- `signage-screen`
+- `ENTERPRISE_REALTIME_SYNC_CODEX_RUNBOOK.md`
+- `docs/architecture/enterprise-realtime-sync.md`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
 
-## Key Rule
+Current fixed rules:
 
-This repo is **artifact-driven**, not source-driven.
+- DB tables, `schedule_snapshots`, `device_commands`, `command_outbox`, and `device_desired_state` are source of truth.
+- WebSocket is notification/wake-up only.
+- REST APIs are authoritative for data fetch and ACK.
+- Media is delivered through HTTP/on-prem object storage/internal media endpoints/local cache, never WebSocket or Valkey.
+- Polling and heartbeat fallback are mandatory.
+- Valkey is on-prem cross-node wake fanout only; it is not durable truth.
+- QA and production behavior must be feature-flagged and rollback-safe.
 
-- no Git submodules
-- no source vendoring
-- no nested repos
-- no requirement for ops/support to clone product repos
-
-The canonical bundle assembler consumes released artifacts:
-
-- backend image archive
-- CMS build archive
-- player installers
-
-This repo also owns the source-protected product export flow:
-
-- `out/<release>/server/`
-- `out/<release>/cms/`
-- `out/<release>/electron/<platform>/`
-
-Notes:
-
-- `server/` and `cms/` exports are direct inputs to the runtime bundle assembler
-- `electron/<platform>/` exports are per-platform distributables for device delivery
-- QA/production bundle assembly still expects `PLAYER_ARTIFACTS_DIR` to contain the Windows and Ubuntu installers you want staged into environment bundles
-
-## Primary Commands
-
-Product export packaging:
-
-```bash
-bash scripts/export/package-all.sh --release 2026-04-02-r1 --electron-platform linux
-```
-
-Split-production variant:
-
-```bash
-bash scripts/export/package-all.sh --release 2026-04-02-r1 --electron-platform linux --server-deployment-layout production-split
-```
-
-Per-product exports:
-
-```bash
-bash scripts/export/package-server.sh --release 2026-04-02-r1
-bash scripts/export/package-cms.sh --release 2026-04-02-r1
-bash scripts/export/package-electron.sh --release 2026-04-02-r1 --platform linux
-```
-
-The plain server export command still supports the legacy `standalone` layout, but the approved QA and production topology uses `production-split`.
-
-For the split QA and production layout (`VM1=data`, `VM2=backend`, `VM3=cms`), export the server package with explicit intent:
-
-```bash
-bash scripts/export/package-server.sh --release 2026-04-02-r1 --deployment-layout production-split
-```
-
-Canonical artifact-driven bundle assembly:
-
-```bash
-bash scripts/bundle/assemble-runtime-bundle.sh <site-name>
-```
-
-Preferred two-step flow:
-
-```bash
-bash scripts/export/package-server.sh --release 2026-04-02-r1 --deployment-layout production-split
-bash scripts/export/package-cms.sh --release 2026-04-02-r1
-
-SERVER_PACKAGE_DIR="out/2026-04-02-r1/server" \
-CMS_PACKAGE_DIR="out/2026-04-02-r1/cms" \
-PLAYER_ARTIFACTS_DIR="/artifacts/signage-screen/2026-04-02-r1" \
-bash scripts/bundle/assemble-runtime-bundle.sh site-a
-```
-
-Transition wrapper for a local shared workspace that still contains sibling product repos:
-
-```bash
-bash scripts/bundle/workspace-build-bundle.sh <site-name>
-```
-
-## Repo Layout
+## Repository Layout
 
 ```text
-docs/        Architecture, environments, runbooks, support, governance
-deploy/      Deployment templates and environment assembly files
-manifests/   QA/production version pins and release records
-scripts/     Bundle assembly, bootstrap, verification, release helpers
-standards/   Repository, CI/CD, security, and observability standards
-assets/      Diagrams, templates, and non-product support assets
+signage-screen/        Electron signage player
+signhex-server/        Backend/API server
+signhex-nexus-core/    CMS/admin frontend
+docs/                  Architecture, contracts, environments, implementation status, QA, runbooks
+deploy/                On-prem deployment and observability templates
+scripts/               Bootstrap, bundle, export, load, release, and verification helpers
+standards/             Repository, CI/CD, observability, and security standards
+manifests/             QA/production version pins and release records
+assets/                Diagrams, templates, and non-product assets
 ```
 
-## Canonical Runbooks
+## Common Commands
 
-- product export packaging: `docs/runbooks/product-export-packaging.md`
-- bundle workflow: `docs/runbooks/onprem-bundle-builder.md`
-- QA deployment: `docs/runbooks/onprem-qa-setup.md`
-- production deployment: `docs/runbooks/onprem-production-setup.md`
-- observability install/upgrade: `docs/runbooks/observability-stack-install-and-upgrade.md`
+Backend:
+
+```bash
+cd signhex-server
+npm run build
+npx vitest run
+```
+
+CMS:
+
+```bash
+cd signhex-nexus-core
+npm run lint
+npm run build
+```
+
+Electron player:
+
+```bash
+cd signage-screen
+npm run build
+npm run test:unit
+```
+
+Platform validation:
+
+```bash
+bash scripts/verify/validate-realtime-sync-phase7-assets.sh
+bash scripts/verify/validate-realtime-sync-phase8-assets.sh
+bash scripts/verify/validate-observability-assets.sh
+```
+
+## On-Prem Deployment
+
+Primary runbooks:
+
+- `docs/runbooks/onprem-qa-setup.md`
+- `docs/runbooks/onprem-production-setup.md`
+- `docs/runbooks/realtime-sync-qa-prod-hardening.md`
+- `docs/runbooks/onprem-bundle-builder.md`
+- `docs/runbooks/product-export-packaging.md`
+
+## Realtime Sync Status
+
+Phase 8 is locally implemented and tested, including Valkey fanout backfill, but production readiness remains blocked until real air-gapped on-prem runtime evidence is accepted.
+
+Phase 9 mobile/TV adapters remain blocked until the Phase 8 gate is accepted or explicitly deferred by a human approver.
 
 ## Commit Rules
 
-- do not commit generated bundles
-- do not commit secrets, certificates, or real `.env` values
-- commit only templates, placeholder READMEs, and reusable operational assets
+- Do not commit generated bundles, `build/`, `dist/`, `out/`, runtime temp files, or `.DS_Store`.
+- Do not commit secrets, real certificates, production `.env` values, or customer data.
+- Keep architecture, task, approval, risk, test, and handoff docs when cleaning up old prompts or planning material.
+- Keep migrations additive and rollback-documented.
