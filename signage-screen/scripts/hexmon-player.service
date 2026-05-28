@@ -1,0 +1,53 @@
+[Unit]
+Description=HexmonSignage Player
+Documentation=https://docs.hexmon.com
+After=network-online.target graphical.target
+Wants=network-online.target
+Requires=graphical.target
+
+[Service]
+Type=simple
+User=hexmon
+Group=hexmon
+WorkingDirectory=/opt/hexmon-signage-player
+
+# Environment variables
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/hexmon/.Xauthority"
+Environment="NODE_ENV=production"
+Environment="HEXMON_CONFIG_PATH=/etc/hexmon/config.json"
+
+# Start command
+ExecStart=/usr/bin/hexmon-signage-player
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=200
+StartLimitBurst=5
+
+# Resource limits
+LimitNOFILE=65536
+MemoryLimit=1G
+CPUQuota=80%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hexmon /var/cache/hexmon /tmp
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hexmon-player
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=graphical.target
+
