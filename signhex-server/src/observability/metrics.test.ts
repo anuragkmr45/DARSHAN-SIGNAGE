@@ -1,0 +1,227 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import {
+  getObservabilityRegistry,
+  observeJobProcessing,
+  observeS3Operation,
+  recordDeviceAuthAttempt,
+  recordDeviceCommandAck,
+  recordDeviceCommandClaim,
+  recordDeviceNodeRegistryMiss,
+  recordDeviceNodeRegistryWrite,
+  recordDeviceRealtimeAuth,
+  recordDeviceRealtimeNotification,
+  recordJobEnqueue,
+  recordMediaCacheReport,
+  recordOutboxDispatch,
+  recordPairingCodeAllocation,
+  recordPairingCsrValidation,
+  recordRealtimeBusFallback,
+  recordRealtimeBusNodeMessage,
+  recordRealtimeBusPublish,
+  recordRealtimeBusSubscribeFailure,
+  recordTelemetryIngest,
+  recordWebsocketNotificationPayloadTooLarge,
+  resetObservabilityMetricsForTests,
+} from '@/observability/metrics';
+import { closeTestServer, createTestServer } from '@/test/helpers';
+
+describe('backend observability instrumentation', () => {
+  let server: FastifyInstance;
+
+  beforeAll(async () => {
+    server = await createTestServer();
+  });
+
+  beforeEach(() => {
+    resetObservabilityMetricsForTests();
+  });
+
+  afterAll(async () => {
+    await closeTestServer(server);
+  });
+
+  it('records custom telemetry, job, and S3 metrics in the shared registry', async () => {
+    recordJobEnqueue('telemetry:heartbeat', 'success');
+    recordTelemetryIngest({
+      telemetryType: 'heartbeat',
+      persistMode: 'queue',
+      result: 'success',
+      heartbeatStatus: 'ONLINE',
+      durationSeconds: 0.01,
+    });
+    await observeJobProcessing('telemetry:heartbeat', async () => undefined);
+    await observeS3Operation('put_object', async () => ({ ok: true }));
+
+    const output = await getObservabilityRegistry().metrics();
+
+    expect(output).toContain('signhex_server_job_enqueued_total{queue="telemetry:heartbeat",result="success"} 1');
+    expect(output).toContain('signhex_server_device_telemetry_ingest_total{telemetry_type="heartbeat",result="success",persist_mode="queue"} 1');
+    expect(output).toContain('signhex_server_device_heartbeats_received_total{status="ONLINE",result="success",persist_mode="queue"} 1');
+    expect(output).toContain('signhex_server_job_processing_total{queue="telemetry:heartbeat",result="success"} 1');
+    expect(output).toContain('signhex_server_s3_operations_total{operation="put_object",result="success"} 1');
+  });
+
+  it('records runtime hardening metrics for pairing, auth, and command claim paths', async () => {
+    recordPairingCodeAllocation('device_request', 'collision_retry');
+    recordPairingCodeAllocation('device_request', 'success');
+    recordPairingCsrValidation('rejected', 'weak_rsa_key');
+    recordPairingCsrValidation('accepted', 'valid');
+    recordDeviceAuthAttempt({
+      configuredMode: 'dual',
+      authMethod: 'signature',
+      result: 'success',
+      reason: 'authorized',
+    });
+    recordDeviceAuthAttempt({
+      configuredMode: 'signature',
+      authMethod: 'signature',
+      result: 'failure',
+      reason: 'missing_device_signature',
+    });
+    recordDeviceCommandClaim('heartbeat', 3);
+    recordDeviceCommandClaim('poll', 1);
+
+    const output = await getObservabilityRegistry().metrics();
+
+    expect(output).toContain(
+      'signhex_server_device_pairing_code_allocations_total{mode="device_request",result="collision_retry"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_pairing_code_allocations_total{mode="device_request",result="success"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_pairing_csr_validation_total{result="rejected",reason="weak_rsa_key"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_pairing_csr_validation_total{result="accepted",reason="valid"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_auth_total{configured_mode="dual",auth_method="signature",result="success",reason="authorized"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_auth_total{configured_mode="signature",auth_method="signature",result="failure",reason="missing_device_signature"} 1'
+    );
+    expect(output).toContain('signhex_server_device_commands_claimed_total{source="heartbeat"} 3');
+    expect(output).toContain('signhex_server_device_commands_claimed_total{source="poll"} 1');
+  });
+
+  it('records realtime sync readiness metrics for outbox, realtime, ACK, and media-cache paths', async () => {
+    recordOutboxDispatch('dispatched', 'COMMAND_AVAILABLE');
+    recordOutboxDispatch('deferred', 'COMMAND_AVAILABLE');
+    recordOutboxDispatch('failed', 'RESYNC_REQUIRED');
+    recordDeviceRealtimeAuth('success', 'authorized');
+    recordDeviceRealtimeAuth('failure', 'Missing device identity');
+    recordDeviceRealtimeNotification('COMMAND_AVAILABLE', 'delivered');
+    recordDeviceRealtimeNotification('COMMAND_AVAILABLE', 'deferred');
+    recordWebsocketNotificationPayloadTooLarge('COMMAND_AVAILABLE');
+    recordRealtimeBusPublish('valkey', 'published', 'COMMAND_AVAILABLE');
+    recordRealtimeBusPublish('valkey', 'failed', 'COMMAND_AVAILABLE');
+    recordRealtimeBusSubscribeFailure('valkey', 'subscriber_error');
+    recordRealtimeBusNodeMessage('received', 'COMMAND_AVAILABLE');
+    recordRealtimeBusNodeMessage('socket_missing', 'COMMAND_AVAILABLE');
+    recordDeviceNodeRegistryWrite('valkey', 'register', 'success');
+    recordDeviceNodeRegistryWrite('valkey', 'refresh', 'error');
+    recordDeviceNodeRegistryMiss('valkey');
+    recordRealtimeBusFallback('valkey_unavailable');
+    recordDeviceCommandAck('success', 0.025);
+    recordDeviceCommandAck('failure', 0.05);
+    recordMediaCacheReport({ eventType: 'DOWNLOAD_FAILED', severity: 'ERROR', result: 'accepted' });
+    recordMediaCacheReport({ eventType: 'DISK_FULL', severity: 'CRITICAL', result: 'error' });
+
+    const output = await getObservabilityRegistry().metrics();
+
+    expect(output).toContain(
+      'signhex_server_command_outbox_dispatch_total{result="dispatched",event_type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_command_outbox_dispatch_total{result="deferred",event_type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_command_outbox_dispatch_total{result="failed",event_type="RESYNC_REQUIRED"} 1'
+    );
+    expect(output).toContain('signhex_server_device_realtime_auth_total{result="success",reason="authorized"} 1');
+    expect(output).toContain(
+      'signhex_server_device_realtime_auth_total{result="failure",reason="Missing device identity"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_realtime_notifications_total{type="COMMAND_AVAILABLE",result="delivered"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_realtime_notifications_total{type="COMMAND_AVAILABLE",result="deferred"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_websocket_notification_payload_too_large_total{type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_publish_total{provider="valkey",result="published",type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_publish_total{provider="valkey",result="failed",type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_subscribe_failures_total{provider="valkey",reason="subscriber_error"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_node_messages_total{result="received",type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_realtime_bus_node_messages_total{result="socket_missing",type="COMMAND_AVAILABLE"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_node_registry_writes_total{provider="valkey",operation="register",result="success"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_device_node_registry_writes_total{provider="valkey",operation="refresh",result="error"} 1'
+    );
+    expect(output).toContain('signhex_server_device_node_registry_misses_total{provider="valkey"} 1');
+    expect(output).toContain('signhex_server_realtime_bus_fallback_total{reason="valkey_unavailable"} 1');
+    expect(output).toContain('signhex_server_device_command_acks_total{result="success"} 1');
+    expect(output).toContain('signhex_server_device_command_acks_total{result="failure"} 1');
+    expect(output).toContain(
+      'signhex_server_media_cache_reports_total{event_type="DOWNLOAD_FAILED",severity="ERROR",result="accepted"} 1'
+    );
+    expect(output).toContain(
+      'signhex_server_media_cache_reports_total{event_type="DISK_FULL",severity="CRITICAL",result="error"} 1'
+    );
+  });
+
+  it('exposes a Prometheus scrape endpoint and preserves route templates', async () => {
+    await server.inject({
+      method: 'GET',
+      url: '/api/v1/health',
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/metrics',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/plain');
+    expect(response.body).toContain('signhex_server_http_requests_total');
+    expect(response.body).toContain('route="/api/v1/health"');
+    expect(response.body).toContain('signhex_server_db_pool_connections');
+    expect(response.body).toContain('signhex_fleet_players_total');
+  });
+
+  it('keeps the CMS metrics overview route JSON-shaped and blocks non-loopback scrape traffic by default', async () => {
+    const overviewResponse = await server.inject({
+      method: 'GET',
+      url: '/api/v1/metrics/overview',
+    });
+
+    expect(overviewResponse.statusCode).toBe(401);
+    expect(overviewResponse.headers['content-type']).toContain('application/json');
+    expect(overviewResponse.json()).toHaveProperty('success', false);
+    expect(overviewResponse.json()).toHaveProperty('error.code', 'UNAUTHORIZED');
+
+    const scrapeResponse = await server.inject({
+      method: 'GET',
+      url: '/metrics',
+      remoteAddress: '192.168.50.10',
+    });
+
+    expect(scrapeResponse.statusCode).toBe(403);
+  });
+});
