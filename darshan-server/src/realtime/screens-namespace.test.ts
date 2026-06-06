@@ -2,14 +2,16 @@ import { randomUUID } from 'crypto';
 import { AddressInfo } from 'net';
 import { FastifyInstance } from 'fastify';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
+import { closeTestServer, createTestServer, testRoles, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { createSessionRepository } from '@/db/repositories/session';
 import { generateAccessToken } from '@/auth/jwt';
+import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
 import * as s3 from '@/s3';
+import { emitScreenPreviewUpdate, emitScreenStateUpdate } from '@/realtime/screens-namespace';
 
 async function issueAdminTokenWithSession() {
   const db = getDatabase();
@@ -21,6 +23,56 @@ async function issueAdminTokenWithSession() {
   const token = await generateAccessToken(testUser.id, testUser.email, adminRole.id, adminRole.name);
   await createSessionRepository().create({
     user_id: testUser.id,
+    access_jti: token.jti,
+    expires_at: token.expiresAt,
+  });
+  return token.token;
+}
+
+async function issueOperatorTokenWithSession() {
+  const token = await generateAccessToken(testUser.id, testUser.email, testRoles.OPERATOR.id, testRoles.OPERATOR.name);
+  await createSessionRepository().create({
+    user_id: testUser.id,
+    access_jti: token.jti,
+    expires_at: token.expiresAt,
+  });
+  return token.token;
+}
+
+async function issueLimitedScreenTokenWithSession(allowedScreenId: string) {
+  const db = getDatabase();
+  const roleId = randomUUID();
+  const userId = randomUUID();
+  const email = `screen-limited-${roleId.slice(0, 8)}@example.com`;
+
+  await db.insert(schema.roles).values({
+    id: roleId,
+    name: `SCREEN_LIMITED_${roleId.slice(0, 8)}`,
+    permissions: {
+      grants: [
+        {
+          action: 'read',
+          subject: 'Screen',
+          conditions: { id: allowedScreenId },
+        },
+      ],
+    },
+    is_system: false,
+  });
+
+  await db.insert(schema.users).values({
+    id: userId,
+    email,
+    password_hash: await hashPassword('Password123!'),
+    first_name: 'Screen',
+    last_name: 'Limited',
+    role_id: roleId,
+    is_active: true,
+  });
+
+  const token = await generateAccessToken(userId, email, roleId, `SCREEN_LIMITED_${roleId.slice(0, 8)}`);
+  await createSessionRepository().create({
+    user_id: userId,
     access_jti: token.jti,
     expires_at: token.expiresAt,
   });
@@ -59,6 +111,24 @@ function waitForEvent<T>(socket: ClientSocket, event: string, predicate: (payloa
   });
 }
 
+function expectNoEvent<T>(socket: ClientSocket, event: string, predicate: (payload: T) => boolean, timeoutMs = 300) {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off(event, handler);
+      resolve();
+    }, timeoutMs);
+
+    const handler = (payload: T) => {
+      if (!predicate(payload)) return;
+      clearTimeout(timer);
+      socket.off(event, handler);
+      reject(new Error(`Unexpected ${event}`));
+    };
+
+    socket.on(event, handler);
+  });
+}
+
 describe('screens namespace realtime updates', () => {
   let server: FastifyInstance;
   let baseUrl: string;
@@ -84,6 +154,13 @@ describe('screens namespace realtime updates', () => {
     }
     vi.restoreAllMocks();
     await closeTestServer(server);
+  });
+
+  afterEach(() => {
+    if (socket) {
+      socket.disconnect();
+      socket = null;
+    }
   });
 
   it('accepts token auth, subscribes to valid screens, and rejects missing ids', async () => {
@@ -123,6 +200,221 @@ describe('screens namespace realtime updates', () => {
 
     expect(Array.isArray(syncResult.screens)).toBe(true);
     expect(syncResult.screens[0].id).toBe(screenId);
+  });
+
+  it('allows an operator with full screen read access to subscribe includeAll', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    const operatorToken = await issueOperatorTokenWithSession();
+
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Operator Socket Screen',
+      status: 'ACTIVE',
+    });
+
+    socket = createClient(`${baseUrl}/screens`, {
+      transports: ['websocket'],
+      auth: { token: operatorToken },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+
+    const subscribeResult = await new Promise<any>((resolve) => {
+      socket!.emit('screens:subscribe', { includeAll: true }, (result: any) => resolve(result));
+    });
+
+    expect(subscribeResult.subscribed_all).toBe(true);
+    expect(subscribeResult.subscribed).toContain(screenId);
+    expect(subscribeResult.rejected).toHaveLength(0);
+  });
+
+  it('filters includeAll and no-id sync to screens authorized by a scoped role', async () => {
+    const db = getDatabase();
+    const allowedScreenId = randomUUID();
+    const unauthorizedScreenId = randomUUID();
+
+    await db.insert(schema.screens).values([
+      {
+        id: allowedScreenId,
+        name: 'Scoped Allowed Screen',
+        status: 'ACTIVE',
+      },
+      {
+        id: unauthorizedScreenId,
+        name: 'Scoped Unauthorized Screen',
+        status: 'ACTIVE',
+      },
+    ]);
+    const limitedToken = await issueLimitedScreenTokenWithSession(allowedScreenId);
+
+    socket = createClient(`${baseUrl}/screens`, {
+      transports: ['websocket'],
+      auth: { token: limitedToken },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+
+    const subscribeResult = await new Promise<any>((resolve) => {
+      socket!.emit('screens:subscribe', { includeAll: true }, (result: any) => resolve(result));
+    });
+
+    expect(subscribeResult.subscribed_all).toBe(true);
+    expect(subscribeResult.subscribed).toContain(allowedScreenId);
+    expect(subscribeResult.subscribed).not.toContain(unauthorizedScreenId);
+
+    const syncResult = await new Promise<any>((resolve) => {
+      socket!.emit('screens:sync', undefined, (result: any) => resolve(result));
+    });
+    const syncedIds = syncResult.screens.map((screen: any) => screen.id);
+    expect(syncedIds).toContain(allowedScreenId);
+    expect(syncedIds).not.toContain(unauthorizedScreenId);
+  });
+
+  it('does not join unauthorized screen rooms for explicit screenIds', async () => {
+    const db = getDatabase();
+    const allowedScreenId = randomUUID();
+    const unauthorizedScreenId = randomUUID();
+
+    await db.insert(schema.screens).values([
+      {
+        id: allowedScreenId,
+        name: 'Explicit Allowed Screen',
+        status: 'ACTIVE',
+      },
+      {
+        id: unauthorizedScreenId,
+        name: 'Explicit Unauthorized Screen',
+        status: 'ACTIVE',
+      },
+    ]);
+    const limitedToken = await issueLimitedScreenTokenWithSession(allowedScreenId);
+
+    socket = createClient(`${baseUrl}/screens`, {
+      transports: ['websocket'],
+      auth: { token: limitedToken },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+
+    const subscribeResult = await new Promise<any>((resolve) => {
+      socket!.emit(
+        'screens:subscribe',
+        { screenIds: [allowedScreenId, unauthorizedScreenId] },
+        (result: any) => resolve(result)
+      );
+    });
+
+    expect(subscribeResult.subscribed).toContain(allowedScreenId);
+    expect(subscribeResult.subscribed).not.toContain(unauthorizedScreenId);
+    expect(subscribeResult.rejected).toContain(unauthorizedScreenId);
+  });
+
+  it('does not deliver unauthorized screen state updates to a scoped socket', async () => {
+    const db = getDatabase();
+    const allowedScreenId = randomUUID();
+    const unauthorizedScreenId = randomUUID();
+
+    await db.insert(schema.screens).values([
+      {
+        id: allowedScreenId,
+        name: 'State Allowed Screen',
+        status: 'ACTIVE',
+      },
+      {
+        id: unauthorizedScreenId,
+        name: 'State Unauthorized Screen',
+        status: 'ACTIVE',
+      },
+    ]);
+    const limitedToken = await issueLimitedScreenTokenWithSession(allowedScreenId);
+
+    socket = createClient(`${baseUrl}/screens`, {
+      transports: ['websocket'],
+      auth: { token: limitedToken },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+    await new Promise<void>((resolve) => {
+      socket!.emit('screens:subscribe', { includeAll: true }, () => resolve());
+    });
+
+    const allowedPromise = waitForEvent<any>(
+      socket,
+      'screens:state:update',
+      (payload) => payload?.screen?.id === allowedScreenId
+    );
+    emitScreenStateUpdate(server, {
+      id: allowedScreenId,
+      name: 'State Allowed Screen',
+      status: 'ACTIVE',
+    });
+    expect((await allowedPromise).screen.id).toBe(allowedScreenId);
+
+    const unauthorizedPromise = expectNoEvent<any>(
+      socket,
+      'screens:state:update',
+      (payload) => payload?.screen?.id === unauthorizedScreenId
+    );
+    emitScreenStateUpdate(server, {
+      id: unauthorizedScreenId,
+      name: 'State Unauthorized Screen',
+      status: 'ACTIVE',
+    });
+    await unauthorizedPromise;
+  });
+
+  it('does not deliver unauthorized screen preview updates or screenshot URLs to a scoped socket', async () => {
+    const db = getDatabase();
+    const allowedScreenId = randomUUID();
+    const unauthorizedScreenId = randomUUID();
+
+    await db.insert(schema.screens).values([
+      {
+        id: allowedScreenId,
+        name: 'Preview Allowed Screen',
+        status: 'ACTIVE',
+      },
+      {
+        id: unauthorizedScreenId,
+        name: 'Preview Unauthorized Screen',
+        status: 'ACTIVE',
+      },
+    ]);
+    const limitedToken = await issueLimitedScreenTokenWithSession(allowedScreenId);
+
+    socket = createClient(`${baseUrl}/screens`, {
+      transports: ['websocket'],
+      auth: { token: limitedToken },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+    await new Promise<void>((resolve) => {
+      socket!.emit('screens:subscribe', { includeAll: true }, () => resolve());
+    });
+
+    const unauthorizedPromise = expectNoEvent<any>(
+      socket,
+      'screens:preview:update',
+      (payload) => payload?.screenId === unauthorizedScreenId || typeof payload?.screenshot_url === 'string'
+    );
+    emitScreenPreviewUpdate(server, {
+      screenId: unauthorizedScreenId,
+      captured_at: new Date().toISOString(),
+      screenshot_url: 'https://cdn.example.com/unauthorized-screenshot',
+      stale: false,
+    });
+    await unauthorizedPromise;
   });
 
   it('rejects cookie websocket auth when origin is not allowlisted', async () => {

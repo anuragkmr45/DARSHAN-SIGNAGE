@@ -1,16 +1,30 @@
 import { FastifyInstance } from 'fastify';
 import { Socket } from 'socket.io';
-import { verifyAccessToken } from '@/auth/jwt';
+import { subject } from '@casl/ability';
+import { verifyAccessToken, type JWTPayload } from '@/auth/jwt';
 import { createSessionRepository } from '@/db/repositories/session';
 import { getDatabase, schema } from '@/db';
 import { createLogger } from '@/utils/logger';
-import { buildScreenPlaybackStateById, buildScreensOverviewPayload } from '@/screens/playback';
+import {
+  buildScreenPlaybackStateById,
+  buildScreensOverviewPayload,
+  summarizeGroupPlayback,
+} from '@/screens/playback';
 import { resolveSocketAuthToken } from '@/realtime/chat-namespace';
 import { getOrCreateSocketServer, getSocketAllowedOrigins, getSocketServer } from '@/realtime/socket-server';
+import { defineAbilityFor, type AppAbility } from '@/rbac';
 import { inArray } from 'drizzle-orm';
 
 const logger = createLogger('screens-namespace');
 const SCREENS_NAMESPACE = '/screens';
+type ScreenRecord = typeof schema.screens.$inferSelect;
+type ScreenSocketAuthz = {
+  allowedRows: ScreenRecord[];
+  allowedIds: Set<string>;
+  hasUnconditionalScreenRead: boolean;
+  hasScreenReadDeny: boolean;
+  rowCount: number;
+};
 
 function isSessionValidForUser(
   session: { user_id: string; expires_at: Date } | null,
@@ -27,6 +41,131 @@ export function screensAllRoom(): string {
 
 export function screenRoom(screenId: string): string {
   return `screens:${screenId}`;
+}
+
+function getSocketUser(socket: Socket): JWTPayload {
+  return (socket.data as any).user as JWTPayload;
+}
+
+function ruleValueIncludes(value: unknown, expected: string): boolean {
+  return Array.isArray(value) ? value.includes(expected) : value === expected;
+}
+
+function hasUnconditionalScreenRead(ability: AppAbility): boolean {
+  const rules = ((ability as any).rules || []) as Array<{
+    action?: string | string[];
+    subject?: string | string[];
+    conditions?: unknown;
+    inverted?: boolean;
+  }>;
+
+  return rules.some((rule) => {
+    if (rule.inverted || rule.conditions) return false;
+    const actionMatches = ruleValueIncludes(rule.action, 'read') || ruleValueIncludes(rule.action, 'manage');
+    const subjectMatches = ruleValueIncludes(rule.subject, 'Screen') || ruleValueIncludes(rule.subject, 'all');
+    return actionMatches && subjectMatches;
+  });
+}
+
+function hasRelevantScreenReadDeny(ability: AppAbility): boolean {
+  const rules = ((ability as any).rules || []) as Array<{
+    action?: string | string[];
+    subject?: string | string[];
+    inverted?: boolean;
+  }>;
+
+  return rules.some((rule) => {
+    if (!rule.inverted) return false;
+    const actionMatches = ruleValueIncludes(rule.action, 'read') || ruleValueIncludes(rule.action, 'manage');
+    const subjectMatches = ruleValueIncludes(rule.subject, 'Screen') || ruleValueIncludes(rule.subject, 'all');
+    return actionMatches && subjectMatches;
+  });
+}
+
+function canReadScreen(ability: AppAbility, screen: ScreenRecord): boolean {
+  return (ability as any).can('read', subject('Screen', screen));
+}
+
+function canUseGlobalScreenRoom(authz: ScreenSocketAuthz): boolean {
+  return authz.hasUnconditionalScreenRead && !authz.hasScreenReadDeny && authz.allowedRows.length === authz.rowCount;
+}
+
+async function resolveScreenSocketAuthz(
+  socket: Socket,
+  options: { screenIds?: string[] } = {}
+): Promise<ScreenSocketAuthz> {
+  const db = getDatabase();
+  const user = getSocketUser(socket);
+  const ability = await defineAbilityFor(user.role_id, user.sub, user.department_id);
+  const rows =
+    options.screenIds && options.screenIds.length > 0
+      ? await db.select().from(schema.screens).where(inArray(schema.screens.id, options.screenIds as any))
+      : await db.select().from(schema.screens);
+  const allowedRows = rows.filter((screen) => canReadScreen(ability, screen));
+
+  return {
+    allowedRows,
+    allowedIds: new Set(allowedRows.map((screen) => screen.id)),
+    hasUnconditionalScreenRead: hasUnconditionalScreenRead(ability),
+    hasScreenReadDeny: hasRelevantScreenReadDeny(ability),
+    rowCount: rows.length,
+  };
+}
+
+function logScreenSocketReject(
+  socket: Socket,
+  event: 'screens:subscribe' | 'screens:sync',
+  details: { requestedCount: number; rejectedCount: number; reason: string }
+) {
+  if (details.rejectedCount <= 0) return;
+  const user = getSocketUser(socket);
+  logger.warn(
+    {
+      event,
+      reason: details.reason,
+      socket_id: socket.id,
+      user_id: user.sub,
+      requested_count: details.requestedCount,
+      rejected_count: details.rejectedCount,
+    },
+    'Screens realtime authorization rejected screen request'
+  );
+}
+
+async function buildAuthorizedScreensOverviewPayload(
+  authorizedRows: ScreenRecord[],
+  db: ReturnType<typeof getDatabase>
+) {
+  const screenIds = authorizedRows.map((screen) => screen.id);
+  const screenSummaries = (
+    await Promise.all(screenIds.map((screenId) => buildScreenPlaybackStateById(screenId, { db })))
+  ).filter(Boolean);
+  const screenSummaryMap = new Map(screenSummaries.map((summary: any) => [summary.id, summary]));
+
+  const memberRows =
+    screenIds.length > 0
+      ? await db
+          .select()
+          .from(schema.screenGroupMembers)
+          .where(inArray(schema.screenGroupMembers.screen_id, screenIds as any))
+      : [];
+  const membersByGroup = memberRows.reduce((acc, row) => {
+    const list = acc.get(row.group_id) || [];
+    list.push(row.screen_id);
+    acc.set(row.group_id, list);
+    return acc;
+  }, new Map<string, string[]>());
+  const groupIds = Array.from(membersByGroup.keys());
+  const groups =
+    groupIds.length > 0
+      ? await db.select().from(schema.screenGroups).where(inArray(schema.screenGroups.id, groupIds as any))
+      : [];
+
+  return {
+    server_time: new Date().toISOString(),
+    screens: screenSummaries,
+    groups: groups.map((group) => summarizeGroupPlayback(group, membersByGroup.get(group.id) || [], screenSummaryMap)),
+  };
 }
 
 export async function setupScreensNamespace(fastify: FastifyInstance) {
@@ -78,35 +217,49 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
         const ids = Array.isArray(payload?.screenIds)
           ? Array.from(new Set(payload.screenIds.filter((value) => typeof value === 'string' && value)))
           : [];
-        const subscribed: string[] = [];
+        const subscribed = new Set<string>();
         const rejected: string[] = [];
         const includeAll = payload?.includeAll === true;
 
         if (includeAll) {
-          socket.join(screensAllRoom());
+          const authz = await resolveScreenSocketAuthz(socket);
+          for (const screen of authz.allowedRows) {
+            socket.join(screenRoom(screen.id));
+            subscribed.add(screen.id);
+          }
+          if (canUseGlobalScreenRoom(authz)) {
+            socket.join(screensAllRoom());
+          }
         }
 
         if (ids.length > 0) {
           const rows = await db
-            .select({ id: schema.screens.id })
+            .select()
             .from(schema.screens)
             .where(inArray(schema.screens.id, ids as any));
-          const existing = new Set(rows.map((row) => row.id));
+          const existing = new Set(rows.map((screen) => screen.id));
+          const authz = await resolveScreenSocketAuthz(socket, { screenIds: ids });
 
           for (const id of ids) {
-            if (!existing.has(id)) {
+            if (!existing.has(id) || !authz.allowedIds.has(id)) {
               rejected.push(id);
               continue;
             }
             socket.join(screenRoom(id));
-            subscribed.push(id);
+            subscribed.add(id);
           }
         }
+
+        logScreenSocketReject(socket, 'screens:subscribe', {
+          requestedCount: ids.length,
+          rejectedCount: rejected.length,
+          reason: 'screen_read_not_allowed_or_missing',
+        });
 
         if (ack) {
           ack({
             subscribed_all: includeAll,
-            subscribed,
+            subscribed: Array.from(subscribed),
             rejected,
           });
         }
@@ -119,8 +272,19 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
           ? Array.from(new Set(payload.screenIds.filter((value) => typeof value === 'string' && value)))
           : [];
 
+        const authz = await resolveScreenSocketAuthz(socket, ids.length > 0 ? { screenIds: ids } : {});
+        if (ids.length > 0) {
+          logScreenSocketReject(socket, 'screens:sync', {
+            requestedCount: ids.length,
+            rejectedCount: ids.filter((id) => !authz.allowedIds.has(id)).length,
+            reason: 'screen_read_not_allowed_or_missing',
+          });
+        }
+
         if (ids.length === 0) {
-          const overview = await buildScreensOverviewPayload({ db });
+          const overview = canUseGlobalScreenRoom(authz)
+            ? await buildScreensOverviewPayload({ db })
+            : await buildAuthorizedScreensOverviewPayload(authz.allowedRows, db);
           if (ack) {
             ack(overview);
           } else {
@@ -130,7 +294,11 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
         }
 
         const screens = (
-          await Promise.all(ids.map((screenId) => buildScreenPlaybackStateById(screenId, { db })))
+          await Promise.all(
+            ids
+              .filter((id) => authz.allowedIds.has(id))
+              .map((screenId) => buildScreenPlaybackStateById(screenId, { db }))
+          )
         ).filter(Boolean);
 
         const result = {
