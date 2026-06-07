@@ -72,6 +72,20 @@ type DeviceCommandClaimSource = 'heartbeat' | 'poll';
 type DeviceCommandAckResult = 'success' | 'failure' | 'error';
 type OutboxDispatchResult = 'dispatched' | 'deferred' | 'failed' | 'skipped_disabled';
 type RealtimeAuthResult = 'success' | 'failure';
+type DeviceSocketAuthMode = 'legacy' | 'signed' | 'unknown';
+type DeviceSocketAuthReason =
+  | 'authorized'
+  | 'missing_identity'
+  | 'legacy_disabled'
+  | 'signed_disabled'
+  | 'missing_signature'
+  | 'malformed_auth'
+  | 'signature_invalid'
+  | 'signature_expired'
+  | 'signature_unavailable'
+  | 'invalid_credentials'
+  | 'device_not_registered'
+  | 'unknown';
 type RealtimeNotificationResult = 'delivered' | 'deferred' | 'payload_too_large' | 'error';
 type RealtimeBusProvider = 'memory' | 'valkey';
 type RealtimeBusPublishResult = 'published' | 'failed' | 'unavailable' | 'payload_too_large';
@@ -98,6 +112,13 @@ type RealtimeSocketRejectReason =
 type RealtimeSocketAuthReason =
   | 'authorized'
   | 'missing_identity'
+  | 'legacy_disabled'
+  | 'signed_disabled'
+  | 'missing_signature'
+  | 'malformed_auth'
+  | 'signature_invalid'
+  | 'signature_expired'
+  | 'signature_unavailable'
   | 'invalid_credentials'
   | 'device_not_registered'
   | 'origin_not_allowed'
@@ -505,6 +526,13 @@ const REALTIME_SOCKET_EVENTS = new Set<string>([
 const REALTIME_SOCKET_AUTH_REASONS = new Set<string>([
   'authorized',
   'missing_identity',
+  'legacy_disabled',
+  'signed_disabled',
+  'missing_signature',
+  'malformed_auth',
+  'signature_invalid',
+  'signature_expired',
+  'signature_unavailable',
   'invalid_credentials',
   'device_not_registered',
   'origin_not_allowed',
@@ -514,11 +542,33 @@ const REALTIME_SOCKET_AUTH_REASONS = new Set<string>([
   'invalid_token',
   'unauthorized',
 ]);
+const DEVICE_SOCKET_AUTH_MODES = new Set<string>(['legacy', 'signed', 'unknown']);
+const DEVICE_SOCKET_AUTH_REASONS = new Set<string>([
+  'authorized',
+  'missing_identity',
+  'legacy_disabled',
+  'signed_disabled',
+  'missing_signature',
+  'malformed_auth',
+  'signature_invalid',
+  'signature_expired',
+  'signature_unavailable',
+  'invalid_credentials',
+  'device_not_registered',
+  'unknown',
+]);
 
 const deviceRealtimeAuthCounter = new Counter({
   name: 'darshan_server_device_realtime_auth_total',
   help: 'Device realtime socket authentication outcomes.',
   labelNames: ['result', 'reason'],
+  registers: [registry],
+});
+
+const deviceSocketAuthCounter = new Counter({
+  name: 'darshan_server_device_socket_auth_total',
+  help: 'Device Socket.IO namespace authentication outcomes by auth mode and bounded reason category.',
+  labelNames: ['namespace', 'mode', 'result', 'reason'],
   registers: [registry],
 });
 
@@ -897,6 +947,22 @@ export function recordDeviceRealtimeAuth(result: RealtimeAuthResult, reason: str
   });
 }
 
+export function recordDeviceSocketAuth(params: {
+  namespace: string;
+  mode: string;
+  result: RealtimeAuthResult;
+  reason: string;
+}) {
+  safeRecord(() => {
+    deviceSocketAuthCounter.inc({
+      namespace: normalizeRealtimeSocketNamespace(params.namespace),
+      mode: normalizeDeviceSocketAuthMode(params.mode),
+      result: params.result,
+      reason: normalizeDeviceSocketAuthReason(params.reason),
+    });
+  });
+}
+
 export function categorizeRealtimeSocketDisconnectReason(reason: string): RealtimeSocketDisconnectReason {
   switch (reason) {
     case 'client namespace disconnect':
@@ -929,6 +995,14 @@ function normalizeRealtimeSocketEvent(event: string): string {
 
 function normalizeRealtimeSocketAuthReason(reason: string): RealtimeSocketAuthReason {
   return REALTIME_SOCKET_AUTH_REASONS.has(reason) ? (reason as RealtimeSocketAuthReason) : 'unknown';
+}
+
+function normalizeDeviceSocketAuthMode(mode: string): DeviceSocketAuthMode {
+  return DEVICE_SOCKET_AUTH_MODES.has(mode) ? (mode as DeviceSocketAuthMode) : 'unknown';
+}
+
+function normalizeDeviceSocketAuthReason(reason: string): DeviceSocketAuthReason {
+  return DEVICE_SOCKET_AUTH_REASONS.has(reason) ? (reason as DeviceSocketAuthReason) : 'unknown';
 }
 
 export function recordRealtimeSocketConnect(namespace: string) {

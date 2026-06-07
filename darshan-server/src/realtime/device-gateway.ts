@@ -1,10 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { Socket } from 'socket.io';
-import { desc, eq } from 'drizzle-orm';
 import { config } from '@/config';
-import { getDatabase, schema } from '@/db';
 import {
   recordDeviceRealtimeAuth,
+  recordDeviceSocketAuth,
   recordDeviceRealtimeNotification,
   recordRealtimeSocketAuth,
   recordRealtimeSocketClientEvent,
@@ -32,6 +31,7 @@ import {
   validateSocketPayload,
   type SocketAck,
 } from '@/realtime/socket-hardening';
+import { authenticateDeviceSocketHandshake, type DeviceSocketAuthFailure } from '@/realtime/device-socket-auth';
 import { createLogger } from '@/utils/logger';
 
 const logger = createLogger('device-realtime-gateway');
@@ -64,12 +64,6 @@ function sendDeviceError(socket: Socket, ack: SocketAck | undefined, response: R
   if (ack) ack(response);
 }
 
-function stringFromHandshake(value: unknown) {
-  if (typeof value === 'string' && value.trim().length > 0) return value.trim();
-  if (Array.isArray(value) && typeof value[0] === 'string' && value[0].trim().length > 0) return value[0].trim();
-  return null;
-}
-
 function notificationSizeBytes(payload: unknown) {
   return Buffer.byteLength(JSON.stringify(payload), 'utf8');
 }
@@ -80,46 +74,6 @@ export function assertNotificationPayloadAllowed(payload: unknown) {
     throw new Error(`WebSocket notification exceeds ${config.WS_NOTIFICATION_MAX_BYTES} bytes`);
   }
   return size;
-}
-
-async function authenticateDeviceSocket(socket: Socket) {
-  const deviceId =
-    stringFromHandshake(socket.handshake.auth?.device_id) ?? stringFromHandshake(socket.handshake.query?.device_id);
-  const serial =
-    stringFromHandshake(socket.handshake.auth?.device_serial) ??
-    stringFromHandshake(socket.handshake.auth?.serial) ??
-    stringFromHandshake(socket.handshake.headers['x-device-serial']);
-
-  if (!deviceId || !serial) {
-    throw new Error('Missing device identity');
-  }
-
-  const db = getDatabase();
-  const certificates = await db
-    .select()
-    .from(schema.deviceCertificates)
-    .where(eq(schema.deviceCertificates.screen_id, deviceId))
-    .orderBy(desc(schema.deviceCertificates.created_at));
-
-  const cert = certificates.find((entry) => entry.serial === serial) ?? null;
-  if (!cert || cert.is_revoked || cert.revoked_at || cert.expires_at.getTime() <= Date.now()) {
-    throw new Error('Invalid device credentials');
-  }
-
-  const [screen] = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.id, deviceId));
-  if (!screen) {
-    throw new Error('Device not registered');
-  }
-
-  return { deviceId, serial };
-}
-
-function classifyDeviceSocketAuthRejectReason(error: unknown) {
-  const message = error instanceof Error ? error.message : '';
-  if (message === 'Missing device identity') return 'missing_identity';
-  if (message === 'Invalid device credentials') return 'invalid_credentials';
-  if (message === 'Device not registered') return 'device_not_registered';
-  return 'unauthorized';
 }
 
 function buildHelloAck(input: {
@@ -167,20 +121,38 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
   });
 
   nsp.use(async (socket, next) => {
-    try {
-      const auth = await authenticateDeviceSocket(socket);
-      (socket.data as any).deviceId = auth.deviceId;
-      (socket.data as any).deviceSerial = auth.serial;
+    const result = await authenticateDeviceSocketHandshake({
+      auth: socket.handshake.auth as Record<string, unknown>,
+      query: socket.handshake.query as Record<string, unknown>,
+      headers: socket.handshake.headers as Record<string, unknown>,
+    });
+
+    if (result.ok) {
+      (socket.data as any).deviceId = result.deviceId;
+      (socket.data as any).deviceSerial = result.serial;
+      (socket.data as any).deviceAuthMode = result.mode;
       recordDeviceRealtimeAuth('success', 'authorized');
+      recordDeviceSocketAuth({
+        namespace: config.REALTIME_DEVICE_NAMESPACE,
+        mode: result.mode,
+        result: 'success',
+        reason: 'authorized',
+      });
       recordRealtimeSocketAuth(config.REALTIME_DEVICE_NAMESPACE, 'success', 'authorized');
       return next();
-    } catch (error) {
-      const reason = classifyDeviceSocketAuthRejectReason(error);
-      recordDeviceRealtimeAuth('failure', error instanceof Error ? error.message : 'unauthorized');
-      recordRealtimeSocketAuth(config.REALTIME_DEVICE_NAMESPACE, 'failure', reason);
-      logger.warn({ reason }, 'Device realtime socket auth failed');
-      return next(new Error('Unauthorized'));
     }
+
+    const failure: DeviceSocketAuthFailure = result;
+    recordDeviceRealtimeAuth('failure', failure.reason);
+    recordDeviceSocketAuth({
+      namespace: config.REALTIME_DEVICE_NAMESPACE,
+      mode: failure.mode,
+      result: 'failure',
+      reason: failure.reason,
+    });
+    recordRealtimeSocketAuth(config.REALTIME_DEVICE_NAMESPACE, 'failure', failure.reason);
+    logger.warn({ mode: failure.mode, reason: failure.reason }, 'Device realtime socket auth failed');
+    return next(new Error('Unauthorized'));
   });
 
   nsp.on('connection', (socket: Socket) => {

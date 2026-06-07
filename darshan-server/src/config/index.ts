@@ -44,6 +44,9 @@ const envSchema = z.object({
   CA_KEY_PATH: z.string().default('./certs/ca.key'),
   DEVICE_AUTH_MODE: z.enum(['legacy', 'dual', 'signature']).default('legacy'),
   DEVICE_AUTH_SIGNATURE_MAX_SKEW_SECONDS: z.coerce.number().int().positive().default(300),
+  DEVICE_SOCKET_LEGACY_AUTH_ALLOWED: optionalBooleanString,
+  DEVICE_SOCKET_SIGNED_AUTH_ENABLED: optionalBooleanString,
+  DEVICE_SOCKET_AUTH_MAX_CLOCK_SKEW_MS: z.coerce.number().int().positive().default(300_000),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   FFMPEG_PATH: z.string().default('ffmpeg'),
   LIBREOFFICE_PATH: z.string().default('soffice'),
@@ -162,6 +165,8 @@ export const config = Object.freeze({
   REALTIME_SOCKET_ALLOW_POLLING: parsed.data.REALTIME_SOCKET_ALLOW_POLLING ?? true,
   REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS:
     parsed.data.REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS ?? false,
+  DEVICE_SOCKET_LEGACY_AUTH_ALLOWED: parsed.data.DEVICE_SOCKET_LEGACY_AUTH_ALLOWED ?? true,
+  DEVICE_SOCKET_SIGNED_AUTH_ENABLED: parsed.data.DEVICE_SOCKET_SIGNED_AUTH_ENABLED ?? true,
   MEDIA_CACHE_REPORTING_ENABLED:
     parsed.data.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED ?? parsed.data.MEDIA_CACHE_REPORTING_ENABLED ?? true,
 });

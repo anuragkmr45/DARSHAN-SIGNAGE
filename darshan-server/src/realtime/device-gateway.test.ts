@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createSign, generateKeyPairSync, randomBytes, randomUUID } from 'crypto';
 import { AddressInfo } from 'net';
 import { FastifyInstance } from 'fastify';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
@@ -8,7 +8,9 @@ import { closeTestServer, createTestServer } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { setupDeviceRealtimeGateway } from '@/realtime/device-gateway';
 import { deviceConnectionRegistry } from '@/realtime/device-connection-registry';
+import { buildDeviceSocketSignaturePayload } from '@/realtime/device-socket-auth';
 import { dispatchPendingCommandOutboxBatch } from '@/services/outbox-dispatcher';
+import { getRecentLogs } from '@/utils/logger';
 
 function waitForSocketConnect(socket: ClientSocket) {
   return new Promise<void>((resolve, reject) => {
@@ -47,7 +49,41 @@ function emitWithAck<T = any>(socket: ClientSocket, event: string, payload: unkn
   });
 }
 
-async function seedDevice() {
+function signPayload(privateKey: string, payload: string) {
+  const signer = createSign('RSA-SHA256');
+  signer.update(payload);
+  signer.end();
+  return signer.sign(privateKey, 'base64');
+}
+
+function signedSocketAuth(input: {
+  deviceId: string;
+  serial: string;
+  privateKey: string;
+  signaturePrivateKey?: string;
+}) {
+  const timestamp = Date.now().toString();
+  const nonce = randomBytes(16).toString('hex');
+  const signingKey = input.signaturePrivateKey ?? input.privateKey;
+  return {
+    device_id: input.deviceId,
+    device_serial: input.serial,
+    auth_version: 'v1',
+    auth_timestamp: timestamp,
+    auth_nonce: nonce,
+    auth_signature: signPayload(
+      signingKey,
+      buildDeviceSocketSignaturePayload({
+        deviceId: input.deviceId,
+        serial: input.serial,
+        timestamp,
+        nonce,
+      })
+    ),
+  };
+}
+
+async function seedDevice(options: { publicKeyPem?: string | null } = {}) {
   const db = getDatabase();
   const deviceId = randomUUID();
   const serial = `device-ws-${randomUUID()}`;
@@ -62,6 +98,8 @@ async function seedDevice() {
     screen_id: deviceId,
     serial,
     certificate_pem: 'test-cert',
+    public_key_pem: options.publicKeyPem ?? null,
+    auth_version: options.publicKeyPem ? 'signature_v1' : 'legacy',
     is_revoked: false,
     expires_at: new Date(Date.now() + 60_000),
   });
@@ -135,6 +173,87 @@ describe('device realtime gateway and outbox dispatcher', () => {
       protocol_version: '1.0',
     });
     expect(deviceConnectionRegistry.getConnections(deviceId)).toHaveLength(1);
+  });
+
+  it('authenticates a device socket with optional signed socket auth', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    const { deviceId, serial } = await seedDevice({ publicKeyPem: publicKey });
+
+    socket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'],
+      auth: signedSocketAuth({
+        deviceId,
+        serial,
+        privateKey,
+      }),
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+    const ack = await emitWithAck<any>(socket, 'HELLO', {
+      type: 'HELLO',
+      protocol_version: '1.0',
+      device_id: deviceId,
+      session_id: 'signed-session',
+    });
+
+    expect(ack).toMatchObject({
+      type: 'HELLO_ACK',
+      device_id: deviceId,
+      session_id: 'signed-session',
+    });
+    expect(deviceConnectionRegistry.getConnections(deviceId)).toHaveLength(1);
+  });
+
+  it('rejects failed signed socket auth without falling back to legacy or leaking signed fields in logs', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    const { privateKey: otherPrivateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    const { deviceId, serial } = await seedDevice({ publicKeyPem: publicKey });
+    const auth = signedSocketAuth({
+      deviceId,
+      serial,
+      privateKey,
+      signaturePrivateKey: otherPrivateKey,
+    });
+
+    const badSocket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'],
+      auth,
+      reconnection: false,
+      forceNew: true,
+    });
+
+    const error = await new Promise<Error>((resolve) => {
+      badSocket.once('connect_error', resolve);
+    });
+    const authFailureLog = getRecentLogs({ limit: 20 }).find(
+      (entry) =>
+        entry.message === 'Device realtime socket auth failed' &&
+        entry.context?.mode === 'signed' &&
+        entry.context?.reason === 'signature_invalid'
+    );
+    const encodedLog = JSON.stringify(authFailureLog ?? {});
+
+    expect(error).toBeTruthy();
+    expect(authFailureLog).toBeTruthy();
+    expect(encodedLog).not.toContain(serial);
+    expect(encodedLog).not.toContain(auth.auth_signature);
+    expect(encodedLog).not.toContain(auth.auth_nonce);
+    expect(deviceConnectionRegistry.getConnections(deviceId)).toHaveLength(0);
+    badSocket.disconnect();
   });
 
   it('rejects malformed HELLO payloads safely', async () => {

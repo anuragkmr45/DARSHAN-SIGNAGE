@@ -13,6 +13,7 @@ import {
   recordDeviceNodeRegistryWrite,
   recordDeviceRealtimeAuth,
   recordDeviceRealtimeNotification,
+  recordDeviceSocketAuth,
   recordJobEnqueue,
   recordMediaCacheReport,
   recordOutboxDispatch,
@@ -120,6 +121,24 @@ describe('backend observability instrumentation', () => {
     recordOutboxDispatch('failed', 'RESYNC_REQUIRED');
     recordDeviceRealtimeAuth('success', 'authorized');
     recordDeviceRealtimeAuth('failure', 'Missing device identity');
+    recordDeviceSocketAuth({
+      namespace: '/device',
+      mode: 'signed',
+      result: 'success',
+      reason: 'authorized',
+    });
+    recordDeviceSocketAuth({
+      namespace: '/device',
+      mode: 'signed',
+      result: 'failure',
+      reason: 'signature_invalid',
+    });
+    recordDeviceSocketAuth({
+      namespace: '/device',
+      mode: 'device-controlled-mode',
+      result: 'failure',
+      reason: 'serial-bearing raw reason',
+    });
     recordDeviceRealtimeNotification('COMMAND_AVAILABLE', 'delivered');
     recordDeviceRealtimeNotification('COMMAND_AVAILABLE', 'deferred');
     recordWebsocketNotificationPayloadTooLarge('COMMAND_AVAILABLE');
@@ -152,6 +171,17 @@ describe('backend observability instrumentation', () => {
     expect(output).toContain(
       'darshan_server_device_realtime_auth_total{result="failure",reason="Missing device identity"} 1'
     );
+    expect(output).toContain(
+      'darshan_server_device_socket_auth_total{namespace="/device",mode="signed",result="success",reason="authorized"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_device_socket_auth_total{namespace="/device",mode="signed",result="failure",reason="signature_invalid"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_device_socket_auth_total{namespace="/device",mode="unknown",result="failure",reason="unknown"} 1'
+    );
+    expect(output).not.toContain('device-controlled-mode');
+    expect(output).not.toContain('serial-bearing raw reason');
     expect(output).toContain(
       'darshan_server_device_realtime_notifications_total{type="COMMAND_AVAILABLE",result="delivered"} 1'
     );
