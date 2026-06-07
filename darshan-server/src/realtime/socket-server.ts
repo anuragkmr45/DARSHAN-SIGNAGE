@@ -1,13 +1,18 @@
 import { FastifyInstance } from 'fastify';
-import { Server as SocketIOServer } from 'socket.io';
+import { Namespace, Server as SocketIOServer } from 'socket.io';
 import type { ServerOptions } from 'socket.io';
 import { config as appConfig } from '@/config';
-import { setWebsocketConnections } from '@/observability/metrics';
+import {
+  recordRealtimeSocketConnect,
+  recordRealtimeSocketDisconnect,
+  setWebsocketConnections,
+} from '@/observability/metrics';
 
 const DEFAULT_ORIGIN = 'http://localhost:8080';
 const DEVELOPMENT_LOCAL_ORIGIN_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const SOCKET_SERVER_KEY = Symbol.for('darshan.socket.io.server');
 const SOCKET_OBSERVABILITY_KEY = Symbol.for('darshan.socket.io.observability');
+const NAMESPACE_OBSERVABILITY_KEY = Symbol.for('darshan.socket.io.namespace.observability');
 let socketServer: SocketIOServer | null = null;
 
 type HttpServerWithSocket = {
@@ -16,6 +21,10 @@ type HttpServerWithSocket = {
 
 type SocketServerWithObservability = SocketIOServer & {
   [SOCKET_OBSERVABILITY_KEY]?: boolean;
+};
+
+type NamespaceWithObservability = Namespace & {
+  [NAMESPACE_OBSERVABILITY_KEY]?: boolean;
 };
 
 function attachSocketObservability(io: SocketIOServer) {
@@ -30,6 +39,21 @@ function attachSocketObservability(io: SocketIOServer) {
     setWebsocketConnections(io.engine.clientsCount);
     socket.on('disconnect', () => {
       setWebsocketConnections(io.engine.clientsCount);
+    });
+  });
+}
+
+export function attachNamespaceSocketObservability(namespace: Namespace, namespaceName: string) {
+  const instrumented = namespace as NamespaceWithObservability;
+  if (instrumented[NAMESPACE_OBSERVABILITY_KEY]) {
+    return;
+  }
+
+  instrumented[NAMESPACE_OBSERVABILITY_KEY] = true;
+  namespace.on('connection', (socket) => {
+    recordRealtimeSocketConnect(namespaceName);
+    socket.on('disconnect', (reason) => {
+      recordRealtimeSocketDisconnect(namespaceName, reason);
     });
   });
 }

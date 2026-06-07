@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   getObservabilityRegistry,
   appendLegacySignhexMetricAliases,
+  categorizeRealtimeSocketDisconnectReason,
   observeJobProcessing,
   observeS3Operation,
   recordDeviceAuthAttempt,
@@ -21,6 +22,12 @@ import {
   recordRealtimeBusNodeMessage,
   recordRealtimeBusPublish,
   recordRealtimeBusSubscribeFailure,
+  recordRealtimeSocketAuth,
+  recordRealtimeSocketClientEvent,
+  recordRealtimeSocketConnect,
+  recordRealtimeSocketDisconnect,
+  recordRealtimeSocketReject,
+  recordRealtimeSocketServerEvent,
   recordTelemetryIngest,
   recordWebsocketNotificationPayloadTooLarge,
   resetObservabilityMetricsForTests,
@@ -185,6 +192,58 @@ describe('backend observability instrumentation', () => {
     expect(output).toContain(
       'darshan_server_media_cache_reports_total{event_type="DISK_FULL",severity="CRITICAL",result="error"} 1'
     );
+  });
+
+  it('records low-cardinality realtime socket namespace metrics', async () => {
+    recordRealtimeSocketConnect('/chat');
+    recordRealtimeSocketClientEvent('/chat', 'chat:typing');
+    recordRealtimeSocketServerEvent('/chat', 'chat:typing');
+    recordRealtimeSocketReject('/chat', 'chat:typing', 'invalid_payload');
+    recordRealtimeSocketReject('/chat', 'chat:typing', 'rate_limited');
+    recordRealtimeSocketAuth('/chat', 'failure', 'invalid_token');
+    recordRealtimeSocketDisconnect('/chat', 'transport close');
+    recordRealtimeSocketConnect('/tenant-controlled-namespace');
+    recordRealtimeSocketDisconnect('/tenant-controlled-namespace', 'raw disconnect reason with token');
+    recordRealtimeSocketClientEvent('/chat', 'client-controlled:event');
+    recordRealtimeSocketServerEvent('/device', 'device-123-controlled-event');
+    recordRealtimeSocketAuth('/screens', 'failure', 'raw token-bearing auth failure');
+
+    const output = await getObservabilityRegistry().metrics();
+
+    expect(categorizeRealtimeSocketDisconnectReason('transport close')).toBe('transport_close');
+    expect(categorizeRealtimeSocketDisconnectReason('unexpected user supplied reason')).toBe('unknown');
+    expect(output).toContain('darshan_server_realtime_socket_connect_total{namespace="/chat"} 1');
+    expect(output).toContain('darshan_server_realtime_socket_disconnect_total{namespace="/chat",reason="transport_close"} 1');
+    expect(output).toContain('darshan_server_realtime_socket_client_events_total{namespace="/chat",event="chat:typing"} 1');
+    expect(output).toContain('darshan_server_realtime_socket_server_events_total{namespace="/chat",event="chat:typing"} 1');
+    expect(output).toContain(
+      'darshan_server_realtime_socket_rejects_total{namespace="/chat",event="chat:typing",reason="invalid_payload"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_realtime_socket_rejects_total{namespace="/chat",event="chat:typing",reason="rate_limited"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_realtime_socket_auth_total{namespace="/chat",result="failure",reason="invalid_token"} 1'
+    );
+    expect(output).toContain('darshan_server_realtime_socket_connect_total{namespace="unknown"} 1');
+    expect(output).toContain('darshan_server_realtime_socket_disconnect_total{namespace="unknown",reason="unknown"} 1');
+    expect(output).toContain(
+      'darshan_server_realtime_socket_client_events_total{namespace="/chat",event="unknown"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_realtime_socket_server_events_total{namespace="/device",event="unknown"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_realtime_socket_auth_total{namespace="/screens",result="failure",reason="unknown"} 1'
+    );
+    expect(output).not.toContain('socket_id=');
+    expect(output).not.toContain('user_id=');
+    expect(output).not.toContain('device_id=');
+    expect(output).not.toContain('/tenant-controlled-namespace');
+    expect(output).not.toContain('raw disconnect reason with token');
+    expect(output).not.toContain('client-controlled:event');
+    expect(output).not.toContain('device-123-controlled-event');
+    expect(output).not.toContain('raw token-bearing auth failure');
   });
 
   it('exposes a Prometheus scrape endpoint and preserves route templates', async () => {

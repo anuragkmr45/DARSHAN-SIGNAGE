@@ -5,6 +5,8 @@ import { afterAll, afterEach, beforeAll, describe, it, expect } from 'vitest';
 import { canSocketSubscribe, resolveSocketAuthToken } from '@/realtime/chat-namespace';
 import { closeTestServer, createTestServer, generateTestToken, testUser } from '@/test/helpers';
 import { createChatRepository } from '@/db/repositories/chat';
+import { getObservabilityRegistry } from '@/observability/metrics';
+import { getRecentLogs } from '@/utils/logger';
 
 function waitForSocketConnect(socket: ClientSocket) {
   return new Promise<void>((resolve, reject) => {
@@ -147,6 +149,28 @@ describe('chat namespace socket payload hardening', () => {
     await waitForSocketConnect(socket);
     return socket;
   }
+
+  it('records auth rejection metrics without logging the rejected token', async () => {
+    const rejectedToken = 'secret-chat-token-that-must-not-appear-in-logs';
+    const rejectedSocket = createClient(`${baseUrl}/chat`, {
+      transports: ['websocket'],
+      auth: { token: rejectedToken },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await expect(waitForSocketConnect(rejectedSocket)).rejects.toBeTruthy();
+    rejectedSocket.disconnect();
+
+    const recentLogText = JSON.stringify(getRecentLogs({ limit: 20 }));
+    expect(recentLogText).toContain('Chat socket auth failed');
+    expect(recentLogText).not.toContain(rejectedToken);
+
+    const metricsOutput = await getObservabilityRegistry().metrics();
+    expect(metricsOutput).toMatch(
+      /darshan_server_realtime_socket_auth_total\{namespace="\/chat",result="failure",reason="invalid_token"\} [1-9]/
+    );
+  });
 
   it('rejects malformed chat socket payloads safely', async () => {
     const chatSocket = await connectChatSocket();

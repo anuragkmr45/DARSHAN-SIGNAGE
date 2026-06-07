@@ -30,6 +30,16 @@ Dedicated realtime sync metrics added locally on 2026-05-24:
 - `darshan_server_device_node_registry_misses_total`
 - `darshan_server_realtime_bus_fallback_total`
 
+Namespace-level realtime observability added in Batch 4:
+
+- `darshan_server_realtime_socket_connections`
+- `darshan_server_realtime_socket_connect_total`
+- `darshan_server_realtime_socket_disconnect_total`
+- `darshan_server_realtime_socket_client_events_total`
+- `darshan_server_realtime_socket_server_events_total`
+- `darshan_server_realtime_socket_rejects_total`
+- `darshan_server_realtime_socket_auth_total`
+
 Dedicated Prometheus recording/alert rules added locally:
 
 - realtime outbox pending rows and oldest pending age
@@ -64,6 +74,7 @@ Latest validation attempt:
 | Fleet heartbeat | `DARSHANFleetHeartbeatsStalled`, `DARSHANFleetOfflinePlayersHigh` | fallback poll/realtime health split absent |
 | Host resources | CPU, memory, filesystem alerts | none for process-specific memory |
 | WebSocket connections | metric exists: `darshan_server_websocket_connections`; auth and notification counters added | production thresholds need QA tuning |
+| Namespace sockets | connect/disconnect, client/server event, auth, validation, rate-limit, and unauthorized reject counters by namespace | production thresholds need QA tuning |
 | Outbox | rows, lag, and dispatch outcome metrics plus alerts added | production thresholds need QA tuning |
 | Command ACK | ACK counters/duration and failure ratio alert added | command-type label intentionally omitted to avoid high cardinality |
 | Media/cache reports | report counters, unresolved critical gauge, and alert rules added | retention/partitioning still needs human decision |
@@ -84,6 +95,15 @@ Expected:
 ```
 
 If Docker images are unavailable, record the exact failure and rerun in the QA build environment.
+
+## Realtime Incident Triage Signals
+
+- Auth-reject spike: check `darshan_server_realtime_socket_auth_total{result="failure"}` by `namespace` and `reason`.
+- Invalid-payload or rate-limit spike: check `darshan_server_realtime_socket_rejects_total` by `namespace`, `event`, and `reason`.
+- Namespace outage or reconnect storm: compare `darshan_server_realtime_socket_connect_total`, `darshan_server_realtime_socket_disconnect_total`, and `darshan_server_realtime_socket_connections`.
+- Valkey fanout failure: check `darshan_server_realtime_bus_publish_total{provider="valkey",result!="published"}`, `darshan_server_realtime_bus_subscribe_failures_total`, and `darshan_server_realtime_bus_fallback_total`.
+- Outbox lag: check `darshan_server_command_outbox_oldest_pending_age_seconds`, `darshan_server_command_outbox_rows{status="PENDING"}`, and `darshan_server_command_outbox_dispatch_total{result="failed"}`.
+- Rollback flags remain `OUTBOX_DISPATCH_ENABLED=false`, `REALTIME_SYNC_ENABLED=false`, and player `DARSHAN_REALTIME_PLAYER_ENABLED=false`; keep REST polling, heartbeat, and command APIs active.
 
 ## Production Alert Gate
 

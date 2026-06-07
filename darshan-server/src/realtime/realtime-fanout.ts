@@ -2,6 +2,7 @@ import { config } from '@/config';
 import {
   recordRealtimeBusFallback,
   recordRealtimeBusNodeMessage,
+  recordRealtimeSocketServerEvent,
 } from '@/observability/metrics';
 import { createDeviceNodeRegistry, DeviceNodeRegistry } from '@/realtime/device-node-registry';
 import { createRealtimeBus, RealtimeBus, RealtimeWakeMessage } from '@/realtime/realtime-bus';
@@ -101,6 +102,9 @@ export function handleLocalFanoutDelivery(message: RealtimeWakeMessage, deliver:
   try {
     const delivered = deliver(message);
     recordRealtimeBusNodeMessage(delivered > 0 ? 'delivered' : 'socket_missing', message.type ?? 'unknown');
+    if (delivered > 0) {
+      recordRealtimeSocketServerEvent(config.REALTIME_DEVICE_NAMESPACE, message.type ?? 'unknown', delivered);
+    }
     return delivered;
   } catch (error) {
     recordRealtimeBusNodeMessage('error', message.type ?? 'unknown');

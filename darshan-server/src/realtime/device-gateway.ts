@@ -6,6 +6,9 @@ import { getDatabase, schema } from '@/db';
 import {
   recordDeviceRealtimeAuth,
   recordDeviceRealtimeNotification,
+  recordRealtimeSocketAuth,
+  recordRealtimeSocketClientEvent,
+  recordRealtimeSocketServerEvent,
   recordWebsocketNotificationPayloadTooLarge,
 } from '@/observability/metrics';
 import { deviceConnectionRegistry } from '@/realtime/device-connection-registry';
@@ -18,7 +21,7 @@ import {
   registerDeviceForFanout,
   unregisterDeviceForFanout,
 } from '@/realtime/realtime-fanout';
-import { getOrCreateSocketServer } from '@/realtime/socket-server';
+import { attachNamespaceSocketObservability, getOrCreateSocketServer } from '@/realtime/socket-server';
 import {
   buildDeviceSocketError,
   consumeSocketRateLimit,
@@ -56,6 +59,7 @@ type DeviceHelloPayload = {
 };
 
 function sendDeviceError(socket: Socket, ack: SocketAck | undefined, response: Record<string, unknown>) {
+  recordRealtimeSocketServerEvent(config.REALTIME_DEVICE_NAMESPACE, 'ERROR');
   socket.emit('ERROR', response);
   if (ack) ack(response);
 }
@@ -110,6 +114,14 @@ async function authenticateDeviceSocket(socket: Socket) {
   return { deviceId, serial };
 }
 
+function classifyDeviceSocketAuthRejectReason(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'Missing device identity') return 'missing_identity';
+  if (message === 'Invalid device credentials') return 'invalid_credentials';
+  if (message === 'Device not registered') return 'device_not_registered';
+  return 'unauthorized';
+}
+
 function buildHelloAck(input: {
   deviceId: string;
   sessionId: string | null;
@@ -143,6 +155,7 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
 
   const io = getOrCreateSocketServer(fastify);
   const nsp = io.of(config.REALTIME_DEVICE_NAMESPACE);
+  attachNamespaceSocketObservability(nsp, config.REALTIME_DEVICE_NAMESPACE);
 
   void initializeRealtimeFanout((message) => {
     handleLocalFanoutDelivery(message, (incoming) => {
@@ -159,16 +172,20 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
       (socket.data as any).deviceId = auth.deviceId;
       (socket.data as any).deviceSerial = auth.serial;
       recordDeviceRealtimeAuth('success', 'authorized');
+      recordRealtimeSocketAuth(config.REALTIME_DEVICE_NAMESPACE, 'success', 'authorized');
       return next();
     } catch (error) {
+      const reason = classifyDeviceSocketAuthRejectReason(error);
       recordDeviceRealtimeAuth('failure', error instanceof Error ? error.message : 'unauthorized');
-      logger.warn({ err: error }, 'Device realtime socket auth failed');
+      recordRealtimeSocketAuth(config.REALTIME_DEVICE_NAMESPACE, 'failure', reason);
+      logger.warn({ reason }, 'Device realtime socket auth failed');
       return next(new Error('Unauthorized'));
     }
   });
 
   nsp.on('connection', (socket: Socket) => {
     socket.on('HELLO', (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      recordRealtimeSocketClientEvent(config.REALTIME_DEVICE_NAMESPACE, 'HELLO');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
         const parsed = validateSocketPayload({
@@ -219,6 +236,7 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
           protocolVersion,
         });
         assertNotificationPayloadAllowed(response);
+        recordRealtimeSocketServerEvent(config.REALTIME_DEVICE_NAMESPACE, 'HELLO_ACK');
         socket.emit('HELLO_ACK', response);
         if (ack) ack(response);
       } catch (error) {
@@ -232,12 +250,14 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
           retryable: false,
           server_time: new Date().toISOString(),
         };
+        recordRealtimeSocketServerEvent(config.REALTIME_DEVICE_NAMESPACE, 'ERROR');
         socket.emit('ERROR', response);
         if (ack) ack(response);
       }
     });
 
     socket.on('PING', (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      recordRealtimeSocketClientEvent(config.REALTIME_DEVICE_NAMESPACE, 'PING');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
         const parsed = validateSocketPayload({
@@ -292,6 +312,7 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
           server_time: new Date().toISOString(),
           echo: parsed.data ?? null,
         };
+        recordRealtimeSocketServerEvent(config.REALTIME_DEVICE_NAMESPACE, 'PONG');
         socket.emit('PONG', response);
         if (ack) ack(response);
       } catch (error) {
@@ -347,6 +368,7 @@ export async function sendDeviceNotification(deviceId: string, type: 'COMMAND_AV
     assertNotificationPayloadAllowed(message);
     const deliveredConnections = deviceConnectionRegistry.emitToDevice(deviceId, type, message);
     if (deliveredConnections > 0) {
+      recordRealtimeSocketServerEvent(config.REALTIME_DEVICE_NAMESPACE, type, deliveredConnections);
       recordDeviceRealtimeNotification(type, 'delivered');
       return deliveredConnections;
     }

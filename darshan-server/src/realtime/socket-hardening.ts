@@ -1,6 +1,7 @@
 import { z, type ZodType } from 'zod';
 import { Socket } from 'socket.io';
 import { config } from '@/config';
+import { recordRealtimeSocketReject } from '@/observability/metrics';
 import { createLogger } from '@/utils/logger';
 
 const logger = createLogger('realtime-socket-hardening');
@@ -229,6 +230,7 @@ function logRealtimeReject(
   reason: RealtimeRejectReason,
   details: Record<string, unknown> = {}
 ) {
+  recordRealtimeSocketReject(namespace, event, reason);
   logger.warn(
     {
       namespace,

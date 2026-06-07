@@ -4,8 +4,14 @@ import { verifyAccessToken } from '@/auth/jwt';
 import { createSessionRepository } from '@/db/repositories/session';
 import { createNotificationCounterRepository } from '@/db/repositories/notification-counter';
 import { createLogger } from '@/utils/logger';
-import { resolveSocketAuthToken } from '@/realtime/chat-namespace';
 import {
+  recordRealtimeSocketAuth,
+  recordRealtimeSocketClientEvent,
+  recordRealtimeSocketServerEvent,
+} from '@/observability/metrics';
+import { classifySocketAuthRejectReason, resolveSocketAuthToken } from '@/realtime/chat-namespace';
+import {
+  attachNamespaceSocketObservability,
   getOrCreateSocketServer,
   getSocketAllowedOrigins,
 } from '@/realtime/socket-server';
@@ -47,6 +53,7 @@ function respondNotificationSocketError(
   if (ack) {
     ack(response);
   } else {
+    recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:error');
     socket.emit('notifications:error', response);
   }
 }
@@ -59,6 +66,7 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
   const sessionRepo = createSessionRepository();
   const counterRepo = createNotificationCounterRepository();
   const nsp = io.of(NOTIFICATIONS_NAMESPACE);
+  attachNamespaceSocketObservability(nsp, NOTIFICATIONS_NAMESPACE);
 
   nsp.use(async (socket, next) => {
     try {
@@ -80,19 +88,26 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
       });
 
       if (!resolved.token) {
+        const reason = classifySocketAuthRejectReason(resolved.error);
+        recordRealtimeSocketAuth(NOTIFICATIONS_NAMESPACE, 'failure', reason);
+        logger.warn({ namespace: NOTIFICATIONS_NAMESPACE, reason }, 'Notification socket auth failed');
         return next(new Error(resolved.error || 'Unauthorized'));
       }
 
       const payload = await verifyAccessToken(resolved.token);
       const session = await sessionRepo.findByJti(payload.jti);
       if (!isSessionValidForUser(session, payload.sub)) {
+        recordRealtimeSocketAuth(NOTIFICATIONS_NAMESPACE, 'failure', 'token_revoked');
+        logger.warn({ namespace: NOTIFICATIONS_NAMESPACE, reason: 'token_revoked' }, 'Notification socket auth failed');
         return next(new Error('Token has been revoked'));
       }
 
       (socket.data as any).user = payload;
+      recordRealtimeSocketAuth(NOTIFICATIONS_NAMESPACE, 'success', 'authorized');
       return next();
     } catch (error) {
-      logger.warn(error, 'Notification socket auth failed');
+      recordRealtimeSocketAuth(NOTIFICATIONS_NAMESPACE, 'failure', 'invalid_token');
+      logger.warn({ namespace: NOTIFICATIONS_NAMESPACE, reason: 'invalid_token' }, 'Notification socket auth failed');
       return next(new Error('Unauthorized'));
     }
   });
@@ -112,6 +127,7 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
     });
 
     socket.on('notifications:sync', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      recordRealtimeSocketClientEvent(NOTIFICATIONS_NAMESPACE, 'notifications:sync');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
         const parsed = validateSocketPayload({
@@ -154,6 +170,7 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
         if (ack) {
           ack({ unread_total });
         } else {
+          recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:count');
           socket.emit('notifications:count', { unread_total });
         }
       } catch (error) {
@@ -163,6 +180,7 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
 
     try {
       const unread_total = await counterRepo.getUnreadTotal(user.sub);
+      recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:count');
       socket.emit('notifications:count', { unread_total });
     } catch (error) {
       logger.warn(error, 'Failed to emit initial notification count');
@@ -178,6 +196,7 @@ export function emitNotificationCountEvent(
   unread_total: number
 ) {
   const io = getOrCreateSocketServer(fastify);
+  recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:count');
   io.of(NOTIFICATIONS_NAMESPACE)
     .to(notificationUserRoom(userId))
     .emit('notifications:count', { unread_total });

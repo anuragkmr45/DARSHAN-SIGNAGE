@@ -6,12 +6,23 @@ import { createSessionRepository } from '@/db/repositories/session';
 import { getDatabase, schema } from '@/db';
 import { createLogger } from '@/utils/logger';
 import {
+  recordRealtimeSocketAuth,
+  recordRealtimeSocketClientEvent,
+  recordRealtimeSocketReject,
+  recordRealtimeSocketServerEvent,
+} from '@/observability/metrics';
+import {
   buildScreenPlaybackStateById,
   buildScreensOverviewPayload,
   summarizeGroupPlayback,
 } from '@/screens/playback';
-import { resolveSocketAuthToken } from '@/realtime/chat-namespace';
-import { getOrCreateSocketServer, getSocketAllowedOrigins, getSocketServer } from '@/realtime/socket-server';
+import { classifySocketAuthRejectReason, resolveSocketAuthToken } from '@/realtime/chat-namespace';
+import {
+  attachNamespaceSocketObservability,
+  getOrCreateSocketServer,
+  getSocketAllowedOrigins,
+  getSocketServer,
+} from '@/realtime/socket-server';
 import {
   buildSafeSocketError,
   consumeSocketRateLimit,
@@ -130,13 +141,12 @@ function logScreenSocketReject(
   details: { requestedCount: number; rejectedCount: number; reason: string }
 ) {
   if (details.rejectedCount <= 0) return;
-  const user = getSocketUser(socket);
+  recordRealtimeSocketReject(SCREENS_NAMESPACE, event, 'unauthorized');
   logger.warn(
     {
       event,
       reason: details.reason,
       socket_id: socket.id,
-      user_id: user.sub,
       requested_count: details.requestedCount,
       rejected_count: details.rejectedCount,
     },
@@ -155,6 +165,7 @@ function respondScreenSocketError(
   if (ack) {
     ack(response);
   } else {
+    recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:error');
     socket.emit('screens:error', response);
   }
 }
@@ -203,6 +214,7 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
   const sessionRepo = createSessionRepository();
   const db = getDatabase();
   const nsp = io.of(SCREENS_NAMESPACE);
+  attachNamespaceSocketObservability(nsp, SCREENS_NAMESPACE);
 
   nsp.use(async (socket, next) => {
     try {
@@ -220,19 +232,26 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
       });
 
       if (!resolved.token) {
+        const reason = classifySocketAuthRejectReason(resolved.error);
+        recordRealtimeSocketAuth(SCREENS_NAMESPACE, 'failure', reason);
+        logger.warn({ namespace: SCREENS_NAMESPACE, reason }, 'Screen socket auth failed');
         return next(new Error(resolved.error || 'Unauthorized'));
       }
 
       const payload = await verifyAccessToken(resolved.token);
       const session = await sessionRepo.findByJti(payload.jti);
       if (!isSessionValidForUser(session, payload.sub)) {
+        recordRealtimeSocketAuth(SCREENS_NAMESPACE, 'failure', 'token_revoked');
+        logger.warn({ namespace: SCREENS_NAMESPACE, reason: 'token_revoked' }, 'Screen socket auth failed');
         return next(new Error('Token has been revoked'));
       }
 
       (socket.data as any).user = payload;
+      recordRealtimeSocketAuth(SCREENS_NAMESPACE, 'success', 'authorized');
       return next();
     } catch (error) {
-      logger.warn(error, 'Screen socket auth failed');
+      recordRealtimeSocketAuth(SCREENS_NAMESPACE, 'failure', 'invalid_token');
+      logger.warn({ namespace: SCREENS_NAMESPACE, reason: 'invalid_token' }, 'Screen socket auth failed');
       return next(new Error('Unauthorized'));
     }
   });
@@ -244,6 +263,7 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
     });
 
     socket.on('screens:subscribe', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      recordRealtimeSocketClientEvent(SCREENS_NAMESPACE, 'screens:subscribe');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
         const parsed = validateSocketPayload({
@@ -339,6 +359,7 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
     });
 
     socket.on('screens:sync', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      recordRealtimeSocketClientEvent(SCREENS_NAMESPACE, 'screens:sync');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
         const parsed = validateSocketPayload({
@@ -396,6 +417,7 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
           if (ack) {
             ack(overview);
           } else {
+            recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:sync');
             socket.emit('screens:sync', overview);
           }
           return;
@@ -417,6 +439,7 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
         if (ack) {
           ack(result);
         } else {
+          recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:sync');
           socket.emit('screens:sync', result);
         }
       } catch (error) {
@@ -442,6 +465,7 @@ function emitScreenState(io: ReturnType<typeof getOrCreateSocketServer>, screen:
       server_time: new Date().toISOString(),
       screen,
     });
+  recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:state:update');
 }
 
 export function emitScreenStateUpdate(
@@ -473,6 +497,7 @@ function emitScreenPreview(io: ReturnType<typeof getOrCreateSocketServer>, paylo
     .to(screensAllRoom())
     .to(screenRoom(payload.screenId))
     .emit('screens:preview:update', payload);
+  recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:preview:update');
 }
 
 export function emitScreenPreviewUpdate(
@@ -525,4 +550,5 @@ export function emitScreensRefreshRequired(
     screen_ids: payload.screen_ids || [],
     group_ids: payload.group_ids || [],
   });
+  recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:refresh:required');
 }

@@ -12,6 +12,7 @@ import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
 import * as s3 from '@/s3';
 import { emitScreenPreviewUpdate, emitScreenStateUpdate } from '@/realtime/screens-namespace';
+import { getObservabilityRegistry } from '@/observability/metrics';
 
 async function issueAdminTokenWithSession() {
   const db = getDatabase();
@@ -351,6 +352,11 @@ describe('screens namespace realtime updates', () => {
     expect(subscribeResult.subscribed).toContain(allowedScreenId);
     expect(subscribeResult.subscribed).not.toContain(unauthorizedScreenId);
     expect(subscribeResult.rejected).toContain(unauthorizedScreenId);
+
+    const metricsOutput = await getObservabilityRegistry().metrics();
+    expect(metricsOutput).toMatch(
+      /darshan_server_realtime_socket_rejects_total\{namespace="\/screens",event="screens:subscribe",reason="unauthorized"\} [1-9]/
+    );
   });
 
   it('does not deliver unauthorized screen state updates to a scoped socket', async () => {

@@ -79,6 +79,34 @@ type RealtimeBusNodeMessageResult = 'received' | 'delivered' | 'socket_missing' 
 type DeviceNodeRegistryOperation = 'register' | 'refresh' | 'unregister';
 type DeviceNodeRegistryResult = 'success' | 'error' | 'unavailable';
 type RealtimeBusFallbackReason = 'valkey_unavailable' | 'device_node_missing';
+type RealtimeSocketAuthResult = 'success' | 'failure';
+type RealtimeSocketNamespace = '/device' | '/screens' | '/chat' | '/notifications' | 'unknown';
+type RealtimeSocketDisconnectReason =
+  | 'client_disconnect'
+  | 'server_disconnect'
+  | 'ping_timeout'
+  | 'transport_close'
+  | 'transport_error'
+  | 'namespace_disconnect'
+  | 'unknown';
+type RealtimeSocketRejectReason =
+  | 'invalid_payload'
+  | 'payload_too_large'
+  | 'rate_limited'
+  | 'unauthorized'
+  | 'auth_failed';
+type RealtimeSocketAuthReason =
+  | 'authorized'
+  | 'missing_identity'
+  | 'invalid_credentials'
+  | 'device_not_registered'
+  | 'origin_not_allowed'
+  | 'origin_required'
+  | 'missing_token'
+  | 'token_revoked'
+  | 'invalid_token'
+  | 'unauthorized'
+  | 'unknown';
 type MediaCacheReportResult = 'accepted' | 'disabled' | 'error';
 
 type JobResult = 'success' | 'error';
@@ -394,6 +422,98 @@ const websocketConnectionsGauge = new Gauge({
   help: 'Current websocket connections on darshan-server.',
   registers: [registry],
 });
+
+const realtimeSocketConnectionsGauge = new Gauge({
+  name: 'darshan_server_realtime_socket_connections',
+  help: 'Current realtime Socket.IO connections by namespace.',
+  labelNames: ['namespace'],
+  registers: [registry],
+});
+const realtimeSocketConnectionCounts = new Map<string, number>();
+
+const realtimeSocketConnectCounter = new Counter({
+  name: 'darshan_server_realtime_socket_connect_total',
+  help: 'Realtime Socket.IO connection attempts accepted by namespace.',
+  labelNames: ['namespace'],
+  registers: [registry],
+});
+
+const realtimeSocketDisconnectCounter = new Counter({
+  name: 'darshan_server_realtime_socket_disconnect_total',
+  help: 'Realtime Socket.IO disconnects by namespace and low-cardinality reason category.',
+  labelNames: ['namespace', 'reason'],
+  registers: [registry],
+});
+
+const realtimeSocketClientEventCounter = new Counter({
+  name: 'darshan_server_realtime_socket_client_events_total',
+  help: 'Client-originated realtime Socket.IO events by namespace and event name.',
+  labelNames: ['namespace', 'event'],
+  registers: [registry],
+});
+
+const realtimeSocketServerEventCounter = new Counter({
+  name: 'darshan_server_realtime_socket_server_events_total',
+  help: 'Server-emitted realtime Socket.IO events by namespace and event name.',
+  labelNames: ['namespace', 'event'],
+  registers: [registry],
+});
+
+const realtimeSocketRejectCounter = new Counter({
+  name: 'darshan_server_realtime_socket_rejects_total',
+  help: 'Realtime Socket.IO event rejects by namespace, event, and low-cardinality reason.',
+  labelNames: ['namespace', 'event', 'reason'],
+  registers: [registry],
+});
+
+const realtimeSocketAuthCounter = new Counter({
+  name: 'darshan_server_realtime_socket_auth_total',
+  help: 'Realtime Socket.IO namespace authentication outcomes by namespace and reason category.',
+  labelNames: ['namespace', 'result', 'reason'],
+  registers: [registry],
+});
+const REALTIME_SOCKET_NAMESPACES = new Set<string>(['/device', '/screens', '/chat', '/notifications']);
+const REALTIME_SOCKET_EVENTS = new Set<string>([
+  'HELLO',
+  'HELLO_ACK',
+  'PING',
+  'PONG',
+  'ERROR',
+  'COMMAND_AVAILABLE',
+  'RESYNC_REQUIRED',
+  'SERVER_TIME',
+  'screens:subscribe',
+  'screens:sync',
+  'screens:error',
+  'screens:state:update',
+  'screens:preview:update',
+  'screens:refresh:required',
+  'chat:subscribe',
+  'chat:typing',
+  'chat:read',
+  'chat:error',
+  'chat:message:new',
+  'chat:message:updated',
+  'chat:message:deleted',
+  'chat:conversation:updated',
+  'chat:pin:update',
+  'chat:bookmark:update',
+  'notifications:sync',
+  'notifications:error',
+  'notifications:count',
+]);
+const REALTIME_SOCKET_AUTH_REASONS = new Set<string>([
+  'authorized',
+  'missing_identity',
+  'invalid_credentials',
+  'device_not_registered',
+  'origin_not_allowed',
+  'origin_required',
+  'missing_token',
+  'token_revoked',
+  'invalid_token',
+  'unauthorized',
+]);
 
 const deviceRealtimeAuthCounter = new Counter({
   name: 'darshan_server_device_realtime_auth_total',
@@ -777,6 +897,112 @@ export function recordDeviceRealtimeAuth(result: RealtimeAuthResult, reason: str
   });
 }
 
+export function categorizeRealtimeSocketDisconnectReason(reason: string): RealtimeSocketDisconnectReason {
+  switch (reason) {
+    case 'client namespace disconnect':
+    case 'io client disconnect':
+      return 'client_disconnect';
+    case 'server namespace disconnect':
+    case 'server shutting down':
+    case 'forced close':
+      return 'server_disconnect';
+    case 'ping timeout':
+      return 'ping_timeout';
+    case 'transport close':
+      return 'transport_close';
+    case 'transport error':
+      return 'transport_error';
+    case 'namespace disconnect':
+      return 'namespace_disconnect';
+    default:
+      return 'unknown';
+  }
+}
+
+function normalizeRealtimeSocketNamespace(namespace: string): RealtimeSocketNamespace {
+  return REALTIME_SOCKET_NAMESPACES.has(namespace) ? (namespace as RealtimeSocketNamespace) : 'unknown';
+}
+
+function normalizeRealtimeSocketEvent(event: string): string {
+  return REALTIME_SOCKET_EVENTS.has(event) ? event : 'unknown';
+}
+
+function normalizeRealtimeSocketAuthReason(reason: string): RealtimeSocketAuthReason {
+  return REALTIME_SOCKET_AUTH_REASONS.has(reason) ? (reason as RealtimeSocketAuthReason) : 'unknown';
+}
+
+export function recordRealtimeSocketConnect(namespace: string) {
+  safeRecord(() => {
+    const normalizedNamespace = normalizeRealtimeSocketNamespace(namespace);
+    const nextCount = (realtimeSocketConnectionCounts.get(normalizedNamespace) || 0) + 1;
+    realtimeSocketConnectionCounts.set(normalizedNamespace, nextCount);
+    realtimeSocketConnectionsGauge.set({ namespace: normalizedNamespace }, nextCount);
+    realtimeSocketConnectCounter.inc({ namespace: normalizedNamespace });
+  });
+}
+
+export function recordRealtimeSocketDisconnect(namespace: string, reason: string) {
+  safeRecord(() => {
+    const normalizedNamespace = normalizeRealtimeSocketNamespace(namespace);
+    const nextCount = Math.max((realtimeSocketConnectionCounts.get(normalizedNamespace) || 0) - 1, 0);
+    realtimeSocketConnectionCounts.set(normalizedNamespace, nextCount);
+    realtimeSocketConnectionsGauge.set({ namespace: normalizedNamespace }, nextCount);
+    realtimeSocketDisconnectCounter.inc({
+      namespace: normalizedNamespace,
+      reason: categorizeRealtimeSocketDisconnectReason(reason),
+    });
+  });
+}
+
+export function recordRealtimeSocketClientEvent(namespace: string, event: string) {
+  safeRecord(() => {
+    realtimeSocketClientEventCounter.inc({
+      namespace: normalizeRealtimeSocketNamespace(namespace),
+      event: normalizeRealtimeSocketEvent(event),
+    });
+  });
+}
+
+export function recordRealtimeSocketServerEvent(namespace: string, event: string, count = 1) {
+  safeRecord(() => {
+    realtimeSocketServerEventCounter.inc(
+      {
+        namespace: normalizeRealtimeSocketNamespace(namespace),
+        event: normalizeRealtimeSocketEvent(event),
+      },
+      Math.max(count, 0)
+    );
+  });
+}
+
+export function recordRealtimeSocketReject(
+  namespace: string,
+  event: string,
+  reason: RealtimeSocketRejectReason
+) {
+  safeRecord(() => {
+    realtimeSocketRejectCounter.inc({
+      namespace: normalizeRealtimeSocketNamespace(namespace),
+      event: normalizeRealtimeSocketEvent(event),
+      reason,
+    });
+  });
+}
+
+export function recordRealtimeSocketAuth(
+  namespace: string,
+  result: RealtimeSocketAuthResult,
+  reason: string
+) {
+  safeRecord(() => {
+    realtimeSocketAuthCounter.inc({
+      namespace: normalizeRealtimeSocketNamespace(namespace),
+      result,
+      reason: normalizeRealtimeSocketAuthReason(reason),
+    });
+  });
+}
+
 export function recordDeviceRealtimeNotification(type: string, result: RealtimeNotificationResult) {
   safeRecord(() => {
     deviceRealtimeNotificationCounter.inc({ type, result });
@@ -923,6 +1149,7 @@ export function setWebsocketConnections(count: number) {
 
 export function resetObservabilityMetricsForTests() {
   registry.resetMetrics();
+  realtimeSocketConnectionCounts.clear();
   setWebsocketConnections(0);
   pgBossAvailableGauge.set(0);
   latestHeartbeatAgeGauge.set(0);
