@@ -19,10 +19,21 @@ import {
   unregisterDeviceForFanout,
 } from '@/realtime/realtime-fanout';
 import { getOrCreateSocketServer } from '@/realtime/socket-server';
+import {
+  buildDeviceSocketError,
+  consumeSocketRateLimit,
+  deviceHelloPayloadSchema,
+  devicePingPayloadSchema,
+  normalizePayloadAndAck,
+  SocketEventRateLimiter,
+  validateSocketPayload,
+  type SocketAck,
+} from '@/realtime/socket-hardening';
 import { createLogger } from '@/utils/logger';
 
 const logger = createLogger('device-realtime-gateway');
 let deviceNodeRefreshTimer: NodeJS.Timeout | null = null;
+const devicePingRateLimiter = new SocketEventRateLimiter(30, 1);
 
 export const DEVICE_REALTIME_MESSAGE_TYPES = [
   'HELLO',
@@ -43,6 +54,11 @@ type DeviceHelloPayload = {
   app?: { version?: string };
   platform?: { family?: string };
 };
+
+function sendDeviceError(socket: Socket, ack: SocketAck | undefined, response: Record<string, unknown>) {
+  socket.emit('ERROR', response);
+  if (ack) ack(response);
+}
 
 function stringFromHandshake(value: unknown) {
   if (typeof value === 'string' && value.trim().length > 0) return value.trim();
@@ -152,8 +168,33 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
   });
 
   nsp.on('connection', (socket: Socket) => {
-    socket.on('HELLO', (payload: DeviceHelloPayload, ack?: (result: unknown) => void) => {
+    socket.on('HELLO', (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        const parsed = validateSocketPayload({
+          socket,
+          namespace: '/device',
+          event: 'HELLO',
+          payload: rawPayload,
+          schema: deviceHelloPayloadSchema,
+        });
+        if (!parsed.ok) {
+          if (parsed.reason === 'payload_too_large') {
+            recordWebsocketNotificationPayloadTooLarge('HELLO');
+          }
+          sendDeviceError(
+            socket,
+            ack,
+            buildDeviceSocketError(
+              'HELLO_INVALID',
+              parsed.reason === 'payload_too_large' ? 'HELLO payload too large' : 'Invalid HELLO payload',
+              false
+            )
+          );
+          return;
+        }
+
+        const payload = parsed.data as DeviceHelloPayload;
         assertNotificationPayloadAllowed(payload);
         const deviceId = (socket.data as any).deviceId as string;
         if (payload?.device_id && payload.device_id !== deviceId) {
@@ -196,21 +237,72 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
       }
     });
 
-    socket.on('PING', (payload: unknown, ack?: (result: unknown) => void) => {
-      const deviceId = (socket.data as any).deviceId as string | undefined;
-      if (deviceId) {
-        void refreshDeviceForFanout(deviceId);
+    socket.on('PING', (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
+      try {
+        const parsed = validateSocketPayload({
+          socket,
+          namespace: '/device',
+          event: 'PING',
+          payload: rawPayload,
+          schema: devicePingPayloadSchema,
+        });
+        if (!parsed.ok) {
+          if (parsed.reason === 'payload_too_large') {
+            recordWebsocketNotificationPayloadTooLarge('PING');
+          }
+          sendDeviceError(
+            socket,
+            ack,
+            buildDeviceSocketError(
+              'PING_INVALID',
+              parsed.reason === 'payload_too_large' ? 'PING payload too large' : 'Invalid PING payload',
+              false
+            )
+          );
+          return;
+        }
+
+        const rateLimit = consumeSocketRateLimit({
+          socket,
+          namespace: '/device',
+          event: 'PING',
+          limiter: devicePingRateLimiter,
+        });
+        if (!rateLimit.allowed) {
+          sendDeviceError(
+            socket,
+            ack,
+            buildDeviceSocketError(
+              'RATE_LIMITED',
+              'PING rate limit exceeded',
+              true,
+              rateLimit.retryAfterSeconds
+            )
+          );
+          return;
+        }
+
+        const deviceId = (socket.data as any).deviceId as string | undefined;
+        if (deviceId) {
+          void refreshDeviceForFanout(deviceId);
+        }
+        const response = {
+          type: 'PONG',
+          server_time: new Date().toISOString(),
+          echo: parsed.data ?? null,
+        };
+        socket.emit('PONG', response);
+        if (ack) ack(response);
+      } catch (error) {
+        logger.warn({ err: error, socket_id: socket.id }, 'Failed to handle device PING');
+        const response = buildDeviceSocketError('PING_INVALID', 'Invalid PING payload', false);
+        sendDeviceError(socket, ack, response);
       }
-      const response = {
-        type: 'PONG',
-        server_time: new Date().toISOString(),
-        echo: payload ?? null,
-      };
-      socket.emit('PONG', response);
-      if (ack) ack(response);
     });
 
     socket.on('disconnect', () => {
+      devicePingRateLimiter.clear(socket.id);
       const deviceId = (socket.data as any).deviceId as string | undefined;
       deviceConnectionRegistry.unregisterSocket(socket.id);
       if (deviceId) {

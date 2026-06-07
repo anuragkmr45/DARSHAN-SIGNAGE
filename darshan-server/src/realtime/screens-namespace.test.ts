@@ -129,6 +129,12 @@ function expectNoEvent<T>(socket: ClientSocket, event: string, predicate: (paylo
   });
 }
 
+function emitWithAck<T = any>(socket: ClientSocket, event: string, payload: unknown) {
+  return new Promise<T>((resolve) => {
+    socket.emit(event, payload, (result: T) => resolve(result));
+  });
+}
+
 describe('screens namespace realtime updates', () => {
   let server: FastifyInstance;
   let baseUrl: string;
@@ -200,6 +206,37 @@ describe('screens namespace realtime updates', () => {
 
     expect(Array.isArray(syncResult.screens)).toBe(true);
     expect(syncResult.screens[0].id).toBe(screenId);
+  });
+
+  it('rejects malformed subscribe and sync payloads safely', async () => {
+    socket = createClient(`${baseUrl}/screens`, {
+      transports: ['websocket'],
+      auth: { token: adminToken },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+
+    const subscribeResult = await emitWithAck<any>(socket, 'screens:subscribe', {
+      includeAll: 'true',
+      screenIds: ['not-a-uuid'],
+    });
+    expect(subscribeResult).toMatchObject({
+      error: {
+        code: 'INVALID_PAYLOAD',
+      },
+    });
+
+    const syncResult = await emitWithAck<any>(socket, 'screens:sync', {
+      screenIds: ['not-a-uuid'],
+    });
+    expect(syncResult).toMatchObject({
+      error: {
+        code: 'INVALID_PAYLOAD',
+      },
+    });
+    expect(socket.connected).toBe(true);
   });
 
   it('allows an operator with full screen read access to subscribe includeAll', async () => {

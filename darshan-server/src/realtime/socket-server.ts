@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { Server as SocketIOServer } from 'socket.io';
+import type { ServerOptions } from 'socket.io';
 import { config as appConfig } from '@/config';
 import { setWebsocketConnections } from '@/observability/metrics';
 
@@ -74,6 +75,19 @@ export function getSocketAllowedOrigins(): string[] {
   return dedupeOrigins([DEFAULT_ORIGIN, ...fromHttpOrigins]);
 }
 
+function getSocketTransports(): ServerOptions['transports'] {
+  const transports = new Set<'websocket' | 'polling'>([appConfig.REALTIME_SOCKET_TRANSPORT]);
+  if (appConfig.REALTIME_SOCKET_ALLOW_POLLING) {
+    transports.add('polling');
+  } else {
+    transports.delete('polling');
+  }
+  if (transports.size === 0) {
+    transports.add('websocket');
+  }
+  return Array.from(transports) as ServerOptions['transports'];
+}
+
 function isDevelopmentLocalOrigin(origin: string): boolean {
   if (appConfig.NODE_ENV === 'production') {
     return false;
@@ -95,6 +109,25 @@ export function isAllowedOrigin(
   return allowlist.includes(origin) || isDevelopmentLocalOrigin(origin);
 }
 
+export function getSocketServerOptions(): Partial<ServerOptions> {
+  const allowlist = getSocketAllowedOrigins();
+  return {
+    path: appConfig.REALTIME_WS_PATH,
+    transports: getSocketTransports(),
+    pingInterval: appConfig.REALTIME_WS_PING_INTERVAL_MS,
+    pingTimeout: appConfig.REALTIME_WS_IDLE_TIMEOUT_MS,
+    maxHttpBufferSize: appConfig.WS_NOTIFICATION_MAX_BYTES,
+    cors: {
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true);
+        if (isAllowedOrigin(origin, allowlist)) return cb(null, true);
+        return cb(new Error('CORS origin not allowed'), false);
+      },
+      credentials: true,
+    },
+  };
+}
+
 export function getOrCreateSocketServer(fastify: FastifyInstance): SocketIOServer {
   const httpServer = fastify.server as HttpServerWithSocket;
   const existingOnServer = httpServer[SOCKET_SERVER_KEY];
@@ -112,17 +145,7 @@ export function getOrCreateSocketServer(fastify: FastifyInstance): SocketIOServe
     return existing;
   }
 
-  const allowlist = getSocketAllowedOrigins();
-  const io = new SocketIOServer(fastify.server, {
-    cors: {
-      origin: (origin, cb) => {
-        if (!origin) return cb(null, true);
-        if (isAllowedOrigin(origin, allowlist)) return cb(null, true);
-        return cb(new Error('CORS origin not allowed'), false);
-      },
-      credentials: true,
-    },
-  });
+  const io = new SocketIOServer(fastify.server, getSocketServerOptions());
 
   (fastify as any).io = io;
   httpServer[SOCKET_SERVER_KEY] = io;

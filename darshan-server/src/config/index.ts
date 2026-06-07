@@ -111,6 +111,12 @@ const envSchema = z.object({
   DARSHAN_REALTIME_SYNC_ENABLED: optionalBooleanString,
   REALTIME_SYNC_ENABLED: optionalBooleanString,
   REALTIME_DEVICE_NAMESPACE: z.string().default('/device'),
+  REALTIME_WS_PATH: z.string().default('/socket.io/'),
+  REALTIME_WS_PING_INTERVAL_MS: z.coerce.number().int().positive().default(25_000),
+  REALTIME_WS_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(75_000),
+  REALTIME_SOCKET_TRANSPORT: z.enum(['websocket', 'polling']).default('websocket'),
+  REALTIME_SOCKET_ALLOW_POLLING: optionalBooleanString,
+  REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS: optionalBooleanString,
   WS_NOTIFICATION_MAX_BYTES: z.coerce.number().int().positive().default(32_768),
   OUTBOX_DISPATCH_ENABLED: optionalBooleanString,
   OUTBOX_DISPATCH_BATCH_SIZE: z.coerce.number().int().positive().default(100),
@@ -153,6 +159,9 @@ export const config = Object.freeze({
   VALKEY_PUBSUB_ENABLED: parsed.data.VALKEY_PUBSUB_ENABLED ?? parsed.data.REALTIME_BUS_PROVIDER === 'valkey',
   OUTBOX_DISPATCH_ENABLED: parsed.data.OUTBOX_DISPATCH_ENABLED ?? false,
   REALTIME_SYNC_ENABLED: parsed.data.DARSHAN_REALTIME_SYNC_ENABLED ?? parsed.data.REALTIME_SYNC_ENABLED ?? false,
+  REALTIME_SOCKET_ALLOW_POLLING: parsed.data.REALTIME_SOCKET_ALLOW_POLLING ?? true,
+  REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS:
+    parsed.data.REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS ?? false,
   MEDIA_CACHE_REPORTING_ENABLED:
     parsed.data.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED ?? parsed.data.MEDIA_CACHE_REPORTING_ENABLED ?? true,
 });

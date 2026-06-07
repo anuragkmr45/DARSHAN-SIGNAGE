@@ -9,9 +9,19 @@ import {
   getOrCreateSocketServer,
   getSocketAllowedOrigins,
 } from '@/realtime/socket-server';
+import {
+  buildSafeSocketError,
+  consumeSocketRateLimit,
+  normalizePayloadAndAck,
+  notificationsSyncPayloadSchema,
+  SocketEventRateLimiter,
+  validateSocketPayload,
+  type SocketAck,
+} from '@/realtime/socket-hardening';
 
 const logger = createLogger('notifications-namespace');
 const NOTIFICATIONS_NAMESPACE = '/notifications';
+const notificationsSyncRateLimiter = new SocketEventRateLimiter(30, 1);
 
 function isSessionValidForUser(
   session: { user_id: string; expires_at: Date } | null,
@@ -24,6 +34,21 @@ function isSessionValidForUser(
 
 export function notificationUserRoom(userId: string): string {
   return `notif:user:${userId}`;
+}
+
+function respondNotificationSocketError(
+  socket: Socket,
+  ack: SocketAck | undefined,
+  code: 'INVALID_PAYLOAD' | 'PAYLOAD_TOO_LARGE' | 'RATE_LIMITED',
+  message: string,
+  retryAfterSeconds?: number
+) {
+  const response = buildSafeSocketError(code, message, retryAfterSeconds);
+  if (ack) {
+    ack(response);
+  } else {
+    socket.emit('notifications:error', response);
+  }
 }
 
 export async function setupNotificationsNamespace(fastify: FastifyInstance) {
@@ -82,15 +107,49 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
     const room = notificationUserRoom(user.sub);
     socket.join(room);
 
-    try {
-      const unread_total = await counterRepo.getUnreadTotal(user.sub);
-      socket.emit('notifications:count', { unread_total });
-    } catch (error) {
-      logger.warn(error, 'Failed to emit initial notification count');
-    }
+    socket.on('disconnect', () => {
+      notificationsSyncRateLimiter.clear(socket.id);
+    });
 
-    socket.on('notifications:sync', async (_payload: unknown, ack?: (result: { unread_total: number }) => void) => {
+    socket.on('notifications:sync', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        const parsed = validateSocketPayload({
+          socket,
+          namespace: '/notifications',
+          event: 'notifications:sync',
+          payload: rawPayload,
+          schema: notificationsSyncPayloadSchema,
+        });
+        if (!parsed.ok) {
+          respondNotificationSocketError(
+            socket,
+            ack,
+            parsed.reason === 'payload_too_large' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_PAYLOAD',
+            parsed.reason === 'payload_too_large'
+              ? 'notifications:sync payload too large'
+              : 'Invalid notifications:sync payload'
+          );
+          return;
+        }
+
+        const rateLimit = consumeSocketRateLimit({
+          socket,
+          namespace: '/notifications',
+          event: 'notifications:sync',
+          limiter: notificationsSyncRateLimiter,
+        });
+        if (!rateLimit.allowed) {
+          respondNotificationSocketError(
+            socket,
+            ack,
+            'RATE_LIMITED',
+            'notifications:sync rate limit exceeded',
+            rateLimit.retryAfterSeconds
+          );
+          return;
+        }
+
         const unread_total = await counterRepo.getUnreadTotal(user.sub);
         if (ack) {
           ack({ unread_total });
@@ -101,6 +160,13 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
         logger.warn(error, 'Failed to sync notification count');
       }
     });
+
+    try {
+      const unread_total = await counterRepo.getUnreadTotal(user.sub);
+      socket.emit('notifications:count', { unread_total });
+    } catch (error) {
+      logger.warn(error, 'Failed to emit initial notification count');
+    }
   });
 
   (fastify as any)._notificationsNamespaceReady = true;

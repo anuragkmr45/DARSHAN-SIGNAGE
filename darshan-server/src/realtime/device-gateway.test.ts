@@ -41,6 +41,12 @@ function waitForEvent<T>(socket: ClientSocket, event: string, timeoutMs = 5000) 
   });
 }
 
+function emitWithAck<T = any>(socket: ClientSocket, event: string, payload: unknown) {
+  return new Promise<T>((resolve) => {
+    socket.emit(event, payload, (result: T) => resolve(result));
+  });
+}
+
 async function seedDevice() {
   const db = getDatabase();
   const deviceId = randomUUID();
@@ -129,6 +135,92 @@ describe('device realtime gateway and outbox dispatcher', () => {
       protocol_version: '1.0',
     });
     expect(deviceConnectionRegistry.getConnections(deviceId)).toHaveLength(1);
+  });
+
+  it('rejects malformed HELLO payloads safely', async () => {
+    const { deviceId, serial } = await seedDevice();
+
+    socket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'],
+      auth: {
+        device_id: deviceId,
+        device_serial: serial,
+      },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+    const ack = await emitWithAck<any>(socket, 'HELLO', {
+      type: 'NOT_HELLO',
+      protocol_version: '1.0',
+      device_id: deviceId,
+    });
+
+    expect(ack).toMatchObject({
+      type: 'ERROR',
+      code: 'HELLO_INVALID',
+      retryable: false,
+    });
+    expect(deviceConnectionRegistry.getConnections(deviceId)).toHaveLength(0);
+    expect(socket.connected).toBe(true);
+  });
+
+  it('rejects malformed PING payloads and does not echo them', async () => {
+    const { deviceId, serial } = await seedDevice();
+    const pongs: any[] = [];
+
+    socket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'],
+      auth: {
+        device_id: deviceId,
+        device_serial: serial,
+      },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+    socket.on('PONG', (payload) => pongs.push(payload));
+
+    const ack = await emitWithAck<any>(socket, 'PING', {
+      type: 'PING',
+      nonce: 'x'.repeat(129),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(ack).toMatchObject({
+      type: 'ERROR',
+      code: 'PING_INVALID',
+      retryable: false,
+    });
+    expect(pongs).toHaveLength(0);
+    expect(socket.connected).toBe(true);
+  });
+
+  it('rate-limits PING floods without disconnecting the socket', async () => {
+    const { deviceId, serial } = await seedDevice();
+
+    socket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'],
+      auth: {
+        device_id: deviceId,
+        device_serial: serial,
+      },
+      reconnection: false,
+      forceNew: true,
+    });
+
+    await waitForSocketConnect(socket);
+
+    const responses: any[] = [];
+    for (let i = 0; i < 35; i += 1) {
+      responses.push(await emitWithAck<any>(socket, 'PING', { type: 'PING', seq: i }));
+    }
+
+    expect(responses.some((response) => response?.type === 'PONG')).toBe(true);
+    expect(responses.some((response) => response?.code === 'RATE_LIMITED')).toBe(true);
+    expect(socket.connected).toBe(true);
   });
 
   it('dispatches command outbox rows as notification-only COMMAND_AVAILABLE messages', async () => {

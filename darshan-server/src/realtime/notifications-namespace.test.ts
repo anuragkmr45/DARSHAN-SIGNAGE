@@ -4,7 +4,7 @@ import path from 'path';
 import { AddressInfo } from 'net';
 import { FastifyInstance } from 'fastify';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, afterEach, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
@@ -66,6 +66,26 @@ function waitForCountEvent(
     };
 
     socket.on('notifications:count', handler);
+  });
+}
+
+function waitForSocketConnect(socket: ClientSocket) {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Socket connect timeout')), 2000);
+    socket.once('connect', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    socket.once('connect_error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+function emitWithAck<T = any>(socket: ClientSocket, event: string, payload: unknown) {
+  return new Promise<T>((resolve) => {
+    socket.emit(event, payload, (result: T) => resolve(result));
   });
 }
 
@@ -163,25 +183,26 @@ describe('notifications namespace realtime count updates', () => {
     await closeTestServer(server);
   });
 
-  it('emits notifications:count increment when recipient gets a new DM notification', async () => {
+  afterEach(() => {
+    if (socket) {
+      socket.disconnect();
+      socket = null;
+    }
+  });
+
+  async function connectRecipientSocket() {
     socket = createClient(`${baseUrl}/notifications`, {
       transports: ['websocket'],
       auth: { token: recipientToken },
       reconnection: false,
       forceNew: true,
     });
+    await waitForSocketConnect(socket);
+    return socket;
+  }
 
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Socket connect timeout')), 5000);
-      socket!.once('connect', () => {
-        clearTimeout(timer);
-        resolve();
-      });
-      socket!.once('connect_error', (error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-    });
+  it('emits notifications:count increment when recipient gets a new DM notification', async () => {
+    socket = await connectRecipientSocket();
 
     const initial = await waitForCountEvent(socket, () => true);
 
@@ -209,5 +230,29 @@ describe('notifications namespace realtime count updates', () => {
 
     const updated = await expectedCountPromise;
     expect(updated.unread_total).toBe(initial.unread_total + 1);
+  });
+
+  it('rejects malformed notifications sync payloads safely', async () => {
+    const notifSocket = await connectRecipientSocket();
+
+    const result = await emitWithAck<any>(notifSocket, 'notifications:sync', {
+      unexpected: 'field',
+    });
+
+    expect(result).toMatchObject({
+      error: {
+        code: 'INVALID_PAYLOAD',
+      },
+    });
+    expect(notifSocket.connected).toBe(true);
+  });
+
+  it('returns unread count for a valid notifications sync payload', async () => {
+    const notifSocket = await connectRecipientSocket();
+
+    const result = await emitWithAck<any>(notifSocket, 'notifications:sync', {});
+
+    expect(typeof result.unread_total).toBe('number');
+    expect(notifSocket.connected).toBe(true);
   });
 });

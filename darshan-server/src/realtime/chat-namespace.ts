@@ -10,10 +10,22 @@ import {
   getSocketAllowedOrigins,
   isAllowedOrigin,
 } from '@/realtime/socket-server';
+import {
+  buildSafeSocketError,
+  chatReadPayloadSchema,
+  chatSubscribePayloadSchema,
+  chatTypingPayloadSchema,
+  consumeSocketRateLimit,
+  normalizePayloadAndAck,
+  SocketEventRateLimiter,
+  validateSocketPayload,
+  type SocketAck,
+} from '@/realtime/socket-hardening';
 
 const logger = createLogger('chat-namespace');
 
 const CHAT_NAMESPACE = '/chat';
+const chatTypingRateLimiter = new SocketEventRateLimiter(5, 1);
 
 function parseCookieValue(cookieHeader: string | undefined, key: string): string | undefined {
   if (!cookieHeader) return undefined;
@@ -90,6 +102,21 @@ export function canSocketSubscribe(
   return !bannedUntil;
 }
 
+function respondChatSocketError(
+  socket: Socket,
+  ack: SocketAck | undefined,
+  code: 'INVALID_PAYLOAD' | 'PAYLOAD_TOO_LARGE' | 'RATE_LIMITED',
+  message: string,
+  retryAfterSeconds?: number
+) {
+  const response = buildSafeSocketError(code, message, retryAfterSeconds);
+  if (ack) {
+    ack(response);
+  } else {
+    socket.emit('chat:error', response);
+  }
+}
+
 export async function setupChatNamespace(fastify: FastifyInstance) {
   if ((fastify as any)._chatNamespaceReady) return;
 
@@ -139,10 +166,33 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
       return;
     }
 
-    socket.on(
-      'chat:subscribe',
-      async (payload: { conversationIds?: string[] }, ack?: (result: any) => void) => {
-        const ids = Array.isArray(payload?.conversationIds) ? payload.conversationIds : [];
+    socket.on('disconnect', () => {
+      chatTypingRateLimiter.clear(socket.id);
+    });
+
+    socket.on('chat:subscribe', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
+      try {
+        const parsed = validateSocketPayload({
+          socket,
+          namespace: '/chat',
+          event: 'chat:subscribe',
+          payload: rawPayload,
+          schema: chatSubscribePayloadSchema,
+        });
+        if (!parsed.ok) {
+          respondChatSocketError(
+            socket,
+            ack,
+            parsed.reason === 'payload_too_large' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_PAYLOAD',
+            parsed.reason === 'payload_too_large'
+              ? 'chat:subscribe payload too large'
+              : 'Invalid chat:subscribe payload'
+          );
+          return;
+        }
+
+        const ids = Array.isArray(parsed.data.conversationIds) ? parsed.data.conversationIds : [];
         const subscribed: string[] = [];
         const rejected: string[] = [];
 
@@ -158,31 +208,99 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
         }
 
         if (ack) ack({ subscribed, rejected });
+      } catch (error) {
+        logger.warn({ err: error, socket_id: socket.id }, 'Failed to subscribe chat socket');
+        respondChatSocketError(socket, ack, 'INVALID_PAYLOAD', 'Invalid chat:subscribe payload');
       }
-    );
-
-    socket.on('chat:typing', async (payload: { conversationId: string; isTyping: boolean }) => {
-      if (!payload?.conversationId) return;
-      const canAccess = await chatRepo.canAccessConversation(payload.conversationId, user.sub, user.role);
-      if (!canAccess) return;
-      const moderation = await chatRepo.getModeration(payload.conversationId, user.sub);
-      if (getActiveModeration(moderation).bannedUntil) return;
-
-      nsp.to(chatConversationRoom(payload.conversationId)).emit('chat:typing', {
-        conversationId: payload.conversationId,
-        userId: user.sub,
-        isTyping: Boolean(payload.isTyping),
-        ttlSeconds: 7,
-      });
     });
 
-    socket.on('chat:read', async (payload: { conversationId: string; lastReadSeq: number }) => {
-      if (!payload?.conversationId || typeof payload.lastReadSeq !== 'number') return;
-      const canAccess = await chatRepo.canAccessConversation(payload.conversationId, user.sub, user.role);
-      if (!canAccess) return;
-      const moderation = await chatRepo.getModeration(payload.conversationId, user.sub);
-      if (getActiveModeration(moderation).bannedUntil) return;
-      await chatRepo.markRead(payload.conversationId, user.sub, payload.lastReadSeq);
+    socket.on('chat:typing', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
+      try {
+        const parsed = validateSocketPayload({
+          socket,
+          namespace: '/chat',
+          event: 'chat:typing',
+          payload: rawPayload,
+          schema: chatTypingPayloadSchema,
+        });
+        if (!parsed.ok) {
+          respondChatSocketError(
+            socket,
+            ack,
+            parsed.reason === 'payload_too_large' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_PAYLOAD',
+            parsed.reason === 'payload_too_large' ? 'chat:typing payload too large' : 'Invalid chat:typing payload'
+          );
+          return;
+        }
+
+        const rateLimit = consumeSocketRateLimit({
+          socket,
+          namespace: '/chat',
+          event: 'chat:typing',
+          limiter: chatTypingRateLimiter,
+        });
+        if (!rateLimit.allowed) {
+          respondChatSocketError(
+            socket,
+            ack,
+            'RATE_LIMITED',
+            'chat:typing rate limit exceeded',
+            rateLimit.retryAfterSeconds
+          );
+          return;
+        }
+
+        const payload = parsed.data;
+        const canAccess = await chatRepo.canAccessConversation(payload.conversationId, user.sub, user.role);
+        if (!canAccess) return;
+        const moderation = await chatRepo.getModeration(payload.conversationId, user.sub);
+        if (getActiveModeration(moderation).bannedUntil) return;
+
+        nsp.to(chatConversationRoom(payload.conversationId)).emit('chat:typing', {
+          conversationId: payload.conversationId,
+          userId: user.sub,
+          isTyping: Boolean(payload.isTyping),
+          ttlSeconds: 7,
+        });
+        if (ack) ack({ ok: true });
+      } catch (error) {
+        logger.warn({ err: error, socket_id: socket.id }, 'Failed to handle chat typing event');
+        respondChatSocketError(socket, ack, 'INVALID_PAYLOAD', 'Invalid chat:typing payload');
+      }
+    });
+
+    socket.on('chat:read', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
+      try {
+        const parsed = validateSocketPayload({
+          socket,
+          namespace: '/chat',
+          event: 'chat:read',
+          payload: rawPayload,
+          schema: chatReadPayloadSchema,
+        });
+        if (!parsed.ok) {
+          respondChatSocketError(
+            socket,
+            ack,
+            parsed.reason === 'payload_too_large' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_PAYLOAD',
+            parsed.reason === 'payload_too_large' ? 'chat:read payload too large' : 'Invalid chat:read payload'
+          );
+          return;
+        }
+
+        const payload = parsed.data;
+        const canAccess = await chatRepo.canAccessConversation(payload.conversationId, user.sub, user.role);
+        if (!canAccess) return;
+        const moderation = await chatRepo.getModeration(payload.conversationId, user.sub);
+        if (getActiveModeration(moderation).bannedUntil) return;
+        await chatRepo.markRead(payload.conversationId, user.sub, payload.lastReadSeq);
+        if (ack) ack({ ok: true });
+      } catch (error) {
+        logger.warn({ err: error, socket_id: socket.id }, 'Failed to handle chat read event');
+        respondChatSocketError(socket, ack, 'INVALID_PAYLOAD', 'Invalid chat:read payload');
+      }
     });
   });
 

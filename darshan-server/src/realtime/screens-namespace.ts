@@ -12,11 +12,23 @@ import {
 } from '@/screens/playback';
 import { resolveSocketAuthToken } from '@/realtime/chat-namespace';
 import { getOrCreateSocketServer, getSocketAllowedOrigins, getSocketServer } from '@/realtime/socket-server';
+import {
+  buildSafeSocketError,
+  consumeSocketRateLimit,
+  normalizePayloadAndAck,
+  screensSubscribePayloadSchema,
+  screensSyncPayloadSchema,
+  SocketEventRateLimiter,
+  validateSocketPayload,
+  type SocketAck,
+} from '@/realtime/socket-hardening';
 import { defineAbilityFor, type AppAbility } from '@/rbac';
 import { inArray } from 'drizzle-orm';
 
 const logger = createLogger('screens-namespace');
 const SCREENS_NAMESPACE = '/screens';
+const screensSubscribeRateLimiter = new SocketEventRateLimiter(20, 1);
+const screensSyncRateLimiter = new SocketEventRateLimiter(30, 1);
 type ScreenRecord = typeof schema.screens.$inferSelect;
 type ScreenSocketAuthz = {
   allowedRows: ScreenRecord[];
@@ -132,6 +144,21 @@ function logScreenSocketReject(
   );
 }
 
+function respondScreenSocketError(
+  socket: Socket,
+  ack: SocketAck | undefined,
+  code: 'INVALID_PAYLOAD' | 'PAYLOAD_TOO_LARGE' | 'RATE_LIMITED',
+  message: string,
+  retryAfterSeconds?: number
+) {
+  const response = buildSafeSocketError(code, message, retryAfterSeconds);
+  if (ack) {
+    ack(response);
+  } else {
+    socket.emit('screens:error', response);
+  }
+}
+
 async function buildAuthorizedScreensOverviewPayload(
   authorizedRows: ScreenRecord[],
   db: ReturnType<typeof getDatabase>
@@ -211,15 +238,57 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
   });
 
   nsp.on('connection', (socket: Socket) => {
-    socket.on(
-      'screens:subscribe',
-      async (payload: { screenIds?: string[]; includeAll?: boolean }, ack?: (result: any) => void) => {
-        const ids = Array.isArray(payload?.screenIds)
+    socket.on('disconnect', () => {
+      screensSubscribeRateLimiter.clear(socket.id);
+      screensSyncRateLimiter.clear(socket.id);
+    });
+
+    socket.on('screens:subscribe', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
+      try {
+        const parsed = validateSocketPayload({
+          socket,
+          namespace: '/screens',
+          event: 'screens:subscribe',
+          payload: rawPayload,
+          schema: screensSubscribePayloadSchema,
+        });
+        if (!parsed.ok) {
+          respondScreenSocketError(
+            socket,
+            ack,
+            parsed.reason === 'payload_too_large' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_PAYLOAD',
+            parsed.reason === 'payload_too_large'
+              ? 'screens:subscribe payload too large'
+              : 'Invalid screens:subscribe payload'
+          );
+          return;
+        }
+
+        const rateLimit = consumeSocketRateLimit({
+          socket,
+          namespace: '/screens',
+          event: 'screens:subscribe',
+          limiter: screensSubscribeRateLimiter,
+        });
+        if (!rateLimit.allowed) {
+          respondScreenSocketError(
+            socket,
+            ack,
+            'RATE_LIMITED',
+            'screens:subscribe rate limit exceeded',
+            rateLimit.retryAfterSeconds
+          );
+          return;
+        }
+
+        const payload = parsed.data;
+        const ids = Array.isArray(payload.screenIds)
           ? Array.from(new Set(payload.screenIds.filter((value) => typeof value === 'string' && value)))
           : [];
         const subscribed = new Set<string>();
         const rejected: string[] = [];
-        const includeAll = payload?.includeAll === true;
+        const includeAll = payload.includeAll === true;
 
         if (includeAll) {
           const authz = await resolveScreenSocketAuthz(socket);
@@ -263,11 +332,50 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
             rejected,
           });
         }
+      } catch (error) {
+        logger.warn({ err: error, socket_id: socket.id }, 'Failed to subscribe screens socket');
+        respondScreenSocketError(socket, ack, 'INVALID_PAYLOAD', 'Invalid screens:subscribe payload');
       }
-    );
+    });
 
-    socket.on('screens:sync', async (payload: { screenIds?: string[] } | undefined, ack?: (result: any) => void) => {
+    socket.on('screens:sync', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+      const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        const parsed = validateSocketPayload({
+          socket,
+          namespace: '/screens',
+          event: 'screens:sync',
+          payload: rawPayload,
+          schema: screensSyncPayloadSchema,
+        });
+        if (!parsed.ok) {
+          respondScreenSocketError(
+            socket,
+            ack,
+            parsed.reason === 'payload_too_large' ? 'PAYLOAD_TOO_LARGE' : 'INVALID_PAYLOAD',
+            parsed.reason === 'payload_too_large' ? 'screens:sync payload too large' : 'Invalid screens:sync payload'
+          );
+          return;
+        }
+
+        const rateLimit = consumeSocketRateLimit({
+          socket,
+          namespace: '/screens',
+          event: 'screens:sync',
+          limiter: screensSyncRateLimiter,
+        });
+        if (!rateLimit.allowed) {
+          respondScreenSocketError(
+            socket,
+            ack,
+            'RATE_LIMITED',
+            'screens:sync rate limit exceeded',
+            rateLimit.retryAfterSeconds
+          );
+          return;
+        }
+
+        const payload = parsed.data ?? undefined;
         const ids = Array.isArray(payload?.screenIds)
           ? Array.from(new Set(payload.screenIds.filter((value) => typeof value === 'string' && value)))
           : [];
