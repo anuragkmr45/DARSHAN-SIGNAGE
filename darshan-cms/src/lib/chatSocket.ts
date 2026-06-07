@@ -48,5 +48,17 @@ export const connectChatSocket = (authToken?: string) => {
 
 export const disconnectChatSocket = () => {
   if (!socketInstance) return;
-  socketInstance.disconnect();
+  const socket = socketInstance;
+  socketInstance = null;
+  socket.auth = {};
+  try {
+    socket.disconnect();
+  } catch {
+    // Logout/auth-clear cleanup must not be blocked by a stale socket.
+  }
+  try {
+    socket.removeAllListeners();
+  } catch {
+    // Listener cleanup is best-effort for already broken socket instances.
+  }
 };

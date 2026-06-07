@@ -18,6 +18,7 @@ import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { clearAuth } from "@/store/authSlice";
 import { authApi } from "@/api/domains/auth";
 import { useNotificationUnreadCount } from "@/hooks/notifications/useNotificationUnreadCount";
+import { disconnectAllRealtimeSockets } from "@/lib/realtimeSockets";
 
 const getInitials = (name?: string, email?: string) => {
   if (name) {
@@ -42,6 +43,7 @@ export function AppHeader() {
   const { unreadTotal, isLoadingInitial } = useNotificationUnreadCount();
 
   const handleLogout = async () => {
+    disconnectAllRealtimeSockets();
     dispatch(clearAuth());
     await queryClient.cancelQueries();
     queryClient.clear();

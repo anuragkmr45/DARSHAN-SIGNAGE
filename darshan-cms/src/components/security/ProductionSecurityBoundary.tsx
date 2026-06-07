@@ -2,9 +2,7 @@ import { PropsWithChildren, useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { ShieldAlert, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { disconnectScreensSocket } from "@/lib/screensSocket";
-import { disconnectNotificationsSocket } from "@/lib/notificationsSocket";
-import { disconnectChatSocket } from "@/lib/chatSocket";
+import { disconnectAllRealtimeSockets } from "@/lib/realtimeSockets";
 import { securityApi } from "@/api/domains/security";
 
 const DEVTOOLS_THRESHOLD_PX = 160;
@@ -162,9 +160,7 @@ export const ProductionSecurityBoundary = ({
   useEffect(() => {
     if (!lockState.locked) return;
     void queryClient.cancelQueries();
-    disconnectScreensSocket();
-    disconnectNotificationsSocket();
-    disconnectChatSocket();
+    disconnectAllRealtimeSockets();
   }, [lockState.locked, queryClient]);
 
   if (!isProductionLockdownEnabled) {

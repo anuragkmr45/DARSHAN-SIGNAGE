@@ -70,6 +70,15 @@ const includeInMainTimeline = (message: ChatMessage) => {
   return false;
 };
 
+export const clearChatTypingTimeouts = (timeouts: Record<string, number>) => {
+  Object.values(timeouts).forEach((timeoutId) => {
+    window.clearTimeout(timeoutId);
+  });
+  Object.keys(timeouts).forEach((key) => {
+    delete timeouts[key];
+  });
+};
+
 export const useChatRealtime = ({
   activeConversationId,
   subscribedConversationIds = [],
@@ -94,6 +103,7 @@ export const useChatRealtime = ({
     if (!authToken) return;
     const socket = connectChatSocket(authToken);
     if (!socket) return;
+    const typingTimeouts = typingTimeoutRef.current;
 
     const subscribe = () => {
       if (subscriptionIds.length === 0) return;
@@ -296,6 +306,7 @@ export const useChatRealtime = ({
     else socket.connect();
 
     return () => {
+      clearChatTypingTimeouts(typingTimeouts);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("reconnect", onReconnect);

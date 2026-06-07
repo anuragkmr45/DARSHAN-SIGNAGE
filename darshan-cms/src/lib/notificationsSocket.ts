@@ -48,6 +48,17 @@ export const connectNotificationsSocket = (authToken?: string) => {
 
 export const disconnectNotificationsSocket = () => {
   if (!notificationsSocketInstance) return;
-  notificationsSocketInstance.disconnect();
+  const socket = notificationsSocketInstance;
+  notificationsSocketInstance = null;
+  socket.auth = {};
+  try {
+    socket.disconnect();
+  } catch {
+    // Logout/auth-clear cleanup must not be blocked by a stale socket.
+  }
+  try {
+    socket.removeAllListeners();
+  } catch {
+    // Listener cleanup is best-effort for already broken socket instances.
+  }
 };
-

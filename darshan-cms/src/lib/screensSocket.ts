@@ -48,5 +48,17 @@ export const connectScreensSocket = (authToken?: string) => {
 
 export const disconnectScreensSocket = () => {
   if (!screensSocketInstance) return;
-  screensSocketInstance.disconnect();
+  const socket = screensSocketInstance;
+  screensSocketInstance = null;
+  socket.auth = {};
+  try {
+    socket.disconnect();
+  } catch {
+    // Logout/auth-clear cleanup must not be blocked by a stale socket.
+  }
+  try {
+    socket.removeAllListeners();
+  } catch {
+    // Listener cleanup is best-effort for already broken socket instances.
+  }
 };
