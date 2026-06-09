@@ -105,6 +105,7 @@ export class ConfigManager {
       },
       realtime: {
         enabled: envFlag(false, 'DARSHAN_REALTIME_PLAYER_ENABLED', 'HEXMON_REALTIME_SYNC_ENABLED'),
+        signedAuthEnabled: envFlag(false, 'DARSHAN_REALTIME_SIGNED_AUTH_ENABLED', 'HEXMON_REALTIME_SIGNED_AUTH_ENABLED'),
         deviceNamespace: envValue('DARSHAN_REALTIME_DEVICE_NAMESPACE', 'HEXMON_REALTIME_DEVICE_NAMESPACE') || '/device',
         commandSafetyPollMs: envNumber(60000, 'DARSHAN_REALTIME_COMMAND_SAFETY_POLL_MS', 'HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS'),
         desiredStatePollMs: envNumber(300000, 'DARSHAN_REALTIME_DESIRED_STATE_POLL_MS', 'HEXMON_REALTIME_DESIRED_STATE_POLL_MS'),
@@ -259,6 +260,7 @@ export class ConfigManager {
       runtime: { ...defaults.runtime, ...overrides.runtime },
       realtime: {
         enabled: overrides.realtime?.enabled ?? defaults.realtime?.enabled ?? false,
+        signedAuthEnabled: overrides.realtime?.signedAuthEnabled ?? defaults.realtime?.signedAuthEnabled ?? false,
         deviceNamespace: overrides.realtime?.deviceNamespace ?? defaults.realtime?.deviceNamespace ?? '/device',
         commandSafetyPollMs:
           overrides.realtime?.commandSafetyPollMs ?? defaults.realtime?.commandSafetyPollMs ?? 60000,
@@ -312,6 +314,7 @@ export class ConfigManager {
       realtime: {
         ...config.realtime,
         enabled: config.realtime?.enabled === true,
+        signedAuthEnabled: config.realtime?.signedAuthEnabled === true,
         deviceNamespace: config.realtime?.deviceNamespace || '/device',
         commandSafetyPollMs: Math.max(config.realtime?.commandSafetyPollMs || 60000, 10000),
         desiredStatePollMs: Math.max(config.realtime?.desiredStatePollMs || 300000, 30000),

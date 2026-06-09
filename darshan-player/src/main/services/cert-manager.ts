@@ -14,6 +14,10 @@ import { DeviceInfo } from '../../common/types'
 import { getPlayerMetrics } from './telemetry/player-metrics'
 
 const logger = getLogger('cert-manager')
+export const DEVICE_SOCKET_AUTH_VERSION = 'v1'
+export const DEVICE_SOCKET_AUTH_PREFIX = 'DARSHAN_DEVICE_SOCKET_AUTH_V1'
+export const DEVICE_SOCKET_AUTH_ACTION = 'CONNECT'
+export const DEVICE_SOCKET_AUTH_NAMESPACE = '/device'
 
 export interface CertificateInfo {
   subject: string
@@ -41,6 +45,23 @@ export interface CSRSubjectOverrides {
   country?: string
   state?: string
   locality?: string
+}
+
+export function buildDeviceSocketAuthPayload(params: {
+  deviceId: string
+  serial: string
+  timestamp: string
+  nonce: string
+}): string {
+  return [
+    DEVICE_SOCKET_AUTH_PREFIX,
+    DEVICE_SOCKET_AUTH_ACTION,
+    DEVICE_SOCKET_AUTH_NAMESPACE,
+    params.deviceId,
+    params.serial,
+    params.timestamp,
+    params.nonce,
+  ].join('\n')
 }
 
 export class CertificateManager {
@@ -85,21 +106,34 @@ export class CertificateManager {
     ].join('\n')
   }
 
-  async signDeviceRequest(params: {
-    method: string
-    url: string
-    deviceId: string
-    timestamp: string
-  }): Promise<string> {
+  private signPayload(payload: string): string {
     if (!this.hasPrivateKey()) {
       throw new Error('Private key not found')
     }
 
     const privateKey = fs.readFileSync(this.keyPath, 'utf-8')
     const signer = crypto.createSign('RSA-SHA256')
-    signer.update(this.buildDeviceRequestSignaturePayload(params))
+    signer.update(payload)
     signer.end()
     return signer.sign(privateKey, 'base64')
+  }
+
+  async signDeviceRequest(params: {
+    method: string
+    url: string
+    deviceId: string
+    timestamp: string
+  }): Promise<string> {
+    return this.signPayload(this.buildDeviceRequestSignaturePayload(params))
+  }
+
+  async signDeviceSocketAuth(params: {
+    deviceId: string
+    serial: string
+    timestamp: string
+    nonce: string
+  }): Promise<string> {
+    return this.signPayload(buildDeviceSocketAuthPayload(params))
   }
 
   /**

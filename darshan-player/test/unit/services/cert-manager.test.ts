@@ -1,11 +1,8 @@
 const { expect } = require('chai')
+const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
-const {
-  createTempDir,
-  cleanupTempDir,
-  issueSignedCertificateFromCsr,
-} = require('../../helpers/test-utils.ts')
+const { createTempDir, cleanupTempDir, issueSignedCertificateFromCsr } = require('../../helpers/test-utils.ts')
 
 describe('Certificate Manager', () => {
   let tempDir
@@ -151,6 +148,39 @@ describe('Certificate Manager', () => {
       osVersion: 'test-os',
     }))
     expect(metrics).to.contain('darshan_player_certificate_validation_total{result="x509_valid"} 1')
+  })
+
+  it('signs the socket auth payload with the stored private key', async () => {
+    writeConfig(false)
+    const { buildDeviceSocketAuthPayload, getCertificateManager } = require('../../../src/main/services/cert-manager')
+
+    const certManager = getCertificateManager()
+    await certManager.generateCSR({
+      deviceId: 'device-1',
+      hostname: 'test-host',
+      platform: 'linux',
+      arch: 'x64',
+      appVersion: '1.0.0',
+      electronVersion: '1.0.0',
+      nodeVersion: process.version,
+    })
+
+    const input = {
+      deviceId: 'device-1',
+      serial: 'serial-1',
+      timestamp: '1770000000000',
+      nonce: '0123456789abcdef0123456789abcdef',
+    }
+    const payload = buildDeviceSocketAuthPayload(input)
+    const signature = await certManager.signDeviceSocketAuth(input)
+    const privateKey = fs.readFileSync(certManager.getCertificatePaths().key, 'utf-8')
+    const publicKey = crypto.createPublicKey(crypto.createPrivateKey(privateKey))
+    const verifier = crypto.createVerify('RSA-SHA256')
+    verifier.update(payload)
+    verifier.end()
+
+    expect(signature).to.match(/^[A-Za-z0-9+/]+={0,2}$/)
+    expect(verifier.verify(publicKey, signature, 'base64')).to.equal(true)
   })
 
   it('rejects compatibility certificates in strict validation mode and preserves the private key', async () => {

@@ -1,9 +1,11 @@
 import { EventEmitter } from 'events'
+import { randomBytes } from 'crypto'
 import WebSocket from 'ws'
 import { getConfigManager } from '../../common/config'
 import { getLogger } from '../../common/logger'
 import { CommandType } from '../../common/types'
 import { ExponentialBackoff } from '../../common/utils'
+import { DEVICE_SOCKET_AUTH_VERSION, getCertificateManager } from './cert-manager'
 import { getCommandProcessor } from './command-processor'
 import { getDeviceStateStore } from './device-state-store'
 import { getHttpClient } from './network/http-client'
@@ -12,6 +14,17 @@ import { getDefaultMediaService } from './settings/default-media-service'
 import { getSnapshotManager } from './snapshot-manager'
 
 const logger = getLogger('realtime-service')
+const SOCKET_AUTH_NONCE_BYTES = 16
+
+type RealtimeSocketAuth = Record<string, string>
+type RealtimeSocketAuthProvider = () => RealtimeSocketAuth | Promise<RealtimeSocketAuth>
+type SocketAuthFallbackReason = 'missing_credentials' | 'signing_failed'
+
+type SocketAuthCertificateManager = {
+  hasPrivateKey(): boolean
+  areCertificatesPresent(): boolean
+  signDeviceSocketAuth(params: { deviceId: string; serial: string; timestamp: string; nonce: string }): Promise<string>
+}
 
 export type RealtimeConnectionState = 'disabled' | 'disconnected' | 'connecting' | 'connected'
 
@@ -63,6 +76,60 @@ export interface RealtimeTransport extends EventEmitter {
   isConnected(): boolean
 }
 
+function buildLegacyRealtimeSocketAuth(deviceId: string, deviceSerial: string): RealtimeSocketAuth {
+  return {
+    device_id: deviceId,
+    device_serial: deviceSerial,
+  }
+}
+
+function generateSocketAuthNonce(): string {
+  return randomBytes(SOCKET_AUTH_NONCE_BYTES).toString('hex')
+}
+
+export async function buildRealtimeDeviceSocketAuth(input: {
+  deviceId: string
+  deviceSerial: string
+  signedAuthEnabled: boolean
+  certificateManager?: SocketAuthCertificateManager
+  nowMs?: () => number
+  nonceFactory?: () => string
+  onFallback?: (reason: SocketAuthFallbackReason) => void
+}): Promise<RealtimeSocketAuth> {
+  const legacyAuth = buildLegacyRealtimeSocketAuth(input.deviceId, input.deviceSerial)
+  if (!input.signedAuthEnabled) {
+    return legacyAuth
+  }
+
+  const certificateManager = input.certificateManager ?? getCertificateManager()
+  if (!certificateManager.hasPrivateKey() || !certificateManager.areCertificatesPresent()) {
+    input.onFallback?.('missing_credentials')
+    return legacyAuth
+  }
+
+  try {
+    const timestamp = (input.nowMs ?? Date.now)().toString()
+    const nonce = (input.nonceFactory ?? generateSocketAuthNonce)()
+    const signature = await certificateManager.signDeviceSocketAuth({
+      deviceId: input.deviceId,
+      serial: input.deviceSerial,
+      timestamp,
+      nonce,
+    })
+
+    return {
+      ...legacyAuth,
+      auth_version: DEVICE_SOCKET_AUTH_VERSION,
+      auth_timestamp: timestamp,
+      auth_nonce: nonce,
+      auth_signature: signature,
+    }
+  } catch {
+    input.onFallback?.('signing_failed')
+    return legacyAuth
+  }
+}
+
 function normalizeNamespace(value?: string): string {
   const namespace = value && value.startsWith('/') ? value : '/device'
   return namespace === '/' ? '' : namespace
@@ -95,14 +162,19 @@ export class SocketIoDeviceTransport extends EventEmitter implements RealtimeTra
   private ws: WebSocket | null = null
   private readonly wsUrl: string
   private readonly namespace: string
-  private readonly auth: Record<string, string>
+  private readonly authProvider: RealtimeSocketAuthProvider
   private connected = false
 
-  constructor(input: { wsUrl: string; namespace: string; auth: Record<string, string> }) {
+  constructor(input: { wsUrl: string; namespace: string; auth: RealtimeSocketAuth | RealtimeSocketAuthProvider }) {
     super()
     this.wsUrl = input.wsUrl
     this.namespace = normalizeNamespace(input.namespace)
-    this.auth = input.auth
+    if (typeof input.auth === 'function') {
+      this.authProvider = input.auth as RealtimeSocketAuthProvider
+    } else {
+      const auth = input.auth as RealtimeSocketAuth
+      this.authProvider = () => auth
+    }
   }
 
   async connect(): Promise<void> {
@@ -124,7 +196,20 @@ export class SocketIoDeviceTransport extends EventEmitter implements RealtimeTra
       })
 
       this.ws.on('open', () => {
-        this.ws?.send(`40${this.namespace},${JSON.stringify(this.auth)}`)
+        void (async () => {
+          try {
+            const auth = await this.authProvider()
+            this.ws?.send(`40${this.namespace},${JSON.stringify(auth)}`)
+          } catch (error) {
+            this.emit('error', error)
+            if (!settled) {
+              settled = true
+              clearTimeout(timeout)
+              reject(error instanceof Error ? error : new Error('Realtime auth generation failed'))
+            }
+            this.ws?.close(1000, 'Auth generation failed')
+          }
+        })()
       })
 
       this.ws.on('message', (data) => {
@@ -207,6 +292,7 @@ export class RealtimeService extends EventEmitter {
   private helloAckTimer?: NodeJS.Timeout
   private started = false
   private readonly reconnectBackoff: ExponentialBackoff
+  private readonly signedAuthFallbackLogs = new Set<SocketAuthFallbackReason>()
 
   constructor(transport?: RealtimeTransport) {
     super()
@@ -350,11 +436,25 @@ export class RealtimeService extends EventEmitter {
     return new SocketIoDeviceTransport({
       wsUrl: this.buildSocketIoUrl(config.realtime?.wsUrl || config.wsUrl || config.apiBase),
       namespace: config.realtime?.deviceNamespace || '/device',
-      auth: {
-        device_id: deviceId,
-        device_serial: authValue,
-      },
+      auth: () => this.buildDefaultSocketAuth(deviceId, authValue),
     })
+  }
+
+  private async buildDefaultSocketAuth(deviceId: string, authValue: string): Promise<RealtimeSocketAuth> {
+    return buildRealtimeDeviceSocketAuth({
+      deviceId,
+      deviceSerial: authValue,
+      signedAuthEnabled: getConfigManager().getConfig().realtime?.signedAuthEnabled === true,
+      onFallback: (reason) => this.logSignedAuthFallback(reason),
+    })
+  }
+
+  private logSignedAuthFallback(reason: SocketAuthFallbackReason): void {
+    if (this.signedAuthFallbackLogs.has(reason)) {
+      return
+    }
+    this.signedAuthFallbackLogs.add(reason)
+    logger.warn({ reason }, 'Signed realtime socket auth unavailable; falling back to legacy socket auth')
   }
 
   private buildSocketIoUrl(baseUrl: string): string {

@@ -29,6 +29,7 @@ export interface RuntimeConfig {
 
 export interface RealtimeConfig {
   enabled: boolean
+  signedAuthEnabled: boolean
   deviceNamespace: string
   commandSafetyPollMs: number
   desiredStatePollMs: number

@@ -98,12 +98,197 @@ describe('Realtime Service', () => {
     sandbox.restore()
     cleanupTempDir(tempDir)
     delete process.env.HEXMON_CONFIG_PATH
+    delete process.env.DARSHAN_REALTIME_SIGNED_AUTH_ENABLED
+    delete process.env.HEXMON_REALTIME_SIGNED_AUTH_ENABLED
 
     Object.keys(require.cache).forEach((key) => {
       if (key.includes('src/main/services') || key.includes('src/common')) {
         delete require.cache[key]
       }
     })
+  })
+
+  function createFakeSocketAuthCertificateManager(
+    options: {
+      hasPrivateKey?: boolean
+      areCertificatesPresent?: boolean
+      failSigning?: boolean
+    } = {}
+  ) {
+    const calls: any[] = []
+    return {
+      calls,
+      manager: {
+        hasPrivateKey: () => options.hasPrivateKey ?? true,
+        areCertificatesPresent: () => options.areCertificatesPresent ?? true,
+        signDeviceSocketAuth: async (params: any) => {
+          calls.push(params)
+          if (options.failSigning) {
+            throw new Error('signing failed')
+          }
+          return Buffer.from(`signature:${params.nonce}`).toString('base64')
+        },
+      },
+    }
+  }
+
+  it('keeps realtime socket auth legacy-only by default', async () => {
+    const { getConfigManager } = require('../../../src/common/config')
+    const { buildRealtimeDeviceSocketAuth } = require('../../../src/main/services/realtime-service')
+
+    expect(getConfigManager().getConfig().realtime.signedAuthEnabled).to.equal(false)
+
+    const auth = await buildRealtimeDeviceSocketAuth({
+      deviceId: 'device-1',
+      deviceSerial: 'serial-1',
+      signedAuthEnabled: false,
+    })
+
+    expect(auth).to.deep.equal({
+      device_id: 'device-1',
+      device_serial: 'serial-1',
+    })
+  })
+
+  it('reads the realtime signed auth player flag from environment', () => {
+    process.env.DARSHAN_REALTIME_SIGNED_AUTH_ENABLED = 'true'
+    Object.keys(require.cache).forEach((key) => {
+      if (key.includes('src/common')) {
+        delete require.cache[key]
+      }
+    })
+
+    const { getConfigManager } = require('../../../src/common/config')
+
+    expect(getConfigManager().getConfig().realtime.signedAuthEnabled).to.equal(true)
+  })
+
+  it('builds the exact realtime socket auth canonical payload', () => {
+    const { buildDeviceSocketAuthPayload } = require('../../../src/main/services/cert-manager')
+
+    const payload = buildDeviceSocketAuthPayload({
+      deviceId: 'device-1',
+      serial: 'serial-1',
+      timestamp: '1770000000000',
+      nonce: '0123456789abcdef0123456789abcdef',
+    })
+
+    expect(payload).to.equal(
+      [
+        'DARSHAN_DEVICE_SOCKET_AUTH_V1',
+        'CONNECT',
+        '/device',
+        'device-1',
+        'serial-1',
+        '1770000000000',
+        '0123456789abcdef0123456789abcdef',
+      ].join('\n')
+    )
+    expect(payload).to.not.contain('DARSHAN_DEVICE_AUTH_V1')
+    expect(payload).to.not.contain('GET')
+  })
+
+  it('builds signed realtime socket auth with auth_version v1 when enabled', async () => {
+    const { buildRealtimeDeviceSocketAuth } = require('../../../src/main/services/realtime-service')
+    const fake = createFakeSocketAuthCertificateManager()
+
+    const auth = await buildRealtimeDeviceSocketAuth({
+      deviceId: 'device-1',
+      deviceSerial: 'serial-1',
+      signedAuthEnabled: true,
+      certificateManager: fake.manager,
+      nowMs: () => 1770000000000,
+      nonceFactory: () => '0123456789abcdef0123456789abcdef',
+    })
+
+    expect(auth).to.include({
+      device_id: 'device-1',
+      device_serial: 'serial-1',
+      auth_version: 'v1',
+      auth_timestamp: '1770000000000',
+      auth_nonce: '0123456789abcdef0123456789abcdef',
+    })
+    expect(auth.auth_signature).to.match(/^[A-Za-z0-9+/]+={0,2}$/)
+    expect(fake.calls).to.deep.equal([
+      {
+        deviceId: 'device-1',
+        serial: 'serial-1',
+        timestamp: '1770000000000',
+        nonce: '0123456789abcdef0123456789abcdef',
+      },
+    ])
+  })
+
+  it('generates fresh realtime socket auth nonce values for reconnect auth factory calls', async () => {
+    const { buildRealtimeDeviceSocketAuth } = require('../../../src/main/services/realtime-service')
+    const fake = createFakeSocketAuthCertificateManager()
+
+    const first = await buildRealtimeDeviceSocketAuth({
+      deviceId: 'device-1',
+      deviceSerial: 'serial-1',
+      signedAuthEnabled: true,
+      certificateManager: fake.manager,
+    })
+    const second = await buildRealtimeDeviceSocketAuth({
+      deviceId: 'device-1',
+      deviceSerial: 'serial-1',
+      signedAuthEnabled: true,
+      certificateManager: fake.manager,
+    })
+
+    expect(first.auth_timestamp).to.match(/^\d{10,17}$/)
+    expect(second.auth_timestamp).to.match(/^\d{10,17}$/)
+    expect(first.auth_nonce).to.match(/^[0-9a-f]{32}$/)
+    expect(second.auth_nonce).to.match(/^[0-9a-f]{32}$/)
+    expect(first.auth_nonce).to.not.equal(second.auth_nonce)
+    expect(fake.calls).to.have.length(2)
+  })
+
+  it('falls back to legacy-only realtime auth when signing credentials are missing', async () => {
+    const { buildRealtimeDeviceSocketAuth } = require('../../../src/main/services/realtime-service')
+    const fake = createFakeSocketAuthCertificateManager({ hasPrivateKey: false })
+    const fallbackReasons: string[] = []
+
+    const auth = await buildRealtimeDeviceSocketAuth({
+      deviceId: 'device-1',
+      deviceSerial: 'serial-1',
+      signedAuthEnabled: true,
+      certificateManager: fake.manager,
+      onFallback: (reason: string) => fallbackReasons.push(reason),
+    })
+
+    expect(auth).to.deep.equal({
+      device_id: 'device-1',
+      device_serial: 'serial-1',
+    })
+    expect(fake.calls).to.deep.equal([])
+    expect(fallbackReasons).to.deep.equal(['missing_credentials'])
+  })
+
+  it('falls back to legacy-only realtime auth with bounded logging data when signing fails', async () => {
+    const { buildRealtimeDeviceSocketAuth } = require('../../../src/main/services/realtime-service')
+    const fake = createFakeSocketAuthCertificateManager({ failSigning: true })
+    const fallbackReasons: string[] = []
+
+    const auth = await buildRealtimeDeviceSocketAuth({
+      deviceId: 'device-1',
+      deviceSerial: 'secret-serial-value',
+      signedAuthEnabled: true,
+      certificateManager: fake.manager,
+      nowMs: () => 1770000000000,
+      nonceFactory: () => '0123456789abcdef0123456789abcdef',
+      onFallback: (reason: string) => fallbackReasons.push(reason),
+    })
+
+    expect(auth).to.deep.equal({
+      device_id: 'device-1',
+      device_serial: 'secret-serial-value',
+    })
+    expect(Object.keys(auth)).to.not.include('auth_signature')
+    expect(Object.keys(auth)).to.not.include('auth_nonce')
+    expect(fallbackReasons).to.deep.equal(['signing_failed'])
+    expect(JSON.stringify(fallbackReasons)).to.not.contain('secret-serial-value')
+    expect(JSON.stringify(fallbackReasons)).to.not.contain('0123456789abcdef0123456789abcdef')
   })
 
   it('treats COMMAND_AVAILABLE as a wake-up and pulls commands/desired state by REST', async () => {
