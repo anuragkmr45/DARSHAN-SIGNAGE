@@ -14,6 +14,7 @@ import {
   recordDeviceRealtimeAuth,
   recordDeviceRealtimeNotification,
   recordDeviceSocketAuth,
+  recordDeviceSocketAuthReplay,
   recordJobEnqueue,
   recordMediaCacheReport,
   recordOutboxDispatch,
@@ -139,6 +140,21 @@ describe('backend observability instrumentation', () => {
       result: 'failure',
       reason: 'serial-bearing raw reason',
     });
+    recordDeviceSocketAuthReplay({
+      namespace: '/device',
+      result: 'accepted',
+      reason: 'stored',
+    });
+    recordDeviceSocketAuthReplay({
+      namespace: '/device',
+      result: 'rejected',
+      reason: 'replay_detected',
+    });
+    recordDeviceSocketAuthReplay({
+      namespace: '/tenant-controlled-namespace',
+      result: 'client-controlled-result',
+      reason: 'raw nonce-bearing replay reason',
+    });
     recordDeviceRealtimeNotification('COMMAND_AVAILABLE', 'delivered');
     recordDeviceRealtimeNotification('COMMAND_AVAILABLE', 'deferred');
     recordWebsocketNotificationPayloadTooLarge('COMMAND_AVAILABLE');
@@ -180,8 +196,20 @@ describe('backend observability instrumentation', () => {
     expect(output).toContain(
       'darshan_server_device_socket_auth_total{namespace="/device",mode="unknown",result="failure",reason="unknown"} 1'
     );
+    expect(output).toContain(
+      'darshan_server_device_socket_auth_replay_total{namespace="/device",result="accepted",reason="stored"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_device_socket_auth_replay_total{namespace="/device",result="rejected",reason="replay_detected"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_device_socket_auth_replay_total{namespace="unknown",result="error",reason="unknown"} 1'
+    );
     expect(output).not.toContain('device-controlled-mode');
     expect(output).not.toContain('serial-bearing raw reason');
+    expect(output).not.toContain('/tenant-controlled-namespace');
+    expect(output).not.toContain('client-controlled-result');
+    expect(output).not.toContain('raw nonce-bearing replay reason');
     expect(output).toContain(
       'darshan_server_device_realtime_notifications_total{type="COMMAND_AVAILABLE",result="delivered"} 1'
     );

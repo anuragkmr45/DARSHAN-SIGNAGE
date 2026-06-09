@@ -2,6 +2,11 @@ import { createVerify } from 'crypto';
 import { desc, eq } from 'drizzle-orm';
 import { config } from '@/config';
 import { getDatabase, schema } from '@/db';
+import {
+  checkDeviceSocketReplay,
+  type DeviceSocketReplayReason,
+  type DeviceSocketReplayStore,
+} from '@/realtime/device-socket-replay';
 import { DEVICE_REQUEST_SIGNATURE_VERSION } from '@/utils/device-request-auth';
 
 export const DEVICE_SOCKET_SIGNATURE_PREFIX = 'DARSHAN_DEVICE_SOCKET_AUTH_V1';
@@ -21,6 +26,9 @@ export type DeviceSocketAuthReason =
   | 'signature_unavailable'
   | 'invalid_credentials'
   | 'device_not_registered'
+  | 'replay_detected'
+  | 'replay_store_unavailable'
+  | 'replay_store_error'
   | 'unknown';
 
 export type DeviceSocketAuthSuccess = {
@@ -44,6 +52,9 @@ type DeviceSocketAuthConfig = {
   legacyAuthAllowed: boolean;
   signedAuthEnabled: boolean;
   maxClockSkewMs: number;
+  replayProtectionEnabled: boolean;
+  replayCacheTtlMs: number;
+  replayFailClosed: boolean;
 };
 
 export type DeviceSocketHandshakeInput = {
@@ -55,6 +66,7 @@ export type DeviceSocketHandshakeInput = {
 export type DeviceSocketAuthOptions = {
   config?: Partial<DeviceSocketAuthConfig>;
   nowMs?: () => number;
+  replayStore?: DeviceSocketReplayStore;
 };
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -70,6 +82,10 @@ function resolveAuthConfig(overrides?: Partial<DeviceSocketAuthConfig>): DeviceS
     legacyAuthAllowed: overrides?.legacyAuthAllowed ?? config.DEVICE_SOCKET_LEGACY_AUTH_ALLOWED,
     signedAuthEnabled: overrides?.signedAuthEnabled ?? config.DEVICE_SOCKET_SIGNED_AUTH_ENABLED,
     maxClockSkewMs: overrides?.maxClockSkewMs ?? config.DEVICE_SOCKET_AUTH_MAX_CLOCK_SKEW_MS,
+    replayProtectionEnabled:
+      overrides?.replayProtectionEnabled ?? config.DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED,
+    replayCacheTtlMs: overrides?.replayCacheTtlMs ?? config.DEVICE_SOCKET_AUTH_REPLAY_CACHE_TTL_MS,
+    replayFailClosed: overrides?.replayFailClosed ?? config.DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED,
   };
 }
 
@@ -142,6 +158,13 @@ function validateIdentityShape(deviceId: string, serial: string) {
 
 function buildFailure(mode: DeviceSocketAuthMode, reason: Exclude<DeviceSocketAuthReason, 'authorized'>): DeviceSocketAuthFailure {
   return { ok: false, mode, reason };
+}
+
+function authReasonForReplayFailure(reason: DeviceSocketReplayReason): Exclude<DeviceSocketAuthReason, 'authorized'> {
+  if (reason === 'replay_detected') return 'replay_detected';
+  if (reason === 'store_unavailable') return 'replay_store_unavailable';
+  if (reason === 'store_error') return 'replay_store_error';
+  return 'unknown';
 }
 
 export function buildDeviceSocketSignaturePayload(input: {
@@ -242,7 +265,8 @@ async function authenticateLegacy(input: DeviceSocketHandshakeInput, authConfig:
 async function authenticateSigned(
   input: DeviceSocketHandshakeInput,
   authConfig: DeviceSocketAuthConfig,
-  nowMs: () => number
+  nowMs: () => number,
+  replayStore?: DeviceSocketReplayStore
 ): Promise<DeviceSocketAuthResult> {
   if (!authConfig.signedAuthEnabled) {
     return buildFailure('signed', 'signed_disabled');
@@ -295,6 +319,23 @@ async function authenticateSigned(
     return buildFailure('signed', 'signature_invalid');
   }
 
+  const replay = await checkDeviceSocketReplay(
+    {
+      deviceId: signed.deviceId,
+      serial: signed.serial,
+      nonce: signed.nonce,
+    },
+    {
+      enabled: authConfig.replayProtectionEnabled,
+      ttlMs: authConfig.replayCacheTtlMs,
+      failClosed: authConfig.replayFailClosed,
+      store: replayStore,
+    }
+  );
+  if (!replay.ok) {
+    return buildFailure('signed', authReasonForReplayFailure(replay.reason));
+  }
+
   return {
     ok: true,
     mode: 'signed',
@@ -312,7 +353,7 @@ export async function authenticateDeviceSocketHandshake(
   const authConfig = resolveAuthConfig(options.config);
   const auth = input.auth ?? {};
   if (hasSignedAuthFields(auth)) {
-    return authenticateSigned(input, authConfig, options.nowMs ?? Date.now);
+    return authenticateSigned(input, authConfig, options.nowMs ?? Date.now, options.replayStore);
   }
   return authenticateLegacy(input, authConfig);
 }

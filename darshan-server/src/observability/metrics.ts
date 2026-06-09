@@ -85,6 +85,17 @@ type DeviceSocketAuthReason =
   | 'signature_unavailable'
   | 'invalid_credentials'
   | 'device_not_registered'
+  | 'replay_detected'
+  | 'replay_store_unavailable'
+  | 'replay_store_error'
+  | 'unknown';
+type DeviceSocketAuthReplayResult = 'accepted' | 'rejected' | 'bypassed' | 'error';
+type DeviceSocketAuthReplayReason =
+  | 'stored'
+  | 'replay_detected'
+  | 'disabled'
+  | 'store_unavailable'
+  | 'store_error'
   | 'unknown';
 type RealtimeNotificationResult = 'delivered' | 'deferred' | 'payload_too_large' | 'error';
 type RealtimeBusProvider = 'memory' | 'valkey';
@@ -121,6 +132,9 @@ type RealtimeSocketAuthReason =
   | 'signature_unavailable'
   | 'invalid_credentials'
   | 'device_not_registered'
+  | 'replay_detected'
+  | 'replay_store_unavailable'
+  | 'replay_store_error'
   | 'origin_not_allowed'
   | 'origin_required'
   | 'missing_token'
@@ -535,6 +549,9 @@ const REALTIME_SOCKET_AUTH_REASONS = new Set<string>([
   'signature_unavailable',
   'invalid_credentials',
   'device_not_registered',
+  'replay_detected',
+  'replay_store_unavailable',
+  'replay_store_error',
   'origin_not_allowed',
   'origin_required',
   'missing_token',
@@ -555,6 +572,18 @@ const DEVICE_SOCKET_AUTH_REASONS = new Set<string>([
   'signature_unavailable',
   'invalid_credentials',
   'device_not_registered',
+  'replay_detected',
+  'replay_store_unavailable',
+  'replay_store_error',
+  'unknown',
+]);
+const DEVICE_SOCKET_AUTH_REPLAY_RESULTS = new Set<string>(['accepted', 'rejected', 'bypassed', 'error']);
+const DEVICE_SOCKET_AUTH_REPLAY_REASONS = new Set<string>([
+  'stored',
+  'replay_detected',
+  'disabled',
+  'store_unavailable',
+  'store_error',
   'unknown',
 ]);
 
@@ -569,6 +598,13 @@ const deviceSocketAuthCounter = new Counter({
   name: 'darshan_server_device_socket_auth_total',
   help: 'Device Socket.IO namespace authentication outcomes by auth mode and bounded reason category.',
   labelNames: ['namespace', 'mode', 'result', 'reason'],
+  registers: [registry],
+});
+
+const deviceSocketAuthReplayCounter = new Counter({
+  name: 'darshan_server_device_socket_auth_replay_total',
+  help: 'Replay protection outcomes for signed device Socket.IO authentication.',
+  labelNames: ['namespace', 'result', 'reason'],
   registers: [registry],
 });
 
@@ -963,6 +999,20 @@ export function recordDeviceSocketAuth(params: {
   });
 }
 
+export function recordDeviceSocketAuthReplay(params: {
+  namespace: string;
+  result: string;
+  reason: string;
+}) {
+  safeRecord(() => {
+    deviceSocketAuthReplayCounter.inc({
+      namespace: normalizeRealtimeSocketNamespace(params.namespace),
+      result: normalizeDeviceSocketAuthReplayResult(params.result),
+      reason: normalizeDeviceSocketAuthReplayReason(params.reason),
+    });
+  });
+}
+
 export function categorizeRealtimeSocketDisconnectReason(reason: string): RealtimeSocketDisconnectReason {
   switch (reason) {
     case 'client namespace disconnect':
@@ -1003,6 +1053,14 @@ function normalizeDeviceSocketAuthMode(mode: string): DeviceSocketAuthMode {
 
 function normalizeDeviceSocketAuthReason(reason: string): DeviceSocketAuthReason {
   return DEVICE_SOCKET_AUTH_REASONS.has(reason) ? (reason as DeviceSocketAuthReason) : 'unknown';
+}
+
+function normalizeDeviceSocketAuthReplayResult(result: string): DeviceSocketAuthReplayResult {
+  return DEVICE_SOCKET_AUTH_REPLAY_RESULTS.has(result) ? (result as DeviceSocketAuthReplayResult) : 'error';
+}
+
+function normalizeDeviceSocketAuthReplayReason(reason: string): DeviceSocketAuthReplayReason {
+  return DEVICE_SOCKET_AUTH_REPLAY_REASONS.has(reason) ? (reason as DeviceSocketAuthReplayReason) : 'unknown';
 }
 
 export function recordRealtimeSocketConnect(namespace: string) {

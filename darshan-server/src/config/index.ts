@@ -47,6 +47,9 @@ const envSchema = z.object({
   DEVICE_SOCKET_LEGACY_AUTH_ALLOWED: optionalBooleanString,
   DEVICE_SOCKET_SIGNED_AUTH_ENABLED: optionalBooleanString,
   DEVICE_SOCKET_AUTH_MAX_CLOCK_SKEW_MS: z.coerce.number().int().positive().default(300_000),
+  DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED: optionalBooleanString,
+  DEVICE_SOCKET_AUTH_REPLAY_CACHE_TTL_MS: z.coerce.number().int().positive().default(300_000),
+  DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED: optionalBooleanString,
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   FFMPEG_PATH: z.string().default('ffmpeg'),
   LIBREOFFICE_PATH: z.string().default('soffice'),
@@ -167,6 +170,9 @@ export const config = Object.freeze({
     parsed.data.REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS ?? false,
   DEVICE_SOCKET_LEGACY_AUTH_ALLOWED: parsed.data.DEVICE_SOCKET_LEGACY_AUTH_ALLOWED ?? true,
   DEVICE_SOCKET_SIGNED_AUTH_ENABLED: parsed.data.DEVICE_SOCKET_SIGNED_AUTH_ENABLED ?? true,
+  DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED:
+    parsed.data.DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED ?? true,
+  DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED: parsed.data.DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED ?? false,
   MEDIA_CACHE_REPORTING_ENABLED:
     parsed.data.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED ?? parsed.data.MEDIA_CACHE_REPORTING_ENABLED ?? true,
 });
