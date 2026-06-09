@@ -1,6 +1,6 @@
 # Realtime Sync Production Readiness Checklist
 
-Last updated: 2026-05-25
+Last updated: 2026-06-09
 Updated by: Codex
 
 ## Production readiness state
@@ -18,10 +18,13 @@ Reason: Phase 8 tooling, checklists, local static validation, CMS lint fix, dedi
 | On-prem dev smoke | `/api/v1/`, CMS, and `/socket.io/` through internal dev endpoints | Open |
 | REST proxy smoke | `/api/v1/` through on-prem QA/prod proxy | Open |
 | WebSocket proxy smoke | `/socket.io/` upgrade, idle timeout, origin, selected transport, and sticky-session setting if polling is enabled | Open |
+| Signed and legacy player socket auth smoke | selected signed canary players connect in signed mode while existing legacy players still connect | Open |
 | Valkey connectivity and fanout smoke | backend nodes connect to Valkey and publish/subscribe wake events under the configured namespace | Partial - local Docker Valkey Pub/Sub smoke passed; on-prem HA topology open |
 | Multi-node fanout smoke | player socket on node A, command created on node B, Valkey wakes node A, player fetches by REST and ACKs | Partial - local simulated node A/node B Pub/Sub smoke passed; real backend/player evidence open |
+| Valkey replay across backend nodes | shared replay cache records fresh signed handshakes and rejects controlled duplicates across node A/node B | Open |
 | Valkey outage fallback | Valkey unavailable while `command_outbox`, REST, polling, heartbeat, schedule/default/emergency delivery continue | Open |
 | Backend/player realtime smoke | Packaged player through on-prem QA proxy | Open |
+| Signed-auth canary rollback drill | player signed auth, optional server signed auth, and replay protection roll back while legacy socket auth and REST fallback remain available | Open |
 | Fallback rollback drill | Realtime disabled and publish/default/emergency still update by polling/heartbeat | Open |
 | 1,000 player load | current, hybrid, fallback profiles | Open |
 | 10,000 player load | current, hybrid, fallback profiles | Open |
@@ -63,15 +66,26 @@ Latest documentation/static validation after the on-prem/Valkey update on 2026-0
 
 Production realtime canary is not allowed until all required gates are passed or explicitly waived by a human approver with rollback responsibility.
 
+Signed `/device` socket auth canary uses existing dual-mode flags only:
+
+- Backend `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true` remains the compatibility posture.
+- Backend `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=true` and `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=true` remain the signed canary posture.
+- Backend `DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED=false` remains the canary posture unless a separate runtime plan approves fail-closed behavior.
+- Player `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=true` applies only to selected canary players.
+
 Sticky-session-only production realtime is not an approved gate outcome. Sticky sessions may be enabled only as a load-balancer compatibility setting when Socket.IO HTTP polling transport remains enabled. Multi-instance notification routing requires Valkey-backed fanout; DB outbox and polling/heartbeat remain the delivery safety net.
 
 ## Rollback Rule
 
 Rollback order:
 
-1. `OUTBOX_DISPATCH_ENABLED=false`
-2. `REALTIME_SYNC_ENABLED=false`
-3. `DARSHAN_REALTIME_PLAYER_ENABLED=false`
-4. Optional: `MEDIA_CACHE_REPORTING_ENABLED=false`
-5. Keep REST, polling, heartbeat, command claim/ACK, snapshot/default/emergency fetch, and media cache active.
-6. Leave additive DB schema in place.
+1. `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=false` on canary players.
+2. `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=false` if optional signed auth causes rejects.
+3. `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=false` if replay protection causes rejects.
+4. Keep `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true` for compatibility.
+5. `OUTBOX_DISPATCH_ENABLED=false`
+6. `REALTIME_SYNC_ENABLED=false`
+7. `DARSHAN_REALTIME_PLAYER_ENABLED=false`
+8. Optional: `MEDIA_CACHE_REPORTING_ENABLED=false`
+9. Keep REST, polling, heartbeat, command claim/ACK, snapshot/default/emergency fetch, and media cache active.
+10. Leave additive DB schema in place.

@@ -1,6 +1,6 @@
 # Enterprise Realtime Sync QA/Prod Hardening Runbook
 
-Last updated: 2026-05-24
+Last updated: 2026-06-09
 Updated by: Codex
 Phase: Phase 7 - QA/prod deployment hardening
 
@@ -51,6 +51,7 @@ Realtime behavior must be enabled in layers. Never enable all flags for the full
 | Delivery UI | backend APIs | `VITE_REALTIME_DELIVERY_STATUS_UI` | Enabled for QA operators first |
 | Media/cache reporting | `MEDIA_CACHE_REPORTING_ENABLED` | `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`, `VITE_MEDIA_CACHE_STATUS_UI` | Enabled in QA; production requires retention/alerts |
 | Realtime bus | `REALTIME_BUS_PROVIDER=valkey`, `VALKEY_URL` | none | Required before multi-instance production realtime |
+| Signed `/device` socket auth canary | `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true`, `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=true`, replay protection enabled with fail-open canary posture | `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=true` on selected canary players only | Dual-mode backend; signed auth remains optional and legacy players must still connect |
 
 ## QA Recommended Values
 
@@ -138,6 +139,53 @@ Do not enable full-fleet realtime sync across multiple backend instances until V
     - fallback polling catches missed notifications.
 13. Expand canary only after the smoke checklist passes.
 
+## Signed Device Socket Auth Canary
+
+This canary validates signed `/device` Socket.IO authentication without requiring signed auth globally. It preserves deployed legacy player compatibility and does not change source-of-truth behavior.
+
+Backend canary values:
+
+- `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true`
+- `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=true`
+- `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=true`
+- `DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED=false`
+
+Player canary value:
+
+- `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=true` only on selected canary players.
+
+Canary checks:
+
+1. Confirm existing unsigned players still connect through the `/device` namespace.
+2. Confirm selected signed players connect in signed mode.
+3. Confirm fresh signed handshakes record replay protection as accepted.
+4. In a controlled environment, test a duplicate signed handshake and record replay rejection evidence if feasible.
+5. Monitor signed and legacy auth outcomes through low-cardinality auth metrics.
+6. Monitor replay outcomes for accepted, rejected, unavailable, and error categories.
+7. Confirm command wake notifications still lead to REST command fetch and REST ACK.
+8. Confirm WebSocket remains wake-only; snapshots, media, screenshots, logs, PoP, and cache reports must not move over WebSocket or Valkey.
+9. Confirm media delivery remains HTTP/object-storage/local-cache only.
+10. Confirm fallback polling catches missed notifications.
+
+Pass criteria:
+
+- Signed canary players connect successfully.
+- Legacy players continue connecting successfully.
+- No unexpected spike appears in malformed auth, invalid signature, expired signature, replay rejection, unavailable replay store, or replay store error categories.
+- Commands are still fetched and ACKed through REST.
+- Outbox wake behavior, Valkey fanout behavior, media delivery, screenshots, and desired-state REST behavior are unchanged.
+- Rollback is executed and recorded before expanding beyond the initial canary set.
+
+Fail criteria:
+
+- Signed canary players cannot connect.
+- Legacy players fail to connect during the canary.
+- Replay protection causes broad auth rejection, unavailable store, or store error categories.
+- WebSocket begins carrying source-of-truth data, media, screenshots, logs, PoP, or cache reports.
+- REST command fetch, ACK, heartbeat, polling, snapshot, default media, or emergency fallback is degraded.
+
+Signed auth rollout must not move to broad enforcement until Valkey node A/node B fanout, replay across backend nodes, proxy upgrade, load/reconnect/chaos, Node 20, and rollback evidence are accepted.
+
 ## Phase 8B Air-Gapped On-Prem Runtime Evidence
 
 Phase 8B must use internal/on-prem endpoints and must not require public endpoints or cloud services.
@@ -176,13 +224,17 @@ Production readiness must remain `NOT_PRODUCTION_READY` until these pass or are 
 
 Rollback must not require DB rollback.
 
-1. Set `OUTBOX_DISPATCH_ENABLED=false`.
-2. Set `REALTIME_SYNC_ENABLED=false`.
-3. Set player `DARSHAN_REALTIME_PLAYER_ENABLED=false` through config management or next installer/config rollout.
-4. Keep command polling, heartbeat, snapshot fetch, default media fetch, emergency fetch, and media cache active.
-5. Optional: set `MEDIA_CACHE_REPORTING_ENABLED=false` and `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` if report ingestion causes unexpected pressure.
-6. Leave additive tables and enum values in place.
-7. Record rollback evidence in the phase handoff.
+1. Set canary player `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=false`.
+2. Set backend `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=false` if optional signed auth causes rejects.
+3. Set backend `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=false` if replay protection causes rejects.
+4. Keep `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true` for compatibility.
+5. Set `OUTBOX_DISPATCH_ENABLED=false` if realtime wake dispatch must be stopped.
+6. Set `REALTIME_SYNC_ENABLED=false` if the gateway must be disabled.
+7. Set player `DARSHAN_REALTIME_PLAYER_ENABLED=false` through config management or next installer/config rollout if realtime must be disabled on players.
+8. Keep command polling, heartbeat, snapshot fetch, default media fetch, emergency fetch, REST ACK, and media cache active.
+9. Optional: set `MEDIA_CACHE_REPORTING_ENABLED=false` and `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` if report ingestion causes unexpected pressure.
+10. Leave additive tables and enum values in place.
+11. Record rollback evidence in the phase handoff.
 
 ## Smoke Checklist
 
@@ -197,9 +249,12 @@ Rollback must not require DB rollback.
 | `/socket.io/` upgrade through proxy | yes | gateway smoke result |
 | Valkey fanout decision and connectivity | yes | decision log and Valkey smoke |
 | Multi-node node A/node B fanout | yes | command delivery evidence |
+| Valkey replay across backend nodes | yes | signed handshake replay evidence under shared Valkey namespace |
+| Signed and legacy player socket auth | yes | signed canary and legacy player connection evidence |
 | Sticky-session setting if Socket.IO polling is enabled | yes | proxy/LB config evidence |
 | Polling/heartbeat fallback with realtime disabled | yes | command delivery evidence |
 | Fallback catches missed WebSocket notification | yes | command delivery evidence |
+| Signed-auth canary rollback | yes | flag rollback evidence with REST/polling still active |
 | Media/cache report retention defined | yes | retention note |
 | Dedicated metrics/alerts for realtime and media/cache failures | yes | dashboard/alert evidence |
 
