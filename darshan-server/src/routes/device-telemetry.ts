@@ -851,7 +851,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         mediaReportSeverity = data.severity;
         await authenticateDeviceOrThrow(request, deviceId);
 
-        if (!appConfig.MEDIA_CACHE_REPORTING_ENABLED) {
+        if (!appConfig.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED) {
           recordMediaCacheReport({
             eventType: mediaReportEventType,
             severity: mediaReportSeverity,

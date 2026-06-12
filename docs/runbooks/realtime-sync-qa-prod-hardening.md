@@ -49,7 +49,7 @@ Realtime behavior must be enabled in layers. Never enable all flags for the full
 | WebSocket gateway | `REALTIME_SYNC_ENABLED` | `DARSHAN_REALTIME_PLAYER_ENABLED` (`HEXMON_REALTIME_SYNC_ENABLED` legacy alias) | Disabled until QA proxy/runtime smoke passes |
 | Outbox dispatcher | `OUTBOX_DISPATCH_ENABLED` | none | Disabled until gateway health and rollback are verified |
 | Delivery UI | backend APIs | `VITE_REALTIME_DELIVERY_STATUS_UI` | Enabled for QA operators first |
-| Media/cache reporting | `MEDIA_CACHE_REPORTING_ENABLED` | `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`, `VITE_MEDIA_CACHE_STATUS_UI` | Enabled in QA; production requires retention/alerts |
+| Media/cache reporting | `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED` | `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`, `VITE_MEDIA_CACHE_STATUS_UI` | Enabled in QA; production requires retention/alerts |
 | Realtime bus | `REALTIME_BUS_PROVIDER=valkey`, `VALKEY_URL` | none | Required before multi-instance production realtime |
 | Signed `/device` socket auth canary | `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true`, `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=true`, replay protection enabled with fail-open canary posture | `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=true` on selected canary players only | Dual-mode backend; signed auth remains optional and legacy players must still connect |
 
@@ -232,7 +232,7 @@ Rollback must not require DB rollback.
 6. Set `REALTIME_SYNC_ENABLED=false` if the gateway must be disabled.
 7. Set player `DARSHAN_REALTIME_PLAYER_ENABLED=false` through config management or next installer/config rollout if realtime must be disabled on players.
 8. Keep command polling, heartbeat, snapshot fetch, default media fetch, emergency fetch, REST ACK, and media cache active.
-9. Optional: set `MEDIA_CACHE_REPORTING_ENABLED=false` and `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` if report ingestion causes unexpected pressure.
+9. Optional: set `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` if report ingestion causes unexpected pressure.
 10. Leave additive tables and enum values in place.
 11. Record rollback evidence in the phase handoff.
 

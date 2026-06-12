@@ -513,7 +513,7 @@ Large media, screenshots, logs, snapshots, and PoP are still not sent over WebSo
 | Item | Expected | Verified? | Status | Evidence | Notes |
 |---|---|---:|---|---|---|
 | Additive report schema | Store media/cache failure metadata by screen/media | yes | VERIFIED_COMPLETE | `0032_media_cache_failure_reporting.sql`; `schema.ts` | No enum rollback risk; table is additive. |
-| Device report endpoint | Device-authenticated REST endpoint ingests failure metadata | yes | VERIFIED_COMPLETE | `POST /api/v1/device/:deviceId/media-cache-report`; focused route test | Controlled by `MEDIA_CACHE_REPORTING_ENABLED`. |
+| Device report endpoint | Device-authenticated REST endpoint ingests failure metadata | yes | VERIFIED_COMPLETE | `POST /api/v1/device/:deviceId/media-cache-report`; focused route test | Controlled by `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`. |
 | CMS report endpoint | CMS can read recent reports per screen | yes | VERIFIED_COMPLETE | `GET /api/v1/screens/:id/media-cache-reports/recent`; focused route test | Requires existing `read Screen` permission. |
 | Player reporter | Electron sends sanitized reports and queues failed sends | yes | VERIFIED_COMPLETE | `media-cache-reporter.ts`; 2 unit tests | Full URLs are not sent; host and path hash only. |
 | Cache integration | Cache/default/snapshot cache paths report failures | yes | VERIFIED_COMPLETE | `cache-manager.ts`, `default-media-service.ts`, `snapshot-manager.ts`; focused tests | Existing playback fallback behavior remains. |
@@ -551,7 +551,7 @@ Phase 7 may start only if these Phase 6 conditions are accepted: rerun builds/te
 
 ### Phase 6 Rollback Notes
 
-- Set backend `MEDIA_CACHE_REPORTING_ENABLED=false` to accept but not store new reports.
+- Set backend `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` to accept but not store new reports.
 - Set player `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` to stop sending player cache failure reports.
 - Set CMS `VITE_MEDIA_CACHE_STATUS_UI=false` to hide the report list in the Delivery tab.
 - Leave the additive table and migration in place if applied.
@@ -633,7 +633,7 @@ Phase 7 may proceed to Phase 8 planning/implementation only after accepting thes
 - Set `OUTBOX_DISPATCH_ENABLED=false`.
 - Set `REALTIME_SYNC_ENABLED=false`.
 - Set `DARSHAN_REALTIME_PLAYER_ENABLED=false`.
-- Optionally set `MEDIA_CACHE_REPORTING_ENABLED=false`, `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`, and `VITE_MEDIA_CACHE_STATUS_UI=false`.
+- Optionally set `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` and `VITE_MEDIA_CACHE_STATUS_UI=false`.
 - Leave additive migrations/tables/enums in place.
 - Keep REST, polling, heartbeat, snapshot/default/emergency fetch, command claim/ACK, and media cache active.
 
@@ -996,5 +996,5 @@ Permutation matrix is maintained in `docs/implementation/realtime-sync-permutati
 - Do not remove enum values.
 - Phase 3 remains feature-flag-safe through `REALTIME_SYNC_ENABLED=false` and `OUTBOX_DISPATCH_ENABLED=false` defaults.
 - Phase 4 remains player-feature-flag-safe through `DARSHAN_REALTIME_PLAYER_ENABLED=false`; no DB rollback is needed for Phase 4.
-- Phase 6 remains feature-flag-safe through `MEDIA_CACHE_REPORTING_ENABLED=false`, `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`, and `VITE_MEDIA_CACHE_STATUS_UI=false`.
+- Phase 6 remains feature-flag-safe through `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` and `VITE_MEDIA_CACHE_STATUS_UI=false`.
 - Phase 7 documents QA/prod rollback order: disable outbox dispatcher, disable backend realtime, disable player realtime, and keep REST/polling/heartbeat active.

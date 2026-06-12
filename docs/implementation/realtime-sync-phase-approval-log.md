@@ -422,7 +422,7 @@ Approval state: `APPROVED_WITH_CONDITIONS`
 - Added additive `media_cache_reports` schema and indexes.
 - Added `POST /api/v1/device/:deviceId/media-cache-report` for device-authenticated REST ingestion.
 - Added `GET /api/v1/screens/:id/media-cache-reports/recent` for CMS read visibility.
-- Added backend feature flag `MEDIA_CACHE_REPORTING_ENABLED`.
+- Added backend feature flag `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`.
 - Added Electron `media-cache-reporter.ts` with sanitized URL host/path hash and existing request-queue fallback.
 - Wired cache manager, snapshot prefetch, and default media cache hydration to report cache/download failures.
 - Added player config flag `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`.

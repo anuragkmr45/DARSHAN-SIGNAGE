@@ -129,7 +129,6 @@ const envSchema = z.object({
   OUTBOX_DISPATCH_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
   OUTBOX_DISPATCH_LEASE_MS: z.coerce.number().int().positive().default(60_000),
   DARSHAN_MEDIA_CACHE_REPORTING_ENABLED: optionalBooleanString,
-  MEDIA_CACHE_REPORTING_ENABLED: optionalBooleanString,
 });
 
 export function resolveValkeyUrl(input: {
@@ -173,7 +172,6 @@ export const config = Object.freeze({
   DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED:
     parsed.data.DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED ?? true,
   DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED: parsed.data.DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED ?? false,
-  MEDIA_CACHE_REPORTING_ENABLED:
-    parsed.data.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED ?? parsed.data.MEDIA_CACHE_REPORTING_ENABLED ?? true,
+  DARSHAN_MEDIA_CACHE_REPORTING_ENABLED: parsed.data.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED ?? true,
 });
 export type Config = typeof config;

@@ -86,6 +86,6 @@ Rollback order:
 5. `OUTBOX_DISPATCH_ENABLED=false`
 6. `REALTIME_SYNC_ENABLED=false`
 7. `DARSHAN_REALTIME_PLAYER_ENABLED=false`
-8. Optional: `MEDIA_CACHE_REPORTING_ENABLED=false`
+8. Optional: `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`
 9. Keep REST, polling, heartbeat, command claim/ACK, snapshot/default/emergency fetch, and media cache active.
 10. Leave additive DB schema in place.

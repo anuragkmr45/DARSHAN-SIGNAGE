@@ -397,7 +397,7 @@ Latest Phase 8 runtime evidence attempt: `docs/implementation/realtime-sync-phas
 - Implementation notes: Added `media_cache_reports`, `POST /api/v1/device/:deviceId/media-cache-report`, Electron `media-cache-reporter.ts`, cache/default/snapshot cache integration, URL host/path-hash sanitization, and existing request-queue fallback. Renderer playback error reporting remains a future extension.
 - Test requirements: endpoint tests, player cache failure tests, queue retry tests. Latest evidence: backend build passed, route tests passed, player build passed, focused player tests passed.
 - Acceptance criteria: media/cache failures are durable and visible by screen/media. Met for cache/download/default/snapshot paths and CMS per-screen view.
-- Rollback notes: set `MEDIA_CACHE_REPORTING_ENABLED=false`, `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`, or `VITE_MEDIA_CACHE_STATUS_UI=false`
+- Rollback notes: set `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false` or `VITE_MEDIA_CACHE_STATUS_UI=false`
 - Approval required: yes
 
 ### RT-0602 - Add Log And Screenshot Result Visibility

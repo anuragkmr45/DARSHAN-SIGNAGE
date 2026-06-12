@@ -17,7 +17,7 @@ No WebSocket semantics, Electron realtime/adaptive polling, mobile adapters, or 
 - Added additive `media_cache_reports` table and indexes.
 - Added device endpoint `POST /api/v1/device/:deviceId/media-cache-report`.
 - Added CMS endpoint `GET /api/v1/screens/:id/media-cache-reports/recent`.
-- Added backend flag `MEDIA_CACHE_REPORTING_ENABLED`.
+- Added backend flag `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`.
 - Added Electron `media-cache-reporter.ts`.
 - Wired cache manager, snapshot prefetch, and default media cache hydration failure paths.
 - Sanitized media URLs to host plus path hash; full signed URLs are not stored.
@@ -101,7 +101,7 @@ No WebSocket semantics, Electron realtime/adaptive polling, mobile adapters, or 
 
 ## Rollback
 
-- Backend: set `MEDIA_CACHE_REPORTING_ENABLED=false`.
+- Backend: set `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`.
 - Player: set `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`.
 - CMS: set `VITE_MEDIA_CACHE_STATUS_UI=false`.
 - Leave `0032_media_cache_failure_reporting.sql` in place if applied.

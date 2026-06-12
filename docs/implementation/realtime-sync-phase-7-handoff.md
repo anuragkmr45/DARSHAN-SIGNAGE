@@ -92,7 +92,7 @@ Rollback is feature-flag based:
 1. Set `OUTBOX_DISPATCH_ENABLED=false`.
 2. Set `REALTIME_SYNC_ENABLED=false`.
 3. Set `DARSHAN_REALTIME_PLAYER_ENABLED=false`.
-4. Optionally set `MEDIA_CACHE_REPORTING_ENABLED=false` and `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`.
+4. Optionally set `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`.
 5. Leave additive DB schema and enum values in place.
 6. Keep polling, heartbeat, REST command claim/ACK, snapshot/default/emergency fetch, and media cache active.
 
