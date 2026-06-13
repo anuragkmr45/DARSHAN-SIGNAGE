@@ -44,13 +44,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      MINIO_ENDPOINT: minio
-      MINIO_PORT: 9000
-      DARSHAN_RUNTIME_CONTAINER: 'true'
-      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     ports:
       - '${API_HOST_PORT:-3000}:3000'
     depends_on:
