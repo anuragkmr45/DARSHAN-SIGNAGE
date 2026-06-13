@@ -177,9 +177,10 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 ## Operator steps
 
 1. Install the packaged artifact that matches this folder's `ELECTRON_PACKAGE_ARCH`.
-2. Copy `config.example.json` to the player config location.
+2. Copy `config.example.json` to `/etc/darshan/config.json` before the first launch, or edit the config path reported by `darshan-player doctor`.
 3. Replace `<backend-ip>` with the real backend IP.
-4. Pair the device and verify it appears in the CMS.
+4. Launch `darshan-player` from the logged-in Ubuntu desktop session. The current Ubuntu package uses XDG desktop autostart, not a systemd service.
+5. Pair the device and verify it appears in the CMS.
 EOF
 
 export_write_checksums "$OUTPUT_DIR"

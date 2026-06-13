@@ -91,7 +91,7 @@
   },
   "build": {
     "appId": "com.darshan.player",
-    "productName": "DARSHAN Player",
+    "productName": "DARSHAN-Player",
     "directories": {
       "output": "build",
       "buildResources": "resources"
@@ -101,21 +101,10 @@
       "package.json"
     ],
     "linux": {
+      "executableName": "darshan-player",
       "target": [
-        {
-          "target": "deb",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        "deb",
+        "AppImage"
       ],
       "category": "Utility",
       "maintainer": "DARSHAN <support@darshan.com>",
@@ -147,6 +136,7 @@
       "category": "public.app-category.utilities"
     },
     "deb": {
+      "afterInstall": "scripts/deb-after-install.sh",
       "depends": [
         "libgtk-3-0",
         "libnotify4",
