@@ -12,7 +12,7 @@ describe('runtime dependency resolution', () => {
     process.env.MINIO_ACCESS_KEY = process.env.MINIO_ACCESS_KEY || 'minioadmin';
     process.env.MINIO_SECRET_KEY = process.env.MINIO_SECRET_KEY || 'minioadmin';
     process.env.ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
-    process.env.ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'ChangeMe123!';
+    process.env.ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'LocalDev@123';
   }
 
   function createExecutable(binDir: string, name: string) {
@@ -107,13 +107,53 @@ describe('runtime dependency resolution', () => {
     process.env.LIBREOFFICE_PATH = join(tmpdir(), 'missing-soffice');
     process.env.PG_DUMP_PATH = join(tmpdir(), 'missing-pg-dump');
     process.env.TAR_PATH = join(tmpdir(), 'missing-tar');
-    process.env.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH = join(tmpdir(), 'missing-chromium');
     process.env.PATH = '';
     applyMinimumEnv();
 
     const { validateRuntimeDependencies } = await import('@/utils/runtime-dependencies');
 
     await expect(validateRuntimeDependencies()).rejects.toThrow('Missing required runtime dependencies');
+  });
+
+  it('treats chromium as optional unless a chromium path is explicitly configured', async () => {
+    vi.doMock('playwright', () => ({
+      chromium: {
+        executablePath: () => join(tmpdir(), 'missing-playwright-chromium'),
+      },
+    }));
+
+    const binDir = mkdtempSync(join(tmpdir(), 'darshan-runtime-core-'));
+    mkdirSync(binDir, { recursive: true });
+    createExecutable(binDir, 'ffmpeg');
+    createExecutable(binDir, 'soffice');
+    createExecutable(binDir, 'pg_dump');
+    createExecutable(binDir, 'tar');
+
+    process.env.PATH = binDir;
+    applyMinimumEnv();
+
+    const { inspectRuntimeDependencies, validateRuntimeDependencies } = await import('@/utils/runtime-dependencies');
+
+    const report = await inspectRuntimeDependencies();
+    expect(report.dependencies.find((dependency) => dependency.name === 'chromium')?.status).toBe('optional');
+    await expect(validateRuntimeDependencies()).resolves.toBeDefined();
+  });
+
+  it('fails fast when an explicit chromium executable path is invalid', async () => {
+    const binDir = mkdtempSync(join(tmpdir(), 'darshan-runtime-invalid-chromium-'));
+    mkdirSync(binDir, { recursive: true });
+    createExecutable(binDir, 'ffmpeg');
+    createExecutable(binDir, 'soffice');
+    createExecutable(binDir, 'pg_dump');
+    createExecutable(binDir, 'tar');
+
+    process.env.PATH = binDir;
+    process.env.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH = join(tmpdir(), 'missing-explicit-chromium');
+    applyMinimumEnv();
+
+    const { validateRuntimeDependencies } = await import('@/utils/runtime-dependencies');
+
+    await expect(validateRuntimeDependencies()).rejects.toThrow('Missing required runtime dependencies: chromium');
   });
 
   it('allows api-only runtime when worker dependencies are absent', async () => {
@@ -127,7 +167,6 @@ describe('runtime dependency resolution', () => {
     process.env.LIBREOFFICE_PATH = join(tmpdir(), 'missing-soffice');
     process.env.PG_DUMP_PATH = join(tmpdir(), 'missing-pg-dump');
     process.env.TAR_PATH = join(tmpdir(), 'missing-tar');
-    process.env.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH = join(tmpdir(), 'missing-chromium');
     process.env.PATH = '';
     applyMinimumEnv();
 

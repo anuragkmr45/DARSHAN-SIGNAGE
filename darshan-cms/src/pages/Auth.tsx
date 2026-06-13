@@ -151,7 +151,7 @@ const Auth = () => {
                         type={showLoginPassword ? "text" : "password"}
                         required
                         disabled={isLoading}
-                        defaultValue="ChangeMe123!"
+                        defaultValue="LocalDev@123"
                         className="pr-10"
                       />
                       <button

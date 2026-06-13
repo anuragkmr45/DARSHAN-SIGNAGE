@@ -30,6 +30,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRY: z.coerce.number().default(900),
+  AUTH_COOKIE_SECURE: optionalBooleanString,
   MINIO_ENDPOINT: z.string().default('localhost'),
   MINIO_PORT: z.coerce.number().default(9000),
   MINIO_ACCESS_KEY: z.string(),
@@ -147,6 +148,7 @@ if (!parsed.success) {
 
 export const config = Object.freeze({
   ...parsed.data,
+  AUTH_COOKIE_SECURE: parsed.data.AUTH_COOKIE_SECURE ?? (parsed.data.NODE_ENV !== 'development'),
   ENABLE_SWAGGER_UI: parsed.data.ENABLE_SWAGGER_UI ?? parsed.data.NODE_ENV !== 'production',
   OBSERVABILITY_METRICS_ENABLED: parsed.data.OBSERVABILITY_METRICS_ENABLED ?? true,
   OBSERVABILITY_DEPLOYMENT_MODE:

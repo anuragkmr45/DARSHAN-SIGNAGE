@@ -232,7 +232,7 @@ ADMIN_EMAIL=admin@darshan.local
 
 # Default admin user password
 # CHANGE THIS IMMEDIATELY AFTER FIRST LOGIN!
-ADMIN_PASSWORD=ChangeMe123!
+ADMIN_PASSWORD=LocalDev@123
 
 # ============================================
 # TLS/mTLS CONFIGURATION (Optional)
@@ -496,7 +496,7 @@ npm run seed
 
 **Default Admin Credentials:**
 - **Email:** admin@darshan.local
-- **Password:** ChangeMe123!
+- **Password:** LocalDev@123
 
 **⚠️ IMPORTANT:** Change this password immediately after first login!
 
@@ -552,7 +552,7 @@ You'll see the Swagger UI with all available API endpoints:
    ```json
    {
      "email": "admin@darshan.local",
-     "password": "ChangeMe123!"
+     "password": "LocalDev@123"
    }
    ```
 5. Click "Execute"
@@ -567,7 +567,7 @@ You'll see the Swagger UI with all available API endpoints:
 # Login and get token
 curl -X POST http://localhost:3000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@darshan.local","password":"ChangeMe123!"}'
+  -d '{"email":"admin@darshan.local","password":"LocalDev@123"}'
 
 # Response will include a token
 # Copy the token and use it in subsequent requests
@@ -1067,7 +1067,7 @@ curl http://localhost:3000/health
 ```bash
 curl -X POST http://localhost:3000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@darshan.local","password":"ChangeMe123!"}'
+  -d '{"email":"admin@darshan.local","password":"LocalDev@123"}'
 ```
 
 **Expected Response:**
@@ -1663,7 +1663,7 @@ docker exec -it darshan-postgres psql -U postgres  # Access database
 
 | Service | Username | Password |
 |---------|----------|----------|
-| Admin User | admin@darshan.local | ChangeMe123! |
+| Admin User | admin@darshan.local | LocalDev@123 |
 | PostgreSQL | postgres | postgres |
 | MinIO | minioadmin | minioadmin |
 

@@ -218,7 +218,7 @@ export async function createServer() {
     const refreshed = (request as unknown as RequestWithRefresh)[REFRESHED_AUTH_KEY];
     if (!refreshed) return payload;
 
-    const secure = appConfig.NODE_ENV !== 'development';
+    const secure = appConfig.AUTH_COOKIE_SECURE;
     const maxAge = Math.max(Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000), 0);
     const accessCookie = [
       `access_token=${refreshed.token}`,

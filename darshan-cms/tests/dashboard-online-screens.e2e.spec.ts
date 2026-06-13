@@ -107,7 +107,7 @@ const overviewPayload = {
 const login = async (page: Page) => {
   await page.goto("/login");
   await page.fill("#login-email", adminUser.email);
-  await page.fill("#login-password", "ChangeMe123!");
+  await page.fill("#login-password", "LocalDev@123");
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL(/\/dashboard/);
 };

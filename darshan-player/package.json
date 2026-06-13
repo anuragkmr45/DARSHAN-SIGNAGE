@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Production-grade Windows and Ubuntu Electron digital signage player for DARSHAN",
   "main": "dist/main/main/index.js",
+  "homepage": "https://github.com/anuragkmr45/DARSHAN-SIGNAGE",
   "author": "DARSHAN",
   "license": "Apache-2.0",
   "private": true,

@@ -341,7 +341,7 @@ MINIO_REGION=us-east-1
 
 # Admin User (for seeding)
 ADMIN_EMAIL=admin@darshan.local
-ADMIN_PASSWORD=ChangeMe123!
+ADMIN_PASSWORD=LocalDev@123
 
 # Logging
 LOG_LEVEL=info

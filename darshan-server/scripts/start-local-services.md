@@ -136,7 +136,7 @@ npm run dev
 # 5. Access application
 # - API: http://localhost:3000
 # - Docs: http://localhost:3000/docs
-# - Login: admin@darshan.local / ChangeMe123!
+# - Login: admin@darshan.local / LocalDev@123
 ```
 
 ## Troubleshooting

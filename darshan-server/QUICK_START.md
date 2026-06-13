@@ -91,7 +91,7 @@ npm run seed
 
 **Default admin credentials:**
 - **Email:** admin@darshan.local
-- **Password:** ChangeMe123!
+- **Password:** LocalDev@123
 
 ### Step 5: Start Development Server
 
@@ -129,7 +129,7 @@ Once the server is running:
    ```json
    {
      "email": "admin@darshan.local",
-     "password": "ChangeMe123!"
+     "password": "LocalDev@123"
    }
    ```
 5. Click "Execute"
@@ -144,7 +144,7 @@ Once the server is running:
 # Login
 curl -X POST http://localhost:3000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@darshan.local","password":"ChangeMe123!"}'
+  -d '{"email":"admin@darshan.local","password":"LocalDev@123"}'
 
 # Copy the token from the response
 

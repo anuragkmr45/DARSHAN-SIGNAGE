@@ -13,7 +13,7 @@ function applyRequiredEnv(): void {
   process.env.MINIO_ACCESS_KEY = 'minioadmin';
   process.env.MINIO_SECRET_KEY = 'minioadmin';
   process.env.ADMIN_EMAIL = 'admin@darshan.invalid';
-  process.env.ADMIN_PASSWORD = 'ChangeMe123!';
+  process.env.ADMIN_PASSWORD = 'LocalDev@123';
 }
 
 afterEach(() => {

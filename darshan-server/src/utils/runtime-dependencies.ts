@@ -131,12 +131,19 @@ export async function getResolvedChromiumExecutable() {
   return resolveChromiumPath();
 }
 
+function hasConfiguredChromiumPath() {
+  return Boolean(
+    appConfig.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH?.trim() ||
+      appConfig.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH?.trim()
+  );
+}
+
 function getRequiredDependencyNames(role: RuntimeDependencyRole) {
   if (role === 'api') {
     return new Set<RuntimeDependency['name']>();
   }
 
-  return new Set<RuntimeDependency['name']>(['ffmpeg', 'libreoffice', 'chromium', 'pg_dump', 'tar']);
+  return new Set<RuntimeDependency['name']>(['ffmpeg', 'libreoffice', 'pg_dump', 'tar']);
 }
 
 export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = 'all'): Promise<RuntimeDependencyReport> {
@@ -145,6 +152,7 @@ export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = '
   const pgDumpPath = resolvePgDumpPath();
   const tarPath = resolveTarPath();
   const requiredNames = getRequiredDependencyNames(role);
+  const chromiumRequired = hasConfiguredChromiumPath();
   let chromiumPath: string | null = null;
   let chromiumDetail: string | undefined;
 
@@ -172,7 +180,7 @@ export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = '
       },
       {
         name: 'chromium',
-        status: chromiumPath ? 'available' : requiredNames.has('chromium') ? 'missing' : 'optional',
+        status: chromiumPath ? 'available' : chromiumRequired ? 'missing' : 'optional',
         path: chromiumPath || undefined,
         detail:
           chromiumPath

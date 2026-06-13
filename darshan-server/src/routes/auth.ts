@@ -102,7 +102,7 @@ export async function authRoutes(fastify: FastifyInstance) {
         });
 
         // Issue cookies (JWT as HttpOnly, CSRF as readable token)
-        const secure = appConfig.NODE_ENV !== 'development';
+        const secure = appConfig.AUTH_COOKIE_SECURE;
         const maxAge = Math.max(Math.floor((expiresAt.getTime() - Date.now()) / 1000), 0);
         const accessCookie = [
           `access_token=${token}`,
@@ -162,7 +162,7 @@ export async function authRoutes(fastify: FastifyInstance) {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const secure = appConfig.NODE_ENV !== 'development';
+      const secure = appConfig.AUTH_COOKIE_SECURE;
       const expired = 'Max-Age=0; Path=/; SameSite=Lax' + (secure ? '; Secure' : '');
 
       try {

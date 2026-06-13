@@ -262,7 +262,7 @@ npm start                   # Start production server
 
 **⚠️ CHANGE IN PRODUCTION!**
 
-- **Admin:** admin@darshan.local / ChangeMe123!
+- **Admin:** admin@darshan.local / LocalDev@123
 - **PostgreSQL:** postgres / postgres
 - **MinIO:** minioadmin / minioadmin
 
