@@ -79,10 +79,24 @@ OUTPUT_DIR="$OUTPUT_BASE/$RELEASE_ID/electron/$TARGET_PLATFORM"
 export_make_clean_dir "$OUTPUT_DIR"
 
 PACKAGE_SCRIPT=""
+PACKAGE_ARCH="native"
 ARTIFACT_PATTERNS=()
 case "$TARGET_PLATFORM" in
   linux)
-    PACKAGE_SCRIPT="package:linux"
+    case "$(uname -m)" in
+      x86_64|amd64)
+        PACKAGE_SCRIPT="package:linux:x64"
+        PACKAGE_ARCH="amd64"
+        ;;
+      aarch64|arm64)
+        PACKAGE_SCRIPT="package:linux:arm64"
+        PACKAGE_ARCH="arm64"
+        ;;
+      *)
+        echo "Unsupported Linux CPU architecture: $(uname -m). Build on an amd64 or arm64 Linux machine." >&2
+        exit 1
+        ;;
+    esac
     ARTIFACT_PATTERNS=("*.deb" "*.AppImage")
     ;;
   macos)
@@ -124,6 +138,7 @@ cat > "$OUTPUT_DIR/package.env" <<EOF
 PACKAGE_KIND=electron
 RELEASE_ID=$RELEASE_ID
 ELECTRON_PACKAGE_PLATFORM=$TARGET_PLATFORM
+ELECTRON_PACKAGE_ARCH=$PACKAGE_ARCH
 EOF
 
 cat > "$OUTPUT_DIR/config.example.json" <<EOF
@@ -161,7 +176,7 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 
 ## Operator steps
 
-1. Install the correct packaged artifact for the target machine.
+1. Install the packaged artifact that matches this folder's `ELECTRON_PACKAGE_ARCH`.
 2. Copy `config.example.json` to the player config location.
 3. Replace `<backend-ip>` with the real backend IP.
 4. Pair the device and verify it appears in the CMS.

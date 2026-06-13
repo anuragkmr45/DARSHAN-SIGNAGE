@@ -31,6 +31,8 @@
     "pair:request": "npm run player:cli -- pair request",
     "package": "electron-builder --linux --win",
     "package:linux": "electron-builder --linux",
+    "package:linux:x64": "electron-builder --linux --x64",
+    "package:linux:arm64": "electron-builder --linux --arm64",
     "package:mac": "electron-builder --mac dmg zip",
     "package:win": "electron-builder --win nsis",
     "package:all": "electron-builder --linux --win",
@@ -146,12 +148,15 @@
     },
     "deb": {
       "depends": [
-        "gconf2",
-        "gconf-service",
+        "libgtk-3-0",
         "libnotify4",
-        "libappindicator1",
+        "libnss3",
+        "libxss1",
         "libxtst6",
-        "libnss3"
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "xdg-utils"
       ]
     }
   },
