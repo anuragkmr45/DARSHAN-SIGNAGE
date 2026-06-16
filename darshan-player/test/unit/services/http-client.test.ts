@@ -99,4 +99,57 @@ describe('HTTP Client', () => {
 
     expect(response.success).to.equal(true)
   })
+
+  it('redacts credentialed base URLs from connectivity diagnostics', async () => {
+    fs.writeFileSync(
+      process.env.HEXMON_CONFIG_PATH,
+      JSON.stringify(
+        {
+          apiBase: 'https://diag-user:diag-pass@backend.internal:3000/api?token=diag-token#diag-fragment',
+          wsUrl: 'wss://api-test.darshan.com/ws',
+          deviceId: 'device-1',
+          mtls: {
+            enabled: false,
+            certPath: path.join(tempDir, 'client.crt'),
+            keyPath: path.join(tempDir, 'client.key'),
+            caPath: path.join(tempDir, 'ca.crt'),
+          },
+          cache: {
+            path: path.join(tempDir, 'cache'),
+            maxBytes: 10485760,
+          },
+          intervals: {
+            heartbeatMs: 30000,
+            commandPollMs: 30000,
+            schedulePollMs: 60000,
+            defaultMediaPollMs: 60000,
+            healthCheckMs: 60000,
+            screenshotMs: 300000,
+          },
+        },
+        null,
+        2
+      )
+    )
+
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const httpClient = getHttpClient()
+    const client = httpClient.getAxiosInstance()
+    client.defaults.adapter = async (config: any) => ({
+      data: { ok: true },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    })
+
+    const result = await httpClient.checkConnectivityDetailed()
+    const serialized = JSON.stringify(result)
+
+    expect(result.baseURL).to.equal('https://backend.internal:3000/api')
+    expect(serialized).not.to.contain('diag-user')
+    expect(serialized).not.to.contain('diag-pass')
+    expect(serialized).not.to.contain('diag-token')
+    expect(serialized).not.to.contain('diag-fragment')
+  })
 })

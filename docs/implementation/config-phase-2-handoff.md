@@ -101,14 +101,20 @@ The following remain runtime state, not config:
 
 `darshan-player --pairing-status` and doctor output include a redacted config summary. It reports whether a player site config file is loaded, selected profile, safe environment labels, backend URL host/path, offline grace, duplicate identity mode, and mapped config keys. It does not include certificate material, private keys, tokens, full runtime identifiers, pairing secrets, URL username/password userinfo, URL query strings, or URL fragments.
 
-CONFIG-2.1 tightened this after independent review found that credentialed env URLs could be printed by diagnostics. Runtime API/socket URL behavior is unchanged; only support diagnostics are redacted.
+CONFIG-2.1 tightened this after independent review found that credentialed env URLs could be printed by config-summary diagnostics. CONFIG-2.2 centralized player URL redaction, but independent verification found remaining URL emission gaps. CONFIG-2.3 patches those gaps by sanitizing log-shipper upload URL logs and outgoing log bundle contents, support-bundle copied text log contents, renderer webpage live URL and navigation drift logs, renderer-to-main log forwarding, renderer player logs, and logger message strings. CONFIG-2.3 also restores request-queue byte accounting to use raw runtime URL data. Runtime API/socket/webpage/upload URL behavior is unchanged; only emitted diagnostic/log/support output is redacted.
 
 ## Tests Run
 
 ```bash
 cd darshan-player && npm run build
 cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/common/file-config.test.ts
+cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/common/redaction.test.ts
+cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/common/logger.test.ts
+cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/log-shipper.test.ts
+cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/renderer/webpage-playback.test.ts
 cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/pairing-service.test.ts
+cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/http-client.test.ts
+cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/request-queue.test.ts
 cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/player-flow.test.ts
 cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/main/cli.test.ts
 cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/main/operator-tools.test.ts
@@ -121,10 +127,16 @@ cd darshan-server && npx vitest run src/config/file-config.test.ts
 
 - `npm run build`: passed
 - `test/unit/common/file-config.test.ts`: 12 passing after CONFIG-2.1 URL redaction regressions
-- `test/unit/services/pairing-service.test.ts`: 1 passing
+- `test/unit/common/redaction.test.ts`: 9 passing after CONFIG-2.3 central redaction/helper coverage
+- `test/unit/common/logger.test.ts`: 1 passing after CONFIG-2.3 logger message/payload coverage
+- `test/unit/services/log-shipper.test.ts`: 2 passing after CONFIG-2.3 upload URL log and shipped log-content coverage
+- `test/unit/renderer/webpage-playback.test.ts`: 4 passing after CONFIG-2.3 renderer live URL/navigation drift coverage
+- `test/unit/services/pairing-service.test.ts`: 2 passing after CONFIG-2.2 diagnostics coverage
+- `test/unit/services/http-client.test.ts`: 2 passing after CONFIG-2.2 connectivity diagnostics coverage
+- `test/unit/services/request-queue.test.ts`: 4 passing after CONFIG-2.3 raw byte-accounting/redacted log coverage
 - `test/unit/services/player-flow.test.ts`: 21 passing
 - `test/unit/main/cli.test.ts`: 7 passing
-- `test/unit/main/operator-tools.test.ts`: 5 passing
+- `test/unit/main/operator-tools.test.ts`: 7 passing after CONFIG-2.3 doctor/support-bundle output coverage
 - `test/unit/services/heartbeat.test.ts`: 2 passing
 - backend `npm run build`: passed
 - backend `src/config/file-config.test.ts`: 15 passing
@@ -158,7 +170,7 @@ Unset `DARSHAN_PLAYER_CONFIG_FILE`, `SIGNHEX_PLAYER_CONFIG_FILE`, `DARSHAN_ENV`,
 
 CONFIG-3 CMS runtime config can start with conditions:
 
-- CONFIG-2 independent verification passes.
+- independent CONFIG-2.3 verification passes.
 - No production readiness is claimed.
 - Node 20 and runtime evidence remain blockers.
 

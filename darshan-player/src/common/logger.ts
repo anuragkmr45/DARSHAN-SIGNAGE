@@ -7,6 +7,7 @@ import pino from 'pino'
 import * as fs from 'fs'
 import * as path from 'path'
 import { getConfigManager } from './config'
+import { sanitizeLogPayloadForDiagnostics } from './redaction'
 
 // PII patterns to redact
 const PII_PATTERNS = [
@@ -75,12 +76,24 @@ function redactPII(obj: unknown, seen: WeakSet<object> = new WeakSet(), depth: n
 
 function safeRedact(obj: unknown): unknown {
   try {
-    return redactPII(obj)
+    return redactPII(sanitizeLogPayloadForDiagnostics(obj))
   } catch (error) {
     return {
       error: 'RedactionFailed',
       message: error instanceof Error ? error.message : 'Unknown error',
     }
+  }
+}
+
+function safeMessage(message: string | undefined): string | undefined {
+  if (typeof message !== 'string') {
+    return undefined
+  }
+
+  try {
+    return sanitizeLogPayloadForDiagnostics(message) as string
+  } catch {
+    return '[redaction-failed]'
   }
 }
 
@@ -213,9 +226,9 @@ export class Logger {
   public trace(msg: string): void
   public trace(objOrMsg: object | string, msg?: string): void {
     if (typeof objOrMsg === 'string') {
-      this.logger.trace(objOrMsg)
+      this.logger.trace(safeMessage(objOrMsg))
     } else {
-      this.logger.trace(safeRedact(objOrMsg), msg)
+      this.logger.trace(safeRedact(objOrMsg), safeMessage(msg))
     }
   }
 
@@ -223,9 +236,9 @@ export class Logger {
   public debug(msg: string): void
   public debug(objOrMsg: object | string, msg?: string): void {
     if (typeof objOrMsg === 'string') {
-      this.logger.debug(objOrMsg)
+      this.logger.debug(safeMessage(objOrMsg))
     } else {
-      this.logger.debug(safeRedact(objOrMsg), msg)
+      this.logger.debug(safeRedact(objOrMsg), safeMessage(msg))
     }
   }
 
@@ -233,9 +246,9 @@ export class Logger {
   public info(msg: string): void
   public info(objOrMsg: object | string, msg?: string): void {
     if (typeof objOrMsg === 'string') {
-      this.logger.info(objOrMsg)
+      this.logger.info(safeMessage(objOrMsg))
     } else {
-      this.logger.info(safeRedact(objOrMsg), msg)
+      this.logger.info(safeRedact(objOrMsg), safeMessage(msg))
     }
   }
 
@@ -243,9 +256,9 @@ export class Logger {
   public warn(msg: string): void
   public warn(objOrMsg: object | string, msg?: string): void {
     if (typeof objOrMsg === 'string') {
-      this.logger.warn(objOrMsg)
+      this.logger.warn(safeMessage(objOrMsg))
     } else {
-      this.logger.warn(safeRedact(objOrMsg), msg)
+      this.logger.warn(safeRedact(objOrMsg), safeMessage(msg))
     }
   }
 
@@ -253,9 +266,9 @@ export class Logger {
   public error(msg: string): void
   public error(objOrMsg: object | string, msg?: string): void {
     if (typeof objOrMsg === 'string') {
-      this.logger.error(objOrMsg)
+      this.logger.error(safeMessage(objOrMsg))
     } else {
-      this.logger.error(safeRedact(objOrMsg), msg)
+      this.logger.error(safeRedact(objOrMsg), safeMessage(msg))
     }
   }
 
@@ -263,9 +276,9 @@ export class Logger {
   public fatal(msg: string): void
   public fatal(objOrMsg: object | string, msg?: string): void {
     if (typeof objOrMsg === 'string') {
-      this.logger.fatal(objOrMsg)
+      this.logger.fatal(safeMessage(objOrMsg))
     } else {
-      this.logger.fatal(safeRedact(objOrMsg), msg)
+      this.logger.fatal(safeRedact(objOrMsg), safeMessage(msg))
     }
   }
 

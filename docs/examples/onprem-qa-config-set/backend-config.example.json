@@ -1,0 +1,48 @@
+{
+  "environment": {
+    "name": "onprem-qa",
+    "deploymentId": "qa-site-a",
+    "serverId": "backend-qa-a"
+  },
+  "http": {
+    "appPublicBaseUrl": "https://qa-cms.internal.example",
+    "corsOrigins": ["https://qa-cms.internal.example"],
+    "socketAllowedOrigins": ["https://qa-cms.internal.example"],
+    "socketIoPath": "/socket.io/"
+  },
+  "realtime": {
+    "enabled": true,
+    "busProvider": "valkey",
+    "socketTransport": "websocket",
+    "socketAllowPolling": true,
+    "socketRequireStickySessions": false,
+    "deviceNamespace": "/device"
+  },
+  "valkey": {
+    "mode": "standalone",
+    "tlsEnabled": true,
+    "authRequired": true,
+    "namespace": "darshan:qa",
+    "pubsubEnabled": true
+  },
+  "duplicateIdentity": {
+    "enabled": true,
+    "enforcement": "warn",
+    "sessionLeaseMs": 300000,
+    "restartGraceMs": 120000
+  },
+  "media": {
+    "endpoint": "https://qa-media.internal.example",
+    "region": "us-east-1"
+  },
+  "observability": {
+    "prometheusUrl": "https://qa-prometheus.internal.example",
+    "prometheusTimeoutMs": 1500,
+    "grafanaEnabled": true,
+    "grafanaEmbedEnabled": true,
+    "grafanaBasePath": "/grafana"
+  },
+  "limits": {
+    "wsNotificationMaxBytes": 32768
+  }
+}

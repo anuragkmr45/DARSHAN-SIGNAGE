@@ -1,5 +1,6 @@
 import { API_BASE_PATH } from "./endpoints";
 import { redirectToLoginForCurrentPage } from "@/lib/authRedirect";
+import { getCmsApiBaseUrl } from "@/config/runtimeConfig";
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
@@ -45,9 +46,6 @@ type RefreshedAuthHandler = (payload: { token: string; expiresAt?: string }) => 
 type UnauthorizedHandler = () => void;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
-const inferredOrigin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
-const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
-const baseURL = `${envBaseUrl ?? inferredOrigin}${API_BASE_PATH}`;
 
 const sanitizeMessage = (message: unknown) =>
   typeof message === "string" ? message : "Request failed. Please try again.";
@@ -105,6 +103,7 @@ export class ApiClient {
 
     const pathWithParams = fillPathParams(options.path, options.pathParams);
     const queryString = this.buildQuery(options.query);
+    const baseURL = getCmsApiBaseUrl();
     const url = `${baseURL}${pathWithParams}${queryString}`;
     const method = options.method ?? "GET";
 

@@ -1,16 +1,10 @@
 import { io, type Socket } from "socket.io-client";
+import { getCmsSocketBaseUrl, getCmsSocketTransports } from "@/config/runtimeConfig";
 
 let socketInstance: Socket | null = null;
 
 const resolveSocketUrl = () => {
-  const wsBaseUrl = import.meta.env.VITE_WS_BASE_URL;
-  const wsUrl = import.meta.env.VITE_WS_URL;
-  const apiUrl = import.meta.env.VITE_API_BASE_URL;
-  if (wsBaseUrl) return wsBaseUrl;
-  if (wsUrl) return wsUrl;
-  if (apiUrl) return apiUrl;
-  if (typeof window !== "undefined") return window.location.origin;
-  return undefined;
+  return getCmsSocketBaseUrl();
 };
 
 const resolveChatNamespaceUrl = (baseUrl: string) => {
@@ -32,7 +26,7 @@ export const getChatSocket = (authToken?: string) => {
   socketInstance = io(resolveChatNamespaceUrl(url), {
     autoConnect: false,
     withCredentials: true,
-    transports: ["websocket", "polling"],
+    transports: getCmsSocketTransports(),
     auth: authToken ? { token: authToken } : undefined,
   });
 

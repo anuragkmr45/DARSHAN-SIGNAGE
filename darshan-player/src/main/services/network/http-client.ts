@@ -3,6 +3,7 @@ import type { AxiosError } from 'axios'
 import * as https from 'https'
 import { getLogger } from '../../../common/logger'
 import { getConfigManager } from '../../../common/config'
+import { redactUrlForDiagnostics, redactUrlOrPathForDiagnostics } from '../../../common/redaction'
 import { getCertificateManager } from '../cert-manager'
 import {
   AppConfig,
@@ -54,7 +55,10 @@ export class HttpClient {
     })
 
     this.setupInterceptors()
-    logger.info({ baseURL: config.apiBase, mtlsEnabled: this.mtlsEnabled }, 'HTTP client initialized')
+    logger.info(
+      { baseURL: redactUrlForDiagnostics(config.apiBase), mtlsEnabled: this.mtlsEnabled },
+      'HTTP client initialized'
+    )
   }
 
   private setupInterceptors(): void {
@@ -72,7 +76,10 @@ export class HttpClient {
           const headerValue = state.fingerprint || metadata?.serialNumber || metadata?.fingerprint
           const headers = AxiosHeaders.from(config.headers ?? {})
           if (!headerValue) {
-            logger.warn({ url: config.url }, 'No device auth header value available for device request')
+            logger.warn(
+              { url: redactUrlOrPathForDiagnostics(config.url) },
+              'No device auth header value available for device request'
+            )
           } else {
             headers.set('x-device-serial', headerValue)
           }
@@ -91,7 +98,10 @@ export class HttpClient {
               headers.set('x-device-timestamp', timestamp)
               headers.set('x-device-signature', signature)
             } catch (error) {
-              logger.debug({ url: config.url, error: String(error) }, 'Skipping device request signature')
+              logger.debug(
+                { url: redactUrlOrPathForDiagnostics(config.url), error: String(error) },
+                'Skipping device request signature'
+              )
             }
           }
 
@@ -183,6 +193,7 @@ export class HttpClient {
     error?: string
   }> {
     const baseURL = this.client.defaults.baseURL || ''
+    const diagnosticBaseURL = redactUrlForDiagnostics(baseURL) || '[invalid-url-redacted]'
     const endpoints = ['/api/v1/health', '/health', '/api/v1/device-pairing?page=1&limit=1']
     let lastError: string | undefined
 
@@ -196,7 +207,7 @@ export class HttpClient {
         })
 
         if (response.status >= 200 && response.status < 300) {
-          return { ok: true, baseURL, endpoint, status: response.status }
+          return { ok: true, baseURL: diagnosticBaseURL, endpoint, status: response.status }
         }
 
         if (endpoint.includes('health') && response.status === 404) {
@@ -205,7 +216,7 @@ export class HttpClient {
         }
 
         if (response.status < 500) {
-          return { ok: true, baseURL, endpoint, status: response.status }
+          return { ok: true, baseURL: diagnosticBaseURL, endpoint, status: response.status }
         }
 
         lastError = `Health check returned ${response.status}`
@@ -217,7 +228,7 @@ export class HttpClient {
 
     return {
       ok: false,
-      baseURL,
+      baseURL: diagnosticBaseURL,
       endpoint: endpoints[endpoints.length - 1] || '',
       error: lastError || 'Unknown network error',
     }
@@ -261,7 +272,10 @@ export class HttpClient {
       maxDelayMs: policy.maxDelayMs,
       shouldRetry: (_attempt, error) => this.isRetryableError(error),
       onRetry: (attempt, error) => {
-        logger.warn({ url, method, attempt, error: error.message }, 'Retrying request')
+        logger.warn(
+          { url: redactUrlOrPathForDiagnostics(url), method, attempt, error: error.message },
+          'Retrying request'
+        )
       },
     })
   }

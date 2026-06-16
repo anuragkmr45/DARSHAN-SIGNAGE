@@ -10,3 +10,4 @@ out/
 *.SKIPPED.txt
 .DS_Store
 .playwright-mcp/
+.local/

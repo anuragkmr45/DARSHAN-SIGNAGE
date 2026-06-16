@@ -1,6 +1,9 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import type { AppConfig, RuntimeMode } from './types'
+import { redactUrlForDiagnostics } from './redaction'
+
+export { redactUrlForDiagnostics } from './redaction'
 
 export type PlayerConfigSelectorSource = 'DARSHAN_PLAYER_CONFIG_FILE' | 'SIGNHEX_PLAYER_CONFIG_FILE' | 'both'
 export type PlayerProfileSelectorSource = 'DARSHAN_ENV' | 'SIGNHEX_ENV' | 'NODE_ENV' | 'default'
@@ -139,31 +142,6 @@ function normalizeSocketUrl(value: string, pathLabel: string): string {
   const parsed = new URL(normalized)
   if (parsed.protocol === 'http:') parsed.protocol = 'ws:'
   if (parsed.protocol === 'https:') parsed.protocol = 'wss:'
-  return parsed.toString().replace(/\/$/, '')
-}
-
-export function redactUrlForDiagnostics(url: string | undefined | null): string | undefined {
-  if (typeof url !== 'string' || url.trim().length === 0) {
-    return undefined
-  }
-
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return '[invalid-url-redacted]'
-  }
-
-  if (!parsed.hostname) {
-    return '[invalid-url-redacted]'
-  }
-
-  parsed.username = ''
-  parsed.password = ''
-
-  parsed.search = ''
-  parsed.hash = ''
-
   return parsed.toString().replace(/\/$/, '')
 }
 

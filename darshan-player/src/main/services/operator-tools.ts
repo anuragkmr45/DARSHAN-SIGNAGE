@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { getConfigManager } from '../../common/config'
+import { redactUrlForDiagnostics, sanitizeLogPayloadForDiagnostics } from '../../common/redaction'
 import type { AppConfig } from '../../common/types'
 import { ensureDir, findExecutable, formatBytes, generateId, getDirectorySize } from '../../common/utils'
 import { getLogger } from '../../common/logger'
@@ -13,6 +14,7 @@ import { getAutostartStatus } from './autostart'
 import { getDeviceStateStore } from './device-state-store'
 import { getSnapshotManager } from './snapshot-manager'
 import { getDefaultMediaService } from './settings/default-media-service'
+import type { NetworkDiagnostics } from './pairing-service'
 
 const logger = getLogger('operator-tools')
 const DEFAULT_PAIRING_VALIDATION_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
@@ -86,6 +88,13 @@ function redactCertificateMetadata(metadata: CertificateMetadata | null) {
   }
 }
 
+function redactNetworkDiagnostics(diagnostics: NetworkDiagnostics): NetworkDiagnostics {
+  return {
+    ...diagnostics,
+    apiBase: redactUrlForDiagnostics(diagnostics.apiBase),
+  }
+}
+
 function pathExists(targetPath: string) {
   try {
     fs.accessSync(targetPath)
@@ -98,6 +107,41 @@ function pathExists(targetPath: string) {
 function writeJsonFile(targetPath: string, payload: unknown) {
   ensureDir(path.dirname(targetPath))
   fs.writeFileSync(targetPath, JSON.stringify(payload, null, 2), 'utf-8')
+}
+
+function sanitizeTextForSupport(content: string): string {
+  const sanitized = sanitizeLogPayloadForDiagnostics(content)
+  return typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized)
+}
+
+function copySanitizedLogDirectory(sourceDir: string, targetDir: string) {
+  ensureDir(targetDir)
+
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const sourcePath = path.join(sourceDir, entry.name)
+    const targetPath = path.join(targetDir, entry.name)
+
+    if (entry.isDirectory()) {
+      copySanitizedLogDirectory(sourcePath, targetPath)
+      continue
+    }
+
+    if (!entry.isFile()) {
+      continue
+    }
+
+    if (entry.name.endsWith('.gz')) {
+      fs.writeFileSync(
+        `${targetPath}.omitted.txt`,
+        'Compressed historical log omitted from support bundle because it cannot be redacted safely in CONFIG-2.3.\n',
+        'utf-8'
+      )
+      continue
+    }
+
+    const content = fs.readFileSync(sourcePath, 'utf-8')
+    fs.writeFileSync(targetPath, sanitizeTextForSupport(content), 'utf-8')
+  }
 }
 
 function getDeviceStatePath(configPath: string) {
@@ -280,7 +324,7 @@ export async function runDoctor() {
   const pairingService = getPairingService()
   const certManager = getCertificateManager()
   const powerManager = getPowerManager()
-  const diagnostics = await pairingService.runDiagnostics()
+  const diagnostics = redactNetworkDiagnostics(await pairingService.runDiagnostics())
   const displays = await powerManager.getDisplayInfo()
   const cacheStats = await getCacheStats(config.cache.path)
   const certificateMetadata = certManager.getCertificateMetadata()
@@ -482,14 +526,14 @@ export async function collectLogs() {
   const logDir = path.join(cacheRoot, 'logs')
   const screenshotDir = path.join(cacheRoot, 'screenshots')
   const popDir = path.join(cacheRoot, 'pop-spool')
-  const diagnostics = await getPairingService().runDiagnostics()
+  const diagnostics = redactNetworkDiagnostics(await getPairingService().runDiagnostics())
   const displays = await getPowerManager().getDisplayInfo()
   const cacheStats = await getCacheStats(cacheRoot)
 
   ensureDir(bundleDir)
 
   if (pathExists(logDir)) {
-    fs.cpSync(logDir, path.join(bundleDir, 'logs'), { recursive: true })
+    copySanitizedLogDirectory(logDir, path.join(bundleDir, 'logs'))
   }
 
   if (pathExists(screenshotDir)) {

@@ -131,4 +131,37 @@ describe("CMS realtime socket lifecycle", () => {
       expect(socket.connected).toBe(true);
     });
   });
+
+  test("socket helpers use browser runtime config when it is loaded", async () => {
+    const runtimeConfig = await import("@/config/runtimeConfig");
+    runtimeConfig.setCmsRuntimeConfigForTests({
+      source: "runtime-config",
+      environment: {
+        name: "onprem-qa",
+        deploymentId: "qa-lab-1",
+        cmsId: "cms-a",
+      },
+      api: {
+        baseUrl: "https://runtime-api.cms.test",
+      },
+      realtime: {
+        socketBaseUrl: "https://runtime-socket.cms.test",
+        socketTransports: ["polling"],
+      },
+      diagnostics: {
+        showEnvironmentIdentity: true,
+      },
+    });
+    const { screens } = await loadRealtimeSocketModules();
+
+    screens.connectScreensSocket("token-a");
+
+    expect(socketState.io).toHaveBeenCalledWith(
+      "https://runtime-socket.cms.test/screens",
+      expect.objectContaining({
+        transports: ["polling"],
+        auth: { token: "token-a" },
+      }),
+    );
+  });
 });

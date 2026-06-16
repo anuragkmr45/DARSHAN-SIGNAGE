@@ -9,6 +9,9 @@ import { DefaultMediaPlayer } from './default-media-player'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
 import { createWebpagePlaybackElement } from './webpage-playback.js'
 
+const { sanitizeLogPayloadForDiagnostics } =
+  require('../common/redaction') as typeof import('../common/redaction')
+
 export function parseAspectRatio(aspectRatio?: string): number | null {
   if (!aspectRatio || typeof aspectRatio !== 'string') {
     return null
@@ -876,10 +879,11 @@ class Player {
    * Log message to main process
    */
   private log(level: string, message: string, data?: any): void {
+    const safeData = sanitizeLogPayloadForDiagnostics(data)
     if (window.darshan && window.darshan.log) {
-      window.darshan.log(level, message, data)
+      window.darshan.log(level, message, safeData)
     } else {
-      console.log(`[${level}] ${message}`, data)
+      console.log(`[${level}] ${message}`, safeData)
     }
   }
 

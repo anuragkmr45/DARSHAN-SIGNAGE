@@ -153,4 +153,44 @@ describe('Request Queue', () => {
     expect(accepted).to.equal(false)
     expect(requestQueue.getSize()).to.equal(0)
   })
+
+  it('uses raw request URL data for byte accounting while logs can redact the URL', async () => {
+    const { getRequestQueue } = require('../../../src/main/services/network/request-queue')
+    const { redactUrlOrPathForDiagnostics } = require('../../../src/common/redaction')
+    const requestQueue = getRequestQueue()
+    const rawUrl = `/api/v1/device/heartbeat?token=${'x'.repeat(64)}#secret`
+    const data = { seq: 1 }
+
+    const accepted = await requestQueue.enqueue({
+      method: 'POST',
+      url: rawUrl,
+      data,
+      maxRetries: 3,
+    })
+
+    const [queued] = requestQueue.getQueue()
+    const rawEstimate = Buffer.byteLength(
+      JSON.stringify({
+        method: 'POST',
+        url: rawUrl,
+        data,
+        headers: null,
+      }),
+      'utf8'
+    )
+    const redactedEstimate = Buffer.byteLength(
+      JSON.stringify({
+        method: 'POST',
+        url: redactUrlOrPathForDiagnostics(rawUrl),
+        data,
+        headers: null,
+      }),
+      'utf8'
+    )
+
+    expect(accepted).to.equal(true)
+    expect(queued.sizeBytes).to.equal(rawEstimate)
+    expect(queued.sizeBytes).to.be.greaterThan(redactedEstimate)
+    expect(requestQueue.getStats().pendingBytes).to.equal(rawEstimate)
+  })
 })

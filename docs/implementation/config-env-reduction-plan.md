@@ -1,6 +1,6 @@
 # Config / Env Reduction Plan
 
-Status: CONFIG-2 player alignment implemented with backend CONFIG-1 ready; CMS runtime config pending
+Status: CONFIG-4 on-prem config profile sets implemented with backend CONFIG-1, player CONFIG-2.3, and CMS CONFIG-3 ready
 Last updated: 2026-06-16
 
 ## Goal
@@ -42,7 +42,7 @@ CONFIG-1 supports JSON only. YAML remains a target architecture option if a pars
 
 ## Phase 3: Player Config Loader Alignment
 
-Status: implemented for a focused JSON-only player subset in CONFIG-2.
+Status: implemented for a focused JSON-only player subset in CONFIG-2, with CONFIG-2.3 closing remaining player URL diagnostic/log emission gaps.
 
 Scope:
 
@@ -51,7 +51,8 @@ Scope:
 - keep `SIGNHEX_PLAYER_CONFIG_FILE` as alias
 - avoid generic `DARSHAN_CONFIG_FILE` fallback so backend config cannot be loaded as player config
 - ensure pairing/reset diagnostics show redacted config summary without secrets
-- redact URL-like diagnostics fields so username/password userinfo, query strings, and fragments from env/runtime URLs are not printed
+- redact URL-like diagnostics, renderer logs, startup/network logs, log-shipper upload URL logs, outgoing text log bundle contents, and support output so username/password userinfo, query strings, and fragments from env/runtime URLs are not printed
+- keep raw runtime URL data for actual network operations and request-queue byte accounting
 - keep env overrides and legacy aliases
 - add tests for precedence and reset behavior
 
@@ -66,7 +67,7 @@ Scope:
 - keep Vite env fallback for compatibility
 - add startup/browser diagnostics for environment identity
 
-This phase needs careful packaging review because CMS currently bakes Vite env into the bundle.
+Status: implemented in CONFIG-3 for a focused browser-safe JSON subset. The CMS loads optional `/config/app-config.json` before mounting React. Missing runtime config falls back to existing `VITE_*` build-time values. Runtime config values are browser-visible and must not contain credentials, tokens, signed URLs, query strings, or fragments.
 
 ## Phase 5: Deprecation And Migration
 
@@ -77,6 +78,8 @@ Scope:
 - migrate deployment examples
 - provide a site migration checklist
 - do not remove old env vars until QA/prod usage is audited
+
+Status: CONFIG-4 created dev/QA/prod on-prem profile sets and a static validator. Deprecation warnings remain future work.
 
 ## Phase 6: QA / Production Validation
 
@@ -95,7 +98,7 @@ Production readiness stays blocked until this phase produces runtime evidence.
 - absent config file means current behavior
 - examples must not contain real secrets
 - private key paths and secret file paths are treated as sensitive
-- credentialed URLs should be treated as sensitive even though player diagnostics redact userinfo, query strings, and fragments
+- credentialed URLs should be treated as sensitive even though player diagnostics, doctor output, support diagnostics, renderer logs, log-shipper URL logs, outgoing text log bundle contents, and player URL-bearing logs redact userinfo, query strings, and fragments
 - default duplicate identity enforcement remains `warn`
 - polling, heartbeat, and offline fallback remain unchanged
 
@@ -119,8 +122,8 @@ Player loader order should stay close to the existing JSON config manager:
 
 Runtime identity, certificates, pairing state, install/session IDs, cache metadata, proof-of-play queues, request queues, and media files are not moved into site config.
 
-CMS should avoid requiring a rebuild for non-secret endpoint changes once runtime config exists.
+CMS runtime config avoids requiring a rebuild for non-secret endpoint changes when a site deploys `/config/app-config.json`. Existing `VITE_*` values remain the fallback when that file is absent.
 
 ## Status
 
-CONFIG-0 is documentation and inventory only. CONFIG-1 adds backend JSON config loading. CONFIG-2 adds optional player-specific JSON site config alignment. CMS runtime config remains intentionally deferred.
+CONFIG-0 is documentation and inventory only. CONFIG-1 adds backend JSON config loading. CONFIG-2 adds optional player-specific JSON site config alignment. CONFIG-2.3 closes remaining player URL diagnostic/log emission gaps. CONFIG-3 adds optional CMS browser runtime JSON config for public endpoint/environment labels while preserving build-time `VITE_*` compatibility. CONFIG-4 adds dev/QA/prod profile sets under `docs/examples/onprem-*-config-set/` and validates them with `scripts/verify/validate-onprem-config-examples.sh`.

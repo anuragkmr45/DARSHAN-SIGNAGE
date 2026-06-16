@@ -1,3 +1,6 @@
+const { redactUrlForDiagnostics, sanitizeLogPayloadForDiagnostics } =
+  require('../common/redaction') as typeof import('../common/redaction')
+
 type EmbeddedWebviewElement = HTMLElement & {
   src: string
   stop?: () => void
@@ -169,7 +172,7 @@ function log(
   message: string,
   data?: Record<string, unknown>
 ) {
-  options.onLog?.(level, message, data);
+  options.onLog?.(level, message, sanitizeLogPayloadForDiagnostics(data) as Record<string, unknown>);
 }
 
 function isSameOriginNavigation(sourceUrl: string, nextUrl: string) {
@@ -260,7 +263,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
     revealedLive = false
     webview.style.opacity = '0'
     fallbackLayer.style.display = 'flex'
-    log(options, 'warn', 'Webpage fallback active', { reason, url: options.liveUrl })
+    log(options, 'warn', 'Webpage fallback active', { reason, url: redactUrlForDiagnostics(options.liveUrl) })
     options.onFallback?.(reason)
   }
 
@@ -273,7 +276,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
     revealedLive = true
     fallbackLayer.style.display = 'none'
     webview.style.opacity = '1'
-    log(options, 'debug', 'Webpage live view healthy', { url: options.liveUrl })
+    log(options, 'debug', 'Webpage live view healthy', { url: redactUrlForDiagnostics(options.liveUrl) })
     options.onHealthy?.()
   }
 
@@ -297,7 +300,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
 
       if (probe?.ready) {
         log(options, 'debug', 'Webpage readiness probe passed', {
-          url: options.liveUrl,
+          url: redactUrlForDiagnostics(options.liveUrl),
           width: probe.width,
           height: probe.height,
           textLength: probe.textLength,
@@ -309,7 +312,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
       }
 
       log(options, 'debug', 'Webpage readiness probe pending', {
-        url: options.liveUrl,
+        url: redactUrlForDiagnostics(options.liveUrl),
         reason: probe?.reason || 'unhealthy',
         width: probe?.width ?? 0,
         height: probe?.height ?? 0,
@@ -340,12 +343,12 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
   }
 
   const handleDomReady = () => {
-    log(options, 'debug', 'Webpage dom-ready', { url: options.liveUrl })
+    log(options, 'debug', 'Webpage dom-ready', { url: redactUrlForDiagnostics(options.liveUrl) })
     muteAndLock()
   }
 
   const handleStopLoading = () => {
-    log(options, 'debug', 'Webpage did-stop-loading', { url: options.liveUrl })
+    log(options, 'debug', 'Webpage did-stop-loading', { url: redactUrlForDiagnostics(options.liveUrl) })
     void probeReadiness()
   }
 
@@ -372,8 +375,8 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
     }
 
     log(options, 'warn', 'Webpage navigation drift blocked', {
-      expected: options.liveUrl,
-      actual: nextUrl,
+      expected: redactUrlForDiagnostics(options.liveUrl),
+      actual: redactUrlForDiagnostics(nextUrl),
     })
 
     try {
@@ -386,7 +389,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
   const handleConsoleMessage = (event: Event) => {
     const consoleEvent = event as unknown as { level?: number; message?: string; line?: number; sourceId?: string }
     log(options, 'debug', 'Webpage console message', {
-      url: options.liveUrl,
+      url: redactUrlForDiagnostics(options.liveUrl),
       level: consoleEvent.level ?? null,
       message: consoleEvent.message ?? '',
       line: consoleEvent.line ?? null,

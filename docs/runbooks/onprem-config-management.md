@@ -1,6 +1,6 @@
 # On-Prem Config Management Runbook
 
-Status: CONFIG-0 draft
+Status: CONFIG-4 draft
 Last updated: 2026-06-16
 
 ## Scope
@@ -42,7 +42,18 @@ Player:
 /etc/darshan/player/secrets.env
 ```
 
-The backend supports a focused JSON config file in CONFIG-1 through `DARSHAN_CONFIG_FILE` or `SIGNHEX_CONFIG_FILE`. The player supports a focused JSON site config file in CONFIG-2 through `DARSHAN_PLAYER_CONFIG_FILE` or `SIGNHEX_PLAYER_CONFIG_FILE`, while preserving the existing runtime config path behavior. CMS config-file loading is planned in a later CONFIG phase.
+The backend supports a focused JSON config file in CONFIG-1 through `DARSHAN_CONFIG_FILE` or `SIGNHEX_CONFIG_FILE`. The player supports a focused JSON site config file in CONFIG-2 through `DARSHAN_PLAYER_CONFIG_FILE` or `SIGNHEX_PLAYER_CONFIG_FILE`, while preserving the existing runtime config path behavior. CONFIG-2.3 closes the remaining player URL diagnostic/log redaction gaps. CONFIG-3 adds optional CMS browser runtime JSON config at `/config/app-config.json`.
+CONFIG-4 adds complete profile bundles:
+
+- `docs/examples/onprem-dev-config-set/`
+- `docs/examples/onprem-qa-config-set/`
+- `docs/examples/onprem-prod-config-set/`
+
+Validate examples with:
+
+```bash
+bash scripts/verify/validate-onprem-config-examples.sh
+```
 
 ## Server Example
 
@@ -75,24 +86,38 @@ Do not commit the secrets file.
 
 ## CMS Example
 
-Current compatibility path:
+Compatibility path:
 
 ```text
 VITE_API_BASE_URL=http://10.20.0.20:3000
 VITE_WS_BASE_URL=http://10.20.0.20:3000
 ```
 
-Target runtime config path:
+CONFIG-3 runtime config path:
 
 ```json
 {
-  "apiBaseUrl": "http://10.20.0.20:3000",
-  "wsBaseUrl": "http://10.20.0.20:3000",
-  "environmentLabel": "qa-site-a"
+  "cms": {
+    "environment": {
+      "name": "onprem-qa",
+      "deploymentId": "qa-site-a",
+      "cmsId": "cms-a"
+    },
+    "api": {
+      "baseUrl": "http://10.20.0.20:3000"
+    },
+    "realtime": {
+      "socketBaseUrl": "http://10.20.0.20:3000",
+      "socketTransports": ["websocket"]
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
 }
 ```
 
-Until CMS runtime config is implemented, changing these values requires rebuilding the CMS.
+Deploy the runtime config as `config/app-config.json` next to the built CMS `index.html`. If the file is absent, the CMS falls back to existing `VITE_*` build values. Do not include tokens, passwords, query strings, URL fragments, credentialed URLs, or secrets in the CMS runtime config because it is browser-visible.
 
 ## Player Example
 
@@ -141,6 +166,7 @@ Do not store private keys, certificates, device IDs, pairing credentials, pairin
 ## Local 192.168.0.5 Example
 
 Use `docs/examples/onprem-local-192.168.0.5.config.example.yaml` as a template only.
+For a complete bundled dev profile, use `docs/examples/onprem-dev-config-set/`.
 
 CONFIG-0 discovery found listeners on ports `3000`, `8080`, `9000`, `9001`, `9090`, `3001`, `6379`, and `5432`, but health checks against `192.168.0.5` and `127.0.0.1:3000` failed during this pass. Treat the example as a starting point, not evidence.
 
@@ -152,11 +178,12 @@ CONFIG-0 discovery found listeners on ports `3000`, `8080`, `9000`, `9001`, `909
 4. Load secrets through the process manager or container secret mechanism.
 5. For backend CONFIG-1, set `DARSHAN_CONFIG_FILE=/etc/darshan/server/config.qa.json` if using a config file.
 6. For player CONFIG-2, set `DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.qa.json` if using a player site config file.
-7. Start backend first.
-8. Validate backend health and `/api/v1/device/:deviceId/pairing-status`.
-9. Start CMS.
-10. Start packaged player.
-11. Record redacted config path and environment identity in QA evidence.
+7. For CMS CONFIG-3, copy the site runtime config to the static CMS deployment path as `config/app-config.json` if using runtime config.
+8. Start backend first.
+9. Validate backend health and `/api/v1/device/:deviceId/pairing-status`.
+10. Start CMS.
+11. Start packaged player.
+12. Record redacted config path and environment identity in QA evidence.
 
 ## Redaction Rules
 
@@ -182,7 +209,7 @@ It is acceptable to show:
 - public/internal hostnames and ports when approved for the QA evidence record
 - certificate suffix/hash if already redacted by the application
 
-Player `--pairing-status` and doctor output redact URL username/password userinfo, query strings, and fragments from URL-like config diagnostics. Operators should still review screenshots, logs, and support bundles before sharing because other tools or shell history may contain the original credentialed values.
+Player `--pairing-status`, doctor output, support-bundle diagnostics, renderer-to-main logs, renderer webpage logs, log-shipper URL logs, outgoing text log bundle contents, and URL-bearing player startup/network logs redact URL username/password userinfo, query strings, and fragments from URL-like fields. Runtime URLs are not changed for network operations, and request-queue byte accounting uses raw runtime URL data. Compressed historical logs are omitted from outgoing support/log-shipment bundles because they cannot be redacted safely in CONFIG-2.3. Operators should still review screenshots, logs, and support bundles before sharing because other tools, shell history, or external logs may contain the original credentialed values.
 
 ## Rollback
 

@@ -30,7 +30,8 @@ Ghost Pairing GP-1 through GP-6 have local automated evidence and remain APPROVE
 | Environment mismatch smoke | BLOCKED_BY_ENV | No safe QA target for mismatch configuration. |
 | Runtime no-secret review | BLOCKED_BY_ENV | No browser network artifacts, runtime logs, player CLI output, or screenshots. |
 | Node 20 validation | BLOCKED_BY_ENV | Local Node is `v24.12.0`; supported target is `>=20 <21`. |
-| Config architecture | CONFIG_BACKEND_JSON_LOADER_READY / CONFIG_PLAYER_JSON_ALIGNMENT_READY / CMS_RUNTIME_CONFIG_PENDING | CONFIG-1 added optional backend JSON config loading with env override compatibility. CONFIG-2 added optional player-specific JSON site config loading while preserving runtime config behavior. CMS runtime config migration remains future work. |
+| Config architecture | CONFIG_BACKEND_JSON_LOADER_READY / CONFIG_PLAYER_JSON_ALIGNMENT_READY / CMS_RUNTIME_CONFIG_READY / PROFILE_SETS_READY / RUNTIME_VALIDATION_PENDING | CONFIG-1 added optional backend JSON config loading with env override compatibility. CONFIG-2 added optional player-specific JSON site config loading while preserving runtime config behavior. CONFIG-2.3 closed remaining player URL emission gaps. CONFIG-3 added optional CMS browser runtime JSON config with Vite fallback. CONFIG-4 added dev/QA/prod profile sets and static validation. Runtime validation remains blocked by missing on-prem inputs and Node 20. |
+| CONFIG-5A runtime readiness | BLOCKED_BY_ENV | `docs/implementation/config-phase-5a-readiness-handoff.md` records local listener discovery, failed health checks, missing Node 20, missing packaged player artifact, and readiness script `MISSING_INPUT`. |
 
 ## Local Test Status
 
@@ -56,9 +57,10 @@ This confirms the reporting fix is still green locally, but it is not a substitu
 - Runtime no-secret review has not run.
 - Node 20 build/test validation has not run.
 - On-prem media/Valkey/Prometheus/proxy evidence is unavailable.
-- Config runtime validation has not run with site-specific backend/player config profiles.
-- CMS optional runtime config loader is pending; existing CMS `VITE_*` env remains the current path.
-- Backend/player config runtime validation with real on-prem site config has not run.
+- Config runtime validation has not run with site-specific backend/player/CMS profile sets.
+- CMS optional runtime config loader is implemented locally but browser/on-prem validation has not run.
+- Backend/player/CMS config runtime validation with real on-prem site config has not run.
+- CONFIG-5A readiness remains blocked: local health checks failed, Node 20 was not found, packaged player artifact was not found, and required runtime env inputs are missing.
 
 ## Required Inputs Before Approval
 

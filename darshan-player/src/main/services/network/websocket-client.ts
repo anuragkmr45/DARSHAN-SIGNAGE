@@ -8,6 +8,7 @@ import * as https from 'https'
 import { EventEmitter } from 'events'
 import { getLogger } from '../../../common/logger'
 import { getConfigManager } from '../../../common/config'
+import { redactUrlForDiagnostics } from '../../../common/redaction'
 import { getCertificateManager } from '../cert-manager'
 import { AppConfig, WSMessage } from '../../../common/types'
 import { ExponentialBackoff } from '../../../common/utils'
@@ -35,7 +36,10 @@ export class WebSocketClient extends EventEmitter {
     this.mtlsEnabled = config.mtls.enabled
     this.reconnectBackoff = new ExponentialBackoff(1000, 60000, 10, 0.2)
 
-    logger.info({ wsUrl: this.wsUrl, mtlsEnabled: this.mtlsEnabled }, 'WebSocket client initialized')
+    logger.info(
+      { wsUrl: redactUrlForDiagnostics(this.wsUrl), mtlsEnabled: this.mtlsEnabled },
+      'WebSocket client initialized'
+    )
   }
 
   /**
@@ -48,7 +52,7 @@ export class WebSocketClient extends EventEmitter {
     }
 
     this.state = 'connecting'
-    logger.info({ wsUrl: this.wsUrl }, 'Connecting to WebSocket')
+    logger.info({ wsUrl: redactUrlForDiagnostics(this.wsUrl) }, 'Connecting to WebSocket')
 
     try {
       const options: WebSocket.ClientOptions = {
@@ -330,4 +334,3 @@ export function getWebSocketClient(): WebSocketClient {
   }
   return wsClient
 }
-

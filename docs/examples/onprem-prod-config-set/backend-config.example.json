@@ -1,0 +1,48 @@
+{
+  "environment": {
+    "name": "onprem-prod",
+    "deploymentId": "prod-site-a",
+    "serverId": "backend-prod-a"
+  },
+  "http": {
+    "appPublicBaseUrl": "https://prod-cms.internal.example",
+    "corsOrigins": ["https://prod-cms.internal.example"],
+    "socketAllowedOrigins": ["https://prod-cms.internal.example"],
+    "socketIoPath": "/socket.io/"
+  },
+  "realtime": {
+    "enabled": true,
+    "busProvider": "valkey",
+    "socketTransport": "websocket",
+    "socketAllowPolling": true,
+    "socketRequireStickySessions": false,
+    "deviceNamespace": "/device"
+  },
+  "valkey": {
+    "mode": "sentinel",
+    "tlsEnabled": true,
+    "authRequired": true,
+    "namespace": "darshan:prod",
+    "pubsubEnabled": true
+  },
+  "duplicateIdentity": {
+    "enabled": true,
+    "enforcement": "warn",
+    "sessionLeaseMs": 300000,
+    "restartGraceMs": 120000
+  },
+  "media": {
+    "endpoint": "https://prod-media.internal.example",
+    "region": "us-east-1"
+  },
+  "observability": {
+    "prometheusUrl": "https://prod-prometheus.internal.example",
+    "prometheusTimeoutMs": 1500,
+    "grafanaEnabled": true,
+    "grafanaEmbedEnabled": true,
+    "grafanaBasePath": "/grafana"
+  },
+  "limits": {
+    "wsNotificationMaxBytes": 32768
+  }
+}

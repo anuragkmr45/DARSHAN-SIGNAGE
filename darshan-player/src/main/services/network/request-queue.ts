@@ -6,6 +6,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { getLogger } from '../../../common/logger'
 import { getConfigManager } from '../../../common/config'
+import { redactUrlOrPathForDiagnostics } from '../../../common/redaction'
 import {
   DeviceApiError,
   type RequestQueueBudget,
@@ -277,7 +278,7 @@ export class RequestQueue {
       {
         id: request.id,
         category: request.category,
-        url: request.url,
+        url: redactUrlOrPathForDiagnostics(request.url),
         sizeBytes: request.sizeBytes,
         reason,
         action,
@@ -427,7 +428,7 @@ export class RequestQueue {
       logger.warn(
         {
           method: queuedRequest.method,
-          url: queuedRequest.url,
+          url: redactUrlOrPathForDiagnostics(queuedRequest.url),
           category: queuedRequest.category,
           sizeBytes: queuedRequest.sizeBytes,
         },
@@ -445,7 +446,7 @@ export class RequestQueue {
       {
         id: queuedRequest.id,
         method: queuedRequest.method,
-        url: queuedRequest.url,
+        url: redactUrlOrPathForDiagnostics(queuedRequest.url),
         category: queuedRequest.category,
         sizeBytes: queuedRequest.sizeBytes,
       },
@@ -512,7 +513,10 @@ export class RequestQueue {
         try {
           await this.executeRequest(httpClient, request)
           removeIds.add(request.id)
-          logger.debug({ id: request.id, method: request.method, url: request.url }, 'Queued request replayed')
+          logger.debug(
+            { id: request.id, method: request.method, url: redactUrlOrPathForDiagnostics(request.url) },
+            'Queued request replayed'
+          )
         } catch (error) {
           logger.warn({ id: request.id, error }, 'Queued request replay failed')
 

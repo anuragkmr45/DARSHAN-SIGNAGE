@@ -2,6 +2,7 @@ import * as os from 'os'
 import { randomUUID } from 'crypto'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
+import { redactUrlForDiagnostics } from '../../common/redaction'
 import { getElectronApp, getElectronScreen } from '../../common/platform-paths'
 import {
   BackendPairingStatusResponse,
@@ -397,7 +398,7 @@ export class PairingService {
     try {
       const config = getConfigManager().getConfig()
       const apiUrl = new URL(config.apiBase)
-      diagnostics.apiBase = config.apiBase
+      diagnostics.apiBase = redactUrlForDiagnostics(config.apiBase)
       diagnostics.apiHost = apiUrl.hostname
       diagnostics.apiIsLoopback = this.isLoopbackHost(apiUrl.hostname)
       diagnostics.apiIsPrivate = this.isPrivateIpv4(apiUrl.hostname)
@@ -415,7 +416,7 @@ export class PairingService {
       diagnostics.dnsResolution = true
       }
     } catch (error) {
-      logger.warn({ error }, 'DNS resolution failed')
+      logger.warn({ error: error instanceof Error ? error.message : String(error) }, 'DNS resolution failed')
     }
 
     try {
@@ -423,7 +424,7 @@ export class PairingService {
       const startTime = Date.now()
       const result = await httpClient.checkConnectivityDetailed()
       diagnostics.apiReachable = result.ok
-      diagnostics.apiBase = result.baseURL
+      diagnostics.apiBase = redactUrlForDiagnostics(result.baseURL)
       diagnostics.apiEndpoint = result.endpoint
       diagnostics.apiStatus = result.status
       diagnostics.apiError = result.error

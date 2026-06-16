@@ -13,6 +13,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { getConfigManager } from '../common/config'
 import { getLogger } from '../common/logger'
+import { redactUrlForDiagnostics, redactUrlOrPathForDiagnostics, sanitizeLogPayloadForDiagnostics } from '../common/redaction'
 import { ExponentialBackoff } from '../common/utils'
 import type { ActiveSlotPlayback, AppConfig, PlayerStatus } from '../common/types'
 import { parseOperatorCommand, runOperatorCommand } from './cli'
@@ -291,7 +292,7 @@ function createWindow(): void {
     const currentUrl = mainWindow?.webContents.getURL()
 
     if (currentUrl && url !== currentUrl) {
-      logger.warn({ url }, 'Prevented navigation')
+      logger.warn({ url: redactUrlOrPathForDiagnostics(url) }, 'Prevented navigation')
       event.preventDefault()
     }
   })
@@ -305,7 +306,7 @@ function createWindow(): void {
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     const targetUrl = typeof params['src'] === 'string' ? params['src'] : ''
     if (!isSafeWebpageUrl(targetUrl)) {
-      logger.warn({ url: targetUrl }, 'Prevented unsafe webpage playback URL')
+      logger.warn({ url: redactUrlOrPathForDiagnostics(targetUrl) }, 'Prevented unsafe webpage playback URL')
       event.preventDefault()
       return
     }
@@ -377,8 +378,8 @@ async function logBackendConnectivity(): Promise<void> {
   const appConfig = config.getConfig()
   logger.info(
     {
-      apiBase: appConfig.apiBase,
-      wsUrl: appConfig.wsUrl,
+      apiBase: redactUrlForDiagnostics(appConfig.apiBase),
+      wsUrl: redactUrlForDiagnostics(appConfig.wsUrl),
       deviceId: appConfig.deviceId || 'unpaired',
       configPath: config.getConfigPath(),
     },
@@ -396,7 +397,13 @@ async function logBackendConnectivity(): Promise<void> {
     const isPrivateIp = isPrivateIpv4(hostname)
     logger.info({ hostname, isLocalhost, isPrivateIp }, 'Backend host classification')
   } catch (error) {
-    logger.warn({ error, apiBase: appConfig.apiBase }, 'Failed to parse backend URL')
+    logger.warn(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        apiBase: redactUrlForDiagnostics(appConfig.apiBase),
+      },
+      'Failed to parse backend URL'
+    )
   }
 
   const { getHttpClient } = await import('./services/network/http-client.js')
@@ -616,7 +623,13 @@ function setupIPCHandlers(): void {
   // Renderer logging
   ipcMain.on('renderer-log', (_event: any, { level, message, data }: any) => {
     const rendererLogger = getLogger('renderer')
-    rendererLogger[level as keyof typeof rendererLogger](data, message)
+    const logMethod = rendererLogger[level as keyof typeof rendererLogger] as any
+    const safeData = sanitizeLogPayloadForDiagnostics(data)
+    if (safeData && typeof safeData === 'object') {
+      logMethod.call(rendererLogger, safeData, message)
+    } else {
+      logMethod.call(rendererLogger, message)
+    }
   })
 
   logger.info('IPC handlers setup complete')
@@ -688,7 +701,7 @@ app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   contents.on('will-navigate', (event, url) => {
     if (!isSafeWebpageUrl(url)) {
-      logger.warn({ url }, 'Blocked unsafe webview navigation')
+      logger.warn({ url: redactUrlOrPathForDiagnostics(url) }, 'Blocked unsafe webview navigation')
       event.preventDefault()
     }
   })

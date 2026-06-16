@@ -1,6 +1,6 @@
 # Ghost Pairing E2E / Permutation Matrix
 
-Status: GP-6 automated and manual evidence matrix recorded on 2026-06-16. On-prem runtime evidence attempt on 2026-06-16 was BLOCKED_BY_ENV; see `docs/implementation/ghost-pairing-onprem-qa-evidence.md`. CONFIG-0 added a config/env reduction plan and a non-secret local example profile, but runtime config evidence remains blocked until a valid site config and Node 20 runtime are provided.
+Status: GP-6 automated and manual evidence matrix recorded on 2026-06-16. On-prem runtime evidence attempt on 2026-06-16 was BLOCKED_BY_ENV; see `docs/implementation/ghost-pairing-onprem-qa-evidence.md`. CONFIG-5A added a runtime input template and readiness script, but runtime config evidence remains blocked until valid on-prem inputs and Node 20 runtime are provided.
 
 This matrix classifies ghost-pairing coverage honestly. `AUTOMATED_PASS` means a local automated test command was run in this GP-6 pass or the scenario is directly covered by a targeted test file run in this pass. Browser and on-prem runtime rows are not marked passed unless they were actually executed.
 
@@ -58,7 +58,7 @@ This matrix classifies ghost-pairing coverage honestly. `AUTOMATED_PASS` means a
 | I5 | Reset/pairing-status CLI does not print secrets | Automated | AUTOMATED_PASS | `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/main/operator-tools.test.ts` | Operator diagnostics redaction test passes. | Packaged CLI smoke. |
 | I6 | Logs do not include full cert serial/private key/token | Automated | AUTOMATED_PASS | `cd darshan-server && npx vitest run src/routes/device-pairing.test.ts` | Pairing completion serial is suffix/hash only; no PEM/private key in responses. | Runtime log spot check. |
 | J1 | Known `screens.test.ts` `active_screens_now` reporting assertion | Automated | AUTOMATED_PASS | `cd darshan-server && npx vitest run src/routes/screens.test.ts` | Reporting metric now counts active published direct/group schedule targets plus the heartbeat/current-schedule fallback; route suite passes. | Keep reporting regression covered. |
-| K1 | On-prem config profile is recorded for evidence run | Docs/Runtime | BLOCKED_BY_ENV | `docs/examples/onprem-local-192.168.0.5.config.example.yaml` | CONFIG-0 created a non-secret local example; local health checks failed and no runtime evidence was claimed. | Provide real on-prem config file, secrets file, endpoints, and Node 20 runtime before evidence run. |
+| K1 | On-prem config profile is recorded for evidence run | Docs/Runtime | BLOCKED_BY_ENV | `docs/examples/onprem-qa-config-set/`; `docs/implementation/config-phase-5-runtime-inputs.template.env`; `scripts/verify/check-config5-runtime-readiness.sh` | CONFIG-4 created non-secret profile sets. CONFIG-5A created a local runtime input template and readiness script; dry-run reports `MISSING_INPUT`. Local health checks failed and no runtime evidence was claimed. | Provide real on-prem config file, secrets file, endpoints, packaged player target, runtime roots, and Node 20 runtime before evidence run. |
 
 ## Coverage Summary
 

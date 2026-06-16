@@ -190,6 +190,80 @@ describe('operator reset tooling', () => {
     expect(serialized).not.to.contain('socket-fragment')
   })
 
+  it('redacts credentialed URLs from doctor network output', async () => {
+    process.env.DARSHAN_API_BASE_URL =
+      'https://doctor-user:doctor-pass@localhost:3000/api?token=doctor-token#doctor-fragment'
+    process.env.DARSHAN_WS_URL =
+      'wss://doctor-socket:socket-pass@localhost:3000/socket.io/?access_key=doctor-key#socket-fragment'
+    seedRuntime()
+
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const httpClient = getHttpClient()
+    const originalCheckConnectivityDetailed = httpClient.checkConnectivityDetailed.bind(httpClient)
+    httpClient.checkConnectivityDetailed = async () => ({
+      ok: false,
+      baseURL: 'https://doctor-result:result-pass@localhost:3000/api?password=result-secret#result-fragment',
+      endpoint: '/api/v1/health',
+      error: 'offline',
+    })
+
+    const { runDoctor } = require('../../../src/main/services/operator-tools')
+
+    try {
+      const { code, payload } = await captureJson(() => runDoctor())
+      const serialized = JSON.stringify(payload)
+
+      expect(code).to.equal(0)
+      expect(payload.config.backend.apiBase).to.equal('https://localhost:3000/api')
+      expect(payload.config.backend.wsUrl).to.equal('wss://localhost:3000/socket.io')
+      expect(payload.network.apiBase).to.equal('https://localhost:3000/api')
+      expect(serialized).to.contain('localhost:3000')
+      expect(serialized).not.to.contain('doctor-user')
+      expect(serialized).not.to.contain('doctor-pass')
+      expect(serialized).not.to.contain('doctor-token')
+      expect(serialized).not.to.contain('doctor-fragment')
+      expect(serialized).not.to.contain('doctor-socket')
+      expect(serialized).not.to.contain('socket-pass')
+      expect(serialized).not.to.contain('doctor-key')
+      expect(serialized).not.to.contain('socket-fragment')
+      expect(serialized).not.to.contain('doctor-result')
+      expect(serialized).not.to.contain('result-pass')
+      expect(serialized).not.to.contain('result-secret')
+      expect(serialized).not.to.contain('result-fragment')
+    } finally {
+      httpClient.checkConnectivityDetailed = originalCheckConnectivityDetailed
+    }
+  })
+
+  it('sanitizes copied log contents in support bundles', async () => {
+    const seeded = seedRuntime()
+    const logDir = path.join(seeded.cacheRoot, 'logs')
+    fs.writeFileSync(
+      path.join(logDir, 'player.log'),
+      'Loading https://user:password@backend.internal:3000/api?token=abc#secret plain password=standalone'
+    )
+    fs.writeFileSync(path.join(logDir, 'historical.log.gz'), 'raw compressed placeholder')
+
+    const { collectLogs } = require('../../../src/main/services/operator-tools')
+    const { code, payload } = await captureJson(() => collectLogs())
+    const supportLog = fs.readFileSync(path.join(payload.bundleDir, 'logs', 'player.log'), 'utf8')
+    const omittedLog = fs.readFileSync(path.join(payload.bundleDir, 'logs', 'historical.log.gz.omitted.txt'), 'utf8')
+    const serialized = JSON.stringify({ supportLog, omittedLog })
+
+    expect(code).to.equal(0)
+    expect(payload.success).to.equal(true)
+    expect(supportLog).to.contain('https://backend.internal:3000/api')
+    expect(omittedLog).to.contain('omitted')
+    expect(serialized).not.to.contain('user')
+    expect(serialized).not.to.contain('password')
+    expect(serialized).not.to.contain('token')
+    expect(serialized).not.to.contain('abc')
+    expect(serialized).not.to.contain('standalone')
+    expect(serialized).not.to.contain('secret')
+
+    fs.rmSync(payload.bundleDir, { recursive: true, force: true })
+  })
+
   it('generates a new runtime session id after process module reload', () => {
     seedRuntime()
     const first = require('../../../src/main/services/pairing-service').getPairingService().getRuntimeSessionId()

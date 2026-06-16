@@ -1,0 +1,38 @@
+{
+  "player": {
+    "environment": {
+      "name": "onprem-prod",
+      "deploymentId": "prod-site-a",
+      "expectedServerId": "backend-prod-a"
+    },
+    "backend": {
+      "baseUrl": "https://prod-backend.internal.example",
+      "socketIoUrl": "https://prod-backend.internal.example/socket.io/"
+    },
+    "realtime": {
+      "enabled": true,
+      "commandSafetyPollMs": 120000,
+      "desiredStatePollMs": 300000
+    },
+    "polling": {
+      "heartbeatMs": 30000,
+      "commandPollMs": 5000,
+      "snapshotPollMs": 300000,
+      "defaultMediaPollMs": 300000
+    },
+    "pairing": {
+      "offlineValidationGraceMs": 604800000,
+      "backendFirstRolloutMode": true
+    },
+    "duplicateIdentity": {
+      "enabled": true,
+      "enforcement": "warn"
+    },
+    "cache": {
+      "maxBytes": 5368709120
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}

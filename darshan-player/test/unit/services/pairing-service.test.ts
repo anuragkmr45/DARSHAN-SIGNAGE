@@ -22,6 +22,8 @@ describe('PairingService', () => {
     originalEnv = {
       DARSHAN_RUNTIME_ROOT: process.env.DARSHAN_RUNTIME_ROOT,
       DARSHAN_PLAYER_CONFIG_FILE: process.env.DARSHAN_PLAYER_CONFIG_FILE,
+      DARSHAN_API_BASE_URL: process.env.DARSHAN_API_BASE_URL,
+      DARSHAN_WS_URL: process.env.DARSHAN_WS_URL,
       HEXMON_CONFIG_PATH: process.env.HEXMON_CONFIG_PATH,
     }
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'darshan-pairing-service-'))
@@ -108,5 +110,40 @@ describe('PairingService', () => {
     expect(capturedHeaders['x-signhex-install-instance-id']).to.be.a('string')
     expect(capturedHeaders['x-signhex-runtime-session-id']).to.be.a('string')
     expect(capturedHeaders).not.to.have.property('x-signhex-server-id')
+  })
+
+  it('redacts credentialed backend URLs from network diagnostics', async () => {
+    process.env.DARSHAN_API_BASE_URL =
+      'https://diag-user:diag-pass@localhost:3000/api?token=diag-token#diag-fragment'
+    process.env.DARSHAN_WS_URL =
+      'wss://socket-user:socket-pass@localhost:3000/socket.io/?access_key=socket-key#socket-fragment'
+    resetRuntimeModules()
+
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const httpClient = getHttpClient()
+    sandbox.stub(httpClient, 'checkConnectivityDetailed').resolves({
+      ok: false,
+      baseURL: 'https://result-user:result-pass@localhost:3000/api?password=result-secret#result-fragment',
+      endpoint: '/api/v1/health',
+      error: 'offline',
+    })
+
+    const diagnostics = await getPairingService().runDiagnostics()
+    const serialized = JSON.stringify(diagnostics)
+
+    expect(diagnostics.apiBase).to.equal('https://localhost:3000/api')
+    expect(serialized).not.to.contain('diag-user')
+    expect(serialized).not.to.contain('diag-pass')
+    expect(serialized).not.to.contain('diag-token')
+    expect(serialized).not.to.contain('diag-fragment')
+    expect(serialized).not.to.contain('result-user')
+    expect(serialized).not.to.contain('result-pass')
+    expect(serialized).not.to.contain('result-secret')
+    expect(serialized).not.to.contain('result-fragment')
+    expect(serialized).not.to.contain('socket-user')
+    expect(serialized).not.to.contain('socket-pass')
+    expect(serialized).not.to.contain('socket-key')
+    expect(serialized).not.to.contain('socket-fragment')
   })
 })

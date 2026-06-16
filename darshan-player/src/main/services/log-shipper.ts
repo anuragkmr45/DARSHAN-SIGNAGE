@@ -9,12 +9,18 @@ import * as zlib from 'zlib'
 import { promisify } from 'util'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
+import { redactUrlForDiagnostics, sanitizeLogPayloadForDiagnostics } from '../../common/redaction'
 import { atomicWrite, ensureDir, generateId } from '../../common/utils'
 import { getHttpClient } from './network/http-client'
 import { getPairingService } from './pairing-service'
 
 const gzipAsync = promisify(zlib.gzip)
 const logger = getLogger('log-shipper')
+
+function sanitizeLogTextForShipment(content: string): string {
+  const sanitized = sanitizeLogPayloadForDiagnostics(content)
+  return typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized)
+}
 
 export interface LogShipmentResult {
   success: boolean
@@ -127,7 +133,7 @@ export class LogShipper {
       // Delete bundle after successful upload
       fs.unlinkSync(bundlePath)
 
-      logger.info({ uploadUrl }, 'Log shipment completed successfully')
+      logger.info({ uploadUrl: redactUrlForDiagnostics(uploadUrl) }, 'Log shipment completed successfully')
 
       return {
         success: true,
@@ -177,9 +183,15 @@ export class LogShipper {
 
       for (const logFile of logFiles) {
         try {
-          const content = fs.readFileSync(logFile, 'utf-8')
           const relativePath = path.relative(this.logDir, logFile)
-          logData[relativePath] = content
+          if (logFile.endsWith('.gz')) {
+            logData[`${relativePath}.omitted.txt`] =
+              'Compressed historical log omitted from shipment because it cannot be redacted safely in CONFIG-2.3.'
+            continue
+          }
+
+          const content = fs.readFileSync(logFile, 'utf-8')
+          logData[relativePath] = sanitizeLogTextForShipment(content)
         } catch (error) {
           logger.warn({ error, logFile }, 'Failed to read log file')
         }
@@ -273,7 +285,7 @@ export class LogShipper {
         },
       })
 
-      logger.info({ logUrl: log_url, size: buffer.length }, 'Log bundle uploaded successfully')
+      logger.info({ logUrl: redactUrlForDiagnostics(log_url), size: buffer.length }, 'Log bundle uploaded successfully')
 
       return log_url
     } catch (error) {

@@ -68,6 +68,10 @@ Diagnostics now preserve useful protocol/host/port/path details while removing:
 
 Invalid URLs return `[invalid-url-redacted]` and do not echo raw input. Credentialed URLs remain sensitive and should not be committed to site config examples.
 
+CONFIG-2.2 follow-up: independent verification later found raw URL exposure outside the config summary path. CONFIG-2.2 centralized the helper in `darshan-player/src/common/redaction.ts` and applied redaction to pairing diagnostics, doctor output, support-bundle diagnostics, HTTP/WebSocket startup logs, player startup connectivity logs, request-queue URL logs, and some log-shipping URL logs.
+
+CONFIG-2.3 follow-up: independent CONFIG-2.2 verification found remaining raw URL emission in log-shipper upload URL logs, renderer webpage logs, renderer-to-main log forwarding, and request-queue byte accounting. CONFIG-2.3 patches those emission paths and restores raw request URL use for byte accounting. Runtime API/socket/webpage/upload behavior remains unchanged.
+
 ## Runtime Evidence Status
 
 BLOCKED_BY_ENV. CONFIG-2.1 is local code/test evidence only and does not claim browser, packaged player, or on-prem runtime validation.
@@ -78,7 +82,7 @@ Revert CONFIG-2.1 changes. The runtime API/socket URL behavior is unaffected by 
 
 ## Next Phase Readiness
 
-CONFIG-3 CMS runtime config can start only after CONFIG-2.1 independent verification passes. Production readiness remains blocked by Node 20 and on-prem runtime evidence.
+CONFIG-3 CMS runtime config can start only after CONFIG-2.3 independent verification passes. Production readiness remains blocked by Node 20 and on-prem runtime evidence.
 
 ## Recommendation
 

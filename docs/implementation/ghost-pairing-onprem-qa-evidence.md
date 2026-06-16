@@ -43,11 +43,25 @@ CONFIG-0 local discovery:
 | Local example profile | `docs/examples/onprem-local-192.168.0.5.config.example.yaml` created as non-secret example only |
 | Backend CONFIG-1 JSON examples | `docs/examples/backend-config.onprem-local-192.168.0.5.example.json`, `docs/examples/backend-config.qa.example.json`, `docs/examples/backend-config.production.example.json` |
 | Player CONFIG-2 JSON examples | `docs/examples/player-config.onprem-local-192.168.0.5.example.json`, `docs/examples/player-config.qa.example.json`, `docs/examples/player-config.production.example.json` |
+| CMS CONFIG-3 runtime examples | `docs/examples/cms-runtime-config.onprem-local-192.168.0.5.example.json`, `docs/examples/cms-runtime-config.qa.example.json`, `docs/examples/cms-runtime-config.production.example.json` |
+| CONFIG-4 profile sets | `docs/examples/onprem-dev-config-set/`, `docs/examples/onprem-qa-config-set/`, `docs/examples/onprem-prod-config-set/` |
+| CONFIG-4 static validator | `bash scripts/verify/validate-onprem-config-examples.sh` passed locally for 3 profile sets |
+| CONFIG-5 runtime evidence attempt | `docs/implementation/config-phase-5-runtime-evidence.md` records BLOCKED_BY_ENV with required inputs missing |
+| CONFIG-5A readiness handoff | `docs/implementation/config-phase-5a-readiness-handoff.md` records local listener/health/Node/package discovery and readiness script result |
+| CONFIG-5 current-shell readiness check | `bash scripts/verify/check-config5-runtime-readiness.sh` returned `MISSING_INPUT`; no browser/package/runtime evidence was run |
 | Listening ports observed | `3000`, `8080`, `9000`, `9001`, `9090`, `3001`, `6379`, `5432` |
 | `http://192.168.0.5:3000/api/v1/health` | connection failed |
 | `http://192.168.0.5:9000/minio/health/live` | connection failed |
 | `http://192.168.0.5:9090/-/ready` | connection failed |
 | `http://127.0.0.1:3000/api/v1/health` | connection failed |
+| CONFIG-5A listener discovery | Docker listeners on `3001`, `5432`, `6379`, `9000`, `9001`, `9090`; node listeners on `3000`, `8080` |
+| CONFIG-5A backend health checks | connection failed for local IP and loopback `/api/v1/health` and `/health` |
+| CONFIG-5A CMS candidates | connection failed on local IP/loopback `3001` and `5173` |
+| CONFIG-5A object storage candidates | connection failed on `192.168.0.5:9000` and `192.168.0.5:9001` |
+| CONFIG-5A Prometheus candidates | connection failed on local IP and loopback `9090/-/healthy` |
+| CONFIG-5A Valkey CLI | `valkey-cli` and `redis-cli` missing |
+| CONFIG-5A packaged player artifact | no usable packaged Darshan/signage player artifact found |
+| CONFIG-5A readiness script | `bash scripts/verify/check-config5-runtime-readiness.sh --dry-run` reported `MISSING_INPUT` |
 
 No runtime evidence was claimed from these local listeners.
 
