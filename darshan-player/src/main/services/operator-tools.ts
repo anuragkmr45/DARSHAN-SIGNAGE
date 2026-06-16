@@ -6,12 +6,32 @@ import type { AppConfig } from '../../common/types'
 import { ensureDir, findExecutable, formatBytes, generateId, getDirectorySize } from '../../common/utils'
 import { getLogger } from '../../common/logger'
 import { getElectronApp } from '../../common/platform-paths'
-import { getCertificateManager } from './cert-manager'
+import { getCertificateManager, type CertificateMetadata } from './cert-manager'
 import { getPairingService } from './pairing-service'
 import { getPowerManager } from './power-manager'
 import { getAutostartStatus } from './autostart'
+import { getDeviceStateStore } from './device-state-store'
+import { getSnapshotManager } from './snapshot-manager'
+import { getDefaultMediaService } from './settings/default-media-service'
 
 const logger = getLogger('operator-tools')
+const PAIRING_VALIDATION_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
+
+export interface ResetPairingCliOptions {
+  reason?: string
+  dryRun?: boolean
+  clearCache?: boolean
+}
+
+type ResetTargetType = 'file' | 'directory' | 'config-field' | 'state-field'
+
+interface ResetTarget {
+  type: ResetTargetType
+  path?: string
+  name?: string
+  exists?: boolean
+  action: string
+}
 
 function getAppMetadata() {
   const electronApp = getElectronApp()
@@ -37,6 +57,31 @@ function redactConfigForSupport(config: AppConfig) {
   }
 }
 
+function redactIdentifier(value?: string | null, suffixLength = 8): string | null {
+  if (!value) {
+    return null
+  }
+
+  const suffix = value.slice(-suffixLength)
+  return suffix ? `...${suffix}` : '[REDACTED]'
+}
+
+function redactCertificateMetadata(metadata: CertificateMetadata | null) {
+  if (!metadata) {
+    return null
+  }
+
+  return {
+    validFrom: metadata.validFrom,
+    validTo: metadata.validTo,
+    subject: metadata.subject ? '[REDACTED]' : '',
+    issuer: metadata.issuer ? '[REDACTED]' : '',
+    serialSuffix: redactIdentifier(metadata.serialNumber, 6),
+    fingerprintSuffix: redactIdentifier(metadata.fingerprint, 12),
+    verificationMode: metadata.verificationMode,
+  }
+}
+
 function pathExists(targetPath: string) {
   try {
     fs.accessSync(targetPath)
@@ -49,6 +94,147 @@ function pathExists(targetPath: string) {
 function writeJsonFile(targetPath: string, payload: unknown) {
   ensureDir(path.dirname(targetPath))
   fs.writeFileSync(targetPath, JSON.stringify(payload, null, 2), 'utf-8')
+}
+
+function getDeviceStatePath(configPath: string) {
+  return path.join(path.dirname(configPath), 'device-state.json')
+}
+
+function getIdentityBoundPaths() {
+  const configManager = getConfigManager()
+  const config = configManager.getConfig()
+  const runtimePaths = configManager.getRuntimePaths()
+  const certDir = path.dirname(config.mtls.keyPath)
+
+  return {
+    runtimePaths,
+    config,
+    configPath: configManager.getConfigPath(),
+    deviceStatePath: getDeviceStatePath(configManager.getConfigPath()),
+    certificateFiles: [
+      config.mtls.certPath,
+      config.mtls.keyPath,
+      config.mtls.caPath,
+      path.join(certDir, 'client.csr'),
+      path.join(certDir, 'cert-meta.json'),
+    ],
+    snapshotMetadataPath: path.join(config.cache.path, 'last-snapshot.json'),
+    defaultMediaMetadataPath: path.join(config.cache.path, 'default-media.json'),
+    cacheTargets: [
+      path.join(config.cache.path, 'media'),
+      path.join(config.cache.path, 'objects'),
+      path.join(config.cache.path, 'quarantine'),
+      path.join(config.cache.path, 'cache-index.db'),
+    ],
+    preservedTargets: [
+      path.join(config.cache.path, 'logs'),
+      path.join(config.cache.path, 'pop-spool'),
+      path.join(config.cache.path, 'request-queue.json'),
+      path.join(config.cache.path, 'request-queue.state.json'),
+      path.join(config.cache.path, 'screenshots'),
+    ],
+  }
+}
+
+function buildResetPlan(options: ResetPairingCliOptions) {
+  const paths = getIdentityBoundPaths()
+  const certificateTargets = paths.certificateFiles.map((file) => ({
+    type: 'file' as const,
+    path: file,
+    exists: pathExists(file),
+    action: 'delete identity certificate artifact',
+  }))
+  const cacheTargets = options.clearCache
+    ? paths.cacheTargets.map((targetPath) => ({
+        type:
+          fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()
+            ? ('directory' as const)
+            : ('file' as const),
+        path: targetPath,
+        exists: pathExists(targetPath),
+        action: 'delete media cache target',
+      }))
+    : []
+
+  return {
+    dryRun: options.dryRun === true,
+    clearCache: options.clearCache === true,
+    reason: options.reason || 'Operator reset pairing',
+    paths: {
+      runtimeRoot: paths.runtimePaths.runtimeRoot,
+      configPath: paths.configPath,
+      cachePath: paths.config.cache.path,
+      certDir: paths.runtimePaths.certDir,
+      deviceStatePath: paths.deviceStatePath,
+      legacyLinux: paths.runtimePaths.legacyLinux,
+    },
+    targets: [
+      {
+        type: 'config-field' as const,
+        name: 'config.deviceId',
+        exists: Boolean(paths.config.deviceId),
+        action: 'clear configured device id',
+      },
+      {
+        type: 'config-field' as const,
+        name: 'config.mtls.enabled',
+        exists: paths.config.mtls.enabled === true,
+        action: 'disable mTLS until next pairing',
+      },
+      {
+        type: 'state-field' as const,
+        name: 'device-state identity and validation metadata',
+        exists: pathExists(paths.deviceStatePath),
+        action: 'clear local pairing state',
+      },
+      ...certificateTargets,
+      {
+        type: 'file' as const,
+        path: paths.snapshotMetadataPath,
+        exists: pathExists(paths.snapshotMetadataPath),
+        action: 'delete cached snapshot metadata',
+      },
+      {
+        type: 'file' as const,
+        path: paths.defaultMediaMetadataPath,
+        exists: pathExists(paths.defaultMediaMetadataPath),
+        action: 'delete cached default-media metadata',
+      },
+      ...cacheTargets,
+    ] satisfies ResetTarget[],
+    preserved: paths.preservedTargets.map((targetPath) => ({
+      path: targetPath,
+      exists: pathExists(targetPath),
+      reason:
+        targetPath.endsWith('request-queue.json') || targetPath.endsWith('request-queue.state.json')
+          ? 'preserve pending offline requests/proof events'
+          : 'not identity-bound; preserved by reset-pairing',
+    })),
+  }
+}
+
+function clearMediaCacheTargets(cacheRoot: string) {
+  const targets = ['media', 'objects', 'quarantine']
+  const removed: string[] = []
+
+  for (const name of targets) {
+    const targetPath = path.join(cacheRoot, name)
+    if (!pathExists(targetPath)) {
+      continue
+    }
+
+    fs.rmSync(targetPath, { recursive: true, force: true })
+    ensureDir(targetPath)
+    removed.push(targetPath)
+  }
+
+  const legacyIndex = path.join(cacheRoot, 'cache-index.db')
+  if (pathExists(legacyIndex)) {
+    fs.rmSync(legacyIndex, { force: true })
+    removed.push(legacyIndex)
+  }
+
+  return removed
 }
 
 async function getCacheStats(cachePath: string) {
@@ -120,11 +306,14 @@ export async function runDoctor() {
       cacheExists: pathExists(config.cache.path),
       certPaths: certificatePaths,
     },
-    pairing: {
-      deviceId: pairingService.getDeviceId() || null,
-      paired: pairingService.isPairedDevice(),
-      identityHealth: pairingService.getStoredIdentityHealth(),
-      certificateMetadata,
+        pairing: {
+          deviceIdPresent: Boolean(pairingService.getDeviceId()),
+          deviceIdSuffix: redactIdentifier(pairingService.getDeviceId()),
+          installInstanceSuffix: redactIdentifier(getDeviceStateStore().getState().installInstanceId),
+          runtimeSessionSuffix: redactIdentifier(pairingService.getRuntimeSessionId()),
+          paired: pairingService.isPairedDevice(),
+          identityHealth: pairingService.getStoredIdentityHealth(),
+          certificateMetadata: redactCertificateMetadata(certificateMetadata),
     },
     network: diagnostics,
     autostart: getAutostartStatus(),
@@ -153,28 +342,128 @@ export async function runDoctor() {
 
 export async function clearCache() {
   const cacheRoot = getConfigManager().getConfig().cache.path
-  const targets = ['media', 'objects', 'quarantine']
-  const removed: string[] = []
-
-  for (const name of targets) {
-    const targetPath = path.join(cacheRoot, name)
-    if (!pathExists(targetPath)) {
-      continue
-    }
-
-    fs.rmSync(targetPath, { recursive: true, force: true })
-    ensureDir(targetPath)
-    removed.push(targetPath)
-  }
-
-  const legacyIndex = path.join(cacheRoot, 'cache-index.db')
-  if (pathExists(legacyIndex)) {
-    fs.rmSync(legacyIndex, { force: true })
-    removed.push(legacyIndex)
-  }
+  const removed = clearMediaCacheTargets(cacheRoot)
 
   logger.info({ removed }, 'Cleared media cache')
   console.log(JSON.stringify({ success: true, cacheRoot, removed }, null, 2))
+  return 0
+}
+
+export async function pairingStatusForCli(): Promise<number> {
+  const configManager = getConfigManager()
+  const config = configManager.getConfig()
+  const pairingService = getPairingService()
+  const certManager = getCertificateManager()
+  const certificatePaths = certManager.getCertificatePaths()
+  const certificateMetadata = certManager.getCertificateMetadata()
+  const state = getPairingService().getStoredIdentityHealth()
+  const deviceState = getDeviceStateStore().getState()
+  const lastValidatedAt = deviceState.lastPairingValidatedAt ? Date.parse(deviceState.lastPairingValidatedAt) : NaN
+  const offlineGraceExpiresAt = Number.isFinite(lastValidatedAt)
+    ? new Date(lastValidatedAt + PAIRING_VALIDATION_OFFLINE_GRACE_MS).toISOString()
+    : null
+  const identityPaths = getIdentityBoundPaths()
+
+  console.log(
+    JSON.stringify(
+      {
+        timestamp: new Date().toISOString(),
+        pairedLocal: pairingService.isPairedDevice(),
+        deviceIdPresent: Boolean(pairingService.getDeviceId()),
+        deviceIdSuffix: redactIdentifier(pairingService.getDeviceId()),
+        identityHealth: state,
+        validation: {
+          lastStatus: deviceState.lastPairingValidationStatus || null,
+          lastValidatedAt: deviceState.lastPairingValidatedAt || null,
+          lastValidatedDeviceIdMatchesCurrent:
+            Boolean(deviceState.lastValidatedDeviceId) &&
+            deviceState.lastValidatedDeviceId === pairingService.getDeviceId(),
+          offlineGraceExpiresAt,
+          serverIdentity: deviceState.lastValidatedServerIdentity || null,
+        },
+        duplicateIdentity: deviceState.duplicateIdentity
+          ? {
+              ...deviceState.duplicateIdentity,
+              sessions: deviceState.duplicateIdentity.sessions.map((session) => ({
+                ...session,
+                installInstanceSuffix: session.installInstanceSuffix,
+                runtimeSessionSuffix: session.runtimeSessionSuffix,
+              })),
+            }
+          : null,
+        session: {
+          installInstancePresent: Boolean(deviceState.installInstanceId),
+          installInstanceSuffix: redactIdentifier(deviceState.installInstanceId),
+          runtimeSessionSuffix: redactIdentifier(pairingService.getRuntimeSessionId()),
+        },
+        paths: {
+          runtimeRoot: identityPaths.runtimePaths.runtimeRoot,
+          configPath: configManager.getConfigPath(),
+          cachePath: config.cache.path,
+          certDir: identityPaths.runtimePaths.certDir,
+          deviceStatePath: identityPaths.deviceStatePath,
+        },
+        certificates: {
+          present: certManager.areCertificatesPresent(),
+          privateKeyPresent: certManager.hasPrivateKey(),
+          paths: {
+            cert: certificatePaths.cert,
+            key: certificatePaths.key,
+            ca: certificatePaths.ca,
+          },
+          metadata: redactCertificateMetadata(certificateMetadata),
+        },
+        cache: {
+          snapshotMetadataPath: identityPaths.snapshotMetadataPath,
+          defaultMediaMetadataPath: identityPaths.defaultMediaMetadataPath,
+          mediaPath: path.join(config.cache.path, 'media'),
+          requestQueuePath: path.join(config.cache.path, 'request-queue.json'),
+          requestQueueStatePath: path.join(config.cache.path, 'request-queue.state.json'),
+          proofOfPlayPath: path.join(config.cache.path, 'pop-spool'),
+        },
+      },
+      null,
+      2
+    )
+  )
+  return 0
+}
+
+export async function resetPairingForCli(options: ResetPairingCliOptions | string = {}): Promise<number> {
+  const normalizedOptions =
+    typeof options === 'string'
+      ? { reason: options }
+      : {
+          ...options,
+        }
+  const reason = normalizedOptions.reason || 'Operator reset pairing'
+  const plan = buildResetPlan({ ...normalizedOptions, reason })
+
+  if (normalizedOptions.dryRun) {
+    console.log(JSON.stringify({ success: true, dryRun: true, plan }, null, 2))
+    return 0
+  }
+
+  getSnapshotManager().clearIdentityBoundState()
+  getDefaultMediaService().clearIdentityBoundState()
+  await getPairingService().resetStoredIdentity(reason)
+  const cacheRemoved = normalizedOptions.clearCache
+    ? clearMediaCacheTargets(getConfigManager().getConfig().cache.path)
+    : []
+
+  console.log(
+    JSON.stringify(
+      {
+        success: true,
+        reason,
+        clearCache: normalizedOptions.clearCache === true,
+        cacheRemoved,
+        preserved: plan.preserved,
+      },
+      null,
+      2
+    )
+  )
   return 0
 }
 
@@ -209,7 +498,7 @@ export async function collectLogs() {
   writeJsonFile(path.join(bundleDir, 'displays.json'), displays)
   writeJsonFile(path.join(bundleDir, 'autostart.json'), getAutostartStatus())
   writeJsonFile(path.join(bundleDir, 'cache-stats.json'), cacheStats)
-  writeJsonFile(path.join(bundleDir, 'certificate-metadata.json'), getCertificateManager().getCertificateMetadata())
+  writeJsonFile(path.join(bundleDir, 'certificate-metadata.redacted.json'), redactCertificateMetadata(getCertificateManager().getCertificateMetadata()))
   writeJsonFile(path.join(bundleDir, 'system-info.json'), {
     timestamp: new Date().toISOString(),
     appVersion: getAppMetadata().version,

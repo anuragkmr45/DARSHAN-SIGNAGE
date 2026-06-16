@@ -90,13 +90,56 @@ export async function metricsRoutes(fastify: FastifyInstance) {
         const mediaStorageTotal = Number(mediaStorageBytes?.total || 0);
         const activeSchedules = Number(activeSchedulesCount?.count || 0);
         const [activeScreensNowRow] = await db
-          .select({ count: sql<number>`count(*)` })
+          .select({ count: sql<number>`count(DISTINCT ${schema.screens.id})` })
           .from(schema.screens)
           .where(
-            sql`${schema.screens.current_schedule_id} IS NOT NULL
-              AND ${schema.screens.status} = 'ACTIVE'
-              AND ${schema.screens.last_heartbeat_at} IS NOT NULL
-              AND ${schema.screens.last_heartbeat_at} >= ${fiveMinutesAgo}`
+            sql`${schema.screens.status} = 'ACTIVE'
+              AND (
+                EXISTS (
+                  SELECT 1
+                  FROM ${schema.publishTargets}
+                  INNER JOIN ${schema.publishes}
+                    ON ${schema.publishTargets.publish_id} = ${schema.publishes.id}
+                  INNER JOIN ${schema.schedules}
+                    ON ${schema.publishes.schedule_id} = ${schema.schedules.id}
+                  WHERE ${schema.publishTargets.screen_id} = ${schema.screens.id}
+                    AND ${schema.publishes.status} = 'ACTIVE'
+                    AND ${schema.publishes.taken_down_at} IS NULL
+                    AND ${schema.schedules.is_active} = true
+                    AND ${schema.schedules.start_at} <= ${now}
+                    AND ${schema.schedules.end_at} >= ${now}
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM ${schema.publishTargets}
+                  INNER JOIN ${schema.publishes}
+                    ON ${schema.publishTargets.publish_id} = ${schema.publishes.id}
+                  INNER JOIN ${schema.schedules}
+                    ON ${schema.publishes.schedule_id} = ${schema.schedules.id}
+                  INNER JOIN ${schema.screenGroupMembers}
+                    ON ${schema.publishTargets.screen_group_id} = ${schema.screenGroupMembers.group_id}
+                  WHERE ${schema.screenGroupMembers.screen_id} = ${schema.screens.id}
+                    AND ${schema.publishTargets.screen_group_id} IS NOT NULL
+                    AND ${schema.publishes.status} = 'ACTIVE'
+                    AND ${schema.publishes.taken_down_at} IS NULL
+                    AND ${schema.schedules.is_active} = true
+                    AND ${schema.schedules.start_at} <= ${now}
+                    AND ${schema.schedules.end_at} >= ${now}
+                )
+                OR (
+                  ${schema.screens.current_schedule_id} IS NOT NULL
+                  AND ${schema.screens.last_heartbeat_at} IS NOT NULL
+                  AND ${schema.screens.last_heartbeat_at} >= ${fiveMinutesAgo}
+                  AND EXISTS (
+                    SELECT 1
+                    FROM ${schema.schedules}
+                    WHERE ${schema.schedules.id} = ${schema.screens.current_schedule_id}
+                      AND ${schema.schedules.is_active} = true
+                      AND ${schema.schedules.start_at} <= ${now}
+                      AND ${schema.schedules.end_at} >= ${now}
+                  )
+                )
+              )`
           );
         const activeScreensNow = Number(activeScreensNowRow?.count || 0);
         const lastHeartbeatAt = latestHeartbeat?.timestamp ? new Date(latestHeartbeat.timestamp) : null;

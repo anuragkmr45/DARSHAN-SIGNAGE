@@ -2,7 +2,9 @@ import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
 import type {
   DevicePairing,
+  DevicePairingOrphanReport,
   DevicePairingRequest,
+  DevicePairingRevokeResponse,
   PaginatedResponse,
   PaginationParams,
   PairingStatusResponse,
@@ -54,6 +56,20 @@ export const devicePairingApi = {
     }>({
       path: endpoints.devicePairing.recovery(deviceId),
       method: "GET",
+    }),
+
+  orphans: (params?: { limit?: number }) =>
+    apiClient.request<DevicePairingOrphanReport>({
+      path: endpoints.devicePairing.orphans,
+      method: "GET",
+      query: params,
+    }),
+
+  revoke: (deviceId: string, payload: { reason: string; note?: string }) =>
+    apiClient.request<DevicePairingRevokeResponse>({
+      path: endpoints.devicePairing.revoke(deviceId),
+      method: "POST",
+      body: payload,
     }),
 
   startRecovery: (deviceId: string, payload?: { expires_in?: number }) =>

@@ -9,6 +9,10 @@ import { HTTP_STATUS } from '@/http-status-codes';
 import * as s3 from '@/s3';
 import * as jobs from '@/jobs';
 import { buildDeviceRequestSignaturePayload } from '@/utils/device-request-auth';
+import {
+  listDuplicateIdentityConflicts,
+  recordDeviceIdentitySession,
+} from '@/services/device-identity-session-service';
 
 function createSignedDeviceHeaders(params: {
   method: string;
@@ -226,6 +230,300 @@ describe('Device telemetry auth runtime validation', () => {
     expect(body.success).toBe(false);
     expect(body.error.code).toBe('NOT_FOUND');
     expect(body.error.message).toBe('Device not registered');
+  });
+
+  it('returns VALID_NO_CONTENT pairing status for a visible authenticated screen with no content', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const serial = `serial-${randomUUID()}`;
+
+    await db.insert(schema.screens).values({
+      id: deviceId,
+      name: 'Pairing Status Screen',
+      status: 'OFFLINE',
+    });
+
+    await db.insert(schema.deviceCertificates).values({
+      screen_id: deviceId,
+      serial,
+      certificate_pem: 'dummy-cert',
+      expires_at: new Date(Date.now() + 60_000),
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/device/${deviceId}/pairing-status`,
+      headers: {
+        'x-device-serial': serial,
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    const body = JSON.parse(response.body);
+    expect(body.status).toBe('VALID_NO_CONTENT');
+    expect(body.deviceId).toBe(deviceId);
+    expect(body.screenId).toBe(deviceId);
+    expect(body.screenVisible).toBe(true);
+    expect(body.screenName).toBe('Pairing Status Screen');
+    expect(body.serverIdentity).toEqual(
+      expect.objectContaining({
+        environment: expect.any(String),
+        deploymentId: expect.any(String),
+        serverId: expect.any(String),
+      })
+    );
+    expect(body.certExpiresAt).toBeTruthy();
+  });
+
+  it('detects duplicate active runtime sessions without flagging quick restarts', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const base = new Date(Date.now() - 180_000);
+
+    await db.insert(schema.screens).values({
+      id: deviceId,
+      name: 'Duplicate Session Screen',
+      status: 'OFFLINE',
+    });
+
+    const first = await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'install-instance-sensitive-1',
+      runtimeSessionId: 'runtime-session-sensitive-a',
+      playerVersion: '1.0.0',
+      ipAddress: '192.168.0.50',
+      machineObservation: 'host-a|eth0|model|linux',
+      userAgent: 'DARSHAN/1.0.0',
+      now: base,
+    });
+    expect(first.active).toBe(false);
+    expect(first.activeSessionCount).toBe(1);
+
+    const quickRestart = await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'install-instance-sensitive-1',
+      runtimeSessionId: 'runtime-session-sensitive-b',
+      playerVersion: '1.0.0',
+      ipAddress: '192.168.0.51',
+      machineObservation: 'host-b|eth0|model|linux',
+      userAgent: 'DARSHAN/1.0.0',
+      now: new Date(base.getTime() + 60_000),
+    });
+    expect(quickRestart.active).toBe(false);
+    expect(quickRestart.activeSessionCount).toBe(2);
+
+    const conflict = await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'install-instance-sensitive-1',
+      runtimeSessionId: 'runtime-session-sensitive-b',
+      playerVersion: '1.0.0',
+      ipAddress: '192.168.0.51',
+      machineObservation: 'host-b|eth0|model|linux',
+      userAgent: 'DARSHAN/1.0.0',
+      now: new Date(base.getTime() + 180_000),
+    });
+    expect(conflict.active).toBe(true);
+    expect(conflict.severity).toBe('WARN');
+    expect(conflict.enforcement).toBe('warn');
+    expect(conflict.sessions).toHaveLength(2);
+    const serialized = JSON.stringify(conflict);
+    expect(serialized).not.toContain('install-instance-sensitive-1');
+    expect(serialized).not.toContain('runtime-session-sensitive-a');
+    expect(serialized).not.toContain('runtime-session-sensitive-b');
+    expect(serialized).not.toContain('192.168.0.50');
+
+    const listed = await listDuplicateIdentityConflicts({ limit: 10 });
+    expect(listed.items.some((item) => item.deviceId === deviceId && item.status === 'OPEN')).toBe(true);
+
+    const resolved = await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'install-instance-sensitive-1',
+      runtimeSessionId: 'runtime-session-sensitive-b',
+      playerVersion: '1.0.0',
+      now: new Date(base.getTime() + 481_000),
+    });
+    expect(resolved.active).toBe(false);
+    expect(resolved.status).toBe('RESOLVED');
+  });
+
+  it('keeps pairing status valid in warn mode while including duplicate identity conflict details', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const serial = `serial-${randomUUID()}`;
+    const base = new Date(Date.now() - 180_000);
+
+    await db.insert(schema.screens).values({
+      id: deviceId,
+      name: 'Duplicate Pairing Status Screen',
+      status: 'OFFLINE',
+    });
+
+    await db.insert(schema.deviceCertificates).values({
+      screen_id: deviceId,
+      serial,
+      certificate_pem: 'dummy-cert',
+      expires_at: new Date(Date.now() + 60_000),
+    });
+
+    await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'copied-install-for-status',
+      runtimeSessionId: 'status-runtime-a',
+      now: base,
+    });
+    await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'copied-install-for-status',
+      runtimeSessionId: 'status-runtime-b',
+      now: new Date(base.getTime() + 60_000),
+    });
+    await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'copied-install-for-status',
+      runtimeSessionId: 'status-runtime-b',
+      now: new Date(base.getTime() + 180_000),
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/device/${deviceId}/pairing-status`,
+      headers: {
+        'x-device-serial': serial,
+        'x-signhex-install-instance-id': 'copied-install-for-status',
+        'x-signhex-runtime-session-id': 'status-runtime-b',
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    const body = JSON.parse(response.body);
+    expect(body.status).toBe('VALID_NO_CONTENT');
+    expect(body.duplicateIdentity.active).toBe(true);
+    expect(body.duplicateIdentity.enforcement).toBe('warn');
+    expect(JSON.stringify(body)).not.toContain('copied-install-for-status');
+    expect(JSON.stringify(body)).not.toContain('status-runtime-a');
+  });
+
+  it('returns ORPHANED_CREDENTIAL pairing status when an authenticated cert has no visible screen row', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const serial = `serial-${randomUUID()}`;
+
+    await db.insert(schema.deviceCertificates).values({
+      screen_id: deviceId,
+      serial,
+      certificate_pem: 'dummy-cert',
+      expires_at: new Date(Date.now() + 60_000),
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/device/${deviceId}/pairing-status`,
+      headers: {
+        'x-device-serial': serial,
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    const body = JSON.parse(response.body);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('ORPHANED_CREDENTIAL');
+    expect(body.error.details.status).toBe('ORPHANED_CREDENTIAL');
+  });
+
+  it('returns ENVIRONMENT_MISMATCH pairing status when optional environment headers disagree', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const serial = `serial-${randomUUID()}`;
+
+    await db.insert(schema.screens).values({
+      id: deviceId,
+      name: 'Environment Mismatch Screen',
+      status: 'OFFLINE',
+    });
+
+    await db.insert(schema.deviceCertificates).values({
+      screen_id: deviceId,
+      serial,
+      certificate_pem: 'dummy-cert',
+      expires_at: new Date(Date.now() + 60_000),
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/device/${deviceId}/pairing-status`,
+      headers: {
+        'x-device-serial': serial,
+        'x-signhex-environment-name': 'different-environment',
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    const body = JSON.parse(response.body);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('ENVIRONMENT_MISMATCH');
+    expect(body.error.details.status).toBe('ENVIRONMENT_MISMATCH');
+    expect(body.error.details.serverIdentity).toEqual(
+      expect.objectContaining({
+        environment: expect.any(String),
+        deploymentId: expect.any(String),
+        serverId: expect.any(String),
+      })
+    );
+  });
+
+  it('returns INVALID_TOKEN pairing status when device credentials are missing', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/device/${randomUUID()}/pairing-status`,
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.UNAUTHORIZED);
+    const body = JSON.parse(response.body);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INVALID_TOKEN');
+    expect(body.error.details.status).toBe('INVALID_TOKEN');
+  });
+
+  it('returns PAIRING_REVOKED pairing status when device credentials are revoked', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const serial = `serial-${randomUUID()}`;
+
+    await db.insert(schema.screens).values({
+      id: deviceId,
+      name: 'Revoked Pairing Screen',
+      status: 'OFFLINE',
+    });
+
+    await db.insert(schema.deviceCertificates).values({
+      screen_id: deviceId,
+      serial,
+      certificate_pem: 'dummy-cert',
+      expires_at: new Date(Date.now() + 60_000),
+      is_revoked: true,
+      revoked_at: new Date(),
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/device/${deviceId}/pairing-status`,
+      headers: {
+        'x-device-serial': serial,
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.GONE);
+    const body = JSON.parse(response.body);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('PAIRING_REVOKED');
+    expect(body.error.details.status).toBe('PAIRING_REVOKED');
   });
 
   it('returns resolved screen-target default media for authenticated device fallback requests', async () => {

@@ -172,7 +172,9 @@ export interface ScreenshotPolicyResponse {
 // Player lifecycle state machine
 export type PlayerState =
   | 'BOOT'
+  | 'LOCAL_IDENTITY_PRESENT'
   | 'BOOTSTRAP_AUTH'
+  | 'OFFLINE_USING_LAST_VALID_PAIRING'
   | 'SOFT_RECOVERY'
   | 'RECOVERY_REQUIRED'
   | 'HARD_RECOVERY'
@@ -513,6 +515,9 @@ export interface HeartbeatPayload {
   os_version?: string
   hostname?: string
   player_uptime_seconds?: number
+  install_instance_id?: string
+  runtime_session_id?: string
+  player_version?: string
   battery_percent?: number
   is_charging?: boolean
   power_source?: PowerSource
@@ -734,6 +739,69 @@ export interface PairingStatusResponse {
   active_pairing?: ActivePairingStatus | null
 }
 
+export type BackendPairingValidationStatus =
+  | 'VALID'
+  | 'VALID_NO_CONTENT'
+  | 'UNPAIRED'
+  | 'INVALID_TOKEN'
+  | 'SCREEN_NOT_FOUND'
+  | 'SCREEN_DELETED'
+  | 'PAIRING_REVOKED'
+  | 'ORPHANED_CREDENTIAL'
+  | 'ENVIRONMENT_MISMATCH'
+  | 'RECLAIM_REQUIRED'
+  | 'BACKEND_REPAIR_REQUIRED'
+
+export interface DuplicateIdentitySessionSample {
+  installInstanceSuffix: string | null
+  runtimeSessionSuffix: string | null
+  machineHash: string | null
+  ipHash: string | null
+  userAgentHash: string | null
+  playerVersion: string | null
+  source: string
+  firstSeenAt: string
+  lastSeenAt: string
+  leaseExpiresAt: string
+}
+
+export interface DuplicateIdentitySummary {
+  active: boolean
+  conflictId: string | null
+  status: 'OPEN' | 'RESOLVED' | null
+  severity: 'WARN' | 'BLOCK' | null
+  enforcement: 'warn' | 'block'
+  activeSessionCount: number
+  leaseMs: number
+  restartGraceMs: number
+  firstSeenAt: string | null
+  lastSeenAt: string | null
+  sessions: DuplicateIdentitySessionSample[]
+  recommendedAction: string | null
+}
+
+export interface ServerIdentity {
+  environment: string
+  deploymentId: string
+  serverId: string
+}
+
+export interface BackendPairingStatusResponse {
+  status: BackendPairingValidationStatus
+  code?: BackendPairingValidationStatus
+  message?: string
+  deviceId: string
+  screenId?: string | null
+  screenVisible?: boolean
+  screenName?: string | null
+  serverIdentity?: ServerIdentity
+  pairingGeneration?: number
+  certExpiresAt?: string | null
+  requiresReclaim?: boolean
+  duplicateIdentity?: DuplicateIdentitySummary
+  serverTime?: string
+}
+
 export type PairingOrientation = 'landscape' | 'portrait'
 
 export interface PairingCodeRequest {
@@ -795,6 +863,8 @@ export interface DeviceStateRecord {
   lastSuccessfulPairingAt?: string
   lastHeartbeatAt?: string
   recoveryReason?: string
+  installInstanceId?: string
+  duplicateIdentity?: DuplicateIdentitySummary
   hardRecoveryDeadlineAt?: string
   pairingRequestInDoubtAt?: string
   recentCommands?: RecentCommandRecord[]
@@ -805,6 +875,10 @@ export interface DeviceStateRecord {
   lastDesiredEmergencyVersion?: string | null
   lastDesiredStateAt?: string
   lastRealtimeConnectedAt?: string
+  lastPairingValidationStatus?: BackendPairingValidationStatus
+  lastPairingValidatedAt?: string
+  lastValidatedDeviceId?: string
+  lastValidatedServerIdentity?: ServerIdentity
 }
 
 export type BackendErrorCode =
@@ -817,6 +891,7 @@ export type BackendErrorCode =
   | 'CA_CERT_MISSING'
   | 'INTERNAL_ERROR'
   | 'NETWORK_ERROR'
+  | BackendPairingValidationStatus
 
 export interface BackendErrorPayload {
   success?: false

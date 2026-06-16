@@ -1,6 +1,6 @@
 # Enterprise Realtime Sync Open Risks
 
-Last updated: 2026-05-25
+Last updated: 2026-06-16
 Updated by: Codex
 
 ## Active Phase 1 And Phase 2 Risks
@@ -36,7 +36,15 @@ Updated by: Codex
 | On-prem object storage/media endpoint behavior | High | Open | Media/cache/runtime evidence has not validated MinIO/internal S3/file-server URLs | Validate internal signed URL behavior, cache headers, range requests, TLS, and player cache fallback. |
 | Phase 8 real load/chaos execution missing | High | Open | Phase 8 added load model and chaos plan, but no on-prem QA target was available for execution | Execute 1k/10k/50k load profiles and chaos suite before production readiness. |
 | Production readiness not approved | Critical | Open | `realtime-sync-production-readiness-checklist.md` state is `NOT_PRODUCTION_READY`; runtime evidence attempt is blocked by missing on-prem QA target | Do not start production canary or Phase 9 mobile adapters without accepted Phase 8 runtime evidence or explicit human deferral. |
-| On-prem QA runtime evidence unavailable | Critical | Open | Packaged QA server health check reports `postgres` not running; localhost backend/socket checks cannot connect; no on-prem QA endpoint env vars are present | Provide on-prem QA endpoints, Valkey topology, simulator credentials, and approved load/chaos window. |
+| On-prem QA runtime evidence unavailable | Critical | Open | Packaged QA server health check reports `postgres` not running; localhost backend/socket checks cannot connect; 2026-06-16 ghost-pairing evidence attempt found all required `ONPREM_*` QA inputs missing | Provide on-prem QA endpoints, Valkey topology, simulator credentials, and approved load/chaos window. |
+| Ghost pairing CMS operator visibility needs runtime QA | High | Implemented locally, open for on-prem | GP-3 added CMS Pairing Health orphan visibility, admin revoke, backend revoke API, and disabled reclaim guidance; no browser/on-prem orphan runtime evidence exists yet | Validate orphan visibility and revoke on an on-prem QA player/backend/CMS deployment. |
+| Ghost pairing clean reinstall/reset needs packaged QA smoke | High | Implemented locally, open for on-prem | GP-4 added pairing-status, reset dry-run/cache policy, and clean reinstall runbooks; no packaged Ubuntu player reset smoke has run yet | Run packaged player `--pairing-status`, `reset-pairing --dry-run`, reset, CMS revoke, and re-pair flow on on-prem QA hardware. |
+| Ghost pairing duplicate identity detection needs on-prem runtime QA | High | Implemented locally, open for on-prem | GP-5 added install/runtime session metadata, backend session lease conflict detection, and CMS Pairing Health duplicate conflict visibility; no two-player/cloned runtime smoke has run yet | Run two packaged players or cloned app-data simulator against on-prem QA and verify warning-mode conflict, CMS visibility, revoke, reset, and conflict resolution. |
+| Ghost pairing browser/on-prem runtime evidence missing | High | Open | GP-6 created the E2E/permutation matrix and targeted local automated evidence; 2026-06-16 evidence attempt was BLOCKED_BY_ENV because the required on-prem QA URLs, media/Valkey/Prometheus inputs, simulator credentials, and Node 20 runtime were unavailable | Execute `docs/runbooks/ghost-pairing-onprem-qa-checklist.md` and attach evidence before production approval. |
+| Ghost pairing reporting assertion previously failing | Medium | Closed 2026-06-16 | `darshan-server/src/routes/screens.test.ts` now passes; `/api/v1/metrics/overview` `active_screens_now` counts active published direct/group schedule targets plus heartbeat/current-schedule fallback | Keep route/reporting regression suite green. |
+| Ghost pairing backend-first rollout required | High | Open | Player validation depends on backend `/api/v1/device/:deviceId/pairing-status`; old backend must not cause player identity wipe | Deploy backend first, validate endpoint, then deploy GP-2 player validation and monitor stale/recovery events. |
+| CONFIG_ARCHITECTURE_PENDING | High | Backend mitigated by CONFIG-1, open for player/CMS | CONFIG-1 added optional backend JSON config loading with env overrides and redacted diagnostics. Player and CMS config loaders remain pending. | Implement player/CMS alignment in later phases. Keep secrets in env/secrets files and existing env compatibility during migration. |
+| CONFIG_RUNTIME_VALIDATION_PENDING | High | Open | Local listeners were discovered on expected ports, but health checks to `192.168.0.5` and localhost backend failed during CONFIG-0; no runtime config evidence was claimed. | Provide valid on-prem QA endpoints and Node 20 runtime, then rerun browser/on-prem evidence using a recorded config profile. |
 
 Latest Phase 1 handoff: `docs/implementation/realtime-sync-phase-1-handoff.md`.
 Latest Phase 2 handoff: `docs/implementation/realtime-sync-phase-2-handoff.md`.

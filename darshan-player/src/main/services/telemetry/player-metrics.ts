@@ -11,7 +11,9 @@ const logger = getLogger('player-metrics')
 
 const PLAYER_STATES: PlayerState[] = [
   'BOOT',
+  'LOCAL_IDENTITY_PRESENT',
   'BOOTSTRAP_AUTH',
+  'OFFLINE_USING_LAST_VALID_PAIRING',
   'SOFT_RECOVERY',
   'RECOVERY_REQUIRED',
   'HARD_RECOVERY',

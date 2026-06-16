@@ -64,6 +64,7 @@ describe('Player Flow', () => {
     const { getTelemetryService } = require('../../../src/main/services/telemetry/telemetry-service')
     const { getCommandProcessor } = require('../../../src/main/services/command-processor')
     const { getDefaultMediaService } = require('../../../src/main/services/settings/default-media-service')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
 
     const httpClient = getHttpClient()
     const heartbeatService = getHeartbeatService()
@@ -72,8 +73,26 @@ describe('Player Flow', () => {
     const telemetryService = getTelemetryService()
     const commandProcessor = getCommandProcessor()
     const defaultMediaService = getDefaultMediaService()
+    const pairingService = getPairingService()
 
     sandbox.stub(httpClient, 'get').resolves({})
+    if (!pairingService.fetchBackendPairingStatus.restore) {
+      sandbox.stub(pairingService, 'fetchBackendPairingStatus').resolves({
+        status: 'VALID',
+        deviceId: '11111111-1111-4111-8111-111111111111',
+        screenId: '11111111-1111-4111-8111-111111111111',
+        screenVisible: true,
+        screenName: 'Test Screen',
+        serverIdentity: {
+          environment: 'test',
+          deploymentId: 'test-suite',
+          serverId: 'darshan-api-test',
+        },
+        certExpiresAt: null,
+        requiresReclaim: false,
+        serverTime: new Date().toISOString(),
+      })
+    }
     sandbox.stub(heartbeatService, 'sendImmediate').resolves()
     sandbox.stub(snapshotManager, 'start').returns(undefined)
     sandbox.stub(snapshotManager, 'refreshSnapshot').resolves({ mode: 'normal', items: [], scheduleId: 'sched-1' })
@@ -93,6 +112,7 @@ describe('Player Flow', () => {
       telemetryService,
       commandProcessor,
       defaultMediaService,
+      pairingService,
     }
   }
 
@@ -124,6 +144,67 @@ describe('Player Flow', () => {
     expect(playerFlow.getState()).to.equal('PAIRED_RUNTIME')
     expect(playerFlow.getStatus().pairingCode).to.equal(undefined)
     expect(stubs.httpClient.get.calledOnce).to.equal(true)
+    expect(stubs.heartbeatService.sendImmediate.calledOnce).to.equal(true)
+
+    await playerFlow.stop()
+  })
+
+  it('should preserve duplicate identity warnings without blocking warn-mode playback', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      fingerprint: 'fingerprint-1',
+    })
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(pairingService, 'fetchScreenshotPolicy').resolves({
+      enabled: false,
+      interval_seconds: null,
+    })
+    sandbox.stub(pairingService, 'fetchBackendPairingStatus').resolves({
+      status: 'VALID_NO_CONTENT',
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      screenId: '11111111-1111-4111-8111-111111111111',
+      screenVisible: true,
+      screenName: 'Test Screen',
+      serverIdentity: {
+        environment: 'test',
+        deploymentId: 'test-suite',
+        serverId: 'darshan-api-test',
+      },
+      certExpiresAt: null,
+      requiresReclaim: false,
+      duplicateIdentity: {
+        active: true,
+        conflictId: 'conflict-1',
+        status: 'OPEN',
+        severity: 'WARN',
+        enforcement: 'warn',
+        activeSessionCount: 2,
+        leaseMs: 300000,
+        restartGraceMs: 120000,
+        firstSeenAt: new Date(0).toISOString(),
+        lastSeenAt: new Date(1).toISOString(),
+        sessions: [],
+        recommendedAction: 'VERIFY_PHYSICAL_PLAYERS_AND_REVOKE_STALE_PAIRING',
+      },
+      serverTime: new Date().toISOString(),
+    })
+
+    const stubs = createCompleteBootstrapStubs()
+    const playerFlow = getPlayerFlow()
+
+    await playerFlow.start()
+
+    expect(playerFlow.getState()).to.equal('PAIRED_RUNTIME')
+    expect(stateStore.getState().duplicateIdentity?.active).to.equal(true)
     expect(stubs.heartbeatService.sendImmediate.calledOnce).to.equal(true)
 
     await playerFlow.stop()
@@ -170,13 +251,12 @@ describe('Player Flow', () => {
     await playerFlow.stop()
   })
 
-  it('should move to SOFT_RECOVERY on transient bootstrap failure', async () => {
+  it('should require pairing validation when backend is unreachable and identity was never validated', async () => {
     const { DeviceApiError } = require('../../../src/common/types')
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
     const { getPairingService } = require('../../../src/main/services/pairing-service')
     const { getHttpClient } = require('../../../src/main/services/network/http-client')
-    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
 
     const stateStore = getDeviceStateStore()
     await stateStore.clearIdentity()
@@ -188,9 +268,6 @@ describe('Player Flow', () => {
     const pairingService = getPairingService()
     sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
     sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
-
-    sandbox.stub(getSnapshotManager(), 'start').returns(undefined)
-    sandbox.stub(getSnapshotManager(), 'refreshSnapshot').resolves({ mode: 'offline', items: [], scheduleId: 'sched-1' })
     sandbox.stub(getHttpClient(), 'get').rejects(
       new DeviceApiError({
         code: 'NETWORK_ERROR',
@@ -202,11 +279,103 @@ describe('Player Flow', () => {
     const playerFlow = getPlayerFlow()
     await playerFlow.start()
 
-    expect(playerFlow.getState()).to.equal('SOFT_RECOVERY')
+    expect(playerFlow.getState()).to.equal('LOCAL_IDENTITY_PRESENT')
+    expect(playerFlow.getStatus().awaitingManualRecovery).to.equal(true)
     await playerFlow.stop()
   })
 
-  it('should move to RECOVERY_REQUIRED on bootstrap credential expiry failure', async () => {
+  it('should allow offline playback when backend is unreachable after a recent valid pairing validation', async () => {
+    const { DeviceApiError } = require('../../../src/common/types')
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+
+    const deviceId = '11111111-1111-4111-8111-111111111111'
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({
+      deviceId,
+      fingerprint: 'fingerprint-1',
+      lastPairingValidationStatus: 'VALID',
+      lastPairingValidatedAt: new Date().toISOString(),
+      lastValidatedDeviceId: deviceId,
+      lastValidatedServerIdentity: {
+        environment: 'test',
+        deploymentId: 'test-suite',
+        serverId: 'darshan-api-test',
+      },
+    })
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(getSnapshotManager(), 'getCurrentPlaylist').returns({
+      mode: 'offline',
+      items: [],
+      scheduleId: 'cached-schedule',
+      lastSnapshotAt: new Date().toISOString(),
+    })
+    sandbox.stub(getHttpClient(), 'get').rejects(
+      new DeviceApiError({
+        code: 'NETWORK_ERROR',
+        message: 'connect ETIMEDOUT',
+        transient: true,
+      })
+    )
+
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+
+    expect(playerFlow.getState()).to.equal('OFFLINE_USING_LAST_VALID_PAIRING')
+    expect(playerFlow.getStatus().mode).to.equal('offline')
+    expect(playerFlow.getStatus().backendAvailable).to.equal(false)
+    await playerFlow.stop()
+  })
+
+  it('should preserve identity when an old backend is missing the pairing-status endpoint', async () => {
+    const { DeviceApiError } = require('../../../src/common/types')
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+
+    const deviceId = '11111111-1111-4111-8111-111111111111'
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({
+      deviceId,
+      fingerprint: 'fingerprint-1',
+      lastPairingValidationStatus: 'VALID',
+      lastPairingValidatedAt: new Date().toISOString(),
+      lastValidatedDeviceId: deviceId,
+    })
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    const requestPairingCode = sandbox.stub(pairingService, 'requestPairingCode').rejects(new Error('should not request'))
+    sandbox.stub(getHttpClient(), 'get').rejects(
+      new DeviceApiError({
+        code: 'NOT_FOUND',
+        status: 404,
+        message: 'Route GET:/api/v1/device/11111111-1111-4111-8111-111111111111/pairing-status not found',
+      })
+    )
+
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+
+    expect(playerFlow.getState()).to.equal('RECOVERY_REQUIRED')
+    expect(playerFlow.getStatus().awaitingManualRecovery).to.equal(true)
+    expect(stateStore.getState().deviceId).to.equal(deviceId)
+    expect(stateStore.getState().fingerprint).to.equal('fingerprint-1')
+    expect(requestPairingCode.called).to.equal(false)
+    await playerFlow.stop()
+  })
+
+  it('should force re-pair on bootstrap credential expiry failure', async () => {
     const { DeviceApiError } = require('../../../src/common/types')
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
@@ -223,6 +392,7 @@ describe('Player Flow', () => {
     const pairingService = getPairingService()
     sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
     sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(pairingService, 'requestPairingCode').rejects(new Error('request failed'))
     sandbox.stub(getHttpClient(), 'get').rejects(
       new DeviceApiError({
         code: 'FORBIDDEN',
@@ -234,11 +404,11 @@ describe('Player Flow', () => {
     const playerFlow = getPlayerFlow()
     await playerFlow.start()
 
-    expect(playerFlow.getState()).to.equal('RECOVERY_REQUIRED')
+    expect(playerFlow.getState()).to.equal('HARD_RECOVERY')
     await playerFlow.stop()
   })
 
-  it('should move to RECOVERY_REQUIRED on bootstrap invalid credential failure', async () => {
+  it('should force re-pair on bootstrap invalid credential failure', async () => {
     const { DeviceApiError } = require('../../../src/common/types')
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
@@ -255,6 +425,7 @@ describe('Player Flow', () => {
     const pairingService = getPairingService()
     sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
     sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(pairingService, 'requestPairingCode').rejects(new Error('request failed'))
     sandbox.stub(getHttpClient(), 'get').rejects(
       new DeviceApiError({
         code: 'FORBIDDEN',
@@ -266,7 +437,7 @@ describe('Player Flow', () => {
     const playerFlow = getPlayerFlow()
     await playerFlow.start()
 
-    expect(playerFlow.getState()).to.equal('RECOVERY_REQUIRED')
+    expect(playerFlow.getState()).to.equal('HARD_RECOVERY')
     await playerFlow.stop()
   })
 
@@ -300,6 +471,82 @@ describe('Player Flow', () => {
     await playerFlow.start()
 
     expect(playerFlow.getState()).to.equal('HARD_RECOVERY')
+    await playerFlow.stop()
+  })
+
+  it('should clear identity-bound cache and re-pair when backend reports deleted screen', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const { getDefaultMediaService } = require('../../../src/main/services/settings/default-media-service')
+
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      fingerprint: 'fingerprint-1',
+      lastPairingValidationStatus: 'VALID',
+      lastPairingValidatedAt: new Date().toISOString(),
+      lastValidatedDeviceId: '11111111-1111-4111-8111-111111111111',
+    })
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').onFirstCall().returns(true).returns(false)
+    sandbox.stub(pairingService, 'fetchBackendPairingStatus').resolves({
+      status: 'SCREEN_DELETED',
+      code: 'SCREEN_DELETED',
+      message: 'This screen pairing was deleted. Pair again.',
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      screenVisible: false,
+      requiresReclaim: false,
+    })
+    sandbox.stub(pairingService, 'requestPairingCode').rejects(new Error('request failed'))
+    const snapshotClear = sandbox.spy(getSnapshotManager(), 'clearIdentityBoundState')
+    const defaultClear = sandbox.spy(getDefaultMediaService(), 'clearIdentityBoundState')
+
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+
+    expect(playerFlow.getState()).to.equal('HARD_RECOVERY')
+    expect(snapshotClear.called).to.equal(true)
+    expect(defaultClear.called).to.equal(true)
+    expect(stateStore.getState().deviceId).to.equal(undefined)
+    expect(stateStore.getState().lastPairingValidationStatus).to.equal(undefined)
+    await playerFlow.stop()
+  })
+
+  it('should force re-pair when backend reports environment mismatch', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      fingerprint: 'fingerprint-1',
+    })
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').onFirstCall().returns(true).returns(false)
+    sandbox.stub(pairingService, 'fetchBackendPairingStatus').resolves({
+      status: 'ENVIRONMENT_MISMATCH',
+      code: 'ENVIRONMENT_MISMATCH',
+      message: 'Player is paired to a different backend environment.',
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      requiresReclaim: true,
+    })
+    sandbox.stub(pairingService, 'requestPairingCode').rejects(new Error('request failed'))
+
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+
+    expect(playerFlow.getState()).to.equal('HARD_RECOVERY')
+    expect(playerFlow.getStatus().recoveryReason).to.equal('request failed')
+    expect(stateStore.getState().deviceId).to.equal(undefined)
     await playerFlow.stop()
   })
 

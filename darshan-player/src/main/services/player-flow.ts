@@ -2,6 +2,8 @@ import { BrowserWindow } from 'electron'
 import { EventEmitter } from 'events'
 import {
   DeviceApiError,
+  BackendPairingStatusResponse,
+  BackendPairingValidationStatus,
   PairingCodeRequest,
   PairingCodeResponse,
   PairingResponse,
@@ -30,6 +32,20 @@ import { getRealtimeService } from './realtime-service'
 
 const logger = getLogger('player-flow')
 const PAIRING_POLL_INTERVAL_MS = 5000
+const PAIRING_VALIDATION_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
+
+const VALID_BACKEND_PAIRING_STATUSES = new Set<BackendPairingValidationStatus>(['VALID', 'VALID_NO_CONTENT'])
+const STALE_BACKEND_PAIRING_STATUSES = new Set<BackendPairingValidationStatus>([
+  'UNPAIRED',
+  'INVALID_TOKEN',
+  'SCREEN_NOT_FOUND',
+  'SCREEN_DELETED',
+  'PAIRING_REVOKED',
+  'ORPHANED_CREDENTIAL',
+  'ENVIRONMENT_MISMATCH',
+  'RECLAIM_REQUIRED',
+  'BACKEND_REPAIR_REQUIRED',
+])
 
 function requiresTimelinePlayback(playlist: PlaybackPlaylist): boolean {
   return (playlist.mode === 'normal' || playlist.mode === 'emergency') && playlist.items.length > 0
@@ -97,13 +113,16 @@ export class PlayerFlow extends EventEmitter {
       error: 'Starting player...',
     })
 
-    this.restoreCachedPlayback()
-
     const persisted = this.store.getState()
     const identity = this.pairingService.getStoredIdentityHealth()
     const trustworthyDeviceId = this.pairingService.hasTrustworthyDeviceId()
 
     if (identity.health === 'complete' && trustworthyDeviceId) {
+      await this.transitionState('LOCAL_IDENTITY_PRESENT', {
+        error: 'Stored device identity found. Validating pairing with backend...',
+        backendAvailable: false,
+        awaitingManualRecovery: false,
+      })
       await this.bootstrapAuthenticatedRuntime()
       return
     }
@@ -238,15 +257,20 @@ export class PlayerFlow extends EventEmitter {
     this.stopPairingTimers()
     this.stopBootstrapRetryTimer()
     this.bindSnapshotListener()
-    this.restoreCachedPlayback()
 
     await this.transitionState('BOOTSTRAP_AUTH', {
-      error: 'Validating device access...',
-      backendAvailable: true,
+      error: 'Validating device pairing with backend...',
+      backendAvailable: false,
       awaitingManualRecovery: false,
     })
 
     try {
+      const pairingStatus = await this.validateBackendPairingStatus()
+      if (!pairingStatus) {
+        return
+      }
+
+      this.restoreCachedPlayback()
       await this.probeAuthenticatedSnapshot()
       await this.applyBootstrapScreenshotPolicy()
       await getSnapshotManager().refreshSnapshot()
@@ -275,6 +299,25 @@ export class PlayerFlow extends EventEmitter {
       enabled: policy?.enabled === true,
       interval_seconds: policy?.interval_seconds ?? null,
     })
+  }
+
+  private async validateBackendPairingStatus(): Promise<BackendPairingStatusResponse | null> {
+    const status = await this.pairingService.fetchBackendPairingStatus()
+
+    if (VALID_BACKEND_PAIRING_STATUSES.has(status.status)) {
+      await this.pairingService.markPairingValidation(status)
+      return status
+    }
+
+    if (STALE_BACKEND_PAIRING_STATUSES.has(status.status)) {
+      const message =
+        status.message ||
+        `Stored device identity is not valid for this backend (${status.status}). Fresh pairing is required.`
+      await this.enterHardRecovery(message)
+      return null
+    }
+
+    throw new Error(`Unsupported backend pairing status: ${status.status}`)
   }
 
   private async startRuntimeLoops(): Promise<void> {
@@ -332,7 +375,11 @@ export class PlayerFlow extends EventEmitter {
       return
     }
 
-    if (this.state !== 'PAIRED_RUNTIME' && this.state !== 'BOOTSTRAP_AUTH') {
+    if (
+      this.state !== 'PAIRED_RUNTIME' &&
+      this.state !== 'BOOTSTRAP_AUTH' &&
+      this.state !== 'OFFLINE_USING_LAST_VALID_PAIRING'
+    ) {
       return
     }
 
@@ -424,6 +471,12 @@ export class PlayerFlow extends EventEmitter {
   }
 
   private async handleBootstrapFailure(error: unknown): Promise<void> {
+    const backendPairingStatus = this.pairingService.getBackendPairingStatusFromError(error)
+    if (backendPairingStatus && STALE_BACKEND_PAIRING_STATUSES.has(backendPairingStatus)) {
+      await this.enterHardRecovery((error as Error).message || `Pairing is invalid (${backendPairingStatus})`)
+      return
+    }
+
     if (this.pairingService.isDeviceNotRegisteredError(error) || !this.pairingService.hasTrustworthyDeviceId()) {
       await this.enterHardRecovery((error as Error).message || 'Stored device identity is no longer registered')
       return
@@ -435,25 +488,78 @@ export class PlayerFlow extends EventEmitter {
     }
 
     if (this.pairingService.isTransientRuntimeError(error)) {
-      await this.enterSoftRecovery((error as Error).message || 'Backend is temporarily unavailable')
+      if (this.canUseOfflineLastValidatedPairing()) {
+        await this.enterOfflineUsingLastValidPairing((error as Error).message || 'Backend is temporarily unavailable')
+      } else {
+        await this.enterPairingValidationRequired(
+          (error as Error).message || 'Backend is unavailable and this local pairing has never been validated'
+        )
+      }
       return
     }
 
     await this.enterRecoveryRequired((error as Error).message || 'Unable to validate stored device credentials')
   }
 
-  private async enterSoftRecovery(reason: string): Promise<void> {
+  private canUseOfflineLastValidatedPairing(): boolean {
+    const state = this.store.getState()
+    const deviceId = this.pairingService.getDeviceId()
+    if (!deviceId || state.lastValidatedDeviceId !== deviceId) {
+      return false
+    }
+    if (!state.lastPairingValidationStatus || !VALID_BACKEND_PAIRING_STATUSES.has(state.lastPairingValidationStatus)) {
+      return false
+    }
+    if (!state.lastPairingValidatedAt) {
+      return false
+    }
+
+    const validatedAt = Date.parse(state.lastPairingValidatedAt)
+    if (Number.isNaN(validatedAt)) {
+      return false
+    }
+
+    return Date.now() - validatedAt <= PAIRING_VALIDATION_OFFLINE_GRACE_MS
+  }
+
+  private async enterOfflineUsingLastValidPairing(reason: string): Promise<void> {
+    this.stopPairingTimers()
+    this.stopRuntimeLoops(false)
+    this.restoreCachedPlayback()
+
+    await this.store.update({
+      lifecycleState: 'OFFLINE_USING_LAST_VALID_PAIRING',
+      recoveryReason: reason,
+    })
+
+    await this.transitionState('OFFLINE_USING_LAST_VALID_PAIRING', {
+      online: false,
+      backendAvailable: false,
+      awaitingManualRecovery: false,
+      error: reason,
+      recoveryReason: reason,
+    })
+
+    this.scheduleBootstrapRetry(this.bootstrapBackoff.getDelay())
+  }
+
+  private async enterPairingValidationRequired(reason: string): Promise<void> {
     this.stopPairingTimers()
     this.stopRuntimeLoops(false)
 
     await this.store.update({
-      lifecycleState: 'SOFT_RECOVERY',
+      lifecycleState: 'LOCAL_IDENTITY_PRESENT',
       recoveryReason: reason,
+      pairingCode: undefined,
+      pairingExpiresAt: undefined,
+      activePairingMode: undefined,
     })
 
-    await this.transitionState('SOFT_RECOVERY', {
+    await this.transitionState('LOCAL_IDENTITY_PRESENT', {
+      mode: 'empty',
+      online: false,
       backendAvailable: false,
-      awaitingManualRecovery: false,
+      awaitingManualRecovery: true,
       error: reason,
       recoveryReason: reason,
     })
@@ -802,7 +908,15 @@ export class PlayerFlow extends EventEmitter {
     await this.store.setLifecycleState(next)
     getPlayerMetrics().setPlayerState(next)
 
-    if (next === 'PAIRING_PENDING' || next === 'PAIRING_CONFIRMED' || next === 'PAIRING_COMPLETING') {
+    if (
+      next === 'LOCAL_IDENTITY_PRESENT' ||
+      next === 'BOOTSTRAP_AUTH' ||
+      next === 'RECOVERY_REQUIRED' ||
+      next === 'HARD_RECOVERY' ||
+      next === 'PAIRING_PENDING' ||
+      next === 'PAIRING_CONFIRMED' ||
+      next === 'PAIRING_COMPLETING'
+    ) {
       this.updateStatus({
         mode: 'empty',
         online: false,

@@ -73,6 +73,7 @@ export const queryKeys = {
   screenDeliveryStatus: (screenId?: string) => ["screens", "delivery-status", screenId] as const,
   screenMediaCacheReports: (screenId?: string) => ["screens", "media-cache-reports", screenId] as const,
   screenGroupSnapshot: (groupId?: string) => ["screen-groups", "snapshot", groupId] as const,
+  devicePairingOrphans: (limit?: number) => ["device-pairing", "orphans", limit ?? null] as const,
   media: ["media"] as const,
   mediaById: (mediaId?: string) => ["media", "by-id", mediaId] as const,
   presentations: ["presentations"] as const,

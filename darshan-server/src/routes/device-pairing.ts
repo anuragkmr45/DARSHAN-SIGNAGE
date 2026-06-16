@@ -1,7 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { randomBytes, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { readFile } from 'fs/promises';
+import { and, eq } from 'drizzle-orm';
 import { config } from '@/config';
 import { createDevicePairingRepository } from '@/db/repositories/device-pairing';
 import { createDeviceCertificateRepository } from '@/db/repositories/device-certificate';
@@ -16,6 +17,7 @@ import { AppError } from '@/utils/app-error';
 import { getDatabase, schema } from '@/db';
 import { extractDeviceAuthPublicKeyFromCsr, issueDeviceCertificateFromCsr } from '@/utils/device-request-auth';
 import { recordPairingCodeAllocation, recordPairingCsrValidation } from '@/observability/metrics';
+import { detectDevicePairingOrphans } from '@/services/device-pairing-orphan-service';
 
 const logger = createLogger('device-pairing-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -66,6 +68,22 @@ function classifyPairingCsrValidationFailure(error: unknown) {
   }
 }
 
+function redactOperationalIdentifier(value: string) {
+  return {
+    suffix: value.slice(-6),
+    sha256_12: createHash('sha256').update(value).digest('hex').slice(0, 12),
+  };
+}
+
+function getServerIdentity() {
+  return {
+    environment: config.SIGNHEX_ENVIRONMENT_NAME,
+    deploymentId: config.SIGNHEX_DEPLOYMENT_ID,
+    serverId: config.SIGNHEX_SERVER_ID,
+    serverTime: new Date().toISOString(),
+  };
+}
+
 const generatePairingCodeSchema = z.object({
   device_id: z.string().min(1),
   expires_in: z.number().int().positive().default(3600), // 1 hour
@@ -96,6 +114,11 @@ const confirmPairingSchema = z.object({
   pairing_code: z.string().min(1),
   name: z.string().min(1).max(255),
   location: z.string().optional(),
+});
+
+const revokePairingSchema = z.object({
+  reason: z.string().trim().min(1).max(120).default('admin_revoked_stale_pairing'),
+  note: z.string().trim().max(500).optional(),
 });
 
 export async function devicePairingRoutes(fastify: FastifyInstance) {
@@ -645,7 +668,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
           {
             deviceId,
             pairingId: pairing.id,
-            serial: deviceSerial,
+            certificateSerial: redactOperationalIdentifier(deviceSerial),
           },
           'Device pairing completed'
         );
@@ -830,6 +853,141 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         });
       } catch (error) {
         logger.error(error, 'Start device recovery error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.get<{ Querystring: { limit?: number } }>(
+    apiEndpoints.devicePairing.orphans,
+    {
+      schema: {
+        description: 'Detect device pairing records that reference missing screen rows (admin only)',
+        tags: ['Device Pairing'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) {
+          throw AppError.unauthorized('Missing authorization header');
+        }
+
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'DevicePairing')) {
+          throw AppError.forbidden('Forbidden');
+        }
+
+        const limit = (request.query as any).limit ? Number.parseInt((request.query as any).limit as string, 10) : undefined;
+        const report = await detectDevicePairingOrphans({ limit });
+        return reply.send({
+          ...report,
+          server_identity: getServerIdentity(),
+        });
+      } catch (error) {
+        logger.error(error, 'List device pairing orphans error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.post<{ Params: { deviceId: string }; Body: { reason?: string; note?: string } }>(
+    apiEndpoints.devicePairing.revoke,
+    {
+      schema: {
+        description: 'Revoke active pairing credentials for an existing screen/device (admin only)',
+        tags: ['Device Pairing'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) {
+          throw AppError.unauthorized('Missing authorization header');
+        }
+
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (
+          !ability.can('manage', 'DevicePairing') &&
+          !ability.can('delete', 'Screen') &&
+          !ability.can('manage', 'all')
+        ) {
+          throw AppError.forbidden('Forbidden');
+        }
+
+        const deviceId = z.string().uuid().parse((request.params as any).deviceId);
+        const body = revokePairingSchema.parse(request.body ?? {});
+        const now = new Date();
+
+        const [screen] = await db
+          .select({ id: schema.screens.id, name: schema.screens.name })
+          .from(schema.screens)
+          .where(eq(schema.screens.id, deviceId))
+          .limit(1);
+
+        const revokedCertificates = await db
+          .update(schema.deviceCertificates)
+          .set({
+            is_revoked: true,
+            revoked_at: now,
+          })
+          .where(
+            and(
+              eq(schema.deviceCertificates.screen_id, deviceId),
+              eq(schema.deviceCertificates.is_revoked, false)
+            )
+          )
+          .returning({ id: schema.deviceCertificates.id });
+
+        const invalidatedPairings = await db
+          .update(schema.devicePairings)
+          .set({
+            used: true,
+            used_at: now,
+            expires_at: now,
+          })
+          .where(
+            and(
+              eq(schema.devicePairings.device_id, deviceId),
+              eq(schema.devicePairings.used, false)
+            )
+          )
+          .returning({ id: schema.devicePairings.id });
+
+        await db.insert(schema.auditLogs).values({
+          user_id: payload.sub,
+          action: 'DEVICE_PAIRING_REVOKE',
+          entity_type: 'DEVICE_PAIRING',
+          entity_id: deviceId,
+          ip_address: request.ip,
+        });
+
+        logger.warn(
+          {
+            deviceId,
+            reason: body.reason,
+            noteProvided: Boolean(body.note),
+            revokedCertificates: revokedCertificates.length,
+            invalidatedPairings: invalidatedPairings.length,
+          },
+          'Device pairing revoked by admin'
+        );
+
+        return reply.status(OK).send({
+          device_id: deviceId,
+          screen: screen ? { id: screen.id, name: screen.name } : null,
+          status: revokedCertificates.length > 0 ? 'PAIRING_REVOKED' : 'NO_ACTIVE_CREDENTIAL',
+          revoked_certificates: revokedCertificates.length,
+          invalidated_pairings: invalidatedPairings.length,
+          recommended_action: 'PAIR_AGAIN',
+          server_identity: getServerIdentity(),
+        });
+      } catch (error) {
+        logger.error(error, 'Revoke device pairing error');
         return respondWithError(reply, error);
       }
     }

@@ -1,0 +1,52 @@
+{
+  "environment": {
+    "name": "local-onprem",
+    "deploymentId": "local-192-168-0-5",
+    "serverId": "mac-mini-a"
+  },
+  "http": {
+    "appPublicBaseUrl": "http://192.168.0.5:8080",
+    "corsOrigins": ["http://192.168.0.5:8080"],
+    "socketAllowedOrigins": ["http://192.168.0.5:8080"],
+    "socketIoPath": "/socket.io/"
+  },
+  "realtime": {
+    "enabled": true,
+    "busProvider": "valkey",
+    "socketTransport": "websocket",
+    "socketAllowPolling": true,
+    "socketRequireStickySessions": false,
+    "deviceNamespace": "/device"
+  },
+  "valkey": {
+    "mode": "standalone",
+    "tlsEnabled": false,
+    "authRequired": false,
+    "namespace": "darshan:local",
+    "pubsubEnabled": true,
+    "deviceNodeTtlMs": 120000,
+    "reconnectMinMs": 500,
+    "reconnectMaxMs": 30000,
+    "publishTimeoutMs": 1000
+  },
+  "duplicateIdentity": {
+    "enabled": true,
+    "enforcement": "warn",
+    "sessionLeaseMs": 300000,
+    "restartGraceMs": 120000
+  },
+  "media": {
+    "endpoint": "http://192.168.0.5:9000",
+    "region": "us-east-1"
+  },
+  "observability": {
+    "prometheusUrl": "http://192.168.0.5:9090",
+    "prometheusTimeoutMs": 1500,
+    "grafanaEnabled": true,
+    "grafanaEmbedEnabled": true,
+    "grafanaBasePath": "/grafana"
+  },
+  "limits": {
+    "wsNotificationMaxBytes": 32768
+  }
+}

@@ -154,6 +154,9 @@ export class HeartbeatService {
       batteryPercent?: number
       isCharging?: boolean
       powerSource?: 'AC' | 'BATTERY' | 'USB' | 'UNKNOWN'
+    },
+    identitySession?: {
+      installInstanceId?: string
     }
   ): HeartbeatPayload {
     const memoryUsagePercent =
@@ -194,6 +197,9 @@ export class HeartbeatService {
       battery_percent: stats.batteryPercent,
       is_charging: stats.isCharging,
       power_source: stats.powerSource,
+      install_instance_id: identitySession?.installInstanceId ?? getDeviceStateStore().getState().installInstanceId,
+      runtime_session_id: getPairingService().getRuntimeSessionId(),
+      player_version: getPairingService().getDeviceInfo().appVersion,
     }
   }
 
@@ -223,13 +229,25 @@ export class HeartbeatService {
       // Collect system stats
       const statsCollector = getSystemStatsCollector()
       stats = await statsCollector.collect()
+      const installInstanceId = await pairingService.getInstallInstanceId()
 
       // Prepare heartbeat payload
-      const payload = this.buildHeartbeatPayload(deviceId, 'ONLINE', stats)
+      const payload = this.buildHeartbeatPayload(deviceId, 'ONLINE', stats, { installInstanceId })
 
       // Send heartbeat
       const httpClient = getHttpClient()
-      const response = await httpClient.post<{ success: boolean; timestamp?: string; commands?: Command[] }>(
+      const response = await httpClient.post<{
+        success: boolean
+        timestamp?: string
+        commands?: Command[]
+        duplicate_identity?: {
+          active?: boolean
+          conflict_id?: string | null
+          severity?: 'WARN' | 'BLOCK' | null
+          enforcement?: 'warn' | 'block'
+          active_session_count?: number
+        }
+      }>(
         '/api/v1/device/heartbeat',
         payload,
         {
@@ -244,6 +262,24 @@ export class HeartbeatService {
       await getDeviceStateStore().update({
         lastHeartbeatAt: response.timestamp || new Date().toISOString(),
       })
+      if (response.duplicate_identity?.active) {
+        await getDeviceStateStore().update({
+          duplicateIdentity: {
+            active: true,
+            conflictId: response.duplicate_identity.conflict_id ?? null,
+            status: 'OPEN',
+            severity: response.duplicate_identity.severity ?? 'WARN',
+            enforcement: response.duplicate_identity.enforcement ?? 'warn',
+            activeSessionCount: response.duplicate_identity.active_session_count ?? 0,
+            leaseMs: 0,
+            restartGraceMs: 0,
+            firstSeenAt: null,
+            lastSeenAt: response.timestamp || new Date().toISOString(),
+            sessions: [],
+            recommendedAction: 'VERIFY_PHYSICAL_PLAYERS_AND_REVOKE_STALE_PAIRING',
+          },
+        })
+      }
       metrics.setLastSuccessfulHeartbeat(response.timestamp || Date.now())
 
       if (Array.isArray(response.commands) && response.commands.length > 0) {

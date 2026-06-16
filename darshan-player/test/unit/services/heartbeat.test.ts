@@ -189,7 +189,14 @@ describe('Heartbeat Service', () => {
     ])
     expect(payload.player_uptime_seconds).to.be.a('number')
     expect(payload.player_uptime_seconds).to.be.greaterThan(0)
-    expect(updateStub.calledOnce).to.equal(true)
+    expect(payload.install_instance_id).to.match(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    )
+    expect(payload.runtime_session_id).to.match(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    )
+    expect(payload.player_version).to.be.a('string')
+    expect(updateStub.callCount).to.equal(2)
     expect(metrics).to.contain('darshan_player_heartbeat_total{result="success"} 1')
     expect(metrics).to.contain('darshan_player_last_successful_heartbeat_unixtime')
   })

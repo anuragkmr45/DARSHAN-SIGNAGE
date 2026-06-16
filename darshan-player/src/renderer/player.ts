@@ -69,6 +69,11 @@ export function resolvePlayerContentSource(
   status: PlayerStatus,
 ): 'schedule' | 'default' | 'none' {
   if (
+    status.state === 'BOOT' ||
+    status.state === 'LOCAL_IDENTITY_PRESENT' ||
+    status.state === 'BOOTSTRAP_AUTH' ||
+    status.state === 'RECOVERY_REQUIRED' ||
+    status.state === 'HARD_RECOVERY' ||
     status.state === 'PAIRING_PENDING' ||
     status.state === 'PAIRING_CONFIRMED' ||
     status.state === 'PAIRING_COMPLETING'

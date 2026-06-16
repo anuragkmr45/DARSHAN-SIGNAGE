@@ -1,0 +1,228 @@
+const { expect } = require('chai')
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+
+const ENV_KEYS = [
+  'DARSHAN_RUNTIME_ROOT',
+  'DARSHAN_CONFIG_PATH',
+  'DARSHAN_CACHE_PATH',
+  'DARSHAN_MTLS_CERT_DIR',
+  'DARSHAN_MTLS_CERT_PATH',
+  'DARSHAN_MTLS_KEY_PATH',
+  'DARSHAN_MTLS_CA_PATH',
+  'HEXMON_RUNTIME_ROOT',
+  'HEXMON_CONFIG_PATH',
+  'HEXMON_CACHE_PATH',
+  'HEXMON_MTLS_CERT_DIR',
+  'HEXMON_MTLS_CERT_PATH',
+  'HEXMON_MTLS_KEY_PATH',
+  'HEXMON_MTLS_CA_PATH',
+]
+
+function resetRuntimeModules() {
+  for (const modulePath of Object.keys(require.cache)) {
+    if (modulePath.includes(`${path.sep}darshan-player${path.sep}src${path.sep}`)) {
+      delete require.cache[modulePath]
+    }
+  }
+}
+
+function writeFile(filePath, content = 'test') {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(filePath, content)
+}
+
+async function captureJson(fn) {
+  const originalLog = console.log
+  const lines = []
+  console.log = (value) => {
+    lines.push(String(value))
+  }
+
+  try {
+    const code = await fn()
+    const payload = JSON.parse(lines[lines.length - 1] || '{}')
+    return { code, payload }
+  } finally {
+    console.log = originalLog
+  }
+}
+
+function seedRuntime() {
+  const { getConfigManager } = require('../../../src/common/config')
+  const configManager = getConfigManager()
+  configManager.updateConfig({
+    deviceId: '11111111-1111-4111-8111-111111111111',
+    mtls: {
+      ...configManager.getConfig().mtls,
+      enabled: true,
+    },
+  })
+
+  const config = configManager.getConfig()
+  const cacheRoot = config.cache.path
+  const statePath = path.join(path.dirname(configManager.getConfigPath()), 'device-state.json')
+  const certDir = path.dirname(config.mtls.keyPath)
+
+  writeFile(config.mtls.certPath, 'client-cert')
+  writeFile(config.mtls.keyPath, 'private-key')
+  writeFile(config.mtls.caPath, 'ca-cert')
+  writeFile(path.join(certDir, 'client.csr'), 'csr')
+  writeFile(path.join(certDir, 'cert-meta.json'), JSON.stringify({
+    fingerprint: 'fingerprint-value',
+    serialNumber: 'serial-value',
+    validFrom: new Date(0).toISOString(),
+    validTo: new Date(1).toISOString(),
+    subject: 'subject',
+    issuer: 'issuer',
+    verificationMode: 'compatibility',
+  }))
+  writeFile(statePath, JSON.stringify({
+    deviceId: '11111111-1111-4111-8111-111111111111',
+    fingerprint: 'fingerprint-value',
+    installInstanceId: 'install-instance-sensitive-value',
+    lastPairingValidationStatus: 'VALID',
+    duplicateIdentity: {
+      active: true,
+      conflictId: 'conflict-1',
+      status: 'OPEN',
+      severity: 'WARN',
+      enforcement: 'warn',
+      activeSessionCount: 2,
+      leaseMs: 300000,
+      restartGraceMs: 120000,
+      firstSeenAt: new Date(0).toISOString(),
+      lastSeenAt: new Date(1).toISOString(),
+      sessions: [],
+      recommendedAction: 'VERIFY_PHYSICAL_PLAYERS_AND_REVOKE_STALE_PAIRING',
+    },
+  }))
+  writeFile(path.join(cacheRoot, 'last-snapshot.json'), '{}')
+  writeFile(path.join(cacheRoot, 'default-media.json'), '{}')
+  writeFile(path.join(cacheRoot, 'media', 'media-1.bin'), 'media')
+  writeFile(path.join(cacheRoot, 'objects', 'object-1.bin'), 'object')
+  writeFile(path.join(cacheRoot, 'quarantine', 'bad.bin'), 'bad')
+  writeFile(path.join(cacheRoot, 'cache-index.db'), 'index')
+  writeFile(path.join(cacheRoot, 'request-queue.json'), '[]')
+  writeFile(path.join(cacheRoot, 'request-queue.state.json'), '{}')
+  writeFile(path.join(cacheRoot, 'pop-spool', 'pending.json'), '{}')
+  writeFile(path.join(cacheRoot, 'logs', 'player.log'), 'log')
+
+  return {
+    configManager,
+    config,
+    cacheRoot,
+    statePath,
+    certDir,
+  }
+}
+
+describe('operator reset tooling', () => {
+  let runtimeRoot
+
+  beforeEach(() => {
+    runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'darshan-reset-test-'))
+    for (const key of ENV_KEYS) {
+      delete process.env[key]
+    }
+    process.env.DARSHAN_RUNTIME_ROOT = runtimeRoot
+    resetRuntimeModules()
+  })
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      delete process.env[key]
+    }
+    resetRuntimeModules()
+    if (runtimeRoot) {
+      fs.rmSync(runtimeRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('reports reset dry-run plan without deleting identity or cache files', async () => {
+    const seeded = seedRuntime()
+    const { resetPairingForCli } = require('../../../src/main/services/operator-tools')
+
+    const { code, payload } = await captureJson(() =>
+      resetPairingForCli({ dryRun: true, clearCache: true, reason: 'unit dry run' })
+    )
+
+    expect(code).to.equal(0)
+    expect(payload.dryRun).to.equal(true)
+    expect(payload.plan.clearCache).to.equal(true)
+    expect(fs.existsSync(seeded.config.mtls.keyPath)).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'last-snapshot.json'))).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'media', 'media-1.bin'))).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'request-queue.json'))).to.equal(true)
+  })
+
+  it('reports pairing status with redacted session metadata', async () => {
+    seedRuntime()
+    const { pairingStatusForCli } = require('../../../src/main/services/operator-tools')
+
+    const { code, payload } = await captureJson(() => pairingStatusForCli())
+    const serialized = JSON.stringify(payload)
+
+    expect(code).to.equal(0)
+    expect(payload.session.installInstancePresent).to.equal(true)
+    expect(payload.session.installInstanceSuffix).to.equal('...ve-value')
+    expect(payload.session.runtimeSessionSuffix).to.be.a('string')
+    expect(payload.duplicateIdentity.active).to.equal(true)
+    expect(serialized).not.to.contain('install-instance-sensitive-value')
+  })
+
+  it('generates a new runtime session id after process module reload', () => {
+    seedRuntime()
+    const first = require('../../../src/main/services/pairing-service').getPairingService().getRuntimeSessionId()
+
+    resetRuntimeModules()
+    process.env.DARSHAN_RUNTIME_ROOT = runtimeRoot
+    const second = require('../../../src/main/services/pairing-service').getPairingService().getRuntimeSessionId()
+
+    expect(first).to.match(/^[0-9a-f-]{36}$/i)
+    expect(second).to.match(/^[0-9a-f-]{36}$/i)
+    expect(second).not.to.equal(first)
+  })
+
+
+  it('clears identity-bound state while preserving media cache and pending queues by default', async () => {
+    const seeded = seedRuntime()
+    const { resetPairingForCli } = require('../../../src/main/services/operator-tools')
+
+    const { code, payload } = await captureJson(() => resetPairingForCli({ reason: 'unit reset' }))
+
+    expect(code).to.equal(0)
+    expect(payload.clearCache).to.equal(false)
+    expect(fs.existsSync(seeded.config.mtls.keyPath)).to.equal(false)
+    expect(fs.existsSync(seeded.config.mtls.certPath)).to.equal(false)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'last-snapshot.json'))).to.equal(false)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'default-media.json'))).to.equal(false)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'media', 'media-1.bin'))).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'request-queue.json'))).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'pop-spool', 'pending.json'))).to.equal(true)
+    expect(seeded.configManager.getConfig().deviceId).to.equal('')
+    expect(seeded.configManager.getConfig().mtls.enabled).to.equal(false)
+    const persistedState = JSON.parse(fs.readFileSync(seeded.statePath, 'utf-8'))
+    expect(persistedState.installInstanceId).to.equal(undefined)
+    expect(persistedState.duplicateIdentity).to.equal(undefined)
+  })
+
+  it('only clears media cache targets when reset-pairing clear-cache is requested', async () => {
+    const seeded = seedRuntime()
+    const { resetPairingForCli } = require('../../../src/main/services/operator-tools')
+
+    const { code, payload } = await captureJson(() => resetPairingForCli({ clearCache: true, reason: 'unit reset' }))
+
+    expect(code).to.equal(0)
+    expect(payload.clearCache).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'media', 'media-1.bin'))).to.equal(false)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'objects', 'object-1.bin'))).to.equal(false)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'quarantine', 'bad.bin'))).to.equal(false)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'cache-index.db'))).to.equal(false)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'request-queue.json'))).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'request-queue.state.json'))).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'pop-spool', 'pending.json'))).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'logs', 'player.log'))).to.equal(true)
+  })
+})

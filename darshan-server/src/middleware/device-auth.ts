@@ -167,6 +167,7 @@ export async function authenticateDeviceOrThrow(
       if (!screen) {
         throw AppError.notFound('Device not registered', {
           reason: 'DEVICE_NOT_REGISTERED',
+          credential_present: true,
         });
       }
 

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import 'dotenv/config'; 
+import 'dotenv/config';
+import { buildBackendRuntimeEnv, buildRedactedRuntimeConfigSummary } from './file-config';
 
 const optionalTrimmedString = z.preprocess(
   (value) => {
@@ -72,6 +73,13 @@ const envSchema = z.object({
     },
     z.string().url().optional()
   ),
+  SIGNHEX_DEPLOYMENT_ID: z.string().trim().min(1).default('local'),
+  SIGNHEX_ENVIRONMENT_NAME: z.string().trim().min(1).default('development'),
+  SIGNHEX_SERVER_ID: z.string().trim().min(1).default('darshan-api'),
+  DUPLICATE_IDENTITY_DETECTION_ENABLED: optionalBooleanString,
+  DUPLICATE_IDENTITY_ENFORCEMENT: z.enum(['warn', 'block']).default('warn'),
+  DEVICE_SESSION_LEASE_MS: z.coerce.number().int().positive().default(300_000),
+  DEVICE_SESSION_RESTART_GRACE_MS: z.coerce.number().int().positive().default(120_000),
   CSRF_ENABLED: z.enum(['true', 'false']).transform((v) => v === 'true').default('true'),
   REDIS_URL: z.string().url().optional(),
   REDIS_URL_ALIAS_FOR_VALKEY: optionalBooleanString,
@@ -140,7 +148,8 @@ export function resolveValkeyUrl(input: {
   return input.VALKEY_URL ?? (input.REDIS_URL_ALIAS_FOR_VALKEY ? input.REDIS_URL : undefined);
 }
 
-const parsed = envSchema.safeParse(process.env);
+const runtimeEnv = buildBackendRuntimeEnv(process.env);
+const parsed = envSchema.safeParse(runtimeEnv.env);
 if (!parsed.success) {
   console.error('Invalid environment variables:', parsed.error.flatten());
   throw new Error('Invalid environment variables');
@@ -174,6 +183,11 @@ export const config = Object.freeze({
   DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED:
     parsed.data.DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED ?? true,
   DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED: parsed.data.DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED ?? false,
+  DUPLICATE_IDENTITY_DETECTION_ENABLED: parsed.data.DUPLICATE_IDENTITY_DETECTION_ENABLED ?? true,
   DARSHAN_MEDIA_CACHE_REPORTING_ENABLED: parsed.data.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED ?? true,
 });
 export type Config = typeof config;
+
+export function getRedactedRuntimeConfigSummary() {
+  return buildRedactedRuntimeConfigSummary(config, runtimeEnv.diagnostics);
+}

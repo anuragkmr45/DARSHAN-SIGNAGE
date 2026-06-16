@@ -55,6 +55,8 @@ export const endpoints = {
     generate: "/device-pairing/generate",
     complete: "/device-pairing/complete",
     status: "/device-pairing/status",
+    orphans: "/device-pairing/orphans",
+    revoke: (deviceId: string) => `/device-pairing/${deviceId}/revoke`,
     recovery: (deviceId: string) => `/device-pairing/recovery/${deviceId}`,
   },
   deviceTelemetry: {

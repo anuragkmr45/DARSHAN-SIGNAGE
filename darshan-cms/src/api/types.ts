@@ -1282,6 +1282,97 @@ export interface PairingStatusResponse {
   } | null;
 }
 
+export interface DevicePairingServerIdentity {
+  environment: string;
+  deploymentId: string;
+  serverId: string;
+  serverTime?: string;
+}
+
+export interface DevicePairingOrphanReport {
+  generated_at: string;
+  limit: number;
+  server_identity?: DevicePairingServerIdentity;
+  counts: {
+    device_certificates: number;
+    device_pairings: number;
+    heartbeats: number;
+    device_commands: number;
+    duplicate_identity_conflicts?: number;
+  };
+  orphans: {
+    device_certificates: Array<{
+      reason: "ORPHANED_CERTIFICATE";
+      id: string;
+      screen_id: string;
+      serial_suffix: string | null;
+      is_revoked: boolean;
+      created_at: string | null;
+      expires_at: string | null;
+      revoked_at: string | null;
+    }>;
+    device_pairings: Array<{
+      reason: "ORPHANED_PAIRING";
+      id: string;
+      device_id: string;
+      used: boolean;
+      created_at: string | null;
+      expires_at: string | null;
+    }>;
+    heartbeats: Array<{
+      reason: "ORPHANED_HEARTBEAT";
+      screen_id: string;
+      row_count: number;
+      latest_created_at: string | null;
+    }>;
+    device_commands: Array<{
+      reason: "ORPHANED_COMMAND";
+      screen_id: string;
+      row_count: number;
+      latest_created_at: string | null;
+    }>;
+  };
+  duplicate_identity?: {
+    conflicts: Array<{
+      conflictId: string;
+      deviceId: string;
+      screenId: string;
+      screenName: string | null;
+      status: "OPEN" | "RESOLVED" | string;
+      severity: "WARN" | "BLOCK" | string;
+      activeSessionCount: number;
+      firstSeenAt: string | null;
+      lastSeenAt: string | null;
+      recommendedAction: string;
+      sessions: Array<{
+        installInstanceSuffix: string | null;
+        runtimeSessionSuffix: string | null;
+        machineHash: string | null;
+        ipHash: string | null;
+        userAgentHash: string | null;
+        playerVersion: string | null;
+        source: string;
+        firstSeenAt: string;
+        lastSeenAt: string;
+        leaseExpiresAt: string;
+      }>;
+    }>;
+  };
+}
+
+export interface DevicePairingRevokeResponse {
+  device_id: string;
+  screen: {
+    id: string;
+    name?: string | null;
+  } | null;
+  status: "PAIRING_REVOKED" | "NO_ACTIVE_CREDENTIAL" | string;
+  revoked_certificates: number;
+  invalidated_pairings: number;
+  recommended_action: "PAIR_AGAIN" | string;
+  server_identity?: DevicePairingServerIdentity;
+}
+
 export interface DevicePairingRequest {
   device_label: string;
   width: number;

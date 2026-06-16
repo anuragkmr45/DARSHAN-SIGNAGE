@@ -1,0 +1,92 @@
+# Local on-prem example for CONFIG-0.
+# This file is intentionally non-secret and should not be copied as production truth.
+# Discovery on 2026-06-16 found listeners on common service ports, but health checks
+# against 192.168.0.5 failed. Validate every endpoint before using this profile.
+
+site:
+  environment: local-onprem
+  deploymentId: local-192-168-0-5
+  serverId: mac-mini-a
+  airGapped: true
+
+server:
+  host: 0.0.0.0
+  port: 3000
+  publicBaseUrl: http://192.168.0.5:3000
+  appPublicBaseUrl: http://192.168.0.5:8080
+  corsOrigins:
+    - http://192.168.0.5:8080
+  socketAllowedOrigins:
+    - http://192.168.0.5:8080
+  swaggerUiEnabled: true
+
+cms:
+  publicBaseUrl: http://192.168.0.5:8080
+  apiBaseUrl: http://192.168.0.5:3000
+  wsBaseUrl: http://192.168.0.5:3000
+  runtimeConfigPath: /etc/darshan/cms/config.local.json
+
+player:
+  apiBase: http://192.168.0.5:3000
+  wsUrl: ws://192.168.0.5:3000/socket.io/
+  runtimeMode: production
+  configPath: /etc/darshan/player/config.local.json
+  offlinePlaybackEnabled: true
+  pollingFallbackEnabled: true
+
+database:
+  host: 192.168.0.5
+  port: 5432
+  name: signhex
+  databaseUrlEnv: DATABASE_URL
+
+objectStorage:
+  endpoint: 192.168.0.5
+  port: 9000
+  consolePort: 9001
+  useSsl: false
+  region: us-east-1
+  accessKeyEnv: MINIO_ACCESS_KEY
+  secretKeyEnv: MINIO_SECRET_KEY
+
+valkey:
+  provider: valkey
+  host: 192.168.0.5
+  port: 6379
+  mode: standalone
+  tlsEnabled: false
+  authRequired: false
+  namespace: darshan:local
+  urlEnv: VALKEY_URL
+
+realtime:
+  syncEnabled: true
+  socketPath: /socket.io/
+  transport: websocket
+  allowPolling: true
+  requireStickySessions: false
+  notificationOnly: true
+
+duplicateIdentity:
+  detectionEnabled: true
+  enforcement: warn
+  sessionLeaseMs: 300000
+  restartGraceMs: 120000
+
+observability:
+  metricsEnabled: true
+  prometheusBaseUrl: http://192.168.0.5:9090
+  grafanaBaseUrl: http://192.168.0.5:3001/grafana
+  grafanaBasePath: /grafana
+  metricsBearerTokenEnv: OBSERVABILITY_METRICS_BEARER_TOKEN
+
+tls:
+  mode: http-local
+  caCertPath: ""
+  privateKeyPathEnv: TLS_KEY_PATH
+
+evidence:
+  node20PathEnv: NODE20_PATH
+  playerPackagePathEnv: ONPREM_PLAYER_PACKAGE_PATH
+  logsPathEnv: ONPREM_LOGS_PATH
+  simulatorCredentialPoolEnv: ONPREM_DEVICE_SIMULATOR_CREDENTIAL_POOL_PATH

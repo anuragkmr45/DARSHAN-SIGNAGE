@@ -1,5 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import { getConfigManager } from '../../common/config'
 import { CommandSource, DeviceStateRecord, PlayerState, RecentCommandRecord } from '../../common/types'
@@ -78,6 +79,16 @@ export class DeviceStateStore {
     return this.getState()
   }
 
+  async ensureInstallInstanceId(): Promise<string> {
+    if (this.state.installInstanceId) {
+      return this.state.installInstanceId
+    }
+
+    const installInstanceId = randomUUID()
+    await this.update({ installInstanceId })
+    return installInstanceId
+  }
+
   async clearPairingMetadata(): Promise<DeviceStateRecord> {
     return await this.update({
       pairingCode: undefined,
@@ -98,9 +109,15 @@ export class DeviceStateStore {
       lastSuccessfulPairingAt: undefined,
       lastHeartbeatAt: undefined,
       recoveryReason: reason,
+      installInstanceId: undefined,
+      duplicateIdentity: undefined,
       hardRecoveryDeadlineAt: undefined,
       pairingRequestInDoubtAt: undefined,
       recentCommands: [],
+      lastPairingValidationStatus: undefined,
+      lastPairingValidatedAt: undefined,
+      lastValidatedDeviceId: undefined,
+      lastValidatedServerIdentity: undefined,
     })
   }
 

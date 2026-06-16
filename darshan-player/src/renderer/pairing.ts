@@ -208,7 +208,19 @@ class PairingScreen {
     }
 
     if (status.state === 'BOOTSTRAP_AUTH') {
-      this.connectivityBanner.textContent = status.error || 'Validating device access...'
+      this.connectivityBanner.textContent = status.error || 'Validating device pairing with backend...'
+      this.connectivityBanner.classList.remove('hidden')
+      return
+    }
+
+    if (status.state === 'LOCAL_IDENTITY_PRESENT') {
+      this.connectivityBanner.textContent = status.error || 'Pairing validation required before playback can start.'
+      this.connectivityBanner.classList.remove('hidden')
+      return
+    }
+
+    if (status.state === 'OFFLINE_USING_LAST_VALID_PAIRING') {
+      this.connectivityBanner.textContent = status.error || 'Backend unavailable. Playback continues from last validated pairing.'
       this.connectivityBanner.classList.remove('hidden')
       return
     }

@@ -11,6 +11,7 @@ import { createSessionRepository } from '@/db/repositories/session';
 import { DevicePairingRepository } from '@/db/repositories/device-pairing';
 import { ScreenRepository } from '@/db/repositories/screen';
 import { testUser } from '@/test/helpers';
+import { recordDeviceIdentitySession } from '@/services/device-identity-session-service';
 
 function buildCsr(options: { deviceId?: string; bits?: number } = {}) {
   const keyPair = forge.pki.rsa.generateKeyPair(options.bits ?? 2048);
@@ -55,6 +56,8 @@ describe('Device Pairing Routes', () => {
     const mergedGrants = [...(currentPermissions.grants || [])];
     for (const grant of [
       { action: 'create', subject: 'DevicePairing' },
+      { action: 'read', subject: 'DevicePairing' },
+      { action: 'manage', subject: 'DevicePairing' },
       { action: 'create', subject: 'Screen' },
     ]) {
       if (!mergedGrants.some((current) => current.action === grant.action && current.subject === grant.subject)) {
@@ -151,6 +154,219 @@ describe('Device Pairing Routes', () => {
     const body = JSON.parse(response.body);
     expect(body.pairing_code).toMatch(/^[A-F0-9]{6}$/);
     expect(createSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('lists orphan device pairing state without exposing full credential material', async () => {
+    const db = getDatabase();
+    const orphanDeviceId = randomUUID();
+    const serial = `orphan-sensitive-serial-${randomUUID()}`;
+
+    await db.insert(schema.deviceCertificates).values({
+      screen_id: orphanDeviceId,
+      serial,
+      certificate_pem: 'orphan-cert-pem-should-not-leak',
+      expires_at: new Date(Date.now() + 60_000),
+    });
+
+    await db.insert(schema.devicePairings).values({
+      device_id: orphanDeviceId,
+      pairing_code: `ORPH${randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}`,
+      expires_at: new Date(Date.now() + 60_000),
+      used: false,
+    });
+
+    await db.insert(schema.heartbeats).values({
+      screen_id: orphanDeviceId,
+      status: 'ONLINE',
+    });
+
+    await db.insert(schema.deviceCommands).values({
+      screen_id: orphanDeviceId,
+      type: 'REFRESH',
+      created_by: testUser.id,
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/device-pairing/orphans?limit=10',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    const body = JSON.parse(response.body);
+    expect(body.counts.device_certificates).toBeGreaterThanOrEqual(1);
+    expect(body.counts.device_pairings).toBeGreaterThanOrEqual(1);
+    expect(body.counts.heartbeats).toBeGreaterThanOrEqual(1);
+    expect(body.counts.device_commands).toBeGreaterThanOrEqual(1);
+
+    const orphanCert = body.orphans.device_certificates.find((row: any) => row.screen_id === orphanDeviceId);
+    expect(orphanCert).toBeTruthy();
+    expect(orphanCert.reason).toBe('ORPHANED_CERTIFICATE');
+    expect(orphanCert.serial_suffix).toBe(serial.slice(-6));
+    expect(body.server_identity).toEqual(
+      expect.objectContaining({
+        environment: expect.any(String),
+        deploymentId: expect.any(String),
+        serverId: expect.any(String),
+      })
+    );
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain(serial);
+    expect(serialized).not.toContain('orphan-cert-pem-should-not-leak');
+  });
+
+  it('includes duplicate identity conflicts in the pairing health report without exposing raw session ids', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const base = new Date(Date.now() - 180_000);
+
+    await db.insert(schema.screens).values({
+      id: deviceId,
+      name: 'Duplicate Identity CMS Screen',
+      status: 'ACTIVE',
+    });
+
+    await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'copied-install-sensitive',
+      runtimeSessionId: 'runtime-sensitive-a',
+      playerVersion: '1.0.0',
+      ipAddress: '192.168.0.10',
+      machineObservation: 'host-a|eth0',
+      now: base,
+    });
+    await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'copied-install-sensitive',
+      runtimeSessionId: 'runtime-sensitive-b',
+      playerVersion: '1.0.0',
+      ipAddress: '192.168.0.11',
+      machineObservation: 'host-b|eth0',
+      now: new Date(base.getTime() + 60_000),
+    });
+    await recordDeviceIdentitySession({
+      deviceId,
+      source: 'heartbeat',
+      installInstanceId: 'copied-install-sensitive',
+      runtimeSessionId: 'runtime-sensitive-b',
+      playerVersion: '1.0.0',
+      ipAddress: '192.168.0.11',
+      machineObservation: 'host-b|eth0',
+      now: new Date(base.getTime() + 180_000),
+    });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/device-pairing/orphans?limit=10',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    const body = JSON.parse(response.body);
+    expect(body.counts.duplicate_identity_conflicts).toBeGreaterThanOrEqual(1);
+    const conflict = body.duplicate_identity.conflicts.find((item: any) => item.deviceId === deviceId);
+    expect(conflict).toBeTruthy();
+    expect(conflict.activeSessionCount).toBe(2);
+    expect(conflict.severity).toBe('WARN');
+    const serialized = JSON.stringify(conflict);
+    expect(serialized).not.toContain('copied-install-sensitive');
+    expect(serialized).not.toContain('runtime-sensitive-a');
+    expect(serialized).not.toContain('runtime-sensitive-b');
+    expect(serialized).not.toContain('192.168.0.10');
+  });
+
+  it('revokes pairing credentials without deleting the screen or exposing credential material', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const serial = `revoke-sensitive-serial-${randomUUID()}`;
+
+    await db.insert(schema.screens).values({
+      id: deviceId,
+      name: 'Revocable Screen',
+      status: 'OFFLINE',
+    });
+
+    await db.insert(schema.deviceCertificates).values({
+      screen_id: deviceId,
+      serial,
+      certificate_pem: 'revoke-cert-pem-should-not-leak',
+      expires_at: new Date(Date.now() + 60_000),
+    });
+
+    await db.insert(schema.devicePairings).values({
+      device_id: deviceId,
+      pairing_code: `REV${randomUUID().replace(/-/g, '').slice(0, 9).toUpperCase()}`,
+      expires_at: new Date(Date.now() + 60_000),
+      used: false,
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/device-pairing/${deviceId}/revoke`,
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      payload: {
+        reason: 'admin_revoked_stale_pairing',
+        note: 'Operator requested re-pair',
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    const body = JSON.parse(response.body);
+    expect(body).toEqual(
+      expect.objectContaining({
+        device_id: deviceId,
+        status: 'PAIRING_REVOKED',
+        revoked_certificates: 1,
+        invalidated_pairings: 1,
+        recommended_action: 'PAIR_AGAIN',
+      })
+    );
+    expect(body.screen).toEqual(expect.objectContaining({ id: deviceId, name: 'Revocable Screen' }));
+    expect(body.server_identity).toEqual(
+      expect.objectContaining({
+        environment: expect.any(String),
+        deploymentId: expect.any(String),
+        serverId: expect.any(String),
+      })
+    );
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain(serial);
+    expect(serialized).not.toContain('revoke-cert-pem-should-not-leak');
+
+    const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, deviceId));
+    expect(screen).toBeTruthy();
+
+    const [certificate] = await db
+      .select()
+      .from(schema.deviceCertificates)
+      .where(eq(schema.deviceCertificates.screen_id, deviceId));
+    expect(certificate?.is_revoked).toBe(true);
+    expect(certificate?.revoked_at).toBeTruthy();
+
+    const [pairing] = await db
+      .select()
+      .from(schema.devicePairings)
+      .where(eq(schema.devicePairings.device_id, deviceId));
+    expect(pairing?.used).toBe(true);
+    expect(pairing?.used_at).toBeTruthy();
+
+    const statusResponse = await server.inject({
+      method: 'GET',
+      url: `/api/v1/device/${deviceId}/pairing-status`,
+      headers: {
+        'x-device-serial': serial,
+      },
+    });
+    expect(statusResponse.statusCode).toBe(HTTP_STATUS.GONE);
+    expect(JSON.parse(statusResponse.body).error.code).toBe('PAIRING_REVOKED');
   });
 
   it('should return 404 for invalid pairing code', async () => {

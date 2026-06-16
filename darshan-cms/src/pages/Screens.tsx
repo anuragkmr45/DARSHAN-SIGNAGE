@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { screensApi } from "@/api/domains/screens";
 import { devicePairingApi } from "@/api/domains/devicePairing";
@@ -34,6 +35,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { useSafeMutation } from "@/hooks/useSafeMutation";
 import { LoadingIndicator } from "@/components/common/LoadingIndicator";
 import { PairDeviceModal } from "@/components/screens/PairDeviceModal";
+import { PairingHealthPanel } from "@/components/screens/PairingHealthPanel";
 import { ScreenDetailsModal } from "@/components/screens/ScreenDetailsModal";
 import { toast } from "sonner";
 import { CreateGroupModal } from "@/components/screens/CreateGroupModal";
@@ -84,6 +86,8 @@ export default function Screens() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [recoveryScreenId, setRecoveryScreenId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScreenOverviewItem | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<ScreenOverviewItem | null>(null);
+  const [revokeNote, setRevokeNote] = useState("");
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [page, setPage] = useState(1);
@@ -195,6 +199,23 @@ export default function Screens() {
     },
   }, "Unable to delete group.");
 
+  const revokePairing = useSafeMutation({
+    mutationFn: (payload: { deviceId: string; note?: string }) =>
+      devicePairingApi.revoke(payload.deviceId, {
+        reason: "admin_revoked_stale_pairing",
+        note: payload.note,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.screens });
+      queryClient.invalidateQueries({ queryKey: queryKeys.screensSummary() });
+      queryClient.invalidateQueries({ queryKey: ["device-pairing", "orphans"] });
+      queryClient.invalidateQueries({ queryKey: ["device-pairings"] });
+      setRevokeTarget(null);
+      setRevokeNote("");
+      toast.success("Pairing revoked. The player must pair again.");
+    },
+  }, "Unable to revoke pairing.");
+
   useEffect(() => {
     setPage(1);
   }, [search]);
@@ -212,6 +233,10 @@ export default function Screens() {
 
   const handleDeleteScreen = (screen: ScreenOverviewItem) => {
     setDeleteTarget(screen);
+  };
+
+  const handleRevokeScreenPairing = (screen: ScreenOverviewItem) => {
+    setRevokeTarget(screen);
   };
 
   const confirmDeleteScreen = () => {
@@ -295,6 +320,13 @@ export default function Screens() {
           icon={<HeartPulse className="h-5 w-5 text-yellow-600" />}
         />
       </div>
+
+      {canManageScreens ? (
+        <PairingHealthPanel
+          canManage={canManageScreens}
+          visibleScreenCount={screensQuery.data?.pagination?.total ?? screens.length}
+        />
+      ) : null}
 
       <Card className="p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -499,6 +531,15 @@ export default function Screens() {
                               aria-label={`Recover Screen ${name}`}
                             >
                               <QrCode className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRevokeScreenPairing(screen)}
+                              disabled={revokePairing.isPending}
+                              aria-label={`Revoke pairing for ${name}`}
+                            >
+                              <ShieldAlert className="h-3 w-3" />
                             </Button>
                             <Button
                               size="sm"
@@ -744,6 +785,48 @@ export default function Screens() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+        ) : null}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(revokeTarget)}
+        title={revokeTarget ? `Revoke pairing for ${revokeTarget.name}?` : "Revoke pairing?"}
+        description="The player will need to pair again. This does not delete the screen."
+        confirmLabel="Revoke Pairing"
+        onConfirm={() => {
+          if (!revokeTarget) return;
+          revokePairing.mutate({
+            deviceId: revokeTarget.id,
+            note: revokeNote.trim() || undefined,
+          });
+        }}
+        onCancel={() => {
+          if (revokePairing.isPending) return;
+          setRevokeTarget(null);
+          setRevokeNote("");
+        }}
+        isLoading={revokePairing.isPending}
+      >
+        {revokeTarget ? (
+          <div className="space-y-3">
+            <div className="rounded-md border p-3 text-sm">
+              <p className="text-muted-foreground">Screen</p>
+              <p className="font-medium">{revokeTarget.name}</p>
+              <p className="break-all font-mono text-xs text-muted-foreground">{revokeTarget.id}</p>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="screen-revoke-note" className="text-sm font-medium">
+                Admin note
+              </label>
+              <Input
+                id="screen-revoke-note"
+                value={revokeNote}
+                onChange={(event) => setRevokeNote(event.target.value)}
+                placeholder="Optional note"
+                maxLength={500}
+              />
             </div>
           </div>
         ) : null}

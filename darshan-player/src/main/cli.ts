@@ -1,7 +1,9 @@
 import {
   clearCache,
   collectLogs,
+  pairingStatusForCli,
   requestPairingCodeForCli,
+  resetPairingForCli,
   runDoctor,
   submitPairingCodeForCli,
 } from './services/operator-tools'
@@ -10,6 +12,8 @@ export type OperatorCommand =
   | { name: 'doctor' }
   | { name: 'clear-cache' }
   | { name: 'collect-logs' }
+  | { name: 'pairing-status' }
+  | { name: 'reset-pairing'; reason?: string; dryRun?: boolean; clearCache?: boolean }
   | { name: 'pair-request' }
   | { name: 'pair-submit'; pairingCode: string }
 
@@ -28,12 +32,27 @@ export function parseOperatorCommand(argv: string[]): OperatorCommand | null {
     return { name: 'doctor' }
   }
 
-  if (tokens.includes('--clear-cache') || findSubcommand(tokens, 'clear-cache') >= 0) {
-    return { name: 'clear-cache' }
-  }
-
   if (tokens.includes('--collect-logs') || findSubcommand(tokens, 'collect-logs') >= 0) {
     return { name: 'collect-logs' }
+  }
+
+  if (tokens.includes('--pairing-status') || findSubcommand(tokens, 'pairing-status') >= 0) {
+    return { name: 'pairing-status' }
+  }
+
+  if (tokens.includes('--reset-pairing') || findSubcommand(tokens, 'reset-pairing') >= 0) {
+    const reasonFlag = tokens.find((token) => token.startsWith('--reason='))
+    const reason = reasonFlag ? reasonFlag.split('=').slice(1).join('=').trim() : undefined
+    return {
+      name: 'reset-pairing',
+      reason,
+      dryRun: tokens.includes('--dry-run'),
+      clearCache: tokens.includes('--clear-cache'),
+    }
+  }
+
+  if (tokens.includes('--clear-cache') || findSubcommand(tokens, 'clear-cache') >= 0) {
+    return { name: 'clear-cache' }
   }
 
   if (tokens.includes('--pair-request')) {
@@ -74,6 +93,10 @@ export async function runOperatorCommand(command: OperatorCommand) {
       return await clearCache()
     case 'collect-logs':
       return await collectLogs()
+    case 'pairing-status':
+      return await pairingStatusForCli()
+    case 'reset-pairing':
+      return await resetPairingForCli(command)
     case 'pair-request':
       return await requestPairingCodeForCli()
     case 'pair-submit':

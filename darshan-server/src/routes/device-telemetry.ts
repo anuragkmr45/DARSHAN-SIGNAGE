@@ -49,6 +49,10 @@ import {
 } from '@/services/command-lifecycle-service';
 import { getDeviceDesiredState } from '@/services/device-desired-state-service';
 import { createMediaCacheReport } from '@/services/media-cache-report-service';
+import {
+  extractDeviceIdentitySessionInput,
+  recordDeviceIdentitySession,
+} from '@/services/device-identity-session-service';
 
 const logger = createLogger('device-telemetry-routes');
 const { CREATED } = HTTP_STATUS;
@@ -115,6 +119,9 @@ const heartbeatSchema = z.object({
   volume: z.number().nonnegative().optional(),
   muted: z.boolean().optional(),
   app_version: z.string().optional(),
+  player_version: z.string().optional(),
+  install_instance_id: z.string().optional(),
+  runtime_session_id: z.string().optional(),
   os_version: z.string().optional(),
   hostname: z.string().optional(),
   device_model: z.string().optional(),
@@ -224,6 +231,122 @@ const normalizeEtagToken = (value: string) =>
     .replace(/\\/g, '')
     .replace(/^"+|"+$/g, '')
     .trim();
+
+const getServerIdentity = () => ({
+  environment: appConfig.SIGNHEX_ENVIRONMENT_NAME,
+  deploymentId: appConfig.SIGNHEX_DEPLOYMENT_ID,
+  serverId: appConfig.SIGNHEX_SERVER_ID,
+});
+
+function pairingStatusError(statusCode: number, code: string, message: string, details: Record<string, unknown> = {}) {
+  return new AppError({
+    statusCode,
+    code,
+    message,
+    details: {
+      status: code,
+      ...details,
+    },
+  });
+}
+
+function getHeaderValue(request: FastifyRequest, names: string[]) {
+  for (const name of names) {
+    const rawValue = request.headers[name.toLowerCase()];
+    const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function getEnvironmentMismatchError(request: FastifyRequest) {
+  const serverIdentity = getServerIdentity();
+  const providedEnvironment = getHeaderValue(request, [
+    'x-signhex-environment-name',
+    'x-darshan-environment-name',
+  ]);
+  const providedDeploymentId = getHeaderValue(request, [
+    'x-signhex-deployment-id',
+    'x-darshan-deployment-id',
+  ]);
+  const mismatches: Array<{ field: 'environment' | 'deploymentId'; received: string; expected: string }> = [];
+
+  if (providedEnvironment && providedEnvironment !== serverIdentity.environment) {
+    mismatches.push({
+      field: 'environment',
+      received: providedEnvironment,
+      expected: serverIdentity.environment,
+    });
+  }
+  if (providedDeploymentId && providedDeploymentId !== serverIdentity.deploymentId) {
+    mismatches.push({
+      field: 'deploymentId',
+      received: providedDeploymentId,
+      expected: serverIdentity.deploymentId,
+    });
+  }
+
+  if (!mismatches.length) {
+    return null;
+  }
+
+  return pairingStatusError(
+    HTTP_STATUS.CONFLICT,
+    'ENVIRONMENT_MISMATCH',
+    'Player is paired to a different backend environment.',
+    {
+      serverIdentity,
+      mismatches,
+    }
+  );
+}
+
+function normalizePairingStatusError(error: unknown) {
+  if (!(error instanceof AppError)) {
+    return error;
+  }
+
+  const details = error.details && !Array.isArray(error.details) ? error.details : {};
+  const reason = typeof details.reason === 'string' ? details.reason : undefined;
+
+  if (reason === 'DEVICE_CREDENTIALS_REVOKED') {
+    return pairingStatusError(HTTP_STATUS.GONE, 'PAIRING_REVOKED', 'This screen pairing was revoked. Pair again.');
+  }
+
+  if (reason === 'DEVICE_NOT_REGISTERED' && details.credential_present === true) {
+    return pairingStatusError(
+      HTTP_STATUS.CONFLICT,
+      'ORPHANED_CREDENTIAL',
+      'This device credential exists but no visible screen record is attached. Pair again or repair the backend record.'
+    );
+  }
+
+  if (reason === 'DEVICE_NOT_REGISTERED' || error.message === 'Device not registered') {
+    return pairingStatusError(
+      HTTP_STATUS.NOT_FOUND,
+      'SCREEN_NOT_FOUND',
+      'This device identity does not map to a visible screen. Pair again.'
+    );
+  }
+
+  if (
+    error.statusCode === HTTP_STATUS.UNAUTHORIZED ||
+    error.statusCode === HTTP_STATUS.FORBIDDEN ||
+    reason === 'DEVICE_CREDENTIALS_EXPIRED' ||
+    reason === 'DEVICE_CREDENTIALS_INVALID' ||
+    reason === 'DEVICE_SERIAL_MISMATCH'
+  ) {
+    return pairingStatusError(
+      HTTP_STATUS.UNAUTHORIZED,
+      'INVALID_TOKEN',
+      'This device identity is no longer valid. Pair again.'
+    );
+  }
+
+  return error;
+}
 
 export function shouldPersistTelemetryInline(
   nodeEnv: string = appConfig.NODE_ENV,
@@ -356,6 +479,88 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
       },
     };
   };
+
+  fastify.get<{ Params: { deviceId: string } }>(
+    apiEndpoints.deviceTelemetry.pairingStatus,
+    {
+      schema: {
+        description: 'Validate whether an authenticated device pairing is still valid and CMS-visible',
+        tags: ['Device Telemetry'],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const deviceId = (request.params as any).deviceId;
+        await authenticateDeviceOrThrow(request, deviceId, { allowUserToken: false });
+        const environmentMismatch = getEnvironmentMismatchError(request);
+        if (environmentMismatch) {
+          throw environmentMismatch;
+        }
+
+        const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, deviceId)).limit(1);
+        if (!screen) {
+          throw pairingStatusError(
+            HTTP_STATUS.NOT_FOUND,
+            'SCREEN_NOT_FOUND',
+            'This device identity does not map to a visible screen. Pair again.'
+          );
+        }
+
+        const certificateId = request.device?.certificateId;
+        const [certificate] = certificateId
+          ? await db
+              .select({ expires_at: schema.deviceCertificates.expires_at })
+              .from(schema.deviceCertificates)
+              .where(eq(schema.deviceCertificates.id, certificateId))
+              .limit(1)
+          : [];
+        const emergency = await getActiveEmergencyForRuntime(deviceId, { db, includeUrls: false });
+        const latest = await getLatestPublishForScreen(deviceId, db);
+        const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
+        const hasContent = Boolean(emergency || latest?.snapshot_id || resolvedDefaultMedia.media_id);
+        const duplicateIdentity = await recordDeviceIdentitySession(
+          extractDeviceIdentitySessionInput(request, {
+            deviceId,
+            source: 'pairing_status',
+          })
+        );
+
+        if (duplicateIdentity.active && appConfig.DUPLICATE_IDENTITY_ENFORCEMENT === 'block') {
+          throw pairingStatusError(
+            HTTP_STATUS.CONFLICT,
+            'RECLAIM_REQUIRED',
+            'Duplicate player identity conflict detected. Admin review is required.',
+            {
+              duplicateIdentity,
+            }
+          );
+        }
+
+        return reply.send({
+          status: hasContent ? 'VALID' : 'VALID_NO_CONTENT',
+          deviceId,
+          screenId: screen.id,
+          screenVisible: true,
+          screenName: screen.name,
+          serverIdentity: getServerIdentity(),
+          certExpiresAt: certificate?.expires_at?.toISOString?.() ?? null,
+          requiresReclaim: false,
+          duplicateIdentity,
+          serverTime: new Date().toISOString(),
+        });
+      } catch (error) {
+        const normalized = normalizePairingStatusError(error);
+        logger.warn(
+          {
+            code: normalized instanceof AppError ? normalized.code : undefined,
+            statusCode: normalized instanceof AppError ? normalized.statusCode : undefined,
+          },
+          'Device pairing status validation failed'
+        );
+        return respondWithError(reply, normalized);
+      }
+    }
+  );
 
   fastify.get<{ Params: { deviceId: string } }>(
     apiEndpoints.deviceTelemetry.screenshotPolicy,
@@ -631,6 +836,13 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         }
 
         const receivedAt = new Date();
+        const duplicateIdentity = await recordDeviceIdentitySession(
+          extractDeviceIdentitySessionInput(request, {
+            deviceId: data.device_id,
+            source: 'heartbeat',
+            body: data as unknown as Record<string, unknown>,
+          })
+        );
         const receivedAtIso = receivedAt.toISOString();
         const storageObjectId = randomUUID();
         const objectKey = buildHeartbeatObjectKey(data.device_id, receivedAtIso, data as unknown as Record<string, unknown>);
@@ -685,6 +897,15 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         return reply.send({
           success: true,
           timestamp: new Date().toISOString(),
+          duplicate_identity: duplicateIdentity.active
+            ? {
+                active: true,
+                conflict_id: duplicateIdentity.conflictId,
+                severity: duplicateIdentity.severity,
+                enforcement: duplicateIdentity.enforcement,
+                active_session_count: duplicateIdentity.activeSessionCount,
+              }
+            : undefined,
           commands: pendingCommands.map((command) => ({
             id: command.id,
             type: command.type,

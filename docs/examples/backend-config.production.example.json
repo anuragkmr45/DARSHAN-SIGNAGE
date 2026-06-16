@@ -1,0 +1,49 @@
+{
+  "environment": {
+    "name": "onprem-production",
+    "deploymentId": "site-a-production",
+    "serverId": "backend-a"
+  },
+  "http": {
+    "appPublicBaseUrl": "https://cms.internal.example",
+    "corsOrigins": ["https://cms.internal.example"],
+    "socketAllowedOrigins": ["https://cms.internal.example"],
+    "socketIoPath": "/socket.io/"
+  },
+  "realtime": {
+    "enabled": true,
+    "busProvider": "valkey",
+    "socketTransport": "websocket",
+    "socketAllowPolling": true,
+    "socketRequireStickySessions": false,
+    "deviceNamespace": "/device"
+  },
+  "valkey": {
+    "mode": "standalone",
+    "tlsEnabled": true,
+    "authRequired": true,
+    "caCertPath": "/etc/darshan/pki/internal-ca.crt",
+    "namespace": "darshan:prod",
+    "pubsubEnabled": true
+  },
+  "duplicateIdentity": {
+    "enabled": true,
+    "enforcement": "warn",
+    "sessionLeaseMs": 300000,
+    "restartGraceMs": 120000
+  },
+  "media": {
+    "endpoint": "https://media.internal.example",
+    "region": "us-east-1"
+  },
+  "observability": {
+    "prometheusUrl": "https://prometheus.internal.example",
+    "prometheusTimeoutMs": 1500,
+    "grafanaEnabled": true,
+    "grafanaEmbedEnabled": true,
+    "grafanaBasePath": "/grafana"
+  },
+  "limits": {
+    "wsNotificationMaxBytes": 32768
+  }
+}

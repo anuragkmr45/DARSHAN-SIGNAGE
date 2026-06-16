@@ -1,8 +1,11 @@
 import * as os from 'os'
+import { randomUUID } from 'crypto'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
 import { getElectronApp, getElectronScreen } from '../../common/platform-paths'
 import {
+  BackendPairingStatusResponse,
+  BackendPairingValidationStatus,
   DeviceInfo,
   PairingCodeRequest,
   PairingCodeResponse,
@@ -18,6 +21,21 @@ import { getHttpClient } from './network/http-client'
 import { getDeviceStateStore } from './device-state-store'
 
 const logger = getLogger('pairing-service')
+const runtimeSessionId = randomUUID()
+
+const BACKEND_PAIRING_STATUS_VALUES = new Set<BackendPairingValidationStatus>([
+  'VALID',
+  'VALID_NO_CONTENT',
+  'UNPAIRED',
+  'INVALID_TOKEN',
+  'SCREEN_NOT_FOUND',
+  'SCREEN_DELETED',
+  'PAIRING_REVOKED',
+  'ORPHANED_CREDENTIAL',
+  'ENVIRONMENT_MISMATCH',
+  'RECLAIM_REQUIRED',
+  'BACKEND_REPAIR_REQUIRED',
+])
 
 export interface NetworkDiagnostics {
   hostname: string
@@ -89,6 +107,14 @@ export class PairingService {
     return metadata?.serialNumber || metadata?.fingerprint
   }
 
+  async getInstallInstanceId(): Promise<string> {
+    return await getDeviceStateStore().ensureInstallInstanceId()
+  }
+
+  getRuntimeSessionId(): string {
+    return runtimeSessionId
+  }
+
   getStoredIdentityHealth(): { health: 'missing' | 'partial' | 'complete'; issues: string[] } {
     const certManager = getCertificateManager()
     const store = getDeviceStateStore()
@@ -114,6 +140,11 @@ export class PairingService {
         activePairingMode: 'PAIRING',
         pairingRequestInDoubtAt: undefined,
         recoveryReason: undefined,
+        lastPairingValidationStatus: undefined,
+        lastPairingValidatedAt: undefined,
+        lastValidatedDeviceId: undefined,
+        lastValidatedServerIdentity: undefined,
+        duplicateIdentity: undefined,
       })
 
       getConfigManager().updateConfig({
@@ -145,6 +176,51 @@ export class PairingService {
       `/api/v1/device-pairing/status?device_id=${encodeURIComponent(deviceId)}`,
       { mtls: false }
     )
+  }
+
+  async fetchBackendPairingStatus(deviceIdOverride?: string): Promise<BackendPairingStatusResponse> {
+    const deviceId = deviceIdOverride || this.getDeviceId()
+    if (!deviceId) {
+      return {
+        status: 'UNPAIRED',
+        code: 'UNPAIRED',
+        message: 'No local device identity is available.',
+        deviceId: '',
+        screenVisible: false,
+        requiresReclaim: false,
+        serverTime: new Date().toISOString(),
+      }
+    }
+
+    const httpClient = getHttpClient()
+    const installInstanceId = await this.getInstallInstanceId()
+    const response = await httpClient.get<BackendPairingStatusResponse>(
+      `/api/v1/device/${encodeURIComponent(deviceId)}/pairing-status`,
+      {
+        retry: false,
+        headers: {
+          'x-signhex-install-instance-id': installInstanceId,
+          'x-signhex-runtime-session-id': this.getRuntimeSessionId(),
+          'x-signhex-player-version': this.getDeviceInfo().appVersion,
+        },
+      }
+    )
+
+    if (!response || !BACKEND_PAIRING_STATUS_VALUES.has(response.status)) {
+      throw new Error('Backend pairing status response is invalid')
+    }
+
+    return response
+  }
+
+  async markPairingValidation(response: BackendPairingStatusResponse): Promise<void> {
+    await getDeviceStateStore().update({
+      lastPairingValidationStatus: response.status,
+      lastPairingValidatedAt: new Date().toISOString(),
+      lastValidatedDeviceId: response.deviceId || this.getDeviceId(),
+      lastValidatedServerIdentity: response.serverIdentity,
+      duplicateIdentity: response.duplicateIdentity,
+    })
   }
 
   async fetchScreenshotPolicy(deviceIdOverride?: string): Promise<ScreenshotPolicyResponse | null> {
@@ -227,6 +303,11 @@ export class PairingService {
       recoveryReason: undefined,
       hardRecoveryDeadlineAt: undefined,
       lastSuccessfulPairingAt: new Date().toISOString(),
+      lastPairingValidationStatus: undefined,
+      lastPairingValidatedAt: undefined,
+      lastValidatedDeviceId: undefined,
+      lastValidatedServerIdentity: undefined,
+      duplicateIdentity: undefined,
     })
 
     getConfigManager().updateConfig({
@@ -381,6 +462,35 @@ export class PairingService {
 
   isTransientRuntimeError(error: unknown): boolean {
     return isDeviceApiError(error) ? error.transient : false
+  }
+
+  getBackendPairingStatusFromError(error: unknown): BackendPairingValidationStatus | null {
+    if (!isDeviceApiError(error)) {
+      return null
+    }
+
+    if (BACKEND_PAIRING_STATUS_VALUES.has(error.code as BackendPairingValidationStatus)) {
+      return error.code as BackendPairingValidationStatus
+    }
+
+    const detailStatus =
+      error.detailsPayload && typeof error.detailsPayload === 'object'
+        ? (error.detailsPayload as Record<string, unknown>)['status'] ||
+          (error.detailsPayload as Record<string, unknown>)['reason']
+        : null
+
+    if (typeof detailStatus === 'string' && BACKEND_PAIRING_STATUS_VALUES.has(detailStatus as BackendPairingValidationStatus)) {
+      return detailStatus as BackendPairingValidationStatus
+    }
+
+    if (error.code === 'NOT_FOUND' && error.message.includes('Device not registered')) {
+      return 'SCREEN_NOT_FOUND'
+    }
+    if (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN') {
+      return error.message.toLowerCase().includes('revoked') ? 'PAIRING_REVOKED' : 'INVALID_TOKEN'
+    }
+
+    return null
   }
 
   private buildPairingCodeRequest(overrides: Partial<PairingCodeRequest> = {}): PairingCodeRequest {

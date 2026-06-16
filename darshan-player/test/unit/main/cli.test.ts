@@ -30,4 +30,29 @@ describe('player CLI parser', () => {
       pairingCode: 'ZXCV12',
     })
   })
+
+  it('parses reset pairing command with reason', () => {
+    const { parseOperatorCommand } = require('../../../src/main/cli')
+    expect(parseOperatorCommand(['/path/to/player', 'reset-pairing', '--reason=stale identity'])).to.deep.equal({
+      name: 'reset-pairing',
+      reason: 'stale identity',
+      dryRun: false,
+      clearCache: false,
+    })
+  })
+
+  it('parses pairing status command', () => {
+    const { parseOperatorCommand } = require('../../../src/main/cli')
+    expect(parseOperatorCommand(['/path/to/player', '--pairing-status'])).to.deep.equal({ name: 'pairing-status' })
+  })
+
+  it('parses reset pairing dry-run with optional cache clearing', () => {
+    const { parseOperatorCommand } = require('../../../src/main/cli')
+    expect(parseOperatorCommand(['/path/to/player', 'reset-pairing', '--dry-run', '--clear-cache'])).to.deep.equal({
+      name: 'reset-pairing',
+      reason: undefined,
+      dryRun: true,
+      clearCache: true,
+    })
+  })
 })
