@@ -252,6 +252,7 @@ function getMachineDefinitions(): MachineDefinition[] {
 
 class PrometheusSummaryClient {
   private readonly baseUrl: string | null;
+  private successfulQueries = 0;
 
   constructor(baseUrl: string | null | undefined) {
     this.baseUrl =
@@ -259,8 +260,12 @@ class PrometheusSummaryClient {
       (appConfig.NODE_ENV === 'test' ? 'http://127.0.0.1:9090' : null);
   }
 
-  get enabled() {
+  get configured() {
     return Boolean(this.baseUrl);
+  }
+
+  get available() {
+    return this.configured && this.successfulQueries > 0;
   }
 
   async query(expression: string): Promise<PrometheusVectorResult[]> {
@@ -289,6 +294,7 @@ class PrometheusSummaryClient {
         return [];
       }
 
+      this.successfulQueries += 1;
       return body.data.result ?? [];
     } catch {
       return [];
@@ -380,15 +386,17 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
       id: machine.id,
       name: machine.name,
       role: machine.role,
-      status: prometheus.enabled
-        ? classifyMachineStatus({
-            expectedTargets: targetState.expected,
-            reachableTargets: targetState.reachable,
-            cpuPercent,
-            memoryPercent,
-            diskPercent,
-          })
-        : 'unconfigured',
+      status: !prometheus.configured
+        ? 'unconfigured'
+        : !prometheus.available
+          ? 'unknown'
+          : classifyMachineStatus({
+              expectedTargets: targetState.expected,
+              reachableTargets: targetState.reachable,
+              cpuPercent,
+              memoryPercent,
+              diskPercent,
+            }),
       scrape_status: {
         reachable_targets: targetState.reachable,
         expected_targets: targetState.expected,
@@ -442,10 +450,14 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
       configured_player_targets: configuredPlayerTargets,
     },
     alerts: {
-      available: prometheus.enabled,
+      available: prometheus.available,
       firing: firingAlerts,
       highest_severity: highestSeverity as ObservabilityOverviewSummary['alerts']['highest_severity'],
-      status: prometheus.enabled ? classifyAlertStatus(firingAlerts, highestSeverity) : 'unconfigured',
+      status: !prometheus.configured
+        ? 'unconfigured'
+        : prometheus.available
+          ? classifyAlertStatus(firingAlerts, highestSeverity)
+          : 'unknown',
     },
     machines,
     grafana: {

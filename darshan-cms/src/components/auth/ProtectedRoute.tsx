@@ -2,6 +2,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAppSelector } from "@/store/hooks";
 import { useAuthorization } from "@/hooks/useAuthorization";
 import { canAccessModule, type ModuleKey } from "@/lib/access";
+import { buildLoginRedirectPath } from "@/lib/authRedirect";
 
 interface ProtectedRouteProps {
   children: React.ReactElement;
@@ -29,7 +30,8 @@ export function ProtectedRoute({
   );
 
   if (!isAuthed) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    const from = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={buildLoginRedirectPath(from)} replace state={{ from }} />;
   }
 
   if (moduleKey) {

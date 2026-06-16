@@ -66,6 +66,40 @@ const resolveStatusLabel = (media: MediaAsset) => media.status ?? "PENDING";
 const resolvePlayableMimeType = (media: MediaAsset) => media.content_type || media.source_content_type || null;
 const resolveOriginalMimeType = (media: MediaAsset) => media.source_content_type || null;
 
+const copyTextToClipboard = async (text: string) => {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  if (typeof document === "undefined") {
+    throw new Error("Clipboard is unavailable in this browser.");
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.top = "0";
+  textArea.style.left = "0";
+  textArea.style.width = "1px";
+  textArea.style.height = "1px";
+  textArea.style.opacity = "0";
+
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  try {
+    const didCopy = document.execCommand("copy");
+    if (!didCopy) {
+      throw new Error("Clipboard copy was blocked by the browser.");
+    }
+  } finally {
+    document.body.removeChild(textArea);
+  }
+};
+
 const formatRelativeMediaTime = (value?: string | null) => {
   if (!value) return null;
   const timestamp = Date.parse(value);
@@ -344,7 +378,7 @@ export default function MediaLibrary() {
   const handleCopyUrl = async (url?: string | null) => {
     if (!url) return;
     try {
-      await navigator.clipboard.writeText(url);
+      await copyTextToClipboard(url);
       toast({ title: "Copied", description: "Media URL copied to clipboard." });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to copy URL.";

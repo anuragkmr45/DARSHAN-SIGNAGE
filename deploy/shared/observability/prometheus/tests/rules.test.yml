@@ -7,35 +7,35 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: 'up{job="prometheus",instance="127.0.0.1:9090",role="observability",site="dev"}'
+      - series: 'up{job="prometheus",instance="127.0.0.1:9090",role="observability",machine="local",site="dev"}'
         values: "1+0x21"
-      - series: 'up{job="darshan-server",instance="10.0.0.20:3000",role="backend",site="dev"}'
+      - series: 'up{job="darshan-server",instance="10.0.0.20:3000",role="backend",machine="vm2",site="dev"}'
         values: "0+0x21"
-      - series: 'up{job="vm1-postgres",instance="10.0.0.10:9187",role="data",site="dev"}'
+      - series: 'up{job="vm1-postgres",instance="10.0.0.10:9187",role="data",machine="vm1",site="dev"}'
         values: "1+0x21"
-      - series: 'up{job="vm1-minio",instance="10.0.0.10:9000",role="data",site="dev"}'
+      - series: 'up{job="vm1-minio",instance="10.0.0.10:9000",role="data",machine="vm1",site="dev"}'
         values: "1+0x21"
-      - series: 'node_memory_MemAvailable_bytes{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
+      - series: 'node_memory_MemAvailable_bytes{job="vm2-node",instance="10.0.0.20:9100",role="backend",machine="vm2",site="dev"}'
         values: "20+0x21"
-      - series: 'node_memory_MemTotal_bytes{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
+      - series: 'node_memory_MemTotal_bytes{job="vm2-node",instance="10.0.0.20:9100",role="backend",machine="vm2",site="dev"}'
         values: "100+0x21"
-      - series: 'node_memory_MemAvailable_bytes{job="vm1-node",instance="10.0.0.10:9100",role="data",site="dev"}'
+      - series: 'node_memory_MemAvailable_bytes{job="vm1-node",instance="10.0.0.10:9100",role="data",machine="vm1",site="dev"}'
         values: "15+0x21"
-      - series: 'node_memory_MemTotal_bytes{job="vm1-node",instance="10.0.0.10:9100",role="data",site="dev"}'
+      - series: 'node_memory_MemTotal_bytes{job="vm1-node",instance="10.0.0.10:9100",role="data",machine="vm1",site="dev"}'
         values: "100+0x21"
-      - series: 'node_filesystem_avail_bytes{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev",fstype="ext4",mountpoint="/",device="/dev/sda1"}'
+      - series: 'node_filesystem_avail_bytes{job="vm2-node",instance="10.0.0.20:9100",role="backend",machine="vm2",site="dev",fstype="ext4",mountpoint="/",device="/dev/sda1"}'
         values: "5+0x21"
-      - series: 'node_filesystem_size_bytes{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev",fstype="ext4",mountpoint="/",device="/dev/sda1"}'
+      - series: 'node_filesystem_size_bytes{job="vm2-node",instance="10.0.0.20:9100",role="backend",machine="vm2",site="dev",fstype="ext4",mountpoint="/",device="/dev/sda1"}'
         values: "100+0x21"
-      - series: 'node_filesystem_avail_bytes{job="vm1-node",instance="10.0.0.10:9100",role="data",site="dev",fstype="ext4",mountpoint="/",device="/dev/sda1"}'
+      - series: 'node_filesystem_avail_bytes{job="vm1-node",instance="10.0.0.10:9100",role="data",machine="vm1",site="dev",fstype="ext4",mountpoint="/",device="/dev/sda1"}'
         values: "10+0x21"
-      - series: 'node_filesystem_size_bytes{job="vm1-node",instance="10.0.0.10:9100",role="data",site="dev",fstype="ext4",mountpoint="/",device="/dev/sda1"}'
+      - series: 'node_filesystem_size_bytes{job="vm1-node",instance="10.0.0.10:9100",role="data",machine="vm1",site="dev",fstype="ext4",mountpoint="/",device="/dev/sda1"}'
         values: "100+0x21"
-      - series: 'node_cpu_seconds_total{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev",mode="idle",cpu="0"}'
+      - series: 'node_cpu_seconds_total{job="vm2-node",instance="10.0.0.20:9100",role="backend",machine="vm2",site="dev",mode="idle",cpu="0"}'
         values: "0+0x21"
-      - series: 'node_cpu_seconds_total{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev",mode="system",cpu="0"}'
+      - series: 'node_cpu_seconds_total{job="vm2-node",instance="10.0.0.20:9100",role="backend",machine="vm2",site="dev",mode="system",cpu="0"}'
         values: "0+1x21"
-      - series: 'pg_up{job="vm1-postgres",instance="10.0.0.10:9187",role="data",site="dev"}'
+      - series: 'pg_up{job="vm1-postgres",instance="10.0.0.10:9187",role="data",machine="vm1",site="dev"}'
         values: "0+0x21"
       - series: 'darshan_fleet_players_total{state="ACTIVE",site="dev"}'
         values: "3+0x21"
@@ -70,10 +70,10 @@ tests:
       - series: 'darshan_server_media_cache_reports_unresolved{severity="CRITICAL",event_type="DISK_FULL",site="dev"}'
         values: "1+0x21"
     promql_expr_test:
-      - expr: 'darshan:host_memory_utilization:ratio{job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
+      - expr: 'darshan:host_memory_utilization:ratio{job="vm2-node",instance="10.0.0.20:9100",role="backend",machine="vm2",site="dev"}'
         eval_time: 5m
         exp_samples:
-          - labels: '{__name__="darshan:host_memory_utilization:ratio",job="vm2-node",instance="10.0.0.20:9100",role="backend",site="dev"}'
+          - labels: '{__name__="darshan:host_memory_utilization:ratio",job="vm2-node",instance="10.0.0.20:9100",role="backend",machine="vm2",site="dev"}'
             value: 0.8
       - expr: 'darshan:fleet_offline_players_ratio{site="dev"}'
         eval_time: 5m
@@ -98,6 +98,7 @@ tests:
               alertname: DARSHANBackendMetricsUnavailable
               instance: 10.0.0.20:3000
               job: darshan-server
+              machine: vm2
               role: backend
               severity: critical
               site: dev
@@ -112,6 +113,7 @@ tests:
               alertname: DARSHANHostFilesystemHigh
               instance: 10.0.0.20:9100
               job: vm2-node
+              machine: vm2
               role: backend
               severity: critical
               site: dev
@@ -126,6 +128,7 @@ tests:
               alertname: DARSHANPostgresUnavailable
               instance: 10.0.0.10:9187
               job: vm1-postgres
+              machine: vm1
               role: data
               severity: critical
               site: dev

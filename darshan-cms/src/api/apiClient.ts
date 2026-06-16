@@ -1,4 +1,5 @@
 import { API_BASE_PATH } from "./endpoints";
+import { redirectToLoginForCurrentPage } from "@/lib/authRedirect";
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
@@ -41,12 +42,12 @@ export class ApiError extends Error {
 
 type TokenProvider = () => string | undefined | null;
 type RefreshedAuthHandler = (payload: { token: string; expiresAt?: string }) => void;
+type UnauthorizedHandler = () => void;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const inferredOrigin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
 const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
 const baseURL = `${envBaseUrl ?? inferredOrigin}${API_BASE_PATH}`;
-const POST_LOGIN_REDIRECT_KEY = "postLoginRedirect";
 
 const sanitizeMessage = (message: unknown) =>
   typeof message === "string" ? message : "Request failed. Please try again.";
@@ -79,6 +80,7 @@ export class ApiClient {
   private apiKeyProvider: TokenProvider = () => undefined;
   private csrfTokenProvider: TokenProvider = () => undefined;
   private refreshedAuthHandler?: RefreshedAuthHandler;
+  private unauthorizedHandler?: UnauthorizedHandler;
   private inflightGetRequests = new Map<string, Promise<unknown>>();
 
   setAuthTokenProvider(getToken: TokenProvider) {
@@ -92,6 +94,9 @@ export class ApiClient {
   }
   setRefreshedAuthHandler(handler: RefreshedAuthHandler) {
     this.refreshedAuthHandler = handler;
+  }
+  setUnauthorizedHandler(handler: UnauthorizedHandler) {
+    this.unauthorizedHandler = handler;
   }
 
   async request<TResponse, TBody = unknown>(options: ApiRequestOptions<TBody>): Promise<TResponse> {
@@ -175,19 +180,12 @@ export class ApiClient {
       } catch (error) {
         if (error instanceof ApiError) {
           if (typeof window !== "undefined" && error.status === 401 && !options.path.includes("/auth/login")) {
-            const isAlreadyOnLogin = window.location.pathname === "/login";
-
-            if (!isAlreadyOnLogin) {
-              try {
-                sessionStorage.setItem(
-                  POST_LOGIN_REDIRECT_KEY,
-                  window.location.pathname + window.location.search,
-                );
-              } catch {
-                /* ignore */
-              }
-              window.location.replace("/login");
+            try {
+              this.unauthorizedHandler?.();
+            } catch {
+              /* ignore auth cleanup failures */
             }
+            redirectToLoginForCurrentPage();
           }
           throw error;
         }

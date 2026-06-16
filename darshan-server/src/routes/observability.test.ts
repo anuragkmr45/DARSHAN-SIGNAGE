@@ -15,10 +15,13 @@ type OverviewResponseBody = {
     total_players: number | null;
   };
   alerts: {
+    available: boolean;
     firing: number;
+    status: string;
   };
   machines: Array<{
     name: string;
+    status: string;
     scrape_status: {
       reachable_targets: number;
     };
@@ -218,6 +221,31 @@ describe('Observability CMS summary routes', () => {
     expect(body.machines[0].name).toContain('Development');
     expect(body.machines[0].scrape_status.reachable_targets).toBe(2);
     expect(body.grafana.links.players_fleet).toContain('/grafana/d/darshan-players-fleet');
+  });
+
+  it('reports observability as unknown instead of critical when Prometheus is unreachable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('Prometheus unavailable');
+      })
+    );
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/observability/overview',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    const body = JSON.parse(response.body) as OverviewResponseBody;
+    expect(body.alerts.available).toBe(false);
+    expect(body.alerts.status).toBe('unknown');
+    expect(body.machines.length).toBeGreaterThan(0);
+    expect(body.machines.every((machine) => machine.status === 'unknown')).toBe(true);
+    expect(body.machines.every((machine) => machine.scrape_status.reachable_targets === 0)).toBe(true);
   });
 
   it('allows operators to read the observability overview route', async () => {

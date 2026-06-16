@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Monitor } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { authApi } from "@/api/domains/auth";
@@ -13,10 +13,11 @@ import { useAppDispatch } from "@/store/hooks";
 import { setCredentials } from "@/store/authSlice";
 import { getCookie } from "@/lib/cookies";
 import { isValidEmail } from "@/lib/validation";
-import { STORAGE_KEYS } from "@/lib/constants";
+import { clearPostLoginRedirect, resolvePostLoginRedirect } from "@/lib/authRedirect";
 
 const Auth = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const dispatch = useAppDispatch();
   const [isLoading, setIsLoading] = useState(false);
@@ -62,11 +63,9 @@ const Auth = () => {
         title: "Login successful",
         description: "Welcome back to DARSHAN CMS",
       });
-      const redirectPath = sessionStorage.getItem(STORAGE_KEYS.postLoginRedirect);
-      if (redirectPath) {
-        sessionStorage.removeItem(STORAGE_KEYS.postLoginRedirect);
-      }
-      navigate(redirectPath || "/dashboard");
+      const redirectPath = resolvePostLoginRedirect(location.search, location.state);
+      clearPostLoginRedirect();
+      navigate(redirectPath || "/dashboard", { replace: true });
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : "Unable to login right now.";

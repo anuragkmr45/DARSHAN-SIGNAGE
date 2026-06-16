@@ -2,40 +2,153 @@
   "annotations": { "list": [] },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
+  "id": null,
   "panels": [
     {
       "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
       "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "sum(up{job=~\"vm1-node|vm1-postgres|vm1-minio|vm1-cadvisor\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "Data Machine Targets Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "max(darshan:host_filesystem_utilization:ratio{job=\"vm1-node\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "Max Filesystem Utilization",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "max(pg_up{job=\"vm1-postgres\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "PostgreSQL Exporter Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "max(up{job=\"vm1-minio\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "MinIO Metrics Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 5 },
+      "id": 5,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "darshan:host_memory_utilization:ratio{role=\"data\"}", "legendFormat": "{{ instance }} memory", "refId": "A" },
-        { "expr": "darshan:host_filesystem_utilization:ratio{role=\"data\"}", "legendFormat": "{{ instance }} filesystem", "refId": "B" }
+        { "expr": "up{job=~\"vm1-node|vm1-postgres|vm1-minio|vm1-cadvisor\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }
       ],
-      "title": "VM1 Memory And Filesystem Utilization",
+      "title": "Data Machine Scrape Target Health",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "darshan:host_cpu_utilization:ratio{job=\"vm1-node\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
+        { "expr": "darshan:host_memory_utilization:ratio{job=\"vm1-node\"}", "legendFormat": "{{ instance }} memory", "refId": "B" },
+        { "expr": "darshan:host_filesystem_utilization:ratio{job=\"vm1-node\"}", "legendFormat": "{{ instance }} filesystem", "refId": "C" }
+      ],
+      "title": "Data Host CPU, Memory, Filesystem",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (instance) (rate(node_disk_read_bytes_total{job=\"vm1-node\",device!~\"ram.*|loop.*\"}[5m]))", "legendFormat": "{{ instance }} read", "refId": "A" },
+        { "expr": "sum by (instance) (rate(node_disk_written_bytes_total{job=\"vm1-node\",device!~\"ram.*|loop.*\"}[5m]))", "legendFormat": "{{ instance }} write", "refId": "B" }
+      ],
+      "title": "Data Disk Throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (instance) (rate(node_network_receive_bytes_total{job=\"vm1-node\",device!~\"lo|docker.*|veth.*|br-.*\"}[5m]))", "legendFormat": "{{ instance }} rx", "refId": "A" },
+        { "expr": "sum by (instance) (rate(node_network_transmit_bytes_total{job=\"vm1-node\",device!~\"lo|docker.*|veth.*|br-.*\"}[5m]))", "legendFormat": "{{ instance }} tx", "refId": "B" }
+      ],
+      "title": "Data Network Throughput",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "id": 2,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "sum(up{job=~\"vm1-node|vm1-postgres|vm1-minio\"})", "refId": "A" }
+        { "expr": "sum by (instance, datname) (pg_stat_database_numbackends{job=\"vm1-postgres\"})", "legendFormat": "{{ datname }} connections", "refId": "A" }
       ],
-      "title": "VM1 Exporter Targets Up",
-      "type": "stat"
+      "title": "PostgreSQL Active Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (api) (rate(minio_s3_requests_total{job=\"vm1-minio\"}[5m]))", "legendFormat": "{{ api }}", "refId": "A" }
+      ],
+      "title": "MinIO S3 Request Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "minio_cluster_usage_total_bytes{job=\"vm1-minio\"}", "legendFormat": "cluster usage", "refId": "A" }
+      ],
+      "title": "MinIO Cluster Storage Usage",
+      "type": "timeseries"
     }
   ],
+  "refresh": "30s",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["darshan", "vm1", "data"],
+  "tags": ["darshan", "data", "machine"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "DARSHAN VM1 Data Machine",
+  "title": "DARSHAN Data Machine",
   "uid": "darshan-vm1-data",
-  "version": 1
+  "version": 2
 }

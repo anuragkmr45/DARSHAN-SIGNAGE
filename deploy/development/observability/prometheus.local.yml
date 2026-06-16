@@ -24,10 +24,18 @@ scrape_configs:
       credentials: darshan-development-prometheus
     static_configs:
       - targets:
-          - host.docker.internal:3002
+          - host.docker.internal:3000
         labels:
           role: backend
-          machine: dev-local
+          machine: vm2
+
+  - job_name: vm2-node
+    static_configs:
+      - targets:
+          - node-exporter:9100
+        labels:
+          role: backend
+          machine: vm2
 
   - job_name: players
     metrics_path: /metrics

@@ -4,7 +4,7 @@ groups:
     rules:
       - record: darshan:host_cpu_utilization:ratio
         expr: |
-          1 - avg by (job, instance, role, site) (
+          1 - avg by (job, instance, role, machine, site) (
             rate(node_cpu_seconds_total{mode="idle"}[5m])
           )
       - record: darshan:host_memory_utilization:ratio
@@ -16,7 +16,7 @@ groups:
           )
       - record: darshan:host_filesystem_utilization:ratio
         expr: |
-          max by (job, instance, role, site) (
+          max by (job, instance, role, machine, site) (
             1 - (
               node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint!~"/run($|/.*)|/var/lib/docker($|/.*)"}
               /

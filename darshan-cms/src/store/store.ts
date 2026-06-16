@@ -13,7 +13,7 @@ import storageSession from "redux-persist/lib/storage/session";
 import { rootReducer } from "./rootReducer";
 import { apiClient } from "@/api/apiClient";
 import { getCookie } from "@/lib/cookies";
-import { setCredentials } from "./authSlice";
+import { clearAuth, setCredentials } from "./authSlice";
 
 const createNoopStorage = () => ({
   getItem: async () => null,
@@ -69,6 +69,16 @@ apiClient.setRefreshedAuthHandler(({ token }) => {
       csrfToken: current.csrfToken ?? getCookie("csrf_token") ?? undefined,
     }),
   );
+});
+apiClient.setUnauthorizedHandler(() => {
+  store.dispatch(clearAuth());
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem("persist:darshan");
+    window.sessionStorage.removeItem("persist:signhex");
+  } catch {
+    /* ignore storage cleanup failures */
+  }
 });
 
 export type RootState = ReturnType<typeof store.getState>;

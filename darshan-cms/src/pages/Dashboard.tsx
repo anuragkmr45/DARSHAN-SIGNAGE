@@ -69,6 +69,9 @@ const formatRelativeTime = (value?: string | null) => {
   return formatDistanceToNow(date, { addSuffix: true });
 };
 
+const hasMetricNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
 const normalizeHealthStatus = (status?: string) => (status || "unknown").toLowerCase();
 
 const getErrorMessage = (error: unknown, fallback: string) =>
@@ -373,10 +376,22 @@ export default function Dashboard() {
   const heartbeats5m = overview?.system_health?.heartbeats?.last_5m ?? screensMetrics.online_last_5m;
   const heartbeats1h = overview?.system_health?.heartbeats?.last_1h;
   const lastHeartbeatAt = overview?.system_health?.last_heartbeat_at;
+  const totalScreens = totalsMetrics.screens ?? screensMetrics.total ?? 0;
+  const hasScreensConfigured = totalScreens > 0;
+  const hasHeartbeatData = Boolean(lastHeartbeatAt);
+  const hasPublishData = Boolean(lastPublishAt);
+  const hasOperatorData = hasMetricNumber(activeOperators) && activeOperators > 0;
   const machineSummaries = observabilityOverview?.machines ?? [];
   const observabilityGrafanaLinks = observabilityOverview?.grafana?.links;
+  const machineTelemetryUnavailable =
+    !isObservabilityLoading && observabilityOverview?.alerts.available === false;
+  const observabilityAvailable = observabilityOverview?.alerts.available === true;
+  const fleetTotalPlayers = observabilityOverview?.fleet.total_players;
+  const hasFleetData = hasMetricNumber(fleetTotalPlayers);
+  const hasRegisteredPlayers = hasMetricNumber(fleetTotalPlayers) && fleetTotalPlayers > 0;
   const playerTargetsReachable = observabilityOverview?.fleet.reachable_players;
   const playerTargetsConfigured = observabilityOverview?.fleet.configured_player_targets;
+  const hasPlayerScrapeTargets = hasMetricNumber(playerTargetsConfigured) && playerTargetsConfigured > 0;
 
   const kpiData = useMemo(() => {
     const storageTrend =
@@ -598,18 +613,44 @@ export default function Dashboard() {
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Fleet totals</p>
                 <p className="mt-1 text-lg font-semibold">
-                  {isObservabilityLoading ? "Loading..." : String(observabilityOverview?.fleet.total_players ?? "—")}
+                  {isObservabilityLoading
+                    ? "Loading..."
+                    : hasFleetData
+                      ? String(fleetTotalPlayers)
+                      : observabilityAvailable
+                        ? "No data"
+                        : "Unavailable"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Active {observabilityOverview?.fleet.active_players ?? "—"} · Offline {observabilityOverview?.fleet.offline_players ?? "—"}
+                  {isObservabilityLoading
+                    ? "Loading fleet state"
+                    : hasRegisteredPlayers
+                      ? `Active ${observabilityOverview?.fleet.active_players ?? 0} · Offline ${observabilityOverview?.fleet.offline_players ?? 0}`
+                      : hasFleetData
+                        ? "No players registered"
+                        : observabilityAvailable
+                          ? "Backend fleet metric has not emitted yet"
+                          : "Prometheus is not reachable"}
                 </p>
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Player scrape reachability</p>
                 <p className="mt-1 text-lg font-semibold">
-                  {isObservabilityLoading ? "Loading..." : `${playerTargetsReachable ?? "—"} / ${playerTargetsConfigured ?? "—"}`}
+                  {isObservabilityLoading
+                    ? "Loading..."
+                    : hasPlayerScrapeTargets
+                      ? `${playerTargetsReachable ?? 0} / ${playerTargetsConfigured}`
+                      : observabilityAvailable
+                        ? "Not configured"
+                        : "Unavailable"}
                 </p>
-                <p className="text-xs text-muted-foreground">Reachable Prometheus player targets</p>
+                <p className="text-xs text-muted-foreground">
+                  {hasPlayerScrapeTargets
+                    ? "Reachable Prometheus player targets"
+                    : observabilityAvailable
+                      ? "Add player targets to Prometheus file discovery"
+                      : "Prometheus player scrape state is unavailable"}
+                </p>
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Alert state</p>
@@ -729,7 +770,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Last Publish</span>
               <span className="text-sm font-medium">
-                {isSystemHealthLoading ? "Loading..." : formatRelativeTime(lastPublishAt)}
+                {isSystemHealthLoading ? "Loading..." : hasPublishData ? formatRelativeTime(lastPublishAt) : "No publish yet"}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -744,7 +785,13 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Active Operators</span>
               <span className="text-sm font-medium">
-                {isSystemHealthLoading ? "Loading..." : activeOperators ?? "—"}
+                {isSystemHealthLoading
+                  ? "Loading..."
+                  : hasOperatorData
+                    ? activeOperators
+                    : activeOperators === 0
+                      ? "No active operators"
+                      : "—"}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -760,13 +807,23 @@ export default function Dashboard() {
               <span className="text-sm font-medium">
                 {isMetricsLoading
                   ? "Loading..."
-                  : `${heartbeats5m ?? 0} / ${heartbeats1h ?? "—"}`}
+                  : !hasScreensConfigured
+                    ? "No screens"
+                    : !hasHeartbeatData
+                      ? "No heartbeats"
+                      : `${heartbeats5m ?? 0} / ${heartbeats1h ?? 0}`}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Last Heartbeat</span>
               <span className="text-sm font-medium">
-                {isMetricsLoading ? "Loading..." : formatRelativeTime(lastHeartbeatAt)}
+                {isMetricsLoading
+                  ? "Loading..."
+                  : !hasScreensConfigured
+                    ? "No screens"
+                    : hasHeartbeatData
+                      ? formatRelativeTime(lastHeartbeatAt)
+                      : "No heartbeat yet"}
               </span>
             </div>
           </CardContent>
@@ -783,7 +840,14 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-3">
-            {machineSummaries.map((machine) => (
+            {machineTelemetryUnavailable ? (
+              <div className="col-span-full rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                Machine metrics are unavailable because Prometheus is not reachable from the backend. Start the
+                observability stack and exporters to populate CPU, memory, disk, and scrape target data.
+              </div>
+            ) : null}
+
+            {!machineTelemetryUnavailable && machineSummaries.map((machine) => (
               <Card key={machine.id} className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -839,7 +903,7 @@ export default function Dashboard() {
               </Card>
             ))}
 
-            {!isObservabilityLoading && machineSummaries.length === 0 ? (
+            {!isObservabilityLoading && !machineTelemetryUnavailable && machineSummaries.length === 0 ? (
               <div className="col-span-full rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
                 Machine summaries are unavailable. Check backend observability configuration.
               </div>

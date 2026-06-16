@@ -1,4 +1,4 @@
-import Fastify, { type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { randomUUID } from 'crypto';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
@@ -130,6 +130,28 @@ function hasObservabilityMetricsBearerAccess(request: FastifyRequest) {
 
   const [scheme, token] = header.split(' ');
   return scheme === 'Bearer' && token === configuredToken;
+}
+
+function applyCorsHeadersForError(request: FastifyRequest, reply: FastifyReply) {
+  const originHeader = request.headers.origin;
+  const origin = Array.isArray(originHeader) ? originHeader[0] : originHeader;
+  if (!origin) return;
+
+  const allowedOrigins = getHttpAllowedOrigins();
+  if (allowedOrigins.length === 0 || !isAllowedOrigin(origin, allowedOrigins)) return;
+
+  reply.header('Access-Control-Allow-Origin', origin);
+  reply.header('Access-Control-Allow-Credentials', 'true');
+
+  const varyHeader = reply.getHeader('vary');
+  const varyValue = Array.isArray(varyHeader) ? varyHeader.join(', ') : String(varyHeader ?? '');
+  const varyParts = varyValue
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!varyParts.some((part) => part.toLowerCase() === 'origin')) {
+    reply.header('Vary', [...varyParts, 'Origin'].join(', '));
+  }
 }
 
 type BodySummary = {
@@ -284,6 +306,7 @@ export async function createServer() {
       }
     }
 
+    applyCorsHeadersForError(request, reply);
     reply.status(clientError.statusCode).send(formatErrorResponse(clientError, request.id));
   });
 
@@ -306,19 +329,9 @@ export async function createServer() {
     crossOriginResourcePolicy: { policy: 'same-site' },
   });
 
-  await fastify.register(fastifyCookie, {
-    secret: appConfig.JWT_SECRET,
-    hook: 'onRequest',
-  });
-
-  fastify.addHook('preHandler', async (request) => {
-    hydrateAuthorizationHeaderFromCookie(request);
-    await refreshSessionFromRequestToken(request);
-  });
-
   const allowedOrigins = getHttpAllowedOrigins();
 
-  // CORS
+  // Register CORS before auth hooks so browser clients can read auth failures.
   await fastify.register(cors, {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
@@ -327,6 +340,16 @@ export async function createServer() {
       return cb(new Error('CORS origin not allowed'), false);
     },
     credentials: true,
+  });
+
+  await fastify.register(fastifyCookie, {
+    secret: appConfig.JWT_SECRET,
+    hook: 'onRequest',
+  });
+
+  fastify.addHook('preHandler', async (request) => {
+    hydrateAuthorizationHeaderFromCookie(request);
+    await refreshSessionFromRequestToken(request);
   });
 
   await fastify.register(csrfProtectionPlugin);

@@ -101,7 +101,13 @@ export async function metricsRoutes(fastify: FastifyInstance) {
         const activeScreensNow = Number(activeScreensNowRow?.count || 0);
         const lastHeartbeatAt = latestHeartbeat?.timestamp ? new Date(latestHeartbeat.timestamp) : null;
         const systemStatus =
-          !lastHeartbeatAt ? 'unknown' : lastHeartbeatAt >= fiveMinutesAgo ? 'healthy' : 'degraded';
+          totalScreens === 0
+            ? 'unconfigured'
+            : !lastHeartbeatAt
+              ? 'unknown'
+              : lastHeartbeatAt >= fiveMinutesAgo
+                ? 'healthy'
+                : 'degraded';
         const healthResponse = { status: 'ok', timestamp: now.toISOString() };
 
         return reply.send({
@@ -114,6 +120,7 @@ export async function metricsRoutes(fastify: FastifyInstance) {
           screens: {
             total: totalScreens,
             online: onlineScreens,
+            online_last_5m: onlineScreens,
           },
           storage: {
             media_bytes: mediaStorageTotal,
