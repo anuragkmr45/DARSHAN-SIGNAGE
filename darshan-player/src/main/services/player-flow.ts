@@ -32,7 +32,7 @@ import { getRealtimeService } from './realtime-service'
 
 const logger = getLogger('player-flow')
 const PAIRING_POLL_INTERVAL_MS = 5000
-const PAIRING_VALIDATION_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
+const DEFAULT_PAIRING_VALIDATION_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
 
 const VALID_BACKEND_PAIRING_STATUSES = new Set<BackendPairingValidationStatus>(['VALID', 'VALID_NO_CONTENT'])
 const STALE_BACKEND_PAIRING_STATUSES = new Set<BackendPairingValidationStatus>([
@@ -519,7 +519,9 @@ export class PlayerFlow extends EventEmitter {
       return false
     }
 
-    return Date.now() - validatedAt <= PAIRING_VALIDATION_OFFLINE_GRACE_MS
+    const offlineGraceMs =
+      getConfigManager().getConfig().pairing?.offlineValidationGraceMs ?? DEFAULT_PAIRING_VALIDATION_OFFLINE_GRACE_MS
+    return Date.now() - validatedAt <= offlineGraceMs
   }
 
   private async enterOfflineUsingLastValidPairing(reason: string): Promise<void> {

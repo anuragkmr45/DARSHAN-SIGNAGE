@@ -8,6 +8,11 @@ import * as net from 'net'
 import { EventEmitter } from 'events'
 import type { AppConfig, RuntimeMode } from './types'
 import { importLegacyLinuxRuntimeState, resolveRuntimePaths, type RuntimePaths } from './platform-paths'
+import {
+  buildRedactedPlayerConfigSummary,
+  loadPlayerFileConfig,
+  type PlayerConfigFileDiagnostics,
+} from './file-config'
 
 const RUNTIME_MODES: RuntimeMode[] = ['dev', 'qa', 'production']
 const LEGACY_COMMAND_POLL_MS = 30000
@@ -41,6 +46,10 @@ function envValue(...names: string[]): string | undefined {
   return undefined
 }
 
+function envPresent(...names: string[]): boolean {
+  return envValue(...names) !== undefined
+}
+
 function envFlag(defaultValue: boolean, ...names: string[]): boolean {
   const value = envValue(...names)
   if (value === undefined) return defaultValue
@@ -68,6 +77,7 @@ export class ConfigManager {
   private readonly configPath: string
   private readonly defaults: AppConfig
   private readonly runtimePaths: RuntimePaths
+  private readonly fileConfigDiagnostics: PlayerConfigFileDiagnostics
   private readonly emitter = new EventEmitter()
 
   constructor(configPath?: string) {
@@ -77,7 +87,9 @@ export class ConfigManager {
     }
     this.configPath = configPath || this.getDefaultConfigPath()
     this.defaults = this.buildDefaultConfig()
-    this.config = this.loadConfig()
+    const fileConfig = loadPlayerFileConfig(process.env)
+    this.fileConfigDiagnostics = fileConfig.diagnostics
+    this.config = this.loadConfig(fileConfig.config)
   }
 
   private getDefaultConfigPath(): string {
@@ -100,6 +112,11 @@ export class ConfigManager {
       apiBase,
       wsUrl,
       deviceId: envValue('DARSHAN_DEVICE_ID', 'HEXMON_DEVICE_ID') || '',
+      environment: {
+        name: envValue('DARSHAN_ENVIRONMENT_NAME', 'SIGNHEX_ENVIRONMENT_NAME'),
+        deploymentId: envValue('DARSHAN_DEPLOYMENT_ID', 'SIGNHEX_DEPLOYMENT_ID'),
+        expectedServerId: envValue('DARSHAN_EXPECTED_SERVER_ID', 'SIGNHEX_EXPECTED_SERVER_ID'),
+      },
       runtime: {
         mode: runtimeMode,
       },
@@ -170,6 +187,33 @@ export class ConfigManager {
         port: envNumber(3300, 'DARSHAN_OBSERVABILITY_PORT', 'HEXMON_OBSERVABILITY_PORT'),
         allowRemoteAccess: envFlag(false, 'DARSHAN_OBSERVABILITY_ALLOW_REMOTE_ACCESS', 'HEXMON_OBSERVABILITY_ALLOW_REMOTE_ACCESS'),
       },
+      pairing: {
+        offlineValidationGraceMs: envNumber(
+          7 * 24 * 60 * 60 * 1000,
+          'DARSHAN_PAIRING_OFFLINE_VALIDATION_GRACE_MS',
+          'SIGNHEX_PAIRING_OFFLINE_VALIDATION_GRACE_MS'
+        ),
+        backendFirstRolloutMode: envFlag(
+          true,
+          'DARSHAN_PAIRING_BACKEND_FIRST_ROLLOUT_MODE',
+          'SIGNHEX_PAIRING_BACKEND_FIRST_ROLLOUT_MODE'
+        ),
+      },
+      duplicateIdentity: {
+        enabled: envFlag(true, 'DARSHAN_DUPLICATE_IDENTITY_DETECTION_ENABLED', 'SIGNHEX_DUPLICATE_IDENTITY_DETECTION_ENABLED'),
+        enforcement:
+          (envValue('DARSHAN_DUPLICATE_IDENTITY_ENFORCEMENT', 'SIGNHEX_DUPLICATE_IDENTITY_ENFORCEMENT') as
+            | 'warn'
+            | 'block'
+            | undefined) || 'warn',
+      },
+      diagnostics: {
+        showEnvironmentIdentity: envFlag(
+          true,
+          'DARSHAN_DIAGNOSTICS_SHOW_ENVIRONMENT_IDENTITY',
+          'SIGNHEX_DIAGNOSTICS_SHOW_ENVIRONMENT_IDENTITY'
+        ),
+      },
     }
   }
 
@@ -219,12 +263,16 @@ export class ConfigManager {
     return this.allowLocalhostFallback(runtimeMode) ? 'ws://localhost:3000/ws' : ''
   }
 
-  private loadConfig(): AppConfig {
-    const fileConfig = this.readConfigFromDisk()
-    const merged = this.mergeConfig(this.defaults, fileConfig || {})
+  private loadConfig(selectedFileConfig: Partial<AppConfig> = {}): AppConfig {
+    const runtimeFileConfig = this.readConfigFromDisk()
+    const selectedFileConfigLoaded = this.fileConfigDiagnostics.configFile.loaded
+    const mergedRuntime = this.mergeConfig(this.defaults, runtimeFileConfig || {})
+    const merged = selectedFileConfigLoaded
+      ? this.mergeConfig(this.mergeConfig(mergedRuntime, selectedFileConfig), this.buildExplicitEnvOverrides())
+      : mergedRuntime
     const normalized = this.normalizeConfig(merged)
 
-    if (!fileConfig) {
+    if (!runtimeFileConfig) {
       this.config = normalized
       this.saveConfig()
       return normalized
@@ -257,6 +305,7 @@ export class ConfigManager {
       apiBase: overrides.apiBase ?? defaults.apiBase,
       wsUrl: overrides.wsUrl ?? defaults.wsUrl,
       deviceId: overrides.deviceId ?? defaults.deviceId,
+      environment: { ...defaults.environment, ...overrides.environment },
       runtime: { ...defaults.runtime, ...overrides.runtime },
       realtime: {
         enabled: overrides.realtime?.enabled ?? defaults.realtime?.enabled ?? false,
@@ -280,7 +329,141 @@ export class ConfigManager {
       power: { ...defaults.power, ...overrides.power },
       security: { ...defaults.security, ...overrides.security },
       observability: { ...defaults.observability, ...overrides.observability },
+      pairing: { ...defaults.pairing, ...overrides.pairing },
+      duplicateIdentity: { ...defaults.duplicateIdentity, ...overrides.duplicateIdentity },
+      diagnostics: { ...defaults.diagnostics, ...overrides.diagnostics },
     }
+  }
+
+  private buildExplicitEnvOverrides(): Partial<AppConfig> {
+    const overrides: Partial<AppConfig> = {}
+    const apiBase = this.normalizeUrl(
+      envValue('DARSHAN_API_BASE_URL', 'DARSHAN_API_BASE', 'SIGNAGE_API_BASE_URL', 'HEXMON_API_BASE', 'API_BASE_URL')
+    )
+    const wsUrl = this.normalizeUrl(envValue('DARSHAN_WS_URL', 'DARSHAN_REALTIME_WS_URL', 'SIGNAGE_WS_URL', 'HEXMON_WS_URL', 'WS_URL'))
+    const runtimeMode = this.getRuntimeModeOverride()
+    const environment: AppConfig['environment'] = {}
+    const duplicateIdentityEnforcement = envValue(
+      'DARSHAN_DUPLICATE_IDENTITY_ENFORCEMENT',
+      'SIGNHEX_DUPLICATE_IDENTITY_ENFORCEMENT'
+    )
+
+    if (apiBase) overrides.apiBase = apiBase
+    if (wsUrl) overrides.wsUrl = wsUrl
+    if (runtimeMode) overrides.runtime = { mode: runtimeMode }
+
+    if (envPresent('DARSHAN_ENVIRONMENT_NAME', 'SIGNHEX_ENVIRONMENT_NAME')) {
+      environment.name = envValue('DARSHAN_ENVIRONMENT_NAME', 'SIGNHEX_ENVIRONMENT_NAME')
+    }
+    if (envPresent('DARSHAN_DEPLOYMENT_ID', 'SIGNHEX_DEPLOYMENT_ID')) {
+      environment.deploymentId = envValue('DARSHAN_DEPLOYMENT_ID', 'SIGNHEX_DEPLOYMENT_ID')
+    }
+    if (envPresent('DARSHAN_EXPECTED_SERVER_ID', 'SIGNHEX_EXPECTED_SERVER_ID')) {
+      environment.expectedServerId = envValue('DARSHAN_EXPECTED_SERVER_ID', 'SIGNHEX_EXPECTED_SERVER_ID')
+    }
+    if (Object.values(environment).some(Boolean)) overrides.environment = environment
+
+    const realtime: Partial<NonNullable<AppConfig['realtime']>> = {}
+    if (envPresent('DARSHAN_REALTIME_PLAYER_ENABLED', 'HEXMON_REALTIME_SYNC_ENABLED')) {
+      realtime.enabled = envFlag(false, 'DARSHAN_REALTIME_PLAYER_ENABLED', 'HEXMON_REALTIME_SYNC_ENABLED')
+    }
+    if (envPresent('DARSHAN_REALTIME_SIGNED_AUTH_ENABLED', 'HEXMON_REALTIME_SIGNED_AUTH_ENABLED')) {
+      realtime.signedAuthEnabled = envFlag(false, 'DARSHAN_REALTIME_SIGNED_AUTH_ENABLED', 'HEXMON_REALTIME_SIGNED_AUTH_ENABLED')
+    }
+    if (envPresent('DARSHAN_REALTIME_DEVICE_NAMESPACE', 'HEXMON_REALTIME_DEVICE_NAMESPACE')) {
+      realtime.deviceNamespace = envValue('DARSHAN_REALTIME_DEVICE_NAMESPACE', 'HEXMON_REALTIME_DEVICE_NAMESPACE')
+    }
+    if (envPresent('DARSHAN_REALTIME_COMMAND_SAFETY_POLL_MS', 'HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS')) {
+      realtime.commandSafetyPollMs = envNumber(60000, 'DARSHAN_REALTIME_COMMAND_SAFETY_POLL_MS', 'HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS')
+    }
+    if (envPresent('DARSHAN_REALTIME_DESIRED_STATE_POLL_MS', 'HEXMON_REALTIME_DESIRED_STATE_POLL_MS')) {
+      realtime.desiredStatePollMs = envNumber(300000, 'DARSHAN_REALTIME_DESIRED_STATE_POLL_MS', 'HEXMON_REALTIME_DESIRED_STATE_POLL_MS')
+    }
+    if (envPresent('DARSHAN_REALTIME_RECONNECT_MIN_MS', 'HEXMON_REALTIME_RECONNECT_MIN_MS')) {
+      realtime.reconnectMinMs = envNumber(1000, 'DARSHAN_REALTIME_RECONNECT_MIN_MS', 'HEXMON_REALTIME_RECONNECT_MIN_MS')
+    }
+    if (envPresent('DARSHAN_REALTIME_RECONNECT_MAX_MS', 'HEXMON_REALTIME_RECONNECT_MAX_MS')) {
+      realtime.reconnectMaxMs = envNumber(60000, 'DARSHAN_REALTIME_RECONNECT_MAX_MS', 'HEXMON_REALTIME_RECONNECT_MAX_MS')
+    }
+    if (envPresent('DARSHAN_REALTIME_WS_PING_INTERVAL_MS', 'HEXMON_REALTIME_WS_PING_INTERVAL_MS')) {
+      realtime.pingIntervalMs = envNumber(25000, 'DARSHAN_REALTIME_WS_PING_INTERVAL_MS', 'HEXMON_REALTIME_WS_PING_INTERVAL_MS')
+    }
+    if (envPresent('DARSHAN_WS_NOTIFICATION_MAX_BYTES', 'HEXMON_WS_NOTIFICATION_MAX_BYTES')) {
+      realtime.notificationMaxBytes = envNumber(32768, 'DARSHAN_WS_NOTIFICATION_MAX_BYTES', 'HEXMON_WS_NOTIFICATION_MAX_BYTES')
+    }
+    if (envPresent('DARSHAN_REALTIME_WS_URL', 'HEXMON_REALTIME_WS_URL')) {
+      realtime.wsUrl = this.normalizeUrl(envValue('DARSHAN_REALTIME_WS_URL', 'HEXMON_REALTIME_WS_URL'))
+    }
+    if (Object.keys(realtime).length > 0) overrides.realtime = realtime as AppConfig['realtime']
+
+    const intervals: Partial<AppConfig['intervals']> = {}
+    if (envPresent('DARSHAN_INTERVAL_HEARTBEAT_MS', 'HEXMON_INTERVAL_HEARTBEAT_MS')) {
+      intervals.heartbeatMs = envNumber(30000, 'DARSHAN_INTERVAL_HEARTBEAT_MS', 'HEXMON_INTERVAL_HEARTBEAT_MS')
+    }
+    if (envPresent('DARSHAN_INTERVAL_COMMAND_POLL_MS', 'HEXMON_INTERVAL_COMMAND_POLL_MS')) {
+      intervals.commandPollMs = envNumber(5000, 'DARSHAN_INTERVAL_COMMAND_POLL_MS', 'HEXMON_INTERVAL_COMMAND_POLL_MS')
+    }
+    if (envPresent('DARSHAN_INTERVAL_SCHEDULE_POLL_MS', 'HEXMON_INTERVAL_SCHEDULE_POLL_MS')) {
+      intervals.schedulePollMs = envNumber(300000, 'DARSHAN_INTERVAL_SCHEDULE_POLL_MS', 'HEXMON_INTERVAL_SCHEDULE_POLL_MS')
+    }
+    if (envPresent('DARSHAN_INTERVAL_DEFAULT_MEDIA_POLL_MS', 'HEXMON_INTERVAL_DEFAULT_MEDIA_POLL_MS')) {
+      intervals.defaultMediaPollMs = envNumber(300000, 'DARSHAN_INTERVAL_DEFAULT_MEDIA_POLL_MS', 'HEXMON_INTERVAL_DEFAULT_MEDIA_POLL_MS')
+    }
+    if (envPresent('DARSHAN_INTERVAL_HEALTH_CHECK_MS', 'HEXMON_INTERVAL_HEALTH_CHECK_MS')) {
+      intervals.healthCheckMs = envNumber(60000, 'DARSHAN_INTERVAL_HEALTH_CHECK_MS', 'HEXMON_INTERVAL_HEALTH_CHECK_MS')
+    }
+    if (envPresent('DARSHAN_INTERVAL_SCREENSHOT_MS', 'HEXMON_INTERVAL_SCREENSHOT_MS')) {
+      intervals.screenshotMs = envNumber(30000, 'DARSHAN_INTERVAL_SCREENSHOT_MS', 'HEXMON_INTERVAL_SCREENSHOT_MS')
+    }
+    if (Object.keys(intervals).length > 0) overrides.intervals = intervals as AppConfig['intervals']
+
+    if (envPresent('DARSHAN_CACHE_MAX_BYTES', 'HEXMON_CACHE_MAX_BYTES')) {
+      overrides.cache = {
+        maxBytes: envNumber(10 * 1024 * 1024 * 1024, 'DARSHAN_CACHE_MAX_BYTES', 'HEXMON_CACHE_MAX_BYTES'),
+      } as AppConfig['cache']
+    }
+
+    const pairing: AppConfig['pairing'] = {}
+    if (envPresent('DARSHAN_PAIRING_OFFLINE_VALIDATION_GRACE_MS', 'SIGNHEX_PAIRING_OFFLINE_VALIDATION_GRACE_MS')) {
+      pairing.offlineValidationGraceMs = envNumber(
+        7 * 24 * 60 * 60 * 1000,
+        'DARSHAN_PAIRING_OFFLINE_VALIDATION_GRACE_MS',
+        'SIGNHEX_PAIRING_OFFLINE_VALIDATION_GRACE_MS'
+      )
+    }
+    if (envPresent('DARSHAN_PAIRING_BACKEND_FIRST_ROLLOUT_MODE', 'SIGNHEX_PAIRING_BACKEND_FIRST_ROLLOUT_MODE')) {
+      pairing.backendFirstRolloutMode = envFlag(
+        true,
+        'DARSHAN_PAIRING_BACKEND_FIRST_ROLLOUT_MODE',
+        'SIGNHEX_PAIRING_BACKEND_FIRST_ROLLOUT_MODE'
+      )
+    }
+    if (Object.keys(pairing).length > 0) overrides.pairing = pairing
+
+    const duplicateIdentity: AppConfig['duplicateIdentity'] = {}
+    if (envPresent('DARSHAN_DUPLICATE_IDENTITY_DETECTION_ENABLED', 'SIGNHEX_DUPLICATE_IDENTITY_DETECTION_ENABLED')) {
+      duplicateIdentity.enabled = envFlag(
+        true,
+        'DARSHAN_DUPLICATE_IDENTITY_DETECTION_ENABLED',
+        'SIGNHEX_DUPLICATE_IDENTITY_DETECTION_ENABLED'
+      )
+    }
+    if (duplicateIdentityEnforcement === 'block' || duplicateIdentityEnforcement === 'warn') {
+      duplicateIdentity.enforcement = duplicateIdentityEnforcement
+    }
+    if (Object.keys(duplicateIdentity).length > 0) overrides.duplicateIdentity = duplicateIdentity
+
+    const diagnostics: AppConfig['diagnostics'] = {}
+    if (envPresent('DARSHAN_DIAGNOSTICS_SHOW_ENVIRONMENT_IDENTITY', 'SIGNHEX_DIAGNOSTICS_SHOW_ENVIRONMENT_IDENTITY')) {
+      diagnostics.showEnvironmentIdentity = envFlag(
+        true,
+        'DARSHAN_DIAGNOSTICS_SHOW_ENVIRONMENT_IDENTITY',
+        'SIGNHEX_DIAGNOSTICS_SHOW_ENVIRONMENT_IDENTITY'
+      )
+    }
+    if (Object.keys(diagnostics).length > 0) overrides.diagnostics = diagnostics
+
+    return overrides
   }
 
   private normalizeConfig(config: AppConfig): AppConfig {
@@ -305,6 +488,9 @@ export class ConfigManager {
 
     return {
       ...config,
+      environment: {
+        ...config.environment,
+      },
       apiBase,
       wsUrl,
       runtime: {
@@ -337,6 +523,17 @@ export class ConfigManager {
         allowRemoteAccess,
         bindAddress,
         port,
+      },
+      pairing: {
+        offlineValidationGraceMs: Math.max(config.pairing?.offlineValidationGraceMs ?? 7 * 24 * 60 * 60 * 1000, 0),
+        backendFirstRolloutMode: config.pairing?.backendFirstRolloutMode !== false,
+      },
+      duplicateIdentity: {
+        enabled: config.duplicateIdentity?.enabled !== false,
+        enforcement: config.duplicateIdentity?.enforcement === 'block' ? 'block' : 'warn',
+      },
+      diagnostics: {
+        showEnvironmentIdentity: config.diagnostics?.showEnvironmentIdentity !== false,
       },
     }
   }
@@ -371,6 +568,7 @@ export class ConfigManager {
   private cloneConfig(config: AppConfig): AppConfig {
     return {
       ...config,
+      environment: config.environment ? { ...config.environment } : undefined,
       runtime: { ...config.runtime },
       realtime: config.realtime ? { ...config.realtime } : undefined,
       mtls: { ...config.mtls },
@@ -380,6 +578,9 @@ export class ConfigManager {
       power: { ...config.power },
       security: { ...config.security, allowedDomains: [...config.security.allowedDomains] },
       observability: { ...config.observability },
+      pairing: config.pairing ? { ...config.pairing } : undefined,
+      duplicateIdentity: config.duplicateIdentity ? { ...config.duplicateIdentity } : undefined,
+      diagnostics: config.diagnostics ? { ...config.diagnostics } : undefined,
     }
   }
 
@@ -429,6 +630,18 @@ export class ConfigManager {
 
   public getConfigPath(): string {
     return this.configPath
+  }
+
+  public getFileConfigDiagnostics(): PlayerConfigFileDiagnostics {
+    return {
+      configFile: { ...this.fileConfigDiagnostics.configFile },
+      profile: { ...this.fileConfigDiagnostics.profile },
+      mappedConfigKeys: [...this.fileConfigDiagnostics.mappedConfigKeys],
+    }
+  }
+
+  public getRedactedRuntimeConfigSummary() {
+    return buildRedactedPlayerConfigSummary(this.config, this.fileConfigDiagnostics)
   }
 
   public validateConfig(): { valid: boolean; errors: string[] } {

@@ -1,6 +1,6 @@
 # On-Prem Config Architecture
 
-Status: CONFIG-1 backend JSON loader implemented; player/CMS loaders pending
+Status: CONFIG-1 backend JSON loader and CONFIG-2 player JSON alignment implemented; CMS loader pending
 Last updated: 2026-06-16
 Owner: Codex
 
@@ -15,14 +15,14 @@ This architecture separates:
 - examples in git with no real credentials
 - site-specific config outside git
 
-CONFIG-1 added an optional backend JSON config loader only. Existing env vars remain valid and override config file values. Player and CMS loader changes remain future work.
+CONFIG-1 added an optional backend JSON config loader. CONFIG-2 added an optional player-specific JSON site config loader. Existing env vars and existing player runtime config files remain valid and override site config values where supported. CMS runtime config changes remain future work.
 
 ## Current State
 
 | App | Current config pattern | Notes |
 |---|---|---|
 | `darshan-server` | Zod-validated env schema in `darshan-server/src/config/index.ts` | Large env surface contains secrets, URLs, ports, labels, feature flags, realtime tuning, observability, duplicate identity settings, and command lifecycle values. |
-| `darshan-player` | JSON config plus env overrides in `darshan-player/src/common/config.ts` | Already close to the target pattern. Env aliases support legacy `HEXMON_*` and `SIGNAGE_*` names. |
+| `darshan-player` | Existing runtime JSON config plus optional player-specific site JSON config in `darshan-player/src/common/config.ts` | CONFIG-2 adds `DARSHAN_PLAYER_CONFIG_FILE` / `SIGNHEX_PLAYER_CONFIG_FILE` for non-secret deployment config. Existing `DARSHAN_CONFIG_PATH`, `SIGNAGE_CONFIG_PATH`, and `HEXMON_CONFIG_PATH` runtime config behavior remains compatible. |
 | `darshan-cms` | Vite build-time env in `darshan-cms/src/api/apiClient.ts` and socket/theme components | Backend/socket URLs are baked into the bundle today. Later phases should move non-secret CMS runtime config to a served JSON file. |
 | deploy/observability | `.env.example` and YAML assets | Observability endpoints, exporters, and dashboard config are environment-specific and should be generated from site config. |
 
@@ -63,6 +63,8 @@ Recommended selectors:
 | `DARSHAN_CONFIG_FILE` | Preferred backend JSON config file selector for CONFIG-1. | No, but may reveal filesystem layout. |
 | `SIGNHEX_CONFIG_FILE` | Absolute path to the app config file. | No, but may reveal filesystem layout. |
 | `SIGNHEX_SECRETS_FILE` | Absolute path to a dotenv/secrets file loaded by the process manager. | Sensitive path |
+| `DARSHAN_PLAYER_CONFIG_FILE` | Preferred player CONFIG-2 JSON site config selector. | No, but may reveal filesystem layout. |
+| `SIGNHEX_PLAYER_CONFIG_FILE` | Player CONFIG-2 JSON site config selector alias. | No, but may reveal filesystem layout. |
 | `DARSHAN_CONFIG_PATH` | Existing player config path override. | No, but may reveal filesystem layout. |
 
 Selectors can be added without removing existing env vars.
@@ -75,6 +77,15 @@ CONFIG-1 backend selector rules:
 - if both point to different files, the backend fails fast.
 - `DARSHAN_ENV` is preferred over `SIGNHEX_ENV`; both must match if both are set.
 - if neither profile selector is set, `NODE_ENV` remains the fallback label source.
+
+CONFIG-2 player selector rules:
+
+- `DARSHAN_PLAYER_CONFIG_FILE` is preferred for player site config.
+- `SIGNHEX_PLAYER_CONFIG_FILE` is accepted when `DARSHAN_PLAYER_CONFIG_FILE` is absent.
+- if both player selectors point to the same resolved path, the player loads that file.
+- if both player selectors point to different files, the player fails fast.
+- generic `DARSHAN_CONFIG_FILE` / `SIGNHEX_CONFIG_FILE` are not used by the player in CONFIG-2 to avoid accidentally loading backend config.
+- existing `DARSHAN_CONFIG_PATH`, `SIGNAGE_CONFIG_PATH`, and `HEXMON_CONFIG_PATH` keep selecting the runtime config file that may contain local runtime state.
 
 ## Precedence
 
@@ -133,6 +144,7 @@ Each app should validate config at startup:
 - keep existing env defaults during migration
 - print a redacted config summary for support diagnostics
 - never print secret values, private keys, cert PEM, raw tokens, or passwords
+- redact credentialed URL userinfo, query strings, and fragments from player diagnostics; credentialed URLs are still sensitive and should stay in env/secrets rather than committed site config
 
 The backend already uses Zod. Later phases should reuse that validation path rather than adding a second schema library unless the air-gapped package mirror impact is approved.
 
@@ -177,19 +189,35 @@ Set `MINIO_SECRET_KEY` and other credential values in the site secrets file; do 
 
 ## Player Proposed Shape
 
-The player already reads a JSON config file. Keep that pattern:
+CONFIG-2 player site config is JSON-only and uses a top-level `player` object:
 
 ```json
 {
-  "apiBase": "http://192.168.0.5:3000",
-  "wsUrl": "ws://192.168.0.5:3000/socket.io/",
-  "runtime": { "mode": "production" },
-  "cache": { "maxBytes": 5368709120 },
-  "observability": { "enabled": true, "port": 19100 }
+  "player": {
+    "environment": {
+      "name": "onprem-qa",
+      "deploymentId": "qa-lab-1",
+      "expectedServerId": "backend-a"
+    },
+    "backend": {
+      "baseUrl": "http://192.168.0.5:3000",
+      "socketIoUrl": "http://192.168.0.5:3000/socket.io/"
+    },
+    "pairing": {
+      "offlineValidationGraceMs": 604800000,
+      "backendFirstRolloutMode": true
+    },
+    "duplicateIdentity": {
+      "enabled": true,
+      "enforcement": "warn"
+    }
+  }
 }
 ```
 
-Identity-bound secrets and certificates remain in the runtime storage paths documented in the player reset runbook, not in committed examples.
+Existing runtime config files selected by `DARSHAN_CONFIG_PATH` are still supported for compatibility. Identity-bound secrets, device IDs, certificates, pairing validation metadata, install/runtime session IDs, proof-of-play queues, request queues, media cache, and snapshot/default-media state remain runtime state in the storage paths documented in the player reset runbook, not in committed site config examples.
+
+Player `--pairing-status` and doctor diagnostics redact URL-like fields before printing support output. The runtime API/socket URLs are not changed by redaction; only diagnostic output removes username/password userinfo, query strings, and URL fragments.
 
 ## CMS Proposed Shape
 
@@ -215,6 +243,7 @@ This avoids rebuilding the CMS bundle just to change on-prem backend/CMS hostnam
 
 - Existing `.env` files continue to work.
 - Backend JSON config file support is opt-in through `DARSHAN_CONFIG_FILE` or `SIGNHEX_CONFIG_FILE`.
+- Player JSON site config support is opt-in through `DARSHAN_PLAYER_CONFIG_FILE` or `SIGNHEX_PLAYER_CONFIG_FILE`.
 - Env vars override config files.
 - Deprecated aliases should warn only after docs and examples are available.
 - No production deployment should break because a site has not migrated yet.

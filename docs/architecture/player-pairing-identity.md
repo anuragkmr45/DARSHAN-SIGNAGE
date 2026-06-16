@@ -83,9 +83,15 @@ The backend exposes safe labels in pairing status:
 
 Configured through:
 
-- `SIGNHEX_ENVIRONMENT_NAME`
-- `SIGNHEX_DEPLOYMENT_ID`
-- `SIGNHEX_SERVER_ID`
+- backend CONFIG-1 JSON config or env:
+  - `SIGNHEX_ENVIRONMENT_NAME`
+  - `SIGNHEX_DEPLOYMENT_ID`
+  - `SIGNHEX_SERVER_ID`
+- player CONFIG-2 JSON site config or env:
+  - `DARSHAN_ENVIRONMENT_NAME`
+  - `SIGNHEX_ENVIRONMENT_NAME`
+  - `DARSHAN_DEPLOYMENT_ID`
+  - `SIGNHEX_DEPLOYMENT_ID`
 
 Players may send optional headers:
 
@@ -95,6 +101,8 @@ Players may send optional headers:
 - `x-darshan-deployment-id`
 
 If present and mismatched, pairing status returns `409 ENVIRONMENT_MISMATCH`. Absence of these headers remains backward compatible for older players.
+
+The player environment/deployment headers are diagnostic guardrails, not identity authority. They do not replace device authentication, certificate validation, backend pairing-status truth, or CMS visibility checks.
 
 ## Phase Boundaries
 

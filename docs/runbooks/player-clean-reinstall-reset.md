@@ -31,6 +31,7 @@ Default runtime root:
 
 Supported overrides:
 
+- `DARSHAN_PLAYER_CONFIG_FILE` and `SIGNHEX_PLAYER_CONFIG_FILE` for optional non-secret player site config.
 - `DARSHAN_RUNTIME_ROOT`
 - `DARSHAN_CONFIG_PATH`
 - `DARSHAN_CACHE_PATH`
@@ -53,6 +54,10 @@ Identity-bound files:
 - cert files: `client.crt`, `client.key`, `ca.crt`, `client.csr`, `cert-meta.json`.
 - snapshot metadata: `cache/last-snapshot.json`.
 - default media metadata: `cache/default-media.json`.
+
+Not identity-bound:
+
+- CONFIG-2 player site config selected by `DARSHAN_PLAYER_CONFIG_FILE` / `SIGNHEX_PLAYER_CONFIG_FILE`. It contains non-secret deployment settings such as backend URL and environment labels and is not removed by `reset-pairing`.
 
 Preserved by default:
 

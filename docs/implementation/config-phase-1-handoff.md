@@ -4,7 +4,7 @@
 
 CONFIG-1 adds an optional backend JSON config loader for a focused non-secret config subset. Existing `.env` behavior remains compatible: if no config file selector is set, backend behavior is unchanged; if a config file is set, env vars override config-file values.
 
-No player or CMS runtime config refactor was done.
+No player or CMS runtime config refactor was done in CONFIG-1. Post-CONFIG-2 note: player-specific JSON site config alignment has since been implemented; CMS runtime config remains pending.
 
 ## Scope Implemented
 
@@ -18,7 +18,7 @@ No player or CMS runtime config refactor was done.
 
 ## Out of Scope
 
-- Player config loader refactor
+- Player config loader refactor, later completed in CONFIG-2
 - CMS runtime config loader
 - YAML support
 - secrets-file autoloading
@@ -155,7 +155,7 @@ Local listeners were present on ports including `3000`, `8080`, `9000`, `9001`, 
 - Backend JSON loader is new and needs Node 20 validation.
 - YAML examples remain docs/target architecture only.
 - CMS still uses Vite build-time env for endpoint config.
-- Player config remains unchanged.
+- Player config was unchanged in CONFIG-1; CONFIG-2 later added opt-in player-specific JSON site config alignment.
 - Real site config runtime evidence has not run.
 
 ## Rollback Plan
@@ -171,13 +171,13 @@ If needed, revert:
 
 ## Next Phase Readiness
 
-CONFIG-2 can start with conditions after independent verification:
+CONFIG-2 has started and completed locally. Independent CONFIG-2 verification can start with conditions:
 
 - backend CONFIG-1 tests stay green
 - no production readiness is claimed
 - Node 20 and runtime evidence remain blockers
 
-Recommended CONFIG-2 scope: player config alignment only, without changing CMS runtime config yet.
+Next recommended scope after CONFIG-2 verification: CONFIG-3 CMS runtime config alignment.
 
 ## Recommendation
 

@@ -30,7 +30,7 @@ Ghost Pairing GP-1 through GP-6 have local automated evidence and remain APPROVE
 | Environment mismatch smoke | BLOCKED_BY_ENV | No safe QA target for mismatch configuration. |
 | Runtime no-secret review | BLOCKED_BY_ENV | No browser network artifacts, runtime logs, player CLI output, or screenshots. |
 | Node 20 validation | BLOCKED_BY_ENV | Local Node is `v24.12.0`; supported target is `>=20 <21`. |
-| Config architecture | CONFIG_BACKEND_JSON_LOADER_READY / CMS_PLAYER_LOADERS_PENDING | CONFIG-1 added optional backend JSON config loading with env override compatibility. Player/CMS config migration remains future work. |
+| Config architecture | CONFIG_BACKEND_JSON_LOADER_READY / CONFIG_PLAYER_JSON_ALIGNMENT_READY / CMS_RUNTIME_CONFIG_PENDING | CONFIG-1 added optional backend JSON config loading with env override compatibility. CONFIG-2 added optional player-specific JSON site config loading while preserving runtime config behavior. CMS runtime config migration remains future work. |
 
 ## Local Test Status
 
@@ -56,9 +56,9 @@ This confirms the reporting fix is still green locally, but it is not a substitu
 - Runtime no-secret review has not run.
 - Node 20 build/test validation has not run.
 - On-prem media/Valkey/Prometheus/proxy evidence is unavailable.
-- Config runtime validation has not run with a site-specific config profile.
+- Config runtime validation has not run with site-specific backend/player config profiles.
 - CMS optional runtime config loader is pending; existing CMS `VITE_*` env remains the current path.
-- Backend config runtime validation with a real on-prem site config has not run.
+- Backend/player config runtime validation with real on-prem site config has not run.
 
 ## Required Inputs Before Approval
 

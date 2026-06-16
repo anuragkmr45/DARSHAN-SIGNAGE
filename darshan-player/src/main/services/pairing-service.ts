@@ -194,6 +194,14 @@ export class PairingService {
 
     const httpClient = getHttpClient()
     const installInstanceId = await this.getInstallInstanceId()
+    const config = getConfigManager().getConfig()
+    const environmentHeaders: Record<string, string> = {}
+    if (config.environment?.name) {
+      environmentHeaders['x-signhex-environment-name'] = config.environment.name
+    }
+    if (config.environment?.deploymentId) {
+      environmentHeaders['x-signhex-deployment-id'] = config.environment.deploymentId
+    }
     const response = await httpClient.get<BackendPairingStatusResponse>(
       `/api/v1/device/${encodeURIComponent(deviceId)}/pairing-status`,
       {
@@ -202,6 +210,7 @@ export class PairingService {
           'x-signhex-install-instance-id': installInstanceId,
           'x-signhex-runtime-session-id': this.getRuntimeSessionId(),
           'x-signhex-player-version': this.getDeviceInfo().appVersion,
+          ...environmentHeaders,
         },
       }
     )

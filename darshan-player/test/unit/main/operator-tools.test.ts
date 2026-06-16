@@ -11,6 +11,10 @@ const ENV_KEYS = [
   'DARSHAN_MTLS_CERT_PATH',
   'DARSHAN_MTLS_KEY_PATH',
   'DARSHAN_MTLS_CA_PATH',
+  'DARSHAN_API_BASE_URL',
+  'DARSHAN_WS_URL',
+  'DARSHAN_PLAYER_CONFIG_FILE',
+  'SIGNHEX_PLAYER_CONFIG_FILE',
   'HEXMON_RUNTIME_ROOT',
   'HEXMON_CONFIG_PATH',
   'HEXMON_CACHE_PATH',
@@ -158,6 +162,10 @@ describe('operator reset tooling', () => {
   })
 
   it('reports pairing status with redacted session metadata', async () => {
+    process.env.DARSHAN_API_BASE_URL =
+      'https://diag-user:diag-pass@backend.internal:3000/api?token=diag-token#diag-fragment'
+    process.env.DARSHAN_WS_URL =
+      'wss://socket-user:socket-pass@backend.internal:3000/socket.io/?access_key=socket-key#socket-fragment'
     seedRuntime()
     const { pairingStatusForCli } = require('../../../src/main/services/operator-tools')
 
@@ -169,7 +177,17 @@ describe('operator reset tooling', () => {
     expect(payload.session.installInstanceSuffix).to.equal('...ve-value')
     expect(payload.session.runtimeSessionSuffix).to.be.a('string')
     expect(payload.duplicateIdentity.active).to.equal(true)
+    expect(payload.config.backend.apiBase).to.equal('https://backend.internal:3000/api')
+    expect(payload.config.backend.wsUrl).to.equal('wss://backend.internal:3000/socket.io')
     expect(serialized).not.to.contain('install-instance-sensitive-value')
+    expect(serialized).not.to.contain('diag-user')
+    expect(serialized).not.to.contain('diag-pass')
+    expect(serialized).not.to.contain('diag-token')
+    expect(serialized).not.to.contain('diag-fragment')
+    expect(serialized).not.to.contain('socket-user')
+    expect(serialized).not.to.contain('socket-pass')
+    expect(serialized).not.to.contain('socket-key')
+    expect(serialized).not.to.contain('socket-fragment')
   })
 
   it('generates a new runtime session id after process module reload', () => {

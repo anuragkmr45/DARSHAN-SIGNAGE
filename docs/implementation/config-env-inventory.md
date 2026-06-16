@@ -146,6 +146,10 @@ Legend:
 
 | Variable | Class | Default/current | Dev | QA | Prod | Recommendation | Risk |
 |---|---|---|---|---|---|---|---|
+| `DARSHAN_PLAYER_CONFIG_FILE` | NON_SECRET_CONFIG | unset | optional | optional | optional | CONFIG-2 preferred player JSON site config selector. | Low |
+| `SIGNHEX_PLAYER_CONFIG_FILE` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 player selector alias; keep compatibility. | Low |
+| `DARSHAN_ENV` | NON_SECRET_CONFIG | `NODE_ENV` fallback | optional | required | required | Shared environment/profile label selector; used by CONFIG-2 diagnostics. | Low |
+| `SIGNHEX_ENV` | LEGACY_ALIAS | unset | optional | optional | optional | Shared environment/profile alias; must match `DARSHAN_ENV` if both are set. | Low |
 | `DARSHAN_CONFIG_PATH` | NON_SECRET_CONFIG | platform path | optional | optional | optional | Keep as existing player selector. | Low |
 | `SIGNAGE_CONFIG_PATH` | LEGACY_ALIAS | unset | optional | optional | optional | Keep compatibility; deprecate later. | Low |
 | `HEXMON_CONFIG_PATH` | LEGACY_ALIAS | unset | optional | optional | optional | Keep compatibility; deprecate later. | Low |
@@ -161,6 +165,12 @@ Legend:
 | `DARSHAN_RUNTIME_MODE` | NON_SECRET_CONFIG | `production` | optional | required | required | Move to player config. | Low |
 | `DARSHAN_API_BASE_URL` | NON_SECRET_CONFIG | no default in prod | optional | required | required | Move to player config; env override remains. | High |
 | `DARSHAN_WS_URL` | NON_SECRET_CONFIG | derived from API base | optional | required | required | Move to player config; env override remains. | High |
+| `DARSHAN_ENVIRONMENT_NAME` | NON_SECRET_CONFIG | unset | optional | required | required | CONFIG-2 env override for player pairing-status environment header. | Low |
+| `SIGNHEX_ENVIRONMENT_NAME` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 environment-name alias. | Low |
+| `DARSHAN_DEPLOYMENT_ID` | NON_SECRET_CONFIG | unset | optional | required | required | CONFIG-2 env override for player pairing-status deployment header. | Low |
+| `SIGNHEX_DEPLOYMENT_ID` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 deployment-id alias. | Low |
+| `DARSHAN_EXPECTED_SERVER_ID` | NON_SECRET_CONFIG | unset | optional | optional | optional | CONFIG-2 diagnostics-only expected backend server label. | Low |
+| `SIGNHEX_EXPECTED_SERVER_ID` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 expected-server alias. | Low |
 | `DARSHAN_ALLOW_LOCALHOST` | FEATURE_FLAG | false in prod | optional | no | no | Keep dev/test env only. | Medium |
 | `DARSHAN_DEVICE_ID` | UNKNOWN_NEEDS_REVIEW | unset | test/operator | avoid | avoid | Avoid in prod except support override; can create identity confusion. | High |
 | `DARSHAN_REALTIME_PLAYER_ENABLED` | FEATURE_FLAG | true | optional | required | required | Move to player config. | Medium |
@@ -177,6 +187,16 @@ Legend:
 | `DARSHAN_MTLS_AUTO_RENEW` | FEATURE_FLAG | true | optional | required | required | Move to player config. | Medium |
 | `DARSHAN_MTLS_RENEW_BEFORE_DAYS` | RUNTIME_TUNING | `30` | optional | required | required | Move to player config. | Low |
 | `DARSHAN_CACHE_MAX_BYTES` | RUNTIME_TUNING | `5368709120` | optional | required | required | Move to player config. | Low |
+| `DARSHAN_PAIRING_OFFLINE_VALIDATION_GRACE_MS` | RUNTIME_TUNING | `604800000` | optional | required | required | CONFIG-2 env override for player offline validation grace; site config preferred. | Medium |
+| `SIGNHEX_PAIRING_OFFLINE_VALIDATION_GRACE_MS` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 offline grace alias. | Low |
+| `DARSHAN_PAIRING_BACKEND_FIRST_ROLLOUT_MODE` | FEATURE_FLAG | `true` | optional | required | required | CONFIG-2 env override; keep enabled for GP backend-first rollout safety. | Medium |
+| `SIGNHEX_PAIRING_BACKEND_FIRST_ROLLOUT_MODE` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 backend-first rollout alias. | Low |
+| `DARSHAN_DUPLICATE_IDENTITY_DETECTION_ENABLED` | FEATURE_FLAG | `true` | optional | required | required | CONFIG-2 env override; site config preferred. | Medium |
+| `SIGNHEX_DUPLICATE_IDENTITY_DETECTION_ENABLED` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 duplicate detection alias. | Low |
+| `DARSHAN_DUPLICATE_IDENTITY_ENFORCEMENT` | FEATURE_FLAG | `warn` | optional | required | required | CONFIG-2 env override; keep `warn` unless separately approved. | High |
+| `SIGNHEX_DUPLICATE_IDENTITY_ENFORCEMENT` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 enforcement alias. | Low |
+| `DARSHAN_DIAGNOSTICS_SHOW_ENVIRONMENT_IDENTITY` | FEATURE_FLAG | `true` | optional | required | required | CONFIG-2 diagnostic display flag; site config preferred. | Low |
+| `SIGNHEX_DIAGNOSTICS_SHOW_ENVIRONMENT_IDENTITY` | LEGACY_ALIAS | unset | optional | optional | optional | CONFIG-2 diagnostics flag alias. | Low |
 | `DARSHAN_CACHE_PREFETCH_CONCURRENCY` | RUNTIME_TUNING | `2` | optional | required | required | Move to player config. | Low |
 | `DARSHAN_CACHE_BANDWIDTH_BUDGET_MBPS` | RUNTIME_TUNING | unset | optional | optional | optional | Move to player config. | Low |
 | `DARSHAN_INTERVAL_*` | RUNTIME_TUNING | varied | optional | required | required | Move to player config. | Low |

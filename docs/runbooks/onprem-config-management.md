@@ -42,7 +42,7 @@ Player:
 /etc/darshan/player/secrets.env
 ```
 
-The player currently supports JSON config directly. The backend supports a focused JSON config file in CONFIG-1 through `DARSHAN_CONFIG_FILE` or `SIGNHEX_CONFIG_FILE`. CMS config-file loading is planned in a later CONFIG phase.
+The backend supports a focused JSON config file in CONFIG-1 through `DARSHAN_CONFIG_FILE` or `SIGNHEX_CONFIG_FILE`. The player supports a focused JSON site config file in CONFIG-2 through `DARSHAN_PLAYER_CONFIG_FILE` or `SIGNHEX_PLAYER_CONFIG_FILE`, while preserving the existing runtime config path behavior. CMS config-file loading is planned in a later CONFIG phase.
 
 ## Server Example
 
@@ -96,17 +96,47 @@ Until CMS runtime config is implemented, changing these values requires rebuildi
 
 ## Player Example
 
+CONFIG-2 player non-secret site config:
+
 ```json
 {
-  "apiBase": "http://10.20.0.20:3000",
-  "wsUrl": "ws://10.20.0.20:3000/socket.io/",
-  "runtime": {
-    "mode": "production"
+  "player": {
+    "environment": {
+      "name": "onprem-qa",
+      "deploymentId": "qa-site-a",
+      "expectedServerId": "backend-a"
+    },
+    "backend": {
+      "baseUrl": "http://10.20.0.20:3000",
+      "socketIoUrl": "http://10.20.0.20:3000/socket.io/"
+    },
+    "polling": {
+      "heartbeatMs": 30000,
+      "commandPollMs": 5000,
+      "snapshotPollMs": 300000,
+      "defaultMediaPollMs": 300000
+    },
+    "pairing": {
+      "offlineValidationGraceMs": 604800000,
+      "backendFirstRolloutMode": true
+    },
+    "duplicateIdentity": {
+      "enabled": true,
+      "enforcement": "warn"
+    }
   }
 }
 ```
 
-Install this as the player config file using the existing player config path mechanism. Do not store private keys or pairing credentials in committed config examples.
+Install this as the player site config file with:
+
+```text
+DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.qa.json
+```
+
+`SIGNHEX_PLAYER_CONFIG_FILE` is accepted as an alias. Existing `DARSHAN_CONFIG_PATH`, `SIGNAGE_CONFIG_PATH`, and `HEXMON_CONFIG_PATH` still select the local runtime config file for compatibility.
+
+Do not store private keys, certificates, device IDs, pairing credentials, pairing validation metadata, install/runtime session IDs, cache metadata, proof-of-play queues, request queues, or downloaded media in committed config examples.
 
 ## Local 192.168.0.5 Example
 
@@ -121,11 +151,12 @@ CONFIG-0 discovery found listeners on ports `3000`, `8080`, `9000`, `9001`, `909
 3. Verify file ownership and permissions.
 4. Load secrets through the process manager or container secret mechanism.
 5. For backend CONFIG-1, set `DARSHAN_CONFIG_FILE=/etc/darshan/server/config.qa.json` if using a config file.
-6. Start backend first.
-7. Validate backend health and `/api/v1/device/:deviceId/pairing-status`.
-8. Start CMS.
-9. Start packaged player.
-10. Record redacted config path and environment identity in QA evidence.
+6. For player CONFIG-2, set `DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.qa.json` if using a player site config file.
+7. Start backend first.
+8. Validate backend health and `/api/v1/device/:deviceId/pairing-status`.
+9. Start CMS.
+10. Start packaged player.
+11. Record redacted config path and environment identity in QA evidence.
 
 ## Redaction Rules
 
@@ -140,6 +171,7 @@ Never print or attach:
 - full certificate serials
 - signed media URLs
 - raw hardware identifiers
+- credentialed URLs or URL query strings/fragments from player/backend/CMS config
 
 It is acceptable to show:
 
@@ -149,6 +181,8 @@ It is acceptable to show:
 - server id
 - public/internal hostnames and ports when approved for the QA evidence record
 - certificate suffix/hash if already redacted by the application
+
+Player `--pairing-status` and doctor output redact URL username/password userinfo, query strings, and fragments from URL-like config diagnostics. Operators should still review screenshots, logs, and support bundles before sharing because other tools or shell history may contain the original credentialed values.
 
 ## Rollback
 
@@ -160,7 +194,7 @@ If a config migration breaks startup:
 4. confirm health checks
 5. keep the failed config file for review, with secrets removed
 
-Do not delete player runtime app-data during config rollback unless the operator is intentionally performing a pairing reset.
+For player CONFIG-2 rollback, unset `DARSHAN_PLAYER_CONFIG_FILE` / `SIGNHEX_PLAYER_CONFIG_FILE`. The existing runtime config path remains available. Do not delete player runtime app-data during config rollback unless the operator is intentionally performing a pairing reset.
 
 ## Human Decisions Required
 

@@ -15,7 +15,7 @@ import { getSnapshotManager } from './snapshot-manager'
 import { getDefaultMediaService } from './settings/default-media-service'
 
 const logger = getLogger('operator-tools')
-const PAIRING_VALIDATION_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
+const DEFAULT_PAIRING_VALIDATION_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
 
 export interface ResetPairingCliOptions {
   reason?: string
@@ -55,6 +55,10 @@ function redactConfigForSupport(config: AppConfig) {
       caPath: '[REDACTED]',
     },
   }
+}
+
+function getOfflineValidationGraceMs(config: AppConfig): number {
+  return config.pairing?.offlineValidationGraceMs ?? DEFAULT_PAIRING_VALIDATION_OFFLINE_GRACE_MS
 }
 
 function redactIdentifier(value?: string | null, suffixLength = 8): string | null {
@@ -306,14 +310,15 @@ export async function runDoctor() {
       cacheExists: pathExists(config.cache.path),
       certPaths: certificatePaths,
     },
-        pairing: {
-          deviceIdPresent: Boolean(pairingService.getDeviceId()),
-          deviceIdSuffix: redactIdentifier(pairingService.getDeviceId()),
-          installInstanceSuffix: redactIdentifier(getDeviceStateStore().getState().installInstanceId),
-          runtimeSessionSuffix: redactIdentifier(pairingService.getRuntimeSessionId()),
-          paired: pairingService.isPairedDevice(),
-          identityHealth: pairingService.getStoredIdentityHealth(),
-          certificateMetadata: redactCertificateMetadata(certificateMetadata),
+    config: configManager.getRedactedRuntimeConfigSummary(),
+    pairing: {
+      deviceIdPresent: Boolean(pairingService.getDeviceId()),
+      deviceIdSuffix: redactIdentifier(pairingService.getDeviceId()),
+      installInstanceSuffix: redactIdentifier(getDeviceStateStore().getState().installInstanceId),
+      runtimeSessionSuffix: redactIdentifier(pairingService.getRuntimeSessionId()),
+      paired: pairingService.isPairedDevice(),
+      identityHealth: pairingService.getStoredIdentityHealth(),
+      certificateMetadata: redactCertificateMetadata(certificateMetadata),
     },
     network: diagnostics,
     autostart: getAutostartStatus(),
@@ -360,7 +365,7 @@ export async function pairingStatusForCli(): Promise<number> {
   const deviceState = getDeviceStateStore().getState()
   const lastValidatedAt = deviceState.lastPairingValidatedAt ? Date.parse(deviceState.lastPairingValidatedAt) : NaN
   const offlineGraceExpiresAt = Number.isFinite(lastValidatedAt)
-    ? new Date(lastValidatedAt + PAIRING_VALIDATION_OFFLINE_GRACE_MS).toISOString()
+    ? new Date(lastValidatedAt + getOfflineValidationGraceMs(config)).toISOString()
     : null
   const identityPaths = getIdentityBoundPaths()
 
@@ -380,7 +385,9 @@ export async function pairingStatusForCli(): Promise<number> {
             deviceState.lastValidatedDeviceId === pairingService.getDeviceId(),
           offlineGraceExpiresAt,
           serverIdentity: deviceState.lastValidatedServerIdentity || null,
+          offlineGraceMs: getOfflineValidationGraceMs(config),
         },
+        config: configManager.getRedactedRuntimeConfigSummary(),
         duplicateIdentity: deviceState.duplicateIdentity
           ? {
               ...deviceState.duplicateIdentity,

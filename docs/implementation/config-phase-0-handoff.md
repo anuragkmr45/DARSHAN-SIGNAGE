@@ -144,6 +144,8 @@ CONFIG-1 implements optional backend config-file loading with no behavior change
 - add redacted config summary
 - add tests for precedence and secret redaction
 
+Post-CONFIG-2 note: backend CONFIG-1 and player CONFIG-2 loaders are now implemented with compatibility preserved. CMS runtime config remains a later phase.
+
 ## Recommendation
 
 APPROVE_CONFIG_PLAN with conditions:

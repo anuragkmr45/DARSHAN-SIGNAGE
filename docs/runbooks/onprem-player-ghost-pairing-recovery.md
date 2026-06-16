@@ -129,9 +129,11 @@ Use CMS Pairing Health and player pairing status to compare:
 - environment
 - deployment id
 - server id
-- backend URL from player config
+- backend URL from the CONFIG-2 player site config or existing runtime config
 
 If the player and CMS point to different backends, do not reset first. Correct the player backend configuration, restart, and validate status. Reset only if the identity remains stale after the environment is corrected.
+
+`reset-pairing` clears identity-bound local state, not the non-secret player site config selected by `DARSHAN_PLAYER_CONFIG_FILE` or `SIGNHEX_PLAYER_CONFIG_FILE`.
 
 ## DB Restore Or Manual Cleanup
 

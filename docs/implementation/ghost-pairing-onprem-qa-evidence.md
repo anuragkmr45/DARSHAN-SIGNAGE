@@ -42,6 +42,7 @@ CONFIG-0 local discovery:
 |---|---|
 | Local example profile | `docs/examples/onprem-local-192.168.0.5.config.example.yaml` created as non-secret example only |
 | Backend CONFIG-1 JSON examples | `docs/examples/backend-config.onprem-local-192.168.0.5.example.json`, `docs/examples/backend-config.qa.example.json`, `docs/examples/backend-config.production.example.json` |
+| Player CONFIG-2 JSON examples | `docs/examples/player-config.onprem-local-192.168.0.5.example.json`, `docs/examples/player-config.qa.example.json`, `docs/examples/player-config.production.example.json` |
 | Listening ports observed | `3000`, `8080`, `9000`, `9001`, `9090`, `3001`, `6379`, `5432` |
 | `http://192.168.0.5:3000/api/v1/health` | connection failed |
 | `http://192.168.0.5:9000/minio/health/live` | connection failed |
@@ -91,4 +92,4 @@ No browser screenshots, packaged player logs, CMS network captures, revoke audit
 
 ## Recommendation
 
-BLOCKED_BY_ENV. Do not approve production. Provide the missing on-prem QA endpoint/configuration inputs, Node 20 runtime, packaged player artifact target, test machines or isolated runtime roots, and a site-specific backend JSON config profile, then rerun the browser/on-prem QA checklist.
+BLOCKED_BY_ENV. Do not approve production. Provide the missing on-prem QA endpoint/configuration inputs, Node 20 runtime, packaged player artifact target, test machines or isolated runtime roots, and site-specific backend/player JSON config profiles, then rerun the browser/on-prem QA checklist.

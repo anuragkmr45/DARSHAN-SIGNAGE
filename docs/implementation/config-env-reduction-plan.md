@@ -1,6 +1,6 @@
 # Config / Env Reduction Plan
 
-Status: CONFIG-0 plan
+Status: CONFIG-2 player alignment implemented with backend CONFIG-1 ready; CMS runtime config pending
 Last updated: 2026-06-16
 
 ## Goal
@@ -42,13 +42,20 @@ CONFIG-1 supports JSON only. YAML remains a target architecture option if a pars
 
 ## Phase 3: Player Config Loader Alignment
 
+Status: implemented for a focused JSON-only player subset in CONFIG-2.
+
 Scope:
 
 - keep existing player JSON config support
-- add `DARSHAN_CONFIG_FILE` or document `DARSHAN_CONFIG_PATH` as the supported selector
-- ensure pairing/reset diagnostics show config path without secrets
+- add player-specific `DARSHAN_PLAYER_CONFIG_FILE`
+- keep `SIGNHEX_PLAYER_CONFIG_FILE` as alias
+- avoid generic `DARSHAN_CONFIG_FILE` fallback so backend config cannot be loaded as player config
+- ensure pairing/reset diagnostics show redacted config summary without secrets
+- redact URL-like diagnostics fields so username/password userinfo, query strings, and fragments from env/runtime URLs are not printed
 - keep env overrides and legacy aliases
 - add tests for precedence and reset behavior
+
+CONFIG-2 supports JSON only. YAML remains target architecture pending an approved parser in the air-gapped dependency mirror.
 
 ## Phase 4: CMS Runtime Config
 
@@ -88,6 +95,7 @@ Production readiness stays blocked until this phase produces runtime evidence.
 - absent config file means current behavior
 - examples must not contain real secrets
 - private key paths and secret file paths are treated as sensitive
+- credentialed URLs should be treated as sensitive even though player diagnostics redact userinfo, query strings, and fragments
 - default duplicate identity enforcement remains `warn`
 - polling, heartbeat, and offline fallback remain unchanged
 
@@ -104,12 +112,15 @@ Backend loader order should be:
 Player loader order should stay close to the existing JSON config manager:
 
 1. built-in defaults
-2. config file
-3. env overrides
-4. command-line/operator overrides where present
+2. existing runtime config selected by `DARSHAN_CONFIG_PATH` / `SIGNAGE_CONFIG_PATH` / `HEXMON_CONFIG_PATH`
+3. optional player site config selected by `DARSHAN_PLAYER_CONFIG_FILE` / `SIGNHEX_PLAYER_CONFIG_FILE`
+4. env overrides
+5. command-line/operator overrides where present
+
+Runtime identity, certificates, pairing state, install/session IDs, cache metadata, proof-of-play queues, request queues, and media files are not moved into site config.
 
 CMS should avoid requiring a rebuild for non-secret endpoint changes once runtime config exists.
 
 ## Status
 
-CONFIG-0 is documentation and inventory only. CONFIG-1 adds backend JSON config loading. Player and CMS loader work is intentionally deferred.
+CONFIG-0 is documentation and inventory only. CONFIG-1 adds backend JSON config loading. CONFIG-2 adds optional player-specific JSON site config alignment. CMS runtime config remains intentionally deferred.

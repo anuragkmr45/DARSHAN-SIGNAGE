@@ -27,10 +27,13 @@ cms:
   runtimeConfigPath: /etc/darshan/cms/config.local.json
 
 player:
-  apiBase: http://192.168.0.5:3000
-  wsUrl: ws://192.168.0.5:3000/socket.io/
-  runtimeMode: production
-  configPath: /etc/darshan/player/config.local.json
+  # CONFIG-2 runtime support is JSON-only. Use
+  # docs/examples/player-config.onprem-local-192.168.0.5.example.json as the
+  # directly loadable player site config.
+  siteConfigPath: /etc/darshan/player/config.local.json
+  siteConfigSelector: DARSHAN_PLAYER_CONFIG_FILE
+  backendBaseUrl: http://192.168.0.5:3000
+  socketIoUrl: http://192.168.0.5:3000/socket.io/
   offlinePlaybackEnabled: true
   pollingFallbackEnabled: true
 

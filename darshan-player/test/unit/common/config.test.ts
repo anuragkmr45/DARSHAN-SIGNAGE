@@ -18,6 +18,8 @@ describe('Config Manager', () => {
   let originalDARSHANApiBase: string | undefined
   let originalDARSHANWsUrl: string | undefined
   let originalSignageAllowLocalhost: string | undefined
+  let originalDarshanPlayerConfigFile: string | undefined
+  let originalSignhexPlayerConfigFile: string | undefined
 
   beforeEach(() => {
     originalNodeEnv = process.env.NODE_ENV
@@ -27,6 +29,10 @@ describe('Config Manager', () => {
     originalDARSHANApiBase = process.env.HEXMON_API_BASE
     originalDARSHANWsUrl = process.env.HEXMON_WS_URL
     originalSignageAllowLocalhost = process.env.SIGNAGE_ALLOW_LOCALHOST
+    originalDarshanPlayerConfigFile = process.env.DARSHAN_PLAYER_CONFIG_FILE
+    originalSignhexPlayerConfigFile = process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
     tempDir = createTempDir('config-test-')
     configPath = path.join(tempDir, 'config.json')
 
@@ -91,6 +97,16 @@ describe('Config Manager', () => {
       delete process.env.SIGNAGE_ALLOW_LOCALHOST
     } else {
       process.env.SIGNAGE_ALLOW_LOCALHOST = originalSignageAllowLocalhost
+    }
+    if (originalDarshanPlayerConfigFile === undefined) {
+      delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    } else {
+      process.env.DARSHAN_PLAYER_CONFIG_FILE = originalDarshanPlayerConfigFile
+    }
+    if (originalSignhexPlayerConfigFile === undefined) {
+      delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    } else {
+      process.env.SIGNHEX_PLAYER_CONFIG_FILE = originalSignhexPlayerConfigFile
     }
     sinon.restore()
   })

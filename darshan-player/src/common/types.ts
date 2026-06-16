@@ -12,6 +12,7 @@ export interface AppConfig {
   apiBase: string
   wsUrl: string
   deviceId: string
+  environment?: PlayerEnvironmentConfig
   runtime: RuntimeConfig
   realtime?: RealtimeConfig
   mtls: MTLSConfig
@@ -21,6 +22,15 @@ export interface AppConfig {
   power: PowerConfig
   security: SecurityConfig
   observability: ObservabilityConfig
+  pairing?: PairingConfig
+  duplicateIdentity?: DuplicateIdentityConfig
+  diagnostics?: DiagnosticsConfig
+}
+
+export interface PlayerEnvironmentConfig {
+  name?: string
+  deploymentId?: string
+  expectedServerId?: string
 }
 
 export interface RuntimeConfig {
@@ -98,6 +108,20 @@ export interface ObservabilityConfig {
   bindAddress: string
   port: number
   allowRemoteAccess: boolean
+}
+
+export interface PairingConfig {
+  offlineValidationGraceMs?: number
+  backendFirstRolloutMode?: boolean
+}
+
+export interface DuplicateIdentityConfig {
+  enabled?: boolean
+  enforcement?: 'warn' | 'block'
+}
+
+export interface DiagnosticsConfig {
+  showEnvironmentIdentity?: boolean
 }
 
 // ============================================================================
