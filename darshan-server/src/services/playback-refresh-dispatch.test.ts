@@ -37,6 +37,10 @@ describe('playback refresh dispatch', () => {
     queuePlaybackRefreshDispatchMock.mockReset();
     emitScreensRefreshRequiredMock.mockReset();
     const db = getDatabase();
+    await db.delete(schema.commandOutbox);
+    await db.delete(schema.deviceDesiredStateHistory);
+    await db.delete(schema.deviceDesiredState);
+    await db.delete(schema.deviceCommandStatusHistory);
     await db.delete(schema.deviceCommands);
   });
 
@@ -88,6 +92,49 @@ describe('playback refresh dispatch', () => {
       .where(inArray(schema.deviceCommands.screen_id, screenIds as string[]));
 
     expect(commands).toHaveLength(0);
+  });
+
+  it('creates default-media refresh commands inline when the job client is initialized', async () => {
+    isJobsInitializedMock.mockReturnValue(true);
+    queuePlaybackRefreshDispatchMock.mockResolvedValue('job-id');
+
+    const screenIds = [randomUUID(), randomUUID()];
+    const result = await dispatchPlaybackRefresh({} as any, {
+      reason: 'DEFAULT_MEDIA',
+      screenIds,
+      createdBy: randomUUID(),
+    });
+
+    expect(result.commandsCreated).toBe(2);
+    expect(queuePlaybackRefreshDispatchMock).not.toHaveBeenCalled();
+
+    const db = getDatabase();
+    const commands = await db
+      .select()
+      .from(schema.deviceCommands)
+      .where(inArray(schema.deviceCommands.screen_id, screenIds as string[]));
+
+    expect(commands).toHaveLength(2);
+    expect(commands.every((command) => command.type === 'REFRESH')).toBe(true);
+    expect(commands.every((command) => (command.payload as { reason?: string } | null)?.reason === 'DEFAULT_MEDIA')).toBe(true);
+    expect(commands.every((command) => command.desired_default_media_version !== null)).toBe(true);
+
+    const desiredStates = await db
+      .select()
+      .from(schema.deviceDesiredState)
+      .where(inArray(schema.deviceDesiredState.screen_id, screenIds as string[]));
+
+    expect(desiredStates).toHaveLength(2);
+    expect(desiredStates.every((state) => state.default_media_version !== null)).toBe(true);
+    expect(desiredStates.every((state) => state.last_changed_reason === 'DEFAULT_MEDIA')).toBe(true);
+
+    const outboxRows = await db
+      .select()
+      .from(schema.commandOutbox)
+      .where(inArray(schema.commandOutbox.command_id, commands.map((command) => command.id)));
+
+    expect(outboxRows).toHaveLength(2);
+    expect(outboxRows.every((row) => row.event_type === 'COMMAND_AVAILABLE' && row.status === 'PENDING')).toBe(true);
   });
 
   it('falls back to inline command creation when queueing fails', async () => {

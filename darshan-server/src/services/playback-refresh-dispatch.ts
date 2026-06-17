@@ -111,7 +111,9 @@ export async function dispatchPlaybackRefresh(
     };
   }
 
-  if (!isJobsInitialized()) {
+  const requiresImmediateCommandCreation = params.reason === 'TAKE_DOWN' || params.reason === 'DEFAULT_MEDIA';
+
+  if (requiresImmediateCommandCreation || !isJobsInitialized()) {
     const inlineResult = await createPlaybackRefreshCommands({
       reason: params.reason,
       screenIds: resolvedScreenIds,
