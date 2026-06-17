@@ -11,3 +11,4 @@ out/
 .DS_Store
 .playwright-mcp/
 .local/
+darshan-cms/.env
