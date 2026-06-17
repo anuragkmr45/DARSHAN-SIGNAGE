@@ -7,7 +7,8 @@ import { ActiveSlotPlayback, DefaultMediaResponse, FitMode, LayoutScene, LayoutS
 import './types'
 import { DefaultMediaPlayer } from './default-media-player'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
-import { createWebpagePlaybackElement } from './webpage-playback.js'
+import { createPdfPlaybackElement } from './pdf-playback'
+import { createWebpagePlaybackElement } from './webpage-playback'
 
 const { sanitizeLogPayloadForDiagnostics } =
   require('../common/redaction') as typeof import('../common/redaction')
@@ -598,18 +599,7 @@ class Player {
    * Render PDF
    */
   private async renderPDF(item: TimelineItem): Promise<HTMLElement> {
-    const iframe = document.createElement('iframe')
-    iframe.style.position = 'absolute'
-    iframe.style.top = '0'
-    iframe.style.left = '0'
-    iframe.style.width = '100%'
-    iframe.style.height = '100%'
-    iframe.style.border = '0'
-    iframe.style.backgroundColor = '#000'
-
-    iframe.src = this.getMediaSource(item)
-
-    return iframe
+    return createPdfPlaybackElement(this.getMediaSource(item))
   }
 
   /**

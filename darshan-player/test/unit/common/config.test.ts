@@ -184,6 +184,36 @@ describe('Config Manager', () => {
 
       expect(config.security.csp).to.include("img-src 'self' data: blob: file: http: https:")
       expect(config.security.csp).to.include("connect-src 'self' data: blob: http: https: ws: wss:")
+      expect(config.security.csp).to.include("frame-src 'self' data: blob: file: http: https: chrome-extension:")
+      expect(diskConfig.security.csp).to.equal(config.security.csp)
+    })
+
+    it('should migrate the previous media-safe CSP to the PDF-viewer-safe default', () => {
+      const previousDefaultConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+      previousDefaultConfig.security = {
+        csp: [
+          "default-src 'self' data: blob: file: http: https:",
+          "script-src 'self'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' data: blob: file: http: https:",
+          "media-src 'self' data: blob: file: http: https:",
+          "connect-src 'self' data: blob: http: https: ws: wss:",
+          "frame-src 'self' data: blob: file: http: https:",
+          "worker-src 'self' blob:",
+          "font-src 'self' data: http: https:",
+          "object-src 'none'",
+        ].join('; '),
+      }
+      fs.writeFileSync(configPath, JSON.stringify(previousDefaultConfig, null, 2))
+
+      delete require.cache[require.resolve('../../../src/common/config')]
+      const { getConfigManager } = require('../../../src/common/config')
+
+      const configManager = getConfigManager()
+      const config = configManager.getConfig()
+      const diskConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+
+      expect(config.security.csp).to.include("frame-src 'self' data: blob: file: http: https: chrome-extension:")
       expect(diskConfig.security.csp).to.equal(config.security.csp)
     })
 

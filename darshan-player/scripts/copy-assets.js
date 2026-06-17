@@ -34,4 +34,12 @@ if (fs.existsSync(srcConfig)) {
   fs.copyFileSync(srcConfig, destConfig)
 }
 
+const srcPdfWorker = path.join(__dirname, '../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs')
+const destPdfWorker = path.join(distRendererDir, 'pdf.worker.mjs')
+
+if (fs.existsSync(srcPdfWorker)) {
+  console.log(`  ${srcPdfWorker} -> ${destPdfWorker}`)
+  fs.copyFileSync(srcPdfWorker, destPdfWorker)
+}
+
 console.log('✓ Assets copied successfully')

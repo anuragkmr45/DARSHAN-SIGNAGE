@@ -11,6 +11,7 @@ import { app, BrowserWindow, screen, session } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
+import { fileURLToPath } from 'url'
 import { getConfigManager } from '../common/config'
 import { getLogger } from '../common/logger'
 import { redactUrlForDiagnostics, redactUrlOrPathForDiagnostics, sanitizeLogPayloadForDiagnostics } from '../common/redaction'
@@ -83,6 +84,68 @@ function isSafeWebpageUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+function isSafeLocalPdfUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'file:' && decodeURIComponent(parsed.pathname).toLowerCase().endsWith('.pdf')
+  } catch {
+    return false
+  }
+}
+
+function isSafeEmbeddedContentUrl(url: string): boolean {
+  if (isSafeWebpageUrl(url) || isSafeLocalPdfUrl(url)) {
+    return true
+  }
+
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'chrome-extension:'
+  } catch {
+    return false
+  }
+}
+
+function resolveSafeCachedPdfPath(source: string): string | null {
+  try {
+    const parsed = new URL(source)
+    if (parsed.protocol !== 'file:') {
+      return null
+    }
+
+    const filePath = path.resolve(fileURLToPath(parsed))
+    if (!filePath.toLowerCase().endsWith('.pdf')) {
+      return null
+    }
+
+    const mediaCacheRoot = path.resolve(config.getConfig().cache.path, 'media')
+    if (filePath !== mediaCacheRoot && !filePath.startsWith(`${mediaCacheRoot}${path.sep}`)) {
+      return null
+    }
+
+    return filePath
+  } catch {
+    return null
+  }
+}
+
+function getAppIconPath(): string | undefined {
+  const electronProcess = process as NodeJS.Process & { resourcesPath?: string }
+  const candidates = [
+    electronProcess.resourcesPath ? path.join(electronProcess.resourcesPath, 'icon.png') : undefined,
+    path.join(app.getAppPath(), 'resources', 'icon.png'),
+    path.join(process.cwd(), 'resources', 'icon.png'),
+  ].filter((candidate): candidate is string => Boolean(candidate))
+
+  return candidates.find((candidate) => {
+    try {
+      return fs.existsSync(candidate)
+    } catch {
+      return false
+    }
+  })
 }
 
 function configureWebpageSession(): void {
@@ -201,12 +264,17 @@ function createWindow(): void {
   const { width, height } = primaryDisplay.workAreaSize
   const windowWidth = windowPolicy.kiosk ? width : Math.min(width, 1440)
   const windowHeight = windowPolicy.kiosk ? height : Math.min(height, 900)
+  const iconPath = getAppIconPath()
 
-  logger.info({ width: windowWidth, height: windowHeight, mode, kiosk: windowPolicy.kiosk }, 'Creating main window')
+  logger.info(
+    { width: windowWidth, height: windowHeight, mode, kiosk: windowPolicy.kiosk, iconConfigured: Boolean(iconPath) },
+    'Creating main window'
+  )
 
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
+    icon: iconPath,
     center: true,
     fullscreen: windowPolicy.fullscreen,
     kiosk: windowPolicy.kiosk,
@@ -305,8 +373,8 @@ function createWindow(): void {
 
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     const targetUrl = typeof params['src'] === 'string' ? params['src'] : ''
-    if (!isSafeWebpageUrl(targetUrl)) {
-      logger.warn({ url: redactUrlOrPathForDiagnostics(targetUrl) }, 'Prevented unsafe webpage playback URL')
+    if (!isSafeEmbeddedContentUrl(targetUrl)) {
+      logger.warn({ url: redactUrlOrPathForDiagnostics(targetUrl) }, 'Prevented unsafe embedded playback URL')
       event.preventDefault()
       return
     }
@@ -318,6 +386,7 @@ function createWindow(): void {
     webPreferences.contextIsolation = true
     webPreferences.sandbox = true
     webPreferences.webSecurity = true
+    webPreferences.plugins = true
     webPreferences.allowRunningInsecureContent = false
   })
 
@@ -524,6 +593,16 @@ function setupIPCHandlers(): void {
     return await getDefaultMediaService().getDefaultMedia(options)
   })
 
+  ipcMain.handle('media:read-pdf', async (_event: any, source: string) => {
+    const filePath = resolveSafeCachedPdfPath(source)
+    if (!filePath) {
+      throw new Error('PDF source is not an allowed cached file')
+    }
+
+    const buffer = await fs.promises.readFile(filePath)
+    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+  })
+
   ipcMain.handle('get-player-state', async () => {
     const { getPlayerFlow } = await import('./services/player-flow.js')
     return getPlayerFlow().getState()
@@ -700,7 +779,7 @@ app.on('web-contents-created', (_event, contents) => {
 
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   contents.on('will-navigate', (event, url) => {
-    if (!isSafeWebpageUrl(url)) {
+    if (!isSafeEmbeddedContentUrl(url)) {
       logger.warn({ url: redactUrlOrPathForDiagnostics(url) }, 'Blocked unsafe webview navigation')
       event.preventDefault()
     }

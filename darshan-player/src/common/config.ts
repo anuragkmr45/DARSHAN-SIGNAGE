@@ -18,6 +18,18 @@ const RUNTIME_MODES: RuntimeMode[] = ['dev', 'qa', 'production']
 const LEGACY_COMMAND_POLL_MS = 30000
 const LIVE_COMMAND_POLL_MS = 5000
 const LEGACY_PLAYER_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+const PRE_PDF_VIEWER_PLAYER_CSP = [
+  "default-src 'self' data: blob: file: http: https:",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: file: http: https:",
+  "media-src 'self' data: blob: file: http: https:",
+  "connect-src 'self' data: blob: http: https: ws: wss:",
+  "frame-src 'self' data: blob: file: http: https:",
+  "worker-src 'self' blob:",
+  "font-src 'self' data: http: https:",
+  "object-src 'none'",
+].join('; ')
 
 function buildDefaultPlayerCsp(): string {
   return [
@@ -27,7 +39,7 @@ function buildDefaultPlayerCsp(): string {
     "img-src 'self' data: blob: file: http: https:",
     "media-src 'self' data: blob: file: http: https:",
     "connect-src 'self' data: blob: http: https: ws: wss:",
-    "frame-src 'self' data: blob: file: http: https:",
+    "frame-src 'self' data: blob: file: http: https: chrome-extension:",
     "worker-src 'self' blob:",
     "font-src 'self' data: http: https:",
     "object-src 'none'",
@@ -473,7 +485,10 @@ export class ConfigManager {
     const commandPollMs =
       config.intervals.commandPollMs === LEGACY_COMMAND_POLL_MS ? LIVE_COMMAND_POLL_MS : config.intervals.commandPollMs
     const normalizedCsp =
-      !config.security.csp || config.security.csp.trim() === '' || config.security.csp === LEGACY_PLAYER_CSP
+      !config.security.csp ||
+      config.security.csp.trim() === '' ||
+      config.security.csp === LEGACY_PLAYER_CSP ||
+      config.security.csp === PRE_PDF_VIEWER_PLAYER_CSP
         ? buildDefaultPlayerCsp()
         : config.security.csp
     const allowRemoteAccess = config.observability.allowRemoteAccess === true

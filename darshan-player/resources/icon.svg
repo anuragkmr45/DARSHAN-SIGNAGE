@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DARSHAN Player icon">
+  <defs>
+    <linearGradient id="bg" x1="74" x2="438" y1="52" y2="460" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="0.52" stop-color="#123f4a"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="124" x2="388" y1="126" y2="338" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#99f6e4"/>
+    </linearGradient>
+    <filter id="shadow" x="56" y="56" width="400" height="400" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#020617" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g filter="url(#shadow)">
+    <rect x="104" y="116" width="304" height="218" rx="34" fill="#020617" opacity="0.92"/>
+    <rect x="128" y="140" width="256" height="170" rx="21" fill="url(#panel)"/>
+    <path d="M206 185c0-15 13-27 28-23l100 37c23 8 23 40 0 48l-100 37c-15 5-28-6-28-22v-77z" fill="#0f172a"/>
+    <path d="M236 205v36l48-18-48-18z" fill="#2dd4bf"/>
+    <path d="M184 367h144" stroke="#ccfbf1" stroke-width="28" stroke-linecap="round"/>
+    <path d="M256 332v35" stroke="#ccfbf1" stroke-width="28" stroke-linecap="round"/>
+  </g>
+  <path d="M154 407h204" stroke="#14b8a6" stroke-width="18" stroke-linecap="round" opacity="0.9"/>
+</svg>

@@ -2,14 +2,28 @@
   "apiBase": "https://api-test.darshan.com",
   "wsUrl": "wss://api-test.darshan.com/ws",
   "deviceId": "test-device-123",
+  "environment": {},
   "runtime": {
     "mode": "dev"
+  },
+  "realtime": {
+    "enabled": false,
+    "signedAuthEnabled": false,
+    "deviceNamespace": "/device",
+    "commandSafetyPollMs": 60000,
+    "desiredStatePollMs": 300000,
+    "reconnectMinMs": 1000,
+    "reconnectMaxMs": 60000,
+    "pingIntervalMs": 25000,
+    "notificationMaxBytes": 32768,
+    "wsUrl": ""
   },
   "mtls": {
     "enabled": false,
     "certPath": "/Users/anuragkumar/.darshan/certs/client.crt",
     "keyPath": "/Users/anuragkumar/.darshan/certs/client.key",
     "caPath": "/Users/anuragkumar/.darshan/certs/ca.crt",
+    "strictCertificateValidation": true,
     "autoRenew": true,
     "renewBeforeDays": 30
   },
@@ -43,7 +57,7 @@
     "scheduleEnabled": false
   },
   "security": {
-    "csp": "default-src 'self' data: blob: file: http: https:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: http: https:; media-src 'self' data: blob: file: http: https:; connect-src 'self' data: blob: http: https: ws: wss:; frame-src 'self' data: blob: file: http: https:; worker-src 'self' blob:; font-src 'self' data: http: https:; object-src 'none'",
+    "csp": "default-src 'self' data: blob: file: http: https:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: http: https:; media-src 'self' data: blob: file: http: https:; connect-src 'self' data: blob: http: https: ws: wss:; frame-src 'self' data: blob: file: http: https: chrome-extension:; worker-src 'self' blob:; font-src 'self' data: http: https:; object-src 'none'",
     "allowedDomains": [],
     "disableEval": true,
     "contextIsolation": true,
@@ -53,8 +67,20 @@
   "observability": {
     "enabled": true,
     "metricsEnabled": true,
+    "mediaCacheReportingEnabled": true,
     "bindAddress": "127.0.0.1",
     "port": 3300,
     "allowRemoteAccess": false
+  },
+  "pairing": {
+    "offlineValidationGraceMs": 604800000,
+    "backendFirstRolloutMode": true
+  },
+  "duplicateIdentity": {
+    "enabled": true,
+    "enforcement": "warn"
+  },
+  "diagnostics": {
+    "showEnvironmentIdentity": true
   }
 }

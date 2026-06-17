@@ -59,6 +59,9 @@ export interface DarshanAPI {
 
   // Logs
   log: (level: string, message: string, data?: unknown) => void
+
+  // Media
+  readPdfData: (source: string) => Promise<ArrayBuffer>
 }
 
 const darshanApi: DarshanAPI = {
@@ -170,6 +173,11 @@ const darshanApi: DarshanAPI = {
   // Logging
   log: (level: string, message: string, data?: unknown): void => {
     ipcRenderer.send('renderer-log', { level, message, data })
+  },
+
+  // Media
+  readPdfData: async (source: string): Promise<ArrayBuffer> => {
+    return await ipcRenderer.invoke('media:read-pdf', source)
   },
 }
 

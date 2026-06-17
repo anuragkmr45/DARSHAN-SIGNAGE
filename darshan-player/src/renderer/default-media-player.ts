@@ -4,7 +4,8 @@
 
 import type { DefaultMediaResponse, DefaultMediaItem } from '../common/types'
 import type { WebpagePlaybackOptions } from './webpage-playback.js'
-import { createWebpagePlaybackElement } from './webpage-playback.js'
+import { createPdfPlaybackElement } from './pdf-playback'
+import { createWebpagePlaybackElement } from './webpage-playback'
 
 export interface DefaultMediaPlayerOptions {
   debugOverlay?: boolean
@@ -284,12 +285,7 @@ export class DefaultMediaPlayer {
   private renderDocument(media: DefaultMediaItem): HTMLElement {
     if (this.isPdf(media)) {
       const source = resolveDefaultMediaSource(media)
-      const iframe = document.createElement('iframe')
-      iframe.src = source || ''
-      iframe.style.width = '100%'
-      iframe.style.height = '100%'
-      iframe.style.border = '0'
-      iframe.style.background = '#000'
+      const iframe = createPdfPlaybackElement(source)
 
       iframe.onload = () => {
         this.markHealthy()
