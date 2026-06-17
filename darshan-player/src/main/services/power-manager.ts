@@ -6,8 +6,8 @@
 import * as os from 'os'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { powerSaveBlocker } from 'electron'
 import { getLogger } from '../../common/logger'
+import type { PowerConfig } from '../../common/types'
 import { findExecutable } from '../../common/utils'
 
 const execAsync = promisify(exec)
@@ -33,19 +33,68 @@ export interface PowerCapabilities {
   displayEnumeration: boolean
 }
 
+type PowerSaveBlockerApi = Pick<typeof import('electron')['powerSaveBlocker'], 'start' | 'stop' | 'isStarted'>
+type PowerSaveBlockerProvider = () => PowerSaveBlockerApi | null
+
+export interface PowerManagerOptions {
+  platform?: NodeJS.Platform
+  xsetPath?: string | null
+  powerSaveBlocker?: PowerSaveBlockerApi | null
+  enforcementIntervalMs?: number
+}
+
+const DEFAULT_POWER_CONFIG: PowerConfig = {
+  dpmsEnabled: true,
+  preventBlanking: true,
+  scheduleEnabled: false,
+}
+const DEFAULT_SLEEP_PREVENTION_ENFORCEMENT_MS = 60000
+
+function getPowerSaveBlocker(): PowerSaveBlockerApi | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const electron = require('electron') as typeof import('electron') | string
+    if (typeof electron !== 'object' || !electron.powerSaveBlocker) {
+      return null
+    }
+
+    const blocker = electron.powerSaveBlocker
+    if (
+      typeof blocker.start !== 'function' ||
+      typeof blocker.stop !== 'function' ||
+      typeof blocker.isStarted !== 'function'
+    ) {
+      return null
+    }
+
+    return blocker
+  } catch {
+    return null
+  }
+}
+
 export class PowerManager {
+  private readonly platform: NodeJS.Platform
   private isLinux: boolean
   private readonly xsetPath: string | null
+  private readonly powerSaveBlockerProvider: PowerSaveBlockerProvider
+  private readonly enforcementIntervalMs: number
   private powerSaveBlockerId?: number
+  private enforcementTimer?: NodeJS.Timeout
   private scheduleTimer?: NodeJS.Timeout
   private currentSchedule?: PowerSchedule
+  private activePowerConfig: PowerConfig = DEFAULT_POWER_CONFIG
 
-  constructor() {
-    this.isLinux = os.platform() === 'linux'
-    this.xsetPath = this.isLinux ? findExecutable('xset') : null
+  constructor(options: PowerManagerOptions = {}) {
+    this.platform = options.platform || os.platform()
+    this.isLinux = this.platform === 'linux'
+    this.xsetPath = options.xsetPath !== undefined ? options.xsetPath : this.isLinux ? findExecutable('xset') : null
+    this.powerSaveBlockerProvider =
+      options.powerSaveBlocker !== undefined ? () => options.powerSaveBlocker || null : getPowerSaveBlocker
+    this.enforcementIntervalMs = options.enforcementIntervalMs || DEFAULT_SLEEP_PREVENTION_ENFORCEMENT_MS
     logger.info(
       {
-        platform: os.platform(),
+        platform: this.platform,
         isLinux: this.isLinux,
         xsetAvailable: Boolean(this.xsetPath),
       },
@@ -55,9 +104,9 @@ export class PowerManager {
 
   getCapabilities(): PowerCapabilities {
     return {
-      platform: os.platform(),
+      platform: this.platform,
       dpmsControl: Boolean(this.xsetPath),
-      preventBlanking: Boolean(this.xsetPath),
+      preventBlanking: Boolean(this.xsetPath) || Boolean(this.powerSaveBlockerProvider()),
       displayEnumeration: true,
     }
   }
@@ -65,26 +114,82 @@ export class PowerManager {
   /**
    * Initialize power manager
    */
-  async initialize(): Promise<void> {
-    logger.info('Initializing power manager')
+  async initialize(powerConfig: PowerConfig = DEFAULT_POWER_CONFIG): Promise<void> {
+    logger.info(
+      {
+        preventBlanking: powerConfig.preventBlanking,
+        dpmsEnabled: powerConfig.dpmsEnabled,
+        scheduleEnabled: powerConfig.scheduleEnabled,
+      },
+      'Initializing power manager'
+    )
 
     try {
-      // Prevent screen blanking
-      await this.preventScreenBlanking()
+      this.activePowerConfig = { ...DEFAULT_POWER_CONFIG, ...powerConfig }
 
-      // Disable DPMS (Linux only)
-      if (this.isLinux) {
-        await this.disableDPMS()
+      if (this.activePowerConfig.preventBlanking) {
+        await this.enforceSleepPrevention('initialize')
+        this.startSleepPreventionEnforcement()
+      } else {
+        this.stopSleepPreventionEnforcement()
+        this.unblockPowerSave()
+        logger.info('Screen blanking prevention disabled by configuration')
       }
 
-      // Block power save
-      this.blockPowerSave()
+      this.setSchedule({
+        enabled: this.activePowerConfig.scheduleEnabled,
+        onTime: this.activePowerConfig.onTime,
+        offTime: this.activePowerConfig.offTime,
+      })
 
       logger.info('Power manager initialized successfully')
     } catch (error) {
       logger.error({ error }, 'Failed to initialize power manager')
       throw error
     }
+  }
+
+  /**
+   * Keep app-owned sleep prevention active while the player is running.
+   */
+  private async enforceSleepPrevention(source: 'initialize' | 'watchdog'): Promise<void> {
+    if (!this.activePowerConfig.preventBlanking) {
+      return
+    }
+
+    this.blockPowerSave()
+    await this.preventScreenBlanking()
+
+    if (this.isLinux && this.activePowerConfig.dpmsEnabled) {
+      await this.disableDPMS()
+    }
+
+    logger.debug({ source }, 'Sleep prevention enforced')
+  }
+
+  private startSleepPreventionEnforcement(): void {
+    if (this.enforcementTimer) {
+      return
+    }
+
+    this.enforcementTimer = setInterval(() => {
+      void this.enforceSleepPrevention('watchdog').catch((error) => {
+        logger.warn({ error }, 'Failed to enforce sleep prevention')
+      })
+    }, this.enforcementIntervalMs)
+
+    if (typeof this.enforcementTimer.unref === 'function') {
+      this.enforcementTimer.unref()
+    }
+  }
+
+  private stopSleepPreventionEnforcement(): void {
+    if (!this.enforcementTimer) {
+      return
+    }
+
+    clearInterval(this.enforcementTimer)
+    this.enforcementTimer = undefined
   }
 
   /**
@@ -148,9 +253,20 @@ export class PowerManager {
    * Block power save using Electron's powerSaveBlocker
    */
   private blockPowerSave(): void {
-    if (this.powerSaveBlockerId !== undefined) {
+    const powerSaveBlocker = this.powerSaveBlockerProvider()
+    if (!powerSaveBlocker) {
+      logger.warn('Electron powerSaveBlocker is not available; display sleep prevention is limited to platform tools')
+      return
+    }
+
+    if (this.powerSaveBlockerId !== undefined && powerSaveBlocker.isStarted(this.powerSaveBlockerId)) {
       logger.debug('Power save already blocked')
       return
+    }
+
+    if (this.powerSaveBlockerId !== undefined) {
+      logger.warn({ blockerId: this.powerSaveBlockerId }, 'Power save blocker stopped unexpectedly; restarting')
+      this.powerSaveBlockerId = undefined
     }
 
     try {
@@ -166,6 +282,13 @@ export class PowerManager {
    */
   private unblockPowerSave(): void {
     if (this.powerSaveBlockerId === undefined) {
+      return
+    }
+
+    const powerSaveBlocker = this.powerSaveBlockerProvider()
+    if (!powerSaveBlocker) {
+      logger.warn({ blockerId: this.powerSaveBlockerId }, 'Electron powerSaveBlocker unavailable during unblock')
+      this.powerSaveBlockerId = undefined
       return
     }
 
@@ -378,6 +501,8 @@ export class PowerManager {
       clearTimeout(this.scheduleTimer)
       this.scheduleTimer = undefined
     }
+
+    this.stopSleepPreventionEnforcement()
 
     // Unblock power save
     this.unblockPowerSave()

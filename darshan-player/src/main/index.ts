@@ -29,6 +29,7 @@ const operatorCommand = parseOperatorCommand(process.argv)
 
 config.onChange((nextConfig) => {
   applyConfigToNetworkClients(nextConfig)
+  void applyConfigToPowerManager(nextConfig)
   broadcastConfigUpdate(nextConfig)
 })
 
@@ -200,6 +201,15 @@ function applyConfigToNetworkClients(nextConfig: AppConfig): void {
     }
   } catch (error) {
     logger.warn({ error }, 'Failed to apply config to realtime service')
+  }
+}
+
+async function applyConfigToPowerManager(nextConfig: AppConfig): Promise<void> {
+  try {
+    const { getPowerManager } = await import('./services/power-manager.js')
+    await getPowerManager().initialize(nextConfig.power)
+  } catch (error) {
+    logger.warn({ error }, 'Failed to apply config to power manager')
   }
 }
 
@@ -724,6 +734,7 @@ async function cleanup(): Promise<void> {
     const { getPlayerFlow } = await import('./services/player-flow.js')
     const { getProofOfPlayService } = await import('./services/pop-service.js')
     const { getCacheManager } = await import('./services/cache/cache-manager.js')
+    const { getPowerManager } = await import('./services/power-manager.js')
 
     const playerFlow = getPlayerFlow()
     await playerFlow.stop()
@@ -737,6 +748,8 @@ async function cleanup(): Promise<void> {
 
     const cacheManager = getCacheManager()
     await cacheManager.cleanup()
+
+    getPowerManager().cleanup()
 
     logger.info('Cleanup completed')
   } catch (error) {
@@ -762,6 +775,7 @@ app.on('ready', async () => {
     }
 
     await ensureAutostartRegistration()
+    await applyConfigToPowerManager(config.getConfig())
     configureWebpageSession()
     setupIPCHandlers()
     createWindow()

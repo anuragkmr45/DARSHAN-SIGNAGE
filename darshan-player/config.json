@@ -1,9 +1,21 @@
 {
-  "apiBase": "http://localhost:3000",
-  "wsUrl": "ws://localhost:3000/ws",
+  "apiBase": "http://192.168.0.3:3000",
+  "wsUrl": "ws://192.168.0.3:3000/ws",
   "deviceId": "",
   "runtime": {
-    "mode": "dev"
+    "mode": "qa"
+  },
+  "realtime": {
+    "enabled": true,
+    "signedAuthEnabled": false,
+    "deviceNamespace": "/device",
+    "commandSafetyPollMs": 60000,
+    "desiredStatePollMs": 300000,
+    "reconnectMinMs": 1000,
+    "reconnectMaxMs": 60000,
+    "pingIntervalMs": 25000,
+    "notificationMaxBytes": 32768,
+    "wsUrl": "ws://192.168.0.3:3000"
   },
   "mtls": {
     "enabled": false,
@@ -41,7 +53,7 @@
     "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
     "allowedDomains": [
       "darshan.local",
-      "*.darshan.com"
+      "192.168.0.3"
     ],
     "disableEval": true,
     "contextIsolation": true,
