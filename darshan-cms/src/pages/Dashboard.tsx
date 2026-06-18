@@ -523,6 +523,16 @@ export default function Dashboard() {
     return items;
   }, [offlineScreens, observabilityGrafanaLinks?.players_fleet, observabilityOverview?.alerts.firing, observabilityOverview?.alerts.highest_severity, quotaPercent, navigate]);
 
+  const onlineScreens = screensMetrics.online_last_5m ?? screensMetrics.online ?? 0;
+  const longOfflineCount = offlineScreens?.count ?? 0;
+  const activeScheduledScreens = overview?.schedules?.active_screens_now ?? overview?.schedules?.active ?? 0;
+  const commandPosture =
+    alerts.length > 0
+      ? `${alerts.length} notice${alerts.length === 1 ? "" : "s"} need review`
+      : isApiHealthy
+        ? "System checks nominal"
+        : "API health needs review";
+
   const readyMedia = useMemo(() => (allMedia ?? []).filter((item) => item.status === "READY"), [allMedia]);
 
   const totalMediaSizeBytes = useMemo(
@@ -536,24 +546,62 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            Overview of your digital signage network
-          </p>
+      <section className="overflow-hidden rounded-2xl border border-primary/10 bg-primary text-primary-foreground shadow-lg">
+        <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+          <div className="max-w-3xl">
+            <Badge className="mb-4 border-white/20 bg-white/10 text-white hover:bg-white/20">
+              Live operations
+            </Badge>
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+              DARSHAN command center
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/75">
+              Monitor player health, scheduled playback, media readiness, and operational notices from the current backend data.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
+            <Button
+              variant="outline"
+              className="border-white/25 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+              onClick={() => setScheduleReportOpen(true)}
+            >
+              <Calendar className="mr-2 h-4 w-4" />
+              Schedule Report
+            </Button>
+            <Button
+              className="bg-accent text-accent-foreground hover:bg-accent/90"
+              onClick={() => navigate("/schedule/new")}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              New Request
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setScheduleReportOpen(true)}>
-            <Calendar className="mr-2 h-4 w-4" />
-            Schedule Report
-          </Button>
-          <Button variant="default" onClick={() => navigate("/schedule/new")}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Request
-          </Button>
+        <div className="grid border-t border-white/10 bg-white/[0.04] sm:grid-cols-2 xl:grid-cols-5">
+          <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
+            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Posture</p>
+            <p className="mt-1 text-sm font-semibold">{commandPosture}</p>
+          </div>
+          <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
+            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Screens</p>
+            <p className="mt-1 text-sm font-semibold">
+              {onlineScreens} online / {totalScreens} total
+            </p>
+          </div>
+          <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
+            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Long offline</p>
+            <p className="mt-1 text-sm font-semibold">{longOfflineCount} screens</p>
+          </div>
+          <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
+            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Active schedule</p>
+            <p className="mt-1 text-sm font-semibold">{activeScheduledScreens} screens now</p>
+          </div>
+          <div className="p-4">
+            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Last publish</p>
+            <p className="mt-1 text-sm font-semibold">{formatRelativeTime(lastPublishAt)}</p>
+          </div>
         </div>
-      </div>
+      </section>
 
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

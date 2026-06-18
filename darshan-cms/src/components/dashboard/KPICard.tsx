@@ -27,25 +27,25 @@ export function KPICard({
 }: KPICardProps) {
   const variantStyles = {
     default: "border-border",
-    success: "border-success/20 bg-success/5",
-    warning: "border-warning/20 bg-warning/5",
-    destructive: "border-destructive/20 bg-destructive/5"
+    success: "border-success/25 bg-success/5",
+    warning: "border-warning/25 bg-warning/5",
+    destructive: "border-destructive/25 bg-destructive/5"
   };
 
   const CardWrapper = onClick ? Button : "div";
   const cardProps = onClick 
-    ? { variant: "ghost" as const, className: "h-auto w-full p-0 hover:bg-accent/50" }
+    ? { variant: "ghost" as const, className: "h-auto w-full p-0 text-left hover:bg-transparent" }
     : {};
 
   return (
     <CardWrapper {...cardProps} onClick={onClick}>
-      <Card className={cn("transition-all", variantStyles[variant], onClick && "cursor-pointer")}>
+      <Card className={cn("h-full transition-all hover:-translate-y-0.5 hover:shadow-md", variantStyles[variant], onClick && "cursor-pointer")}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
+          <CardTitle className="text-sm font-semibold text-muted-foreground">
             {title}
           </CardTitle>
           <div className={cn(
-            "p-2 rounded-lg",
+            "rounded-lg p-2",
             variant === "success" && "bg-success/10 text-success",
             variant === "warning" && "bg-warning/10 text-warning",
             variant === "destructive" && "bg-destructive/10 text-destructive",
@@ -55,7 +55,7 @@ export function KPICard({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="text-3xl font-bold">{value}</div>
+          <div className="text-3xl font-bold tracking-tight text-foreground">{value}</div>
           {subtitle && (
             <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
           )}

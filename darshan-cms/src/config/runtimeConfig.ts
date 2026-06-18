@@ -150,6 +150,8 @@ const toTransports = (value: unknown): Array<"websocket" | "polling"> | undefine
   return transports.length > 0 ? transports : undefined;
 };
 
+const getContentType = (response: Response) => response.headers?.get("content-type")?.toLowerCase() ?? "";
+
 const getBuildEnvConfig = (env: BuildEnv = import.meta.env, origin = getWindowOrigin()): CmsRuntimeConfig => {
   const apiBaseUrl = validatePublicBaseUrl(env.VITE_API_BASE_URL ?? origin, "api.baseUrl");
   const socketBaseUrl = validatePublicBaseUrl(
@@ -281,6 +283,15 @@ export const loadCmsRuntimeConfig = async (options: LoadOptions = {}) => {
     }
     if (!response.ok) {
       throw new Error(`Runtime CMS config request failed with status ${response.status}`);
+    }
+
+    const contentType = getContentType(response);
+    if (contentType && !contentType.includes("application/json")) {
+      if (configPath === DEFAULT_RUNTIME_CONFIG_PATH && contentType.includes("text/html")) {
+        cachedRuntimeConfig = getBuildEnvConfig(env);
+        return cachedRuntimeConfig;
+      }
+      throw new Error("Runtime CMS config response was not JSON");
     }
 
     const payload = (await response.json()) as CmsRuntimeConfigInput;

@@ -143,4 +143,45 @@ describe("CMS runtime config", () => {
     expect(getCmsRuntimeConfig().source).toBe("build-env");
     expect(getCmsRuntimeConfigSummary().apiBaseUrl).not.toContain("token=");
   });
+
+  it("falls back to build config when the default runtime config path returns Vite HTML", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://cms.test" },
+      setTimeout,
+      clearTimeout,
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: vi.fn().mockReturnValue("text/html; charset=utf-8"),
+      },
+      json: vi.fn(),
+    });
+
+    await loadCmsRuntimeConfig({ fetchImpl });
+
+    expect(getCmsRuntimeConfig().source).toBe("build-env");
+    expect(fetchImpl.mock.results[0]).toBeDefined();
+  });
+
+  it("fails clearly when an explicit runtime config path does not return JSON", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://cms.test" },
+      setTimeout,
+      clearTimeout,
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: vi.fn().mockReturnValue("text/html; charset=utf-8"),
+      },
+      json: vi.fn(),
+    });
+
+    await expect(loadCmsRuntimeConfig({ fetchImpl, configPath: "/custom/runtime-config.json" })).rejects.toThrow(
+      /response was not JSON/,
+    );
+  });
 });

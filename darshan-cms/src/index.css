@@ -8,78 +8,78 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    /* DARSHAN Brand Colors */
-    --brand-300: 0 34% 69%;
-    --brand-700: 0 100% 25%;
-    --brand-750: 359 79% 29%;
-    --brand-800: 356 71% 21%;
+    /* DARSHAN warm enterprise palette */
+    --brand-300: 22 54% 66%;
+    --brand-700: 336 16% 33%;
+    --brand-750: 357 11% 39%;
+    --brand-800: 335 16% 23%;
     
     /* Base Colors */
-    --background: 20 20% 98%;
-    --foreground: 356 40% 15%;
+    --background: 35 26% 96%;
+    --foreground: 330 13% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 356 40% 15%;
+    --card-foreground: 330 13% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 356 40% 15%;
+    --popover-foreground: 330 13% 12%;
 
-    /* Primary = Rich Maroon */
-    --primary: 356 72% 28%;
+    /* Primary = deep operational plum */
+    --primary: 335 16% 23%;
     --primary-foreground: 0 0% 100%;
 
-    /* Secondary = Warm Rose */
-    --secondary: 0 25% 90%;
-    --secondary-foreground: 356 71% 21%;
+    /* Secondary = warm taupe surface */
+    --secondary: 35 21% 89%;
+    --secondary-foreground: 335 16% 23%;
 
-    /* Muted = Warm Rose-Gray */
-    --muted: 20 15% 95%;
-    --muted-foreground: 356 20% 35%;
+    /* Muted = quiet warm neutral */
+    --muted: 34 25% 92%;
+    --muted-foreground: 338 8% 38%;
 
-    /* Accent = Soft Maroon Glow */
-    --accent: 356 45% 92%;
-    --accent-foreground: 356 72% 28%;
+    /* Accent = copper highlight, dark text for contrast */
+    --accent: 22 54% 66%;
+    --accent-foreground: 330 13% 12%;
 
     /* Semantic Colors */
-    --destructive: 0 84% 60%;
+    --destructive: 3 56% 50%;
     --destructive-foreground: 0 0% 100%;
     
-    --success: 152 69% 31%;
+    --success: 158 71% 29%;
     --success-foreground: 0 0% 100%;
     
-    --warning: 38 92% 50%;
+    --warning: 36 73% 43%;
     --warning-foreground: 0 0% 100%;
     
-    --info: 221 83% 53%;
+    --info: 211 62% 40%;
     --info-foreground: 0 0% 100%;
 
     /* UI Elements */
-    --border: 20 15% 88%;
-    --input: 20 15% 88%;
-    --ring: 356 72% 45%;
+    --border: 30 18% 86%;
+    --input: 30 18% 86%;
+    --ring: 22 54% 54%;
 
-    --radius: 0.625rem;
+    --radius: 0.5rem;
 
-    /* Sidebar = Dark Maroon */
-    --sidebar-background: 356 65% 22%;
+    /* Sidebar = deep brand surface */
+    --sidebar-background: 335 16% 23%;
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-primary: 0 34% 75%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 356 60% 28%;
-    --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 356 50% 30%;
-    --sidebar-ring: 356 72% 45%;
+    --sidebar-primary: 22 54% 66%;
+    --sidebar-primary-foreground: 330 13% 12%;
+    --sidebar-accent: 357 11% 39%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 335 13% 29%;
+    --sidebar-ring: 22 54% 66%;
 
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, #7A1A22, #942832);
-    --gradient-card: linear-gradient(180deg, #FFFFFF, #FCF9F7);
-    --gradient-surface: linear-gradient(135deg, #FDFCFB, #F9F4F5);
+    --gradient-primary: linear-gradient(135deg, #604652, #735557);
+    --gradient-card: linear-gradient(180deg, #FFFFFF, #FFFDFC);
+    --gradient-surface: linear-gradient(135deg, #F8F6F3, #F1ECE7);
 
     /* Shadows */
-    --shadow-sm: 0 1px 2px hsl(356 40% 15% / 0.06);
-    --shadow-md: 0 6px 16px hsl(356 40% 15% / 0.1);
-    --shadow-lg: 0 14px 32px hsl(356 40% 15% / 0.14);
-    --shadow-glow: 0 0 22px hsl(356 72% 45% / 0.28);
+    --shadow-sm: 0 1px 2px hsl(330 13% 12% / 0.05);
+    --shadow-md: 0 8px 22px hsl(330 13% 12% / 0.08);
+    --shadow-lg: 0 18px 42px hsl(330 13% 12% / 0.12);
+    --shadow-glow: 0 0 0 3px hsl(22 54% 66% / 0.24);
   }
 
   .dark {
@@ -151,9 +151,39 @@ All colors MUST be HSL.
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     font-variant-numeric: tabular-nums;
   }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
 }
 
 @layer utilities {
+  .operational-shell {
+    background:
+      radial-gradient(circle at top left, hsl(22 54% 66% / 0.12), transparent 28rem),
+      linear-gradient(180deg, hsl(var(--background)), hsl(35 26% 94%));
+  }
+
+  .operational-card {
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    box-shadow: var(--shadow-sm);
+  }
+
+  .operational-card-strong {
+    border: 1px solid hsl(var(--border));
+    background: var(--gradient-card);
+    box-shadow: var(--shadow-md);
+  }
+
+  .status-dot {
+    height: 0.625rem;
+    width: 0.625rem;
+    border-radius: 999px;
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.16);
+  }
+
   .glass-card {
     background: hsl(var(--card) / 0.7);
     backdrop-filter: blur(10px);
