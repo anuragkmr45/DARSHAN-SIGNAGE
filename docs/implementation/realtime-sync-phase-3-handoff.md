@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-24
 Updated by: Codex
-Repo path: `/Users/anuragkumar/Desktop/signhex`
+Repo path: `/Users/anuragkumar/Desktop/darshan`
 Phase status: `APPROVED_WITH_CONDITIONS`
 
 ## Scope Implemented
@@ -28,23 +28,23 @@ Phase status: `APPROVED_WITH_CONDITIONS`
 
 ## Code Evidence
 
-- `signhex-server/src/realtime/device-gateway.ts`
-- `signhex-server/src/realtime/device-connection-registry.ts`
-- `signhex-server/src/services/outbox-dispatcher.ts`
-- `signhex-server/src/server/index.ts`
-- `signhex-server/src/realtime/device-gateway.test.ts`
-- `signhex-server/src/config/index.ts`
-- `signhex-server/.env.example`
-- `signhex-server/.env.qa.example`
+- `darshan-server/src/realtime/device-gateway.ts`
+- `darshan-server/src/realtime/device-connection-registry.ts`
+- `darshan-server/src/services/outbox-dispatcher.ts`
+- `darshan-server/src/server/index.ts`
+- `darshan-server/src/realtime/device-gateway.test.ts`
+- `darshan-server/src/config/index.ts`
+- `darshan-server/.env.example`
+- `darshan-server/.env.qa.example`
 
 ## Tests Run
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signhex-server && npm run build` | Passed | Node `v24.12.0`; repo expects `>=20 <21`. |
-| `cd signhex-server && npx vitest run src/realtime/device-gateway.test.ts` | Passed, 4 tests | Gateway auth/HELLO, notification-only dispatch, no-connection retry, bad credential rejection. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 12 tests | Existing polling/heartbeat command path still works. |
-| `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests | Existing command/outbox write path still works. |
+| `cd darshan-server && npm run build` | Passed | Node `v24.12.0`; repo expects `>=20 <21`. |
+| `cd darshan-server && npx vitest run src/realtime/device-gateway.test.ts` | Passed, 4 tests | Gateway auth/HELLO, notification-only dispatch, no-connection retry, bad credential rejection. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 12 tests | Existing polling/heartbeat command path still works. |
+| `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests | Existing command/outbox write path still works. |
 
 ## Feature Flags And Env Vars
 

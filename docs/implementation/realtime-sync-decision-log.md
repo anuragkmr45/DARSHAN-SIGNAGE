@@ -184,5 +184,13 @@ Updated by: Codex
 - Consequences: `VALKEY_URL` is the preferred new env var. If current code uses `REDIS_URL`, docs treat it as a backward-compatible alias until code migrates to `VALKEY_URL`. Valkey outage must not block schedule/default/emergency delivery because polling/heartbeat and DB outbox remain mandatory. Media and full snapshots must never go over Valkey.
 - Implementation tasks: Valkey bus config/adapter, outbox dispatcher fanout, gateway node subscriber, device-node registry, and local metrics were implemented as a Phase 8 backfill on 2026-05-25. Remaining tasks are real on-prem node A/node B fanout, Valkey outage fallback, HA topology validation, and alert threshold tuning.
 - Rollout plan: keep realtime disabled, validate REST/polling fallback, validate Valkey connectivity, run on-prem QA node A/node B fanout, run Valkey outage fallback, then canary enable backend realtime and player realtime.
-- Rollback plan: set `OUTBOX_DISPATCH_ENABLED=false`, set `REALTIME_SYNC_ENABLED=false`, set `HEXMON_REALTIME_SYNC_ENABLED=false`, leave Valkey unused, and rely on REST/polling/heartbeat with DB source of truth.
+- Rollback plan: set `OUTBOX_DISPATCH_ENABLED=false`, set `REALTIME_SYNC_ENABLED=false`, set `DARSHAN_REALTIME_PLAYER_ENABLED=false` (`HEXMON_REALTIME_SYNC_ENABLED=false` remains a legacy alias), leave Valkey unused, and rely on REST/polling/heartbeat with DB source of truth.
 - Follow-up tasks: Phase 8B on-prem runtime evidence, future Valkey adapter implementation before multi-instance production, Phase 9 remains blocked.
+
+## ADR-0023 - Product Rename To DARSHAN With One-Release Compatibility Aliases
+
+- Context: The monorepo and runtime still contained development names including Signhex, Hexmon, HexmonSignage, and folder paths from the earlier multi-repo layout.
+- Decision: Use `DARSHAN` for visible product branding and `darshan` for package, service, folder, container, artifact, metric, and path prefixes. The primary folders are `darshan-server`, `darshan-cms`, and `darshan-player`. Runtime compatibility aliases remain for one release where old names affect persisted data or deployed devices: `HEXMON_*`, `SIGNHEX_*`, `window.hexmon`, `persist:signhex`, and `signhex_*` metric aliases.
+- Consequences: New docs, package names, service names, and deployment examples use DARSHAN. Existing deployed players and dashboards can continue using legacy env, IPC, store, signature, and metric names during migration.
+- Alternatives considered: immediate hard cutover with no aliases; leaving dev names in code while changing only visible UI.
+- Follow-up tasks: remove compatibility aliases after one release with an explicit migration checklist; update external release origin after the new remote is finalized.

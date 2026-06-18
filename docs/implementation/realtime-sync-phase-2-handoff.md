@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-24
 Updated by: Codex
-Repo path: `/Users/anuragkumar/Desktop/signhex`
+Repo path: `/Users/anuragkumar/Desktop/darshan`
 Branch: `release-01`
 
 ## Status
@@ -18,10 +18,10 @@ Phase 2 backend work is implemented and focused tests passed. Conditions remain 
 
 ## Implemented
 
-- Added `signhex-server/drizzle/migrations/0031_command_outbox_desired_state.sql`.
-- Added `command_outbox`, `device_desired_state`, and `device_desired_state_history` to `signhex-server/src/db/schema.ts`.
-- Added `signhex-server/src/services/command-outbox-service.ts`.
-- Added `signhex-server/src/services/device-desired-state-service.ts`.
+- Added `darshan-server/drizzle/migrations/0031_command_outbox_desired_state.sql`.
+- Added `command_outbox`, `device_desired_state`, and `device_desired_state_history` to `darshan-server/src/db/schema.ts`.
+- Added `darshan-server/src/services/command-outbox-service.ts`.
+- Added `darshan-server/src/services/device-desired-state-service.ts`.
 - Updated `createDeviceCommands` so command creation, command status history, desired state, desired-state history, and outbox event commit in the same DB transaction.
 - Updated playback refresh command creation so publish/default/emergency refresh commands carry desired snapshot/default/emergency version metadata.
 - Added `GET /api/v1/device/:deviceId/desired-state`.
@@ -42,13 +42,13 @@ Phase 2 backend work is implemented and focused tests passed. Conditions remain 
 
 | Command | Result |
 |---|---|
-| `cd signhex-server && npm run build` | Passed |
-| `cd signhex-server && DRIZZLE_STRICT=false npm run db:push` | Passed after escalation to reach local Docker Postgres |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 12 tests |
-| `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests |
-| `cd signhex-server && npx vitest run src/routes/settings.test.ts` | Passed, 5 tests |
-| `cd signhex-server && npx vitest run src/routes/schedules.publish.test.ts` | Passed, 2 tests |
-| `cd signhex-server && npx vitest run src/routes/emergency.test.ts` | Passed, 2 tests when isolated |
+| `cd darshan-server && npm run build` | Passed |
+| `cd darshan-server && DRIZZLE_STRICT=false npm run db:push` | Passed after escalation to reach local Docker Postgres |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed, 12 tests |
+| `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed, 2 tests |
+| `cd darshan-server && npx vitest run src/routes/settings.test.ts` | Passed, 5 tests |
+| `cd darshan-server && npx vitest run src/routes/schedules.publish.test.ts` | Passed, 2 tests |
+| `cd darshan-server && npx vitest run src/routes/emergency.test.ts` | Passed, 2 tests when isolated |
 
 ## Known Failed/Non-Approval Test
 

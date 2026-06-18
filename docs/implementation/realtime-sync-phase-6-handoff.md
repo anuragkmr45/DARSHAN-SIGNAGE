@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-24
 Updated by: Codex
-Repo path: `/Users/anuragkumar/Desktop/signhex`
+Repo path: `/Users/anuragkumar/Desktop/darshan`
 Branch: `release-01`
 Approval state: `APPROVED_WITH_CONDITIONS`
 
@@ -17,11 +17,11 @@ No WebSocket semantics, Electron realtime/adaptive polling, mobile adapters, or 
 - Added additive `media_cache_reports` table and indexes.
 - Added device endpoint `POST /api/v1/device/:deviceId/media-cache-report`.
 - Added CMS endpoint `GET /api/v1/screens/:id/media-cache-reports/recent`.
-- Added backend flag `MEDIA_CACHE_REPORTING_ENABLED`.
+- Added backend flag `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`.
 - Added Electron `media-cache-reporter.ts`.
 - Wired cache manager, snapshot prefetch, and default media cache hydration failure paths.
 - Sanitized media URLs to host plus path hash; full signed URLs are not stored.
-- Added player flag `HEXMON_MEDIA_CACHE_REPORTING_ENABLED`.
+- Added player flag `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`.
 - Added CMS media/cache failure list to the Delivery tab behind `VITE_MEDIA_CACHE_STATUS_UI`.
 
 ## Out Of Scope
@@ -36,51 +36,51 @@ No WebSocket semantics, Electron realtime/adaptive polling, mobile adapters, or 
 
 ## Files Changed
 
-- `signhex-server/drizzle/migrations/0032_media_cache_failure_reporting.sql`
-- `signhex-server/src/db/schema.ts`
-- `signhex-server/src/services/media-cache-report-service.ts`
-- `signhex-server/src/routes/device-telemetry.ts`
-- `signhex-server/src/routes/screens.ts`
-- `signhex-server/src/config/apiEndpoints.ts`
-- `signhex-server/src/config/index.ts`
-- `signhex-server/.env.example`
-- `signhex-server/.env.qa.example`
-- `signhex-server/src/routes/device-telemetry-media-cache-report.test.ts`
-- `signage-screen/src/main/services/media-cache-reporter.ts`
-- `signage-screen/src/main/services/cache/cache-manager.ts`
-- `signage-screen/src/main/services/settings/default-media-service.ts`
-- `signage-screen/src/main/services/snapshot-manager.ts`
-- `signage-screen/src/common/config.ts`
-- `signage-screen/src/common/types.ts`
-- `signage-screen/test/unit/services/media-cache-reporter.test.ts`
-- `signage-screen/test/unit/services/cache-manager.test.ts`
-- `signage-screen/test/unit/services/default-media-service.test.ts`
-- `signhex-nexus-core/src/api/endpoints.ts`
-- `signhex-nexus-core/src/api/queryKeys.ts`
-- `signhex-nexus-core/src/api/types.ts`
-- `signhex-nexus-core/src/api/domains/screens.ts`
-- `signhex-nexus-core/src/components/screens/ScreenDetailsModal.tsx`
-- `signhex-platform/docs/implementation/realtime-sync-project-status.md`
-- `signhex-platform/docs/implementation/realtime-sync-task-register.md`
-- `signhex-platform/docs/implementation/realtime-sync-phase-approval-log.md`
-- `signhex-platform/docs/implementation/realtime-sync-test-plan.md`
-- `signhex-platform/docs/implementation/realtime-sync-open-risks.md`
-- `signhex-platform/docs/architecture/player-contract.md`
-- `signhex-platform/docs/architecture/failure-modes.md`
-- `signhex-platform/docs/architecture/enterprise-realtime-sync.md`
+- `darshan-server/drizzle/migrations/0032_media_cache_failure_reporting.sql`
+- `darshan-server/src/db/schema.ts`
+- `darshan-server/src/services/media-cache-report-service.ts`
+- `darshan-server/src/routes/device-telemetry.ts`
+- `darshan-server/src/routes/screens.ts`
+- `darshan-server/src/config/apiEndpoints.ts`
+- `darshan-server/src/config/index.ts`
+- `darshan-server/.env.example`
+- `darshan-server/.env.qa.example`
+- `darshan-server/src/routes/device-telemetry-media-cache-report.test.ts`
+- `darshan-player/src/main/services/media-cache-reporter.ts`
+- `darshan-player/src/main/services/cache/cache-manager.ts`
+- `darshan-player/src/main/services/settings/default-media-service.ts`
+- `darshan-player/src/main/services/snapshot-manager.ts`
+- `darshan-player/src/common/config.ts`
+- `darshan-player/src/common/types.ts`
+- `darshan-player/test/unit/services/media-cache-reporter.test.ts`
+- `darshan-player/test/unit/services/cache-manager.test.ts`
+- `darshan-player/test/unit/services/default-media-service.test.ts`
+- `darshan-cms/src/api/endpoints.ts`
+- `darshan-cms/src/api/queryKeys.ts`
+- `darshan-cms/src/api/types.ts`
+- `darshan-cms/src/api/domains/screens.ts`
+- `darshan-cms/src/components/screens/ScreenDetailsModal.tsx`
+- `docs/implementation/realtime-sync-project-status.md`
+- `docs/implementation/realtime-sync-task-register.md`
+- `docs/implementation/realtime-sync-phase-approval-log.md`
+- `docs/implementation/realtime-sync-test-plan.md`
+- `docs/implementation/realtime-sync-open-risks.md`
+- `docs/architecture/player-contract.md`
+- `docs/architecture/failure-modes.md`
+- `docs/architecture/enterprise-realtime-sync.md`
 
 ## Tests Run
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signhex-server && npm run build` | Passed | TypeScript build completed under Node `v24.12.0`. |
-| `cd signhex-server && DRIZZLE_STRICT=false npm run db:push` | Passed after escalation | Applied local test schema; production must use reviewed migration. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` | Passed, 1 test | Covers device ingest and CMS read endpoint. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts src/routes/device-telemetry-media-cache-report.test.ts` | Passed, 14 tests | Confirms command route remains compatible. |
-| `cd signage-screen && npm run build` | Passed | Main and renderer build completed. |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts --spec test/unit/services/cache-manager.test.ts --spec test/unit/services/default-media-service.test.ts` | Passed, 18 tests | Covers reporting, queue fallback, cache behavior, and default media caching. |
-| `cd signhex-nexus-core && npm run build` | Passed | Vite build completed with existing chunk/browser-data warnings. |
-| `cd signhex-nexus-core && npm run lint` | Failed outside Phase 6 changed files | Existing lint issues remain in unrelated files. |
+| `cd darshan-server && npm run build` | Passed | TypeScript build completed under Node `v24.12.0`. |
+| `cd darshan-server && DRIZZLE_STRICT=false npm run db:push` | Passed after escalation | Applied local test schema; production must use reviewed migration. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-media-cache-report.test.ts` | Passed, 1 test | Covers device ingest and CMS read endpoint. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts src/routes/device-telemetry-media-cache-report.test.ts` | Passed, 14 tests | Confirms command route remains compatible. |
+| `cd darshan-player && npm run build` | Passed | Main and renderer build completed. |
+| `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/media-cache-reporter.test.ts --spec test/unit/services/cache-manager.test.ts --spec test/unit/services/default-media-service.test.ts` | Passed, 18 tests | Covers reporting, queue fallback, cache behavior, and default media caching. |
+| `cd darshan-cms && npm run build` | Passed | Vite build completed with existing chunk/browser-data warnings. |
+| `cd darshan-cms && npm run lint` | Failed outside Phase 6 changed files | Existing lint issues remain in unrelated files. |
 
 ## Architecture Compliance
 
@@ -101,8 +101,8 @@ No WebSocket semantics, Electron realtime/adaptive polling, mobile adapters, or 
 
 ## Rollback
 
-- Backend: set `MEDIA_CACHE_REPORTING_ENABLED=false`.
-- Player: set `HEXMON_MEDIA_CACHE_REPORTING_ENABLED=false`.
+- Backend: set `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`.
+- Player: set `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED=false`.
 - CMS: set `VITE_MEDIA_CACHE_STATUS_UI=false`.
 - Leave `0032_media_cache_failure_reporting.sql` in place if applied.
 - Existing REST polling, heartbeat, snapshot, default media, emergency, command ACK, and WebSocket notification behavior remain active.

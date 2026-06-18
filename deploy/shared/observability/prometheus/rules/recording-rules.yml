@@ -1,22 +1,22 @@
 groups:
-  - name: signhex_host_utilization
+  - name: darshan_host_utilization
     interval: 1m
     rules:
-      - record: signhex:host_cpu_utilization:ratio
+      - record: darshan:host_cpu_utilization:ratio
         expr: |
-          1 - avg by (job, instance, role, site) (
+          1 - avg by (job, instance, role, machine, site) (
             rate(node_cpu_seconds_total{mode="idle"}[5m])
           )
-      - record: signhex:host_memory_utilization:ratio
+      - record: darshan:host_memory_utilization:ratio
         expr: |
           1 - (
             node_memory_MemAvailable_bytes
             /
             node_memory_MemTotal_bytes
           )
-      - record: signhex:host_filesystem_utilization:ratio
+      - record: darshan:host_filesystem_utilization:ratio
         expr: |
-          max by (job, instance, role, site) (
+          max by (job, instance, role, machine, site) (
             1 - (
               node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint!~"/run($|/.*)|/var/lib/docker($|/.*)"}
               /
@@ -24,91 +24,91 @@ groups:
             )
           )
 
-  - name: signhex_backend_service
+  - name: darshan_backend_service
     interval: 1m
     rules:
-      - record: signhex:backend_http_request_rate_per_second
+      - record: darshan:backend_http_request_rate_per_second
         expr: |
           sum by (site) (
-            rate(signhex_server_http_requests_total[5m])
+            rate(darshan_server_http_requests_total[5m])
           )
-      - record: signhex:backend_http_error_rate:ratio
+      - record: darshan:backend_http_error_rate:ratio
         expr: |
           sum by (site) (
-            rate(signhex_server_http_requests_total{status_class="5xx"}[5m])
+            rate(darshan_server_http_requests_total{status_class="5xx"}[5m])
           )
           /
           clamp_min(
             sum by (site) (
-              rate(signhex_server_http_requests_total[5m])
+              rate(darshan_server_http_requests_total[5m])
             ),
             1
           )
-      - record: signhex:fleet_total_players
+      - record: darshan:fleet_total_players
         expr: |
           sum by (site) (
-            signhex_fleet_players_total
+            darshan_fleet_players_total
           )
-      - record: signhex:fleet_offline_players_ratio
+      - record: darshan:fleet_offline_players_ratio
         expr: |
           sum by (site) (
-            signhex_fleet_players_total{state="OFFLINE"}
+            darshan_fleet_players_total{state="OFFLINE"}
           )
           /
           clamp_min(
             sum by (site) (
-              signhex_fleet_players_total
+              darshan_fleet_players_total
             ),
             1
           )
 
-  - name: signhex_realtime_sync
+  - name: darshan_realtime_sync
     interval: 1m
     rules:
-      - record: signhex:realtime_outbox_pending_rows
+      - record: darshan:realtime_outbox_pending_rows
         expr: |
           sum by (site) (
-            signhex_server_command_outbox_rows{status="PENDING"}
+            darshan_server_command_outbox_rows{status="PENDING"}
           )
-      - record: signhex:realtime_outbox_dispatch_failure_rate_per_second
+      - record: darshan:realtime_outbox_dispatch_failure_rate_per_second
         expr: |
           sum by (site) (
-            rate(signhex_server_command_outbox_dispatch_total{result="failed"}[5m])
+            rate(darshan_server_command_outbox_dispatch_total{result="failed"}[5m])
           )
-      - record: signhex:realtime_payload_too_large_rate_per_second
+      - record: darshan:realtime_payload_too_large_rate_per_second
         expr: |
           sum by (site) (
-            rate(signhex_server_websocket_notification_payload_too_large_total[5m])
+            rate(darshan_server_websocket_notification_payload_too_large_total[5m])
           )
-      - record: signhex:realtime_valkey_publish_failure_rate_per_second
+      - record: darshan:realtime_valkey_publish_failure_rate_per_second
         expr: |
           sum by (site) (
-            rate(signhex_server_realtime_bus_publish_total{provider="valkey",result=~"failed|unavailable"}[5m])
+            rate(darshan_server_realtime_bus_publish_total{provider="valkey",result=~"failed|unavailable"}[5m])
           )
-      - record: signhex:realtime_valkey_fallback_rate_per_second
+      - record: darshan:realtime_valkey_fallback_rate_per_second
         expr: |
           sum by (site) (
-            rate(signhex_server_realtime_bus_fallback_total[5m])
+            rate(darshan_server_realtime_bus_fallback_total[5m])
           )
-      - record: signhex:realtime_fallback_poll_claim_rate_per_second
+      - record: darshan:realtime_fallback_poll_claim_rate_per_second
         expr: |
           sum by (site) (
-            rate(signhex_server_device_commands_claimed_total{source="poll"}[5m])
+            rate(darshan_server_device_commands_claimed_total{source="poll"}[5m])
           )
-      - record: signhex:device_command_ack_failure_ratio
+      - record: darshan:device_command_ack_failure_ratio
         expr: |
           sum by (site) (
-            rate(signhex_server_device_command_acks_total{result=~"failure|error"}[5m])
+            rate(darshan_server_device_command_acks_total{result=~"failure|error"}[5m])
           )
           /
           clamp_min(
             sum by (site) (
-              rate(signhex_server_device_command_acks_total[5m])
+              rate(darshan_server_device_command_acks_total[5m])
             ),
             1
           )
-      - record: signhex:media_cache_failure_rate_per_second
+      - record: darshan:media_cache_failure_rate_per_second
         expr: |
           sum by (site) (
-            rate(signhex_server_media_cache_reports_total{result="accepted",severity=~"ERROR|CRITICAL"}[5m])
+            rate(darshan_server_media_cache_reports_total{result="accepted",severity=~"ERROR|CRITICAL"}[5m])
           )

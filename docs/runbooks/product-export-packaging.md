@@ -12,7 +12,7 @@ These outputs are source-free. They are the operator-facing runtime or delivery 
 
 ## Primary command
 
-Run from `signhex-platform`:
+Run from `DARSHAN monorepo root`:
 
 ```bash
 bash scripts/export/package-all.sh --release 2026-04-02-r1 --electron-platform linux
@@ -101,7 +101,7 @@ bash scripts/export/package-cms.sh --release 2026-04-02-r1
 
 SERVER_PACKAGE_DIR="out/2026-04-02-r1/server" \
 CMS_PACKAGE_DIR="out/2026-04-02-r1/cms" \
-PLAYER_ARTIFACTS_DIR="/artifacts/signage-screen/2026-04-02-r1" \
+PLAYER_ARTIFACTS_DIR="/artifacts/darshan-player/2026-04-02-r1" \
 bash scripts/bundle/assemble-runtime-bundle.sh --profile qa site-a-qa
 ```
 

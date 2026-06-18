@@ -1,6 +1,6 @@
-# Signhex Observability Assets
+# DARSHAN Observability Assets
 
-This directory contains the platform-owned observability assets for Signhex on-prem deployments.
+This directory contains the platform-owned observability assets for DARSHAN on-prem deployments.
 
 Scope:
 

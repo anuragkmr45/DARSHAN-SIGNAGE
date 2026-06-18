@@ -6,7 +6,7 @@ global:
     environment: development
 
 rule_files:
-  - /etc/signhex/prometheus/rules/*.yml
+  - /etc/darshan/prometheus/rules/*.yml
 
 scrape_configs:
   - job_name: prometheus
@@ -17,21 +17,29 @@ scrape_configs:
           role: observability
           machine: local
 
-  - job_name: signhex-server
+  - job_name: darshan-server
     metrics_path: /metrics
     authorization:
       type: Bearer
-      credentials: signhex-development-prometheus
+      credentials: darshan-development-prometheus
     static_configs:
       - targets:
-          - host.docker.internal:3002
+          - host.docker.internal:3000
         labels:
           role: backend
-          machine: dev-local
+          machine: vm2
+
+  - job_name: vm2-node
+    static_configs:
+      - targets:
+          - node-exporter:9100
+        labels:
+          role: backend
+          machine: vm2
 
   - job_name: players
     metrics_path: /metrics
     file_sd_configs:
       - files:
-          - /etc/signhex/prometheus/file-sd/players.targets.json
+          - /etc/darshan/prometheus/file-sd/players.targets.json
         refresh_interval: 1m

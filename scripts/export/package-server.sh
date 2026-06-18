@@ -7,9 +7,9 @@ Usage:
   bash scripts/export/package-server.sh --release <release-id> [--deployment-layout standalone|production-split]
 
 Optional environment overrides:
-  SERVER_REPO_DIR=/path/to/signhex-server
-  OUTPUT_BASE=/path/to/signhex-platform/out
-  BACKEND_IMAGE_REF=signhex-server-export:<release-id>
+  SERVER_REPO_DIR=/path/to/darshan-server
+  OUTPUT_BASE=/path/to/darshan/out
+  BACKEND_IMAGE_REF=darshan-server-export:<release-id>
   POSTGRES_IMAGE=postgres:15-alpine
   MINIO_IMAGE=minio/minio:latest
 EOF
@@ -60,9 +60,9 @@ case "$DEPLOYMENT_LAYOUT" in
     ;;
 esac
 
-SERVER_REPO_DIR="${SERVER_REPO_DIR:-$PLATFORM_ROOT/../signhex-server}"
+SERVER_REPO_DIR="${SERVER_REPO_DIR:-$PLATFORM_ROOT/darshan-server}"
 OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
-BACKEND_IMAGE_REF="${BACKEND_IMAGE_REF:-signhex-server-export:$RELEASE_ID}"
+BACKEND_IMAGE_REF="${BACKEND_IMAGE_REF:-darshan-server-export:$RELEASE_ID}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:15-alpine}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
 
@@ -126,7 +126,7 @@ services:
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
-      - signhex_server_postgres_data:/var/lib/postgresql/data
+      - darshan_server_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -144,7 +144,7 @@ services:
       - "${MINIO_HOST_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - signhex_server_minio_data:/data
+      - darshan_server_minio_data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -161,7 +161,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
-      HEXMON_RUNTIME_CONTAINER: "true"
+      DARSHAN_RUNTIME_CONTAINER: "true"
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     ports:
       - "${API_HOST_PORT:-3000}:3000"
@@ -195,7 +195,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
-      HEXMON_RUNTIME_CONTAINER: "true"
+      DARSHAN_RUNTIME_CONTAINER: "true"
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
     depends_on:
       postgres:
@@ -207,8 +207,8 @@ services:
     command: npm run start:worker
 
 volumes:
-  signhex_server_postgres_data:
-  signhex_server_minio_data:
+  darshan_server_postgres_data:
+  darshan_server_minio_data:
 EOF
 
 export_write_load_images_script "$OUTPUT_DIR/load-images.sh"
@@ -323,7 +323,7 @@ Do not commit real certificates into source control.
 EOF
 
 cat > "$OUTPUT_DIR/README.md" <<EOF
-# Signhex Server Package
+# DARSHAN Server Package
 
 This folder is a source-free server deploy package.
 
@@ -351,7 +351,7 @@ bash scripts/export/package-cms.sh --release <release-id>
 
 SERVER_PACKAGE_DIR="out/<release-id>/server" \
 CMS_PACKAGE_DIR="out/<release-id>/cms" \
-PLAYER_ARTIFACTS_DIR="/artifacts/signage-screen/<release-id>" \
+PLAYER_ARTIFACTS_DIR="/artifacts/darshan-player/<release-id>" \
 bash scripts/bundle/assemble-runtime-bundle.sh --profile production <site-name>
 ```
 
@@ -400,8 +400,8 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 
 PostgreSQL and MinIO data are stored in Docker named volumes:
 
-- \`signhex_server_postgres_data\`
-- \`signhex_server_minio_data\`
+- \`darshan_server_postgres_data\`
+- \`darshan_server_minio_data\`
 
 ## Observability assets
 

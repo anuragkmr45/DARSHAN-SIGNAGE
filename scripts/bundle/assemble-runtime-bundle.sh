@@ -15,9 +15,9 @@ Profiles:
   production  Generate only the production bundle tree
 
 Required artifact inputs:
-  BACKEND_IMAGE_REF=ghcr.io/hexmon/signhex-server:1.2.3
-  BACKEND_IMAGE_ARCHIVE=/path/to/signhex-server-1.2.3.tar
-  CMS_BUNDLE_SOURCE=/path/to/signhex-nexus-core-1.2.3.tgz
+  BACKEND_IMAGE_REF=ghcr.io/darshan/darshan-server:1.2.3
+  BACKEND_IMAGE_ARCHIVE=/path/to/darshan-server-1.2.3.tar
+  CMS_BUNDLE_SOURCE=/path/to/darshan-cms-1.2.3.tgz
   PLAYER_ARTIFACTS_DIR=/path/to/player-release
 
 Required environment inputs:
@@ -58,10 +58,10 @@ Example:
   BACKEND_DEVICE_HOST=10.20.0.21 \
   DATA_PRIVATE_HOST=10.20.0.10 \
   OBSERVABILITY_PRIVATE_HOST=10.20.0.40 \
-  BACKEND_IMAGE_REF=ghcr.io/hexmon/signhex-server:1.2.3 \
-  BACKEND_IMAGE_ARCHIVE=/artifacts/signhex-server-1.2.3.tar \
-  CMS_BUNDLE_SOURCE=/artifacts/signhex-nexus-core-1.2.3.tgz \
-  PLAYER_ARTIFACTS_DIR=/artifacts/signage-screen/1.2.3 \
+  BACKEND_IMAGE_REF=ghcr.io/darshan/darshan-server:1.2.3 \
+  BACKEND_IMAGE_ARCHIVE=/artifacts/darshan-server-1.2.3.tar \
+  CMS_BUNDLE_SOURCE=/artifacts/darshan-cms-1.2.3.tgz \
+  PLAYER_ARTIFACTS_DIR=/artifacts/darshan-player/1.2.3 \
   bash scripts/bundle/assemble-runtime-bundle.sh site-a
 EOF
 }
@@ -474,15 +474,15 @@ services:
     ports:
       - "${PROMETHEUS_HOST_PORT:-9090}:9090"
     command:
-      - --config.file=/etc/signhex/prometheus/prometheus.yml
+      - --config.file=/etc/darshan/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}
       - --storage.tsdb.wal-compression
       - --web.enable-lifecycle
     volumes:
-      - ./prometheus/prometheus.yml:/etc/signhex/prometheus/prometheus.yml:ro
-      - ./prometheus/rules:/etc/signhex/prometheus/rules:ro
-      - ./prometheus/file-sd:/etc/signhex/prometheus/file-sd:ro
+      - ./prometheus/prometheus.yml:/etc/darshan/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/darshan/prometheus/rules:ro
+      - ./prometheus/file-sd:/etc/darshan/prometheus/file-sd:ro
       - prometheus_data:/prometheus
 
   alertmanager:
@@ -491,11 +491,11 @@ services:
     ports:
       - "${ALERTMANAGER_HOST_PORT:-9093}:9093"
     command:
-      - --config.file=/etc/signhex/alertmanager/alertmanager.yml
+      - --config.file=/etc/darshan/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/signhex/alertmanager/alertmanager.yml:ro
-      - ./alertmanager/templates:/etc/signhex/alertmanager/templates:ro
+      - ./alertmanager/alertmanager.yml:/etc/darshan/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/darshan/alertmanager/templates:ro
       - alertmanager_data:/alertmanager
 
   grafana:
@@ -519,7 +519,7 @@ volumes:
 EOF
 }
 
-TEMP_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/signhex-platform.XXXXXX")"
+TEMP_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/darshan-platform.XXXXXX")"
 cleanup_temp_work_dir() {
   rm -rf "$TEMP_WORK_DIR"
 }
@@ -619,15 +619,15 @@ fi
 
 POSTGRES_USER="${POSTGRES_USER:-postgres}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
-POSTGRES_DB="${POSTGRES_DB:-signhex}"
+POSTGRES_DB="${POSTGRES_DB:-darshan}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}"
 MINIO_USE_SSL="${MINIO_USE_SSL:-false}"
 MINIO_REGION="${MINIO_REGION:-us-east-1}"
 JWT_SECRET="${JWT_SECRET:-replace-with-32-char-secret-value}"
 JWT_EXPIRY="${JWT_EXPIRY:-900}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-admin@signhex.invalid}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-ChangeMe123!}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@darshan.invalid}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-LocalDev@123}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-3000}"
 CA_CERT_PATH="${CA_CERT_PATH:-./certs/ca.crt}"
@@ -636,7 +636,8 @@ FFMPEG_PATH="${FFMPEG_PATH:-ffmpeg}"
 LIBREOFFICE_PATH="${LIBREOFFICE_PATH:-soffice}"
 PG_DUMP_PATH="${PG_DUMP_PATH:-pg_dump}"
 TAR_PATH="${TAR_PATH:-tar}"
-HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH="${HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-}"
+DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH="${DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-${HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-}}"
+HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH="${HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH}"
 PG_BOSS_SCHEMA="${PG_BOSS_SCHEMA:-pgboss}"
 RATE_LIMIT_ENABLED="${RATE_LIMIT_ENABLED:-true}"
 RATE_LIMIT_MAX="${RATE_LIMIT_MAX:-1000}"
@@ -953,7 +954,7 @@ if profile_enabled qa; then
   cat > "$QA_BACKEND_DIR/certs/README.md" <<'EOF'
 # QA Backend Pairing CA Material
 
-This folder contains the pairing CA certificate required by the Signhex API:
+This folder contains the pairing CA certificate required by the DARSHAN API:
 
 - `ca.crt`
 
@@ -1064,7 +1065,8 @@ FFMPEG_PATH=$FFMPEG_PATH
 LIBREOFFICE_PATH=$LIBREOFFICE_PATH
 PG_DUMP_PATH=$PG_DUMP_PATH
 TAR_PATH=$TAR_PATH
-HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH
+DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
+HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
 PG_BOSS_SCHEMA=$PG_BOSS_SCHEMA
 RATE_LIMIT_ENABLED=$RATE_LIMIT_ENABLED
 RATE_LIMIT_MAX=$RATE_LIMIT_MAX
@@ -1078,6 +1080,7 @@ LOGIN_MAX_ATTEMPTS=$LOGIN_MAX_ATTEMPTS
 LOGIN_LOCKOUT_WINDOW_SECONDS=$LOGIN_LOCKOUT_WINDOW_SECONDS
 MAX_UPLOAD_MB=$MAX_UPLOAD_MB
 STORAGE_QUOTA_BYTES=$STORAGE_QUOTA_BYTES
+DARSHAN_RUNTIME_CONTAINER=true
 HEXMON_RUNTIME_CONTAINER=true
 PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 PROMETHEUS_HOST_PORT=$QA_PROMETHEUS_HOST_PORT
@@ -1104,7 +1107,7 @@ services:
     ports:
       - "${POSTGRES_HOST_PORT}:5432"
     volumes:
-      - signhex_qa_postgres_data:/var/lib/postgresql/data
+      - darshan_qa_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -1122,7 +1125,7 @@ services:
       - "${MINIO_HOST_PORT}:9000"
       - "${MINIO_CONSOLE_PORT}:9001"
     volumes:
-      - signhex_qa_minio_data:/data
+      - darshan_qa_minio_data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -1130,8 +1133,8 @@ services:
       retries: 5
 
 volumes:
-  signhex_qa_postgres_data:
-  signhex_qa_minio_data:
+  darshan_qa_postgres_data:
+  darshan_qa_minio_data:
 EOF
 
   cat > "$QA_BACKEND_DIR/docker-compose.yml" <<'EOF'
@@ -1345,7 +1348,8 @@ FFMPEG_PATH=$FFMPEG_PATH
 LIBREOFFICE_PATH=$LIBREOFFICE_PATH
 PG_DUMP_PATH=$PG_DUMP_PATH
 TAR_PATH=$TAR_PATH
-HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH
+DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
+HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
 PG_BOSS_SCHEMA=$PG_BOSS_SCHEMA
 RATE_LIMIT_ENABLED=$RATE_LIMIT_ENABLED
 RATE_LIMIT_MAX=$RATE_LIMIT_MAX
@@ -1359,6 +1363,7 @@ LOGIN_MAX_ATTEMPTS=$LOGIN_MAX_ATTEMPTS
 LOGIN_LOCKOUT_WINDOW_SECONDS=$LOGIN_LOCKOUT_WINDOW_SECONDS
 MAX_UPLOAD_MB=$MAX_UPLOAD_MB
 STORAGE_QUOTA_BYTES=$STORAGE_QUOTA_BYTES
+DARSHAN_RUNTIME_CONTAINER=true
 HEXMON_RUNTIME_CONTAINER=true
 PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 EOF
@@ -1440,7 +1445,7 @@ services:
     ports:
       - "${POSTGRES_HOST_PORT}:5432"
     volumes:
-      - signhex_postgres_data:/var/lib/postgresql/data
+      - darshan_postgres_data:/var/lib/postgresql/data
 
   minio:
     image: ${MINIO_IMAGE}
@@ -1453,11 +1458,11 @@ services:
       - "${MINIO_HOST_PORT}:9000"
       - "${MINIO_CONSOLE_PORT}:9001"
     volumes:
-      - signhex_minio_data:/data
+      - darshan_minio_data:/data
 
 volumes:
-  signhex_postgres_data:
-  signhex_minio_data:
+  darshan_postgres_data:
+  darshan_minio_data:
 EOF
 
   cat > "$PROD_BACKEND_DIR/docker-compose.yml" <<'EOF'
@@ -1526,7 +1531,7 @@ server {
   ssl_certificate /etc/nginx/tls/tls.crt;
   ssl_certificate_key /etc/nginx/tls/tls.key;
   ssl_session_timeout 1d;
-  ssl_session_cache shared:SignhexTLS:10m;
+  ssl_session_cache shared:DARSHANTLS:10m;
   ssl_protocols TLSv1.2 TLSv1.3;
   ssl_ciphers HIGH:!aNULL:!MD5;
   add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
@@ -1657,7 +1662,7 @@ EOF
   cat > "$PROD_BACKEND_DIR/README.md" <<EOF
 # Production Backend Bundle
 
-This folder runs the Signhex backend bundle with separate \`api\` and \`worker\` containers from the same image.
+This folder runs the DARSHAN backend bundle with separate \`api\` and \`worker\` containers from the same image.
 
 ## Start
 
@@ -1725,7 +1730,7 @@ EOF
 fi
 
 cat > "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF
-# Signhex Runtime Bundle Overview
+# DARSHAN Runtime Bundle Overview
 
 Site: **$SITE_NAME**
 

@@ -1,8 +1,8 @@
 groups:
-  - name: signhex_platform_alerts
+  - name: darshan_platform_alerts
     interval: 1m
     rules:
-      - alert: SignhexPrometheusUnavailable
+      - alert: DARSHANPrometheusUnavailable
         expr: up{job="prometheus"} == 0
         for: 5m
         labels:
@@ -12,17 +12,17 @@ groups:
           summary: "Prometheus is unavailable"
           description: "Prometheus on {{ $labels.instance }} has been unreachable for 5 minutes."
 
-      - alert: SignhexBackendMetricsUnavailable
-        expr: up{job="signhex-server"} == 0
+      - alert: DARSHANBackendMetricsUnavailable
+        expr: up{job="darshan-server"} == 0
         for: 5m
         labels:
           severity: critical
           team: platform
         annotations:
           summary: "Backend metrics are unavailable"
-          description: "signhex-server on {{ $labels.instance }} has been unreachable for 5 minutes."
+          description: "darshan-server on {{ $labels.instance }} has been unreachable for 5 minutes."
 
-      - alert: SignhexVm1DataMetricsUnavailable
+      - alert: DARSHANVm1DataMetricsUnavailable
         expr: up{job=~"vm1-node|vm1-postgres|vm1-minio"} == 0
         for: 5m
         labels:
@@ -32,7 +32,7 @@ groups:
           summary: "VM1 data-plane metrics target is down"
           description: "{{ $labels.job }} on {{ $labels.instance }} has been unreachable for 5 minutes."
 
-      - alert: SignhexVm3HostMetricsUnavailable
+      - alert: DARSHANVm3HostMetricsUnavailable
         expr: up{job="vm3-node"} == 0
         for: 10m
         labels:
@@ -42,7 +42,7 @@ groups:
           summary: "VM3 host metrics are unavailable"
           description: "vm3-node on {{ $labels.instance }} has been unreachable for 10 minutes."
 
-      - alert: SignhexGrafanaMetricsUnavailable
+      - alert: DARSHANGrafanaMetricsUnavailable
         expr: up{job="vm3-grafana"} == 0
         for: 10m
         labels:
@@ -52,7 +52,7 @@ groups:
           summary: "Grafana metrics are unavailable"
           description: "Grafana on {{ $labels.instance }} has been unreachable for 10 minutes."
 
-      - alert: SignhexPostgresUnavailable
+      - alert: DARSHANPostgresUnavailable
         expr: pg_up == 0
         for: 5m
         labels:
@@ -62,7 +62,7 @@ groups:
           summary: "PostgreSQL is unavailable"
           description: "postgres_exporter can reach {{ $labels.instance }}, but PostgreSQL is reporting down."
 
-      - alert: SignhexMinioMetricsUnavailable
+      - alert: DARSHANMinioMetricsUnavailable
         expr: up{job="vm1-minio"} == 0
         for: 5m
         labels:
@@ -72,8 +72,8 @@ groups:
           summary: "MinIO metrics are unavailable"
           description: "MinIO cluster metrics on {{ $labels.instance }} have been unreachable for 5 minutes."
 
-      - alert: SignhexBackendHttp5xxHigh
-        expr: signhex:backend_http_error_rate:ratio > 0.05
+      - alert: DARSHANBackendHttp5xxHigh
+        expr: darshan:backend_http_error_rate:ratio > 0.05
         for: 10m
         labels:
           severity: warning
@@ -82,8 +82,8 @@ groups:
           summary: "Backend 5xx rate is elevated"
           description: "The backend 5xx ratio has been above 5% for 10 minutes."
 
-      - alert: SignhexHostCpuHigh
-        expr: signhex:host_cpu_utilization:ratio > 0.85
+      - alert: DARSHANHostCpuHigh
+        expr: darshan:host_cpu_utilization:ratio > 0.85
         for: 15m
         labels:
           severity: warning
@@ -92,8 +92,8 @@ groups:
           summary: "Host CPU utilization is high"
           description: "{{ $labels.job }} on {{ $labels.instance }} has been above 85% CPU for 15 minutes."
 
-      - alert: SignhexHostFilesystemHigh
-        expr: signhex:host_filesystem_utilization:ratio{job!="vm1-node"} > 0.90
+      - alert: DARSHANHostFilesystemHigh
+        expr: darshan:host_filesystem_utilization:ratio{job!="vm1-node"} > 0.90
         for: 15m
         labels:
           severity: critical
@@ -102,8 +102,8 @@ groups:
           summary: "Host filesystem utilization is high"
           description: "{{ $labels.job }} on {{ $labels.instance }} has a filesystem above 90% utilization."
 
-      - alert: SignhexVm1DataFilesystemHigh
-        expr: signhex:host_filesystem_utilization:ratio{job="vm1-node"} > 0.85
+      - alert: DARSHANVm1DataFilesystemHigh
+        expr: darshan:host_filesystem_utilization:ratio{job="vm1-node"} > 0.85
         for: 10m
         labels:
           severity: critical
@@ -112,8 +112,8 @@ groups:
           summary: "VM1 data machine filesystem utilization is high"
           description: "VM1 data storage on {{ $labels.instance }} has been above 85% utilization for 10 minutes and may impact PostgreSQL or MinIO."
 
-      - alert: SignhexHostMemoryHigh
-        expr: signhex:host_memory_utilization:ratio > 0.90
+      - alert: DARSHANHostMemoryHigh
+        expr: darshan:host_memory_utilization:ratio > 0.90
         for: 15m
         labels:
           severity: warning
@@ -122,8 +122,8 @@ groups:
           summary: "Host memory utilization is high"
           description: "{{ $labels.job }} on {{ $labels.instance }} has been above 90% memory utilization for 15 minutes."
 
-      - alert: SignhexFleetHeartbeatsStalled
-        expr: signhex_fleet_latest_heartbeat_age_seconds > 600 and signhex:fleet_total_players >= 1
+      - alert: DARSHANFleetHeartbeatsStalled
+        expr: darshan_fleet_latest_heartbeat_age_seconds > 600 and darshan:fleet_total_players >= 1
         for: 10m
         labels:
           severity: critical
@@ -132,8 +132,8 @@ groups:
           summary: "Player fleet heartbeats are stalled"
           description: "The backend has not recorded a fresh player heartbeat for more than 10 minutes."
 
-      - alert: SignhexFleetOfflinePlayersHigh
-        expr: signhex:fleet_offline_players_ratio > 0.25 and signhex:fleet_total_players >= 4
+      - alert: DARSHANFleetOfflinePlayersHigh
+        expr: darshan:fleet_offline_players_ratio > 0.25 and darshan:fleet_total_players >= 4
         for: 15m
         labels:
           severity: warning
@@ -142,8 +142,8 @@ groups:
           summary: "Offline player ratio is elevated"
           description: "More than 25% of the known player fleet has been marked OFFLINE for 15 minutes."
 
-      - alert: SignhexRealtimeOutboxLagHigh
-        expr: signhex_server_command_outbox_oldest_pending_age_seconds > 120
+      - alert: DARSHANRealtimeOutboxLagHigh
+        expr: darshan_server_command_outbox_oldest_pending_age_seconds > 120
         for: 10m
         labels:
           severity: warning
@@ -152,8 +152,8 @@ groups:
           summary: "Realtime outbox lag is elevated"
           description: "The oldest pending realtime outbox row has been waiting for more than 2 minutes."
 
-      - alert: SignhexRealtimeOutboxDispatchFailures
-        expr: signhex:realtime_outbox_dispatch_failure_rate_per_second > 0
+      - alert: DARSHANRealtimeOutboxDispatchFailures
+        expr: darshan:realtime_outbox_dispatch_failure_rate_per_second > 0
         for: 10m
         labels:
           severity: warning
@@ -162,8 +162,8 @@ groups:
           summary: "Realtime outbox dispatch failures detected"
           description: "The outbox dispatcher has recorded failed notification dispatch attempts."
 
-      - alert: SignhexRealtimePayloadTooLarge
-        expr: signhex:realtime_payload_too_large_rate_per_second > 0
+      - alert: DARSHANRealtimePayloadTooLarge
+        expr: darshan:realtime_payload_too_large_rate_per_second > 0
         for: 5m
         labels:
           severity: critical
@@ -172,8 +172,8 @@ groups:
           summary: "Realtime notification payload rejected"
           description: "One or more websocket notification payloads exceeded the configured hard limit."
 
-      - alert: SignhexRealtimeValkeyPublishFailures
-        expr: signhex:realtime_valkey_publish_failure_rate_per_second > 0
+      - alert: DARSHANRealtimeValkeyPublishFailures
+        expr: darshan:realtime_valkey_publish_failure_rate_per_second > 0
         for: 10m
         labels:
           severity: warning
@@ -182,8 +182,8 @@ groups:
           summary: "Valkey realtime fanout publish failures detected"
           description: "Valkey wake notification fanout is failing. DB outbox, REST, polling, and heartbeat fallback must remain active."
 
-      - alert: SignhexRealtimeValkeyFallbackHigh
-        expr: signhex:realtime_valkey_fallback_rate_per_second > 0.1
+      - alert: DARSHANRealtimeValkeyFallbackHigh
+        expr: darshan:realtime_valkey_fallback_rate_per_second > 0.1
         for: 10m
         labels:
           severity: warning
@@ -192,8 +192,8 @@ groups:
           summary: "Realtime fanout fallback rate is elevated"
           description: "Players are relying on durable DB/REST/polling fallback because Valkey fanout is unavailable or device-node mappings are missing."
 
-      - alert: SignhexRealtimeAuthFailuresHigh
-        expr: sum by (site) (rate(signhex_server_device_realtime_auth_total{result="failure"}[5m])) > 0.5
+      - alert: DARSHANRealtimeAuthFailuresHigh
+        expr: sum by (site) (rate(darshan_server_device_realtime_auth_total{result="failure"}[5m])) > 0.5
         for: 10m
         labels:
           severity: warning
@@ -202,8 +202,8 @@ groups:
           summary: "Realtime device authentication failures are elevated"
           description: "Device websocket authentication failures exceed 0.5 attempts per second."
 
-      - alert: SignhexCommandAckFailuresHigh
-        expr: signhex:device_command_ack_failure_ratio > 0.10
+      - alert: DARSHANCommandAckFailuresHigh
+        expr: darshan:device_command_ack_failure_ratio > 0.10
         for: 10m
         labels:
           severity: warning
@@ -212,8 +212,8 @@ groups:
           summary: "Device command ACK failures are elevated"
           description: "More than 10% of command acknowledgements are failing or returning error."
 
-      - alert: SignhexDeviceCommandDeadLettersPresent
-        expr: sum by (site) (signhex_server_device_commands_rows{status=~"DEAD_LETTER|EXPIRED"}) > 0
+      - alert: DARSHANDeviceCommandDeadLettersPresent
+        expr: sum by (site) (darshan_server_device_commands_rows{status=~"DEAD_LETTER|EXPIRED"}) > 0
         for: 15m
         labels:
           severity: warning
@@ -222,8 +222,8 @@ groups:
           summary: "Terminal failed device commands are present"
           description: "Device commands have reached DEAD_LETTER or EXPIRED status and need operator review."
 
-      - alert: SignhexMediaCacheFailuresHigh
-        expr: signhex:media_cache_failure_rate_per_second > 0.1
+      - alert: DARSHANMediaCacheFailuresHigh
+        expr: darshan:media_cache_failure_rate_per_second > 0.1
         for: 10m
         labels:
           severity: warning
@@ -232,8 +232,8 @@ groups:
           summary: "Media/cache failures are elevated"
           description: "Players are reporting ERROR or CRITICAL media/cache failures above the warning threshold."
 
-      - alert: SignhexCriticalMediaCacheReportsUnresolved
-        expr: sum by (site) (signhex_server_media_cache_reports_unresolved{severity="CRITICAL"}) > 0
+      - alert: DARSHANCriticalMediaCacheReportsUnresolved
+        expr: sum by (site) (darshan_server_media_cache_reports_unresolved{severity="CRITICAL"}) > 0
         for: 15m
         labels:
           severity: critical

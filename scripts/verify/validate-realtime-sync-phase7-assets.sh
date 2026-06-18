@@ -34,8 +34,8 @@ for env_file in \
   require_pattern "$env_file" '^OUTBOX_DISPATCH_ENABLED='
   require_pattern "$env_file" '^COMMAND_OUTBOX_WRITE_ENABLED='
   require_pattern "$env_file" '^DEVICE_DESIRED_STATE_ENABLED='
-  require_pattern "$env_file" '^MEDIA_CACHE_REPORTING_ENABLED='
-  require_pattern "$env_file" '^HEXMON_REALTIME_SYNC_ENABLED='
+  require_pattern "$env_file" '^DARSHAN_MEDIA_CACHE_REPORTING_ENABLED='
+  require_pattern "$env_file" '^DARSHAN_REALTIME_PLAYER_ENABLED='
   require_pattern "$env_file" '^VITE_REALTIME_DELIVERY_STATUS_UI='
   require_pattern "$env_file" '^VITE_MEDIA_CACHE_STATUS_UI='
 done

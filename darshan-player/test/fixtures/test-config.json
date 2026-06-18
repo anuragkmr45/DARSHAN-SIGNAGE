@@ -1,0 +1,86 @@
+{
+  "apiBase": "https://api-test.darshan.com",
+  "wsUrl": "wss://api-test.darshan.com/ws",
+  "deviceId": "test-device-123",
+  "environment": {},
+  "runtime": {
+    "mode": "dev"
+  },
+  "realtime": {
+    "enabled": false,
+    "signedAuthEnabled": false,
+    "deviceNamespace": "/device",
+    "commandSafetyPollMs": 60000,
+    "desiredStatePollMs": 300000,
+    "reconnectMinMs": 1000,
+    "reconnectMaxMs": 60000,
+    "pingIntervalMs": 25000,
+    "notificationMaxBytes": 32768,
+    "wsUrl": ""
+  },
+  "mtls": {
+    "enabled": false,
+    "certPath": "/Users/anuragkumar/.darshan/certs/client.crt",
+    "keyPath": "/Users/anuragkumar/.darshan/certs/client.key",
+    "caPath": "/Users/anuragkumar/.darshan/certs/ca.crt",
+    "strictCertificateValidation": true,
+    "autoRenew": true,
+    "renewBeforeDays": 30
+  },
+  "cache": {
+    "path": "./test/fixtures/cache",
+    "maxBytes": 1073741824,
+    "prefetchConcurrency": 3,
+    "bandwidthBudgetMbps": 50,
+    "downloadConcurrency": 3,
+    "bandwidthBytesPerSecond": 10485760
+  },
+  "intervals": {
+    "heartbeatMs": 300000,
+    "commandPollMs": 5000,
+    "schedulePollMs": 300000,
+    "defaultMediaPollMs": 300000,
+    "healthCheckMs": 60000,
+    "screenshotMs": 30000,
+    "popFlushMs": 60000
+  },
+  "log": {
+    "level": "info",
+    "shipPolicy": "batch",
+    "rotationSizeMb": 100,
+    "rotationIntervalHours": 24,
+    "compressionEnabled": true
+  },
+  "power": {
+    "dpmsEnabled": true,
+    "preventBlanking": true,
+    "scheduleEnabled": false
+  },
+  "security": {
+    "csp": "default-src 'self' data: blob: file: http: https:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: http: https:; media-src 'self' data: blob: file: http: https:; connect-src 'self' data: blob: http: https: ws: wss:; frame-src 'self' data: blob: file: http: https: chrome-extension:; worker-src 'self' blob:; font-src 'self' data: http: https:; object-src 'none'",
+    "allowedDomains": [],
+    "disableEval": true,
+    "contextIsolation": true,
+    "nodeIntegration": false,
+    "sandbox": true
+  },
+  "observability": {
+    "enabled": true,
+    "metricsEnabled": true,
+    "mediaCacheReportingEnabled": true,
+    "bindAddress": "127.0.0.1",
+    "port": 3300,
+    "allowRemoteAccess": false
+  },
+  "pairing": {
+    "offlineValidationGraceMs": 604800000,
+    "backendFirstRolloutMode": true
+  },
+  "duplicateIdentity": {
+    "enabled": true,
+    "enforcement": "warn"
+  },
+  "diagnostics": {
+    "showEnvironmentIdentity": true
+  }
+}

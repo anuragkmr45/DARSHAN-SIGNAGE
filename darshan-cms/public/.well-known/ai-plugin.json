@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "DARSHAN Nexus Core",
+  "name_for_model": "darshan_nexus_core",
+  "description_for_human": "Example API for DARSHAN Nexus Core.",
+  "description_for_model": "API for DARSHAN Nexus Core that allows XYZ.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://darshan-cms.vercel.app/openapi.yaml"
+  },
+  "logo_url": "https://darshan-cms.vercel.app/logo.png",
+  "contact_email": "you@example.com",
+  "legal_info_url": "https://darshan-cms.vercel.app/legal"
+}

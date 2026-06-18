@@ -32,7 +32,7 @@
 
 ## Backend Metrics Missing
 
-1. Confirm `signhex-server` is reachable on VM2 and `/metrics` still binds to the expected local or management interface.
+1. Confirm `darshan-server` is reachable on VM2 and `/metrics` still binds to the expected local or management interface.
 2. Check whether the backend process is healthy but the `/metrics` access policy changed.
 3. If the scrape is blocked only by config drift, restore the expected bind or token config instead of broadening exposure.
 4. Use CMS summary APIs as a fallback current-state view while the Prometheus scrape path is being restored.

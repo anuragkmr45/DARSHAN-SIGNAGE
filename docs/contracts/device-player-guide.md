@@ -1,6 +1,6 @@
 # Device Player Implementation Guide
 
-Note: for the authoritative lifecycle and current code-truth behavior, use `signhex-server/docs/DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md`. This file is directionally useful, but some older transport/auth assumptions here are broader than what the current runtime actually enforces.
+Note: for the authoritative lifecycle and current code-truth behavior, use `darshan-server/docs/DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md`. This file is directionally useful, but some older transport/auth assumptions here are broader than what the current runtime actually enforces.
 
 This backend is already serving playlists and presigned media URLs. Implement the device/player with the flow below.
 

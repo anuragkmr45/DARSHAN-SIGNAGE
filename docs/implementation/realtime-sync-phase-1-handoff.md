@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-24
 Updated by: Codex
-Repo path: `/Users/anuragkumar/Desktop/signhex`
+Repo path: `/Users/anuragkumar/Desktop/darshan`
 Current branch: `release-01`
 
 ## Gate Result
@@ -29,16 +29,16 @@ Phase 2 may start with the documented conditions carried forward. Phase 2 must n
 
 | Area | Status | Evidence |
 |---|---|---|
-| Additive migration | Verified present | `signhex-server/drizzle/migrations/0030_command_lifecycle_normalization.sql` |
-| Expanded backend enums | Verified present | `signhex-server/src/db/schema.ts` |
-| Lifecycle fields and indexes | Verified present | `signhex-server/src/db/schema.ts`, migration `0030_command_lifecycle_normalization.sql` |
+| Additive migration | Verified present | `darshan-server/drizzle/migrations/0030_command_lifecycle_normalization.sql` |
+| Expanded backend enums | Verified present | `darshan-server/src/db/schema.ts` |
+| Lifecycle fields and indexes | Verified present | `darshan-server/src/db/schema.ts`, migration `0030_command_lifecycle_normalization.sql` |
 | Status history table | Verified present | `device_command_status_history` in schema and migration |
-| Command lifecycle service | Verified present | `signhex-server/src/services/command-lifecycle-service.ts` |
-| Poll command claim path | Verified present | `signhex-server/src/routes/device-telemetry.ts` |
-| Heartbeat command claim path | Verified present | `signhex-server/src/routes/device-telemetry.ts` |
-| ACK payload persistence | Verified present | `signhex-server/src/services/command-lifecycle-service.ts` |
-| Recent command status API | Verified present | `GET /api/v1/screens/:id/commands/recent` in `signhex-server/src/routes/screens.ts` |
-| Electron ACK enrichment | Verified present | `signage-screen/src/main/services/command-processor.ts` |
+| Command lifecycle service | Verified present | `darshan-server/src/services/command-lifecycle-service.ts` |
+| Poll command claim path | Verified present | `darshan-server/src/routes/device-telemetry.ts` |
+| Heartbeat command claim path | Verified present | `darshan-server/src/routes/device-telemetry.ts` |
+| ACK payload persistence | Verified present | `darshan-server/src/services/command-lifecycle-service.ts` |
+| Recent command status API | Verified present | `GET /api/v1/screens/:id/commands/recent` in `darshan-server/src/routes/screens.ts` |
+| Electron ACK enrichment | Verified present | `darshan-player/src/main/services/command-processor.ts` |
 | `RESYNC` compatibility | Verified fixed | Backend accepts `RESYNC`; Electron handles it as a REST refresh/resync alias |
 | Playback refresh status history | Verified fixed | `createPlaybackRefreshCommands` uses `createDeviceCommands`; test verifies creation history |
 
@@ -46,14 +46,14 @@ Phase 2 may start with the documented conditions carried forward. Phase 2 must n
 
 | Command | Result | Notes |
 |---|---|---|
-| `cd signhex-server && npm run build` | Passed | TypeScript build exited 0 under Node `v24.12.0`. |
-| `cd signhex-server && DRIZZLE_STRICT=false npm run db:push` | Passed | Applied schema to local Docker Postgres for test execution. |
-| `cd signhex-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed | 11 passing against local Docker Postgres. |
-| `cd signhex-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed | 2 passing, including creation history assertion. |
-| `cd signhex-server && npx vitest run src/routes/settings.test.ts` | Passed | 5 passing in isolated run. |
-| `cd signhex-server && npx vitest run src/routes/emergency.test.ts` | Passed | 2 passing in isolated run. |
-| `cd signage-screen && npm run build` | Passed | Main and renderer builds completed. |
-| `cd signage-screen && npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Passed | 14 passing. |
+| `cd darshan-server && npm run build` | Passed | TypeScript build exited 0 under Node `v24.12.0`. |
+| `cd darshan-server && DRIZZLE_STRICT=false npm run db:push` | Passed | Applied schema to local Docker Postgres for test execution. |
+| `cd darshan-server && npx vitest run src/routes/device-telemetry-commands.test.ts` | Passed | 11 passing against local Docker Postgres. |
+| `cd darshan-server && npx vitest run src/services/playback-refresh-dispatch.test.ts` | Passed | 2 passing, including creation history assertion. |
+| `cd darshan-server && npx vitest run src/routes/settings.test.ts` | Passed | 5 passing in isolated run. |
+| `cd darshan-server && npx vitest run src/routes/emergency.test.ts` | Passed | 2 passing in isolated run. |
+| `cd darshan-player && npm run build` | Passed | Main and renderer builds completed. |
+| `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/command-processor.test.ts --spec test/unit/services/heartbeat.test.ts` | Passed | 14 passing. |
 
 ## Blocked Test Evidence
 
@@ -67,7 +67,7 @@ connect ECONNREFUSED 127.0.0.1:5432
 Required rerun after Postgres is available:
 
 ```bash
-cd signhex-server
+cd darshan-server
 npx vitest run src/routes/device-telemetry-commands.test.ts
 ```
 

@@ -8,7 +8,7 @@ Status: DOCUMENTATION_AND_LOCAL_IMPLEMENTATION_UPDATED
 
 All dev, QA, and production realtime sync evidence and rollout planning is air-gapped on-prem by default. Public internet, public DNS, public media CDN, public object storage, public cloud push, and public staging endpoints are not baseline dependencies.
 
-For multi-instance production realtime, SignHex uses Valkey-backed fanout/distributed coordination. Sticky sessions are allowed only as a load-balancer compatibility setting when Socket.IO HTTP polling transport is enabled. Sticky-session-only production realtime is not approved.
+For multi-instance production realtime, DARSHAN uses Valkey-backed fanout/distributed coordination. Sticky sessions are allowed only as a load-balancer compatibility setting when Socket.IO HTTP polling transport is enabled. Sticky-session-only production realtime is not approved.
 
 Valkey Pub/Sub is wake-notification fanout only. DB `device_commands`, `command_outbox`, `schedule_snapshots`, and `device_desired_state` remain the durable source of truth. If broker-side persisted fanout is required later, Valkey Streams can be reviewed, but the DB outbox remains the durability layer.
 
@@ -40,7 +40,7 @@ Local backend fanout implementation was added on 2026-05-25. See `realtime-sync-
 | `docs/architecture/failure-modes.md` | needed Valkey failure mode | Updated Valkey outage behavior and Phase 8 blocked evidence language. |
 | `docs/architecture/mobile-tv-player-strategy.md` | needed air-gapped mobile update | Updated to make public FCM/APNs non-baseline and require foreground/kiosk WebSocket plus REST/polling fallback. |
 | `docs/architecture/player-contract.md` | needed mobile push caveat | Updated background wake strategy for air-gapped mode. |
-| `signhex-server/src/realtime/*` | needed implementation | Added Valkey-compatible Pub/Sub fanout, device-node registry, gateway/outbox wiring, and focused tests. |
+| `darshan-server/src/realtime/*` | needed implementation | Added Valkey-compatible Pub/Sub fanout, device-node registry, gateway/outbox wiring, and focused tests. |
 
 ## Required On-Prem Inputs
 

@@ -2,7 +2,7 @@
 
 ## Naming
 
-- Use stable `signhex_*` metric names for application metrics.
+- Use stable `darshan_*` metric names for application metrics.
 - Use exporter-native names for third-party exporters and normalize with recording rules where useful.
 - Use nouns for gauges and totals for counters.
 - Suffix counters with `_total`.

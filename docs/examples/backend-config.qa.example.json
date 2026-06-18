@@ -1,0 +1,48 @@
+{
+  "environment": {
+    "name": "onprem-qa",
+    "deploymentId": "qa-site-a",
+    "serverId": "backend-a"
+  },
+  "http": {
+    "appPublicBaseUrl": "http://10.20.0.30:8080",
+    "corsOrigins": ["http://10.20.0.30:8080"],
+    "socketAllowedOrigins": ["http://10.20.0.30:8080"],
+    "socketIoPath": "/socket.io/"
+  },
+  "realtime": {
+    "enabled": true,
+    "busProvider": "valkey",
+    "socketTransport": "websocket",
+    "socketAllowPolling": true,
+    "socketRequireStickySessions": false,
+    "deviceNamespace": "/device"
+  },
+  "valkey": {
+    "mode": "standalone",
+    "tlsEnabled": false,
+    "authRequired": true,
+    "namespace": "darshan:qa",
+    "pubsubEnabled": true
+  },
+  "duplicateIdentity": {
+    "enabled": true,
+    "enforcement": "warn",
+    "sessionLeaseMs": 300000,
+    "restartGraceMs": 120000
+  },
+  "media": {
+    "endpoint": "http://10.20.0.10:9000",
+    "region": "us-east-1"
+  },
+  "observability": {
+    "prometheusUrl": "http://10.20.0.40:9090",
+    "prometheusTimeoutMs": 1500,
+    "grafanaEnabled": true,
+    "grafanaEmbedEnabled": true,
+    "grafanaBasePath": "/grafana"
+  },
+  "limits": {
+    "wsNotificationMaxBytes": 32768
+  }
+}

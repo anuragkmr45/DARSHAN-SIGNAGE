@@ -12,7 +12,7 @@ Retention and partitioning require product and DBA approval because the correct 
 
 ## Current Schema
 
-Source: `signhex-server/src/db/schema.ts`
+Source: `darshan-server/src/db/schema.ts`
 
 Table: `media_cache_reports`
 

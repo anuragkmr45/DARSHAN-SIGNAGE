@@ -17,4 +17,4 @@ default_theme = light
 enabled = false
 
 [dashboards]
-default_home_dashboard_path = /var/lib/grafana/dashboards/backend-service.json
+default_home_dashboard_path = /var/lib/grafana/dashboards/vm2-backend.json

@@ -1,13 +1,13 @@
-# Signhex QA Setup Guide
+# DARSHAN QA Setup Guide
 
 This is the primary QA deployment runbook for the approved air-gapped on-prem multi-VM QA topology.
 
 QA uses the same machine-role split as production:
 
 - VM1 data: PostgreSQL + MinIO
-- VM2 backend: `signhex-server` and Prometheus
-- VM3 CMS: `signhex-nexus-core` and Grafana behind `/grafana/`
-- separate wired player machines: `signage-screen`
+- VM2 backend: `darshan-server` and Prometheus
+- VM3 CMS: `darshan-cms` and Grafana behind `/grafana/`
+- separate wired player machines: `darshan-player`
 
 No public internet, public DNS, public endpoint, public media CDN, public S3, public broker, FCM, or APNs service is assumed. Valkey, if used, is an internal on-prem service.
 
@@ -46,7 +46,7 @@ export QA_BACKEND_DEVICE_HOST="10.30.0.20"
 export QA_CMS_HOST="10.30.0.30"
 export SERVER_PACKAGE_DIR="out/${RELEASE_ID}/server"
 export CMS_PACKAGE_DIR="out/${RELEASE_ID}/cms"
-export PLAYER_ARTIFACTS_DIR="/artifacts/signage-screen/1.2.3"
+export PLAYER_ARTIFACTS_DIR="/artifacts/darshan-player/1.2.3"
 
 bash scripts/bundle/assemble-runtime-bundle.sh --profile qa "$SITE_NAME"
 ```
@@ -82,9 +82,9 @@ export QA_BACKEND_VM_HOST="10.30.0.20"
 export QA_CMS_VM_HOST="10.30.0.30"
 export RELEASE_ID="2026-04-02-r1"
 
-scp -r "dist/onprem/${SITE_NAME}/qa/data" "${DEPLOY_USER}@${QA_DATA_VM_HOST}:/opt/signhex/${SITE_NAME}/releases/${RELEASE_ID}/"
-scp -r "dist/onprem/${SITE_NAME}/qa/backend" "${DEPLOY_USER}@${QA_BACKEND_VM_HOST}:/opt/signhex/${SITE_NAME}/releases/${RELEASE_ID}/"
-scp -r "dist/onprem/${SITE_NAME}/qa/cms" "${DEPLOY_USER}@${QA_CMS_VM_HOST}:/opt/signhex/${SITE_NAME}/releases/${RELEASE_ID}/"
+scp -r "dist/onprem/${SITE_NAME}/qa/data" "${DEPLOY_USER}@${QA_DATA_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
+scp -r "dist/onprem/${SITE_NAME}/qa/backend" "${DEPLOY_USER}@${QA_BACKEND_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
+scp -r "dist/onprem/${SITE_NAME}/qa/cms" "${DEPLOY_USER}@${QA_CMS_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
 ```
 
 ## 5. Start the QA services
@@ -92,7 +92,7 @@ scp -r "dist/onprem/${SITE_NAME}/qa/cms" "${DEPLOY_USER}@${QA_CMS_VM_HOST}:/opt/
 ### VM1 data
 
 ```bash
-cd "/opt/signhex/${SITE_NAME}/releases/${RELEASE_ID}/data"
+cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/data"
 ./load-images.sh
 ./start.sh
 ./health-check.sh
@@ -101,7 +101,7 @@ cd "/opt/signhex/${SITE_NAME}/releases/${RELEASE_ID}/data"
 ### VM2 backend
 
 ```bash
-cd "/opt/signhex/${SITE_NAME}/releases/${RELEASE_ID}/backend"
+cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/backend"
 ./load-images.sh
 ./start.sh
 ./health-check.sh
@@ -115,7 +115,7 @@ Notes:
 ### VM3 CMS
 
 ```bash
-cd "/opt/signhex/${SITE_NAME}/releases/${RELEASE_ID}/cms"
+cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/cms"
 ./load-images.sh
 ./start.sh
 ./health-check.sh
@@ -157,7 +157,7 @@ docs/environments/qa/realtime-sync.env.example
 
 Minimum QA realtime gate:
 
-- keep `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`, and `HEXMON_REALTIME_SYNC_ENABLED=false` until REST/polling/heartbeat command delivery is verified
+- keep `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`, and `DARSHAN_REALTIME_PLAYER_ENABLED=false` until REST/polling/heartbeat command delivery is verified
 - validate `/api/v1/` through the QA proxy
 - validate `/socket.io/` upgrade and idle timeout through the QA proxy before canary
 - validate Valkey connectivity and fanout before multi-node realtime canary
@@ -207,5 +207,5 @@ Check:
 - players use the QA backend device IP, not the CMS IP
 - QA network allows player access to `3000/tcp`
 - VM2 backend health check passes
-- if realtime is enabled, `/socket.io/` upgrade works through the selected QA proxy path; otherwise disable `REALTIME_SYNC_ENABLED` and `HEXMON_REALTIME_SYNC_ENABLED` and verify REST/polling fallback
+- if realtime is enabled, `/socket.io/` upgrade works through the selected QA proxy path; otherwise disable `REALTIME_SYNC_ENABLED` and `DARSHAN_REALTIME_PLAYER_ENABLED` and verify REST/polling fallback
 - for multi-node realtime, Valkey is reachable from every backend node and Pub/Sub fanout wakes the node that owns the player socket

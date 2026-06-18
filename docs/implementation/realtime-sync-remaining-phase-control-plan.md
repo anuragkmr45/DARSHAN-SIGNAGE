@@ -23,7 +23,7 @@ The sections below are a control plan only. They do not approve implementation.
 - Objective: Add durable notification intent and per-device desired-state reconciliation while preserving DB/REST source of truth.
 - Non-goals: No WebSocket gateway, no Electron realtime, no CMS UI.
 - Prerequisites: Phase 1 conditionally approved; tenancy decision; group command materialization decision; Phase 1 rollout conditions carried forward.
-- Files likely to change: `signhex-server/src/db/schema.ts`, `signhex-server/drizzle/migrations/0031_command_outbox_desired_state.sql`, `src/services/device-desired-state-service.ts`, `src/services/command-outbox-service.ts`, schedule/default/emergency command creation paths, `src/routes/device-telemetry.ts`.
+- Files likely to change: `darshan-server/src/db/schema.ts`, `darshan-server/drizzle/migrations/0031_command_outbox_desired_state.sql`, `src/services/device-desired-state-service.ts`, `src/services/command-outbox-service.ts`, schedule/default/emergency command creation paths, `src/routes/device-telemetry.ts`.
 - DB migrations required: `command_outbox`, `device_desired_state`, indexes on outbox status/next attempt/device, unique desired state by screen, optional desired-state history.
 - APIs required: `GET /api/v1/device/:deviceId/desired-state`.
 - Env vars required: `DEVICE_DESIRED_STATE_ENABLED`, `OUTBOX_DISPATCH_ENABLED=false`, `OUTBOX_DISPATCH_BATCH_SIZE`, `OUTBOX_DISPATCH_INTERVAL_MS`.
@@ -46,7 +46,7 @@ The sections below are a control plan only. They do not approve implementation.
 - Objective: Add authenticated notification-only player gateway and outbox dispatcher.
 - Non-goals: No full snapshot/media over WS, no player adaptive polling yet, no mobile push.
 - Prerequisites: Phase 2 conditionally approved; WS runtime decision. Valkey fanout/topology implementation is required before multi-instance production.
-- Files likely to change: `signhex-server/src/realtime/*`, `src/jobs/*`, `src/config/index.ts`, env examples, observability files.
+- Files likely to change: `darshan-server/src/realtime/*`, `src/jobs/*`, `src/config/index.ts`, env examples, observability files.
 - DB migrations required: optional `device_realtime_sessions` if persistent session audit is needed; otherwise none beyond outbox.
 - APIs required: WebSocket HELLO/HELLO_ACK protocol, health/metrics endpoints.
 - Env vars required: `REALTIME_SYNC_ENABLED`, `REALTIME_DEVICE_NAMESPACE`, `WS_NOTIFICATION_MAX_BYTES`, `OUTBOX_DISPATCH_ENABLED`, `OUTBOX_DISPATCH_BATCH_SIZE`, `OUTBOX_DISPATCH_INTERVAL_MS`, `OUTBOX_DISPATCH_LEASE_MS`, `REALTIME_BUS_PROVIDER=valkey`, `VALKEY_URL`, `VALKEY_MODE`, `VALKEY_NAMESPACE`, `VALKEY_TLS_ENABLED`, and `VALKEY_AUTH_REQUIRED` before multi-instance production.
@@ -69,7 +69,7 @@ The sections below are a control plan only. They do not approve implementation.
 - Objective: Add player realtime client that wakes REST pulls and adapts polling based on WS health.
 - Non-goals: No change to source of truth, no removal of heartbeat/polling, no mobile push.
 - Prerequisites: Phase 3 approved; player contract stable.
-- Files likely to change: `signage-screen/src/main/services/realtime-service.ts`, command processor, snapshot/default media services, config, tests.
+- Files likely to change: `darshan-player/src/main/services/realtime-service.ts`, command processor, snapshot/default media services, config, tests.
 - DB migrations required: none.
 - APIs required: existing REST commands/snapshot/default/emergency/desired-state/ACK.
 - Env vars/config required: realtime enabled flag, WS URL/path, safety poll/fallback poll intervals.
@@ -92,7 +92,7 @@ The sections below are a control plan only. They do not approve implementation.
 - Objective: Expose command, publish, emergency, and delivery status to operators.
 - Non-goals: No new delivery mechanism; no direct command mutation beyond approved APIs.
 - Prerequisites: Phases 1-4 stable enough to provide status.
-- Files likely to change: `signhex-server/src/routes/*`, `signhex-nexus-core` API clients/components/routes.
+- Files likely to change: `darshan-server/src/routes/*`, `darshan-cms` API clients/components/routes.
 - DB migrations required: likely none if Phase 1/2 status tables are sufficient.
 - APIs required: command status, publish delivery status, emergency delivery status, dead-letter/failure listing.
 - Env vars required: CMS feature flag for delivery UI.

@@ -1,13 +1,15 @@
-# Signhex Monorepo
+# DARSHAN Monorepo
 
-This repository is the unified source and platform workspace for the Signhex digital signage system.
+This repository is the unified source and platform workspace for the DARSHAN digital signage system.
+
+Former development names were Signhex, Hexmon, HexmonSignage, `signhex-server`, `signhex-nexus-core`, `signage-screen`, and `signhex-platform`. Runtime aliases for those names are kept only where they protect deployed devices, persisted browser state, metrics dashboards, or environment-variable compatibility during the DARSHAN migration window.
 
 It contains:
 
-- `signhex-server/` - backend/API server, database schema, migrations, device APIs, CMS APIs, command lifecycle, realtime notification gateway, telemetry, proof-of-play, default media, emergency/takeover, and reservations/conflicts.
-- `signhex-nexus-core/` - CMS/admin frontend for schedules, presentations, layouts, media assignment, default media, emergency/takeover, publish, monitoring, and screen operations.
-- `signage-screen/` - Electron signage player used on physical screens.
-- `docs/`, `deploy/`, `scripts/`, `standards/`, `manifests/`, and `assets/` - platform architecture, on-prem deployment, observability, release, QA, support, and implementation tracking material formerly maintained in `signhex-platform`.
+- `darshan-server/` - backend/API server, database schema, migrations, device APIs, CMS APIs, command lifecycle, realtime notification gateway, telemetry, proof-of-play, default media, emergency/takeover, and reservations/conflicts.
+- `darshan-cms/` - CMS/admin frontend for schedules, presentations, layouts, media assignment, default media, emergency/takeover, publish, monitoring, and screen operations.
+- `darshan-player/` - Electron signage player used on physical screens.
+- `docs/`, `deploy/`, `scripts/`, `standards/`, `manifests/`, and `assets/` - platform architecture, on-prem deployment, observability, release, QA, support, and implementation tracking material from the former platform repo.
 
 ## Architecture Guardrails
 
@@ -31,9 +33,9 @@ Current fixed rules:
 ## Repository Layout
 
 ```text
-signage-screen/        Electron signage player
-signhex-server/        Backend/API server
-signhex-nexus-core/    CMS/admin frontend
+darshan-player/        Electron signage player
+darshan-server/        Backend/API server
+darshan-cms/    CMS/admin frontend
 docs/                  Architecture, contracts, environments, implementation status, QA, runbooks
 deploy/                On-prem deployment and observability templates
 scripts/               Bootstrap, bundle, export, load, release, and verification helpers
@@ -47,7 +49,7 @@ assets/                Diagrams, templates, and non-product assets
 Backend:
 
 ```bash
-cd signhex-server
+cd darshan-server
 npm run build
 npx vitest run
 ```
@@ -55,7 +57,7 @@ npx vitest run
 CMS:
 
 ```bash
-cd signhex-nexus-core
+cd darshan-cms
 npm run lint
 npm run build
 ```
@@ -63,7 +65,7 @@ npm run build
 Electron player:
 
 ```bash
-cd signage-screen
+cd darshan-player
 npm run build
 npm run test:unit
 ```

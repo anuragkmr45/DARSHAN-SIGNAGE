@@ -1,0 +1,1263 @@
+/**
+ * Player - Main playback UI controller
+ * Handles media rendering and transitions in the renderer process
+ */
+
+import { ActiveSlotPlayback, DefaultMediaResponse, FitMode, LayoutScene, LayoutSceneSlot, PlayerStatus, TimelineItem } from '../common/types'
+import './types'
+import { DefaultMediaPlayer } from './default-media-player'
+import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
+import { createPdfPlaybackElement } from './pdf-playback'
+import { createWebpagePlaybackElement } from './webpage-playback'
+
+const { sanitizeLogPayloadForDiagnostics } =
+  require('../common/redaction') as typeof import('../common/redaction')
+
+export function parseAspectRatio(aspectRatio?: string): number | null {
+  if (!aspectRatio || typeof aspectRatio !== 'string') {
+    return null
+  }
+
+  const parts = aspectRatio.split(':')
+  if (parts.length !== 2) {
+    return null
+  }
+
+  const width = Number(parts[0]?.trim())
+  const height = Number(parts[1]?.trim())
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null
+  }
+
+  return width / height
+}
+
+export function computeSceneStageFrame(
+  aspectRatio: string | undefined,
+  viewportWidth: number,
+  viewportHeight: number,
+): { width: number; height: number; left: number; top: number } {
+  const ratio = parseAspectRatio(aspectRatio)
+  if (!ratio || viewportWidth <= 0 || viewportHeight <= 0) {
+    return {
+      width: viewportWidth,
+      height: viewportHeight,
+      left: 0,
+      top: 0,
+    }
+  }
+
+  const viewportRatio = viewportWidth / viewportHeight
+  if (viewportRatio > ratio) {
+    const height = viewportHeight
+    const width = height * ratio
+    return {
+      width,
+      height,
+      left: (viewportWidth - width) / 2,
+      top: 0,
+    }
+  }
+
+  const width = viewportWidth
+  const height = width / ratio
+  return {
+    width,
+    height,
+    left: 0,
+    top: (viewportHeight - height) / 2,
+  }
+}
+
+export function resolvePlayerContentSource(
+  status: PlayerStatus,
+): 'schedule' | 'default' | 'none' {
+  if (
+    status.state === 'BOOT' ||
+    status.state === 'LOCAL_IDENTITY_PRESENT' ||
+    status.state === 'BOOTSTRAP_AUTH' ||
+    status.state === 'RECOVERY_REQUIRED' ||
+    status.state === 'HARD_RECOVERY' ||
+    status.state === 'PAIRING_PENDING' ||
+    status.state === 'PAIRING_CONFIRMED' ||
+    status.state === 'PAIRING_COMPLETING'
+  ) {
+    return 'none'
+  }
+
+  if (status.mode === 'default' || status.mode === 'offline' || status.mode === 'empty') {
+    return 'default'
+  }
+
+  return 'schedule'
+}
+
+export function shouldUseManualVideoReplay(item: TimelineItem): boolean {
+  return item.type === 'video' && item.loop === true
+}
+
+type TransitionStyleTarget = {
+  style: {
+    transition: string
+    opacity: string
+  }
+}
+
+export function resolveOpacityTransitionStyle(durationMs?: number): string {
+  const safeDuration = Math.max(0, Number(durationMs) || 0)
+  if (safeDuration <= 0) {
+    return ''
+  }
+
+  return `opacity ${safeDuration}ms ease-in-out`
+}
+
+export function prepareElementForFadeIn(
+  element: TransitionStyleTarget,
+  durationMs?: number,
+): boolean {
+  const transitionStyle = resolveOpacityTransitionStyle(durationMs)
+  element.style.transition = transitionStyle
+  if (!transitionStyle) {
+    element.style.opacity = '1'
+    return false
+  }
+
+  element.style.opacity = '0'
+  return true
+}
+
+export function prepareElementForFadeOut(
+  element: TransitionStyleTarget,
+  durationMs?: number,
+): void {
+  element.style.transition = resolveOpacityTransitionStyle(durationMs)
+  element.style.opacity = '0'
+}
+
+type DisposableMediaNode = {
+  __darshanCleanup?: () => void
+  pause?: () => void
+  removeAttribute?: (name: string) => void
+  load?: () => void
+  stop?: () => void
+  querySelectorAll?: (selector: string) => ArrayLike<DisposableMediaNode>
+  parentElement?: { removeChild?: (child: DisposableMediaNode) => void } | null
+  remove?: () => void
+  src?: string
+}
+
+type RenderedScene = {
+  element: HTMLElement
+  cleanup: () => void
+}
+
+type PendingTransition = {
+  currentId: string
+  nextId: string
+  durationMs: number
+}
+
+function teardownDisposableNode(node: DisposableMediaNode | null | undefined): void {
+  if (!node) {
+    return
+  }
+
+  try {
+    node.pause?.()
+  } catch {
+    // ignore teardown errors from inert/fake nodes
+  }
+
+  try {
+    node.removeAttribute?.('src')
+  } catch {
+    // ignore teardown errors from inert/fake nodes
+  }
+
+  if (typeof node.src === 'string') {
+    try {
+      node.src = ''
+    } catch {
+      // ignore read-only src properties
+    }
+  }
+
+  try {
+    node.load?.()
+  } catch {
+    // ignore teardown errors from inert/fake nodes
+  }
+
+  try {
+    node.stop?.()
+  } catch {
+    // ignore teardown errors from inert/fake nodes
+  }
+
+  if (node.parentElement?.removeChild) {
+    try {
+      node.parentElement.removeChild(node)
+      return
+    } catch {
+      // fall back to remove()
+    }
+  }
+
+  try {
+    node.remove?.()
+  } catch {
+    // ignore teardown errors from inert/fake nodes
+  }
+}
+
+export function teardownScheduledElementTree(root: DisposableMediaNode | null | undefined): void {
+  if (!root) {
+    return
+  }
+
+  try {
+    root.__darshanCleanup?.()
+  } catch {
+    // ignore teardown errors from managed nodes
+  }
+
+  const descendants =
+    typeof root.querySelectorAll === 'function'
+      ? Array.from(root.querySelectorAll('video, audio, iframe, webview'))
+      : []
+
+  descendants.forEach((node) => teardownDisposableNode(node))
+  teardownDisposableNode(root)
+}
+
+class Player {
+  private static readonly FALLBACK_STATUS_GUARD_MS = 2000
+  private canvas: HTMLCanvasElement | null = null
+  private currentElement?: HTMLElement
+  private mediaContainer: HTMLElement | null = null
+  private defaultMediaContainer: HTMLElement | null = null
+  private defaultMediaPlayer?: DefaultMediaPlayer
+  private activeSource: 'schedule' | 'default' | 'none' = 'schedule'
+  private statusOverlay: HTMLElement | null = null
+  private statusConnection: HTMLElement | null = null
+  private statusSnapshot: HTMLElement | null = null
+  private modeBanner: HTMLElement | null = null
+  private currentCleanup?: () => void
+  private playbackSession = 0
+  private ignoreFallbackStatusUntil = 0
+  private pendingTransition?: PendingTransition
+  private activeSceneId?: string
+  private activeSlotPlaybacks = new Map<string, ActiveSlotPlayback>()
+
+  constructor() {
+    this.initializeElements()
+    this.setupDefaultMedia()
+    this.setupIPC()
+    this.log('info', 'Player initialized')
+  }
+
+  /**
+   * Initialize DOM elements
+   */
+  private initializeElements(): void {
+    this.canvas = document.getElementById('media-canvas') as HTMLCanvasElement
+    this.mediaContainer = document.getElementById('playback-container')
+    this.defaultMediaContainer = document.getElementById('default-media-container')
+    this.statusOverlay = document.getElementById('status-overlay')
+    this.statusConnection = document.getElementById('status-connection')
+    this.statusSnapshot = document.getElementById('status-snapshot-time')
+    this.modeBanner = document.getElementById('mode-banner')
+
+    if (this.canvas) {
+      this.resizeCanvas()
+      this.canvas.style.display = 'none'
+
+      // Handle window resize
+      window.addEventListener('resize', () => this.resizeCanvas())
+    }
+  }
+
+  private setupDefaultMedia(): void {
+    if (!this.defaultMediaContainer) {
+      return
+    }
+
+    this.defaultMediaPlayer = new DefaultMediaPlayer(this.defaultMediaContainer, {
+      onRefreshRequested: (reason) => {
+        this.refreshDefaultMedia(reason).catch((error) => {
+          this.log('warn', 'Default media refresh failed', { reason, error: error.message })
+        })
+      },
+      onLog: (level, message, data) => {
+        this.log(level, message, data)
+      },
+      debugOverlay: false,
+    })
+
+    this.loadDefaultMediaConfig().catch((error) => {
+      this.log('warn', 'Failed to load default media config', { error: error.message })
+    })
+
+    this.refreshDefaultMedia('initial').catch((error) => {
+      this.log('warn', 'Initial default media fetch failed', { error: error.message })
+    })
+
+    if (window.darshan && window.darshan.onDefaultMediaChanged) {
+      window.darshan.onDefaultMediaChanged((data: any) => {
+        this.defaultMediaPlayer?.setMedia(data as DefaultMediaResponse)
+      })
+    }
+  }
+
+  /**
+   * Resize canvas to window size
+   */
+  private resizeCanvas(): void {
+    if (!this.canvas) return
+
+    this.canvas.width = window.innerWidth
+    this.canvas.height = window.innerHeight
+  }
+
+  /**
+   * Setup IPC listeners
+   */
+  private setupIPC(): void {
+    // Listen for media playback events
+    if (window.darshan && window.darshan.onMediaChange) {
+      window.darshan.onMediaChange((data: any) => {
+        this.log('debug', 'Received play-media event', data)
+        this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
+        this.setActiveSource('schedule')
+        this.playMedia(data.item).catch((error) => {
+          this.log('error', 'Failed to play media', { error: error.message })
+          this.showFallback(error.message)
+        })
+      })
+    }
+
+    // Listen for transition events
+    if (window.darshan && window.darshan.onPlaybackUpdate) {
+      window.darshan.onPlaybackUpdate((data: any) => {
+        if (data.type === 'transition-start') {
+          this.log('debug', 'Received transition-start event', data)
+          this.startTransition(data.current, data.next, data.durationMs)
+        } else if (data.type === 'clear-active') {
+          this.log('debug', 'Received clear-active event', data)
+          this.ignoreFallbackStatusUntil = 0
+          this.clearScheduledPlayback(data.reason || 'clear-active')
+          this.setActiveSource('default')
+        } else if (data.type === 'show-fallback') {
+          this.log('warn', 'Received show-fallback event', data)
+          this.showFallback(data.message)
+        }
+      })
+    }
+
+    if (window.darshan && window.darshan.onPlayerStatus) {
+      window.darshan.onPlayerStatus((data: any) => {
+        const status = data as PlayerStatus
+        this.updateStatusOverlay(status)
+        this.updateContentSource(status)
+      })
+    }
+
+    if (window.darshan && window.darshan.getPlayerStatus) {
+      window.darshan.getPlayerStatus().then((status: any) => {
+        const typedStatus = status as PlayerStatus
+        this.updateStatusOverlay(typedStatus)
+        this.updateContentSource(typedStatus)
+      }).catch(() => {
+        // ignore initial status failures
+      })
+    }
+  }
+
+  private async refreshDefaultMedia(reason: string): Promise<void> {
+    if (!window.darshan || !window.darshan.getDefaultMedia) {
+      return
+    }
+
+    const data = await window.darshan.getDefaultMedia({ refresh: true })
+    this.defaultMediaPlayer?.setMedia(data as DefaultMediaResponse)
+    this.log('debug', 'Default media refreshed', { reason })
+  }
+
+  private async loadDefaultMediaConfig(): Promise<void> {
+    if (!window.darshan || !window.darshan.getConfig) {
+      return
+    }
+
+    const config = await window.darshan.getConfig()
+    const logLevel = (config as any)?.log?.level
+    const debugEnabled = logLevel === 'debug' || logLevel === 'trace'
+
+    this.defaultMediaPlayer?.setDebugOverlayEnabled(debugEnabled)
+  }
+
+  private updateContentSource(status: PlayerStatus): void {
+    const nextSource = resolvePlayerContentSource(status)
+    if (nextSource === 'schedule') {
+      this.setActiveSource('schedule')
+      return
+    }
+
+    if (Date.now() < this.ignoreFallbackStatusUntil) {
+      this.log('debug', 'Ignoring stale fallback status during schedule activation', {
+        mode: status.mode,
+        state: status.state,
+      })
+      return
+    }
+  }
+
+  private setActiveSource(source: 'schedule' | 'default' | 'none'): void {
+    if (this.activeSource === source) {
+      return
+    }
+
+    this.activeSource = source
+
+    if (source === 'default') {
+      this.defaultMediaPlayer?.show()
+    } else {
+      this.defaultMediaPlayer?.hide()
+    }
+  }
+
+  /**
+   * Play media item
+   */
+  private async playMedia(item: TimelineItem): Promise<void> {
+    const sessionId = ++this.playbackSession
+    this.log('info', 'Playing media', { itemId: item.id, type: item.type })
+    const transitionDurationMs =
+      this.pendingTransition?.nextId === item.id ? this.pendingTransition.durationMs : undefined
+    this.pendingTransition = undefined
+
+    try {
+      if (item.type === 'scene') {
+        const scene = this.getSceneDefinition(item)
+        if (!scene) {
+          throw new Error('Scene definition missing from scheduled layout item')
+        }
+
+        this.activeSceneId = item.id
+        this.activeSlotPlaybacks.clear()
+        this.reportActivePlayback()
+        const renderedScene = this.renderScene(item, scene)
+        const element = renderedScene.element
+        if (sessionId !== this.playbackSession) {
+          this.disposeScheduledElement(element)
+          return
+        }
+        this.showElement(element, renderedScene.cleanup, transitionDurationMs)
+        this.currentElement = element
+        return
+      }
+
+      this.activeSceneId = undefined
+      this.activeSlotPlaybacks.clear()
+      this.reportActivePlayback()
+
+      const compat = this.getItemCompatibility(item)
+
+      if (compat.status === 'PLAYABLE_NOW') {
+        this.log('debug', 'Media compatibility check', { itemId: item.id, compat })
+      } else if (compat.status === 'ACCEPTED_BUT_NOT_SUPPORTED_YET') {
+        this.log('warn', 'Media not supported yet', { itemId: item.id, compat })
+        this.showCompatibilityPlaceholder(compat, item)
+        return
+      } else {
+        this.log('error', 'Media rejected by compatibility check', { itemId: item.id, compat })
+        this.showFallback(`Unsupported media: ${compat.reason}`)
+        return
+      }
+
+      let element: HTMLElement
+
+      switch (item.type) {
+        case 'image':
+          element = await this.renderImage(item)
+          break
+        case 'video':
+          element = await this.renderVideo(item)
+          break
+        case 'pdf':
+          element = await this.renderPDF(item)
+          break
+        case 'office':
+          element = this.renderDocumentPlaceholder(item, compat)
+          break
+        case 'url':
+          element = await this.renderURL(item)
+          break
+        default:
+          throw new Error(`Unsupported media type: ${item.type}`)
+      }
+
+      // Apply fit mode
+      this.applyFitMode(element, item.fit)
+
+      if (sessionId !== this.playbackSession) {
+        this.disposeScheduledElement(element)
+        return
+      }
+
+      // Show element
+      this.showElement(element, undefined, transitionDurationMs)
+
+      this.currentElement = element
+    } catch (error) {
+      this.log('error', 'Failed to play media', { error: (error as Error).message })
+      throw error
+    }
+  }
+
+  /**
+   * Render image
+   */
+  private async renderImage(item: TimelineItem): Promise<HTMLElement> {
+    return new Promise((resolve, reject) => {
+      const img = document.createElement('img')
+      img.style.position = 'absolute'
+      img.style.top = '0'
+      img.style.left = '0'
+      img.style.width = '100%'
+      img.style.height = '100%'
+
+      img.onload = () => {
+        this.log('debug', 'Image loaded', { itemId: item.id })
+        resolve(img)
+      }
+
+      img.onerror = () => {
+        reject(new Error(`Failed to load image: ${item.mediaId || item.objectKey || item.url}`))
+      }
+
+      // Set source (from cache or URL)
+      img.src = this.getMediaSource(item)
+    })
+  }
+
+  /**
+   * Render video
+   */
+  private async renderVideo(item: TimelineItem): Promise<HTMLElement> {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video')
+      const source = this.getMediaSource(item)
+      const useManualReplay = shouldUseManualVideoReplay(item)
+      video.style.position = 'absolute'
+      video.style.top = '0'
+      video.style.left = '0'
+      video.style.width = '100%'
+      video.style.height = '100%'
+      video.muted = item.muted
+      video.loop = !useManualReplay && item.loop
+
+      this.log('debug', 'Preparing video playback', {
+        itemId: item.id,
+        displayMs: item.displayMs,
+        loop: item.loop,
+        source,
+        slotId: typeof item.meta?.['slotId'] === 'string' ? item.meta?.['slotId'] : null,
+      })
+
+      video.onloadeddata = () => {
+        this.log('debug', 'Video loaded', { itemId: item.id })
+        video.play().catch((error) => {
+          this.log('error', 'Failed to play video', { error: error.message })
+        })
+        resolve(video)
+      }
+
+      video.onerror = () => {
+        reject(new Error(`Failed to load video: ${item.mediaId || item.objectKey || item.url}`))
+      }
+
+      if (useManualReplay) {
+        video.onended = () => {
+          this.log('debug', 'Manually replaying loop-enabled video', {
+            itemId: item.id,
+            displayMs: item.displayMs,
+            source,
+          })
+          video.currentTime = 0
+          video.play().catch((error) => {
+            this.log('error', 'Failed to replay loop-enabled video', { error: error.message, itemId: item.id })
+          })
+        }
+      }
+
+      video.src = source
+    })
+  }
+
+  /**
+   * Render PDF
+   */
+  private async renderPDF(item: TimelineItem): Promise<HTMLElement> {
+    return createPdfPlaybackElement(this.getMediaSource(item))
+  }
+
+  /**
+   * Render URL
+   */
+  private async renderURL(item: TimelineItem): Promise<HTMLElement> {
+    const sourceUrl = this.getMediaSource(item)
+    const fallbackUrl =
+      item.localUrl ||
+      (typeof item.meta?.['fallback_local_url'] === 'string' ? String(item.meta?.['fallback_local_url']) : undefined) ||
+      (typeof item.meta?.['fallback_url'] === 'string' ? String(item.meta?.['fallback_url']) : undefined)
+
+    return createWebpagePlaybackElement({
+      liveUrl: sourceUrl,
+      fallbackUrl,
+      fallbackFit: item.fit === 'stretch' ? 'fill' : item.fit,
+      onFallback: (reason) => {
+        this.log('warn', 'Scheduled webpage fallback active', {
+          itemId: item.id,
+          reason,
+          sourceUrl,
+        })
+      },
+      onLog: (level, message, data) => {
+        this.log(level, message, {
+          itemId: item.id,
+          ...data,
+        })
+      },
+    })
+  }
+
+  private renderScene(sceneItem: TimelineItem, scene: LayoutScene): RenderedScene {
+    const container = document.createElement('div')
+    container.style.position = 'absolute'
+    container.style.top = '0'
+    container.style.left = '0'
+    container.style.width = '100%'
+    container.style.height = '100%'
+    container.style.backgroundColor = '#000'
+    container.dataset['sceneId'] = sceneItem.id
+
+    const stage = document.createElement('div')
+    stage.style.position = 'absolute'
+    stage.style.overflow = 'hidden'
+    stage.style.backgroundColor = '#000'
+
+    const frame = computeSceneStageFrame(scene.aspectRatio, window.innerWidth, window.innerHeight)
+    stage.style.left = `${frame.left}px`
+    stage.style.top = `${frame.top}px`
+    stage.style.width = `${frame.width}px`
+    stage.style.height = `${frame.height}px`
+    stage.dataset['sceneAspectRatio'] = scene.aspectRatio || 'free'
+    container.appendChild(stage)
+
+    const cleanupCallbacks: Array<() => void> = []
+
+    scene.slots.forEach((slot) => {
+      const slotContainer = document.createElement('div')
+      slotContainer.style.position = 'absolute'
+      slotContainer.style.overflow = 'hidden'
+      slotContainer.style.backgroundColor = '#000'
+      this.applySlotBounds(slotContainer, slot)
+
+      stage.appendChild(slotContainer)
+      cleanupCallbacks.push(
+        this.mountSceneSlot(
+          slotContainer,
+          slot,
+          sceneItem.id,
+          scene.startsAt,
+          typeof sceneItem.meta?.['scheduleId'] === 'string' ? String(sceneItem.meta?.['scheduleId']) : undefined,
+          scene.serverTimeOffsetMs || 0,
+        )
+      )
+    })
+
+    const cleanup = () => {
+      cleanupCallbacks.forEach((cleanup) => cleanup())
+      cleanupCallbacks.length = 0
+    }
+
+    return {
+      element: container,
+      cleanup,
+    }
+  }
+
+  /**
+   * Get media source (from cache or URL)
+   */
+  private getMediaSource(item: TimelineItem): string {
+    if (item.type === 'url') {
+      if (item.url) return item.url
+      if (item.remoteUrl) return item.remoteUrl
+    }
+
+    const sourceContentType =
+      typeof item.meta?.['source_content_type'] === 'string' ? String(item.meta?.['source_content_type']) : undefined
+    const contentType =
+      typeof item.meta?.['content_type'] === 'string' ? String(item.meta?.['content_type']) : undefined
+    const localSourceLooksLikePdf = Boolean(
+      (item.localUrl && /\.pdf(\?|#|$)/i.test(item.localUrl)) ||
+      (item.localPath && /\.pdf(\?|#|$)/i.test(item.localPath))
+    )
+    if (
+      item.type === 'pdf' &&
+      (contentType === 'application/pdf' || sourceContentType === 'application/pdf') &&
+      item.remoteUrl &&
+      !localSourceLooksLikePdf
+    ) {
+      return item.remoteUrl
+    }
+
+    if (item.localUrl) {
+      return item.localUrl
+    }
+
+    if (item.remoteUrl) {
+      return item.remoteUrl
+    }
+
+    if (item.localPath) {
+      return item.localPath
+    }
+
+    throw new Error('Media is not cached')
+  }
+
+  /**
+   * Apply fit mode to element
+   */
+  private applyFitMode(element: HTMLElement, fit: FitMode): void {
+    switch (fit) {
+      case 'contain':
+        element.style.objectFit = 'contain'
+        break
+      case 'cover':
+        element.style.objectFit = 'cover'
+        break
+      case 'stretch':
+        element.style.objectFit = 'fill'
+        break
+    }
+  }
+
+  /**
+   * Show element with fade in
+   */
+  private showElement(element: HTMLElement, nextCleanup?: () => void, fadeMs: number = 500): void {
+    if (!this.mediaContainer) return
+
+    const safeFadeMs = Math.max(0, fadeMs)
+
+    this.runCurrentCleanup()
+
+    // Hide current element
+    if (this.currentElement) {
+      const previous = this.currentElement
+      prepareElementForFadeOut(previous, safeFadeMs)
+      setTimeout(() => {
+        if (this.mediaContainer && previous.parentElement === this.mediaContainer) {
+          this.disposeScheduledElement(previous)
+        }
+      }, safeFadeMs)
+    }
+
+    // Add and show new element
+    element.style.zIndex = '1'
+    const deferFadeIn = prepareElementForFadeIn(element, safeFadeMs)
+    this.mediaContainer.appendChild(element)
+    if (deferFadeIn) {
+      this.deferStyleCommit(() => {
+        element.style.opacity = '1'
+      })
+    } else {
+      element.style.opacity = '1'
+    }
+    this.currentCleanup = nextCleanup
+  }
+
+  /**
+   * Start transition between items
+   */
+  private startTransition(current: TimelineItem, next: TimelineItem, durationMs: number): void {
+    this.log('debug', 'Starting transition', { currentId: current.id, nextId: next.id, durationMs })
+    this.pendingTransition = {
+      currentId: current.id,
+      nextId: next.id,
+      durationMs: Math.max(0, durationMs),
+    }
+  }
+
+  /**
+   * Show fallback slide
+   */
+  private showFallback(message: string): void {
+    if (!this.mediaContainer) return
+
+    const fallback = document.createElement('div')
+    fallback.className = 'fallback-slide'
+
+    const icon = document.createElement('div')
+    icon.className = 'fallback-icon'
+    icon.textContent = '⚠️'
+
+    const msg = document.createElement('div')
+    msg.className = 'fallback-message'
+    msg.textContent = message || 'An error occurred during playback'
+
+    fallback.appendChild(icon)
+    fallback.appendChild(msg)
+
+    this.showElement(fallback)
+  }
+
+  private showCompatibilityPlaceholder(result: CompatResult, item: TimelineItem): void {
+    if (!this.mediaContainer) return
+
+    const container = this.createMediaPreviewCard(
+      item,
+      result.kind === 'DOCUMENT' ? 'Document preview' : 'Media playback not supported yet',
+      result.reason,
+    )
+
+    this.showElement(container)
+    this.currentElement = container
+  }
+
+  private updateStatusOverlay(status: PlayerStatus): void {
+    if (this.statusOverlay) {
+      this.statusOverlay.classList.remove('hidden')
+    }
+
+    if (this.statusConnection) {
+      this.statusConnection.textContent = status.online ? 'ONLINE' : 'OFFLINE'
+      this.statusConnection.className = status.online ? 'status-pill online' : 'status-pill offline'
+    }
+
+    if (this.statusSnapshot) {
+      this.statusSnapshot.textContent = status.lastSnapshotAt ? new Date(status.lastSnapshotAt).toLocaleString() : '-'
+    }
+
+    if (this.modeBanner) {
+      this.modeBanner.classList.remove('hidden', 'emergency', 'default', 'offline')
+
+      if (status.mode === 'emergency') {
+        this.modeBanner.textContent = 'EMERGENCY'
+        this.modeBanner.classList.add('emergency')
+      } else if (status.mode === 'default') {
+        this.modeBanner.textContent = 'DEFAULT MEDIA'
+        this.modeBanner.classList.add('default')
+      } else if (status.mode === 'empty') {
+        this.modeBanner.textContent = 'NO CONTENT ASSIGNED'
+        this.modeBanner.classList.add('default')
+      } else if (status.mode === 'offline') {
+        this.modeBanner.textContent = 'OFFLINE MODE'
+        this.modeBanner.classList.add('offline')
+      } else {
+        this.modeBanner.textContent = ''
+        this.modeBanner.classList.add('hidden')
+      }
+    }
+  }
+
+  /**
+   * Log message to main process
+   */
+  private log(level: string, message: string, data?: any): void {
+    const safeData = sanitizeLogPayloadForDiagnostics(data)
+    if (window.darshan && window.darshan.log) {
+      window.darshan.log(level, message, safeData)
+    } else {
+      console.log(`[${level}] ${message}`, safeData)
+    }
+  }
+
+  private getSceneDefinition(item: TimelineItem): LayoutScene | null {
+    const scene = item.meta?.['scene']
+    if (!scene || typeof scene !== 'object') {
+      return null
+    }
+
+    return scene as LayoutScene
+  }
+
+  private applySlotBounds(element: HTMLElement, slot: LayoutSceneSlot): void {
+    const width = this.normalizeDimension(slot.bounds.w)
+    const height = this.normalizeDimension(slot.bounds.h)
+    const left = this.normalizeDimension(slot.bounds.x)
+    const top = this.normalizeDimension(slot.bounds.y)
+
+    element.style.left = left
+    element.style.top = top
+    element.style.width = width
+    element.style.height = height
+
+    if (typeof slot.bounds.zIndex === 'number') {
+      element.style.zIndex = String(slot.bounds.zIndex)
+    }
+  }
+
+  private normalizeDimension(value: number | string | undefined): string {
+    if (typeof value === 'number') {
+      return value > 1 ? `${value}px` : `${value * 100}%`
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      if (trimmed.endsWith('%') || trimmed.endsWith('px')) {
+        return trimmed
+      }
+
+      const numeric = Number(trimmed)
+      if (Number.isFinite(numeric)) {
+        return numeric > 1 ? `${numeric}px` : `${numeric * 100}%`
+      }
+    }
+
+    return '0%'
+  }
+
+  private mountSceneSlot(
+    container: HTMLElement,
+    slot: LayoutSceneSlot,
+    sceneId: string,
+    sceneStartsAt?: string,
+    scheduleId?: string,
+    serverTimeOffsetMs: number = 0,
+  ): () => void {
+    const timers = new Set<number>()
+    let disposed = false
+    let activeElement: HTMLElement | undefined
+
+    const totalDurationMs = slot.items.reduce((sum, item) => sum + Math.max(1, item.displayMs), 0)
+
+    const resolveScenePosition = (): { index: number; remainingMs: number } => {
+      if (slot.items.length === 0) {
+        return { index: 0, remainingMs: 1000 }
+      }
+
+      if (totalDurationMs <= 0) {
+        return { index: 0, remainingMs: slot.items[0]?.displayMs || 1000 }
+      }
+
+      const elapsedSinceSceneStart = sceneStartsAt
+        ? Math.max(0, Date.now() + serverTimeOffsetMs - Date.parse(sceneStartsAt))
+        : 0
+      const cycleOffset = elapsedSinceSceneStart % totalDurationMs
+
+      let consumed = 0
+      for (let index = 0; index < slot.items.length; index += 1) {
+        const item = slot.items[index]
+        if (!item) continue
+        const duration = Math.max(1, item.displayMs)
+        if (cycleOffset < consumed + duration) {
+          return {
+            index,
+            remainingMs: Math.max(250, consumed + duration - cycleOffset),
+          }
+        }
+        consumed += duration
+      }
+
+      return { index: 0, remainingMs: Math.max(250, slot.items[0]?.displayMs || 1000) }
+    }
+
+    const renderIntoSlot = async (item: TimelineItem): Promise<HTMLElement> => {
+      const compat = this.getItemCompatibility(item)
+      if (compat.status === 'ACCEPTED_BUT_NOT_SUPPORTED_YET') {
+        return this.renderDocumentPlaceholder(item, compat)
+      }
+
+      if (compat.status === 'REJECTED') {
+        return this.createMediaPreviewCard(item, 'Preview unavailable', compat.reason)
+      }
+
+      switch (item.type) {
+        case 'image':
+          return await this.renderImage(item)
+        case 'video':
+          return await this.renderVideo(item)
+        case 'pdf':
+          return await this.renderPDF(item)
+        case 'office':
+          return this.renderDocumentPlaceholder(item, compat)
+        case 'url':
+          return await this.renderURL(item)
+        default:
+          throw new Error(`Unsupported scene media type: ${item.type}`)
+      }
+    }
+
+    const showSlotItem = async (index: number, delayOverrideMs?: number): Promise<void> => {
+      if (disposed || slot.items.length === 0) {
+        return
+      }
+
+      const normalizedIndex = index % slot.items.length
+      const item = slot.items[normalizedIndex]
+      if (!item) {
+        return
+      }
+
+      try {
+        this.log('debug', 'Rendering scene slot item', {
+          slotId: slot.id,
+          itemId: item.id,
+          mediaType: item.type,
+          displayMs: item.displayMs,
+          loop: item.loop,
+          source: item.localUrl || item.localPath || item.remoteUrl || item.url || null,
+        })
+
+        const nextElement = await renderIntoSlot(item)
+        if (disposed) {
+          this.disposeScheduledElement(nextElement)
+          return
+        }
+        this.applyFitMode(nextElement, item.fit)
+        const slotFadeMs = Math.max(0, item.transitionDurationMs || 0)
+        const deferSlotFadeIn = prepareElementForFadeIn(nextElement, slotFadeMs)
+        container.appendChild(nextElement)
+        if (deferSlotFadeIn) {
+          this.deferStyleCommit(() => {
+            nextElement.style.opacity = '1'
+          })
+        } else {
+          nextElement.style.opacity = '1'
+        }
+
+        if (activeElement && activeElement.parentElement === container) {
+          const previous = activeElement
+          prepareElementForFadeOut(previous, slotFadeMs)
+          const fadeTimer = window.setTimeout(() => {
+            timers.delete(fadeTimer)
+            if (previous.parentElement === container) {
+              this.disposeScheduledElement(previous)
+            }
+          }, slotFadeMs)
+          timers.add(fadeTimer)
+        }
+
+        activeElement = nextElement
+        this.setActiveSlotPlayback(slot.id, {
+          scene_id: sceneId,
+          slot_id: slot.id,
+          item_id: item.id,
+          media_id: item.mediaId || item.objectKey || null,
+          schedule_id: scheduleId || null,
+          playback_instance_id: globalThis.crypto.randomUUID(),
+          started_at: new Date(Date.now() + serverTimeOffsetMs).toISOString(),
+        })
+        const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
+        const timer = window.setTimeout(() => {
+          timers.delete(timer)
+          const nextPosition = resolveScenePosition()
+          void showSlotItem(nextPosition.index, nextPosition.remainingMs)
+        }, delayMs)
+        timers.add(timer)
+      } catch (error) {
+        this.log('error', 'Failed to render scene slot media', {
+          slotId: slot.id,
+          itemId: item.id,
+          error: (error as Error).message,
+        })
+
+        const placeholder = this.createMediaPreviewCard(item, 'Preview unavailable', (error as Error).message)
+        placeholder.style.opacity = '1'
+        while (container.firstChild) {
+          container.removeChild(container.firstChild)
+        }
+        container.appendChild(placeholder)
+        activeElement = placeholder
+        this.clearActiveSlotPlayback(slot.id)
+        const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
+        const timer = window.setTimeout(() => {
+          timers.delete(timer)
+          const nextPosition = resolveScenePosition()
+          void showSlotItem(nextPosition.index, nextPosition.remainingMs)
+        }, delayMs)
+        timers.add(timer)
+      }
+    }
+
+    const initialPosition = resolveScenePosition()
+    void showSlotItem(initialPosition.index, initialPosition.remainingMs)
+
+    return () => {
+      disposed = true
+      this.clearActiveSlotPlayback(slot.id)
+      timers.forEach((timer) => window.clearTimeout(timer))
+      timers.clear()
+
+      if (activeElement) {
+        this.disposeScheduledElement(activeElement)
+        activeElement = undefined
+      }
+
+      while (container.firstChild) {
+        this.disposeScheduledElement(container.firstChild as HTMLElement)
+      }
+    }
+  }
+
+  private disposeScheduledElement(element: HTMLElement | null | undefined): void {
+    teardownScheduledElementTree(element as DisposableMediaNode | null | undefined)
+  }
+
+  private clearScheduledPlayback(reason: string): void {
+    this.playbackSession += 1
+    this.pendingTransition = undefined
+    this.activeSceneId = undefined
+    this.activeSlotPlaybacks.clear()
+    this.reportActivePlayback()
+    this.runCurrentCleanup()
+
+    if (this.mediaContainer) {
+      while (this.mediaContainer.firstChild) {
+        this.disposeScheduledElement(this.mediaContainer.firstChild as HTMLElement)
+      }
+    }
+
+    this.currentElement = undefined
+    this.log('debug', 'Cleared scheduled playback', { reason })
+  }
+
+  private reportActivePlayback(): void {
+    window.darshan?.reportActivePlayback?.({
+      sceneId: this.activeSceneId,
+      activeSlots: Array.from(this.activeSlotPlaybacks.values()),
+    })
+  }
+
+  private setActiveSlotPlayback(slotId: string, playback: ActiveSlotPlayback): void {
+    this.activeSlotPlaybacks.set(slotId, playback)
+    this.reportActivePlayback()
+  }
+
+  private clearActiveSlotPlayback(slotId: string): void {
+    if (!this.activeSlotPlaybacks.has(slotId)) {
+      return
+    }
+    this.activeSlotPlaybacks.delete(slotId)
+    this.reportActivePlayback()
+  }
+
+  private runCurrentCleanup(): void {
+    if (!this.currentCleanup) {
+      return
+    }
+
+    const cleanup = this.currentCleanup
+    this.currentCleanup = undefined
+    cleanup()
+  }
+
+  private deferStyleCommit(callback: () => void): void {
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => callback())
+      return
+    }
+
+    window.setTimeout(() => callback(), 0)
+  }
+
+  private getItemCompatibility(item: TimelineItem): CompatResult {
+    const sourceContentType =
+      typeof item.meta?.['source_content_type'] === 'string' ? (item.meta?.['source_content_type'] as string) : undefined
+    const contentType =
+      typeof item.meta?.['content_type'] === 'string' ? (item.meta?.['content_type'] as string) : undefined
+    const mediaName = typeof item.meta?.['name'] === 'string' ? (item.meta?.['name'] as string) : undefined
+    const mediaUrl = item.localUrl || item.remoteUrl || item.url || item.localPath
+
+    return checkMediaCompatibility({
+      type: item.type,
+      content_type: contentType,
+      source_content_type: sourceContentType,
+      name: mediaName,
+      media_url: mediaUrl,
+    })
+  }
+
+  private renderDocumentPlaceholder(item: TimelineItem, compat?: CompatResult): HTMLElement {
+    return this.createMediaPreviewCard(
+      item,
+      'Document preview',
+      compat?.reason || 'Document rendering is not available for this file',
+    )
+  }
+
+  private createMediaPreviewCard(item: TimelineItem, titleText: string, subtitleText?: string): HTMLElement {
+    const kind = item.type === 'video' ? 'VIDEO' : item.type === 'pdf' || item.type === 'office' ? 'DOCUMENT' : 'MEDIA'
+    const name = typeof item.meta?.['name'] === 'string' ? String(item.meta?.['name']) : item.mediaId || item.id
+
+    const container = document.createElement('div')
+    container.style.display = 'flex'
+    container.style.flexDirection = 'column'
+    container.style.alignItems = 'center'
+    container.style.justifyContent = 'center'
+    container.style.width = '100%'
+    container.style.height = '100%'
+    container.style.padding = '18px'
+    container.style.gap = '10px'
+    container.style.background = 'linear-gradient(180deg, rgba(27,31,38,0.95), rgba(15,18,24,0.98))'
+    container.style.color = '#fff'
+    container.style.textAlign = 'center'
+    container.style.border = '1px solid rgba(255,255,255,0.12)'
+
+    const badge = document.createElement('div')
+    badge.textContent = kind
+    badge.style.fontSize = '11px'
+    badge.style.fontWeight = '700'
+    badge.style.letterSpacing = '0.18em'
+    badge.style.textTransform = 'uppercase'
+    badge.style.opacity = '0.7'
+
+    const title = document.createElement('div')
+    title.textContent = titleText
+    title.style.fontSize = '18px'
+    title.style.fontWeight = '700'
+    title.style.lineHeight = '1.2'
+
+    const nameEl = document.createElement('div')
+    nameEl.textContent = name
+    nameEl.style.fontSize = '13px'
+    nameEl.style.opacity = '0.86'
+    nameEl.style.maxWidth = '100%'
+    nameEl.style.wordBreak = 'break-word'
+
+    container.appendChild(badge)
+    container.appendChild(title)
+    container.appendChild(nameEl)
+
+    if (subtitleText) {
+      const subtitle = document.createElement('div')
+      subtitle.textContent = subtitleText
+      subtitle.style.fontSize = '12px'
+      subtitle.style.opacity = '0.58'
+      subtitle.style.maxWidth = '100%'
+      subtitle.style.wordBreak = 'break-word'
+      container.appendChild(subtitle)
+    }
+
+    return container
+  }
+}
+
+export function bootstrapPlayer(): void {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      new Player()
+    })
+  } else {
+    new Player()
+  }
+}
+
+if (typeof document !== 'undefined') {
+  bootstrapPlayer()
+}

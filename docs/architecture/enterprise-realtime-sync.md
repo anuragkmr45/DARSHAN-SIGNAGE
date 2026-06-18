@@ -6,7 +6,7 @@ Status: Phase 8 Valkey fanout backfill implemented locally; on-prem runtime evid
 
 ## Purpose
 
-This document defines the target enterprise realtime sync architecture for Signhex signage players and CMS operations.
+This document defines the target enterprise realtime sync architecture for DARSHAN signage players and CMS operations.
 
 The selected architecture is hybrid:
 
@@ -44,16 +44,16 @@ Phase 7 may start only after accepting Phase 6 conditions. QA/prod realtime enab
 
 Confirmed from repo audit:
 
-- Backend publishes schedules into DB-backed snapshots through `signhex-server/src/routes/schedule-publish-helper.ts`.
-- Device runtime snapshots are fetched through `signhex-server/src/routes/device-telemetry.ts` at `GET /api/v1/device/:deviceId/snapshot`.
+- Backend publishes schedules into DB-backed snapshots through `darshan-server/src/routes/schedule-publish-helper.ts`.
+- Device runtime snapshots are fetched through `darshan-server/src/routes/device-telemetry.ts` at `GET /api/v1/device/:deviceId/snapshot`.
 - Default media is fetched through `GET /api/v1/device/:deviceId/default-media`.
-- Durable commands are stored in `device_commands` in `signhex-server/src/db/schema.ts`.
+- Durable commands are stored in `device_commands` in `darshan-server/src/db/schema.ts`.
 - Electron claims commands through heartbeat and `GET /api/v1/device/:deviceId/commands`.
 - Electron acknowledges commands through `POST /api/v1/device/:deviceId/commands/:commandId/ack`.
-- Electron caches media locally through `signage-screen/src/main/services/cache/cache-manager.ts`.
+- Electron caches media locally through `darshan-player/src/main/services/cache/cache-manager.ts`.
 - Existing Socket.IO infrastructure now includes an isolated `/device` namespace for production player wake-up notifications when `REALTIME_SYNC_ENABLED=true`.
 - Backend realtime fanout now supports a Valkey Pub/Sub-backed node bus and short-lived device-to-node mapping for on-prem multi-instance wake notification routing when `REALTIME_BUS_PROVIDER=valkey`.
-- Electron now includes a feature-flagged RealtimeService that consumes `/device` wake notifications when `HEXMON_REALTIME_SYNC_ENABLED=true`.
+- Electron now includes a feature-flagged RealtimeService that consumes `/device` wake notifications when `DARSHAN_REALTIME_PLAYER_ENABLED=true`.
 - CMS screen details now includes a feature-flagged Delivery tab backed by `GET /api/v1/screens/:id/delivery-status`.
 - Existing nginx config proxies `/socket.io/`.
 
@@ -274,7 +274,7 @@ sequenceDiagram
 
 Owns the device realtime endpoint. It sends notification-only messages and never sends media or authoritative snapshots.
 
-Implemented location: `signhex-server/src/realtime/device-gateway.ts`.
+Implemented location: `darshan-server/src/realtime/device-gateway.ts`.
 
 Phase 3 implementation:
 
@@ -288,9 +288,9 @@ Phase 3 implementation:
 
 Tracks connected device sessions, protocol version, app version, last ping, and disconnect reason. It is for observability and best-effort local routing only.
 
-Implemented location: `signhex-server/src/realtime/device-connection-registry.ts`.
+Implemented location: `darshan-server/src/realtime/device-connection-registry.ts`.
 
-The socket registry remains local in-memory state. Phase 8 backfill adds Valkey-backed fanout/distributed coordination through `signhex-server/src/realtime/realtime-fanout.ts`, `signhex-server/src/realtime/realtime-bus.ts`, and `signhex-server/src/realtime/device-node-registry.ts`. Local unit and Docker Valkey integration tests pass, but on-prem node A/node B fanout and outage fallback evidence are still required before production readiness.
+The socket registry remains local in-memory state. Phase 8 backfill adds Valkey-backed fanout/distributed coordination through `darshan-server/src/realtime/realtime-fanout.ts`, `darshan-server/src/realtime/realtime-bus.ts`, and `darshan-server/src/realtime/device-node-registry.ts`. Local unit and Docker Valkey integration tests pass, but on-prem node A/node B fanout and outage fallback evidence are still required before production readiness.
 
 ### On-Prem Multi-Instance Fanout
 
@@ -317,7 +317,7 @@ Transactional table written in the same DB transaction as command/state changes.
 
 Worker that reads pending outbox rows, dispatches realtime notifications, retries failures, and records dispatch status.
 
-Implemented location: `signhex-server/src/services/outbox-dispatcher.ts`.
+Implemented location: `darshan-server/src/services/outbox-dispatcher.ts`.
 
 Phase 3 behavior:
 
@@ -348,11 +348,11 @@ Central service for command creation, lease, reclaim, processing, ACK success/fa
 
 Connects after authenticated runtime bootstrap. Handles HELLO, HELLO_ACK, reconnect/backoff, pings, and wake messages.
 
-Implemented location: `signage-screen/src/main/services/realtime-service.ts`.
+Implemented location: `darshan-player/src/main/services/realtime-service.ts`.
 
 Phase 4 behavior:
 
-- Connects to the backend `/device` Socket.IO namespace when `HEXMON_REALTIME_SYNC_ENABLED=true`.
+- Connects to the backend `/device` Socket.IO namespace when `DARSHAN_REALTIME_PLAYER_ENABLED=true`.
 - Sends platform-neutral `HELLO` and waits for `HELLO_ACK` before marking realtime healthy.
 - Treats `COMMAND_AVAILABLE` and `RESYNC_REQUIRED` as wake notifications only.
 - Fetches desired state and commands through REST.
@@ -361,7 +361,7 @@ Phase 4 behavior:
 
 ### Adaptive Polling
 
-Implemented location: `signage-screen/src/main/services/command-processor.ts`.
+Implemented location: `darshan-player/src/main/services/command-processor.ts`.
 
 When realtime is healthy, command polling uses the configured safety interval. When realtime is unhealthy, disabled, or disconnected, the existing fallback polling interval is used. Heartbeat remains active in both states.
 
@@ -416,9 +416,9 @@ Phase 6 implements per-screen media cache failures, URL expiry errors, download 
 - Outbox dispatcher must run as a worker role.
 - DB indexes must support command lease, expiry, outbox dispatch, and desired-state reads.
 - Metrics must include active connections, notification dispatch latency, outbox lag, command lifecycle counters, ACK latency, fallback polling rate, and reconnect storms.
-- Phase 7 deployment hardening assets are documented in `signhex-platform/docs/runbooks/realtime-sync-qa-prod-hardening.md`.
-- QA and production environment checklists live in `signhex-platform/docs/environments/qa/realtime-sync.env.example` and `signhex-platform/docs/environments/production/realtime-sync.env.example`.
-- The explicit REST plus notification-only Socket.IO proxy snippet lives in `signhex-platform/deploy/shared/realtime-sync-nginx.socketio.conf.template`.
+- Phase 7 deployment hardening assets are documented in `docs/runbooks/realtime-sync-qa-prod-hardening.md`.
+- QA and production environment checklists live in `docs/environments/qa/realtime-sync.env.example` and `docs/environments/production/realtime-sync.env.example`.
+- The explicit REST plus notification-only Socket.IO proxy snippet lives in `deploy/shared/realtime-sync-nginx.socketio.conf.template`.
 
 ## QA/Prod Rollout Plan
 

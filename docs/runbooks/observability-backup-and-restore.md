@@ -33,5 +33,5 @@ Optional:
 ## Notes
 
 - Observability history is operationally useful but not the product system of record.
-- A failed TSDB restore must not block recovery of core Signhex services.
+- A failed TSDB restore must not block recovery of core DARSHAN services.
 - Production and QA follow the same restore order. Development local validation normally restores config only, not historical data.
