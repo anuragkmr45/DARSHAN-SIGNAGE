@@ -6,6 +6,7 @@
 import { EventEmitter } from 'events'
 import { getLogger } from '../../../common/logger'
 import { TimelineItem } from '../../../common/types'
+import { shouldRepeatScheduledItem } from '../../../common/playback-policy'
 
 const logger = getLogger('timeline-scheduler')
 
@@ -49,10 +50,14 @@ export class TimelineScheduler extends EventEmitter {
     }
 
     if (index >= items.length) {
-      // Loop back to start
-      logger.debug('Timeline completed, looping')
       this.emit('timeline-complete')
-      this.start(items)
+      if (shouldRepeatScheduledItem(items.length, items[0])) {
+        // Loop back to start
+        logger.debug('Timeline completed, looping')
+        this.start(items)
+      } else {
+        logger.debug('Timeline completed without looping')
+      }
       return
     }
 
@@ -284,4 +289,3 @@ export class TimelineScheduler extends EventEmitter {
     return Date.now() - this.startTime
   }
 }
-

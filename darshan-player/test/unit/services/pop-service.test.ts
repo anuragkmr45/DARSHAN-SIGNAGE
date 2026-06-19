@@ -91,7 +91,18 @@ describe('Proof-of-Play Service', () => {
       const buffer = (popService as any).eventBuffer
       const event = buffer[0]
 
-      expect(event.duration).to.be.at.least(0)
+      expect(event.duration).to.be.at.least(1)
+    })
+
+    it('records at least one second for immediate playback end events', () => {
+      const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+      const popService = getProofOfPlayService()
+
+      popService.recordStart('schedule-1', 'media-1')
+      popService.recordEnd('schedule-1', 'media-1', true)
+
+      const buffer = (popService as any).eventBuffer
+      expect(buffer[0].duration).to.equal(1)
     })
 
     it('should mark incomplete playback', () => {

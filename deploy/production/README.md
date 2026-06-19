@@ -353,6 +353,51 @@ cat ~/.config/autostart/darshan-player.desktop
 
 On the next reboot/login, the desktop session should start `darshan-player` automatically and inherit `DARSHAN_PLAYER_CONFIG_FILE` from `/etc/environment`.
 
+If the site uses a systemd service instead of desktop-session autostart, add the config selector to the service environment and restart the service:
+
+```bash
+sudo systemctl edit darshan-player
+```
+
+Use this drop-in:
+
+```ini
+[Service]
+Environment="DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json"
+```
+
+Then reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart darshan-player
+sudo systemctl status darshan-player
+```
+
+### Player shutdown / restart behavior
+
+If a player machine loses power or is shut down, the expected production behavior is:
+
+1. The operating system boots.
+2. The desktop session starts.
+3. The DARSHAN player starts again through XDG autostart when `runtime.mode` is `qa` or `production`, or through the installed service if the site uses the systemd deployment path.
+4. The player reads `/etc/darshan/player/config.json` through `DARSHAN_PLAYER_CONFIG_FILE`.
+5. The player loads its local runtime state from the app-data/runtime folder. This includes the previous device id, certificate paths, cached snapshot/default-media metadata, last validated pairing status, and queued offline data.
+6. Before showing paired/no-content as a success state, the player validates the stored identity with the backend pairing-status API.
+
+Result by condition:
+
+| Restart condition | Expected behavior |
+|---|---|
+| Backend reachable and pairing still valid | Player validates pairing, sends heartbeat, reconnects realtime, refreshes desired state/snapshot/default media, and returns to normal playback. |
+| Backend reachable but screen deleted, revoked, invalid, orphaned, or environment-mismatched | Player clears identity-bound state and returns to fresh pairing/OTP recovery. |
+| Backend temporarily unreachable and the same identity was validated recently | Player may continue cached/offline playback within `player.pairing.offlineValidationGraceMs`, then retries backend validation with backoff. |
+| Backend unreachable and the identity was never validated, or offline grace expired | Player does not claim paired/no-content success; it stays in validation-required/recovery until backend validation succeeds. |
+| Pairing was pending before shutdown and the code is still valid | Player resumes pairing-status polling for that code. |
+| Pairing was pending before shutdown and the code expired | Player requests a new fresh pairing code. |
+
+The restart path intentionally does not auto-wipe app-data just because the machine rebooted. Clean identity reset is an explicit operator action using `darshan-player reset-pairing`.
+
 Legacy env URL overrides are still supported for compatibility:
 
 ```bash

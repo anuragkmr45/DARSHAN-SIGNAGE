@@ -188,7 +188,7 @@ export class PlaybackEngine extends EventEmitter {
     })
 
     this.scheduler.on('timeline-complete', () => {
-      logger.debug('Timeline completed, will loop')
+      logger.debug('Timeline completed')
     })
   }
 
@@ -390,7 +390,7 @@ export class PlaybackEngine extends EventEmitter {
       type: item.type,
       mediaId: item.mediaId ?? null,
       objectKey: item.objectKey ?? null,
-      displayMs: item.displayMs,
+      displayMs: item.type === 'scene' ? null : item.displayMs,
       fit: item.fit,
       muted: item.muted,
       loop: item.loop,
@@ -455,6 +455,9 @@ export class PlaybackEngine extends EventEmitter {
     return Object.keys(record)
       .sort()
       .reduce<Record<string, unknown>>((acc, currentKey) => {
+        if (currentKey === 'serverTimeOffsetMs') {
+          return acc
+        }
         acc[currentKey] = this.normalizeComparableMeta(record[currentKey], currentKey)
         return acc
       }, {})
