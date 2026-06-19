@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BASE_DIR="$ROOT_DIR/deploy/local-production-like"
+BASE_DIR="$ROOT_DIR/deploy/production"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 SITE_ENV="$BASE_DIR/.env.local"
 
@@ -22,9 +22,9 @@ require_var() {
   fi
 }
 
-load_local_prodlike_env() {
-  require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/local-production-like/.env.example to .env.local and edit host IPs."
-  require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it before starting the production-like stack."
+load_production_env() {
+  require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/.env.example to .env.local and edit host IPs."
+  require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it before starting the production stack."
 
   set -a
   # shellcheck disable=SC1090
@@ -36,6 +36,9 @@ load_local_prodlike_env() {
   require_var BACKEND_HOST
   require_var CMS_HOST
   require_var OBSERVABILITY_HOST
+  require_var SIGNHEX_ENVIRONMENT_NAME
+  require_var SIGNHEX_DEPLOYMENT_ID
+  require_var SIGNHEX_SERVER_ID
   require_var POSTGRES_HOST_PORT
   require_var MINIO_HOST_PORT
   require_var MINIO_CONSOLE_PORT

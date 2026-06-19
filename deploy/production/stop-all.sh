@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BASE_DIR="$ROOT_DIR/deploy/local-production-like"
+BASE_DIR="$ROOT_DIR/deploy/production"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 
 stop_project() {
@@ -20,4 +20,4 @@ stop_project darshan-backend backend
 stop_project darshan-valkey valkey
 stop_project darshan-data data
 
-echo "Stopped DARSHAN local production-like stack without removing volumes."
+echo "Stopped DARSHAN production stack without removing volumes."

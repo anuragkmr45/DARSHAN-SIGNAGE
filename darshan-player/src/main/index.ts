@@ -7,7 +7,7 @@ console.log('=== DARSHAN Player Starting ===')
 console.log('NODE_ENV:', process.env['NODE_ENV'])
 console.log('__dirname:', __dirname)
 
-import { app, BrowserWindow, screen, session } from 'electron'
+import { app, BrowserWindow, Menu, screen, session } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -107,6 +107,67 @@ function isSafeEmbeddedContentUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+function shouldHardenDebugSurfaces(appConfig?: AppConfig): boolean {
+  const runtimeMode = appConfig ? getRuntimeMode(appConfig) : undefined
+  return app.isPackaged || process.env['NODE_ENV'] === 'production' || runtimeMode === 'production' || runtimeMode === 'qa'
+}
+
+function isDevToolsShortcut(input: Electron.Input): boolean {
+  const key = String(input.key || '').toLowerCase()
+  const code = String(input.code || '').toLowerCase()
+  const commandOrControl = Boolean(input.control || input.meta)
+
+  if (key === 'f12' || code === 'f12') {
+    return true
+  }
+
+  if (commandOrControl && input.shift && (key === 'i' || key === 'j' || key === 'c')) {
+    return true
+  }
+
+  if (commandOrControl && (key === 'u' || key === 'r')) {
+    return true
+  }
+
+  return false
+}
+
+function applyDebugSurfacePolicy(window: BrowserWindow, appConfig: AppConfig): void {
+  if (!shouldHardenDebugSurfaces(appConfig)) {
+    return
+  }
+
+  window.setMenuBarVisibility(false)
+  window.removeMenu()
+  window.webContents.setIgnoreMenuShortcuts(true)
+
+  window.webContents.on('context-menu', (event) => {
+    event.preventDefault()
+  })
+
+  window.webContents.on('devtools-opened', () => {
+    logger.warn('Blocked DevTools opening in production runtime')
+    window.webContents.closeDevTools()
+  })
+
+  window.webContents.on('before-input-event', (event, input) => {
+    if (isDevToolsShortcut(input)) {
+      logger.warn(
+        {
+          key: input.key,
+          code: input.code,
+          control: input.control,
+          shift: input.shift,
+          alt: input.alt,
+          meta: input.meta,
+        },
+        'Blocked DevTools or source-view shortcut in production runtime'
+      )
+      event.preventDefault()
+    }
+  })
 }
 
 function resolveSafeCachedPdfPath(source: string): string | null {
@@ -301,6 +362,7 @@ function createWindow(): void {
       nodeIntegration: appConfig.security.nodeIntegration,
       contextIsolation: appConfig.security.contextIsolation,
       sandbox: appConfig.security.sandbox,
+      devTools: !shouldHardenDebugSurfaces(appConfig),
       webviewTag: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
@@ -401,6 +463,7 @@ function createWindow(): void {
   })
 
   applyRuntimeInteractionPolicy(mainWindow, appConfig)
+  applyDebugSurfacePolicy(mainWindow, appConfig)
 }
 
 /**
@@ -775,6 +838,9 @@ app.on('ready', async () => {
     }
 
     await ensureAutostartRegistration()
+    if (shouldHardenDebugSurfaces(config.getConfig())) {
+      Menu.setApplicationMenu(null)
+    }
     await applyConfigToPowerManager(config.getConfig())
     configureWebpageSession()
     setupIPCHandlers()
@@ -787,6 +853,21 @@ app.on('ready', async () => {
 })
 
 app.on('web-contents-created', (_event, contents) => {
+  if (shouldHardenDebugSurfaces(config.getConfig())) {
+    contents.on('context-menu', (event) => {
+      event.preventDefault()
+    })
+    contents.on('devtools-opened', () => {
+      logger.warn({ type: contents.getType() }, 'Blocked DevTools opening in production runtime')
+      contents.closeDevTools()
+    })
+    contents.on('before-input-event', (event, input) => {
+      if (isDevToolsShortcut(input)) {
+        event.preventDefault()
+      }
+    })
+  }
+
   if (contents.getType() !== 'webview') {
     return
   }

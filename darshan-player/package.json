@@ -11,7 +11,7 @@
     "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
     "dev:main": "tsc -p tsconfig.main.json --watch",
     "dev:renderer": "tsc -p tsconfig.renderer.json --watch",
-    "build": "npm run build:main && npm run prepare:renderer",
+    "build": "npm run build:main && npm run prepare:renderer && node scripts/remove-source-maps.js",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "tsc -p tsconfig.renderer.json",
     "bundle:renderer": "node scripts/build-renderer.js",

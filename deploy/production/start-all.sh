@@ -2,7 +2,7 @@
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
-load_local_prodlike_env
+load_production_env
 
 "$BASE_DIR/start-data.sh"
 "$BASE_DIR/start-valkey.sh"
@@ -12,12 +12,12 @@ load_local_prodlike_env
 
 cat <<EOF
 
-DARSHAN production-like stack is started.
+DARSHAN production stack is started.
 
 Backend: http://${BACKEND_HOST}:${API_HOST_PORT}/api/v1/health
 CMS:     http://${CMS_HOST}:${CMS_HTTP_PORT}
 MinIO:   http://${DATA_HOST}:${MINIO_HOST_PORT}/minio/health/live
 Grafana: http://${OBSERVABILITY_HOST}:${GRAFANA_PORT}/grafana/
 
-Run: bash deploy/local-production-like/health-check.sh
+Run: bash deploy/production/health-check.sh
 EOF

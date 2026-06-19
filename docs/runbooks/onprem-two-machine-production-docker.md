@@ -1,25 +1,25 @@
-# DARSHAN Two-Machine Production-Like Docker Start
+# DARSHAN Two-Machine Production Docker Start
 
 Use this runbook for the current local/on-prem validation shape:
 
 - server machine: `192.168.0.6`
 - player machine: separate Ubuntu/RPi/AXON/player host on the same LAN
 
-This is production-like runtime behavior. Do not use Vite, `tsx`, or dev watchers for the server/CMS runtime evidence path.
+This is production runtime behavior. Do not use Vite, `tsx`, or dev watchers for the server/CMS runtime evidence path.
 
 ## Quick Local Split for Docker Desktop
 
 If you are not building a source-free runtime bundle yet and only want the current repo to run as separate Docker Desktop projects, use:
 
 ```bash
-cp deploy/local-production-like/.env.example deploy/local-production-like/.env.local
-# edit deploy/local-production-like/.env.local only if your server IP is not 192.168.0.6
+cp deploy/production/.env.example deploy/production/.env.local
+# edit deploy/production/.env.local only if your server IP is not 192.168.0.6
 
 cd darshan-server
 docker compose --env-file .env down --remove-orphans
 
 cd ..
-bash deploy/local-production-like/start-all.sh
+bash deploy/production/start-all.sh
 ```
 
 This starts separate Compose projects:
@@ -35,7 +35,7 @@ darshan-observability   Prometheus + Grafana
 For a clean reset:
 
 ```bash
-bash deploy/local-production-like/reset-fresh.sh
+bash deploy/production/reset-fresh.sh
 ```
 
 That reset removes Docker volumes. Use it only when you intentionally want to delete local DB/object-store/observability data.
@@ -62,7 +62,7 @@ Future LXC/VM deployments keep the same scripts and replace only these host valu
 Build source-free production artifacts on the build machine:
 
 ```bash
-export RELEASE_ID="local-prodlike-r1"
+export RELEASE_ID="production-r1"
 export SITE_NAME="local-192-168-0-6"
 
 bash scripts/export/package-server.sh --release "$RELEASE_ID" --deployment-layout production-split

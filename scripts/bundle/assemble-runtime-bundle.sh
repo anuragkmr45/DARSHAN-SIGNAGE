@@ -1819,6 +1819,11 @@ server {
     proxy_read_timeout 600s;
   }
 
+  location ~* \.map$ {
+    access_log off;
+    return 404;
+  }
+
   location / {
     try_files \$uri \$uri/ /index.html;
     add_header Cache-Control "no-store";

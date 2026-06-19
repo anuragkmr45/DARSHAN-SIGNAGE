@@ -764,6 +764,12 @@ export class PlayerFlow extends EventEmitter {
       })
       this.schedulePairingStatusPoll(PAIRING_POLL_INTERVAL_MS)
     } catch (error) {
+      const backendPairingStatus = this.pairingService.getBackendPairingStatusFromError(error)
+      if (backendPairingStatus && STALE_BACKEND_PAIRING_STATUSES.has(backendPairingStatus)) {
+        await this.enterHardRecovery((error as Error).message || `Pairing is invalid (${backendPairingStatus})`)
+        return
+      }
+
       if (this.pairingService.isDeviceNotRegisteredError(error)) {
         await this.enterHardRecovery((error as Error).message || 'Device not registered in backend')
         return

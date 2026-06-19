@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BASE_DIR="$ROOT_DIR/deploy/local-production-like"
+BASE_DIR="$ROOT_DIR/deploy/production"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 
 cat <<'EOF'
-WARNING: this removes Docker volumes for the local production-like DARSHAN stack.
+WARNING: this removes Docker volumes for the production DARSHAN stack.
 
 It deletes:
 - Postgres data

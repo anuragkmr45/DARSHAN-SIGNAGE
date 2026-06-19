@@ -2,7 +2,7 @@
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
-load_local_prodlike_env
+load_production_env
 
 echo "Building CMS static files"
 (

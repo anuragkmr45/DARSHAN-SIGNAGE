@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BASE_DIR="$ROOT_DIR/deploy/local-production-like"
+BASE_DIR="$ROOT_DIR/deploy/production"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 SITE_ENV="$BASE_DIR/.env.local"
 

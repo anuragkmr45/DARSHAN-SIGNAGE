@@ -20,7 +20,7 @@ async function build() {
       outfile: path.join(__dirname, '../dist/renderer/player.bundle.js'),
       platform: 'browser',
       target: 'es2020',
-      sourcemap: true,
+      sourcemap: false,
       format: 'iife', // Immediately Invoked Function Expression for browser
       external: ['electron'], // Don't bundle electron
     })
@@ -32,7 +32,7 @@ async function build() {
       outfile: path.join(__dirname, '../dist/renderer/pairing.bundle.js'),
       platform: 'browser',
       target: 'es2020',
-      sourcemap: true,
+      sourcemap: false,
       format: 'iife',
       external: ['electron'],
     })
@@ -44,7 +44,7 @@ async function build() {
       outfile: path.join(__dirname, '../dist/renderer/diagnostics.bundle.js'),
       platform: 'browser',
       target: 'es2020',
-      sourcemap: true,
+      sourcemap: false,
       format: 'iife',
       external: ['electron'],
     })
