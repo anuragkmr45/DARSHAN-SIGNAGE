@@ -3,7 +3,7 @@ const sinon = require('sinon')
 
 describe('Default Media Player helpers', () => {
   it('prefers cached local_url over remote media_url', async () => {
-    const { resolveDefaultMediaSource } = await import('../../../src/renderer/default-media-player.ts')
+    const { resolveDefaultMediaSource } = require('../../../src/renderer/default-media-helpers.ts')
 
     const source = resolveDefaultMediaSource({
       id: 'media-1',
@@ -17,7 +17,7 @@ describe('Default Media Player helpers', () => {
   })
 
   it('falls back to remote media_url when no cached local_url exists', async () => {
-    const { resolveDefaultMediaSource } = await import('../../../src/renderer/default-media-player.ts')
+    const { resolveDefaultMediaSource } = require('../../../src/renderer/default-media-helpers.ts')
 
     const source = resolveDefaultMediaSource({
       id: 'media-1',
@@ -30,7 +30,7 @@ describe('Default Media Player helpers', () => {
   })
 
   it('uses fallback_media_url when webpage preview has no direct media_url', async () => {
-    const { resolveDefaultMediaSource } = await import('../../../src/renderer/default-media-player.ts')
+    const { resolveDefaultMediaSource } = require('../../../src/renderer/default-media-helpers.ts')
 
     const source = resolveDefaultMediaSource({
       id: 'media-webpage',
@@ -44,7 +44,7 @@ describe('Default Media Player helpers', () => {
   })
 
   it('recursively tears down hidden default-media trees', async () => {
-    const { teardownDefaultMediaElementTree } = await import('../../../src/renderer/default-media-player.ts')
+    const { teardownDefaultMediaElementTree } = require('../../../src/renderer/default-media-helpers.ts')
 
     const videoParent = { removeChild: sinon.spy() }
     const iframeParent = { removeChild: sinon.spy() }

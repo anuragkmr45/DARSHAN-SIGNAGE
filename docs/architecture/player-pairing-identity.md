@@ -192,6 +192,22 @@ On startup, the Electron player loads persisted runtime state from its app-data/
 
 Linux production autostart is handled outside the pairing identity decision. Packaged/session installs use XDG autostart in `qa` or `production` runtime mode, and service-based deployments may use the installed `darshan-player.service`. In both cases the identity decision still depends on backend validation after startup.
 
+### Secure Offline Playback Lock
+
+The default player behavior remains resilience-first: if the backend is temporarily unreachable after recent validation, cached playback can continue inside `pairing.offlineValidationGraceMs`.
+
+For sites that need theft-resistant behavior, the optional `player.security` playback lock adds a shorter backend-validation lease:
+
+- `offlinePlaybackPolicy: "standard"` keeps the existing behavior.
+- `offlinePlaybackPolicy: "secure"` or `"high_security"`, or `backendRequiredForPlayback: true`, requires recent backend validation before visible playback can continue.
+- Pairing-status validation and successful heartbeats renew the playback lease.
+- Transient backend/network failure starts a grace window. Effective grace is the larger of `networkSwitchGraceMs` and `lockAfterOfflineMs`.
+- When the grace expires, scheduled and default media playback stop and the renderer shows a full-screen backend-validation warning. Heartbeat/retry paths continue in the background.
+- Once backend validation succeeds again, playback unlocks and returns to the current valid schedule/default media.
+- No backend API, DB schema, CMS API contract, pairing protocol, or realtime architecture changes are involved.
+
+Optional media-cache purge is disabled by default with `purgeCacheAfterOfflineMs: 0`. If a site enables a positive value, the player deletes only media cache targets after the long-offline timeout: `media`, `objects`, `quarantine`, and legacy `cache-index.db`. It preserves logs, screenshots, proof-of-play spool, and request queue data. Do not enable purge until real-device recovery has been tested.
+
 Scheduled playback restart is schedule-aligned after validation. If the player restarts during an active schedule window, it recomputes the active item from the backend snapshot schedule start time and seeks timed video playback to the wall-clock-correct position. Multi-item layouts keep cycling by total item duration. A single scheduled item with `loop=true` resumes at its modulo position. A single scheduled item with `loop=false` does not replay from zero once its scheduled item duration has elapsed; the player holds near the final frame until the schedule changes or fallback/default media takes over.
 
 The player also persists a small `playback-progress.json` file in the cache path as a fallback for content that lacks a schedule start anchor. That file stores only non-secret schedule/media identifiers and timing numbers. It does not store media URLs, signed URLs, tokens, certificate material, or private keys. Schedule wall-clock state wins over persisted progress whenever a schedule anchor exists.

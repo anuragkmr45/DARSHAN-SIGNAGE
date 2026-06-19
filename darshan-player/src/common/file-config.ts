@@ -40,6 +40,7 @@ type JsonObject = Record<string, unknown>
 
 const RUNTIME_MODES = new Set<RuntimeMode>(['dev', 'qa', 'production'])
 const DUPLICATE_ENFORCEMENT = new Set(['warn', 'block'])
+const OFFLINE_PLAYBACK_POLICIES = new Set(['standard', 'secure', 'high_security'])
 const SECRET_KEY_FRAGMENTS = [
   'accesskey',
   'apikey',
@@ -80,7 +81,9 @@ function assertNoSecretLikeKeys(value: unknown, pathParts: string[] = []): void 
     const forbidden = SECRET_KEY_FRAGMENTS.find((fragment) => normalized.includes(fragment))
     if (forbidden) {
       const label = [...pathParts, key].join('.') || key
-      throw new Error(`Player config contains secret-like key "${label}" (${forbidden}); keep secrets in env/runtime state`)
+      throw new Error(
+        `Player config contains secret-like key "${label}" (${forbidden}); keep secrets in env/runtime state`
+      )
     }
     assertNoSecretLikeKeys(child, [...pathParts, key])
   }
@@ -154,7 +157,18 @@ function setNested<T extends object, K extends keyof T>(target: T, key: K, value
 function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; mappedConfigKeys: string[] } {
   assertKnownKeys(
     rawPlayer,
-    ['environment', 'backend', 'realtime', 'polling', 'pairing', 'duplicateIdentity', 'cache', 'diagnostics', 'runtime'],
+    [
+      'environment',
+      'backend',
+      'realtime',
+      'polling',
+      'pairing',
+      'duplicateIdentity',
+      'cache',
+      'diagnostics',
+      'runtime',
+      'security',
+    ],
     'player'
   )
 
@@ -167,7 +181,11 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
     assertKnownKeys(environment, ['name', 'deploymentId', 'expectedServerId'], 'player.environment')
     config.environment = {}
     setNested(config.environment, 'name', stringValue(environment['name'], 'player.environment.name'))
-    setNested(config.environment, 'deploymentId', stringValue(environment['deploymentId'], 'player.environment.deploymentId'))
+    setNested(
+      config.environment,
+      'deploymentId',
+      stringValue(environment['deploymentId'], 'player.environment.deploymentId')
+    )
     setNested(
       config.environment,
       'expectedServerId',
@@ -250,9 +268,21 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
     assertPlainObject(polling, 'player.polling')
     assertKnownKeys(polling, ['heartbeatMs', 'commandPollMs', 'snapshotPollMs', 'defaultMediaPollMs'], 'player.polling')
     config.intervals = {}
-    setNested(config.intervals, 'heartbeatMs', numberValue(polling['heartbeatMs'], 'player.polling.heartbeatMs', 10000) as any)
-    setNested(config.intervals, 'commandPollMs', numberValue(polling['commandPollMs'], 'player.polling.commandPollMs', 5000) as any)
-    setNested(config.intervals, 'schedulePollMs', numberValue(polling['snapshotPollMs'], 'player.polling.snapshotPollMs', 10000) as any)
+    setNested(
+      config.intervals,
+      'heartbeatMs',
+      numberValue(polling['heartbeatMs'], 'player.polling.heartbeatMs', 10000) as any
+    )
+    setNested(
+      config.intervals,
+      'commandPollMs',
+      numberValue(polling['commandPollMs'], 'player.polling.commandPollMs', 5000) as any
+    )
+    setNested(
+      config.intervals,
+      'schedulePollMs',
+      numberValue(polling['snapshotPollMs'], 'player.polling.snapshotPollMs', 10000) as any
+    )
     setNested(
       config.intervals,
       'defaultMediaPollMs',
@@ -279,6 +309,64 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
     mappedConfigKeys.push('pairing')
   }
 
+  const security = rawPlayer['security']
+  if (security !== undefined) {
+    assertPlainObject(security, 'player.security')
+    assertKnownKeys(
+      security,
+      [
+        'offlinePlaybackPolicy',
+        'backendRequiredForPlayback',
+        'networkSwitchGraceMs',
+        'playbackLeaseMs',
+        'lockAfterOfflineMs',
+        'purgeCacheAfterOfflineMs',
+        'showSecurityLockScreen',
+      ],
+      'player.security'
+    )
+    const offlinePlaybackPolicy = stringValue(
+      security['offlinePlaybackPolicy'],
+      'player.security.offlinePlaybackPolicy'
+    )
+    if (offlinePlaybackPolicy !== undefined && !OFFLINE_PLAYBACK_POLICIES.has(offlinePlaybackPolicy)) {
+      throw new Error('player.security.offlinePlaybackPolicy must be one of: standard, secure, high_security')
+    }
+    config.security = {}
+    setNested(config.security, 'offlinePlaybackPolicy', offlinePlaybackPolicy as any)
+    setNested(
+      config.security,
+      'backendRequiredForPlayback',
+      booleanValue(security['backendRequiredForPlayback'], 'player.security.backendRequiredForPlayback') as any
+    )
+    setNested(
+      config.security,
+      'networkSwitchGraceMs',
+      numberValue(security['networkSwitchGraceMs'], 'player.security.networkSwitchGraceMs', 0) as any
+    )
+    setNested(
+      config.security,
+      'playbackLeaseMs',
+      numberValue(security['playbackLeaseMs'], 'player.security.playbackLeaseMs', 1000) as any
+    )
+    setNested(
+      config.security,
+      'lockAfterOfflineMs',
+      numberValue(security['lockAfterOfflineMs'], 'player.security.lockAfterOfflineMs', 0) as any
+    )
+    setNested(
+      config.security,
+      'purgeCacheAfterOfflineMs',
+      numberValue(security['purgeCacheAfterOfflineMs'], 'player.security.purgeCacheAfterOfflineMs', 0) as any
+    )
+    setNested(
+      config.security,
+      'showSecurityLockScreen',
+      booleanValue(security['showSecurityLockScreen'], 'player.security.showSecurityLockScreen') as any
+    )
+    mappedConfigKeys.push('security')
+  }
+
   const duplicateIdentity = rawPlayer['duplicateIdentity']
   if (duplicateIdentity !== undefined) {
     assertPlainObject(duplicateIdentity, 'player.duplicateIdentity')
@@ -302,7 +390,11 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
     assertPlainObject(cache, 'player.cache')
     assertKnownKeys(cache, ['maxBytes'], 'player.cache')
     config.cache = {}
-    setNested(config.cache, 'maxBytes', numberValue(cache['maxBytes'], 'player.cache.maxBytes', 1024 * 1024 * 100) as any)
+    setNested(
+      config.cache,
+      'maxBytes',
+      numberValue(cache['maxBytes'], 'player.cache.maxBytes', 1024 * 1024 * 100) as any
+    )
     mappedConfigKeys.push('cache.maxBytes')
   }
 
@@ -330,7 +422,9 @@ export function resolvePlayerConfigFileSelector(env: NodeJS.ProcessEnv = process
     const darshanPath = path.resolve(darshan)
     const signhexPath = path.resolve(signhex)
     if (darshanPath !== signhexPath) {
-      throw new Error('DARSHAN_PLAYER_CONFIG_FILE and SIGNHEX_PLAYER_CONFIG_FILE point to different player config files')
+      throw new Error(
+        'DARSHAN_PLAYER_CONFIG_FILE and SIGNHEX_PLAYER_CONFIG_FILE point to different player config files'
+      )
     }
     return { configured: true, path: darshanPath, source: 'both' }
   }
@@ -437,6 +531,15 @@ export function buildRedactedPlayerConfigSummary(config: AppConfig, diagnostics:
     runtime: config.runtime,
     pairing: config.pairing ?? null,
     duplicateIdentity: config.duplicateIdentity ?? null,
+    security: {
+      offlinePlaybackPolicy: config.security.offlinePlaybackPolicy ?? 'standard',
+      backendRequiredForPlayback: config.security.backendRequiredForPlayback === true,
+      networkSwitchGraceMs: config.security.networkSwitchGraceMs ?? null,
+      playbackLeaseMs: config.security.playbackLeaseMs ?? null,
+      lockAfterOfflineMs: config.security.lockAfterOfflineMs ?? null,
+      purgeCacheAfterOfflineMs: config.security.purgeCacheAfterOfflineMs ?? null,
+      showSecurityLockScreen: config.security.showSecurityLockScreen !== false,
+    },
     cache: {
       maxBytes: config.cache.maxBytes,
       pathConfigured: Boolean(config.cache.path),

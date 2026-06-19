@@ -21,6 +21,13 @@ const ENV_KEYS = [
   'DARSHAN_DEPLOYMENT_ID',
   'SIGNHEX_DEPLOYMENT_ID',
   'DARSHAN_PAIRING_OFFLINE_VALIDATION_GRACE_MS',
+  'DARSHAN_SECURITY_OFFLINE_PLAYBACK_POLICY',
+  'DARSHAN_SECURITY_BACKEND_REQUIRED_FOR_PLAYBACK',
+  'DARSHAN_SECURITY_NETWORK_SWITCH_GRACE_MS',
+  'DARSHAN_SECURITY_PLAYBACK_LEASE_MS',
+  'DARSHAN_SECURITY_LOCK_AFTER_OFFLINE_MS',
+  'DARSHAN_SECURITY_PURGE_CACHE_AFTER_OFFLINE_MS',
+  'DARSHAN_SECURITY_SHOW_LOCK_SCREEN',
 ]
 
 function resetRuntimeModules() {
@@ -122,6 +129,15 @@ describe('player file config loader', () => {
           offlineValidationGraceMs: 123456,
           backendFirstRolloutMode: true,
         },
+        security: {
+          offlinePlaybackPolicy: 'secure',
+          backendRequiredForPlayback: true,
+          networkSwitchGraceMs: 15000,
+          playbackLeaseMs: 60000,
+          lockAfterOfflineMs: 120000,
+          purgeCacheAfterOfflineMs: 3600000,
+          showSecurityLockScreen: true,
+        },
         duplicateIdentity: {
           enabled: true,
           enforcement: 'warn',
@@ -149,6 +165,10 @@ describe('player file config loader', () => {
     expect(config.environment.name).to.equal('onprem-qa')
     expect(config.environment.deploymentId).to.equal('qa-lab-1')
     expect(config.pairing.offlineValidationGraceMs).to.equal(123456)
+    expect(config.security.offlinePlaybackPolicy).to.equal('secure')
+    expect(config.security.backendRequiredForPlayback).to.equal(true)
+    expect(config.security.lockAfterOfflineMs).to.equal(120000)
+    expect(config.security.purgeCacheAfterOfflineMs).to.equal(3600000)
     expect(config.cache.maxBytes).to.equal(2147483648)
   })
 
@@ -203,12 +223,15 @@ describe('player file config loader', () => {
         environment: { name: 'from-file', deploymentId: 'file-deployment' },
         backend: { baseUrl: 'http://file.local:3000' },
         pairing: { offlineValidationGraceMs: 999999 },
+        security: { offlinePlaybackPolicy: 'standard', lockAfterOfflineMs: 999999 },
       },
     })
     process.env.DARSHAN_PLAYER_CONFIG_FILE = siteConfigPath
     process.env.DARSHAN_API_BASE_URL = 'http://env.local:3000'
     process.env.DARSHAN_ENVIRONMENT_NAME = 'from-env'
     process.env.DARSHAN_PAIRING_OFFLINE_VALIDATION_GRACE_MS = '111111'
+    process.env.DARSHAN_SECURITY_OFFLINE_PLAYBACK_POLICY = 'high_security'
+    process.env.DARSHAN_SECURITY_LOCK_AFTER_OFFLINE_MS = '222222'
 
     const { getConfigManager } = require('../../../src/common/config')
     const config = getConfigManager().getConfig()
@@ -217,6 +240,8 @@ describe('player file config loader', () => {
     expect(config.environment.name).to.equal('from-env')
     expect(config.environment.deploymentId).to.equal('file-deployment')
     expect(config.pairing.offlineValidationGraceMs).to.equal(111111)
+    expect(config.security.offlinePlaybackPolicy).to.equal('high_security')
+    expect(config.security.lockAfterOfflineMs).to.equal(222222)
   })
 
   it('fails clearly on invalid JSON', () => {
@@ -242,6 +267,16 @@ describe('player file config loader', () => {
     process.env.DARSHAN_PLAYER_CONFIG_FILE = secretConfigPath
 
     expect(() => loadPlayerFileConfig()).to.throw(/secret-like key/)
+
+    resetRuntimeModules()
+    const badPolicyConfigPath = path.join(tempDir, 'bad-policy.json')
+    writeJson(badPolicyConfigPath, {
+      player: {
+        security: { offlinePlaybackPolicy: 'allow_forever' },
+      },
+    })
+    process.env.DARSHAN_PLAYER_CONFIG_FILE = badPolicyConfigPath
+    expect(() => loadPlayerFileConfig()).to.throw(/offlinePlaybackPolicy must be one of/)
   })
 
   it('rejects credentialed URLs and YAML in CONFIG-2', () => {
@@ -264,9 +299,7 @@ describe('player file config loader', () => {
     expect(
       redactUrlForDiagnostics('https://user:password@backend.internal:3000/api?token=abc123#secret-fragment')
     ).to.equal('https://backend.internal:3000/api')
-    expect(redactUrlForDiagnostics('http://admin:secret@192.168.0.5:3000/api')).to.equal(
-      'http://192.168.0.5:3000/api'
-    )
+    expect(redactUrlForDiagnostics('http://admin:secret@192.168.0.5:3000/api')).to.equal('http://192.168.0.5:3000/api')
     expect(redactUrlForDiagnostics('https://backend.internal:3000/api?password=abc&safe=value')).to.equal(
       'https://backend.internal:3000/api'
     )
@@ -304,14 +337,17 @@ describe('player file config loader', () => {
 
     expect(summary.configFile.loaded).to.equal(true)
     expect(summary.backend.apiBase).to.equal('http://backend.local:3000')
+    expect(summary.security.offlinePlaybackPolicy).to.equal('standard')
     expect(serialized).not.to.contain('sensitive-device-id')
     expect(serialized).not.to.contain('/secret/client.key')
     expect(summary.redaction.secretValuesIncluded).to.equal(false)
   })
 
   it('redacts credentialed env URLs in diagnostics while preserving runtime config', () => {
-    process.env.DARSHAN_API_BASE_URL = 'https://env-user:env-password@backend.internal:3000/api?token=env-token#env-fragment'
-    process.env.DARSHAN_WS_URL = 'wss://ws-user:ws-password@backend.internal:3000/socket.io/?access_key=ws-key#ws-fragment'
+    process.env.DARSHAN_API_BASE_URL =
+      'https://env-user:env-password@backend.internal:3000/api?token=env-token#env-fragment'
+    process.env.DARSHAN_WS_URL =
+      'wss://ws-user:ws-password@backend.internal:3000/socket.io/?access_key=ws-key#ws-fragment'
 
     const { getConfigManager } = require('../../../src/common/config')
     const configManager = getConfigManager()

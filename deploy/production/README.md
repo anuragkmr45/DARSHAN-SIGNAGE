@@ -304,6 +304,15 @@ Example:
       "offlineValidationGraceMs": 604800000,
       "backendFirstRolloutMode": true
     },
+    "security": {
+      "offlinePlaybackPolicy": "secure",
+      "backendRequiredForPlayback": true,
+      "networkSwitchGraceMs": 30000,
+      "playbackLeaseMs": 120000,
+      "lockAfterOfflineMs": 120000,
+      "purgeCacheAfterOfflineMs": 0,
+      "showSecurityLockScreen": true
+    },
     "duplicateIdentity": {
       "enabled": true,
       "enforcement": "warn"
@@ -398,6 +407,37 @@ Result by condition:
 
 The restart path intentionally does not auto-wipe app-data just because the machine rebooted. Clean identity reset is an explicit operator action using `darshan-player reset-pairing`.
 
+### Secure Offline Playback Lock
+
+Normal offline grace is designed for resilience during short backend/network outages. Sites that need theft-resistant behavior can enable an additional playback lock in `player.security`.
+
+When `player.security.offlinePlaybackPolicy` is `secure` or `high_security`, or `player.security.backendRequiredForPlayback` is `true`:
+
+- each successful backend pairing-status/heartbeat grants a short playback lease;
+- transient network loss enters a configured grace window;
+- after the lease/grace expires, scheduled/default media playback is stopped and the player shows a full-screen DARSHAN backend-validation warning;
+- heartbeat/retry paths continue in the background;
+- once backend validation succeeds again, playback unlocks and returns to the current valid schedule/default media;
+- no backend API, CMS API, DB schema, pairing protocol, or realtime architecture changes are required.
+
+Optional cache purge is separate. `player.security.purgeCacheAfterOfflineMs` defaults to `0`, which means media cache purge is disabled. If set to a positive value, the player deletes only media cache targets (`media`, `objects`, `quarantine`, legacy `cache-index.db`) after the long-offline timeout. It preserves logs, screenshots, proof-of-play spool, and request queue data. Do not enable purge until the site has tested recovery and operator procedures on the real player device.
+
+Suggested production starting point:
+
+```json
+"security": {
+  "offlinePlaybackPolicy": "secure",
+  "backendRequiredForPlayback": true,
+  "networkSwitchGraceMs": 30000,
+  "playbackLeaseMs": 120000,
+  "lockAfterOfflineMs": 120000,
+  "purgeCacheAfterOfflineMs": 0,
+  "showSecurityLockScreen": true
+}
+```
+
+For stricter theft resistance after on-device testing, lower the lease/grace values or use `offlinePlaybackPolicy: "high_security"` with a positive `purgeCacheAfterOfflineMs`. Keep the first production rollout conservative and verify the AVITA LAP/RPi/AXON behavior before enabling purge.
+
 Scheduled playback after restart is wall-clock aligned:
 
 | Active scheduled media at restart | Expected behavior after validation |
@@ -461,6 +501,13 @@ Environment variables override values from the config file. This is useful for e
 | `player.polling.defaultMediaPollMs` | number | Default-media polling interval in milliseconds. Minimum accepted by config file is `10000`. |
 | `player.pairing.offlineValidationGraceMs` | number | How long a previously validated identity may continue offline. Example `604800000` is 7 days. |
 | `player.pairing.backendFirstRolloutMode` | boolean | Keeps old-backend rollout safety. Leave `true` unless there is a documented migration reason. |
+| `player.security.offlinePlaybackPolicy` | `standard`, `secure`, `high_security` | Additional playback lock policy. `standard` preserves normal offline grace. `secure`/`high_security` require recent backend validation for visible playback. |
+| `player.security.backendRequiredForPlayback` | boolean | When `true`, visible playback is gated by the secure playback lease even if policy is `standard`. |
+| `player.security.networkSwitchGraceMs` | number | Minimum grace window for legitimate network changes before security lock. |
+| `player.security.playbackLeaseMs` | number | How long a successful backend validation keeps playback allowed before backend contact is required again. |
+| `player.security.lockAfterOfflineMs` | number | Grace window after backend contact is lost before playback is locked. Effective grace is the larger of this value and `networkSwitchGraceMs`. |
+| `player.security.purgeCacheAfterOfflineMs` | number | Optional media-cache purge timeout after backend loss. `0` disables purge. Purge preserves logs, PoP spool, and request queues. |
+| `player.security.showSecurityLockScreen` | boolean | Shows the full-screen backend-validation warning while locked. Keep `true` for production operators. |
 | `player.duplicateIdentity.enabled` | boolean | Enables duplicate/cloned identity detection metadata handling. |
 | `player.duplicateIdentity.enforcement` | `warn`, `block` | Duplicate identity mode. Keep `warn` for production unless block mode has been separately approved and tested. |
 | `player.cache.maxBytes` | number | Maximum local media cache size in bytes. Example `10737418240` is 10 GiB. |

@@ -3,7 +3,15 @@
  * Handles media rendering and transitions in the renderer process
  */
 
-import { ActiveSlotPlayback, DefaultMediaResponse, FitMode, LayoutScene, LayoutSceneSlot, PlayerStatus, TimelineItem } from '../common/types'
+import {
+  ActiveSlotPlayback,
+  DefaultMediaResponse,
+  FitMode,
+  LayoutScene,
+  LayoutSceneSlot,
+  PlayerStatus,
+  TimelineItem,
+} from '../common/types'
 import './types'
 import { DefaultMediaPlayer } from './default-media-player'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
@@ -14,148 +22,28 @@ import {
   resolveScheduledResumePosition,
   shouldRepeatScheduledItem,
 } from '../common/playback-policy'
-import type {
-  PlaybackProgressEntry,
-  PlaybackProgressIdentity,
-  PlaybackResumeDecision,
-} from '../common/playback-policy'
+import { resolvePlayerContentSource, shouldDisplaySecurityLock } from '../common/player-content-source'
+import {
+  computeSceneStageFrame,
+  prepareElementForFadeIn,
+  prepareElementForFadeOut,
+  shouldUseManualVideoReplay,
+  teardownScheduledElementTree,
+  type DisposableMediaNode,
+} from './player-layout-helpers'
+import type { PlaybackProgressEntry, PlaybackProgressIdentity, PlaybackResumeDecision } from '../common/playback-policy'
 
-const { sanitizeLogPayloadForDiagnostics } =
-  require('../common/redaction') as typeof import('../common/redaction')
+const { sanitizeLogPayloadForDiagnostics } = require('../common/redaction') as typeof import('../common/redaction')
 
-export function parseAspectRatio(aspectRatio?: string): number | null {
-  if (!aspectRatio || typeof aspectRatio !== 'string') {
-    return null
-  }
-
-  const parts = aspectRatio.split(':')
-  if (parts.length !== 2) {
-    return null
-  }
-
-  const width = Number(parts[0]?.trim())
-  const height = Number(parts[1]?.trim())
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return null
-  }
-
-  return width / height
-}
-
-export function computeSceneStageFrame(
-  aspectRatio: string | undefined,
-  viewportWidth: number,
-  viewportHeight: number,
-): { width: number; height: number; left: number; top: number } {
-  const ratio = parseAspectRatio(aspectRatio)
-  if (!ratio || viewportWidth <= 0 || viewportHeight <= 0) {
-    return {
-      width: viewportWidth,
-      height: viewportHeight,
-      left: 0,
-      top: 0,
-    }
-  }
-
-  const viewportRatio = viewportWidth / viewportHeight
-  if (viewportRatio > ratio) {
-    const height = viewportHeight
-    const width = height * ratio
-    return {
-      width,
-      height,
-      left: (viewportWidth - width) / 2,
-      top: 0,
-    }
-  }
-
-  const width = viewportWidth
-  const height = width / ratio
-  return {
-    width,
-    height,
-    left: 0,
-    top: (viewportHeight - height) / 2,
-  }
-}
-
-export function resolvePlayerContentSource(
-  status: PlayerStatus,
-): 'schedule' | 'default' | 'none' {
-  if (
-    status.state === 'BOOT' ||
-    status.state === 'LOCAL_IDENTITY_PRESENT' ||
-    status.state === 'BOOTSTRAP_AUTH' ||
-    status.state === 'RECOVERY_REQUIRED' ||
-    status.state === 'HARD_RECOVERY' ||
-    status.state === 'PAIRING_PENDING' ||
-    status.state === 'PAIRING_CONFIRMED' ||
-    status.state === 'PAIRING_COMPLETING'
-  ) {
-    return 'none'
-  }
-
-  if (status.mode === 'default' || status.mode === 'offline' || status.mode === 'empty') {
-    return 'default'
-  }
-
-  return 'schedule'
-}
-
-export function shouldUseManualVideoReplay(item: TimelineItem): boolean {
-  return item.type === 'video' && item.loop === true
-}
-
-type TransitionStyleTarget = {
-  style: {
-    transition: string
-    opacity: string
-  }
-}
-
-export function resolveOpacityTransitionStyle(durationMs?: number): string {
-  const safeDuration = Math.max(0, Number(durationMs) || 0)
-  if (safeDuration <= 0) {
-    return ''
-  }
-
-  return `opacity ${safeDuration}ms ease-in-out`
-}
-
-export function prepareElementForFadeIn(
-  element: TransitionStyleTarget,
-  durationMs?: number,
-): boolean {
-  const transitionStyle = resolveOpacityTransitionStyle(durationMs)
-  element.style.transition = transitionStyle
-  if (!transitionStyle) {
-    element.style.opacity = '1'
-    return false
-  }
-
-  element.style.opacity = '0'
-  return true
-}
-
-export function prepareElementForFadeOut(
-  element: TransitionStyleTarget,
-  durationMs?: number,
-): void {
-  element.style.transition = resolveOpacityTransitionStyle(durationMs)
-  element.style.opacity = '0'
-}
-
-type DisposableMediaNode = {
-  __darshanCleanup?: () => void
-  pause?: () => void
-  removeAttribute?: (name: string) => void
-  load?: () => void
-  stop?: () => void
-  querySelectorAll?: (selector: string) => ArrayLike<DisposableMediaNode>
-  parentElement?: { removeChild?: (child: DisposableMediaNode) => void } | null
-  remove?: () => void
-  src?: string
-}
+export { resolvePlayerContentSource } from '../common/player-content-source'
+export {
+  computeSceneStageFrame,
+  prepareElementForFadeIn,
+  prepareElementForFadeOut,
+  resolveOpacityTransitionStyle,
+  shouldUseManualVideoReplay,
+  teardownScheduledElementTree,
+} from './player-layout-helpers'
 
 type RenderedScene = {
   element: HTMLElement
@@ -176,79 +64,6 @@ type PlaybackProgressContext = PlaybackProgressIdentity & {
   itemDisplayMs?: number
 }
 
-function teardownDisposableNode(node: DisposableMediaNode | null | undefined): void {
-  if (!node) {
-    return
-  }
-
-  try {
-    node.pause?.()
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-
-  try {
-    node.removeAttribute?.('src')
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-
-  if (typeof node.src === 'string') {
-    try {
-      node.src = ''
-    } catch {
-      // ignore read-only src properties
-    }
-  }
-
-  try {
-    node.load?.()
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-
-  try {
-    node.stop?.()
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-
-  if (node.parentElement?.removeChild) {
-    try {
-      node.parentElement.removeChild(node)
-      return
-    } catch {
-      // fall back to remove()
-    }
-  }
-
-  try {
-    node.remove?.()
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-}
-
-export function teardownScheduledElementTree(root: DisposableMediaNode | null | undefined): void {
-  if (!root) {
-    return
-  }
-
-  try {
-    root.__darshanCleanup?.()
-  } catch {
-    // ignore teardown errors from managed nodes
-  }
-
-  const descendants =
-    typeof root.querySelectorAll === 'function'
-      ? Array.from(root.querySelectorAll('video, audio, iframe, webview'))
-      : []
-
-  descendants.forEach((node) => teardownDisposableNode(node))
-  teardownDisposableNode(root)
-}
-
 class Player {
   private static readonly FALLBACK_STATUS_GUARD_MS = 2000
   private canvas: HTMLCanvasElement | null = null
@@ -261,6 +76,7 @@ class Player {
   private statusConnection: HTMLElement | null = null
   private statusSnapshot: HTMLElement | null = null
   private modeBanner: HTMLElement | null = null
+  private securityLockOverlay: HTMLElement | null = null
   private currentCleanup?: () => void
   private playbackSession = 0
   private ignoreFallbackStatusUntil = 0
@@ -286,6 +102,7 @@ class Player {
     this.statusConnection = document.getElementById('status-connection')
     this.statusSnapshot = document.getElementById('status-snapshot-time')
     this.modeBanner = document.getElementById('mode-banner')
+    this.securityLockOverlay = document.getElementById('security-lock-overlay')
 
     if (this.canvas) {
       this.resizeCanvas()
@@ -384,13 +201,16 @@ class Player {
     }
 
     if (window.darshan && window.darshan.getPlayerStatus) {
-      window.darshan.getPlayerStatus().then((status: any) => {
-        const typedStatus = status as PlayerStatus
-        this.updateStatusOverlay(typedStatus)
-        this.updateContentSource(typedStatus)
-      }).catch(() => {
-        // ignore initial status failures
-      })
+      window.darshan
+        .getPlayerStatus()
+        .then((status: any) => {
+          const typedStatus = status as PlayerStatus
+          this.updateStatusOverlay(typedStatus)
+          this.updateContentSource(typedStatus)
+        })
+        .catch(() => {
+          // ignore initial status failures
+        })
     }
   }
 
@@ -417,6 +237,12 @@ class Player {
   }
 
   private updateContentSource(status: PlayerStatus): void {
+    if (shouldDisplaySecurityLock(status)) {
+      this.clearScheduledPlayback('security-lock')
+      this.setActiveSource('none')
+      return
+    }
+
     const nextSource = resolvePlayerContentSource(status)
     if (nextSource === 'schedule') {
       this.setActiveSource('schedule')
@@ -686,7 +512,7 @@ class Player {
 
   private async resolveSingleItemResumeDecision(
     item: TimelineItem,
-    scheduleId?: string,
+    scheduleId?: string
   ): Promise<PlaybackResumeInstruction> {
     const context = this.buildPlaybackProgressContext(item, { scheduleId })
     const startsAt = this.getStringMeta(item, 'scheduleWindowStartsAt') || this.getStringMeta(item, 'scheduleStartsAt')
@@ -703,7 +529,7 @@ class Player {
 
   private buildPlaybackProgressContext(
     item: TimelineItem,
-    overrides: Partial<PlaybackProgressContext> = {},
+    overrides: Partial<PlaybackProgressContext> = {}
   ): PlaybackProgressContext {
     return {
       scheduleId:
@@ -730,7 +556,9 @@ class Player {
     }
   }
 
-  private async getPersistedPlaybackProgress(expected: PlaybackProgressIdentity): Promise<PlaybackProgressEntry | null> {
+  private async getPersistedPlaybackProgress(
+    expected: PlaybackProgressIdentity
+  ): Promise<PlaybackProgressEntry | null> {
     if (!window.darshan?.getPlaybackResumeState) {
       return null
     }
@@ -746,7 +574,7 @@ class Player {
   private attachVideoProgressReporter(
     element: HTMLElement,
     item: TimelineItem,
-    context: PlaybackProgressContext,
+    context: PlaybackProgressContext
   ): void {
     if (!(element instanceof HTMLVideoElement) || !window.darshan?.reportPlaybackProgress) {
       return
@@ -875,7 +703,7 @@ class Player {
           scene.startsAt,
           scene.endsAt,
           typeof sceneItem.meta?.['scheduleId'] === 'string' ? String(sceneItem.meta?.['scheduleId']) : undefined,
-          scene.serverTimeOffsetMs || 0,
+          scene.serverTimeOffsetMs || 0
         )
       )
     })
@@ -1025,7 +853,7 @@ class Player {
     const container = this.createMediaPreviewCard(
       item,
       result.kind === 'DOCUMENT' ? 'Document preview' : 'Media playback not supported yet',
-      result.reason,
+      result.reason
     )
 
     this.showElement(container)
@@ -1033,6 +861,13 @@ class Player {
   }
 
   private updateStatusOverlay(status: PlayerStatus): void {
+    const displaySecurityLock = shouldDisplaySecurityLock(status)
+    if (displaySecurityLock) {
+      this.showSecurityLock(status)
+    } else {
+      this.hideSecurityLock()
+    }
+
     if (this.statusOverlay) {
       this.statusOverlay.classList.remove('hidden')
     }
@@ -1049,7 +884,10 @@ class Player {
     if (this.modeBanner) {
       this.modeBanner.classList.remove('hidden', 'emergency', 'default', 'offline')
 
-      if (status.mode === 'emergency') {
+      if (displaySecurityLock) {
+        this.modeBanner.textContent = 'SECURITY LOCK'
+        this.modeBanner.classList.add('offline')
+      } else if (status.mode === 'emergency') {
         this.modeBanner.textContent = 'EMERGENCY'
         this.modeBanner.classList.add('emergency')
       } else if (status.mode === 'default') {
@@ -1066,6 +904,56 @@ class Player {
         this.modeBanner.classList.add('hidden')
       }
     }
+  }
+
+  private showSecurityLock(status: PlayerStatus): void {
+    if (!this.securityLockOverlay) {
+      return
+    }
+
+    const reason = status.securityLock?.reason || 'Backend validation is required before playback can continue.'
+    const lastSuccess = status.securityLock?.lastBackendSuccessAt
+      ? new Date(status.securityLock.lastBackendSuccessAt).toLocaleString()
+      : 'not available'
+
+    this.securityLockOverlay.classList.remove('hidden')
+    this.securityLockOverlay.innerHTML = `
+      <div class="security-lock-card">
+        <div class="security-lock-eyebrow">Playback locked</div>
+        <h1>DARSHAN requires backend validation</h1>
+        <p>${this.escapeHtml(reason)}</p>
+        <div class="security-lock-meta">
+          <span>Last backend validation</span>
+          <strong>${this.escapeHtml(lastSuccess)}</strong>
+        </div>
+        <div class="security-lock-guidance">
+          Connect this player to the approved DARSHAN network. Playback will resume only after backend validation succeeds.
+        </div>
+      </div>
+    `
+  }
+
+  private hideSecurityLock(): void {
+    this.securityLockOverlay?.classList.add('hidden')
+  }
+
+  private escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (char) => {
+      switch (char) {
+        case '&':
+          return '&amp;'
+        case '<':
+          return '&lt;'
+        case '>':
+          return '&gt;'
+        case '"':
+          return '&quot;'
+        case "'":
+          return '&#39;'
+        default:
+          return char
+      }
+    })
   }
 
   /**
@@ -1132,7 +1020,7 @@ class Player {
     sceneStartsAt?: string,
     sceneEndsAt?: string,
     scheduleId?: string,
-    serverTimeOffsetMs: number = 0,
+    serverTimeOffsetMs: number = 0
   ): () => void {
     const timers = new Set<number>()
     let disposed = false
@@ -1184,7 +1072,7 @@ class Player {
     const showSlotItem = async (
       index: number,
       delayOverrideMs?: number,
-      resumeOverride?: PlaybackResumeDecision,
+      resumeOverride?: PlaybackResumeDecision
     ): Promise<void> => {
       if (disposed || slot.items.length === 0) {
         return
@@ -1229,7 +1117,7 @@ class Player {
               slotId: slot.id,
               scheduleStartsAt: sceneStartsAt || null,
               scheduleEndsAt: sceneEndsAt || null,
-            }),
+            })
           )
         }
         this.applyFitMode(nextElement, item.fit)
@@ -1398,7 +1286,9 @@ class Player {
 
   private getItemCompatibility(item: TimelineItem): CompatResult {
     const sourceContentType =
-      typeof item.meta?.['source_content_type'] === 'string' ? (item.meta?.['source_content_type'] as string) : undefined
+      typeof item.meta?.['source_content_type'] === 'string'
+        ? (item.meta?.['source_content_type'] as string)
+        : undefined
     const contentType =
       typeof item.meta?.['content_type'] === 'string' ? (item.meta?.['content_type'] as string) : undefined
     const mediaName = typeof item.meta?.['name'] === 'string' ? (item.meta?.['name'] as string) : undefined
@@ -1417,7 +1307,7 @@ class Player {
     return this.createMediaPreviewCard(
       item,
       'Document preview',
-      compat?.reason || 'Document rendering is not available for this file',
+      compat?.reason || 'Document rendering is not available for this file'
     )
   }
 

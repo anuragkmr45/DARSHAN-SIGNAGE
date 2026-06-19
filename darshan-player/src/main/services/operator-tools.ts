@@ -15,6 +15,7 @@ import { getDeviceStateStore } from './device-state-store'
 import { getSnapshotManager } from './snapshot-manager'
 import { getDefaultMediaService } from './settings/default-media-service'
 import { getPlaybackProgressPath, getPlaybackProgressStore } from './playback-progress-store'
+import { clearMediaCacheTargets } from './media-cache-purge'
 import type { NetworkDiagnostics } from './pairing-service'
 
 const logger = getLogger('operator-tools')
@@ -39,7 +40,10 @@ interface ResetTarget {
 function getAppMetadata() {
   const electronApp = getElectronApp()
   return {
-    version: typeof electronApp?.getVersion === 'function' ? electronApp.getVersion() : process.env['npm_package_version'] || 'unknown',
+    version:
+      typeof electronApp?.getVersion === 'function'
+        ? electronApp.getVersion()
+        : process.env['npm_package_version'] || 'unknown',
     packaged: Boolean(electronApp?.isPackaged),
     execPath: process.execPath,
   }
@@ -267,30 +271,6 @@ function buildResetPlan(options: ResetPairingCliOptions) {
           : 'not identity-bound; preserved by reset-pairing',
     })),
   }
-}
-
-function clearMediaCacheTargets(cacheRoot: string) {
-  const targets = ['media', 'objects', 'quarantine']
-  const removed: string[] = []
-
-  for (const name of targets) {
-    const targetPath = path.join(cacheRoot, name)
-    if (!pathExists(targetPath)) {
-      continue
-    }
-
-    fs.rmSync(targetPath, { recursive: true, force: true })
-    ensureDir(targetPath)
-    removed.push(targetPath)
-  }
-
-  const legacyIndex = path.join(cacheRoot, 'cache-index.db')
-  if (pathExists(legacyIndex)) {
-    fs.rmSync(legacyIndex, { force: true })
-    removed.push(legacyIndex)
-  }
-
-  return removed
 }
 
 async function getCacheStats(cachePath: string) {
@@ -559,7 +539,10 @@ export async function collectLogs() {
   writeJsonFile(path.join(bundleDir, 'displays.json'), displays)
   writeJsonFile(path.join(bundleDir, 'autostart.json'), getAutostartStatus())
   writeJsonFile(path.join(bundleDir, 'cache-stats.json'), cacheStats)
-  writeJsonFile(path.join(bundleDir, 'certificate-metadata.redacted.json'), redactCertificateMetadata(getCertificateManager().getCertificateMetadata()))
+  writeJsonFile(
+    path.join(bundleDir, 'certificate-metadata.redacted.json'),
+    redactCertificateMetadata(getCertificateManager().getCertificateMetadata())
+  )
   writeJsonFile(path.join(bundleDir, 'system-info.json'), {
     timestamp: new Date().toISOString(),
     appVersion: getAppMetadata().version,

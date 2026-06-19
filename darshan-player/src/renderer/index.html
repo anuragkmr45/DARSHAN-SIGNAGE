@@ -483,6 +483,81 @@
       color: #ffd666;
     }
 
+    #security-lock-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: clamp(28px, 5vw, 72px);
+      background:
+        radial-gradient(circle at top left, rgba(255, 214, 102, 0.13), transparent 28rem),
+        linear-gradient(135deg, #171114 0%, #2f2329 48%, #604652 100%);
+      color: #fff;
+      z-index: 30;
+    }
+
+    #security-lock-overlay.hidden {
+      display: none;
+    }
+
+    .security-lock-card {
+      width: min(860px, 100%);
+      padding: clamp(28px, 5vw, 56px);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(210, 159, 128, 0.28);
+      box-shadow: 0 28px 90px rgba(0, 0, 0, 0.38);
+      text-align: center;
+    }
+
+    .security-lock-eyebrow {
+      margin-bottom: 16px;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: #ffd666;
+    }
+
+    .security-lock-card h1 {
+      margin-bottom: 18px;
+      font-size: clamp(34px, 5.4vw, 72px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    .security-lock-card p {
+      max-width: 700px;
+      margin: 0 auto 26px;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: clamp(18px, 2vw, 26px);
+      line-height: 1.45;
+    }
+
+    .security-lock-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 22px;
+      padding: 12px 16px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.26);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 14px;
+    }
+
+    .security-lock-meta strong {
+      color: #fff;
+    }
+
+    .security-lock-guidance {
+      color: rgba(255, 255, 255, 0.72);
+      font-size: clamp(15px, 1.4vw, 18px);
+      line-height: 1.5;
+    }
+
     #connectivity-banner {
       position: absolute;
       bottom: 24px;
@@ -553,6 +628,8 @@
 
   <!-- Default Media Container -->
   <div id="default-media-container"></div>
+
+  <div id="security-lock-overlay" class="hidden"></div>
 
   <div id="status-overlay" class="hidden">
     <div class="status-row">

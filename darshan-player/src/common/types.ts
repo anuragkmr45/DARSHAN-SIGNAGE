@@ -99,7 +99,16 @@ export interface SecurityConfig {
   contextIsolation: boolean
   nodeIntegration: boolean
   sandbox: boolean
+  offlinePlaybackPolicy?: SecureOfflinePlaybackPolicy
+  backendRequiredForPlayback?: boolean
+  networkSwitchGraceMs?: number
+  playbackLeaseMs?: number
+  lockAfterOfflineMs?: number
+  purgeCacheAfterOfflineMs?: number
+  showSecurityLockScreen?: boolean
 }
+
+export type SecureOfflinePlaybackPolicy = 'standard' | 'secure' | 'high_security'
 
 export interface ObservabilityConfig {
   enabled: boolean
@@ -225,6 +234,20 @@ export interface PlayerStatus {
   lastSnapshotAt?: string
   lastHeartbeatAt?: string
   error?: string
+  securityLock?: PlayerSecurityLockStatus
+}
+
+export interface PlayerSecurityLockStatus {
+  enabled: boolean
+  locked: boolean
+  inGrace: boolean
+  reason?: string
+  lastBackendSuccessAt?: string
+  firstBackendFailureAt?: string
+  lockedAt?: string
+  lockAt?: string
+  purgeCacheAfterOfflineMs?: number
+  purgeDue?: boolean
 }
 
 export interface TimelineItem {

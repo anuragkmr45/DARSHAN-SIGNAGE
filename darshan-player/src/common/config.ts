@@ -8,13 +8,11 @@ import * as net from 'net'
 import { EventEmitter } from 'events'
 import type { AppConfig, RuntimeMode } from './types'
 import { importLegacyLinuxRuntimeState, resolveRuntimePaths, type RuntimePaths } from './platform-paths'
-import {
-  buildRedactedPlayerConfigSummary,
-  loadPlayerFileConfig,
-  type PlayerConfigFileDiagnostics,
-} from './file-config'
+import { buildRedactedPlayerConfigSummary, loadPlayerFileConfig, type PlayerConfigFileDiagnostics } from './file-config'
+import { DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG, normalizeSecureOfflinePlaybackConfig } from './offline-security-policy'
 
 const RUNTIME_MODES: RuntimeMode[] = ['dev', 'qa', 'production']
+const SECURE_OFFLINE_PLAYBACK_POLICIES = new Set(['standard', 'secure', 'high_security'])
 const LEGACY_COMMAND_POLL_MS = 30000
 const LIVE_COMMAND_POLL_MS = 5000
 const LEGACY_PLAYER_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
@@ -75,6 +73,18 @@ function envNumber(defaultValue: number, ...names: string[]): number {
   return Number.isFinite(parsed) ? parsed : defaultValue
 }
 
+function envSecureOfflinePlaybackPolicy(
+  defaultValue: AppConfig['security']['offlinePlaybackPolicy'],
+  ...names: string[]
+) {
+  const value = envValue(...names)
+  if (!value) return defaultValue
+  const normalized = value.trim().toLowerCase()
+  return SECURE_OFFLINE_PLAYBACK_POLICIES.has(normalized)
+    ? (normalized as AppConfig['security']['offlinePlaybackPolicy'])
+    : defaultValue
+}
+
 function isLoopbackAddress(value: string): boolean {
   if (!value) {
     return false
@@ -116,8 +126,10 @@ export class ConfigManager {
     const defaultCachePath = envValue('DARSHAN_CACHE_PATH', 'HEXMON_CACHE_PATH') || this.runtimePaths.cachePath
     const defaultCertDir = envValue('DARSHAN_MTLS_CERT_DIR', 'HEXMON_MTLS_CERT_DIR') || this.runtimePaths.certDir
 
-    const defaultCertPath = envValue('DARSHAN_MTLS_CERT_PATH', 'HEXMON_MTLS_CERT_PATH') || path.join(defaultCertDir, 'client.crt')
-    const defaultKeyPath = envValue('DARSHAN_MTLS_KEY_PATH', 'HEXMON_MTLS_KEY_PATH') || path.join(defaultCertDir, 'client.key')
+    const defaultCertPath =
+      envValue('DARSHAN_MTLS_CERT_PATH', 'HEXMON_MTLS_CERT_PATH') || path.join(defaultCertDir, 'client.crt')
+    const defaultKeyPath =
+      envValue('DARSHAN_MTLS_KEY_PATH', 'HEXMON_MTLS_KEY_PATH') || path.join(defaultCertDir, 'client.key')
     const defaultCaPath = envValue('DARSHAN_MTLS_CA_PATH', 'HEXMON_MTLS_CA_PATH') || path.join(defaultCertDir, 'ca.crt')
 
     return {
@@ -134,10 +146,22 @@ export class ConfigManager {
       },
       realtime: {
         enabled: envFlag(false, 'DARSHAN_REALTIME_PLAYER_ENABLED', 'HEXMON_REALTIME_SYNC_ENABLED'),
-        signedAuthEnabled: envFlag(false, 'DARSHAN_REALTIME_SIGNED_AUTH_ENABLED', 'HEXMON_REALTIME_SIGNED_AUTH_ENABLED'),
+        signedAuthEnabled: envFlag(
+          false,
+          'DARSHAN_REALTIME_SIGNED_AUTH_ENABLED',
+          'HEXMON_REALTIME_SIGNED_AUTH_ENABLED'
+        ),
         deviceNamespace: envValue('DARSHAN_REALTIME_DEVICE_NAMESPACE', 'HEXMON_REALTIME_DEVICE_NAMESPACE') || '/device',
-        commandSafetyPollMs: envNumber(60000, 'DARSHAN_REALTIME_COMMAND_SAFETY_POLL_MS', 'HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS'),
-        desiredStatePollMs: envNumber(300000, 'DARSHAN_REALTIME_DESIRED_STATE_POLL_MS', 'HEXMON_REALTIME_DESIRED_STATE_POLL_MS'),
+        commandSafetyPollMs: envNumber(
+          60000,
+          'DARSHAN_REALTIME_COMMAND_SAFETY_POLL_MS',
+          'HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS'
+        ),
+        desiredStatePollMs: envNumber(
+          300000,
+          'DARSHAN_REALTIME_DESIRED_STATE_POLL_MS',
+          'HEXMON_REALTIME_DESIRED_STATE_POLL_MS'
+        ),
         reconnectMinMs: envNumber(1000, 'DARSHAN_REALTIME_RECONNECT_MIN_MS', 'HEXMON_REALTIME_RECONNECT_MIN_MS'),
         reconnectMaxMs: envNumber(60000, 'DARSHAN_REALTIME_RECONNECT_MAX_MS', 'HEXMON_REALTIME_RECONNECT_MAX_MS'),
         pingIntervalMs: envNumber(25000, 'DARSHAN_REALTIME_WS_PING_INTERVAL_MS', 'HEXMON_REALTIME_WS_PING_INTERVAL_MS'),
@@ -149,7 +173,11 @@ export class ConfigManager {
         certPath: defaultCertPath,
         keyPath: defaultKeyPath,
         caPath: defaultCaPath,
-        strictCertificateValidation: envFlag(true, 'DARSHAN_MTLS_STRICT_CERTIFICATE_VALIDATION', 'HEXMON_MTLS_STRICT_CERTIFICATE_VALIDATION'),
+        strictCertificateValidation: envFlag(
+          true,
+          'DARSHAN_MTLS_STRICT_CERTIFICATE_VALIDATION',
+          'HEXMON_MTLS_STRICT_CERTIFICATE_VALIDATION'
+        ),
         autoRenew: envFlag(true, 'DARSHAN_MTLS_AUTO_RENEW', 'HEXMON_MTLS_AUTO_RENEW'),
         renewBeforeDays: envNumber(30, 'DARSHAN_MTLS_RENEW_BEFORE_DAYS', 'HEXMON_MTLS_RENEW_BEFORE_DAYS'),
       },
@@ -163,15 +191,24 @@ export class ConfigManager {
         heartbeatMs: envNumber(30000, 'DARSHAN_INTERVAL_HEARTBEAT_MS', 'HEXMON_INTERVAL_HEARTBEAT_MS'),
         commandPollMs: envNumber(5000, 'DARSHAN_INTERVAL_COMMAND_POLL_MS', 'HEXMON_INTERVAL_COMMAND_POLL_MS'),
         schedulePollMs: envNumber(300000, 'DARSHAN_INTERVAL_SCHEDULE_POLL_MS', 'HEXMON_INTERVAL_SCHEDULE_POLL_MS'),
-        defaultMediaPollMs: envNumber(300000, 'DARSHAN_INTERVAL_DEFAULT_MEDIA_POLL_MS', 'HEXMON_INTERVAL_DEFAULT_MEDIA_POLL_MS'),
+        defaultMediaPollMs: envNumber(
+          300000,
+          'DARSHAN_INTERVAL_DEFAULT_MEDIA_POLL_MS',
+          'HEXMON_INTERVAL_DEFAULT_MEDIA_POLL_MS'
+        ),
         healthCheckMs: envNumber(60000, 'DARSHAN_INTERVAL_HEALTH_CHECK_MS', 'HEXMON_INTERVAL_HEALTH_CHECK_MS'),
         screenshotMs: envNumber(30000, 'DARSHAN_INTERVAL_SCREENSHOT_MS', 'HEXMON_INTERVAL_SCREENSHOT_MS'),
       },
       log: {
         level: (envValue('DARSHAN_LOG_LEVEL', 'HEXMON_LOG_LEVEL') as AppConfig['log']['level']) || 'info',
-        shipPolicy: (envValue('DARSHAN_LOG_SHIP_POLICY', 'HEXMON_LOG_SHIP_POLICY') as AppConfig['log']['shipPolicy']) || 'batch',
+        shipPolicy:
+          (envValue('DARSHAN_LOG_SHIP_POLICY', 'HEXMON_LOG_SHIP_POLICY') as AppConfig['log']['shipPolicy']) || 'batch',
         rotationSizeMb: envNumber(100, 'DARSHAN_LOG_ROTATION_SIZE_MB', 'HEXMON_LOG_ROTATION_SIZE_MB'),
-        rotationIntervalHours: envNumber(24, 'DARSHAN_LOG_ROTATION_INTERVAL_HOURS', 'HEXMON_LOG_ROTATION_INTERVAL_HOURS'),
+        rotationIntervalHours: envNumber(
+          24,
+          'DARSHAN_LOG_ROTATION_INTERVAL_HOURS',
+          'HEXMON_LOG_ROTATION_INTERVAL_HOURS'
+        ),
         compressionEnabled: envFlag(true, 'DARSHAN_LOG_COMPRESSION_ENABLED', 'HEXMON_LOG_COMPRESSION_ENABLED'),
       },
       power: {
@@ -183,21 +220,65 @@ export class ConfigManager {
       },
       security: {
         csp: envValue('DARSHAN_SECURITY_CSP', 'HEXMON_SECURITY_CSP') || buildDefaultPlayerCsp(),
-        allowedDomains: envValue('DARSHAN_SECURITY_ALLOWED_DOMAINS', 'HEXMON_SECURITY_ALLOWED_DOMAINS')?.split(',') || [],
+        allowedDomains:
+          envValue('DARSHAN_SECURITY_ALLOWED_DOMAINS', 'HEXMON_SECURITY_ALLOWED_DOMAINS')?.split(',') || [],
         disableEval: envFlag(true, 'DARSHAN_SECURITY_DISABLE_EVAL', 'HEXMON_SECURITY_DISABLE_EVAL'),
         contextIsolation: envFlag(true, 'DARSHAN_SECURITY_CONTEXT_ISOLATION', 'HEXMON_SECURITY_CONTEXT_ISOLATION'),
         nodeIntegration: envFlag(false, 'DARSHAN_SECURITY_NODE_INTEGRATION', 'HEXMON_SECURITY_NODE_INTEGRATION'),
         sandbox: envFlag(true, 'DARSHAN_SECURITY_SANDBOX', 'HEXMON_SECURITY_SANDBOX'),
+        offlinePlaybackPolicy: envSecureOfflinePlaybackPolicy(
+          DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.offlinePlaybackPolicy,
+          'DARSHAN_SECURITY_OFFLINE_PLAYBACK_POLICY',
+          'SIGNHEX_SECURITY_OFFLINE_PLAYBACK_POLICY'
+        ),
+        backendRequiredForPlayback: envFlag(
+          DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.backendRequiredForPlayback,
+          'DARSHAN_SECURITY_BACKEND_REQUIRED_FOR_PLAYBACK',
+          'SIGNHEX_SECURITY_BACKEND_REQUIRED_FOR_PLAYBACK'
+        ),
+        networkSwitchGraceMs: envNumber(
+          DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.networkSwitchGraceMs,
+          'DARSHAN_SECURITY_NETWORK_SWITCH_GRACE_MS',
+          'SIGNHEX_SECURITY_NETWORK_SWITCH_GRACE_MS'
+        ),
+        playbackLeaseMs: envNumber(
+          DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.playbackLeaseMs,
+          'DARSHAN_SECURITY_PLAYBACK_LEASE_MS',
+          'SIGNHEX_SECURITY_PLAYBACK_LEASE_MS'
+        ),
+        lockAfterOfflineMs: envNumber(
+          DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.lockAfterOfflineMs,
+          'DARSHAN_SECURITY_LOCK_AFTER_OFFLINE_MS',
+          'SIGNHEX_SECURITY_LOCK_AFTER_OFFLINE_MS'
+        ),
+        purgeCacheAfterOfflineMs: envNumber(
+          DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.purgeCacheAfterOfflineMs,
+          'DARSHAN_SECURITY_PURGE_CACHE_AFTER_OFFLINE_MS',
+          'SIGNHEX_SECURITY_PURGE_CACHE_AFTER_OFFLINE_MS'
+        ),
+        showSecurityLockScreen: envFlag(
+          DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.showSecurityLockScreen,
+          'DARSHAN_SECURITY_SHOW_LOCK_SCREEN',
+          'SIGNHEX_SECURITY_SHOW_LOCK_SCREEN'
+        ),
       },
       observability: {
         enabled: envFlag(true, 'DARSHAN_OBSERVABILITY_ENABLED', 'HEXMON_OBSERVABILITY_ENABLED'),
         metricsEnabled: envFlag(true, 'DARSHAN_OBSERVABILITY_METRICS_ENABLED', 'HEXMON_OBSERVABILITY_METRICS_ENABLED'),
-        mediaCacheReportingEnabled: envFlag(true, 'DARSHAN_MEDIA_CACHE_REPORTING_ENABLED', 'HEXMON_MEDIA_CACHE_REPORTING_ENABLED'),
+        mediaCacheReportingEnabled: envFlag(
+          true,
+          'DARSHAN_MEDIA_CACHE_REPORTING_ENABLED',
+          'HEXMON_MEDIA_CACHE_REPORTING_ENABLED'
+        ),
         bindAddress:
           envValue('DARSHAN_OBSERVABILITY_BIND_ADDRESS', 'HEXMON_OBSERVABILITY_BIND_ADDRESS') ||
           buildDefaultObservabilityBindAddress(false),
         port: envNumber(3300, 'DARSHAN_OBSERVABILITY_PORT', 'HEXMON_OBSERVABILITY_PORT'),
-        allowRemoteAccess: envFlag(false, 'DARSHAN_OBSERVABILITY_ALLOW_REMOTE_ACCESS', 'HEXMON_OBSERVABILITY_ALLOW_REMOTE_ACCESS'),
+        allowRemoteAccess: envFlag(
+          false,
+          'DARSHAN_OBSERVABILITY_ALLOW_REMOTE_ACCESS',
+          'HEXMON_OBSERVABILITY_ALLOW_REMOTE_ACCESS'
+        ),
       },
       pairing: {
         offlineValidationGraceMs: envNumber(
@@ -212,7 +293,11 @@ export class ConfigManager {
         ),
       },
       duplicateIdentity: {
-        enabled: envFlag(true, 'DARSHAN_DUPLICATE_IDENTITY_DETECTION_ENABLED', 'SIGNHEX_DUPLICATE_IDENTITY_DETECTION_ENABLED'),
+        enabled: envFlag(
+          true,
+          'DARSHAN_DUPLICATE_IDENTITY_DETECTION_ENABLED',
+          'SIGNHEX_DUPLICATE_IDENTITY_DETECTION_ENABLED'
+        ),
         enforcement:
           (envValue('DARSHAN_DUPLICATE_IDENTITY_ENFORCEMENT', 'SIGNHEX_DUPLICATE_IDENTITY_ENFORCEMENT') as
             | 'warn'
@@ -258,8 +343,13 @@ export class ConfigManager {
   }
 
   private buildDefaultApiBase(runtimeMode: RuntimeMode): string {
-    const envApiBase =
-      envValue('DARSHAN_API_BASE_URL', 'DARSHAN_API_BASE', 'SIGNAGE_API_BASE_URL', 'HEXMON_API_BASE', 'API_BASE_URL')
+    const envApiBase = envValue(
+      'DARSHAN_API_BASE_URL',
+      'DARSHAN_API_BASE',
+      'SIGNAGE_API_BASE_URL',
+      'HEXMON_API_BASE',
+      'API_BASE_URL'
+    )
     const normalizedEnv = this.normalizeUrl(envApiBase)
     if (normalizedEnv) return normalizedEnv
     return this.allowLocalhostFallback(runtimeMode) ? 'http://localhost:3000' : ''
@@ -323,10 +413,8 @@ export class ConfigManager {
         enabled: overrides.realtime?.enabled ?? defaults.realtime?.enabled ?? false,
         signedAuthEnabled: overrides.realtime?.signedAuthEnabled ?? defaults.realtime?.signedAuthEnabled ?? false,
         deviceNamespace: overrides.realtime?.deviceNamespace ?? defaults.realtime?.deviceNamespace ?? '/device',
-        commandSafetyPollMs:
-          overrides.realtime?.commandSafetyPollMs ?? defaults.realtime?.commandSafetyPollMs ?? 60000,
-        desiredStatePollMs:
-          overrides.realtime?.desiredStatePollMs ?? defaults.realtime?.desiredStatePollMs ?? 300000,
+        commandSafetyPollMs: overrides.realtime?.commandSafetyPollMs ?? defaults.realtime?.commandSafetyPollMs ?? 60000,
+        desiredStatePollMs: overrides.realtime?.desiredStatePollMs ?? defaults.realtime?.desiredStatePollMs ?? 300000,
         reconnectMinMs: overrides.realtime?.reconnectMinMs ?? defaults.realtime?.reconnectMinMs ?? 1000,
         reconnectMaxMs: overrides.realtime?.reconnectMaxMs ?? defaults.realtime?.reconnectMaxMs ?? 60000,
         pingIntervalMs: overrides.realtime?.pingIntervalMs ?? defaults.realtime?.pingIntervalMs ?? 25000,
@@ -352,7 +440,9 @@ export class ConfigManager {
     const apiBase = this.normalizeUrl(
       envValue('DARSHAN_API_BASE_URL', 'DARSHAN_API_BASE', 'SIGNAGE_API_BASE_URL', 'HEXMON_API_BASE', 'API_BASE_URL')
     )
-    const wsUrl = this.normalizeUrl(envValue('DARSHAN_WS_URL', 'DARSHAN_REALTIME_WS_URL', 'SIGNAGE_WS_URL', 'HEXMON_WS_URL', 'WS_URL'))
+    const wsUrl = this.normalizeUrl(
+      envValue('DARSHAN_WS_URL', 'DARSHAN_REALTIME_WS_URL', 'SIGNAGE_WS_URL', 'HEXMON_WS_URL', 'WS_URL')
+    )
     const runtimeMode = this.getRuntimeModeOverride()
     const environment: AppConfig['environment'] = {}
     const duplicateIdentityEnforcement = envValue(
@@ -380,28 +470,52 @@ export class ConfigManager {
       realtime.enabled = envFlag(false, 'DARSHAN_REALTIME_PLAYER_ENABLED', 'HEXMON_REALTIME_SYNC_ENABLED')
     }
     if (envPresent('DARSHAN_REALTIME_SIGNED_AUTH_ENABLED', 'HEXMON_REALTIME_SIGNED_AUTH_ENABLED')) {
-      realtime.signedAuthEnabled = envFlag(false, 'DARSHAN_REALTIME_SIGNED_AUTH_ENABLED', 'HEXMON_REALTIME_SIGNED_AUTH_ENABLED')
+      realtime.signedAuthEnabled = envFlag(
+        false,
+        'DARSHAN_REALTIME_SIGNED_AUTH_ENABLED',
+        'HEXMON_REALTIME_SIGNED_AUTH_ENABLED'
+      )
     }
     if (envPresent('DARSHAN_REALTIME_DEVICE_NAMESPACE', 'HEXMON_REALTIME_DEVICE_NAMESPACE')) {
       realtime.deviceNamespace = envValue('DARSHAN_REALTIME_DEVICE_NAMESPACE', 'HEXMON_REALTIME_DEVICE_NAMESPACE')
     }
     if (envPresent('DARSHAN_REALTIME_COMMAND_SAFETY_POLL_MS', 'HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS')) {
-      realtime.commandSafetyPollMs = envNumber(60000, 'DARSHAN_REALTIME_COMMAND_SAFETY_POLL_MS', 'HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS')
+      realtime.commandSafetyPollMs = envNumber(
+        60000,
+        'DARSHAN_REALTIME_COMMAND_SAFETY_POLL_MS',
+        'HEXMON_REALTIME_COMMAND_SAFETY_POLL_MS'
+      )
     }
     if (envPresent('DARSHAN_REALTIME_DESIRED_STATE_POLL_MS', 'HEXMON_REALTIME_DESIRED_STATE_POLL_MS')) {
-      realtime.desiredStatePollMs = envNumber(300000, 'DARSHAN_REALTIME_DESIRED_STATE_POLL_MS', 'HEXMON_REALTIME_DESIRED_STATE_POLL_MS')
+      realtime.desiredStatePollMs = envNumber(
+        300000,
+        'DARSHAN_REALTIME_DESIRED_STATE_POLL_MS',
+        'HEXMON_REALTIME_DESIRED_STATE_POLL_MS'
+      )
     }
     if (envPresent('DARSHAN_REALTIME_RECONNECT_MIN_MS', 'HEXMON_REALTIME_RECONNECT_MIN_MS')) {
       realtime.reconnectMinMs = envNumber(1000, 'DARSHAN_REALTIME_RECONNECT_MIN_MS', 'HEXMON_REALTIME_RECONNECT_MIN_MS')
     }
     if (envPresent('DARSHAN_REALTIME_RECONNECT_MAX_MS', 'HEXMON_REALTIME_RECONNECT_MAX_MS')) {
-      realtime.reconnectMaxMs = envNumber(60000, 'DARSHAN_REALTIME_RECONNECT_MAX_MS', 'HEXMON_REALTIME_RECONNECT_MAX_MS')
+      realtime.reconnectMaxMs = envNumber(
+        60000,
+        'DARSHAN_REALTIME_RECONNECT_MAX_MS',
+        'HEXMON_REALTIME_RECONNECT_MAX_MS'
+      )
     }
     if (envPresent('DARSHAN_REALTIME_WS_PING_INTERVAL_MS', 'HEXMON_REALTIME_WS_PING_INTERVAL_MS')) {
-      realtime.pingIntervalMs = envNumber(25000, 'DARSHAN_REALTIME_WS_PING_INTERVAL_MS', 'HEXMON_REALTIME_WS_PING_INTERVAL_MS')
+      realtime.pingIntervalMs = envNumber(
+        25000,
+        'DARSHAN_REALTIME_WS_PING_INTERVAL_MS',
+        'HEXMON_REALTIME_WS_PING_INTERVAL_MS'
+      )
     }
     if (envPresent('DARSHAN_WS_NOTIFICATION_MAX_BYTES', 'HEXMON_WS_NOTIFICATION_MAX_BYTES')) {
-      realtime.notificationMaxBytes = envNumber(32768, 'DARSHAN_WS_NOTIFICATION_MAX_BYTES', 'HEXMON_WS_NOTIFICATION_MAX_BYTES')
+      realtime.notificationMaxBytes = envNumber(
+        32768,
+        'DARSHAN_WS_NOTIFICATION_MAX_BYTES',
+        'HEXMON_WS_NOTIFICATION_MAX_BYTES'
+      )
     }
     if (envPresent('DARSHAN_REALTIME_WS_URL', 'HEXMON_REALTIME_WS_URL')) {
       realtime.wsUrl = this.normalizeUrl(envValue('DARSHAN_REALTIME_WS_URL', 'HEXMON_REALTIME_WS_URL'))
@@ -416,10 +530,18 @@ export class ConfigManager {
       intervals.commandPollMs = envNumber(5000, 'DARSHAN_INTERVAL_COMMAND_POLL_MS', 'HEXMON_INTERVAL_COMMAND_POLL_MS')
     }
     if (envPresent('DARSHAN_INTERVAL_SCHEDULE_POLL_MS', 'HEXMON_INTERVAL_SCHEDULE_POLL_MS')) {
-      intervals.schedulePollMs = envNumber(300000, 'DARSHAN_INTERVAL_SCHEDULE_POLL_MS', 'HEXMON_INTERVAL_SCHEDULE_POLL_MS')
+      intervals.schedulePollMs = envNumber(
+        300000,
+        'DARSHAN_INTERVAL_SCHEDULE_POLL_MS',
+        'HEXMON_INTERVAL_SCHEDULE_POLL_MS'
+      )
     }
     if (envPresent('DARSHAN_INTERVAL_DEFAULT_MEDIA_POLL_MS', 'HEXMON_INTERVAL_DEFAULT_MEDIA_POLL_MS')) {
-      intervals.defaultMediaPollMs = envNumber(300000, 'DARSHAN_INTERVAL_DEFAULT_MEDIA_POLL_MS', 'HEXMON_INTERVAL_DEFAULT_MEDIA_POLL_MS')
+      intervals.defaultMediaPollMs = envNumber(
+        300000,
+        'DARSHAN_INTERVAL_DEFAULT_MEDIA_POLL_MS',
+        'HEXMON_INTERVAL_DEFAULT_MEDIA_POLL_MS'
+      )
     }
     if (envPresent('DARSHAN_INTERVAL_HEALTH_CHECK_MS', 'HEXMON_INTERVAL_HEALTH_CHECK_MS')) {
       intervals.healthCheckMs = envNumber(60000, 'DARSHAN_INTERVAL_HEALTH_CHECK_MS', 'HEXMON_INTERVAL_HEALTH_CHECK_MS')
@@ -428,6 +550,60 @@ export class ConfigManager {
       intervals.screenshotMs = envNumber(30000, 'DARSHAN_INTERVAL_SCREENSHOT_MS', 'HEXMON_INTERVAL_SCREENSHOT_MS')
     }
     if (Object.keys(intervals).length > 0) overrides.intervals = intervals as AppConfig['intervals']
+
+    const security: Partial<AppConfig['security']> = {}
+    if (envPresent('DARSHAN_SECURITY_OFFLINE_PLAYBACK_POLICY', 'SIGNHEX_SECURITY_OFFLINE_PLAYBACK_POLICY')) {
+      security.offlinePlaybackPolicy = envSecureOfflinePlaybackPolicy(
+        DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.offlinePlaybackPolicy,
+        'DARSHAN_SECURITY_OFFLINE_PLAYBACK_POLICY',
+        'SIGNHEX_SECURITY_OFFLINE_PLAYBACK_POLICY'
+      )
+    }
+    if (
+      envPresent('DARSHAN_SECURITY_BACKEND_REQUIRED_FOR_PLAYBACK', 'SIGNHEX_SECURITY_BACKEND_REQUIRED_FOR_PLAYBACK')
+    ) {
+      security.backendRequiredForPlayback = envFlag(
+        DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.backendRequiredForPlayback,
+        'DARSHAN_SECURITY_BACKEND_REQUIRED_FOR_PLAYBACK',
+        'SIGNHEX_SECURITY_BACKEND_REQUIRED_FOR_PLAYBACK'
+      )
+    }
+    if (envPresent('DARSHAN_SECURITY_NETWORK_SWITCH_GRACE_MS', 'SIGNHEX_SECURITY_NETWORK_SWITCH_GRACE_MS')) {
+      security.networkSwitchGraceMs = envNumber(
+        DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.networkSwitchGraceMs,
+        'DARSHAN_SECURITY_NETWORK_SWITCH_GRACE_MS',
+        'SIGNHEX_SECURITY_NETWORK_SWITCH_GRACE_MS'
+      )
+    }
+    if (envPresent('DARSHAN_SECURITY_PLAYBACK_LEASE_MS', 'SIGNHEX_SECURITY_PLAYBACK_LEASE_MS')) {
+      security.playbackLeaseMs = envNumber(
+        DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.playbackLeaseMs,
+        'DARSHAN_SECURITY_PLAYBACK_LEASE_MS',
+        'SIGNHEX_SECURITY_PLAYBACK_LEASE_MS'
+      )
+    }
+    if (envPresent('DARSHAN_SECURITY_LOCK_AFTER_OFFLINE_MS', 'SIGNHEX_SECURITY_LOCK_AFTER_OFFLINE_MS')) {
+      security.lockAfterOfflineMs = envNumber(
+        DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.lockAfterOfflineMs,
+        'DARSHAN_SECURITY_LOCK_AFTER_OFFLINE_MS',
+        'SIGNHEX_SECURITY_LOCK_AFTER_OFFLINE_MS'
+      )
+    }
+    if (envPresent('DARSHAN_SECURITY_PURGE_CACHE_AFTER_OFFLINE_MS', 'SIGNHEX_SECURITY_PURGE_CACHE_AFTER_OFFLINE_MS')) {
+      security.purgeCacheAfterOfflineMs = envNumber(
+        DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.purgeCacheAfterOfflineMs,
+        'DARSHAN_SECURITY_PURGE_CACHE_AFTER_OFFLINE_MS',
+        'SIGNHEX_SECURITY_PURGE_CACHE_AFTER_OFFLINE_MS'
+      )
+    }
+    if (envPresent('DARSHAN_SECURITY_SHOW_LOCK_SCREEN', 'SIGNHEX_SECURITY_SHOW_LOCK_SCREEN')) {
+      security.showSecurityLockScreen = envFlag(
+        DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG.showSecurityLockScreen,
+        'DARSHAN_SECURITY_SHOW_LOCK_SCREEN',
+        'SIGNHEX_SECURITY_SHOW_LOCK_SCREEN'
+      )
+    }
+    if (Object.keys(security).length > 0) overrides.security = security as AppConfig['security']
 
     if (envPresent('DARSHAN_CACHE_MAX_BYTES', 'HEXMON_CACHE_MAX_BYTES')) {
       overrides.cache = {
@@ -491,6 +667,7 @@ export class ConfigManager {
       config.security.csp === PRE_PDF_VIEWER_PLAYER_CSP
         ? buildDefaultPlayerCsp()
         : config.security.csp
+    const secureOfflinePlayback = normalizeSecureOfflinePlaybackConfig(config.security)
     const allowRemoteAccess = config.observability.allowRemoteAccess === true
     const requestedBindAddress = config.observability.bindAddress?.trim()
     const bindAddress = allowRemoteAccess
@@ -532,6 +709,7 @@ export class ConfigManager {
       security: {
         ...config.security,
         csp: normalizedCsp,
+        ...secureOfflinePlayback,
       },
       observability: {
         ...config.observability,
