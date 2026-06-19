@@ -10,8 +10,10 @@ Optional environment overrides:
   SERVER_REPO_DIR=/path/to/darshan-server
   OUTPUT_BASE=/path/to/darshan/out
   BACKEND_IMAGE_REF=darshan-server-export:<release-id>
+  INSTALL_PLAYWRIGHT_CHROMIUM=true
   POSTGRES_IMAGE=postgres:15-alpine
   MINIO_IMAGE=minio/minio:latest
+  VALKEY_IMAGE=valkey/valkey:7-alpine
 EOF
 }
 
@@ -63,8 +65,10 @@ esac
 SERVER_REPO_DIR="${SERVER_REPO_DIR:-$PLATFORM_ROOT/darshan-server}"
 OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
 BACKEND_IMAGE_REF="${BACKEND_IMAGE_REF:-darshan-server-export:$RELEASE_ID}"
+INSTALL_PLAYWRIGHT_CHROMIUM="${INSTALL_PLAYWRIGHT_CHROMIUM:-true}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:15-alpine}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
+VALKEY_IMAGE="${VALKEY_IMAGE:-valkey/valkey:7-alpine}"
 
 OUTPUT_DIR="$OUTPUT_BASE/$RELEASE_ID/server"
 IMAGES_DIR="$OUTPUT_DIR/images"
@@ -82,18 +86,21 @@ mkdir -p "$IMAGES_DIR" "$CERTS_DIR" "$OBSERVABILITY_DIR"
 BACKEND_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$BACKEND_IMAGE_REF")"
 POSTGRES_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$POSTGRES_IMAGE")"
 MINIO_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$MINIO_IMAGE")"
+VALKEY_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$VALKEY_IMAGE")"
 
 export_common_log "Building backend image $BACKEND_IMAGE_REF"
-docker build -t "$BACKEND_IMAGE_REF" "$SERVER_REPO_DIR"
+docker build --build-arg INSTALL_PLAYWRIGHT_CHROMIUM="$INSTALL_PLAYWRIGHT_CHROMIUM" -t "$BACKEND_IMAGE_REF" "$SERVER_REPO_DIR"
 
 export_common_log "Ensuring base images are available"
 docker image inspect "$POSTGRES_IMAGE" >/dev/null 2>&1 || docker pull "$POSTGRES_IMAGE"
 docker image inspect "$MINIO_IMAGE" >/dev/null 2>&1 || docker pull "$MINIO_IMAGE"
+docker image inspect "$VALKEY_IMAGE" >/dev/null 2>&1 || docker pull "$VALKEY_IMAGE"
 
 export_common_log "Saving server package images"
 docker save -o "$IMAGES_DIR/$BACKEND_IMAGE_ARCHIVE_NAME" "$BACKEND_IMAGE_REF"
 docker save -o "$IMAGES_DIR/$POSTGRES_IMAGE_ARCHIVE_NAME" "$POSTGRES_IMAGE"
 docker save -o "$IMAGES_DIR/$MINIO_IMAGE_ARCHIVE_NAME" "$MINIO_IMAGE"
+docker save -o "$IMAGES_DIR/$VALKEY_IMAGE_ARCHIVE_NAME" "$VALKEY_IMAGE"
 
 cat > "$OUTPUT_DIR/package.env" <<EOF
 PACKAGE_KIND=server
@@ -105,12 +112,15 @@ SERVER_PACKAGE_POSTGRES_IMAGE_REF=$POSTGRES_IMAGE
 SERVER_PACKAGE_POSTGRES_IMAGE_ARCHIVE=images/$POSTGRES_IMAGE_ARCHIVE_NAME
 SERVER_PACKAGE_MINIO_IMAGE_REF=$MINIO_IMAGE
 SERVER_PACKAGE_MINIO_IMAGE_ARCHIVE=images/$MINIO_IMAGE_ARCHIVE_NAME
+SERVER_PACKAGE_VALKEY_IMAGE_REF=$VALKEY_IMAGE
+SERVER_PACKAGE_VALKEY_IMAGE_ARCHIVE=images/$VALKEY_IMAGE_ARCHIVE_NAME
 EOF
 
 {
   printf 'BACKEND_IMAGE=%s\n' "$BACKEND_IMAGE_REF"
   printf 'POSTGRES_IMAGE=%s\n' "$POSTGRES_IMAGE"
-  printf 'MINIO_IMAGE=%s\n\n' "$MINIO_IMAGE"
+  printf 'MINIO_IMAGE=%s\n' "$MINIO_IMAGE"
+  printf 'VALKEY_IMAGE=%s\n\n' "$VALKEY_IMAGE"
   cat "$SERVER_REPO_DIR/.env.example"
 } > "$OUTPUT_DIR/.env.template"
 
@@ -151,6 +161,17 @@ services:
       timeout: 5s
       retries: 5
 
+  valkey:
+    image: ${VALKEY_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "${VALKEY_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     image: ${BACKEND_IMAGE}
     restart: unless-stopped
@@ -163,12 +184,25 @@ services:
       MINIO_PORT: 9000
       DARSHAN_RUNTIME_CONTAINER: "true"
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      COMMAND_OUTBOX_WRITE_ENABLED: "true"
+      DEVICE_DESIRED_STATE_ENABLED: "true"
+      DARSHAN_REALTIME_SYNC_ENABLED: "true"
+      REALTIME_SYNC_ENABLED: "true"
+      REALTIME_BUS_PROVIDER: valkey
+      VALKEY_URL: redis://valkey:6379
+      VALKEY_MODE: standalone
+      VALKEY_TLS_ENABLED: "false"
+      VALKEY_AUTH_REQUIRED: "false"
+      VALKEY_PUBSUB_ENABLED: "true"
+      OUTBOX_DISPATCH_ENABLED: "true"
     ports:
       - "${API_HOST_PORT:-3000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      valkey:
         condition: service_healthy
     volumes:
       - ./certs:/app/certs:ro
@@ -197,10 +231,23 @@ services:
       MINIO_PORT: 9000
       DARSHAN_RUNTIME_CONTAINER: "true"
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      COMMAND_OUTBOX_WRITE_ENABLED: "true"
+      DEVICE_DESIRED_STATE_ENABLED: "true"
+      DARSHAN_REALTIME_SYNC_ENABLED: "true"
+      REALTIME_SYNC_ENABLED: "true"
+      REALTIME_BUS_PROVIDER: valkey
+      VALKEY_URL: redis://valkey:6379
+      VALKEY_MODE: standalone
+      VALKEY_TLS_ENABLED: "false"
+      VALKEY_AUTH_REQUIRED: "false"
+      VALKEY_PUBSUB_ENABLED: "true"
+      OUTBOX_DISPATCH_ENABLED: "true"
     depends_on:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      valkey:
         condition: service_healthy
     volumes:
       - ./certs:/app/certs:ro
@@ -257,7 +304,7 @@ wait_for_postgres() {
   return 1
 }
 
-docker compose --env-file .env up -d postgres minio
+docker compose --env-file .env up -d postgres minio valkey
 wait_for_postgres
 docker compose --env-file .env run --rm -e DRIZZLE_STRICT=false api npm run db:push
 docker compose --env-file .env up -d api worker
@@ -292,7 +339,7 @@ wait_for_postgres() {
   return 1
 }
 
-docker compose --env-file .env up -d postgres minio
+docker compose --env-file .env up -d postgres minio valkey
 wait_for_postgres
 docker compose --env-file .env run --rm -e DRIZZLE_STRICT=false api npm run db:push
 docker compose --env-file .env up -d --remove-orphans api worker
@@ -307,6 +354,7 @@ source ./.env
 
 docker compose --env-file .env exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 curl -fsS "http://127.0.0.1:${MINIO_HOST_PORT:-9000}/minio/health/live" >/dev/null
+docker compose --env-file .env exec -T valkey valkey-cli ping | grep -q PONG
 curl -fsS "http://127.0.0.1:${API_HOST_PORT:-3000}/api/v1/health" >/dev/null
 docker compose --env-file .env ps --services --status running | grep -qx worker
 echo "Server package healthy."
@@ -335,13 +383,14 @@ EOF
 if [[ "$DEPLOYMENT_LAYOUT" == "production-split" ]]; then
   cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 
-This package still contains backend, PostgreSQL, and MinIO image archives together because the production bundle builder redistributes them into separate runtime folders.
+This package still contains backend, PostgreSQL, MinIO, and Valkey image archives together because the production bundle builder redistributes them into separate runtime folders.
 
 Use this package as an input to the production bundle builder when you want:
 
-- VM1: PostgreSQL + MinIO
-- VM2: backend bundle running separate `api` and `worker` containers
-- VM3: CMS
+- VM1/LXC1: PostgreSQL + MinIO
+- VM2/LXC2: Valkey realtime notification bus
+- VM3/LXC3: backend bundle running separate `api` and `worker` containers
+- VM4/LXC4: CMS
 
 Canonical flow:
 
@@ -358,18 +407,20 @@ bash scripts/bundle/assemble-runtime-bundle.sh --profile production <site-name>
 The generated production bundle is what produces:
 
 - `production/data/`
+- `production/valkey/`
 - `production/backend/`
 - `production/cms/`
 EOF
 else
   cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 
-This layout is intended for the all-in-one server package workflow where backend, PostgreSQL, and MinIO run from this folder on one host.
+This layout is intended for the all-in-one server package workflow where backend, PostgreSQL, MinIO, and Valkey run from this folder on one host.
 
 It starts two backend containers from the same image:
 
 - `api`: HTTP and websocket runtime on port `3000`
 - `worker`: pg-boss handlers, media jobs, telemetry persistence, archive, and backup work
+- `valkey`: notification-only realtime bus; PostgreSQL remains the source of truth
 EOF
 fi
 

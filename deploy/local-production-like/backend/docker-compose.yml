@@ -1,0 +1,43 @@
+services:
+  api:
+    build:
+      context: ../../../darshan-server
+      dockerfile: Dockerfile
+      args:
+        INSTALL_PLAYWRIGHT_CHROMIUM: ${INSTALL_PLAYWRIGHT_CHROMIUM:-true}
+    image: ${BACKEND_IMAGE:-darshan-server-api:local-production-like}
+    restart: unless-stopped
+    env_file:
+      - ../../../darshan-server/.env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      DARSHAN_PROCESS_ROLE: all
+      DATABASE_URL: ${DATABASE_URL}
+      MINIO_ENDPOINT: ${DATA_HOST}
+      MINIO_PORT: ${MINIO_HOST_PORT}
+      VALKEY_URL: redis://${VALKEY_HOST}:${VALKEY_HOST_PORT}
+      REALTIME_BUS_PROVIDER: valkey
+      REALTIME_SYNC_ENABLED: "true"
+      DARSHAN_REALTIME_SYNC_ENABLED: "true"
+      OUTBOX_DISPATCH_ENABLED: "true"
+      COMMAND_OUTBOX_WRITE_ENABLED: "true"
+      DEVICE_DESIRED_STATE_ENABLED: "true"
+    ports:
+      - "${API_HOST_PORT}:3000"
+    volumes:
+      - ../../../darshan-server/certs:/app/certs:ro
+    command: npm start
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/v1/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 10

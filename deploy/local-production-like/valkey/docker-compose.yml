@@ -1,0 +1,17 @@
+services:
+  valkey:
+    image: ${VALKEY_IMAGE:-valkey/valkey:7-alpine}
+    restart: unless-stopped
+    ports:
+      - "${VALKEY_HOST_PORT}:6379"
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  valkey_data:
