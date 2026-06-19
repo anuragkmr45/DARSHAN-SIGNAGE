@@ -6,7 +6,11 @@
 import { EventEmitter } from 'events'
 import { getLogger } from '../../../common/logger'
 import { TimelineItem } from '../../../common/types'
-import { shouldRepeatScheduledItem } from '../../../common/playback-policy'
+import {
+  PlaybackResumeDecision,
+  resolveScheduledResumePosition,
+  shouldRepeatScheduledItem,
+} from '../../../common/playback-policy'
 
 const logger = getLogger('timeline-scheduler')
 
@@ -15,6 +19,7 @@ export interface ScheduledItem {
   startTime: number
   endTime: number
   index: number
+  resumeDecision?: PlaybackResumeDecision
 }
 
 export class TimelineScheduler extends EventEmitter {
@@ -38,13 +43,14 @@ export class TimelineScheduler extends EventEmitter {
     logger.info({ itemCount: items.length }, 'Starting timeline')
 
     this.startTime = Date.now()
-    this.scheduleNext(items, 0)
+    const resumeDecision = this.resolveInitialResumeDecision(items)
+    this.scheduleNext(items, resumeDecision.index, resumeDecision)
   }
 
   /**
    * Schedule next item
    */
-  private scheduleNext(items: TimelineItem[], index: number): void {
+  private scheduleNext(items: TimelineItem[], index: number, resumeDecision?: PlaybackResumeDecision): void {
     if (this.isPaused) {
       return
     }
@@ -69,13 +75,20 @@ export class TimelineScheduler extends EventEmitter {
 
     const now = Date.now()
     const startTime = now
-    const endTime = startTime + item.displayMs
+    const durationMs = Math.max(1, item.displayMs)
+    const scheduledDurationMs = resumeDecision
+      ? resumeDecision.completed
+        ? 0
+        : Math.max(0, resumeDecision.remainingMs)
+      : durationMs
+    const endTime = startTime + scheduledDurationMs
 
     const scheduledItem: ScheduledItem = {
       item,
       startTime,
       endTime,
       index,
+      resumeDecision,
     }
 
     // Set as current item
@@ -88,7 +101,7 @@ export class TimelineScheduler extends EventEmitter {
         this.nextItem = {
           item: nextItem,
           startTime: endTime,
-          endTime: endTime + nextItem.displayMs,
+          endTime: endTime + Math.max(1, nextItem.displayMs),
           index: index + 1,
         }
       } else {
@@ -108,6 +121,10 @@ export class TimelineScheduler extends EventEmitter {
         itemId: item.id,
         index,
         displayMs: item.displayMs,
+        scheduledDurationMs,
+        resumeSource: resumeDecision?.source,
+        resumeSeekMs: resumeDecision?.seekMs,
+        resumeCompleted: resumeDecision?.completed,
         jitter,
       },
       'Playing item'
@@ -116,7 +133,7 @@ export class TimelineScheduler extends EventEmitter {
     this.emit('play-item', scheduledItem)
 
     // Schedule transition to next item
-    const transitionTime = item.displayMs - (item.transitionDurationMs || 0)
+    const transitionTime = scheduledDurationMs - (item.transitionDurationMs || 0)
 
     // Schedule transition start
     if (item.transitionDurationMs && item.transitionDurationMs > 0) {
@@ -133,7 +150,25 @@ export class TimelineScheduler extends EventEmitter {
         this.emit('item-complete', scheduledItem)
         this.scheduleNext(items, index + 1)
       }
-    }, item.displayMs)
+    }, Math.max(0, scheduledDurationMs))
+  }
+
+  private resolveInitialResumeDecision(items: TimelineItem[]): PlaybackResumeDecision {
+    const first = items[0]
+    if (!first || first.type === 'scene') {
+      return resolveScheduledResumePosition({ items })
+    }
+
+    const startsAt = typeof first.meta?.['scheduleWindowStartsAt'] === 'string'
+      ? String(first.meta['scheduleWindowStartsAt'])
+      : undefined
+    const serverTimeOffsetMs = Number(first.meta?.['serverTimeOffsetMs'])
+
+    return resolveScheduledResumePosition({
+      items,
+      startsAt,
+      serverTimeOffsetMs: Number.isFinite(serverTimeOffsetMs) ? serverTimeOffsetMs : 0,
+    })
   }
 
   /**

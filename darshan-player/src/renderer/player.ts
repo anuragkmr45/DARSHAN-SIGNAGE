@@ -9,7 +9,16 @@ import { DefaultMediaPlayer } from './default-media-player'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
 import { createPdfPlaybackElement } from './pdf-playback'
 import { createWebpagePlaybackElement } from './webpage-playback'
-import { shouldRepeatScheduledItem } from '../common/playback-policy'
+import {
+  clampVideoSeekSeconds,
+  resolveScheduledResumePosition,
+  shouldRepeatScheduledItem,
+} from '../common/playback-policy'
+import type {
+  PlaybackProgressEntry,
+  PlaybackProgressIdentity,
+  PlaybackResumeDecision,
+} from '../common/playback-policy'
 
 const { sanitizeLogPayloadForDiagnostics } =
   require('../common/redaction') as typeof import('../common/redaction')
@@ -157,6 +166,14 @@ type PendingTransition = {
   currentId: string
   nextId: string
   durationMs: number
+}
+
+type PlaybackResumeInstruction = Pick<PlaybackResumeDecision, 'seekMs' | 'autoplay' | 'completed' | 'source'>
+
+type PlaybackProgressContext = PlaybackProgressIdentity & {
+  scheduleStartsAt?: string | null
+  scheduleEndsAt?: string | null
+  itemDisplayMs?: number
 }
 
 function teardownDisposableNode(node: DisposableMediaNode | null | undefined): void {
@@ -331,7 +348,9 @@ class Player {
         this.log('debug', 'Received play-media event', data)
         this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
         this.setActiveSource('schedule')
-        this.playMedia(data.item).catch((error) => {
+        this.playMedia(data.item, {
+          scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+        }).catch((error) => {
           this.log('error', 'Failed to play media', { error: error.message })
           this.showFallback(error.message)
         })
@@ -430,7 +449,7 @@ class Player {
   /**
    * Play media item
    */
-  private async playMedia(item: TimelineItem): Promise<void> {
+  private async playMedia(item: TimelineItem, options: { scheduleId?: string } = {}): Promise<void> {
     const sessionId = ++this.playbackSession
     this.log('info', 'Playing media', { itemId: item.id, type: item.type })
     const transitionDurationMs =
@@ -477,13 +496,18 @@ class Player {
       }
 
       let element: HTMLElement
+      const resumeDecision = await this.resolveSingleItemResumeDecision(item, options.scheduleId)
+      const progressContext = this.buildPlaybackProgressContext(item, {
+        scheduleId: options.scheduleId,
+      })
 
       switch (item.type) {
         case 'image':
           element = await this.renderImage(item)
           break
         case 'video':
-          element = await this.renderVideo(item)
+          element = await this.renderVideo(item, resumeDecision)
+          this.attachVideoProgressReporter(element as HTMLVideoElement, item, progressContext)
           break
         case 'pdf':
           element = await this.renderPDF(item)
@@ -545,11 +569,13 @@ class Player {
   /**
    * Render video
    */
-  private async renderVideo(item: TimelineItem): Promise<HTMLElement> {
+  private async renderVideo(item: TimelineItem, resume?: PlaybackResumeInstruction): Promise<HTMLElement> {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video')
       const source = this.getMediaSource(item)
       const useManualReplay = shouldUseManualVideoReplay(item)
+      let resolved = false
+      let started = false
       video.style.position = 'absolute'
       video.style.top = '0'
       video.style.left = '0'
@@ -562,16 +588,75 @@ class Player {
         itemId: item.id,
         displayMs: item.displayMs,
         loop: item.loop,
+        resumeSource: resume?.source,
+        resumeSeekMs: resume?.seekMs,
+        resumeCompleted: resume?.completed,
         source,
         slotId: typeof item.meta?.['slotId'] === 'string' ? item.meta?.['slotId'] : null,
       })
 
-      video.onloadeddata = () => {
-        this.log('debug', 'Video loaded', { itemId: item.id })
+      const finalize = () => {
+        if (resolved) {
+          return
+        }
+        resolved = true
+        this.log('debug', 'Video loaded', {
+          itemId: item.id,
+          resumeSource: resume?.source,
+          resumeSeekMs: resume?.seekMs,
+          completed: resume?.completed,
+        })
+
+        if (resume?.autoplay === false) {
+          video.pause()
+          resolve(video)
+          return
+        }
+
+        started = true
         video.play().catch((error) => {
           this.log('error', 'Failed to play video', { error: error.message })
         })
         resolve(video)
+      }
+
+      video.onloadedmetadata = () => {
+        const seekSeconds = clampVideoSeekSeconds(resume?.seekMs ?? 0, video.duration, item.displayMs)
+        if (seekSeconds > 0.1) {
+          try {
+            video.currentTime = seekSeconds
+          } catch (error) {
+            this.log('warn', 'Failed to seek scheduled video before playback', {
+              itemId: item.id,
+              error: (error as Error).message,
+            })
+            finalize()
+            return
+          }
+
+          let seekTimer: number | undefined
+          const onSeeked = () => {
+            if (seekTimer !== undefined) {
+              window.clearTimeout(seekTimer)
+            }
+            video.removeEventListener('seeked', onSeeked)
+            finalize()
+          }
+          seekTimer = window.setTimeout(() => {
+            video.removeEventListener('seeked', onSeeked)
+            finalize()
+          }, 2000)
+          video.addEventListener('seeked', onSeeked)
+          return
+        }
+
+        finalize()
+      }
+
+      video.onloadeddata = () => {
+        if (!resolved && !video.seeking) {
+          finalize()
+        }
       }
 
       video.onerror = () => {
@@ -585,6 +670,9 @@ class Player {
             displayMs: item.displayMs,
             source,
           })
+          if (!started) {
+            return
+          }
           video.currentTime = 0
           video.play().catch((error) => {
             this.log('error', 'Failed to replay loop-enabled video', { error: error.message, itemId: item.id })
@@ -594,6 +682,119 @@ class Player {
 
       video.src = source
     })
+  }
+
+  private async resolveSingleItemResumeDecision(
+    item: TimelineItem,
+    scheduleId?: string,
+  ): Promise<PlaybackResumeInstruction> {
+    const context = this.buildPlaybackProgressContext(item, { scheduleId })
+    const startsAt = this.getStringMeta(item, 'scheduleWindowStartsAt') || this.getStringMeta(item, 'scheduleStartsAt')
+    const persisted = startsAt ? null : await this.getPersistedPlaybackProgress(context)
+
+    return resolveScheduledResumePosition({
+      items: [item],
+      startsAt,
+      serverTimeOffsetMs: this.getNumberMeta(item, 'serverTimeOffsetMs') || 0,
+      expected: context,
+      persisted,
+    })
+  }
+
+  private buildPlaybackProgressContext(
+    item: TimelineItem,
+    overrides: Partial<PlaybackProgressContext> = {},
+  ): PlaybackProgressContext {
+    return {
+      scheduleId:
+        overrides.scheduleId ??
+        this.getStringMeta(item, 'scheduleId') ??
+        this.getStringMeta(item, 'presentationId') ??
+        null,
+      snapshotId: overrides.snapshotId ?? this.getStringMeta(item, 'snapshotId') ?? null,
+      sceneId: overrides.sceneId ?? this.getStringMeta(item, 'sceneId') ?? null,
+      slotId: overrides.slotId ?? this.getStringMeta(item, 'slotId') ?? null,
+      itemId: overrides.itemId ?? item.id,
+      mediaId: overrides.mediaId ?? item.mediaId ?? item.objectKey ?? null,
+      scheduleStartsAt:
+        overrides.scheduleStartsAt ??
+        this.getStringMeta(item, 'scheduleWindowStartsAt') ??
+        this.getStringMeta(item, 'scheduleStartsAt') ??
+        null,
+      scheduleEndsAt:
+        overrides.scheduleEndsAt ??
+        this.getStringMeta(item, 'scheduleWindowEndsAt') ??
+        this.getStringMeta(item, 'scheduleEndsAt') ??
+        null,
+      itemDisplayMs: overrides.itemDisplayMs ?? item.displayMs,
+    }
+  }
+
+  private async getPersistedPlaybackProgress(expected: PlaybackProgressIdentity): Promise<PlaybackProgressEntry | null> {
+    if (!window.darshan?.getPlaybackResumeState) {
+      return null
+    }
+
+    try {
+      return await window.darshan.getPlaybackResumeState(expected)
+    } catch (error) {
+      this.log('debug', 'Playback resume state unavailable', { error: (error as Error).message })
+      return null
+    }
+  }
+
+  private attachVideoProgressReporter(
+    element: HTMLElement,
+    item: TimelineItem,
+    context: PlaybackProgressContext,
+  ): void {
+    if (!(element instanceof HTMLVideoElement) || !window.darshan?.reportPlaybackProgress) {
+      return
+    }
+
+    const video = element
+    const sendProgress = (completed: boolean = false) => {
+      window.darshan.reportPlaybackProgress({
+        scheduleId: context.scheduleId ?? null,
+        snapshotId: context.snapshotId ?? null,
+        sceneId: context.sceneId ?? null,
+        slotId: context.slotId ?? null,
+        itemId: context.itemId ?? item.id,
+        mediaId: context.mediaId ?? item.mediaId ?? item.objectKey ?? null,
+        scheduleStartsAt: context.scheduleStartsAt ?? null,
+        scheduleEndsAt: context.scheduleEndsAt ?? null,
+        itemDisplayMs: context.itemDisplayMs ?? item.displayMs,
+        positionMs: Math.max(0, Math.round((Number(video.currentTime) || 0) * 1000)),
+        completed,
+        updatedAt: new Date().toISOString(),
+      })
+    }
+
+    const interval = window.setInterval(() => sendProgress(false), 5000)
+    const onPause = () => sendProgress(false)
+    const onEnded = () => sendProgress(true)
+    video.addEventListener('pause', onPause)
+    video.addEventListener('ended', onEnded)
+
+    const previousCleanup = (video as DisposableMediaNode).__darshanCleanup
+    ;(video as DisposableMediaNode).__darshanCleanup = () => {
+      window.clearInterval(interval)
+      video.removeEventListener('pause', onPause)
+      video.removeEventListener('ended', onEnded)
+      sendProgress(video.ended)
+      previousCleanup?.()
+    }
+  }
+
+  private getStringMeta(item: TimelineItem, key: string): string | undefined {
+    const value = item.meta?.[key]
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+  }
+
+  private getNumberMeta(item: TimelineItem, key: string): number | undefined {
+    const value = item.meta?.[key]
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? numeric : undefined
   }
 
   /**
@@ -672,6 +873,7 @@ class Player {
           slot,
           sceneItem.id,
           scene.startsAt,
+          scene.endsAt,
           typeof sceneItem.meta?.['scheduleId'] === 'string' ? String(sceneItem.meta?.['scheduleId']) : undefined,
           scene.serverTimeOffsetMs || 0,
         )
@@ -928,6 +1130,7 @@ class Player {
     slot: LayoutSceneSlot,
     sceneId: string,
     sceneStartsAt?: string,
+    sceneEndsAt?: string,
     scheduleId?: string,
     serverTimeOffsetMs: number = 0,
   ): () => void {
@@ -935,40 +1138,24 @@ class Player {
     let disposed = false
     let activeElement: HTMLElement | undefined
 
-    const totalDurationMs = slot.items.reduce((sum, item) => sum + Math.max(1, item.displayMs), 0)
-
-    const resolveScenePosition = (): { index: number; remainingMs: number } => {
-      if (slot.items.length === 0) {
-        return { index: 0, remainingMs: 1000 }
-      }
-
-      if (totalDurationMs <= 0) {
-        return { index: 0, remainingMs: slot.items[0]?.displayMs || 1000 }
-      }
-
-      const elapsedSinceSceneStart = sceneStartsAt
-        ? Math.max(0, Date.now() + serverTimeOffsetMs - Date.parse(sceneStartsAt))
-        : 0
-      const cycleOffset = elapsedSinceSceneStart % totalDurationMs
-
-      let consumed = 0
-      for (let index = 0; index < slot.items.length; index += 1) {
-        const item = slot.items[index]
-        if (!item) continue
-        const duration = Math.max(1, item.displayMs)
-        if (cycleOffset < consumed + duration) {
-          return {
-            index,
-            remainingMs: Math.max(250, consumed + duration - cycleOffset),
-          }
-        }
-        consumed += duration
-      }
-
-      return { index: 0, remainingMs: Math.max(250, slot.items[0]?.displayMs || 1000) }
+    const slotContext: PlaybackProgressIdentity = {
+      scheduleId: scheduleId || null,
+      sceneId,
+      slotId: slot.id,
     }
 
-    const renderIntoSlot = async (item: TimelineItem): Promise<HTMLElement> => {
+    const resolveScenePosition = async (): Promise<PlaybackResumeDecision> => {
+      const persisted = sceneStartsAt ? null : await this.getPersistedPlaybackProgress(slotContext)
+      return resolveScheduledResumePosition({
+        items: slot.items,
+        startsAt: sceneStartsAt,
+        serverTimeOffsetMs,
+        expected: slotContext,
+        persisted,
+      })
+    }
+
+    const renderIntoSlot = async (item: TimelineItem, resume?: PlaybackResumeInstruction): Promise<HTMLElement> => {
       const compat = this.getItemCompatibility(item)
       if (compat.status === 'ACCEPTED_BUT_NOT_SUPPORTED_YET') {
         return this.renderDocumentPlaceholder(item, compat)
@@ -982,7 +1169,7 @@ class Player {
         case 'image':
           return await this.renderImage(item)
         case 'video':
-          return await this.renderVideo(item)
+          return await this.renderVideo(item, resume)
         case 'pdf':
           return await this.renderPDF(item)
         case 'office':
@@ -994,7 +1181,11 @@ class Player {
       }
     }
 
-    const showSlotItem = async (index: number, delayOverrideMs?: number): Promise<void> => {
+    const showSlotItem = async (
+      index: number,
+      delayOverrideMs?: number,
+      resumeOverride?: PlaybackResumeDecision,
+    ): Promise<void> => {
       if (disposed || slot.items.length === 0) {
         return
       }
@@ -1015,10 +1206,31 @@ class Player {
           source: item.localUrl || item.localPath || item.remoteUrl || item.url || null,
         })
 
-        const nextElement = await renderIntoSlot(item)
+        const resumeDecision =
+          resumeOverride && resumeOverride.index === normalizedIndex
+            ? resumeOverride
+            : resolveScheduledResumePosition({
+                items: [item],
+                startsAt: sceneStartsAt,
+                serverTimeOffsetMs,
+              })
+        const nextElement = await renderIntoSlot(item, resumeDecision)
         if (disposed) {
           this.disposeScheduledElement(nextElement)
           return
+        }
+        if (item.type === 'video') {
+          this.attachVideoProgressReporter(
+            nextElement,
+            item,
+            this.buildPlaybackProgressContext(item, {
+              scheduleId: scheduleId || null,
+              sceneId,
+              slotId: slot.id,
+              scheduleStartsAt: sceneStartsAt || null,
+              scheduleEndsAt: sceneEndsAt || null,
+            }),
+          )
         }
         this.applyFitMode(nextElement, item.fit)
         const slotFadeMs = Math.max(0, item.transitionDurationMs || 0)
@@ -1045,21 +1257,30 @@ class Player {
         }
 
         activeElement = nextElement
-        this.setActiveSlotPlayback(slot.id, {
-          scene_id: sceneId,
-          slot_id: slot.id,
-          item_id: item.id,
-          media_id: item.mediaId || item.objectKey || null,
-          schedule_id: scheduleId || null,
-          playback_instance_id: globalThis.crypto.randomUUID(),
-          started_at: new Date(Date.now() + serverTimeOffsetMs).toISOString(),
-        })
-        if (shouldRepeatScheduledItem(slot.items.length, item)) {
-          const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
+        if (resumeDecision.completed) {
+          this.clearActiveSlotPlayback(slot.id)
+        } else {
+          this.setActiveSlotPlayback(slot.id, {
+            scene_id: sceneId,
+            slot_id: slot.id,
+            item_id: item.id,
+            media_id: item.mediaId || item.objectKey || null,
+            schedule_id: scheduleId || null,
+            playback_instance_id: globalThis.crypto.randomUUID(),
+            started_at: new Date(Date.now() + serverTimeOffsetMs).toISOString(),
+          })
+        }
+        if (shouldRepeatScheduledItem(slot.items.length, item) && !resumeDecision.completed) {
+          const delayMs = delayOverrideMs ?? resumeDecision.remainingMs ?? Math.max(250, item.displayMs)
           const timer = window.setTimeout(() => {
             timers.delete(timer)
-            const nextPosition = resolveScenePosition()
-            void showSlotItem(nextPosition.index, nextPosition.remainingMs)
+            if (sceneStartsAt) {
+              void resolveScenePosition().then((nextPosition) => {
+                void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
+              })
+            } else {
+              void showSlotItem(normalizedIndex + 1)
+            }
           }, delayMs)
           timers.add(timer)
         }
@@ -1081,15 +1302,21 @@ class Player {
         const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
         const timer = window.setTimeout(() => {
           timers.delete(timer)
-          const nextPosition = resolveScenePosition()
-          void showSlotItem(nextPosition.index, nextPosition.remainingMs)
+          if (sceneStartsAt) {
+            void resolveScenePosition().then((nextPosition) => {
+              void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
+            })
+          } else {
+            void showSlotItem(normalizedIndex + 1)
+          }
         }, delayMs)
         timers.add(timer)
       }
     }
 
-    const initialPosition = resolveScenePosition()
-    void showSlotItem(initialPosition.index, initialPosition.remainingMs)
+    void resolveScenePosition().then((initialPosition) => {
+      void showSlotItem(initialPosition.index, initialPosition.remainingMs, initialPosition)
+    })
 
     return () => {
       disposed = true

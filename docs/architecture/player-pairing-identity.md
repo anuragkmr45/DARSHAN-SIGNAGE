@@ -192,6 +192,14 @@ On startup, the Electron player loads persisted runtime state from its app-data/
 
 Linux production autostart is handled outside the pairing identity decision. Packaged/session installs use XDG autostart in `qa` or `production` runtime mode, and service-based deployments may use the installed `darshan-player.service`. In both cases the identity decision still depends on backend validation after startup.
 
+Scheduled playback restart is schedule-aligned after validation. If the player restarts during an active schedule window, it recomputes the active item from the backend snapshot schedule start time and seeks timed video playback to the wall-clock-correct position. Multi-item layouts keep cycling by total item duration. A single scheduled item with `loop=true` resumes at its modulo position. A single scheduled item with `loop=false` does not replay from zero once its scheduled item duration has elapsed; the player holds near the final frame until the schedule changes or fallback/default media takes over.
+
+The player also persists a small `playback-progress.json` file in the cache path as a fallback for content that lacks a schedule start anchor. That file stores only non-secret schedule/media identifiers and timing numbers. It does not store media URLs, signed URLs, tokens, certificate material, or private keys. Schedule wall-clock state wins over persisted progress whenever a schedule anchor exists.
+
+Proof-of-play remains evidence-honest across restart. A clean close ends active playback as incomplete. A crash or power loss does not create a fake end event or backfill continuous playback. After restart, any resumed active video creates a new playback instance from the resumed position; completed non-loop hold states are not reported as active playback.
+
+`reset-pairing` clears playback resume progress together with other identity-bound metadata. It still preserves media cache, logs, screenshots, proof-of-play spool, and offline request queue by default.
+
 ## Rollout Rule
 
 Deploy backend pairing-status before enabling GP-2 player validation. If a new player is deployed before the backend supports pairing-status, it must not clear identity solely because the endpoint is missing. Backend-first rollout is required for production and air-gapped on-prem sites.

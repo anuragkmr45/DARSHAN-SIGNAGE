@@ -14,6 +14,7 @@ import { getAutostartStatus } from './autostart'
 import { getDeviceStateStore } from './device-state-store'
 import { getSnapshotManager } from './snapshot-manager'
 import { getDefaultMediaService } from './settings/default-media-service'
+import { getPlaybackProgressPath, getPlaybackProgressStore } from './playback-progress-store'
 import type { NetworkDiagnostics } from './pairing-service'
 
 const logger = getLogger('operator-tools')
@@ -168,6 +169,7 @@ function getIdentityBoundPaths() {
     ],
     snapshotMetadataPath: path.join(config.cache.path, 'last-snapshot.json'),
     defaultMediaMetadataPath: path.join(config.cache.path, 'default-media.json'),
+    playbackProgressPath: getPlaybackProgressPath(config.cache.path),
     cacheTargets: [
       path.join(config.cache.path, 'media'),
       path.join(config.cache.path, 'objects'),
@@ -247,6 +249,12 @@ function buildResetPlan(options: ResetPairingCliOptions) {
         path: paths.defaultMediaMetadataPath,
         exists: pathExists(paths.defaultMediaMetadataPath),
         action: 'delete cached default-media metadata',
+      },
+      {
+        type: 'file' as const,
+        path: paths.playbackProgressPath,
+        exists: pathExists(paths.playbackProgressPath),
+        action: 'delete cached playback resume metadata',
       },
       ...cacheTargets,
     ] satisfies ResetTarget[],
@@ -467,6 +475,7 @@ export async function pairingStatusForCli(): Promise<number> {
         cache: {
           snapshotMetadataPath: identityPaths.snapshotMetadataPath,
           defaultMediaMetadataPath: identityPaths.defaultMediaMetadataPath,
+          playbackProgressPath: identityPaths.playbackProgressPath,
           mediaPath: path.join(config.cache.path, 'media'),
           requestQueuePath: path.join(config.cache.path, 'request-queue.json'),
           requestQueueStatePath: path.join(config.cache.path, 'request-queue.state.json'),
@@ -497,6 +506,7 @@ export async function resetPairingForCli(options: ResetPairingCliOptions | strin
 
   getSnapshotManager().clearIdentityBoundState()
   getDefaultMediaService().clearIdentityBoundState()
+  getPlaybackProgressStore().clear()
   await getPairingService().resetStoredIdentity(reason)
   const cacheRemoved = normalizedOptions.clearCache
     ? clearMediaCacheTargets(getConfigManager().getConfig().cache.path)

@@ -17,6 +17,7 @@ import { getLogger } from '../common/logger'
 import { redactUrlForDiagnostics, redactUrlOrPathForDiagnostics, sanitizeLogPayloadForDiagnostics } from '../common/redaction'
 import { ExponentialBackoff } from '../common/utils'
 import type { ActiveSlotPlayback, AppConfig, PlayerStatus } from '../common/types'
+import type { PlaybackProgressIdentity } from '../common/playback-policy'
 import { parseOperatorCommand, runOperatorCommand } from './cli'
 import { getRuntimeMode, getRuntimeWindowPolicy } from './runtime-mode'
 import { ensureAutostartRegistration } from './services/autostart'
@@ -769,6 +770,25 @@ function setupIPCHandlers(): void {
       getCacheManager().replaceNowPlaying(activeSlots.map((slot) => slot.media_id).filter((mediaId): mediaId is string => Boolean(mediaId)))
     } catch (error) {
       logger.warn({ error }, 'Failed to process active playback update from renderer')
+    }
+  })
+
+  ipcMain.on('player-playback-progress', async (_event: any, payload: unknown) => {
+    try {
+      const { getPlaybackProgressStore } = await import('./services/playback-progress-store.js')
+      await getPlaybackProgressStore().record(payload)
+    } catch (error) {
+      logger.warn({ error }, 'Failed to persist playback progress update from renderer')
+    }
+  })
+
+  ipcMain.handle('player-playback-resume-state', async (_event: any, expected?: PlaybackProgressIdentity) => {
+    try {
+      const { getPlaybackProgressStore } = await import('./services/playback-progress-store.js')
+      return getPlaybackProgressStore().getLatest(expected)
+    } catch (error) {
+      logger.warn({ error }, 'Failed to read playback resume state for renderer')
+      return null
     }
   })
 

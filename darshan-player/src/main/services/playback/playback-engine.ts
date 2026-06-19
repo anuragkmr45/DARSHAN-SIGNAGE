@@ -244,7 +244,7 @@ export class PlaybackEngine extends EventEmitter {
     }
 
     // Record proof-of-play start
-    if (this.currentScheduleId && item.type !== 'scene') {
+    if (this.currentScheduleId && item.type !== 'scene' && scheduledItem.resumeDecision?.completed !== true) {
       const popService = getProofOfPlayService()
       this.currentPlaybackInstanceId = randomUUID()
       popService.recordStart({

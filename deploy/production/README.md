@@ -398,6 +398,20 @@ Result by condition:
 
 The restart path intentionally does not auto-wipe app-data just because the machine rebooted. Clean identity reset is an explicit operator action using `darshan-player reset-pairing`.
 
+Scheduled playback after restart is wall-clock aligned:
+
+| Active scheduled media at restart | Expected behavior after validation |
+|---|---|
+| Multi-item schedule/layout | Player computes the currently active timed item from the schedule start time and shows that item, not always item 1. |
+| Video still inside its timed item duration | Player seeks to the wall-clock-correct timestamp and continues playback. |
+| Single scheduled video with `loop=true` | Player resumes at the modulo timestamp and continues looping. |
+| Single scheduled video with `loop=false` and elapsed time greater than item duration | Player does not replay from `0`; it holds near the final frame until the schedule/default-media transition. |
+| Crash or power loss | Player does not create fake proof-of-play completion/backfill. Restart creates a new playback instance only when playback is active again. |
+
+The updated player package stores a small `playback-progress.json` fallback in the cache path for schedules without a usable start anchor. The file contains only non-secret identifiers and timing numbers. It must not contain media URLs, signed URLs, tokens, certificates, or private keys. Schedule wall-clock state takes precedence whenever the backend snapshot includes a schedule start time.
+
+To get this behavior on an existing screen such as AVITA LAP, install the updated player package on the device and restart the player. Backend/CMS changes are not required for the resume feature, but the player still needs the normal backend validation gate before scheduled playback is shown.
+
 Legacy env URL overrides are still supported for compatibility:
 
 ```bash
