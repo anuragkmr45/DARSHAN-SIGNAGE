@@ -670,6 +670,53 @@ describe('Player Flow', () => {
     await playerFlow.stop()
   })
 
+  it('should hard recover when runtime recovery polling reports revoked credentials', async () => {
+    const { DeviceApiError } = require('../../../src/common/types')
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      fingerprint: 'fingerprint-1',
+    })
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(pairingService, 'fetchPairingStatus').rejects(
+      new DeviceApiError({
+        code: 'FORBIDDEN',
+        status: 403,
+        message: 'Pairing revoked',
+      })
+    )
+    sandbox.stub(pairingService, 'requestPairingCode').rejects(new Error('request failed'))
+
+    createCompleteBootstrapStubs()
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+
+    getLifecycleEvents().emitRuntimeAuthFailure({
+      source: 'heartbeat',
+      error: new DeviceApiError({
+        code: 'FORBIDDEN',
+        status: 403,
+        message: 'Invalid device credentials',
+      }),
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(playerFlow.getState()).to.equal('HARD_RECOVERY')
+    expect(playerFlow.getStatus().recoveryReason).to.equal('request failed')
+    expect(stateStore.getState().deviceId).to.equal(undefined)
+    await playerFlow.stop()
+  })
+
   it('should complete fresh pairing when active_pairing mode is PAIRING', async () => {
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')

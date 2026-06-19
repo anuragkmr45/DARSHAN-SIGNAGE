@@ -59,11 +59,11 @@ const AuthenticatedAppShell = () => {
     <ProtectedRoute>
       <AppSettingsBootstrap />
       <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-        <div className="min-h-screen flex w-full bg-background">
+        <div className="operational-shell flex min-h-screen w-full bg-background">
           <AppSidebar />
           <div className="flex min-w-0 flex-1 flex-col">
             <AppHeader />
-            <main className="flex-1 overflow-x-hidden overflow-y-auto px-3 py-4 sm:px-4 sm:py-5 lg:px-6 lg:py-6">
+            <main className="flex-1 overflow-x-hidden overflow-y-auto px-3 py-4 sm:px-5 sm:py-5 lg:px-7 lg:py-7">
               <Routes>
                 <Route
                   path="/dashboard"

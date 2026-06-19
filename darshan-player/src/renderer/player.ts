@@ -9,6 +9,7 @@ import { DefaultMediaPlayer } from './default-media-player'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
 import { createPdfPlaybackElement } from './pdf-playback'
 import { createWebpagePlaybackElement } from './webpage-playback'
+import { shouldRepeatScheduledItem } from '../common/playback-policy'
 
 const { sanitizeLogPayloadForDiagnostics } =
   require('../common/redaction') as typeof import('../common/redaction')
@@ -1053,13 +1054,15 @@ class Player {
           playback_instance_id: globalThis.crypto.randomUUID(),
           started_at: new Date(Date.now() + serverTimeOffsetMs).toISOString(),
         })
-        const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
-        const timer = window.setTimeout(() => {
-          timers.delete(timer)
-          const nextPosition = resolveScenePosition()
-          void showSlotItem(nextPosition.index, nextPosition.remainingMs)
-        }, delayMs)
-        timers.add(timer)
+        if (shouldRepeatScheduledItem(slot.items.length, item)) {
+          const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
+          const timer = window.setTimeout(() => {
+            timers.delete(timer)
+            const nextPosition = resolveScenePosition()
+            void showSlotItem(nextPosition.index, nextPosition.remainingMs)
+          }, delayMs)
+          timers.add(timer)
+        }
       } catch (error) {
         this.log('error', 'Failed to render scene slot media', {
           slotId: slot.id,

@@ -12,3 +12,5 @@ out/
 .playwright-mcp/
 .local/
 darshan-cms/.env
+deploy/production/.env.local
+deploy/production/observability/prometheus.yml

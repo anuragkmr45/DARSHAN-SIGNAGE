@@ -36,7 +36,7 @@ const statusConfig: Record<Status, { label: string; variant: "default" | "second
   rejected: { label: "Rejected", variant: "destructive" },
   failed: { label: "Failed", variant: "destructive" },
   online: { label: "Online", variant: "default", className: "bg-success text-success-foreground" },
-  offline: { label: "Offline", variant: "secondary" },
+  offline: { label: "Offline", variant: "outline", className: "border-destructive/40 text-destructive" },
   maintenance: { label: "Maintenance", variant: "outline", className: "border-warning text-warning" },
   stale: { label: "Stale", variant: "outline", className: "border-warning text-warning" },
   error: { label: "Error", variant: "destructive" },

@@ -62,6 +62,14 @@ interface SpoolFileEntry {
 const IDLE_FLUSH_MS = 60000
 const BACKLOG_FLUSH_MS = 15000
 
+function normalizePositiveDurationSeconds(value: unknown, fallback: number = 1): number {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return fallback
+  }
+  return Math.max(1, Math.round(numeric))
+}
+
 function stripReplayMetadata(event: BufferedProofOfPlayEvent | ProofOfPlayEvent): ProofOfPlayEvent {
   return {
     device_id: event.device_id,
@@ -193,7 +201,7 @@ export class ProofOfPlayService {
     const endTimestamp = new Date().toISOString()
     const startTime = new Date(active.startTimestamp).getTime()
     const endTime = new Date(endTimestamp).getTime()
-    const durationSeconds = Math.max(0, Math.round((endTime - startTime) / 1000))
+    const durationSeconds = normalizePositiveDurationSeconds((endTime - startTime) / 1000)
 
     const pairingService = getPairingService()
     const deviceId = pairingService.getDeviceId()
@@ -669,10 +677,10 @@ export class ProofOfPlayService {
     const durationMs = event.durationMs ?? event.duration_ms
     const normalizedDuration =
       typeof event.duration === 'number'
-        ? event.duration
+        ? normalizePositiveDurationSeconds(event.duration)
         : durationMs !== undefined
-          ? Math.max(0, Math.round(Number(durationMs) / 1000))
-          : 0
+          ? normalizePositiveDurationSeconds(Number(durationMs) / 1000)
+          : 1
 
     return {
       device_id: event.device_id || event.deviceId || pairingService.getDeviceId() || '',

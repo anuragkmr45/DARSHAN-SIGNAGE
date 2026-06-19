@@ -91,21 +91,42 @@ const Auth = () => {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-muted/30 to-background px-4 py-6 sm:px-6">
-      <div className="w-full max-w-md space-y-5 sm:space-y-6">
+    <div className="operational-shell flex min-h-screen items-center justify-center px-4 py-6 sm:px-6">
+      <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[0.92fr_1fr]">
+        <section className="hidden overflow-hidden rounded-2xl border border-primary/20 bg-primary p-8 text-primary-foreground shadow-lg lg:flex lg:flex-col lg:justify-between">
+          <div>
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-accent-foreground shadow-sm">
+              <Monitor className="h-8 w-8" />
+            </div>
+            <h2 className="mt-8 text-4xl font-bold tracking-tight">DARSHAN</h2>
+            <p className="mt-4 max-w-sm text-sm leading-6 text-white/75">
+              Operational signage control for screens, media, schedules, player health, and emergency response.
+            </p>
+          </div>
+          <div className="grid gap-3 text-sm text-white/70">
+            <div className="rounded-xl border border-white/10 bg-white/[0.08] p-4">
+              Backend remains the source of truth. Realtime is used for notification and refresh signals.
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/[0.08] p-4">
+              Designed for on-prem teams managing live display fleets.
+            </div>
+          </div>
+        </section>
+
+        <div className="mx-auto w-full max-w-md space-y-5 sm:space-y-6 lg:mx-0">
         {/* Logo */}
         <div className="text-center space-y-2">
           <div className="flex justify-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary shadow-lg sm:h-16 sm:w-16">
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary shadow-lg sm:h-16 sm:w-16 lg:hidden">
               <Monitor className="h-8 w-8 text-primary-foreground sm:h-10 sm:w-10" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-foreground sm:text-3xl">DARSHAN CMS</h1>
-          <p className="text-sm text-muted-foreground sm:text-base">Enterprise Digital Signage Management</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">DARSHAN CMS</h1>
+          <p className="text-sm text-muted-foreground sm:text-base">Sign in to the operations console</p>
         </div>
 
         {/* Auth Card */}
-        <Card className="border-border shadow-xl">
+        <Card className="operational-card-strong rounded-2xl">
           <Tabs defaultValue="login" className="w-full">
             <CardHeader className="space-y-1">
               <TabsList className="grid w-full grid-cols-2">
@@ -268,6 +289,7 @@ const Auth = () => {
           <Button variant="ghost" onClick={() => navigate("/")}>
             Back to Home
           </Button>
+        </div>
         </div>
       </div>
     </div>

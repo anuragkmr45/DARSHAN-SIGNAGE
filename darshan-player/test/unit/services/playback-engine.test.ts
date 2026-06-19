@@ -111,4 +111,86 @@ describe('Playback Engine', () => {
     expect(engine.stop.called).to.equal(false)
     expect(startPlaylistStub.called).to.equal(false)
   })
+
+  it('ignores equivalent scene playlist updates when only remaining scene time changed', async () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+
+    const engine = getPlaybackEngine()
+    sandbox.stub(engine, 'stop')
+    const startPlaylistStub = sandbox.stub(engine, 'startPlaylist').resolves()
+
+    const sceneMeta = {
+      source: 'schedule',
+      scheduleId: 'schedule-1',
+      scene: {
+        startsAt: '2026-06-19T11:38:00.000Z',
+        endsAt: '2026-06-19T12:30:00.000Z',
+        serverTimeOffsetMs: 100,
+        slots: [
+          {
+            id: 'slot-1',
+            bounds: { x: 0, y: 0, w: 1, h: 1 },
+            items: [
+              {
+                id: 'slot-item-1',
+                type: 'video',
+                mediaId: 'media-1',
+                remoteUrl: 'https://cdn.example.com/video.mp4?signature=one',
+                displayMs: 464000,
+                fit: 'cover',
+                muted: false,
+                loop: false,
+                transitionDurationMs: 0,
+              },
+            ],
+          },
+        ],
+      },
+    }
+
+    const basePlaylist = {
+      mode: 'normal',
+      scheduleId: 'schedule-1',
+      snapshotId: 'snapshot-1',
+      items: [
+        {
+          id: 'scene:window-1',
+          type: 'scene',
+          displayMs: 2_400_000,
+          fit: 'contain',
+          muted: true,
+          loop: false,
+          transitionDurationMs: 0,
+          meta: sceneMeta,
+        },
+      ],
+    }
+
+    engine.state = 'playing'
+    engine.currentTimelineFingerprint = engine.fingerprintPlaylist(basePlaylist)
+
+    getSnapshotManager().emit('playlist-updated', {
+      ...basePlaylist,
+      snapshotId: 'snapshot-2',
+      items: [
+        {
+          ...basePlaylist.items[0],
+          displayMs: 2_100_000,
+          meta: {
+            ...sceneMeta,
+            scene: {
+              ...sceneMeta.scene,
+              serverTimeOffsetMs: 500,
+            },
+          },
+        },
+      ],
+    })
+
+    await Promise.resolve()
+
+    expect(engine.stop.called).to.equal(false)
+    expect(startPlaylistStub.called).to.equal(false)
+  })
 })

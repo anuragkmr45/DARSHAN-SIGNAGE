@@ -5,8 +5,9 @@ This is the primary QA deployment runbook for the approved air-gapped on-prem mu
 QA uses the same machine-role split as production:
 
 - VM1 data: PostgreSQL + MinIO
-- VM2 backend: `darshan-server` and Prometheus
-- VM3 CMS: `darshan-cms` and Grafana behind `/grafana/`
+- VM2 Valkey: notification-only realtime bus
+- VM3 backend: `darshan-server` and Prometheus
+- VM4 CMS: `darshan-cms` and Grafana behind `/grafana/`
 - separate wired player machines: `darshan-player`
 
 No public internet, public DNS, public endpoint, public media CDN, public S3, public broker, FCM, or APNs service is assumed. Valkey, if used, is an internal on-prem service.
@@ -15,6 +16,7 @@ No public internet, public DNS, public endpoint, public media CDN, public S3, pu
 
 - `SITE_NAME`
 - `QA_DATA_HOST`
+- `QA_VALKEY_HOST`, optional and defaults to `QA_BACKEND_HOST`
 - `QA_BACKEND_HOST`
 - `QA_CMS_HOST`
 - optional `QA_BACKEND_DEVICE_HOST` if players should use a different backend-facing IP
@@ -26,7 +28,7 @@ No public internet, public DNS, public endpoint, public media CDN, public S3, pu
   - `BACKEND_IMAGE_ARCHIVE`
   - `CMS_BUNDLE_SOURCE`
 - `PLAYER_ARTIFACTS_DIR`
-- optional `VALKEY_URL` and Valkey topology inputs when QA validates multi-node realtime fanout
+- optional Valkey topology inputs when QA validates multi-node realtime fanout
 
 Use the split server export layout for QA:
 
@@ -41,6 +43,7 @@ bash scripts/export/package-cms.sh --release <release-id>
 export RELEASE_ID="2026-04-02-r1"
 export SITE_NAME="site-a-qa"
 export QA_DATA_HOST="10.30.0.10"
+export QA_VALKEY_HOST="10.30.0.15"
 export QA_BACKEND_HOST="10.30.0.20"
 export QA_BACKEND_DEVICE_HOST="10.30.0.20"
 export QA_CMS_HOST="10.30.0.30"
@@ -54,6 +57,7 @@ bash scripts/bundle/assemble-runtime-bundle.sh --profile qa "$SITE_NAME"
 Expected QA bundle layout:
 
 - `qa/data/`
+- `qa/valkey/`
 - `qa/backend/`
 - `qa/cms/`
 - `qa/electron/`
@@ -71,18 +75,20 @@ find qa -maxdepth 2 -type f | sort
 Confirm:
 
 - checksum validation succeeds
-- `qa/data/`, `qa/backend/`, `qa/cms/`, and `qa/electron/` exist
+- `qa/data/`, `qa/valkey/`, `qa/backend/`, `qa/cms/`, and `qa/electron/` exist
 
 ## 4. Copy the runtime folders
 
 ```bash
 export DEPLOY_USER="support"
 export QA_DATA_VM_HOST="10.30.0.10"
+export QA_VALKEY_VM_HOST="10.30.0.15"
 export QA_BACKEND_VM_HOST="10.30.0.20"
 export QA_CMS_VM_HOST="10.30.0.30"
 export RELEASE_ID="2026-04-02-r1"
 
 scp -r "dist/onprem/${SITE_NAME}/qa/data" "${DEPLOY_USER}@${QA_DATA_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
+scp -r "dist/onprem/${SITE_NAME}/qa/valkey" "${DEPLOY_USER}@${QA_VALKEY_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
 scp -r "dist/onprem/${SITE_NAME}/qa/backend" "${DEPLOY_USER}@${QA_BACKEND_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
 scp -r "dist/onprem/${SITE_NAME}/qa/cms" "${DEPLOY_USER}@${QA_CMS_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
 ```
@@ -98,7 +104,20 @@ cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/data"
 ./health-check.sh
 ```
 
-### VM2 backend
+### VM2 Valkey
+
+```bash
+cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/valkey"
+./load-images.sh
+./start.sh
+./health-check.sh
+```
+
+Notes:
+
+- Valkey is a notification-only bus. PostgreSQL and REST remain authoritative.
+
+### VM3 backend
 
 ```bash
 cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/backend"
@@ -112,7 +131,7 @@ Notes:
 - the backend release folder contains `observability/prometheus/`, `observability/alertmanager/`, and exporter templates
 - Prometheus belongs on VM2
 
-### VM3 CMS
+### VM4 CMS
 
 ```bash
 cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/cms"

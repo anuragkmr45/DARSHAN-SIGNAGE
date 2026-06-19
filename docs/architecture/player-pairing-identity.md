@@ -177,6 +177,21 @@ Detailed operator steps live in:
 - `docs/runbooks/player-clean-reinstall-reset.md`
 - `docs/runbooks/onprem-player-ghost-pairing-recovery.md`
 
+## Player Power-Cycle / Restart Behavior
+
+Machine shutdown or reboot is treated as a normal runtime restart, not as a reinstall and not as a clean reset.
+
+On startup, the Electron player loads persisted runtime state from its app-data/runtime path, classifies the local identity, and then follows the startup validation gate:
+
+- complete local identity plus trustworthy device id -> `LOCAL_IDENTITY_PRESENT`, then authenticated backend pairing-status validation.
+- valid backend pairing status -> `PAIRED_RUNTIME`; heartbeat, realtime, telemetry, snapshot/default-media services, and command polling start.
+- stale backend pairing status such as `INVALID_TOKEN`, `SCREEN_NOT_FOUND`, `PAIRING_REVOKED`, `ORPHANED_CREDENTIAL`, or `ENVIRONMENT_MISMATCH` -> `HARD_RECOVERY`; identity-bound state is cleared and a fresh OTP/pairing code is requested.
+- backend unreachable after a recently validated same identity -> `OFFLINE_USING_LAST_VALID_PAIRING`; cached playback may continue while validation retries with backoff.
+- backend unreachable before any successful validation, or after offline grace expiry -> validation-required/recovery; the player must not show paired/no-content as a success state.
+- pending pairing code that survives restart and has not expired -> pairing-status polling resumes; expired pairing metadata causes fresh hard recovery and a new code.
+
+Linux production autostart is handled outside the pairing identity decision. Packaged/session installs use XDG autostart in `qa` or `production` runtime mode, and service-based deployments may use the installed `darshan-player.service`. In both cases the identity decision still depends on backend validation after startup.
+
 ## Rollout Rule
 
 Deploy backend pairing-status before enabling GP-2 player validation. If a new player is deployed before the backend supports pairing-status, it must not clear identity solely because the endpoint is missing. Backend-first rollout is required for production and air-gapped on-prem sites.

@@ -1,5 +1,4 @@
-import { Bell, Search, LogOut } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { Bell, LogOut, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
@@ -13,7 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { clearAuth } from "@/store/authSlice";
 import { authApi } from "@/api/domains/auth";
@@ -35,12 +34,36 @@ const getInitials = (name?: string, email?: string) => {
   return "SA";
 };
 
+const routeLabels: Array<{ match: RegExp; title: string; eyebrow: string }> = [
+  { match: /^\/dashboard/, title: "Operations dashboard", eyebrow: "Fleet overview" },
+  { match: /^\/media/, title: "Media library", eyebrow: "Assets and readiness" },
+  { match: /^\/layouts/, title: "Layouts", eyebrow: "Screen compositions" },
+  { match: /^\/screens/, title: "Screens", eyebrow: "Player health and pairing" },
+  { match: /^\/schedule/, title: "Schedule queue", eyebrow: "Publishing operations" },
+  { match: /^\/requests/, title: "Requests", eyebrow: "Emergency and approvals" },
+  { match: /^\/chat|^\/conversations/, title: "Conversations", eyebrow: "Team communication" },
+  { match: /^\/notifications/, title: "Notifications", eyebrow: "Attention queue" },
+  { match: /^\/operators/, title: "Operators", eyebrow: "Operational access" },
+  { match: /^\/departments/, title: "Departments", eyebrow: "Organization routing" },
+  { match: /^\/users/, title: "Users", eyebrow: "Account management" },
+  { match: /^\/reports|^\/proof-of-play/, title: "Reports & logs", eyebrow: "Evidence and audit" },
+  { match: /^\/settings|^\/api-keys|^\/webhooks|^\/sso-config/, title: "Site settings", eyebrow: "Platform configuration" },
+];
+
+const getRouteLabel = (pathname: string) =>
+  routeLabels.find((item) => item.match.test(pathname)) ?? {
+    title: "DARSHAN",
+    eyebrow: "Operations console",
+  };
+
 export function AppHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
   const dispatch = useAppDispatch();
   const queryClient = useQueryClient();
   const user = useAppSelector((state) => state.auth.user);
   const { unreadTotal, isLoadingInitial } = useNotificationUnreadCount();
+  const routeLabel = getRouteLabel(location.pathname);
 
   const handleLogout = async () => {
     disconnectAllRealtimeSockets();
@@ -53,21 +76,23 @@ export function AppHeader() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex min-h-16 flex-wrap items-center gap-3 px-3 py-2 sm:px-4">
+    <header className="sticky top-0 z-50 w-full border-b bg-card/90 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/75">
+      <div className="flex min-h-16 flex-wrap items-center gap-3 px-3 py-2 sm:px-5">
         <SidebarTrigger />
 
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3 lg:flex-nowrap">
-          <div className="order-2 relative w-full min-w-0 lg:order-1 lg:max-w-2xl">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              aria-label="Global search unavailable"
-              title="Global search is not available in this build."
-              placeholder="Global search unavailable in this build"
-              className="h-10 pl-9 bg-muted/50"
-              disabled
-              readOnly
-            />
+          <div className="order-2 flex min-w-0 flex-1 items-center gap-3 lg:order-1">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
+              <Radio className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                {routeLabel.eyebrow}
+              </p>
+              <h1 className="truncate text-lg font-semibold leading-tight text-foreground sm:text-xl">
+                {routeLabel.title}
+              </h1>
+            </div>
           </div>
 
           <div className="order-1 ml-auto flex shrink-0 items-center gap-2 lg:order-2">
