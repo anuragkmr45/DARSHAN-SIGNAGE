@@ -321,7 +321,7 @@ export class SnapshotManager extends EventEmitter {
       if (evaluation.activeWindow && evaluation.items.length > 0) {
         mode = 'normal'
         const hydratedWindowItems = await this.attachLocalMedia(evaluation.items)
-        items = this.buildLayoutSceneItems(evaluation.activeWindow, hydratedWindowItems, snapshot.scheduleId)
+        items = this.buildLayoutSceneItems(evaluation.activeWindow, hydratedWindowItems, snapshot.scheduleId, snapshot.snapshotId)
       } else if (snapshot.defaultItem) {
         mode = 'default'
         items = await this.attachLocalMedia([snapshot.defaultItem])
@@ -447,18 +447,20 @@ export class SnapshotManager extends EventEmitter {
   private buildLayoutSceneItems(
     window: NormalizedScheduleWindow,
     items: TimelineItem[],
-    scheduleId?: string
+    scheduleId?: string,
+    snapshotId?: string,
   ): TimelineItem[] {
+    const scheduledItems = this.addScheduleWindowMeta(window, items, scheduleId, snapshotId)
     const slots = this.extractLayoutSlots(window)
     if (slots.length === 0) {
-      return items
+      return scheduledItems
     }
 
     const itemsBySlot = new Map<string, TimelineItem[]>()
-    for (const item of items) {
+    for (const item of scheduledItems) {
       const slotId = typeof item.meta?.['slotId'] === 'string' ? String(item.meta?.['slotId']) : undefined
       if (!slotId) {
-        return items
+        return scheduledItems
       }
       const bucket = itemsBySlot.get(slotId) || []
       bucket.push(item)
@@ -521,6 +523,7 @@ export class SnapshotManager extends EventEmitter {
         meta: {
           source: 'schedule',
           scheduleId,
+          snapshotId,
           presentationId: window.presentationId,
           presentationName: window.presentationName,
           layout: window.layout,
@@ -528,6 +531,29 @@ export class SnapshotManager extends EventEmitter {
         },
       },
     ]
+  }
+
+  private addScheduleWindowMeta(
+    window: NormalizedScheduleWindow,
+    items: TimelineItem[],
+    scheduleId?: string,
+    snapshotId?: string,
+  ): TimelineItem[] {
+    return items.map((item) => ({
+      ...item,
+      meta: {
+        ...(item.meta ?? {}),
+        source: 'schedule',
+        scheduleId,
+        snapshotId,
+        presentationId: window.presentationId,
+        presentationName: window.presentationName,
+        scheduleWindowId: window.id,
+        scheduleWindowStartsAt: window.startAt,
+        scheduleWindowEndsAt: window.endAt,
+        serverTimeOffsetMs: this.serverClockOffsetMs,
+      },
+    }))
   }
 
   private extractLayoutSlots(window: NormalizedScheduleWindow): LayoutSlotSpec[] {

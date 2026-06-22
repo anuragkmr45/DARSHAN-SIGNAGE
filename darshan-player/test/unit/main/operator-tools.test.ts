@@ -104,6 +104,18 @@ function seedRuntime() {
   }))
   writeFile(path.join(cacheRoot, 'last-snapshot.json'), '{}')
   writeFile(path.join(cacheRoot, 'default-media.json'), '{}')
+  writeFile(path.join(cacheRoot, 'playback-progress.json'), JSON.stringify({
+    schemaVersion: 1,
+    entries: [
+      {
+        scheduleId: 'schedule-1',
+        itemId: 'item-1',
+        mediaId: 'media-1',
+        positionMs: 120000,
+        updatedAt: new Date().toISOString(),
+      },
+    ],
+  }))
   writeFile(path.join(cacheRoot, 'media', 'media-1.bin'), 'media')
   writeFile(path.join(cacheRoot, 'objects', 'object-1.bin'), 'object')
   writeFile(path.join(cacheRoot, 'quarantine', 'bad.bin'), 'bad')
@@ -157,6 +169,7 @@ describe('operator reset tooling', () => {
     expect(payload.plan.clearCache).to.equal(true)
     expect(fs.existsSync(seeded.config.mtls.keyPath)).to.equal(true)
     expect(fs.existsSync(path.join(seeded.cacheRoot, 'last-snapshot.json'))).to.equal(true)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'playback-progress.json'))).to.equal(true)
     expect(fs.existsSync(path.join(seeded.cacheRoot, 'media', 'media-1.bin'))).to.equal(true)
     expect(fs.existsSync(path.join(seeded.cacheRoot, 'request-queue.json'))).to.equal(true)
   })
@@ -290,6 +303,7 @@ describe('operator reset tooling', () => {
     expect(fs.existsSync(seeded.config.mtls.certPath)).to.equal(false)
     expect(fs.existsSync(path.join(seeded.cacheRoot, 'last-snapshot.json'))).to.equal(false)
     expect(fs.existsSync(path.join(seeded.cacheRoot, 'default-media.json'))).to.equal(false)
+    expect(fs.existsSync(path.join(seeded.cacheRoot, 'playback-progress.json'))).to.equal(false)
     expect(fs.existsSync(path.join(seeded.cacheRoot, 'media', 'media-1.bin'))).to.equal(true)
     expect(fs.existsSync(path.join(seeded.cacheRoot, 'request-queue.json'))).to.equal(true)
     expect(fs.existsSync(path.join(seeded.cacheRoot, 'pop-spool', 'pending.json'))).to.equal(true)

@@ -3,150 +3,47 @@
  * Handles media rendering and transitions in the renderer process
  */
 
-import { ActiveSlotPlayback, DefaultMediaResponse, FitMode, LayoutScene, LayoutSceneSlot, PlayerStatus, TimelineItem } from '../common/types'
+import {
+  ActiveSlotPlayback,
+  DefaultMediaResponse,
+  FitMode,
+  LayoutScene,
+  LayoutSceneSlot,
+  PlayerStatus,
+  TimelineItem,
+} from '../common/types'
 import './types'
 import { DefaultMediaPlayer } from './default-media-player'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
 import { createPdfPlaybackElement } from './pdf-playback'
 import { createWebpagePlaybackElement } from './webpage-playback'
-import { shouldRepeatScheduledItem } from '../common/playback-policy'
+import {
+  clampVideoSeekSeconds,
+  resolveScheduledResumePosition,
+  shouldRepeatScheduledItem,
+} from '../common/playback-policy'
+import { resolvePlayerContentSource, shouldDisplaySecurityLock } from '../common/player-content-source'
+import {
+  computeSceneStageFrame,
+  prepareElementForFadeIn,
+  prepareElementForFadeOut,
+  shouldUseManualVideoReplay,
+  teardownScheduledElementTree,
+  type DisposableMediaNode,
+} from './player-layout-helpers'
+import type { PlaybackProgressEntry, PlaybackProgressIdentity, PlaybackResumeDecision } from '../common/playback-policy'
 
-const { sanitizeLogPayloadForDiagnostics } =
-  require('../common/redaction') as typeof import('../common/redaction')
+const { sanitizeLogPayloadForDiagnostics } = require('../common/redaction') as typeof import('../common/redaction')
 
-export function parseAspectRatio(aspectRatio?: string): number | null {
-  if (!aspectRatio || typeof aspectRatio !== 'string') {
-    return null
-  }
-
-  const parts = aspectRatio.split(':')
-  if (parts.length !== 2) {
-    return null
-  }
-
-  const width = Number(parts[0]?.trim())
-  const height = Number(parts[1]?.trim())
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return null
-  }
-
-  return width / height
-}
-
-export function computeSceneStageFrame(
-  aspectRatio: string | undefined,
-  viewportWidth: number,
-  viewportHeight: number,
-): { width: number; height: number; left: number; top: number } {
-  const ratio = parseAspectRatio(aspectRatio)
-  if (!ratio || viewportWidth <= 0 || viewportHeight <= 0) {
-    return {
-      width: viewportWidth,
-      height: viewportHeight,
-      left: 0,
-      top: 0,
-    }
-  }
-
-  const viewportRatio = viewportWidth / viewportHeight
-  if (viewportRatio > ratio) {
-    const height = viewportHeight
-    const width = height * ratio
-    return {
-      width,
-      height,
-      left: (viewportWidth - width) / 2,
-      top: 0,
-    }
-  }
-
-  const width = viewportWidth
-  const height = width / ratio
-  return {
-    width,
-    height,
-    left: 0,
-    top: (viewportHeight - height) / 2,
-  }
-}
-
-export function resolvePlayerContentSource(
-  status: PlayerStatus,
-): 'schedule' | 'default' | 'none' {
-  if (
-    status.state === 'BOOT' ||
-    status.state === 'LOCAL_IDENTITY_PRESENT' ||
-    status.state === 'BOOTSTRAP_AUTH' ||
-    status.state === 'RECOVERY_REQUIRED' ||
-    status.state === 'HARD_RECOVERY' ||
-    status.state === 'PAIRING_PENDING' ||
-    status.state === 'PAIRING_CONFIRMED' ||
-    status.state === 'PAIRING_COMPLETING'
-  ) {
-    return 'none'
-  }
-
-  if (status.mode === 'default' || status.mode === 'offline' || status.mode === 'empty') {
-    return 'default'
-  }
-
-  return 'schedule'
-}
-
-export function shouldUseManualVideoReplay(item: TimelineItem): boolean {
-  return item.type === 'video' && item.loop === true
-}
-
-type TransitionStyleTarget = {
-  style: {
-    transition: string
-    opacity: string
-  }
-}
-
-export function resolveOpacityTransitionStyle(durationMs?: number): string {
-  const safeDuration = Math.max(0, Number(durationMs) || 0)
-  if (safeDuration <= 0) {
-    return ''
-  }
-
-  return `opacity ${safeDuration}ms ease-in-out`
-}
-
-export function prepareElementForFadeIn(
-  element: TransitionStyleTarget,
-  durationMs?: number,
-): boolean {
-  const transitionStyle = resolveOpacityTransitionStyle(durationMs)
-  element.style.transition = transitionStyle
-  if (!transitionStyle) {
-    element.style.opacity = '1'
-    return false
-  }
-
-  element.style.opacity = '0'
-  return true
-}
-
-export function prepareElementForFadeOut(
-  element: TransitionStyleTarget,
-  durationMs?: number,
-): void {
-  element.style.transition = resolveOpacityTransitionStyle(durationMs)
-  element.style.opacity = '0'
-}
-
-type DisposableMediaNode = {
-  __darshanCleanup?: () => void
-  pause?: () => void
-  removeAttribute?: (name: string) => void
-  load?: () => void
-  stop?: () => void
-  querySelectorAll?: (selector: string) => ArrayLike<DisposableMediaNode>
-  parentElement?: { removeChild?: (child: DisposableMediaNode) => void } | null
-  remove?: () => void
-  src?: string
-}
+export { resolvePlayerContentSource } from '../common/player-content-source'
+export {
+  computeSceneStageFrame,
+  prepareElementForFadeIn,
+  prepareElementForFadeOut,
+  resolveOpacityTransitionStyle,
+  shouldUseManualVideoReplay,
+  teardownScheduledElementTree,
+} from './player-layout-helpers'
 
 type RenderedScene = {
   element: HTMLElement
@@ -159,77 +56,12 @@ type PendingTransition = {
   durationMs: number
 }
 
-function teardownDisposableNode(node: DisposableMediaNode | null | undefined): void {
-  if (!node) {
-    return
-  }
+type PlaybackResumeInstruction = Pick<PlaybackResumeDecision, 'seekMs' | 'autoplay' | 'completed' | 'source'>
 
-  try {
-    node.pause?.()
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-
-  try {
-    node.removeAttribute?.('src')
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-
-  if (typeof node.src === 'string') {
-    try {
-      node.src = ''
-    } catch {
-      // ignore read-only src properties
-    }
-  }
-
-  try {
-    node.load?.()
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-
-  try {
-    node.stop?.()
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-
-  if (node.parentElement?.removeChild) {
-    try {
-      node.parentElement.removeChild(node)
-      return
-    } catch {
-      // fall back to remove()
-    }
-  }
-
-  try {
-    node.remove?.()
-  } catch {
-    // ignore teardown errors from inert/fake nodes
-  }
-}
-
-export function teardownScheduledElementTree(root: DisposableMediaNode | null | undefined): void {
-  if (!root) {
-    return
-  }
-
-  try {
-    root.__darshanCleanup?.()
-  } catch {
-    // ignore teardown errors from managed nodes
-  }
-
-  const descendants =
-    typeof root.querySelectorAll === 'function'
-      ? Array.from(root.querySelectorAll('video, audio, iframe, webview'))
-      : []
-
-  descendants.forEach((node) => teardownDisposableNode(node))
-  teardownDisposableNode(root)
+type PlaybackProgressContext = PlaybackProgressIdentity & {
+  scheduleStartsAt?: string | null
+  scheduleEndsAt?: string | null
+  itemDisplayMs?: number
 }
 
 class Player {
@@ -244,6 +76,7 @@ class Player {
   private statusConnection: HTMLElement | null = null
   private statusSnapshot: HTMLElement | null = null
   private modeBanner: HTMLElement | null = null
+  private securityLockOverlay: HTMLElement | null = null
   private currentCleanup?: () => void
   private playbackSession = 0
   private ignoreFallbackStatusUntil = 0
@@ -269,6 +102,7 @@ class Player {
     this.statusConnection = document.getElementById('status-connection')
     this.statusSnapshot = document.getElementById('status-snapshot-time')
     this.modeBanner = document.getElementById('mode-banner')
+    this.securityLockOverlay = document.getElementById('security-lock-overlay')
 
     if (this.canvas) {
       this.resizeCanvas()
@@ -331,7 +165,9 @@ class Player {
         this.log('debug', 'Received play-media event', data)
         this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
         this.setActiveSource('schedule')
-        this.playMedia(data.item).catch((error) => {
+        this.playMedia(data.item, {
+          scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+        }).catch((error) => {
           this.log('error', 'Failed to play media', { error: error.message })
           this.showFallback(error.message)
         })
@@ -365,13 +201,16 @@ class Player {
     }
 
     if (window.darshan && window.darshan.getPlayerStatus) {
-      window.darshan.getPlayerStatus().then((status: any) => {
-        const typedStatus = status as PlayerStatus
-        this.updateStatusOverlay(typedStatus)
-        this.updateContentSource(typedStatus)
-      }).catch(() => {
-        // ignore initial status failures
-      })
+      window.darshan
+        .getPlayerStatus()
+        .then((status: any) => {
+          const typedStatus = status as PlayerStatus
+          this.updateStatusOverlay(typedStatus)
+          this.updateContentSource(typedStatus)
+        })
+        .catch(() => {
+          // ignore initial status failures
+        })
     }
   }
 
@@ -398,6 +237,12 @@ class Player {
   }
 
   private updateContentSource(status: PlayerStatus): void {
+    if (shouldDisplaySecurityLock(status)) {
+      this.clearScheduledPlayback('security-lock')
+      this.setActiveSource('none')
+      return
+    }
+
     const nextSource = resolvePlayerContentSource(status)
     if (nextSource === 'schedule') {
       this.setActiveSource('schedule')
@@ -430,7 +275,7 @@ class Player {
   /**
    * Play media item
    */
-  private async playMedia(item: TimelineItem): Promise<void> {
+  private async playMedia(item: TimelineItem, options: { scheduleId?: string } = {}): Promise<void> {
     const sessionId = ++this.playbackSession
     this.log('info', 'Playing media', { itemId: item.id, type: item.type })
     const transitionDurationMs =
@@ -477,13 +322,18 @@ class Player {
       }
 
       let element: HTMLElement
+      const resumeDecision = await this.resolveSingleItemResumeDecision(item, options.scheduleId)
+      const progressContext = this.buildPlaybackProgressContext(item, {
+        scheduleId: options.scheduleId,
+      })
 
       switch (item.type) {
         case 'image':
           element = await this.renderImage(item)
           break
         case 'video':
-          element = await this.renderVideo(item)
+          element = await this.renderVideo(item, resumeDecision)
+          this.attachVideoProgressReporter(element as HTMLVideoElement, item, progressContext)
           break
         case 'pdf':
           element = await this.renderPDF(item)
@@ -545,11 +395,13 @@ class Player {
   /**
    * Render video
    */
-  private async renderVideo(item: TimelineItem): Promise<HTMLElement> {
+  private async renderVideo(item: TimelineItem, resume?: PlaybackResumeInstruction): Promise<HTMLElement> {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video')
       const source = this.getMediaSource(item)
       const useManualReplay = shouldUseManualVideoReplay(item)
+      let resolved = false
+      let started = false
       video.style.position = 'absolute'
       video.style.top = '0'
       video.style.left = '0'
@@ -562,16 +414,75 @@ class Player {
         itemId: item.id,
         displayMs: item.displayMs,
         loop: item.loop,
+        resumeSource: resume?.source,
+        resumeSeekMs: resume?.seekMs,
+        resumeCompleted: resume?.completed,
         source,
         slotId: typeof item.meta?.['slotId'] === 'string' ? item.meta?.['slotId'] : null,
       })
 
-      video.onloadeddata = () => {
-        this.log('debug', 'Video loaded', { itemId: item.id })
+      const finalize = () => {
+        if (resolved) {
+          return
+        }
+        resolved = true
+        this.log('debug', 'Video loaded', {
+          itemId: item.id,
+          resumeSource: resume?.source,
+          resumeSeekMs: resume?.seekMs,
+          completed: resume?.completed,
+        })
+
+        if (resume?.autoplay === false) {
+          video.pause()
+          resolve(video)
+          return
+        }
+
+        started = true
         video.play().catch((error) => {
           this.log('error', 'Failed to play video', { error: error.message })
         })
         resolve(video)
+      }
+
+      video.onloadedmetadata = () => {
+        const seekSeconds = clampVideoSeekSeconds(resume?.seekMs ?? 0, video.duration, item.displayMs)
+        if (seekSeconds > 0.1) {
+          try {
+            video.currentTime = seekSeconds
+          } catch (error) {
+            this.log('warn', 'Failed to seek scheduled video before playback', {
+              itemId: item.id,
+              error: (error as Error).message,
+            })
+            finalize()
+            return
+          }
+
+          let seekTimer: number | undefined
+          const onSeeked = () => {
+            if (seekTimer !== undefined) {
+              window.clearTimeout(seekTimer)
+            }
+            video.removeEventListener('seeked', onSeeked)
+            finalize()
+          }
+          seekTimer = window.setTimeout(() => {
+            video.removeEventListener('seeked', onSeeked)
+            finalize()
+          }, 2000)
+          video.addEventListener('seeked', onSeeked)
+          return
+        }
+
+        finalize()
+      }
+
+      video.onloadeddata = () => {
+        if (!resolved && !video.seeking) {
+          finalize()
+        }
       }
 
       video.onerror = () => {
@@ -585,6 +496,9 @@ class Player {
             displayMs: item.displayMs,
             source,
           })
+          if (!started) {
+            return
+          }
           video.currentTime = 0
           video.play().catch((error) => {
             this.log('error', 'Failed to replay loop-enabled video', { error: error.message, itemId: item.id })
@@ -594,6 +508,121 @@ class Player {
 
       video.src = source
     })
+  }
+
+  private async resolveSingleItemResumeDecision(
+    item: TimelineItem,
+    scheduleId?: string
+  ): Promise<PlaybackResumeInstruction> {
+    const context = this.buildPlaybackProgressContext(item, { scheduleId })
+    const startsAt = this.getStringMeta(item, 'scheduleWindowStartsAt') || this.getStringMeta(item, 'scheduleStartsAt')
+    const persisted = startsAt ? null : await this.getPersistedPlaybackProgress(context)
+
+    return resolveScheduledResumePosition({
+      items: [item],
+      startsAt,
+      serverTimeOffsetMs: this.getNumberMeta(item, 'serverTimeOffsetMs') || 0,
+      expected: context,
+      persisted,
+    })
+  }
+
+  private buildPlaybackProgressContext(
+    item: TimelineItem,
+    overrides: Partial<PlaybackProgressContext> = {}
+  ): PlaybackProgressContext {
+    return {
+      scheduleId:
+        overrides.scheduleId ??
+        this.getStringMeta(item, 'scheduleId') ??
+        this.getStringMeta(item, 'presentationId') ??
+        null,
+      snapshotId: overrides.snapshotId ?? this.getStringMeta(item, 'snapshotId') ?? null,
+      sceneId: overrides.sceneId ?? this.getStringMeta(item, 'sceneId') ?? null,
+      slotId: overrides.slotId ?? this.getStringMeta(item, 'slotId') ?? null,
+      itemId: overrides.itemId ?? item.id,
+      mediaId: overrides.mediaId ?? item.mediaId ?? item.objectKey ?? null,
+      scheduleStartsAt:
+        overrides.scheduleStartsAt ??
+        this.getStringMeta(item, 'scheduleWindowStartsAt') ??
+        this.getStringMeta(item, 'scheduleStartsAt') ??
+        null,
+      scheduleEndsAt:
+        overrides.scheduleEndsAt ??
+        this.getStringMeta(item, 'scheduleWindowEndsAt') ??
+        this.getStringMeta(item, 'scheduleEndsAt') ??
+        null,
+      itemDisplayMs: overrides.itemDisplayMs ?? item.displayMs,
+    }
+  }
+
+  private async getPersistedPlaybackProgress(
+    expected: PlaybackProgressIdentity
+  ): Promise<PlaybackProgressEntry | null> {
+    if (!window.darshan?.getPlaybackResumeState) {
+      return null
+    }
+
+    try {
+      return await window.darshan.getPlaybackResumeState(expected)
+    } catch (error) {
+      this.log('debug', 'Playback resume state unavailable', { error: (error as Error).message })
+      return null
+    }
+  }
+
+  private attachVideoProgressReporter(
+    element: HTMLElement,
+    item: TimelineItem,
+    context: PlaybackProgressContext
+  ): void {
+    if (!(element instanceof HTMLVideoElement) || !window.darshan?.reportPlaybackProgress) {
+      return
+    }
+
+    const video = element
+    const sendProgress = (completed: boolean = false) => {
+      window.darshan.reportPlaybackProgress({
+        scheduleId: context.scheduleId ?? null,
+        snapshotId: context.snapshotId ?? null,
+        sceneId: context.sceneId ?? null,
+        slotId: context.slotId ?? null,
+        itemId: context.itemId ?? item.id,
+        mediaId: context.mediaId ?? item.mediaId ?? item.objectKey ?? null,
+        scheduleStartsAt: context.scheduleStartsAt ?? null,
+        scheduleEndsAt: context.scheduleEndsAt ?? null,
+        itemDisplayMs: context.itemDisplayMs ?? item.displayMs,
+        positionMs: Math.max(0, Math.round((Number(video.currentTime) || 0) * 1000)),
+        completed,
+        updatedAt: new Date().toISOString(),
+      })
+    }
+
+    const interval = window.setInterval(() => sendProgress(false), 5000)
+    const onPause = () => sendProgress(false)
+    const onEnded = () => sendProgress(true)
+    video.addEventListener('pause', onPause)
+    video.addEventListener('ended', onEnded)
+
+    const previousCleanup = (video as DisposableMediaNode).__darshanCleanup
+    ;(video as DisposableMediaNode).__darshanCleanup = () => {
+      window.clearInterval(interval)
+      video.removeEventListener('pause', onPause)
+      video.removeEventListener('ended', onEnded)
+      sendProgress(video.ended)
+      previousCleanup?.()
+    }
+  }
+
+  private getStringMeta(item: TimelineItem, key: string): string | undefined {
+    const value = item.meta?.[key]
+    return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+  }
+
+  private getNumberMeta(item: TimelineItem, key: string): number | undefined {
+    const value = item.meta?.[key]
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? numeric : undefined
   }
 
   /**
@@ -672,8 +701,9 @@ class Player {
           slot,
           sceneItem.id,
           scene.startsAt,
+          scene.endsAt,
           typeof sceneItem.meta?.['scheduleId'] === 'string' ? String(sceneItem.meta?.['scheduleId']) : undefined,
-          scene.serverTimeOffsetMs || 0,
+          scene.serverTimeOffsetMs || 0
         )
       )
     })
@@ -823,7 +853,7 @@ class Player {
     const container = this.createMediaPreviewCard(
       item,
       result.kind === 'DOCUMENT' ? 'Document preview' : 'Media playback not supported yet',
-      result.reason,
+      result.reason
     )
 
     this.showElement(container)
@@ -831,6 +861,13 @@ class Player {
   }
 
   private updateStatusOverlay(status: PlayerStatus): void {
+    const displaySecurityLock = shouldDisplaySecurityLock(status)
+    if (displaySecurityLock) {
+      this.showSecurityLock(status)
+    } else {
+      this.hideSecurityLock()
+    }
+
     if (this.statusOverlay) {
       this.statusOverlay.classList.remove('hidden')
     }
@@ -847,7 +884,10 @@ class Player {
     if (this.modeBanner) {
       this.modeBanner.classList.remove('hidden', 'emergency', 'default', 'offline')
 
-      if (status.mode === 'emergency') {
+      if (displaySecurityLock) {
+        this.modeBanner.textContent = 'SECURITY LOCK'
+        this.modeBanner.classList.add('offline')
+      } else if (status.mode === 'emergency') {
         this.modeBanner.textContent = 'EMERGENCY'
         this.modeBanner.classList.add('emergency')
       } else if (status.mode === 'default') {
@@ -864,6 +904,56 @@ class Player {
         this.modeBanner.classList.add('hidden')
       }
     }
+  }
+
+  private showSecurityLock(status: PlayerStatus): void {
+    if (!this.securityLockOverlay) {
+      return
+    }
+
+    const reason = status.securityLock?.reason || 'Backend validation is required before playback can continue.'
+    const lastSuccess = status.securityLock?.lastBackendSuccessAt
+      ? new Date(status.securityLock.lastBackendSuccessAt).toLocaleString()
+      : 'not available'
+
+    this.securityLockOverlay.classList.remove('hidden')
+    this.securityLockOverlay.innerHTML = `
+      <div class="security-lock-card">
+        <div class="security-lock-eyebrow">Playback locked</div>
+        <h1>DARSHAN requires backend validation</h1>
+        <p>${this.escapeHtml(reason)}</p>
+        <div class="security-lock-meta">
+          <span>Last backend validation</span>
+          <strong>${this.escapeHtml(lastSuccess)}</strong>
+        </div>
+        <div class="security-lock-guidance">
+          Connect this player to the approved DARSHAN network. Playback will resume only after backend validation succeeds.
+        </div>
+      </div>
+    `
+  }
+
+  private hideSecurityLock(): void {
+    this.securityLockOverlay?.classList.add('hidden')
+  }
+
+  private escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (char) => {
+      switch (char) {
+        case '&':
+          return '&amp;'
+        case '<':
+          return '&lt;'
+        case '>':
+          return '&gt;'
+        case '"':
+          return '&quot;'
+        case "'":
+          return '&#39;'
+        default:
+          return char
+      }
+    })
   }
 
   /**
@@ -928,47 +1018,32 @@ class Player {
     slot: LayoutSceneSlot,
     sceneId: string,
     sceneStartsAt?: string,
+    sceneEndsAt?: string,
     scheduleId?: string,
-    serverTimeOffsetMs: number = 0,
+    serverTimeOffsetMs: number = 0
   ): () => void {
     const timers = new Set<number>()
     let disposed = false
     let activeElement: HTMLElement | undefined
 
-    const totalDurationMs = slot.items.reduce((sum, item) => sum + Math.max(1, item.displayMs), 0)
-
-    const resolveScenePosition = (): { index: number; remainingMs: number } => {
-      if (slot.items.length === 0) {
-        return { index: 0, remainingMs: 1000 }
-      }
-
-      if (totalDurationMs <= 0) {
-        return { index: 0, remainingMs: slot.items[0]?.displayMs || 1000 }
-      }
-
-      const elapsedSinceSceneStart = sceneStartsAt
-        ? Math.max(0, Date.now() + serverTimeOffsetMs - Date.parse(sceneStartsAt))
-        : 0
-      const cycleOffset = elapsedSinceSceneStart % totalDurationMs
-
-      let consumed = 0
-      for (let index = 0; index < slot.items.length; index += 1) {
-        const item = slot.items[index]
-        if (!item) continue
-        const duration = Math.max(1, item.displayMs)
-        if (cycleOffset < consumed + duration) {
-          return {
-            index,
-            remainingMs: Math.max(250, consumed + duration - cycleOffset),
-          }
-        }
-        consumed += duration
-      }
-
-      return { index: 0, remainingMs: Math.max(250, slot.items[0]?.displayMs || 1000) }
+    const slotContext: PlaybackProgressIdentity = {
+      scheduleId: scheduleId || null,
+      sceneId,
+      slotId: slot.id,
     }
 
-    const renderIntoSlot = async (item: TimelineItem): Promise<HTMLElement> => {
+    const resolveScenePosition = async (): Promise<PlaybackResumeDecision> => {
+      const persisted = sceneStartsAt ? null : await this.getPersistedPlaybackProgress(slotContext)
+      return resolveScheduledResumePosition({
+        items: slot.items,
+        startsAt: sceneStartsAt,
+        serverTimeOffsetMs,
+        expected: slotContext,
+        persisted,
+      })
+    }
+
+    const renderIntoSlot = async (item: TimelineItem, resume?: PlaybackResumeInstruction): Promise<HTMLElement> => {
       const compat = this.getItemCompatibility(item)
       if (compat.status === 'ACCEPTED_BUT_NOT_SUPPORTED_YET') {
         return this.renderDocumentPlaceholder(item, compat)
@@ -982,7 +1057,7 @@ class Player {
         case 'image':
           return await this.renderImage(item)
         case 'video':
-          return await this.renderVideo(item)
+          return await this.renderVideo(item, resume)
         case 'pdf':
           return await this.renderPDF(item)
         case 'office':
@@ -994,7 +1069,11 @@ class Player {
       }
     }
 
-    const showSlotItem = async (index: number, delayOverrideMs?: number): Promise<void> => {
+    const showSlotItem = async (
+      index: number,
+      delayOverrideMs?: number,
+      resumeOverride?: PlaybackResumeDecision
+    ): Promise<void> => {
       if (disposed || slot.items.length === 0) {
         return
       }
@@ -1015,10 +1094,31 @@ class Player {
           source: item.localUrl || item.localPath || item.remoteUrl || item.url || null,
         })
 
-        const nextElement = await renderIntoSlot(item)
+        const resumeDecision =
+          resumeOverride && resumeOverride.index === normalizedIndex
+            ? resumeOverride
+            : resolveScheduledResumePosition({
+                items: [item],
+                startsAt: sceneStartsAt,
+                serverTimeOffsetMs,
+              })
+        const nextElement = await renderIntoSlot(item, resumeDecision)
         if (disposed) {
           this.disposeScheduledElement(nextElement)
           return
+        }
+        if (item.type === 'video') {
+          this.attachVideoProgressReporter(
+            nextElement,
+            item,
+            this.buildPlaybackProgressContext(item, {
+              scheduleId: scheduleId || null,
+              sceneId,
+              slotId: slot.id,
+              scheduleStartsAt: sceneStartsAt || null,
+              scheduleEndsAt: sceneEndsAt || null,
+            })
+          )
         }
         this.applyFitMode(nextElement, item.fit)
         const slotFadeMs = Math.max(0, item.transitionDurationMs || 0)
@@ -1045,21 +1145,30 @@ class Player {
         }
 
         activeElement = nextElement
-        this.setActiveSlotPlayback(slot.id, {
-          scene_id: sceneId,
-          slot_id: slot.id,
-          item_id: item.id,
-          media_id: item.mediaId || item.objectKey || null,
-          schedule_id: scheduleId || null,
-          playback_instance_id: globalThis.crypto.randomUUID(),
-          started_at: new Date(Date.now() + serverTimeOffsetMs).toISOString(),
-        })
-        if (shouldRepeatScheduledItem(slot.items.length, item)) {
-          const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
+        if (resumeDecision.completed) {
+          this.clearActiveSlotPlayback(slot.id)
+        } else {
+          this.setActiveSlotPlayback(slot.id, {
+            scene_id: sceneId,
+            slot_id: slot.id,
+            item_id: item.id,
+            media_id: item.mediaId || item.objectKey || null,
+            schedule_id: scheduleId || null,
+            playback_instance_id: globalThis.crypto.randomUUID(),
+            started_at: new Date(Date.now() + serverTimeOffsetMs).toISOString(),
+          })
+        }
+        if (shouldRepeatScheduledItem(slot.items.length, item) && !resumeDecision.completed) {
+          const delayMs = delayOverrideMs ?? resumeDecision.remainingMs ?? Math.max(250, item.displayMs)
           const timer = window.setTimeout(() => {
             timers.delete(timer)
-            const nextPosition = resolveScenePosition()
-            void showSlotItem(nextPosition.index, nextPosition.remainingMs)
+            if (sceneStartsAt) {
+              void resolveScenePosition().then((nextPosition) => {
+                void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
+              })
+            } else {
+              void showSlotItem(normalizedIndex + 1)
+            }
           }, delayMs)
           timers.add(timer)
         }
@@ -1081,15 +1190,21 @@ class Player {
         const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
         const timer = window.setTimeout(() => {
           timers.delete(timer)
-          const nextPosition = resolveScenePosition()
-          void showSlotItem(nextPosition.index, nextPosition.remainingMs)
+          if (sceneStartsAt) {
+            void resolveScenePosition().then((nextPosition) => {
+              void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
+            })
+          } else {
+            void showSlotItem(normalizedIndex + 1)
+          }
         }, delayMs)
         timers.add(timer)
       }
     }
 
-    const initialPosition = resolveScenePosition()
-    void showSlotItem(initialPosition.index, initialPosition.remainingMs)
+    void resolveScenePosition().then((initialPosition) => {
+      void showSlotItem(initialPosition.index, initialPosition.remainingMs, initialPosition)
+    })
 
     return () => {
       disposed = true
@@ -1171,7 +1286,9 @@ class Player {
 
   private getItemCompatibility(item: TimelineItem): CompatResult {
     const sourceContentType =
-      typeof item.meta?.['source_content_type'] === 'string' ? (item.meta?.['source_content_type'] as string) : undefined
+      typeof item.meta?.['source_content_type'] === 'string'
+        ? (item.meta?.['source_content_type'] as string)
+        : undefined
     const contentType =
       typeof item.meta?.['content_type'] === 'string' ? (item.meta?.['content_type'] as string) : undefined
     const mediaName = typeof item.meta?.['name'] === 'string' ? (item.meta?.['name'] as string) : undefined
@@ -1190,7 +1307,7 @@ class Player {
     return this.createMediaPreviewCard(
       item,
       'Document preview',
-      compat?.reason || 'Document rendering is not available for this file',
+      compat?.reason || 'Document rendering is not available for this file'
     )
   }
 

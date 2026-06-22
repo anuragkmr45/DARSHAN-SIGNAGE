@@ -29,6 +29,8 @@ import { getLifecycleEvents, RuntimeAuthFailureEvent } from './lifecycle-events'
 import { getHttpClient } from './network/http-client'
 import { getPlayerMetrics } from './telemetry/player-metrics'
 import { getRealtimeService } from './realtime-service'
+import { getSecurePlaybackGuard, type SecurePlaybackGuardStatus } from './secure-playback-guard'
+import { clearMediaCacheTargets } from './media-cache-purge'
 
 const logger = getLogger('player-flow')
 const PAIRING_POLL_INTERVAL_MS = 5000
@@ -65,6 +67,8 @@ export class PlayerFlow extends EventEmitter {
   private snapshotListenerBound = false
   private lifecycleEventsBound = false
   private defaultMediaListenerBound = false
+  private securePlaybackGuardBound = false
+  private securePlaybackPurgeCompleted = false
   private screenshotInterval?: NodeJS.Timeout
   private pairingPollTimer?: NodeJS.Timeout
   private bootstrapRetryTimer?: NodeJS.Timeout
@@ -78,6 +82,12 @@ export class PlayerFlow extends EventEmitter {
   }
   private readonly onDefaultMediaChanged = (): void => {
     this.refreshPlaybackStatusFromCurrentState()
+  }
+  private readonly onSecurePlaybackChanged = (status: SecurePlaybackGuardStatus): void => {
+    void this.handleSecurePlaybackStatus(status)
+  }
+  private readonly onSecurePlaybackPurgeRequested = (status: SecurePlaybackGuardStatus): void => {
+    void this.handleSecurePlaybackPurgeRequest(status)
   }
 
   constructor() {
@@ -104,16 +114,21 @@ export class PlayerFlow extends EventEmitter {
     this.bindLifecycleEvents()
     this.bindSnapshotListener()
     this.bindDefaultMediaListener()
+    this.bindSecurePlaybackGuard()
   }
 
   async start(): Promise<void> {
     this.bindLifecycleEvents()
     this.bindSnapshotListener()
+    this.bindSecurePlaybackGuard()
     await this.transitionState('BOOT', {
       error: 'Starting player...',
     })
 
     const persisted = this.store.getState()
+    if (persisted.lastPairingValidatedAt) {
+      getSecurePlaybackGuard().seedBackendSuccess(Date.parse(persisted.lastPairingValidatedAt))
+    }
     const identity = this.pairingService.getStoredIdentityHealth()
     const trustworthyDeviceId = this.pairingService.hasTrustworthyDeviceId()
 
@@ -195,6 +210,7 @@ export class PlayerFlow extends EventEmitter {
     this.stopRuntimeLoops(false)
     this.unbindLifecycleEvents()
     this.unbindDefaultMediaListener()
+    this.unbindSecurePlaybackGuard()
   }
 
   private bindLifecycleEvents(): void {
@@ -244,6 +260,31 @@ export class PlayerFlow extends EventEmitter {
     this.defaultMediaListenerBound = false
   }
 
+  private bindSecurePlaybackGuard(): void {
+    if (this.securePlaybackGuardBound) {
+      return
+    }
+
+    const guard = getSecurePlaybackGuard()
+    guard.on('changed', this.onSecurePlaybackChanged)
+    guard.on('purge-requested', this.onSecurePlaybackPurgeRequested)
+    this.securePlaybackGuardBound = true
+    this.updateStatus({
+      securityLock: this.toPlayerSecurityLockStatus(guard.getStatus()),
+    })
+  }
+
+  private unbindSecurePlaybackGuard(): void {
+    if (!this.securePlaybackGuardBound) {
+      return
+    }
+
+    const guard = getSecurePlaybackGuard()
+    guard.off('changed', this.onSecurePlaybackChanged)
+    guard.off('purge-requested', this.onSecurePlaybackPurgeRequested)
+    this.securePlaybackGuardBound = false
+  }
+
   private restoreCachedPlayback(): void {
     const cachedPlaylist = getSnapshotManager().getCurrentPlaylist()
     if (!cachedPlaylist) {
@@ -269,6 +310,7 @@ export class PlayerFlow extends EventEmitter {
       if (!pairingStatus) {
         return
       }
+      getSecurePlaybackGuard().markBackendSuccess('pairing-status')
 
       this.restoreCachedPlayback()
       await this.probeAuthenticatedSnapshot()
@@ -352,6 +394,8 @@ export class PlayerFlow extends EventEmitter {
   private clearIdentityBoundRuntimeState(): void {
     getPlaybackEngine().stop()
     this.playbackReady = false
+    getSecurePlaybackGuard().reset()
+    this.securePlaybackPurgeCompleted = false
     getSnapshotManager().clearIdentityBoundState()
     getDefaultMediaService().clearIdentityBoundState()
   }
@@ -386,10 +430,31 @@ export class PlayerFlow extends EventEmitter {
     this.updateStatus({
       mode: getDefaultMediaService().getCurrent().media_id ? 'default' : 'empty',
       currentMediaId: undefined,
+      securityLock: this.toPlayerSecurityLockStatus(getSecurePlaybackGuard().getStatus()),
     })
   }
 
   private handlePlaylistUpdate(playlist: PlaybackPlaylist): void {
+    const securePlaybackStatus = getSecurePlaybackGuard().getStatus()
+    if (securePlaybackStatus.locked) {
+      if (this.playbackReady) {
+        getPlaybackEngine().stop()
+        this.playbackReady = false
+      }
+
+      this.updateStatus({
+        mode: 'offline',
+        online: false,
+        scheduleId: playlist.scheduleId,
+        currentMediaId: undefined,
+        lastSnapshotAt: playlist.lastSnapshotAt,
+        backendAvailable: false,
+        error: securePlaybackStatus.reason,
+        securityLock: this.toPlayerSecurityLockStatus(securePlaybackStatus),
+      })
+      return
+    }
+
     if (requiresTimelinePlayback(playlist)) {
       if (!this.playbackReady) {
         void getPlaybackEngine().start()
@@ -407,7 +472,64 @@ export class PlayerFlow extends EventEmitter {
       currentMediaId: requiresTimelinePlayback(playlist) ? this.status.currentMediaId : undefined,
       lastSnapshotAt: playlist.lastSnapshotAt,
       backendAvailable: playlist.mode !== 'offline',
+      securityLock: this.toPlayerSecurityLockStatus(securePlaybackStatus),
     })
+  }
+
+  private async handleSecurePlaybackStatus(status: SecurePlaybackGuardStatus): Promise<void> {
+    if (status.locked) {
+      getPlaybackEngine().stop()
+      this.playbackReady = false
+
+      this.updateStatus({
+        mode: 'offline',
+        online: false,
+        backendAvailable: false,
+        currentMediaId: undefined,
+        error: status.reason,
+        securityLock: this.toPlayerSecurityLockStatus(status),
+      })
+      return
+    }
+
+    this.updateStatus({
+      securityLock: this.toPlayerSecurityLockStatus(status),
+      error: this.state === 'PAIRED_RUNTIME' ? undefined : this.status.error,
+    })
+
+    if (this.state === 'PAIRED_RUNTIME' || this.state === 'OFFLINE_USING_LAST_VALID_PAIRING') {
+      this.refreshPlaybackStatusFromCurrentState()
+    }
+  }
+
+  private async handleSecurePlaybackPurgeRequest(status: SecurePlaybackGuardStatus): Promise<void> {
+    if (this.securePlaybackPurgeCompleted || !status.locked || status.purgeDue !== true) {
+      return
+    }
+
+    this.securePlaybackPurgeCompleted = true
+    try {
+      const removed = clearMediaCacheTargets(getConfigManager().getConfig().cache.path)
+      logger.warn({ removed }, 'Secure offline playback lock purged media cache targets')
+    } catch (error) {
+      this.securePlaybackPurgeCompleted = false
+      logger.error({ error }, 'Secure offline playback lock failed to purge media cache targets')
+    }
+  }
+
+  private toPlayerSecurityLockStatus(status: SecurePlaybackGuardStatus): PlayerStatus['securityLock'] {
+    return {
+      enabled: status.enabled,
+      locked: status.locked,
+      inGrace: status.inGrace,
+      reason: status.reason,
+      lastBackendSuccessAt: status.lastBackendSuccessAt,
+      firstBackendFailureAt: status.firstBackendFailureAt,
+      lockedAt: status.lockedAt,
+      lockAt: status.lockAt,
+      purgeCacheAfterOfflineMs: status.purgeCacheAfterOfflineMs,
+      purgeDue: status.purgeDue,
+    }
   }
 
   private startScreenshotLoop(): void {
@@ -488,6 +610,7 @@ export class PlayerFlow extends EventEmitter {
     }
 
     if (this.pairingService.isTransientRuntimeError(error)) {
+      getSecurePlaybackGuard().markBackendFailure('bootstrap', error)
       if (this.canUseOfflineLastValidatedPairing()) {
         await this.enterOfflineUsingLastValidPairing((error as Error).message || 'Backend is temporarily unavailable')
       } else {

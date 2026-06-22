@@ -13,6 +13,7 @@ import { getProofOfPlayService } from '../pop-service'
 import { getTelemetryService } from '../telemetry/telemetry-service'
 import { TimelineScheduler, ScheduledItem } from './timeline-scheduler'
 import { getSnapshotManager, PlaybackPlaylist } from '../snapshot-manager'
+import { getSecurePlaybackGuard } from '../secure-playback-guard'
 
 const logger = getLogger('playback-engine')
 
@@ -60,6 +61,12 @@ export class PlaybackEngine extends EventEmitter {
     logger.info('Starting playback')
 
     try {
+      if (getSecurePlaybackGuard().isPlaybackLocked()) {
+        logger.warn('Secure offline playback lock is active; timeline playback will not start')
+        this.stop()
+        return
+      }
+
       const snapshotManager = getSnapshotManager()
       const playlist = snapshotManager.getCurrentPlaylist()
 
@@ -199,6 +206,15 @@ export class PlaybackEngine extends EventEmitter {
     const snapshotManager = getSnapshotManager()
 
     snapshotManager.on('playlist-updated', (playlist: PlaybackPlaylist) => {
+      if (getSecurePlaybackGuard().isPlaybackLocked()) {
+        logger.warn(
+          { mode: playlist.mode },
+          'Secure offline playback lock is active; ignoring timeline playlist update'
+        )
+        this.stop()
+        return
+      }
+
       if (!usesTimelinePlayback(playlist)) {
         logger.info({ mode: playlist.mode }, 'Playlist updated for fallback mode, stopping timeline playback')
         this.stop()
@@ -244,7 +260,7 @@ export class PlaybackEngine extends EventEmitter {
     }
 
     // Record proof-of-play start
-    if (this.currentScheduleId && item.type !== 'scene') {
+    if (this.currentScheduleId && item.type !== 'scene' && scheduledItem.resumeDecision?.completed !== true) {
       const popService = getProofOfPlayService()
       this.currentPlaybackInstanceId = randomUUID()
       popService.recordStart({
@@ -396,9 +412,8 @@ export class PlaybackEngine extends EventEmitter {
       loop: item.loop,
       sha256: item.sha256 ?? null,
       transitionDurationMs: item.transitionDurationMs,
-      remoteUrl: item.type === 'url'
-        ? this.normalizeComparableUrl(liveUrl, true)
-        : this.normalizeComparableUrl(liveUrl, false),
+      remoteUrl:
+        item.type === 'url' ? this.normalizeComparableUrl(liveUrl, true) : this.normalizeComparableUrl(liveUrl, false),
       meta: this.normalizeComparableMeta(item.meta),
     }
   }

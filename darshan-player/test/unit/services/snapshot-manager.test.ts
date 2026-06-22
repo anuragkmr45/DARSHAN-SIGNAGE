@@ -8,6 +8,14 @@ const path = require('path')
 const sinon = require('sinon')
 const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils.ts')
 
+function clearRuntimeModuleCache() {
+  Object.keys(require.cache).forEach((key) => {
+    if (key.includes('src/main/services') || key.includes('src/common')) {
+      delete require.cache[key]
+    }
+  })
+}
+
 describe('Snapshot Manager', () => {
   let tempDir: string
   let cacheDir: string
@@ -15,6 +23,7 @@ describe('Snapshot Manager', () => {
   let clock: sinon.SinonFakeTimers | undefined
 
   beforeEach(() => {
+    clearRuntimeModuleCache()
     sandbox = sinon.createSandbox()
     tempDir = createTempDir('snapshot-test-')
     cacheDir = path.join(tempDir, 'cache')
@@ -53,11 +62,7 @@ describe('Snapshot Manager', () => {
     cleanupTempDir(tempDir)
     delete process.env.HEXMON_CONFIG_PATH
 
-    Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services') || key.includes('src/common')) {
-        delete require.cache[key]
-      }
-    })
+    clearRuntimeModuleCache()
   })
 
   it('should treat a 404 snapshot response as intentional no-content instead of offline fallback', async () => {
@@ -182,7 +187,7 @@ describe('Snapshot Manager', () => {
           'media-1': 'https://cdn.example.com/morning.mp4',
           'media-default': 'https://cdn.example.com/default.jpg',
         },
-      }),
+      })
     )
 
     fs.writeFileSync(path.join(mediaDir, 'media-1.mp4'), Buffer.from('scheduled'))
@@ -283,7 +288,7 @@ describe('Snapshot Manager', () => {
           'media-left': 'https://cdn.example.com/left.jpg',
           'media-right': 'https://cdn.example.com/right.mp4',
         },
-      }),
+      })
     )
 
     fs.writeFileSync(path.join(mediaDir, 'media-left.jpg'), Buffer.from('left'))
@@ -342,7 +347,7 @@ describe('Snapshot Manager', () => {
         media_urls: {
           'media-remote-1': 'https://cdn.example.com/remote-asset.jpg',
         },
-      }),
+      })
     )
 
     const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
@@ -368,7 +373,7 @@ describe('Snapshot Manager', () => {
           id: 'sched-clear',
           items: [],
         },
-      }),
+      })
     )
 
     const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')

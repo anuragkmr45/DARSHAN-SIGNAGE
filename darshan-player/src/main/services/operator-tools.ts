@@ -14,6 +14,8 @@ import { getAutostartStatus } from './autostart'
 import { getDeviceStateStore } from './device-state-store'
 import { getSnapshotManager } from './snapshot-manager'
 import { getDefaultMediaService } from './settings/default-media-service'
+import { getPlaybackProgressPath, getPlaybackProgressStore } from './playback-progress-store'
+import { clearMediaCacheTargets } from './media-cache-purge'
 import type { NetworkDiagnostics } from './pairing-service'
 
 const logger = getLogger('operator-tools')
@@ -38,7 +40,10 @@ interface ResetTarget {
 function getAppMetadata() {
   const electronApp = getElectronApp()
   return {
-    version: typeof electronApp?.getVersion === 'function' ? electronApp.getVersion() : process.env['npm_package_version'] || 'unknown',
+    version:
+      typeof electronApp?.getVersion === 'function'
+        ? electronApp.getVersion()
+        : process.env['npm_package_version'] || 'unknown',
     packaged: Boolean(electronApp?.isPackaged),
     execPath: process.execPath,
   }
@@ -168,6 +173,7 @@ function getIdentityBoundPaths() {
     ],
     snapshotMetadataPath: path.join(config.cache.path, 'last-snapshot.json'),
     defaultMediaMetadataPath: path.join(config.cache.path, 'default-media.json'),
+    playbackProgressPath: getPlaybackProgressPath(config.cache.path),
     cacheTargets: [
       path.join(config.cache.path, 'media'),
       path.join(config.cache.path, 'objects'),
@@ -248,6 +254,12 @@ function buildResetPlan(options: ResetPairingCliOptions) {
         exists: pathExists(paths.defaultMediaMetadataPath),
         action: 'delete cached default-media metadata',
       },
+      {
+        type: 'file' as const,
+        path: paths.playbackProgressPath,
+        exists: pathExists(paths.playbackProgressPath),
+        action: 'delete cached playback resume metadata',
+      },
       ...cacheTargets,
     ] satisfies ResetTarget[],
     preserved: paths.preservedTargets.map((targetPath) => ({
@@ -259,30 +271,6 @@ function buildResetPlan(options: ResetPairingCliOptions) {
           : 'not identity-bound; preserved by reset-pairing',
     })),
   }
-}
-
-function clearMediaCacheTargets(cacheRoot: string) {
-  const targets = ['media', 'objects', 'quarantine']
-  const removed: string[] = []
-
-  for (const name of targets) {
-    const targetPath = path.join(cacheRoot, name)
-    if (!pathExists(targetPath)) {
-      continue
-    }
-
-    fs.rmSync(targetPath, { recursive: true, force: true })
-    ensureDir(targetPath)
-    removed.push(targetPath)
-  }
-
-  const legacyIndex = path.join(cacheRoot, 'cache-index.db')
-  if (pathExists(legacyIndex)) {
-    fs.rmSync(legacyIndex, { force: true })
-    removed.push(legacyIndex)
-  }
-
-  return removed
 }
 
 async function getCacheStats(cachePath: string) {
@@ -467,6 +455,7 @@ export async function pairingStatusForCli(): Promise<number> {
         cache: {
           snapshotMetadataPath: identityPaths.snapshotMetadataPath,
           defaultMediaMetadataPath: identityPaths.defaultMediaMetadataPath,
+          playbackProgressPath: identityPaths.playbackProgressPath,
           mediaPath: path.join(config.cache.path, 'media'),
           requestQueuePath: path.join(config.cache.path, 'request-queue.json'),
           requestQueueStatePath: path.join(config.cache.path, 'request-queue.state.json'),
@@ -497,6 +486,7 @@ export async function resetPairingForCli(options: ResetPairingCliOptions | strin
 
   getSnapshotManager().clearIdentityBoundState()
   getDefaultMediaService().clearIdentityBoundState()
+  getPlaybackProgressStore().clear()
   await getPairingService().resetStoredIdentity(reason)
   const cacheRemoved = normalizedOptions.clearCache
     ? clearMediaCacheTargets(getConfigManager().getConfig().cache.path)
@@ -549,7 +539,10 @@ export async function collectLogs() {
   writeJsonFile(path.join(bundleDir, 'displays.json'), displays)
   writeJsonFile(path.join(bundleDir, 'autostart.json'), getAutostartStatus())
   writeJsonFile(path.join(bundleDir, 'cache-stats.json'), cacheStats)
-  writeJsonFile(path.join(bundleDir, 'certificate-metadata.redacted.json'), redactCertificateMetadata(getCertificateManager().getCertificateMetadata()))
+  writeJsonFile(
+    path.join(bundleDir, 'certificate-metadata.redacted.json'),
+    redactCertificateMetadata(getCertificateManager().getCertificateMetadata())
+  )
   writeJsonFile(path.join(bundleDir, 'system-info.json'), {
     timestamp: new Date().toISOString(),
     appVersion: getAppMetadata().version,

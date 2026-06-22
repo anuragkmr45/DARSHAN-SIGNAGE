@@ -24,6 +24,15 @@
       "offlineValidationGraceMs": 604800000,
       "backendFirstRolloutMode": true
     },
+    "security": {
+      "offlinePlaybackPolicy": "standard",
+      "backendRequiredForPlayback": false,
+      "networkSwitchGraceMs": 30000,
+      "playbackLeaseMs": 120000,
+      "lockAfterOfflineMs": 120000,
+      "purgeCacheAfterOfflineMs": 0,
+      "showSecurityLockScreen": true
+    },
     "duplicateIdentity": {
       "enabled": true,
       "enforcement": "warn"

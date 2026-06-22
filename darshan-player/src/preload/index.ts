@@ -15,6 +15,7 @@ import type {
   PairingResponse,
   PairingStatusResponse,
 } from '../common/types'
+import type { PlaybackProgressEntry, PlaybackProgressIdentity } from '../common/playback-policy'
 
 // Define the API that will be exposed to the renderer
 export interface DarshanAPI {
@@ -50,6 +51,8 @@ export interface DarshanAPI {
   // Commands
   executeCommand: (command: string, payload?: unknown) => Promise<unknown>
   reportActivePlayback: (payload: { sceneId?: string; activeSlots: ActiveSlotPlayback[] }) => void
+  reportPlaybackProgress: (payload: PlaybackProgressEntry) => void
+  getPlaybackResumeState: (expected?: PlaybackProgressIdentity) => Promise<PlaybackProgressEntry | null>
 
   // Configuration
   getConfig: () => Promise<AppConfig>
@@ -148,6 +151,14 @@ const darshanApi: DarshanAPI = {
 
   reportActivePlayback: (payload: { sceneId?: string; activeSlots: ActiveSlotPlayback[] }): void => {
     ipcRenderer.send('player-active-playback', payload)
+  },
+
+  reportPlaybackProgress: (payload: PlaybackProgressEntry): void => {
+    ipcRenderer.send('player-playback-progress', payload)
+  },
+
+  getPlaybackResumeState: async (expected?: PlaybackProgressIdentity): Promise<PlaybackProgressEntry | null> => {
+    return await ipcRenderer.invoke('player-playback-resume-state', expected)
   },
 
   // Configuration

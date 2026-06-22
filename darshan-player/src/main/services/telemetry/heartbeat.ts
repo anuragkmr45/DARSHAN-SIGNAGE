@@ -13,6 +13,7 @@ import { getDeviceStateStore } from '../device-state-store'
 import { getLifecycleEvents } from '../lifecycle-events'
 import { getCommandProcessor } from '../command-processor'
 import { getPlayerMetrics } from './player-metrics'
+import { getSecurePlaybackGuard } from '../secure-playback-guard'
 
 const logger = getLogger('heartbeat')
 
@@ -74,9 +75,12 @@ export class HeartbeatService {
       clearTimeout(this.timer)
     }
 
-    this.timer = setTimeout(() => {
-      void this.runScheduledHeartbeat()
-    }, Math.max(0, Math.round(delayMs)))
+    this.timer = setTimeout(
+      () => {
+        void this.runScheduledHeartbeat()
+      },
+      Math.max(0, Math.round(delayMs))
+    )
   }
 
   private async runScheduledHeartbeat(): Promise<void> {
@@ -247,21 +251,18 @@ export class HeartbeatService {
           enforcement?: 'warn' | 'block'
           active_session_count?: number
         }
-      }>(
-        '/api/v1/device/heartbeat',
-        payload,
-        {
-          retryPolicy: {
-            maxAttempts: 3,
-            baseDelayMs: 2000,
-            maxDelayMs: 30000,
-          },
-        }
-      )
+      }>('/api/v1/device/heartbeat', payload, {
+        retryPolicy: {
+          maxAttempts: 3,
+          baseDelayMs: 2000,
+          maxDelayMs: 30000,
+        },
+      })
 
       await getDeviceStateStore().update({
         lastHeartbeatAt: response.timestamp || new Date().toISOString(),
       })
+      getSecurePlaybackGuard().markBackendSuccess('heartbeat')
       if (response.duplicate_identity?.active) {
         await getDeviceStateStore().update({
           duplicateIdentity: {
@@ -293,6 +294,7 @@ export class HeartbeatService {
         error instanceof DeviceApiError &&
         (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN' || error.code === 'NOT_FOUND')
       ) {
+        getSecurePlaybackGuard().markBackendFailure('heartbeat-auth-failure', error)
         getLifecycleEvents().emitRuntimeAuthFailure({
           source: 'heartbeat',
           error,
@@ -302,6 +304,7 @@ export class HeartbeatService {
       }
 
       logger.error({ error }, 'Failed to send heartbeat')
+      getSecurePlaybackGuard().markBackendFailure('heartbeat', error)
 
       // Queue for later if offline
       const requestQueue = getRequestQueue()
