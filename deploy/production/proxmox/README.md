@@ -53,6 +53,140 @@ Keep PostgreSQL, Valkey, MinIO admin, Prometheus, and Grafana restricted by fire
 
 `proxmox/reset-fresh.sh` is intentionally disabled. Do not delete CT disks or service data unless you are intentionally destroying the environment after backup.
 
+## Capacity Plan For 16 GiB RAM / 16 Cores / 1 TB Host
+
+This is the bare-minimum production allocation for one Proxmox host running only these five DARSHAN LXCs. It intentionally does not allocate the full host to containers; Proxmox, package caches, logs, snapshots, emergency restores, filesystem free space, and short spikes need room.
+
+Memory and swap are shown in MiB because Proxmox `pct set -memory` and `pct set -swap` use MiB-style values in normal operation. Disk sizes are root filesystem caps; for real production, CT 201 should eventually move MinIO media/object storage to a separate disk or mount point so media growth does not compete with the database and OS.
+
+### Calculation Rules
+
+Use these formulas first, then adjust after monitoring real usage:
+
+```text
+Total RAM            = 16 GiB = 16384 MiB
+
+Host RAM reserve     = round_up_to_1024(max(2048 MiB, 15% of total RAM))
+                     = round_up_to_1024(max(2048, 16384 * 0.15))
+                     = round_up_to_1024(2458)
+                     = 3072 MiB
+
+RAM available to LXCs = 16384 MiB - 3072 MiB
+                      = 13312 MiB
+
+Host CPU reserve      = max(2 cores, ceil(10% of total cores))
+                      = max(2, ceil(16 * 0.10))
+                      = 2 cores
+
+CPU cap budget for LXCs = 16 cores - 2 cores
+                        = 14 cores
+
+Host/free storage reserve = max(120 GB, 18% of disk)
+                          = max(120, 1000 * 0.18)
+                          = 180 GB
+
+Storage available to LXCs = 1000 GB - 180 GB
+                          = 820 GB
+```
+
+Why these rules:
+
+- PostgreSQL recommends `shared_buffers` around 25% of RAM as a reasonable starting value on a dedicated database server with at least 1 GB RAM, while leaving room for OS cache. With a 4096 MiB data CT, set PostgreSQL `shared_buffers` around `1GB`.
+- Prometheus documents the storage formula `retention_time_seconds * ingested_samples_per_second * bytes_per_sample`, with an average of 1-2 bytes per sample, and recommends keeping retention size at most 80-85% of the allocated Prometheus disk.
+- Grafana's official small deployment baseline is 2 CPU cores, 2-4 GB memory, and 10-20 GB disk for Grafana itself. Because this CT also runs Prometheus, allocate 3072 MiB RAM and 50 GB disk.
+- Valkey keeps data in memory. Size it from peak memory, not average memory, and cap it with `maxmemory` so the host is not surprised by cache growth.
+- Playwright documents `npx playwright install --with-deps chromium` for browser plus OS dependencies, and browser binaries alone take hundreds of MB before OS packages, Node modules, LibreOffice, ffmpeg temp files, and build output. Backend therefore gets 4096 MiB and 70 GB even in the bare-minimum plan.
+- MinIO's current official AIStor production hardware recommendations target large enterprise object-storage deployments, far above this 16 GiB single-host plan. This DARSHAN plan treats MinIO as a small single-node object store and sizes CT 201 mainly from expected media growth and backup needs. It is not a high-availability MinIO design.
+
+### Recommended Bare-Minimum Allocation
+
+| CT | Role | CPU cores | Memory (MiB) | Swap (MiB) | Root disk | Reason |
+|---:|---|---:|---:|---:|---:|---|
+| 201 | Data: PostgreSQL + MinIO | 4 | 4096 | 1024 | 650 GB | Main durable database and media/object storage live here. PostgreSQL can use about 1 GB `shared_buffers`; MinIO and Linux page cache use the rest. |
+| 202 | Valkey | 1 | 1024 | 512 | 20 GB | Realtime/cache/outbox state should stay small. Configure Valkey `maxmemory` around `700mb` with `maxmemory-policy noeviction`. |
+| 203 | Backend API/worker | 4 | 4096 | 1024 | 70 GB | Node build/runtime plus ffmpeg, LibreOffice, Playwright Chromium, uploads, temp files, and logs. |
+| 204 | CMS/nginx | 2 | 1024 | 512 | 30 GB | Vite build can use CPU/RAM; nginx runtime is light. |
+| 205 | Observability: Prometheus + Grafana | 2 | 3072 | 1024 | 50 GB | Grafana small-tier baseline plus Prometheus TSDB/WAL and dashboards. Set Prometheus retention size to about `40GB`. |
+| Host/unallocated | Proxmox reserve | 3 effective spare cores | 3072 | host-managed | 180 GB | Host OS, logs, package cache, snapshots, backups, emergency restore space, and short spikes. |
+
+Totals:
+
+```text
+LXC memory = 4096 + 1024 + 4096 + 1024 + 3072 = 13312 MiB
+Host reserve = 3072 MiB
+Total memory = 16384 MiB
+
+LXC CPU caps = 4 + 1 + 4 + 2 + 2 = 13 cores
+Host/spare   = 3 cores effective headroom from a 16-core host
+
+LXC disk = 650 + 20 + 70 + 30 + 50 = 820 GB
+Host/free disk = 180 GB
+Total disk = 1000 GB
+```
+
+If the Proxmox UI shows GiB instead of decimal GB, a 1 TB disk appears as about 931 GiB. Use the same percentages rather than the exact decimal numbers:
+
+```text
+Host/free reserve ~= 0.18 * 931 GiB = 168 GiB
+LXC disk budget   ~= 931 - 168 = 763 GiB
+```
+
+Scale the table by multiplying each disk allocation by `763 / 820 = 0.93`. That gives roughly: data `605GiB`, Valkey `18GiB`, backend `65GiB`, CMS `28GiB`, observability `47GiB`.
+
+Do not set all CT memory to "unlimited". Fixed memory caps make failures easier to diagnose and preserve the host reserve.
+
+### Proxmox Commands
+
+Use these as the resource caps after CT creation. Replace `local-lvm` and rootfs names with your storage pool/layout.
+
+```bash
+pct set 201 -cores 4 -memory 4096 -swap 1024
+pct resize 201 rootfs 650G
+
+pct set 202 -cores 1 -memory 1024 -swap 512
+pct resize 202 rootfs 20G
+
+pct set 203 -cores 4 -memory 4096 -swap 1024
+pct resize 203 rootfs 70G
+
+pct set 204 -cores 2 -memory 1024 -swap 512
+pct resize 204 rootfs 30G
+
+pct set 205 -cores 2 -memory 3072 -swap 1024
+pct resize 205 rootfs 50G
+```
+
+Recommended service settings after allocation:
+
+```conf
+# CT 201 PostgreSQL, postgresql.conf
+shared_buffers = 1GB
+effective_cache_size = 2GB
+maintenance_work_mem = 256MB
+work_mem = 8MB
+
+# CT 202 Valkey, valkey.conf
+maxmemory 700mb
+maxmemory-policy noeviction
+
+# CT 205 Prometheus systemd args or package config
+--storage.tsdb.retention.time=15d
+--storage.tsdb.retention.size=40GB
+```
+
+### When To Increase
+
+| Symptom | Increase |
+|---|---|
+| Backend fails during `npm run build`, webpage capture, PDF capture, LibreOffice conversion, or ffmpeg jobs | CT 203 RAM to 5-6 GB, CPU to 5-6 cores |
+| PostgreSQL has slow queries, high cache misses, or MinIO uploads contend with DB I/O | CT 201 RAM to 6 GB and disk/I/O first |
+| Media storage reaches 75% of CT 201 disk | Add a dedicated disk/mount for MinIO or enlarge CT 201 |
+| Valkey reports OOM or `used_memory_peak` near `maxmemory` | CT 202 RAM to 2 GB and `maxmemory` to about 1400 MB |
+| Prometheus/Grafana dashboards are slow or Prometheus disk reaches 80% | CT 205 RAM to 4 GB and disk to 80-100 GB |
+| Host memory pressure or swap use appears on Proxmox | Reduce CT memory or add physical RAM; do not starve the host |
+
+If the Proxmox host uses ZFS, reserve more RAM for the host. On a 16 GB host, use a 4 GB host reserve and reduce CT 203 backend to 3 GB until monitoring proves you can give it back.
+
 ## Environment Files
 
 Create these files on the Proxmox host:
@@ -171,11 +305,18 @@ systemctl enable prometheus grafana-server
 These scripts follow the documented service model from the platform tools:
 
 - Proxmox `pct` manual: `pct start`, `pct exec`, `pct push`, and `pct shutdown` are the host-side LXC control commands: https://pve.proxmox.com/pve-docs/pct.1.html
+- Proxmox VE system requirements and host planning guidance: https://pve.proxmox.com/pve-docs/pve-admin-guide.html#system_requirements
 - systemd service units use `ExecStart=` for the service command and `EnvironmentFile=` for env files: https://man7.org/linux/man-pages/man5/systemd.service.5.html and https://man7.org/linux/man-pages/man5/systemd.exec.5.html
 - PostgreSQL documents server startup and service-manager integration: https://www.postgresql.org/docs/current/server-start.html
 - MinIO documents `/minio/health/live` as a liveness health probe: https://min.io/docs/minio/linux/operations/monitoring/healthcheck-probe.html
+- MinIO AIStor hardware requirements show enterprise object-storage targets far above this small single-node plan: https://docs.min.io/aistor/reference/aistor-server/requirements/
 - Prometheus static scrape targets and per-job config are configured under `scrape_configs`: https://prometheus.io/docs/prometheus/latest/configuration/configuration/
+- Prometheus local storage sizing and retention-size guidance: https://prometheus.io/docs/prometheus/latest/storage/
 - Grafana `root_url`/sub-path serving is controlled by server configuration/env equivalents: https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/
+- Grafana minimum and small-tier hardware guidance: https://grafana.com/docs/grafana/latest/setup-grafana/installation/
+- PostgreSQL memory/resource guidance: https://www.postgresql.org/docs/current/runtime-config-resource.html
+- Valkey memory allocation and `maxmemory` guidance: https://valkey.io/topics/memory-optimization/
+- Playwright browser/dependency install guidance: https://playwright.dev/docs/browsers
 
 ## Production Checklist
 
