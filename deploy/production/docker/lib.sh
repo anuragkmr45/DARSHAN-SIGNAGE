@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BASE_DIR="$ROOT_DIR/deploy/production"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+BASE_DIR="$ROOT_DIR/deploy/production/docker"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
-SITE_ENV="$BASE_DIR/.env.local"
+SITE_ENV="${DARSHAN_DOCKER_ENV:-$BASE_DIR/.env}"
+if [[ ! -f "$SITE_ENV" && -f "$ROOT_DIR/deploy/production/.env.local" ]]; then
+  SITE_ENV="$ROOT_DIR/deploy/production/.env.local"
+fi
 
 require_file() {
   local file="$1"
@@ -22,13 +25,31 @@ require_var() {
   fi
 }
 
+yaml_single_quote() {
+  local value="$1"
+  value=${value//\'/\'\'}
+  printf "'%s'" "$value"
+}
+
+prometheus_backend_authorization_block() {
+  if [[ -n "${OBSERVABILITY_METRICS_BEARER_TOKEN:-}" ]]; then
+    cat <<EOF
+    authorization:
+      type: Bearer
+      credentials: $(yaml_single_quote "$OBSERVABILITY_METRICS_BEARER_TOKEN")
+EOF
+  fi
+}
+
 load_production_env() {
-  require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/.env.example to .env.local and edit host IPs."
+  require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/docker/.env.example to deploy/production/docker/.env and edit host IPs."
   require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it before starting the production stack."
 
   set -a
   # shellcheck disable=SC1090
   source "$SITE_ENV"
+  # shellcheck disable=SC1090
+  source "$SERVER_ENV"
   set +a
 
   require_var DATA_HOST
@@ -100,10 +121,31 @@ wait_for_http() {
 }
 
 generate_prometheus_config() {
-  sed \
-    -e "s|__BACKEND_HOST__|${BACKEND_HOST}|g" \
-    -e "s|__BACKEND_PORT__|${API_HOST_PORT}|g" \
-    -e "s|__DATA_HOST__|${DATA_HOST}|g" \
-    -e "s|__MINIO_PORT__|${MINIO_HOST_PORT}|g" \
-    "$BASE_DIR/observability/prometheus.yml.template" > "$BASE_DIR/observability/prometheus.yml"
+  cat > "$BASE_DIR/observability/prometheus.yml" <<EOF
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/darshan/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: darshan-backend
+    metrics_path: /metrics
+$(prometheus_backend_authorization_block)
+    static_configs:
+      - targets:
+          - "${BACKEND_HOST}:${API_HOST_PORT}"
+
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets:
+          - "${DATA_HOST}:${MINIO_HOST_PORT}"
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - "127.0.0.1:9090"
+EOF
 }

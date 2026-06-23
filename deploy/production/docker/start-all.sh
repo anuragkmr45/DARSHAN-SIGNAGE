@@ -19,5 +19,5 @@ CMS:     http://${CMS_HOST}:${CMS_HTTP_PORT}
 MinIO:   http://${DATA_HOST}:${MINIO_HOST_PORT}/minio/health/live
 Grafana: http://${OBSERVABILITY_HOST}:${GRAFANA_PORT}/grafana/
 
-Run: bash deploy/production/health-check.sh
+Run: bash deploy/production/docker/health-check.sh
 EOF
