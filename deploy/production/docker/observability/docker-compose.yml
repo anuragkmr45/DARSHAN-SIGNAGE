@@ -14,7 +14,7 @@ services:
       - "${PROMETHEUS_PORT}:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ../../../deploy/shared/observability/prometheus/rules:/etc/darshan/prometheus/rules:ro
+      - ../../../../deploy/shared/observability/prometheus/rules:/etc/darshan/prometheus/rules:ro
       - prometheus_data:/prometheus
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9090/-/healthy >/dev/null"]
@@ -35,8 +35,8 @@ services:
     ports:
       - "${GRAFANA_PORT}:3000"
     volumes:
-      - ../../../deploy/shared/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../../../deploy/shared/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ../../../../deploy/shared/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../../../deploy/shared/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/grafana/api/health >/dev/null"]

@@ -1,14 +1,14 @@
 services:
   api:
     build:
-      context: ../../../darshan-server
+      context: ../../../../darshan-server
       dockerfile: Dockerfile
       args:
         INSTALL_PLAYWRIGHT_CHROMIUM: ${INSTALL_PLAYWRIGHT_CHROMIUM:-true}
     image: ${BACKEND_IMAGE:-darshan-server-api:production}
     restart: unless-stopped
     env_file:
-      - ../../../darshan-server/.env
+      - ../../../../darshan-server/.env
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -29,7 +29,7 @@ services:
     ports:
       - "${API_HOST_PORT}:3000"
     volumes:
-      - ../../../darshan-server/certs:/app/certs:ro
+      - ../../../../darshan-server/certs:/app/certs:ro
     command: npm start
     extra_hosts:
       - "host.docker.internal:host-gateway"
