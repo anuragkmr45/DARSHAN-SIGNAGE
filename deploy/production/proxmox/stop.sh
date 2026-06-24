@@ -4,10 +4,10 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 load_production_env false
 
-shutdown_ct "$OBSERVABILITY_CT_ID" "darshan-observability"
-shutdown_ct "$CMS_CT_ID" "darshan-cms-prod"
-shutdown_ct "$BACKEND_CT_ID" "darshan-backend"
-shutdown_ct "$VALKEY_CT_ID" "darshan-valkey"
-shutdown_ct "$DATA_CT_ID" "darshan-data"
+shutdown_ct "$OBSERVABILITY_CT_ID" "DARSHAN-OBSERVABILITY"
+shutdown_ct "$CMS_CT_ID" "DARSHAN-CMS"
+shutdown_ct "$BACKEND_CT_ID" "DARSHAN-SERVER"
+shutdown_ct "$VALKEY_CT_ID" "DARSHAN-VALKEY"
+shutdown_ct "$DATA_CT_ID" "DARSHAN-DATA"
 
 echo "DARSHAN Proxmox LXCs are stopped. No data was deleted."

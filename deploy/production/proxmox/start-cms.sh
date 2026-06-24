@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 load_production_env false
 
-ensure_ct_running "$CMS_CT_ID" "darshan-cms-prod"
+ensure_ct_running "$CMS_CT_ID" "DARSHAN-CMS"
 
 echo "Building CMS in CT $CMS_CT_ID"
 if [[ -f "$CMS_ENV" ]]; then

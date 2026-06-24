@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 load_production_env
 
-ensure_ct_running "$BACKEND_CT_ID" "darshan-backend"
+ensure_ct_running "$BACKEND_CT_ID" "DARSHAN-SERVER"
 
 pct_sh "$BACKEND_CT_ID" "cd $(shell_quote "$BACKEND_APP_DIR") && \
   missing=0 && \

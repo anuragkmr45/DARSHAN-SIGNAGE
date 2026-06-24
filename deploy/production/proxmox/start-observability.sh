@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 load_production_env
 
-ensure_ct_running "$OBSERVABILITY_CT_ID" "darshan-observability"
+ensure_ct_running "$OBSERVABILITY_CT_ID" "DARSHAN-OBSERVABILITY"
 
 echo "Generating Prometheus config for LXC static IPs"
 generate_prometheus_config
@@ -21,6 +21,7 @@ Environment="GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL}"
 Environment="GF_SERVER_SERVE_FROM_SUB_PATH=true"
 Environment="GF_SECURITY_ALLOW_EMBEDDING=true"
 Environment="GF_SERVER_HTTP_PORT=${GRAFANA_PORT}"
+Environment="PROMETHEUS_UPSTREAM_URL=${PROMETHEUS_UPSTREAM_URL}"
 EOF
 pct_sh "$OBSERVABILITY_CT_ID" "install -d -m 0755 $(shell_quote "/etc/systemd/system/${GRAFANA_SERVICE_NAME}.service.d")"
 pct_push_file "$OBSERVABILITY_CT_ID" "$GENERATED_DIR/grafana-darshan.conf" "/etc/systemd/system/${GRAFANA_SERVICE_NAME}.service.d/darshan.conf" 0644

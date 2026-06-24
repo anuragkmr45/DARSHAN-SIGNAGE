@@ -5,9 +5,9 @@
     "serverId": "backend-a"
   },
   "http": {
-    "appPublicBaseUrl": "http://192.168.1.204:8080",
-    "corsOrigins": ["http://192.168.1.204:8080"],
-    "socketAllowedOrigins": ["http://192.168.1.204:8080"],
+    "appPublicBaseUrl": "http://192.168.1.102:8080",
+    "corsOrigins": ["http://192.168.1.102:8080"],
+    "socketAllowedOrigins": ["http://192.168.1.102:8080"],
     "socketIoPath": "/socket.io/"
   },
   "realtime": {
@@ -69,12 +69,12 @@
     "dispatchLeaseMs": 60000
   },
   "media": {
-    "endpoint": "http://192.168.1.201:9000",
+    "endpoint": "http://192.168.1.100:9000",
     "region": "us-east-1",
     "cacheReportingEnabled": true
   },
   "observability": {
-    "prometheusUrl": "http://192.168.1.205:9090",
+    "prometheusUrl": "http://192.168.1.104:9090",
     "prometheusTimeoutMs": 1500,
     "grafanaEnabled": true,
     "grafanaEmbedEnabled": true,

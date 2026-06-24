@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 load_production_env false
 
-ensure_ct_running "$VALKEY_CT_ID" "darshan-valkey"
+ensure_ct_running "$VALKEY_CT_ID" "DARSHAN-VALKEY"
 
 echo "Restarting Valkey in CT $VALKEY_CT_ID"
 restart_service "$VALKEY_CT_ID" "$VALKEY_SERVICE_NAME"

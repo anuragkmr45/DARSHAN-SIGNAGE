@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 load_production_env
 
-ensure_ct_running "$BACKEND_CT_ID" "darshan-backend"
+ensure_ct_running "$BACKEND_CT_ID" "DARSHAN-SERVER"
 
 wait_for_tcp "PostgreSQL" "$DATA_HOST" "$POSTGRES_HOST_PORT" 45
 wait_for_http "MinIO" "http://${DATA_HOST}:${MINIO_HOST_PORT}/minio/health/live" 45

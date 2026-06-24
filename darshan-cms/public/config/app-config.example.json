@@ -6,10 +6,10 @@
       "cmsId": "cms-a"
     },
     "api": {
-      "baseUrl": "http://192.168.1.204:8080"
+      "baseUrl": "http://192.168.1.102:8080"
     },
     "realtime": {
-      "socketBaseUrl": "http://192.168.1.204:8080",
+      "socketBaseUrl": "http://192.168.1.102:8080",
       "socketTransports": ["websocket"]
     },
     "diagnostics": {

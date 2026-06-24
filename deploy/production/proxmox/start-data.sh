@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 load_production_env false
 
-ensure_ct_running "$DATA_CT_ID" "darshan-data"
+ensure_ct_running "$DATA_CT_ID" "DARSHAN-DATA"
 
 echo "Restarting data services in CT $DATA_CT_ID"
 restart_service "$DATA_CT_ID" "$POSTGRES_SERVICE_NAME"

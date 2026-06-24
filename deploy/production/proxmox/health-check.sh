@@ -28,11 +28,11 @@ check_service() {
   fi
 }
 
-check_ct "$DATA_CT_ID" "darshan-data"
-check_ct "$VALKEY_CT_ID" "darshan-valkey"
-check_ct "$BACKEND_CT_ID" "darshan-backend"
-check_ct "$CMS_CT_ID" "darshan-cms-prod"
-check_ct "$OBSERVABILITY_CT_ID" "darshan-observability"
+check_ct "$DATA_CT_ID" "DARSHAN-DATA"
+check_ct "$BACKEND_CT_ID" "DARSHAN-SERVER"
+check_ct "$CMS_CT_ID" "DARSHAN-CMS"
+check_ct "$VALKEY_CT_ID" "DARSHAN-VALKEY"
+check_ct "$OBSERVABILITY_CT_ID" "DARSHAN-OBSERVABILITY"
 
 check_service "$DATA_CT_ID" "$POSTGRES_SERVICE_NAME"
 check_service "$DATA_CT_ID" "$MINIO_SERVICE_NAME"
