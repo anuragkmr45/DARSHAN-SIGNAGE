@@ -30,7 +30,7 @@ if [[ -f "$CMS_ENV" ]]; then
   pct_push_file "$CMS_CT_ID" "$CMS_ENV" "$CMS_APP_DIR/.env" 0644
 fi
 if is_enabled "$RUN_CMS_NPM_CI"; then
-  pct_sh "$CMS_CT_ID" "cd $(shell_quote "$CMS_APP_DIR") && if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci; else npm install; fi"
+  pct_sh "$CMS_CT_ID" "cd $(shell_quote "$CMS_APP_DIR") && if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci --include=dev; else npm install --include=dev; fi"
 fi
 pct_sh "$CMS_CT_ID" "cd $(shell_quote "$CMS_APP_DIR") && npm run build"
 

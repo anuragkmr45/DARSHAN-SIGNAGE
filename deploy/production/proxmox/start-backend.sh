@@ -44,7 +44,7 @@ fi
 
 echo "Installing/building backend in CT $BACKEND_CT_ID"
 if is_enabled "$RUN_BACKEND_NPM_CI"; then
-  pct_sh "$BACKEND_CT_ID" "cd $(shell_quote "$BACKEND_APP_DIR") && if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci; else npm install; fi"
+  pct_sh "$BACKEND_CT_ID" "cd $(shell_quote "$BACKEND_APP_DIR") && if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci --include=dev; else npm install --include=dev; fi"
 fi
 pct_sh "$BACKEND_CT_ID" "cd $(shell_quote "$BACKEND_APP_DIR") && npm run build"
 

@@ -6,18 +6,69 @@ load_production_env
 
 ensure_ct_running "$BACKEND_CT_ID" "DARSHAN-SERVER"
 
-pct_sh "$BACKEND_CT_ID" "cd $(shell_quote "$BACKEND_APP_DIR") && \
-  missing=0 && \
-  node_major=\"\$(node -p \\\"process.versions.node.split('.')[0]\\\")\" && \
-  if [ \"\$node_major\" != \"20\" ]; then echo \"MISSING Node 20 runtime, found \$(node --version)\" >&2; missing=1; else echo \"OK node: \$(node --version)\"; fi && \
-  echo \"OK npm: \$(npm --version)\" && \
-  check_tool() { name=\"\$1\"; if command -v \"\$name\" >/dev/null 2>&1; then echo \"OK \$name: \$(command -v \"\$name\")\"; else echo \"MISSING \$name\" >&2; missing=1; fi; } && \
-  check_any_tool() { label=\"\$1\"; shift; for name in \"\$@\"; do if command -v \"\$name\" >/dev/null 2>&1; then echo \"OK \$label: \$(command -v \"\$name\")\"; return 0; fi; done; echo \"MISSING \$label\" >&2; missing=1; } && \
-  check_tool ffmpeg && \
-  check_any_tool libreoffice libreoffice soffice && \
-  check_tool pg_dump && \
-  check_tool tar && \
-  PLAYWRIGHT_BROWSERS_PATH=/ms-playwright node -e \"import('playwright').then(async ({ chromium }) => { console.log(chromium.executablePath()); const browser = await chromium.launch({ headless: true }); await browser.close(); }).catch((error) => { console.error(error); process.exit(1); })\" && \
-  test \"\$missing\" = \"0\""
+pct_exec "$BACKEND_CT_ID" bash -s -- "$BACKEND_APP_DIR" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+app_dir="$1"
+cd "$app_dir"
+
+missing=0
+
+node_major="$(node -p "process.versions.node.split('.')[0]")"
+if [ "$node_major" != "20" ]; then
+  echo "MISSING Node 20 runtime, found $(node --version)" >&2
+  missing=1
+else
+  echo "OK node: $(node --version)"
+fi
+
+echo "OK npm: $(npm --version)"
+
+check_tool() {
+  local name="$1"
+  local path
+  if path="$(command -v "$name")"; then
+    echo "OK $name: $path"
+  else
+    echo "MISSING $name" >&2
+    missing=1
+  fi
+}
+
+check_any_tool() {
+  local label="$1"
+  local name
+  local path
+  shift
+  for name in "$@"; do
+    if path="$(command -v "$name")"; then
+      echo "OK $label: $path"
+      return 0
+    fi
+  done
+  echo "MISSING $label" >&2
+  missing=1
+}
+
+check_tool ffmpeg
+check_any_tool libreoffice libreoffice soffice
+check_tool pg_dump
+check_tool tar
+
+PLAYWRIGHT_BROWSERS_PATH=/ms-playwright node <<'NODE_SCRIPT'
+import('playwright')
+  .then(async ({ chromium }) => {
+    console.log(chromium.executablePath());
+    const browser = await chromium.launch({ headless: true });
+    await browser.close();
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+NODE_SCRIPT
+
+test "$missing" = "0"
+REMOTE_SCRIPT
 
 echo "OK backend runtime tools in CT $BACKEND_CT_ID"
