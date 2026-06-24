@@ -23,6 +23,25 @@ else
   echo "Continuing with env/default config only."
 fi
 
+if ! pct_sh "$BACKEND_CT_ID" "test -d $(shell_quote "$BACKEND_APP_DIR")"; then
+  cat >&2 <<EOF
+Missing backend app directory in CT $BACKEND_CT_ID: $BACKEND_APP_DIR
+
+Copy or clone this repository into CT $BACKEND_CT_ID at REMOTE_REPO_DIR
+before running the backend startup.
+EOF
+  exit 1
+fi
+
+if ! pct_sh "$BACKEND_CT_ID" "command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1"; then
+  cat >&2 <<EOF
+Missing Node.js/npm in CT $BACKEND_CT_ID.
+
+Install Node.js 20 and npm inside CT $BACKEND_CT_ID before running the backend startup.
+EOF
+  exit 1
+fi
+
 echo "Installing/building backend in CT $BACKEND_CT_ID"
 if is_enabled "$RUN_BACKEND_NPM_CI"; then
   pct_sh "$BACKEND_CT_ID" "cd $(shell_quote "$BACKEND_APP_DIR") && npm ci"
