@@ -59,7 +59,24 @@ pct_sh "$BACKEND_CT_ID" "if id darshan >/dev/null 2>&1; then chown -R darshan:da
 "$BASE_DIR/check-backend-runtime-tools.sh"
 
 echo "Waiting for PostgreSQL readiness from the backend CT"
-pct_sh "$BACKEND_CT_ID" "set -a && . $(shell_quote "$BACKEND_ENV_PATH") && set +a && until pg_isready -d \"\$DATABASE_URL\"; do sleep 2; done"
+pct_exec "$BACKEND_CT_ID" bash -s -- "$BACKEND_ENV_PATH" <<'REMOTE_SCRIPT'
+set -euo pipefail
+
+backend_env_path="$1"
+set -a
+. "$backend_env_path"
+set +a
+
+for _ in $(seq 1 45); do
+  if pg_isready -d "$DATABASE_URL"; then
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "PostgreSQL did not become ready from the backend CT after 90 seconds" >&2
+exit 1
+REMOTE_SCRIPT
 
 echo "Running backend schema/bootstrap"
 if pct_sh "$BACKEND_CT_ID" "cd $(shell_quote "$BACKEND_APP_DIR") && node -e \"const p=require('./package.json'); process.exit(p.scripts && p.scripts['db:migrate'] ? 0 : 1)\""; then
