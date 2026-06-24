@@ -38,6 +38,21 @@ fi
 
 echo "Restarting Valkey in CT $VALKEY_CT_ID"
 restart_service "$VALKEY_CT_ID" "$VALKEY_SERVICE_NAME"
-wait_for_tcp "Valkey" "$VALKEY_HOST" "$VALKEY_HOST_PORT" 30
 pct_exec "$VALKEY_CT_ID" "$VALKEY_CLI_NAME" ping >/dev/null
 echo "OK Valkey ping"
+
+if ! wait_for_tcp "Valkey" "$VALKEY_HOST" "$VALKEY_HOST_PORT" 30; then
+  cat >&2 <<EOF
+Valkey is running inside CT $VALKEY_CT_ID, but ${VALKEY_HOST}:${VALKEY_HOST_PORT} is not reachable.
+
+Check whether Valkey is listening only on localhost:
+  pct exec $VALKEY_CT_ID -- bash -lc 'ss -ltnp | grep :${VALKEY_HOST_PORT} || true'
+
+If it listens on 127.0.0.1 only, update the Valkey config inside CT $VALKEY_CT_ID
+to bind to the CT network interface, then restart $VALKEY_SERVICE_NAME.
+Common config files:
+  /etc/valkey/valkey.conf
+  /etc/redis/redis.conf
+EOF
+  exit 1
+fi
