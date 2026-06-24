@@ -6,9 +6,6 @@ BASE_DIR="$PRODUCTION_DIR/proxmox"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 CMS_ENV="$ROOT_DIR/darshan-cms/.env"
 SITE_ENV="${DARSHAN_PRODUCTION_ENV:-$PRODUCTION_DIR/.env}"
-if [[ ! -f "$SITE_ENV" && -f "$PRODUCTION_DIR/.env.local" ]]; then
-  SITE_ENV="$PRODUCTION_DIR/.env.local"
-fi
 GENERATED_DIR="${DARSHAN_PROXMOX_GENERATED_DIR:-$PRODUCTION_DIR/.generated/proxmox}"
 
 require_file() {
@@ -64,7 +61,7 @@ yaml_single_quote() {
 
 load_production_env() {
   local require_server_env="${1:-true}"
-  require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/.env.example to deploy/production/.env and edit CT IDs/IPs."
+  require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/.env.example to deploy/production/.env and edit CT IDs/IPs. Do not use deploy/production/.env.local for Proxmox; that file is used by the Docker-style local production path."
   if [[ "$require_server_env" == "true" ]]; then
     require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it with production secrets and LXC service URLs."
   fi
@@ -106,6 +103,8 @@ load_production_env() {
   export REMOTE_REPO_DIR="${REMOTE_REPO_DIR:-/opt/darshan/DARSHAN-SIGNAGE}"
   export BACKEND_APP_DIR="${BACKEND_APP_DIR:-$REMOTE_REPO_DIR/darshan-server}"
   export CMS_APP_DIR="${CMS_APP_DIR:-$REMOTE_REPO_DIR/darshan-cms}"
+  export BACKEND_CONFIG_SOURCE="${BACKEND_CONFIG_SOURCE:-$ROOT_DIR/darshan-server/config/backend.production.example.json}"
+  export BACKEND_CONFIG_PATH="${BACKEND_CONFIG_PATH:-/etc/darshan/server/config.json}"
   export CMS_WEB_ROOT="${CMS_WEB_ROOT:-/usr/share/nginx/html}"
   export CMS_NGINX_CONFIG_PATH="${CMS_NGINX_CONFIG_PATH:-/etc/nginx/conf.d/darshan-cms.conf}"
   export BACKEND_ENV_PATH="${BACKEND_ENV_PATH:-/etc/darshan/backend.env}"
@@ -142,7 +141,6 @@ load_production_env() {
   if [[ "$require_server_env" == "true" ]]; then
     require_var DATABASE_URL
     require_var VALKEY_URL
-    require_var MINIO_ENDPOINT
   fi
 }
 

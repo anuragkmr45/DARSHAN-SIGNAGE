@@ -44,7 +44,7 @@ No WebSocket semantics, Electron realtime/adaptive polling, mobile adapters, or 
 - `darshan-server/src/config/apiEndpoints.ts`
 - `darshan-server/src/config/index.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `darshan-server/src/routes/device-telemetry-media-cache-report.test.ts`
 - `darshan-player/src/main/services/media-cache-reporter.ts`
 - `darshan-player/src/main/services/cache/cache-manager.ts`

@@ -40,7 +40,7 @@ This is not production approval. GP-6 E2E coverage and on-prem two-player runtim
 - `darshan-server/src/routes/device-pairing.test.ts`
 - `darshan-server/src/config/index.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `darshan-player/src/common/types.ts`
 - `darshan-player/src/main/services/device-state-store.ts`
 - `darshan-player/src/main/services/pairing-service.ts`

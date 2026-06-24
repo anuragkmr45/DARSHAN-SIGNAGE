@@ -99,7 +99,7 @@ Phase 1 approval blockers are fixed. The implementation now has backend/player `
 - `darshan-server/src/config/index.ts`
 - `darshan-server/src/config/apiEndpoints.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `darshan-server/src/routes/device-telemetry-commands.test.ts`
 - `darshan-player/src/main/services/command-processor.ts`
 - `darshan-player/test/unit/services/command-processor.test.ts`
@@ -185,7 +185,7 @@ The new device endpoint `GET /api/v1/device/:deviceId/desired-state` returns ver
 - `darshan-server/src/config/index.ts`
 - `darshan-server/src/config/apiEndpoints.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `darshan-server/src/routes/device-telemetry-commands.test.ts`
 - `darshan-server/src/services/playback-refresh-dispatch.test.ts`
 
@@ -197,7 +197,7 @@ The new device endpoint `GET /api/v1/device/:deviceId/desired-state` returns ver
 | Additive desired-state schema | `device_desired_state` and history table | yes | VERIFIED_COMPLETE | `schema.ts`; migration `0031_command_outbox_desired_state.sql` | One current row per screen plus history rows. |
 | Transactional command/state/outbox write | Command creation writes status history, desired state, desired-state history, and outbox in one DB transaction | yes | VERIFIED_COMPLETE | `command-lifecycle-service.ts`; `device-telemetry-commands.test.ts`; `playback-refresh-dispatch.test.ts` | Covers admin command creation and refresh commands used by publish/default/emergency paths. |
 | Desired-state REST endpoint | Device-authenticated endpoint returns versions and REST hints only | yes | VERIFIED_COMPLETE | `device-telemetry.ts`; `apiEndpoints.ts`; command route test | Electron Phase 4 now consumes this endpoint for reconciliation. |
-| Feature flags | QA/prod can disable additive write paths | yes | VERIFIED_COMPLETE | `config/index.ts`; `.env.example`; `.env.qa.example` | `COMMAND_OUTBOX_WRITE_ENABLED`, `DEVICE_DESIRED_STATE_ENABLED`. |
+| Feature flags | QA/prod can disable additive write paths | yes | VERIFIED_COMPLETE | `config/index.ts`; `.env.example`; `.env.example` | `COMMAND_OUTBOX_WRITE_ENABLED`, `DEVICE_DESIRED_STATE_ENABLED`. |
 | WebSocket not implemented in Phase 2 | No WS gateway/dispatcher added during Phase 2 | yes | VERIFIED_COMPLETE | Code review | Phase 3 has since implemented backend gateway/dispatcher. |
 | Electron realtime not implemented | No Electron RealtimeService/adaptive polling changes during Phase 2 | yes | VERIFIED_COMPLETE | Code review | Phase 4 has since implemented the player side. |
 
@@ -262,7 +262,7 @@ The dispatcher atomically claims due outbox rows by moving them to `DISPATCHING`
 - `darshan-server/src/server/index.ts`
 - `darshan-server/src/config/index.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `docs/implementation/realtime-sync-phase-3-handoff.md`
 - `docs/implementation/realtime-sync-project-status.md`
 - `docs/implementation/realtime-sync-task-register.md`
@@ -283,7 +283,7 @@ The dispatcher atomically claims due outbox rows by moving them to `DISPATCHING`
 | Outbox dispatcher input | Dispatcher consumes `command_outbox` rows | yes | VERIFIED_COMPLETE | `outbox-dispatcher.ts`; `device-gateway.test.ts` | No direct DB-state push from command creation. |
 | Atomic dispatcher claim | Prevent concurrent duplicate dispatcher claim | yes | VERIFIED_COMPLETE | `outbox-dispatcher.ts` | Rows move to `DISPATCHING` in the claim transaction. |
 | Retry/defer behavior | No connected device leaves row retryable | yes | VERIFIED_COMPLETE | `device-gateway.test.ts` | Row returns to `PENDING`, increments attempt, sets `next_attempt_at` and `last_error`. |
-| Feature flags | Disabled by default in env examples | yes | VERIFIED_COMPLETE | `config/index.ts`; `.env.example`; `.env.qa.example` | `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`. |
+| Feature flags | Disabled by default in env examples | yes | VERIFIED_COMPLETE | `config/index.ts`; `.env.example`; `.env.example` | `REALTIME_SYNC_ENABLED=false`, `OUTBOX_DISPATCH_ENABLED=false`. |
 | REST authoritative behavior | Polling/heartbeat command path still passes | yes | VERIFIED_COMPLETE | `device-telemetry-commands.test.ts` | Existing command tests still pass. |
 | Electron/CMS/mobile untouched | Do not implement later phases | yes | VERIFIED_COMPLETE | Code review | No Electron RealtimeService/adaptive polling/CMS/mobile changes in Phase 3. |
 | Dedicated metrics/health | Active connection/outbox lag metrics | partial | VERIFIED_PARTIAL | Existing logs and registry stats only | Dedicated metrics deferred/required before QA/prod enablement. |
@@ -490,7 +490,7 @@ Large media, screenshots, logs, snapshots, and PoP are still not sent over WebSo
 - `darshan-server/src/config/apiEndpoints.ts`
 - `darshan-server/src/config/index.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `darshan-server/src/routes/device-telemetry-media-cache-report.test.ts`
 - `darshan-player/src/main/services/media-cache-reporter.ts`
 - `darshan-player/src/main/services/cache/cache-manager.ts`

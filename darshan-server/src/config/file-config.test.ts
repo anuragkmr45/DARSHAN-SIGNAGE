@@ -206,6 +206,60 @@ describe('backend file config loader', () => {
     expect(loaded.env.MINIO_REGION).toBe('us-east-1');
   });
 
+  it('maps non-secret runtime feature flags from config file', () => {
+    const configFile = makeTempConfigFile({
+      security: {
+        authCookieSecure: true,
+        csrfEnabled: true,
+        loginMaxAttempts: 6,
+        loginLockoutWindowSeconds: 1200,
+        maxUploadMb: 500,
+        storageQuotaBytes: 0,
+        swaggerUiEnabled: false,
+      },
+      deviceSocketAuth: {
+        legacyAllowed: true,
+        signedEnabled: true,
+        maxClockSkewMs: 300000,
+        replayProtectionEnabled: true,
+        replayCacheTtlMs: 300000,
+        replayFailClosed: false,
+      },
+      commands: {
+        leaseMs: 60000,
+        maxAttempts: 5,
+        defaultExpiresMs: 86400000,
+        emergencyExpiresMs: 300000,
+        outboxWriteEnabled: true,
+        desiredStateEnabled: true,
+      },
+      outbox: {
+        dispatchEnabled: true,
+        batchSize: 100,
+        dispatchIntervalMs: 1000,
+        dispatchLeaseMs: 60000,
+      },
+      media: {
+        cacheReportingEnabled: true,
+      },
+    });
+
+    const loaded = loadBackendFileConfigEnv({ DARSHAN_CONFIG_FILE: configFile });
+
+    expect(loaded.env.AUTH_COOKIE_SECURE).toBe('true');
+    expect(loaded.env.CSRF_ENABLED).toBe('true');
+    expect(loaded.env.LOGIN_MAX_ATTEMPTS).toBe('6');
+    expect(loaded.env.MAX_UPLOAD_MB).toBe('500');
+    expect(loaded.env.ENABLE_SWAGGER_UI).toBe('false');
+    expect(loaded.env.DEVICE_SOCKET_SIGNED_AUTH_ENABLED).toBe('true');
+    expect(loaded.env.DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED).toBe('false');
+    expect(loaded.env.COMMAND_OUTBOX_WRITE_ENABLED).toBe('true');
+    expect(loaded.env.DEVICE_DESIRED_STATE_ENABLED).toBe('true');
+    expect(loaded.env.OUTBOX_DISPATCH_ENABLED).toBe('true');
+    expect(loaded.env.OUTBOX_DISPATCH_BATCH_SIZE).toBe('100');
+    expect(loaded.env.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED).toBe('true');
+  });
+
   it('builds a redacted diagnostics summary without secret values', () => {
     const summary = buildRedactedRuntimeConfigSummary(
       {

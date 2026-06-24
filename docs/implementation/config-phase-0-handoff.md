@@ -29,7 +29,7 @@ Excluded:
 - `darshan-server/src/config/index.ts`
 - `darshan-server/src/device-auth/config.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `darshan-player/src/common/config.ts`
 - `darshan-player/src/common/platform-paths.ts`
 - `darshan-player/config.example.json`

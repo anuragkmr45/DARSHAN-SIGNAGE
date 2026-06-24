@@ -86,10 +86,54 @@ const backendFileConfigSchema = z
       })
       .strict()
       .optional(),
+    security: z
+      .object({
+        authCookieSecure: z.boolean().optional(),
+        csrfEnabled: z.boolean().optional(),
+        loginMaxAttempts: z.number().int().positive().optional(),
+        loginLockoutWindowSeconds: z.number().int().positive().optional(),
+        maxUploadMb: z.number().int().positive().optional(),
+        storageQuotaBytes: z.number().int().nonnegative().optional(),
+        swaggerUiEnabled: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    deviceSocketAuth: z
+      .object({
+        legacyAllowed: z.boolean().optional(),
+        signedEnabled: z.boolean().optional(),
+        maxClockSkewMs: z.number().int().positive().optional(),
+        replayProtectionEnabled: z.boolean().optional(),
+        replayCacheTtlMs: z.number().int().positive().optional(),
+        replayFailClosed: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    commands: z
+      .object({
+        leaseMs: z.number().int().positive().optional(),
+        maxAttempts: z.number().int().positive().optional(),
+        defaultExpiresMs: z.number().int().positive().optional(),
+        emergencyExpiresMs: z.number().int().positive().optional(),
+        outboxWriteEnabled: z.boolean().optional(),
+        desiredStateEnabled: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    outbox: z
+      .object({
+        dispatchEnabled: z.boolean().optional(),
+        batchSize: z.number().int().positive().optional(),
+        dispatchIntervalMs: z.number().int().positive().optional(),
+        dispatchLeaseMs: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
     media: z
       .object({
         endpoint: urlWithoutCredentials.optional(),
         region: z.string().trim().min(1).optional(),
+        cacheReportingEnabled: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -281,6 +325,37 @@ export function mapBackendFileConfigToEnv(config: BackendFileConfig): Record<str
   putIfDefined(env, 'DEVICE_SESSION_LEASE_MS', config.duplicateIdentity?.sessionLeaseMs);
   putIfDefined(env, 'DEVICE_SESSION_RESTART_GRACE_MS', config.duplicateIdentity?.restartGraceMs);
 
+  putIfDefined(env, 'AUTH_COOKIE_SECURE', config.security?.authCookieSecure);
+  putIfDefined(env, 'CSRF_ENABLED', config.security?.csrfEnabled);
+  putIfDefined(env, 'LOGIN_MAX_ATTEMPTS', config.security?.loginMaxAttempts);
+  putIfDefined(env, 'LOGIN_LOCKOUT_WINDOW_SECONDS', config.security?.loginLockoutWindowSeconds);
+  putIfDefined(env, 'MAX_UPLOAD_MB', config.security?.maxUploadMb);
+  putIfDefined(env, 'STORAGE_QUOTA_BYTES', config.security?.storageQuotaBytes);
+  putIfDefined(env, 'ENABLE_SWAGGER_UI', config.security?.swaggerUiEnabled);
+
+  putIfDefined(env, 'DEVICE_SOCKET_LEGACY_AUTH_ALLOWED', config.deviceSocketAuth?.legacyAllowed);
+  putIfDefined(env, 'DEVICE_SOCKET_SIGNED_AUTH_ENABLED', config.deviceSocketAuth?.signedEnabled);
+  putIfDefined(env, 'DEVICE_SOCKET_AUTH_MAX_CLOCK_SKEW_MS', config.deviceSocketAuth?.maxClockSkewMs);
+  putIfDefined(
+    env,
+    'DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED',
+    config.deviceSocketAuth?.replayProtectionEnabled
+  );
+  putIfDefined(env, 'DEVICE_SOCKET_AUTH_REPLAY_CACHE_TTL_MS', config.deviceSocketAuth?.replayCacheTtlMs);
+  putIfDefined(env, 'DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED', config.deviceSocketAuth?.replayFailClosed);
+
+  putIfDefined(env, 'COMMAND_LEASE_MS', config.commands?.leaseMs);
+  putIfDefined(env, 'COMMAND_MAX_ATTEMPTS', config.commands?.maxAttempts);
+  putIfDefined(env, 'COMMAND_DEFAULT_EXPIRES_MS', config.commands?.defaultExpiresMs);
+  putIfDefined(env, 'COMMAND_EMERGENCY_EXPIRES_MS', config.commands?.emergencyExpiresMs);
+  putIfDefined(env, 'COMMAND_OUTBOX_WRITE_ENABLED', config.commands?.outboxWriteEnabled);
+  putIfDefined(env, 'DEVICE_DESIRED_STATE_ENABLED', config.commands?.desiredStateEnabled);
+
+  putIfDefined(env, 'OUTBOX_DISPATCH_ENABLED', config.outbox?.dispatchEnabled);
+  putIfDefined(env, 'OUTBOX_DISPATCH_BATCH_SIZE', config.outbox?.batchSize);
+  putIfDefined(env, 'OUTBOX_DISPATCH_INTERVAL_MS', config.outbox?.dispatchIntervalMs);
+  putIfDefined(env, 'OUTBOX_DISPATCH_LEASE_MS', config.outbox?.dispatchLeaseMs);
+
   if (config.media?.endpoint) {
     const endpoint = parseMediaEndpoint(config.media.endpoint);
     putIfDefined(env, 'MINIO_ENDPOINT', endpoint.host);
@@ -288,6 +363,7 @@ export function mapBackendFileConfigToEnv(config: BackendFileConfig): Record<str
     putIfDefined(env, 'MINIO_USE_SSL', endpoint.useSsl);
   }
   putIfDefined(env, 'MINIO_REGION', config.media?.region);
+  putIfDefined(env, 'DARSHAN_MEDIA_CACHE_REPORTING_ENABLED', config.media?.cacheReportingEnabled);
 
   putIfDefined(env, 'OBSERVABILITY_PROMETHEUS_BASE_URL', config.observability?.prometheusUrl);
   putIfDefined(env, 'OBSERVABILITY_PROMETHEUS_TIMEOUT_MS', config.observability?.prometheusTimeoutMs);

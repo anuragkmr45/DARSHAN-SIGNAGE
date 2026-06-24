@@ -35,7 +35,7 @@ Phase status: `APPROVED_WITH_CONDITIONS`
 - `darshan-server/src/realtime/device-gateway.test.ts`
 - `darshan-server/src/config/index.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 
 ## Tests Run
 

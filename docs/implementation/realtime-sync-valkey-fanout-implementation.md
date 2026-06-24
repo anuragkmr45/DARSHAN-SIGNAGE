@@ -42,7 +42,7 @@ This work does not implement Phase 9, mobile/TV adapters, source-of-truth change
 - `darshan-server/src/observability/index.ts`
 - `darshan-server/src/observability/metrics.test.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 
 ## Runtime Behavior
 

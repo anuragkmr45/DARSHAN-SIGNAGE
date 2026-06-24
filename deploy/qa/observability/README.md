@@ -1,10 +1,12 @@
 # QA Observability Deployment Notes
 
-QA uses the same VM1 / VM2 / VM3 topology pattern as production.
+QA uses the same Proxmox LXC role pattern as production. Older bundle labels may still say VM1 / VM2 / VM3, but QA evidence should be collected against the five role split unless a test explicitly documents a Docker-only exception.
 
-- QA VM1 data: exporters and native MinIO metrics
-- QA VM2 backend: Prometheus, optional Alertmanager, backend `/metrics`, VM exporters
-- QA VM3 CMS: Grafana behind `/grafana/`
+- QA data LXC: exporters and native MinIO metrics
+- QA Valkey LXC: Valkey health and realtime bus checks
+- QA backend LXC: backend `/metrics`, runtime dependency checks, optional host exporters
+- QA CMS LXC: nginx CMS and `/grafana/` proxy checks
+- QA observability LXC: Prometheus, Grafana, optional Alertmanager
 
 The QA topology intentionally mirrors production so observability assets, runbooks, and promotions stay aligned.
 

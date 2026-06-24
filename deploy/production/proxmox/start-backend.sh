@@ -14,6 +14,15 @@ echo "Publishing backend env into CT $BACKEND_CT_ID"
 pct_sh "$BACKEND_CT_ID" "install -d -m 0750 $(shell_quote "$(dirname "$BACKEND_ENV_PATH")")"
 pct_push_file "$BACKEND_CT_ID" "$SERVER_ENV" "$BACKEND_ENV_PATH" 0600
 
+if [[ -f "$BACKEND_CONFIG_SOURCE" ]]; then
+  echo "Publishing backend JSON config into CT $BACKEND_CT_ID"
+  pct_sh "$BACKEND_CT_ID" "install -d -m 0755 $(shell_quote "$(dirname "$BACKEND_CONFIG_PATH")")"
+  pct_push_file "$BACKEND_CT_ID" "$BACKEND_CONFIG_SOURCE" "$BACKEND_CONFIG_PATH" 0644
+else
+  echo "Backend JSON config source not found: $BACKEND_CONFIG_SOURCE"
+  echo "Continuing with env/default config only."
+fi
+
 echo "Installing/building backend in CT $BACKEND_CT_ID"
 if is_enabled "$RUN_BACKEND_NPM_CI"; then
   pct_sh "$BACKEND_CT_ID" "cd $(shell_quote "$BACKEND_APP_DIR") && npm ci"

@@ -185,7 +185,6 @@ darshan-server/src/routes/screens.ts
 darshan-server/src/routes/screen-groups.ts
 darshan-server/src/config/index.ts
 darshan-server/.env.example
-darshan-server/.env.qa.example
 darshan-player/src/main/services/command-processor.ts
 docs/architecture/command-lifecycle.md
 docs/implementation/realtime-sync-project-status.md
@@ -351,7 +350,6 @@ darshan-server/src/routes/screens.ts
 darshan-server/src/routes/screen-groups.ts
 darshan-server/src/config/index.ts
 darshan-server/.env.example
-darshan-server/.env.qa.example
 darshan-player/src/main/services/command-processor.ts
 docs/architecture/command-lifecycle.md
 docs/implementation/realtime-sync-project-status.md

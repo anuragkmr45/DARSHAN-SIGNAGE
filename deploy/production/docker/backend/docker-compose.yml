@@ -7,29 +7,35 @@ services:
         INSTALL_PLAYWRIGHT_CHROMIUM: ${INSTALL_PLAYWRIGHT_CHROMIUM:-true}
     image: ${BACKEND_IMAGE:-darshan-server-api:production}
     restart: unless-stopped
-    env_file:
-      - ../../../../darshan-server/.env
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       DARSHAN_PROCESS_ROLE: all
-      SIGNHEX_ENVIRONMENT_NAME: ${SIGNHEX_ENVIRONMENT_NAME}
-      SIGNHEX_DEPLOYMENT_ID: ${SIGNHEX_DEPLOYMENT_ID}
-      SIGNHEX_SERVER_ID: ${SIGNHEX_SERVER_ID}
-      DATABASE_URL: ${DATABASE_URL}
-      MINIO_ENDPOINT: ${DATA_HOST}
-      MINIO_PORT: ${MINIO_HOST_PORT}
-      VALKEY_URL: redis://${VALKEY_HOST}:${VALKEY_HOST_PORT}
-      REALTIME_BUS_PROVIDER: valkey
-      REALTIME_SYNC_ENABLED: "true"
-      DARSHAN_REALTIME_SYNC_ENABLED: "true"
-      OUTBOX_DISPATCH_ENABLED: "true"
-      COMMAND_OUTBOX_WRITE_ENABLED: "true"
-      DEVICE_DESIRED_STATE_ENABLED: "true"
+      DARSHAN_CONFIG_FILE: ${DARSHAN_CONFIG_FILE:-/app/config/backend.json}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATA_HOST}:${POSTGRES_HOST_PORT}/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRY: ${JWT_EXPIRY:-900}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      CA_CERT_PATH: ${CA_CERT_PATH:-./certs/ca.crt}
+      CA_KEY_PATH: ${CA_KEY_PATH:-./certs/ca.key}
+      TLS_CERT_PATH: ${TLS_CERT_PATH:-./certs/server.crt}
+      TLS_KEY_PATH: ${TLS_KEY_PATH:-./certs/server.key}
+      VALKEY_URL: ${VALKEY_URL}
+      OBSERVABILITY_METRICS_BEARER_TOKEN: ${OBSERVABILITY_METRICS_BEARER_TOKEN:-}
+      FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
+      LIBREOFFICE_PATH: ${LIBREOFFICE_PATH:-soffice}
+      PG_DUMP_PATH: ${PG_DUMP_PATH:-pg_dump}
+      TAR_PATH: ${TAR_PATH:-tar}
+      PLAYWRIGHT_BROWSERS_PATH: ${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}
+      DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH: ${DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-}
     ports:
       - "${API_HOST_PORT}:3000"
     volumes:
       - ../../../../darshan-server/certs:/app/certs:ro
+      - ../../../../darshan-server/config:/app/config:ro
     command: npm start
     extra_hosts:
       - "host.docker.internal:host-gateway"

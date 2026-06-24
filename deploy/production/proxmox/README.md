@@ -24,6 +24,42 @@ This production path runs five Proxmox LXC system containers and does not run Do
 
 The service names are configurable in `deploy/production/.env` if your distro packages use names such as `valkey-server`. If your package installs `redis-cli` instead of `valkey-cli`, set `VALKEY_CLI_NAME=redis-cli`.
 
+## Docker Parity Contract
+
+The Proxmox LXC path is the production path, but it must provide the same DARSHAN runtime capabilities as the Docker path. Docker achieves this with images; Proxmox achieves this with OS packages, copied app files, and systemd services.
+
+| Capability | Docker production path | Proxmox LXC production path | Verification |
+|---|---|---|---|
+| PostgreSQL | `postgres:15-alpine` container | CT 201 `postgresql` service | `systemctl is-active postgresql`; TCP `5432`; backend `pg_isready` |
+| MinIO | `minio/minio` container | CT 201 `minio` service from `proxmox/systemd/minio.service` | `/minio/health/live` |
+| Valkey | `valkey/valkey:7-alpine` container | CT 202 `valkey`, `valkey-server`, or `redis-server` service | TCP `6379`; `VALKEY_CLI_NAME ping` |
+| Backend app | custom `darshan-server-api:production` image | CT 203 `darshan-backend` systemd service | `/api/v1/health` |
+| Backend Node runtime | `node:20-bookworm` image base | Node.js 20 installed in CT 203 | `check-backend-runtime-tools.sh` validates major version `20` |
+| ffmpeg | installed in backend Dockerfile | `ffmpeg` package in CT 203 | `command -v ffmpeg` |
+| LibreOffice | installed in backend Dockerfile | `libreoffice` package in CT 203 | `command -v libreoffice` or `command -v soffice` |
+| pg_dump | `postgresql-client` in backend Dockerfile | `postgresql-client` in CT 203 | `command -v pg_dump` |
+| tar | installed in backend Dockerfile | `tar` package in CT 203 | `command -v tar` |
+| Playwright Chromium | optional Docker build arg `INSTALL_PLAYWRIGHT_CHROMIUM=true` | `npx playwright install --with-deps chromium` into `/ms-playwright` | launch Chromium headless from CT 203 |
+| API + worker role | `DARSHAN_PROCESS_ROLE=all` in API container | systemd unit sets `DARSHAN_PROCESS_ROLE=all` | default-media refresh, outbox, desired-state jobs run from backend service |
+| CMS static UI | `nginx:1.27-alpine` container | CT 204 `nginx` service | CMS HTTP and SPA refresh |
+| CMS API/socket proxy | nginx template in Docker CMS | `proxmox/nginx/darshan-cms.conf.template` | `/api/v1`, `/socket.io`, `/grafana` proxy paths |
+| Prometheus | `prom/prometheus` container | CT 205 `prometheus` service | `/-/healthy` |
+| Grafana | `grafana/grafana` container | CT 205 `grafana-server` service | `/grafana/api/health` |
+
+Run this after backend setup to confirm backend runtime parity:
+
+```bash
+bash deploy/production/proxmox/check-backend-runtime-tools.sh
+```
+
+Run this after all five LXCs are started to confirm service parity:
+
+```bash
+bash deploy/production/proxmox/health-check.sh
+```
+
+Do not run Docker inside the Proxmox LXCs for DARSHAN production. If an operator wants image-based behavior, use `deploy/production/docker` instead of `deploy/production/proxmox`.
+
 ## Port/IP Map
 
 | From | To | Port | Purpose |
@@ -193,15 +229,38 @@ Create these files on the Proxmox host:
 
 ```bash
 cp deploy/production/.env.example deploy/production/.env
-cp darshan-server/.env.production.lxc.example darshan-server/.env
-cp darshan-cms/.env.production.lxc.example darshan-cms/.env
+cp darshan-server/.env.example darshan-server/.env
+cp darshan-server/config/backend.production.example.json /etc/darshan/server/config.json
+cp darshan-cms/.env.example darshan-cms/.env
+cp darshan-cms/public/config/app-config.example.json /usr/share/nginx/html/config/app-config.json
 ```
+
+Do not use `deploy/production/.env.local` for the Proxmox path. That file is used by the Docker-style local production path and commonly sets all role hosts to one LAN IP. Proxmox needs `deploy/production/.env` with CT IDs and the five LXC IPs.
+
+Do not create LXC-specific app env templates. `darshan-server/.env.example` and `darshan-cms/.env.example` are the only app env examples. The feature flags and software behavior should match Docker; only host/IP values and secrets change.
+
+For production, keep `darshan-server/.env` short and set:
+
+```bash
+DARSHAN_CONFIG_FILE=/etc/darshan/server/config.json
+```
+
+`start-backend.sh` pushes `BACKEND_CONFIG_SOURCE` into `BACKEND_CONFIG_PATH` inside the backend LXC. Defaults:
+
+```bash
+BACKEND_CONFIG_SOURCE=darshan-server/config/backend.production.example.json
+BACKEND_CONFIG_PATH=/etc/darshan/server/config.json
+```
+
+The backend config file stores non-secret runtime settings. Secrets and sensitive URLs such as `DATABASE_URL`, `VALKEY_URL`, `JWT_SECRET`, and MinIO credentials stay in `darshan-server/.env`.
 
 Required production values:
 
 - `deploy/production/.env`: CT IDs, static IPs, public URLs, service names, app paths, start behavior.
-- `darshan-server/.env`: secrets and backend runtime URLs. Use `DATABASE_URL=...@192.168.1.201:5432`, `VALKEY_URL=redis://192.168.1.202:6379`, and `MINIO_ENDPOINT=192.168.1.201`.
-- `darshan-cms/.env`: public build defaults only. Do not put secrets here.
+- `darshan-server/.env`: secrets, sensitive URLs, and `DARSHAN_CONFIG_FILE`. Use `DATABASE_URL=...@192.168.1.201:5432` and `VALKEY_URL=redis://192.168.1.202:6379`.
+- `/etc/darshan/server/config.json`: non-secret backend runtime/deployment config.
+- `darshan-cms/.env`: minimal public build fallback values only. Do not put secrets here.
+- `/usr/share/nginx/html/config/app-config.json`: browser-visible CMS runtime config.
 
 These files are sourced by bash during deployment. Quote values that contain spaces, `#`, `$`, backticks, or shell metacharacters.
 

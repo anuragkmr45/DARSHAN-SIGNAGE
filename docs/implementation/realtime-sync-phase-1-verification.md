@@ -27,7 +27,7 @@ Backend:
 - `darshan-server/src/config/index.ts`
 - `darshan-server/src/config/apiEndpoints.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `darshan-server/src/routes/device-telemetry-commands.test.ts`
 
 Electron:

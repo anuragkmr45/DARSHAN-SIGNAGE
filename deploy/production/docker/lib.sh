@@ -57,9 +57,6 @@ load_production_env() {
   require_var BACKEND_HOST
   require_var CMS_HOST
   require_var OBSERVABILITY_HOST
-  require_var SIGNHEX_ENVIRONMENT_NAME
-  require_var SIGNHEX_DEPLOYMENT_ID
-  require_var SIGNHEX_SERVER_ID
   require_var POSTGRES_HOST_PORT
   require_var MINIO_HOST_PORT
   require_var MINIO_CONSOLE_PORT
@@ -69,8 +66,17 @@ load_production_env() {
   require_var PROMETHEUS_PORT
   require_var GRAFANA_PORT
   require_var INSTALL_PLAYWRIGHT_CHROMIUM
+  require_var POSTGRES_USER
+  require_var POSTGRES_PASSWORD
+  require_var POSTGRES_DB
+  require_var JWT_SECRET
+  require_var MINIO_ACCESS_KEY
+  require_var MINIO_SECRET_KEY
+  require_var ADMIN_EMAIL
+  require_var ADMIN_PASSWORD
 
   export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://${OBSERVABILITY_HOST}:${GRAFANA_PORT}/grafana/}"
+  export VALKEY_URL="${VALKEY_URL:-redis://${VALKEY_HOST}:${VALKEY_HOST_PORT}}"
 }
 
 compose_cmd() {

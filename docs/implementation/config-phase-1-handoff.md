@@ -32,7 +32,7 @@ No player or CMS runtime config refactor was done in CONFIG-1. Post-CONFIG-2 not
 - `darshan-server/src/config/file-config.test.ts`
 - `darshan-server/src/config/index.ts`
 - `darshan-server/.env.example`
-- `darshan-server/.env.qa.example`
+- `darshan-server/.env.example`
 - `docs/examples/backend-config.onprem-local-192.168.0.5.example.json`
 - `docs/examples/backend-config.qa.example.json`
 - `docs/examples/backend-config.production.example.json`

@@ -607,7 +607,7 @@ If on-prem or air-gapped deployment is confirmed or supported:
 - Use separate env files:
   - `.env.local.example`
   - `.env.dev.example`
-  - `.env.qa.example`
+  - `.env.example`
   - `.env.prod.example`
 - Use separate databases or schemas per environment.
 - Use separate object storage buckets/folders per environment.
@@ -1250,7 +1250,7 @@ release/
     docker-compose.qa.yml
   env/
     .env.prod.example
-    .env.qa.example
+    .env.example
   migrations/
   docs/
   scripts/
