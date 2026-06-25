@@ -387,10 +387,11 @@ This package still contains backend, PostgreSQL, MinIO, and Valkey image archive
 
 Use this package as an input to the production bundle builder when you want:
 
-- VM1/LXC1: PostgreSQL + MinIO
-- VM2/LXC2: Valkey realtime notification bus
-- VM3/LXC3: backend bundle running separate `api` and `worker` containers
-- VM4/LXC4: CMS
+- VM1: PostgreSQL + MinIO
+- VM2: Valkey realtime notification bus
+- VM3: backend runtime with API + worker behavior
+- VM4: CMS
+- VM5: observability when the runtime bundle includes the observability role
 
 Canonical flow:
 

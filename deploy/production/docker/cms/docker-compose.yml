@@ -1,6 +1,9 @@
 services:
   cms:
-    image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    build:
+      context: ../../../..
+      dockerfile: deploy/production/docker/cms/Dockerfile
+    image: ${CMS_IMAGE:-darshan-cms:production}
     restart: unless-stopped
     environment:
       BACKEND_HOST: ${BACKEND_HOST}
@@ -10,8 +13,7 @@ services:
     ports:
       - "${CMS_HTTP_PORT}:80"
     volumes:
-      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - ../../../../darshan-cms/dist:/usr/share/nginx/html:ro
+      - ${CMS_RUNTIME_CONFIG_SOURCE:-../../../../darshan-cms/public/config/app-config.json}:/usr/share/nginx/html/config/app-config.json:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null"]
       interval: 30s

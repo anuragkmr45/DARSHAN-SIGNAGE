@@ -1,22 +1,22 @@
 # DARSHAN QA Deployment
 
-QA should mirror the production Proxmox LXC topology.
+QA should mirror the production Docker-on-VM topology.
 
 Use QA for release-candidate validation before production:
 
 | QA role | Production equivalent | Runtime model |
 |---|---|---|
-| QA data | Production data CT | PostgreSQL + MinIO in LXC/systemd |
-| QA Valkey | Production Valkey CT | Valkey in LXC/systemd |
-| QA backend | Production backend CT | Node 20 backend service with worker role and runtime tools |
-| QA CMS | Production CMS CT | nginx static CMS |
-| QA observability | Production observability CT | Prometheus + Grafana |
+| QA data VM | Production data VM | Docker Postgres + MinIO |
+| QA Valkey VM | Production Valkey VM | Docker Valkey |
+| QA backend VM | Production backend VM | Docker backend image with API + worker role and runtime tools |
+| QA CMS VM | Production CMS VM | Docker nginx static CMS image |
+| QA observability VM | Production observability VM | Docker Prometheus + Grafana |
 
-Docker is acceptable for development-only checks, but QA evidence should come from the Proxmox LXC role split unless a test explicitly says it is Docker-only.
+Development-only Docker checks are not enough for release evidence. QA evidence should use the same role split, host/IP model, env/config layout, and Docker images as production.
 
 ## Required Parity With Production
 
-QA must validate the same feature surface as production:
+QA must validate:
 
 - backend REST API and auth,
 - player APIs and pairing,

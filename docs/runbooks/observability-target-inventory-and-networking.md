@@ -11,11 +11,12 @@
 
 Required reachability:
 
-- VM2 Prometheus to VM1 exporters and MinIO metrics
-- VM2 Prometheus to VM2 local exporters and backend `/metrics`
-- VM2 Prometheus to VM3 exporters and Grafana metrics if enabled
-- VM3 nginx to local Grafana on `/grafana/`
-- VM3 CMS reverse proxy to VM2 backend `/api/v1/` and `/socket.io/`
+- Observability VM Prometheus to data VM exporters, Postgres metrics, and MinIO metrics
+- Observability VM Prometheus to Valkey VM metrics if enabled
+- Observability VM Prometheus to backend VM `/metrics`
+- Observability VM Prometheus to CMS VM and Grafana metrics if enabled
+- CMS VM reverse proxy to backend VM `/api/v1/` and `/socket.io/`
+- CMS VM reverse proxy to observability VM Grafana when `/grafana/` is exposed through CMS
 
 ## Firewall Guidance
 

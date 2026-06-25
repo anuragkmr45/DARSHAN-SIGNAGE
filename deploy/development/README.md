@@ -29,9 +29,9 @@ It mounts shared assets from:
 
 ## Boundary
 
-Do not use this path as production evidence. Production and QA use the Proxmox LXC service model under:
+Do not use this path as production evidence. Production and QA use the Docker-on-VM role model under:
 
 - `deploy/qa`
-- `deploy/production/proxmox`
+- `deploy/production/docker`
 
 Use this path only to validate local dashboards, rules, and developer runtime behavior.

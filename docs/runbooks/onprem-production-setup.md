@@ -28,7 +28,7 @@ This guide assumes:
   - `production/backend/`
   - `production/cms/`
   - `production/electron/`
-  - optional `production/observability/` when `OBSERVABILITY_PRIVATE_HOST` is set
+  - `production/observability/`
 
 Observability assets are staged alongside the runtime folders:
 
@@ -36,27 +36,25 @@ Observability assets are staged alongside the runtime folders:
 - `production/backend/observability/`
 - `production/cms/observability/`
 
-When `OBSERVABILITY_PRIVATE_HOST` is set, the bundle also includes:
-
-- `production/observability/`
+The production Docker topology includes a dedicated observability role.
 
 ## 1. Before You Start
 
 ### Required hosts
 
 - `Data VM`
-- `Valkey VM/LXC`
+- `Valkey VM`
 - `Backend VM`
 - `CMS guest`
-- optional `Observability VM` for the custom 4-VM layout
+- `Observability VM`
 - separate player machines
 
 Recommended topology:
 
 - `Data VM`: Ubuntu Server VM
-- `Valkey VM/LXC`: Ubuntu Server or LXC running Valkey only
-- `Backend VM`: Ubuntu Server VM running separate `api` and `worker` containers from `production/backend/`
-- `CMS guest`: small Ubuntu VM by default, or an unprivileged LXC only when Docker/Compose support is already prepared
+- `Valkey VM`: Ubuntu Server VM running Docker Valkey only
+- `Backend VM`: Ubuntu Server VM running the backend Docker image with API + worker behavior
+- `CMS VM`: small Ubuntu VM running the CMS nginx Docker image
 - optional `Observability VM`: Ubuntu Server VM for Prometheus, Alertmanager, and Grafana
 
 ### Supported deployment layouts
@@ -65,13 +63,13 @@ Primary supported production layout:
 
 - machine A: PostgreSQL + MinIO from `production/data/`
 - machine B: Valkey from `production/valkey/`
-- machine C: backend bundle from `production/backend/` running separate `api` and `worker` containers
+- machine C: backend bundle from `production/backend/` running API + worker behavior
 - machine D: CMS from `production/cms/`
 - separate player machines on the same private network
 
 This is the default topology assumed by this runbook and by the generated production bundle.
 
-Custom 4-VM variation:
+Five-role production layout:
 
 - machine A: PostgreSQL + MinIO from `production/data/`
 - machine B: Valkey from `production/valkey/`
@@ -106,15 +104,10 @@ Confirm these paths before deployment:
 - backend host must reach data host on `9000/tcp` for MinIO
 - backend host must reach Valkey host on `6379/tcp`
 - player devices must reach `http://<backend-device-ip>:3000`
-- VM2 Prometheus must reach VM1, VM2, and VM3 exporter ports
-- VM3 nginx must reach local Grafana on the configured upstream port
+- Observability VM Prometheus must reach data, Valkey, backend, and CMS metrics/exporter targets
+- CMS nginx must reach Grafana on the observability VM when `/grafana/` is proxied through CMS
 - when realtime sync is enabled, player devices or the CMS proxy path must reach the backend `/socket.io/` endpoint with WebSocket upgrade support
 - when multiple backend instances are used for realtime sync, every backend instance must reach the on-prem Valkey service for cross-node wake notification fanout
-
-When `OBSERVABILITY_PRIVATE_HOST` is set:
-
-- VM4 Prometheus must reach VM1, VM2, and VM3 exporter and metrics ports
-- VM3 nginx must reach VM4 Grafana on `3001/tcp`
 
 Optional:
 
@@ -132,7 +125,7 @@ Collect these before you build the bundle:
 - `BACKEND_DEVICE_HOST`
 - `DATA_PRIVATE_HOST`
 - `VALKEY_PRIVATE_HOST`, optional and defaults to `BACKEND_PRIVATE_HOST`
-- optional `OBSERVABILITY_PRIVATE_HOST` for the custom 4-VM bundle
+- `OBSERVABILITY_PRIVATE_HOST`
 - preferred:
   - `SERVER_PACKAGE_DIR`
   - `CMS_PACKAGE_DIR`
@@ -144,7 +137,7 @@ Collect these before you build the bundle:
 - `VALKEY_PRIVATE_HOST` and optional Valkey HA topology inputs before multi-instance realtime enablement
 - optional provided cert files if you are not using generated CMS TLS
 
-No new bundle environment variables are required for the API/worker split. The generated backend compose file starts both containers automatically. `DARSHAN_PROCESS_ROLE` is available only as an optional manual override when you run the backend image outside the generated compose files; `HEXMON_PROCESS_ROLE` remains a legacy alias for one release.
+No new bundle environment variables are required for backend worker behavior. The production Docker path runs API + worker behavior from the backend image.
 
 Realtime sync production hardening must follow:
 
@@ -294,7 +287,7 @@ Expected result:
   - `production/backend/`
   - `production/cms/`
   - `production/electron/`
-  - optional `production/observability/` when `OBSERVABILITY_PRIVATE_HOST` is set
+  - `production/observability/`
 
 Failure hint:
 
@@ -321,11 +314,6 @@ scp -r "dist/onprem/${SITE_NAME}/production/data" "${DEPLOY_USER}@${DATA_VM_HOST
 scp -r "dist/onprem/${SITE_NAME}/production/valkey" "${DEPLOY_USER}@${VALKEY_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
 scp -r "dist/onprem/${SITE_NAME}/production/backend" "${DEPLOY_USER}@${BACKEND_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
 scp -r "dist/onprem/${SITE_NAME}/production/cms" "${DEPLOY_USER}@${CMS_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
-```
-
-If you built the custom 4-VM bundle:
-
-```bash
 scp -r "dist/onprem/${SITE_NAME}/production/observability" "${DEPLOY_USER}@${OBSERVABILITY_VM_HOST}:/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/"
 ```
 
@@ -348,11 +336,6 @@ ssh "${DEPLOY_USER}@${DATA_VM_HOST}" "mkdir -p /opt/darshan/${SITE_NAME}/release
 ssh "${DEPLOY_USER}@${VALKEY_VM_HOST}" "mkdir -p /opt/darshan/${SITE_NAME}/releases/${RELEASE_ID} /opt/darshan/${SITE_NAME} && ln -sfn /opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/valkey /opt/darshan/${SITE_NAME}/current"
 ssh "${DEPLOY_USER}@${BACKEND_VM_HOST}" "mkdir -p /opt/darshan/${SITE_NAME}/releases/${RELEASE_ID} /opt/darshan/${SITE_NAME} && ln -sfn /opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/backend /opt/darshan/${SITE_NAME}/current"
 ssh "${DEPLOY_USER}@${CMS_VM_HOST}" "mkdir -p /opt/darshan/${SITE_NAME}/releases/${RELEASE_ID} /opt/darshan/${SITE_NAME} && ln -sfn /opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/cms /opt/darshan/${SITE_NAME}/current"
-```
-
-If you built the custom 4-VM bundle:
-
-```bash
 ssh "${DEPLOY_USER}@${OBSERVABILITY_VM_HOST}" "mkdir -p /opt/darshan/${SITE_NAME}/releases/${RELEASE_ID} /opt/darshan/${SITE_NAME} && ln -sfn /opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/observability /opt/darshan/${SITE_NAME}/current"
 ```
 
@@ -374,9 +357,9 @@ Expected result:
 
 - PostgreSQL and MinIO are healthy
 
-### Valkey VM/LXC
+### Valkey VM
 
-Run on the Valkey VM/LXC:
+Run on the Valkey VM:
 
 ```bash
 cd "/opt/darshan/${SITE_NAME}/current"
@@ -408,7 +391,7 @@ curl -fsS "http://127.0.0.1:3000/api/v1/health"
 Expected result:
 
 - backend health endpoint returns success
-- both `api` and `worker` containers show as running in `docker compose ps`
+- the backend container is running in `docker compose ps`
 - `certs/ca.crt` exists
 
 ### CMS guest
@@ -468,8 +451,7 @@ Confirm:
 - dashboards load
 - API calls succeed
 - live socket-driven areas connect
-- `/grafana/` resolves through the same-origin VM3 reverse proxy after Grafana is started locally on VM3
-- in the custom 4-VM layout, `/grafana/` resolves through the same-origin VM3 reverse proxy to VM4 Grafana
+- `/grafana/` resolves through the CMS reverse proxy to Grafana on the observability VM
 
 ### API checks
 
@@ -555,7 +537,7 @@ Use:
 - `data` on the Data VM
 - `backend` on the Backend VM
 - `cms` on the CMS guest
-- `observability` on the Observability VM when the custom 4-VM bundle is used
+- `observability` on the Observability VM
 
 ## 9. Troubleshooting
 

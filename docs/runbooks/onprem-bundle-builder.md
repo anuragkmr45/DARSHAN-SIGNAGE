@@ -78,7 +78,7 @@ The per-platform export folders under `out/<release>/electron/<platform>/` are f
 - `QA_DATA_HOST`, `QA_BACKEND_HOST`, `QA_CMS_HOST` for `qa` and `all`
 - optional `QA_BACKEND_DEVICE_HOST` if players should not use `QA_BACKEND_HOST`
 - `CMS_PUBLIC_HOST`, `BACKEND_PRIVATE_HOST`, `BACKEND_DEVICE_HOST`, `DATA_PRIVATE_HOST` for `production` and `all`
-- optional `OBSERVABILITY_PRIVATE_HOST` for the custom 4-VM production layout
+- `OBSERVABILITY_PRIVATE_HOST` for the observability VM
 
 ## Profiles
 
@@ -127,11 +127,13 @@ bash scripts/bundle/assemble-runtime-bundle.sh site-a
 
 Use `--deployment-layout production-split` on the server export when the intended production topology is:
 
-- VM1: PostgreSQL + MinIO
-- VM2: backend API
-- VM3: CMS
+- Data VM: PostgreSQL + MinIO
+- Valkey VM: realtime notification bus
+- Backend VM: API + worker behavior
+- CMS VM: static CMS
+- Observability VM: Prometheus + Grafana
 
-For QA and production, use the split layout so the runtime bundle aligns with the approved VM1 / VM2 / VM3 topology.
+For QA and production, use the split layout so the runtime bundle aligns with the approved Docker-on-VM role topology.
 
 Fallback example using raw released artifacts:
 
@@ -166,7 +168,7 @@ dist/onprem/<site-name>/
     data/
     backend/
     cms/
-    observability/   # only when OBSERVABILITY_PRIVATE_HOST is set
+    observability/
     electron/
     PRODUCTION_SETUP_GUIDE.md
   SHA256SUMS.txt

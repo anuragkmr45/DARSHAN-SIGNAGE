@@ -271,7 +271,7 @@ Player metrics stay localhost-bound by default. Enable remote scrape only by set
 }
 ```
 
-Apply that only on management networks where VM2 Prometheus is explicitly allowed to reach the player.
+Apply that only on management networks where the observability VM Prometheus is explicitly allowed to reach the player.
 
 ### Log Monitoring
 ```bash

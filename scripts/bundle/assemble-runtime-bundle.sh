@@ -32,7 +32,7 @@ Required environment inputs:
   BACKEND_DEVICE_HOST=10.20.0.21              # required for profile all|production, defaults to BACKEND_PRIVATE_HOST
   DATA_PRIVATE_HOST=10.20.0.10                # required for profile all|production
   VALKEY_PRIVATE_HOST=10.20.0.15              # optional for profile all|production, defaults to BACKEND_PRIVATE_HOST
-  OBSERVABILITY_PRIVATE_HOST=10.20.0.40       # optional custom production 4-VM layout only
+  OBSERVABILITY_PRIVATE_HOST=10.20.0.40       # production observability VM host
 
 Optional operational inputs:
   SERVER_PACKAGE_DIR=/path/to/out/<release>/server
@@ -1459,7 +1459,7 @@ EOF
   cat > "$QA_BACKEND_DIR/README.md" <<EOF
 # QA Backend Bundle
 
-This folder runs the QA backend bundle on the backend VM/LXC.
+This folder runs the QA backend bundle on the backend VM.
 
 ## Start
 
@@ -1945,7 +1945,7 @@ EOF
   cat > "$PROD_BACKEND_DIR/README.md" <<EOF
 # Production Backend Bundle
 
-This folder runs the DARSHAN backend bundle with separate \`api\` and \`worker\` containers from the same image.
+This folder runs the DARSHAN backend bundle with API and worker behavior from the backend image.
 
 ## Start
 
@@ -2107,35 +2107,35 @@ cd dist/onprem/<site-name>
 EOF
 
 cat > "$BUNDLE_ROOT/PROXMOX_SIZING.md" <<'EOF'
-# Proxmox Guest Sizing
+# Proxmox VM Sizing
 
 ## Recommended topology
 
 - QA:
   - Data VM
-  - Valkey VM/LXC or same host as backend for small sites
+  - Valkey VM or same host as backend for small sites
   - Backend VM
   - CMS VM
   - separate player machines on the same network
 - Production:
   - Data VM
-  - Valkey VM/LXC or same host as backend for 2-machine deployments
+  - Valkey VM or same host as backend for 2-machine deployments
   - Backend VM
-  - CMS guest as a small VM by default or an unprivileged LXC when Docker support is already prepared
-  - optional dedicated Observability VM for custom 4-VM layouts
+  - CMS VM
+  - Observability VM
 
 ## Production baseline
 
 - Data VM: 6 vCPU / 16 GB RAM / 500 GB NVMe-backed storage minimum
-- Valkey VM/LXC: 1-2 vCPU / 1-2 GB RAM / 20 GB storage
+- Valkey VM: 1-2 vCPU / 1-2 GB RAM / 20 GB storage
 - Backend VM: 6 vCPU / 12 GB RAM / 120 GB SSD
-- CMS guest: 2 vCPU / 4 GB RAM / 40 GB SSD
-- Observability VM: 4 vCPU / 8 GB RAM / 120 GB SSD when used
+- CMS VM: 2 vCPU / 4 GB RAM / 40 GB SSD
+- Observability VM: 4 vCPU / 8 GB RAM / 120 GB SSD
 
 ## Rules
 
-- Keep Data and Backend on VMs in the primary production topology.
-- CMS may use an unprivileged LXC when resource optimization matters and Docker/Compose support is already prepared.
+- Run DARSHAN services in Docker containers inside normal VMs.
+- Do not use legacy LXC/systemd scripts for DARSHAN production.
 - Keep players on separate desktop machines connected to the same network as the backend.
 EOF
 

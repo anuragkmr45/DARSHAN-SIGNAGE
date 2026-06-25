@@ -5,7 +5,7 @@ templates:
   - /etc/darshan/alertmanager/templates/*.tmpl
 
 # Default deployment posture:
-# - Alertmanager runs on VM2 for grouping, silences, and alert inspection.
+# - Alertmanager runs on the observability VM for grouping, silences, and alert inspection.
 # - Outbound notification integrations are site-specific and must be added at render time.
 # - The base template intentionally keeps alerts local-only until a site-specific receiver is configured.
 route:

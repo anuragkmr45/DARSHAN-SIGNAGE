@@ -5,9 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 BASE_DIR="$ROOT_DIR/deploy/production/docker"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 SITE_ENV="${DARSHAN_DOCKER_ENV:-$BASE_DIR/.env}"
-if [[ ! -f "$SITE_ENV" && -f "$ROOT_DIR/deploy/production/.env.local" ]]; then
-  SITE_ENV="$ROOT_DIR/deploy/production/.env.local"
-fi
+
+[[ -f "$SITE_ENV" ]] || { echo "Missing $SITE_ENV. Copy deploy/production/docker/.env.example to deploy/production/docker/.env." >&2; exit 1; }
+[[ -f "$SERVER_ENV" ]] || { echo "Missing $SERVER_ENV. Create darshan-server/.env before resetting Docker projects." >&2; exit 1; }
 
 cat <<'EOF'
 WARNING: this removes Docker volumes for the production DARSHAN stack.

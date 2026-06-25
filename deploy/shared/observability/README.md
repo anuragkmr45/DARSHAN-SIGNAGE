@@ -4,10 +4,10 @@ This directory contains the platform-owned observability assets for DARSHAN on-p
 
 Scope:
 
-- Prometheus templates and rule files for VM2
-- Grafana provisioning and dashboards for VM3
-- Alertmanager templates for VM2
-- Exporter configuration examples for VM1 / VM2 / VM3
+- Prometheus templates and rule files for the observability VM
+- Grafana provisioning and dashboards for the observability VM
+- Alertmanager templates for the observability VM when enabled
+- Exporter configuration examples for data, Valkey, backend, CMS, and player roles
 - Player `file_sd` inventory templates for optional direct scrape
 - Validation fixtures used by `scripts/verify/validate-observability-assets.sh`
 

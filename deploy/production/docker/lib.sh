@@ -4,9 +4,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 BASE_DIR="$ROOT_DIR/deploy/production/docker"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 SITE_ENV="${DARSHAN_DOCKER_ENV:-$BASE_DIR/.env}"
-if [[ ! -f "$SITE_ENV" && -f "$ROOT_DIR/deploy/production/.env.local" ]]; then
-  SITE_ENV="$ROOT_DIR/deploy/production/.env.local"
-fi
 
 require_file() {
   local file="$1"
@@ -42,7 +39,7 @@ EOF
 }
 
 load_production_env() {
-  require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/docker/.env.example to deploy/production/docker/.env and edit host IPs."
+  require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/docker/.env.example to deploy/production/docker/.env and edit Docker-on-VM host IPs."
   require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it before starting the production stack."
 
   set -a
@@ -66,6 +63,8 @@ load_production_env() {
   require_var PROMETHEUS_PORT
   require_var GRAFANA_PORT
   require_var INSTALL_PLAYWRIGHT_CHROMIUM
+  require_var BACKEND_IMAGE
+  require_var CMS_IMAGE
   require_var POSTGRES_USER
   require_var POSTGRES_PASSWORD
   require_var POSTGRES_DB
@@ -75,8 +74,9 @@ load_production_env() {
   require_var ADMIN_EMAIL
   require_var ADMIN_PASSWORD
 
-  export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://${OBSERVABILITY_HOST}:${GRAFANA_PORT}/grafana/}"
+  export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://${CMS_HOST}:${CMS_HTTP_PORT}/grafana/}"
   export VALKEY_URL="${VALKEY_URL:-redis://${VALKEY_HOST}:${VALKEY_HOST_PORT}}"
+  export CMS_RUNTIME_CONFIG_SOURCE="${CMS_RUNTIME_CONFIG_SOURCE:-$ROOT_DIR/darshan-cms/public/config/app-config.json}"
 }
 
 compose_cmd() {
@@ -110,6 +110,12 @@ compose_run() {
   compose_cmd "$project" "$dir" run --rm "$@"
 }
 
+compose_ps() {
+  local project="$1"
+  local dir="$2"
+  compose_cmd "$project" "$dir" ps
+}
+
 wait_for_http() {
   local name="$1"
   local url="$2"
@@ -123,6 +129,28 @@ wait_for_http() {
     sleep 2
   done
   echo "$name did not become healthy at $url" >&2
+  return 1
+}
+
+wait_for_tcp() {
+  local name="$1"
+  local host="$2"
+  local port="$3"
+  local attempts="${4:-30}"
+  local i
+  for ((i = 1; i <= attempts; i++)); do
+    if command -v nc >/dev/null 2>&1; then
+      if nc -z "$host" "$port" >/dev/null 2>&1; then
+        echo "$name is reachable"
+        return 0
+      fi
+    elif bash -c "cat < /dev/null > /dev/tcp/$host/$port" >/dev/null 2>&1; then
+      echo "$name is reachable"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "$name did not become reachable at $host:$port" >&2
   return 1
 }
 

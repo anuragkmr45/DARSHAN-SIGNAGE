@@ -4,10 +4,11 @@ This is the primary QA deployment runbook for the approved air-gapped on-prem mu
 
 QA uses the same machine-role split as production:
 
-- VM1 data: PostgreSQL + MinIO
-- VM2 Valkey: notification-only realtime bus
-- VM3 backend: `darshan-server` and Prometheus
-- VM4 CMS: `darshan-cms` and Grafana behind `/grafana/`
+- Data VM: PostgreSQL + MinIO
+- Valkey VM: notification-only realtime bus
+- Backend VM: `darshan-server`
+- CMS VM: `darshan-cms`
+- Observability VM: Prometheus and Grafana when QA is deployed through the production Docker role folders with QA host values
 - separate wired player machines: `darshan-player`
 
 No public internet, public DNS, public endpoint, public media CDN, public S3, public broker, FCM, or APNs service is assumed. Valkey, if used, is an internal on-prem service.
@@ -95,7 +96,7 @@ scp -r "dist/onprem/${SITE_NAME}/qa/cms" "${DEPLOY_USER}@${QA_CMS_VM_HOST}:/opt/
 
 ## 5. Start the QA services
 
-### VM1 data
+### Data VM
 
 ```bash
 cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/data"
@@ -104,7 +105,7 @@ cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/data"
 ./health-check.sh
 ```
 
-### VM2 Valkey
+### Valkey VM
 
 ```bash
 cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/valkey"
@@ -117,7 +118,7 @@ Notes:
 
 - Valkey is a notification-only bus. PostgreSQL and REST remain authoritative.
 
-### VM3 backend
+### Backend VM
 
 ```bash
 cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/backend"
@@ -128,10 +129,9 @@ cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/backend"
 
 Notes:
 
-- the backend release folder contains `observability/prometheus/`, `observability/alertmanager/`, and exporter templates
-- Prometheus belongs on VM2
+- the backend release folder contains backend runtime assets and optional local exporter templates
 
-### VM4 CMS
+### CMS VM
 
 ```bash
 cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/cms"
@@ -142,8 +142,11 @@ cd "/opt/darshan/${SITE_NAME}/releases/${RELEASE_ID}/cms"
 
 Notes:
 
-- the CMS release folder contains `observability/grafana/`
-- Grafana is served through the CMS-facing reverse proxy on `/grafana/`
+- the CMS release folder contains CMS runtime assets and proxy config
+
+### Observability VM
+
+For QA observability that mirrors production, use `deploy/production/docker/observability` with QA host values in `deploy/production/docker/.env`.
 
 ## 6. QA validation
 
@@ -158,7 +161,7 @@ Confirm:
 - login works
 - dashboard loads
 - API calls succeed through the same origin
-- `/grafana/` resolves through the same VM3 reverse proxy path once Grafana is started locally on VM3
+- `/grafana/` resolves through the CMS reverse proxy when QA observability is running on an observability VM
 
 ### Realtime sync QA validation
 
@@ -215,9 +218,9 @@ Minimum workflow:
 
 Check:
 
-- VM3 can reach VM2 on `3000/tcp`
-- VM3 nginx config points to the correct backend and Grafana upstreams
-- Grafana is listening locally on VM3 at the configured upstream port
+- CMS VM can reach backend VM on `3000/tcp`
+- CMS nginx config points to the correct backend and Grafana upstreams
+- Grafana is listening on the observability VM at the configured upstream port
 
 ### Players cannot connect
 
@@ -225,6 +228,6 @@ Check:
 
 - players use the QA backend device IP, not the CMS IP
 - QA network allows player access to `3000/tcp`
-- VM2 backend health check passes
+- backend VM health check passes
 - if realtime is enabled, `/socket.io/` upgrade works through the selected QA proxy path; otherwise disable `REALTIME_SYNC_ENABLED` and `DARSHAN_REALTIME_PLAYER_ENABLED` and verify REST/polling fallback
 - for multi-node realtime, Valkey is reachable from every backend node and Pub/Sub fanout wakes the node that owns the player socket

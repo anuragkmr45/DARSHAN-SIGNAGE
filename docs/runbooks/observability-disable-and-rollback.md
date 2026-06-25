@@ -11,13 +11,13 @@
 ### Disable outbound alert delivery
 
 1. Render Alertmanager with the base local-only receiver configuration.
-2. Restart only Alertmanager on VM2.
+2. Restart only Alertmanager on the observability VM.
 3. Confirm alerts still appear in Alertmanager and Grafana, but external delivery is no longer attempted.
 
 ### Disable Grafana temporarily
 
-1. Stop only the Grafana container on VM3.
-2. Keep Prometheus and Alertmanager running on VM2.
+1. Stop only the Grafana container on the observability VM.
+2. Keep Prometheus and Alertmanager running on the observability VM.
 3. Confirm operators can still use CMS summary pages while Grafana history is unavailable.
 
 ## Rollback Procedure

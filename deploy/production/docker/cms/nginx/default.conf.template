@@ -43,6 +43,11 @@ server {
     return 404;
   }
 
+  location = /config/app-config.json {
+    add_header Cache-Control "no-store";
+    try_files $uri =404;
+  }
+
   location / {
     try_files $uri $uri/ /index.html;
     add_header Cache-Control "no-store";

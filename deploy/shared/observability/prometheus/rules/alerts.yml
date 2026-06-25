@@ -29,7 +29,7 @@ groups:
           severity: critical
           team: platform
         annotations:
-          summary: "VM1 data-plane metrics target is down"
+          summary: "Data VM metrics target is down"
           description: "{{ $labels.job }} on {{ $labels.instance }} has been unreachable for 5 minutes."
 
       - alert: DARSHANVm3HostMetricsUnavailable
@@ -39,7 +39,7 @@ groups:
           severity: warning
           team: platform
         annotations:
-          summary: "VM3 host metrics are unavailable"
+          summary: "CMS VM host metrics are unavailable"
           description: "vm3-node on {{ $labels.instance }} has been unreachable for 10 minutes."
 
       - alert: DARSHANGrafanaMetricsUnavailable
@@ -109,8 +109,8 @@ groups:
           severity: critical
           team: platform
         annotations:
-          summary: "VM1 data machine filesystem utilization is high"
-          description: "VM1 data storage on {{ $labels.instance }} has been above 85% utilization for 10 minutes and may impact PostgreSQL or MinIO."
+          summary: "Data VM filesystem utilization is high"
+          description: "Data VM storage on {{ $labels.instance }} has been above 85% utilization for 10 minutes and may impact PostgreSQL or MinIO."
 
       - alert: DARSHANHostMemoryHigh
         expr: darshan:host_memory_utilization:ratio > 0.90

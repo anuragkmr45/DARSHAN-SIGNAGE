@@ -1,72 +1,135 @@
 # DARSHAN Production Deployment
 
-This folder now has two separate production paths:
+Production now uses Docker role deployments on normal Proxmox VMs. Proxmox is only the hypervisor; DARSHAN services run in Docker containers inside the VMs.
 
-| Path | Use case |
-|---|---|
-| `deploy/production/proxmox` | Real production on 5 Proxmox LXC system containers, no Docker inside LXCs |
-| `deploy/production/docker` | Existing Docker Compose split, kept for development, local production-like checks, and Docker-based installs |
-
-For the standard on-prem rollout:
-
-- development uses Docker under `deploy/development`,
-- QA should mirror production using Proxmox LXC,
-- production uses `deploy/production/proxmox`,
-- `deploy/production/docker` remains available only when the target host intentionally uses Docker.
-
-For your Proxmox production target, use:
+Use:
 
 ```bash
-cp deploy/production/.env.example deploy/production/.env
+deploy/production/docker
+```
+
+Do not use legacy LXC/systemd scripts for DARSHAN production.
+
+## Production Topology
+
+| VM | Role | Docker project | Main containers |
+|---|---|---|---|
+| VM 1 | Data | `darshan-data` | `postgres`, `minio` |
+| VM 2 | Valkey | `darshan-valkey` | `valkey` |
+| VM 3 | Backend | `darshan-backend` | `api` with API + worker role |
+| VM 4 | CMS | `darshan-cms-prod` | `cms` nginx static app |
+| VM 5 | Observability | `darshan-observability` | `prometheus`, `grafana` |
+
+Containers do not receive LAN/Wi-Fi IPs directly. Configure the VM IPs in `deploy/production/docker/.env`; Docker publishes container ports through each VM.
+
+## First-Time Setup
+
+On each VM, install Docker Engine and Docker Compose, then place the repository checkout or release bundle on the VM.
+
+Create the shared production inputs:
+
+```bash
+cp deploy/production/docker/.env.example deploy/production/docker/.env
 cp darshan-server/.env.example darshan-server/.env
 cp darshan-server/config/backend.production.example.json darshan-server/config/backend.json
 cp darshan-cms/.env.example darshan-cms/.env
 cp darshan-cms/public/config/app-config.example.json darshan-cms/public/config/app-config.json
-bash deploy/production/proxmox/start.sh
 ```
 
-Before starting, edit `darshan-server/.env` and set the backend config selector for the target runtime:
+Edit `deploy/production/docker/.env` on every VM and set:
+
+- `DATA_HOST`
+- `VALKEY_HOST`
+- `BACKEND_HOST`
+- `CMS_HOST`
+- `OBSERVABILITY_HOST`
+- role ports
+- image names/tags
+- Docker data bootstrap values
+
+Edit `darshan-server/.env` for secrets, sensitive URLs, and config selectors. For Docker production, set:
 
 ```env
-# Proxmox LXC production
-DARSHAN_CONFIG_FILE=/etc/darshan/server/config.json
-
-# Docker production path
-# DARSHAN_CONFIG_FILE=/app/config/backend.json
+DARSHAN_CONFIG_FILE=/app/config/backend.json
 ```
 
-Then edit the JSON config files for non-secret hostnames, ports, deployment labels, realtime flags, media endpoint, and observability URLs. Keep JWT/admin secrets, MinIO credentials, Valkey URLs with auth, cert/key paths, and bearer tokens in env.
+Edit `darshan-server/config/backend.json` and `darshan-cms/public/config/app-config.json` for non-secret deployment labels, URLs, realtime flags, media endpoint, and observability URLs.
 
-Database handling differs by runtime:
+## Start One Role Per VM
 
-- Docker: `deploy/production/docker/.env` owns `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`; the backend Docker service builds `DATABASE_URL` from those values.
-- Proxmox/LXC: PostgreSQL is managed as a system service, so `darshan-server/.env` should contain the backend `DATABASE_URL`.
+Run only the script for the VM's assigned role.
 
-Read `deploy/production/proxmox/README.md` before first production use. It includes the service map, port map, backup map, bootstrap outline, and source links.
-
-There is only one app env example per app:
-
-- `darshan-server/.env.example`
-- `darshan-cms/.env.example`
-
-Keep those env files short. Put secrets, sensitive URLs, and config selectors in env. Put non-secret runtime behavior in config files:
-
-- backend: `darshan-server/config/backend.production.example.json`
-- CMS: `darshan-cms/public/config/app-config.example.json`
-
-Use the same feature flags and runtime behavior in Docker and Proxmox. Only change host/IP values and secrets for the target topology.
-
-The Docker Compose scripts were moved under `deploy/production/docker` and still keep the existing Compose project names:
-
-- `darshan-data`
-- `darshan-valkey`
-- `darshan-backend`
-- `darshan-cms-prod`
-- `darshan-observability`
-
-Docker quick start:
+Data VM:
 
 ```bash
-cp deploy/production/docker/.env.example deploy/production/docker/.env
-bash deploy/production/docker/start.sh
+bash deploy/production/docker/start-data.sh
+bash deploy/production/docker/health-check.sh data
 ```
+
+Valkey VM:
+
+```bash
+bash deploy/production/docker/start-valkey.sh
+bash deploy/production/docker/health-check.sh valkey
+```
+
+Backend VM:
+
+```bash
+bash deploy/production/docker/start-backend.sh
+bash deploy/production/docker/check-backend-runtime-tools.sh
+bash deploy/production/docker/health-check.sh backend
+```
+
+CMS VM:
+
+```bash
+bash deploy/production/docker/start-cms.sh
+bash deploy/production/docker/health-check.sh cms
+```
+
+Observability VM:
+
+```bash
+bash deploy/production/docker/start-observability.sh
+bash deploy/production/docker/health-check.sh observability
+```
+
+From any VM or operator workstation that can reach all service IPs:
+
+```bash
+bash deploy/production/docker/health-check.sh network
+```
+
+`start-all.sh` remains only for single-host lab checks where all roles intentionally run on one machine.
+
+## Backend Runtime Tools
+
+The backend Docker image includes or validates:
+
+- Node 20
+- ffmpeg
+- LibreOffice
+- `pg_dump`
+- `tar`
+- Playwright Chromium when `INSTALL_PLAYWRIGHT_CHROMIUM=true`
+
+The backend container runs `DARSHAN_PROCESS_ROLE=all`, so API routes, Socket.IO notifications, default-media refresh jobs, desired-state updates, telemetry persistence, backups, and worker jobs run from the same backend container.
+
+## Volumes And Backups
+
+Back up these Docker volumes before destructive maintenance:
+
+| Role | Volume | Contents |
+|---|---|---|
+| Data | `postgres_data` | PostgreSQL database |
+| Data | `minio_data` | uploaded media and object storage |
+| Valkey | `valkey_data` | Valkey append-only data |
+| Observability | `prometheus_data` | Prometheus time series |
+| Observability | `grafana_data` | Grafana state |
+
+`reset-fresh.sh` is destructive and removes Docker volumes. Use it only when intentionally wiping an environment.
+
+## Production Evidence
+
+This deployment migration does not mark DARSHAN production-ready by itself. Production readiness still requires real browser QA, packaged player evidence, on-prem runtime evidence, and Node/runtime validation.

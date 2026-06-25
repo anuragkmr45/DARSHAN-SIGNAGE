@@ -9,17 +9,17 @@ This is production runtime behavior. Do not use Vite, `tsx`, or dev watchers for
 
 ## Quick Local Split for Docker Desktop
 
-If you are not building a source-free runtime bundle yet and only want the current repo to run as separate Docker Desktop projects, use:
+If you are not building a source-free runtime bundle yet and only want the current repo to run as separate Docker projects on one server machine, use:
 
 ```bash
-cp deploy/production/.env.example deploy/production/.env.local
-# edit deploy/production/.env.local only if your server IP is not 192.168.0.6
+cp deploy/production/docker/.env.example deploy/production/docker/.env
+# edit deploy/production/docker/.env only if your server IP is not 192.168.0.6
 
 cd darshan-server
 docker compose --env-file .env down --remove-orphans
 
 cd ..
-bash deploy/production/start-all.sh
+bash deploy/production/docker/start-all.sh
 ```
 
 This starts separate Compose projects:
@@ -35,14 +35,14 @@ darshan-observability   Prometheus + Grafana
 For a clean reset:
 
 ```bash
-bash deploy/production/reset-fresh.sh
+bash deploy/production/docker/reset-fresh.sh
 ```
 
 That reset removes Docker volumes. Use it only when you intentionally want to delete local DB/object-store/observability data.
 
 ## Service Roles
 
-Use host/LXC/VM IPs, not per-container Wi-Fi IPs.
+Use host/VM IPs, not per-container Wi-Fi IPs.
 
 For the current two-machine setup, all server roles may use `192.168.0.6`:
 
@@ -55,7 +55,7 @@ OBSERVABILITY_HOST=192.168.0.6
 PLAYER_BACKEND_BASE_URL=http://192.168.0.6:3000
 ```
 
-Future LXC/VM deployments keep the same scripts and replace only these host values.
+Future five-VM deployments keep the same Docker role scripts and replace only these host values.
 
 ## Canonical Bundle Flow
 
