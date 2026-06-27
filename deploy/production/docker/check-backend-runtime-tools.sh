@@ -2,7 +2,7 @@
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
-load_production_env
+load_backend_env
 
 compose_run darshan-backend backend --no-deps api sh -lc '
 set -eu

@@ -16,21 +16,34 @@ Use host/VM IPs in `.env`; do not assign LAN IPs to individual containers.
 
 ## Config Files
 
-Create local files:
+Create only the files needed for the VM role you are setting up:
 
 ```bash
+# Every server-side VM:
 cp deploy/production/docker/.env.example deploy/production/docker/.env
+
+# Backend VM only:
 cp darshan-server/.env.example darshan-server/.env
 cp darshan-server/config/backend.production.example.json darshan-server/config/backend.json
-cp darshan-cms/.env.example darshan-cms/.env
+
+# CMS VM only:
 cp darshan-cms/public/config/app-config.example.json darshan-cms/public/config/app-config.json
 ```
+
+| VM | Required local files |
+|---|---|
+| Data VM | `deploy/production/docker/.env` |
+| Valkey VM | `deploy/production/docker/.env` |
+| Backend VM | `deploy/production/docker/.env`, `darshan-server/.env`, `darshan-server/config/backend.json`, backend cert files |
+| CMS VM | `deploy/production/docker/.env`, `darshan-cms/public/config/app-config.json` |
+| Observability VM | `deploy/production/docker/.env` |
+| Player devices | `/etc/darshan/player/config.json` |
 
 Keep env files short:
 
 - `deploy/production/docker/.env`: VM IPs, ports, image tags, Docker data bootstrap values
-- `darshan-server/.env`: secrets, sensitive URLs, config selector
-- `darshan-cms/.env`: browser build/runtime selector fallbacks
+- `darshan-server/.env`: backend secrets, sensitive URLs, config selector; Backend VM only
+- `darshan-cms/public/config/app-config.json`: browser-visible CMS runtime config; CMS VM only
 
 The production Docker env must include the bootstrap credentials used by the data containers:
 
@@ -122,7 +135,13 @@ Changing VM IPs should normally require editing the runtime config and restartin
 Stop one role on its VM:
 
 ```bash
-docker compose --env-file deploy/production/docker/.env --env-file darshan-server/.env -f deploy/production/docker/<role>/docker-compose.yml down
+docker compose --env-file deploy/production/docker/.env -f deploy/production/docker/<role>/docker-compose.yml down
+```
+
+For the backend role, include backend secrets if you run Docker Compose manually:
+
+```bash
+docker compose --env-file deploy/production/docker/.env --env-file darshan-server/.env -f deploy/production/docker/backend/docker-compose.yml down
 ```
 
 Or use:

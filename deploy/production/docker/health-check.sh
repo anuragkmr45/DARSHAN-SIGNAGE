@@ -2,7 +2,6 @@
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
-load_production_env
 
 ROLE="${1:-network}"
 
@@ -76,12 +75,12 @@ check_network() {
 }
 
 case "$ROLE" in
-  data) check_data ;;
-  valkey) check_valkey ;;
-  backend) check_backend ;;
-  cms) check_cms ;;
-  observability) check_observability ;;
-  network | all) check_network ;;
+  data) load_production_env; check_data ;;
+  valkey) load_production_env; check_valkey ;;
+  backend) load_backend_env; check_backend ;;
+  cms) load_production_env; check_cms ;;
+  observability) load_production_env; check_observability ;;
+  network | all) load_production_env; check_network ;;
   *)
     echo "Usage: $0 [data|valkey|backend|cms|observability|network]" >&2
     exit 2

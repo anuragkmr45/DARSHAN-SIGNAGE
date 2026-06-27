@@ -38,12 +38,25 @@ Use config files for non-secret runtime behavior:
 - backend: `darshan-server/config/backend.production.example.json`
 - CMS: `darshan-cms/public/config/app-config.example.json`
 
-There should be one app env example per app:
+There should be one app env example per app for app-local fallback and backend secrets:
 
 - `darshan-server/.env.example`
 - `darshan-cms/.env.example`
 
 Production site values live in `deploy/production/docker/.env`, copied from `deploy/production/docker/.env.example`.
+
+Production Docker role file placement:
+
+| Runtime target | Required local files |
+|---|---|
+| Data VM | `deploy/production/docker/.env` |
+| Valkey VM | `deploy/production/docker/.env` |
+| Backend VM | `deploy/production/docker/.env`, `darshan-server/.env`, `darshan-server/config/backend.json`, backend cert files |
+| CMS VM | `deploy/production/docker/.env`, `darshan-cms/public/config/app-config.json` |
+| Observability VM | `deploy/production/docker/.env` |
+| Player device | `/etc/darshan/player/config.json` |
+
+Backend secrets in `darshan-server/.env` are required only on the Backend VM. CMS production runtime config is browser-visible and should be supplied through `darshan-cms/public/config/app-config.json` for the Docker image mount; `darshan-cms/.env` is only a build-time fallback.
 
 ## Shared Assets
 

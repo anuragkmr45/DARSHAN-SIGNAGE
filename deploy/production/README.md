@@ -26,15 +26,28 @@ Containers do not receive LAN/Wi-Fi IPs directly. Configure the VM IPs in `deplo
 
 On each VM, install Docker Engine and Docker Compose, then place the repository checkout or release bundle on the VM.
 
-Create the shared production inputs:
+Create only the inputs needed for the VM role you are setting up.
 
 ```bash
+# Every server-side VM:
 cp deploy/production/docker/.env.example deploy/production/docker/.env
+
+# Backend VM only:
 cp darshan-server/.env.example darshan-server/.env
 cp darshan-server/config/backend.production.example.json darshan-server/config/backend.json
-cp darshan-cms/.env.example darshan-cms/.env
+
+# CMS VM only:
 cp darshan-cms/public/config/app-config.example.json darshan-cms/public/config/app-config.json
 ```
+
+| VM | Required local files |
+|---|---|
+| Data VM | `deploy/production/docker/.env` |
+| Valkey VM | `deploy/production/docker/.env` |
+| Backend VM | `deploy/production/docker/.env`, `darshan-server/.env`, `darshan-server/config/backend.json`, backend cert files |
+| CMS VM | `deploy/production/docker/.env`, `darshan-cms/public/config/app-config.json` |
+| Observability VM | `deploy/production/docker/.env` |
+| Player devices | `/etc/darshan/player/config.json` |
 
 Edit `deploy/production/docker/.env` on every VM and set:
 
@@ -49,13 +62,13 @@ Edit `deploy/production/docker/.env` on every VM and set:
 
 Use the same `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` in the Docker env on the Data VM and Backend VM. The Data VM maps them to MinIO root credentials, and the Backend VM uses them to access object storage.
 
-Edit `darshan-server/.env` for secrets, sensitive URLs, and config selectors. For Docker production, set:
+Edit `darshan-server/.env` on the Backend VM for backend secrets, sensitive URLs, and config selectors. For Docker production, set:
 
 ```env
 DARSHAN_CONFIG_FILE=/app/config/backend.json
 ```
 
-Edit `darshan-server/config/backend.json` and `darshan-cms/public/config/app-config.json` for non-secret deployment labels, URLs, realtime flags, media endpoint, and observability URLs.
+Edit `darshan-server/config/backend.json` on the Backend VM and `darshan-cms/public/config/app-config.json` on the CMS VM for non-secret deployment labels, URLs, realtime flags, media endpoint, and observability URLs.
 
 ## Start One Role Per VM
 

@@ -4,6 +4,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 BASE_DIR="$ROOT_DIR/deploy/production/docker"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 SITE_ENV="${DARSHAN_DOCKER_ENV:-$BASE_DIR/.env}"
+BACKEND_ENV_LOADED="${BACKEND_ENV_LOADED:-false}"
 
 require_file() {
   local file="$1"
@@ -17,7 +18,7 @@ require_file() {
 require_var() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
-    echo "Missing required non-secret config: $name in $SITE_ENV" >&2
+    echo "Missing required production value: $name" >&2
     exit 1
   fi
 }
@@ -40,13 +41,10 @@ EOF
 
 load_production_env() {
   require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/docker/.env.example to deploy/production/docker/.env and edit Docker-on-VM host IPs."
-  require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it before starting the production stack."
 
   set -a
   # shellcheck disable=SC1090
   source "$SITE_ENV"
-  # shellcheck disable=SC1090
-  source "$SERVER_ENV"
   set +a
 
   require_var DATA_HOST
@@ -68,15 +66,28 @@ load_production_env() {
   require_var POSTGRES_USER
   require_var POSTGRES_PASSWORD
   require_var POSTGRES_DB
-  require_var JWT_SECRET
   require_var MINIO_ACCESS_KEY
   require_var MINIO_SECRET_KEY
-  require_var ADMIN_EMAIL
-  require_var ADMIN_PASSWORD
 
   export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://${CMS_HOST}:${CMS_HTTP_PORT}/grafana/}"
   export VALKEY_URL="${VALKEY_URL:-redis://${VALKEY_HOST}:${VALKEY_HOST_PORT}}"
   export CMS_RUNTIME_CONFIG_SOURCE="${CMS_RUNTIME_CONFIG_SOURCE:-$ROOT_DIR/darshan-cms/public/config/app-config.json}"
+}
+
+load_backend_env() {
+  load_production_env
+  require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it on the Backend VM before starting backend."
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$SERVER_ENV"
+  set +a
+
+  require_var JWT_SECRET
+  require_var ADMIN_EMAIL
+  require_var ADMIN_PASSWORD
+  BACKEND_ENV_LOADED="true"
+  export BACKEND_ENV_LOADED
 }
 
 compose_cmd() {
@@ -85,7 +96,11 @@ compose_cmd() {
   shift 2
   (
     cd "$BASE_DIR/$dir"
-    COMPOSE_PROJECT_NAME="$project" docker compose --env-file "$SITE_ENV" --env-file "$SERVER_ENV" "$@"
+    local env_args=(--env-file "$SITE_ENV")
+    if [[ "${BACKEND_ENV_LOADED:-false}" == "true" ]]; then
+      env_args+=(--env-file "$SERVER_ENV")
+    fi
+    COMPOSE_PROJECT_NAME="$project" docker compose "${env_args[@]}" "$@"
   )
 }
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
-load_production_env
+load_backend_env
 
 echo "Building backend image with runtime tools"
 compose_build darshan-backend backend api

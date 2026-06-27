@@ -15,6 +15,16 @@ If you are not building a source-free runtime bundle yet and only want the curre
 cp deploy/production/docker/.env.example deploy/production/docker/.env
 # edit deploy/production/docker/.env only if your server IP is not 192.168.0.6
 
+cp darshan-server/.env.example darshan-server/.env
+# edit darshan-server/.env with backend secrets and set:
+# DARSHAN_CONFIG_FILE=/app/config/backend.json
+
+cp darshan-server/config/backend.production.example.json darshan-server/config/backend.json
+# edit darshan-server/config/backend.json with server/CMS/data/observability IPs
+
+cp darshan-cms/public/config/app-config.example.json darshan-cms/public/config/app-config.json
+# edit darshan-cms/public/config/app-config.json with CMS browser origin
+
 cd darshan-server
 docker compose --env-file .env down --remove-orphans
 
@@ -56,6 +66,19 @@ PLAYER_BACKEND_BASE_URL=http://192.168.0.6:3000
 ```
 
 Future five-VM deployments keep the same Docker role scripts and replace only these host values.
+
+In the five-VM Docker deployment, do not copy every app file to every VM:
+
+| VM | Required files |
+|---|---|
+| Data VM | `deploy/production/docker/.env` |
+| Valkey VM | `deploy/production/docker/.env` |
+| Backend VM | `deploy/production/docker/.env`, `darshan-server/.env`, `darshan-server/config/backend.json`, backend cert files |
+| CMS VM | `deploy/production/docker/.env`, `darshan-cms/public/config/app-config.json` |
+| Observability VM | `deploy/production/docker/.env` |
+| Player device | `/etc/darshan/player/config.json` |
+
+`darshan-server/.env` is loaded only by the backend role scripts. Data, Valkey, CMS, and Observability roles use `deploy/production/docker/.env` and do not need backend secrets.
 
 ## Canonical Bundle Flow
 
