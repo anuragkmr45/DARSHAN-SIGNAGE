@@ -141,7 +141,7 @@ docker compose --env-file deploy/production/docker/.env -f deploy/production/doc
 For the backend role, include backend secrets if you run Docker Compose manually:
 
 ```bash
-docker compose --env-file deploy/production/docker/.env --env-file darshan-server/.env -f deploy/production/docker/backend/docker-compose.yml down
+docker compose --env-file darshan-server/.env --env-file deploy/production/docker/.env -f deploy/production/docker/backend/docker-compose.yml down
 ```
 
 Or use:

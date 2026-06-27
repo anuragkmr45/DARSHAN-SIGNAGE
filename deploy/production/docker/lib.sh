@@ -75,13 +75,16 @@ load_production_env() {
 }
 
 load_backend_env() {
-  load_production_env
   require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it on the Backend VM before starting backend."
 
   set -a
   # shellcheck disable=SC1090
   source "$SERVER_ENV"
   set +a
+
+  # Load Docker site values after backend app env so role topology and data
+  # bootstrap values win over any app-template defaults with the same name.
+  load_production_env
 
   require_var JWT_SECRET
   require_var ADMIN_EMAIL
@@ -98,7 +101,7 @@ compose_cmd() {
     cd "$BASE_DIR/$dir"
     local env_args=(--env-file "$SITE_ENV")
     if [[ "${BACKEND_ENV_LOADED:-false}" == "true" ]]; then
-      env_args+=(--env-file "$SERVER_ENV")
+      env_args=(--env-file "$SERVER_ENV" --env-file "$SITE_ENV")
     fi
     COMPOSE_PROJECT_NAME="$project" docker compose "${env_args[@]}" "$@"
   )
