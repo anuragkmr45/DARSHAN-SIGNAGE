@@ -45,7 +45,9 @@ Edit `deploy/production/docker/.env` on every VM and set:
 - `OBSERVABILITY_HOST`
 - role ports
 - image names/tags
-- Docker data bootstrap values
+- Docker data bootstrap values: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`
+
+Use the same `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` in the Docker env on the Data VM and Backend VM. The Data VM maps them to MinIO root credentials, and the Backend VM uses them to access object storage.
 
 Edit `darshan-server/.env` for secrets, sensitive URLs, and config selectors. For Docker production, set:
 

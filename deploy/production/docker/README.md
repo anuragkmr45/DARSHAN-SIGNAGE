@@ -32,6 +32,18 @@ Keep env files short:
 - `darshan-server/.env`: secrets, sensitive URLs, config selector
 - `darshan-cms/.env`: browser build/runtime selector fallbacks
 
+The production Docker env must include the bootstrap credentials used by the data containers:
+
+```env
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=<strong-postgres-password>
+POSTGRES_DB=darshan
+MINIO_ACCESS_KEY=<strong-minio-access-key>
+MINIO_SECRET_KEY=<strong-minio-secret-key>
+```
+
+`MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` are also passed to the backend container so the API can read/write object storage. Use the same values on the Data VM and Backend VM.
+
 Keep non-secret runtime behavior in JSON:
 
 - `darshan-server/config/backend.json`
