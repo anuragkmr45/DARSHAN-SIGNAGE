@@ -4,6 +4,9 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 load_backend_env
 
+echo "Ensuring backend pairing CA files exist"
+"$BASE_DIR/ensure-backend-certs.sh"
+
 echo "Building backend image with runtime tools"
 compose_build darshan-backend backend api
 

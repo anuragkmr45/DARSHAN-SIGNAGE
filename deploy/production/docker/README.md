@@ -109,6 +109,18 @@ bash deploy/production/docker/health-check.sh network
 
 `start-all.sh` and `stop-all.sh` are for single-host lab validation only.
 
+## Backend Pairing CA
+
+The backend role needs `darshan-server/certs/ca.crt` and `darshan-server/certs/ca.key` for player pairing certificate issuance.
+
+`start-backend.sh` runs:
+
+```bash
+bash deploy/production/docker/ensure-backend-certs.sh
+```
+
+The helper never overwrites existing certs. It generates a fresh CA only when both files are missing. If only one file is present, it fails so an operator can restore the missing file or intentionally remove both for a fresh environment.
+
 ## Backend Schema And Seed
 
 `start-backend.sh` does not modify schema or seed data by default.

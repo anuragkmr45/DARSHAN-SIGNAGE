@@ -23,6 +23,39 @@ require_var() {
   fi
 }
 
+load_env_file() {
+  local file="$1"
+  local line key value line_no
+  line_no=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_no=$((line_no + 1))
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == export\ * ]] && line="${line#export }"
+
+    if [[ ! "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      echo "Invalid env line in $file:$line_no" >&2
+      exit 1
+    fi
+
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+
+    if [[ "$value" == \"*\" && "$value" == *\" && ${#value} -ge 2 ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" == \'* && "$value" == *\' && ${#value} -ge 2 ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+
+    export "$key=$value"
+  done < "$file"
+}
+
 yaml_single_quote() {
   local value="$1"
   value=${value//\'/\'\'}
@@ -42,10 +75,7 @@ EOF
 load_production_env() {
   require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/docker/.env.example to deploy/production/docker/.env and edit Docker-on-VM host IPs."
 
-  set -a
-  # shellcheck disable=SC1090
-  source "$SITE_ENV"
-  set +a
+  load_env_file "$SITE_ENV"
 
   require_var DATA_HOST
   require_var VALKEY_HOST
@@ -77,10 +107,7 @@ load_production_env() {
 load_backend_env() {
   require_file "$SERVER_ENV" "Missing darshan-server/.env. Create it on the Backend VM before starting backend."
 
-  set -a
-  # shellcheck disable=SC1090
-  source "$SERVER_ENV"
-  set +a
+  load_env_file "$SERVER_ENV"
 
   # Load Docker site values after backend app env so role topology and data
   # bootstrap values win over any app-template defaults with the same name.

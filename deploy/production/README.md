@@ -350,7 +350,36 @@ darshan-server/certs/ca.key
 
 Keep private keys out of git and backups shared outside the operator team.
 
-If using generated on-prem certificates from the bundle flow, copy the generated certs into `darshan-server/certs` before starting backend.
+`start-backend.sh` runs `deploy/production/docker/ensure-backend-certs.sh` before building/starting the backend.
+
+Behavior:
+
+- if `ca.crt` and `ca.key` already exist, the script leaves them in place
+- if both files are missing, the script generates a fresh self-signed pairing CA for a new environment
+- if only one file exists, the script stops and asks you to restore the missing file or remove both files for a fresh environment
+- it never overwrites an existing CA
+
+Manual run:
+
+```bash
+cd /opt/signhex
+bash deploy/production/docker/ensure-backend-certs.sh
+```
+
+To require a pre-provisioned CA and disable automatic first-run generation, set this in the Backend VM shell before starting backend:
+
+```bash
+export DARSHAN_AUTO_GENERATE_BACKEND_CA=false
+```
+
+Optional generation controls:
+
+```bash
+export DARSHAN_PAIRING_CA_SUBJECT="/CN=DARSHAN Production Pairing CA/O=DARSHAN"
+export DARSHAN_PAIRING_CA_DAYS=3650
+```
+
+If using generated on-prem certificates from the bundle flow, copy the generated certs into `darshan-server/certs` before starting backend. The helper will detect them and will not regenerate.
 
 ## CMS VM Runtime Config
 
