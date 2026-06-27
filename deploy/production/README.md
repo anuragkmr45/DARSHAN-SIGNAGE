@@ -604,8 +604,8 @@ Use:
       "mode": "production"
     },
     "backend": {
-      "baseUrl": "http://192.168.1.103:3000",
-      "socketIoUrl": "http://192.168.1.103:3000/socket.io/"
+      "baseUrl": "http://172.22.128.109:3000",
+      "socketIoUrl": "http://172.22.128.109:3000/socket.io/"
     },
     "realtime": {
       "enabled": true,

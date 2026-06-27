@@ -38,6 +38,7 @@ config.onChange((nextConfig) => {
 const gotTheLock = operatorCommand ? true : app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
+  console.warn('DARSHAN Player is already running. Exiting this second instance.')
   logger.warn('Another instance is already running. Exiting.')
   app.quit()
 } else if (!operatorCommand) {
@@ -867,6 +868,7 @@ app.on('ready', async () => {
     createWindow()
     await initializeServices()
   } catch (error) {
+    console.error('DARSHAN Player startup failed:', sanitizeLogPayloadForDiagnostics(error))
     logger.fatal({ error }, 'Failed to start application')
     app.quit()
   }

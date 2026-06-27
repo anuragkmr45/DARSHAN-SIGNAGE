@@ -142,12 +142,14 @@ export class Logger {
     if (isDevelopment) {
       this.logger = pino(pinoConfig, process.stdout)
     } else {
-      // In production, log to file
+      // In packaged Electron, the app can exit very early during startup
+      // (for example when another player instance already owns the lock).
+      // Synchronous writes avoid SonicBoom flushing before the destination is ready.
       this.logger = pino(
         pinoConfig,
         pino.destination({
           dest: this.currentLogFile,
-          sync: this.isNodeCliRuntime,
+          sync: true,
           mkdir: true,
         })
       )
