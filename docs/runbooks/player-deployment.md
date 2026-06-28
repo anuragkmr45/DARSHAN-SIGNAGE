@@ -1,489 +1,371 @@
-# Deployment Guide
+# DARSHAN Player Deployment Runbook
 
-## Overview
+Last code-truth refresh: 2026-06-28.
 
-This guide covers deploying the DARSHAN Player to production Ubuntu systems.
+Use this runbook to install or update the DARSHAN Electron player on Ubuntu, Raspberry Pi OS 64-bit, or compatible Linux signage hardware.
 
-## System Requirements
+For full server-side production setup, see:
 
-### Minimum Requirements
-- **OS:** Ubuntu 20.04 LTS or later
-- **CPU:** 2 cores (x86_64 or ARM64)
-- **RAM:** 2GB
-- **Disk:** 20GB free space
-- **Network:** Stable internet connection (10 Mbps+)
-- **Display:** HDMI output
-
-### Recommended Requirements
-- **OS:** Ubuntu 22.04 LTS
-- **CPU:** 4 cores (x86_64)
-- **RAM:** 4GB
-- **Disk:** 50GB SSD
-- **Network:** 50 Mbps+ with low latency
-- **Display:** 1920x1080 or higher
-
-### Software Dependencies
-- Node.js 18+ (bundled in package)
-- X11 display server
-- OpenSSL 1.1.1+
-- systemd
-
-## Pre-Deployment Checklist
-
-- [ ] Ubuntu system installed and updated
-- [ ] Network connectivity verified
-- [ ] Display connected and working
-- [ ] Backend API accessible
-- [ ] Pairing code obtained
-- [ ] Firewall rules configured
-- [ ] Backup plan in place
-
-## Installation Methods
-
-### Method 1: .deb Package (Recommended)
-
-#### 1. Download Package
-```bash
-wget https://releases.darshan.com/darshan-player_1.0.0_amd64.deb
+```text
+docs/runbooks/onprem-production-setup.md
+deploy/production/README.md
 ```
 
-#### 2. Install Package
+## Supported Player Targets
+
+Recommended production targets:
+
+- Ubuntu x64
+- Raspberry Pi OS 64-bit / ARM64
+- compatible ARM64 signage boards, such as AXON-class devices, after package validation
+
+Avoid 32-bit Raspberry Pi OS unless it is explicitly tested for the release.
+
+## Production Method
+
+Use a packaged `.deb` install.
+
+Do not run the player from source for production kiosk evidence. Source/dev mode is acceptable only for local engineering checks.
+
+Code sources:
+
+- package scripts: `darshan-player/package.json`
+- Electron main runtime: `darshan-player/src/main/index.ts`
+- player config loader: `darshan-player/src/common/file-config.ts`
+- player paths: `darshan-player/src/common/platform-paths.ts`
+- operator CLI: `darshan-player/src/main/cli.ts`
+
+## Build The Package
+
+Build on a machine with the repo checkout and Node 20.
+
+Ubuntu x64:
+
 ```bash
-sudo dpkg -i darshan-player_1.0.0_amd64.deb
-sudo apt-get install -f  # Fix dependencies if needed
-```
-
-#### 3. Verify Installation
-```bash
-which darshan-player
-darshan-player --version
-```
-
-### Method 2: AppImage
-
-#### 1. Download AppImage
-```bash
-wget https://releases.darshan.com/DARSHAN-Player-1.0.0.AppImage
-chmod +x DARSHAN-Player-1.0.0.AppImage
-```
-
-#### 2. Run AppImage
-```bash
-./DARSHAN-Player-1.0.0.AppImage
-```
-
-### Method 3: Build from Source
-
-#### 1. Clone Repository
-```bash
-git clone https://github.com/darshan/signage-player.git
-cd signage-player
-```
-
-#### 2. Install Dependencies
-```bash
+cd /opt/signhex/darshan-player
 npm install
-```
-
-#### 3. Build
-```bash
 npm run build
-npm run package:deb
+npm run package:linux:x64
 ```
 
-#### 4. Install
+Raspberry Pi OS 64-bit / ARM64:
+
 ```bash
-sudo dpkg -i build/darshan-player_1.0.0_amd64.deb
+cd /opt/signhex/darshan-player
+npm install
+npm run build
+npm run package:linux:arm64
 ```
 
-## Configuration
+Find the generated package:
 
-### 1. Edit Configuration File
 ```bash
-sudo nano /etc/darshan/config.json
+find /opt/signhex/darshan-player/build -type f -name "*.deb" -print
 ```
 
-### 2. Required Settings
+The package name usually looks like:
+
+```text
+darshan-player_1.0.0_amd64.deb
+darshan-player_1.0.0_arm64.deb
+```
+
+## Copy To Player Device
+
+Example:
+
+```bash
+scp /opt/signhex/darshan-player/build/*.deb hexmon@<PLAYER_IP>:/tmp/
+```
+
+Replace `hexmon` and `<PLAYER_IP>` with the real player username and IP.
+
+## Install Or Update
+
+Run on the player machine:
+
+```bash
+sudo apt update
+sudo apt install -y /tmp/darshan-player*.deb
+```
+
+If dependencies need repair:
+
+```bash
+sudo apt --fix-broken install
+sudo apt install -y /tmp/darshan-player*.deb
+```
+
+Verify:
+
+```bash
+command -v darshan-player
+dpkg -l | grep -i darshan
+dpkg -L darshan-player 2>/dev/null | grep '/bin/'
+```
+
+If `darshan-player` is not found, the package did not install correctly or the binary name differs from the expected package.
+
+## Player Config File
+
+Create this file on each player:
+
+```bash
+sudo mkdir -p /etc/darshan/player
+sudo nano /etc/darshan/player/config.json
+```
+
+Example:
+
 ```json
 {
-  "apiBase": "https://api.darshan.com",
-  "wsUrl": "wss://api.darshan.com/ws",
-  "deviceId": "",  // Will be set during pairing
-  "cache": {
-    "path": "/var/cache/darshan",
-    "maxBytes": 10737418240  // 10GB
-  },
-  "intervals": {
-    "heartbeatMs": 300000,     // 5 minutes
-    "schedulePollMs": 300000,  // 5 minutes
-    "commandPollMs": 30000     // 30 seconds
+  "player": {
+    "environment": {
+      "name": "production",
+      "deploymentId": "site-a",
+      "expectedServerId": "backend-a"
+    },
+    "runtime": {
+      "mode": "production"
+    },
+    "backend": {
+      "baseUrl": "http://192.168.1.103:3000",
+      "socketIoUrl": "http://192.168.1.103:3000/socket.io/"
+    },
+    "realtime": {
+      "enabled": true,
+      "signedAuthEnabled": false,
+      "deviceNamespace": "/device",
+      "commandSafetyPollMs": 60000,
+      "desiredStatePollMs": 300000
+    },
+    "polling": {
+      "heartbeatMs": 30000,
+      "commandPollMs": 5000,
+      "snapshotPollMs": 300000,
+      "defaultMediaPollMs": 300000
+    },
+    "pairing": {
+      "offlineValidationGraceMs": 604800000,
+      "backendFirstRolloutMode": true
+    },
+    "duplicateIdentity": {
+      "enabled": true,
+      "enforcement": "warn"
+    },
+    "cache": {
+      "maxBytes": 10737418240
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
   }
 }
 ```
 
-### 3. Optional Settings
+Use the Backend VM IP in:
+
 ```json
-{
-  "logLevel": "info",  // debug, info, warn, error
-  "mTLS": {
-    "enabled": true,
-    "certPath": "/var/lib/darshan/certs"
-  },
-  "display": {
-    "width": 1920,
-    "height": 1080,
-    "fullscreen": true
-  }
-}
+"baseUrl": "http://<BACKEND_VM_IP>:3000"
 ```
 
-## Device Pairing
+and:
 
-### Interactive Pairing
-```bash
-sudo darshan-pair-device
+```json
+"socketIoUrl": "http://<BACKEND_VM_IP>:3000/socket.io/"
 ```
 
-Follow the prompts:
-1. Enter 6-character pairing code
-2. Wait for certificate generation
-3. Verify pairing success
+Do not put device IDs, certificates, private keys, tokens, pairing state, or cache metadata in this config file.
 
-### Manual Pairing
+Validate JSON:
+
 ```bash
-# Generate key pair
-sudo openssl ecparam -name prime256v1 -genkey -noout \
-  -out /var/lib/darshan/certs/client.key
-
-# Generate CSR
-sudo openssl req -new -key /var/lib/darshan/certs/client.key \
-  -out /var/lib/darshan/certs/client.csr \
-  -subj "/CN=$(hostname)/O=DARSHAN"
-
-# Submit to backend (use API or admin dashboard)
-# Save returned certificate to /var/lib/darshan/certs/client.crt
+node -e "JSON.parse(require('fs').readFileSync('/etc/darshan/player/config.json','utf8')); console.log('config json OK')"
 ```
 
-## Service Management
+## Start Manually
 
-### Enable Service
+If an old instance is running, stop it first:
+
 ```bash
-sudo systemctl enable darshan-player
+pgrep -af 'darshan-player|DARSHAN-Player' || true
+pkill -f 'darshan-player|DARSHAN-Player' || true
+pgrep -af 'darshan-player|DARSHAN-Player' || echo "player stopped"
 ```
 
-### Start Service
+Start:
+
 ```bash
-sudo systemctl start darshan-player
+export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
+darshan-player
 ```
 
-### Check Status
+If the player exits immediately, run diagnostics:
+
 ```bash
+export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
+darshan-player doctor
+```
+
+## Autostart
+
+Production player machines must autostart the player after reboot.
+
+If using systemd, set the config environment:
+
+```ini
+[Service]
+Environment="DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json"
+```
+
+Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart darshan-player
 sudo systemctl status darshan-player
 ```
 
-### View Logs
+If using desktop autostart, verify the desktop entry or wrapper script exports the config selector:
+
 ```bash
-sudo journalctl -u darshan-player -f
+ls -l ~/.config/autostart/
+cat ~/.config/autostart/darshan-player.desktop
 ```
 
-### Restart Service
+## Pairing
+
+Start the player and use the OTP screen in CMS.
+
+Expected behavior:
+
+1. Player starts.
+2. Player reads `/etc/darshan/player/config.json`.
+3. Player contacts Backend VM.
+4. OTP/pairing screen appears if not paired.
+5. CMS pairing flow approves the player.
+6. Player persists identity/runtime state locally.
+7. Player begins heartbeat, realtime notification connection, schedule/default-media fetch, and playback.
+
+Do not copy app-data from one player to another. Pair each physical player normally.
+
+## Reboot Behavior
+
+After shutdown/restart:
+
+1. OS boots.
+2. Autostart/systemd starts DARSHAN Player.
+3. Player loads local runtime identity and cache state.
+4. Player validates with backend before treating the paired state as healthy.
+5. If backend validates the device, playback and heartbeat resume.
+6. If backend is temporarily unavailable and offline grace is valid, cached/offline playback may continue according to config.
+7. If backend reports deleted/revoked/env mismatch, the player enters recovery/OTP flow.
+
+Autostart is required. Without autostart, the app will not open by itself after reboot.
+
+## Updating A Player
+
+1. Build a new `.deb`.
+2. Copy it to the player.
+3. Stop the old running player.
+4. Install the new `.deb`.
+5. Keep `/etc/darshan/player/config.json` unless changing backend/site.
+6. Restart player.
+7. Verify `darshan-player doctor`.
+
+Commands:
+
 ```bash
-sudo systemctl restart darshan-player
+pkill -f 'darshan-player|DARSHAN-Player' || true
+sudo apt install -y /tmp/darshan-player*.deb
+export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
+darshan-player doctor
+darshan-player
 ```
 
-### Stop Service
+## Fresh Re-Pairing
+
+Use this only when intentionally resetting one player identity.
+
+First try the supported CLI:
+
 ```bash
-sudo systemctl stop darshan-player
+export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
+darshan-player reset-pairing --reason="operator requested fresh pairing"
 ```
 
-## Network Configuration
+Then restart the player and pair again from CMS.
 
-### Firewall Rules
+Do not delete proof-of-play, request queues, or media cache unless the operator explicitly wants a full wipe.
+
+## Health Checks
+
+From player:
+
 ```bash
-# Allow HTTPS
-sudo ufw allow 443/tcp
-
-# Allow WebSocket
-sudo ufw allow 443/tcp
-
-# Enable firewall
-sudo ufw enable
+curl -fsS http://<BACKEND_VM_IP>:3000/api/v1/health
 ```
 
-### Proxy Configuration
-If using a proxy, add to `/etc/darshan/config.json`:
-```json
-{
-  "proxy": {
-    "http": "http://proxy.example.com:8080",
-    "https": "http://proxy.example.com:8080"
-  }
-}
-```
+Realtime path:
 
-### DNS Configuration
-Ensure DNS resolution works:
 ```bash
-nslookup api.darshan.com
+curl -i http://<BACKEND_VM_IP>:3000/socket.io/
 ```
 
-## Display Configuration
+Player diagnostics:
 
-### Set Resolution
 ```bash
-xrandr --output HDMI-1 --mode 1920x1080
+export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
+darshan-player doctor
+darshan-player pairing-status
 ```
 
-### Disable Screen Blanking
-```bash
-xset s off
-xset s noblank
-xset -dpms
-```
+Diagnostics/log output must not expose credentials, signed URLs, cert PEM, private keys, or tokens.
 
-### Auto-start X11
-Edit `/etc/X11/default-display-manager`:
-```
-/usr/sbin/lightdm
-```
+## Runtime Evidence Boundary
 
-## Monitoring
-
-### Health Check
-```bash
-curl http://127.0.0.1:3300/healthz
-```
-
-### Metrics
-```bash
-curl http://127.0.0.1:3300/metrics
-```
-
-Player metrics stay localhost-bound by default. Enable remote scrape only by setting:
-
-```json
-"observability": {
-  "enabled": true,
-  "metricsEnabled": true,
-  "bindAddress": "0.0.0.0",
-  "port": 3300,
-  "allowRemoteAccess": true
-}
-```
-
-Apply that only on management networks where the observability VM Prometheus is explicitly allowed to reach the player.
-
-### Log Monitoring
-```bash
-# Real-time logs
-sudo journalctl -u darshan-player -f
-
-# Application logs
-sudo tail -f /var/cache/darshan/logs/darshan-*.log
-```
-
-### Alerting
-Set up monitoring with:
-- Prometheus + Grafana
-- Nagios
-- Datadog
-- Custom scripts
-
-Example Prometheus scrape config:
-```yaml
-scrape_configs:
-  - job_name: 'darshan-player'
-    static_configs:
-      - targets: ['localhost:3300']
-```
-
-## Backup and Recovery
-
-### Backup Configuration
-```bash
-sudo tar -czf darshan-backup.tar.gz \
-  /etc/darshan/ \
-  /var/lib/darshan/certs/
-```
-
-### Restore Configuration
-```bash
-sudo tar -xzf darshan-backup.tar.gz -C /
-sudo systemctl restart darshan-player
-```
-
-### Disaster Recovery
-1. Reinstall package
-2. Restore configuration
-3. Re-pair device if certificates lost
-4. Restart service
-
-## Scaling Deployment
-
-### Ansible Playbook
-```yaml
----
-- hosts: signage_players
-  become: yes
-  tasks:
-    - name: Install DARSHAN Player
-      apt:
-        deb: /tmp/darshan-player_1.0.0_amd64.deb
-
-    - name: Copy configuration
-      template:
-        src: config.json.j2
-        dest: /etc/darshan/config.json
-        mode: '0640'
-
-    - name: Enable and start service
-      systemd:
-        name: darshan-player
-        enabled: yes
-        state: started
-```
-
-### Docker (Experimental)
-```dockerfile
-FROM ubuntu:22.04
-
-RUN apt-get update && apt-get install -y \
-    xvfb \
-    x11vnc \
-    openssl
-
-COPY darshan-player_1.0.0_amd64.deb /tmp/
-RUN dpkg -i /tmp/darshan-player_1.0.0_amd64.deb
-
-CMD ["darshan-player"]
-```
-
-## Security Hardening
-
-### File Permissions
-```bash
-sudo chmod 700 /var/lib/darshan/certs
-sudo chmod 600 /var/lib/darshan/certs/*
-sudo chmod 640 /etc/darshan/config.json
-```
-
-### User Isolation
-```bash
-# Service runs as darshan user (created during install)
-id darshan
-```
-
-### SELinux/AppArmor
-```bash
-# Enable AppArmor profile
-sudo aa-enforce /etc/apparmor.d/darshan-player
-```
-
-### Automatic Updates
-```bash
-# Enable unattended upgrades
-sudo apt-get install unattended-upgrades
-sudo dpkg-reconfigure -plow unattended-upgrades
-```
+Installing the package and running `doctor` are necessary checks, but they do not by themselves prove production readiness. Browser pairing, packaged autostart, target-device media rendering, screenshot capture, proof-of-play, realtime wake-up, polling fallback, and no-secret support-bundle review must be verified on the target device.
 
 ## Troubleshooting
 
-See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for common issues and solutions.
+`darshan-player: command not found`:
 
-### Quick Diagnostics
-```bash
-# Collect diagnostic information
-sudo darshan-collect-logs
+- install the `.deb`
+- verify `command -v darshan-player`
+- inspect package files with `dpkg -L darshan-player`
 
-# Check service status
-sudo systemctl status darshan-player
+`Unknown player config key`:
 
-# Check health
-curl http://127.0.0.1:3300/healthz
-```
+- installed package is older than the config file
+- rebuild and reinstall the latest `.deb`, or remove unsupported config keys for that installed version
 
-## Maintenance
+`Invalid player config JSON`:
 
-### Regular Tasks
+- JSON syntax error, often a trailing comma after deleting a block
+- validate with the `node -e` command above
 
-**Daily:**
-- Monitor health endpoint
-- Check for errors in logs
+`sonic boom is not ready yet`:
 
-**Weekly:**
-- Review system resources
-- Check disk space
-- Verify playback
+- old package may have a logger shutdown bug during early exit
+- check if another player instance is already running
+- install the latest `.deb` built from current source
 
-**Monthly:**
-- Update system packages
-- Review security logs
-- Test backup restoration
-- Check certificate expiry
+Player appears offline in CMS:
 
-**Quarterly:**
-- Performance review
-- Security audit
-- Update documentation
+- verify backend health from the player machine
+- verify player config points to Backend VM IP
+- verify the player is paired to the expected screen
+- run `darshan-player doctor`
 
-### Update Procedure
+Default media changes are delayed:
 
-1. **Backup current installation**
-   ```bash
-   sudo darshan-collect-logs
-   sudo tar -czf backup.tar.gz /etc/darshan /var/lib/darshan/certs
-   ```
+- verify backend realtime/Valkey/outbox are enabled and healthy
+- polling fallback may still eventually apply media, but production realtime should notify quickly
 
-2. **Download new version**
-   ```bash
-   wget https://releases.darshan.com/darshan-player_1.1.0_amd64.deb
-   ```
+## Security Notes
 
-3. **Stop service**
-   ```bash
-   sudo systemctl stop darshan-player
-   ```
-
-4. **Install update**
-   ```bash
-   sudo dpkg -i darshan-player_1.1.0_amd64.deb
-   ```
-
-5. **Start service**
-   ```bash
-   sudo systemctl start darshan-player
-   ```
-
-6. **Verify**
-   ```bash
-   curl http://127.0.0.1:3300/healthz
-   ```
-
-## Uninstallation
-
-### Remove Package
-```bash
-sudo systemctl stop darshan-player
-sudo systemctl disable darshan-player
-sudo dpkg -r darshan-player
-```
-
-### Remove Data (Optional)
-```bash
-sudo rm -rf /var/lib/darshan
-sudo rm -rf /var/cache/darshan
-sudo rm -rf /etc/darshan
-sudo userdel darshan
-```
-
-## Support
-
-For deployment assistance:
-- Email: support@darshan.com
-- Documentation: https://docs.darshan.com
-- Community: https://community.darshan.com
-
----
-
-**Last Updated:** 2025-01-05
-**Version:** 1.0.0
+- Keep `/etc/darshan/player/config.json` non-secret.
+- Do not store credentials in player config URLs.
+- Do not copy runtime identity state between devices.
+- Review support bundles/logs before sharing externally.
+- For stolen-device resistant playback, use the secure offline playback policy only after real-device QA.

@@ -384,3 +384,23 @@ Baseline for air-gapped mode:
 - local cache/offline startup
 
 Push payloads are optional and environment-specific. If an on-prem MDM/private push mechanism or documented non-air-gapped exception exists, push payloads still follow the same notification-only principle and instruct the app to wake and REST-fetch authoritative state.
+
+## Code-Truth Update: 2026-06-28
+
+The current implemented Electron player contract is traceable to backend route registration, shared API endpoint constants, and player service calls. The full product map is in `docs/architecture/product-architecture.md`.
+
+| Feature / behavior | Code source of truth | Data/API dependency | Runtime owner | Notes / known gaps |
+|---|---|---|---|---|
+| Device pairing request/status/complete/recovery/revoke | `darshan-server/src/routes/device-pairing.ts`, `darshan-server/src/config/apiEndpoints.ts`, `darshan-player/src/main/services/pairing-service.ts` | `/api/v1/device-pairing/*`, `devicePairings`, `deviceCertificates`, `screens` | Backend + Player + CMS | Player must not treat local identity as authoritative without backend validation. |
+| Authenticated pairing-status truth | `darshan-server/src/routes/device-pairing.ts`, `darshan-player/src/main/services/pairing-service.ts`, `player-flow.ts` | `GET /api/v1/device/:deviceId/pairing-status` | Backend + Player | Drives valid/no-content/recovery/offline decisions. |
+| Heartbeat and online state | `darshan-server/src/routes/device-telemetry.ts`, `darshan-player/src/main/services/telemetry/heartbeat.ts` | `POST /api/v1/device/heartbeat`, `heartbeats`, `screens` | Backend + Player + CMS | CMS online state depends on backend receipt, not just player process status. |
+| Command poll and ACK | `darshan-server/src/routes/device-telemetry.ts`, `darshan-server/src/services/command-lifecycle-service.ts`, `darshan-player/src/main/services/command-processor.ts` | `GET /api/v1/device/:id/commands`, `POST /api/v1/device/:id/commands/:commandId/ack`, `deviceCommands` | Backend + Player | REST command rows remain authoritative; notifications only wake polling/fetch. |
+| Desired state | `darshan-server/src/routes/device-telemetry.ts`, `device-desired-state-service.ts`, `darshan-player/src/main/services/realtime-service.ts` | `GET /api/v1/device/:id/desired-state`, `deviceDesiredState` | Backend + Player | Used to reconcile missed notifications. |
+| Snapshot/default media | `darshan-server/src/routes/device-telemetry.ts`, `darshan-player/src/main/services/snapshot-manager.ts`, `settings/default-media-service.ts` | `GET /api/v1/device/:id/snapshot?include_urls=true`, `GET /api/v1/device/:id/default-media` | Backend + Player | Snapshot/default metadata points to HTTP/object storage/local cache paths. |
+| Proof-of-play | `darshan-server/src/routes/device-telemetry.ts`, `darshan-server/src/jobs/device-telemetry.ts`, `darshan-player/src/main/services/pop-service.ts` | `/api/v1/device/proof-of-play`, PoP table and object-storage log bucket | Backend + Player + CMS | Crash/power loss does not create fake continuous playback evidence. |
+| Screenshots and screenshot policy | `darshan-server/src/routes/device-telemetry.ts`, `darshan-server/src/routes/screens.ts`, `darshan-player/src/main/services/screenshot-service.ts` | screenshot result/policy endpoints, `screenshots`, object storage | Backend + Player + CMS | Device capture requires runtime OS/Electron support. |
+| Media cache reporting | `darshan-server/src/routes/device-telemetry.ts`, `media-cache-report-service.ts`, `darshan-player/src/main/services/media-cache-reporter.ts`, `cache/cache-manager.ts` | `POST /api/v1/device/:id/media-cache-report`, `mediaCacheReports` | Backend + Player + CMS | Reports contain sanitized host/path-hash metadata, not signed URL values. |
+| Device Socket.IO messages | `darshan-server/src/realtime/device-gateway.ts`, `outbox-dispatcher.ts`, `darshan-player/src/main/services/realtime-service.ts` | `/device` namespace; `HELLO`, `HELLO_ACK`, `COMMAND_AVAILABLE`, `RESYNC_REQUIRED`, `SERVER_TIME`, `ERROR` | Backend realtime + Player | Notification-only. Full state remains REST. |
+| Player internal IPC | `darshan-player/src/preload/index.ts`, `darshan-player/src/main/index.ts` | `window.darshan` / legacy `window.hexmon` IPC channels | Player main/preload/renderer | Internal renderer contract only; it is not a backend API contract. |
+
+Contract gaps requiring runtime verification: packaged player startup, target OS media rendering, screenshot capture, LAN Socket.IO proxy behavior, and proof-of-play replay under real offline/reconnect conditions.

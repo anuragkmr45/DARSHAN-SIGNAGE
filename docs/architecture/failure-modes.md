@@ -68,3 +68,20 @@ Phase 8 adds load modeling, chaos planning, production readiness gates, on-prem 
 - heartbeat freshness
 - PoP backlog and ingest latency
 - emergency delivery p50/p95/p99 latency
+
+## Code-Truth Update: 2026-06-28
+
+These failure-mode statements are backed by the current codebase. They do not replace on-prem chaos/load evidence.
+
+| Failure mode | Code-backed behavior | Code source of truth | Runtime evidence still required |
+|---|---|---|---|
+| Valkey unavailable | Realtime bus publish/subscribe can fail without changing DB command truth; players still have polling/desired-state paths. | `darshan-server/src/realtime/realtime-bus.ts`, `valkey-realtime-bus.ts`, `services/outbox-dispatcher.ts`, `darshan-player/src/main/services/realtime-service.ts` | Stop Valkey on the target deployment and verify default-media, publish, emergency, and command catch-up latency. |
+| Socket.IO unavailable | Player realtime service marks unhealthy and command/snapshot/default-media safety polling remains active. | `darshan-player/src/main/services/realtime-service.ts`, `command-processor.ts`, `snapshot-manager.ts`, `settings/default-media-service.ts` | Proxy outage and reconnect behavior on production nginx/network. |
+| Backend unavailable after recent validation | Player can use offline grace/cache paths where policy allows; secure lock can block visible playback when configured. | `darshan-player/src/main/services/player-flow.ts`, `common/offline-security-policy.ts`, `main/services/secure-playback-guard.ts` | Real player network switch/theft-resistance scenarios. |
+| Backend unavailable before validation or after revocation/mismatch | Player should not treat local identity as paired success and can enter recovery/OTP paths. | `darshan-player/src/main/services/player-flow.ts`, `pairing-service.ts`, backend `routes/device-pairing.ts` | Delete/revoke/re-pair smoke on packaged device. |
+| pg-boss unavailable for telemetry | Device telemetry can persist inline where queue submission fails. | `darshan-server/src/routes/device-telemetry.ts`, `darshan-server/src/jobs/device-telemetry.ts` | Queue failure and recovery on the production DB/job topology. |
+| Object storage/media failure | Player cache/media failures can be reported through sanitized media-cache reports and queued if HTTP is unavailable. | `darshan-player/src/main/services/cache/cache-manager.ts`, `media-cache-reporter.ts`, backend `media-cache-report-service.ts` | Disk-full, URL-expired, MinIO outage, and recovery evidence. |
+| Screenshot/log upload failure | Player has request queue/log-shipper paths and redaction for emitted support data. | `darshan-player/src/main/services/screenshot-service.ts`, `log-shipper.ts`, `network/request-queue.ts`, `common/redaction.ts` | Real OS screenshot capture and support-bundle review. |
+| Crash/power loss during playback | Player does not backfill fake continuous proof-of-play; restart creates new active playback evidence after validation/resume. | `darshan-player/src/main/services/pop-service.ts`, `playback-progress-store.ts`, renderer playback progress IPC | Real mid-schedule shutdown/restart test on the target player. |
+
+Known non-code-proven areas remain: packaged player autostart on each OS image, hardware video/PDF/office rendering, LAN firewall behavior, Prometheus/Grafana scrape health, and fleet-scale latency under load.

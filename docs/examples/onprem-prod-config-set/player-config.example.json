@@ -5,12 +5,17 @@
       "deploymentId": "prod-site-a",
       "expectedServerId": "backend-prod-a"
     },
+    "runtime": {
+      "mode": "production"
+    },
     "backend": {
-      "baseUrl": "https://prod-backend.internal.example",
-      "socketIoUrl": "https://prod-backend.internal.example/socket.io/"
+      "baseUrl": "https://backend.internal.example:3000",
+      "socketIoUrl": "https://backend.internal.example:3000/socket.io/"
     },
     "realtime": {
       "enabled": true,
+      "signedAuthEnabled": false,
+      "deviceNamespace": "/device",
       "commandSafetyPollMs": 120000,
       "desiredStatePollMs": 300000
     },

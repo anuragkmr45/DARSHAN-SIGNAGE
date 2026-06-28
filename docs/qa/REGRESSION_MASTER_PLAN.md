@@ -2,6 +2,10 @@
 
 This plan defines the phased QA discovery and regression program for the current multi-repo DARSHAN workspace. It is intentionally code-anchored: repo entrypoints, test harnesses, manifests, and runtime scripts determine scope and sequencing.
 
+Last code-truth refresh: 2026-06-28.
+
+Current production QA reference: Docker-on-VM roles under `deploy/production/docker/*`. Proxmox is the hypervisor only. Backend Docker config is `/app/config/backend.json`; player device config is `/etc/darshan/player/config.json`. Historical LXC/systemd production assumptions are not part of current QA acceptance.
+
 ## Test Phases
 
 | Phase | Wave | Primary Objective | Primary Surfaces | Core Outputs |
@@ -19,8 +23,8 @@ This plan defines the phased QA discovery and regression program for the current
 | Local backend stack | `darshan-server/docker-compose.yml`; `darshan-server/docker-compose.dev.yml`; `darshan-server/.env.example`; `darshan-server/config/backend.production.example.json` | Bring up API, Postgres, and MinIO for backend-backed regression and data seeding. | Use the single backend env template plus a JSON config file for non-secret QA runtime settings. |
 | Local CMS | `darshan-cms/package.json`; `darshan-cms/vite.config.ts`; `darshan-cms/vitest.config.ts`; `darshan-cms/playwright.config.ts` | Execute CMS unit and e2e coverage against local or pointed backend. | `playwright.config.ts` supports local dev server or external `E2E_BASE_URL`. |
 | Local player | `darshan-player/package.json`; `darshan-player/src/main/index.ts`; `darshan-player/.mocharc.json` | Exercise Electron runtime, pairing, telemetry, and offline/runtime behavior. | Use for unit, integration, fault-injection, and performance suites. |
-| QA artifact-driven environment | `manifests/qa/versions.example.yaml`; `deploy/qa`; `docs/runbooks/onprem-qa-setup.md` | Validate release-candidate artifacts in the same topology expected for QA promotion. | Treat manifests as the release pin source, not local source checkouts. |
-| Production-like reference environment | `manifests/production/versions.example.yaml`; `deploy/production`; `docs/runbooks/onprem-production-setup.md` | Compare QA findings against production promotion rules and environment constraints. | Used for gate validation and rollout-readiness checks, not exploratory feature discovery. |
+| QA artifact-driven environment | `manifests/qa/versions.example.yaml`; `deploy/qa`; `docs/runbooks/onprem-qa-setup.md` | Validate release-candidate artifacts in a topology aligned with production role separation where practical. | Treat manifests as the release pin source, not local source checkouts. Runtime proof still requires actual QA targets. |
+| Production-like reference environment | `manifests/production/versions.example.yaml`; `deploy/production/docker`; `deploy/production/README.md`; `docs/runbooks/onprem-production-setup.md` | Compare QA findings against Docker-on-VM production promotion rules and environment constraints. | Used for gate validation and rollout-readiness checks. Five-role Docker production evidence still requires real VMs and target player devices. |
 
 ## Test Harnesses And Commands
 
@@ -29,7 +33,7 @@ This plan defines the phased QA discovery and regression program for the current
 | Backend | `cd darshan-server && npm test`; `cd darshan-server && npx vitest run`; `cd darshan-server && npm run test:default-media` | Confirms route/service behavior and existing focused coverage such as default media. |
 | CMS | `cd darshan-cms && npm run test:unit`; `cd darshan-cms && npm run test:chat-e2e`; `cd darshan-cms && npm run test:default-media` | Covers unit logic and browser-level e2e flows already present in the repo. |
 | Player | `cd darshan-player && npm test`; `cd darshan-player && npm run test:integration`; `cd darshan-player && npm run test:fault`; `cd darshan-player && npm run test:performance`; `cd darshan-player && npm run test:default-media` | Provides runtime, reliability, offline, and performance coverage for the device layer. |
-| Deploy/Ops | `bash scripts/export/package-all.sh --release <tag> --electron-platform linux`; `bash scripts/bundle/assemble-runtime-bundle.sh <site-name>` | Validates artifact-driven promotion and bundle assembly assumptions used by QA and production. |
+| Deploy/Ops | Docker role scripts under `deploy/production/docker/start-*.sh`; export/bundle scripts under `scripts/export/*` and `scripts/bundle/*` where release artifacts are required | Validates current Docker role startup plus artifact-driven QA/bundle assumptions. |
 
 ## Regression Execution Baseline
 

@@ -5,12 +5,17 @@
       "deploymentId": "qa-site-a",
       "expectedServerId": "backend-qa-a"
     },
+    "runtime": {
+      "mode": "qa"
+    },
     "backend": {
-      "baseUrl": "https://qa-backend.internal.example",
-      "socketIoUrl": "https://qa-backend.internal.example/socket.io/"
+      "baseUrl": "https://qa-backend.internal.example:3000",
+      "socketIoUrl": "https://qa-backend.internal.example:3000/socket.io/"
     },
     "realtime": {
       "enabled": true,
+      "signedAuthEnabled": false,
+      "deviceNamespace": "/device",
       "commandSafetyPollMs": 120000,
       "desiredStatePollMs": 300000
     },

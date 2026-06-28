@@ -1,6 +1,7 @@
 # Enterprise Realtime Sync QA/Prod Hardening Runbook
 
-Last updated: 2026-06-09
+Last code-truth refresh: 2026-06-28
+Original phase update: 2026-06-09
 Updated by: Codex
 Phase: Phase 7 - QA/prod deployment hardening
 
@@ -18,6 +19,13 @@ It does not introduce new runtime semantics. The approved architecture remains:
 - QA/prod enablement must be feature-flagged and rollback-safe.
 - On-prem object storage or MinIO is the media egress layer; no public media CDN is assumed.
 - Valkey is the approved on-prem cross-node realtime fanout/coordination layer for multi-instance production.
+
+Code sources:
+
+- backend realtime: `darshan-server/src/realtime/*`
+- command/outbox/desired-state services: `darshan-server/src/services/*command*`, `device-desired-state-service.ts`, `outbox-dispatcher.ts`
+- player realtime/commands: `darshan-player/src/main/services/realtime-service.ts`, `command-processor.ts`, `network/websocket-client.ts`
+- contracts: `docs/contracts/realtime-command-contracts.md`
 
 ## Non-Goals
 

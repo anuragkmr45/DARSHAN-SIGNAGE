@@ -2,6 +2,10 @@
 
 This tracker is the system of record for defects found during phased feature discovery and regression execution.
 
+Last code-truth refresh: 2026-06-28.
+
+Current status note: the April 2026 `verified` rows are preserved as historical regression evidence. They are not a substitute for new runtime evidence on current Docker-on-VM production targets, current CMS browser builds, or packaged player devices. New defects should continue from the next unused `REG-*` ID and must cite current code/test/runtime evidence.
+
 ## Usage Rules
 
 - Create one row per confirmed defect.

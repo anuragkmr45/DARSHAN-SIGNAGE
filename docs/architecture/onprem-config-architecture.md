@@ -287,3 +287,30 @@ Every browser/on-prem evidence run should record:
 - Node/runtime version
 
 Runtime evidence must not be claimed from examples alone.
+
+## Code-Truth Update: 2026-06-28
+
+The current config boundary is code-backed as follows. The full system evidence map lives in `docs/architecture/product-architecture.md`.
+
+| Feature / behavior | Code source of truth | Runtime owner | Notes / known gaps |
+|---|---|---|---|
+| Backend optional JSON config selector | `darshan-server/src/config/file-config.ts`, `darshan-server/src/config/index.ts`, `darshan-server/src/config/file-config.test.ts` | Backend API/worker/all | `DARSHAN_CONFIG_FILE` is preferred; `SIGNHEX_CONFIG_FILE` is an alias; conflicts fail fast. Env overrides remain compatible. |
+| Backend Docker config mount | `deploy/production/docker/backend/docker-compose.yml`, `deploy/production/docker/README.md` | Backend Docker role | Docker sets `DARSHAN_CONFIG_FILE` to `/app/config/backend.json` by default and mounts the site file from `darshan-server/config/backend.json`. Direct host installs may use `/etc/darshan/server/config.json`, but that is not the Docker path. |
+| Backend secrets and sensitive URLs | `darshan-server/.env.example`, backend config schema | Backend Docker role | DB URL, JWT/admin secrets, object-storage credentials, CA key paths, metrics tokens, and sensitive service URLs stay in env or secret management. |
+| CMS runtime JSON | `darshan-cms/src/config/runtimeConfig.ts`, `darshan-cms/public/config/app-config.example.json` | CMS nginx/browser role | Browser-visible `/config/app-config.json` carries only public API/socket URLs, labels, and UI flags. It rejects secret-looking keys and credentialed URLs. |
+| Player site JSON | `darshan-player/src/common/file-config.ts`, `darshan-player/src/common/config.ts`, `darshan-player/test/unit/common/file-config.test.ts` | Player machine | `DARSHAN_PLAYER_CONFIG_FILE` is preferred; `SIGNHEX_PLAYER_CONFIG_FILE` is an alias. Generic backend config selectors are not used by the player. |
+| Player runtime identity boundary | `darshan-player/src/main/services/device-state-store.ts`, `cert-manager.ts`, `operator-tools.ts`, `playback-progress-store.ts` | Player machine | Device id, certs, pairing validation, install/runtime session ids, queues, cached media, screenshots, logs, and proof-of-play spool are runtime state, not site config. |
+| Docker site env | `deploy/production/docker/.env.example`, role scripts under `deploy/production/docker/*.sh` | Each Docker VM role | This env carries VM IPs, ports, image names/tags, and data bootstrap credentials. App runtime config remains in app-specific files where supported. |
+
+Current production Docker placement:
+
+| Machine / role | Files needed |
+|---|---|
+| Data VM | `deploy/production/docker/.env` |
+| Valkey VM | `deploy/production/docker/.env` |
+| Backend VM | `deploy/production/docker/.env`, `darshan-server/.env`, `darshan-server/config/backend.json`, backend CA/cert files generated or supplied for pairing |
+| CMS VM | `deploy/production/docker/.env`, `darshan-cms/public/config/app-config.json` |
+| Observability VM | `deploy/production/docker/.env` |
+| Player machine | `/etc/darshan/player/config.json` selected by `DARSHAN_PLAYER_CONFIG_FILE` in the player runtime environment |
+
+Runtime evidence status: config examples and docs are not deployment proof. Health checks, browser QA, packaged player QA, and no-secret runtime review must still be run on the target site.

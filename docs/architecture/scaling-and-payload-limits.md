@@ -258,3 +258,20 @@ Keep hot status in compact current-state tables.
 - Signed URLs should be refreshed by REST when expired.
 - WebSocket notification never carries URLs unless the URL is tiny and non-sensitive; preferred behavior is REST fetch.
 - Cache reports should make media failures visible in CMS.
+
+## Code-Truth Update: 2026-06-28
+
+The following limits and scaling boundaries are present or referenced in the current code. Capacity numbers above are planning models until measured on the target deployment.
+
+| Feature / behavior | Code source of truth | Data/API dependency | Runtime owner | Notes / known gaps |
+|---|---|---|---|---|
+| WebSocket notification size cap | `darshan-server/src/config/index.ts`, `src/config/file-config.ts`, `src/realtime/device-gateway.ts`, `src/realtime/realtime-bus.ts` | `limits.wsNotificationMaxBytes` / env compatibility | Backend realtime | Default examples use 32768 bytes. Real gateway/proxy behavior still needs tests. |
+| Snapshot payload REST path | `darshan-server/src/routes/device-telemetry.ts`, `src/routes/screens.ts`, `src/routes/screen-groups.ts`, player `snapshot-manager.ts` | snapshot endpoints, `scheduleSnapshots`, `publishes` | Backend + Player + CMS | Snapshot payloads are REST responses, not Socket.IO payloads. |
+| Default media REST path | `darshan-server/src/routes/settings.ts`, `src/utils/default-media.ts`, player `settings/default-media-service.ts` | settings/default-media endpoints and device default-media endpoint | Backend + Player + CMS | Realtime can wake refresh, but polling remains fallback. |
+| Command/outbox/desired-state storage | `darshan-server/src/db/schema.ts`, `command-lifecycle-service.ts`, `command-outbox-service.ts`, `device-desired-state-service.ts` | `deviceCommands`, `deviceCommandStatusHistory`, `commandOutbox`, `deviceDesiredState`, `deviceDesiredStateHistory` | Backend | Scaling depends on DB indexes, batch sizes, and outbox lag under measured load. |
+| Telemetry/evidence storage | `darshan-server/src/db/schema.ts`, `routes/device-telemetry.ts`, `jobs/device-telemetry.ts`, `routes/proof-of-play.ts` | `heartbeats`, `proofOfPlay`, `screenshots`, object storage buckets | Backend + Player + CMS | Retention/partitioning are architecture requirements for larger fleets, not fully proven by code. |
+| Player polling and reconciliation intervals | `darshan-player/src/common/config.ts`, `darshan-player/src/common/file-config.ts`, `realtime-service.ts`, `command-processor.ts`, `heartbeat.ts` | player JSON/env config | Player | Site config controls intervals; production values need load validation. |
+| Media egress boundary | `darshan-server/src/s3/index.ts`, `routes/media.ts`, player `cache/cache-manager.ts` | MinIO/S3 HTTP URLs and local cache | Backend + Player + Data VM | Media, logs, screenshots, and large telemetry do not belong on Socket.IO/Valkey. |
+| Observability metrics | `darshan-server/src/observability/metrics.ts`, `routes/metrics.ts`, `deploy/shared/observability/*` | Prometheus/Grafana | Backend + Observability VM | Scrape health and alert quality require runtime evidence. |
+
+Architecture acceptance rule: no capacity claim should be promoted to production-ready without matching runtime evidence for the actual Docker VM topology, LAN, player hardware, and media mix.

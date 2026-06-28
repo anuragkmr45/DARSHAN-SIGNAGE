@@ -16,7 +16,9 @@
     "socketTransport": "websocket",
     "socketAllowPolling": true,
     "socketRequireStickySessions": false,
-    "deviceNamespace": "/device"
+    "deviceNamespace": "/device",
+    "wsPingIntervalMs": 25000,
+    "wsIdleTimeoutMs": 75000
   },
   "valkey": {
     "mode": "standalone",
@@ -31,12 +33,44 @@
     "sessionLeaseMs": 300000,
     "restartGraceMs": 120000
   },
+  "security": {
+    "authCookieSecure": true,
+    "csrfEnabled": true,
+    "loginMaxAttempts": 5,
+    "loginLockoutWindowSeconds": 900,
+    "maxUploadMb": 200,
+    "storageQuotaBytes": 0,
+    "swaggerUiEnabled": false
+  },
+  "deviceSocketAuth": {
+    "legacyAllowed": true,
+    "signedEnabled": true,
+    "maxClockSkewMs": 300000,
+    "replayProtectionEnabled": true,
+    "replayCacheTtlMs": 300000,
+    "replayFailClosed": false
+  },
+  "commands": {
+    "leaseMs": 60000,
+    "maxAttempts": 5,
+    "defaultExpiresMs": 86400000,
+    "emergencyExpiresMs": 300000,
+    "outboxWriteEnabled": true,
+    "desiredStateEnabled": true
+  },
+  "outbox": {
+    "dispatchEnabled": true,
+    "batchSize": 100,
+    "dispatchIntervalMs": 1000,
+    "dispatchLeaseMs": 60000
+  },
   "media": {
-    "endpoint": "https://qa-media.internal.example",
-    "region": "us-east-1"
+    "endpoint": "https://qa-data.internal.example:9000",
+    "region": "us-east-1",
+    "cacheReportingEnabled": true
   },
   "observability": {
-    "prometheusUrl": "https://qa-prometheus.internal.example",
+    "prometheusUrl": "https://qa-observability.internal.example:9090",
     "prometheusTimeoutMs": 1500,
     "grafanaEnabled": true,
     "grafanaEmbedEnabled": true,

@@ -219,3 +219,20 @@ Proof-of-play remains evidence-honest across restart. A clean close ends active 
 ## Rollout Rule
 
 Deploy backend pairing-status before enabling GP-2 player validation. If a new player is deployed before the backend supports pairing-status, it must not clear identity solely because the endpoint is missing. Backend-first rollout is required for production and air-gapped on-prem sites.
+
+## Code-Truth Update: 2026-06-28
+
+The current pairing identity implementation is split between backend truth, player runtime state, and operator tooling. The full product evidence map is in `docs/architecture/product-architecture.md`.
+
+| Feature / behavior | Code source of truth | Data/API dependency | Runtime owner | Notes / known gaps |
+|---|---|---|---|---|
+| Pairing truth and recovery statuses | `darshan-server/src/routes/device-pairing.ts`, `darshan-server/src/services/device-pairing-orphan-service.ts` | `devicePairings`, `deviceCertificates`, `screens`, pairing APIs | Backend API | Backend pairing-status is authoritative for valid/recovery decisions. |
+| Player local identity and certificates | `darshan-player/src/main/services/device-state-store.ts`, `cert-manager.ts`, `pairing-service.ts` | local device state file, cert/key files, pairing endpoints | Player main | Local identity is operational state, not authority. |
+| Startup validation gate | `darshan-player/src/main/services/player-flow.ts`, `darshan-player/src/main/services/pairing-service.ts` | `GET /api/v1/device/:deviceId/pairing-status` | Player main + Backend | Player should only enter paired runtime after backend validation or valid offline grace. |
+| Environment/deployment mismatch guard | backend pairing route and player pairing service/config files | player environment headers and backend labels | Backend + Player | Mismatch returns recovery behavior without changing pairing protocol. |
+| Duplicate identity warning/block policy | backend pairing route/session metadata and player config/state | `screens.device_info.identity_sessions`, heartbeat/pairing metadata | Backend + Player + CMS | Warn mode preserves playback; block mode is config-gated. |
+| Reset-pairing operator path | `darshan-player/src/main/cli.ts`, `operator-tools.ts`, `device-state-store.ts`, `playback-progress-store.ts` | local identity/cert/config metadata and cache paths | Player CLI | Reset clears identity-bound state and playback progress; media cache/PoP/request queues are preserved unless explicitly clearing cache. |
+| Offline grace and secure lock | `darshan-player/src/common/offline-security-policy.ts`, `src/main/services/secure-playback-guard.ts`, `player-flow.ts` | pairing validation timestamp, backend reachability, config | Player main/renderer | Secure lock behavior is code-backed but must be validated on real devices before broad production enablement. |
+| Restart during active schedule | `darshan-player/src/common/playback-policy.ts`, `playback-progress-store.ts`, renderer playback files | schedule snapshot timing, local non-secret playback progress | Player main/renderer | Wall-clock resume logic is code-backed; exact media-driver behavior requires real-device testing. |
+
+Current guarantee from code inspection: uninstall/reboot/local files alone do not prove pairing authority; the player runtime is designed to validate against backend pairing-status or enter recovery/offline-grace states. Current non-guarantee: code inspection does not prove every Linux/RPi/AXON autostart, video driver, or network transition behavior without target hardware tests.

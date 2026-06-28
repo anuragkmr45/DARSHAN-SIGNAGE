@@ -1,6 +1,18 @@
 # On-Prem Player Ghost Pairing Recovery
 
-Status: GP-4 on-prem recovery guidance recorded on 2026-06-16.
+Last code-truth refresh: 2026-06-28.
+
+Historical note: this runbook originated from GP-4 on-prem recovery guidance recorded on 2026-06-16.
+
+## Source References
+
+| Area | Source |
+|---|---|
+| Backend pairing/recovery | `darshan-server/src/routes/device-pairing.ts` |
+| Backend telemetry/pairing status | `darshan-server/src/routes/device-telemetry.ts` |
+| CMS Screens/Pairing Health | `darshan-cms/src/pages/Screens.tsx`, `darshan-cms/src/components/screens/*` |
+| Player pairing flow | `darshan-player/src/main/services/pairing-service.ts`, `darshan-player/src/main/services/player-flow.ts` |
+| Player reset/operator tools | `darshan-player/src/main/services/operator-tools.ts`, `darshan-player/src/main/cli.ts` |
 
 ## When To Use
 
@@ -32,6 +44,12 @@ Use this runbook when:
 14. Assign content/default media and verify playback.
 
 ## Commands
+
+If the installed player uses a site config file, export it first:
+
+```bash
+export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
+```
 
 Inspect local identity:
 
@@ -67,7 +85,7 @@ darshan-player reset-pairing --reason=ghost_pairing_recovery
 sudo systemctl start darshan-player
 ```
 
-If using the source tree:
+If using the source tree for engineering-only checks:
 
 ```bash
 cd darshan-player

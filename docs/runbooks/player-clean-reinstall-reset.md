@@ -1,6 +1,8 @@
 # Player Clean Reinstall And Reset Runbook
 
-Status: GP-4 on-prem reset guidance recorded on 2026-06-16.
+Last code-truth refresh: 2026-06-28.
+
+Historical note: this runbook originated from GP-4 on-prem reset guidance recorded on 2026-06-16.
 
 ## Purpose
 
@@ -41,9 +43,12 @@ Supported overrides:
 - `DARSHAN_MTLS_CA_PATH`
 - legacy `HEXMON_*` equivalents
 
-Legacy Linux import paths:
+Current packaged Linux site config path:
 
-- config: `/etc/darshan/config.json`
+- site config: `/etc/darshan/player/config.json`
+
+Legacy Linux import paths from older installs are compatibility-only. Current packaged Linux site config should use `/etc/darshan/player/config.json`.
+
 - certs: `/var/lib/darshan/certs`
 - cache: `/var/cache/darshan`
 

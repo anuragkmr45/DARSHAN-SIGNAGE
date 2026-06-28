@@ -1,6 +1,15 @@
 # DARSHAN QA Setup Guide
 
+Last code-truth refresh: 2026-06-28.
+
 This is the primary QA deployment runbook for the approved air-gapped on-prem multi-VM QA topology.
+
+Code/deploy sources:
+
+- Docker production role layout: `deploy/production/docker/*`
+- QA environment contract: `docs/environments/qa/README.md`
+- bundle/export flow: `scripts/export/*`, `scripts/bundle/assemble-runtime-bundle.sh`
+- runtime evidence rules: `docs/governance/runtime-evidence-governance.md`
 
 QA uses the same machine-role split as production:
 

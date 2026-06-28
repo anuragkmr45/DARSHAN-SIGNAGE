@@ -5,12 +5,17 @@
       "deploymentId": "qa-site-a",
       "expectedServerId": "backend-a"
     },
+    "runtime": {
+      "mode": "qa"
+    },
     "backend": {
       "baseUrl": "http://10.30.0.20:3000",
       "socketIoUrl": "http://10.30.0.20:3000/socket.io/"
     },
     "realtime": {
       "enabled": true,
+      "signedAuthEnabled": false,
+      "deviceNamespace": "/device",
       "commandSafetyPollMs": 120000,
       "desiredStatePollMs": 300000
     },

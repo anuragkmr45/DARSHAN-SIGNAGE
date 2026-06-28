@@ -272,3 +272,19 @@ Compatibility rules:
 - The outbox row is a notification intent only; authoritative data remains available through REST.
 - `COMMAND_OUTBOX_WRITE_ENABLED=false` stops new outbox rows.
 - `DEVICE_DESIRED_STATE_ENABLED=false` stops desired-state updates.
+
+## Code-Truth Update: 2026-06-28
+
+The command lifecycle now has concrete code paths beyond the earlier target-state language. The full cross-product map is in `docs/architecture/product-architecture.md`.
+
+| Feature / behavior | Code source of truth | Data/API dependency | Runtime owner | Notes / known gaps |
+|---|---|---|---|---|
+| Durable command creation | `darshan-server/src/services/command-lifecycle-service.ts`, `playback-refresh-commands.ts`, `playback-refresh-dispatch.ts` | `deviceCommands`, `deviceCommandStatusHistory` | Backend API/worker/all | Refresh commands are created for publish, emergency, group membership, takedown, default media, and manual/operator reasons. |
+| Desired-state update | `darshan-server/src/services/device-desired-state-service.ts` | `deviceDesiredState`, `deviceDesiredStateHistory` | Backend API/worker/all | State versions and resource versions let players reconcile missed notifications. |
+| Outbox write | `darshan-server/src/services/command-outbox-service.ts`, `command-lifecycle-service.ts` | `commandOutbox` | Backend API/worker/all | Outbox is notification intent, not command authority. |
+| Outbox dispatch | `darshan-server/src/services/outbox-dispatcher.ts`, `darshan-server/src/realtime/device-gateway.ts`, `realtime-bus.ts` | Socket.IO `/device`, optional Valkey Pub/Sub | Backend worker/all | If dispatch fails, command rows and desired-state remain available through REST/polling. |
+| Player command fetch and execution | `darshan-player/src/main/services/command-processor.ts`, `snapshot-manager.ts`, `settings/default-media-service.ts` | `GET /api/v1/device/:id/commands` | Player main | Command side effects remain player-local until ACK/report. |
+| Player ACK | `darshan-server/src/routes/device-telemetry.ts`, `command-lifecycle-service.ts`, `darshan-player/src/main/services/command-processor.ts`, request queue | `POST /api/v1/device/:id/commands/:commandId/ack` | Player + Backend | ACK failures are queued/retried by player request paths where supported. |
+| CMS delivery visibility | `darshan-server/src/routes/screens.ts`, CMS screens/API domains | command/outbox/desired-state rows, heartbeats, cache reports | Backend + CMS | UI confidence still requires browser/runtime QA after deployment. |
+
+Operational rule: disabling realtime or Valkey must not disable command correctness. The player can still poll commands and desired state, and backend command rows remain the durable source of command intent.

@@ -1,6 +1,15 @@
 # Product Export Packaging
 
+Last code-truth refresh: 2026-06-28.
+
 Use this runbook when you want source-free, per-product deliverables from a build machine.
+
+Code/deploy sources:
+
+- export scripts: `scripts/export/*`
+- bundle assembly: `scripts/bundle/assemble-runtime-bundle.sh`
+- production Docker role contract: `deploy/production/docker/*`
+- player package scripts: `darshan-player/package.json`
 
 Generated outputs:
 

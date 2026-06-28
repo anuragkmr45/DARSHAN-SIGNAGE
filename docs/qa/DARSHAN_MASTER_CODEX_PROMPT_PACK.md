@@ -1,6 +1,10 @@
 # DARSHAN - Master Codex Prompt Pack
 ## Business-Aware QA, Deployment Readiness, And On-Prem / Air-Gapped Support
 
+Status: historical prompt pack and broad workflow reference.
+
+Current QA documentation lives in `docs/qa/**`, with `docs/qa/README.md` as the entrypoint. Any older instruction in this file that says to create artifacts under `/qa` should be read as historical; current repo-local QA artifacts belong under `docs/qa`.
+
 Use this prompt pack for the software product named DARSHAN.
 It is intentionally not HRMS-specific. DARSHAN may have a different tech stack, business domain, integrations, and deployment requirements.
 
@@ -1306,4 +1310,3 @@ no action: ...
 ```
 
 Then paste Prompt 2, Prompt 3, and Prompt 4.
-

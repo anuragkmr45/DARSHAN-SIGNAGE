@@ -1,6 +1,15 @@
 # On-Prem Runtime Bundle Builder
 
+Last code-truth refresh: 2026-06-28.
+
 Start here for platform bundle generation.
+
+Code/deploy sources:
+
+- bundle assembly: `scripts/bundle/assemble-runtime-bundle.sh`
+- production Docker role files: `deploy/production/docker/*`
+- shared observability assets: `deploy/shared/observability/*`
+- export packaging: `scripts/export/*`
 
 - QA runbook: `docs/runbooks/onprem-qa-setup.md`
 - production runbook: `docs/runbooks/onprem-production-setup.md`

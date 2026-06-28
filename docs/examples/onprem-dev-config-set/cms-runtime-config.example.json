@@ -6,10 +6,10 @@
       "cmsId": "cms-dev-a"
     },
     "api": {
-      "baseUrl": "http://192.168.0.5:3000"
+      "baseUrl": "http://192.168.0.5:8080"
     },
     "realtime": {
-      "socketBaseUrl": "http://192.168.0.5:3000",
+      "socketBaseUrl": "http://192.168.0.5:8080",
       "socketTransports": ["websocket"]
     },
     "diagnostics": {

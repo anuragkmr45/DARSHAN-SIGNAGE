@@ -5,7 +5,16 @@ Use this runbook for the current local/on-prem validation shape:
 - server machine: `192.168.0.6`
 - player machine: separate Ubuntu/RPi/AXON/player host on the same LAN
 
-This is production runtime behavior. Do not use Vite, `tsx`, or dev watchers for the server/CMS runtime evidence path.
+This is production runtime behavior. Do not use Vite, TypeScript runtime runners, or development watchers for the server/CMS runtime evidence path.
+
+For the full five-VM production deployment, use:
+
+```text
+docs/runbooks/onprem-production-setup.md
+deploy/production/README.md
+```
+
+This two-machine runbook is a lab/small-site variation where all server roles share one server machine IP.
 
 ## Quick Local Split for Docker Desktop
 
@@ -76,7 +85,7 @@ In the five-VM Docker deployment, do not copy every app file to every VM:
 | Backend VM | `deploy/production/docker/.env`, `darshan-server/.env`, `darshan-server/config/backend.json`, backend cert files |
 | CMS VM | `deploy/production/docker/.env`, `darshan-cms/public/config/app-config.json` |
 | Observability VM | `deploy/production/docker/.env` |
-| Player device | `/etc/darshan/player/config.json` |
+| Player device | installed DARSHAN Player `.deb`, `/etc/darshan/player/config.json` |
 
 `darshan-server/.env` is loaded only by the backend role scripts. Data, Valkey, CMS, and Observability roles use `deploy/production/docker/.env` and do not need backend secrets.
 
@@ -195,7 +204,36 @@ curl -fsS http://192.168.0.6:3000/api/v1/health
 
 ## Player Config Example
 
-Use the packaged player on the second machine. Point it at the backend host:
+Use the packaged player on the second machine. Build/install the `.deb` first; the `darshan-player` command exists only after package installation.
+
+Ubuntu x64 package:
+
+```bash
+cd /opt/signhex/darshan-player
+npm install
+npm run build
+npm run package:linux:x64
+find build -type f -name "*.deb" -print
+```
+
+Raspberry Pi OS 64-bit / ARM64 package:
+
+```bash
+cd /opt/signhex/darshan-player
+npm install
+npm run build
+npm run package:linux:arm64
+find build -type f -name "*.deb" -print
+```
+
+Install on the player:
+
+```bash
+sudo apt update
+sudo apt install -y /tmp/darshan-player*.deb
+```
+
+Then create `/etc/darshan/player/config.json` and point it at the backend host:
 
 ```json
 {
@@ -214,6 +252,13 @@ Use the packaged player on the second machine. Point it at the backend host:
 ```
 
 Do not copy player app-data between machines. Pair each physical player normally.
+
+Manual launch after install:
+
+```bash
+export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
+darshan-player
+```
 
 ## Troubleshooting
 

@@ -442,3 +442,19 @@ Phase 6 implements per-screen media cache failures, URL expiry errors, download 
 - Leave additive DB columns/tables in place.
 - Continue serving snapshots/default/emergency through existing REST APIs.
 - Revert player config to polling intervals if adaptive polling causes regressions.
+
+## Code-Truth Update: 2026-06-28
+
+The current realtime architecture remains notification-only. REST plus PostgreSQL remain the source of truth for player state, command state, published snapshots, default media, telemetry, and proof-of-play. See `docs/architecture/product-architecture.md` for the full feature map.
+
+| Feature / behavior | Code source of truth | Data/API dependency | Runtime owner | Notes / known gaps |
+|---|---|---|---|---|
+| Device Socket.IO namespace | `darshan-server/src/realtime/device-gateway.ts`, `darshan-server/src/server/index.ts` | Socket.IO namespace from config, default `/device` | Backend realtime | Registered from server bootstrap. Gateway messages wake devices; they do not carry media or full snapshots. |
+| Player realtime client | `darshan-player/src/main/services/realtime-service.ts`, `darshan-player/src/main/services/network/websocket-client.ts` | `/device` namespace, desired-state REST, command REST | Player main | On notification, player pulls authoritative REST resources. Runtime proxy/hardware evidence is still required. |
+| Valkey fanout bus | `darshan-server/src/realtime/realtime-bus.ts`, `valkey-realtime-bus.ts`, `device-connection-registry.ts` | Valkey Pub/Sub, short-lived connection mapping | Backend realtime | If Valkey publish/subscribe fails, DB/outbox/polling are still the recovery path. Real on-prem outage testing remains required. |
+| Transactional outbox dispatch | `darshan-server/src/services/command-outbox-service.ts`, `outbox-dispatcher.ts` | `commandOutbox` table | Backend API/worker/all | Outbox rows are notification intent only. Command rows and desired-state rows remain authoritative. |
+| Desired-state reconciliation | `darshan-server/src/services/device-desired-state-service.ts`, `darshan-server/src/routes/device-telemetry.ts`, `darshan-player/src/main/services/realtime-service.ts` | `GET /api/v1/device/:deviceId/desired-state` | Backend + Player | Used to detect missed notifications and decide which REST resources to refresh. |
+| CMS browser realtime | `darshan-server/src/realtime/chat-namespace.ts`, `notifications-namespace.ts`, `screens-namespace.ts`, CMS realtime hooks under `darshan-cms/src/hooks` and `src/lib` | Browser Socket.IO namespaces plus REST domains | Backend realtime + CMS | Browser realtime is separate from player `/device` and does not change source-of-truth rules. |
+| Media delivery boundary | `darshan-server/src/routes/device-telemetry.ts`, `darshan-player/src/main/services/cache/cache-manager.ts`, `darshan-player/src/main/services/snapshot-manager.ts` | HTTP/object storage/local cache | Backend + Player | Media bytes, screenshots, logs, and large telemetry are not Socket.IO payloads. |
+
+Runtime evidence not proven by code inspection: low-latency LAN delivery, nginx/proxy upgrade behavior, Valkey outage fallback, reconnect storms, and emergency fanout latency must be validated on the target deployment.

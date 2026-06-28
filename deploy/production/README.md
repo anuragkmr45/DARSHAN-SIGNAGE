@@ -59,7 +59,7 @@ Do not copy every app file to every VM.
 | Backend VM | `deploy/production/docker/.env`, `darshan-server/.env`, `darshan-server/config/backend.json`, backend cert files |
 | CMS VM | `deploy/production/docker/.env`, `darshan-cms/public/config/app-config.json` |
 | Observability VM | `deploy/production/docker/.env` |
-| Player devices | `/etc/darshan/player/config.json` |
+| Player devices | installed DARSHAN Player `.deb` package, `/etc/darshan/player/config.json` |
 
 `darshan-server/.env` is loaded only by backend role scripts. Data, Valkey, CMS, and Observability do not need backend secrets.
 
@@ -579,9 +579,73 @@ sudo ufw enable
 sudo ufw status
 ```
 
-## Player Device Config
+## Player Device Install And Config
 
-Player devices do not need server repo files.
+Player devices do not need server repo files after installation. The `darshan-player` command exists only after installing the packaged player application. Do not expect this command to work on a fresh player machine before installing the `.deb`.
+
+### 1. Build The Player Package
+
+Build on a machine with the repo checkout and Node 20.
+
+For Ubuntu x64 player machines:
+
+```bash
+cd /opt/signhex/darshan-player
+npm install
+npm run build
+npm run package:linux:x64
+```
+
+For Raspberry Pi OS 64-bit / ARM64 player machines:
+
+```bash
+cd /opt/signhex/darshan-player
+npm install
+npm run build
+npm run package:linux:arm64
+```
+
+The generated package is normally under `darshan-player/build/`. Find it with:
+
+```bash
+find build -type f -name "*.deb" -print
+```
+
+### 2. Copy The Package To The Player Device
+
+Example:
+
+```bash
+scp build/*.deb hexmon@<PLAYER_IP>:/tmp/
+```
+
+Replace `hexmon` and `<PLAYER_IP>` with the real player username and IP.
+
+### 3. Install Or Update The Player On The Device
+
+Run on the player machine:
+
+```bash
+sudo apt update
+sudo apt install -y /tmp/darshan-player*.deb
+```
+
+If package dependencies need repair:
+
+```bash
+sudo apt --fix-broken install
+sudo apt install -y /tmp/darshan-player*.deb
+```
+
+If an older player version is already running, stop it before manual testing:
+
+```bash
+pgrep -af 'darshan-player|DARSHAN-Player' || true
+pkill -f 'darshan-player|DARSHAN-Player' || true
+pgrep -af 'darshan-player|DARSHAN-Player' || echo "player stopped"
+```
+
+### 4. Create The Player Config
 
 Create on each player/RPi/AXON:
 
@@ -638,12 +702,30 @@ Use:
 }
 ```
 
-Start player with:
+Validate the JSON:
+
+```bash
+node -e "JSON.parse(require('fs').readFileSync('/etc/darshan/player/config.json','utf8')); console.log('config json OK')"
+```
+
+### 5. Start The Installed Player
+
+Start player manually with:
 
 ```bash
 export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
 darshan-player
 ```
+
+If `darshan-player` is not found, the `.deb` is not installed correctly or the package installed a different binary name. Check:
+
+```bash
+command -v darshan-player
+dpkg -l | grep -i darshan
+dpkg -L darshan-player 2>/dev/null | grep '/bin/'
+```
+
+### 6. Production Autostart
 
 For systemd-managed player service, set:
 
@@ -657,6 +739,30 @@ Then:
 sudo systemctl daemon-reload
 sudo systemctl restart darshan-player
 ```
+
+If the deployment uses desktop autostart instead of systemd, verify the desktop entry includes the config env or calls a wrapper script that exports it:
+
+```bash
+ls -l ~/.config/autostart/
+cat ~/.config/autostart/darshan-player.desktop
+```
+
+### 7. Verify Player Runtime
+
+Run:
+
+```bash
+export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
+darshan-player doctor
+```
+
+Then open the player. If it exits immediately, check for an already-running instance:
+
+```bash
+pgrep -af 'darshan-player|DARSHAN-Player'
+```
+
+If a previous version was already running, stop it and launch again after installing the new package.
 
 ## Stop, Restart, And Reset
 

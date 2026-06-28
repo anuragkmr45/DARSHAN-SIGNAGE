@@ -1,11 +1,10 @@
 # On-Prem Config Management Runbook
 
-Status: CONFIG-4 draft
-Last updated: 2026-06-16
+Last code-truth refresh: 2026-06-28.
 
 ## Scope
 
-Use this runbook to prepare non-secret site config and secret env files for Darshan on-prem dev, QA, and production deployments.
+Use this runbook to prepare non-secret site config and secret env files for DARSHAN on-prem dev, QA, and production deployments.
 
 This runbook does not approve production. Runtime evidence still requires a running backend, CMS, packaged player, observability services, and supported Node/runtime validation.
 
@@ -15,35 +14,39 @@ This runbook does not approve production. Runtime evidence still requires a runn
 - Keep real secrets outside git.
 - Use config files for non-secret runtime settings.
 - Use env/secrets files for credentials and sensitive URLs.
-- Keep existing `.env` compatibility until loaders and deprecation warnings are implemented.
+- Keep existing `.env` compatibility where current loaders support it.
 - Do not wipe player app-data during normal upgrades.
 - Do not enable duplicate identity block mode unless separately approved.
 
-## Recommended File Layout
+## Current File Layout
 
-Server:
+Production uses Docker role deployments on Ubuntu Server VMs. Direct-host `/etc/darshan/server/...` paths are compatibility-only and are not the Docker backend config path.
+
+Backend Docker:
 
 ```text
-/etc/darshan/server/config.qa.yaml
-/etc/darshan/server/secrets.env
+darshan-server/.env
+darshan-server/config/backend.json
+DARSHAN_CONFIG_FILE=/app/config/backend.json
 ```
 
-CMS:
+CMS Docker/nginx:
 
 ```text
-/etc/darshan/cms/config.qa.yaml
-/etc/darshan/cms/secrets.env
+darshan-cms/public/config/app-config.json
+served as /config/app-config.json
 ```
 
 Player:
 
 ```text
-/etc/darshan/player/config.qa.json
-/etc/darshan/player/secrets.env
+/etc/darshan/player/config.json
+DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
 ```
 
-The backend supports a focused JSON config file in CONFIG-1 through `DARSHAN_CONFIG_FILE` or `SIGNHEX_CONFIG_FILE`. The player supports a focused JSON site config file in CONFIG-2 through `DARSHAN_PLAYER_CONFIG_FILE` or `SIGNHEX_PLAYER_CONFIG_FILE`, while preserving the existing runtime config path behavior. CONFIG-2.3 closes the remaining player URL diagnostic/log redaction gaps. CONFIG-3 adds optional CMS browser runtime JSON config at `/config/app-config.json`.
-CONFIG-4 adds complete profile bundles:
+The backend supports a focused JSON config file through `DARSHAN_CONFIG_FILE` or `SIGNHEX_CONFIG_FILE`. The player supports a focused JSON site config file through `DARSHAN_PLAYER_CONFIG_FILE` or `SIGNHEX_PLAYER_CONFIG_FILE`, while preserving existing runtime config path compatibility. The CMS supports browser-visible runtime JSON config at `/config/app-config.json`.
+
+Example profile bundles:
 
 - `docs/examples/onprem-dev-config-set/`
 - `docs/examples/onprem-qa-config-set/`
@@ -172,13 +175,13 @@ CONFIG-0 discovery found listeners on ports `3000`, `8080`, `9000`, `9001`, `909
 
 ## Startup Checklist
 
-1. Place non-secret config under `/etc/darshan/<app>/`.
-2. Place secrets under `/etc/darshan/<app>/secrets.env`.
-3. Verify file ownership and permissions.
-4. Load secrets through the process manager or container secret mechanism.
-5. For backend CONFIG-1, set `DARSHAN_CONFIG_FILE=/etc/darshan/server/config.qa.json` if using a config file.
-6. For player CONFIG-2, set `DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.qa.json` if using a player site config file.
-7. For CMS CONFIG-3, copy the site runtime config to the static CMS deployment path as `config/app-config.json` if using runtime config.
+1. For Docker backend, set `DARSHAN_CONFIG_FILE=/app/config/backend.json` in `darshan-server/.env`.
+2. Put backend secrets and sensitive URLs in `darshan-server/.env`.
+3. Put backend non-secret runtime/deployment values in `darshan-server/config/backend.json`.
+4. Put CMS browser-visible runtime values in `darshan-cms/public/config/app-config.json`.
+5. Put player non-secret site config in `/etc/darshan/player/config.json`.
+6. Set `DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json` in the player runtime environment.
+7. Verify file ownership and permissions.
 8. Start backend first.
 9. Validate backend health and `/api/v1/device/:deviceId/pairing-status`.
 10. Start CMS.
@@ -223,10 +226,11 @@ If a config migration breaks startup:
 
 For player CONFIG-2 rollback, unset `DARSHAN_PLAYER_CONFIG_FILE` / `SIGNHEX_PLAYER_CONFIG_FILE`. The existing runtime config path remains available. Do not delete player runtime app-data during config rollback unless the operator is intentionally performing a pairing reset.
 
-## Human Decisions Required
+## Current Decisions
 
-- Final selector names: `SIGNHEX_CONFIG_FILE`, `DARSHAN_CONFIG_FILE`, or both.
-- Whether CMS runtime config is served as JSON or injected by nginx/template.
-- Whether Valkey config is split into host/port/password or remains a URL.
-- Whether `HEXMON_*` aliases get a deprecation date.
-- Node 20 path for release validation.
+- Backend preferred selector: `DARSHAN_CONFIG_FILE`; `SIGNHEX_CONFIG_FILE` remains an alias where supported.
+- Player preferred selector: `DARSHAN_PLAYER_CONFIG_FILE`; `SIGNHEX_PLAYER_CONFIG_FILE` remains an alias where supported.
+- CMS runtime config is browser-visible JSON served at `/config/app-config.json`.
+- Docker production backend config path is `/app/config/backend.json` inside the backend container.
+- Valkey connection remains an env/sensitive URL boundary where auth/TLS details are needed.
+- Node 20 and target-runtime checks remain runtime evidence requirements.

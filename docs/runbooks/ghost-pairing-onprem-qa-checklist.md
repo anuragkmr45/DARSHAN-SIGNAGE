@@ -1,8 +1,20 @@
 # Ghost Pairing On-Prem QA Checklist
 
-Status: GP-6 manual/browser/runtime checklist recorded on 2026-06-16.
+Last code-truth refresh: 2026-06-28.
+
+Historical note: this checklist originated from GP-6 manual/browser/runtime QA on 2026-06-16.
 
 Use this checklist for actual on-prem QA. Do not mark any row passed unless it was run against a real backend/CMS/player target.
+
+## Source References
+
+| Area | Source |
+|---|---|
+| Backend pairing | `darshan-server/src/routes/device-pairing.ts` |
+| Backend pairing-status/telemetry | `darshan-server/src/routes/device-telemetry.ts` |
+| CMS pairing UI | `darshan-cms/src/pages/Screens.tsx`, `darshan-cms/src/components/screens/PairingHealthPanel.tsx`, `PairDeviceModal.tsx` |
+| Player pairing/runtime | `darshan-player/src/main/services/pairing-service.ts`, `player-flow.ts`, `device-state-store.ts` |
+| Reset CLI | `darshan-player/src/main/cli.ts`, `darshan-player/src/main/services/operator-tools.ts` |
 
 ## Preconditions
 

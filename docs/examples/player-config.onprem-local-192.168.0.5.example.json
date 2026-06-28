@@ -5,12 +5,17 @@
       "deploymentId": "local-192-168-0-5",
       "expectedServerId": "mac-mini-backend-a"
     },
+    "runtime": {
+      "mode": "dev"
+    },
     "backend": {
       "baseUrl": "http://192.168.0.5:3000",
       "socketIoUrl": "http://192.168.0.5:3000/socket.io/"
     },
     "realtime": {
       "enabled": true,
+      "signedAuthEnabled": false,
+      "deviceNamespace": "/device",
       "commandSafetyPollMs": 120000,
       "desiredStatePollMs": 300000
     },

@@ -6,10 +6,10 @@
       "cmsId": "cms-a"
     },
     "api": {
-      "baseUrl": "https://cms-backend.prod.example.local"
+      "baseUrl": "https://cms.internal.example"
     },
     "realtime": {
-      "socketBaseUrl": "https://cms-backend.prod.example.local",
+      "socketBaseUrl": "https://cms.internal.example",
       "socketTransports": ["websocket"]
     },
     "diagnostics": {
