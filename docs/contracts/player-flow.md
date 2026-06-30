@@ -1,493 +1,108 @@
-# Player Flow (Desktop Screen App) — Full API Reference
+# Player Flow Contract
 
-This document gives the **exact call sequence** and **per‑API details** (purpose, endpoint, payload, response types, and dummy responses) for the desktop player.
+Last code-truth audit: 2026-06-28.
 
----
+This document records the current desktop Electron player flow from code. It intentionally avoids stale example payloads; route-local schemas and player TypeScript types remain the exact field source of truth.
 
-## Base URL + Auth
-- Base URL: `http://localhost:3000`
-- Device endpoints are **mTLS/device‑certificate authenticated**. Some are **public** during pairing.
-- When using user auth (admin token), send `Authorization: Bearer <token>`.
+## Source Files
 
-### Standard Error Response (all APIs)
-All error responses follow this shape:
-```json
-{
-  "success": false,
-  "error": {
-    "code": "<STABLE_MACHINE_CODE>",
-    "message": "<FRONTEND_SAFE_MESSAGE>",
-    "details": null,
-    "traceId": "<request-id>"
-  }
-}
+| Flow area | Code source of truth |
+|---|---|
+| Main lifecycle and IPC | `darshan-player/src/main/index.ts`, `darshan-player/src/preload/index.ts` |
+| Config and paths | `darshan-player/src/common/config.ts`, `file-config.ts`, `platform-paths.ts`, `types.ts` |
+| Pairing and certificates | `darshan-player/src/main/services/pairing-service.ts`, `cert-manager.ts`, `device-state-store.ts` |
+| Player state machine | `darshan-player/src/main/services/player-flow.ts` |
+| HTTP/replay/realtime | `network/http-client.ts`, `network/request-queue.ts`, `network/websocket-client.ts`, `realtime-service.ts` |
+| Playback | `snapshot-manager.ts`, `snapshot-parser.ts`, `settings/default-media-service.ts`, renderer playback files |
+| Telemetry/evidence | `telemetry/heartbeat.ts`, `pop-service.ts`, `screenshot-service.ts`, `media-cache-reporter.ts`, `log-shipper.ts` |
+| Backend routes | `darshan-server/src/config/apiEndpoints.ts`, `routes/device-pairing.ts`, `routes/device-telemetry.ts` |
+
+## Flow 1: First Launch / Unpaired
+
+1. Main process starts, loads config and platform paths.
+2. Device state is loaded from local runtime storage.
+3. If no usable local identity/certificate exists, player enters pairing-required behavior.
+4. Renderer pairing UI uses preload IPC to request pairing status/code.
+5. Pairing service calls backend device-pairing request/status/complete endpoints.
+6. Successful pairing persists identity/cert metadata locally.
+
+Contract rule: pairing codes and cert material are runtime state. They must not be committed in config examples or support docs.
+
+## Flow 2: Startup With Local Identity
+
+1. Player loads local device id, cert metadata, cached snapshot/default-media metadata, queues, and config.
+2. Pairing service calls authenticated backend pairing-status.
+3. If backend returns valid paired state, player starts heartbeat, realtime, command polling, snapshot/default-media refresh, telemetry, and playback.
+4. If backend indicates revoked/orphaned/screen missing/environment mismatch, player enters hard recovery/OTP flow.
+5. If backend is temporarily unavailable after recent validation, offline grace or secure-lock policy determines whether cached playback may continue.
+
+Contract rule: local identity is not backend authority.
+
+## Flow 3: Schedule / Default Media Playback
+
+1. Snapshot manager fetches `GET /api/v1/device/:deviceId/snapshot?include_urls=true`.
+2. Snapshot parser normalizes schedule/layout/media data into playback items.
+3. Cache manager prefetches/downloads media over HTTP/object storage URLs.
+4. Renderer plays emergency, schedule, default media, offline, or empty states according to player flow and playback policy.
+5. Active playback reporting flows back to main process for heartbeat/proof-of-play.
+
+Contract rule: media never moves through Socket.IO. Socket.IO can only wake a REST refresh.
+
+## Flow 4: Realtime Wake And Command Execution
+
+1. Realtime service connects to Socket.IO `/device`.
+2. Player sends HELLO metadata.
+3. Backend sends wake notifications such as `COMMAND_AVAILABLE` or `RESYNC_REQUIRED`.
+4. Player fetches desired state and commands by REST.
+5. Command processor executes commands locally and ACKs via REST.
+6. If realtime is disconnected or disabled, command/snapshot/default-media polling continues.
+
+Contract rule: duplicate notifications are safe because command execution is driven by durable command ids and REST fetches.
+
+## Flow 5: Telemetry And Evidence
+
+| Evidence flow | Player source | Backend endpoint group |
+|---|---|---|
+| Heartbeat | `telemetry/heartbeat.ts` | `/api/v1/device/heartbeat` |
+| Proof-of-play | `pop-service.ts` | `/api/v1/device/proof-of-play` |
+| Screenshot | `screenshot-service.ts` | `/api/v1/device/screenshot` and screenshot policy/result endpoints |
+| Media cache reports | `media-cache-reporter.ts` | `/api/v1/device/:deviceId/media-cache-report` |
+| Logs/support uploads | `log-shipper.ts`, `operator-tools.ts` | backend upload/log support paths |
+
+Contract rule: crash/power loss does not create fake proof-of-play continuity. Restart creates new evidence after validation/resume.
+
+## Flow 6: Reset / Clean Reinstall
+
+Operator CLI entrypoint:
+
+```bash
+darshan-player --pairing-status
+darshan-player reset-pairing --dry-run
+darshan-player reset-pairing --reason=clean_reinstall
 ```
 
----
+Source: `darshan-player/src/main/cli.ts`, `darshan-player/src/main/services/operator-tools.ts`.
 
-# 0) Boot → Pairing → Playback Loop (Sequence)
+Reset clears identity-bound state and playback progress. It preserves media cache, logs, screenshots, proof-of-play spool, and request queues unless an explicit cache-clear option is used.
 
-## Boot
-1. Load from disk: `device_id`, device certificate, cached media, last snapshot.
-2. If no certificate → go to **Pairing Flow**.
-3. If certificate present → go to **Playback Loop**.
+## Flow 7: Runtime Config
 
-## Pairing Flow (device)
-1. `POST /api/v1/device-pairing/request`
-2. Admin confirms: `POST /api/v1/device-pairing/confirm` (CMS)
-3. Device completes pairing: `POST /api/v1/device-pairing/complete`
+Preferred production player config selector:
 
-## Playback Loop (device)
-1. `GET /api/v1/device/:deviceId/snapshot?include_urls=true`
-2. Cache media files by `media_id`
-3. Play schedule locally
-4. Heartbeat + Proof of Play + Screenshot uploads
-5. Poll `/commands` and `ack`
-
----
-
-# 1) Pairing APIs
-
-## 1.1 Request Pairing Code
-**Purpose:** Device requests a pairing code and temporary device_id.
-
-**Endpoint:** `POST /api/v1/device-pairing/request`
-
-**Auth:** None
-
-**Request Body**
-```json
-{
-  "device_label": "Lobby Screen",
-  "expires_in": 600,
-  "width": 1920,
-  "height": 1080,
-  "aspect_ratio": "16:9",
-  "orientation": "landscape",
-  "model": "Intel NUC",
-  "codecs": ["h264", "h265"],
-  "device_info": { "os": "Windows" }
-}
+```bash
+DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
 ```
 
-**Success (201)**
-```json
-{
-  "id": "0c9b2b1c-9f0e-4f0f-96a2-0bfb6f7c7f1a",
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "pairing_code": "582931",
-  "expires_at": "2026-01-23T12:30:00.000Z",
-  "expires_in": 600,
-  "connected": true,
-  "observed_ip": "192.168.1.10",
-  "specs": {
-    "width": 1920,
-    "height": 1080,
-    "aspect_ratio": "16:9",
-    "orientation": "landscape",
-    "model": "Intel NUC",
-    "codecs": ["h264", "h265"],
-    "device_info": { "os": "Windows" }
-  }
-}
-```
-
-**Possible Errors**
-- 422 `VALIDATION_ERROR`
-- 500 `INTERNAL_ERROR`
-
-**Error (422)**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Some fields are invalid.",
-    "details": [{ "field": "expires_in", "message": "Must be a positive integer" }],
-    "traceId": "f8f594cc-3d29-40f7-8d94-0f9dcb99fd8d"
-  }
-}
-```
-
----
-
-## 1.2 Check Pairing Status
-**Purpose:** Check if device is already registered as a screen.
-
-**Endpoint:** `GET /api/v1/device-pairing/status?device_id=<uuid>`
-
-**Auth:** None
-
-**Success (200)**
-```json
-{
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "paired": true,
-  "screen": {
-    "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-    "status": "ACTIVE"
-  }
-}
-```
-
-**Possible Errors**
-- 422 `VALIDATION_ERROR`
-- 500 `INTERNAL_ERROR`
-
----
-
-## 1.3 Complete Pairing (CSR → Certificate)
-**Purpose:** Device submits CSR to receive a certificate.
-
-**Endpoint:** `POST /api/v1/device-pairing/complete`
-
-**Auth:** None
-
-**Request Body**
-```json
-{
-  "pairing_code": "582931",
-  "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----"
-}
-```
-
-**Success (201)**
-```json
-{
-  "success": true,
-  "message": "Device pairing completed. Certificate issued.",
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "certificate": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----",
-  "fingerprint": "2a1c4d9e...",
-  "expires_at": "2027-01-23T12:30:00.000Z"
-}
-```
-
-**Possible Errors**
-- 404 `NOT_FOUND` (invalid/expired pairing code)
-- 400 `BAD_REQUEST` (invalid CSR format)
-- 422 `VALIDATION_ERROR`
-- 500 `INTERNAL_ERROR`
-
-**Error (404)**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Invalid or expired pairing code",
-    "details": null,
-    "traceId": "b8c2d2c7-4f0a-4e2a-8d60-7b1e9df33835"
-  }
-}
-```
-
----
-
-# 2) Playback / Snapshot
-
-## 2.1 Get Latest Snapshot (Core Playback)
-**Purpose:** Fetch the latest publish snapshot filtered for this screen.
-
-**Endpoint:** `GET /api/v1/device/:deviceId/snapshot?include_urls=true`
-
-**Auth:** Device certificate or user token
-
-**Query Params**
-- `include_urls=true|false` (include media URLs for download)
-
-**Success (200) — normal publish**
-```json
-{
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "publish": {
-    "publish_id": "8bb69a54-3b7d-4b7c-9d4c-2c47c5bca6a2",
-    "schedule_id": "5d927d9b-3c67-4cd9-a4f6-9f6f5f0a4321",
-    "snapshot_id": "7df5f2fe-0987-4b2e-b4a6-0d2d36f6b6a3",
-    "published_at": "2026-01-23T12:00:00.000Z"
-  },
-  "snapshot": {
-    "schedule": {
-      "id": "5d927d9b-3c67-4cd9-a4f6-9f6f5f0a4321",
-      "items": [
-        {
-          "id": "item-1",
-          "presentation": {
-            "id": "pres-1",
-            "slots": [
-              { "media_id": "media-1", "duration_seconds": 10 }
-            ]
-          }
-        }
-      ]
-    }
-  },
-  "media_urls": {
-    "media-1": "https://storage.example.com/signed-url"
-  },
-  "emergency": null
-}
-```
-
-**Success (200) — emergency active**
-```json
-{
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "publish": null,
-  "snapshot": null,
-  "media_urls": null,
-  "emergency": {
-    "id": "emg-1",
-    "title": "Fire Drill",
-    "media_url": "https://storage.example.com/emergency.png"
-  },
-  "default_media": null
-}
-```
-
-**Success (200) — default media fallback**
-```json
-{
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "publish": null,
-  "snapshot": null,
-  "media_urls": null,
-  "emergency": null,
-  "default_media": {
-    "id": "media-default",
-    "name": "Welcome Screen",
-    "type": "IMAGE",
-    "duration_seconds": 15,
-    "media_url": "https://storage.example.com/default.png"
-  }
-}
-```
-
-**Possible Errors**
-- 401 `UNAUTHORIZED` (missing/invalid device cert or token)
-- 403 `FORBIDDEN` (token lacks screen read permission)
-- 404 `NOT_FOUND` (no publish + no default media)
-- 422 `VALIDATION_ERROR`
-- 500 `INTERNAL_ERROR`
-
-**Error (404)**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "No publish found for this device",
-    "details": null,
-    "traceId": "1fdc41f6-6f6b-4d49-bb40-21c9c3f1e1d0"
-  }
-}
-```
-
----
-
-# 3) Telemetry / Reporting
-
-## 3.1 Heartbeat
-**Purpose:** Report device health + get pending commands.
-
-**Endpoint:** `POST /api/v1/device/heartbeat`
-
-**Auth:** Device certificate (mTLS)
-
-**Request Body**
-```json
-{
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "status": "ONLINE",
-  "uptime": 3600,
-  "memory_usage": 1234,
-  "cpu_usage": 12,
-  "current_schedule_id": "5d927d9b-3c67-4cd9-a4f6-9f6f5f0a4321",
-  "current_media_id": "media-1"
-}
-```
-
-**Success (200)**
-```json
-{
-  "success": true,
-  "timestamp": "2026-01-23T12:10:00.000Z",
-  "commands": [
-    {
-      "id": "cmd-1",
-      "type": "REFRESH",
-      "payload": {},
-      "timestamp": "2026-01-23T12:09:00.000Z"
-    }
-  ]
-}
-```
-
-**Possible Errors**
-- 404 `NOT_FOUND` (device not registered)
-- 422 `VALIDATION_ERROR`
-- 500 `INTERNAL_ERROR`
-
----
-
-## 3.2 Proof of Play
-**Purpose:** Report played media for analytics and audits.
-
-**Endpoint:** `POST /api/v1/device/proof-of-play`
-
-**Auth:** Device certificate (mTLS)
-
-**Request Body**
-```json
-{
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "media_id": "media-1",
-  "schedule_id": "5d927d9b-3c67-4cd9-a4f6-9f6f5f0a4321",
-  "start_time": "2026-01-23T12:00:00.000Z",
-  "end_time": "2026-01-23T12:00:10.000Z",
-  "duration": 10,
-  "completed": true
-}
-```
-
-**Success (201)**
-```json
-{
-  "success": true,
-  "timestamp": "2026-01-23T12:00:11.000Z"
-}
-```
-
-**Possible Errors**
-- 422 `VALIDATION_ERROR`
-- 500 `INTERNAL_ERROR`
-
----
-
-## 3.3 Screenshot Upload
-**Purpose:** Upload a screenshot image (base64).
-
-**Endpoint:** `POST /api/v1/device/screenshot`
-
-**Auth:** Device certificate (mTLS)
-
-**Request Body**
-```json
-{
-  "device_id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-  "timestamp": "2026-01-23T12:05:00.000Z",
-  "image_data": "iVBORw0KGgoAAAANSUhEUg..."
-}
-```
-
-**Success (201)**
-```json
-{
-  "success": true,
-  "object_key": "device-screenshots/1a2b3.../1706011500000.png",
-  "timestamp": "2026-01-23T12:05:00.000Z"
-}
-```
-
-**Possible Errors**
-- 422 `VALIDATION_ERROR`
-- 500 `INTERNAL_ERROR`
-
----
-
-# 4) Remote Commands
-
-## 4.1 Fetch Pending Commands
-**Purpose:** Device polls for commands (reboot, refresh, screenshot, etc.).
-
-**Endpoint:** `GET /api/v1/device/:deviceId/commands`
-
-**Auth:** Device certificate (mTLS)
-
-**Success (200)**
-```json
-{
-  "commands": [
-    {
-      "id": "cmd-1",
-      "type": "REBOOT",
-      "payload": null,
-      "timestamp": "2026-01-23T12:12:00.000Z"
-    }
-  ]
-}
-```
-
-**Possible Errors**
-- 500 `INTERNAL_ERROR`
-
----
-
-## 4.2 Acknowledge Command
-**Purpose:** Confirm command execution.
-
-**Endpoint:** `POST /api/v1/device/:deviceId/commands/:commandId/ack`
-
-**Auth:** Device certificate (mTLS)
-
-**Success (200)**
-```json
-{
-  "success": true,
-  "timestamp": "2026-01-23T12:12:30.000Z"
-}
-```
-
-**Possible Errors**
-- 404 `NOT_FOUND` (command not found)
-- 500 `INTERNAL_ERROR`
-
----
-
-# 5) Default Media (Server Setting)
-
-Default media is configured by admin and used when **no publish exists** for a device.
-
-**Endpoints (admin only):**
-- `GET /api/v1/settings/default-media`
-- `PUT /api/v1/settings/default-media` with `{ "media_id": "..." }`
-
-**Device behavior:**
-- Snapshot response includes `default_media` if set
-- If no default media, snapshot returns **404**
-
----
-
-# 6) Caching Guidance (Device)
-
-- **Cache by media_id** on disk. If already cached, skip download.
-- **Do not stream** from URLs; download then play locally.
-- Pre‑signed URLs expire (about 1 hour). If download fails, re‑fetch snapshot for new URLs.
-- Cache the **last snapshot** for offline fallback.
-
----
-
-# 7) Desktop App Open Questions (Enterprise‑grade checklist)
-
-Please answer these before implementation so we choose the correct, secure defaults.
-
-1) **CSR / keypair generation**
-   - Do we already generate a device keypair + CSR today? If yes, where (file path / module)?
-   - If not, can we use **Node.js crypto** or **OpenSSL**? Is `openssl` guaranteed on target machines?
-
-2) **mTLS trust model**
-   - Do we have a **CA bundle** provided by the backend, or should we use the OS trust store?
-   - Any server certificate **pinning** requirements?
-
-3) **Media storage + cache**
-   - Where should media files be cached on disk (path conventions per OS)?
-   - What file naming strategy do you prefer (by `media_id`, hash, or content signature)?
-   - Any size limits / eviction policy (LRU, TTL)?
-
-4) **Playback implementation**
-   - How is playback implemented today? (HTML5 video/image rotation, native player, custom renderer)
-   - Where is schedule parsing logic located (if any)?
-
-5) **Telemetry & command support**
-   - Are heartbeat / proof‑of‑play / screenshot / commands already implemented?
-   - If yes, which endpoints are currently called, and from which file paths/modules?
+The selected JSON may include backend URLs, Socket.IO URL, environment labels, realtime/polling intervals, pairing grace, duplicate identity mode, cache limit, and diagnostics flags supported by `file-config.ts`. It must not include cert private material, tokens, device identity, pairing state, media cache, or proof-of-play data.
+
+## Needs Runtime Verification
+
+These behaviors are code-backed but not proven by documentation:
+
+- packaged player startup after OS reboot
+- fullscreen/kiosk behavior on target OS images
+- video/PDF/office/webpage playback on target hardware
+- screenshot capture on real display driver stack
+- Socket.IO behavior through production nginx and LAN
+- secure offline lock behavior during network switch/theft simulation
+- proof-of-play replay after real network outage and power loss

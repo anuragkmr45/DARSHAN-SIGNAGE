@@ -1,0 +1,12 @@
+Total messages: 5 (Errors: 3, Warnings: 0)
+Returning 3 messages for level "error"
+
+[ERROR] [Pairing] Failed to populate device info TypeError: Cannot read properties of undefined (reading 'getDeviceInfo')
+    at PairingScreen.populateDeviceInfo (http://127.0.0.1:5184/pairing.bundle.js:84:41)
+    at new PairingScreen (http://127.0.0.1:5184/pairing.bundle.js:32:12)
+    at HTMLDocument.<anonymous> (http://127.0.0.1:5184/pairing.bundle.js:324:7) @ http://127.0.0.1:5184/pairing.bundle.js:32
+[ERROR] [Pairing] Bootstrap failed TypeError: Cannot read properties of undefined (reading 'getPlayerStatus')
+    at PairingScreen.bootstrap (http://127.0.0.1:5184/pairing.bundle.js:77:50)
+    at new PairingScreen (http://127.0.0.1:5184/pairing.bundle.js:35:12)
+    at HTMLDocument.<anonymous> (http://127.0.0.1:5184/pairing.bundle.js:324:7) @ http://127.0.0.1:5184/pairing.bundle.js:35
+[ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://127.0.0.1:5184/favicon.ico:0

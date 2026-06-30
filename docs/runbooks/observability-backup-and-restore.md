@@ -18,7 +18,7 @@ Optional:
 ## Backup Notes
 
 - Prefer backing up configuration on every release and data snapshots on a scheduled maintenance window.
-- Do not enable Prometheus admin APIs just for snapshotting. Use VM or storage snapshots, or an agreed maintenance procedure on VM2.
+- Do not enable Prometheus admin APIs just for snapshotting. Use VM or storage snapshots, or an agreed maintenance procedure on the observability VM.
 - Grafana dashboard state should remain provisioned from git-managed files where possible. If operators create local dashboards, export and back them up explicitly before upgrades.
 
 ## Restore
@@ -33,5 +33,5 @@ Optional:
 ## Notes
 
 - Observability history is operationally useful but not the product system of record.
-- A failed TSDB restore must not block recovery of core Signhex services.
+- A failed TSDB restore must not block recovery of core DARSHAN services.
 - Production and QA follow the same restore order. Development local validation normally restores config only, not historical data.

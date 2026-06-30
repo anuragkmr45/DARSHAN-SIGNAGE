@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist/main",
+    "types": ["node", "electron"]
+  },
+  "include": ["src/main/**/*", "src/common/**/*"],
+  "exclude": ["node_modules", "dist", "build", "test", "src/renderer/**/*", "src/preload/**/*"]
+}
+

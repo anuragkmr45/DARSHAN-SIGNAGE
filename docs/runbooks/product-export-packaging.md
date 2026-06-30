@@ -1,6 +1,15 @@
 # Product Export Packaging
 
+Last code-truth refresh: 2026-06-28.
+
 Use this runbook when you want source-free, per-product deliverables from a build machine.
+
+Code/deploy sources:
+
+- export scripts: `scripts/export/*`
+- bundle assembly: `scripts/bundle/assemble-runtime-bundle.sh`
+- production Docker role contract: `deploy/production/docker/*`
+- player package scripts: `darshan-player/package.json`
 
 Generated outputs:
 
@@ -12,7 +21,7 @@ These outputs are source-free. They are the operator-facing runtime or delivery 
 
 ## Primary command
 
-Run from `signhex-platform`:
+Run from `DARSHAN monorepo root`:
 
 ```bash
 bash scripts/export/package-all.sh --release 2026-04-02-r1 --electron-platform linux
@@ -32,9 +41,9 @@ Server:
 bash scripts/export/package-server.sh --release 2026-04-02-r1
 ```
 
-Use `--deployment-layout production-split` for both QA and production so the runtime bundle aligns with the approved VM1 / VM2 / VM3 topology.
+Use `--deployment-layout production-split` for both QA and production so the runtime bundle aligns with the approved Docker-on-VM role topology.
 
-Server for the split production layout (`VM1=data`, `VM2=backend`, `VM3=cms`):
+Server for the split production layout:
 
 ```bash
 bash scripts/export/package-server.sh --release 2026-04-02-r1 --deployment-layout production-split
@@ -101,13 +110,13 @@ bash scripts/export/package-cms.sh --release 2026-04-02-r1
 
 SERVER_PACKAGE_DIR="out/2026-04-02-r1/server" \
 CMS_PACKAGE_DIR="out/2026-04-02-r1/cms" \
-PLAYER_ARTIFACTS_DIR="/artifacts/signage-screen/2026-04-02-r1" \
+PLAYER_ARTIFACTS_DIR="/artifacts/darshan-player/2026-04-02-r1" \
 bash scripts/bundle/assemble-runtime-bundle.sh --profile qa site-a-qa
 ```
 
 For production, use the same exported `server/` package as input to the production bundle builder. The package still contains backend, PostgreSQL, and MinIO image archives together; the split into `production/data/` and `production/backend/` happens during runtime bundle assembly.
 
-If you set `OBSERVABILITY_PRIVATE_HOST` while assembling the production bundle, the bundle builder also creates a source-free `production/observability/` folder for a dedicated fourth observability VM. That dedicated observability folder is assembled from the platform-owned observability assets, not from a separate product export package.
+If you set `OBSERVABILITY_PRIVATE_HOST` while assembling the production bundle, the bundle builder also creates a source-free `production/observability/` folder for the dedicated observability VM. That observability folder is assembled from the platform-owned observability assets, not from a separate product export package.
 
 Production-oriented export example:
 

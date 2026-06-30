@@ -1,118 +1,99 @@
 # Device Player Implementation Guide
 
-Note: for the authoritative lifecycle and current code-truth behavior, use `signhex-server/docs/DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md`. This file is directionally useful, but some older transport/auth assumptions here are broader than what the current runtime actually enforces.
+Last code-truth audit: 2026-06-28.
 
-This backend is already serving playlists and presigned media URLs. Implement the device/player with the flow below.
+This guide describes the current DARSHAN player/device behavior from code. It is not a standalone OpenAPI schema. For endpoint groups, see `docs/contracts/backend-api-contracts.md`; for runtime internals, see `docs/contracts/player-runtime-contracts.md`; for realtime/command behavior, see `docs/contracts/realtime-command-contracts.md`.
 
-## Fetch snapshot
-1. Call `GET /api/v1/device/:deviceId/snapshot?include_urls=true` (device-auth) or `GET /api/v1/screens/:id/snapshot?include_urls=true` (server-auth).
-2. Response: `snapshot.schedule` (items with start/end, targets, priority, presentation data), `media_urls` keyed by `media_id`.
+## Source Of Truth
 
-## Build timelines
-```ts
-type TimelineItem = {
-  slotId: string;
-  mediaUrl: string;
-  startAt: Date;
-  endAt: Date;
-  durationSeconds?: number;
-  fitMode?: string;
-  audioEnabled?: boolean;
-};
+| Area | Code source of truth |
+|---|---|
+| Backend player endpoints | `darshan-server/src/config/apiEndpoints.ts`, `darshan-server/src/routes/device-telemetry.ts`, `darshan-server/src/routes/device-pairing.ts` |
+| Device auth | `darshan-server/src/middleware/device-auth.ts`, `darshan-server/src/utils/device-request-auth.ts`, `darshan-server/src/realtime/device-socket-auth.ts` |
+| Player runtime | `darshan-player/src/main/services/player-flow.ts`, `pairing-service.ts`, `command-processor.ts`, `realtime-service.ts`, `snapshot-manager.ts`, `settings/default-media-service.ts` |
+| Renderer playback | `darshan-player/src/renderer/player.ts`, `default-media-player.ts`, `pdf-playback.ts`, `webpage-playback.ts`, `darshan-player/src/common/playback-policy.ts` |
+| Local runtime state | `darshan-player/src/common/platform-paths.ts`, `darshan-player/src/main/services/device-state-store.ts`, `cert-manager.ts`, `playback-progress-store.ts` |
 
-function buildSlotTimelines(snapshot: any): Record<string, TimelineItem[]> {
-  const timelines: Record<string, TimelineItem[]> = {};
-  for (const item of snapshot.schedule.items || []) {
-    const pres = item.presentation;
-    if (!pres) continue;
+## Boot And Pairing Contract
 
-    // Base playlist (no layout)
-    if (!pres.layout) {
-      const list = timelines['default'] || [];
-      list.push({
-        slotId: 'default',
-        mediaUrl: mediaUrl(pres.items?.[0]?.media_id),
-        startAt: new Date(item.start_at),
-        endAt: new Date(item.end_at),
-        durationSeconds: pres.items?.[0]?.duration_seconds,
-      });
-      timelines['default'] = list;
-    }
+1. Player loads local runtime paths, config, device state, certificates, cache metadata, and queues.
+2. If no valid local identity exists, the player requests or displays OTP pairing state through pairing service and renderer pairing UI.
+3. Pairing uses backend device-pairing endpoints:
+   - `POST /api/v1/device-pairing/request`
+   - `GET /api/v1/device-pairing/status`
+   - `POST /api/v1/device-pairing/complete`
+   - recovery/admin endpoints where applicable
+4. If local identity exists, the player calls authenticated pairing-status:
+   - `GET /api/v1/device/:deviceId/pairing-status`
+5. The player must not treat local files alone as pairing authority. Backend status or valid offline grace is required before paired runtime success.
 
-    // Layout slots
-    for (const slot of pres.slots || []) {
-      const list = timelines[slot.slot_id] || [];
-      list.push({
-        slotId: slot.slot_id,
-        mediaUrl: mediaUrl(slot.media_id),
-        startAt: new Date(item.start_at),
-        endAt: new Date(item.end_at),
-        durationSeconds: slot.duration_seconds,
-        fitMode: slot.fit_mode,
-        audioEnabled: slot.audio_enabled,
-      });
-      timelines[slot.slot_id] = list;
-    }
-  }
+Runtime evidence required: packaged player pairing against a real backend/CMS deployment.
 
-  // Sort each slot by start time
-  Object.values(timelines).forEach((list) => list.sort((a, b) => a.startAt.getTime() - b.startAt.getTime()));
-  return timelines;
-}
-```
+## Playback Fetch Contract
 
-## Playback loop
-1. For each slot timeline, run a loop:
-   - Find current item where `startAt <= now <= endAt`.
-   - If multiple, pick highest `priority` from parent schedule item (fallback first).
-   - Render media (image/video/doc) in that slot; honor `fit_mode`/`audio_enabled`.
-   - If no current item, show fallback (black/idle).
-2. Respect `duration_seconds` inside the item to advance within a presentation list when needed.
-3. On change of active item or completion, post PoP/heartbeat if required by the device app.
+The player pulls authoritative playback state by REST:
 
-## Emergency override
-- If `snapshot` response includes `emergency`, pause normal playback and render the emergency media full-screen.
-- Use `include_urls=true` to get `emergency.media_url`.
-- Resume normal playback only after `emergency` is cleared (no emergency in snapshot).
+| Resource | Endpoint | Player source | Notes |
+|---|---|---|---|
+| Snapshot | `GET /api/v1/device/:deviceId/snapshot?include_urls=true` | `snapshot-manager.ts`, `snapshot-parser.ts` | Returns latest publish/snapshot/default/emergency context for the device. |
+| Default media | `GET /api/v1/device/:deviceId/default-media` | `settings/default-media-service.ts` | Used when no active schedule/emergency wins. |
+| Desired state | `GET /api/v1/device/:deviceId/desired-state` | `realtime-service.ts` | Reconciles missed notifications and stale local state. |
+| Commands | `GET /api/v1/device/:deviceId/commands` | `command-processor.ts` | Durable command intent; may be woken by Socket.IO. |
 
-## Refresh strategy
-1. Poll snapshot endpoint periodically (e.g., every 30–60s) with `If-None-Match` or timestamp caching; if `published_at` changes, rebuild timelines.
-2. Also poll commands:
-   - `GET /api/v1/device/:deviceId/commands` to retrieve queued commands.
-   - Execute (e.g., `REFRESH` triggers immediate snapshot refetch).
-   - New commands:
-     - `TAKE_SCREENSHOT`: capture and upload via `POST /api/v1/device/screenshot`.
-     - `SET_SCREENSHOT_INTERVAL`: update local screenshot timer (payload: `{ interval_seconds, enabled }`).
-   - Acknowledge via `POST /api/v1/device/:deviceId/commands/:commandId/ack`.
+The backend may also expose CMS-authenticated screen/group snapshot endpoints for admin/operator surfaces, but the player runtime path is the device endpoint.
 
-## Validity & targeting
-- Each schedule item includes `start_at`/`end_at`; never render outside that window.
-- The server already filtered items per device/screen using `screen_ids` and `screen_group_ids`; no extra filtering needed on the client.
+## Media And Rendering Contract
 
-## Error handling
-- If `media_urls[media_id]` is missing, skip the item and log.
-- If snapshot fetch fails, keep playing the last valid timelines until expiry; optionally show an offline banner when all items expire.
+- Media bytes move through HTTP/object storage/local cache, not Socket.IO.
+- The player cache manager downloads/preloads media from URLs received through snapshot/default-media data.
+- Renderer playback supports image, video, PDF/document/webpage paths according to renderer and helper code.
+- Layout and slot behavior is derived from normalized snapshots and playback policy helpers, not from this document.
+- Emergency content has higher priority than normal schedule/default media when backend state says it is active.
 
-## Minimal bootstrap loop
-```ts
-async function runPlayer(deviceId: string) {
-  let timelines = {};
-  let publishVersion = '';
+Runtime evidence required: actual target hardware must render video, image, PDF, office/document, and webpage assets.
 
-  async function refresh() {
-    const res = await fetch(`/api/v1/device/${deviceId}/snapshot?include_urls=true`);
-    if (!res.ok) throw new Error('snapshot failed');
-    const body = await res.json();
-    if (body.publish.published_at !== publishVersion) {
-      publishVersion = body.publish.published_at;
-      timelines = buildSlotTimelines(body.snapshot);
-    }
-  }
+## Realtime Refresh Contract
 
-  setInterval(refresh, 60000); // poll for new publish
-  setInterval(pollCommands, 15000); // handle device commands
-  renderLoop(timelines); // your rendering loop per slot
-}
-```
+Socket.IO `/device` is a wake channel only:
 
-Implement `renderLoop` with your UI stack (HTML5/Canvas/React Native/etc.) to draw slots and swap media when timelines change or when the current item expires.
+1. Player connects through `realtime-service.ts`.
+2. Backend sends events such as `COMMAND_AVAILABLE`, `RESYNC_REQUIRED`, `SERVER_TIME`, or `ERROR`.
+3. Player responds by fetching commands, desired state, snapshot, or default media over REST.
+4. If Socket.IO is unavailable, polling/heartbeat fallback remains the recovery path.
+
+Never send media bytes, screenshots, logs, full snapshots, or proof-of-play batches through realtime messages.
+
+## Telemetry And Evidence Contract
+
+| Evidence | Endpoint group | Player source | Notes |
+|---|---|---|---|
+| Heartbeat | `POST /api/v1/device/heartbeat` | `telemetry/heartbeat.ts` | CMS online state depends on backend receiving heartbeats. |
+| Proof-of-play | `/api/v1/device/proof-of-play` | `pop-service.ts` | Crash/power loss does not create fake continuous playback evidence. |
+| Screenshot | `/api/v1/device/screenshot`, screenshot policy/result paths | `screenshot-service.ts` | Capture depends on OS/Electron display support. |
+| Media cache report | `POST /api/v1/device/:deviceId/media-cache-report` | `media-cache-reporter.ts`, `cache-manager.ts` | Reports sanitized metadata, not signed URL values. |
+| Logs/support data | log upload/support paths | `log-shipper.ts`, `operator-tools.ts`, `redaction.ts` | URL-like emitted fields are redacted. |
+
+## Restart And Offline Contract
+
+- Reboot is not reinstall. The player reloads local state and revalidates identity.
+- If backend validates the same identity, playback/heartbeat/realtime/default-media/snapshot flows start.
+- If backend is temporarily unavailable after recent validation, offline grace may allow cached playback.
+- Secure offline policy can stop visible playback after a shorter backend-validation lease when configured.
+- If identity is revoked, orphaned, missing, or environment-mismatched, the player enters recovery/OTP behavior.
+- Scheduled playback resume is schedule-aligned where snapshot timing supports it; exact seek/render behavior still needs target-device testing.
+
+## Reset Contract
+
+`darshan-player reset-pairing` clears identity-bound state and playback progress. By default it preserves media cache, logs, screenshots, proof-of-play spool, and request queues. `--clear-cache` clears media cache targets only.
+
+Source: `darshan-player/src/main/cli.ts`, `darshan-player/src/main/services/operator-tools.ts`.
+
+## Known Runtime Verification Gaps
+
+- live packaged player on each target OS and CPU architecture
+- fullscreen/kiosk/autostart behavior
+- LAN Socket.IO proxy behavior
+- media rendering on target display drivers
+- screenshot capture
+- offline/reconnect queues under real network outage
+- no-secret review for logs, diagnostics, screenshots, and support bundles

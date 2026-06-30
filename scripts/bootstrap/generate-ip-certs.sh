@@ -32,7 +32,7 @@ if [[ ! "$CMS_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
   exit 1
 fi
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/signhex-ip-certs.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/darshan-ip-certs.XXXXXX")"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
@@ -50,11 +50,11 @@ mkdir -p "$OUTPUT_DIR"
 openssl genrsa -out "$CA_KEY" 4096 >/dev/null 2>&1
 openssl req -x509 -new -sha256 -key "$CA_KEY" -days 3650 \
   -out "$CA_CERT" \
-  -subj "/C=IN/O=Signhex/OU=OnPrem/CN=Signhex ${SITE_NAME} Root CA" >/dev/null 2>&1
+  -subj "/C=IN/O=DARSHAN/OU=OnPrem/CN=DARSHAN ${SITE_NAME} Root CA" >/dev/null 2>&1
 
 openssl genrsa -out "$CMS_KEY" 4096 >/dev/null 2>&1
 openssl req -new -key "$CMS_KEY" -out "$CMS_CSR" \
-  -subj "/C=IN/O=Signhex/OU=OnPrem/CN=${CMS_IP}" >/dev/null 2>&1
+  -subj "/C=IN/O=DARSHAN/OU=OnPrem/CN=${CMS_IP}" >/dev/null 2>&1
 
 cat > "$CMS_EXT" <<EOF
 authorityKeyIdentifier=keyid,issuer

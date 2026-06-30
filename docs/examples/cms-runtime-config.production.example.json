@@ -1,0 +1,19 @@
+{
+  "cms": {
+    "environment": {
+      "name": "onprem-prod",
+      "deploymentId": "prod-site-1",
+      "cmsId": "cms-a"
+    },
+    "api": {
+      "baseUrl": "https://cms.internal.example"
+    },
+    "realtime": {
+      "socketBaseUrl": "https://cms.internal.example",
+      "socketTransports": ["websocket"]
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}

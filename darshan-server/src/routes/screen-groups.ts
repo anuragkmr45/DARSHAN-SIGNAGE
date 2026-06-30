@@ -1,0 +1,882 @@
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { createScreenGroupRepository } from '@/db/repositories/screen-group';
+import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
+import { defineAbilityFor } from '@/rbac';
+import { createLogger } from '@/utils/logger';
+import { apiEndpoints } from '@/config/apiEndpoints';
+import { HTTP_STATUS } from '@/http-status-codes';
+import { respondWithError } from '@/utils/errors';
+import { getDatabase, schema } from '@/db';
+import { and, desc, eq, inArray } from 'drizzle-orm';
+import { getPresignedUrl } from '@/s3';
+import { AppError } from '@/utils/app-error';
+import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
+import { createDeviceCommand } from '@/services/command-lifecycle-service';
+import {
+  buildScreenPlaybackState,
+  buildScreenRecoveryStateMap,
+  getLastProofOfPlayMap,
+  summarizeGroupPlayback,
+} from '@/screens/playback';
+
+const logger = createLogger('screen-group-routes');
+const { CREATED } = HTTP_STATUS;
+
+const screenGroupSchema = z.object({
+  name: z.string().min(1).max(255),
+  description: z.string().optional(),
+  screen_ids: z.array(z.string().uuid()).optional(),
+});
+
+const listGroupsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  q: z.string().trim().optional(),
+  include_summary: z.enum(['true', 'false']).optional(),
+});
+
+const screenshotSettingsSchema = z.object({
+  interval_seconds: z.number().int().positive().max(86400).optional(),
+  enabled: z.boolean().optional(),
+});
+
+const screenshotTriggerSchema = z.object({
+  reason: z.string().optional(),
+});
+
+const availableScreensQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(50),
+  group_id: z.string().uuid().optional(),
+});
+
+const snapshotQuerySchema = z.object({
+  include_urls: z.string().optional(),
+});
+
+export async function screenGroupRoutes(fastify: FastifyInstance) {
+  const repo = createScreenGroupRepository();
+  const db = getDatabase();
+
+  const getGroupIdsForScreen = async (screenId: string): Promise<string[]> => {
+    const rows = await db
+      .select({ group_id: schema.screenGroupMembers.group_id })
+      .from(schema.screenGroupMembers)
+      .where(eq(schema.screenGroupMembers.screen_id, screenId));
+    return rows.map((r) => r.group_id);
+  };
+
+  const filterItemsForScreen = (items: any[], screenId: string, groupIds: string[]) => {
+    return items.filter((i) => {
+      const itemScreens = (i.screen_ids || []) as string[];
+      const itemGroups = (i.screen_group_ids || []) as string[];
+      const hasTargets = (itemScreens && itemScreens.length > 0) || (itemGroups && itemGroups.length > 0);
+      if (!hasTargets) return true;
+      if (itemScreens.includes(screenId)) return true;
+      return itemGroups.some((gid) => groupIds.includes(gid));
+    });
+  };
+
+  const filterItemsForGroup = (items: any[], groupId: string, memberIds: string[]) => {
+    return items.filter((i) => {
+      const itemScreens = (i.screen_ids || []) as string[];
+      const itemGroups = (i.screen_group_ids || []) as string[];
+      const hasTargets = (itemScreens && itemScreens.length > 0) || (itemGroups && itemGroups.length > 0);
+      if (!hasTargets) return true;
+      if (itemGroups.includes(groupId)) return true;
+      return itemScreens.some((sid) => memberIds.includes(sid));
+    });
+  };
+
+  const buildTimeline = (items: any[]) => {
+    const now = new Date();
+    const activeItems = items
+      .filter((i) => {
+        const start = new Date(i.start_at);
+        const end = new Date(i.end_at);
+        return start <= now && end >= now;
+      })
+      .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+
+    const upcomingItems = items
+      .filter((i) => new Date(i.start_at) > now)
+      .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+
+    const bookedUntil = items.length
+      ? new Date(Math.max(...items.map((i) => new Date(i.end_at).getTime()))).toISOString()
+      : null;
+
+    return { activeItems, upcomingItems, bookedUntil };
+  };
+
+  // Create group
+  fastify.post<{ Body: typeof screenGroupSchema._type }>(
+    apiEndpoints.screenGroups.create,
+    {
+      schema: {
+        description: 'Create a screen group',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('create', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const data = screenGroupSchema.parse(request.body);
+        const group = await repo.create(data);
+        await dispatchPlaybackRefresh(fastify, {
+          reason: 'GROUP_MEMBERSHIP',
+          screenIds: Array.from(new Set(data.screen_ids || [])),
+          groupIds: [group.id],
+          createdBy: payload.sub,
+        });
+
+        return reply.status(CREATED).send({
+          id: group.id,
+          name: group.name,
+          description: group.description,
+          created_at: group.created_at.toISOString(),
+          updated_at: group.updated_at.toISOString(),
+          screen_ids: data.screen_ids || [],
+        });
+      } catch (error) {
+        logger.error(error, 'Create screen group error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Group availability (aggregated from member screens)
+  fastify.get<{ Params: { id: string } }>(
+    apiEndpoints.screenGroups.availability,
+    {
+      schema: {
+        description: 'Get availability (current/next) for all screens in a group',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const group = await repo.findById((request.params as any).id);
+        if (!group) throw AppError.notFound('Screen group not found');
+        const members = await repo.members(group.id);
+
+        const merged: Map<string, any> = new Map();
+        const perScreen: any[] = [];
+
+        await Promise.all(
+          members.map(async (m: any) => {
+            const screenId = m.screen_id;
+            const [latest] = await db
+              .select({
+                publish_id: schema.publishes.id,
+                schedule_id: schema.publishes.schedule_id,
+                snapshot_id: schema.publishes.snapshot_id,
+                published_at: schema.publishes.published_at,
+                payload: schema.scheduleSnapshots.payload,
+              })
+              .from(schema.publishTargets)
+              .innerJoin(schema.publishes, eq(schema.publishTargets.publish_id, schema.publishes.id))
+              .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+              .where(
+                and(
+                  eq(schema.publishTargets.screen_id, screenId),
+                  eq(schema.publishes.status, 'ACTIVE')
+                )
+              )
+              .orderBy(desc(schema.publishes.published_at))
+              .limit(1);
+
+            if (!latest) {
+              perScreen.push({
+                screen_id: screenId,
+                publish: null,
+                current_items: [],
+                next_item: null,
+                upcoming_items: [],
+                booked_until: null,
+              });
+              return;
+            }
+
+            const schedulePayload = (latest.payload as any)?.schedule;
+            const groupIds = await getGroupIdsForScreen(screenId);
+            const items = filterItemsForScreen((schedulePayload?.items || []) as any[], screenId, groupIds);
+            items.forEach((it: any) => {
+              if (!merged.has(it.id)) merged.set(it.id, it);
+            });
+            const { activeItems, upcomingItems, bookedUntil } = buildTimeline(items);
+            perScreen.push({
+              screen_id: screenId,
+              publish: {
+                publish_id: latest.publish_id,
+                schedule_id: latest.schedule_id,
+                snapshot_id: latest.snapshot_id,
+                published_at: latest.published_at.toISOString?.() ?? latest.published_at,
+                schedule_start_at: schedulePayload?.start_at ?? null,
+                schedule_end_at: schedulePayload?.end_at ?? null,
+              },
+              current_items: activeItems,
+              next_item: upcomingItems[0] || null,
+              upcoming_items: upcomingItems,
+              booked_until: bookedUntil,
+            });
+          })
+        );
+
+        const { activeItems, upcomingItems, bookedUntil } = buildTimeline(Array.from(merged.values()));
+
+        return reply.send({
+          group_id: group.id,
+          name: group.name,
+          description: group.description,
+          screen_ids: members.map((m: any) => m.screen_id),
+          current_items: activeItems,
+          next_item: upcomingItems[0] || null,
+          upcoming_items: upcomingItems,
+          booked_until: bookedUntil,
+          screens: perScreen,
+        });
+      } catch (error) {
+        logger.error(error, 'Group availability error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Snapshot for a screen group
+  fastify.get<{ Params: { id: string }; Querystring: typeof snapshotQuerySchema._type }>(
+    apiEndpoints.screenGroups.snapshot,
+    {
+      schema: {
+        description: 'Get latest publish snapshot targeting this screen group',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const groupId = (request.params as any).id;
+        const group = await repo.findById(groupId);
+        if (!group) throw AppError.notFound('Screen group not found');
+        const members = await repo.members(group.id);
+        const screenIds = members.map((m: any) => m.screen_id);
+        const query = snapshotQuerySchema.parse(request.query);
+        const includeUrls = query.include_urls?.toLowerCase() === 'true';
+
+        const [latest] = await db
+          .select({
+            publish_id: schema.publishes.id,
+            schedule_id: schema.publishes.schedule_id,
+            snapshot_id: schema.publishes.snapshot_id,
+            published_at: schema.publishes.published_at,
+            payload: schema.scheduleSnapshots.payload,
+          })
+          .from(schema.publishTargets)
+          .innerJoin(schema.publishes, eq(schema.publishTargets.publish_id, schema.publishes.id))
+          .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+          .where(
+            and(
+              eq(schema.publishTargets.screen_group_id, group.id),
+              eq(schema.publishes.status, 'ACTIVE')
+            )
+          )
+          .orderBy(desc(schema.publishes.published_at))
+          .limit(1);
+
+        if (!latest) {
+          return reply.send({
+            group_id: group.id,
+            name: group.name,
+            description: group.description,
+            screen_ids: screenIds,
+            publish: null,
+            snapshot: null,
+            media_urls: undefined,
+          });
+        }
+
+        const rawPayload = (latest.payload as any) || {};
+        const schedule = rawPayload.schedule || {};
+        const filteredItems = filterItemsForGroup(schedule.items || [], group.id, screenIds);
+        const filteredSnapshot = {
+          ...rawPayload,
+          schedule: { ...schedule, items: filteredItems },
+        };
+
+        let mediaUrls: Record<string, string | null> | undefined;
+        if (includeUrls) {
+          const mediaIds = new Set<string>();
+          const collectMediaIds = (obj: any) => {
+            if (!obj) return;
+            if (obj.media_id) mediaIds.add(obj.media_id);
+            if (Array.isArray(obj.items)) obj.items.forEach(collectMediaIds);
+            if (Array.isArray(obj.slots)) obj.slots.forEach(collectMediaIds);
+          };
+
+          filteredItems.forEach((item) => {
+            collectMediaIds(item.presentation);
+          });
+
+          const ids = Array.from(mediaIds);
+          if (ids.length > 0) {
+            const medias = await db.select().from(schema.media).where(inArray(schema.media.id, ids as any));
+            const readyIds = medias.map((m: any) => m.ready_object_id).filter(Boolean) as string[];
+            const sourceRefs = medias
+              .filter((m: any) => m.source_bucket && m.source_object_key)
+              .map((m: any) => ({ id: m.id, bucket: m.source_bucket, key: m.source_object_key }));
+
+            const storageRows = readyIds.length
+              ? await db.select().from(schema.storageObjects).where(inArray(schema.storageObjects.id, readyIds as any))
+              : [];
+            const storageMap = new Map(storageRows.map((s: any) => [s.id, s]));
+
+            mediaUrls = {};
+            for (const m of medias as any[]) {
+              try {
+                if (m.ready_object_id) {
+                  const stor = storageMap.get(m.ready_object_id);
+                  if (stor) {
+                    mediaUrls[m.id] = await getPresignedUrl(stor.bucket, stor.object_key, 3600);
+                    continue;
+                  }
+                }
+                const source = sourceRefs.find((s) => s.id === m.id);
+                if (source) {
+                  mediaUrls[m.id] = await getPresignedUrl(source.bucket, source.key, 3600);
+                } else {
+                  mediaUrls[m.id] = null;
+                }
+              } catch {
+                mediaUrls[m.id] = null;
+              }
+            }
+          }
+        }
+
+        return reply.send({
+          group_id: group.id,
+          name: group.name,
+          description: group.description,
+          screen_ids: screenIds,
+          publish: {
+            publish_id: latest.publish_id,
+            schedule_id: latest.schedule_id,
+            snapshot_id: latest.snapshot_id,
+            published_at: latest.published_at.toISOString?.() ?? latest.published_at,
+          },
+          snapshot: filteredSnapshot,
+          media_urls: mediaUrls,
+        });
+      } catch (error) {
+        logger.error(error, 'Get screen group snapshot error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Set screenshot interval for a screen group
+  fastify.post<{ Params: { id: string }; Body: typeof screenshotSettingsSchema._type }>(
+    apiEndpoints.screenGroups.screenshotSettings,
+    {
+      schema: {
+        description: 'Set screenshot interval for all screens in a group',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('update', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const group = await repo.findById((request.params as any).id);
+        if (!group) throw AppError.notFound('Screen group not found');
+
+        const data = screenshotSettingsSchema.parse(request.body);
+        const enabled = typeof data.enabled === 'boolean' ? data.enabled : true;
+        const intervalSeconds = typeof data.interval_seconds === 'number' ? data.interval_seconds : null;
+        if (enabled && !intervalSeconds) {
+          throw AppError.badRequest('interval_seconds is required when enabled');
+        }
+
+        const members = await repo.members(group.id);
+        const screenIds = Array.from(new Set(members.map((m: any) => m.screen_id)));
+
+        if (screenIds.length) {
+          await db
+            .update(schema.screens)
+            .set({
+              screenshot_interval_seconds: intervalSeconds,
+              screenshot_enabled: enabled,
+              updated_at: new Date(),
+            })
+            .where(inArray(schema.screens.id, screenIds as any));
+        }
+
+        const inserted = [];
+        for (const screenId of screenIds) {
+          const command = await createDeviceCommand({
+            screenId,
+            type: 'SET_SCREENSHOT_INTERVAL',
+            payload: { interval_seconds: intervalSeconds, enabled, reason: 'SCREENSHOT_POLICY' },
+            createdBy: payload.sub,
+          });
+          inserted.push({ id: command.id, screen_id: command.screen_id });
+        }
+
+        return reply.send({
+          group_id: group.id,
+          screenshot_enabled: enabled,
+          screenshot_interval_seconds: intervalSeconds,
+          updated_screens: screenIds.length,
+          commands: inserted,
+        });
+      } catch (error) {
+        logger.error(error, 'Set group screenshot interval error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Trigger screenshot for a screen group
+  fastify.post<{ Params: { id: string }; Body: typeof screenshotTriggerSchema._type }>(
+    apiEndpoints.screenGroups.screenshot,
+    {
+      schema: {
+        description: 'Trigger screenshot capture for all screens in a group',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('update', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const group = await repo.findById((request.params as any).id);
+        if (!group) throw AppError.notFound('Screen group not found');
+
+        const data = screenshotTriggerSchema.parse(request.body);
+
+        const members = await repo.members(group.id);
+        const screenIds = Array.from(new Set(members.map((m: any) => m.screen_id)));
+
+        const inserted = [];
+        for (const screenId of screenIds) {
+          const command = await createDeviceCommand({
+            screenId,
+            type: 'TAKE_SCREENSHOT',
+            payload: { reason: data.reason ?? 'SCREENSHOT' },
+            createdBy: payload.sub,
+          });
+          inserted.push({ id: command.id, screen_id: command.screen_id });
+        }
+
+        return reply.send({
+          group_id: group.id,
+          commands_created: inserted.length,
+          commands: inserted,
+        });
+      } catch (error) {
+        logger.error(error, 'Trigger group screenshot error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // List screens that are not members of any group (optionally allow existing members of a group)
+  fastify.get<{ Querystring: typeof availableScreensQuerySchema._type }>(
+    apiEndpoints.screenGroups.availableScreens,
+    {
+      schema: {
+        description: 'List screens that are not assigned to a group (includes current group members if group_id is provided)',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const query = availableScreensQuerySchema.parse(request.query);
+
+        const [screens, memberships] = await Promise.all([
+          db.select().from(schema.screens).orderBy(desc(schema.screens.created_at)),
+          db.select().from(schema.screenGroupMembers),
+        ]);
+
+        const memberMap = memberships.reduce((acc: Map<string, Set<string>>, row: any) => {
+          const list = acc.get(row.screen_id) || new Set<string>();
+          list.add(row.group_id);
+          acc.set(row.screen_id, list);
+          return acc;
+        }, new Map());
+
+        const available = screens.filter((s: any) => {
+          const groups = memberMap.get(s.id);
+          if (!groups || groups.size === 0) return true;
+          if (query.group_id) {
+            // Allow screens already in this group (useful when editing)
+            return [...groups].every((gid) => gid === query.group_id);
+          }
+          return false;
+        });
+
+        const start = (query.page - 1) * query.limit;
+        const paged = available.slice(start, start + query.limit);
+
+        return reply.send({
+          items: paged.map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            location: (s as any).location ?? null,
+            status: s.status,
+            last_heartbeat_at: s.last_heartbeat_at?.toISOString?.() ?? s.last_heartbeat_at,
+            created_at: s.created_at.toISOString(),
+            updated_at: s.updated_at.toISOString(),
+          })),
+          pagination: {
+            page: query.page,
+            limit: query.limit,
+            total: available.length,
+          },
+        });
+      } catch (error) {
+        logger.error(error, 'List available screens for groups error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // List groups
+  fastify.get<{ Querystring: typeof listGroupsQuerySchema._type }>(
+    apiEndpoints.screenGroups.list,
+    {
+      schema: {
+        description: 'List screen groups',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const query = listGroupsQuerySchema.parse(request.query);
+        const result = await repo.list({ page: query.page, limit: query.limit, q: query.q });
+        const groupIds = result.items.map((group) => group.id);
+        const memberRows = groupIds.length
+          ? await db
+              .select({
+                group_id: schema.screenGroupMembers.group_id,
+                screen_id: schema.screenGroupMembers.screen_id,
+              })
+              .from(schema.screenGroupMembers)
+              .where(inArray(schema.screenGroupMembers.group_id, groupIds as any))
+          : [];
+        const memberIdsByGroup = memberRows.reduce((acc, row) => {
+          const list = acc.get(row.group_id) || [];
+          list.push(row.screen_id);
+          acc.set(row.group_id, list);
+          return acc;
+        }, new Map<string, string[]>());
+
+        if (query.include_summary?.toLowerCase() === 'true') {
+          const serverTime = new Date();
+          const uniqueScreenIds = Array.from(new Set(memberRows.map((row) => row.screen_id)));
+          const screens = uniqueScreenIds.length
+            ? await db.select().from(schema.screens).where(inArray(schema.screens.id, uniqueScreenIds as any))
+            : [];
+          const recoveryStateMap = await buildScreenRecoveryStateMap(uniqueScreenIds, db, serverTime);
+          const proofOfPlayMap = await getLastProofOfPlayMap(uniqueScreenIds, db);
+          const screenSummaries = await Promise.all(
+            screens.map((screen) =>
+              buildScreenPlaybackState(screen, {
+                db,
+                now: serverTime,
+                lastProofOfPlayAt: proofOfPlayMap.get(screen.id) ?? null,
+                recoveryState: recoveryStateMap.get(screen.id),
+              })
+            )
+          );
+          const screenSummaryMap = new Map(screenSummaries.map((summary) => [summary.id, summary]));
+
+          return reply.send({
+            server_time: serverTime.toISOString(),
+            items: result.items.map((group) =>
+              summarizeGroupPlayback(group, memberIdsByGroup.get(group.id) || [], screenSummaryMap)
+            ),
+            pagination: {
+              page: result.page,
+              limit: result.limit,
+              total: result.total,
+            },
+          });
+        }
+
+        return reply.send({
+          items: result.items.map((g: any) => ({
+            id: g.id,
+            name: g.name,
+            description: g.description,
+            screen_ids: memberIdsByGroup.get(g.id) || [],
+            created_at: g.created_at.toISOString(),
+            updated_at: g.updated_at.toISOString(),
+          })),
+          pagination: {
+            page: result.page,
+            limit: result.limit,
+            total: result.total,
+          },
+        });
+      } catch (error) {
+        logger.error(error, 'List screen groups error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Get group
+  fastify.get<{ Params: { id: string } }>(
+    apiEndpoints.screenGroups.get,
+    {
+      schema: {
+        description: 'Get screen group by ID',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const group = await repo.findById((request.params as any).id);
+        if (!group) throw AppError.notFound('Screen group not found');
+        const members = await repo.members(group.id);
+
+        return reply.send({
+          id: group.id,
+          name: group.name,
+          description: group.description,
+          screen_ids: members.map((m: any) => m.screen_id),
+          created_at: group.created_at.toISOString(),
+          updated_at: group.updated_at.toISOString(),
+        });
+      } catch (error) {
+        logger.error(error, 'Get screen group error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Update group
+  fastify.patch<{ Params: { id: string }; Body: Partial<typeof screenGroupSchema._type> }>(
+    apiEndpoints.screenGroups.update,
+    {
+      schema: {
+        description: 'Update screen group',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('update', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const data = screenGroupSchema.partial().parse(request.body);
+        const before = await repo.findById((request.params as any).id);
+        if (!before) throw AppError.notFound('Screen group not found');
+        const beforeMembers = await repo.members(before.id);
+        const group = await repo.update((request.params as any).id, data);
+        if (!group) throw AppError.notFound('Screen group not found');
+        const members = await repo.members(group.id);
+        await dispatchPlaybackRefresh(fastify, {
+          reason: 'GROUP_MEMBERSHIP',
+          screenIds: Array.from(new Set([...beforeMembers.map((m: any) => m.screen_id), ...members.map((m: any) => m.screen_id)])),
+          groupIds: [group.id],
+          createdBy: payload.sub,
+        });
+
+        return reply.send({
+          id: group.id,
+          name: group.name,
+          description: group.description,
+          screen_ids: members.map((m: any) => m.screen_id),
+          created_at: group.created_at.toISOString(),
+          updated_at: group.updated_at.toISOString(),
+        });
+      } catch (error) {
+        logger.error(error, 'Update screen group error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Group now-playing aggregated from member screens
+  fastify.get<{ Params: { id: string } }>(
+    apiEndpoints.screenGroupNowPlaying.get,
+    {
+      schema: {
+        description: 'Get now-playing info for all screens in a group',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const group = await repo.findById((request.params as any).id);
+        if (!group) throw AppError.notFound('Screen group not found');
+        const members = await repo.members(group.id);
+
+        const screens = await Promise.all(
+          members.map(async (m: any) => {
+            const screenId = m.screen_id;
+            const [latest] = await db
+              .select({
+                publish_id: schema.publishes.id,
+                schedule_id: schema.publishes.schedule_id,
+                snapshot_id: schema.publishes.snapshot_id,
+                published_at: schema.publishes.published_at,
+                payload: schema.scheduleSnapshots.payload,
+              })
+              .from(schema.publishTargets)
+              .innerJoin(schema.publishes, eq(schema.publishTargets.publish_id, schema.publishes.id))
+              .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+              .where(
+                and(
+                  eq(schema.publishTargets.screen_id, screenId),
+                  eq(schema.publishes.status, 'ACTIVE')
+                )
+              )
+              .orderBy(desc(schema.publishes.published_at))
+              .limit(1);
+
+            if (!latest) {
+              return {
+                screen_id: screenId,
+                publish: null,
+                active_items: [],
+                upcoming_items: [],
+                booked_until: null,
+              };
+            }
+
+            const schedulePayload = (latest.payload as any)?.schedule;
+            const groupIds = await getGroupIdsForScreen(screenId);
+            const items = filterItemsForScreen((schedulePayload?.items || []) as any[], screenId, groupIds);
+            const { activeItems, upcomingItems, bookedUntil } = buildTimeline(items);
+
+            return {
+              screen_id: screenId,
+              publish: {
+                publish_id: latest.publish_id,
+                schedule_id: latest.schedule_id,
+                snapshot_id: latest.snapshot_id,
+                published_at: latest.published_at.toISOString?.() ?? latest.published_at,
+                schedule_start_at: schedulePayload?.start_at ?? null,
+                schedule_end_at: schedulePayload?.end_at ?? null,
+              },
+              active_items: activeItems,
+              upcoming_items: upcomingItems,
+              booked_until: bookedUntil,
+            };
+          })
+        );
+
+        return reply.send({
+          group_id: group.id,
+          name: group.name,
+          screens,
+        });
+      } catch (error) {
+        logger.error(error, 'Group now-playing error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Delete group
+  fastify.delete<{ Params: { id: string } }>(
+    apiEndpoints.screenGroups.delete,
+    {
+      schema: {
+        description: 'Delete screen group',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('delete', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
+        const group = await repo.findById((request.params as any).id);
+        if (!group) throw AppError.notFound('Screen group not found');
+        const members = await repo.members(group.id);
+
+        await repo.delete(group.id);
+        await dispatchPlaybackRefresh(fastify, {
+          reason: 'GROUP_MEMBERSHIP',
+          screenIds: Array.from(new Set(members.map((m: any) => m.screen_id))),
+          groupIds: [group.id],
+          createdBy: payload.sub,
+        });
+        return reply.status(204).send();
+      } catch (error) {
+        logger.error(error, 'Delete screen group error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+}

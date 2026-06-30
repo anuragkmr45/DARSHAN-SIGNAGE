@@ -1,0 +1,19 @@
+{
+  "cms": {
+    "environment": {
+      "name": "onprem-dev",
+      "deploymentId": "local-192-168-0-5",
+      "cmsId": "cms-dev-a"
+    },
+    "api": {
+      "baseUrl": "http://192.168.0.5:8080"
+    },
+    "realtime": {
+      "socketBaseUrl": "http://192.168.0.5:8080",
+      "socketTransports": ["websocket"]
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}

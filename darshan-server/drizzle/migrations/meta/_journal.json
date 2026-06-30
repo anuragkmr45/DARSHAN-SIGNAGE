@@ -1,0 +1,41 @@
+{
+  "version": "5",
+  "dialect": "pg",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1762330542078,
+      "tag": "0000_free_supernaut",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1762357548264,
+      "tag": "0001_brown_prism",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1763393473729,
+      "tag": "0002_romantic_unicorn",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1764148678594,
+      "tag": "0003_absurd_ravenous",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1765000000000,
+      "tag": "0004_schedule_requests_targets",
+      "breakpoints": true
+    }
+  ]
+}

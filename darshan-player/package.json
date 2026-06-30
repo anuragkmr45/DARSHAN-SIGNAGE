@@ -1,0 +1,167 @@
+{
+  "name": "darshan-player",
+  "version": "1.0.0",
+  "description": "Production-grade Windows and Ubuntu Electron digital signage player for DARSHAN",
+  "main": "dist/main/main/index.js",
+  "homepage": "https://github.com/anuragkmr45/DARSHAN-SIGNAGE",
+  "author": "DARSHAN",
+  "license": "Apache-2.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
+    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "dev:renderer": "tsc -p tsconfig.renderer.json --watch",
+    "build": "npm run build:main && npm run prepare:renderer && node scripts/remove-source-maps.js",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "tsc -p tsconfig.renderer.json",
+    "bundle:renderer": "node scripts/build-renderer.js",
+    "copy-assets": "node scripts/copy-assets.js",
+    "prepare:main": "npm run build:main",
+    "prepare:renderer": "npm run build:renderer && npm run bundle:renderer && npm run copy-assets",
+    "prepare:dev": "npm run prepare:main && npm run prepare:renderer",
+    "start": "electron .",
+    "start:dev": "npm run prepare:dev && cross-env NODE_ENV=development electron .",
+    "start:dev:win": "npm run start:dev",
+    "start:dev:mac": "npm run start:dev",
+    "start:dev:linux": "npm run start:dev",
+    "player:cli": "node -r ts-node/register src/main/cli-runner.ts",
+    "doctor": "npm run player:cli -- doctor",
+    "pairing-status": "npm run player:cli -- pairing-status",
+    "clear-cache": "npm run player:cli -- clear-cache",
+    "reset-pairing": "npm run player:cli -- reset-pairing",
+    "collect-logs": "npm run player:cli -- collect-logs",
+    "pair:request": "npm run player:cli -- pair request",
+    "package": "electron-builder --linux --win",
+    "package:linux": "electron-builder --linux",
+    "package:linux:x64": "electron-builder --linux --x64",
+    "package:linux:arm64": "electron-builder --linux --arm64",
+    "package:mac": "electron-builder --mac dmg zip",
+    "package:win": "electron-builder --win nsis",
+    "package:all": "electron-builder --linux --win",
+    "package:deb": "electron-builder --linux deb",
+    "package:appimage": "electron-builder --linux AppImage",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\"",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:default-media": "mocha --config .mocharc.json --spec 'test/unit/services/settings-client.test.ts' --spec 'test/unit/services/default-media-service.test.ts' --spec 'test/unit/services/player-flow.test.ts' --spec 'test/unit/renderer/default-media-player.test.ts'",
+    "test:unit": "mocha --config .mocharc.json --spec 'test/unit/**/*.test.ts'",
+    "test:integration": "mocha --config .mocharc.json --timeout 10000 --spec 'test/integration/**/*.test.ts'",
+    "test:performance": "mocha --config .mocharc.json --timeout 30000 --spec 'test/performance/**/*.test.ts'",
+    "test:fault": "mocha --config .mocharc.json --timeout 10000 --spec 'test/fault-injection/**/*.test.ts'",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:performance && npm run test:fault",
+    "test:watch": "mocha --config .mocharc.json --watch --watch-files 'src/**/*.ts,test/**/*.ts' --spec 'test/**/*.test.ts'",
+    "test:coverage": "nyc --reporter=html --reporter=text npm run test:unit",
+    "clean": "rimraf dist build"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "electron-log": "^5.2.2",
+    "electron-store": "^10.0.0",
+    "minio": "^8.0.6",
+    "node-forge": "^1.3.3",
+    "pdfjs-dist": "^4.10.38",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.10.2",
+    "@types/node-forge": "^1.3.14",
+    "@types/sinon": "^17.0.2",
+    "@types/ws": "^8.5.13",
+    "@typescript-eslint/eslint-plugin": "^8.18.1",
+    "@typescript-eslint/parser": "^8.18.1",
+    "chai": "^4.3.10",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.27.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "mocha": "^11.0.1",
+    "nyc": "^15.1.0",
+    "prettier": "^3.4.2",
+    "rimraf": "^6.0.1",
+    "sinon": "^17.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "build": {
+    "appId": "com.darshan.player",
+    "productName": "DARSHAN-Player",
+    "icon": "resources/icon.png",
+    "directories": {
+      "output": "build",
+      "buildResources": "resources"
+    },
+    "extraResources": [
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "executableName": "darshan-player",
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "Utility",
+      "maintainer": "DARSHAN <support@darshan.com>",
+      "vendor": "DARSHAN",
+      "synopsis": "Digital signage player for Ubuntu desktop sessions",
+      "description": "Production-grade digital signage player with offline-first architecture, mTLS authentication, autostart registration, and comprehensive telemetry",
+      "desktop": {
+        "Name": "DARSHAN Player",
+        "Comment": "Digital Signage Player",
+        "Categories": "Utility;",
+        "Terminal": false
+      }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.utilities"
+    },
+    "deb": {
+      "afterInstall": "scripts/deb-after-install.sh",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "xdg-utils"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=20 <21",
+    "npm": ">=9.0.0"
+  }
+}

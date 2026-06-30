@@ -2,53 +2,41 @@
 
 ## Scope
 
-This runbook covers the platform-owned observability stack:
+This runbook covers the platform-owned observability stack in the Docker-on-VM production topology:
 
-- Prometheus on VM2
-- optional Alertmanager on VM2
-- Grafana on VM3 behind `/grafana/`
-- exporter placement on VM1 / VM2 / VM3
-
-Custom 4-VM variation:
-
-- Prometheus on VM4
-- optional Alertmanager on VM4
-- Grafana on VM4 behind the CMS reverse proxy on `/grafana/`
-- exporter placement on VM1 / VM2 / VM3
+- Prometheus on the observability VM
+- Grafana on the observability VM, optionally proxied through CMS at `/grafana/`
+- exporter and metrics targets on the data, Valkey, backend, CMS, and player networks
 
 ## Install
 
-1. Start from the environment example in `deploy/production/observability/` or `deploy/qa/observability/`.
-2. Render the Prometheus, Alertmanager, and Grafana templates with site-specific values.
-3. Stage the rendered files into the target host release folders under `observability/`.
+1. Start from `deploy/production/docker/.env.example` or the QA equivalent.
+2. Render Prometheus, Alertmanager if used, and Grafana templates with site-specific values.
+3. Stage rendered files into the observability VM release folder.
 4. Load any required image archives before starting containers.
 5. Keep the base Alertmanager config local-only unless a site-specific outbound receiver has been reviewed and rendered.
-6. Start VM1 exporters first, then VM2 Alertmanager, then VM2 Prometheus, then VM3 Grafana.
-7. Confirm Prometheus target health, rule load success, Alertmanager config load success, and Grafana dashboard provisioning.
+6. Start data, Valkey, backend, and CMS roles before starting observability.
+7. Start observability with `bash deploy/production/docker/start-observability.sh`.
+8. Confirm Prometheus target health, rule load success, and Grafana dashboard provisioning.
 
 ## Upgrade
 
-1. Copy the previous rendered env files and target inventories into the new release.
+1. Copy previous rendered env files and target inventories into the new release.
 2. Replace only the version-pinned image archives and rendered config outputs intended for the new release.
 3. Re-run `scripts/verify/validate-observability-assets.sh` before loading the new images.
 4. Re-run any site-specific Alertmanager receiver validation after rendering secrets or destinations.
-5. Restart Alertmanager and Prometheus before Grafana so datasource and alert health are already available.
+5. Restart Prometheus before Grafana so datasource and alert health are already available.
 
 ## Rollback
 
-1. Stop the observability containers on the affected host.
+1. Stop the observability containers on the observability VM.
 2. Restore the previous release folder or previous rendered config set.
 3. Re-load the previous image archives if the version changed.
 4. Start the previous release and validate target health again.
 
 ## Operational Notes
 
-- Production and QA should keep Alertmanager running even when outbound notifications are intentionally disabled; this preserves grouping, silences, and a stable alert inspection surface.
+- Production and QA should keep Alertmanager running if the site has enabled it, even when outbound notifications are intentionally disabled.
 - CMS currently shows alert summary posture only. Detailed alert triage, silence management, and notification workflow remain in Grafana and Alertmanager.
-- Keep Prometheus retention aligned to the actual VM2 storage budget. The 30-day baseline is a starting point, not a guarantee for undersized disks.
-
-## Environment Notes
-
-- Production and QA share the same VM1 / VM2 / VM3 structure.
-- If `OBSERVABILITY_PRIVATE_HOST` is used, production can instead run the observability stack on a dedicated VM4.
-- Development uses `deploy/development/observability/` only for local validation of the observability assets themselves.
+- Keep Prometheus retention aligned to observability VM storage. The baseline is a starting point, not a guarantee for undersized disks.
+- Development uses `deploy/development/observability/` only for local validation of observability assets.

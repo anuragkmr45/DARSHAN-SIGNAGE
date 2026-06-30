@@ -29,7 +29,7 @@
 - Production and QA default to 30 days of Prometheus retention unless the site storage budget requires a lower value.
 - Development local validation defaults to 7 days and is not a production sizing reference.
 - Enable Prometheus WAL compression by default.
-- Prometheus history is operationally useful but not the SignHex system of record.
+- Prometheus history is operationally useful but not the DARSHAN system of record.
 
 ## Validation
 

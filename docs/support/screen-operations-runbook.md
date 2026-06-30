@@ -1,9 +1,17 @@
 # Screen Operations Runbook
 
-## Source of truth
-- Backend screen lifecycle contract: `signhex-server/docs/DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md`
-- Pairing and recovery API examples: `signhex-server/docs/DEVICE_PAIRING_API_FLOW_WITH_CURLS.md`
-- Live playback/dashboard contract: `signhex-server/docs/SCREENS_REALTIME_PLAYBACK_GUIDE.md`
+Last code-truth refresh: 2026-06-28.
+
+## Source Of Truth
+
+| Area | Current source |
+|---|---|
+| Backend screen APIs | `darshan-server/src/routes/screens.ts`, `darshan-server/src/routes/screen-groups.ts` |
+| Pairing/recovery APIs | `darshan-server/src/routes/device-pairing.ts` |
+| Player pairing runtime | `darshan-player/src/main/services/pairing-service.ts`, `darshan-player/src/main/services/player-flow.ts` |
+| Heartbeat/screenshots/PoP | `darshan-server/src/routes/device-telemetry.ts`, player telemetry/screenshot/PoP services |
+| CMS screen UI | `darshan-cms/src/pages/Screens.tsx`, `darshan-cms/src/components/screens/*` |
+| Contract docs | `docs/architecture/player-pairing-identity.md`, `docs/contracts/player-runtime-contracts.md` |
 
 ## Screen creation
 - Screens are not created manually from CMS.
@@ -41,7 +49,7 @@
 
 ## Live monitoring
 - CMS screen list uses `/api/v1/screens/overview` for bootstrap.
-- CMS listens on `/screens` websocket namespace for:
+- CMS listens on screen realtime hooks/libs for:
   - `screens:state:update`
   - `screens:refresh:required`
 - If live detail looks stale, refetch the selected screen detail.
@@ -51,3 +59,37 @@
 - `Device credentials revoked`: recover the same screen identity.
 - `Device not registered`: start fresh pairing.
 - `UNSUPPORTED_SCREEN_CODEC`: retarget the publish or use compatible media for that screen.
+
+## Default Media Or Schedule Not Applying
+
+1. Confirm the screen is paired and backend pairing status is valid.
+2. Confirm the player heartbeat is recent enough for CMS to show online.
+3. Check whether the backend desired-state/command path was updated after the CMS action.
+4. Confirm Socket.IO `/device` is reachable if realtime wake-up is expected.
+5. Confirm polling fallback eventually fetches snapshot/default media.
+6. If only polling works, triage backend/outbox/Valkey before changing player playback code.
+
+Relevant code:
+
+- default media settings: `darshan-server/src/routes/settings.ts`, `darshan-server/src/utils/default-media.ts`
+- playback refresh: `darshan-server/src/services/playback-refresh-dispatch.ts`
+- player fetch: `darshan-player/src/main/services/settings/default-media-service.ts`
+- realtime: `darshan-server/src/realtime/*`, `darshan-player/src/main/services/realtime-service.ts`
+
+## Screenshot Capture Failure
+
+1. Confirm screen is online and paired.
+2. Confirm CMS action reaches backend screen/device endpoint.
+3. Check player screenshot service and queued upload behavior.
+4. Confirm target OS/display stack supports Electron capture.
+5. Treat target-device screenshot behavior as `needs runtime verification` until tested on that device.
+
+Relevant code:
+
+- backend telemetry screenshot path: `darshan-server/src/routes/device-telemetry.ts`
+- player screenshot service: `darshan-player/src/main/services/screenshot-service.ts`
+- CMS screen UI: `darshan-cms/src/components/screens/ScreenDetailsModal.tsx`
+
+## No-Secret Rule
+
+Before sharing screen support evidence, review screenshots, logs, doctor output, browser network payloads, and support bundles for secrets or credentialed URLs. Use `docs/support/runtime-evidence-and-no-secret-review.md`.

@@ -1,6 +1,15 @@
 # On-Prem Runtime Bundle Builder
 
+Last code-truth refresh: 2026-06-28.
+
 Start here for platform bundle generation.
+
+Code/deploy sources:
+
+- bundle assembly: `scripts/bundle/assemble-runtime-bundle.sh`
+- production Docker role files: `deploy/production/docker/*`
+- shared observability assets: `deploy/shared/observability/*`
+- export packaging: `scripts/export/*`
 
 - QA runbook: `docs/runbooks/onprem-qa-setup.md`
 - production runbook: `docs/runbooks/onprem-production-setup.md`
@@ -10,7 +19,7 @@ The canonical workflow is artifact-driven:
 - server package in or backend image archive in
 - CMS package in or CMS build archive in
 - player installers in
-- observability configs, dashboards, and rules from `signhex-platform`
+- observability configs, dashboards, and rules from `DARSHAN monorepo root`
 - runtime bundle out
 
 Preferred inputs can come from product export packages:
@@ -36,7 +45,7 @@ Observability note:
 
 ## Primary Command
 
-Run from the `signhex-platform` repo root:
+Run from the `DARSHAN monorepo root` repo root:
 
 ```bash
 bash scripts/bundle/assemble-runtime-bundle.sh <site-name>
@@ -78,7 +87,7 @@ The per-platform export folders under `out/<release>/electron/<platform>/` are f
 - `QA_DATA_HOST`, `QA_BACKEND_HOST`, `QA_CMS_HOST` for `qa` and `all`
 - optional `QA_BACKEND_DEVICE_HOST` if players should not use `QA_BACKEND_HOST`
 - `CMS_PUBLIC_HOST`, `BACKEND_PRIVATE_HOST`, `BACKEND_DEVICE_HOST`, `DATA_PRIVATE_HOST` for `production` and `all`
-- optional `OBSERVABILITY_PRIVATE_HOST` for the custom 4-VM production layout
+- `OBSERVABILITY_PRIVATE_HOST` for the observability VM
 
 ## Profiles
 
@@ -121,17 +130,19 @@ DATA_PRIVATE_HOST=10.20.0.10 \
 OBSERVABILITY_PRIVATE_HOST=10.20.0.40 \
 SERVER_PACKAGE_DIR=out/2026-04-02-r1/server \
 CMS_PACKAGE_DIR=out/2026-04-02-r1/cms \
-PLAYER_ARTIFACTS_DIR=/artifacts/signage-screen/1.2.3 \
+PLAYER_ARTIFACTS_DIR=/artifacts/darshan-player/1.2.3 \
 bash scripts/bundle/assemble-runtime-bundle.sh site-a
 ```
 
 Use `--deployment-layout production-split` on the server export when the intended production topology is:
 
-- VM1: PostgreSQL + MinIO
-- VM2: backend API
-- VM3: CMS
+- Data VM: PostgreSQL + MinIO
+- Valkey VM: realtime notification bus
+- Backend VM: API + worker behavior
+- CMS VM: static CMS
+- Observability VM: Prometheus + Grafana
 
-For QA and production, use the split layout so the runtime bundle aligns with the approved VM1 / VM2 / VM3 topology.
+For QA and production, use the split layout so the runtime bundle aligns with the approved Docker-on-VM role topology.
 
 Fallback example using raw released artifacts:
 
@@ -145,10 +156,10 @@ BACKEND_PRIVATE_HOST=10.20.0.20 \
 BACKEND_DEVICE_HOST=10.20.0.21 \
 DATA_PRIVATE_HOST=10.20.0.10 \
 OBSERVABILITY_PRIVATE_HOST=10.20.0.40 \
-BACKEND_IMAGE_REF=ghcr.io/hexmon/signhex-server:1.2.3 \
-BACKEND_IMAGE_ARCHIVE=/artifacts/signhex-server-1.2.3.tar \
-CMS_BUNDLE_SOURCE=/artifacts/signhex-nexus-core-1.2.3.tgz \
-PLAYER_ARTIFACTS_DIR=/artifacts/signage-screen/1.2.3 \
+BACKEND_IMAGE_REF=ghcr.io/darshan/darshan-server:1.2.3 \
+BACKEND_IMAGE_ARCHIVE=/artifacts/darshan-server-1.2.3.tar \
+CMS_BUNDLE_SOURCE=/artifacts/darshan-cms-1.2.3.tgz \
+PLAYER_ARTIFACTS_DIR=/artifacts/darshan-player/1.2.3 \
 bash scripts/bundle/assemble-runtime-bundle.sh site-a
 ```
 
@@ -166,7 +177,7 @@ dist/onprem/<site-name>/
     data/
     backend/
     cms/
-    observability/   # only when OBSERVABILITY_PRIVATE_HOST is set
+    observability/
     electron/
     PRODUCTION_SETUP_GUIDE.md
   SHA256SUMS.txt
@@ -184,7 +195,7 @@ cd dist/onprem/<site-name>
 
 ## Transition Helper
 
-For a temporary local workspace that still contains sibling product repos next to `signhex-platform`, use:
+For a temporary local workspace that still contains sibling product repos next to `DARSHAN monorepo root`, use:
 
 ```bash
 bash scripts/bundle/workspace-build-bundle.sh <site-name>

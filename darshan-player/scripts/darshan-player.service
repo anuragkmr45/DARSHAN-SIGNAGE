@@ -1,0 +1,52 @@
+[Unit]
+Description=DARSHAN Player
+Documentation=https://docs.darshan.com
+After=network-online.target graphical.target
+Wants=network-online.target
+Requires=graphical.target
+
+[Service]
+Type=simple
+User=darshan
+Group=darshan
+WorkingDirectory=/opt/darshan-player
+
+# Environment variables
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/darshan/.Xauthority"
+Environment="NODE_ENV=production"
+Environment="DARSHAN_CONFIG_PATH=/etc/darshan/config.json"
+
+# Start command
+ExecStart=/usr/bin/darshan-player
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=200
+StartLimitBurst=5
+
+# Resource limits
+LimitNOFILE=65536
+MemoryLimit=1G
+CPUQuota=80%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/darshan /var/cache/darshan /tmp
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=darshan-player
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=graphical.target

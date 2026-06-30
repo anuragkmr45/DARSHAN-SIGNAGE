@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLATFORM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/signhex-observability-verify.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/darshan-observability-verify.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 PROMTOOL_IMAGE="${PROMTOOL_IMAGE:-prom/prometheus:v3.3.1}"
@@ -53,8 +53,8 @@ echo "[verify] promtool check config"
 docker run --rm \
   --entrypoint promtool \
   -v "$WORK_DIR:/work:ro" \
-  -v "$PLATFORM_ROOT/deploy/shared/observability/prometheus/rules:/etc/signhex/prometheus/rules:ro" \
-  -v "$PLATFORM_ROOT/deploy/shared/observability/prometheus/file-sd:/etc/signhex/prometheus/file-sd:ro" \
+  -v "$PLATFORM_ROOT/deploy/shared/observability/prometheus/rules:/etc/darshan/prometheus/rules:ro" \
+  -v "$PLATFORM_ROOT/deploy/shared/observability/prometheus/file-sd:/etc/darshan/prometheus/file-sd:ro" \
   "$PROMTOOL_IMAGE" \
   check config /work/prometheus.yml
 
@@ -70,7 +70,7 @@ echo "[verify] amtool check-config"
 docker run --rm \
   --entrypoint amtool \
   -v "$WORK_DIR:/work:ro" \
-  -v "$PLATFORM_ROOT/deploy/shared/observability/alertmanager/templates:/etc/signhex/alertmanager/templates:ro" \
+  -v "$PLATFORM_ROOT/deploy/shared/observability/alertmanager/templates:/etc/darshan/alertmanager/templates:ro" \
   "$ALERTMANAGER_IMAGE" \
   check-config /work/alertmanager.yml
 

@@ -1,0 +1,8 @@
+{
+  "require": ["ts-node/register/transpile-only", "./test/setup.cjs"],
+  "extensions": ["ts"],
+  "timeout": 5000,
+  "color": true,
+  "reporter": "spec",
+  "exit": true
+}

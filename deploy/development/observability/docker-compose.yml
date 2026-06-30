@@ -2,6 +2,8 @@ services:
   prometheus:
     image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.3.1}
     restart: unless-stopped
+    depends_on:
+      - node-exporter
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command:
@@ -14,8 +16,14 @@ services:
       - "${DEV_PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
-      - ../../shared/observability/prometheus/rules:/etc/signhex/prometheus/rules:ro
-      - ./prometheus.players.local.json:/etc/signhex/prometheus/file-sd/players.targets.json:ro
+      - ../../shared/observability/prometheus/rules:/etc/darshan/prometheus/rules:ro
+      - ./prometheus.players.local.json:/etc/darshan/prometheus/file-sd/players.targets.json:ro
+
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.8.2}
+    restart: unless-stopped
+    ports:
+      - "${DEV_NODE_EXPORTER_PORT:-9100}:9100"
 
   grafana:
     image: ${GRAFANA_IMAGE:-grafana/grafana:12.0.2}

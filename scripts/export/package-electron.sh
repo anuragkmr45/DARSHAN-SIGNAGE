@@ -7,8 +7,8 @@ Usage:
   bash scripts/export/package-electron.sh --release <release-id> --platform windows|macos|linux|all-supported
 
 Optional environment overrides:
-  PLAYER_REPO_DIR=/path/to/signage-screen
-  OUTPUT_BASE=/path/to/signhex-platform/out
+  PLAYER_REPO_DIR=/path/to/darshan-player
+  OUTPUT_BASE=/path/to/darshan/out
 EOF
 }
 
@@ -47,7 +47,7 @@ if [[ -z "$RELEASE_ID" ]]; then
   exit 1
 fi
 
-PLAYER_REPO_DIR="${PLAYER_REPO_DIR:-$PLATFORM_ROOT/../signage-screen}"
+PLAYER_REPO_DIR="${PLAYER_REPO_DIR:-$PLATFORM_ROOT/darshan-player}"
 OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
 HOST_PLATFORM="$(export_host_platform)"
 
@@ -79,10 +79,24 @@ OUTPUT_DIR="$OUTPUT_BASE/$RELEASE_ID/electron/$TARGET_PLATFORM"
 export_make_clean_dir "$OUTPUT_DIR"
 
 PACKAGE_SCRIPT=""
+PACKAGE_ARCH="native"
 ARTIFACT_PATTERNS=()
 case "$TARGET_PLATFORM" in
   linux)
-    PACKAGE_SCRIPT="package:linux"
+    case "$(uname -m)" in
+      x86_64|amd64)
+        PACKAGE_SCRIPT="package:linux:x64"
+        PACKAGE_ARCH="amd64"
+        ;;
+      aarch64|arm64)
+        PACKAGE_SCRIPT="package:linux:arm64"
+        PACKAGE_ARCH="arm64"
+        ;;
+      *)
+        echo "Unsupported Linux CPU architecture: $(uname -m). Build on an amd64 or arm64 Linux machine." >&2
+        exit 1
+        ;;
+    esac
     ARTIFACT_PATTERNS=("*.deb" "*.AppImage")
     ;;
   macos)
@@ -124,6 +138,7 @@ cat > "$OUTPUT_DIR/package.env" <<EOF
 PACKAGE_KIND=electron
 RELEASE_ID=$RELEASE_ID
 ELECTRON_PACKAGE_PLATFORM=$TARGET_PLATFORM
+ELECTRON_PACKAGE_ARCH=$PACKAGE_ARCH
 EOF
 
 cat > "$OUTPUT_DIR/config.example.json" <<EOF
@@ -146,7 +161,7 @@ cat > "$OUTPUT_DIR/config.example.json" <<EOF
 EOF
 
 cat > "$OUTPUT_DIR/README.md" <<EOF
-# Signhex Electron Package ($TARGET_PLATFORM)
+# DARSHAN Electron Package ($TARGET_PLATFORM)
 
 This folder contains packaged player artifacts only. Do not copy the source repo to the target machine.
 
@@ -161,10 +176,11 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 
 ## Operator steps
 
-1. Install the correct packaged artifact for the target machine.
-2. Copy `config.example.json` to the player config location.
+1. Install the packaged artifact that matches this folder's `ELECTRON_PACKAGE_ARCH`.
+2. Copy `config.example.json` to `/etc/darshan/config.json` before the first launch, or edit the config path reported by `darshan-player doctor`.
 3. Replace `<backend-ip>` with the real backend IP.
-4. Pair the device and verify it appears in the CMS.
+4. Launch `darshan-player` from the logged-in Ubuntu desktop session. The current Ubuntu package uses XDG desktop autostart, not a systemd service.
+5. Pair the device and verify it appears in the CMS.
 EOF
 
 export_write_checksums "$OUTPUT_DIR"

@@ -2,40 +2,155 @@
   "annotations": { "list": [] },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
+  "id": null,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
       "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "sum(up{job=~\"vm3-node|vm3-nginx|vm3-grafana\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "CMS Machine Targets Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "max(up{job=\"vm3-nginx\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "Nginx Exporter Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "max(up{job=\"vm3-grafana\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "Grafana Metrics Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "max(darshan:host_memory_utilization:ratio{job=\"vm3-node\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "CMS Host Memory",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 5 },
+      "id": 5,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "signhex:host_cpu_utilization:ratio{role=\"cms\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
-        { "expr": "signhex:host_memory_utilization:ratio{role=\"cms\"}", "legendFormat": "{{ instance }} memory", "refId": "B" }
+        { "expr": "up{job=~\"vm3-node|vm3-nginx|vm3-grafana\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }
       ],
-      "title": "VM3 CPU And Memory Utilization",
+      "title": "CMS Machine Scrape Target Health",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "id": 2,
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 6,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "sum(rate(nginx_http_requests_total[5m]))", "legendFormat": "nginx request rate", "refId": "A" }
+        { "expr": "darshan:host_cpu_utilization:ratio{job=\"vm3-node\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
+        { "expr": "darshan:host_memory_utilization:ratio{job=\"vm3-node\"}", "legendFormat": "{{ instance }} memory", "refId": "B" },
+        { "expr": "darshan:host_filesystem_utilization:ratio{job=\"vm3-node\"}", "legendFormat": "{{ instance }} filesystem", "refId": "C" }
+      ],
+      "title": "CMS Host CPU, Memory, Filesystem",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum(rate(nginx_http_requests_total{job=\"vm3-nginx\"}[5m])) or vector(0)", "legendFormat": "nginx requests", "refId": "A" }
       ],
       "title": "CMS Reverse Proxy Request Rate",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "nginx_connections_active{job=\"vm3-nginx\"} or vector(0)", "legendFormat": "active", "refId": "A" },
+        { "expr": "nginx_connections_reading{job=\"vm3-nginx\"} or vector(0)", "legendFormat": "reading", "refId": "B" },
+        { "expr": "nginx_connections_writing{job=\"vm3-nginx\"} or vector(0)", "legendFormat": "writing", "refId": "C" },
+        { "expr": "nginx_connections_waiting{job=\"vm3-nginx\"} or vector(0)", "legendFormat": "waiting", "refId": "D" }
+      ],
+      "title": "Nginx Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "process_resident_memory_bytes{job=\"vm3-grafana\"}", "legendFormat": "grafana rss", "refId": "A" },
+        { "expr": "process_resident_memory_bytes{job=\"prometheus\"}", "legendFormat": "prometheus rss", "refId": "B" }
+      ],
+      "title": "Observability Process Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "scrape_samples_scraped{job=~\"vm3-node|vm3-nginx|vm3-grafana\"}", "legendFormat": "{{ job }}", "refId": "A" }
+      ],
+      "title": "CMS Exporter Scrape Samples",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "scrape_duration_seconds{job=~\"vm3-node|vm3-nginx|vm3-grafana\"}", "legendFormat": "{{ job }}", "refId": "A" }
+      ],
+      "title": "CMS Exporter Scrape Duration",
+      "type": "timeseries"
     }
   ],
+  "refresh": "30s",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["signhex", "vm3", "cms"],
+  "tags": ["darshan", "cms", "machine"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "Signhex VM3 CMS Machine",
-  "uid": "signhex-vm3-cms",
-  "version": 1
+  "title": "DARSHAN CMS Machine",
+  "uid": "darshan-vm3-cms",
+  "version": 2
 }

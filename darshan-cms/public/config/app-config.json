@@ -1,0 +1,19 @@
+{
+  "cms": {
+    "environment": {
+      "name": "production",
+      "deploymentId": "site-a",
+      "cmsId": "cms-a"
+    },
+    "api": {
+      "baseUrl": "http://192.168.0.6:8080"
+    },
+    "realtime": {
+      "socketBaseUrl": "http://192.168.0.6:8080",
+      "socketTransports": ["websocket"]
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}

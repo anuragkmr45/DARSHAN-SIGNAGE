@@ -9,3 +9,12 @@ out/
 *.p12
 *.SKIPPED.txt
 .DS_Store
+.playwright-mcp/
+.local/
+darshan-cms/.env
+deploy/production/.env
+deploy/production/.env.local
+deploy/production/observability/prometheus.yml
+deploy/production/docker/.env
+deploy/production/docker/observability/prometheus.yml
+deploy/production/.generated/

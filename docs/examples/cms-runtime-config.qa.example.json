@@ -1,0 +1,19 @@
+{
+  "cms": {
+    "environment": {
+      "name": "onprem-qa",
+      "deploymentId": "qa-lab-1",
+      "cmsId": "cms-a"
+    },
+    "api": {
+      "baseUrl": "https://qa-cms.internal.example"
+    },
+    "realtime": {
+      "socketBaseUrl": "https://qa-cms.internal.example",
+      "socketTransports": ["websocket"]
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}

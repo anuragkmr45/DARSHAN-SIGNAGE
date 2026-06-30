@@ -2,39 +2,187 @@
   "annotations": { "list": [] },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
+  "id": null,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
       "id": 1,
-      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "count(up{job=\"players\"} == 1)", "refId": "A" }
+        { "expr": "sum(darshan_fleet_players_total) or vector(0)", "refId": "A" }
       ],
-      "title": "Players Reachable By Prometheus",
+      "title": "Known Players",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "signhex-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
       "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "sum(darshan_fleet_players_total{state=\"ACTIVE\"}) or vector(0)", "refId": "A" }
+      ],
+      "title": "Active Players",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "darshan:fleet_offline_players_ratio or vector(0)", "refId": "A" }
+      ],
+      "title": "Offline Player Ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "sum(darshan_fleet_heartbeats_last_5m) or vector(0)", "refId": "A" }
+      ],
+      "title": "Heartbeats Last 5m",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 5 },
+      "id": 5,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "up{job=\"players\"}", "legendFormat": "{{ instance }}", "refId": "A" }
+        { "expr": "darshan_fleet_players_total", "legendFormat": "{{ state }}", "refId": "A" }
       ],
-      "title": "Player Scrape Status",
+      "title": "Fleet Players By State",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 5 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "darshan_fleet_latest_heartbeat_age_seconds", "legendFormat": "latest heartbeat age", "refId": "A" }
+      ],
+      "title": "Latest Fleet Heartbeat Age",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "up{job=\"players\"}", "legendFormat": "{{ instance }} {{ player_id }} {{ player_group }}", "refId": "A" }
+      ],
+      "title": "Direct Player Scrape Status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 8,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "count(up{job=\"players\"} == 1) or vector(0)", "legendFormat": "reachable", "refId": "A" },
+        { "expr": "count(up{job=\"players\"} == 0) or vector(0)", "legendFormat": "unreachable", "refId": "B" }
+      ],
+      "title": "Direct Player Metrics Reachability",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "process_resident_memory_bytes{job=\"players\"}", "legendFormat": "{{ instance }} rss", "refId": "A" }
+      ],
+      "title": "Player Process Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "id": 10,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "rate(process_cpu_seconds_total{job=\"players\"}[5m])", "legendFormat": "{{ instance }} cpu", "refId": "A" }
+      ],
+      "title": "Player Process CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (source) (rate(darshan_server_device_commands_claimed_total[5m]))", "legendFormat": "{{ source }} claims", "refId": "A" },
+        { "expr": "sum by (result) (rate(darshan_server_device_command_acks_total[5m]))", "legendFormat": "{{ result }} acks", "refId": "B" }
+      ],
+      "title": "Player Command Delivery And Acks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (namespace) (darshan_server_realtime_socket_connections{namespace=\"/device\"})", "legendFormat": "{{ namespace }}", "refId": "A" }
+      ],
+      "title": "Realtime Device Socket Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (severity, event_type) (rate(darshan_server_media_cache_reports_total{result=\"accepted\"}[5m]))", "legendFormat": "{{ severity }} {{ event_type }}", "refId": "A" }
+      ],
+      "title": "Player Media Cache Failure Reports",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (severity, event_type) (darshan_server_media_cache_reports_unresolved)", "legendFormat": "{{ severity }} {{ event_type }}", "refId": "A" }
+      ],
+      "title": "Unresolved Player Media Cache Reports",
       "type": "timeseries"
     }
   ],
+  "refresh": "30s",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["signhex", "players"],
+  "tags": ["darshan", "players", "fleet", "machines"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "Signhex Player Fleet",
-  "uid": "signhex-players-fleet",
-  "version": 1
+  "title": "DARSHAN Player Machines Fleet",
+  "uid": "darshan-players-fleet",
+  "version": 2
 }

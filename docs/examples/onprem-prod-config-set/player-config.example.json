@@ -1,0 +1,52 @@
+{
+  "player": {
+    "environment": {
+      "name": "onprem-prod",
+      "deploymentId": "prod-site-a",
+      "expectedServerId": "backend-prod-a"
+    },
+    "runtime": {
+      "mode": "production"
+    },
+    "backend": {
+      "baseUrl": "https://backend.internal.example:3000",
+      "socketIoUrl": "https://backend.internal.example:3000/socket.io/"
+    },
+    "realtime": {
+      "enabled": true,
+      "signedAuthEnabled": false,
+      "deviceNamespace": "/device",
+      "commandSafetyPollMs": 120000,
+      "desiredStatePollMs": 300000
+    },
+    "polling": {
+      "heartbeatMs": 30000,
+      "commandPollMs": 5000,
+      "snapshotPollMs": 300000,
+      "defaultMediaPollMs": 300000
+    },
+    "pairing": {
+      "offlineValidationGraceMs": 604800000,
+      "backendFirstRolloutMode": true
+    },
+    "security": {
+      "offlinePlaybackPolicy": "secure",
+      "backendRequiredForPlayback": true,
+      "networkSwitchGraceMs": 30000,
+      "playbackLeaseMs": 120000,
+      "lockAfterOfflineMs": 120000,
+      "purgeCacheAfterOfflineMs": 0,
+      "showSecurityLockScreen": true
+    },
+    "duplicateIdentity": {
+      "enabled": true,
+      "enforcement": "warn"
+    },
+    "cache": {
+      "maxBytes": 5368709120
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}

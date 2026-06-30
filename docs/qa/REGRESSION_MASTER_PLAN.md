@@ -1,0 +1,151 @@
+# Regression Master Plan
+
+This plan defines the phased QA discovery and regression program for the current multi-repo DARSHAN workspace. It is intentionally code-anchored: repo entrypoints, test harnesses, manifests, and runtime scripts determine scope and sequencing.
+
+Last code-truth refresh: 2026-06-28.
+
+Current production QA reference: Docker-on-VM roles under `deploy/production/docker/*`. Proxmox is the hypervisor only. Backend Docker config is `/app/config/backend.json`; player device config is `/etc/darshan/player/config.json`. Historical LXC/systemd production assumptions are not part of current QA acceptance.
+
+## Test Phases
+
+| Phase | Wave | Primary Objective | Primary Surfaces | Core Outputs |
+| --- | --- | --- | --- | --- |
+| `Phase 1` | Access/Admin | Establish trusted baseline for authentication, sessions, RBAC, users, departments, and core settings before broader feature execution. | `darshan-server/src/routes/auth.ts`, `users.ts`, `departments.ts`, `roles.ts`, `permissions.ts`, `settings.ts`; `darshan-cms/src/pages/Auth.tsx`, `Users.tsx`, `Departments.tsx`, `Settings.tsx` | Confirmed inventory rows, smoke coverage map, and first-pass access/admin defect list. |
+| `Phase 2` | Content/Scheduling | Validate authoring and publishing paths for media, layouts, schedules, requests, reservations, emergency takeover, and default media. | `darshan-server/src/routes/media.ts`, `layouts.ts`, `presentations.ts`, `schedules.ts`, `schedule-requests.ts`, `schedule-reservations.ts`, `emergency.ts`, `settings.ts`; `darshan-cms/src/pages/MediaLibrary.tsx`, `Layouts.tsx`, `ScheduleQueue.tsx`, `ScheduleCreator.tsx`, `Requests.tsx` | Execution-ready coverage matrix for content and scheduling plus defect backlog linked to `PH2-*` IDs. |
+| `Phase 3` | Fleet/Player Runtime | Validate screen management, pairing, telemetry, playback, commands, screenshots, proof-of-play, and offline recovery across backend and player. | `darshan-server/src/routes/screens.ts`, `screen-groups.ts`, `device-pairing.ts`, `device-telemetry.ts`, `proof-of-play.ts`; `darshan-player/src/main/index.ts`, `src/main/services`; `darshan-cms/src/pages/Screens.tsx` | Cross-stack runtime coverage, environment notes for real device validation, and defect backlog linked to `PH3-*` IDs. |
+| `Phase 4` | Communications/Reporting/Ops | Validate collaboration, reporting, security/ops surfaces, and deployment/observability readiness. | `darshan-server/src/routes/requests.ts`, `notifications.ts`, `conversations.ts`, `chat.ts`, `reports.ts`, `audit-logs.ts`, `api-keys.ts`, `webhooks.ts`, `sso-config.ts`, `metrics.ts`, `observability.ts`; `manifests`; `deploy` | Coverage map for communications/reporting/ops and environment fidelity gaps linked to `PH4-*` IDs. |
+| `Phase 5` | Robustness-Only Fixes | Re-test and close logged defects without expanding scope. | `QA_REGRESSION_TRACKER.md`; targeted source/test paths referenced by defect rows | Verified fixes, no-scope-creep enforcement, and closeout evidence. |
+
+## Environments
+
+| Environment | Verified Anchors | Purpose | Notes |
+| --- | --- | --- | --- |
+| Local backend stack | `darshan-server/docker-compose.yml`; `darshan-server/docker-compose.dev.yml`; `darshan-server/.env.example`; `darshan-server/config/backend.production.example.json` | Bring up API, Postgres, and MinIO for backend-backed regression and data seeding. | Use the single backend env template plus a JSON config file for non-secret QA runtime settings. |
+| Local CMS | `darshan-cms/package.json`; `darshan-cms/vite.config.ts`; `darshan-cms/vitest.config.ts`; `darshan-cms/playwright.config.ts` | Execute CMS unit and e2e coverage against local or pointed backend. | `playwright.config.ts` supports local dev server or external `E2E_BASE_URL`. |
+| Local player | `darshan-player/package.json`; `darshan-player/src/main/index.ts`; `darshan-player/.mocharc.json` | Exercise Electron runtime, pairing, telemetry, and offline/runtime behavior. | Use for unit, integration, fault-injection, and performance suites. |
+| QA artifact-driven environment | `manifests/qa/versions.example.yaml`; `deploy/qa`; `docs/runbooks/onprem-qa-setup.md` | Validate release-candidate artifacts in a topology aligned with production role separation where practical. | Treat manifests as the release pin source, not local source checkouts. Runtime proof still requires actual QA targets. |
+| Production-like reference environment | `manifests/production/versions.example.yaml`; `deploy/production/docker`; `deploy/production/README.md`; `docs/runbooks/onprem-production-setup.md` | Compare QA findings against Docker-on-VM production promotion rules and environment constraints. | Used for gate validation and rollout-readiness checks. Five-role Docker production evidence still requires real VMs and target player devices. |
+
+## Test Harnesses And Commands
+
+| Area | Verified Commands / Harnesses | Why It Matters |
+| --- | --- | --- |
+| Backend | `cd darshan-server && npm test`; `cd darshan-server && npx vitest run`; `cd darshan-server && npm run test:default-media` | Confirms route/service behavior and existing focused coverage such as default media. |
+| CMS | `cd darshan-cms && npm run test:unit`; `cd darshan-cms && npm run test:chat-e2e`; `cd darshan-cms && npm run test:default-media` | Covers unit logic and browser-level e2e flows already present in the repo. |
+| Player | `cd darshan-player && npm test`; `cd darshan-player && npm run test:integration`; `cd darshan-player && npm run test:fault`; `cd darshan-player && npm run test:performance`; `cd darshan-player && npm run test:default-media` | Provides runtime, reliability, offline, and performance coverage for the device layer. |
+| Deploy/Ops | Docker role scripts under `deploy/production/docker/start-*.sh`; export/bundle scripts under `scripts/export/*` and `scripts/bundle/*` where release artifacts are required | Validates current Docker role startup plus artifact-driven QA/bundle assumptions. |
+
+## Regression Execution Baseline
+
+This baseline turns the verified repo anchors into an execution order for regression startup. It is additive to the phase tables above and is intended to normalize readiness checks, seed expectations, and tracker handling before feature-by-feature execution begins.
+
+### Environment Status
+
+| Area | Status | Details | Commands |
+| --- | --- | --- | --- |
+| `backend` | `ready` | Evidence: `darshan-server/docker-compose.yml`, `docker-compose.dev.yml`, `.env.example`, `config/backend.production.example.json`, `scripts/check-services.ts`, `scripts/seed.ts`, `vitest.config.ts`, `scripts/api-test-report.ts`.<br>Local Postgres and MinIO readiness is repo-backed.<br>`npm test` is a live API smoke wrapper, not the primary unit harness, and it requires admin credentials. | `cd darshan-server && cp .env.example .env`<br>`cd darshan-server && cp config/backend.production.example.json config/backend.qa.json`<br>`cd darshan-server && printf '\\nDARSHAN_CONFIG_FILE=%s\\nDARSHAN_ENV=qa\\n' \"$(pwd)/config/backend.qa.json\" >> .env`<br>`cd darshan-server && npm install`<br>`cd darshan-server && docker compose up -d postgres minio`<br>`cd darshan-server && npm run check`<br>`cd darshan-server && npm run seed`<br>`cd darshan-server && npx vitest run`<br>`cd darshan-server && npm run test:default-media`<br>`cd darshan-server && npm run dev:watch`<br>`cd darshan-server && API_BASE_URL=http://127.0.0.1:3000 ADMIN_EMAIL=<admin-email> ADMIN_PASSWORD=<admin-password> npm test` |
+| `cms` | `partial` | Evidence: `darshan-cms/vitest.config.ts`, `playwright.config.ts`, `tests/*.e2e.spec.ts`.<br>Unit harness is ready.<br>Playwright is present but depends on browser install plus backend and auth setup for the full suite.<br>`test:chat-e2e` is misnamed and actually runs the Playwright suite via the shared config.<br>`test:default-media` is mock-backed and can run without a live backend. | `cd darshan-cms && npm install`<br>`cd darshan-cms && npm run test:unit`<br>`cd darshan-cms && npx playwright install --with-deps chromium`<br>`cd darshan-cms && VITE_API_BASE_URL=http://127.0.0.1:3000 E2E_ADMIN_EMAIL=<admin-email> E2E_ADMIN_PASSWORD=<admin-password> npm run test:chat-e2e`<br>`cd darshan-cms && npm run test:default-media` |
+| `player` | `ready` | Evidence: `darshan-player/.mocharc.json`, `src/main/services/operator-tools.ts`, `test/unit`, `test/integration`, `test/fault-injection`, `test/performance`.<br>`npm test` covers unit and integration only.<br>Fault and performance remain separate required passes.<br>`npm run doctor` is a real readiness probe for config, pairing, display, cache, and autostart state. | `cd darshan-player && npm install`<br>`cd darshan-player && npm run doctor`<br>`cd darshan-player && npm test`<br>`cd darshan-player && npm run test:default-media`<br>`cd darshan-player && npm run test:fault`<br>`cd darshan-player && npm run test:performance` |
+| `deploy` | `partial` | Evidence: `scripts/export/package-server.sh`, `package-cms.sh`, `package-all.sh`, `scripts/bundle/assemble-runtime-bundle.sh`, `docs/runbooks/onprem-qa-setup.md`, `deploy/qa`, `manifests/qa/versions.example.yaml`.<br>Artifact and bundle scripts are present.<br>QA deployment depends on external release artifacts and QA VM topology, so it is not locally self-sufficient.<br>The baseline should use the runbook-backed export flow, not only the older generic `package-all.sh` shortcut. | `export RELEASE_ID=<release-id>`<br>`bash scripts/export/package-server.sh --release "$RELEASE_ID" --deployment-layout production-split`<br>`bash scripts/export/package-cms.sh --release "$RELEASE_ID"`<br>`export SITE_NAME=<site-name>`<br>`export QA_DATA_HOST=<qa-data-ip>`<br>`export QA_BACKEND_HOST=<qa-backend-ip>`<br>`export QA_BACKEND_DEVICE_HOST=<qa-backend-device-ip>`<br>`export QA_CMS_HOST=<qa-cms-ip>`<br>`export SERVER_PACKAGE_DIR="out/${RELEASE_ID}/server"`<br>`export CMS_PACKAGE_DIR="out/${RELEASE_ID}/cms"`<br>`export PLAYER_ARTIFACTS_DIR=<player-artifacts-dir>`<br>`bash scripts/bundle/assemble-runtime-bundle.sh --profile qa "$SITE_NAME"` |
+
+### Seed And Data Preconditions
+
+- Backend seed uses `darshan-server/scripts/seed.ts` and must create the admin account from `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+- Non-admin user coverage must exist before `RG-4` because CMS authz and RBAC checks need more than the seeded admin.
+- The media library must include at least one `READY` image, video, document/PDF-like asset, and default-media candidate before `RG-5`.
+- At least one paired screen with valid certificate history is required before `RG-6`.
+- Chat, notification, API key, webhook, and SSO sample data are required before `RG-7`.
+- Player fixtures under `darshan-player/test/fixtures` are harness fixtures only and do not replace backend or CMS seed data.
+
+### Phase Order
+
+| Phase | Goal | Entry Requirements | Exit Requirements |
+| --- | --- | --- | --- |
+| `RG-0` | Workspace And Tracker Baseline | All three QA docs are present.<br>`darshan-server`, `darshan-cms`, `darshan-player`, and `DARSHAN monorepo root` are available locally.<br>Node 20 and Docker are available. | Environment statuses are recorded.<br>Tracker workflow is locked for execution.<br>Known defects `REG-0001` through `REG-0009` are listed as the starting backlog. |
+| `RG-1` | Backend Local Stack Readiness | `.env` is materialized from `.env.example`, with `DARSHAN_CONFIG_FILE` pointing at a QA JSON config copy.<br>Docker is available. | Postgres and MinIO are healthy.<br>Seed succeeds.<br>Backend Vitest and default-media suites are runnable.<br>Live API smoke command is documented with required auth env. |
+| `RG-2` | CMS Unit/E2E Readiness | `RG-1` is complete.<br>The backend is reachable at `http://127.0.0.1:3000`.<br>Playwright browser installation is complete. | CMS unit suite is runnable.<br>The local dev-server-backed Playwright path is confirmed.<br>Admin credential requirement is documented.<br>Mocked default-media spec and the full Playwright suite are clearly separated. |
+| `RG-3` | Player Harness Readiness | Node and npm are available.<br>Player config and test fixture path are understood. | `doctor`, unit, integration, fault, performance, and default-media commands are all mapped.<br>`npm test` scope is explicitly documented as unit and integration only. |
+| `RG-4` | Phase 1 Access/Admin Regression | `RG-1` and `RG-2` are complete.<br>Seeded admin and non-admin accounts are available. | Auth, session, RBAC, users, departments, and settings smoke coverage is executed.<br>Pre-existing `REG-0001` and `REG-0002` are revalidated instead of duplicated.<br>No open current-phase `blocker` or `critical` issue remains. |
+| `RG-5` | Phase 2 Content/Scheduling Regression | `RG-4` is stable.<br>Media, layout, schedule, and default-media seed set exists. | Media, layouts, scheduling, requests, reservations, emergency, and default-media flows are mapped to runnable tests and manual checks.<br>Pre-existing `REG-0006` is revalidated.<br>No open `blocker` against Phase 2 surfaces remains. |
+| `RG-6` | Phase 3 Fleet/Player Runtime Regression | `RG-3` is complete.<br>At least one paired device or reproducible player fixture path is available.<br>Publish path is stable from `RG-5`. | Pairing, telemetry, playback, commands, screenshots, proof-of-play, and offline recovery are executed across backend, player, and CMS return paths.<br>Pre-existing `REG-0008` and `REG-0009` are revalidated.<br>No open `blocker` against Phase 3 surfaces remains. |
+| `RG-7` | Phase 4 Communications, Reporting, And QA Artifact Readiness | `RG-6` is stable.<br>Report and chat seed data are available.<br>Release artifact inputs are available for QA bundle validation. | Communications, reporting, and ops surfaces are executed.<br>The artifact-driven QA bundle path is verified as runnable from the documented commands.<br>Pre-existing `REG-0003`, `REG-0004`, `REG-0005`, and `REG-0007` are revalidated.<br>Deploy readiness gaps are recorded as environment blockers if unresolved. |
+| `RG-8` | Phase 5 Robustness Revalidation And Closeout | Discovery across `RG-4` through `RG-7` is substantially complete. | Only tracker-backed fixes are retested.<br>Rows move through `fixed-pending-qa` to `verified`.<br>No scope expansion occurs beyond existing tracker items. |
+
+### Tracker Workflow During Regression
+
+- `REG-0001` through `REG-0009` are the known starting defect set and must be revalidated in the matching `RG-*` phase instead of being re-filed.
+- Known defect mapping for baseline execution is: `RG-4` revalidates `REG-0001` and `REG-0002`; `RG-5` revalidates `REG-0006`; `RG-6` revalidates `REG-0008` and `REG-0009`; `RG-7` revalidates `REG-0003`, `REG-0004`, `REG-0005`, and `REG-0007`.
+- New defects discovered during execution continue at `REG-0010`.
+- Use `blocked` only for environment or dependency issues that stop the current `RG-*` phase.
+- Every new defect row must reference canonical IDs from `FEATURE_INVENTORY.md` and the active regression phase.
+- Phase exits must respect the existing plan gates: unresolved `blocker` or `critical` issues in the current phase stop progression.
+- `RG-8` may update only previously logged tracker rows.
+
+### Execution Notes
+
+| Date | RG Phase | Outcome | Notes |
+| --- | --- | --- | --- |
+| `2026-04-15` | `RG-4` | `executed-with-open-defects` | Backend Phase 1 route coverage passed for auth, login throttle, RBAC policy, users, invites, departments, roles/permissions, and backup deletion after test-harness seeding was expanded to include `SUPER_ADMIN`. CMS unit coverage passed for `access` and `authorization` helpers. `REG-0001` and `REG-0002` were revalidated, and `REG-0010` was created for a CMS/backend RBAC contract mismatch in user-target management. No `blocker` or `critical` defect was confirmed in this phase. |
+| `2026-04-15` | `RG-5` | `executed-with-open-defects` | Backend Phase 2 route coverage passed in isolated fresh-database runs for media, media completion, ready-list repair, layouts, schedules, publish, schedule-request filters, reservations, emergency, settings, screens, and device-auth fallback/default-media paths. The earlier combined-suite failures were traced to test-harness contamination from repeated fixed-user seeding and shared command/state rows, not to new product regressions. CMS unit coverage passed for `mediaUploadFlow` and `scheduleQuickPresets`. Existing mock-backed Playwright specs for default media and scheduling/emergency no longer match the current UI flow and remain harness debt rather than confirmed product defects. `REG-0006` was revalidated with a focused failing auth-contract test, and no new in-scope `blocker` or `critical` defect was confirmed in this phase. |
+| `2026-04-15` | `RG-6` | `executed-with-open-defects` | Player integration, default-media, fault-injection, and performance suites passed. Full player `npm test` on this machine's unsupported Node `v24.12.0` reported a cert-manager suite-contamination failure that disappeared in isolation and a cache-manager expectation that no longer matches the implemented now-playing eviction rule, so neither was logged as a product regression. Backend runtime route coverage passed in isolated fresh-database runs for pairing, recovery, device auth, runtime snapshot, screen refresh, commands, and proof-of-play. `src/routes/screens.test.ts` still has a `/api/v1/metrics/overview` assertion failure that belongs to the reporting surface and should be revisited in `RG-7`. CMS Playwright fleet specs for `screens.e2e` and `dashboard-online-screens.e2e` no longer match the current mocked data sources and selectors, so they remain harness debt rather than confirmed product bugs. `REG-0008` and `REG-0009` were revalidated, including a focused failing command-ack regression assertion, and no new in-scope `blocker` or `critical` defect was confirmed in this phase. |
+| `2026-04-15` | `RG-7` | `executed-with-open-defects` | Backend Phase 4 route coverage passed on an isolated scratch database for notifications, notification unread sync, conversations, chat REST and realtime behavior, schedule and report summaries, audit-log PDF export, observability, metrics, and security-event ingestion after correcting local regression-environment schema drift that did not reflect current code contracts. `src/routes/reports-export.test.ts` still contains a stale proof-of-play fixture that omits the now-required `idempotency_key`, so its remaining failure was treated as harness debt rather than a confirmed product defect. Focused backend regression coverage was added for API keys, webhooks, and SSO config lifecycle in `src/routes/admin-ops-contracts.test.ts`. `REG-0003`, `REG-0004`, `REG-0005`, and `REG-0007` were revalidated, and `REG-0011` was created because the authenticated CMS `/requests` route currently renders `null` even though the backend request workflow remains live. Deploy-readiness scripts for server packaging, CMS packaging, and QA runtime-bundle assembly were verified as runnable via their checked-in help paths, but full artifact-driven QA execution remains environment-partial until release artifacts and QA hosts are available. |
+| `2026-04-15` | `Integrated Sweep` | `executed-with-open-defects` | Integrated workflow regression for `INT-001` through `INT-009` passed on targeted backend and player surfaces for pairing and recovery, publish activation, refresh fanout, screenshot persistence, heartbeat state reflection, proof-of-play ingest and replay, offline queue recovery, and no-content versus default-media fallback. The targeted player workflow suite finished `87` passing with `1` failing assertion that revalidated `REG-0009`, and isolated backend reruns for `schedules.publish.test.ts` and `schedule-reservations.test.ts` passed once they were cloned from the aligned scratch database instead of replaying the drifted raw migration chain. CMS return-path validation stayed partial: `screens.e2e.spec.ts` still misses the current `/api/v1/screens?include_summary=true&include_media=true` list contract in its mocks, and `settings-default-media.e2e.spec.ts` still expects the default-media panel to be visible without selecting the `Default Media` settings tab, so both remain harness debt rather than confirmed product defects. No new integrated regression defect was confirmed; the open integrated mismatches remain `REG-0008` and `REG-0009`. |
+| `2026-04-15` | `Reliability Sweep` | `executed-with-open-defects` | Concurrency, degradation, and recovery regression passed on live DB-backed backend routes for command claim and stale-lease reclaim, token-guarded acknowledgements, overlapping reservation ownership, take-down fallback, refresh-dispatch queue fallback, screen-state refresh, screenshot preview events, notification unread sync under background activity, proof-of-play ingest idempotency, and runtime no-content versus default responses. The targeted player reliability run finished `92` passing with `2` failing assertions: `REG-0009` was revalidated again in `command-processor.test.ts`, while the remaining cache-manager failure was treated as harness drift because the implementation now intentionally throws when protected now-playing items prevent eviction and the stale expectation still assumes the second add should succeed. Offline queue, proof-of-play replay, screenshot retry, snapshot no-content fallback, player recovery, health-server, fault-injection, and performance coverage all passed. QA packaging and runtime-bundle scripts were smoke-verified through their checked-in help paths, but artifact execution remains environment-partial until release artifacts and QA hosts are available. No new confirmed product defect was added in this sweep. |
+| `2026-04-15` | `Release Closeout` | `artifact-validated-with-known-risk` | Final artifact-driven verification passed on a fresh release tag: `bash scripts/export/package-server.sh --release 2026-04-15-artifact-verify --deployment-layout production-split`; `bash scripts/export/package-cms.sh --release 2026-04-15-artifact-verify`; `bash scripts/bundle/assemble-runtime-bundle.sh --profile qa qa-verify`; and `cd dist/onprem/qa-verify && ./verify-bundle.sh`. Runtime smoke then passed for the packaged QA backend and CMS surfaces with `./health-check.sh`, direct backend health at `http://127.0.0.1:13000/api/v1/health`, and CMS root plus proxied backend health at `http://127.0.0.1:18080/` and `http://127.0.0.1:18080/api/v1/health`. Known release caveat: this was validated on the closest available single-host QA-like setup using generated bundle env overrides for ports and `host.docker.internal`, not on the intended split-VM QA topology. |
+
+## Data / Seed Needs
+
+- Backend bootstrap data from `darshan-server/scripts/seed.ts`.
+- Admin and non-admin user accounts that exercise role/permission boundaries.
+- Department hierarchy and screen ownership assignments.
+- Sample media files that cover image, video, document, and default-media fallback cases.
+- Layouts, presentations, schedules, publishes, and schedule reservations that exercise queue and availability logic.
+- Emergency types and at least one active/clear cycle scenario.
+- Paired screen/device fixture with valid certificate and pairing history.
+- Chat/conversation sample data including attachments, threads, pins, and bookmarks.
+- API key, webhook, and SSO configuration data for security/ops surface validation.
+- Player fixtures from `darshan-player/test/fixtures/device-state.json` and `darshan-player/test/fixtures/test-config.json`.
+- Observability inputs for Prometheus/Grafana-backed checks referenced by `deploy/shared/observability`.
+
+## Entry / Exit Criteria
+
+### Global Entry Criteria
+
+- The target branch or workspace state is known and the repos needed for the phase are available locally.
+- The environment for the current phase is bootable with the required secrets/config placeholders resolved.
+- The feature inventory section for the phase exists and has starter rows linked to code evidence.
+
+### Per-Phase Exit Criteria
+
+| Phase | Exit Criteria |
+| --- | --- |
+| `Phase 1` | Inventory complete for access/admin capabilities, baseline smoke paths pass, and no open `blocker` or `critical` defects remain against `PH1-*`. |
+| `Phase 2` | Content and scheduling flows are inventoried and executable, publish/emergency/default-media cases are covered, and no open `blocker` defects remain against `PH2-*`. |
+| `Phase 3` | Pairing, telemetry, playback, screenshot, command, and proof-of-play coverage is complete across backend and player, and no open `blocker` defects remain against `PH3-*`. |
+| `Phase 4` | Communications, reporting, observability, and deployment verification surfaces are inventoried with executable checks, and no open `blocker` defects remain against `PH4-*`. |
+| `Phase 5` | Only logged regression fixes and revalidation remain, every accepted fix maps to an existing tracker row, and all completed fixes are moved to `verified`. |
+
+## Gates For Moving To The Next Phase
+
+- Gate to `Phase 2`: `Phase 1` inventory rows are materially complete, login/RBAC/user baseline is stable enough to support broader CMS and API execution, and outstanding access/admin defects do not invalidate later results.
+- Gate to `Phase 3`: `Phase 2` scheduling and publishing paths are stable enough that runtime validation can trust authored content and publish state.
+- Gate to `Phase 4`: `Phase 3` pairing/runtime flows are stable enough that communications, reporting, and observability findings are not dominated by device bootstrap noise.
+- Gate to `Phase 5`: Defect discovery is substantially complete for Phases 1 through 4, and remaining work is fix-and-retest rather than net-new coverage expansion.
+
+## Repo Map
+
+| Area | Paths | Why It Matters |
+| --- | --- | --- |
+| `cms` | `darshan-cms/src/App.tsx`; `darshan-cms/src/pages`; `darshan-cms/src/components`; `darshan-cms/tests` | Defines user-facing routes, page boundaries, navigation modules, and current UI/e2e coverage. |
+| `backend` | `darshan-server/src/server/index.ts`; `darshan-server/src/routes`; `darshan-server/src/services`; `darshan-server/src/config/apiEndpoints.ts` | Defines the authoritative API surface, route registration, and backend service seams. |
+| `player` | `darshan-player/src/main/index.ts`; `darshan-player/src/main/services`; `darshan-player/test` | Defines pairing, playback, telemetry, offline behavior, and player regression surfaces. |
+| `db` | `darshan-server/src/db/schema.ts`; `darshan-server/src/db/repositories`; `darshan-server/drizzle` | Canonical schema and persistence anchors for evidence and data validation. |
+| `tests` | `darshan-server/vitest.config.ts`; `darshan-cms/vitest.config.ts`; `darshan-cms/playwright.config.ts`; `darshan-player/.mocharc.json` | Test harness entrypoints that shape how regression is executed and reported. |
+| `deploy` | `manifests/qa`; `manifests/production`; `deploy`; `darshan-server/docker-compose.yml`; `darshan-server/docker-compose.dev.yml` | Defines environment topology, promotion inputs, and local verification paths. |
+
+## Next-Phase Inputs
+
+1. Backend route handlers and route tests in `darshan-server/src/routes`, starting with auth/user/settings and then scheduling/runtime paths.
+2. CMS pages, shared components, and Playwright specs in `darshan-cms/src` and `darshan-cms/tests`, with emphasis on gaps where backend capability exists but UI trace is still shallow.
+3. Player services and test suites in `darshan-player/src/main/services` and `darshan-player/test`, especially command handling, offline replay, screenshot capture, and telemetry loops.
+4. Deployment manifests, bundle scripts, and environment runbooks in `manifests`, `deploy`, and `docs/runbooks`.
