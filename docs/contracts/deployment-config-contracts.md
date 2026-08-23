@@ -1,6 +1,18 @@
 # Deployment And Config Contracts
 
-Last code-truth audit: 2026-06-28.
+Last code-truth audit: 2026-08-23.
+
+## Source-Free Production Composition
+
+The only manually edited source is
+`deploy/production/bundles/<site>-<release>.env`. The strict parser rejects
+unknown, duplicate, interpolated, placeholder, and unsafe values and derives all
+role runtime files. Production requires HTTPS/WSS, backend and MinIO TLS,
+CMS-origin MinIO CORS, strict player transport trust, verified Nginx/Prometheus
+upstreams, persistent transport/device CAs, and no packaged transport CA key.
+
+Generated role env, CMS runtime JSON, player config, and TLS files are release
+outputs. Editing them creates an unsupported configuration split.
 
 This document describes deployment/config contracts visible in the repo. It does not prove a production site is healthy.
 

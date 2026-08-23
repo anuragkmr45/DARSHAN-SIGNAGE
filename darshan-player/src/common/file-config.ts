@@ -5,7 +5,8 @@ import { redactUrlForDiagnostics } from './redaction'
 
 export { redactUrlForDiagnostics } from './redaction'
 
-export type PlayerConfigSelectorSource = 'DARSHAN_PLAYER_CONFIG_FILE' | 'SIGNHEX_PLAYER_CONFIG_FILE' | 'both'
+export type PlayerConfigSelectorSource =
+  'DARSHAN_PLAYER_CONFIG_FILE' | 'SIGNHEX_PLAYER_CONFIG_FILE' | 'both' | 'default-path'
 export type PlayerProfileSelectorSource = 'DARSHAN_ENV' | 'SIGNHEX_ENV' | 'NODE_ENV' | 'default'
 
 export interface PlayerConfigFileSelector {
@@ -45,7 +46,6 @@ const SECRET_KEY_FRAGMENTS = [
   'accesskey',
   'apikey',
   'bearer',
-  'certificate',
   'credential',
   'jwt',
   'password',
@@ -168,6 +168,7 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       'diagnostics',
       'runtime',
       'security',
+      'transportTls',
     ],
     'player'
   )
@@ -261,6 +262,28 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       numberValue(realtime['desiredStatePollMs'], 'player.realtime.desiredStatePollMs', 30000) as any
     )
     mappedConfigKeys.push('realtime')
+  }
+
+  const transportTls = rawPlayer['transportTls']
+  if (transportTls !== undefined) {
+    assertPlainObject(transportTls, 'player.transportTls')
+    assertKnownKeys(transportTls, ['enabled', 'caPath', 'strictCertificateValidation'], 'player.transportTls')
+    config.transportTls = {}
+    setNested(
+      config.transportTls,
+      'enabled',
+      booleanValue(transportTls['enabled'], 'player.transportTls.enabled') as any
+    )
+    setNested(config.transportTls, 'caPath', stringValue(transportTls['caPath'], 'player.transportTls.caPath') as any)
+    setNested(
+      config.transportTls,
+      'strictCertificateValidation',
+      booleanValue(
+        transportTls['strictCertificateValidation'],
+        'player.transportTls.strictCertificateValidation'
+      ) as any
+    )
+    mappedConfigKeys.push('transportTls')
   }
 
   const polling = rawPlayer['polling']
@@ -437,7 +460,24 @@ export function resolvePlayerConfigFileSelector(env: NodeJS.ProcessEnv = process
     return { configured: true, path: path.resolve(signhex), source: 'SIGNHEX_PLAYER_CONFIG_FILE' }
   }
 
+  const defaultPath = resolveDefaultPlayerSiteConfigPath(process.platform, env)
+  if (defaultPath && fs.existsSync(defaultPath)) {
+    return { configured: true, path: defaultPath, source: 'default-path' }
+  }
+
   return { configured: false }
+}
+
+export function resolveDefaultPlayerSiteConfigPath(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): string | undefined {
+  if (platform === 'linux') return '/etc/darshan/player/config.json'
+  if (platform === 'win32') {
+    const programData = env['PROGRAMDATA']?.trim()
+    return programData ? path.win32.join(programData, 'DARSHAN', 'config.json') : undefined
+  }
+  return undefined
 }
 
 export function resolvePlayerProfileSelector(env: NodeJS.ProcessEnv = process.env): PlayerProfileSelector {
@@ -527,6 +567,11 @@ export function buildRedactedPlayerConfigSummary(config: AppConfig, diagnostics:
       wsUrl: redactUrlForDiagnostics(config.wsUrl) ?? null,
       realtimeWsUrl: redactUrlForDiagnostics(config.realtime?.wsUrl) ?? null,
       realtimeWsConfigured: Boolean(config.realtime?.wsUrl || config.wsUrl),
+    },
+    transportTls: {
+      enabled: config.transportTls.enabled,
+      caPathConfigured: Boolean(config.transportTls.caPath),
+      strictCertificateValidation: config.transportTls.strictCertificateValidation,
     },
     runtime: config.runtime,
     pairing: config.pairing ?? null,

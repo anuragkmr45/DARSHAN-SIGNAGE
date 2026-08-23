@@ -1,6 +1,9 @@
 # DARSHAN Player Deployment Runbook
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-08-23.
+
+For source-free production, use the generated `production/electron/` config,
+installer, and transport CA without manually rebuilding the JSON below.
 
 Use this runbook to install or update the DARSHAN Electron player on Ubuntu, Raspberry Pi OS 64-bit, or compatible Linux signage hardware.
 
@@ -129,8 +132,8 @@ Example:
       "mode": "production"
     },
     "backend": {
-      "baseUrl": "http://192.168.1.103:3000",
-      "socketIoUrl": "http://192.168.1.103:3000/socket.io/"
+      "baseUrl": "https://backend.site.test:3000",
+      "socketIoUrl": "wss://backend.site.test:3000"
     },
     "realtime": {
       "enabled": true,
@@ -138,6 +141,11 @@ Example:
       "deviceNamespace": "/device",
       "commandSafetyPollMs": 60000,
       "desiredStatePollMs": 300000
+    },
+    "transportTls": {
+      "enabled": true,
+      "caPath": "/etc/darshan/transport-ca.crt",
+      "strictCertificateValidation": true
     },
     "polling": {
       "heartbeatMs": 30000,
@@ -166,16 +174,21 @@ Example:
 Use the Backend VM IP in:
 
 ```json
-"baseUrl": "http://<BACKEND_VM_IP>:3000"
+"baseUrl": "https://<BACKEND_HOST>:3000"
 ```
 
 and:
 
 ```json
-"socketIoUrl": "http://<BACKEND_VM_IP>:3000/socket.io/"
+"socketIoUrl": "wss://<BACKEND_HOST>:3000"
 ```
 
 Do not put device IDs, certificates, private keys, tokens, pairing state, or cache metadata in this config file.
+
+Install the public transport CA at the configured `transportTls.caPath`. This
+CA is not the player device certificate and must not be placed in `mtls.caPath`.
+Production config rejects HTTP, WS, missing transport trust, and disabled
+certificate validation.
 
 Validate JSON:
 
@@ -206,6 +219,10 @@ If the player exits immediately, run diagnostics:
 export DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json
 darshan-player doctor
 ```
+
+Current packages also discover `/etc/darshan/player/config.json` automatically,
+so desktop autostart remains configured after reboot without a shell export.
+The env selector is still useful for nonstandard or side-by-side config paths.
 
 ## Autostart
 

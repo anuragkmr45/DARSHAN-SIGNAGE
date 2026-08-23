@@ -24,7 +24,9 @@ scrape_configs:
           machine: __PROMETHEUS_MACHINE_LABEL__
 
   - job_name: darshan-server
+    scheme: __BACKEND_METRICS_SCHEME__
     metrics_path: /metrics
+__BACKEND_METRICS_TLS_CONFIG__
     static_configs:
       - targets:
           - "__BACKEND_METRICS_TARGET__"
@@ -49,10 +51,12 @@ scrape_configs:
           machine: vm1
 
   - job_name: vm1-minio
+    scheme: __MINIO_METRICS_SCHEME__
     metrics_path: /minio/v2/metrics/cluster
+__MINIO_METRICS_TLS_CONFIG__
     static_configs:
       - targets:
-          - "__VM1_DATA_HOST__:9000"
+          - "__MINIO_METRICS_TARGET__"
         labels:
           role: data
           machine: vm1

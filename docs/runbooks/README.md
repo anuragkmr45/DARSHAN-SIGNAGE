@@ -1,6 +1,6 @@
 # DARSHAN Runbooks
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-08-23.
 
 This folder is the operator-facing procedure layer for DARSHAN. The codebase and active deploy files are authoritative; runbooks explain how to operate the system safely.
 
@@ -31,6 +31,7 @@ This folder is the operator-facing procedure layer for DARSHAN. The codebase and
 | `ghost-pairing-onprem-qa-checklist.md` | Manual/browser/runtime QA checklist for pairing hardening. |
 | `realtime-sync-qa-prod-hardening.md` | Realtime canary, rollback, and QA/prod hardening controls. |
 | `runtime-evidence-collection.md` | Full-product runtime evidence and no-secret review procedure. |
+| `source-free-production-bundle-deployment.md` | Canonical one-file build flow; generated production VM files require no manual edits. |
 | `product-export-packaging.md` | Source-free product export packaging. |
 | `onprem-bundle-builder.md` | Runtime bundle assembly. |
 | `observability-*.md` | Observability install, upgrade, incident, rollback, networking, backup, and offline images. |
@@ -43,6 +44,8 @@ This folder is the operator-facing procedure layer for DARSHAN. The codebase and
 - Backend Docker config selector must resolve inside the container, normally `/app/config/backend.json`.
 - CMS runtime config is browser-visible `/config/app-config.json`; never put secrets there.
 - Player site config is `/etc/darshan/player/config.json`; runtime identity/certs/cache/queues stay in player app data.
+- Source-free production is generated only from `deploy/production/bundles/<site>-<release>.env`; do not also edit source or target role config.
+- Production browser/API/player/media/scrape transport uses verified HTTPS/WSS with separate transport and device CAs.
 - Media moves through HTTP/object storage/local cache, not Socket.IO.
 - REST/DB/object storage remain source of truth. Socket.IO is notification-only.
 - Do not wipe DB, object storage, player app-data, certs, cache, request queue, or PoP spool unless the specific runbook says to and the operator approves.

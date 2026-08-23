@@ -168,6 +168,11 @@ export class ConfigManager {
         notificationMaxBytes: envNumber(32768, 'DARSHAN_WS_NOTIFICATION_MAX_BYTES', 'HEXMON_WS_NOTIFICATION_MAX_BYTES'),
         wsUrl: this.normalizeUrl(envValue('DARSHAN_REALTIME_WS_URL', 'HEXMON_REALTIME_WS_URL')),
       },
+      transportTls: {
+        enabled: envFlag(false, 'DARSHAN_TRANSPORT_TLS_ENABLED'),
+        caPath: envValue('DARSHAN_TRANSPORT_TLS_CA_PATH') || '',
+        strictCertificateValidation: envFlag(true, 'DARSHAN_TRANSPORT_TLS_STRICT_CERTIFICATE_VALIDATION'),
+      },
       mtls: {
         enabled: envFlag(false, 'DARSHAN_MTLS_ENABLED', 'HEXMON_MTLS_ENABLED'),
         certPath: defaultCertPath,
@@ -300,9 +305,7 @@ export class ConfigManager {
         ),
         enforcement:
           (envValue('DARSHAN_DUPLICATE_IDENTITY_ENFORCEMENT', 'SIGNHEX_DUPLICATE_IDENTITY_ENFORCEMENT') as
-            | 'warn'
-            | 'block'
-            | undefined) || 'warn',
+            'warn' | 'block' | undefined) || 'warn',
       },
       diagnostics: {
         showEnvironmentIdentity: envFlag(
@@ -422,6 +425,7 @@ export class ConfigManager {
           overrides.realtime?.notificationMaxBytes ?? defaults.realtime?.notificationMaxBytes ?? 32768,
         wsUrl: overrides.realtime?.wsUrl ?? defaults.realtime?.wsUrl,
       },
+      transportTls: { ...defaults.transportTls, ...overrides.transportTls },
       mtls: { ...defaults.mtls, ...overrides.mtls },
       cache: { ...defaults.cache, ...overrides.cache },
       intervals: { ...defaults.intervals, ...overrides.intervals },
@@ -521,6 +525,20 @@ export class ConfigManager {
       realtime.wsUrl = this.normalizeUrl(envValue('DARSHAN_REALTIME_WS_URL', 'HEXMON_REALTIME_WS_URL'))
     }
     if (Object.keys(realtime).length > 0) overrides.realtime = realtime as AppConfig['realtime']
+
+    if (
+      envPresent(
+        'DARSHAN_TRANSPORT_TLS_ENABLED',
+        'DARSHAN_TRANSPORT_TLS_CA_PATH',
+        'DARSHAN_TRANSPORT_TLS_STRICT_CERTIFICATE_VALIDATION'
+      )
+    ) {
+      overrides.transportTls = {
+        enabled: envFlag(false, 'DARSHAN_TRANSPORT_TLS_ENABLED'),
+        caPath: envValue('DARSHAN_TRANSPORT_TLS_CA_PATH') || this.defaults.transportTls.caPath,
+        strictCertificateValidation: envFlag(true, 'DARSHAN_TRANSPORT_TLS_STRICT_CERTIFICATE_VALIDATION'),
+      }
+    }
 
     const intervals: Partial<AppConfig['intervals']> = {}
     if (envPresent('DARSHAN_INTERVAL_HEARTBEAT_MS', 'HEXMON_INTERVAL_HEARTBEAT_MS')) {
@@ -702,6 +720,12 @@ export class ConfigManager {
         notificationMaxBytes: Math.max(config.realtime?.notificationMaxBytes || 32768, 1024),
         wsUrl: this.normalizeUrl(config.realtime?.wsUrl),
       },
+      transportTls: {
+        ...config.transportTls,
+        enabled: config.transportTls?.enabled === true,
+        caPath: config.transportTls?.caPath?.trim() || '',
+        strictCertificateValidation: config.transportTls?.strictCertificateValidation !== false,
+      },
       intervals: {
         ...config.intervals,
         commandPollMs,
@@ -764,6 +788,7 @@ export class ConfigManager {
       environment: config.environment ? { ...config.environment } : undefined,
       runtime: { ...config.runtime },
       realtime: config.realtime ? { ...config.realtime } : undefined,
+      transportTls: { ...config.transportTls },
       mtls: { ...config.mtls },
       cache: { ...config.cache },
       intervals: { ...config.intervals },
@@ -845,7 +870,7 @@ export class ConfigManager {
     if (!this.config.apiBase) {
       errors.push(
         requireExplicitBackend
-          ? 'apiBase is required for qa/production. Configure the backend IP, for example http://10.20.0.20:3000'
+          ? 'apiBase is required for qa/production. Configure the backend HTTPS URL, for example https://10.20.0.20:3000'
           : 'apiBase is required'
       )
     }
@@ -853,7 +878,7 @@ export class ConfigManager {
     if (!this.config.wsUrl) {
       errors.push(
         requireExplicitBackend
-          ? 'wsUrl is required for qa/production. Configure the backend websocket URL, for example ws://10.20.0.20:3000/ws'
+          ? 'wsUrl is required for qa/production. Configure the backend secure websocket URL, for example wss://10.20.0.20:3000/ws'
           : 'wsUrl is required'
       )
     }
@@ -872,6 +897,25 @@ export class ConfigManager {
       } catch {
         errors.push('wsUrl must be a valid URL')
       }
+    }
+
+    if (runtimeMode === 'production') {
+      if (this.config.apiBase && !this.config.apiBase.startsWith('https://')) {
+        errors.push('production apiBase must use https')
+      }
+      if (this.config.wsUrl && !this.config.wsUrl.startsWith('wss://')) {
+        errors.push('production wsUrl must use wss')
+      }
+      if (!this.config.transportTls.enabled) {
+        errors.push('production transportTls.enabled must be true')
+      }
+      if (!this.config.transportTls.strictCertificateValidation) {
+        errors.push('production transportTls.strictCertificateValidation must be true')
+      }
+    }
+
+    if (this.config.transportTls.enabled && !this.config.transportTls.caPath) {
+      errors.push('transportTls.caPath is required when transport TLS trust is enabled')
     }
 
     if (!this.isRuntimeMode(this.config.runtime.mode)) {

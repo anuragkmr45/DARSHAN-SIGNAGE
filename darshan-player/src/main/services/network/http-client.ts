@@ -5,15 +5,10 @@ import { getLogger } from '../../../common/logger'
 import { getConfigManager } from '../../../common/config'
 import { redactUrlForDiagnostics, redactUrlOrPathForDiagnostics } from '../../../common/redaction'
 import { getCertificateManager } from '../cert-manager'
-import {
-  AppConfig,
-  BackendErrorCode,
-  BackendErrorPayload,
-  DeviceApiError,
-  NetworkError,
-} from '../../../common/types'
+import { AppConfig, BackendErrorCode, BackendErrorPayload, DeviceApiError, NetworkError } from '../../../common/types'
 import { retryWithBackoff } from '../../../common/utils'
 import { getDeviceStateStore } from '../device-state-store'
+import { createTransportHttpsAgent, loadTransportCertificateAuthority } from './transport-tls'
 
 const logger = getLogger('http-client')
 
@@ -40,14 +35,18 @@ const DEFAULT_RETRY_POLICY: RetryPolicy = {
 export class HttpClient {
   private client: AxiosInstance
   private mtlsEnabled: boolean
+  private transportTls: AppConfig['transportTls']
 
   constructor() {
     const config = getConfigManager().getConfig()
     this.mtlsEnabled = config.mtls.enabled
+    this.transportTls = config.transportTls
+    const transportAgent = createTransportHttpsAgent(this.transportTls)
 
     this.client = axios.create({
       baseURL: config.apiBase,
       timeout: 30000,
+      ...(transportAgent ? { httpsAgent: transportAgent } : {}),
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 'DARSHAN/1.0.0',
@@ -132,12 +131,7 @@ export class HttpClient {
   }
 
   async getResponse<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
-    return await this.executeWithRetry(
-      async () => await this.client.get<T>(url, config),
-      url,
-      'GET',
-      config
-    )
+    return await this.executeWithRetry(async () => await this.client.get<T>(url, config), url, 'GET', config)
   }
 
   async post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
@@ -330,8 +324,9 @@ export class HttpClient {
       return new https.Agent({
         cert: certs.cert,
         key: certs.key,
-        ca: certs.ca,
+        ca: loadTransportCertificateAuthority(this.transportTls) ?? certs.ca,
         rejectUnauthorized: true,
+        minVersion: 'TLSv1.2',
       })
     } catch (error) {
       logger.error({ error }, 'Failed to create mTLS agent')

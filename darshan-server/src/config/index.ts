@@ -2,26 +2,20 @@ import { z } from 'zod';
 import 'dotenv/config';
 import { buildBackendRuntimeEnv, buildRedactedRuntimeConfigSummary } from './file-config';
 
-const optionalTrimmedString = z.preprocess(
-  (value) => {
-    if (typeof value !== 'string') return value;
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-  },
-  z.string().optional()
-);
+const optionalTrimmedString = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}, z.string().optional());
 
-const optionalBooleanString = z.preprocess(
-  (value) => {
-    if (typeof value !== 'string') return value;
-    const trimmed = value.trim().toLowerCase();
-    if (trimmed.length === 0) return undefined;
-    if (trimmed === 'true') return true;
-    if (trimmed === 'false') return false;
-    return value;
-  },
-  z.boolean().optional()
-);
+const optionalBooleanString = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed.length === 0) return undefined;
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  return value;
+}, z.boolean().optional());
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -36,10 +30,14 @@ const envSchema = z.object({
   MINIO_PORT: z.coerce.number().default(9000),
   MINIO_ACCESS_KEY: z.string(),
   MINIO_SECRET_KEY: z.string(),
-  MINIO_USE_SSL: z.enum(['true', 'false']).transform((v) => v === 'true').default('false'),
+  MINIO_USE_SSL: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
   MINIO_REGION: z.string().default('us-east-1'),
   ADMIN_EMAIL: z.string().email(),
   ADMIN_PASSWORD: z.string().min(8),
+  SERVER_TLS_ENABLED: optionalBooleanString,
   TLS_CERT_PATH: z.string().default('./certs/server.crt'),
   TLS_KEY_PATH: z.string().default('./certs/server.key'),
   CA_CERT_PATH: z.string().default('./certs/ca.crt'),
@@ -60,19 +58,19 @@ const envSchema = z.object({
   DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH: optionalTrimmedString,
   HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH: optionalTrimmedString,
   PG_BOSS_SCHEMA: z.string().default('pgboss'),
-  RATE_LIMIT_ENABLED: z.enum(['true', 'false']).transform((v) => v === 'true').default('true'),
+  RATE_LIMIT_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(1000),
   RATE_LIMIT_TIME_WINDOW: z.string().default('1 minute'),
   CORS_ORIGINS: z.string().default(''),
   SOCKET_ALLOWED_ORIGINS: z.string().default(''),
-  APP_PUBLIC_BASE_URL: z.preprocess(
-    (value) => {
-      if (typeof value !== 'string') return value;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
-    },
-    z.string().url().optional()
-  ),
+  APP_PUBLIC_BASE_URL: z.preprocess((value) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }, z.string().url().optional()),
   SIGNHEX_DEPLOYMENT_ID: z.string().trim().min(1).default('local'),
   SIGNHEX_ENVIRONMENT_NAME: z.string().trim().min(1).default('development'),
   SIGNHEX_SERVER_ID: z.string().trim().min(1).default('darshan-api'),
@@ -80,7 +78,10 @@ const envSchema = z.object({
   DUPLICATE_IDENTITY_ENFORCEMENT: z.enum(['warn', 'block']).default('warn'),
   DEVICE_SESSION_LEASE_MS: z.coerce.number().int().positive().default(300_000),
   DEVICE_SESSION_RESTART_GRACE_MS: z.coerce.number().int().positive().default(120_000),
-  CSRF_ENABLED: z.enum(['true', 'false']).transform((v) => v === 'true').default('true'),
+  CSRF_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
   REDIS_URL: z.string().url().optional(),
   REDIS_URL_ALIAS_FOR_VALKEY: optionalBooleanString,
   REALTIME_BUS_PROVIDER: z.enum(['memory', 'valkey']).default('memory'),
@@ -98,21 +99,22 @@ const envSchema = z.object({
   REALTIME_VALKEY_PUBLISH_TIMEOUT_MS: z.coerce.number().int().positive().default(1_000),
   PASSWORD_MIN_LENGTH: z.coerce.number().int().min(8).default(12),
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
-  LOGIN_LOCKOUT_WINDOW_SECONDS: z.coerce.number().int().positive().default(15 * 60),
+  LOGIN_LOCKOUT_WINDOW_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15 * 60),
   MAX_UPLOAD_MB: z.coerce.number().int().positive().default(200),
   STORAGE_QUOTA_BYTES: z.coerce.number().int().nonnegative().default(0),
   ENABLE_SWAGGER_UI: optionalBooleanString,
   OBSERVABILITY_METRICS_ENABLED: optionalBooleanString,
   OBSERVABILITY_METRICS_BEARER_TOKEN: optionalTrimmedString,
   OBSERVABILITY_DEPLOYMENT_MODE: z.enum(['development', 'qa', 'production']).optional(),
-  OBSERVABILITY_PROMETHEUS_BASE_URL: z.preprocess(
-    (value) => {
-      if (typeof value !== 'string') return value;
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
-    },
-    z.string().url().optional()
-  ),
+  OBSERVABILITY_PROMETHEUS_BASE_URL: z.preprocess((value) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }, z.string().url().optional()),
   OBSERVABILITY_PROMETHEUS_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
   OBSERVABILITY_GRAFANA_ENABLED: optionalBooleanString,
   OBSERVABILITY_GRAFANA_EMBED_ENABLED: optionalBooleanString,
@@ -157,7 +159,8 @@ if (!parsed.success) {
 
 export const config = Object.freeze({
   ...parsed.data,
-  AUTH_COOKIE_SECURE: parsed.data.AUTH_COOKIE_SECURE ?? (parsed.data.NODE_ENV !== 'development'),
+  SERVER_TLS_ENABLED: parsed.data.SERVER_TLS_ENABLED ?? false,
+  AUTH_COOKIE_SECURE: parsed.data.AUTH_COOKIE_SECURE ?? parsed.data.NODE_ENV !== 'development',
   ENABLE_SWAGGER_UI: parsed.data.ENABLE_SWAGGER_UI ?? parsed.data.NODE_ENV !== 'production',
   OBSERVABILITY_METRICS_ENABLED: parsed.data.OBSERVABILITY_METRICS_ENABLED ?? true,
   OBSERVABILITY_DEPLOYMENT_MODE:
@@ -168,13 +171,16 @@ export const config = Object.freeze({
   COMMAND_OUTBOX_WRITE_ENABLED: parsed.data.COMMAND_OUTBOX_WRITE_ENABLED ?? true,
   DEVICE_DESIRED_STATE_ENABLED: parsed.data.DEVICE_DESIRED_STATE_ENABLED ?? true,
   HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:
-    parsed.data.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH ?? parsed.data.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH,
+    parsed.data.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH ??
+    parsed.data.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH,
   VALKEY_URL: resolveValkeyUrl(parsed.data),
   VALKEY_TLS_ENABLED: parsed.data.VALKEY_TLS_ENABLED ?? false,
   VALKEY_AUTH_REQUIRED: parsed.data.VALKEY_AUTH_REQUIRED ?? Boolean(parsed.data.VALKEY_URL),
-  VALKEY_PUBSUB_ENABLED: parsed.data.VALKEY_PUBSUB_ENABLED ?? parsed.data.REALTIME_BUS_PROVIDER === 'valkey',
+  VALKEY_PUBSUB_ENABLED:
+    parsed.data.VALKEY_PUBSUB_ENABLED ?? parsed.data.REALTIME_BUS_PROVIDER === 'valkey',
   OUTBOX_DISPATCH_ENABLED: parsed.data.OUTBOX_DISPATCH_ENABLED ?? false,
-  REALTIME_SYNC_ENABLED: parsed.data.DARSHAN_REALTIME_SYNC_ENABLED ?? parsed.data.REALTIME_SYNC_ENABLED ?? false,
+  REALTIME_SYNC_ENABLED:
+    parsed.data.DARSHAN_REALTIME_SYNC_ENABLED ?? parsed.data.REALTIME_SYNC_ENABLED ?? false,
   REALTIME_SOCKET_ALLOW_POLLING: parsed.data.REALTIME_SOCKET_ALLOW_POLLING ?? true,
   REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS:
     parsed.data.REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS ?? false,

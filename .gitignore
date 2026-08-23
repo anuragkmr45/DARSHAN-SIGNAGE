@@ -14,6 +14,8 @@ out/
 darshan-cms/.env
 deploy/production/.env
 deploy/production/.env.local
+deploy/production/*.bundle.env
+deploy/production/bundles/*.env
 deploy/production/observability/prometheus.yml
 deploy/production/docker/.env
 deploy/production/docker/observability/prometheus.yml

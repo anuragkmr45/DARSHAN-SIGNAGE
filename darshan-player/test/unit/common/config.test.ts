@@ -445,6 +445,29 @@ describe('Config Manager', () => {
   })
 
   describe('Production backend requirements', () => {
+    it('requires HTTPS, WSS, and strict transport trust in production', () => {
+      delete require.cache[require.resolve('../../../src/common/config')]
+      const { ConfigManager } = require('../../../src/common/config')
+      const configManager = new ConfigManager(path.join(tempDir, 'production-http.json'))
+      configManager.updateConfig({
+        apiBase: 'http://backend.internal:3000',
+        wsUrl: 'ws://backend.internal:3000',
+        runtime: { mode: 'production' },
+        transportTls: {
+          enabled: false,
+          caPath: '',
+          strictCertificateValidation: false,
+        },
+      })
+
+      const validation = configManager.validateConfig()
+      expect(validation.valid).to.equal(false)
+      expect(validation.errors).to.include('production apiBase must use https')
+      expect(validation.errors).to.include('production wsUrl must use wss')
+      expect(validation.errors).to.include('production transportTls.enabled must be true')
+      expect(validation.errors).to.include('production transportTls.strictCertificateValidation must be true')
+    })
+
     it('should not invent a backend IP in production when none is configured', () => {
       fs.writeFileSync(
         configPath,
@@ -474,10 +497,10 @@ describe('Config Manager', () => {
       expect(config.wsUrl).to.equal('')
       expect(validation.valid).to.equal(false)
       expect(validation.errors).to.include(
-        'apiBase is required for qa/production. Configure the backend IP, for example http://10.20.0.20:3000'
+        'apiBase is required for qa/production. Configure the backend HTTPS URL, for example https://10.20.0.20:3000'
       )
       expect(validation.errors).to.include(
-        'wsUrl is required for qa/production. Configure the backend websocket URL, for example ws://10.20.0.20:3000/ws'
+        'wsUrl is required for qa/production. Configure the backend secure websocket URL, for example wss://10.20.0.20:3000/ws'
       )
     })
   })

@@ -46,6 +46,9 @@ fi
 CMS_REPO_DIR="${CMS_REPO_DIR:-$PLATFORM_ROOT/darshan-cms}"
 OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
 NGINX_IMAGE="${NGINX_IMAGE:-nginx:1.27-alpine}"
+VITE_ENABLE_PRODUCTION_LOCKDOWN="${VITE_ENABLE_PRODUCTION_LOCKDOWN:-true}"
+VITE_REALTIME_DELIVERY_STATUS_UI="${VITE_REALTIME_DELIVERY_STATUS_UI:-true}"
+VITE_MEDIA_CACHE_STATUS_UI="${VITE_MEDIA_CACHE_STATUS_UI:-true}"
 
 OUTPUT_DIR="$OUTPUT_BASE/$RELEASE_ID/cms"
 IMAGES_DIR="$OUTPUT_DIR/images"
@@ -74,10 +77,18 @@ export_common_log "Building CMS dist from $CMS_REPO_DIR"
   VITE_DEVICE_API_BASE_URL= \
   VITE_WS_BASE_URL= \
   VITE_WS_URL= \
+  VITE_CMS_RUNTIME_CONFIG_PATH=/config/app-config.json \
+  VITE_CMS_ENVIRONMENT_NAME=artifact \
+  VITE_CMS_DEPLOYMENT_ID="$RELEASE_ID" \
+  VITE_CMS_ID=cms \
+  VITE_ENABLE_PRODUCTION_LOCKDOWN="$VITE_ENABLE_PRODUCTION_LOCKDOWN" \
+  VITE_REALTIME_DELIVERY_STATUS_UI="$VITE_REALTIME_DELIVERY_STATUS_UI" \
+  VITE_MEDIA_CACHE_STATUS_UI="$VITE_MEDIA_CACHE_STATUS_UI" \
   npm run build
 )
 
 cp -R "$CMS_REPO_DIR/dist/." "$WWW_DIR/"
+rm -f "$WWW_DIR/config/app-config.json"
 
 export_common_log "Ensuring nginx image is available"
 docker image inspect "$NGINX_IMAGE" >/dev/null 2>&1 || docker pull "$NGINX_IMAGE"
@@ -104,7 +115,7 @@ cp "$TEMPLATE_SOURCE" "$NGINX_DIR/default.conf.template"
 cp -R "$PLATFORM_ROOT/deploy/shared/observability/grafana" "$OBSERVABILITY_DIR/grafana"
 mkdir -p "$OBSERVABILITY_DIR/environments"
 cp -R "$PLATFORM_ROOT/deploy/qa/observability" "$OBSERVABILITY_DIR/environments/qa"
-cp -R "$PLATFORM_ROOT/deploy/production/observability" "$OBSERVABILITY_DIR/environments/production"
+cp -R "$PLATFORM_ROOT/deploy/production/docker/observability" "$OBSERVABILITY_DIR/environments/production"
 
 cat > "$OUTPUT_DIR/docker-compose.yml" <<'EOF'
 services:

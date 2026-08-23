@@ -58,6 +58,7 @@ import { setupDeviceRealtimeGateway } from '@/realtime/device-gateway';
 import { startOutboxDispatcher, stopOutboxDispatcher } from '@/services/outbox-dispatcher';
 import { registerObservabilityHttp } from '@/observability/http';
 import { ensureObservabilityInitialized } from '@/observability/metrics';
+import { loadServerTlsOptions } from '@/server/tls';
 
 const REFRESHED_AUTH_KEY = Symbol.for('darshan.refreshedAuth');
 const DEVICE_SCREENSHOT_BODY_LIMIT_BYTES = 4 * 1024 * 1024;
@@ -202,12 +203,18 @@ function sanitizeErrorMessage(message?: string) {
 }
 
 export async function createServer() {
+  const tlsOptions = loadServerTlsOptions({
+    enabled: appConfig.SERVER_TLS_ENABLED,
+    certificatePath: appConfig.TLS_CERT_PATH,
+    privateKeyPath: appConfig.TLS_KEY_PATH,
+  });
   await syncSystemRolePermissions();
   await preloadSettingsCache();
   setRuntimeLogLevel(getRuntimeLogLevelSetting());
   ensureObservabilityInitialized();
 
   const fastify = Fastify({
+    ...(tlsOptions ? { https: tlsOptions } : {}),
     logger: {
       level: getRuntimeLogLevelSetting(),
       transport: {

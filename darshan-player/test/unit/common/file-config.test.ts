@@ -28,6 +28,9 @@ const ENV_KEYS = [
   'DARSHAN_SECURITY_LOCK_AFTER_OFFLINE_MS',
   'DARSHAN_SECURITY_PURGE_CACHE_AFTER_OFFLINE_MS',
   'DARSHAN_SECURITY_SHOW_LOCK_SCREEN',
+  'DARSHAN_TRANSPORT_TLS_ENABLED',
+  'DARSHAN_TRANSPORT_TLS_CA_PATH',
+  'DARSHAN_TRANSPORT_TLS_STRICT_CERTIFICATE_VALIDATION',
 ]
 
 function resetRuntimeModules() {
@@ -216,6 +219,14 @@ describe('player file config loader', () => {
     ).to.throw(/different player config files/)
   })
 
+  it('resolves stable source-free site config paths for Linux and Windows', () => {
+    const { resolveDefaultPlayerSiteConfigPath } = require('../../../src/common/file-config')
+    expect(resolveDefaultPlayerSiteConfigPath('linux', {})).to.equal('/etc/darshan/player/config.json')
+    expect(resolveDefaultPlayerSiteConfigPath('win32', { PROGRAMDATA: 'C:\\ProgramData' })).to.equal(
+      'C:\\ProgramData\\DARSHAN\\config.json'
+    )
+  })
+
   it('lets env vars override selected player config values', () => {
     const siteConfigPath = path.join(tempDir, 'player-config.json')
     writeJson(siteConfigPath, {
@@ -291,6 +302,34 @@ describe('player file config loader', () => {
     fs.writeFileSync(yamlPath, 'player:\n  backend:\n    baseUrl: http://backend.local:3000\n')
     process.env.DARSHAN_PLAYER_CONFIG_FILE = yamlPath
     expect(() => loadPlayerFileConfig()).to.throw(/supports JSON files only/)
+  })
+
+  it('loads private transport CA trust without treating validation settings as secrets', () => {
+    const siteConfigPath = path.join(tempDir, 'player-config.json')
+    writeJson(siteConfigPath, {
+      player: {
+        runtime: { mode: 'production' },
+        backend: {
+          baseUrl: 'https://backend.site.test:3000',
+          socketIoUrl: 'wss://backend.site.test:3000',
+        },
+        transportTls: {
+          enabled: true,
+          caPath: '/etc/darshan/transport-ca.crt',
+          strictCertificateValidation: true,
+        },
+      },
+    })
+    process.env.DARSHAN_PLAYER_CONFIG_FILE = siteConfigPath
+
+    const { loadPlayerFileConfig } = require('../../../src/common/file-config')
+    const loaded = loadPlayerFileConfig()
+    expect(loaded.config.transportTls).to.deep.equal({
+      enabled: true,
+      caPath: '/etc/darshan/transport-ca.crt',
+      strictCertificateValidation: true,
+    })
+    expect(loaded.diagnostics.mappedConfigKeys).to.include('transportTls')
   })
 
   it('redacts diagnostic URLs without changing useful host details', () => {

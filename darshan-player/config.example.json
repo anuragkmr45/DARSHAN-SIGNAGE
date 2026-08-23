@@ -1,9 +1,14 @@
 {
-  "apiBase": "http://10.20.0.20:3000",
-  "wsUrl": "ws://10.20.0.20:3000/ws",
+  "apiBase": "https://backend.example.internal:3000",
+  "wsUrl": "wss://backend.example.internal:3000",
   "deviceId": "",
   "runtime": {
     "mode": "production"
+  },
+  "transportTls": {
+    "enabled": true,
+    "caPath": "/etc/darshan/transport-ca.crt",
+    "strictCertificateValidation": true
   },
   "mtls": {
     "enabled": false,

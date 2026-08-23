@@ -24,7 +24,12 @@ describe("CMS runtime config", () => {
   });
 
   it("keeps build-time env behavior when no runtime config is present", () => {
-    const config = resolveCmsRuntimeConfig(undefined, buildEnv, "https://cms.test", "runtime-config");
+    const config = resolveCmsRuntimeConfig(
+      undefined,
+      buildEnv,
+      "https://cms.test",
+      "runtime-config",
+    );
 
     expect(config.source).toBe("build-env");
     expect(config.api.baseUrl).toBe("https://build-api.cms.test");
@@ -55,7 +60,7 @@ describe("CMS runtime config", () => {
         },
       },
       buildEnv,
-      "https://cms.test",
+      "http://cms.test",
       "runtime-config",
     );
 
@@ -63,6 +68,50 @@ describe("CMS runtime config", () => {
     expect(config.api.baseUrl).toBe("http://192.168.0.5:3000");
     expect(config.realtime.socketTransports).toEqual(["websocket", "polling"]);
     expect(config.environment.name).toBe("onprem-qa");
+  });
+
+  it("rejects mixed-content API and socket endpoints on an HTTPS CMS", () => {
+    expect(() =>
+      resolveCmsRuntimeConfig(
+        {
+          cms: {
+            api: { baseUrl: "http://backend.test:3000" },
+            realtime: { socketBaseUrl: "http://backend.test:3000" },
+          },
+        },
+        buildEnv,
+        "https://cms.test",
+      ),
+    ).toThrow(/must use https/);
+  });
+
+  it("rejects HTTP build fallbacks when an HTTPS CMS has no runtime override", () => {
+    expect(() =>
+      resolveCmsRuntimeConfig(
+        undefined,
+        {
+          ...buildEnv,
+          VITE_API_BASE_URL: "http://backend.test:3000",
+          VITE_WS_BASE_URL: "http://backend.test:3000",
+        },
+        "https://cms.test",
+      ),
+    ).toThrow(/must use https/);
+  });
+
+  it("keeps HTTP available for an explicitly non-production development CMS", () => {
+    const config = resolveCmsRuntimeConfig(
+      {
+        cms: {
+          environment: { name: "development" },
+          api: { baseUrl: "http://localhost:3000" },
+          realtime: { socketBaseUrl: "http://localhost:3000" },
+        },
+      },
+      buildEnv,
+      "http://localhost:5173",
+    );
+    expect(config.api.baseUrl).toBe("http://localhost:3000");
   });
 
   it("rejects secret-looking keys in browser-visible config", () => {
@@ -114,7 +163,10 @@ describe("CMS runtime config", () => {
       }),
     });
 
-    await loadCmsRuntimeConfig({ fetchImpl, configPath: "/config/app-config.json" });
+    await loadCmsRuntimeConfig({
+      fetchImpl,
+      configPath: "/config/app-config.json",
+    });
 
     expect(fetchImpl).toHaveBeenCalledWith(
       "/config/app-config.json",
@@ -138,7 +190,10 @@ describe("CMS runtime config", () => {
       status: 404,
     });
 
-    await loadCmsRuntimeConfig({ fetchImpl, configPath: "/config/app-config.json" });
+    await loadCmsRuntimeConfig({
+      fetchImpl,
+      configPath: "/config/app-config.json",
+    });
 
     expect(getCmsRuntimeConfig().source).toBe("build-env");
     expect(getCmsRuntimeConfigSummary().apiBaseUrl).not.toContain("token=");
@@ -180,8 +235,11 @@ describe("CMS runtime config", () => {
       json: vi.fn(),
     });
 
-    await expect(loadCmsRuntimeConfig({ fetchImpl, configPath: "/custom/runtime-config.json" })).rejects.toThrow(
-      /response was not JSON/,
-    );
+    await expect(
+      loadCmsRuntimeConfig({
+        fetchImpl,
+        configPath: "/custom/runtime-config.json",
+      }),
+    ).rejects.toThrow(/response was not JSON/);
   });
 });

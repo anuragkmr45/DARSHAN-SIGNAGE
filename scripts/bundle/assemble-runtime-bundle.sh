@@ -183,6 +183,26 @@ require_ipv4() {
   fi
 }
 
+is_valid_hostname() {
+  local value="$1"
+  [[ -n "$value" && ${#value} -le 253 && "$value" != *. ]] || return 1
+  local label
+  IFS='.' read -r -a labels <<<"$value"
+  for label in "${labels[@]}"; do
+    [[ -n "$label" && ${#label} -le 63 ]] || return 1
+    [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
+  done
+}
+
+require_host() {
+  local name="$1"
+  local value="$2"
+  if [[ -z "$value" ]] || { ! is_valid_ipv4 "$value" && ! is_valid_hostname "$value"; }; then
+    echo "$name is required and must be an IPv4 address or DNS hostname: $value" >&2
+    exit 1
+  fi
+}
+
 require_command() {
   local command_name="$1"
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -241,6 +261,12 @@ stage_player_bundle() {
   local runtime_mode="$2"
   local backend_host="$3"
   local guide_name="$4"
+  local endpoint_scheme="http"
+  local socket_scheme="ws"
+  local endpoint_port="${QA_API_HOST_PORT:-3000}"
+  local transport_enabled="false"
+  local linux_ca_path=""
+  local windows_ca_path=""
 
   mkdir -p "$bundle_dir/installers"
 
@@ -250,24 +276,55 @@ stage_player_bundle() {
     cp "$PLAYER_UBUNTU_APPIMAGE" "$bundle_dir/installers/$(basename "$PLAYER_UBUNTU_APPIMAGE")"
   fi
 
-  cat > "$bundle_dir/config.example.json" <<EOF
+  if [[ "$runtime_mode" == "production" ]]; then
+    endpoint_scheme="https"
+    socket_scheme="wss"
+    endpoint_port="$API_HOST_PORT"
+    transport_enabled="true"
+    linux_ca_path="/etc/darshan/transport-ca.crt"
+    windows_ca_path='C:\\ProgramData\\DARSHAN\\transport-ca.crt'
+    cp "$PROD_BACKEND_DIR/certs/transport-ca.crt" "$bundle_dir/transport-ca.crt"
+  fi
+
+  write_player_config() {
+    local destination="$1"
+    local ca_path="$2"
+    cat > "$destination" <<EOF
 {
-  "apiBase": "http://$backend_host:3000",
-  "wsUrl": "ws://$backend_host:3000/ws",
-  "deviceId": "",
-  "runtime": {
-    "mode": "$runtime_mode"
-  },
-  "mtls": {
-    "enabled": false,
-    "autoRenew": true,
-    "renewBeforeDays": 30
-  },
-  "security": {
-    "allowedDomains": []
+  "player": {
+    "environment": {
+      "name": "$runtime_mode",
+      "deploymentId": "$SITE_NAME",
+      "expectedServerId": "backend-$SITE_NAME"
+    },
+    "backend": {
+      "baseUrl": "$endpoint_scheme://$backend_host:$endpoint_port",
+      "socketIoUrl": "$socket_scheme://$backend_host:$endpoint_port"
+    },
+    "runtime": {
+      "mode": "$runtime_mode"
+    },
+    "realtime": {
+      "enabled": true,
+      "signedAuthEnabled": true,
+      "deviceNamespace": "/device",
+      "commandSafetyPollMs": 60000,
+      "desiredStatePollMs": 300000
+    },
+    "transportTls": {
+      "enabled": $transport_enabled,
+      "caPath": "$ca_path",
+      "strictCertificateValidation": true
+    }
   }
 }
 EOF
+  }
+
+  write_player_config "$bundle_dir/config.json" "$linux_ca_path"
+  if [[ "$runtime_mode" == "production" ]]; then
+    write_player_config "$bundle_dir/config.windows.json" "$windows_ca_path"
+  fi
 
   cat > "$bundle_dir/README.md" <<EOF
 # Electron Player Bundle
@@ -291,17 +348,18 @@ EOF
 ## Target endpoint
 
 \`\`\`text
-API: http://$backend_host:3000
-WS:  ws://$backend_host:3000/ws
+API: $endpoint_scheme://$backend_host:$endpoint_port
+WS:  $socket_scheme://$backend_host:$endpoint_port/socket.io/
 \`\`\`
 
 ## Minimum workflow
 
 1. Copy one installer from \`./installers\` to the target player machine.
-2. Copy \`config.example.json\` to the player config location and fill the device ID after pairing if needed.
-3. Keep \`runtime.mode\` as \`$runtime_mode\`.
-4. Pair the device against the backend IP, not the CMS IP.
-5. Verify fullscreen kiosk behavior and confirm the device appears in the CMS.
+2. On Ubuntu, install \`config.json\` as \`/etc/darshan/player/config.json\`. On Windows, install \`config.windows.json\` as \`C:\\ProgramData\\DARSHAN\\config.json\`.
+3. For production, copy \`transport-ca.crt\` to the exact \`transportTls.caPath\` in that generated config.
+4. Keep \`runtime.mode\` as \`$runtime_mode\` and do not disable certificate validation. Current packages discover these standard site-config paths automatically; explicit selector env vars remain supported.
+5. Pair the device against the backend host, not the CMS host.
+6. Verify fullscreen kiosk behavior and confirm the device appears in the CMS.
 
 See \`../$guide_name\` for the environment deployment steps.
 EOF
@@ -479,12 +537,16 @@ stage_observability_assets() {
   copy_tree_contents "$PLATFORM_ROOT/deploy/shared/observability/alertmanager" "$backend_dir/observability/alertmanager"
   copy_tree_contents "$PLATFORM_ROOT/deploy/shared/observability/grafana" "$cms_dir/observability/grafana"
 
-  cp "$PLATFORM_ROOT/deploy/$environment_name/observability/README.md" "$backend_dir/observability/README.md"
-  cp "$PLATFORM_ROOT/deploy/$environment_name/observability/bundle.env.example" "$backend_dir/observability/.env.observability.example"
-  cp "$PLATFORM_ROOT/deploy/$environment_name/observability/README.md" "$data_dir/observability/README.md"
-  cp "$PLATFORM_ROOT/deploy/$environment_name/observability/bundle.env.example" "$data_dir/observability/.env.observability.example"
-  cp "$PLATFORM_ROOT/deploy/$environment_name/observability/README.md" "$cms_dir/observability/README.md"
-  cp "$PLATFORM_ROOT/deploy/$environment_name/observability/bundle.env.example" "$cms_dir/observability/.env.observability.example"
+  local environment_assets="$PLATFORM_ROOT/deploy/$environment_name/observability"
+  if [[ "$environment_name" == "production" ]]; then
+    environment_assets="$PLATFORM_ROOT/deploy/production/docker/observability"
+  fi
+  cp "$environment_assets/README.md" "$backend_dir/observability/README.md"
+  cp "$environment_assets/bundle.env.example" "$backend_dir/observability/.env.observability.example"
+  cp "$environment_assets/README.md" "$data_dir/observability/README.md"
+  cp "$environment_assets/bundle.env.example" "$data_dir/observability/.env.observability.example"
+  cp "$environment_assets/README.md" "$cms_dir/observability/README.md"
+  cp "$environment_assets/bundle.env.example" "$cms_dir/observability/.env.observability.example"
 
   write_observability_images_readme "$data_dir/observability/images/README.md"
   write_observability_images_readme "$backend_dir/observability/images/README.md"
@@ -508,6 +570,11 @@ render_prometheus_config() {
   local grafana_metrics_target="${14}"
   local grafana_role_label="${15}"
   local grafana_machine_label="${16}"
+  local backend_metrics_scheme="${17:-http}"
+  local transport_ca_path="${18:-}"
+  local minio_metrics_scheme="${19:-http}"
+  local minio_metrics_target="${20:-${vm1_data_host}:9000}"
+  local rendered_tmp="$TEMP_WORK_DIR/prometheus-rendered-$environment_name.yml"
 
   sed \
     -e "s/__SITE_NAME__/${site_name}/g" \
@@ -525,7 +592,21 @@ render_prometheus_config() {
     -e "s/__GRAFANA_METRICS_TARGET__/${grafana_metrics_target}/g" \
     -e "s/__GRAFANA_ROLE_LABEL__/${grafana_role_label}/g" \
     -e "s/__GRAFANA_MACHINE_LABEL__/${grafana_machine_label}/g" \
-    "$PLATFORM_ROOT/deploy/shared/observability/prometheus/prometheus.yml.template" > "$destination"
+    -e "s/__BACKEND_METRICS_SCHEME__/${backend_metrics_scheme}/g" \
+    -e "s/__MINIO_METRICS_SCHEME__/${minio_metrics_scheme}/g" \
+    -e "s/__MINIO_METRICS_TARGET__/${minio_metrics_target}/g" \
+    "$PLATFORM_ROOT/deploy/shared/observability/prometheus/prometheus.yml.template" > "$rendered_tmp"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      *__BACKEND_METRICS_TLS_CONFIG__*|*__MINIO_METRICS_TLS_CONFIG__*)
+        if [[ -n "$transport_ca_path" ]]; then
+          printf '    tls_config:\n      ca_file: %s\n' "$transport_ca_path"
+        fi
+        ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done < "$rendered_tmp" > "$destination"
 }
 
 render_grafana_ini() {
@@ -560,6 +641,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/darshan/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/darshan/prometheus/rules:ro
       - ./prometheus/file-sd:/etc/darshan/prometheus/file-sd:ro
+      - ./certs/transport-ca.crt:/etc/darshan/tls/transport-ca.crt:ro
       - prometheus_data:/prometheus
 
   alertmanager:
@@ -673,6 +755,15 @@ CMS_TLS_CERT_FILE="${CMS_TLS_CERT_FILE:-}"
 CMS_TLS_KEY_FILE="${CMS_TLS_KEY_FILE:-}"
 ONPREM_CERT_MODE="${ONPREM_CERT_MODE:-generate}"
 ONPREM_BACKEND_CA_FILE="${ONPREM_BACKEND_CA_FILE:-}"
+TRANSPORT_TLS_MODE="${TRANSPORT_TLS_MODE:-}"
+TRANSPORT_CA_CERT_FILE="${TRANSPORT_CA_CERT_FILE:-}"
+TRANSPORT_CA_KEY_FILE="${TRANSPORT_CA_KEY_FILE:-}"
+BACKEND_TLS_CERT_FILE="${BACKEND_TLS_CERT_FILE:-}"
+BACKEND_TLS_KEY_FILE="${BACKEND_TLS_KEY_FILE:-}"
+MINIO_TLS_CERT_FILE="${MINIO_TLS_CERT_FILE:-}"
+MINIO_TLS_KEY_FILE="${MINIO_TLS_KEY_FILE:-}"
+DEVICE_CA_CERT_FILE="${DEVICE_CA_CERT_FILE:-}"
+DEVICE_CA_KEY_FILE="${DEVICE_CA_KEY_FILE:-}"
 
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-${SERVER_PACKAGE_POSTGRES_IMAGE_REF:-postgres:15-alpine}}"
 MINIO_IMAGE="${MINIO_IMAGE:-${SERVER_PACKAGE_MINIO_IMAGE_REF:-minio/minio:latest}}"
@@ -713,6 +804,14 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-LocalDev@123}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-3000}"
 CA_CERT_PATH="${CA_CERT_PATH:-./certs/ca.crt}"
+CA_KEY_PATH="${CA_KEY_PATH:-./certs/ca.key}"
+TLS_CERT_PATH="${TLS_CERT_PATH:-./certs/server.crt}"
+TLS_KEY_PATH="${TLS_KEY_PATH:-./certs/server.key}"
+SERVER_TLS_ENABLED="${SERVER_TLS_ENABLED:-false}"
+AUTH_COOKIE_SECURE="${AUTH_COOKIE_SECURE:-}"
+SIGNHEX_DEPLOYMENT_ID="${SIGNHEX_DEPLOYMENT_ID:-$SITE_NAME}"
+SIGNHEX_ENVIRONMENT_NAME="${SIGNHEX_ENVIRONMENT_NAME:-production}"
+SIGNHEX_SERVER_ID="${SIGNHEX_SERVER_ID:-backend-$SITE_NAME}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 FFMPEG_PATH="${FFMPEG_PATH:-ffmpeg}"
 LIBREOFFICE_PATH="${LIBREOFFICE_PATH:-soffice}"
@@ -767,13 +866,21 @@ if profile_enabled production; then
     echo "CMS_PUBLIC_SCHEME must be https for the production on-prem profile." >&2
     exit 1
   fi
-  require_ipv4 "CMS_PUBLIC_HOST" "$CMS_PUBLIC_HOST"
-  require_ipv4 "BACKEND_PRIVATE_HOST" "$BACKEND_PRIVATE_HOST"
-  require_ipv4 "BACKEND_DEVICE_HOST" "$BACKEND_DEVICE_HOST"
-  require_ipv4 "DATA_PRIVATE_HOST" "$DATA_PRIVATE_HOST"
-  require_ipv4 "VALKEY_PRIVATE_HOST" "$VALKEY_PRIVATE_HOST"
+  require_host "CMS_PUBLIC_HOST" "$CMS_PUBLIC_HOST"
+  require_host "BACKEND_PRIVATE_HOST" "$BACKEND_PRIVATE_HOST"
+  require_host "BACKEND_DEVICE_HOST" "$BACKEND_DEVICE_HOST"
+  require_host "DATA_PRIVATE_HOST" "$DATA_PRIVATE_HOST"
+  require_host "VALKEY_PRIVATE_HOST" "$VALKEY_PRIVATE_HOST"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
-    require_ipv4 "OBSERVABILITY_PRIVATE_HOST" "$OBSERVABILITY_PRIVATE_HOST"
+    require_host "OBSERVABILITY_PRIVATE_HOST" "$OBSERVABILITY_PRIVATE_HOST"
+  fi
+  if [[ "$TRANSPORT_TLS_MODE" != "internal-ca" && "$TRANSPORT_TLS_MODE" != "provided" ]]; then
+    echo "TRANSPORT_TLS_MODE must be internal-ca or provided for production." >&2
+    exit 1
+  fi
+  if [[ "$MINIO_USE_SSL" != "true" || "$SERVER_TLS_ENABLED" != "true" ]]; then
+    echo "Production requires MINIO_USE_SSL=true and SERVER_TLS_ENABLED=true." >&2
+    exit 1
   fi
 fi
 
@@ -868,6 +975,7 @@ fi
 if profile_enabled production; then
   mkdir -p \
     "$PROD_DATA_DIR/images" \
+    "$PROD_DATA_DIR/tls/CAs" \
     "$PROD_VALKEY_DIR/images" \
     "$PROD_BACKEND_DIR/images" \
     "$PROD_BACKEND_DIR/certs" \
@@ -882,7 +990,8 @@ if profile_enabled production; then
       "$PROD_OBSERVABILITY_DIR/images" \
       "$PROD_OBSERVABILITY_DIR/prometheus" \
       "$PROD_OBSERVABILITY_DIR/alertmanager" \
-      "$PROD_OBSERVABILITY_DIR/grafana"
+      "$PROD_OBSERVABILITY_DIR/grafana" \
+      "$PROD_OBSERVABILITY_DIR/certs"
   fi
 fi
 
@@ -1063,35 +1172,22 @@ fi
 CERTS_OUTPUT_DIR="$TEMP_WORK_DIR/generated-certs"
 BACKEND_CA_SOURCE_FILE=""
 
-if [[ "$ONPREM_CERT_MODE" == "generate" ]]; then
-  CERT_HOST="$QA_CMS_HOST"
-  if profile_enabled production; then
-    CERT_HOST="$CMS_PUBLIC_HOST"
-  fi
-  echo "Generating site-local certificate material for $CERT_HOST..."
-  bash "$BOOTSTRAP_DIR/generate-ip-certs.sh" "$SITE_NAME" "$CERT_HOST" "$CERTS_OUTPUT_DIR"
-  BACKEND_CA_SOURCE_FILE="$CERTS_OUTPUT_DIR/cms-root-ca.crt"
-
-  if profile_enabled production; then
-    cp "$CERTS_OUTPUT_DIR/tls.crt" "$PROD_CMS_DIR/tls/tls.crt"
-    cp "$CERTS_OUTPUT_DIR/tls.key" "$PROD_CMS_DIR/tls/tls.key"
-    cp "$CERTS_OUTPUT_DIR/cms-root-ca.crt" "$PROD_CMS_DIR/admin-browser/cms-trust.crt"
-  fi
-else
-  require_file "ONPREM_BACKEND_CA_FILE" "$ONPREM_BACKEND_CA_FILE"
-  BACKEND_CA_SOURCE_FILE="$ONPREM_BACKEND_CA_FILE"
-
-  if profile_enabled production; then
-    require_file "CMS_TLS_CERT_FILE" "$CMS_TLS_CERT_FILE"
-    require_file "CMS_TLS_KEY_FILE" "$CMS_TLS_KEY_FILE"
-    cp "$CMS_TLS_CERT_FILE" "$PROD_CMS_DIR/tls/tls.crt"
-    cp "$CMS_TLS_KEY_FILE" "$PROD_CMS_DIR/tls/tls.key"
-    cp "$CMS_TLS_CERT_FILE" "$PROD_CMS_DIR/admin-browser/cms-server.crt"
-  fi
-fi
-
 if profile_enabled qa; then
-  cp "$BACKEND_CA_SOURCE_FILE" "$QA_BACKEND_DIR/certs/ca.crt"
+  if [[ -n "$DEVICE_CA_CERT_FILE" && -n "$DEVICE_CA_KEY_FILE" ]]; then
+    require_file "DEVICE_CA_CERT_FILE" "$DEVICE_CA_CERT_FILE"
+    require_file "DEVICE_CA_KEY_FILE" "$DEVICE_CA_KEY_FILE"
+    cp "$DEVICE_CA_CERT_FILE" "$QA_BACKEND_DIR/certs/ca.crt"
+    cp "$DEVICE_CA_KEY_FILE" "$QA_BACKEND_DIR/certs/ca.key"
+  else
+    if [[ "$ONPREM_CERT_MODE" == "generate" ]]; then
+      bash "$BOOTSTRAP_DIR/generate-ip-certs.sh" "$SITE_NAME" "$QA_CMS_HOST" "$CERTS_OUTPUT_DIR"
+      BACKEND_CA_SOURCE_FILE="$CERTS_OUTPUT_DIR/cms-root-ca.crt"
+    else
+      require_file "ONPREM_BACKEND_CA_FILE" "$ONPREM_BACKEND_CA_FILE"
+      BACKEND_CA_SOURCE_FILE="$ONPREM_BACKEND_CA_FILE"
+    fi
+    cp "$BACKEND_CA_SOURCE_FILE" "$QA_BACKEND_DIR/certs/ca.crt"
+  fi
   cat > "$QA_BACKEND_DIR/certs/README.md" <<'EOF'
 # QA Backend Pairing CA Material
 
@@ -1104,16 +1200,56 @@ EOF
 fi
 
 if profile_enabled production; then
-  cp "$BACKEND_CA_SOURCE_FILE" "$PROD_BACKEND_DIR/certs/ca.crt"
+  TLS_PREPARED_DIR="$TEMP_WORK_DIR/production-tls"
+  TLS_PREPARE_ARGS=(
+    --mode "$TRANSPORT_TLS_MODE"
+    --site-name "$SITE_NAME"
+    --output-dir "$TLS_PREPARED_DIR"
+    --transport-ca-cert "$TRANSPORT_CA_CERT_FILE"
+    --device-ca-cert "$DEVICE_CA_CERT_FILE"
+    --device-ca-key "$DEVICE_CA_KEY_FILE"
+    --cms-host "$CMS_PUBLIC_HOST"
+    --backend-host "$BACKEND_PRIVATE_HOST"
+    --backend-device-host "$BACKEND_DEVICE_HOST"
+    --data-host "$DATA_PRIVATE_HOST"
+  )
+  if [[ "$TRANSPORT_TLS_MODE" == "internal-ca" ]]; then
+    TLS_PREPARE_ARGS+=(--transport-ca-key "$TRANSPORT_CA_KEY_FILE")
+  else
+    TLS_PREPARE_ARGS+=(
+      --cms-cert "$CMS_TLS_CERT_FILE" --cms-key "$CMS_TLS_KEY_FILE"
+      --backend-cert "$BACKEND_TLS_CERT_FILE" --backend-key "$BACKEND_TLS_KEY_FILE"
+      --minio-cert "$MINIO_TLS_CERT_FILE" --minio-key "$MINIO_TLS_KEY_FILE"
+    )
+  fi
+  bash "$BOOTSTRAP_DIR/prepare-transport-tls.sh" "${TLS_PREPARE_ARGS[@]}"
+
+  cp "$TLS_PREPARED_DIR/cms/tls.crt" "$PROD_CMS_DIR/tls/tls.crt"
+  cp "$TLS_PREPARED_DIR/cms/tls.key" "$PROD_CMS_DIR/tls/tls.key"
+  cp "$TLS_PREPARED_DIR/transport-ca.crt" "$PROD_CMS_DIR/tls/transport-ca.crt"
+  cp "$TLS_PREPARED_DIR/transport-ca.crt" "$PROD_CMS_DIR/admin-browser/transport-ca.crt"
+  cp "$TLS_PREPARED_DIR/backend/server.crt" "$PROD_BACKEND_DIR/certs/server.crt"
+  cp "$TLS_PREPARED_DIR/backend/server.key" "$PROD_BACKEND_DIR/certs/server.key"
+  cp "$TLS_PREPARED_DIR/transport-ca.crt" "$PROD_BACKEND_DIR/certs/transport-ca.crt"
+  cp "$TLS_PREPARED_DIR/device/device-ca.crt" "$PROD_BACKEND_DIR/certs/device-ca.crt"
+  cp "$TLS_PREPARED_DIR/device/device-ca.key" "$PROD_BACKEND_DIR/certs/device-ca.key"
+  cp "$TLS_PREPARED_DIR/minio/public.crt" "$PROD_DATA_DIR/tls/public.crt"
+  cp "$TLS_PREPARED_DIR/minio/private.key" "$PROD_DATA_DIR/tls/private.key"
+  cp "$TLS_PREPARED_DIR/transport-ca.crt" "$PROD_DATA_DIR/tls/CAs/transport-ca.crt"
+  if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
+    cp "$TLS_PREPARED_DIR/transport-ca.crt" "$PROD_OBSERVABILITY_DIR/certs/transport-ca.crt"
+  fi
 
   cat > "$PROD_BACKEND_DIR/certs/README.md" <<'EOF'
-# Production Backend Pairing CA Material
+# Production Backend Certificate Material
 
-This bundle requires only the pairing CA certificate:
+The API serves HTTPS and retains a separate device-pairing CA:
 
-- `ca.crt`
+- `server.crt` / `server.key`: backend HTTPS identity
+- `transport-ca.crt`: trust for MinIO and backend clients
+- `device-ca.crt` / `device-ca.key`: device certificate issuance only
 
-The production on-prem profile uses backend/player traffic on port 3000. Do not add `server.crt` or `server.key` here for this deployment model.
+The transport CA private key is intentionally absent from every runtime role.
 EOF
 
   cat > "$PROD_CMS_DIR/tls/README.md" <<EOF
@@ -1123,8 +1259,9 @@ The CMS guest serves HTTPS from:
 
 - \`tls.crt\`
 - \`tls.key\`
+- \`transport-ca.crt\`
 
-These files were prepared by the bundle builder in \`ONPREM_CERT_MODE=$ONPREM_CERT_MODE\`.
+These files were validated by the bundle builder in \`TRANSPORT_TLS_MODE=$TRANSPORT_TLS_MODE\`.
 EOF
 
   cat > "$PROD_CMS_DIR/admin-browser/README.md" <<EOF
@@ -1137,19 +1274,14 @@ $CMS_PRODUCTION_ORIGIN
 \`\`\`
 EOF
 
-  if [[ "$ONPREM_CERT_MODE" == "generate" ]]; then
-    cat >> "$PROD_CMS_DIR/admin-browser/README.md" <<'EOF'
+  cat >> "$PROD_CMS_DIR/admin-browser/README.md" <<'EOF'
 
-Import `cms-trust.crt` into admin/operator browsers before first login.
+Import `transport-ca.crt` into the admin/operator browser trust store before first login.
+Do not bypass certificate warnings and do not import a server private key.
 EOF
-  else
-    cat >> "$PROD_CMS_DIR/admin-browser/README.md" <<'EOF'
-
-If the provided certificate is self-signed, import `cms-server.crt` into admin/operator browsers. Otherwise import the issuing CA separately.
-EOF
-  fi
 
   printf '%s\n' "$CMS_PRODUCTION_ORIGIN" > "$PROD_CMS_DIR/admin-browser/cms-origin.txt"
+  chmod 600 "$PROD_CMS_DIR/tls/tls.key" "$PROD_BACKEND_DIR/certs/server.key" "$PROD_BACKEND_DIR/certs/device-ca.key" "$PROD_DATA_DIR/tls/private.key"
 fi
 
 if profile_enabled qa; then
@@ -1162,8 +1294,8 @@ if profile_enabled production; then
     copy_tree_contents "$PLATFORM_ROOT/deploy/shared/observability/prometheus" "$PROD_OBSERVABILITY_DIR/prometheus"
     copy_tree_contents "$PLATFORM_ROOT/deploy/shared/observability/alertmanager" "$PROD_OBSERVABILITY_DIR/alertmanager"
     copy_tree_contents "$PLATFORM_ROOT/deploy/shared/observability/grafana" "$PROD_OBSERVABILITY_DIR/grafana"
-    cp "$PLATFORM_ROOT/deploy/production/observability/README.md" "$PROD_OBSERVABILITY_DIR/README.md"
-    cp "$PLATFORM_ROOT/deploy/production/observability/bundle.env.example" "$PROD_OBSERVABILITY_DIR/.env.observability.example"
+    cp "$PLATFORM_ROOT/deploy/production/docker/observability/README.md" "$PROD_OBSERVABILITY_DIR/README.md"
+    cp "$PLATFORM_ROOT/deploy/production/docker/observability/bundle.env.example" "$PROD_OBSERVABILITY_DIR/.env.observability.example"
     write_observability_images_readme "$PROD_OBSERVABILITY_DIR/images/README.md"
   fi
 fi
@@ -1532,6 +1664,8 @@ MINIO_ACCESS_KEY=$MINIO_ACCESS_KEY
 MINIO_SECRET_KEY=$MINIO_SECRET_KEY
 MINIO_HOST_PORT=$MINIO_HOST_PORT
 MINIO_CONSOLE_PORT=$MINIO_CONSOLE_PORT
+MINIO_API_CORS_ALLOW_ORIGIN=$CMS_PRODUCTION_ORIGIN
+DATA_PRIVATE_HOST=$DATA_PRIVATE_HOST
 EOF
 
   cat > "$PROD_VALKEY_DIR/.env.production" <<EOF
@@ -1545,11 +1679,12 @@ NODE_ENV=production
 HOST=$HOST
 PORT=$PORT
 API_HOST_PORT=$API_HOST_PORT
-DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$DATA_PRIVATE_HOST:5432/$POSTGRES_DB
+BACKEND_PRIVATE_HOST=$BACKEND_PRIVATE_HOST
+DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$DATA_PRIVATE_HOST:$POSTGRES_HOST_PORT/$POSTGRES_DB
 JWT_SECRET=$JWT_SECRET
 JWT_EXPIRY=$JWT_EXPIRY
 MINIO_ENDPOINT=$DATA_PRIVATE_HOST
-MINIO_PORT=9000
+MINIO_PORT=$MINIO_HOST_PORT
 MINIO_ACCESS_KEY=$MINIO_ACCESS_KEY
 MINIO_SECRET_KEY=$MINIO_SECRET_KEY
 MINIO_USE_SSL=$MINIO_USE_SSL
@@ -1557,6 +1692,15 @@ MINIO_REGION=$MINIO_REGION
 ADMIN_EMAIL=$ADMIN_EMAIL
 ADMIN_PASSWORD=$ADMIN_PASSWORD
 CA_CERT_PATH=$CA_CERT_PATH
+CA_KEY_PATH=$CA_KEY_PATH
+SERVER_TLS_ENABLED=$SERVER_TLS_ENABLED
+TLS_CERT_PATH=$TLS_CERT_PATH
+TLS_KEY_PATH=$TLS_KEY_PATH
+NODE_EXTRA_CA_CERTS=/app/certs/transport-ca.crt
+AUTH_COOKIE_SECURE=$AUTH_COOKIE_SECURE
+SIGNHEX_DEPLOYMENT_ID=$SIGNHEX_DEPLOYMENT_ID
+SIGNHEX_ENVIRONMENT_NAME=$SIGNHEX_ENVIRONMENT_NAME
+SIGNHEX_SERVER_ID=$SIGNHEX_SERVER_ID
 LOG_LEVEL=$LOG_LEVEL
 ENABLE_SWAGGER_UI=false
 FFMPEG_PATH=$FFMPEG_PATH
@@ -1605,9 +1749,11 @@ EOF
 NGINX_IMAGE=$NGINX_IMAGE
 CMS_PUBLIC_SCHEME=$CMS_PUBLIC_SCHEME
 CMS_PUBLIC_ORIGIN=$CMS_PRODUCTION_ORIGIN
+CMS_PUBLIC_HOST=$CMS_PUBLIC_HOST
 CMS_HTTP_PORT=$CMS_HTTP_PORT
 CMS_HTTPS_PORT=$CMS_HTTPS_PORT
 BACKEND_PRIVATE_HOST=$BACKEND_PRIVATE_HOST
+API_HOST_PORT=$API_HOST_PORT
 GRAFANA_UPSTREAM_HOST=$PROD_GRAFANA_UPSTREAM_HOST
 GRAFANA_UPSTREAM_PORT=$PROD_GRAFANA_UPSTREAM_PORT
 EOF
@@ -1652,7 +1798,11 @@ EOF
       "$PROD_BACKEND_METRICS_TARGET" \
       "$PROD_GRAFANA_METRICS_TARGET" \
       "$PROD_GRAFANA_ROLE_LABEL" \
-      "$PROD_GRAFANA_MACHINE_LABEL"
+      "$PROD_GRAFANA_MACHINE_LABEL" \
+      "https" \
+      "/etc/darshan/tls/transport-ca.crt" \
+      "https" \
+      "${DATA_PRIVATE_HOST}:${MINIO_HOST_PORT}"
 
     cp "$PLATFORM_ROOT/deploy/shared/observability/alertmanager/alertmanager.yml.template" \
       "$PROD_OBSERVABILITY_DIR/alertmanager/alertmanager.yml"
@@ -1686,12 +1836,15 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-    command: server /data --console-address ":9001"
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    command: server --certs-dir /certs --console-address ":9001" /data
     ports:
       - "${MINIO_HOST_PORT}:9000"
       - "${MINIO_CONSOLE_PORT}:9001"
     volumes:
       - darshan_minio_data:/data
+      - ./tls:/certs:ro
 
 volumes:
   darshan_postgres_data:
@@ -1730,7 +1883,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3000/api/v1/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+          "fetch('https://127.0.0.1:3000/api/v1/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
         ]
       interval: 30s
       timeout: 10s
@@ -1757,7 +1910,30 @@ services:
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./tls:/etc/nginx/tls:ro
-      - ./www/www:/usr/share/nginx/html:ro
+      - ./www:/usr/share/nginx/html:ro
+EOF
+
+  mkdir -p "$PROD_CMS_DIR/www/config"
+  cat > "$PROD_CMS_DIR/www/config/app-config.json" <<EOF
+{
+  "cms": {
+    "environment": {
+      "name": "production",
+      "deploymentId": "$SITE_NAME",
+      "cmsId": "cms-$SITE_NAME"
+    },
+    "api": {
+      "baseUrl": "$CMS_PRODUCTION_ORIGIN"
+    },
+    "realtime": {
+      "socketBaseUrl": "$CMS_PRODUCTION_ORIGIN",
+      "socketTransports": ["websocket"]
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}
 EOF
 
   cat > "$PROD_CMS_DIR/nginx/default.conf" <<EOF
@@ -1765,11 +1941,12 @@ server {
   listen 80;
   server_name _;
 
-  return 301 https://\$host\$request_uri;
+  return 301 $CMS_PRODUCTION_ORIGIN\$request_uri;
 }
 
 server {
-  listen 443 ssl http2;
+  listen 443 ssl;
+  http2 on;
   server_name _;
 
   root /usr/share/nginx/html;
@@ -1781,25 +1958,35 @@ server {
   ssl_session_cache shared:DARSHANTLS:10m;
   ssl_protocols TLSv1.2 TLSv1.3;
   ssl_ciphers HIGH:!aNULL:!MD5;
-  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  add_header Strict-Transport-Security "max-age=31536000" always;
   add_header X-Content-Type-Options "nosniff" always;
   add_header X-Frame-Options "DENY" always;
 
   location /api/v1/ {
-    proxy_pass http://$BACKEND_PRIVATE_HOST:3000/api/v1/;
+    proxy_pass https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT/api/v1/;
     proxy_http_version 1.1;
-    proxy_set_header Host \$host;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $BACKEND_PRIVATE_HOST;
+    proxy_ssl_trusted_certificate /etc/nginx/tls/transport-ca.crt;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 3;
+    proxy_set_header Host $BACKEND_PRIVATE_HOST;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto \$scheme;
   }
 
   location /socket.io/ {
-    proxy_pass http://$BACKEND_PRIVATE_HOST:3000/socket.io/;
+    proxy_pass https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT/socket.io/;
     proxy_http_version 1.1;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $BACKEND_PRIVATE_HOST;
+    proxy_ssl_trusted_certificate /etc/nginx/tls/transport-ca.crt;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 3;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection "upgrade";
-    proxy_set_header Host \$host;
+    proxy_set_header Host $BACKEND_PRIVATE_HOST;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto \$scheme;
@@ -1858,7 +2045,10 @@ EOF
 set -euo pipefail
 source ./.env.production
 docker compose --env-file .env.production exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
-curl -fsS "http://127.0.0.1:${MINIO_HOST_PORT}/minio/health/live" >/dev/null
+curl --fail --silent --show-error \
+  --cacert ./tls/CAs/transport-ca.crt \
+  --resolve "${DATA_PRIVATE_HOST:-localhost}:${MINIO_HOST_PORT}:127.0.0.1" \
+  "https://${DATA_PRIVATE_HOST:-localhost}:${MINIO_HOST_PORT}/minio/health/live" >/dev/null
 echo "Production data tier healthy."
 EOF
 
@@ -1874,7 +2064,10 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 source ./.env.production
-curl -fsS "http://127.0.0.1:${API_HOST_PORT}/api/v1/health" >/dev/null
+curl --fail --silent --show-error \
+  --cacert ./certs/transport-ca.crt \
+  --resolve "${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}:127.0.0.1" \
+  "https://${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}/api/v1/health" >/dev/null
 docker compose --env-file .env.production ps --services --status running | grep -qx worker
 echo "Production backend healthy."
 EOF
@@ -1884,8 +2077,14 @@ EOF
 set -euo pipefail
 source ./.env.production
 curl -fsSI "http://127.0.0.1:${CMS_HTTP_PORT}/" | grep -q "301"
-curl -kfsS "https://127.0.0.1:${CMS_HTTPS_PORT}/" >/dev/null
-curl -kfsS "https://127.0.0.1:${CMS_HTTPS_PORT}/api/v1/health" >/dev/null
+curl --fail --silent --show-error \
+  --cacert ./tls/transport-ca.crt \
+  --resolve "${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}:127.0.0.1" \
+  "https://${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}/" >/dev/null
+curl --fail --silent --show-error \
+  --cacert ./tls/transport-ca.crt \
+  --resolve "${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}:127.0.0.1" \
+  "https://${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}/api/v1/health" >/dev/null
 echo "Production CMS healthy."
 EOF
 
@@ -1957,8 +2156,8 @@ This folder runs the DARSHAN backend bundle with API and worker behavior from th
 
 ## Reachability
 
-- API: http://$BACKEND_PRIVATE_HOST:$API_HOST_PORT
-- Player endpoint: http://$BACKEND_DEVICE_HOST:3000
+- API: https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT
+- Player endpoint: https://$BACKEND_DEVICE_HOST:$API_HOST_PORT
 - Valkey bus target: redis://$VALKEY_PRIVATE_HOST:$VALKEY_HOST_PORT
 - Worker: background jobs only, no public port
 - Prometheus templates: ./observability/prometheus/
@@ -1980,7 +2179,7 @@ This folder runs the prebuilt CMS through Nginx with HTTPS termination.
 ## Reachability
 
 - CMS: $CMS_PRODUCTION_ORIGIN
-- API/socket proxy target: http://$BACKEND_PRIVATE_HOST:3000
+- API/socket proxy target: https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT
 - Grafana upstream target: http://$PROD_GRAFANA_UPSTREAM_HOST:$PROD_GRAFANA_UPSTREAM_PORT
 - Grafana path: $CMS_PRODUCTION_ORIGIN/grafana/
 EOF
@@ -2005,12 +2204,13 @@ This folder runs Prometheus, Alertmanager, and Grafana on the dedicated observab
 - Alertmanager: http://$OBSERVABILITY_PRIVATE_HOST:$ALERTMANAGER_HOST_PORT
 - Grafana internal host: http://$OBSERVABILITY_PRIVATE_HOST:$GRAFANA_HOST_PORT
 - Grafana operator path: $CMS_PRODUCTION_ORIGIN/grafana/
-- Backend scrape target: http://$BACKEND_PRIVATE_HOST:$API_HOST_PORT/metrics
+- Backend scrape target: https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT/metrics
+- MinIO scrape target: https://$DATA_PRIVATE_HOST:$MINIO_HOST_PORT/minio/v2/metrics/cluster
 EOF
   fi
 
   stage_player_bundle "$PROD_ELECTRON_DIR" "production" "$BACKEND_DEVICE_HOST" "PRODUCTION_SETUP_GUIDE.md"
-  cp "$RUNBOOKS_DIR/onprem-production-setup.md" "$PRODUCTION_ROOT/PRODUCTION_SETUP_GUIDE.md"
+  cp "$RUNBOOKS_DIR/source-free-production-bundle-deployment.md" "$PRODUCTION_ROOT/PRODUCTION_SETUP_GUIDE.md"
 fi
 
 cat > "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF
@@ -2067,8 +2267,8 @@ if profile_enabled production; then
 - Production
   - CMS: $CMS_PRODUCTION_ORIGIN
   - valkey: redis://$VALKEY_PRIVATE_HOST:$VALKEY_HOST_PORT
-  - backend: http://$BACKEND_PRIVATE_HOST:$API_HOST_PORT
-  - player endpoint: http://$BACKEND_DEVICE_HOST:3000
+  - backend: https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT
+  - player endpoint: https://$BACKEND_DEVICE_HOST:$API_HOST_PORT
 EOF
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     cat >> "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF

@@ -6,6 +6,7 @@ import { getLogger } from '../../../common/logger'
 import { CacheEntry, CacheStats, CacheError } from '../../../common/types'
 import { atomicWrite, calculateBufferHash, ensureDir, sanitizeFilename } from '../../../common/utils'
 import { reportMediaCacheFailure, type MediaCacheReportSource } from '../media-cache-reporter'
+import { createTransportHttpsAgent } from '../network/transport-tls'
 
 const logger = getLogger('cache-manager')
 
@@ -35,12 +36,14 @@ export class CacheManager {
   private entries = new Map<string, CacheEntry>()
   private nowPlaying = new Set<string>()
   private inFlight = new Map<string, Promise<void>>()
+  private httpsAgent: ReturnType<typeof createTransportHttpsAgent>
 
   constructor() {
     const config = getConfigManager().getConfig()
     this.cacheDir = path.join(config.cache.path, 'media')
     this.maxBytes = config.cache.maxBytes
     this.prefetchConcurrency = Math.max(1, config.cache.prefetchConcurrency)
+    this.httpsAgent = createTransportHttpsAgent(config.transportTls)
 
     ensureDir(this.cacheDir)
     this.loadExistingEntries()
@@ -152,6 +155,7 @@ export class CacheManager {
       const response = await axios.get<ArrayBuffer>(url, {
         responseType: 'arraybuffer',
         timeout: 30000,
+        ...(this.httpsAgent ? { httpsAgent: this.httpsAgent } : {}),
       })
       return Buffer.from(response.data)
     } catch (error: any) {

@@ -15,6 +15,7 @@ export interface AppConfig {
   environment?: PlayerEnvironmentConfig
   runtime: RuntimeConfig
   realtime?: RealtimeConfig
+  transportTls: TransportTLSConfig
   mtls: MTLSConfig
   cache: CacheConfig
   intervals: IntervalsConfig
@@ -58,6 +59,12 @@ export interface MTLSConfig {
   strictCertificateValidation: boolean
   autoRenew: boolean
   renewBeforeDays: number
+}
+
+export interface TransportTLSConfig {
+  enabled: boolean
+  caPath: string
+  strictCertificateValidation: boolean
 }
 
 export interface CacheConfig {

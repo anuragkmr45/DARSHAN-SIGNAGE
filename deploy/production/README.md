@@ -1,5 +1,15 @@
 # DARSHAN Production Deployment
 
+> This document also covers the older checkout-based Docker-role workflow. For
+> source-free production, edit one private bundle env on the build machine and
+> transfer generated role folders without editing `.env.production`, CMS/player
+> JSON, or TLS files. Use
+> `docs/runbooks/source-free-production-bundle-deployment.md`.
+
+Source-free production uses verified HTTPS for CMS, backend, MinIO, players,
+and Prometheus scrapes. HTTP examples below are compatibility examples for the
+checkout-based workflow and are not valid source-free production values.
+
 Production uses Docker role deployments on normal Proxmox VMs. Proxmox is only the hypervisor; DARSHAN services run in Docker containers inside Ubuntu Server VMs.
 
 Use this production path:

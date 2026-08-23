@@ -1,6 +1,6 @@
 # Product Export Packaging
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-08-23.
 
 Use this runbook when you want source-free, per-product deliverables from a build machine.
 
@@ -18,6 +18,10 @@ Generated outputs:
 - `out/<release>/electron/<platform>/`
 
 These outputs are source-free. They are the operator-facing runtime or delivery folders, not development builds.
+
+These per-product exports are intermediate artifacts. For the strict production
+source-free workflow, feed them to `build-production-bundle.sh`; do not follow
+the standalone target-host env-edit steps later in this document.
 
 ## Primary command
 
@@ -134,6 +138,10 @@ bash scripts/export/package-cms.sh --release 2026-04-02-r1
 The per-platform `electron/<platform>/` exports are for direct delivery to target player machines. If you want to use them as bundle inputs, collect the required Windows and Ubuntu installers into a single `PLAYER_ARTIFACTS_DIR` first.
 
 ## Operator commands on target hosts
+
+This section applies only when intentionally deploying a standalone product
+export. A canonical production bundle already contains generated
+`.env.production` files and must not be edited on the target.
 
 Server package:
 

@@ -1,8 +1,13 @@
 # On-Prem Runtime Bundle Builder
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-08-23.
 
 Start here for platform bundle generation.
+
+For source-free production, use only the strict one-file wrapper documented in
+`source-free-production-bundle-deployment.md`. The direct assembler examples
+below are low-level/QA compatibility interfaces and must not be used to create a
+manually configured production release.
 
 Code/deploy sources:
 
@@ -44,6 +49,22 @@ Observability note:
 - runtime pulls are not acceptable for production; if images are not pre-staged into the bundle, follow the offline image-loading runbook
 
 ## Primary Command
+
+Preferred production wrapper:
+
+```bash
+cp deploy/production/bundle.env.example deploy/production/bundles/site-a-2026-08-22-r1.env
+nano deploy/production/bundles/site-a-2026-08-22-r1.env
+bash scripts/bundle/build-production-bundle.sh deploy/production/bundles/site-a-2026-08-22-r1.env
+```
+
+This keeps `RELEASE_ID`, `SITE_NAME`, artifact paths, and production VM IPs in
+one private build-machine file. For the full source-free production workflow,
+see `docs/runbooks/source-free-production-bundle-deployment.md`.
+
+The wrapper also prepares role TLS, verifies generated HTTPS/WSS endpoints,
+rejects source/source maps and insecure TLS bypasses, writes a redacted
+`CONFIGURATION_MANIFEST.json`, and recomputes checksums.
 
 Run from the `DARSHAN monorepo root` repo root:
 

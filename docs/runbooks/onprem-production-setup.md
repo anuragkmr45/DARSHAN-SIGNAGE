@@ -1,8 +1,17 @@
 # DARSHAN On-Prem Production Setup
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-08-23.
 
-This is the docs-folder production runbook for the current DARSHAN deployment model.
+> This guide preserves the editable Git-checkout Docker workflow. It requires
+> separate backend, CMS, Docker, and player config edits and uses legacy HTTP
+> examples. It is not the canonical source-free production flow. For a fresh
+> build machine and fresh VMs, use
+> `docs/runbooks/source-free-production-bundle-deployment.md`; edit only
+> `deploy/production/bundles/<site>-<release>.env` and deploy the generated
+> HTTPS role folders.
+
+This is the docs-folder compatibility runbook for the editable-checkout
+DARSHAN deployment model.
 
 The active production path is Docker role deployment on normal Ubuntu Server VMs:
 

@@ -143,19 +143,24 @@ EOF
 
 cat > "$OUTPUT_DIR/config.example.json" <<EOF
 {
-  "apiBase": "http://<backend-ip>:3000",
-  "wsUrl": "ws://<backend-ip>:3000/ws",
-  "deviceId": "",
-  "runtime": {
-    "mode": "production"
-  },
-  "mtls": {
-    "enabled": false,
-    "autoRenew": true,
-    "renewBeforeDays": 30
-  },
-  "security": {
-    "allowedDomains": []
+  "player": {
+    "environment": {
+      "name": "production",
+      "deploymentId": "<site-name>",
+      "expectedServerId": "backend-<site-name>"
+    },
+    "backend": {
+      "baseUrl": "https://<backend-host>:3000",
+      "socketIoUrl": "wss://<backend-host>:3000"
+    },
+    "runtime": {
+      "mode": "production"
+    },
+    "transportTls": {
+      "enabled": true,
+      "caPath": "/etc/darshan/transport-ca.crt",
+      "strictCertificateValidation": true
+    }
   }
 }
 EOF
@@ -177,8 +182,8 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 ## Operator steps
 
 1. Install the packaged artifact that matches this folder's `ELECTRON_PACKAGE_ARCH`.
-2. Copy `config.example.json` to `/etc/darshan/config.json` before the first launch, or edit the config path reported by `darshan-player doctor`.
-3. Replace `<backend-ip>` with the real backend IP.
+2. Copy `config.example.json` to `/etc/darshan/player/config.json` and replace the site/host placeholders.
+3. Set `DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json` in the player launch environment and install the transport CA at the configured `transportTls.caPath`.
 4. Launch `darshan-player` from the logged-in Ubuntu desktop session. The current Ubuntu package uses XDG desktop autostart, not a systemd service.
 5. Pair the device and verify it appears in the CMS.
 EOF

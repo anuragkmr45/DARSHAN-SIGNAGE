@@ -1,12 +1,19 @@
 # On-Prem Config Management Runbook
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-08-23.
 
 ## Scope
 
 Use this runbook to prepare non-secret site config and secret env files for DARSHAN on-prem dev, QA, and production deployments.
 
 This runbook does not approve production. Runtime evidence still requires a running backend, CMS, packaged player, observability services, and supported Node/runtime validation.
+
+For canonical source-free production, the config boundary is simpler: manually
+edit only `deploy/production/bundles/<site>-<release>.env` on the build machine.
+The builder generates role `.env.production`, CMS runtime JSON, and player site
+JSON. The source-tree and per-target examples below remain valid for
+checkout-based development/QA and legacy Docker-role workflows, not as extra
+inputs to a source-free bundle.
 
 ## Principles
 
@@ -89,6 +96,9 @@ Do not commit the secrets file.
 
 ## CMS Example
 
+Production CMS pages served over HTTPS reject absolute HTTP API/socket values.
+Development and HTTP QA retain HTTP compatibility.
+
 Compatibility path:
 
 ```text
@@ -123,6 +133,19 @@ CONFIG-3 runtime config path:
 Deploy the runtime config as `config/app-config.json` next to the built CMS `index.html`. If the file is absent, the CMS falls back to existing `VITE_*` build values. Do not include tokens, passwords, query strings, URL fragments, credentialed URLs, or secrets in the CMS runtime config because it is browser-visible.
 
 ## Player Example
+
+Source-free production player config additionally requires HTTPS/WSS and:
+
+```json
+"transportTls": {
+  "enabled": true,
+  "caPath": "/etc/darshan/transport-ca.crt",
+  "strictCertificateValidation": true
+}
+```
+
+Current packages automatically discover `/etc/darshan/player/config.json` on
+Linux and `C:\\ProgramData\\DARSHAN\\config.json` on Windows.
 
 CONFIG-2 player non-secret site config:
 

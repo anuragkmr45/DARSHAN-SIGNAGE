@@ -1,6 +1,6 @@
 # DARSHAN Environment Architecture
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-08-23.
 
 This folder documents DARSHAN environments from code and deployment files. Code, compose files, and runtime config loaders are the source of truth. These docs do not prove that any runtime is healthy.
 
@@ -26,6 +26,10 @@ This folder documents DARSHAN environments from code and deployment files. Code,
 | Player device | Screen/player runtime | Packaged Electron app on Ubuntu/RPi/AXON/other supported target, not a server Docker role | `docs/runbooks/player-deployment.md`, `docs/contracts/player-runtime-contracts.md` |
 
 ## Current Production Role Contract
+
+The source-free variant generates these roles from one private build-machine
+env and uses verified HTTPS/WSS between CMS, backend, MinIO, players, and
+Prometheus. The direct config inputs below remain for checkout-based workflows.
 
 Production uses host or VM IPs, not per-container LAN IPs.
 
@@ -76,4 +80,3 @@ Production uses host or VM IPs, not per-container LAN IPs.
 - These docs do not claim production readiness.
 - These docs do not validate runtime health.
 - These docs do not authorize deleting app/runtime state or resetting player identity.
-

@@ -11,6 +11,7 @@ import { getDeviceStateStore } from './device-state-store'
 import { getHttpClient } from './network/http-client'
 import { getPairingService } from './pairing-service'
 import { getDefaultMediaService } from './settings/default-media-service'
+import { createTransportHttpsAgent } from './network/transport-tls'
 import { getSnapshotManager } from './snapshot-manager'
 
 const logger = getLogger('realtime-service')
@@ -193,6 +194,7 @@ export class SocketIoDeviceTransport extends EventEmitter implements RealtimeTra
 
       this.ws = new WebSocket(this.wsUrl, {
         handshakeTimeout: 10000,
+        agent: createTransportHttpsAgent(getConfigManager().getConfig().transportTls),
       })
 
       this.ws.on('open', () => {
@@ -519,7 +521,16 @@ export class RealtimeService extends EventEmitter {
         arch: process.arch,
       },
       capabilities: {
-        commands: ['REFRESH', 'REFRESH_SCHEDULE', 'RESYNC', 'REBOOT', 'SCREENSHOT', 'TAKE_SCREENSHOT', 'CLEAR_CACHE', 'PING'],
+        commands: [
+          'REFRESH',
+          'REFRESH_SCHEDULE',
+          'RESYNC',
+          'REBOOT',
+          'SCREENSHOT',
+          'TAKE_SCREENSHOT',
+          'CLEAR_CACHE',
+          'PING',
+        ],
         screenshot: true,
         log_upload: true,
         offline_startup: true,

@@ -1,5 +1,10 @@
 # DARSHAN Two-Machine Production Docker Start
 
+> This is an editable-checkout lab/small-site workflow, not the canonical
+> source-free production deployment. Source-free production uses
+> `docs/runbooks/source-free-production-bundle-deployment.md`, one private
+> bundle env on the build machine, generated role folders, and verified HTTPS.
+
 Use this runbook for the current local/on-prem validation shape:
 
 - server machine: `192.168.0.6`

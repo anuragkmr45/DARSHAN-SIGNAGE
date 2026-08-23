@@ -1,5 +1,11 @@
 # DARSHAN Deployment Layout
 
+> Source-free production contract (2026-08-23): use
+> `deploy/production/bundles/<site>-<release>.env` with
+> `scripts/bundle/build-production-bundle.sh`. Do not also edit source product
+> env/config files. Generated target role files are immutable release outputs.
+> See `docs/runbooks/source-free-production-bundle-deployment.md`.
+
 DARSHAN production uses Docker role deployments on normal Proxmox VMs. Proxmox is the hypervisor only; DARSHAN services run in Docker containers inside the VMs.
 
 | Path | Purpose | Runtime model |
@@ -23,6 +29,14 @@ Use five VMs for production:
 
 Containers do not get LAN/Wi-Fi IPs directly. Each VM exposes its role's container ports through the VM IP configured in `deploy/production/docker/.env`.
 
+## Checkout-Based Compatibility Rule
+
+The remainder of this document describes the editable Git-checkout workflow.
+It is useful for development and compatibility deployments, but it is not the
+canonical source-free production procedure. In source-free production, the
+builder generates all of the files listed below from the single private bundle
+env.
+
 ## Environment Rule
 
 Use env for:
@@ -43,7 +57,9 @@ There should be one app env example per app for app-local fallback and backend s
 - `darshan-server/.env.example`
 - `darshan-cms/.env.example`
 
-Production site values live in `deploy/production/docker/.env`, copied from `deploy/production/docker/.env.example`.
+For the checkout-based workflow, production site values live in
+`deploy/production/docker/.env`, copied from
+`deploy/production/docker/.env.example`.
 
 Production Docker role file placement:
 

@@ -1,7 +1,13 @@
 # On-Prem Config Architecture
 
+Source-free production adds a composition layer: one strict private
+`deploy/production/bundles/<site>-<release>.env` becomes the backend role env,
+CMS browser config, Nginx/Prometheus config, player site config, and role TLS
+material. Operators do not edit those generated outputs independently.
+Checkout-based development/QA keeps the direct inputs described below.
+
 Status: CONFIG-1 backend JSON loader, CONFIG-2.3 player JSON/log redaction alignment, CONFIG-3 CMS runtime JSON alignment, and CONFIG-4 config profile sets implemented
-Last updated: 2026-06-16
+Last updated: 2026-08-23
 Owner: Codex
 
 ## Purpose

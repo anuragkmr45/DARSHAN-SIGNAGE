@@ -266,7 +266,7 @@ cp -R "$PLATFORM_ROOT/deploy/shared/observability/alertmanager" "$OBSERVABILITY_
 cp -R "$PLATFORM_ROOT/deploy/shared/observability/exporters" "$OBSERVABILITY_DIR/exporters"
 mkdir -p "$OBSERVABILITY_DIR/environments"
 cp -R "$PLATFORM_ROOT/deploy/qa/observability" "$OBSERVABILITY_DIR/environments/qa"
-cp -R "$PLATFORM_ROOT/deploy/production/observability" "$OBSERVABILITY_DIR/environments/production"
+cp -R "$PLATFORM_ROOT/deploy/production/docker/observability" "$OBSERVABILITY_DIR/environments/production"
 
 cat > "$OUTPUT_DIR/init-env.sh" <<'EOF'
 #!/usr/bin/env bash

@@ -1,6 +1,11 @@
 # DARSHAN Production Environment
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-08-23.
+
+> Source-free production is configured only through
+> `deploy/production/bundles/<site>-<release>.env` on the build machine. Its
+> generated role env, CMS/player JSON, and TLS files are not manually edited on
+> target VMs. See the source-free production runbook.
 
 Production uses Docker role deployments on normal VMs. Proxmox is the hypervisor only; DARSHAN services run in Docker containers inside Ubuntu Server VMs.
 
@@ -225,4 +230,3 @@ For five VMs, run only the role script for that VM. `start-all.sh` is single-hos
 ## Runtime Evidence Boundary
 
 These docs do not prove production readiness. Production evidence still requires live role health checks, browser CMS QA, packaged player QA, player pairing/default-media/schedule/realtime tests, observability scrape checks, and no-secret review.
-

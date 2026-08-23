@@ -12,6 +12,7 @@ import { redactUrlForDiagnostics } from '../../../common/redaction'
 import { getCertificateManager } from '../cert-manager'
 import { AppConfig, WSMessage } from '../../../common/types'
 import { ExponentialBackoff } from '../../../common/utils'
+import { createTransportHttpsAgent, loadTransportCertificateAuthority } from './transport-tls'
 
 const logger = getLogger('websocket-client')
 
@@ -26,6 +27,7 @@ export class WebSocketClient extends EventEmitter {
   private pingTimer?: NodeJS.Timeout
   private pongTimeout?: NodeJS.Timeout
   private mtlsEnabled: boolean
+  private transportTls: AppConfig['transportTls']
   private messageQueue: WSMessage[] = []
   private maxQueueSize = 100
 
@@ -34,6 +36,7 @@ export class WebSocketClient extends EventEmitter {
     const config = getConfigManager().getConfig()
     this.wsUrl = config.wsUrl
     this.mtlsEnabled = config.mtls.enabled
+    this.transportTls = config.transportTls
     this.reconnectBackoff = new ExponentialBackoff(1000, 60000, 10, 0.2)
 
     logger.info(
@@ -59,10 +62,11 @@ export class WebSocketClient extends EventEmitter {
         handshakeTimeout: 10000,
       }
 
-      // Add mTLS certificates if enabled
       if (this.mtlsEnabled) {
         const agent = await this.createMTLSAgent()
         options.agent = agent
+      } else {
+        options.agent = createTransportHttpsAgent(this.transportTls)
       }
 
       this.ws = new WebSocket(this.wsUrl, options)
@@ -88,8 +92,9 @@ export class WebSocketClient extends EventEmitter {
     return new https.Agent({
       cert: certs.cert,
       key: certs.key,
-      ca: certs.ca,
+      ca: loadTransportCertificateAuthority(this.transportTls) ?? certs.ca,
       rejectUnauthorized: true,
+      minVersion: 'TLSv1.2',
     })
   }
 
