@@ -94,8 +94,11 @@ Optional non-root Docker access:
 
 ```bash
 sudo usermod -aG docker "$USER"
-newgrp docker
 ```
+
+Log out and back in before running Docker commands. If `newgrp` is available,
+`newgrp docker` can be used instead; otherwise install `util-linux-extra` or
+start a new login session.
 
 Recommended checkout/bundle path:
 

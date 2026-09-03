@@ -19,6 +19,7 @@ Required artifact inputs:
   BACKEND_IMAGE_ARCHIVE=/path/to/darshan-server-1.2.3.tar
   CMS_BUNDLE_SOURCE=/path/to/darshan-cms-1.2.3.tgz
   PLAYER_ARTIFACTS_DIR=/path/to/player-release
+  PLAYER_TARGET_PLATFORMS=windows,linux  # or linux for an Ubuntu-only bundle
 
 Required environment inputs:
   QA_DATA_HOST=10.30.0.10                     # required for profile all|qa
@@ -270,8 +271,12 @@ stage_player_bundle() {
 
   mkdir -p "$bundle_dir/installers"
 
-  cp "$PLAYER_WINDOWS_INSTALLER" "$bundle_dir/installers/$(basename "$PLAYER_WINDOWS_INSTALLER")"
-  cp "$PLAYER_UBUNTU_DEB" "$bundle_dir/installers/$(basename "$PLAYER_UBUNTU_DEB")"
+  if [[ -n "$PLAYER_WINDOWS_INSTALLER" ]]; then
+    cp "$PLAYER_WINDOWS_INSTALLER" "$bundle_dir/installers/$(basename "$PLAYER_WINDOWS_INSTALLER")"
+  fi
+  if [[ -n "$PLAYER_UBUNTU_DEB" ]]; then
+    cp "$PLAYER_UBUNTU_DEB" "$bundle_dir/installers/$(basename "$PLAYER_UBUNTU_DEB")"
+  fi
   if [[ -n "${PLAYER_UBUNTU_APPIMAGE:-}" ]]; then
     cp "$PLAYER_UBUNTU_APPIMAGE" "$bundle_dir/installers/$(basename "$PLAYER_UBUNTU_APPIMAGE")"
   fi
@@ -332,10 +337,18 @@ EOF
 This folder contains runtime-only player deliverables. Do not copy the player source tree to target machines.
 
 ## Included artifacts
+EOF
 
+  if [[ -n "$PLAYER_WINDOWS_INSTALLER" ]]; then
+    cat >> "$bundle_dir/README.md" <<EOF
 - Windows installer: \`$(basename "$PLAYER_WINDOWS_INSTALLER")\`
+EOF
+  fi
+  if [[ -n "$PLAYER_UBUNTU_DEB" ]]; then
+    cat >> "$bundle_dir/README.md" <<EOF
 - Ubuntu package: \`$(basename "$PLAYER_UBUNTU_DEB")\`
 EOF
+  fi
 
   if [[ -n "${PLAYER_UBUNTU_APPIMAGE:-}" ]]; then
     cat >> "$bundle_dir/README.md" <<EOF
@@ -729,6 +742,23 @@ if [[ -z "$CMS_BUNDLE_SOURCE" && -n "$CMS_PACKAGE_DIR" && -n "${CMS_PACKAGE_WWW_
 fi
 
 PLAYER_ARTIFACTS_DIR="${PLAYER_ARTIFACTS_DIR:-}"
+PLAYER_TARGET_PLATFORMS="${PLAYER_TARGET_PLATFORMS:-windows,linux}"
+case "$PLAYER_TARGET_PLATFORMS" in
+  linux|windows|linux,windows|windows,linux)
+    ;;
+  *)
+    echo "Unsupported PLAYER_TARGET_PLATFORMS: $PLAYER_TARGET_PLATFORMS. Use linux, windows, or windows,linux." >&2
+    exit 1
+    ;;
+esac
+PLAYER_TARGET_WINDOWS="false"
+PLAYER_TARGET_LINUX="false"
+case ",$PLAYER_TARGET_PLATFORMS," in
+  *,windows,*) PLAYER_TARGET_WINDOWS="true" ;;
+esac
+case ",$PLAYER_TARGET_PLATFORMS," in
+  *,linux,*) PLAYER_TARGET_LINUX="true" ;;
+esac
 
 QA_CMS_HTTP_PORT="${QA_CMS_HTTP_PORT:-80}"
 QA_API_HOST_PORT="${QA_API_HOST_PORT:-3000}"
@@ -924,12 +954,26 @@ if [[ ! -d "$PLAYER_ARTIFACTS_DIR" ]]; then
   exit 1
 fi
 
-PLAYER_WINDOWS_INSTALLER="$(find_first_artifact "$PLAYER_ARTIFACTS_DIR" '*.exe')"
-PLAYER_UBUNTU_DEB="$(find_first_artifact "$PLAYER_ARTIFACTS_DIR" '*.deb')"
-PLAYER_UBUNTU_APPIMAGE="$(find_first_artifact "$PLAYER_ARTIFACTS_DIR" '*.AppImage' || true)"
+PLAYER_WINDOWS_INSTALLER=""
+PLAYER_UBUNTU_DEB=""
+PLAYER_UBUNTU_APPIMAGE=""
+if [[ "$PLAYER_TARGET_WINDOWS" == "true" ]]; then
+  PLAYER_WINDOWS_INSTALLER="$(find_first_artifact "$PLAYER_ARTIFACTS_DIR" '*.exe')"
+fi
+if [[ "$PLAYER_TARGET_LINUX" == "true" ]]; then
+  PLAYER_UBUNTU_DEB="$(find_first_artifact "$PLAYER_ARTIFACTS_DIR" '*.deb')"
+  PLAYER_UBUNTU_APPIMAGE="$(find_first_artifact "$PLAYER_ARTIFACTS_DIR" '*.AppImage' || true)"
+fi
 
-if [[ -z "$PLAYER_WINDOWS_INSTALLER" || -z "$PLAYER_UBUNTU_DEB" ]]; then
-  echo "Missing required player artifacts in $PLAYER_ARTIFACTS_DIR. Required: one Windows .exe and one Ubuntu .deb installer." >&2
+missing_player_artifacts=()
+if [[ "$PLAYER_TARGET_WINDOWS" == "true" && -z "$PLAYER_WINDOWS_INSTALLER" ]]; then
+  missing_player_artifacts+=("one Windows .exe")
+fi
+if [[ "$PLAYER_TARGET_LINUX" == "true" && -z "$PLAYER_UBUNTU_DEB" ]]; then
+  missing_player_artifacts+=("one Ubuntu .deb")
+fi
+if [[ "${#missing_player_artifacts[@]}" -gt 0 ]]; then
+  echo "Missing required player artifacts in $PLAYER_ARTIFACTS_DIR for PLAYER_TARGET_PLATFORMS=$PLAYER_TARGET_PLATFORMS: ${missing_player_artifacts[*]}." >&2
   exit 1
 fi
 
@@ -2228,9 +2272,19 @@ This bundle was assembled from released runtime artifacts. Do not copy the sourc
 - Backend image ref: \`$BACKEND_IMAGE_REF\`
 - Backend image archive: \`$(basename "$BACKEND_IMAGE_ARCHIVE")\`
 - CMS bundle source: \`$(basename "$CMS_BUNDLE_SOURCE")\`
+- Player target platforms: \`$PLAYER_TARGET_PLATFORMS\`
+EOF
+
+if [[ -n "$PLAYER_WINDOWS_INSTALLER" ]]; then
+  cat >> "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF
 - Windows player installer: \`$(basename "$PLAYER_WINDOWS_INSTALLER")\`
+EOF
+fi
+if [[ -n "$PLAYER_UBUNTU_DEB" ]]; then
+  cat >> "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF
 - Ubuntu player installer: \`$(basename "$PLAYER_UBUNTU_DEB")\`
 EOF
+fi
 
 if [[ -n "${PLAYER_UBUNTU_APPIMAGE:-}" ]]; then
   cat >> "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF

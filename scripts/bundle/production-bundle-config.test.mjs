@@ -13,6 +13,26 @@ test('parser rejects unknown, duplicate, placeholder, and interpolated values', 
   assert.throws(() => parseBundleEnvText('SITE_NAME=$(hostname)\n'), /shell interpolation/)
 })
 
+test('parser reports every malformed line in one pass', () => {
+  let error
+  try {
+    parseBundleEnvText([
+      'UNKNOWN=value',
+      'SITE_NAME=site-a',
+      'SITE_NAME=site-b',
+      'CMS_PUBLIC_HOST=$(hostname)',
+      'not-a-key-value-line',
+    ].join('\n'))
+  } catch (caught) {
+    error = caught
+  }
+  assert.ok(error)
+  assert.match(error.message, /unknown key/)
+  assert.match(error.message, /duplicates key/)
+  assert.match(error.message, /shell interpolation/)
+  assert.match(error.message, /KEY=value syntax/)
+})
+
 test('production config derives HTTPS and separates transport from device CA', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'darshan-bundle-config-'))
   const pkiRoot = path.join(root, 'pki')
@@ -31,6 +51,7 @@ SITE_NAME=site-a
 EXPORT_SERVER=false
 EXPORT_CMS=false
 EXPORT_ELECTRON=false
+PLAYER_TARGET_PLATFORMS=linux
 PACKAGE_OUTPUT_BASE=${packages}
 CMS_PUBLIC_HOST=10.20.0.30
 BACKEND_PRIVATE_HOST=10.20.0.20
@@ -54,7 +75,25 @@ ADMIN_PASSWORD=strong-admin-pass
   assert.equal(runtime.TLS_CERT_PATH, '/app/certs/server.crt')
   assert.equal(loaded.config.BACKEND_DEVICE_HOST, '10.20.0.20')
   assert.equal(loaded.config.VALKEY_PRIVATE_HOST, '10.20.0.20')
+  assert.equal(loaded.config.PLAYER_TARGET_PLATFORMS, 'linux')
   assert.equal(loaded.config.SITE_PKI_DIR, secure)
-  fs.writeFileSync(envFile, fs.readFileSync(envFile, 'utf8').replace('strong-postgres-pass', 'has:a:colon-password'))
-  assert.throws(() => loadProductionBundleConfig(envFile, root), /POSTGRES_PASSWORD may contain only/)
+  const validText = fs.readFileSync(envFile, 'utf8')
+  fs.writeFileSync(envFile, validText.replace('PLAYER_TARGET_PLATFORMS=linux', 'PLAYER_TARGET_PLATFORMS=macos'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /PLAYER_TARGET_PLATFORMS must be/)
+  fs.writeFileSync(envFile, validText
+    .replace('strong-postgres-pass', 'has:a:colon-password')
+    .replace('darshan1', 'darshan:access')
+    .replace('strong-minio-secret', 'has:a:strong-minio-secret')
+    .replace('01234567890123456789012345678901', 'has:a:01234567890123456789012345678901')
+    .replace('strong-admin-pass', 'has:a:strong-admin-pass'))
+  let error
+  try {
+    loadProductionBundleConfig(envFile, root)
+  } catch (caught) {
+    error = caught
+  }
+  assert.ok(error)
+  for (const name of ['POSTGRES_PASSWORD', 'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'JWT_SECRET', 'ADMIN_PASSWORD']) {
+    assert.match(error.message, new RegExp(`${name} may contain only`))
+  }
 })

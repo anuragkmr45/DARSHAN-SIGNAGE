@@ -129,13 +129,14 @@ bash scripts/export/package-server.sh --release 2026-04-02-r1 --deployment-layou
 bash scripts/export/package-cms.sh --release 2026-04-02-r1
 ```
 
+For a bundle with `PLAYER_TARGET_PLATFORMS=windows,linux`,
 `PLAYER_ARTIFACTS_DIR` must contain at least:
 
 - one Windows `.exe`
 - one Ubuntu `.deb`
 - optional Ubuntu `.AppImage`
 
-The per-platform `electron/<platform>/` exports are for direct delivery to target player machines. If you want to use them as bundle inputs, collect the required Windows and Ubuntu installers into a single `PLAYER_ARTIFACTS_DIR` first.
+The per-platform `electron/<platform>/` exports are for direct delivery to target player machines. If you want to use them as bundle inputs, collect the selected installers into a single `PLAYER_ARTIFACTS_DIR` first. A Linux-only bundle requires only the Ubuntu `.deb`.
 
 ## Operator commands on target hosts
 

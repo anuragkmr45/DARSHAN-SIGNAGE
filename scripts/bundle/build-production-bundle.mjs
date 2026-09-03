@@ -60,9 +60,35 @@ function assertDirectory(label, directory) {
   }
 }
 
+function hasArtifact(directory, extension) {
+  const pending = [directory]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const absolute = path.join(current, entry.name)
+      if (entry.isDirectory()) pending.push(absolute)
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(extension)) return true
+    }
+  }
+  return false
+}
+
+function assertPlayerArtifacts(directory) {
+  const missing = []
+  const targets = config.PLAYER_TARGET_PLATFORMS.split(',')
+  if (targets.includes('windows') && !hasArtifact(directory, '.exe')) missing.push('one Windows .exe')
+  if (targets.includes('linux') && !hasArtifact(directory, '.deb')) missing.push('one Ubuntu .deb')
+  if (missing.length > 0) {
+    fail(`PLAYER_ARTIFACTS_DIR is missing required artifacts for PLAYER_TARGET_PLATFORMS=${config.PLAYER_TARGET_PLATFORMS}: ${missing.join(' and ')}`)
+  }
+}
+
 if (config.EXPORT_SERVER === 'false') assertDirectory('SERVER_PACKAGE_DIR', config.SERVER_PACKAGE_DIR)
 if (config.EXPORT_CMS === 'false') assertDirectory('CMS_PACKAGE_DIR', config.CMS_PACKAGE_DIR)
-if (config.EXPORT_ELECTRON === 'false') assertDirectory('PLAYER_ARTIFACTS_DIR', config.PLAYER_ARTIFACTS_DIR)
+if (config.EXPORT_ELECTRON === 'false') {
+  assertDirectory('PLAYER_ARTIFACTS_DIR', config.PLAYER_ARTIFACTS_DIR)
+  assertPlayerArtifacts(config.PLAYER_ARTIFACTS_DIR)
+}
 if (validateOnly) {
   process.stdout.write(`Production bundle configuration is valid: ${loaded.envFile}\n`)
   process.exit(0)
@@ -111,6 +137,7 @@ if (config.EXPORT_ELECTRON === 'true') {
 assertDirectory('SERVER_PACKAGE_DIR', config.SERVER_PACKAGE_DIR)
 assertDirectory('CMS_PACKAGE_DIR', config.CMS_PACKAGE_DIR)
 assertDirectory('PLAYER_ARTIFACTS_DIR', config.PLAYER_ARTIFACTS_DIR)
+if (config.EXPORT_ELECTRON === 'true') assertPlayerArtifacts(config.PLAYER_ARTIFACTS_DIR)
 
 const assemblerArgs = ['scripts/bundle/assemble-runtime-bundle.sh']
 if (skipDocker) assemblerArgs.push('--skip-docker')

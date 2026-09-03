@@ -66,9 +66,21 @@ docker compose version
 openssl version
 ```
 
-Player packaging is native-host oriented. Collect one Windows `.exe` from a
-Windows builder and one Ubuntu `.deb` from a Linux builder in a release artifact
-directory. The production bundle requires both.
+If Docker reports permission denied, add the build user to the Docker group and
+start a new login session before building:
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+Log out and back in, then confirm `docker ps` works without `sudo`. If you use
+`newgrp docker` instead, install `util-linux-extra` first when that command is
+not available.
+
+Player packaging is native-host oriented. Set `PLAYER_TARGET_PLATFORMS=linux`
+when this release will include only the Ubuntu player; use
+`PLAYER_TARGET_PLATFORMS=windows,linux` after a Windows installer is available.
+The backend and server configuration remain platform-neutral.
 
 ## 2. Create Persistent Site PKI Once
 
@@ -98,7 +110,10 @@ nano "deploy/production/bundles/${SITE_NAME}-${RELEASE_ID}.env"
 ```
 
 Set the release/site, artifact paths, six VM/player-reachable hosts, ports,
-PKI paths, credentials, images, and CMS feature flags there. Values are literal:
+PKI paths, credentials, images, and CMS feature flags there. When
+`EXPORT_ELECTRON=false`, `PLAYER_ARTIFACTS_DIR` must point to an existing
+staging directory containing the installer types selected by
+`PLAYER_TARGET_PLATFORMS`. Values are literal:
 unknown keys, duplicates, shell expansion, unresolved placeholders, weak/default
 secrets, unsafe connection-string characters, missing files, and exposed private
 keys fail validation.
@@ -109,6 +124,10 @@ Validate before a long build:
 bash scripts/bundle/build-production-bundle.sh --validate-only \
   "deploy/production/bundles/${SITE_NAME}-${RELEASE_ID}.env"
 ```
+
+Validation scans the complete env file before exiting and lists all detected
+configuration errors in one report. Correct the reported values and run the
+same command again until it reports that the configuration is valid.
 
 ## 4. Build And Verify
 

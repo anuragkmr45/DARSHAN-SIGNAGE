@@ -95,13 +95,14 @@ Default behavior:
 - a CMS `dist/` directory
 - a tar-compatible archive of the CMS build output
 
-`PLAYER_ARTIFACTS_DIR` must contain:
+`PLAYER_ARTIFACTS_DIR` must contain the installer types selected by
+`PLAYER_TARGET_PLATFORMS`:
 
-- one Windows `.exe`
-- one Ubuntu `.deb`
+- one Windows `.exe` when `windows` is selected
+- one Ubuntu `.deb` when `linux` is selected
 - optional Ubuntu `.AppImage`
 
-The per-platform export folders under `out/<release>/electron/<platform>/` are for direct device delivery. If you want to stage player installers into QA or production bundles, collect the Windows and Ubuntu installers into one `PLAYER_ARTIFACTS_DIR`.
+The per-platform export folders under `out/<release>/electron/<platform>/` are for direct device delivery. If you want to stage player installers into QA or production bundles, collect the selected installers into one `PLAYER_ARTIFACTS_DIR`. Set `PLAYER_TARGET_PLATFORMS=linux` when no Windows installer is available.
 
 ## Required Environment Inputs
 
