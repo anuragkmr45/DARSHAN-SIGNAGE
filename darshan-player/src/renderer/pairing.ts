@@ -1,4 +1,5 @@
 import type { PairingCodeRequest, PlayerPresentationSnapshot, PlayerStatus } from '../common/types'
+import type { DisplayProfileV1 } from '../common/display-profile'
 import './types'
 
 class PairingScreen {
@@ -23,9 +24,14 @@ class PairingScreen {
   private countdownTimer?: number
   private currentStatus: PlayerStatus | null = null
   private latestPresentationRevision = -1
+  private currentDisplay: DisplayProfileV1 | undefined
+  private viewportFrame?: number
+  private layoutObserver?: ResizeObserver
+  private lastViewportSignature = ''
 
   constructor() {
     this.initializeElements()
+    this.installViewportReporting()
     this.setupEventListeners()
     this.populateDeviceInfo().catch((error) => {
       console.error('[Pairing] Failed to populate device info', error)
@@ -83,6 +89,9 @@ class PairingScreen {
     window.darshan.onPlayerPresentation((presentation) => this.applyPresentation(presentation))
     const initialPresentation = await window.darshan.getPlayerPresentation()
     this.applyPresentation(initialPresentation)
+    const appConfig = await window.darshan.getConfig()
+    document.body.dataset['runtimeMode'] = appConfig.runtime.mode
+    this.scheduleViewportReport()
   }
 
   private applyPresentation(presentation: PlayerPresentationSnapshot): void {
@@ -91,6 +100,7 @@ class PairingScreen {
     }
 
     this.latestPresentationRevision = presentation.revision
+    this.currentDisplay = presentation.display
     this.render(presentation.status)
   }
 
@@ -101,11 +111,7 @@ class PairingScreen {
       this.deviceLabelInput.value = hostname
     }
 
-    const width = window.screen.width
-    const height = window.screen.height
-    if (this.resolutionElement) {
-      this.resolutionElement.textContent = `${width} × ${height}`
-    }
+    this.renderDisplayInfo()
 
     if (this.modelElement && info && typeof info === 'object') {
       const typedInfo = info as { platform?: string; arch?: string }
@@ -119,7 +125,59 @@ class PairingScreen {
     this.renderRecoveryState(status)
     this.renderConnectivity(status)
     this.renderSharedFields(status)
+    this.renderDisplayInfo()
     this.startCountdowns()
+    this.scheduleViewportReport()
+  }
+
+  private installViewportReporting(): void {
+    const observe = () => this.scheduleViewportReport()
+    window.addEventListener('resize', observe, { passive: true })
+    this.layoutObserver = new ResizeObserver(observe)
+    this.layoutObserver.observe(document.documentElement)
+  }
+
+  private scheduleViewportReport(): void {
+    if (this.viewportFrame !== undefined) window.cancelAnimationFrame(this.viewportFrame)
+    this.viewportFrame = window.requestAnimationFrame(() => {
+      this.viewportFrame = undefined
+      const root = document.documentElement
+      const pairing = this.pairingScreenElement
+      const width = Math.max(1, Math.round(window.innerWidth))
+      const height = Math.max(1, Math.round(window.innerHeight))
+      const initialDensity: 'FULL' | 'COMPACT' | 'MINIMAL' =
+        width < 600 || height < 460 ? 'MINIMAL' : width < 900 || height < 720 ? 'COMPACT' : 'FULL'
+      if (pairing) pairing.dataset['density'] = initialDensity
+      // Re-evaluate after density rules take effect. If that first measure
+      // overflows, force the minimal surface and take a second measure before
+      // reporting an unfit kiosk. This avoids publishing a transient result
+      // while CSS is still applying.
+      window.requestAnimationFrame(() => {
+        const publishMeasurement = (density: 'FULL' | 'COMPACT' | 'MINIMAL') => {
+          const overflowing = root.scrollHeight > height + 1 || root.scrollWidth > width + 1
+          const payload = {
+            width_css_px: width,
+            height_css_px: height,
+            device_pixel_ratio: window.devicePixelRatio || 1,
+            density,
+            conformant: !overflowing,
+            omitted_regions: density === 'MINIMAL' ? ['DIAGNOSTICS', 'OPERATOR_CONTROLS'] : [],
+          }
+          const signature = JSON.stringify(payload)
+          if (signature !== this.lastViewportSignature) {
+            this.lastViewportSignature = signature
+            window.darshan.reportViewport(payload)
+          }
+        }
+        const initiallyOverflowing = root.scrollHeight > height + 1 || root.scrollWidth > width + 1
+        if (initiallyOverflowing && initialDensity !== 'MINIMAL') {
+          if (pairing) pairing.dataset['density'] = 'MINIMAL'
+          window.requestAnimationFrame(() => publishMeasurement('MINIMAL'))
+          return
+        }
+        publishMeasurement(initialDensity)
+      })
+    })
   }
 
   private renderPairingState(status: PlayerStatus): void {
@@ -128,8 +186,7 @@ class PairingScreen {
       typeof status.error === 'string' &&
       status.error.toLowerCase().includes('configuration required')
     const showPairing =
-      showConfigurationRequired ||
-      ['PAIRING_PENDING', 'PAIRING_CONFIRMED', 'PAIRING_COMPLETING'].includes(status.state)
+      showConfigurationRequired || ['PAIRING_PENDING', 'PAIRING_CONFIRMED', 'PAIRING_COMPLETING'].includes(status.state)
 
     this.pairingScreenElement?.classList.toggle('hidden', !showPairing)
 
@@ -187,7 +244,8 @@ class PairingScreen {
     }
 
     if (this.recoveryReason) {
-      this.recoveryReason.textContent = status.recoveryReason || status.error || 'Runtime authentication requires attention.'
+      this.recoveryReason.textContent =
+        status.recoveryReason || status.error || 'Runtime authentication requires attention.'
     }
 
     if (this.recoveryRetryButton) {
@@ -229,13 +287,15 @@ class PairingScreen {
     }
 
     if (status.state === 'OFFLINE_USING_LAST_VALID_PAIRING') {
-      this.connectivityBanner.textContent = status.error || 'Backend unavailable. Playback continues from last validated pairing.'
+      this.connectivityBanner.textContent =
+        status.error || 'Backend unavailable. Playback continues from last validated pairing.'
       this.connectivityBanner.classList.remove('hidden')
       return
     }
 
     if (status.state === 'SOFT_RECOVERY') {
-      this.connectivityBanner.textContent = status.error || 'Backend unavailable. Retrying while cached playback continues.'
+      this.connectivityBanner.textContent =
+        status.error || 'Backend unavailable. Retrying while cached playback continues.'
       this.connectivityBanner.classList.remove('hidden')
       return
     }
@@ -255,23 +315,21 @@ class PairingScreen {
     }
   }
 
-  private buildPairingRequestPayload(): Partial<PairingCodeRequest> {
-    const width = window.screen.width
-    const height = window.screen.height
-    const orientation = width >= height ? 'landscape' : 'portrait'
-    const aspectRatio = this.getAspectRatio(width, height)
+  private renderDisplayInfo(): void {
+    if (!this.resolutionElement) return
+    const output = this.currentDisplay?.output
+    if (!output) {
+      this.resolutionElement.textContent = 'Detecting display'
+      return
+    }
+    const { width, height } = output.estimated_backing_px
+    const placement = this.currentDisplay?.placement === 'VERIFIED' ? '' : ' · unverified'
+    this.resolutionElement.textContent = `${width} × ${height}${placement}`
+  }
 
+  private buildPairingRequestPayload(): Partial<PairingCodeRequest> {
     return {
       device_label: this.deviceLabelInput?.value?.trim() || 'DARSHAN Screen',
-      width,
-      height,
-      orientation,
-      aspect_ratio: aspectRatio,
-      model: this.modelElement?.textContent || 'unknown',
-      codecs: ['h264'],
-      device_info: {
-        os: navigator.userAgent,
-      },
     }
   }
 
@@ -301,8 +359,15 @@ class PairingScreen {
         return
       }
       this.updatePairingExpiry(this.currentStatus.pairingExpiresAt)
-      if (this.recoveryMeta && this.currentStatus.state === 'HARD_RECOVERY' && this.currentStatus.hardRecoveryDeadlineAt) {
-        this.recoveryMeta.textContent = this.formatDeadline(this.currentStatus.hardRecoveryDeadlineAt, 'Fresh pairing starts in')
+      if (
+        this.recoveryMeta &&
+        this.currentStatus.state === 'HARD_RECOVERY' &&
+        this.currentStatus.hardRecoveryDeadlineAt
+      ) {
+        this.recoveryMeta.textContent = this.formatDeadline(
+          this.currentStatus.hardRecoveryDeadlineAt,
+          'Fresh pairing starts in'
+        )
       }
     }, 1000)
   }
@@ -342,9 +407,23 @@ class PairingScreen {
       const diagnostics = await window.darshan.getDiagnostics()
       const items: string[] = []
       items.push(this.createDiagnosticItem('Hostname', diagnostics.hostname || 'Unknown', true))
-      items.push(this.createDiagnosticItem('IP Address', diagnostics.ipAddresses?.join(', ') || diagnostics.ipAddress, true))
-      items.push(this.createDiagnosticItem('DNS Resolution', diagnostics.dnsResolution ? 'OK' : 'Failed', diagnostics.dnsResolution ?? false))
-      items.push(this.createDiagnosticItem('API Reachable', diagnostics.apiReachable ? 'OK' : 'Failed', diagnostics.apiReachable ?? false))
+      items.push(
+        this.createDiagnosticItem('IP Address', diagnostics.ipAddresses?.join(', ') || diagnostics.ipAddress, true)
+      )
+      items.push(
+        this.createDiagnosticItem(
+          'DNS Resolution',
+          diagnostics.dnsResolution ? 'OK' : 'Failed',
+          diagnostics.dnsResolution ?? false
+        )
+      )
+      items.push(
+        this.createDiagnosticItem(
+          'API Reachable',
+          diagnostics.apiReachable ? 'OK' : 'Failed',
+          diagnostics.apiReachable ?? false
+        )
+      )
       if (diagnostics.latency) {
         items.push(this.createDiagnosticItem('Latency', `${diagnostics.latency}ms`, true))
       }
@@ -362,22 +441,6 @@ class PairingScreen {
         <span>${value}</span>
       </li>
     `
-  }
-
-  private getAspectRatio(width: number, height: number): string {
-    const divisor = this.getGreatestCommonDivisor(width, height)
-    return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`
-  }
-
-  private getGreatestCommonDivisor(a: number, b: number): number {
-    let x = Math.abs(a)
-    let y = Math.abs(b)
-    while (y !== 0) {
-      const temp = y
-      y = x % y
-      x = temp
-    }
-    return x || 1
   }
 }
 

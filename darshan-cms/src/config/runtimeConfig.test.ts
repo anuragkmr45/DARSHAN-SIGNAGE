@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getCmsApiBaseUrl,
   getCmsRuntimeConfig,
@@ -21,6 +21,15 @@ describe("CMS runtime config", () => {
   beforeEach(() => {
     resetCmsRuntimeConfigForTests();
     vi.unstubAllGlobals();
+    // Runtime fallback tests must not inherit a developer's HTTP-only .env
+    // when they intentionally emulate an HTTPS CMS origin.
+    vi.stubEnv("VITE_API_BASE_URL", "https://build-api.cms.test");
+    vi.stubEnv("VITE_WS_BASE_URL", "https://build-ws.cms.test");
+    vi.stubEnv("VITE_CMS_ENVIRONMENT_NAME", "development");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("keeps build-time env behavior when no runtime config is present", () => {

@@ -109,7 +109,21 @@ export class ConfigManager {
     }
     this.configPath = configPath || this.getDefaultConfigPath()
     this.defaults = this.buildDefaultConfig()
-    const fileConfig = loadPlayerFileConfig(process.env)
+    // An explicitly selected writable runtime config is authoritative. Do not
+    // let an ambient /etc site profile unexpectedly override tests, recovery
+    // tooling, or a deliberately selected device configuration. Explicit
+    // DARSHAN_PLAYER_CONFIG_FILE/SIGNHEX_PLAYER_CONFIG_FILE values still load.
+    const hasExplicitRuntimeConfig = Boolean(
+      configPath ||
+      envValue(
+        'DARSHAN_CONFIG_PATH',
+        'SIGNAGE_CONFIG_PATH',
+        'HEXMON_CONFIG_PATH',
+        'DARSHAN_RUNTIME_ROOT',
+        'HEXMON_RUNTIME_ROOT'
+      )
+    )
+    const fileConfig = loadPlayerFileConfig(process.env, { allowDefaultPath: !hasExplicitRuntimeConfig })
     this.fileConfigDiagnostics = fileConfig.diagnostics
     this.config = this.loadConfig(fileConfig.config)
   }

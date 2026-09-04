@@ -5,6 +5,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Route suites use a shared integration database. File-level parallelism
+    // makes fleet/count assertions observe unrelated fixtures mid-test.
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
@@ -30,4 +33,3 @@ export default defineConfig({
     },
   },
 });
-

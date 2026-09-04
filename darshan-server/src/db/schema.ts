@@ -55,6 +55,7 @@ export const commandTypeEnum = pgEnum('command_type', [
   'CLEAR_CACHE',
   'PING',
   'RESYNC',
+  'SET_ACTIVE_DISPLAY',
 ]);
 export const commandStatusEnum = pgEnum('command_status', [
   'PENDING',
@@ -394,6 +395,36 @@ export const screens = pgTable(
     currentScheduleIdx: index('screens_current_schedule_idx').on(table.current_schedule_id),
     currentMediaIdx: index('screens_current_media_idx').on(table.current_media_id),
     currentSceneIdx: index('screens_current_scene_idx').on(table.current_scene_id),
+  })
+);
+
+/**
+ * Device-observed display state and the operator's desired selection.  The
+ * legacy geometry columns on `screens` remain populated for older consumers;
+ * this table is the authoritative V1 record.
+ */
+export const screenDisplayStates = pgTable(
+  'screen_display_states',
+  {
+    screen_id: uuid('screen_id').primaryKey(),
+    desired_selection: jsonb('desired_selection')
+      .notNull()
+      .default(sql`'{"mode":"PRIMARY","preferred_key":null}'::jsonb`),
+    selection_version: integer('selection_version').notNull().default(1),
+    active_display_key: varchar('active_display_key', { length: 255 }),
+    placement: varchar('placement', { length: 32 }).notNull().default('UNVERIFIED'),
+    display_profile: jsonb('display_profile'),
+    profile_hash: varchar('profile_hash', { length: 64 }),
+    profile_revision: integer('profile_revision').notNull().default(0),
+    runtime_session_id: varchar('runtime_session_id', { length: 64 }),
+    observation_seq: bigint('observation_seq', { mode: 'number' }).notNull().default(0),
+    observed_at: timestamp('observed_at'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    profileUpdatedIdx: index('screen_display_states_profile_updated_idx').on(table.updated_at),
+    activeDisplayIdx: index('screen_display_states_active_display_idx').on(table.active_display_key),
   })
 );
 

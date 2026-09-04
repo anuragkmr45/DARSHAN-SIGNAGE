@@ -3,7 +3,8 @@ import { randomUUID } from 'crypto'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
 import { redactUrlForDiagnostics } from '../../common/redaction'
-import { getElectronApp, getElectronScreen } from '../../common/platform-paths'
+import { getElectronApp } from '../../common/platform-paths'
+import { getDisplayManager } from './display-manager'
 import {
   BackendPairingStatusResponse,
   BackendPairingValidationStatus,
@@ -58,7 +59,11 @@ export class PairingService {
   isPairedDevice(): boolean {
     const certManager = getCertificateManager()
     const state = getDeviceStateStore().getState()
-    return Boolean(this.getDeviceId() && (state.fingerprint || certManager.getCertificateMetadata()?.fingerprint) && certManager.areCertificatesPresent())
+    return Boolean(
+      this.getDeviceId() &&
+      (state.fingerprint || certManager.getCertificateMetadata()?.fingerprint) &&
+      certManager.areCertificatesPresent()
+    )
   }
 
   getDeviceId(): string | undefined {
@@ -67,7 +72,10 @@ export class PairingService {
 
   hasTrustworthyDeviceId(): boolean {
     const deviceId = this.getDeviceId()
-    return typeof deviceId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId)
+    return (
+      typeof deviceId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId)
+    )
   }
 
   getFingerprint(): string | undefined {
@@ -241,9 +249,12 @@ export class PairingService {
 
     try {
       const httpClient = getHttpClient()
-      return await httpClient.get<ScreenshotPolicyResponse>(`/api/v1/device/${encodeURIComponent(deviceId)}/screenshot-policy`, {
-        retry: false,
-      })
+      return await httpClient.get<ScreenshotPolicyResponse>(
+        `/api/v1/device/${encodeURIComponent(deviceId)}/screenshot-policy`,
+        {
+          retry: false,
+        }
+      )
     } catch (error) {
       if (isDeviceApiError(error)) {
         logger.warn(
@@ -359,7 +370,10 @@ export class PairingService {
     })
   }
 
-  async markRecoveryState(state: Extract<PlayerState, 'RECOVERY_REQUIRED' | 'HARD_RECOVERY'>, reason: string): Promise<void> {
+  async markRecoveryState(
+    state: Extract<PlayerState, 'RECOVERY_REQUIRED' | 'HARD_RECOVERY'>,
+    reason: string
+  ): Promise<void> {
     await getDeviceStateStore().update({
       lifecycleState: state,
       recoveryReason: reason,
@@ -406,14 +420,14 @@ export class PairingService {
       if (diagnostics.apiIsLoopback) {
         diagnostics.dnsResolution = true
       } else {
-      const dns = await import('dns')
+        const dns = await import('dns')
         await new Promise<void>((resolve, reject) => {
           dns.lookup(apiUrl.hostname, (err) => {
-          if (err) reject(err)
-          else resolve()
+            if (err) reject(err)
+            else resolve()
+          })
         })
-      })
-      diagnostics.dnsResolution = true
+        diagnostics.dnsResolution = true
       }
     } catch (error) {
       logger.warn({ error: error instanceof Error ? error.message : String(error) }, 'DNS resolution failed')
@@ -489,7 +503,10 @@ export class PairingService {
           (error.detailsPayload as Record<string, unknown>)['reason']
         : null
 
-    if (typeof detailStatus === 'string' && BACKEND_PAIRING_STATUS_VALUES.has(detailStatus as BackendPairingValidationStatus)) {
+    if (
+      typeof detailStatus === 'string' &&
+      BACKEND_PAIRING_STATUS_VALUES.has(detailStatus as BackendPairingValidationStatus)
+    ) {
       return detailStatus as BackendPairingValidationStatus
     }
 
@@ -504,10 +521,10 @@ export class PairingService {
   }
 
   private buildPairingCodeRequest(overrides: Partial<PairingCodeRequest> = {}): PairingCodeRequest {
-    const electronScreen = getElectronScreen()
-    const display = typeof electronScreen?.getPrimaryDisplay === 'function' ? electronScreen.getPrimaryDisplay() : undefined
-    const width = display?.workAreaSize.width ?? 0
-    const height = display?.workAreaSize.height ?? 0
+    const displayProfile = getDisplayManager().getProfile()
+    const display = displayProfile.output
+    const width = display?.estimated_backing_px.width ?? 0
+    const height = display?.estimated_backing_px.height ?? 0
     const hasValidDimensions = Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
     const orientation = hasValidDimensions && width >= height ? 'landscape' : 'portrait'
 
@@ -518,6 +535,7 @@ export class PairingService {
       device_info: {
         os: `${os.platform()} ${os.release()}`,
       },
+      display_profile_v1: displayProfile,
     }
 
     if (hasValidDimensions) {
@@ -529,9 +547,13 @@ export class PairingService {
       logger.warn({ width, height }, 'Invalid display dimensions, omitting size fields from pairing request')
     }
 
+    // Renderer input is allowed to supply an operator label only. Physical
+    // display observations are main-process authority and must never be
+    // replaceable by browser `window.screen` values.
     return {
-      ...base,
       ...overrides,
+      ...base,
+      device_label: overrides.device_label ?? base.device_label,
       device_info: {
         ...base.device_info,
         ...overrides.device_info,

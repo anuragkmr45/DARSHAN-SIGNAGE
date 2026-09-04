@@ -7,10 +7,19 @@ const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils.ts')
 describe('Heartbeat Service', () => {
   let tempDir
   let sandbox
+  let originalDarshanPlayerConfigFile
+  let originalSignhexPlayerConfigFile
 
   beforeEach(() => {
     sandbox = sinon.createSandbox()
     tempDir = createTempDir('heartbeat-test-')
+    // The process running the tests can be a provisioned player host with a
+    // site profile configured. This fixture must exercise its own runtime
+    // configuration, not inherit that host-level selector.
+    originalDarshanPlayerConfigFile = process.env.DARSHAN_PLAYER_CONFIG_FILE
+    originalSignhexPlayerConfigFile = process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
 
     process.env.HEXMON_CONFIG_PATH = path.join(tempDir, 'config.json')
     fs.writeFileSync(
@@ -55,6 +64,16 @@ describe('Heartbeat Service', () => {
     sandbox.restore()
     cleanupTempDir(tempDir)
     delete process.env.HEXMON_CONFIG_PATH
+    if (originalDarshanPlayerConfigFile === undefined) {
+      delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    } else {
+      process.env.DARSHAN_PLAYER_CONFIG_FILE = originalDarshanPlayerConfigFile
+    }
+    if (originalSignhexPlayerConfigFile === undefined) {
+      delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    } else {
+      process.env.SIGNHEX_PLAYER_CONFIG_FILE = originalSignhexPlayerConfigFile
+    }
 
     Object.keys(require.cache).forEach((key) => {
       if (key.includes('src/main/services') || key.includes('src/common')) {
@@ -126,7 +145,9 @@ describe('Heartbeat Service', () => {
       powerSource: 'AC',
     })
 
-    const postStub = sandbox.stub(httpClient, 'post').resolves({ success: true, timestamp: new Date().toISOString(), commands: [] })
+    const postStub = sandbox
+      .stub(httpClient, 'post')
+      .resolves({ success: true, timestamp: new Date().toISOString(), commands: [] })
     sandbox.stub(commandProcessor, 'ingestCommands').resolves()
     const updateStub = sandbox.stub(deviceStateStore, 'update').resolves()
 

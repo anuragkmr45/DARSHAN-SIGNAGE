@@ -55,6 +55,14 @@ export interface DarshanAPI {
   executeCommand: (command: string, payload?: unknown) => Promise<unknown>
   reportActivePlayback: (payload: { sceneId?: string; activeSlots: ActiveSlotPlayback[] }) => void
   reportPlaybackProgress: (payload: PlaybackProgressEntry) => void
+  reportViewport: (payload: {
+    width_css_px: number
+    height_css_px: number
+    device_pixel_ratio: number
+    density: 'FULL' | 'COMPACT' | 'MINIMAL'
+    conformant: boolean
+    omitted_regions: string[]
+  }) => void
   getPlaybackResumeState: (expected?: PlaybackProgressIdentity) => Promise<PlaybackProgressEntry | null>
 
   // Configuration
@@ -168,6 +176,10 @@ const darshanApi: DarshanAPI = {
 
   reportPlaybackProgress: (payload: PlaybackProgressEntry): void => {
     ipcRenderer.send('player-playback-progress', payload)
+  },
+
+  reportViewport: (payload): void => {
+    ipcRenderer.send('player-viewport', payload)
   },
 
   getPlaybackResumeState: async (expected?: PlaybackProgressIdentity): Promise<PlaybackProgressEntry | null> => {

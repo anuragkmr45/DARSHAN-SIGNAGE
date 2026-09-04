@@ -29,6 +29,7 @@ When source inspection cannot prove behavior on a real host, hardware, browser, 
 | `deployment-config-contracts.md` | Docker production role contract, env/config boundaries, runtime tools, player package/config, and runtime evidence gaps. |
 | `device-player-guide.md` | Code-backed implementation guide for player/device runtime behavior. |
 | `player-flow.md` | Current player flow sequence and API groups without stale example payload promises. |
+| `display-authority-and-responsive-kiosk.md` | Display selection authority, V1 profile, responsive kiosk surfaces, publish preflight, rollout, and runtime-evidence boundary. |
 
 Related architecture map:
 

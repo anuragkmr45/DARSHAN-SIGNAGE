@@ -13,6 +13,7 @@ import { getDeviceStateStore } from './device-state-store'
 import { getLifecycleEvents } from './lifecycle-events'
 import { getDefaultMediaService } from './settings/default-media-service'
 import { getPlayerMetrics } from './telemetry/player-metrics'
+import { getDisplayManager } from './display-manager'
 
 const logger = getLogger('command-processor')
 
@@ -249,6 +250,9 @@ export class CommandProcessor {
         case 'PING':
           result = this.handlePing()
           break
+        case 'SET_ACTIVE_DISPLAY':
+          result = await this.handleSetActiveDisplay(command)
+          break
         default:
           result = {
             success: false,
@@ -399,35 +403,59 @@ export class CommandProcessor {
     }
   }
 
-  private async acknowledgeCommand(commandId: string, deliveryToken: string | undefined, result: CommandResult): Promise<void> {
+  private async handleSetActiveDisplay(command: Command): Promise<CommandResult> {
+    const rawSelection = command.params?.['selection']
+    if (!rawSelection || typeof rawSelection !== 'object') {
+      return { success: false, error: 'Missing display selection', timestamp: new Date().toISOString() }
+    }
+    const selection = rawSelection as Record<string, unknown>
+    const profile = await getDisplayManager().applyDesiredSelection({
+      mode: selection['mode'],
+      preferred_key: selection['preferred_key'],
+      selection_version: command.params?.['selection_version'],
+    })
+    return {
+      success: profile.output !== null,
+      message: profile.output ? `Active display set to ${profile.output.key}` : 'No display is available',
+      error: profile.output ? undefined : 'No display is available',
+      data: {
+        active_display_key: profile.selection.active_key,
+        placement: profile.placement,
+        fallback_reason: profile.selection.fallback_reason,
+      },
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  private async acknowledgeCommand(
+    commandId: string,
+    deliveryToken: string | undefined,
+    result: CommandResult
+  ): Promise<void> {
     const deviceId = getPairingService().getDeviceId()
     if (!deviceId) {
       getPlayerMetrics().recordCommandAck('skipped_unpaired')
       return
     }
 
-	    const payload = {
-	      ...(deliveryToken ? { delivery_token: deliveryToken } : {}),
-	      success: result.success,
-	      ...(typeof result.error === 'string' && result.error.length > 0 ? { error: result.error } : {}),
-	      ...(typeof result.message === 'string' && result.message.length > 0 ? { message: result.message } : {}),
-	      ...(result.data ? { result_payload: result.data, data: result.data } : {}),
-	      processed_at: result.timestamp,
-	    }
+    const payload = {
+      ...(deliveryToken ? { delivery_token: deliveryToken } : {}),
+      success: result.success,
+      ...(typeof result.error === 'string' && result.error.length > 0 ? { error: result.error } : {}),
+      ...(typeof result.message === 'string' && result.message.length > 0 ? { message: result.message } : {}),
+      ...(result.data ? { result_payload: result.data, data: result.data } : {}),
+      processed_at: result.timestamp,
+    }
 
     try {
       const httpClient = getHttpClient()
-      await httpClient.post(
-        `/api/v1/device/${deviceId}/commands/${commandId}/ack`,
-        payload,
-        {
-          retryPolicy: {
-            maxAttempts: 3,
-            baseDelayMs: 2000,
-            maxDelayMs: 30000,
-          },
-        }
-      )
+      await httpClient.post(`/api/v1/device/${deviceId}/commands/${commandId}/ack`, payload, {
+        retryPolicy: {
+          maxAttempts: 3,
+          baseDelayMs: 2000,
+          maxDelayMs: 30000,
+        },
+      })
       await getDeviceStateStore().recordCommandAcknowledged(commandId, deliveryToken)
       logger.debug({ commandId, success: result.success }, 'Command acknowledged')
       getPlayerMetrics().recordCommandAck('success')

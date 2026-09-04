@@ -7,6 +7,7 @@ import * as os from 'os'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { getLogger } from '../../common/logger'
+import { getDisplayManager } from './display-manager'
 import type { PowerConfig } from '../../common/types'
 import { findExecutable } from '../../common/utils'
 
@@ -33,7 +34,7 @@ export interface PowerCapabilities {
   displayEnumeration: boolean
 }
 
-type PowerSaveBlockerApi = Pick<typeof import('electron')['powerSaveBlocker'], 'start' | 'stop' | 'isStarted'>
+type PowerSaveBlockerApi = Pick<(typeof import('electron'))['powerSaveBlocker'], 'start' | 'stop' | 'isStarted'>
 type PowerSaveBlockerProvider = () => PowerSaveBlockerApi | null
 
 export interface PowerManagerOptions {
@@ -347,27 +348,16 @@ export class PowerManager {
    * Get display information
    */
   async getDisplayInfo(): Promise<DisplayInfo[]> {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { screen } = require('electron') as typeof import('electron')
-      if (!screen || typeof screen.getAllDisplays !== 'function') {
-        logger.debug('Electron screen API not available')
-        return []
-      }
-
-      const primaryId = screen.getPrimaryDisplay()?.id
-      const displays = screen.getAllDisplays().map((display) => ({
-        name: display.label || `Display ${display.id}`,
-        connected: true,
-        resolution: `${display.bounds.width}x${display.bounds.height}`,
-        primary: display.id === primaryId,
+    const displays = getDisplayManager()
+      .getProfile()
+      .inventory.map((display) => ({
+        name: display.label || `Display ${display.electron_id}`,
+        connected: display.detected,
+        resolution: `${display.estimated_backing_px.width}x${display.estimated_backing_px.height}`,
+        primary: display.primary,
       }))
-      logger.debug({ displays }, 'Display information retrieved')
-      return displays
-    } catch (error) {
-      logger.error({ error }, 'Failed to get display information')
-      return []
-    }
+    logger.debug({ displays }, 'Display information retrieved')
+    return displays
   }
 
   /**

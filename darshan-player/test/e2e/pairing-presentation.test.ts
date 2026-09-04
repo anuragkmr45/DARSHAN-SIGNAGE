@@ -13,9 +13,14 @@ type CdpResponse = {
   error?: { message: string }
 }
 
+const CHROMIUM_DEBUGGER_STARTUP_TIMEOUT_MS = 15_000
+
 class CdpSession {
   private nextId = 1
-  private readonly pending = new Map<number, { resolve: (value: CdpResponse) => void; reject: (error: Error) => void }>()
+  private readonly pending = new Map<
+    number,
+    { resolve: (value: CdpResponse) => void; reject: (error: Error) => void }
+  >()
 
   constructor(private readonly socket: WebSocket) {
     socket.on('message', (raw) => {
@@ -66,9 +71,19 @@ async function freePort(): Promise<number> {
   return address.port
 }
 
-async function waitForTarget(port: number): Promise<{ webSocketDebuggerUrl: string }> {
+async function waitForTarget(
+  port: number,
+  browser: ChildProcess,
+  getDiagnostics: () => string
+): Promise<{ webSocketDebuggerUrl: string }> {
   let lastError = 'Chromium did not expose a debugging target'
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + CHROMIUM_DEBUGGER_STARTUP_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (browser.exitCode !== null) {
+      throw new Error(
+        `Chromium exited before exposing a debugging target (exit ${browser.exitCode}). ${getDiagnostics()}`
+      )
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json`)
       const targets = (await response.json()) as Array<{ type: string; webSocketDebuggerUrl?: string }>
@@ -80,7 +95,9 @@ async function waitForTarget(port: number): Promise<{ webSocketDebuggerUrl: stri
     }
     await sleep(50)
   }
-  throw new Error(lastError)
+  throw new Error(
+    `Chromium did not expose a debugging target within ${CHROMIUM_DEBUGGER_STARTUP_TIMEOUT_MS}ms: ${lastError}. ${getDiagnostics()}`
+  )
 }
 
 async function closeBrowser(port: number): Promise<void> {
@@ -132,6 +149,7 @@ describe('Pairing presentation browser regression', () => {
   let session: CdpSession | undefined
   let profileDir: string | undefined
   let debugPort: number | undefined
+  let browserDiagnostics = ''
 
   afterEach(async () => {
     session?.close()
@@ -141,6 +159,7 @@ describe('Pairing presentation browser regression', () => {
       debugPort = undefined
     }
     browser = undefined
+    browserDiagnostics = ''
     if (profileDir) {
       await fs.promises.rm(profileDir, { recursive: true, force: true })
       profileDir = undefined
@@ -151,18 +170,25 @@ describe('Pairing presentation browser regression', () => {
     const port = await freePort()
     debugPort = port
     profileDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'darshan-player-e2e-'))
-    browser = spawn(browserExecutable(), [
-      '--headless=new',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-gpu',
-      '--remote-allow-origins=*',
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${profileDir}`,
-      'about:blank',
-    ])
+    browser = spawn(
+      browserExecutable(),
+      [
+        '--headless=new',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-gpu',
+        '--remote-allow-origins=*',
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profileDir}`,
+        'about:blank',
+      ],
+      { stdio: ['ignore', 'ignore', 'pipe'] }
+    )
+    browser.stderr?.on('data', (chunk: Buffer) => {
+      browserDiagnostics = `${browserDiagnostics}${chunk.toString()}`.slice(-8_000)
+    })
 
-    const target = await waitForTarget(port)
+    const target = await waitForTarget(port, browser, () => browserDiagnostics.trim() || 'No Chromium stderr captured')
     const socket = new WebSocket(target.webSocketDebuggerUrl)
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve)
@@ -216,7 +242,11 @@ describe('Pairing presentation browser regression', () => {
 
     const rendererUrl = pathToFileURL(path.resolve(__dirname, '../../dist/renderer/index.html')).toString()
     await session.command('Page.navigate', { url: rendererUrl })
-    await waitFor(session, "document.getElementById('default-media-container')?.classList.contains('hidden') === false", 'default surface')
+    await waitFor(
+      session,
+      "document.getElementById('default-media-container')?.classList.contains('hidden') === false",
+      'default surface'
+    )
     await waitFor(session, "document.getElementById('device-label')?.value === 'e2e-player'", 'pairing controller')
 
     // This is the observed failure ordering: cleanup during recovery, followed

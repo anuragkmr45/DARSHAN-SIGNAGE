@@ -18,10 +18,7 @@ import {
 import { ExponentialBackoff, atomicWrite, ensureDir, sleep } from '../../../common/utils'
 import { getHttpClient } from './http-client'
 import { getLifecycleEvents } from '../lifecycle-events'
-import {
-  REQUEST_QUEUE_TOTAL_MAX_ITEMS,
-  deriveRequestQueueMaxBytes,
-} from '../offline-replay-budgets'
+import { REQUEST_QUEUE_TOTAL_MAX_ITEMS, deriveRequestQueueMaxBytes } from '../offline-replay-budgets'
 
 const logger = getLogger('request-queue')
 
@@ -412,7 +409,9 @@ export class RequestQueue {
     }, delay)
   }
 
-  async enqueue(request: Omit<QueuedRequest, 'id' | 'timestamp' | 'retries' | 'sizeBytes' | 'category'>): Promise<boolean> {
+  async enqueue(
+    request: Omit<QueuedRequest, 'id' | 'timestamp' | 'retries' | 'sizeBytes' | 'category'>
+  ): Promise<boolean> {
     const queuedRequest: QueuedRequest = {
       ...request,
       id: `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
@@ -422,6 +421,16 @@ export class RequestQueue {
       category: this.classifyRequest(request.url),
     }
     queuedRequest.sizeBytes = this.estimateRequestSize(queuedRequest)
+
+    if (queuedRequest.category === 'heartbeat') {
+      // Offline heartbeat replay is a state report, not an event log. Keep
+      // exactly the newest report so reconnect sends current topology/state.
+      for (let index = this.queue.length - 1; index >= 0; index -= 1) {
+        if (this.queue[index]?.category === 'heartbeat') {
+          this.removeRequestAt(index, 'compacted', 'heartbeat-latest-state')
+        }
+      }
+    }
 
     if (!this.evictForIncoming(queuedRequest)) {
       await this.persist()

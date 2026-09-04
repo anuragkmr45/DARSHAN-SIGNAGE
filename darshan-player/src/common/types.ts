@@ -254,6 +254,7 @@ export interface PlayerStatus {
 export interface PlayerPresentationSnapshot {
   revision: number
   status: PlayerStatus
+  display?: import('./display-profile').DisplayProfileV1
 }
 
 export interface PlayerSecurityLockStatus {
@@ -583,6 +584,7 @@ export interface HeartbeatPayload {
   player_uptime_seconds?: number
   install_instance_id?: string
   runtime_session_id?: string
+  display_profile_v1?: import('./display-profile').DisplayProfileV1
   player_version?: string
   battery_percent?: number
   is_charging?: boolean
@@ -714,6 +716,7 @@ export type CommandType =
   | 'CLEAR_CACHE'
   | 'PING'
   | 'RESYNC'
+  | 'SET_ACTIVE_DISPLAY'
 
 export interface DeviceCommand {
   id: string
@@ -882,6 +885,7 @@ export interface PairingCodeRequest {
     os?: string
     [key: string]: unknown
   }
+  display_profile_v1?: import('./display-profile').DisplayProfileV1
 }
 
 export interface PairingCodeResponse {
@@ -939,6 +943,7 @@ export interface DeviceStateRecord {
   lastDesiredSnapshotId?: string | null
   lastDesiredDefaultMediaVersion?: string | null
   lastDesiredEmergencyVersion?: string | null
+  lastDesiredDisplaySelectionVersion?: number
   lastDesiredStateAt?: string
   lastRealtimeConnectedAt?: string
   lastPairingValidationStatus?: BackendPairingValidationStatus

@@ -7,20 +7,25 @@ console.log('=== DARSHAN Player Starting ===')
 console.log('NODE_ENV:', process.env['NODE_ENV'])
 console.log('__dirname:', __dirname)
 
-import { app, BrowserWindow, Menu, screen, session } from 'electron'
+import { app, BrowserWindow, Menu, session } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 import { getConfigManager } from '../common/config'
 import { getLogger } from '../common/logger'
-import { redactUrlForDiagnostics, redactUrlOrPathForDiagnostics, sanitizeLogPayloadForDiagnostics } from '../common/redaction'
+import {
+  redactUrlForDiagnostics,
+  redactUrlOrPathForDiagnostics,
+  sanitizeLogPayloadForDiagnostics,
+} from '../common/redaction'
 import { ExponentialBackoff } from '../common/utils'
 import type { ActiveSlotPlayback, AppConfig, PlayerPresentationSnapshot, PlayerStatus } from '../common/types'
 import type { PlaybackProgressIdentity } from '../common/playback-policy'
 import { parseOperatorCommand, runOperatorCommand } from './cli'
 import { getRuntimeMode, getRuntimeWindowPolicy } from './runtime-mode'
 import { ensureAutostartRegistration } from './services/autostart'
+import { getDisplayManager } from './services/display-manager'
 
 console.log('Initializing logger...')
 const logger = getLogger('main')
@@ -55,10 +60,31 @@ if (!gotTheLock) {
 let mainWindow: BrowserWindow | null = null
 const restartBackoff = new ExponentialBackoff(1000, 60000, 10)
 const WEBPAGE_PARTITION = 'persist:darshan-webpage-playback'
+// The renderer reports its first measured viewport through the preload bridge.
+// A bounded fallback is required for a crashed/old renderer, but normal kiosk
+// startup must not expose a partially laid out pairing or recovery surface.
+const RENDERER_LAYOUT_ACK_TIMEOUT_MS = 5_000
 let lastBlockedInputLogAt = 0
 let startupConfigError: string | null = null
 let lastReportedActiveSlots = new Map<string, ActiveSlotPlayback>()
 let servicesInitialized = false
+let readyToShowWindow: BrowserWindow | null = null
+let rendererLayoutAcknowledgedWindow: BrowserWindow | null = null
+let rendererLayoutAckTimer: NodeJS.Timeout | undefined
+
+function clearRendererLayoutAckTimer(): void {
+  if (rendererLayoutAckTimer) clearTimeout(rendererLayoutAckTimer)
+  rendererLayoutAckTimer = undefined
+}
+
+function showWindowAfterRendererLayout(window: BrowserWindow, source: 'viewport-ack' | 'safe-timeout'): void {
+  if (window.isDestroyed() || readyToShowWindow !== window) return
+  clearRendererLayoutAckTimer()
+  readyToShowWindow = null
+  window.show()
+  logger.info({ source }, 'Main window shown after kiosk layout gate')
+  restartBackoff.reset()
+}
 
 function buildStartupConfigStatus(): PlayerStatus {
   return {
@@ -67,9 +93,7 @@ function buildStartupConfigStatus(): PlayerStatus {
     online: false,
     deviceId: config.getConfig().deviceId || undefined,
     backendAvailable: false,
-    error:
-      startupConfigError ||
-      'Backend configuration is required before this player can pair or start playback.',
+    error: startupConfigError || 'Backend configuration is required before this player can pair or start playback.',
   }
 }
 
@@ -77,6 +101,7 @@ function buildStartupPresentationSnapshot(): PlayerPresentationSnapshot {
   return {
     revision: 0,
     status: buildStartupConfigStatus(),
+    display: getDisplayManager().getProfile(),
   }
 }
 
@@ -84,7 +109,7 @@ function broadcastPlayerStatus(status: PlayerStatus): void {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) {
       win.webContents.send('player-status', status)
-      win.webContents.send('player-presentation', { revision: 0, status })
+      win.webContents.send('player-presentation', { revision: 0, status, display: getDisplayManager().getProfile() })
     }
   })
 }
@@ -122,7 +147,9 @@ function isSafeEmbeddedContentUrl(url: string): boolean {
 
 function shouldHardenDebugSurfaces(appConfig?: AppConfig): boolean {
   const runtimeMode = appConfig ? getRuntimeMode(appConfig) : undefined
-  return app.isPackaged || process.env['NODE_ENV'] === 'production' || runtimeMode === 'production' || runtimeMode === 'qa'
+  return (
+    app.isPackaged || process.env['NODE_ENV'] === 'production' || runtimeMode === 'production' || runtimeMode === 'qa'
+  )
 }
 
 function isDevToolsShortcut(input: Electron.Input): boolean {
@@ -323,12 +350,14 @@ function applyRuntimeInteractionPolicy(window: BrowserWindow, appConfig: AppConf
   if (shouldHideCursor) {
     const pointerRules = policy.disableInput ? 'pointer-events: none !important;' : ''
     window.webContents
-      .insertCSS(`
+      .insertCSS(
+        `
         * {
           cursor: none !important;
           ${pointerRules}
         }
-      `)
+      `
+      )
       .catch((error) => {
         logger.error({ error, mode }, 'Failed to apply runtime interaction policy')
       })
@@ -342,10 +371,9 @@ function createWindow(): void {
   const appConfig = config.getConfig()
   const mode = getRuntimeMode(appConfig)
   const windowPolicy = getRuntimeWindowPolicy(mode)
-  const primaryDisplay = screen.getPrimaryDisplay()
-  const { width, height } = primaryDisplay.workAreaSize
-  const windowWidth = windowPolicy.kiosk ? width : Math.min(width, 1440)
-  const windowHeight = windowPolicy.kiosk ? height : Math.min(height, 900)
+  const initialBounds = getDisplayManager().getInitialWindowBounds()
+  const windowWidth = windowPolicy.kiosk ? initialBounds.width : Math.min(initialBounds.width, 1440)
+  const windowHeight = windowPolicy.kiosk ? initialBounds.height : Math.min(initialBounds.height, 900)
   const iconPath = getAppIconPath()
 
   logger.info(
@@ -353,11 +381,15 @@ function createWindow(): void {
     'Creating main window'
   )
 
+  rendererLayoutAcknowledgedWindow = null
+  clearRendererLayoutAckTimer()
   mainWindow = new BrowserWindow({
+    x: initialBounds.x,
+    y: initialBounds.y,
     width: windowWidth,
     height: windowHeight,
     icon: iconPath,
-    center: true,
+    center: false,
     fullscreen: windowPolicy.fullscreen,
     kiosk: windowPolicy.kiosk,
     frame: windowPolicy.frame,
@@ -410,7 +442,8 @@ function createWindow(): void {
     )
     void mainWindow.loadURL(`data:text/plain,${message}`)
   } else {
-    mainWindow.loadFile(rendererPath)
+    mainWindow
+      .loadFile(rendererPath)
       .then(() => {
         logger.info('Renderer HTML loaded successfully')
         if (servicesInitialized && mainWindow && !mainWindow.isDestroyed()) {
@@ -428,15 +461,30 @@ function createWindow(): void {
       })
   }
 
-  // Show window when ready
+  // The renderer must finish its first density/overflow measurement before a
+  // kiosk becomes visible. Older or failed renderers remain recoverable via a
+  // deliberate safety timeout instead of leaving a black display indefinitely.
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
-    logger.info('Main window shown')
-    restartBackoff.reset()
+    const window = mainWindow
+    if (!window || window.isDestroyed()) return
+    readyToShowWindow = window
+    if (rendererLayoutAcknowledgedWindow === window) {
+      showWindowAfterRendererLayout(window, 'viewport-ack')
+      return
+    }
+    rendererLayoutAckTimer = setTimeout(() => {
+      showWindowAfterRendererLayout(window, 'safe-timeout')
+    }, RENDERER_LAYOUT_ACK_TIMEOUT_MS)
   })
 
   // Handle window closed
   mainWindow.on('closed', () => {
+    if (readyToShowWindow === mainWindow) {
+      readyToShowWindow = null
+      clearRendererLayoutAckTimer()
+    }
+    if (rendererLayoutAcknowledgedWindow === mainWindow) rendererLayoutAcknowledgedWindow = null
+    getDisplayManager().detachWindow(mainWindow ?? undefined)
     mainWindow = null
     logger.info('Main window closed')
   })
@@ -484,6 +532,7 @@ function createWindow(): void {
 
   applyRuntimeInteractionPolicy(mainWindow, appConfig)
   applyDebugSurfacePolicy(mainWindow, appConfig)
+  getDisplayManager().attachWindow(mainWindow)
 }
 
 /**
@@ -666,7 +715,12 @@ function setupIPCHandlers(): void {
 
   ipcMain.handle('player-action', async (_event: any, action: string, payload?: any) => {
     const { getPlayerFlow } = await import('./services/player-flow.js')
-    if (action === 'retry-recovery' || action === 're-pair' || action === 'reset-doubtful-pairing' || action === 'refresh-pairing') {
+    if (
+      action === 'retry-recovery' ||
+      action === 're-pair' ||
+      action === 'reset-doubtful-pairing' ||
+      action === 'refresh-pairing'
+    ) {
       await getPlayerFlow().performAction(action, payload)
       return getPlayerFlow().getStatus()
     }
@@ -759,48 +813,53 @@ function setupIPCHandlers(): void {
     }
   })
 
-  ipcMain.on('player-active-playback', async (_event: any, payload: { sceneId?: string; activeSlots?: ActiveSlotPlayback[] }) => {
-    try {
-      const { getTelemetryService } = await import('./services/telemetry/telemetry-service.js')
-      const { getProofOfPlayService } = await import('./services/pop-service.js')
-      const { getCacheManager } = await import('./services/cache/cache-manager.js')
+  ipcMain.on(
+    'player-active-playback',
+    async (_event: any, payload: { sceneId?: string; activeSlots?: ActiveSlotPlayback[] }) => {
+      try {
+        const { getTelemetryService } = await import('./services/telemetry/telemetry-service.js')
+        const { getProofOfPlayService } = await import('./services/pop-service.js')
+        const { getCacheManager } = await import('./services/cache/cache-manager.js')
 
-      const sceneId = typeof payload?.sceneId === 'string' ? payload.sceneId : undefined
-      const activeSlots = Array.isArray(payload?.activeSlots) ? payload.activeSlots : []
-      const nextSlots = new Map(activeSlots.map((slot) => [slot.playback_instance_id, slot]))
+        const sceneId = typeof payload?.sceneId === 'string' ? payload.sceneId : undefined
+        const activeSlots = Array.isArray(payload?.activeSlots) ? payload.activeSlots : []
+        const nextSlots = new Map(activeSlots.map((slot) => [slot.playback_instance_id, slot]))
 
-      const popService = getProofOfPlayService()
-      for (const playbackInstanceId of lastReportedActiveSlots.keys()) {
-        if (!nextSlots.has(playbackInstanceId)) {
-          popService.recordEnd(playbackInstanceId, true)
+        const popService = getProofOfPlayService()
+        for (const playbackInstanceId of lastReportedActiveSlots.keys()) {
+          if (!nextSlots.has(playbackInstanceId)) {
+            popService.recordEnd(playbackInstanceId, true)
+          }
         }
+
+        for (const [playbackInstanceId, slot] of nextSlots.entries()) {
+          if (lastReportedActiveSlots.has(playbackInstanceId)) {
+            continue
+          }
+          if (!slot.schedule_id || !slot.media_id) {
+            continue
+          }
+          popService.recordStart({
+            scheduleId: slot.schedule_id,
+            mediaId: slot.media_id,
+            playbackInstanceId,
+            sceneId: slot.scene_id,
+            slotId: slot.slot_id,
+            itemId: slot.item_id,
+            startedAt: slot.started_at,
+          })
+        }
+
+        lastReportedActiveSlots = nextSlots
+        getTelemetryService().setActivePlayback(sceneId, activeSlots)
+        getCacheManager().replaceNowPlaying(
+          activeSlots.map((slot) => slot.media_id).filter((mediaId): mediaId is string => Boolean(mediaId))
+        )
+      } catch (error) {
+        logger.warn({ error }, 'Failed to process active playback update from renderer')
       }
-
-      for (const [playbackInstanceId, slot] of nextSlots.entries()) {
-        if (lastReportedActiveSlots.has(playbackInstanceId)) {
-          continue
-        }
-        if (!slot.schedule_id || !slot.media_id) {
-          continue
-        }
-        popService.recordStart({
-          scheduleId: slot.schedule_id,
-          mediaId: slot.media_id,
-          playbackInstanceId,
-          sceneId: slot.scene_id,
-          slotId: slot.slot_id,
-          itemId: slot.item_id,
-          startedAt: slot.started_at,
-        })
-      }
-
-      lastReportedActiveSlots = nextSlots
-      getTelemetryService().setActivePlayback(sceneId, activeSlots)
-      getCacheManager().replaceNowPlaying(activeSlots.map((slot) => slot.media_id).filter((mediaId): mediaId is string => Boolean(mediaId)))
-    } catch (error) {
-      logger.warn({ error }, 'Failed to process active playback update from renderer')
     }
-  })
+  )
 
   ipcMain.on('player-playback-progress', async (_event: any, payload: unknown) => {
     try {
@@ -808,6 +867,15 @@ function setupIPCHandlers(): void {
       await getPlaybackProgressStore().record(payload)
     } catch (error) {
       logger.warn({ error }, 'Failed to persist playback progress update from renderer')
+    }
+  })
+
+  ipcMain.on('player-viewport', (event: any, payload: unknown) => {
+    getDisplayManager().reportViewport((payload || {}) as Record<string, unknown>)
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (senderWindow && senderWindow === mainWindow) {
+      rendererLayoutAcknowledgedWindow = senderWindow
+      showWindowAfterRendererLayout(senderWindow, 'viewport-ack')
     }
   })
 
@@ -862,6 +930,7 @@ async function cleanup(): Promise<void> {
     await cacheManager.cleanup()
 
     getPowerManager().cleanup()
+    getDisplayManager().stop()
 
     logger.info('Cleanup completed')
   } catch (error) {
@@ -892,6 +961,18 @@ app.on('ready', async () => {
     }
     await applyConfigToPowerManager(config.getConfig())
     configureWebpageSession()
+    const displayManager = getDisplayManager()
+    displayManager.start()
+    displayManager.onChange(() => {
+      if (servicesInitialized) {
+        void import('./services/player-flow.js')
+          .then(({ getPlayerFlow }) => getPlayerFlow().refreshPresentation())
+          .catch((error) => logger.warn({ error }, 'Failed to publish display state to renderer'))
+        void import('./services/telemetry/heartbeat.js')
+          .then(({ getHeartbeatService }) => getHeartbeatService().sendImmediate())
+          .catch((error) => logger.warn({ error }, 'Failed to send updated display profile heartbeat'))
+      }
+    })
     setupIPCHandlers()
     createWindow()
     await initializeServices()

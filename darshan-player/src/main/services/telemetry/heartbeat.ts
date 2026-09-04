@@ -8,6 +8,7 @@ import { ActiveSlotPlayback, Command, DeviceApiError, HeartbeatPayload, SystemSt
 import { getHttpClient } from '../network/http-client'
 import { getRequestQueue } from '../network/request-queue'
 import { getPairingService } from '../pairing-service'
+import { getDisplayManager } from '../display-manager'
 import { getSystemStatsCollector } from './system-stats'
 import { getDeviceStateStore } from '../device-state-store'
 import { getLifecycleEvents } from '../lifecycle-events'
@@ -25,6 +26,7 @@ export class HeartbeatService {
   private currentSceneId?: string
   private activeSlots: ActiveSlotPlayback[] = []
   private inFlightHeartbeat?: Promise<void>
+  private followUpRequested = false
 
   /**
    * Start heartbeat service
@@ -100,9 +102,14 @@ export class HeartbeatService {
 
   private sendHeartbeatSingleFlight(source: 'scheduled' | 'immediate'): Promise<void> {
     if (this.inFlightHeartbeat) {
-      if (source === 'scheduled') {
-        logger.debug('Skipping overlapping scheduled heartbeat; existing send is still in flight')
+      // The next payload is assembled immediately before sending. This avoids
+      // replaying stale geometry while retaining bounded one-follow-up work.
+      // Count the coalesced follow-up once, rather than over-counting every
+      // timer/immediate trigger that arrives during the same request.
+      if (!this.followUpRequested) {
+        this.followUpRequested = true
         getPlayerMetrics().safeRecordHeartbeat('skipped_in_flight', 0)
+        logger.debug({ source }, 'Heartbeat changed while one was in flight; queued one current-state follow-up')
       }
       return this.inFlightHeartbeat
     }
@@ -110,6 +117,10 @@ export class HeartbeatService {
     const heartbeatPromise = this.sendHeartbeat().finally(() => {
       if (this.inFlightHeartbeat === heartbeatPromise) {
         this.inFlightHeartbeat = undefined
+        if (this.followUpRequested) {
+          this.followUpRequested = false
+          void this.sendHeartbeatSingleFlight('immediate')
+        }
       }
     })
     this.inFlightHeartbeat = heartbeatPromise
@@ -204,6 +215,7 @@ export class HeartbeatService {
       install_instance_id: identitySession?.installInstanceId ?? getDeviceStateStore().getState().installInstanceId,
       runtime_session_id: getPairingService().getRuntimeSessionId(),
       player_version: getPairingService().getDeviceInfo().appVersion,
+      display_profile_v1: getDisplayManager().getProfile(),
     }
   }
 

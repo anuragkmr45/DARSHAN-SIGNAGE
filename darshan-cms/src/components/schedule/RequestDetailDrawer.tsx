@@ -27,9 +27,11 @@ import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { useAuthorization } from "@/hooks/useAuthorization";
 import { useToast } from "@/hooks/use-toast";
 import { scheduleRequestsApi } from "@/api/domains/scheduleRequests";
+import { schedulesApi } from "@/api/domains/schedules";
 import { queryKeys } from "@/api/queryKeys";
-import type { MediaAsset, ScheduleRequestListItem } from "@/api/types";
+import type { DisplayPreflightResponse, MediaAsset, ScheduleRequestListItem } from "@/api/types";
 import { MediaPreview } from "@/components/common/MediaPreview";
+import { AspectFrame } from "@/components/common/AspectFrame";
 import { resolveMediaDisplayName } from "@/lib/media";
 
 interface RequestDetailDrawerProps {
@@ -37,7 +39,7 @@ interface RequestDetailDrawerProps {
   onClose: () => void;
 }
 
-type ActionType = "approve" | "reject" | "approve_publish" | "take_down";
+type ActionType = "approve" | "reject" | "approve_publish" | "take_down" | "aspect_override" | "approve_publish_aspect_override";
 
 type LayoutSlot = {
   id: string;
@@ -87,13 +89,6 @@ const resolveContentType = (media: MediaAsset): ContentType => {
   return "document";
 };
 
-const parseAspectRatio = (value?: string) => {
-  if (!value) return 16 / 9;
-  const parts = value.split(":").map((part) => Number(part));
-  if (parts.length !== 2 || parts.some((part) => Number.isNaN(part) || part <= 0)) return 16 / 9;
-  return parts[0] / parts[1];
-};
-
 const normalizeLayoutSlots = (spec?: unknown): LayoutSlot[] => {
   if (!spec) return [];
   if (Array.isArray(spec)) return spec as LayoutSlot[];
@@ -112,6 +107,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   const [actionDialog, setActionDialog] = useState<ActionType | null>(null);
   const [actionComment, setActionComment] = useState("");
   const [previewMedia, setPreviewMedia] = useState<MediaAsset | null>(null);
+  const [displayPreflight, setDisplayPreflight] = useState<DisplayPreflightResponse | null>(null);
 
   useEffect(() => {
     setCurrentRequest(request);
@@ -138,7 +134,6 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   const primaryPresentation = presentations[0];
   const layoutSpec = primaryPresentation?.layout?.spec;
   const layoutSlots = normalizeLayoutSlots(layoutSpec);
-  const layoutAspectRatio = parseAspectRatio(primaryPresentation?.layout?.aspect_ratio);
 
   const slotsForPresentation = useMemo(() => {
     if (!primaryPresentation?.id) return presentationSlots;
@@ -211,7 +206,10 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   });
 
   const publishMutation = useMutation({
-    mutationFn: (id: string) => scheduleRequestsApi.publish(id),
+    mutationFn: ({ id, issueHash, reason }: { id: string; issueHash?: string; reason?: string }) => scheduleRequestsApi.publish(
+      id,
+      issueHash ? { aspect_override: { acknowledged: true, issue_hash: issueHash, reason } } : undefined,
+    ),
     onSuccess: () => {
       setCurrentRequest((prev) => ({
         ...prev,
@@ -227,9 +225,12 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   });
 
   const approvePublishMutation = useMutation({
-    mutationFn: async ({ id, comment }: { id: string; comment?: string }) => {
+    mutationFn: async ({ id, comment, issueHash }: { id: string; comment?: string; issueHash?: string }) => {
       await scheduleRequestsApi.approve(id, comment ? { comment } : undefined);
-      return scheduleRequestsApi.publish(id);
+      return scheduleRequestsApi.publish(
+        id,
+        issueHash ? { aspect_override: { acknowledged: true, issue_hash: issueHash, reason: comment } } : undefined,
+      );
     },
     onSuccess: () => {
       setCurrentRequest((prev) => ({
@@ -293,17 +294,63 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
       rejectMutation.mutate({ id: currentRequest.id, comment });
     }
     if (actionDialog === "approve_publish") {
-      approvePublishMutation.mutate({ id: currentRequest.id, comment });
+      void handleApproveAndPublish(comment);
     }
     if (actionDialog === "take_down") {
       takeDownMutation.mutate({ id: currentRequest.id, reason: comment });
+    }
+    if (actionDialog === "aspect_override" && displayPreflight?.issue_hash) {
+      publishMutation.mutate({ id: currentRequest.id, issueHash: displayPreflight.issue_hash, reason: comment });
+      setDisplayPreflight(null);
+    }
+    if (actionDialog === "approve_publish_aspect_override" && displayPreflight?.issue_hash) {
+      approvePublishMutation.mutate({ id: currentRequest.id, comment, issueHash: displayPreflight.issue_hash });
+      setDisplayPreflight(null);
     }
     setActionDialog(null);
     setActionComment("");
   };
 
-  const handlePublish = () => {
-    publishMutation.mutate(currentRequest.id);
+  const handlePublish = async () => {
+    const scheduleId = currentRequest.schedule_id || currentRequest.schedule?.id;
+    if (!scheduleId) {
+      publishMutation.mutate({ id: currentRequest.id });
+      return;
+    }
+    try {
+      const preflight = await schedulesApi.displayPreflight({ schedule_id: scheduleId });
+      if (preflight.compatible || !preflight.issue_hash) {
+        publishMutation.mutate({ id: currentRequest.id });
+        return;
+      }
+      setDisplayPreflight(preflight);
+      setActionComment("");
+      setActionDialog("aspect_override");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to run display preflight.";
+      toast({ title: "Display preflight failed", description: message, variant: "destructive" });
+    }
+  };
+
+  const handleApproveAndPublish = async (comment?: string) => {
+    const scheduleId = currentRequest.schedule_id || currentRequest.schedule?.id;
+    if (!scheduleId) {
+      approvePublishMutation.mutate({ id: currentRequest.id, comment });
+      return;
+    }
+    try {
+      const preflight = await schedulesApi.displayPreflight({ schedule_id: scheduleId });
+      if (preflight.compatible || !preflight.issue_hash) {
+        approvePublishMutation.mutate({ id: currentRequest.id, comment });
+        return;
+      }
+      setDisplayPreflight(preflight);
+      setActionComment(comment || "");
+      setActionDialog("approve_publish_aspect_override");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to run display preflight.";
+      toast({ title: "Display preflight failed", description: message, variant: "destructive" });
+    }
   };
 
   const showScheduleOverview = Boolean(currentRequest.schedule);
@@ -701,9 +748,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   <CardTitle className="text-base">Layout Preview</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div
-                    className="relative border-2 rounded-lg bg-muted/30 mx-auto"
-                    style={{ width: 280, height: 280 / layoutAspectRatio }}
+                  <AspectFrame
+                    aspectRatio={primaryPresentation?.layout?.aspect_ratio}
+                    className="relative w-[280px] max-w-full overflow-hidden rounded-lg border-2 bg-muted/30 mx-auto"
                   >
                     {layoutSlots.map((slot) => {
                       const media = slotMediaById.get(slot.id);
@@ -730,12 +777,12 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                             <img
                               src={media?.media_url ?? ""}
                               alt={mediaLabel || "Media"}
-                              className="h-full w-full object-cover"
+                              className="h-full w-full object-contain"
                             />
                           ) : isVideo ? (
                             <video
                               src={media?.media_url ?? ""}
-                              className="h-full w-full object-cover"
+                              className="h-full w-full object-contain"
                               muted
                               preload="metadata"
                             />
@@ -759,7 +806,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                         </div>
                       );
                     })}
-                  </div>
+                  </AspectFrame>
                 </CardContent>
               </Card>
             )}
@@ -769,19 +816,19 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                 <h3 className="font-semibold mb-3">Target Screens ({screens.length})</h3>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {screens.map((screen) => (
-                    <div
-                      key={screen.id}
-                      className="aspect-[9/16] bg-muted rounded-lg border border-border/50 p-3 flex flex-col"
-                    >
-                      <div className="flex-1 w-full overflow-hidden rounded-md border border-border/30 mb-3">
+                    <div key={screen.id} className="bg-muted rounded-lg border border-border/50 p-3">
+                      <AspectFrame
+                        aspectRatio={screen.aspect_ratio}
+                        className="w-full overflow-hidden rounded-md border border-border/30 mb-3"
+                      >
                           {screenPreviewMedia ? (
-                            <MediaPreview media={screenPreviewMedia} className="w-full h-full object-cover" />
+                            <MediaPreview media={screenPreviewMedia} className="w-full h-full object-contain" />
                           ) : (
                           <div className="h-full w-full flex items-center justify-center text-xs text-muted-foreground">
                             No preview
                           </div>
                         )}
-                      </div>
+                      </AspectFrame>
                       <div className="space-y-1 text-center">
                         <p className="text-xs font-medium">{screen.name}</p>
                         <p className="text-xs text-muted-foreground">{screen.id}</p>
@@ -829,17 +876,30 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
               {actionDialog === "approve" && "Approve request"}
               {actionDialog === "reject" && "Reject request"}
               {actionDialog === "approve_publish" && "Approve & publish"}
+              {actionDialog === "approve_publish_aspect_override" && "Approve & confirm letterboxing"}
               {actionDialog === "take_down" && "Take down published schedule"}
+              {actionDialog === "aspect_override" && "Confirm letterboxing"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               {actionDialog === "take_down"
                 ? "This published schedule will be removed from all targeted screens. If another published schedule still applies, it will become active automatically; otherwise the screen falls back to default media."
+                : actionDialog === "aspect_override" || actionDialog === "approve_publish_aspect_override"
+                  ? `${displayPreflight?.issues.length ?? 0} target presentation/display combination(s) will letterbox. Review the predicted unused area and explicitly confirm this current preflight result.`
                 : "Add an optional note for this action."}
             </p>
+            {(actionDialog === "aspect_override" || actionDialog === "approve_publish_aspect_override") && displayPreflight?.issues.length ? (
+              <div className="max-h-36 space-y-1 overflow-y-auto rounded border bg-muted/30 p-2 text-xs">
+                {displayPreflight.issues.map((issue) => (
+                  <p key={`${issue.screen_id}-${issue.presentation_id}`}>
+                    {issue.layout_aspect_ratio} → {issue.screen_aspect_ratio?.toFixed(3) ?? "unknown"}; unused area {issue.usable_area_fraction === null ? "unknown" : `${((1 - issue.usable_area_fraction) * 100).toFixed(1)}%`}.
+                  </p>
+                ))}
+              </div>
+            ) : null}
             <label className="text-sm text-muted-foreground">
-              {actionDialog === "take_down" ? "Reason (optional)" : "Comment (optional)"}
+              {actionDialog === "take_down" ? "Reason (optional)" : actionDialog === "aspect_override" || actionDialog === "approve_publish_aspect_override" ? "Confirmation reason (optional)" : "Comment (optional)"}
             </label>
             <Textarea
               value={actionComment}
@@ -847,6 +907,8 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
               placeholder={
                 actionDialog === "take_down"
                   ? "Add an optional takedown note"
+                  : actionDialog === "aspect_override" || actionDialog === "approve_publish_aspect_override"
+                    ? "Optional reason for accepting letterboxing"
                   : "Add a note for this action"
               }
               rows={4}

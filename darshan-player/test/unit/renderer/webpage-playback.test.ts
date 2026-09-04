@@ -72,6 +72,8 @@ describe('Webpage playback helpers', () => {
       textLength: 0,
       mediaCount: 0,
       visibleElementCount: 1,
+      overflowX: false,
+      overflowY: false,
     })
 
     expect(ready).to.equal(false)
@@ -86,9 +88,26 @@ describe('Webpage playback helpers', () => {
       textLength: 56,
       mediaCount: 0,
       visibleElementCount: 3,
+      overflowX: false,
+      overflowY: false,
     })
 
     expect(ready).to.equal(true)
+  })
+
+  it('keeps the fallback visible when the webpage overflows its slot', async () => {
+    const { shouldRevealLiveWebpage } = loadWebpagePlaybackModule()
+    expect(
+      shouldRevealLiveWebpage({
+        width: 1280,
+        height: 720,
+        textLength: 56,
+        mediaCount: 0,
+        visibleElementCount: 3,
+        overflowX: true,
+        overflowY: false,
+      })
+    ).to.equal(false)
   })
 
   it('redacts credentialed live URLs in renderer webpage logs without changing runtime URL', async () => {

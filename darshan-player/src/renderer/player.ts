@@ -714,15 +714,23 @@ class Player {
     stage.style.overflow = 'hidden'
     stage.style.backgroundColor = '#000'
 
-    const frame = computeSceneStageFrame(scene.aspectRatio, window.innerWidth, window.innerHeight)
-    stage.style.left = `${frame.left}px`
-    stage.style.top = `${frame.top}px`
-    stage.style.width = `${frame.width}px`
-    stage.style.height = `${frame.height}px`
+    const reflowStage = () => {
+      const rect = container.getBoundingClientRect()
+      const width = Math.max(1, rect.width || window.innerWidth)
+      const height = Math.max(1, rect.height || window.innerHeight)
+      const frame = computeSceneStageFrame(scene.aspectRatio, width, height)
+      stage.style.left = `${frame.left}px`
+      stage.style.top = `${frame.top}px`
+      stage.style.width = `${frame.width}px`
+      stage.style.height = `${frame.height}px`
+    }
+    reflowStage()
     stage.dataset['sceneAspectRatio'] = scene.aspectRatio || 'free'
     container.appendChild(stage)
 
     const cleanupCallbacks: Array<() => void> = []
+    const stageResizeObserver = new ResizeObserver(reflowStage)
+    stageResizeObserver.observe(container)
 
     scene.slots.forEach((slot) => {
       const slotContainer = document.createElement('div')
@@ -746,6 +754,7 @@ class Player {
     })
 
     const cleanup = () => {
+      stageResizeObserver.disconnect()
       cleanupCallbacks.forEach((cleanup) => cleanup())
       cleanupCallbacks.length = 0
     }

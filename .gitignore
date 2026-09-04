@@ -18,5 +18,6 @@ deploy/production/*.bundle.env
 deploy/production/bundles/*.env
 deploy/production/observability/prometheus.yml
 deploy/production/docker/.env
+deploy/development/https-gateway/certs/
 deploy/production/docker/observability/prometheus.yml
 deploy/production/.generated/

@@ -7,10 +7,18 @@ const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils.ts')
 describe('Request Queue', () => {
   let tempDir: string
   let sandbox: sinon.SinonSandbox
+  let originalDarshanPlayerConfigFile: string | undefined
+  let originalSignhexPlayerConfigFile: string | undefined
 
   beforeEach(() => {
     sandbox = sinon.createSandbox()
     tempDir = createTempDir('request-queue-test-')
+    // Avoid leaking a provisioned player's site configuration into this
+    // isolated queue-budget fixture.
+    originalDarshanPlayerConfigFile = process.env.DARSHAN_PLAYER_CONFIG_FILE
+    originalSignhexPlayerConfigFile = process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
 
     process.env.HEXMON_CONFIG_PATH = path.join(tempDir, 'config.json')
     fs.writeFileSync(
@@ -48,6 +56,16 @@ describe('Request Queue', () => {
   afterEach(async () => {
     sandbox.restore()
     delete process.env.HEXMON_CONFIG_PATH
+    if (originalDarshanPlayerConfigFile === undefined) {
+      delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    } else {
+      process.env.DARSHAN_PLAYER_CONFIG_FILE = originalDarshanPlayerConfigFile
+    }
+    if (originalSignhexPlayerConfigFile === undefined) {
+      delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    } else {
+      process.env.SIGNHEX_PLAYER_CONFIG_FILE = originalSignhexPlayerConfigFile
+    }
 
     try {
       const { getRequestQueue } = require('../../../src/main/services/network/request-queue')
@@ -133,8 +151,12 @@ describe('Request Queue', () => {
 
     await requestQueue.flush()
 
-    expect(postStub.callCount).to.equal(5)
-    expect(requestQueue.getSize()).to.equal(8)
+    // Heartbeats are state snapshots, so enqueue compacts ten observations to
+    // the newest one. A replay batch still keeps screenshot work paced at one
+    // item while sending the current heartbeat immediately.
+    expect(postStub.callCount).to.equal(2)
+    expect(postStub.firstCall.args[1]).to.deep.include({ seq: 9 })
+    expect(requestQueue.getSize()).to.equal(2)
   })
 
   it('returns false when an incoming request cannot fit within queue budgets', async () => {

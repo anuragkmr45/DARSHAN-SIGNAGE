@@ -20,6 +20,7 @@ import type {
   ScreenListSummaryResponse,
   ScreenDeliveryStatus,
   ScreenMediaCacheReportsResponse,
+  ScreenDisplayState,
 } from "../types";
 
 export const screensApi = {
@@ -154,6 +155,22 @@ export const screensApi = {
       path: endpoints.screens.screenshot(screenId),
       method: "POST",
       body: payload ?? {},
+    }),
+
+  getDisplayState: (screenId: string) =>
+    apiClient.request<ScreenDisplayState>({
+      path: endpoints.screens.displayState(screenId),
+      method: "GET",
+    }),
+
+  setDisplaySelection: (
+    screenId: string,
+    payload: { mode: "PRIMARY" } | { mode: "PINNED"; display_key: string; expected_profile_revision: number },
+  ) =>
+    apiClient.request<ScreenDisplayState>({
+      path: endpoints.screens.displaySelection(screenId),
+      method: "PUT",
+      body: payload,
     }),
 
   getGroupSnapshot: (groupId: string, includeUrls = true) =>

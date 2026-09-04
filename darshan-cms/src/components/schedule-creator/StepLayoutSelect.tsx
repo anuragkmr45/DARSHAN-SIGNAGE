@@ -21,6 +21,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { useDebounce } from "@/hooks/use-debounce";
 import type { ScreenAspectRatio } from "@/api/types";
 import type { Layout } from "@/pages/Layouts";
+import { AspectFrame } from "@/components/common/AspectFrame";
 
 interface StepLayoutSelectProps {
   selectedLayout: Layout | null;
@@ -96,15 +97,8 @@ export function StepLayoutSelect({ selectedLayout, onSelectLayout }: StepLayoutS
   };
 
   const renderLayoutPreview = (layout: Layout) => {
-    const aspectRatio = layout.aspect_ratio === "9:16" ? 9 / 16 : 16 / 9;
-    const previewWidth = 120;
-    const previewHeight = previewWidth / aspectRatio;
-
     return (
-      <div
-        className="relative border rounded bg-muted/30"
-        style={{ width: previewWidth, height: previewHeight }}
-      >
+      <AspectFrame aspectRatio={layout.aspect_ratio} className="relative w-[120px] max-w-full border rounded bg-muted/30">
         {layout.spec.slots.map((slot) => (
           <div
             key={slot.id}
@@ -119,7 +113,7 @@ export function StepLayoutSelect({ selectedLayout, onSelectLayout }: StepLayoutS
             {slot.id}
           </div>
         ))}
-      </div>
+      </AspectFrame>
     );
   };
 

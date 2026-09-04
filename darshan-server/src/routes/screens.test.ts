@@ -8,6 +8,7 @@ import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { HTTP_STATUS } from '@/http-status-codes';
 import * as s3 from '@/s3';
+import { recordDisplayProfile } from '@/services/screen-display-state-service';
 
 async function issueAdminToken() {
   const db = getDatabase();
@@ -24,6 +25,7 @@ async function issueAdminToken() {
   for (const grant of [
     { action: 'create', subject: 'Screen' },
     { action: 'read', subject: 'Screen' },
+    { action: 'update', subject: 'Screen' },
     { action: 'delete', subject: 'Screen' },
     { action: 'read', subject: 'Dashboard' },
   ]) {
@@ -125,6 +127,101 @@ describe('Screens routes realtime playback bootstrap', () => {
     expect(body.success).toBe(false);
     expect(body.error.code).toBe('CONFLICT');
     expect(body.error.message).toContain('device completes pairing');
+  });
+
+  it('returns display authority state and dispatches an idempotent active-display command', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    const runtimeSessionId = randomUUID();
+    const output = {
+      key: 'platform:1',
+      electron_id: '1',
+      identity_confidence: 'PLATFORM' as const,
+      label: 'Lobby display',
+      detected: true,
+      internal: false,
+      primary: true,
+      bounds_dip: { x: 0, y: 0, width: 1920, height: 1080 },
+      work_area_dip: { x: 0, y: 0, width: 1920, height: 1040 },
+      scale_factor: 1,
+      estimated_backing_px: { width: 1920, height: 1080 },
+      native_mode_px: { width: 1920, height: 1080 },
+      rotation_degrees: 0,
+      refresh_rate_hz: 60,
+      orientation: 'LANDSCAPE' as const,
+      aspect: {
+        exact_key: '16:9',
+        numeric_value: 16 / 9,
+        match_key: '16:9',
+        relative_error: 0,
+        normalizer_version: 1 as const,
+      },
+    };
+
+    await db.insert(schema.screens).values({ id: screenId, name: `Display API ${screenId}`, status: 'ACTIVE' });
+    await recordDisplayProfile(screenId, {
+      schema_version: 1,
+      runtime_session_id: runtimeSessionId,
+      observation_seq: 1,
+      observed_at: '2026-01-01T00:00:00.000Z',
+      selection: {
+        mode: 'PRIMARY',
+        preferred_key: null,
+        active_key: output.key,
+        fallback_used: false,
+        fallback_reason: null,
+      },
+      placement: 'VERIFIED',
+      output,
+      inventory: [output],
+      viewport: null,
+    });
+
+    const stateResponse = await server.inject({
+      method: 'GET',
+      url: `/api/v1/screens/${screenId}/display-state`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(stateResponse.statusCode).toBe(HTTP_STATUS.OK);
+    const state = JSON.parse(stateResponse.body) as any;
+    expect(state).toEqual(
+      expect.objectContaining({
+        screen_id: screenId,
+        profile_revision: 1,
+        placement: 'VERIFIED',
+        active_display_key: output.key,
+      }),
+    );
+    expect(state.profile.inventory).toEqual([expect.objectContaining({ key: output.key })]);
+
+    const selectionResponse = await server.inject({
+      method: 'PUT',
+      url: `/api/v1/screens/${screenId}/display-selection`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        mode: 'PINNED',
+        display_key: output.key,
+        expected_profile_revision: state.profile_revision,
+      },
+    });
+    expect(selectionResponse.statusCode).toBe(HTTP_STATUS.OK);
+    const selected = JSON.parse(selectionResponse.body) as any;
+    expect(selected.desired_selection).toEqual({ mode: 'PINNED', preferred_key: output.key });
+    expect(selected.selection_version).toBe(2);
+    expect(selected.command).toEqual(expect.objectContaining({ type: 'SET_ACTIVE_DISPLAY', status: 'PENDING' }));
+
+    const staleResponse = await server.inject({
+      method: 'PUT',
+      url: `/api/v1/screens/${screenId}/display-selection`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        mode: 'PINNED',
+        display_key: output.key,
+        expected_profile_revision: 0,
+      },
+    });
+    expect(staleResponse.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(staleResponse.body).error.details.code).toBe('DISPLAY_PROFILE_STALE');
   });
 
   it('returns paginated screen summaries from the list endpoint with server-side search', async () => {

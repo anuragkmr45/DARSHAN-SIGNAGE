@@ -35,7 +35,8 @@ type CommandType =
   | 'SCREENSHOT'
   | 'CLEAR_CACHE'
   | 'PING'
-  | 'RESYNC';
+  | 'RESYNC'
+  | 'SET_ACTIVE_DISPLAY';
 
 export type CommandAckInput = {
   delivery_token?: string;

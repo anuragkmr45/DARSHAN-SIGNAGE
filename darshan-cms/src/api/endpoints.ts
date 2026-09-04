@@ -144,6 +144,7 @@ export const endpoints = {
     takeDownPublish: (publishId: string) => `/publishes/${publishId}/take-down`,
     publishesForSchedule: (scheduleId: string) => `/schedules/${scheduleId}/publishes`,
     publishTarget: (publishId: string, targetId: string) => `/publishes/${publishId}/targets/${targetId}`,
+    displayPreflight: "/schedules/display-preflight",
   },
   scheduleRequests: {
     base: "/schedule-requests",
@@ -171,6 +172,8 @@ export const endpoints = {
     deliveryStatus: (screenId: string) => `/screens/${screenId}/delivery-status`,
     mediaCacheReports: (screenId: string) => `/screens/${screenId}/media-cache-reports/recent`,
     screenshot: (screenId: string) => `/screens/${screenId}/screenshot`,
+    displayState: (screenId: string) => `/screens/${screenId}/display-state`,
+    displaySelection: (screenId: string) => `/screens/${screenId}/display-selection`,
     groups: "/screen-groups",
     groupById: (groupId: string) => `/screen-groups/${groupId}`,
     aspectRatios: "/screens/aspect-ratios",

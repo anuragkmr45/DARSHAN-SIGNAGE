@@ -7,6 +7,7 @@ import type {
   Schedule,
   ScheduleItem,
   ScheduleItemPayload,
+  DisplayPreflightResponse,
 } from "../types";
 
 export interface SchedulePayload {
@@ -48,10 +49,17 @@ export const schedulesApi = {
 
   publish: (
     scheduleId: string,
-    payload: { screen_ids?: string[]; screen_group_ids?: string[] },
+    payload: { screen_ids?: string[]; screen_group_ids?: string[]; aspect_override?: { acknowledged: true; issue_hash: string; reason?: string } },
   ) =>
     apiClient.request<Publish>({
       path: endpoints.schedules.publish(scheduleId),
+      method: "POST",
+      body: payload,
+    }),
+
+  displayPreflight: (payload: { schedule_id: string; screen_ids?: string[]; screen_group_ids?: string[] }) =>
+    apiClient.request<DisplayPreflightResponse>({
+      path: endpoints.schedules.displayPreflight,
       method: "POST",
       body: payload,
     }),

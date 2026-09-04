@@ -36,6 +36,12 @@ import {
   getLatestPublishForScreen,
 } from '@/screens/playback';
 import { emitScreensRefreshRequired, setupScreensNamespace } from '@/realtime/screens-namespace';
+import {
+  getScreenDisplayState,
+  serializeDisplayState,
+  updateDisplaySelection,
+} from '@/services/screen-display-state-service';
+import { displaySelectionSchema } from '@/utils/display-profile';
 
 const logger = createLogger('screen-routes');
 const { OK } = HTTP_STATUS;
@@ -907,6 +913,81 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
   // Get screen by ID
   fastify.get<{ Params: { id: string } }>(
+    apiEndpoints.screens.displayState,
+    {
+      schema: {
+        description: 'Get the desired and device-observed display state for a screen',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
+
+        const screenId = (request.params as any).id;
+        const [screen] = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
+        if (!screen) throw AppError.notFound('Screen not found');
+        return reply.send(serializeDisplayState(await getScreenDisplayState(screenId)));
+      } catch (error) {
+        logger.error(error, 'Get screen display state error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.put<{ Params: { id: string } }>(
+    apiEndpoints.screens.displaySelection,
+    {
+      schema: {
+        description: 'Select the primary or one observed output for a screen',
+        tags: ['Screens'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
+
+        const screenId = (request.params as any).id;
+        const [screen] = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
+        if (!screen) throw AppError.notFound('Screen not found');
+
+        const selection = displaySelectionSchema.parse(request.body);
+        const state = await updateDisplaySelection(screenId, selection);
+        const command = await createDeviceCommand({
+          screenId,
+          type: 'SET_ACTIVE_DISPLAY',
+          createdBy: payload.sub,
+          idempotencyKey: `display-selection:${screenId}:${state.selection_version}`,
+          payload: {
+            selection: state.desired_selection,
+            selection_version: state.selection_version,
+            profile_revision: state.profile_revision,
+            reason: 'DISPLAY_SELECTION_CHANGED',
+          },
+        });
+        emitScreensRefreshRequired(fastify, { reason: 'DISPLAY_SELECTION', screen_ids: [screenId] });
+        return reply.send({
+          ...serializeDisplayState(state),
+          command: { id: command.id, status: command.status, type: command.type },
+        });
+      } catch (error) {
+        logger.error(error, 'Update screen display selection error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.get<{ Params: { id: string } }>(
     apiEndpoints.screens.get,
     {
       schema: {
@@ -1633,6 +1714,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
           : [];
 
         const cleanup = await db.transaction(async (tx) => {
+          const displayStateDeleted = await tx
+            .delete(schema.screenDisplayStates)
+            .where(eq(schema.screenDisplayStates.screen_id, screenId));
           const commandsDeleted = await tx.delete(schema.deviceCommands).where(eq(schema.deviceCommands.screen_id, screenId));
           const heartbeatsDeleted = await tx.delete(schema.heartbeats).where(eq(schema.heartbeats.screen_id, screenId));
           const popDeleted = await tx.delete(schema.proofOfPlay).where(eq(schema.proofOfPlay.screen_id, screenId));
@@ -1653,6 +1737,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
           await tx.delete(schema.screens).where(eq(schema.screens.id, screenId));
 
           return {
+            display_state: (displayStateDeleted as any)?.length ?? 0,
             device_commands: (commandsDeleted as any)?.length ?? 0,
             heartbeats: (heartbeatsDeleted as any)?.length ?? 0,
             proof_of_play: (popDeleted as any)?.length ?? 0,

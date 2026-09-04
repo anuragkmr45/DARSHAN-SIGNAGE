@@ -37,9 +37,22 @@ export const publishScheduleSchema = z.object({
   screen_group_ids: z.array(z.string().uuid()).optional(),
   notes: z.string().optional(),
   schedule_request_id: z.string().uuid().optional(),
+  aspect_override: z
+    .object({
+      acknowledged: z.literal(true),
+      issue_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      reason: z.string().min(3).max(500).optional(),
+    })
+    .optional(),
 });
 
 export type PublishScheduleRequest = z.infer<typeof publishScheduleSchema>;
+
+export const displayPreflightSchema = z.object({
+  schedule_id: z.string().uuid(),
+  screen_ids: z.array(z.string().uuid()).optional(),
+  screen_group_ids: z.array(z.string().uuid()).optional(),
+});
 
 export const scheduleResponseSchema = z.object({
   id: z.string().uuid(),

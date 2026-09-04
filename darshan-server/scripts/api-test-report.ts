@@ -1580,6 +1580,12 @@ ${detailBlocks}
 
   writeFileSync(reportPath, markdown, { encoding: 'utf8' });
   console.log(`\nReport written to ${reportPath}`);
+
+  // This command is used by CI as well as local diagnostics. A report is
+  // useful after a failure, but a green process status must never conceal it.
+  if (failed > 0) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {

@@ -661,6 +661,74 @@ export interface Screen {
   updated_at?: string;
 }
 
+export interface DisplayOutputV1 {
+  key: string;
+  label?: string | null;
+  electron_id: string;
+  identity_confidence: "PLATFORM" | "SIGNATURE" | "SESSION";
+  primary: boolean;
+  detected: boolean;
+  bounds_dip: { x: number; y: number; width: number; height: number };
+  work_area_dip: { x: number; y: number; width: number; height: number };
+  scale_factor: number;
+  estimated_backing_px: { width: number; height: number };
+  rotation_degrees: number;
+  refresh_rate_hz?: number | null;
+  orientation: "LANDSCAPE" | "PORTRAIT" | "SQUARE";
+  aspect: { exact_key: string; match_key: string; numeric_value: number; relative_error: number };
+}
+
+export interface DisplayProfileV1 {
+  schema_version: 1;
+  runtime_session_id: string;
+  observation_seq: number;
+  observed_at: string;
+  selection: {
+    mode: "PRIMARY" | "PINNED";
+    preferred_key?: string | null;
+    active_key?: string | null;
+    fallback_used: boolean;
+    fallback_reason?: "TARGET_MISSING" | "AMBIGUOUS_IDENTITY" | "WAYLAND_UNVERIFIED" | null;
+  };
+  placement: "VERIFIED" | "UNVERIFIED" | "HEADLESS";
+  output: DisplayOutputV1 | null;
+  inventory: DisplayOutputV1[];
+  viewport: {
+    width_css_px: number;
+    height_css_px: number;
+    device_pixel_ratio: number;
+    density: "FULL" | "COMPACT" | "MINIMAL";
+    conformant: boolean;
+    omitted_regions: string[];
+  } | null;
+}
+
+export interface ScreenDisplayState {
+  screen_id: string;
+  desired_selection: { mode: "PRIMARY" | "PINNED"; preferred_key?: string | null };
+  selection_version: number;
+  active_display_key?: string | null;
+  placement: "VERIFIED" | "UNVERIFIED" | "HEADLESS" | string;
+  profile: DisplayProfileV1 | null;
+  profile_revision: number;
+  observed_at?: string | null;
+  command?: { id: string; status: string; type: string };
+}
+
+export interface DisplayPreflightResponse {
+  target_screen_ids: string[];
+  compatible: boolean;
+  issue_hash: string | null;
+  issues: Array<{
+    screen_id: string;
+    presentation_id: string;
+    layout_aspect_ratio: string;
+    screen_aspect_ratio: number | null;
+    usable_area_fraction: number | null;
+    profile_revision: number | null;
+  }>;
+}
+
 export interface ScreenFleetSummary {
   server_time?: string;
   total: number;

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 type FakeSocket = {
   auth?: unknown;
@@ -47,9 +47,16 @@ const loadRealtimeSocketModules = async () => {
 describe("CMS realtime socket lifecycle", () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.stubEnv("VITE_API_BASE_URL", "https://build-api.cms.test");
+    vi.stubEnv("VITE_WS_BASE_URL", "https://build-ws.cms.test");
+    vi.stubEnv("VITE_CMS_ENVIRONMENT_NAME", "development");
     socketState.io.mockClear();
     socketState.sockets.length = 0;
     vi.stubGlobal("window", { location: { origin: "https://cms.test" } });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   test("disconnectAllRealtimeSockets disconnects screens, chat, and notifications sockets", async () => {

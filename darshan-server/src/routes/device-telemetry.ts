@@ -53,6 +53,9 @@ import {
   extractDeviceIdentitySessionInput,
   recordDeviceIdentitySession,
 } from '@/services/device-identity-session-service';
+import { recordDisplayProfile } from '@/services/screen-display-state-service';
+import { getScreenDisplayState, serializeDisplayState } from '@/services/screen-display-state-service';
+import { displayProfileV1Schema } from '@/utils/display-profile';
 
 const logger = createLogger('device-telemetry-routes');
 const { CREATED } = HTTP_STATUS;
@@ -133,6 +136,7 @@ const heartbeatSchema = z.object({
   is_charging: z.boolean().optional(),
   power_source: z.enum(['AC', 'BATTERY', 'USB', 'UNKNOWN']).optional(),
   metrics: z.record(z.any()).optional(),
+  display_profile_v1: displayProfileV1Schema.optional(),
 });
 
 const proofOfPlaySchema = z.object({
@@ -198,6 +202,7 @@ const createCommandSchema = z.object({
     'CLEAR_CACHE',
     'PING',
     'RESYNC',
+    'SET_ACTIVE_DISPLAY',
   ]),
   payload: z.record(z.any()).optional(),
   priority: z.number().int().optional(),
@@ -858,6 +863,13 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const screenStatus =
           data.status === 'ONLINE' ? 'ACTIVE' : data.status === 'OFFLINE' ? 'OFFLINE' : 'INACTIVE';
 
+        if (data.display_profile_v1) {
+          const displayWrite = await recordDisplayProfile(data.device_id, data.display_profile_v1);
+          if (!displayWrite.applied) {
+            logger.debug({ deviceId: data.device_id, reason: displayWrite.reason }, 'Ignored stale display profile observation');
+          }
+        }
+
         await db
           .update(schema.screens)
           .set({
@@ -1165,6 +1177,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         await authenticateDeviceOrThrow(request, deviceId);
 
         const state = await getDeviceDesiredState(deviceId);
+        const displayState = await getScreenDisplayState(deviceId);
 
         return reply.send({
           device_id: deviceId,
@@ -1198,6 +1211,14 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             commands: apiEndpoints.deviceTelemetry.commands.replace(':deviceId', deviceId),
             snapshot: `${apiEndpoints.deviceTelemetry.snapshot.replace(':deviceId', deviceId)}?include_urls=true`,
             default_media: apiEndpoints.deviceTelemetry.defaultMedia.replace(':deviceId', deviceId),
+          },
+          display: {
+            desired_selection: displayState.desired_selection,
+            selection_version: displayState.selection_version,
+            profile_revision: displayState.profile_revision,
+            placement: displayState.placement,
+            active_display_key: displayState.active_display_key,
+            state: serializeDisplayState(displayState),
           },
         });
       } catch (error) {

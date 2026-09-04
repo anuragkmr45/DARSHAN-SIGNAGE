@@ -9,6 +9,7 @@ import { promisify } from 'util'
 import { getLogger } from '../../../common/logger'
 import { DisplayTelemetry, NetworkInterface, PowerSource, SystemStats } from '../../../common/types'
 import { getDiskUsage } from '../../../common/utils'
+import { getDisplayManager } from '../display-manager'
 
 const execAsync = promisify(exec)
 const logger = getLogger('system-stats')
@@ -129,7 +130,7 @@ export class SystemStatsCollector {
       }
 
       // Try using sensors command
-      const { stdout } = await execAsync('sensors -u 2>/dev/null | grep temp1_input | head -1 | awk \'{print $2}\'')
+      const { stdout } = await execAsync("sensors -u 2>/dev/null | grep temp1_input | head -1 | awk '{print $2}'")
       const temp = parseFloat(stdout.trim())
       if (!isNaN(temp)) {
         return temp
@@ -175,29 +176,17 @@ export class SystemStatsCollector {
   }
 
   async getDisplays(): Promise<DisplayTelemetry[]> {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { screen } = require('electron') as typeof import('electron')
-      if (!screen || typeof screen.getAllDisplays !== 'function') {
-        return []
-      }
-
-      return screen.getAllDisplays().map((display) => ({
-        id: String(display.id),
-        width: display.bounds.width,
-        height: display.bounds.height,
-        refresh_rate_hz:
-          typeof display.displayFrequency === 'number' && Number.isFinite(display.displayFrequency)
-            ? display.displayFrequency
-            : undefined,
-        orientation: display.rotation === 90 || display.rotation === 270 ? 'portrait' : 'landscape',
-        connected: true,
-        model: display.label || undefined,
+    return getDisplayManager()
+      .getProfile()
+      .inventory.map((display) => ({
+        id: display.key,
+        width: display.estimated_backing_px.width,
+        height: display.estimated_backing_px.height,
+        refresh_rate_hz: display.refresh_rate_hz ?? undefined,
+        orientation: display.orientation === 'PORTRAIT' ? 'portrait' : 'landscape',
+        connected: display.detected,
+        model: display.label ?? undefined,
       }))
-    } catch (error) {
-      logger.debug({ error }, 'Failed to get display information')
-      return []
-    }
   }
 
   async getBatteryInfo(): Promise<
@@ -252,7 +241,8 @@ export class SystemStatsCollector {
     const acOnlineRaw = readValue(acDir, 'online')
 
     const parsedPercent = percentRaw ? Number(percentRaw) : undefined
-    const batteryPercent = typeof parsedPercent === 'number' && Number.isFinite(parsedPercent) ? parsedPercent : undefined
+    const batteryPercent =
+      typeof parsedPercent === 'number' && Number.isFinite(parsedPercent) ? parsedPercent : undefined
     const isCharging =
       statusRaw === 'charging' ? true : statusRaw === 'discharging' ? false : statusRaw === 'full' ? false : undefined
     const powerSource: PowerSource | undefined =
@@ -288,7 +278,8 @@ export class SystemStatsCollector {
     const status = stdout.toLowerCase()
 
     const parsedPercent = percentMatch ? Number(percentMatch[1]) : undefined
-    const batteryPercent = typeof parsedPercent === 'number' && Number.isFinite(parsedPercent) ? parsedPercent : undefined
+    const batteryPercent =
+      typeof parsedPercent === 'number' && Number.isFinite(parsedPercent) ? parsedPercent : undefined
     const isCharging = status.includes('charging') ? true : status.includes('discharging') ? false : undefined
     const powerSource: PowerSource | undefined =
       status.includes('ac power') || status.includes('charging')

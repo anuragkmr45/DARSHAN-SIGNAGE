@@ -1,9 +1,11 @@
+import { createHash } from 'crypto';
 import { inArray } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { createScheduleRepository, ScheduleRepository } from '@/db/repositories/schedule';
 import { createScheduleItemRepository, ScheduleItemRepository } from '@/db/repositories/schedule-item';
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
+import { areAspectsCompatible, parseAspectRatio } from '@/utils/display-profile';
 
 type DB = ReturnType<typeof getDatabase>;
 
@@ -114,6 +116,7 @@ export interface PublishScheduleParams {
   screenGroupIds?: string[];
   publishedBy: string;
   notes?: string | null;
+  aspectOverride?: { acknowledged: true; issue_hash: string; reason?: string } | null;
   db?: DB;
   scheduleRepo?: ScheduleRepository;
   scheduleItemRepo?: ScheduleItemRepository;
@@ -125,6 +128,93 @@ export interface PublishScheduleParams {
     scheduleItems: any[];
     resolvedScreenIds: string[];
   }) => Promise<void>;
+}
+
+export async function getScheduleDisplayPreflight(params: {
+  scheduleId: string;
+  screenIds?: string[];
+  screenGroupIds?: string[];
+  db?: DB;
+  scheduleItemRepo?: ScheduleItemRepository;
+}) {
+  const db = params.db ?? getDatabase();
+  const scheduleItemRepo = params.scheduleItemRepo ?? createScheduleItemRepository();
+  const scheduleItems = await scheduleItemRepo.listBySchedule(params.scheduleId);
+  const presentations = await resolvePresentations(scheduleItems.map((item: any) => item.presentation_id), db);
+  const groupIds = new Set<string>(params.screenGroupIds || []);
+  scheduleItems.forEach((item: any) => (item.screen_group_ids || []).forEach((groupId: string) => groupIds.add(groupId)));
+  const members = groupIds.size
+    ? await db.select().from(schema.screenGroupMembers).where(inArray(schema.screenGroupMembers.group_id, Array.from(groupIds) as any))
+    : [];
+  const groupMap = new Map<string, string[]>();
+  members.forEach((member: any) => {
+    const values = groupMap.get(member.group_id) || [];
+    values.push(member.screen_id);
+    groupMap.set(member.group_id, values);
+  });
+  const expandGroups = (groupIdsToExpand: string[] = []) => {
+    const ids = new Set<string>();
+    groupIdsToExpand.forEach((groupId) => (groupMap.get(groupId) || []).forEach((screenId) => ids.add(screenId)));
+    return ids;
+  };
+  const targets = new Set<string>(params.screenIds || []);
+  expandGroups(params.screenGroupIds || []).forEach((screenId) => targets.add(screenId));
+  if (targets.size === 0) {
+    scheduleItems.forEach((item: any) => {
+      (item.screen_ids || []).forEach((screenId: string) => targets.add(screenId));
+      expandGroups(item.screen_group_ids || []).forEach((screenId) => targets.add(screenId));
+    });
+  }
+  const targetIds = Array.from(targets);
+  if (targetIds.length === 0) return { target_screen_ids: [], issues: [], issue_hash: null, compatible: true };
+  const [displayStates, screens] = await Promise.all([
+    db.select().from(schema.screenDisplayStates).where(inArray(schema.screenDisplayStates.screen_id, targetIds as any)),
+    db
+      .select({ id: schema.screens.id, aspect_ratio: schema.screens.aspect_ratio, width: schema.screens.width, height: schema.screens.height })
+      .from(schema.screens)
+      .where(inArray(schema.screens.id, targetIds as any)),
+  ]);
+  const displayMap = new Map(displayStates.map((state) => [state.screen_id, state]));
+  const screenMap = new Map(screens.map((screen) => [screen.id, screen]));
+  const aspectForScreen = (screenId: string) => {
+    const observed = (displayMap.get(screenId)?.display_profile as any)?.output?.aspect?.numeric_value;
+    if (typeof observed === 'number' && Number.isFinite(observed) && observed > 0) return observed;
+    const legacy = screenMap.get(screenId);
+    return parseAspectRatio(legacy?.aspect_ratio) ?? (legacy?.width && legacy?.height ? legacy.width / legacy.height : null);
+  };
+  const issues: Array<{
+    screen_id: string;
+    presentation_id: string;
+    layout_aspect_ratio: string;
+    screen_aspect_ratio: number | null;
+    usable_area_fraction: number | null;
+    profile_revision: number | null;
+  }> = [];
+  scheduleItems.forEach((item: any) => {
+    const presentation = presentations.get(item.presentation_id);
+    const layoutRatio = parseAspectRatio(presentation?.layout?.aspect_ratio);
+    if (!layoutRatio) return;
+    const itemTargets = new Set<string>();
+    (item.screen_ids || []).forEach((screenId: string) => itemTargets.add(screenId));
+    expandGroups(item.screen_group_ids || []).forEach((screenId) => itemTargets.add(screenId));
+    if (itemTargets.size === 0) targetIds.forEach((screenId) => itemTargets.add(screenId));
+    itemTargets.forEach((screenId) => {
+      const actual = aspectForScreen(screenId);
+      if (actual !== null && !areAspectsCompatible(layoutRatio, actual)) {
+        issues.push({
+          screen_id: screenId,
+          presentation_id: presentation.id,
+          layout_aspect_ratio: presentation.layout.aspect_ratio,
+          screen_aspect_ratio: actual,
+          usable_area_fraction: Math.min(layoutRatio / actual, actual / layoutRatio),
+          profile_revision: displayMap.get(screenId)?.profile_revision ?? null,
+        });
+      }
+    });
+  });
+  const sorted = issues.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  const issueHash = sorted.length ? createHash('sha256').update(JSON.stringify(sorted)).digest('hex') : null;
+  return { target_screen_ids: targetIds, issues: sorted, issue_hash: issueHash, compatible: sorted.length === 0 };
 }
 
 export async function publishScheduleSnapshot(params: PublishScheduleParams) {
@@ -322,6 +412,75 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
         unsupported_targets: unsupportedTargets,
       }
     );
+  }
+
+  const displayRows = await db
+    .select({
+      screen_id: schema.screenDisplayStates.screen_id,
+      display_profile: schema.screenDisplayStates.display_profile,
+      placement: schema.screenDisplayStates.placement,
+      profile_revision: schema.screenDisplayStates.profile_revision,
+    })
+    .from(schema.screenDisplayStates)
+    .where(inArray(schema.screenDisplayStates.screen_id, Array.from(resolvedScreenIds) as any));
+  const displayByScreenId = new Map(displayRows.map((row) => [row.screen_id, row]));
+  const legacyScreenById = new Map(
+    (await db
+      .select({ id: schema.screens.id, aspect_ratio: schema.screens.aspect_ratio, width: schema.screens.width, height: schema.screens.height })
+      .from(schema.screens)
+      .where(inArray(schema.screens.id, Array.from(resolvedScreenIds) as any)))
+      .map((screen) => [screen.id, screen])
+  );
+  const screenAspect = (screenId: string) => {
+    const profile = displayByScreenId.get(screenId)?.display_profile as any;
+    const observed = profile?.output?.aspect?.numeric_value;
+    if (typeof observed === 'number' && Number.isFinite(observed) && observed > 0) return observed;
+    const legacy = legacyScreenById.get(screenId);
+    return parseAspectRatio(legacy?.aspect_ratio) ??
+      (legacy?.width && legacy?.height ? legacy.width / legacy.height : null);
+  };
+  const aspectIssues: Array<{
+    screen_id: string;
+    presentation_id: string;
+    layout_aspect_ratio: string;
+    screen_aspect_ratio: number | null;
+    usable_area_fraction: number | null;
+    profile_revision: number | null;
+  }> = [];
+  scheduleItems.forEach((item: any) => {
+    const presentation = presMap.get(item.presentation_id);
+    const layoutRatio = parseAspectRatio(presentation?.layout?.aspect_ratio);
+    if (!layoutRatio) return;
+    const targets = new Set<string>();
+    (item.screen_ids || []).forEach((screenId: string) => targets.add(screenId));
+    resolveGroupScreens(item.screen_group_ids || []).forEach((screenId) => targets.add(screenId));
+    if (targets.size === 0) resolvedScreenIds.forEach((screenId) => targets.add(screenId));
+    targets.forEach((screenId) => {
+      const actual = screenAspect(screenId);
+      if (actual !== null && !areAspectsCompatible(layoutRatio, actual)) {
+        aspectIssues.push({
+          screen_id: screenId,
+          presentation_id: presentation.id,
+          layout_aspect_ratio: presentation.layout.aspect_ratio,
+          screen_aspect_ratio: actual,
+          usable_area_fraction: Math.min(layoutRatio / actual, actual / layoutRatio),
+          profile_revision: displayByScreenId.get(screenId)?.profile_revision ?? null,
+        });
+      }
+    });
+  });
+  if (aspectIssues.length > 0) {
+    const issueHash = createHash('sha256')
+      .update(JSON.stringify(aspectIssues.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))))
+      .digest('hex');
+    if (!params.aspectOverride?.acknowledged || params.aspectOverride.issue_hash !== issueHash) {
+      throw new AppError({
+        statusCode: 409,
+        code: 'DISPLAY_ASPECT_MISMATCH',
+        message: 'One or more target displays have an incompatible aspect ratio. Review the preflight and explicitly confirm letterboxing.',
+        details: { issue_hash: issueHash, issues: aspectIssues, compatibility_threshold: 0.995 },
+      });
+    }
   }
 
   const publishedAt = new Date().toISOString();

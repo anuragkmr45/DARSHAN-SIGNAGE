@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { AspectFrame } from "@/components/common/AspectFrame";
 import {
   Select,
   SelectContent,
@@ -228,15 +229,8 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
   };
 
   const renderLayoutPreview = () => {
-    const aspectRatio = layout.aspect_ratio === "9:16" ? 9 / 16 : 16 / 9;
-    const previewWidth = 320;
-    const previewHeight = previewWidth / aspectRatio;
-
     return (
-      <div
-        className="relative mx-auto rounded-lg border-2 bg-muted/30"
-        style={{ width: previewWidth, height: previewHeight }}
-      >
+      <AspectFrame aspectRatio={layout.aspect_ratio} className="relative mx-auto w-full max-w-[320px] rounded-lg border-2 bg-muted/30">
         {slots.map((slot) => {
           const isSelected = selectedSlotId === slot.id;
           const slotItems = getSlotMedia(slot.id);
@@ -300,7 +294,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
             </div>
           );
         })}
-      </div>
+      </AspectFrame>
     );
   };
 

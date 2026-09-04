@@ -34,6 +34,16 @@ const updateRequestSchema = z.object({
   notes: z.string().optional(),
 });
 
+const publishRequestSchema = z.object({
+  aspect_override: z
+    .object({
+      acknowledged: z.literal(true),
+      issue_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      reason: z.string().min(3).max(500).optional(),
+    })
+    .optional(),
+});
+
 const scheduleRequestFilterQuerySchema = z.object({
   q: z.string().trim().optional(),
   date_field: z.enum(['created_at', 'schedule_window']).optional(),
@@ -907,7 +917,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
   );
 
   // Publish an approved request (admin only)
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post<{ Params: { id: string }; Body: typeof publishRequestSchema._type }>(
     apiEndpoints.scheduleRequests.publish,
     {
       schema: {
@@ -944,12 +954,14 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
           });
         }
 
+        const publishData = publishRequestSchema.parse(request.body ?? {});
         const publishResult = await publishScheduleSnapshot({
           scheduleId: req.schedule_id,
           screenIds: [],
           screenGroupIds: [],
           publishedBy: payload.sub,
           notes: req.notes ?? null,
+          aspectOverride: publishData.aspect_override ?? null,
           db,
           scheduleRepo,
           scheduleItemRepo,
@@ -971,6 +983,22 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
           publishId: publishResult.publish.id,
           snapshotId: publishResult.snapshot.id,
         });
+
+        const aspectOverride = publishData.aspect_override;
+        if (aspectOverride?.acknowledged && aspectOverride.issue_hash) {
+          await db.insert(schema.systemLogs).values({
+            level: 'INFO',
+            message: 'Display aspect override accepted for schedule request publish',
+            context: {
+              schedule_request_id: req.id,
+              publish_id: publishResult.publish.id,
+              accepted_by: payload.sub,
+              accepted_at: new Date().toISOString(),
+              issue_hash: aspectOverride.issue_hash,
+              reason: aspectOverride.reason ?? null,
+            },
+          });
+        }
 
         return reply.send({
           message: 'Schedule published from request',

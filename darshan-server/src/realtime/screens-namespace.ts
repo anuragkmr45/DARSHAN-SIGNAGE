@@ -533,7 +533,7 @@ export function emitScreenPreviewUpdateGlobal(payload: {
 export function emitScreensRefreshRequired(
   fastify: FastifyInstance,
   payload: {
-    reason: 'PUBLISH' | 'EMERGENCY' | 'GROUP_MEMBERSHIP' | 'TAKE_DOWN' | 'DEFAULT_MEDIA';
+    reason: 'PUBLISH' | 'EMERGENCY' | 'GROUP_MEMBERSHIP' | 'TAKE_DOWN' | 'DEFAULT_MEDIA' | 'DISPLAY_SELECTION';
     screen_ids?: string[];
     group_ids?: string[];
   }

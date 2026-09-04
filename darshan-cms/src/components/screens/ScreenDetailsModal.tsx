@@ -209,6 +209,12 @@ export function ScreenDetailsModal({
     enabled: open && deliveryStatusUiEnabled && mediaCacheStatusUiEnabled,
     refetchInterval: open && deliveryStatusUiEnabled && mediaCacheStatusUiEnabled ? 30_000 : false,
   });
+  const displayStateQuery = useQuery({
+    queryKey: ["screen-display-state", screenId],
+    queryFn: () => screensApi.getDisplayState(screenId),
+    enabled: open,
+    refetchInterval: open ? 15_000 : false,
+  });
 
   useEffect(() => {
     const interval = window.setInterval(() => setClockTick(Date.now()), 1000);
@@ -252,6 +258,17 @@ export function ScreenDetailsModal({
     },
   }, "Unable to trigger screenshot.");
 
+  const updateDisplaySelection = useSafeMutation({
+    mutationFn: (payload: { mode: "PRIMARY" } | { mode: "PINNED"; display_key: string; expected_profile_revision: number }) =>
+      screensApi.setDisplaySelection(screenId, payload),
+    onSuccess: (state) => {
+      queryClient.setQueryData(["screen-display-state", screenId], state);
+      void queryClient.invalidateQueries({ queryKey: ["screen-display-state", screenId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.screens });
+      toast.success(state.command ? "Display selection queued for the player" : "Display selection saved");
+    },
+  }, "Unable to update the preferred display.");
+
   const screen = screenQuery.data;
   const screenStatusDetails = statusQuery.data;
   const nowPlaying = nowPlayingQuery.data;
@@ -283,6 +300,9 @@ export function ScreenDetailsModal({
   const upcomingItemSummaries = nowPlaying?.upcoming_item_summaries ?? [];
   const isTakingSnapshot = triggerScreenshot.isPending || Boolean(pendingSnapshotCapture);
   const telemetry = screenStatusDetails?.latest_heartbeat?.payload ?? null;
+  const displayState = displayStateQuery.data;
+  const displayProfile = displayState?.profile ?? null;
+  const activeOutput = displayProfile?.output ?? null;
   const latestNowPlayingPreviewCapturedAt = nowPlayingQuery.data?.preview?.captured_at ?? null;
 
   useEffect(() => {
@@ -608,6 +628,61 @@ export function ScreenDetailsModal({
                     </div>
                   </div>
                 ) : null}
+              </Card>
+
+              <Card className="p-4 space-y-4" data-testid="screen-display-authority">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-semibold">Display authority</h3>
+                    <p className="text-sm text-muted-foreground">Choose the output the player should use. Changes are delivered as a device command.</p>
+                  </div>
+                  <Badge variant="outline" className={displayState?.placement === "VERIFIED" ? "border-emerald-500 text-emerald-700" : "border-amber-500 text-amber-700"}>
+                    {displayState?.placement || "UNVERIFIED"}
+                  </Badge>
+                </div>
+                {displayStateQuery.isLoading ? (
+                  <Skeleton className="h-20 w-full" />
+                ) : !displayProfile ? (
+                  <p className="text-sm text-muted-foreground">This player has not reported Display Profile V1 yet. Primary output remains the safe default.</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2 xl:grid-cols-4">
+                      <TelemetryField label="Preferred output" value={displayState.desired_selection.mode === "PRIMARY" ? "Primary" : displayState.desired_selection.preferred_key || "Unavailable"} />
+                      <TelemetryField label="Active output" value={activeOutput?.label || activeOutput?.key || "None"} />
+                      <TelemetryField label="Output geometry" value={activeOutput ? `${activeOutput.bounds_dip.width} × ${activeOutput.bounds_dip.height} DIP · ${activeOutput.aspect.exact_key} · ${activeOutput.orientation}` : "None"} />
+                      <TelemetryField label="Renderer viewport" value={displayProfile.viewport ? `${displayProfile.viewport.width_css_px} × ${displayProfile.viewport.height_css_px} CSS px · ${displayProfile.viewport.density}${displayProfile.viewport.conformant ? "" : " · UNFIT"}` : "Not reported"} />
+                    </div>
+                    {displayProfile.selection.fallback_used || displayState.placement !== "VERIFIED" ? (
+                      <p className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+                        {displayProfile.selection.fallback_reason || "Placement is not verified"}. The player may currently be using its primary output.
+                      </p>
+                    ) : null}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Label htmlFor="preferred-display" className="shrink-0">Preferred output</Label>
+                      <select
+                        id="preferred-display"
+                        aria-label="Preferred display output"
+                        className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
+                        value={displayState.desired_selection.mode === "PRIMARY" ? "__PRIMARY__" : displayState.desired_selection.preferred_key || "__PRIMARY__"}
+                        disabled={updateDisplaySelection.isPending}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          updateDisplaySelection.mutate(value === "__PRIMARY__"
+                            ? { mode: "PRIMARY" }
+                            : { mode: "PINNED", display_key: value, expected_profile_revision: displayState.profile_revision });
+                        }}
+                      >
+                        <option value="__PRIMARY__">Primary output</option>
+                        {displayProfile.inventory.map((output) => (
+                          <option key={output.key} value={output.key} disabled={output.identity_confidence === "SESSION"}>
+                            {(output.label || output.key)} — {output.bounds_dip.width}×{output.bounds_dip.height} DIP · {output.identity_confidence}{output.identity_confidence === "SESSION" ? " (ambiguous)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Scale {activeOutput?.scale_factor ?? "N/A"}; rotation {activeOutput?.rotation_degrees ?? "N/A"}°; observed {formatDateTime(displayState.observed_at)}.</p>
+                  </>
+                )}
               </Card>
 
               {availability && (

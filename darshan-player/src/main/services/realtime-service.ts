@@ -13,6 +13,7 @@ import { getPairingService } from './pairing-service'
 import { getDefaultMediaService } from './settings/default-media-service'
 import { createTransportHttpsAgent } from './network/transport-tls'
 import { getSnapshotManager } from './snapshot-manager'
+import { getDisplayManager } from './display-manager'
 
 const logger = getLogger('realtime-service')
 const SOCKET_AUTH_NONCE_BYTES = 16
@@ -67,6 +68,11 @@ export type DesiredStateResponse = {
     commands?: string
     snapshot?: string
     default_media?: string
+  }
+  display?: {
+    desired_selection?: { mode?: 'PRIMARY' | 'PINNED'; preferred_key?: string | null }
+    selection_version?: number
+    profile_revision?: number
   }
 }
 
@@ -631,6 +637,9 @@ export class RealtimeService extends EventEmitter {
     const snapshotChanged = state.snapshot_id !== (current.lastDesiredSnapshotId ?? null)
     const defaultMediaChanged = state.default_media_version !== (current.lastDesiredDefaultMediaVersion ?? null)
     const emergencyChanged = state.emergency_version !== (current.lastDesiredEmergencyVersion ?? null)
+    const displaySelection = desired.display?.desired_selection
+    const displaySelectionVersion = desired.display?.selection_version ?? 0
+    const displayChanged = displaySelectionVersion > (current.lastDesiredDisplaySelectionVersion ?? 0)
 
     if (commandChanged) {
       await getCommandProcessor().pollNow('realtime')
@@ -644,12 +653,21 @@ export class RealtimeService extends EventEmitter {
       await getDefaultMediaService().refreshNow(`desired-state:${reason}`)
     }
 
+    if (displayChanged && displaySelection) {
+      await getDisplayManager().applyDesiredSelection({
+        mode: displaySelection.mode,
+        preferred_key: displaySelection.preferred_key,
+        selection_version: displaySelectionVersion,
+      })
+    }
+
     await getDeviceStateStore().update({
       lastDesiredStateVersion: state.state_version,
       lastDesiredCommandVersion: state.command_version,
       lastDesiredSnapshotId: state.snapshot_id,
       lastDesiredDefaultMediaVersion: state.default_media_version,
       lastDesiredEmergencyVersion: state.emergency_version,
+      lastDesiredDisplaySelectionVersion: displaySelectionVersion,
       lastDesiredStateAt: desired.server_time || new Date().toISOString(),
     })
   }

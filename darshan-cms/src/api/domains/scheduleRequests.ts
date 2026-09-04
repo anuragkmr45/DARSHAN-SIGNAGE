@@ -29,10 +29,11 @@ export const scheduleRequestsApi = {
       method: "POST",
       body: payload,
     }),
-  publish: (requestId: string) =>
+  publish: (requestId: string, payload?: { aspect_override?: { acknowledged: true; issue_hash: string; reason?: string } }) =>
     apiClient.request<ScheduleRequestPublishResponse>({
       path: endpoints.scheduleRequests.publish(requestId),
       method: "POST",
+      body: payload,
     }),
   reject: (requestId: string, payload?: { comment?: string }) =>
     apiClient.request<ScheduleRequestReviewResponse>({

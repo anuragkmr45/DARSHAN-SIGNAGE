@@ -38,15 +38,24 @@ type WebpageProbeResult = {
   textLength: number
   mediaCount: number
   visibleElementCount: number
+  viewportWidth: number
+  viewportHeight: number
+  overflowX: boolean
+  overflowY: boolean
 }
 
 export function shouldRevealLiveWebpage(
-  probe: Pick<WebpageProbeResult, 'width' | 'height' | 'textLength' | 'mediaCount' | 'visibleElementCount'>,
+  probe: Pick<
+    WebpageProbeResult,
+    'width' | 'height' | 'textLength' | 'mediaCount' | 'visibleElementCount' | 'overflowX' | 'overflowY'
+  >
 ): boolean {
   return (
     probe.width > 0 &&
     probe.height > 0 &&
-    (probe.textLength > 24 || probe.mediaCount > 0 || probe.visibleElementCount > 1)
+    (probe.textLength > 24 || probe.mediaCount > 0 || probe.visibleElementCount > 1) &&
+    !probe.overflowX &&
+    !probe.overflowY
   )
 }
 
@@ -66,11 +75,19 @@ const WEBPAGE_READY_PROBE = `
           textLength: 0,
           mediaCount: 0,
           visibleElementCount: 0,
+          viewportWidth: 0,
+          viewportHeight: 0,
+          overflowX: false,
+          overflowY: false,
         };
       }
 
       const maxWidth = Math.max(root.clientWidth, root.scrollWidth, body.clientWidth, body.scrollWidth);
       const maxHeight = Math.max(root.clientHeight, root.scrollHeight, body.clientHeight, body.scrollHeight);
+      const viewportWidth = Math.max(0, root.clientWidth, body.clientWidth);
+      const viewportHeight = Math.max(0, root.clientHeight, body.clientHeight);
+      const overflowX = maxWidth > viewportWidth + 2;
+      const overflowY = maxHeight > viewportHeight + 2;
       const textLength = (body.innerText || '').trim().length;
       const mediaCount = body.querySelectorAll('img, video, canvas, svg, iframe, embed, object').length;
       const visibleElements = Array.from(body.querySelectorAll('*')).filter((node) => {
@@ -111,11 +128,13 @@ const WEBPAGE_READY_PROBE = `
       const ready =
         maxWidth > 0 &&
         maxHeight > 0 &&
-        (textLength > 24 || mediaCount > 0 || visibleElementCount > 1);
+        (textLength > 24 || mediaCount > 0 || visibleElementCount > 1) &&
+        !overflowX &&
+        !overflowY;
 
       return {
         ready,
-        reason: maxWidth <= 0 || maxHeight <= 0 ? 'zero-size' : hasVisibleContent ? 'ok' : 'empty-dom',
+        reason: maxWidth <= 0 || maxHeight <= 0 ? 'zero-size' : overflowX || overflowY ? 'overflow' : hasVisibleContent ? 'ok' : 'empty-dom',
         hasBody: true,
         hasVisibleContent,
         width: maxWidth,
@@ -123,6 +142,10 @@ const WEBPAGE_READY_PROBE = `
         textLength,
         mediaCount,
         visibleElementCount,
+        viewportWidth,
+        viewportHeight,
+        overflowX,
+        overflowY,
       };
     } catch (error) {
       return {
@@ -135,10 +158,14 @@ const WEBPAGE_READY_PROBE = `
         textLength: 0,
         mediaCount: 0,
         visibleElementCount: 0,
+        viewportWidth: 0,
+        viewportHeight: 0,
+        overflowX: false,
+        overflowY: false,
       };
     }
   })()
-`;
+`
 
 const WEBPAGE_LOCKDOWN_SCRIPT = `
   (() => {
@@ -164,25 +191,20 @@ const WEBPAGE_LOCKDOWN_SCRIPT = `
     window.open = () => null;
     return true;
   })()
-`;
+`
 
-function log(
-  options: WebpagePlaybackOptions,
-  level: WebpageLogLevel,
-  message: string,
-  data?: Record<string, unknown>
-) {
-  options.onLog?.(level, message, sanitizeLogPayloadForDiagnostics(data) as Record<string, unknown>);
+function log(options: WebpagePlaybackOptions, level: WebpageLogLevel, message: string, data?: Record<string, unknown>) {
+  options.onLog?.(level, message, sanitizeLogPayloadForDiagnostics(data) as Record<string, unknown>)
 }
 
 function isSameOriginNavigation(sourceUrl: string, nextUrl: string) {
   try {
-    const expected = new URL(sourceUrl);
-    const actual = new URL(nextUrl);
-    const safeProtocol = actual.protocol === 'http:' || actual.protocol === 'https:';
-    return safeProtocol && expected.origin === actual.origin;
+    const expected = new URL(sourceUrl)
+    const actual = new URL(nextUrl)
+    const safeProtocol = actual.protocol === 'http:' || actual.protocol === 'https:'
+    return safeProtocol && expected.origin === actual.origin
   } catch {
-    return false;
+    return false
   }
 }
 
@@ -246,6 +268,10 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
   let revealedLive = false
   let healthProbeTimer: number | undefined
   let healthProbeDeadlineAt = 0
+  let healthySamples = 0
+  let unhealthySamples = 0
+  let probeGeneration = 0
+  let resizeObserver: ResizeObserver | undefined
 
   const clearHealthProbeTimer = () => {
     if (healthProbeTimer) {
@@ -280,6 +306,17 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
     options.onHealthy?.()
   }
 
+  const beginHealthProbe = (reason: string) => {
+    if (disposed) return
+    probeGeneration += 1
+    healthySamples = 0
+    unhealthySamples = 0
+    healthProbeDeadlineAt = Date.now() + 12_000
+    clearHealthProbeTimer()
+    log(options, 'debug', 'Webpage health probe reset', { reason, url: redactUrlForDiagnostics(options.liveUrl) })
+    void probeReadiness(probeGeneration)
+  }
+
   const muteAndLock = () => {
     try {
       webview.setAudioMuted?.(true)
@@ -292,13 +329,15 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
     })
   }
 
-  const probeReadiness = async () => {
+  const probeReadiness = async (generation: number) => {
     try {
-      const probe = (await webview.executeJavaScript?.(WEBPAGE_READY_PROBE, false)) as
-        | WebpageProbeResult
-        | undefined
+      const probe = (await webview.executeJavaScript?.(WEBPAGE_READY_PROBE, false)) as WebpageProbeResult | undefined
+
+      if (disposed || generation !== probeGeneration) return
 
       if (probe?.ready) {
+        healthySamples += 1
+        unhealthySamples = 0
         log(options, 'debug', 'Webpage readiness probe passed', {
           url: redactUrlForDiagnostics(options.liveUrl),
           width: probe.width,
@@ -306,11 +345,25 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
           textLength: probe.textLength,
           mediaCount: probe.mediaCount,
           visibleElementCount: probe.visibleElementCount,
+          overflowX: probe.overflowX,
+          overflowY: probe.overflowY,
         })
-        revealLive()
+        // An SPA can briefly report a healthy shell while it applies its own
+        // delayed layout. Require two consecutive healthy samples before it
+        // replaces the known-safe fallback surface.
+        if (healthySamples >= 2) {
+          revealLive()
+          return
+        }
+        clearHealthProbeTimer()
+        healthProbeTimer = window.setTimeout(() => {
+          void probeReadiness(generation)
+        }, 150)
         return
       }
 
+      healthySamples = 0
+      unhealthySamples += 1
       log(options, 'debug', 'Webpage readiness probe pending', {
         url: redactUrlForDiagnostics(options.liveUrl),
         reason: probe?.reason || 'unhealthy',
@@ -319,7 +372,15 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
         textLength: probe?.textLength ?? 0,
         mediaCount: probe?.mediaCount ?? 0,
         visibleElementCount: probe?.visibleElementCount ?? 0,
+        overflowX: probe?.overflowX ?? false,
+        overflowY: probe?.overflowY ?? false,
       })
+      // Once visible, two stable overflow findings are enough to return to
+      // fallback immediately. A single probe can be a page-navigation frame.
+      if (revealedLive && probe?.reason === 'overflow' && unhealthySamples >= 2) {
+        showFallback('probe-overflow')
+        return
+      }
       if (Date.now() >= healthProbeDeadlineAt) {
         showFallback(`probe-${probe?.reason || 'unhealthy'}`)
         return
@@ -327,9 +388,10 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
 
       clearHealthProbeTimer()
       healthProbeTimer = window.setTimeout(() => {
-        void probeReadiness()
+        void probeReadiness(generation)
       }, 350)
     } catch {
+      if (disposed || generation !== probeGeneration) return
       if (Date.now() >= healthProbeDeadlineAt) {
         showFallback('probe-execution-failed')
         return
@@ -337,7 +399,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
 
       clearHealthProbeTimer()
       healthProbeTimer = window.setTimeout(() => {
-        void probeReadiness()
+        void probeReadiness(generation)
       }, 500)
     }
   }
@@ -345,11 +407,12 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
   const handleDomReady = () => {
     log(options, 'debug', 'Webpage dom-ready', { url: redactUrlForDiagnostics(options.liveUrl) })
     muteAndLock()
+    beginHealthProbe('dom-ready')
   }
 
   const handleStopLoading = () => {
     log(options, 'debug', 'Webpage did-stop-loading', { url: redactUrlForDiagnostics(options.liveUrl) })
-    void probeReadiness()
+    beginHealthProbe('did-stop-loading')
   }
 
   const handleFailLoad = () => {
@@ -371,6 +434,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
     }
 
     if (isSameOriginNavigation(options.liveUrl, nextUrl)) {
+      beginHealthProbe('same-origin-navigation')
       return
     }
 
@@ -406,12 +470,11 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
   webview.addEventListener('did-navigate-in-page', handleNavigate as EventListener)
   webview.addEventListener('console-message', handleConsoleMessage as EventListener)
 
-  healthProbeDeadlineAt = Date.now() + 12_000
-  healthProbeTimer = window.setTimeout(() => {
-    if (!revealedLive) {
-      showFallback('health-timeout')
-    }
-  }, 12_000)
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => beginHealthProbe('slot-resize'))
+    resizeObserver.observe(container)
+  }
+  beginHealthProbe('initial')
 
   container.__darshanCleanup = () => {
     if (disposed) {
@@ -420,6 +483,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
 
     disposed = true
     clearHealthProbeTimer()
+    resizeObserver?.disconnect()
     webview.removeEventListener('dom-ready', handleDomReady)
     webview.removeEventListener('did-stop-loading', handleStopLoading)
     webview.removeEventListener('did-fail-load', handleFailLoad)

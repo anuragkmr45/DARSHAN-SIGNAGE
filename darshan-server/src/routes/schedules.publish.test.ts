@@ -218,4 +218,120 @@ describe('Schedule publish codec validation', () => {
     expect(body.error.details?.reason).toBe('INVALID_PRESENTATION_ASSETS');
     expect(body.error.details?.invalid_references?.[0]?.issue).toBe('MEDIA_NOT_READY');
   });
+
+  it('requires a hash-matched operator acknowledgement before publishing across incompatible display aspects', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    const mediaId = randomUUID();
+    const layoutId = randomUUID();
+    const presentationId = randomUUID();
+    const scheduleId = randomUUID();
+    const now = new Date();
+    const startAt = new Date(now.getTime() + 5 * 60 * 1000);
+    const endAt = new Date(now.getTime() + 30 * 60 * 1000);
+
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Portrait display aspect guard',
+      status: 'OFFLINE',
+      aspect_ratio: '9:16',
+      width: 1080,
+      height: 1920,
+    });
+    await db.insert(schema.layouts).values({
+      id: layoutId,
+      name: 'Landscape publish layout',
+      aspect_ratio: '16:9',
+      spec: { slots: [{ id: 'hero', x: 0, y: 0, w: 1, h: 1 }] },
+      created_by: testUser.id,
+    });
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: 'Ready aspect guard media',
+      type: 'IMAGE',
+      status: 'READY',
+      created_by: testUser.id,
+      width: 1920,
+      height: 1080,
+    });
+    await db.insert(schema.presentations).values({
+      id: presentationId,
+      name: 'Landscape aspect guard presentation',
+      layout_id: layoutId,
+      created_by: testUser.id,
+    });
+    await db.insert(schema.presentationItems).values({
+      id: randomUUID(),
+      presentation_id: presentationId,
+      media_id: mediaId,
+      order: 0,
+      duration_seconds: 15,
+    });
+    await db.insert(schema.schedules).values({
+      id: scheduleId,
+      name: 'Aspect guard schedule',
+      start_at: startAt,
+      end_at: endAt,
+      is_active: true,
+      created_by: testUser.id,
+    });
+    await db.insert(schema.scheduleItems).values({
+      id: randomUUID(),
+      schedule_id: scheduleId,
+      presentation_id: presentationId,
+      start_at: startAt,
+      end_at: endAt,
+      priority: 0,
+      screen_ids: [screenId],
+      screen_group_ids: [],
+    });
+
+    const preflightResponse = await server.inject({
+      method: 'POST',
+      url: '/api/v1/schedules/display-preflight',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { schedule_id: scheduleId, screen_ids: [screenId] },
+    });
+    expect(preflightResponse.statusCode).toBe(HTTP_STATUS.OK);
+    const preflight = JSON.parse(preflightResponse.body);
+    expect(preflight.compatible).toBe(false);
+    expect(preflight.issues).toEqual([
+      expect.objectContaining({
+        screen_id: screenId,
+        presentation_id: presentationId,
+        layout_aspect_ratio: '16:9',
+        usable_area_fraction: 0.31640625,
+      }),
+    ]);
+    expect(preflight.issue_hash).toMatch(/^[a-f0-9]{64}$/);
+
+    const blockedResponse = await server.inject({
+      method: 'POST',
+      url: `/api/v1/schedules/${scheduleId}/publish`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { screen_ids: [screenId] },
+    });
+    expect(blockedResponse.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    const blocked = JSON.parse(blockedResponse.body);
+    expect(blocked.error.code).toBe('DISPLAY_ASPECT_MISMATCH');
+    expect(blocked.error.details.issue_hash).toBe(preflight.issue_hash);
+
+    const acceptedResponse = await server.inject({
+      method: 'POST',
+      url: `/api/v1/schedules/${scheduleId}/publish`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        screen_ids: [screenId],
+        aspect_override: {
+          acknowledged: true,
+          issue_hash: preflight.issue_hash,
+          reason: 'Portrait letterboxing approved for the lobby display.',
+        },
+      },
+    });
+    expect(acceptedResponse.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(acceptedResponse.body)).toEqual(
+      expect.objectContaining({ schedule_id: scheduleId, resolved_screen_ids: [screenId] }),
+    );
+  });
 });

@@ -8,12 +8,22 @@ describe('Runtime mode configuration integration', () => {
   let configPath: string
   let originalNodeEnv: string | undefined
   let originalRuntimeMode: string | undefined
+  let originalDarshanRuntimeMode: string | undefined
   let originalConfigPath: string | undefined
+  let originalPlayerConfigPath: string | undefined
+  let originalSignhexPlayerConfigPath: string | undefined
 
   beforeEach(() => {
     originalNodeEnv = process.env.NODE_ENV
     originalRuntimeMode = process.env.HEXMON_RUNTIME_MODE
+    originalDarshanRuntimeMode = process.env.DARSHAN_RUNTIME_MODE
     originalConfigPath = process.env.HEXMON_CONFIG_PATH
+    originalPlayerConfigPath = process.env.DARSHAN_PLAYER_CONFIG_FILE
+    originalSignhexPlayerConfigPath = process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    delete process.env.DARSHAN_RUNTIME_MODE
+    delete process.env.HEXMON_RUNTIME_MODE
+    delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
     tempDir = createTempDir('runtime-mode-integration-')
     configPath = path.join(tempDir, 'config.json')
     process.env.HEXMON_CONFIG_PATH = configPath
@@ -30,6 +40,21 @@ describe('Runtime mode configuration integration', () => {
       delete process.env.HEXMON_RUNTIME_MODE
     } else {
       process.env.HEXMON_RUNTIME_MODE = originalRuntimeMode
+    }
+    if (originalDarshanRuntimeMode === undefined) {
+      delete process.env.DARSHAN_RUNTIME_MODE
+    } else {
+      process.env.DARSHAN_RUNTIME_MODE = originalDarshanRuntimeMode
+    }
+    if (originalPlayerConfigPath === undefined) {
+      delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    } else {
+      process.env.DARSHAN_PLAYER_CONFIG_FILE = originalPlayerConfigPath
+    }
+    if (originalSignhexPlayerConfigPath === undefined) {
+      delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    } else {
+      process.env.SIGNHEX_PLAYER_CONFIG_FILE = originalSignhexPlayerConfigPath
     }
     if (originalNodeEnv === undefined) {
       delete process.env.NODE_ENV

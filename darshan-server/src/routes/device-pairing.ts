@@ -18,6 +18,8 @@ import { getDatabase, schema } from '@/db';
 import { extractDeviceAuthPublicKeyFromCsr, issueDeviceCertificateFromCsr } from '@/utils/device-request-auth';
 import { recordPairingCodeAllocation, recordPairingCsrValidation } from '@/observability/metrics';
 import { detectDevicePairingOrphans } from '@/services/device-pairing-orphan-service';
+import { recordDisplayProfile } from '@/services/screen-display-state-service';
+import { displayProfileV1Schema } from '@/utils/display-profile';
 
 const logger = createLogger('device-pairing-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -104,6 +106,7 @@ const requestPairingSchema = z.object({
   model: z.string().optional(),
   codecs: z.array(z.string()).optional(),
   device_info: z.record(z.any()).optional(),
+  display_profile_v1: displayProfileV1Schema.optional(),
 });
 
 const pairingStatusQuerySchema = z.object({
@@ -482,7 +485,10 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             orientation: data.orientation,
             model: data.model,
             codecs: data.codecs,
-            device_info: data.device_info,
+            device_info: {
+              ...(data.device_info ?? {}),
+              ...(data.display_profile_v1 ? { display_profile_v1: data.display_profile_v1 } : {}),
+            },
           },
           () => (Math.floor(Math.random() * 900000) + 100000).toString(),
           {
@@ -663,6 +669,12 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             );
           }
         });
+
+        const pairingProfile = (pairing.device_info as Record<string, unknown> | null)?.display_profile_v1;
+        const parsedPairingProfile = displayProfileV1Schema.safeParse(pairingProfile);
+        if (parsedPairingProfile.success) {
+          await recordDisplayProfile(deviceId, parsedPairingProfile.data);
+        }
 
         logger.info(
           {
@@ -1021,6 +1033,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         const limit = (request.query as any).limit ? parseInt((request.query as any).limit as string) : 20;
 
         const result = await pairingRepo.list({ page, limit });
+        const now = new Date();
 
         return reply.send({
           items: result.items.map((p) => ({
@@ -1042,6 +1055,10 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             device_id: p.device_id,
             pairing_code: p.pairing_code,
             used: p.used,
+            // Keep the legacy booleans for existing clients, while giving the
+            // operator a deterministic state that does not require each UI to
+            // infer expiry differently.
+            status: p.used ? 'USED' : p.expires_at.getTime() <= now.getTime() ? 'EXPIRED' : 'PENDING',
             used_at: p.used_at?.toISOString() || null,
             expires_at: p.expires_at.toISOString(),
             created_at: p.created_at.toISOString(),

@@ -80,7 +80,7 @@ const MediaPreview = ({ media, mediaType, sizeClass }: { media: MediaAsset; medi
   if (mediaType === "IMAGE") {
     return (
       <div className={`${sizeClass} rounded-md overflow-hidden bg-muted`}>
-        <img src={media.media_url} alt={resolveMediaDisplayName(media)} className="h-full w-full object-cover" loading="lazy" />
+        <img src={media.media_url} alt={resolveMediaDisplayName(media)} className="h-full w-full object-contain" loading="lazy" />
       </div>
     );
   }
@@ -88,7 +88,7 @@ const MediaPreview = ({ media, mediaType, sizeClass }: { media: MediaAsset; medi
   if (mediaType === "VIDEO") {
     return (
       <div className={`${sizeClass} rounded-md overflow-hidden bg-muted`}>
-        <video src={media.media_url} className="h-full w-full object-cover" muted preload="metadata" />
+        <video src={media.media_url} className="h-full w-full object-contain" muted preload="metadata" />
       </div>
     );
   }
@@ -96,7 +96,7 @@ const MediaPreview = ({ media, mediaType, sizeClass }: { media: MediaAsset; medi
   if (mediaType === "WEBPAGE") {
     return (
       <div className={`${sizeClass} rounded-md overflow-hidden bg-muted`}>
-        <img src={media.media_url} alt={resolveMediaDisplayName(media)} className="h-full w-full object-cover" loading="lazy" />
+        <img src={media.media_url} alt={resolveMediaDisplayName(media)} className="h-full w-full object-contain" loading="lazy" />
       </div>
     );
   }

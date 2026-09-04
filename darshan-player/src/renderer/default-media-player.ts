@@ -203,17 +203,10 @@ export class DefaultMediaPlayer {
   private renderDocument(media: DefaultMediaItem): HTMLElement {
     if (this.isPdf(media)) {
       const source = resolveDefaultMediaSource(media)
-      const iframe = createPdfPlaybackElement(source)
-
-      iframe.onload = () => {
-        this.markHealthy()
-      }
-
-      iframe.onerror = () => {
-        this.handlePlaybackError('pdf-error')
-      }
-
-      return iframe
+      const pdf = createPdfPlaybackElement(source)
+      pdf.addEventListener('darshan-pdf-rendered', () => this.markHealthy(), { once: true })
+      pdf.addEventListener('darshan-pdf-error', () => this.handlePlaybackError('pdf-error'), { once: true })
+      return pdf
     }
 
     return this.renderUnsupported(media)

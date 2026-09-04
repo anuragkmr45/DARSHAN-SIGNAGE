@@ -37,6 +37,11 @@ export interface PlayerFileConfigLoadResult {
   diagnostics: PlayerConfigFileDiagnostics
 }
 
+export interface PlayerFileConfigLoadOptions {
+  /** Explicit player selectors still win; this only suppresses the OS site default. */
+  allowDefaultPath?: boolean
+}
+
 type JsonObject = Record<string, unknown>
 
 const RUNTIME_MODES = new Set<RuntimeMode>(['dev', 'qa', 'production'])
@@ -437,7 +442,10 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
   return { config, mappedConfigKeys }
 }
 
-export function resolvePlayerConfigFileSelector(env: NodeJS.ProcessEnv = process.env): PlayerConfigFileSelector {
+export function resolvePlayerConfigFileSelector(
+  env: NodeJS.ProcessEnv = process.env,
+  options: PlayerFileConfigLoadOptions = {}
+): PlayerConfigFileSelector {
   const darshan = envText(env, 'DARSHAN_PLAYER_CONFIG_FILE')
   const signhex = envText(env, 'SIGNHEX_PLAYER_CONFIG_FILE')
 
@@ -460,9 +468,11 @@ export function resolvePlayerConfigFileSelector(env: NodeJS.ProcessEnv = process
     return { configured: true, path: path.resolve(signhex), source: 'SIGNHEX_PLAYER_CONFIG_FILE' }
   }
 
-  const defaultPath = resolveDefaultPlayerSiteConfigPath(process.platform, env)
-  if (defaultPath && fs.existsSync(defaultPath)) {
-    return { configured: true, path: defaultPath, source: 'default-path' }
+  if (options.allowDefaultPath !== false) {
+    const defaultPath = resolveDefaultPlayerSiteConfigPath(process.platform, env)
+    if (defaultPath && fs.existsSync(defaultPath)) {
+      return { configured: true, path: defaultPath, source: 'default-path' }
+    }
   }
 
   return { configured: false }
@@ -494,8 +504,11 @@ export function resolvePlayerProfileSelector(env: NodeJS.ProcessEnv = process.en
   return { name: 'development', source: 'default' }
 }
 
-export function loadPlayerFileConfig(env: NodeJS.ProcessEnv = process.env): PlayerFileConfigLoadResult {
-  const selector = resolvePlayerConfigFileSelector(env)
+export function loadPlayerFileConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  options: PlayerFileConfigLoadOptions = {}
+): PlayerFileConfigLoadResult {
+  const selector = resolvePlayerConfigFileSelector(env, options)
   const profile = resolvePlayerProfileSelector(env)
   const emptyDiagnostics: PlayerConfigFileDiagnostics = {
     configFile: {

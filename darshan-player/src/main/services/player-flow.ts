@@ -29,6 +29,7 @@ import { getDefaultMediaService } from './settings/default-media-service'
 import { getLifecycleEvents, RuntimeAuthFailureEvent } from './lifecycle-events'
 import { getHttpClient } from './network/http-client'
 import { getPlayerMetrics } from './telemetry/player-metrics'
+import { getDisplayManager } from './display-manager'
 import { getRealtimeService } from './realtime-service'
 import { getSecurePlaybackGuard, type SecurePlaybackGuardStatus } from './secure-playback-guard'
 import { clearMediaCacheTargets } from './media-cache-purge'
@@ -195,7 +196,13 @@ export class PlayerFlow extends EventEmitter {
     return {
       revision: this.statusRevision,
       status: this.getStatus(),
+      display: getDisplayManager().getProfile(),
     }
+  }
+
+  /** Publish a display-only update through the same monotonic renderer stream. */
+  refreshPresentation(): void {
+    this.updateStatus({})
   }
 
   async requestPairingCode(overrides?: Partial<PairingCodeRequest>): Promise<PairingCodeResponse | null> {

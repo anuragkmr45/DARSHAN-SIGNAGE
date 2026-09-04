@@ -5,6 +5,7 @@ import {
   updateScheduleSchema,
   listSchedulesQuerySchema,
   publishScheduleSchema,
+  displayPreflightSchema,
 } from '@/schemas/schedule';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { createScheduleRepository } from '@/db/repositories/schedule';
@@ -16,7 +17,7 @@ import { defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
-import { publishScheduleSnapshot, resolvePresentations } from '@/routes/schedule-publish-helper';
+import { getScheduleDisplayPreflight, publishScheduleSnapshot, resolvePresentations } from '@/routes/schedule-publish-helper';
 import z from 'zod';
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
@@ -118,6 +119,40 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     if (!canAccessSchedule) throw AppError.forbidden('Forbidden');
     return schedule;
   };
+
+  fastify.post<{ Body: typeof displayPreflightSchema._type }>(
+    apiEndpoints.schedules.displayPreflight,
+    {
+      schema: {
+        description: 'Analyze target display aspect compatibility before publish',
+        tags: ['Schedules'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Schedule')) throw AppError.forbidden('Forbidden');
+        const data = displayPreflightSchema.parse(request.body);
+        await assertScheduleAccess(payload, data.schedule_id);
+        return reply.send(
+          await getScheduleDisplayPreflight({
+            scheduleId: data.schedule_id,
+            screenIds: Array.from(new Set(data.screen_ids || [])),
+            screenGroupIds: Array.from(new Set(data.screen_group_ids || [])),
+            db,
+            scheduleItemRepo,
+          })
+        );
+      } catch (error) {
+        logger.error(error, 'Display preflight error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
 
 
   // Create schedule
@@ -761,6 +796,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           screenGroupIds: uniqueGroups,
           publishedBy: payload.sub,
           notes: (data as any).notes,
+          aspectOverride: data.aspect_override ?? null,
           db,
           scheduleRepo,
           scheduleItemRepo,
@@ -797,6 +833,21 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           publishId: publishResult.publish.id,
           snapshotId: publishResult.snapshot.id,
         });
+
+        if (data.aspect_override) {
+          await db.insert(schema.systemLogs).values({
+            level: 'INFO',
+            message: 'Display aspect override accepted for schedule publish',
+            context: {
+              schedule_id: (request.params as any).id,
+              publish_id: publishResult.publish.id,
+              accepted_by: payload.sub,
+              accepted_at: new Date().toISOString(),
+              issue_hash: data.aspect_override.issue_hash,
+              reason: data.aspect_override.reason ?? null,
+            },
+          });
+        }
 
         return reply.send({
           message: 'Schedule published successfully',

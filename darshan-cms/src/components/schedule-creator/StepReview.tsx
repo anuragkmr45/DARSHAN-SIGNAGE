@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MediaPreview } from "@/components/common/MediaPreview";
+import { AspectFrame } from "@/components/common/AspectFrame";
 import type { ScheduleWizardState, SlotMedia } from "@/pages/ScheduleCreator";
 
 interface StepReviewProps {
@@ -47,7 +48,7 @@ function LayoutPreview({ state }: { state: ScheduleWizardState }) {
     slotMedia.filter((item) => item.slotId === slotId).sort((left, right) => left.order - right.order);
 
   return (
-    <div className="relative w-full aspect-video overflow-hidden rounded-lg border-2 border-dashed border-border bg-muted/30">
+    <AspectFrame aspectRatio={selectedLayout.aspect_ratio} className="relative w-full overflow-hidden rounded-lg border-2 border-dashed border-border bg-muted/30">
       {selectedLayout.spec.slots.map((slot) => {
         const mediaItems = getSlotMedia(slot.id);
         const primaryMedia = mediaItems[0];
@@ -103,7 +104,7 @@ function LayoutPreview({ state }: { state: ScheduleWizardState }) {
           </div>
         );
       })}
-    </div>
+    </AspectFrame>
   );
 }
 
