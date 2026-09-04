@@ -9,6 +9,7 @@ import {
   PairingResponse,
   PairingStatusResponse,
   PlaybackMode,
+  PlayerPresentationSnapshot,
   PlayerState,
   PlayerStatus,
   TimelineItem,
@@ -61,6 +62,7 @@ export class PlayerFlow extends EventEmitter {
     online: false,
     backendAvailable: false,
   }
+  private statusRevision = 0
   private mainWindow?: BrowserWindow
   private runtimeLoopsStarted = false
   private playbackReady = false
@@ -69,6 +71,7 @@ export class PlayerFlow extends EventEmitter {
   private defaultMediaListenerBound = false
   private securePlaybackGuardBound = false
   private securePlaybackPurgeCompleted = false
+  private rendererServicesInitialized = false
   private screenshotInterval?: NodeJS.Timeout
   private pairingPollTimer?: NodeJS.Timeout
   private bootstrapRetryTimer?: NodeJS.Timeout
@@ -99,22 +102,44 @@ export class PlayerFlow extends EventEmitter {
   }
 
   initialize(mainWindow: BrowserWindow): void {
-    this.mainWindow = mainWindow
+    this.attachWindow(mainWindow)
+
+    if (this.rendererServicesInitialized) {
+      return
+    }
+    this.rendererServicesInitialized = true
 
     const playbackEngine = getPlaybackEngine()
-    playbackEngine.initialize(mainWindow)
     playbackEngine.on('item-playing', (item: TimelineItem) => {
       this.updateStatus({
         currentMediaId: item.mediaId || item.id,
       })
     })
 
-    getScreenshotService().initialize(mainWindow)
-    getDefaultMediaService().initialize(mainWindow)
     this.bindLifecycleEvents()
     this.bindSnapshotListener()
     this.bindDefaultMediaListener()
     this.bindSecurePlaybackGuard()
+  }
+
+  /** Rebind long-lived services after the renderer window is recreated. */
+  attachWindow(mainWindow: BrowserWindow): void {
+    this.mainWindow = mainWindow
+
+    const playbackEngine = getPlaybackEngine()
+    playbackEngine.initialize(mainWindow)
+    getScreenshotService().initialize(mainWindow)
+    getDefaultMediaService().initialize(mainWindow)
+
+    // `loadFile()` has completed before reattachment, so renderer listeners
+    // are registered. Restore the in-flight timeline item immediately rather
+    // than showing a blank/default surface until the next scheduler boundary.
+    if (
+      this.playbackReady &&
+      ['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(this.status.state)
+    ) {
+      playbackEngine.restoreCurrentItemInRenderer()
+    }
   }
 
   async start(): Promise<void> {
@@ -164,6 +189,13 @@ export class PlayerFlow extends EventEmitter {
 
   getStatus(): PlayerStatus {
     return { ...this.status }
+  }
+
+  getPresentationSnapshot(): PlayerPresentationSnapshot {
+    return {
+      revision: this.statusRevision,
+      status: this.getStatus(),
+    }
   }
 
   async requestPairingCode(overrides?: Partial<PairingCodeRequest>): Promise<PairingCodeResponse | null> {
@@ -1085,9 +1117,15 @@ export class PlayerFlow extends EventEmitter {
   }
 
   private emitStatus(): void {
-    this.emit('status', this.status)
+    this.statusRevision += 1
+    const presentation = this.getPresentationSnapshot()
+    this.emit('status', presentation.status)
+    this.emit('presentation-status', presentation)
     if (this.mainWindow) {
-      this.mainWindow.webContents.send('player-status', this.status)
+      // Retain player-status until all renderer integrations have migrated.
+      // New renderer code consumes the revisioned presentation event below.
+      this.mainWindow.webContents.send('player-status', presentation.status)
+      this.mainWindow.webContents.send('player-presentation', presentation)
     }
   }
 }

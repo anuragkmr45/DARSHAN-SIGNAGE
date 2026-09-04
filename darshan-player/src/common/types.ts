@@ -244,6 +244,18 @@ export interface PlayerStatus {
   securityLock?: PlayerSecurityLockStatus
 }
 
+/**
+ * A monotonic state snapshot used to initialise or restore the renderer.
+ *
+ * The renderer subscribes before reading this value. Its revision prevents an
+ * older IPC response from overwriting a newer lifecycle transition that arrived
+ * while the renderer was starting.
+ */
+export interface PlayerPresentationSnapshot {
+  revision: number
+  status: PlayerStatus
+}
+
 export interface PlayerSecurityLockStatus {
   enabled: boolean
   locked: boolean

@@ -384,6 +384,25 @@ export class PlaybackEngine extends EventEmitter {
   }
 
   /**
+   * Re-send the already active item after Electron recreates the renderer.
+   * The scheduler deliberately keeps running across a renderer crash, so the
+   * fresh DOM must be given the current item instead of waiting for its next
+   * boundary (which could otherwise leave a signage screen blank).
+   */
+  restoreCurrentItemInRenderer(): boolean {
+    if (!this.mainWindow || !this.currentItem) {
+      return false
+    }
+
+    this.mainWindow.webContents.send('media-change', {
+      item: this.currentItem,
+      scheduleId: this.currentScheduleId,
+      restored: true,
+    })
+    return true
+  }
+
+  /**
    * Get jitter statistics
    */
   getJitterStats() {

@@ -143,7 +143,7 @@ CMS_HOST=192.168.1.102
 OBSERVABILITY_HOST=192.168.1.104
 
 POSTGRES_IMAGE=postgres:15-alpine
-MINIO_IMAGE=minio/minio:latest
+MINIO_IMAGE=minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
 VALKEY_IMAGE=valkey/valkey:7-alpine
 BACKEND_IMAGE=darshan-server-api:production
 CMS_IMAGE=darshan-cms:production
@@ -577,7 +577,7 @@ Open only the ports needed for each VM role.
 
 | VM | Required inbound ports |
 |---|---|
-| Data VM | `22`, `5432`, `9000`, optional `9001` |
+| Data VM | `22`; `5432` and `9000` only from Backend/player subnets; optional `9001` only from an admin subnet |
 | Valkey VM | `22`, `6379` |
 | Backend VM | `22`, `3000` |
 | CMS VM | `22`, `8080` |
@@ -591,6 +591,9 @@ sudo ufw allow <role-port>/tcp
 sudo ufw enable
 sudo ufw status
 ```
+
+For CMS uploads, staff browsers must reach object storage only through the CMS
+HTTPS origin. Never allow the workstation subnet to reach MinIO port `9000`.
 
 ## Player Device Install And Config
 

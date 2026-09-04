@@ -79,6 +79,10 @@ export const endpoints = {
   media: {
     base: "/media",
     presignUpload: "/media/presign-upload",
+    uploadSessions: "/media/uploads",
+    uploadSession: (sessionId: string) => `/media/uploads/${sessionId}`,
+    uploadSessionParts: (sessionId: string) => `/media/uploads/${sessionId}/parts/presign`,
+    uploadSessionComplete: (sessionId: string) => `/media/uploads/${sessionId}/complete`,
     complete: (mediaId: string) => `/media/${mediaId}/complete`,
     byId: (mediaId: string) => `/media/${mediaId}`,
   },

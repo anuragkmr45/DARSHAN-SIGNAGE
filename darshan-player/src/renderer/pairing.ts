@@ -1,4 +1,4 @@
-import type { PairingCodeRequest, PlayerStatus } from '../common/types'
+import type { PairingCodeRequest, PlayerPresentationSnapshot, PlayerStatus } from '../common/types'
 import './types'
 
 class PairingScreen {
@@ -22,6 +22,7 @@ class PairingScreen {
   private connectivityBanner: HTMLElement | null = null
   private countdownTimer?: number
   private currentStatus: PlayerStatus | null = null
+  private latestPresentationRevision = -1
 
   constructor() {
     this.initializeElements()
@@ -77,12 +78,20 @@ class PairingScreen {
   }
 
   private async bootstrap(): Promise<void> {
-    const initialStatus = (await window.darshan.getPlayerStatus()) as PlayerStatus
-    this.render(initialStatus)
+    // Subscribe first so an OTP replacement cannot be missed while the
+    // renderer is fetching its initial state.
+    window.darshan.onPlayerPresentation((presentation) => this.applyPresentation(presentation))
+    const initialPresentation = await window.darshan.getPlayerPresentation()
+    this.applyPresentation(initialPresentation)
+  }
 
-    window.darshan.onPlayerStatus((data: unknown) => {
-      this.render(data as PlayerStatus)
-    })
+  private applyPresentation(presentation: PlayerPresentationSnapshot): void {
+    if (!presentation || !presentation.status || presentation.revision < this.latestPresentationRevision) {
+      return
+    }
+
+    this.latestPresentationRevision = presentation.revision
+    this.render(presentation.status)
   }
 
   private async populateDeviceInfo(): Promise<void> {

@@ -8,7 +8,7 @@ import { join } from 'path';
 import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { config as appConfig } from '@/config';
-import { deleteObject, getObject, putObject } from '@/s3';
+import { abortMultipartUpload, deleteObject, getObject, putObject } from '@/s3';
 import { createLogger } from '@/utils/logger';
 import { createMediaRepository } from '@/db/repositories/media';
 import { createBackupRun, getLatestBackupRun, runFullBackup } from '@/utils/backup-runs';
@@ -1113,6 +1113,39 @@ export async function registerJobHandlers() {
               .where(lte(schema.sessions.expires_at, new Date()))
               .returning({ id: schema.sessions.id });
             logger.info(`Deleted ${deleted.length} expired sessions`);
+
+            const expiredUploads = await db
+              .select()
+              .from(schema.mediaUploadSessions)
+              .where(
+                and(
+                  lte(schema.mediaUploadSessions.expires_at, new Date()),
+                  inArray(schema.mediaUploadSessions.state, ['INITIALIZING', 'ACTIVE', 'FINALIZING'])
+                )
+              )
+              .limit(100);
+
+            for (const upload of expiredUploads) {
+              try {
+                if (upload.strategy === 'multipart' && upload.multipart_upload_id) {
+                  await abortMultipartUpload(upload.staging_bucket, upload.staging_object_key, upload.multipart_upload_id);
+                }
+                await deleteObject(upload.staging_bucket, upload.staging_object_key).catch(() => undefined);
+                await db.transaction(async (tx) => {
+                  await tx
+                    .update(schema.mediaUploadSessions)
+                    .set({ state: 'EXPIRED', failure_reason: 'UPLOAD_SESSION_EXPIRED', updated_at: new Date() })
+                    .where(eq(schema.mediaUploadSessions.id, upload.id));
+                  await tx
+                    .update(schema.media)
+                    .set({ status: 'FAILED', status_reason: 'UPLOAD_SESSION_EXPIRED', updated_at: new Date() })
+                    .where(eq(schema.media.id, upload.media_id));
+                });
+              } catch (error) {
+                logger.warn({ error, uploadSessionId: upload.id }, 'Failed to clean up expired media upload session');
+              }
+            }
+            logger.info(`Cleaned up ${expiredUploads.length} expired media upload sessions`);
             break;
           }
           case 'old_logs': {
@@ -1329,7 +1362,7 @@ export async function scheduleRecurringJobs() {
     await jobs.unschedule('backup:check').catch(() => { });
 
     // Now schedule safely (queues exist)
-    await jobs.schedule('cleanup', '0 2 * * *', { type: 'expired_sessions' });      // daily 2 AM
+    await jobs.schedule('cleanup', '15 * * * *', { type: 'expired_sessions' });      // hourly upload/session expiry cleanup
     await jobs.schedule('archive', '0 3 * * 0', { type: 'logs', startDate: '', endDate: '' }); // Sun 3 AM
     await jobs.schedule('backup:check', '0 * * * *', { trigger: 'scheduled-check' }); // hourly
 

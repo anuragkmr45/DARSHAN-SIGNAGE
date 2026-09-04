@@ -25,6 +25,36 @@ export interface MediaCompletionPayload {
   duration_seconds?: number;
 }
 
+export interface UploadSessionCreatePayload extends PresignPayload {
+  checksum_sha256: string;
+}
+
+export interface UploadSessionPart {
+  part_number: number;
+  etag: string;
+  size?: number | null;
+}
+
+export interface UploadSessionResponse {
+  session_id: string;
+  media_id: string;
+  state: "INITIALIZING" | "ACTIVE" | "FINALIZING" | "COMPLETED" | "ABORTED" | "EXPIRED" | "FAILED";
+  strategy: "single" | "multipart";
+  expires_at: string;
+  part_size: number | null;
+  part_count: number;
+  uploaded_parts: UploadSessionPart[];
+  upload_url?: string;
+  media: MediaAsset | null;
+  failure_reason?: string | null;
+}
+
+export interface UploadPartUrl {
+  part_number: number;
+  upload_url: string;
+  expires_in: number;
+}
+
 export interface MediaMetadataPayload {
   name: string;
   type: MediaType;
@@ -62,6 +92,48 @@ export const mediaApi = {
       path: endpoints.media.presignUpload,
       method: "POST",
       body: payload,
+    }),
+
+  createUploadSession: (payload: UploadSessionCreatePayload, idempotencyKey: string) =>
+    apiClient.request<UploadSessionResponse>({
+      path: endpoints.media.uploadSessions,
+      method: "POST",
+      body: payload,
+      headers: { "Idempotency-Key": idempotencyKey },
+      timeoutMs: 30_000,
+    }),
+
+  getUploadSession: (sessionId: string) =>
+    apiClient.request<UploadSessionResponse>({
+      path: endpoints.media.uploadSession(sessionId),
+      method: "GET",
+      timeoutMs: 30_000,
+    }),
+
+  presignUploadParts: (sessionId: string, partNumbers: number[]) =>
+    apiClient.request<{ session_id: string; parts: UploadPartUrl[] }>({
+      path: endpoints.media.uploadSessionParts(sessionId),
+      method: "POST",
+      body: { part_numbers: partNumbers },
+      timeoutMs: 30_000,
+    }),
+
+  completeUploadSession: (
+    sessionId: string,
+    payload: { parts?: Array<{ part_number: number; etag: string }>; width?: number; height?: number; duration_seconds?: number },
+  ) =>
+    apiClient.request<UploadSessionResponse>({
+      path: endpoints.media.uploadSessionComplete(sessionId),
+      method: "POST",
+      body: payload,
+      timeoutMs: 10 * 60_000,
+    }),
+
+  abortUploadSession: (sessionId: string) =>
+    apiClient.request<{ session_id: string; state: "ABORTED" }>({
+      path: endpoints.media.uploadSession(sessionId),
+      method: "DELETE",
+      timeoutMs: 30_000,
     }),
 
   complete: (mediaId: string, payload: MediaCompletionPayload) =>

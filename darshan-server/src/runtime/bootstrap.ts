@@ -12,6 +12,7 @@ const logger = createLogger('runtime-bootstrap');
 
 const REQUIRED_BUCKETS = [
   'media-source',
+  'media-staging',
   'media-ready',
   'media-thumbnails',
   'device-screenshots',

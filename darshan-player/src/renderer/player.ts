@@ -9,6 +9,7 @@ import {
   FitMode,
   LayoutScene,
   LayoutSceneSlot,
+  PlayerPresentationSnapshot,
   PlayerStatus,
   TimelineItem,
 } from '../common/types'
@@ -71,7 +72,8 @@ class Player {
   private mediaContainer: HTMLElement | null = null
   private defaultMediaContainer: HTMLElement | null = null
   private defaultMediaPlayer?: DefaultMediaPlayer
-  private activeSource: 'schedule' | 'default' | 'none' = 'schedule'
+  private latestStatus?: PlayerStatus
+  private latestPresentationRevision = -1
   private statusOverlay: HTMLElement | null = null
   private statusConnection: HTMLElement | null = null
   private statusSnapshot: HTMLElement | null = null
@@ -103,6 +105,12 @@ class Player {
     this.statusSnapshot = document.getElementById('status-snapshot-time')
     this.modeBanner = document.getElementById('mode-banner')
     this.securityLockOverlay = document.getElementById('security-lock-overlay')
+
+    // The DOM is parsed before the first player-status IPC message arrives.
+    // Keep the playback root inert during that interval so it cannot cover the
+    // pairing/recovery surface after a renderer reload.
+    this.mediaContainer?.classList.add('hidden')
+    this.defaultMediaContainer?.classList.add('hidden')
 
     if (this.canvas) {
       this.resizeCanvas()
@@ -163,6 +171,12 @@ class Player {
     if (window.darshan && window.darshan.onMediaChange) {
       window.darshan.onMediaChange((data: any) => {
         this.log('debug', 'Received play-media event', data)
+        if (!this.canRenderScheduledContent()) {
+          this.log('debug', 'Ignoring playback event while lifecycle blocks content', {
+            state: this.latestStatus?.state,
+          })
+          return
+        }
         this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
         this.setActiveSource('schedule')
         this.playMedia(data.item, {
@@ -178,40 +192,51 @@ class Player {
     if (window.darshan && window.darshan.onPlaybackUpdate) {
       window.darshan.onPlaybackUpdate((data: any) => {
         if (data.type === 'transition-start') {
+          if (!this.canRenderScheduledContent()) {
+            return
+          }
           this.log('debug', 'Received transition-start event', data)
           this.startTransition(data.current, data.next, data.durationMs)
         } else if (data.type === 'clear-active') {
           this.log('debug', 'Received clear-active event', data)
           this.ignoreFallbackStatusUntil = 0
           this.clearScheduledPlayback(data.reason || 'clear-active')
-          this.setActiveSource('default')
         } else if (data.type === 'show-fallback') {
+          if (!this.canRenderScheduledContent()) {
+            return
+          }
           this.log('warn', 'Received show-fallback event', data)
           this.showFallback(data.message)
         }
       })
     }
 
-    if (window.darshan && window.darshan.onPlayerStatus) {
-      window.darshan.onPlayerStatus((data: any) => {
-        const status = data as PlayerStatus
-        this.updateStatusOverlay(status)
-        this.updateContentSource(status)
-      })
+    // Arm the event stream before fetching the snapshot. A lifecycle change
+    // between those two operations is safe because stale snapshots are ignored
+    // by their monotonic revision.
+    if (window.darshan && window.darshan.onPlayerPresentation) {
+      window.darshan.onPlayerPresentation((presentation) => this.applyPresentation(presentation))
     }
 
-    if (window.darshan && window.darshan.getPlayerStatus) {
+    if (window.darshan && window.darshan.getPlayerPresentation) {
       window.darshan
-        .getPlayerStatus()
-        .then((status: any) => {
-          const typedStatus = status as PlayerStatus
-          this.updateStatusOverlay(typedStatus)
-          this.updateContentSource(typedStatus)
-        })
+        .getPlayerPresentation()
+        .then((presentation) => this.applyPresentation(presentation))
         .catch(() => {
           // ignore initial status failures
         })
     }
+  }
+
+  private applyPresentation(presentation: PlayerPresentationSnapshot): void {
+    if (!presentation || !presentation.status || presentation.revision < this.latestPresentationRevision) {
+      return
+    }
+
+    this.latestPresentationRevision = presentation.revision
+    this.latestStatus = presentation.status
+    this.updateStatusOverlay(presentation.status)
+    this.updateContentSource(presentation.status)
   }
 
   private async refreshDefaultMedia(reason: string): Promise<void> {
@@ -244,6 +269,14 @@ class Player {
     }
 
     const nextSource = resolvePlayerContentSource(status)
+    if (nextSource === 'none') {
+      // Pairing/recovery is authoritative and must never wait behind the
+      // schedule fallback guard. This is the expiry/OTP regression boundary.
+      this.clearScheduledPlayback(`lifecycle-${status.state.toLowerCase()}`)
+      this.setActiveSource('none')
+      return
+    }
+
     if (nextSource === 'schedule') {
       this.setActiveSource('schedule')
       return
@@ -256,14 +289,18 @@ class Player {
       })
       return
     }
+
+    this.clearScheduledPlayback('default-media')
+    this.setActiveSource('default')
+  }
+
+  private canRenderScheduledContent(): boolean {
+    return this.latestStatus ? resolvePlayerContentSource(this.latestStatus) === 'schedule' : false
   }
 
   private setActiveSource(source: 'schedule' | 'default' | 'none'): void {
-    if (this.activeSource === source) {
-      return
-    }
-
-    this.activeSource = source
+    this.mediaContainer?.classList.toggle('hidden', source !== 'schedule')
+    this.defaultMediaContainer?.classList.toggle('hidden', source !== 'default')
 
     if (source === 'default') {
       this.defaultMediaPlayer?.show()
@@ -828,6 +865,7 @@ class Player {
    * Show fallback slide
    */
   private showFallback(message: string): void {
+    if (!this.canRenderScheduledContent()) return
     if (!this.mediaContainer) return
 
     const fallback = document.createElement('div')
@@ -862,6 +900,10 @@ class Player {
 
   private updateStatusOverlay(status: PlayerStatus): void {
     const displaySecurityLock = shouldDisplaySecurityLock(status)
+    const displayRuntimeStatus =
+      status.state === 'PAIRED_RUNTIME' ||
+      status.state === 'OFFLINE_USING_LAST_VALID_PAIRING' ||
+      status.state === 'SOFT_RECOVERY'
     if (displaySecurityLock) {
       this.showSecurityLock(status)
     } else {
@@ -869,7 +911,12 @@ class Player {
     }
 
     if (this.statusOverlay) {
-      this.statusOverlay.classList.remove('hidden')
+      this.statusOverlay.classList.toggle('hidden', !displayRuntimeStatus)
+    }
+
+    if (!displayRuntimeStatus) {
+      this.modeBanner?.classList.add('hidden')
+      return
     }
 
     if (this.statusConnection) {

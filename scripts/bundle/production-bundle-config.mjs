@@ -86,7 +86,7 @@ const DEFAULTS = {
   MINIO_HOST_PORT: '9000', MINIO_CONSOLE_PORT: '9001', VALKEY_HOST_PORT: '6379',
   PROMETHEUS_HOST_PORT: '9090', ALERTMANAGER_HOST_PORT: '9093', GRAFANA_HOST_PORT: '3001',
   POSTGRES_USER: 'postgres', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info',
-  POSTGRES_IMAGE: 'postgres:15-alpine', MINIO_IMAGE: 'minio/minio:latest', VALKEY_IMAGE: 'valkey/valkey:7-alpine',
+  POSTGRES_IMAGE: 'postgres:15-alpine', MINIO_IMAGE: 'minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e', VALKEY_IMAGE: 'valkey/valkey:7-alpine',
   NGINX_IMAGE: 'nginx:1.27-alpine', PROMETHEUS_IMAGE: 'prom/prometheus:v3.3.1',
   ALERTMANAGER_IMAGE: 'prom/alertmanager:v0.28.1', GRAFANA_IMAGE: 'grafana/grafana:12.0.2',
   PROMETHEUS_SCRAPE_INTERVAL: '30s', PROMETHEUS_EVALUATION_INTERVAL: '30s', PROMETHEUS_RETENTION_TIME: '30d',

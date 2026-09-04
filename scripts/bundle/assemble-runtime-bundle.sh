@@ -45,7 +45,7 @@ Optional operational inputs:
   CMS_TLS_CERT_FILE=/path/to/fullchain.pem
   CMS_TLS_KEY_FILE=/path/to/privkey.pem
   POSTGRES_IMAGE=postgres:15-alpine
-  MINIO_IMAGE=minio/minio:latest
+  MINIO_IMAGE=minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
   VALKEY_IMAGE=valkey/valkey:7-alpine
   NGINX_IMAGE=nginx:1.27-alpine
   PROMETHEUS_IMAGE=prom/prometheus:v3.3.1
@@ -796,7 +796,7 @@ DEVICE_CA_CERT_FILE="${DEVICE_CA_CERT_FILE:-}"
 DEVICE_CA_KEY_FILE="${DEVICE_CA_KEY_FILE:-}"
 
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-${SERVER_PACKAGE_POSTGRES_IMAGE_REF:-postgres:15-alpine}}"
-MINIO_IMAGE="${MINIO_IMAGE:-${SERVER_PACKAGE_MINIO_IMAGE_REF:-minio/minio:latest}}"
+MINIO_IMAGE="${MINIO_IMAGE:-${SERVER_PACKAGE_MINIO_IMAGE_REF:-minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}}"
 VALKEY_IMAGE="${VALKEY_IMAGE:-${SERVER_PACKAGE_VALKEY_IMAGE_REF:-valkey/valkey:7-alpine}}"
 NGINX_IMAGE="${NGINX_IMAGE:-${CMS_PACKAGE_NGINX_IMAGE_REF:-nginx:1.27-alpine}}"
 PROMETHEUS_IMAGE="${PROMETHEUS_IMAGE:-prom/prometheus:v3.3.1}"
@@ -1374,6 +1374,7 @@ JWT_SECRET=$JWT_SECRET
 JWT_EXPIRY=$JWT_EXPIRY
 MINIO_ENDPOINT=$QA_DATA_HOST
 MINIO_PORT=9000
+MINIO_PUBLIC_ENDPOINT=$CMS_QA_ORIGIN
 MINIO_ACCESS_KEY=$MINIO_ACCESS_KEY
 MINIO_SECRET_KEY=$MINIO_SECRET_KEY
 MINIO_USE_SSL=$MINIO_USE_SSL
@@ -1542,6 +1543,8 @@ EOF
     -e "s/__BACKEND_UPSTREAM_PORT__/$QA_API_HOST_PORT/g" \
     -e "s/__GRAFANA_UPSTREAM_HOST__/127.0.0.1/g" \
     -e "s/__GRAFANA_UPSTREAM_PORT__/$QA_GRAFANA_UPSTREAM_PORT/g" \
+    -e "s/__MINIO_UPSTREAM_HOST__/$QA_DATA_HOST/g" \
+    -e "s/__MINIO_UPSTREAM_PORT__/$QA_MINIO_HOST_PORT/g" \
     "$PLATFORM_ROOT/deploy/shared/cms-nginx.default.conf.template" > "$QA_CMS_DIR/nginx/default.conf"
 
   write_load_images_script "$QA_DATA_DIR/load-images.sh"
@@ -1729,6 +1732,7 @@ JWT_SECRET=$JWT_SECRET
 JWT_EXPIRY=$JWT_EXPIRY
 MINIO_ENDPOINT=$DATA_PRIVATE_HOST
 MINIO_PORT=$MINIO_HOST_PORT
+MINIO_PUBLIC_ENDPOINT=$CMS_PRODUCTION_ORIGIN
 MINIO_ACCESS_KEY=$MINIO_ACCESS_KEY
 MINIO_SECRET_KEY=$MINIO_SECRET_KEY
 MINIO_USE_SSL=$MINIO_USE_SSL
@@ -2035,6 +2039,30 @@ server {
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto \$scheme;
     proxy_read_timeout 600s;
+  }
+
+  # Keep SigV4's path, query, and CMS Host intact. This is the only browser
+  # route to object storage; signed query strings are never access-logged.
+  location ~ ^/(?:media-staging|media-source|media-ready|media-thumbnails|device-screenshots|logs-audit|logs-system|logs-auth|logs-heartbeats|logs-proof-of-play|archives)/ {
+    if (\$request_method !~ ^(GET|HEAD|PUT)\$) { return 405; }
+    access_log off;
+    proxy_pass https://$DATA_PRIVATE_HOST:$MINIO_HOST_PORT;
+    proxy_http_version 1.1;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $DATA_PRIVATE_HOST;
+    proxy_ssl_trusted_certificate /etc/nginx/tls/transport-ca.crt;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 3;
+    proxy_set_header Host \$http_host;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
   }
 
   location /grafana/ {

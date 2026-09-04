@@ -1,5 +1,5 @@
 import { ApiError } from "@/api/apiClient";
-import { mediaApi } from "@/api/domains/media";
+import { mediaApi, type UploadSessionResponse } from "@/api/domains/media";
 import type { MediaAsset } from "@/api/types";
 import { maybeCompressForUpload, type CompressionResult } from "@/lib/mediaCompression";
 import { deriveDisplayNameFromFilename } from "@/lib/media";
@@ -42,6 +42,8 @@ export interface UploadMediaResult extends CompressionResult {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+const MULTIPART_CONCURRENCY = 3;
+const SESSION_STORAGE_PREFIX = "darshan.media-upload-session.v1:";
 
 class UploadHttpError extends Error {
   status: number;
@@ -114,11 +116,11 @@ export const readMediaMetadata = (
 
 const uploadViaXhr = (
   uploadUrl: string,
-  file: File,
+  body: Blob,
   contentType: string,
   onProgress?: (percent: number) => void,
 ) =>
-  new Promise<void>((resolve, reject) => {
+  new Promise<string | undefined>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", uploadUrl, true);
     xhr.setRequestHeader("Content-Type", contentType);
@@ -136,7 +138,7 @@ const uploadViaXhr = (
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         onProgress?.(100);
-        resolve();
+        resolve(xhr.getResponseHeader("ETag") ?? undefined);
         return;
       }
 
@@ -144,8 +146,157 @@ const uploadViaXhr = (
       reject(new UploadHttpError(xhr.status, message));
     };
 
-    xhr.send(file);
+    xhr.send(body);
   });
+
+const sha256File = async (file: File): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+const sessionStorageKey = (file: File, checksum: string) =>
+  `${SESSION_STORAGE_PREFIX}${file.name}:${file.size}:${file.lastModified}:${checksum}`;
+
+const getPersistedSessionId = (key: string): string | null => {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const persistSessionId = (key: string, sessionId: string) => {
+  try {
+    if (typeof window !== "undefined") window.localStorage.setItem(key, sessionId);
+  } catch {
+    // Storage being unavailable must not block the upload itself.
+  }
+};
+
+const clearPersistedSessionId = (key: string) => {
+  try {
+    if (typeof window !== "undefined") window.localStorage.removeItem(key);
+  } catch {
+    // Storage being unavailable must not block the upload itself.
+  }
+};
+
+const newIdempotencyKey = () => crypto.randomUUID();
+
+const partByteLength = (fileSize: number, partSize: number, partNumber: number) =>
+  Math.min(partSize, fileSize - (partNumber - 1) * partSize);
+
+const requireCompletedMedia = (session: UploadSessionResponse): MediaAsset => {
+  if (!session.media) throw new Error("Upload completed without a media record.");
+  return session.media;
+};
+
+const resolveUploadSession = async (params: {
+  file: File;
+  contentType: string;
+  displayName: string;
+  checksum: string;
+}): Promise<{ session: UploadSessionResponse; storageKey: string }> => {
+  const storageKey = sessionStorageKey(params.file, params.checksum);
+  const persistedSessionId = getPersistedSessionId(storageKey);
+  if (persistedSessionId) {
+    try {
+      const existing = await mediaApi.getUploadSession(persistedSessionId);
+      if (existing.state === "ACTIVE" && new Date(existing.expires_at).getTime() > Date.now()) {
+        return { session: existing, storageKey };
+      }
+      if (existing.state === "COMPLETED") {
+        return { session: existing, storageKey };
+      }
+    } catch {
+      // A user may have changed browser/auth context. Create a fresh session.
+    }
+    clearPersistedSessionId(storageKey);
+  }
+
+  const session = await mediaApi.createUploadSession(
+    {
+      filename: params.file.name,
+      display_name: params.displayName,
+      content_type: params.contentType,
+      size: params.file.size,
+      checksum_sha256: params.checksum,
+    },
+    newIdempotencyKey(),
+  );
+  persistSessionId(storageKey, session.session_id);
+  return { session, storageKey };
+};
+
+const uploadMultipart = async (params: {
+  session: UploadSessionResponse;
+  file: File;
+  contentType: string;
+  onProgress?: (percent: number) => void;
+}) => {
+  const { session, file, contentType, onProgress } = params;
+  if (!session.part_size) throw new Error("Multipart upload session is missing part_size.");
+  const uploadedEtags = new Map(session.uploaded_parts.map((part) => [part.part_number, part.etag]));
+  const totalParts = session.part_count;
+  const progressByPart = new Map<number, number>();
+  for (const partNumber of uploadedEtags.keys()) {
+    progressByPart.set(partNumber, partByteLength(file.size, session.part_size, partNumber));
+  }
+
+  const reportProgress = () => {
+    const uploaded = Array.from(progressByPart.values()).reduce((sum, value) => sum + value, 0);
+    onProgress?.(Math.min(100, Math.round((uploaded / file.size) * 100)));
+  };
+  reportProgress();
+
+  const pendingPartNumbers = Array.from({ length: totalParts }, (_value, index) => index + 1).filter(
+    (partNumber) => !uploadedEtags.has(partNumber),
+  );
+  const urlByPart = new Map<number, string>();
+  for (let start = 0; start < pendingPartNumbers.length; start += 20) {
+    const batch = pendingPartNumbers.slice(start, start + 20);
+    const response = await mediaApi.presignUploadParts(session.session_id, batch);
+    response.parts.forEach((part) => urlByPart.set(part.part_number, part.upload_url));
+  }
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < pendingPartNumbers.length) {
+      const partNumber = pendingPartNumbers[cursor++];
+      const start = (partNumber - 1) * session.part_size;
+      const part = file.slice(start, Math.min(start + session.part_size, file.size));
+      let etag: string | undefined;
+      let lastError: unknown;
+
+      for (let attempt = 0; attempt < 2 && !etag; attempt += 1) {
+        try {
+          const uploadUrl =
+            attempt === 0 ? urlByPart.get(partNumber) : (await mediaApi.presignUploadParts(session.session_id, [partNumber])).parts[0]?.upload_url;
+          if (!uploadUrl) throw new Error(`No upload URL returned for part ${partNumber}.`);
+          etag = await uploadViaXhr(uploadUrl, part, contentType, (percent) => {
+            progressByPart.set(partNumber, Math.round((part.size * percent) / 100));
+            reportProgress();
+          });
+          if (!etag) throw new Error(`Object storage did not return an ETag for part ${partNumber}.`);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!etag) {
+        throw lastError instanceof Error ? lastError : new Error(`Part ${partNumber} upload failed.`);
+      }
+      uploadedEtags.set(partNumber, etag);
+      progressByPart.set(partNumber, part.size);
+      reportProgress();
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(MULTIPART_CONCURRENCY, pendingPartNumbers.length) }, worker));
+  return Array.from(uploadedEtags.entries())
+    .map(([part_number, etag]) => ({ part_number, etag }))
+    .sort((left, right) => left.part_number - right.part_number);
+};
 
 export const uploadMediaWithPresign = async (
   file: File,
@@ -160,15 +311,23 @@ export const uploadMediaWithPresign = async (
   const contentType = finalFile.type || "application/octet-stream";
 
   opts?.onPrepared?.(processed);
-
-  const presign = await mediaApi.presignUpload({
-    filename: finalFile.name,
-    display_name: opts?.displayName?.trim() || deriveDisplayNameFromFilename(file.name),
-    content_type: contentType,
-    size: finalFile.size,
+  const checksum = await sha256File(finalFile);
+  const { session: initialSession, storageKey } = await resolveUploadSession({
+    file: finalFile,
+    contentType,
+    displayName: opts?.displayName?.trim() || deriveDisplayNameFromFilename(file.name),
+    checksum,
   });
 
-  await uploadViaXhr(presign.upload_url, finalFile, contentType, opts?.onProgress);
+  if (initialSession.state === "COMPLETED") {
+    clearPersistedSessionId(storageKey);
+    return { ...processed, media: requireCompletedMedia(initialSession) };
+  }
+
+  if (initialSession.state !== "ACTIVE") {
+    clearPersistedSessionId(storageKey);
+    throw new Error(`Upload session is ${initialSession.state.toLowerCase()}. Start a new upload.`);
+  }
 
   const metadata =
     processed.width || processed.height
@@ -179,16 +338,30 @@ export const uploadMediaWithPresign = async (
         }
       : await readMediaMetadata(finalFile);
 
-  const media = await mediaApi.complete(presign.media_id, {
-    content_type: contentType,
-    size: finalFile.size,
-    ...metadata,
-  });
+  try {
+    if (initialSession.strategy === "single") {
+      const uploadUrl = initialSession.upload_url || (await mediaApi.getUploadSession(initialSession.session_id)).upload_url;
+      if (!uploadUrl) throw new Error("Upload session did not return a single-upload URL.");
+      await uploadViaXhr(uploadUrl, finalFile, contentType, opts?.onProgress);
+    }
 
-  return {
-    ...processed,
-    media,
-  };
+    const parts =
+      initialSession.strategy === "multipart"
+        ? await uploadMultipart({ session: initialSession, file: finalFile, contentType, onProgress: opts?.onProgress })
+        : undefined;
+    const completed = await mediaApi.completeUploadSession(initialSession.session_id, { parts, ...metadata });
+    const media = requireCompletedMedia(completed);
+    clearPersistedSessionId(storageKey);
+
+    return {
+      ...processed,
+      media,
+    };
+  } catch (error) {
+    // Keep the session id locally. Retrying the same file resumes server-listed
+    // parts rather than silently starting a second object or media record.
+    throw error;
+  }
 };
 
 export const getFriendlyUploadError = (error: unknown): string => {
@@ -202,6 +375,9 @@ export const getFriendlyUploadError = (error: unknown): string => {
   if (status === 413) return "Upload failed: file is too large.";
   if (status === 415) return "Upload failed: unsupported file type.";
   if (status === 403) return "Upload failed: you do not have permission to upload this file.";
+  if (status === 408) return "Upload paused because the network timed out. Retry with the same file to resume.";
+  if (status === 409) return "This upload session is no longer active. Please start the upload again.";
+  if (status === 0) return "Network connection interrupted. Retry with the same file to resume the saved upload.";
 
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error) return error.message;

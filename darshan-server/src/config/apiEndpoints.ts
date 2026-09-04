@@ -35,6 +35,10 @@ export const apiEndpoints = {
   },
   media: {
     presignUpload: withBase('/media/presign-upload'),
+    uploadSessions: withBase('/media/uploads'),
+    uploadSession: withBase('/media/uploads/:sessionId'),
+    uploadSessionParts: withBase('/media/uploads/:sessionId/parts/presign'),
+    uploadSessionComplete: withBase('/media/uploads/:sessionId/complete'),
     create: withBase('/media'),
     list: withBase('/media'),
     get: withBase('/media/:id'),

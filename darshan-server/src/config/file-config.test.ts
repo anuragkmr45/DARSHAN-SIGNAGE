@@ -194,6 +194,7 @@ describe('backend file config loader', () => {
     const configFile = makeTempConfigFile({
       media: {
         endpoint: 'https://minio.local:9443',
+        publicEndpoint: 'https://cms.local',
         region: 'us-east-1',
       },
     });
@@ -203,6 +204,7 @@ describe('backend file config loader', () => {
     expect(loaded.env.MINIO_ENDPOINT).toBe('minio.local');
     expect(loaded.env.MINIO_PORT).toBe('9443');
     expect(loaded.env.MINIO_USE_SSL).toBe('true');
+    expect(loaded.env.MINIO_PUBLIC_ENDPOINT).toBe('https://cms.local');
     expect(loaded.env.MINIO_REGION).toBe('us-east-1');
   });
 

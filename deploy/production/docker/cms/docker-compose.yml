@@ -8,6 +8,8 @@ services:
     environment:
       BACKEND_HOST: ${BACKEND_HOST}
       BACKEND_PORT: ${API_HOST_PORT}
+      MINIO_HOST: ${MINIO_HOST}
+      MINIO_PORT: ${MINIO_PORT:-9000}
       GRAFANA_HOST: ${OBSERVABILITY_HOST}
       GRAFANA_PORT: ${GRAFANA_PORT}
     ports:

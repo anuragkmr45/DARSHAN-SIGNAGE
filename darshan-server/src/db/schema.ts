@@ -191,6 +191,47 @@ export const media = pgTable(
   })
 );
 
+// Resumable browser-to-object-storage uploads. The final media record is kept
+// PENDING until the staging object is verified and promoted to its immutable
+// canonical key.
+export const mediaUploadSessions = pgTable(
+  'media_upload_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    media_id: uuid('media_id').notNull(),
+    created_by: uuid('created_by').notNull(),
+    idempotency_key: varchar('idempotency_key', { length: 255 }).notNull(),
+    state: varchar('state', { length: 32 }).notNull().default('INITIALIZING'),
+    strategy: varchar('strategy', { length: 16 }).notNull(),
+    original_filename: varchar('original_filename', { length: 512 }).notNull(),
+    display_name: varchar('display_name', { length: 255 }).notNull(),
+    content_type: varchar('content_type', { length: 255 }).notNull(),
+    expected_size: integer('expected_size').notNull(),
+    checksum_sha256: varchar('checksum_sha256', { length: 64 }).notNull(),
+    part_size: integer('part_size'),
+    staging_bucket: varchar('staging_bucket', { length: 255 }).notNull(),
+    staging_object_key: varchar('staging_object_key', { length: 1024 }).notNull(),
+    canonical_bucket: varchar('canonical_bucket', { length: 255 }).notNull(),
+    canonical_object_key: varchar('canonical_object_key', { length: 1024 }).notNull(),
+    multipart_upload_id: text('multipart_upload_id'),
+    expires_at: timestamp('expires_at').notNull(),
+    completed_at: timestamp('completed_at'),
+    aborted_at: timestamp('aborted_at'),
+    failure_reason: varchar('failure_reason', { length: 120 }),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    mediaIdIdx: uniqueIndex('media_upload_sessions_media_id_idx').on(table.media_id),
+    userIdempotencyIdx: uniqueIndex('media_upload_sessions_user_idempotency_idx').on(
+      table.created_by,
+      table.idempotency_key
+    ),
+    expiresAtIdx: index('media_upload_sessions_expires_at_idx').on(table.expires_at),
+    stateExpiresIdx: index('media_upload_sessions_state_expires_at_idx').on(table.state, table.expires_at),
+  })
+);
+
 // Presentations table
 export const presentations = pgTable(
   'presentations',

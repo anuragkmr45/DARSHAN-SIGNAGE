@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
-import { getPresignedUrl, headObject } from '@/s3';
+import { getPresignedUrl, headObject, type S3UrlAudience } from '@/s3';
 import { buildContentDisposition } from '@/utils/object-key';
 import { createLogger } from '@/utils/logger';
 
@@ -19,6 +19,7 @@ export type ResolvedMediaAccess = {
 
 type ResolveMediaAccessOptions = {
   readyObjectMap?: Map<string, StorageObjectRecord>;
+  audience?: S3UrlAudience;
 };
 
 const isObjectMissingError = (error: unknown) => {
@@ -151,6 +152,7 @@ export async function resolveMediaAccess(
       expiresIn: 3600,
       responseContentDisposition: contentDisposition,
       responseContentType: resolvedContentType ?? undefined,
+      audience: options.audience ?? 'cms',
     });
 
     return {

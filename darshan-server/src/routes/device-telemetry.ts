@@ -459,7 +459,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
       };
     }
 
-    const mediaAccess = await resolveMediaAccess(resolvedDefaultMedia.media, db);
+    const mediaAccess = await resolveMediaAccess(resolvedDefaultMedia.media, db, { audience: 'device' });
     return {
       default_media: {
         media_id: resolvedDefaultMedia.media.id,
@@ -611,7 +611,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
 
         const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
         const defaultMediaAccess = resolvedDefaultMedia.media
-          ? await resolveMediaAccess(resolvedDefaultMedia.media, db)
+          ? await resolveMediaAccess(resolvedDefaultMedia.media, db, { audience: 'device' })
           : null;
         return reply.send({
           source: resolvedDefaultMedia.source,
@@ -715,7 +715,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
 
           const ids = Array.from(mediaIds);
           if (ids.length > 0) {
-            const resolvedMediaMap = await buildResolvedMediaMap(ids, db);
+            const resolvedMediaMap = await buildResolvedMediaMap(ids, db, 'device');
             filteredSnapshot = attachResolvedMediaToScheduleSnapshot(filteredSnapshot, resolvedMediaMap);
             mediaUrls = {};
             for (const [mediaId, media] of resolvedMediaMap.entries()) {

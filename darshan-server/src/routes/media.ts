@@ -2,11 +2,16 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import path from 'path';
 import {
   completeUploadSchema,
+  completeUploadSessionSchema,
+  createUploadSessionSchema,
   createMediaSchema,
   presignUploadSchema,
   listMediaQuerySchema,
+  uploadPartPresignSchema,
+  uploadSessionParamsSchema,
 } from '@/schemas/media';
 import { createMediaRepository } from '@/db/repositories/media';
+import { createMediaUploadSessionRepository } from '@/db/repositories/media-upload-session';
 import type { MediaUsageReference } from '@/db/repositories/media';
 import { createUserRepository } from '@/db/repositories/user';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
@@ -18,13 +23,25 @@ import {
   getDepartmentUserIds,
   isDepartmentScopedRole,
 } from '@/rbac/policy';
-import { getPresignedPutUrl, createBucketIfNotExists, headObject, getPresignedUrl } from '@/s3';
+import {
+  abortMultipartUpload,
+  completeMultipartUpload,
+  computeObjectSha256,
+  copyObject,
+  createBucketIfNotExists,
+  createMultipartUpload,
+  deleteObject,
+  getPresignedPutUrl,
+  getPresignedUploadPartUrl,
+  getPresignedUrl,
+  headObject,
+  listMultipartUploadParts,
+} from '@/s3';
 import { createLogger } from '@/utils/logger';
-import { randomUUID } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import { apiEndpoints, PENDINGSTATUS } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
-import { deleteObject } from '@/s3';
 import { getDatabase, schema } from '@/db';
 import { eq, inArray } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
@@ -51,10 +68,18 @@ import {
 const logger = createLogger('media-routes');
 const { CREATED, FORBIDDEN, OK } = HTTP_STATUS;
 const LEGACY_WEBPAGE_PREVIEW_REQUEUE_COOLDOWN_MS = 5 * 60 * 1000;
+const UPLOAD_MULTIPART_THRESHOLD_BYTES = 100 * 1024 * 1024;
+const UPLOAD_PART_SIZE_BYTES = 16 * 1024 * 1024;
+const UPLOAD_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const UPLOAD_SINGLE_URL_TTL_SECONDS = 60 * 60;
+const UPLOAD_PART_URL_TTL_SECONDS = 15 * 60;
+const UPLOAD_STAGING_BUCKET = 'media-staging';
+const UPLOAD_CANONICAL_BUCKET = 'media-source';
 const legacyWebpagePreviewRequeueAt = new Map<string, number>();
 
 export async function mediaRoutes(fastify: FastifyInstance) {
   const mediaRepo = createMediaRepository();
+  const uploadSessionRepo = createMediaUploadSessionRepository();
   const userRepo = createUserRepository();
   const db = getDatabase();
 
@@ -365,6 +390,445 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     return readyMedia;
   };
 
+  const requireMediaCreateAbility = async (request: FastifyRequest) => {
+    const token = extractTokenFromHeader(request.headers.authorization);
+    if (!token) {
+      throw AppError.unauthorized('Missing authorization header');
+    }
+
+    const payload = await verifyAccessToken(token);
+    const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+    if (!ability.can('create', 'Media')) {
+      throw AppError.forbidden('Forbidden');
+    }
+    return payload;
+  };
+
+  const getIdempotencyKey = (request: FastifyRequest) => {
+    const rawHeader = request.headers['idempotency-key'];
+    const idempotencyKey = (Array.isArray(rawHeader) ? rawHeader[0] : rawHeader)?.trim();
+    if (!idempotencyKey || idempotencyKey.length > 255) {
+      throw AppError.badRequest('Idempotency-Key header is required and must be at most 255 characters');
+    }
+    return idempotencyKey;
+  };
+
+  const isSessionExpired = (session: { expires_at: Date }) => session.expires_at.getTime() <= Date.now();
+
+  const assertSessionOwner = async (request: FastifyRequest, sessionId: string) => {
+    const payload = await requireMediaCreateAbility(request);
+    const session = await uploadSessionRepo.findById(sessionId);
+    if (!session) {
+      throw AppError.notFound('Upload session not found');
+    }
+    if (session.created_by !== payload.sub) {
+      throw AppError.forbidden('This upload session belongs to another user');
+    }
+    return { payload, session };
+  };
+
+  const sessionPartCount = (session: { expected_size: number; part_size: number | null }) => {
+    if (!session.part_size) return 0;
+    return Math.ceil(session.expected_size / session.part_size);
+  };
+
+  const safeChecksumEquals = (actual: string, expected: string) => {
+    const actualBytes = Buffer.from(actual, 'utf8');
+    const expectedBytes = Buffer.from(expected, 'utf8');
+    return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+  };
+
+  const listUploadedParts = async (session: {
+    strategy: string;
+    multipart_upload_id: string | null;
+    staging_bucket: string;
+    staging_object_key: string;
+  }) => {
+    if (session.strategy !== 'multipart' || !session.multipart_upload_id) return [];
+    const response = await listMultipartUploadParts(
+      session.staging_bucket,
+      session.staging_object_key,
+      session.multipart_upload_id
+    );
+    return (response.Parts ?? [])
+      .filter((part): part is { PartNumber: number; ETag: string; Size?: number } =>
+        typeof part.PartNumber === 'number' && typeof part.ETag === 'string'
+      )
+      .map((part) => ({ part_number: part.PartNumber, etag: part.ETag, size: part.Size ?? null }))
+      .sort((left, right) => left.part_number - right.part_number);
+  };
+
+  const serializeUploadSession = async (session: any, includeSingleUploadUrl = false) => {
+    let uploadedParts: Array<{ part_number: number; etag: string; size: number | null }> = [];
+    if (session.strategy === 'multipart' && session.state === 'ACTIVE' && session.multipart_upload_id) {
+      uploadedParts = await listUploadedParts(session);
+    }
+
+    const singleUploadUrl =
+      includeSingleUploadUrl && session.strategy === 'single' && session.state === 'ACTIVE'
+        ? await getPresignedPutUrl(
+            session.staging_bucket,
+            session.staging_object_key,
+            UPLOAD_SINGLE_URL_TTL_SECONDS,
+            'cms'
+          )
+        : undefined;
+    const media = session.state === 'COMPLETED' ? await mediaRepo.findById(session.media_id) : null;
+
+    return {
+      session_id: session.id,
+      media_id: session.media_id,
+      state: session.state,
+      strategy: session.strategy,
+      expires_at: session.expires_at.toISOString(),
+      part_size: session.part_size,
+      part_count: sessionPartCount(session),
+      uploaded_parts: uploadedParts,
+      upload_url: singleUploadUrl,
+      media: media ? await serializeCurrentMediaState(media) : null,
+      failure_reason: session.failure_reason,
+    };
+  };
+
+  const markUploadSessionFailed = async (session: any, reason: string, deleteStaging = false) => {
+    if (deleteStaging) {
+      await deleteObject(session.staging_bucket, session.staging_object_key).catch((error) => {
+        logger.warn({ error, sessionId: session.id }, 'Failed to remove rejected staging object');
+      });
+    }
+    await uploadSessionRepo.update(session.id, { state: 'FAILED', failure_reason: reason });
+    await mediaRepo.update(session.media_id, { status: 'FAILED', status_reason: reason });
+  };
+
+  // Resumable upload session. The browser only receives CMS-origin signed URLs
+  // for an immutable staging key; no staging object is ever playable.
+  fastify.post<{ Body: typeof createUploadSessionSchema._type }>(
+    apiEndpoints.media.uploadSessions,
+    {
+      schema: {
+        description: 'Create or resume an idempotent, verified media upload session',
+        tags: ['Media'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const payload = await requireMediaCreateAbility(request);
+        const idempotencyKey = getIdempotencyKey(request);
+        const data = createUploadSessionSchema.parse(request.body);
+        const existing = await uploadSessionRepo.findByUserAndIdempotencyKey(payload.sub, idempotencyKey);
+        if (existing) {
+          const requestMatchesExisting =
+            existing.original_filename === normalizeOriginalFilename(data.filename) &&
+            existing.display_name === normalizeDisplayName(data.display_name || data.filename) &&
+            existing.content_type === data.content_type &&
+            existing.expected_size === data.size &&
+            safeChecksumEquals(existing.checksum_sha256, data.checksum_sha256);
+          if (!requestMatchesExisting) {
+            throw AppError.conflict('Idempotency-Key is already associated with a different upload');
+          }
+          return reply.send(await serializeUploadSession(existing, true));
+        }
+
+        const mediaId = randomUUID();
+        const sessionId = randomUUID();
+        const originalFilename = normalizeOriginalFilename(data.filename);
+        const displayName = normalizeDisplayName(data.display_name || originalFilename);
+        const { objectKey } = buildObjectKey({
+          originalFilename,
+          mimeType: data.content_type,
+          id: mediaId,
+        });
+        const strategy = data.size >= UPLOAD_MULTIPART_THRESHOLD_BYTES ? 'multipart' : 'single';
+        const expiresAt = new Date(Date.now() + UPLOAD_SESSION_TTL_MS);
+        const stagingObjectKey = `uploads/${sessionId}/${objectKey}`;
+
+        await Promise.all([
+          createBucketIfNotExists(UPLOAD_STAGING_BUCKET),
+          createBucketIfNotExists(UPLOAD_CANONICAL_BUCKET),
+        ]);
+
+        await mediaRepo.create({
+          id: mediaId,
+          name: displayName,
+          type: inferUploadMediaType(data.content_type) as any,
+          status: PENDINGSTATUS,
+          source_bucket: UPLOAD_CANONICAL_BUCKET,
+          source_object_key: objectKey,
+          source_content_type: data.content_type,
+          source_size: data.size,
+          status_reason: null,
+          created_by: payload.sub,
+        });
+
+        let session = await uploadSessionRepo.create({
+          id: sessionId,
+          media_id: mediaId,
+          created_by: payload.sub,
+          idempotency_key: idempotencyKey,
+          state: 'INITIALIZING',
+          strategy,
+          original_filename: originalFilename,
+          display_name: displayName,
+          content_type: data.content_type,
+          expected_size: data.size,
+          checksum_sha256: data.checksum_sha256,
+          part_size: strategy === 'multipart' ? UPLOAD_PART_SIZE_BYTES : null,
+          staging_bucket: UPLOAD_STAGING_BUCKET,
+          staging_object_key: stagingObjectKey,
+          canonical_bucket: UPLOAD_CANONICAL_BUCKET,
+          canonical_object_key: objectKey,
+          expires_at: expiresAt,
+        });
+
+        try {
+          if (strategy === 'multipart') {
+            const multipart = await createMultipartUpload({
+              bucket: UPLOAD_STAGING_BUCKET,
+              key: stagingObjectKey,
+              contentType: data.content_type,
+              checksumSha256: data.checksum_sha256,
+            });
+            if (!multipart.UploadId) {
+              throw new Error('Object storage did not return a multipart upload id');
+            }
+            session = await uploadSessionRepo.update(session.id, {
+              state: 'ACTIVE',
+              multipart_upload_id: multipart.UploadId,
+            });
+          } else {
+            session = await uploadSessionRepo.update(session.id, { state: 'ACTIVE' });
+          }
+        } catch (error) {
+          await markUploadSessionFailed(session, 'UPLOAD_SESSION_INITIALIZATION_FAILED');
+          throw error;
+        }
+
+        if (!session) {
+          throw AppError.internal('Failed to activate upload session');
+        }
+        return reply.status(CREATED).send(await serializeUploadSession(session, true));
+      } catch (error) {
+        logger.error(error, 'Create upload session error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.get<{ Params: typeof uploadSessionParamsSchema._type }>(
+    apiEndpoints.media.uploadSession,
+    {
+      schema: { description: 'Get resumable upload session state', tags: ['Media'], security: [{ bearerAuth: [] }] },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { sessionId } = uploadSessionParamsSchema.parse(request.params);
+        const { session } = await assertSessionOwner(request, sessionId);
+        if (isSessionExpired(session) && session.state === 'ACTIVE') {
+          await uploadSessionRepo.update(session.id, { state: 'EXPIRED', failure_reason: 'UPLOAD_SESSION_EXPIRED' });
+          await mediaRepo.update(session.media_id, { status: 'FAILED', status_reason: 'UPLOAD_SESSION_EXPIRED' });
+          return reply.send(await serializeUploadSession({ ...session, state: 'EXPIRED', failure_reason: 'UPLOAD_SESSION_EXPIRED' }));
+        }
+        return reply.send(await serializeUploadSession(session, true));
+      } catch (error) {
+        logger.error(error, 'Get upload session error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.post<{ Params: typeof uploadSessionParamsSchema._type; Body: typeof uploadPartPresignSchema._type }>(
+    apiEndpoints.media.uploadSessionParts,
+    {
+      schema: { description: 'Issue short-lived CMS-origin URLs for upload parts', tags: ['Media'], security: [{ bearerAuth: [] }] },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { sessionId } = uploadSessionParamsSchema.parse(request.params);
+        const { session } = await assertSessionOwner(request, sessionId);
+        if (session.strategy !== 'multipart' || !session.multipart_upload_id) {
+          throw AppError.badRequest('This upload session does not use multipart upload');
+        }
+        if (session.state !== 'ACTIVE' || isSessionExpired(session)) {
+          throw AppError.conflict('Upload session is no longer active');
+        }
+
+        const data = uploadPartPresignSchema.parse(request.body);
+        const maxPartNumber = sessionPartCount(session);
+        const partNumbers = Array.from(new Set(data.part_numbers)).sort((left, right) => left - right);
+        if (partNumbers.some((partNumber) => partNumber > maxPartNumber)) {
+          throw AppError.badRequest('Requested part number is outside the upload bounds');
+        }
+
+        const parts = await Promise.all(
+          partNumbers.map(async (partNumber) => ({
+            part_number: partNumber,
+            upload_url: await getPresignedUploadPartUrl({
+              bucket: session.staging_bucket,
+              key: session.staging_object_key,
+              uploadId: session.multipart_upload_id as string,
+              partNumber,
+              expiresIn: UPLOAD_PART_URL_TTL_SECONDS,
+              audience: 'cms',
+            }),
+            expires_in: UPLOAD_PART_URL_TTL_SECONDS,
+          }))
+        );
+        return reply.send({ session_id: session.id, parts });
+      } catch (error) {
+        logger.error(error, 'Presign upload part error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.post<{ Params: typeof uploadSessionParamsSchema._type; Body: typeof completeUploadSessionSchema._type }>(
+    apiEndpoints.media.uploadSessionComplete,
+    {
+      schema: { description: 'Verify, promote, and finalize an upload session', tags: ['Media'], security: [{ bearerAuth: [] }] },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      let finalizingSessionId: string | undefined;
+      try {
+        const { sessionId } = uploadSessionParamsSchema.parse(request.params);
+        const { session: originalSession } = await assertSessionOwner(request, sessionId);
+        const data = completeUploadSessionSchema.parse(request.body);
+        if (originalSession.state === 'COMPLETED') {
+          return reply.send(await serializeUploadSession(originalSession));
+        }
+        if (originalSession.state !== 'ACTIVE' || isSessionExpired(originalSession)) {
+          throw AppError.conflict('Upload session is no longer active');
+        }
+
+        let session = await uploadSessionRepo.claimForFinalization(originalSession.id);
+        if (!session) throw AppError.conflict('Upload session is already being finalized');
+        finalizingSessionId = session.id;
+
+        if (session.strategy === 'multipart') {
+          const suppliedParts = data.parts ?? [];
+          const uploadedParts = await listUploadedParts(session);
+          const expectedPartCount = sessionPartCount(session);
+          if (uploadedParts.length !== expectedPartCount || suppliedParts.length !== expectedPartCount) {
+            throw AppError.badRequest('All upload parts must be present before completion');
+          }
+
+          const suppliedByNumber = new Map(suppliedParts.map((part) => [part.part_number, part.etag]));
+          const authoritativeParts = uploadedParts.map((part) => ({ partNumber: part.part_number, etag: part.etag }));
+          const validParts =
+            authoritativeParts.length === expectedPartCount &&
+            authoritativeParts.every(
+              (part, index) =>
+                part.partNumber === index + 1 &&
+                typeof suppliedByNumber.get(part.partNumber) === 'string' &&
+                suppliedByNumber.get(part.partNumber) === part.etag
+            );
+          if (!validParts) {
+            throw AppError.badRequest('Upload part list does not match object storage state');
+          }
+          await completeMultipartUpload({
+            bucket: session.staging_bucket,
+            key: session.staging_object_key,
+            uploadId: session.multipart_upload_id as string,
+            parts: authoritativeParts,
+          });
+        }
+
+        const stagingHead = await headObject(session.staging_bucket, session.staging_object_key);
+        const stagingSize = normalizeHeadSize(stagingHead?.ContentLength);
+        if (stagingSize !== session.expected_size) {
+          await markUploadSessionFailed(session, 'UPLOAD_SIZE_MISMATCH', true);
+          throw AppError.badRequest('Uploaded object size does not match expected size', {
+            expected_size: session.expected_size,
+            actual_size: stagingSize,
+          });
+        }
+        const actualChecksum = await computeObjectSha256(session.staging_bucket, session.staging_object_key);
+        if (!safeChecksumEquals(actualChecksum, session.checksum_sha256)) {
+          await markUploadSessionFailed(session, 'UPLOAD_CHECKSUM_MISMATCH', true);
+          throw AppError.badRequest('Uploaded object checksum does not match expected SHA-256');
+        }
+
+        await copyObject({
+          sourceBucket: session.staging_bucket,
+          sourceKey: session.staging_object_key,
+          destinationBucket: session.canonical_bucket,
+          destinationKey: session.canonical_object_key,
+        });
+        const canonicalHead = await headObject(session.canonical_bucket, session.canonical_object_key);
+        if (normalizeHeadSize(canonicalHead?.ContentLength) !== session.expected_size) {
+          await markUploadSessionFailed(session, 'UPLOAD_PROMOTION_SIZE_MISMATCH');
+          throw AppError.internal('Promoted object did not match the verified staging object size');
+        }
+
+        const media = await mediaRepo.findById(session.media_id);
+        if (!media) throw AppError.internal('Upload session media record is missing');
+        const finalizedMedia = await finalizeVerifiedUpload(media, {
+          content_type: session.content_type,
+          size: session.expected_size,
+          width: data.width,
+          height: data.height,
+          duration_seconds: data.duration_seconds,
+        });
+        if (finalizedMedia.source_object_id) {
+          await db
+            .update(schema.storageObjects)
+            .set({ sha256: actualChecksum })
+            .where(eq(schema.storageObjects.id, finalizedMedia.source_object_id));
+        }
+        await deleteObject(session.staging_bucket, session.staging_object_key).catch((error) => {
+          logger.warn({ error, sessionId: session.id }, 'Promoted staging object will be cleaned up later');
+        });
+        session = await uploadSessionRepo.update(session.id, {
+          state: 'COMPLETED',
+          completed_at: new Date(),
+          failure_reason: null,
+        });
+        if (!session) throw AppError.internal('Failed to mark upload session complete');
+        return reply.send(await serializeUploadSession(session));
+      } catch (error) {
+        if (finalizingSessionId) {
+          const latestSession = await uploadSessionRepo.findById(finalizingSessionId).catch(() => null);
+          if (latestSession?.state === 'FINALIZING') {
+            await uploadSessionRepo.releaseFinalization(finalizingSessionId).catch((releaseError) => {
+              logger.error({ releaseError, sessionId: finalizingSessionId }, 'Failed to release upload finalization lock');
+            });
+          }
+        }
+        logger.error(error, 'Complete upload session error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.delete<{ Params: typeof uploadSessionParamsSchema._type }>(
+    apiEndpoints.media.uploadSession,
+    {
+      schema: { description: 'Abort and clean up an incomplete upload session', tags: ['Media'], security: [{ bearerAuth: [] }] },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { sessionId } = uploadSessionParamsSchema.parse(request.params);
+        const { session } = await assertSessionOwner(request, sessionId);
+        if (session.state === 'COMPLETED') {
+          throw AppError.conflict('Completed upload sessions cannot be aborted');
+        }
+        if (session.strategy === 'multipart' && session.multipart_upload_id) {
+          await abortMultipartUpload(session.staging_bucket, session.staging_object_key, session.multipart_upload_id).catch((error) => {
+            logger.warn({ error, sessionId: session.id }, 'Failed to abort multipart upload');
+          });
+        }
+        await deleteObject(session.staging_bucket, session.staging_object_key).catch(() => undefined);
+        await uploadSessionRepo.update(session.id, { state: 'ABORTED', aborted_at: new Date(), failure_reason: 'UPLOAD_ABORTED' });
+        await mediaRepo.update(session.media_id, { status: 'FAILED', status_reason: 'UPLOAD_ABORTED' });
+        return reply.status(OK).send({ session_id: session.id, state: 'ABORTED' });
+      } catch (error) {
+        logger.error(error, 'Abort upload session error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Legacy direct presign route. New CMS uploads use resumable sessions above.
   // Presign upload URL
   fastify.post<{ Body: typeof presignUploadSchema._type }>(
     apiEndpoints.media.presignUpload,
@@ -392,7 +856,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const data = presignUploadSchema.parse(request.body);
         const mediaId = randomUUID();
         const originalFilename = normalizeOriginalFilename(data.filename);
-        const displayName = normalizeDisplayName(originalFilename);
+        const displayName = normalizeDisplayName(data.display_name || originalFilename);
         const { objectKey } = buildObjectKey({
           originalFilename,
           mimeType: data.content_type,
@@ -405,8 +869,10 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         // Ensure bucket exists
         await createBucketIfNotExists(bucket);
 
-        // Generate presigned URL
-        const uploadUrl = await getPresignedPutUrl(bucket, objectKey, 3600);
+        // CMS web browsers are restricted to the CMS HTTPS origin. Sign the
+        // path-style URL for that Nginx gateway, never for the internal MinIO
+        // endpoint that a browser cannot reliably reach.
+        const uploadUrl = await getPresignedPutUrl(bucket, objectKey, 3600, 'cms');
 
         // Create media record
         const media = await mediaRepo.create({

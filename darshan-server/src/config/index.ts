@@ -35,6 +35,13 @@ const envSchema = z.object({
     .transform((v) => v === 'true')
     .default('false'),
   MINIO_REGION: z.string().default('us-east-1'),
+  // Public, path-style S3 endpoint used only by browser-origin CMS traffic.
+  // It is normally the CMS HTTPS origin fronting MinIO through Nginx.
+  MINIO_PUBLIC_ENDPOINT: z.preprocess((value) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }, z.string().url().optional()),
   ADMIN_EMAIL: z.string().email(),
   ADMIN_PASSWORD: z.string().min(8),
   SERVER_TLS_ENABLED: optionalBooleanString,

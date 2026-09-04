@@ -8,6 +8,12 @@ Fresh reinstall defaults to a new player and pairing is required by default. A p
 
 The backend pairing-status contract is the source of truth. The player must not show paired or no-content UI until the backend validates the local identity, except for offline playback using the same identity that was validated recently.
 
+## Renderer Safety Invariant
+
+The renderer must expose exactly one primary content surface. While the player is bootstrapping, pairing, provisioning, or recovering, scheduled and default media are hidden and torn down. Playback cleanup events may clear media resources, but they must never select the default or paired-idle surface. A fresh OTP must therefore remain visible after an expired OTP enters hard recovery and requests a replacement code.
+
+`ONLINE`, `OFFLINE`, and `NO CONTENT ASSIGNED` are runtime playback indicators only; they are not pairing truth and must not be shown for pairing or recovery states.
+
 ## Current Local Identity Risk
 
 The Electron player can preserve runtime identity across uninstall because app data and runtime state can survive package removal. That persisted state may include device id, certificate metadata, CA/cert/key paths, pairing validation metadata, snapshots, default-media metadata, and cached playback state.

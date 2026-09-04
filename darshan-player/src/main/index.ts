@@ -16,7 +16,7 @@ import { getConfigManager } from '../common/config'
 import { getLogger } from '../common/logger'
 import { redactUrlForDiagnostics, redactUrlOrPathForDiagnostics, sanitizeLogPayloadForDiagnostics } from '../common/redaction'
 import { ExponentialBackoff } from '../common/utils'
-import type { ActiveSlotPlayback, AppConfig, PlayerStatus } from '../common/types'
+import type { ActiveSlotPlayback, AppConfig, PlayerPresentationSnapshot, PlayerStatus } from '../common/types'
 import type { PlaybackProgressIdentity } from '../common/playback-policy'
 import { parseOperatorCommand, runOperatorCommand } from './cli'
 import { getRuntimeMode, getRuntimeWindowPolicy } from './runtime-mode'
@@ -58,6 +58,7 @@ const WEBPAGE_PARTITION = 'persist:darshan-webpage-playback'
 let lastBlockedInputLogAt = 0
 let startupConfigError: string | null = null
 let lastReportedActiveSlots = new Map<string, ActiveSlotPlayback>()
+let servicesInitialized = false
 
 function buildStartupConfigStatus(): PlayerStatus {
   return {
@@ -72,10 +73,18 @@ function buildStartupConfigStatus(): PlayerStatus {
   }
 }
 
+function buildStartupPresentationSnapshot(): PlayerPresentationSnapshot {
+  return {
+    revision: 0,
+    status: buildStartupConfigStatus(),
+  }
+}
+
 function broadcastPlayerStatus(status: PlayerStatus): void {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) {
       win.webContents.send('player-status', status)
+      win.webContents.send('player-presentation', { revision: 0, status })
     }
   })
 }
@@ -404,6 +413,15 @@ function createWindow(): void {
     mainWindow.loadFile(rendererPath)
       .then(() => {
         logger.info('Renderer HTML loaded successfully')
+        if (servicesInitialized && mainWindow && !mainWindow.isDestroyed()) {
+          void import('./services/player-flow.js')
+            .then(({ getPlayerFlow }) => {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                getPlayerFlow().attachWindow(mainWindow)
+              }
+            })
+            .catch((error) => logger.error({ error }, 'Failed to reattach renderer services'))
+        }
       })
       .catch((error) => {
         logger.error({ error, rendererPath }, 'Failed to load renderer')
@@ -511,6 +529,7 @@ async function initializeServices(): Promise<void> {
     }
 
     await playerFlow.start()
+    servicesInitialized = true
     logger.info('All services initialized successfully')
   } catch (error) {
     logger.fatal({ error }, 'Failed to initialize services')
@@ -661,6 +680,15 @@ function setupIPCHandlers(): void {
 
     const { getPlayerFlow } = await import('./services/player-flow.js')
     return getPlayerFlow().getStatus()
+  })
+
+  ipcMain.handle('get-player-presentation', async () => {
+    if (startupConfigError) {
+      return buildStartupPresentationSnapshot()
+    }
+
+    const { getPlayerFlow } = await import('./services/player-flow.js')
+    return getPlayerFlow().getPresentationSnapshot()
   })
 
   ipcMain.handle('default-media:get', async (_event: any, options?: { refresh?: boolean }) => {

@@ -45,6 +45,7 @@ export const presignUploadSchema = z.object({
     .min(1)
     .transform((val) => val.replace(/[^\\w.\\-]+/g, '_')),
   content_type: z.enum(allowedContentTypes),
+  display_name: z.string().trim().min(1).max(255).optional(),
   size: z
     .number()
     .positive()
@@ -52,6 +53,46 @@ export const presignUploadSchema = z.object({
 });
 
 export type PresignUploadRequest = z.infer<typeof presignUploadSchema>;
+
+const uploadSessionFileSchema = z.object({
+  filename: z
+    .string()
+    .min(1)
+    .transform((val) => val.replace(/[^\w.\-]+/g, '_')),
+  display_name: z.string().trim().min(1).max(255).optional(),
+  content_type: z.enum(allowedContentTypes),
+  size: z
+    .number()
+    .int()
+    .positive()
+    .max(appConfig.MAX_UPLOAD_MB * 1024 * 1024, `File too large (max ${appConfig.MAX_UPLOAD_MB} MB)`),
+  checksum_sha256: z.string().regex(/^[a-f0-9]{64}$/, 'checksum_sha256 must be a lowercase SHA-256 hex digest'),
+});
+
+export const createUploadSessionSchema = uploadSessionFileSchema;
+export type CreateUploadSessionRequest = z.infer<typeof createUploadSessionSchema>;
+
+export const uploadSessionParamsSchema = z.object({
+  sessionId: z.string().uuid(),
+});
+
+export const uploadPartPresignSchema = z.object({
+  part_numbers: z.array(z.number().int().min(1).max(10_000)).min(1).max(20),
+});
+
+export const completeUploadSessionSchema = z.object({
+  parts: z
+    .array(
+      z.object({
+        part_number: z.number().int().min(1).max(10_000),
+        etag: z.string().min(1).max(512),
+      })
+    )
+    .optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  duration_seconds: z.number().int().positive().optional(),
+});
 
 export const presignUploadResponseSchema = z.object({
   upload_url: z.string().url(),

@@ -310,7 +310,7 @@ export class DefaultMediaPlayer {
     logo.style.marginBottom = '12px'
 
     const message = document.createElement('div')
-    message.textContent = 'Screen paired successfully. No content assigned yet.'
+    message.textContent = 'No content assigned yet.'
     message.style.fontSize = '18px'
     message.style.opacity = '0.8'
 

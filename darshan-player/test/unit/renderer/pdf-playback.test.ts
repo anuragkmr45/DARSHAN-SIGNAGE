@@ -2,7 +2,7 @@ const { expect } = require('chai')
 
 describe('PDF playback helpers', () => {
   it('keeps the runtime PDF source unchanged for PDF.js rendering', async () => {
-    const { buildPdfPlaybackSource } = await import('../../../src/renderer/pdf-playback.ts')
+    const { buildPdfPlaybackSource } = require('../../../src/renderer/pdf-playback')
 
     const source = buildPdfPlaybackSource('file:///tmp/darshan/doc.pdf')
 
@@ -10,7 +10,7 @@ describe('PDF playback helpers', () => {
   })
 
   it('preserves existing PDF fragments for PDF.js rendering', async () => {
-    const { buildPdfPlaybackSource } = await import('../../../src/renderer/pdf-playback.ts')
+    const { buildPdfPlaybackSource } = require('../../../src/renderer/pdf-playback')
 
     const source = buildPdfPlaybackSource('https://backend.local/media/doc.pdf#page=2')
 
@@ -50,7 +50,7 @@ describe('PDF playback helpers', () => {
     }
 
     try {
-      const { createPdfPlaybackElement } = await import('../../../src/renderer/pdf-playback.ts')
+      const { createPdfPlaybackElement } = require('../../../src/renderer/pdf-playback')
       const element = createPdfPlaybackElement('file:///tmp/darshan/doc.pdf')
 
       expect(element).to.equal(createdDiv)
@@ -70,7 +70,7 @@ describe('PDF playback helpers', () => {
   })
 
   it('uses the bundled PDF.js worker asset', async () => {
-    const { PDF_WORKER_SOURCE } = await import('../../../src/renderer/pdf-playback.ts')
+    const { PDF_WORKER_SOURCE } = require('../../../src/renderer/pdf-playback')
 
     expect(PDF_WORKER_SOURCE).to.equal('./pdf.worker.mjs')
   })

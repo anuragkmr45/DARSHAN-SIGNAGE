@@ -12,7 +12,7 @@ Optional environment overrides:
   BACKEND_IMAGE_REF=darshan-server-export:<release-id>
   INSTALL_PLAYWRIGHT_CHROMIUM=true
   POSTGRES_IMAGE=postgres:15-alpine
-  MINIO_IMAGE=minio/minio:latest
+  MINIO_IMAGE=minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
   VALKEY_IMAGE=valkey/valkey:7-alpine
 EOF
 }
@@ -67,7 +67,7 @@ OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
 BACKEND_IMAGE_REF="${BACKEND_IMAGE_REF:-darshan-server-export:$RELEASE_ID}"
 INSTALL_PLAYWRIGHT_CHROMIUM="${INSTALL_PLAYWRIGHT_CHROMIUM:-true}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:15-alpine}"
-MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
+MINIO_IMAGE="${MINIO_IMAGE:-minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}"
 VALKEY_IMAGE="${VALKEY_IMAGE:-valkey/valkey:7-alpine}"
 
 OUTPUT_DIR="$OUTPUT_BASE/$RELEASE_ID/server"

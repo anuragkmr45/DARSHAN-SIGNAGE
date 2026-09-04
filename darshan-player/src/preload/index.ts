@@ -14,6 +14,7 @@ import type {
   PairingCodeResponse,
   PairingResponse,
   PairingStatusResponse,
+  PlayerPresentationSnapshot,
 } from '../common/types'
 import type { PlaybackProgressEntry, PlaybackProgressIdentity } from '../common/playback-policy'
 
@@ -24,6 +25,7 @@ export interface DarshanAPI {
   onMediaChange: (callback: (data: unknown) => void) => void
   onEmergencyOverride: (callback: (data: unknown) => void) => void
   onPlayerStatus: (callback: (data: unknown) => void) => void
+  onPlayerPresentation: (callback: (data: PlayerPresentationSnapshot) => void) => () => void
 
   // Pairing
   submitPairingCode: (code: string) => Promise<PairingResponse>
@@ -43,6 +45,7 @@ export interface DarshanAPI {
   // Health
   getHealth: () => Promise<HealthStatus>
   getPlayerStatus: () => Promise<unknown>
+  getPlayerPresentation: () => Promise<PlayerPresentationSnapshot>
 
   // Default media
   getDefaultMedia: (options?: { refresh?: boolean }) => Promise<DefaultMediaResponse>
@@ -83,6 +86,12 @@ const darshanApi: DarshanAPI = {
 
   onPlayerStatus: (callback: (data: unknown) => void) => {
     ipcRenderer.on('player-status', (_event, data) => callback(data))
+  },
+
+  onPlayerPresentation: (callback: (data: PlayerPresentationSnapshot) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: PlayerPresentationSnapshot) => callback(data)
+    ipcRenderer.on('player-presentation', listener)
+    return () => ipcRenderer.removeListener('player-presentation', listener)
   },
 
   // Pairing
@@ -129,6 +138,10 @@ const darshanApi: DarshanAPI = {
 
   getPlayerStatus: async (): Promise<unknown> => {
     return await ipcRenderer.invoke('get-player-status')
+  },
+
+  getPlayerPresentation: async (): Promise<PlayerPresentationSnapshot> => {
+    return await ipcRenderer.invoke('get-player-presentation')
   },
 
   // Default media

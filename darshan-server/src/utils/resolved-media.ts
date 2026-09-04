@@ -2,10 +2,12 @@ import { eq, inArray } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { resolveMediaAccess } from '@/utils/media-access';
 import { serializeMediaRecord } from '@/utils/media';
+import type { S3UrlAudience } from '@/s3';
 
 export async function buildResolvedMediaMap(
   mediaIds: string[],
-  db = getDatabase()
+  db = getDatabase(),
+  audience: S3UrlAudience = 'cms'
 ): Promise<Map<string, ReturnType<typeof serializeMediaRecord>>> {
   const uniqueIds = Array.from(new Set(mediaIds.filter(Boolean)));
   if (uniqueIds.length === 0) {
@@ -15,7 +17,7 @@ export async function buildResolvedMediaMap(
   const mediaRows = await db.select().from(schema.media).where(inArray(schema.media.id, uniqueIds as any));
   const resolvedEntries = await Promise.all(
     mediaRows.map(async (media) => {
-      const access = await resolveMediaAccess(media, db);
+      const access = await resolveMediaAccess(media, db, { audience });
       return [
         media.id,
         serializeMediaRecord(media, access.media_url, {
@@ -98,9 +100,10 @@ export function attachResolvedMediaToScheduleSnapshot(
 
 export async function buildResolvedMediaUrls(
   mediaIds: string[],
-  db = getDatabase()
+  db = getDatabase(),
+  audience: S3UrlAudience = 'cms'
 ): Promise<Record<string, string>> {
-  const mediaMap = await buildResolvedMediaMap(mediaIds, db);
+  const mediaMap = await buildResolvedMediaMap(mediaIds, db, audience);
   const result: Record<string, string> = {};
 
   for (const [mediaId, media] of mediaMap.entries()) {
@@ -115,13 +118,14 @@ export async function buildResolvedMediaUrls(
 
 export async function buildResolvedMediaRecord(
   mediaId?: string | null,
-  db = getDatabase()
+  db = getDatabase(),
+  audience: S3UrlAudience = 'cms'
 ) {
   if (!mediaId) return null;
   const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId)).limit(1);
   if (!media) return null;
 
-  const access = await resolveMediaAccess(media, db);
+  const access = await resolveMediaAccess(media, db, { audience });
   const serialized = serializeMediaRecord(media, access.media_url, {
     content_type: access.content_type,
     source_content_type: access.source_content_type,

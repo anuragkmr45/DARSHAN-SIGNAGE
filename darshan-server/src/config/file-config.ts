@@ -132,6 +132,7 @@ const backendFileConfigSchema = z
     media: z
       .object({
         endpoint: urlWithoutCredentials.optional(),
+        publicEndpoint: urlWithoutCredentials.optional(),
         region: z.string().trim().min(1).optional(),
         cacheReportingEnabled: z.boolean().optional(),
       })
@@ -363,6 +364,7 @@ export function mapBackendFileConfigToEnv(config: BackendFileConfig): Record<str
     putIfDefined(env, 'MINIO_USE_SSL', endpoint.useSsl);
   }
   putIfDefined(env, 'MINIO_REGION', config.media?.region);
+  putIfDefined(env, 'MINIO_PUBLIC_ENDPOINT', config.media?.publicEndpoint);
   putIfDefined(env, 'DARSHAN_MEDIA_CACHE_REPORTING_ENABLED', config.media?.cacheReportingEnabled);
 
   putIfDefined(env, 'OBSERVABILITY_PROMETHEUS_BASE_URL', config.observability?.prometheusUrl);
