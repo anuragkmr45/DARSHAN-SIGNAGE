@@ -33,7 +33,7 @@ describe('runtime dependency resolution', () => {
   it('finds bare executables through PATH for runtime doctor checks', async () => {
     const binDir = mkdtempSync(join(tmpdir(), 'darshan-runtime-bin-'));
     mkdirSync(binDir, { recursive: true });
-    const executablePath = createExecutable(binDir, 'pg_dump');
+    createExecutable(binDir, 'pg_dump');
     const chromiumPath = createExecutable(binDir, 'chromium');
 
     vi.doMock('playwright', () => ({

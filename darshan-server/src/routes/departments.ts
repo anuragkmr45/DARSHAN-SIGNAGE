@@ -11,7 +11,7 @@ import { AppError } from '@/utils/app-error';
 import { isAdminLike } from '@/rbac/policy';
 
 const logger = createLogger('department-routes');
-const { CREATED, FORBIDDEN, NOT_FOUND, OK, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED, OK } = HTTP_STATUS;
 
 const createDepartmentSchema = z.object({
   name: z.string().min(1).max(255),

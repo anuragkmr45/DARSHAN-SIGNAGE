@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/export/package-server.sh --release <release-id> [--deployment-layout standalone|production-split]
+  bash scripts/export/package-server.sh --release <release-id> [--deployment-layout production-split|standalone]
 
 Optional environment overrides:
   SERVER_REPO_DIR=/path/to/darshan-server
@@ -23,7 +23,7 @@ PLATFORM_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 RELEASE_ID=""
-DEPLOYMENT_LAYOUT="standalone"
+DEPLOYMENT_LAYOUT="production-split"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -120,14 +120,19 @@ EOF
   printf 'BACKEND_IMAGE=%s\n' "$BACKEND_IMAGE_REF"
   printf 'POSTGRES_IMAGE=%s\n' "$POSTGRES_IMAGE"
   printf 'MINIO_IMAGE=%s\n' "$MINIO_IMAGE"
-  printf 'VALKEY_IMAGE=%s\n\n' "$VALKEY_IMAGE"
-  cat "$SERVER_REPO_DIR/.env.example"
+  printf 'VALKEY_IMAGE=%s\n' "$VALKEY_IMAGE"
+  printf 'DARSHAN_RELEASE_ID=%s\n' "$RELEASE_ID"
+  printf 'INITIAL_ADMIN_EMAIL=admin@example.local\n\n'
+  # Demo-seed credentials belong to local development only. A production
+  # bundle receives a one-time password via bootstrap-secrets/admin-password.
+  grep -v -E '^ADMIN_(EMAIL|PASSWORD)=' "$SERVER_REPO_DIR/.env.example"
 } > "$OUTPUT_DIR/.env.template"
 
 cat > "$OUTPUT_DIR/docker-compose.yml" <<'EOF'
 services:
   postgres:
     image: ${POSTGRES_IMAGE}
+    pull_policy: never
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -145,6 +150,7 @@ services:
 
   minio:
     image: ${MINIO_IMAGE}
+    pull_policy: never
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
@@ -163,6 +169,7 @@ services:
 
   valkey:
     image: ${VALKEY_IMAGE}
+    pull_policy: never
     restart: unless-stopped
     ports:
       - "${VALKEY_HOST_PORT:-6379}:6379"
@@ -174,11 +181,15 @@ services:
 
   api:
     image: ${BACKEND_IMAGE}
+    pull_policy: never
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      NODE_ENV: production
+      # Standalone is an explicitly requested isolated/local runtime. The
+      # production-split source-free bundle is the production path with TLS,
+      # file-backed secrets, signed roles, and strict cross-VM readiness.
+      NODE_ENV: ${STANDALONE_NODE_ENV:-development}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
@@ -206,6 +217,7 @@ services:
         condition: service_healthy
     volumes:
       - ./certs:/app/certs:ro
+      - ./secrets:/run/secrets:ro
     command: npm run start:api
     healthcheck:
       test:
@@ -213,7 +225,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3000/api/v1/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+          "fetch('http://127.0.0.1:3000/api/v1/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
         ]
       interval: 30s
       timeout: 10s
@@ -221,11 +233,15 @@ services:
 
   worker:
     image: ${BACKEND_IMAGE}
+    pull_policy: never
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      NODE_ENV: production
+      # Standalone is an explicitly requested isolated/local runtime. The
+      # production-split source-free bundle is the production path with TLS,
+      # file-backed secrets, signed roles, and strict cross-VM readiness.
+      NODE_ENV: ${STANDALONE_NODE_ENV:-development}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
@@ -251,6 +267,7 @@ services:
         condition: service_healthy
     volumes:
       - ./certs:/app/certs:ro
+      - ./secrets:/run/secrets:ro
     command: npm run start:worker
 
 volumes:
@@ -279,8 +296,9 @@ else
   echo ".env already exists"
 fi
 
-mkdir -p certs
+mkdir -p certs secrets bootstrap-secrets
 echo "Ensure certs/ca.crt exists before starting the stack."
+echo "For a fresh deployment, create bootstrap-secrets/admin-password with mode 0600."
 EOF
 
 cat > "$OUTPUT_DIR/start.sh" <<'EOF'
@@ -306,8 +324,8 @@ wait_for_postgres() {
 
 docker compose --env-file .env up -d postgres minio valkey
 wait_for_postgres
-docker compose --env-file .env run --rm -e DRIZZLE_STRICT=false api npm run db:push
 docker compose --env-file .env up -d api worker
+exec ./health-check.sh
 EOF
 
 cat > "$OUTPUT_DIR/stop.sh" <<'EOF'
@@ -341,8 +359,58 @@ wait_for_postgres() {
 
 docker compose --env-file .env up -d postgres minio valkey
 wait_for_postgres
-docker compose --env-file .env run --rm -e DRIZZLE_STRICT=false api npm run db:push
+[[ -n "${DARSHAN_RELEASE_ID:-}" ]] || { echo "DARSHAN_RELEASE_ID is required." >&2; exit 1; }
+docker compose --env-file .env run --rm api npm run --silent db:migrate -- --release-id "$DARSHAN_RELEASE_ID" --json
 docker compose --env-file .env up -d --remove-orphans api worker
+exec ./health-check.sh
+EOF
+
+cat > "$OUTPUT_DIR/install.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ -f ".env" ]] || { echo ".env is missing. Run ./init-env.sh first." >&2; exit 1; }
+[[ -f "certs/ca.crt" ]] || { echo "certs/ca.crt is missing." >&2; exit 1; }
+[[ -f "bootstrap-secrets/admin-password" && ! -L "bootstrap-secrets/admin-password" ]] || { echo "Fresh installation requires a regular bootstrap-secrets/admin-password file." >&2; exit 1; }
+[[ "$(stat -c '%a' bootstrap-secrets/admin-password)" == "600" ]] || { echo "bootstrap-secrets/admin-password must have mode 0600." >&2; exit 1; }
+source ./.env
+[[ -n "${DARSHAN_RELEASE_ID:-}" ]] || { echo "DARSHAN_RELEASE_ID is required." >&2; exit 1; }
+[[ -n "${INITIAL_ADMIN_EMAIL:-}" ]] || { echo "INITIAL_ADMIN_EMAIL is required." >&2; exit 1; }
+
+docker compose --env-file .env up -d postgres minio valkey
+for attempt in $(seq 1 30); do
+  if docker compose --env-file .env exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then break; fi
+  [[ "$attempt" == "30" ]] && { echo "Postgres did not become ready in time." >&2; exit 1; }
+  sleep 2
+done
+docker compose --env-file .env run --rm api npm run --silent db:migrate -- --release-id "$DARSHAN_RELEASE_ID" --json
+docker compose --env-file .env run --rm --volume "$(pwd)/bootstrap-secrets/admin-password:/run/darshan-bootstrap/admin-password:ro" api npm run --silent bootstrap:production -- --email "$INITIAL_ADMIN_EMAIL" --release-id "$DARSHAN_RELEASE_ID" --password-file /run/darshan-bootstrap/admin-password --json
+./start.sh
+./acceptance-check.sh --password-file bootstrap-secrets/admin-password
+rm -f bootstrap-secrets/admin-password
+echo "Standalone fresh installation completed; bootstrap password file was removed."
+EOF
+
+cat > "$OUTPUT_DIR/acceptance-check.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ "${1:-}" == "--password-file" && -n "${2:-}" ]] || { echo "Usage: $0 --password-file <mode-0600-file>" >&2; exit 2; }
+password_file="$2"
+[[ -f "$password_file" && ! -L "$password_file" && "$(stat -c '%a' "$password_file")" == "600" ]] || { echo "A regular mode-0600 password file is required." >&2; exit 1; }
+source ./.env
+status=$(node -e '
+const fs = require("node:fs");
+const text = fs.readFileSync(process.argv[1], "utf8");
+const password = text.replace(/\r?\n$/, "");
+if (!password || /[\r\n\0]/.test(password)) {
+  console.error("Password file must contain one non-empty line.");
+  process.exit(2);
+}
+process.stdout.write(JSON.stringify({email: process.argv[2], password}));
+' "$password_file" "$INITIAL_ADMIN_EMAIL" | curl --silent --show-error --output /dev/null --write-out '%{http_code}' --header 'Content-Type: application/json' --data-binary @- "http://127.0.0.1:${API_HOST_PORT:-3000}/api/v1/auth/login")
+[[ "$status" == "200" ]] || { echo "Backend login acceptance failed with HTTP $status." >&2; exit 1; }
+echo "Backend login acceptance passed."
 EOF
 
 cat > "$OUTPUT_DIR/health-check.sh" <<'EOF'
@@ -355,7 +423,7 @@ source ./.env
 docker compose --env-file .env exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 curl -fsS "http://127.0.0.1:${MINIO_HOST_PORT:-9000}/minio/health/live" >/dev/null
 docker compose --env-file .env exec -T valkey valkey-cli ping | grep -q PONG
-curl -fsS "http://127.0.0.1:${API_HOST_PORT:-3000}/api/v1/health" >/dev/null
+curl -fsS "http://127.0.0.1:${API_HOST_PORT:-3000}/api/v1/health/ready" >/dev/null
 docker compose --env-file .env ps --services --status running | grep -qx worker
 echo "Server package healthy."
 EOF
@@ -415,7 +483,13 @@ EOF
 else
   cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 
-This layout is intended for the all-in-one server package workflow where backend, PostgreSQL, MinIO, and Valkey run from this folder on one host.
+This layout is intended only for an explicitly requested all-in-one isolated
+server package workflow where backend, PostgreSQL, MinIO, and Valkey run from
+this folder on one host. It defaults the backend containers to
+`STANDALONE_NODE_ENV=development` because this layout does not provide the
+production source-free bundle controls: signed role manifests, cross-VM TLS,
+authenticated Valkey, strict off-host backup evidence, and production role
+readiness. Do not use it for production promotion.
 
 It starts two backend containers from the same image:
 
@@ -434,7 +508,7 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 # edit .env
 # place certs/ca.crt
 ./load-images.sh
-./start.sh
+./install.sh
 ./health-check.sh
 \`\`\`
 
@@ -447,6 +521,10 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 ./update.sh
 ./health-check.sh
 \`\`\`
+
+`start.sh` is a restart-only command. It never runs migrations or creates an
+administrator. The production-split bundle remains the authoritative
+production deployment path; this standalone package is for isolated use only.
 
 ## Persistent data
 
@@ -465,8 +543,10 @@ chmod +x \
   "$OUTPUT_DIR/load-images.sh" \
   "$OUTPUT_DIR/init-env.sh" \
   "$OUTPUT_DIR/start.sh" \
+  "$OUTPUT_DIR/install.sh" \
   "$OUTPUT_DIR/stop.sh" \
   "$OUTPUT_DIR/update.sh" \
+  "$OUTPUT_DIR/acceptance-check.sh" \
   "$OUTPUT_DIR/health-check.sh"
 
 export_write_checksums "$OUTPUT_DIR"

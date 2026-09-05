@@ -10,6 +10,11 @@ const logger = createLogger('seed');
 
 async function seed() {
   try {
+    if (!appConfig.ADMIN_EMAIL || !appConfig.ADMIN_PASSWORD) {
+      throw new Error('Development/demo seed requires ADMIN_EMAIL and ADMIN_PASSWORD. Production must use npm run bootstrap:production.');
+    }
+    const adminEmail = appConfig.ADMIN_EMAIL.trim().toLowerCase();
+    const adminPassword = appConfig.ADMIN_PASSWORD;
     logger.info('Initializing database...');
     await initializeDatabase();
     const db = getDatabase();
@@ -50,25 +55,25 @@ async function seed() {
 
     // Create admin user
     logger.info('Creating admin user...');
-    const adminPasswordHash = await hashPassword(appConfig.ADMIN_PASSWORD);
+    const adminPasswordHash = await hashPassword(adminPassword);
 
     const existingAdmin = await db
       .select()
       .from(schema.users)
-      .where(eq(schema.users.email, appConfig.ADMIN_EMAIL));
+      .where(eq(schema.users.email, adminEmail));
 
     if (existingAdmin.length === 0) {
       await db.insert(schema.users).values({
-        email: appConfig.ADMIN_EMAIL,
+        email: adminEmail,
         password_hash: adminPasswordHash,
         first_name: 'Admin',
         last_name: 'User',
         role_id: roleIdByName.get('SUPER_ADMIN') ?? roleIdByName.get('ADMIN')!,
         is_active: true,
       });
-      logger.info(`Admin user created: ${appConfig.ADMIN_EMAIL}`);
+      logger.info(`Admin user created: ${adminEmail}`);
     } else {
-      logger.info(`Admin user already exists: ${appConfig.ADMIN_EMAIL}`);
+      logger.info(`Admin user already exists: ${adminEmail}`);
     }
 
     // Create sample departments

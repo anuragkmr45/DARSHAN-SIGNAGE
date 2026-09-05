@@ -8,6 +8,8 @@ const registerJobHandlers = vi.fn();
 const scheduleRecurringJobs = vi.fn();
 const stopJobs = vi.fn();
 const validateRuntimeDependencies = vi.fn();
+const startWorkerHeartbeat = vi.fn();
+const stopWorkerHeartbeat = vi.fn();
 const listen = vi.fn();
 const close = vi.fn();
 const createServer = vi.fn(async () => ({ listen, close }));
@@ -36,6 +38,8 @@ vi.mock('@/utils/runtime-dependencies', () => ({
   validateRuntimeDependencies,
 }));
 
+vi.mock('@/runtime/worker-heartbeat', () => ({ startWorkerHeartbeat, stopWorkerHeartbeat }));
+
 describe('runtime bootstrap', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -48,9 +52,11 @@ describe('runtime bootstrap', () => {
     expect(validateRuntimeDependencies).toHaveBeenCalledWith('api');
     expect(initializeDatabase).toHaveBeenCalled();
     expect(initializeS3).toHaveBeenCalled();
+    expect(createBucketIfNotExists).toHaveBeenCalledTimes(11);
     expect(initializeJobs).toHaveBeenCalled();
     expect(registerJobHandlers).not.toHaveBeenCalled();
     expect(scheduleRecurringJobs).not.toHaveBeenCalled();
+    expect(startWorkerHeartbeat).not.toHaveBeenCalled();
     expect(createServer).toHaveBeenCalled();
     expect(listen).toHaveBeenCalled();
     expect(runtime.role).toBe('api');
@@ -65,6 +71,7 @@ describe('runtime bootstrap', () => {
     expect(initializeJobs).toHaveBeenCalled();
     expect(registerJobHandlers).toHaveBeenCalled();
     expect(scheduleRecurringJobs).toHaveBeenCalled();
+    expect(startWorkerHeartbeat).toHaveBeenCalled();
     expect(createServer).not.toHaveBeenCalled();
     expect(runtime.fastify).toBeUndefined();
   });
@@ -75,5 +82,6 @@ describe('runtime bootstrap', () => {
 
     expect(close).toHaveBeenCalled();
     expect(stopJobs).toHaveBeenCalled();
+    expect(stopWorkerHeartbeat).toHaveBeenCalled();
   });
 });

@@ -34,7 +34,7 @@ Record for every check:
 
 | Domain | Evidence |
 |---|---|
-| Backend Docker | `/api/v1/health`, DB schema/bootstrap, MinIO reachability, Valkey reachability, runtime tool check, all-role worker behavior. |
+| Backend Docker | `/api/v1/health/live` for process liveness and `/api/v1/health/ready` for production readiness, DB schema/bootstrap, MinIO reachability, Valkey reachability, runtime tool check, all-role worker behavior. |
 | CMS Docker/browser | CMS loads from nginx, `/login`, `/dashboard`, major routes, nested refresh, `/api/v1` proxy, `/socket.io` proxy, `/grafana` proxy if enabled. |
 | Player package | `.deb` install, config selection, autostart/systemd or desktop autostart, pairing, reset/re-pair, heartbeat online. |
 | Media | upload, processing, player render for video, image, PDF, office, webpage where supported by the release. |

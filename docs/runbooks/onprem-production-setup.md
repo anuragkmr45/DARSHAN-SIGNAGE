@@ -155,8 +155,6 @@ GRAFANA_PORT=3001
 GRAFANA_ROOT_URL=http://192.168.1.102:8080/grafana/
 
 INSTALL_PLAYWRIGHT_CHROMIUM=true
-RUN_PRODUCTION_DB_PUSH=false
-RUN_PRODUCTION_SEED=false
 
 CMS_RUNTIME_CONFIG_SOURCE=../../../../darshan-cms/public/config/app-config.json
 
@@ -191,7 +189,6 @@ JWT_SECRET=<strong-random-secret-min-32-chars>
 JWT_EXPIRY=900
 
 ADMIN_EMAIL=admin@your-company.local
-ADMIN_PASSWORD=<strong-admin-password>
 
 CA_CERT_PATH=./certs/ca.crt
 CA_KEY_PATH=./certs/ca.key
@@ -448,25 +445,26 @@ bash deploy/production/docker/check-backend-runtime-tools.sh
 bash deploy/production/docker/health-check.sh backend
 ```
 
-First empty database only:
-
-```env
-RUN_PRODUCTION_DB_PUSH=true
-RUN_PRODUCTION_SEED=true
-```
-
-Then rerun:
+First empty database only, use the explicit lifecycle commands. Do not enable
+`RUN_PRODUCTION_DB_PUSH`, `RUN_PRODUCTION_SEED`, `npm run db:push`, or
+`npm run seed` in production:
 
 ```bash
-bash deploy/production/docker/start-backend.sh
+cd /opt/darshan/<release>/backend
+sudo install -d -m 0700 bootstrap-secrets
+sudo install -m 0600 /path/to/approved-admin-password bootstrap-secrets/admin-password
+sudo docker compose --env-file .env.production run --rm api npm run --silent db:migrate -- --release-id "$DARSHAN_RELEASE_ID" --json
+sudo docker compose --env-file .env.production run --rm --volume "$(pwd)/bootstrap-secrets/admin-password:/run/darshan-bootstrap/admin-password:ro" api npm run --silent bootstrap:production -- --email "$INITIAL_ADMIN_EMAIL" --release-id "$DARSHAN_RELEASE_ID" --password-file /run/darshan-bootstrap/admin-password --json
+sudo docker compose --env-file .env.production up -d
 ```
-
-After successful bootstrap, set both values back to `false` and restart backend.
 
 Backend health:
 
 ```bash
-curl -fsS http://192.168.1.103:3000/api/v1/health
+curl --fail --show-error --silent \
+  --cacert ./certs/transport-ca.crt \
+  --resolve backend.signage.example:3000:192.168.1.103 \
+  https://backend.signage.example:3000/api/v1/health/ready
 ```
 
 Backend image should include:
@@ -489,14 +487,20 @@ bash deploy/production/docker/health-check.sh cms
 Browser URL:
 
 ```text
-http://192.168.1.102:8080
+https://cms.signage.example
 ```
 
 Proxy checks:
 
 ```bash
-curl -fsS http://192.168.1.102:8080/
-curl -fsS http://192.168.1.102:8080/api/v1/health
+curl --fail --show-error --silent \
+  --cacert /opt/darshan/transport-ca.crt \
+  --resolve cms.signage.example:443:192.168.1.102 \
+  https://cms.signage.example/
+curl --fail --show-error --silent \
+  --cacert /opt/darshan/transport-ca.crt \
+  --resolve cms.signage.example:443:192.168.1.102 \
+  https://cms.signage.example/api/v1/health/ready
 ```
 
 ### 5. Observability VM
@@ -744,15 +748,16 @@ Also back up:
 `relation "roles" does not exist`:
 
 - backend reached Postgres but schema was not initialized
-- set `RUN_PRODUCTION_DB_PUSH=true` and `RUN_PRODUCTION_SEED=true` once on Backend VM
-- rerun `start-backend.sh`
-- set both back to `false` after bootstrap
+- run `npm run db:status -- --json` from the backend container to classify the database
+- for an empty database, run `db:migrate` and `bootstrap:production` with the protected bootstrap password file
+- for a non-empty untracked database, stop and use the reviewed `adopt-existing.sh --ticket <approved-ticket>` flow after a restore-verified off-host backup
 
 Backend cannot reach MinIO:
 
 - check `DATA_HOST`
 - check `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` match on Data and Backend
-- verify `curl http://<DATA_HOST>:9000/minio/health/live`
+- verify `curl --cacert ./certs/transport-ca.crt --resolve <MINIO_CERT_HOSTNAME>:9000:<DATA_HOST> https://<MINIO_CERT_HOSTNAME>:9000/minio/health/live`
+- verify `curl --cacert ./certs/transport-ca.crt --resolve <BACKEND_CERT_HOSTNAME>:3000:<BACKEND_HOST> https://<BACKEND_CERT_HOSTNAME>:3000/api/v1/health/ready`
 
 Default media updates only after polling:
 

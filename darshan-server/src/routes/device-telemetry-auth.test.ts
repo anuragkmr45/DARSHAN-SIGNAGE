@@ -107,6 +107,12 @@ describe('Device telemetry auth runtime validation', () => {
       });
 
       expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      const [observation] = await db
+        .select()
+        .from(schema.deviceAuthRolloutObservations)
+        .where(eq(schema.deviceAuthRolloutObservations.screen_id, deviceId));
+      expect(observation?.last_signed_http_at).toBeInstanceOf(Date);
+      expect(observation?.last_legacy_http_at).toBeNull();
     } finally {
       queueHeartbeatSpy.mockRestore();
       if (previousMode == null) {

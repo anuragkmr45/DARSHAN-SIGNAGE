@@ -1,8 +1,7 @@
 import { randomUUID } from 'crypto';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { config } from '@/config';
-import { getDatabase, schema } from '@/db';
-import { createCommandOutboxEvent } from '@/services/command-outbox-service';
+import { getDatabase, schema, type Database } from '@/db';
 import { recordDesiredStateForCommand } from '@/services/device-desired-state-service';
 import { AppError } from '@/utils/app-error';
 
@@ -11,6 +10,9 @@ export const COMMAND_PRIORITY_CRITICAL = 100;
 
 const ACTIVE_LEASE_STATUSES = ['SENT', 'LEASED', 'PROCESSING'] as const;
 const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'ACKED_SUCCESS', 'ACKED_FAILURE', 'EXPIRED', 'DEAD_LETTER', 'CANCELLED'] as const;
+type DeviceCommandRecord = typeof schema.deviceCommands.$inferSelect;
+type DeviceDesiredStateRecord = typeof schema.deviceDesiredState.$inferSelect;
+type CommandLifecycleTx = Pick<Database, 'insert' | 'update' | 'select' | 'execute'>;
 
 type CommandStatus =
   | 'PENDING'
@@ -112,7 +114,16 @@ function resolveReason(payload: unknown) {
 }
 
 function hasOwnValue<T extends object>(input: T, key: keyof T) {
-  return Object.prototype.hasOwnProperty.call(input, key);
+  return Object.prototype.hasOwnProperty.call(input, key) && input[key] !== undefined;
+}
+
+function hasDuplicateScreenIds(inputs: CreateDeviceCommandInput[]) {
+  const screenIds = new Set<string>();
+  for (const input of inputs) {
+    if (screenIds.has(input.screenId)) return true;
+    screenIds.add(input.screenId);
+  }
+  return false;
 }
 
 function isTerminalStatus(status: string) {
@@ -132,7 +143,7 @@ function parseDbTimestamp(value: Date | string | null | undefined) {
 }
 
 async function insertStatusHistory(
-  tx: any,
+  tx: CommandLifecycleTx,
   input: {
     commandId: string;
     screenId: string;
@@ -154,6 +165,258 @@ async function insertStatusHistory(
     delivery_token: input.deliveryToken ?? null,
     metadata: input.metadata ?? null,
   });
+}
+
+function buildCreateCommandHistoryValue(command: DeviceCommandRecord) {
+  return {
+    command_id: command.id,
+    screen_id: command.screen_id,
+    old_status: null as CommandStatus | null,
+    new_status: 'PENDING' as CommandStatus,
+    reason: 'created',
+    attempt_count: command.attempt_count,
+    delivery_token: null,
+    metadata: {
+      type: command.type,
+      priority: command.priority,
+      expires_at: command.expires_at?.toISOString?.() ?? command.expires_at ?? null,
+    },
+  };
+}
+
+async function insertCreateCommandHistory(tx: CommandLifecycleTx, commands: DeviceCommandRecord[]) {
+  if (commands.length === 0) return;
+  await tx.insert(schema.deviceCommandStatusHistory).values(commands.map(buildCreateCommandHistoryValue));
+}
+
+type DesiredStateMode = {
+  snapshotId: 'set' | 'preserve';
+  defaultMediaVersion: 'set' | 'preserve';
+  emergencyVersion: 'set' | 'preserve';
+};
+
+function getUniformDesiredStateMode(inputs: CreateDeviceCommandInput[]): DesiredStateMode | null {
+  const snapshotModes = new Set(inputs.map((input) => hasOwnValue(input, 'desiredSnapshotId')));
+  const defaultMediaModes = new Set(inputs.map((input) => hasOwnValue(input, 'desiredDefaultMediaVersion')));
+  const emergencyModes = new Set(inputs.map((input) => hasOwnValue(input, 'desiredEmergencyVersion')));
+
+  if (snapshotModes.size > 1 || defaultMediaModes.size > 1 || emergencyModes.size > 1) {
+    return null;
+  }
+
+  return {
+    snapshotId: snapshotModes.has(true) ? 'set' : 'preserve',
+    defaultMediaVersion: defaultMediaModes.has(true) ? 'set' : 'preserve',
+    emergencyVersion: emergencyModes.has(true) ? 'set' : 'preserve',
+  };
+}
+
+function buildDesiredStateMetadata(params: {
+  command: DeviceCommandRecord;
+  desiredSnapshotId?: string | null;
+  desiredDefaultMediaVersion?: string | null;
+  desiredEmergencyVersion?: string | null;
+}) {
+  return {
+    command_id: params.command.id,
+    command_type: params.command.type,
+    priority: params.command.priority,
+    desired_snapshot_id: params.desiredSnapshotId ?? null,
+    desired_default_media_version: params.desiredDefaultMediaVersion ?? null,
+    desired_emergency_version: params.desiredEmergencyVersion ?? null,
+  };
+}
+
+async function recordDesiredStatesSequentially(
+  tx: CommandLifecycleTx,
+  commands: DeviceCommandRecord[],
+  inputs: CreateDeviceCommandInput[]
+) {
+  const states = [];
+  for (let index = 0; index < commands.length; index += 1) {
+    const command = commands[index];
+    const input = inputs[index];
+    const reason = resolveReason(command.payload);
+    const desiredSnapshotId = hasOwnValue(input, 'desiredSnapshotId') ? input.desiredSnapshotId ?? null : undefined;
+    const desiredDefaultMediaVersion = hasOwnValue(input, 'desiredDefaultMediaVersion')
+      ? input.desiredDefaultMediaVersion ?? null
+      : undefined;
+    const desiredEmergencyVersion = hasOwnValue(input, 'desiredEmergencyVersion') ? input.desiredEmergencyVersion ?? null : undefined;
+
+    states.push(
+      await recordDesiredStateForCommand(tx, {
+        screenId: command.screen_id,
+        commandId: command.id,
+        commandType: command.type,
+        commandReason: reason,
+        snapshotId: desiredSnapshotId,
+        defaultMediaVersion: desiredDefaultMediaVersion,
+        emergencyVersion: desiredEmergencyVersion,
+        metadata: buildDesiredStateMetadata({
+          command,
+          desiredSnapshotId,
+          desiredDefaultMediaVersion,
+          desiredEmergencyVersion,
+        }),
+      })
+    );
+  }
+
+  return states;
+}
+
+async function recordDesiredStatesForCommands(
+  tx: CommandLifecycleTx,
+  commands: DeviceCommandRecord[],
+  inputs: CreateDeviceCommandInput[]
+) {
+  if (!config.DEVICE_DESIRED_STATE_ENABLED) {
+    return commands.map(() => null);
+  }
+
+  const mode = getUniformDesiredStateMode(inputs);
+  if (!mode || hasDuplicateScreenIds(inputs)) {
+    return await recordDesiredStatesSequentially(tx, commands, inputs);
+  }
+
+  const now = new Date();
+  const values = commands.map((command, index) => {
+    const input = inputs[index];
+    const reason = resolveReason(command.payload);
+    const desiredSnapshotId = hasOwnValue(input, 'desiredSnapshotId') ? input.desiredSnapshotId ?? null : null;
+    const desiredDefaultMediaVersion = hasOwnValue(input, 'desiredDefaultMediaVersion')
+      ? input.desiredDefaultMediaVersion ?? null
+      : null;
+    const desiredEmergencyVersion = hasOwnValue(input, 'desiredEmergencyVersion') ? input.desiredEmergencyVersion ?? null : null;
+
+    return {
+      screen_id: command.screen_id,
+      snapshot_id: desiredSnapshotId,
+      default_media_version: desiredDefaultMediaVersion,
+      emergency_version: desiredEmergencyVersion,
+      command_version: 1,
+      state_version: 1,
+      last_command_id: command.id,
+      last_command_type: command.type,
+      last_command_reason: reason,
+      last_changed_reason: reason ?? 'COMMAND_AVAILABLE',
+      metadata: buildDesiredStateMetadata({
+        command,
+        desiredSnapshotId,
+        desiredDefaultMediaVersion,
+        desiredEmergencyVersion,
+      }),
+      created_at: now,
+      updated_at: now,
+    };
+  });
+
+  const states = (await tx
+    .insert(schema.deviceDesiredState)
+    .values(values)
+    .onConflictDoUpdate({
+      target: schema.deviceDesiredState.screen_id,
+      set: {
+        snapshot_id:
+          mode.snapshotId === 'preserve'
+            ? sql`COALESCE(${schema.deviceDesiredState.snapshot_id}, excluded.snapshot_id)`
+            : sql`excluded.snapshot_id`,
+        default_media_version:
+          mode.defaultMediaVersion === 'preserve'
+            ? sql`COALESCE(${schema.deviceDesiredState.default_media_version}, excluded.default_media_version)`
+            : sql`excluded.default_media_version`,
+        emergency_version:
+          mode.emergencyVersion === 'preserve'
+            ? sql`COALESCE(${schema.deviceDesiredState.emergency_version}, excluded.emergency_version)`
+            : sql`excluded.emergency_version`,
+        command_version: sql`${schema.deviceDesiredState.command_version} + 1`,
+        state_version: sql`${schema.deviceDesiredState.state_version} + 1`,
+        last_command_id: sql`excluded.last_command_id`,
+        last_command_type: sql`excluded.last_command_type`,
+        last_command_reason: sql`excluded.last_command_reason`,
+        last_changed_reason: sql`excluded.last_changed_reason`,
+        metadata: sql`excluded.metadata`,
+        updated_at: now,
+      },
+    })
+    .returning()) as DeviceDesiredStateRecord[];
+
+  const stateByScreenId = new Map(states.map((state) => [state.screen_id, state]));
+  const orderedStates = commands.map((command) => stateByScreenId.get(command.screen_id) ?? null);
+  const historyValues = orderedStates.flatMap((state, index) => {
+    if (!state) return [];
+    const command = commands[index];
+    const input = inputs[index];
+    return [
+      {
+        screen_id: state.screen_id,
+        state_version: state.state_version,
+        command_version: state.command_version,
+        snapshot_id: state.snapshot_id,
+        default_media_version: state.default_media_version,
+        emergency_version: state.emergency_version,
+        command_id: command.id,
+        reason: resolveReason(command.payload) ?? 'COMMAND_AVAILABLE',
+        metadata: buildDesiredStateMetadata({
+          command,
+          desiredSnapshotId: hasOwnValue(input, 'desiredSnapshotId') ? input.desiredSnapshotId ?? null : undefined,
+          desiredDefaultMediaVersion: hasOwnValue(input, 'desiredDefaultMediaVersion')
+            ? input.desiredDefaultMediaVersion ?? null
+            : undefined,
+          desiredEmergencyVersion: hasOwnValue(input, 'desiredEmergencyVersion') ? input.desiredEmergencyVersion ?? null : undefined,
+        }),
+        created_at: now,
+      },
+    ];
+  });
+
+  if (historyValues.length > 0) {
+    await tx.insert(schema.deviceDesiredStateHistory).values(historyValues);
+  }
+
+  return orderedStates;
+}
+
+async function insertCommandOutboxEvents(
+  tx: CommandLifecycleTx,
+  commands: DeviceCommandRecord[],
+  inputs: CreateDeviceCommandInput[],
+  desiredStates: Array<DeviceDesiredStateRecord | null>
+) {
+  if (!config.COMMAND_OUTBOX_WRITE_ENABLED || commands.length === 0) {
+    return;
+  }
+
+  await tx.insert(schema.commandOutbox).values(
+    commands.map((command, index) => {
+      const input = inputs[index];
+      const reason = resolveReason(command.payload);
+      const desiredSnapshotId = hasOwnValue(input, 'desiredSnapshotId') ? input.desiredSnapshotId ?? null : undefined;
+      const desiredDefaultMediaVersion = hasOwnValue(input, 'desiredDefaultMediaVersion')
+        ? input.desiredDefaultMediaVersion ?? null
+        : undefined;
+      const desiredEmergencyVersion = hasOwnValue(input, 'desiredEmergencyVersion') ? input.desiredEmergencyVersion ?? null : undefined;
+
+      return {
+        screen_id: command.screen_id,
+        command_id: command.id,
+        event_type: 'COMMAND_AVAILABLE' as const,
+        reason,
+        payload: {
+          command_id: command.id,
+          command_type: command.type,
+          reason,
+          state_version: desiredStates[index]?.state_version ?? null,
+          command_version: desiredStates[index]?.command_version ?? null,
+          desired_snapshot_id: desiredSnapshotId ?? null,
+          desired_default_media_version: desiredDefaultMediaVersion ?? null,
+          desired_emergency_version: desiredEmergencyVersion ?? null,
+        },
+        priority: command.priority,
+        max_attempts: config.COMMAND_MAX_ATTEMPTS,
+      };
+    })
+  );
 }
 
 function buildCreateCommandValues(input: CreateDeviceCommandInput) {
@@ -192,68 +455,9 @@ export async function createDeviceCommands(inputs: CreateDeviceCommandInput[]) {
       .values(commandValues)
       .returning();
 
-    for (let index = 0; index < commands.length; index += 1) {
-      const command = commands[index];
-      const input = inputs[index];
-      const reason = resolveReason(command.payload);
-      const desiredSnapshotId = hasOwnValue(input, 'desiredSnapshotId') ? input.desiredSnapshotId ?? null : undefined;
-      const desiredDefaultMediaVersion = hasOwnValue(input, 'desiredDefaultMediaVersion')
-        ? input.desiredDefaultMediaVersion ?? null
-        : undefined;
-      const desiredEmergencyVersion = hasOwnValue(input, 'desiredEmergencyVersion')
-        ? input.desiredEmergencyVersion ?? null
-        : undefined;
-
-      await insertStatusHistory(tx, {
-        commandId: command.id,
-        screenId: command.screen_id,
-        oldStatus: null,
-        newStatus: 'PENDING',
-        reason: 'created',
-        attemptCount: command.attempt_count,
-        metadata: {
-          type: command.type,
-          priority: command.priority,
-          expires_at: command.expires_at?.toISOString?.() ?? command.expires_at ?? null,
-        },
-      });
-
-      const desiredState = await recordDesiredStateForCommand(tx, {
-        screenId: command.screen_id,
-        commandId: command.id,
-        commandType: command.type,
-        commandReason: reason,
-        snapshotId: desiredSnapshotId,
-        defaultMediaVersion: desiredDefaultMediaVersion,
-        emergencyVersion: desiredEmergencyVersion,
-        metadata: {
-          command_id: command.id,
-          command_type: command.type,
-          priority: command.priority,
-          desired_snapshot_id: desiredSnapshotId ?? null,
-          desired_default_media_version: desiredDefaultMediaVersion ?? null,
-          desired_emergency_version: desiredEmergencyVersion ?? null,
-        },
-      });
-
-      await createCommandOutboxEvent(tx, {
-        screenId: command.screen_id,
-        commandId: command.id,
-        eventType: 'COMMAND_AVAILABLE',
-        reason,
-        priority: command.priority,
-        payload: {
-          command_id: command.id,
-          command_type: command.type,
-          reason,
-          state_version: desiredState?.state_version ?? null,
-          command_version: desiredState?.command_version ?? null,
-          desired_snapshot_id: desiredSnapshotId ?? null,
-          desired_default_media_version: desiredDefaultMediaVersion ?? null,
-          desired_emergency_version: desiredEmergencyVersion ?? null,
-        },
-      });
-    }
+    await insertCreateCommandHistory(tx, commands);
+    const desiredStates = await recordDesiredStatesForCommands(tx, commands, inputs);
+    await insertCommandOutboxEvents(tx, commands, inputs, desiredStates);
 
     return commands;
   });

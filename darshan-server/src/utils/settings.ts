@@ -87,6 +87,24 @@ const settingsCache: Record<SettingsSectionKey, unknown> = {
   [BACKUPS_SETTINGS_KEY]: backupsSettingsSchema.parse({}),
 };
 
+/**
+ * Production backup cadence is release policy, not an optional CMS preference.
+ * Keeping this transformation beside the persisted settings makes old rows
+ * safe too: a legacy `automatic_enabled=false` row cannot silently disable the
+ * off-host recovery objective after an upgrade.
+ */
+export function applyProductionBackupSchedule(value: BackupsSettings): BackupsSettings {
+  if (appConfig.NODE_ENV !== 'production') return value;
+  if (!appConfig.BACKUP_INTERVAL_HOURS) {
+    throw new Error('Production backup interval is not configured.');
+  }
+  return {
+    ...value,
+    automatic_enabled: true,
+    interval_hours: appConfig.BACKUP_INTERVAL_HOURS,
+  };
+}
+
 export async function preloadSettingsCache() {
   const db = getDatabase();
   const rows = await db
@@ -98,12 +116,18 @@ export async function preloadSettingsCache() {
     const key = row.key as SettingsSectionKey;
     const parser = SECTION_SCHEMAS[key];
     if (!parser) continue;
-    settingsCache[key] = parser.parse(row.value ?? {});
+    const parsed = parser.parse(row.value ?? {});
+    settingsCache[key] = key === BACKUPS_SETTINGS_KEY
+      ? applyProductionBackupSchedule(parsed as BackupsSettings)
+      : parsed;
   }
 }
 
 export function getCachedSettings<K extends SettingsSectionKey>(key: K): SectionValues[K] {
-  return settingsCache[key] as SectionValues[K];
+  const cached = settingsCache[key] as SectionValues[K];
+  return (key === BACKUPS_SETTINGS_KEY
+    ? applyProductionBackupSchedule(cached as BackupsSettings)
+    : cached) as SectionValues[K];
 }
 
 export async function getSettingsSection<K extends SettingsSectionKey>(key: K): Promise<SectionValues[K]> {
@@ -111,8 +135,11 @@ export async function getSettingsSection<K extends SettingsSectionKey>(key: K): 
   const [row] = await db.select().from(schema.settings).where(eq(schema.settings.key, key));
   const parser = SECTION_SCHEMAS[key];
   const parsed = parser.parse(row?.value ?? {});
-  settingsCache[key] = parsed;
-  return parsed as SectionValues[K];
+  const effective = key === BACKUPS_SETTINGS_KEY
+    ? applyProductionBackupSchedule(parsed as BackupsSettings)
+    : parsed;
+  settingsCache[key] = effective;
+  return effective as SectionValues[K];
 }
 
 export async function saveSettingsSection<K extends SettingsSectionKey>(
@@ -122,15 +149,18 @@ export async function saveSettingsSection<K extends SettingsSectionKey>(
   const db = getDatabase();
   const parser = SECTION_SCHEMAS[key];
   const parsed = parser.parse(value);
+  const effective = key === BACKUPS_SETTINGS_KEY
+    ? applyProductionBackupSchedule(parsed as BackupsSettings)
+    : parsed;
   await db
     .insert(schema.settings)
-    .values({ key, value: parsed })
+    .values({ key, value: effective })
     .onConflictDoUpdate({
       target: schema.settings.key,
-      set: { value: parsed, updated_at: new Date() },
+      set: { value: effective, updated_at: new Date() },
     });
-  settingsCache[key] = parsed;
-  return parsed as SectionValues[K];
+  settingsCache[key] = effective;
+  return effective as SectionValues[K];
 }
 
 export function getPasswordPolicy() {

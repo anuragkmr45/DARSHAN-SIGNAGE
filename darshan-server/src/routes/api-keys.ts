@@ -10,7 +10,7 @@ import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('api-keys-routes');
-const { BAD_REQUEST, CREATED, FORBIDDEN, NOT_FOUND, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED } = HTTP_STATUS;
 
 const createApiKeySchema = z.object({
   name: z.string().min(1),

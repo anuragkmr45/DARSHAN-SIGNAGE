@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { config } from '@/config';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, registerDatabaseShutdownHook, schema } from '@/db';
 import { recordOutboxDispatch } from '@/observability/metrics';
 import { sendDeviceNotification } from '@/realtime/device-gateway';
 import { createLogger } from '@/utils/logger';
@@ -8,6 +8,8 @@ import { createLogger } from '@/utils/logger';
 const logger = createLogger('outbox-dispatcher');
 
 let dispatcherTimer: NodeJS.Timeout | null = null;
+let dispatcherRun: Promise<void> | null = null;
+let dispatcherGeneration = 0;
 
 type CommandOutboxRow = typeof schema.commandOutbox.$inferSelect;
 
@@ -173,25 +175,51 @@ export async function dispatchPendingCommandOutboxBatch(options: { force?: boole
   };
 }
 
+async function runDispatcherTick(generation: number): Promise<void> {
+  if (generation !== dispatcherGeneration || dispatcherRun) {
+    return;
+  }
+
+  const run = dispatchPendingCommandOutboxBatch()
+    .then(() => undefined)
+    .catch((error) => {
+      logger.warn(error, 'Outbox dispatcher tick failed');
+    })
+    .finally(() => {
+      if (dispatcherRun === run) {
+        dispatcherRun = null;
+      }
+    });
+  dispatcherRun = run;
+  await run;
+}
+
 export function startOutboxDispatcher() {
   if (dispatcherTimer || !config.OUTBOX_DISPATCH_ENABLED || !config.REALTIME_SYNC_ENABLED) {
     return false;
   }
 
+  const generation = ++dispatcherGeneration;
   dispatcherTimer = setInterval(() => {
-    dispatchPendingCommandOutboxBatch().catch((error) => {
-      logger.warn(error, 'Outbox dispatcher tick failed');
-    });
+    void runDispatcherTick(generation);
   }, config.OUTBOX_DISPATCH_INTERVAL_MS);
   dispatcherTimer.unref?.();
   return true;
 }
 
-export function stopOutboxDispatcher() {
-  if (!dispatcherTimer) {
-    return false;
+export async function stopOutboxDispatcher() {
+  const timer = dispatcherTimer;
+  const activeRun = dispatcherRun;
+  const wasRunning = Boolean(timer || activeRun);
+  ++dispatcherGeneration;
+  if (timer) {
+    clearInterval(timer);
+    dispatcherTimer = null;
   }
-  clearInterval(dispatcherTimer);
-  dispatcherTimer = null;
-  return true;
+  await activeRun;
+  return wasRunning;
 }
+
+registerDatabaseShutdownHook('outbox-dispatcher', async () => {
+  await stopOutboxDispatcher();
+});

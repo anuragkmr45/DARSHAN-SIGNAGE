@@ -45,7 +45,10 @@ Server:
 bash scripts/export/package-server.sh --release 2026-04-02-r1
 ```
 
-Use `--deployment-layout production-split` for both QA and production so the runtime bundle aligns with the approved Docker-on-VM role topology.
+`production-split` is the default and required layout for QA/production bundle
+inputs so the runtime bundle aligns with the approved Docker-on-VM role
+topology. Use `--deployment-layout standalone` only for an intentionally
+isolated all-in-one local package; it is not a production promotion path.
 
 Server for the split production layout:
 
@@ -142,7 +145,11 @@ The per-platform `electron/<platform>/` exports are for direct delivery to targe
 
 This section applies only when intentionally deploying a standalone product
 export. A canonical production bundle already contains generated
-`.env.production` files and must not be edited on the target.
+`.env.production` files and must not be edited on the target. The standalone
+server package defaults its backend containers to `STANDALONE_NODE_ENV=development`
+because it does not provide the production bundle controls: signed role
+manifests, authenticated TLS between VMs, strict readiness, and off-host
+restore evidence.
 
 Server package:
 

@@ -8,6 +8,13 @@ export default defineConfig({
     // Route suites use a shared integration database. File-level parallelism
     // makes fleet/count assertions observe unrelated fixtures mid-test.
     fileParallelism: false,
+    // The suite mutates a PostgreSQL database. Test workers always run in
+    // test mode and globalSetup rejects any DATABASE_URL that is not a
+    // dedicated *_test database before test modules execute.
+    env: {
+      NODE_ENV: 'test',
+    },
+    globalSetup: './vitest.global-setup.ts',
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],

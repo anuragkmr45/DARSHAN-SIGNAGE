@@ -7,7 +7,10 @@ import {
   type DeviceSocketReplayReason,
   type DeviceSocketReplayStore,
 } from '@/realtime/device-socket-replay';
-import { DEVICE_REQUEST_SIGNATURE_VERSION } from '@/utils/device-request-auth';
+import {
+  DEVICE_REQUEST_SIGNATURE_VERSION,
+  isDeviceLegacyAuthCompatibilityActive,
+} from '@/utils/device-request-auth';
 
 export const DEVICE_SOCKET_SIGNATURE_PREFIX = 'DARSHAN_DEVICE_SOCKET_AUTH_V1';
 export const DEVICE_SOCKET_SIGNATURE_ACTION = 'CONNECT';
@@ -79,7 +82,9 @@ const signedAuthFieldNames = ['auth_version', 'auth_timestamp', 'auth_nonce', 'a
 
 function resolveAuthConfig(overrides?: Partial<DeviceSocketAuthConfig>): DeviceSocketAuthConfig {
   return {
-    legacyAuthAllowed: overrides?.legacyAuthAllowed ?? config.DEVICE_SOCKET_LEGACY_AUTH_ALLOWED,
+    legacyAuthAllowed:
+      overrides?.legacyAuthAllowed ??
+      (config.DEVICE_SOCKET_LEGACY_AUTH_ALLOWED && isDeviceLegacyAuthCompatibilityActive()),
     signedAuthEnabled: overrides?.signedAuthEnabled ?? config.DEVICE_SOCKET_SIGNED_AUTH_ENABLED,
     maxClockSkewMs: overrides?.maxClockSkewMs ?? config.DEVICE_SOCKET_AUTH_MAX_CLOCK_SKEW_MS,
     replayProtectionEnabled:

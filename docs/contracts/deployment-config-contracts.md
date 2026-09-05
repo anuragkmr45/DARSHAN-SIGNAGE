@@ -1,6 +1,6 @@
 # Deployment And Config Contracts
 
-Last code-truth audit: 2026-08-23.
+Last code-truth audit: 2026-09-05.
 
 ## Source-Free Production Composition
 
@@ -20,36 +20,43 @@ This document describes deployment/config contracts visible in the repo. It does
 
 | Role | Current production path | Runtime contents | Contract notes |
 |---|---|---|---|
-| Data VM | `deploy/production/docker/data` | Postgres + MinIO | Owns DB and object storage volumes. |
-| Valkey VM | `deploy/production/docker/valkey` | Valkey | Realtime notification fanout only; not source of truth. |
-| Backend VM | `deploy/production/docker/backend` | backend API/all-role container with worker behavior and runtime tools | Backend image must contain Node 20, ffmpeg, LibreOffice, pg_dump, tar, Playwright Chromium when enabled. |
-| CMS VM | `deploy/production/docker/cms` | nginx static CMS image and runtime config | Serves built CMS, SPA fallback, `/api/v1`, `/socket.io`, and `/grafana` proxy paths where configured. |
-| Observability VM | `deploy/production/docker/observability` | Prometheus + Grafana | Consumes shared rules/dashboards/provisioning. |
-| Player machines | `darshan-player/package.json`, production runbooks | packaged Electron `.deb` plus `/etc/darshan/player/config.json` | Player is not a Docker server role. |
+| Data VM | generated bundle `production/data` | Postgres + MinIO | Owns DB and object storage volumes. |
+| Valkey VM | generated bundle `production/valkey` | Valkey | Realtime notification fanout only; not source of truth. |
+| Backend VM | generated bundle `production/backend` | backend API plus worker role containers and runtime tools | Backend image must contain Node 20, ffmpeg, LibreOffice, pg_dump, tar, Playwright Chromium when enabled; `deploy.sh` owns install/upgrade/adoption dispatch. |
+| CMS VM | generated bundle `production/cms` | nginx static CMS image and runtime config | Serves built CMS, SPA fallback, `/api/v1`, `/socket.io`, and `/grafana` proxy paths where configured. |
+| Observability VM | generated bundle `production/observability` | Prometheus + Grafana | Consumes generated rules/dashboards/provisioning and protected credential files. |
+| Player machines | generated bundle `production/electron` plus production runbooks | packaged Electron installer plus `/etc/darshan/player/config.json` | Player is not a Docker server role; runtime identity/certs/cache stay on the player. |
 
-Proxmox is the hypervisor only. DARSHAN services run inside Docker on normal Ubuntu Server VMs for production deployment.
+Proxmox is the hypervisor only. DARSHAN services run inside Docker on normal
+Ubuntu Server VMs for production deployment. The checkout-based
+`deploy/production/docker/*` tree is retained for compatibility/lab reference
+only and must not be treated as the production authority for fresh install,
+upgrade, adoption, rollback, or administrator recovery.
 
 ## Config Boundary
 
 | Runtime | Secrets / sensitive settings | Non-secret runtime config | Code source of truth |
 |---|---|---|---|
-| Backend | `darshan-server/.env`, Docker role env, DB/object storage/JWT/admin/cert paths | `darshan-server/config/backend.json` mounted as `/app/config/backend.json` in Docker | `darshan-server/src/config/index.ts`, `src/config/file-config.ts`, backend compose |
+| Backend | generated role `secrets/*`, `worker-secrets/*`, DB/object storage/JWT/cert paths; no runtime admin password | generated `.env.production` and cert files mounted by the backend role | `darshan-server/src/config/index.ts`, `src/config/file-config.ts`, generated backend compose |
 | CMS | no secrets; all browser-visible | `/config/app-config.json` from `darshan-cms/public/config/app-config.json` | `darshan-cms/src/config/runtimeConfig.ts`, CMS nginx role |
 | Player | site config must avoid secrets; certs/tokens/runtime identity stay local runtime state | `/etc/darshan/player/config.json` selected by `DARSHAN_PLAYER_CONFIG_FILE` | `darshan-player/src/common/config.ts`, `src/common/file-config.ts`, `platform-paths.ts` |
-| Docker site | VM IPs, ports, image names/tags, data bootstrap credentials | role env shared by scripts | `deploy/production/docker/.env.example`, role scripts |
+| Bundle site | VM IPs, ports, image names/tags, data bootstrap credentials | strict site env parsed into generated role files | `deploy/production/bundles/<site>-<release>.env`, `scripts/bundle/production-bundle-config.mjs` |
 
 ## File Placement Contract
 
 | Machine / role | Files required |
 |---|---|
-| Data VM | `deploy/production/docker/.env` |
-| Valkey VM | `deploy/production/docker/.env` |
-| Backend VM | `deploy/production/docker/.env`, `darshan-server/.env`, `darshan-server/config/backend.json`, backend pairing CA/cert files generated or supplied for the site |
-| CMS VM | `deploy/production/docker/.env`, `darshan-cms/public/config/app-config.json` |
-| Observability VM | `deploy/production/docker/.env` |
-| Player machine | `/etc/darshan/player/config.json` plus installed player package |
+| Data VM | generated `production/data` role folder |
+| Valkey VM | generated `production/valkey` role folder |
+| Backend VM | generated `production/backend` role folder with protected `secrets/*`, `worker-secrets/*`, and cert files |
+| CMS VM | generated `production/cms` role folder with built static app and runtime config |
+| Observability VM | generated `production/observability` role folder with protected observability secrets |
+| Player machine | generated `production/electron` installer/config assets plus installed player package state under `/etc/darshan/player` |
 
-In Docker production, backend `DARSHAN_CONFIG_FILE` should resolve inside the container, normally `/app/config/backend.json`.
+In source-free production, generated files are release artifacts. Operators may
+edit only the private site bundle env before generation; editing role
+`.env.production`, CMS JSON, player JSON, or TLS files after generation creates
+an unsupported split.
 
 ## Runtime Tool Contract
 
@@ -64,7 +71,7 @@ In Docker production, backend `DARSHAN_CONFIG_FILE` should resolve inside the co
 ## Runtime Evidence Required
 
 - `docker compose config` and role startup on each production VM.
-- Backend `/api/v1/health` from CMS/player network.
+- Backend `/api/v1/health/live` and `/api/v1/health/ready` from CMS/player network; production readiness evidence must use `/ready`.
 - MinIO and Postgres health from backend VM.
 - Valkey ping from backend VM.
 - CMS browser login and nested route refresh from operator workstation.

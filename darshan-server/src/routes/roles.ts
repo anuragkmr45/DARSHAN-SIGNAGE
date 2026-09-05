@@ -14,7 +14,7 @@ import { PERMISSION_ACTIONS } from '@/rbac/permissions';
 import { canManageSystemRole, isSuperAdmin } from '@/rbac/policy';
 
 const logger = createLogger('role-routes');
-const { CREATED, FORBIDDEN, NOT_FOUND, OK, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED, OK } = HTTP_STATUS;
 
 const permissionGrantSchema = z.object({
   action: z.enum(PERMISSION_ACTIONS),

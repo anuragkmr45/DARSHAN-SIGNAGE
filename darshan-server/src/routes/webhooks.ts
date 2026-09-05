@@ -10,7 +10,7 @@ import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('webhook-routes');
-const { BAD_REQUEST, CREATED, FORBIDDEN, NO_CONTENT, NOT_FOUND, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED, NO_CONTENT } = HTTP_STATUS;
 
 const webhookSchema = z.object({
   name: z.string().min(1),

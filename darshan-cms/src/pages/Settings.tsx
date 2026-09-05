@@ -59,7 +59,7 @@ import {
 } from "@/hooks/useSettingsApi";
 import { canManageBrandingSettings } from "@/lib/access";
 import { mediaApi } from "@/api/domains/media";
-import type { BackupRun, MediaAsset } from "@/api/types";
+import type { BackupRun, BackupSettings, MediaAsset } from "@/api/types";
 import { uploadMediaWithPresign, validateUploadFile, getFriendlyUploadError } from "@/lib/mediaUploadFlow";
 import { useToast } from "@/hooks/use-toast";
 
@@ -288,7 +288,7 @@ const Settings = () => {
     accent_preset: "crimson" as const,
     sidebar_mode: "expanded" as const,
   });
-  const [backups, setBackups] = useState({
+  const [backups, setBackups] = useState<BackupSettings>({
     automatic_enabled: false,
     interval_hours: 24,
     log_level: "info" as const,
@@ -318,6 +318,7 @@ const Settings = () => {
   const backupRuns = backupRunsQuery.data?.items ?? [];
   const recentLogs = recentLogsQuery.data?.items ?? [];
   const automaticBackupsEnabled = backups.automatic_enabled;
+  const backupScheduleManaged = backups.schedule_managed_by_deployment === true;
 
   const brandingPreviewName = branding.app_name.trim() || "DARSHAN CMS";
 
@@ -666,16 +667,22 @@ const Settings = () => {
                   {automaticBackupsEnabled
                     ? `Recurring backups are enabled for this installation and will be checked every ${backups.interval_hours} hour${backups.interval_hours === 1 ? "" : "s"}.`
                     : "Automatic backups stay off until you enable them and save this section."}
+                  {backupScheduleManaged && ` Production policy requires an independently operated off-host copy${backups.retention_days ? ` retained for ${backups.retention_days} days` : ""}.`}
                 </span>
               </div>
               <div className="flex items-center justify-between rounded-lg border p-4">
                 <div>
                   <p className="font-medium">Automatic backups</p>
-                  <p className="text-sm text-muted-foreground">Run recurring full backups into the archives bucket.</p>
+                  <p className="text-sm text-muted-foreground">
+                    {backupScheduleManaged
+                      ? "This production cadence is locked by the signed deployment policy."
+                      : "Run recurring full backups into the archives bucket."}
+                  </p>
                 </div>
                 <Switch
                   checked={backups.automatic_enabled}
                   onCheckedChange={(checked) => setBackups((current) => ({ ...current, automatic_enabled: checked }))}
+                  disabled={backupScheduleManaged}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -687,6 +694,7 @@ const Settings = () => {
                     min={1}
                     max={168}
                     value={backups.interval_hours}
+                    disabled={backupScheduleManaged}
                     onChange={(event) =>
                       setBackups((current) => ({ ...current, interval_hours: Number(event.target.value || 24) }))
                     }

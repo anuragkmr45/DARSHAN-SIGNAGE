@@ -106,6 +106,7 @@ export class ValkeyRealtimeBus implements RealtimeBus {
       url?: string;
       namespace: string;
       tlsEnabled: boolean;
+      caCertPath?: string;
       publishTimeoutMs: number;
       reconnectMinMs: number;
       reconnectMaxMs: number;
@@ -115,11 +116,13 @@ export class ValkeyRealtimeBus implements RealtimeBus {
     this.publisher = new ValkeyCommandClient({
       url: options.url,
       tlsEnabled: options.tlsEnabled,
+      caCertPath: options.caCertPath,
       commandTimeoutMs: options.publishTimeoutMs,
     });
     this.subscriber = new ValkeySubscriberClient({
       url: options.url,
       tlsEnabled: options.tlsEnabled,
+      caCertPath: options.caCertPath,
       commandTimeoutMs: options.publishTimeoutMs,
       reconnectMinMs: options.reconnectMinMs,
       reconnectMaxMs: options.reconnectMaxMs,
@@ -216,6 +219,7 @@ export function createRealtimeBus() {
       url: config.VALKEY_URL,
       namespace: config.VALKEY_NAMESPACE,
       tlsEnabled: config.VALKEY_TLS_ENABLED,
+      caCertPath: config.VALKEY_CA_CERT_PATH,
       publishTimeoutMs: config.REALTIME_VALKEY_PUBLISH_TIMEOUT_MS,
       reconnectMinMs: config.REALTIME_VALKEY_RECONNECT_MIN_MS,
       reconnectMaxMs: config.REALTIME_VALKEY_RECONNECT_MAX_MS,

@@ -32,7 +32,7 @@ This document defines what evidence is required before DARSHAN behavior can be c
 | Domain | Minimum evidence | Status without evidence |
 |---|---|---|
 | Node runtime | Node `>=20 <21` build/test path for backend, CMS, and player where applicable | `needs runtime verification` |
-| Backend Docker role | `/api/v1/health`, DB init, MinIO, Valkey, runtime tools, worker/all-role behavior | `needs runtime verification` |
+| Backend Docker role | `/api/v1/health/live` plus `/api/v1/health/ready`, DB init, MinIO, Valkey, runtime tools, worker/all-role behavior | `needs runtime verification` |
 | CMS Docker role | Built nginx CMS loads, nested route refresh works, `/api/v1`, `/socket.io`, `/grafana` proxy paths work | `needs runtime verification` |
 | Browser CMS QA | Login, dashboard, media, schedule, screens/pairing, settings/default media, emergency/requests, reports/PoP as applicable | `needs runtime verification` |
 | Packaged player | Install, config selection, autostart, pairing, reset/re-pair, heartbeat online, screenshot, default media, schedule playback | `needs runtime verification` |
@@ -67,4 +67,3 @@ This document defines what evidence is required before DARSHAN behavior can be c
 | Screenshots | device telemetry and screen routes | Screens screenshot actions | screenshot service/queue | Capture/upload from target display. |
 | PoP | device telemetry/proof-of-play routes | PoP/reports pages | PoP service/spool | Playback evidence with queue/replay review. |
 | Observability | metrics/observability routes | dashboard/reports observability surfaces | player metrics/health server | Scrape and dashboard/alert validation. |
-

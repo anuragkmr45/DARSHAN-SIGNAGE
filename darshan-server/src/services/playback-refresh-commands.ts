@@ -2,7 +2,8 @@ import { and, eq, gte, inArray, isNull, or } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { createDeviceCommands } from '@/services/command-lifecycle-service';
 
-export type PlaybackRefreshReason = 'PUBLISH' | 'EMERGENCY' | 'GROUP_MEMBERSHIP' | 'TAKE_DOWN' | 'DEFAULT_MEDIA';
+export type PlaybackRefreshReason =
+  'PUBLISH' | 'EMERGENCY' | 'GROUP_MEMBERSHIP' | 'TAKE_DOWN' | 'DEFAULT_MEDIA';
 
 export type PlaybackRefreshCommandBatch = {
   reason: PlaybackRefreshReason;
@@ -48,18 +49,18 @@ export async function createPlaybackRefreshCommands(params: PlaybackRefreshComma
                     eq(schema.deviceCommands.status, 'PENDING'),
                     gte(schema.deviceCommands.created_at, dedupeCutoff)
                   ),
-	                  and(
-	                    eq(schema.deviceCommands.status, 'SENT'),
-	                    isNull(schema.deviceCommands.acknowledged_at),
-	                    gte(schema.deviceCommands.claimed_at, activeLeaseCutoff)
-	                  ),
-	                  and(
-	                    eq(schema.deviceCommands.status, 'LEASED'),
-	                    isNull(schema.deviceCommands.acknowledged_at),
-	                    gte(schema.deviceCommands.lease_expires_at, activeLeaseCutoff)
-	                  )
-	                )
-	              )
+                  and(
+                    eq(schema.deviceCommands.status, 'SENT'),
+                    isNull(schema.deviceCommands.acknowledged_at),
+                    gte(schema.deviceCommands.claimed_at, activeLeaseCutoff)
+                  ),
+                  and(
+                    eq(schema.deviceCommands.status, 'LEASED'),
+                    isNull(schema.deviceCommands.acknowledged_at),
+                    gte(schema.deviceCommands.lease_expires_at, activeLeaseCutoff)
+                  )
+                )
+              )
             );
 
           const blockedScreenIds = new Set(existingRefreshes.map((row) => row.screen_id));
@@ -77,13 +78,14 @@ export async function createPlaybackRefreshCommands(params: PlaybackRefreshComma
   const requestedAt = new Date().toISOString();
   const desiredSnapshotId =
     params.reason === 'PUBLISH'
-      ? params.snapshotId ?? null
+      ? (params.snapshotId ?? null)
       : params.reason === 'TAKE_DOWN'
-      ? null
-      : undefined;
+        ? null
+        : undefined;
   const desiredDefaultMediaVersion =
-    params.reason === 'DEFAULT_MEDIA' ? params.defaultMediaVersion ?? requestedAt : undefined;
-  const desiredEmergencyVersion = params.reason === 'EMERGENCY' ? params.emergencyVersion ?? requestedAt : undefined;
+    params.reason === 'DEFAULT_MEDIA' ? (params.defaultMediaVersion ?? requestedAt) : undefined;
+  const desiredEmergencyVersion =
+    params.reason === 'EMERGENCY' ? (params.emergencyVersion ?? requestedAt) : undefined;
 
   const inserted = await createDeviceCommands(
     screenIdsToQueue.map((screenId) => ({

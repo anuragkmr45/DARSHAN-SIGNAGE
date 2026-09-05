@@ -32,6 +32,7 @@ import {
   type SocketAck,
 } from '@/realtime/socket-hardening';
 import { authenticateDeviceSocketHandshake, type DeviceSocketAuthFailure } from '@/realtime/device-socket-auth';
+import { recordDeviceAuthRolloutObservation } from '@/deployment/device-auth-rollout';
 import { createLogger } from '@/utils/logger';
 
 const logger = createLogger('device-realtime-gateway');
@@ -131,6 +132,18 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
       (socket.data as any).deviceId = result.deviceId;
       (socket.data as any).deviceSerial = result.serial;
       (socket.data as any).deviceAuthMode = result.mode;
+      try {
+        await recordDeviceAuthRolloutObservation({
+          screenId: result.deviceId,
+          channel: 'socket',
+          method: result.mode === 'signed' ? 'signed' : 'legacy',
+        });
+      } catch (observationError) {
+        // The handshake is already cryptographically authenticated. Retain
+        // availability while logging the missing evidence; promotion tooling
+        // will then refuse to claim this screen is signature-ready.
+        logger.warn({ err: observationError, device_id: result.deviceId }, 'Failed to record device socket rollout observation');
+      }
       recordDeviceRealtimeAuth('success', 'authorized');
       recordDeviceSocketAuth({
         namespace: config.REALTIME_DEVICE_NAMESPACE,

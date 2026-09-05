@@ -7,8 +7,9 @@ services:
     restart: unless-stopped
     environment:
       BACKEND_HOST: ${BACKEND_HOST}
+      BACKEND_PRIVATE_HOST: ${BACKEND_PRIVATE_HOST:-${BACKEND_HOST}}
       BACKEND_PORT: ${API_HOST_PORT}
-      MINIO_HOST: ${MINIO_HOST}
+      MINIO_HOST: ${MINIO_HOST:-${DATA_HOST}}
       MINIO_PORT: ${MINIO_PORT:-9000}
       GRAFANA_HOST: ${OBSERVABILITY_HOST}
       GRAFANA_PORT: ${GRAFANA_PORT}
@@ -16,6 +17,7 @@ services:
       - "${CMS_HTTP_PORT}:80"
     volumes:
       - ${CMS_RUNTIME_CONFIG_SOURCE:-../../../../darshan-cms/public/config/app-config.json}:/usr/share/nginx/html/config/app-config.json:ro
+      - ${DARSHAN_BACKEND_TRANSPORT_CA_FILE:-../../../../darshan-server/certs/transport-ca.crt}:/etc/darshan/transport-ca.crt:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null"]
       interval: 30s

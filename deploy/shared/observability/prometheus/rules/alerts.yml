@@ -42,8 +42,48 @@ groups:
           summary: "CMS VM host metrics are unavailable"
           description: "vm3-node on {{ $labels.instance }} has been unreachable for 10 minutes."
 
+      - alert: DARSHANValkeyHostMetricsUnavailable
+        expr: up{job="vm-valkey-node"} == 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Valkey VM host metrics are unavailable"
+          description: "vm-valkey-node on {{ $labels.instance }} has been unreachable for 10 minutes."
+
+      - alert: DARSHANBackendHostMetricsUnavailable
+        expr: up{job="vm2-node"} == 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Backend VM host metrics are unavailable"
+          description: "vm2-node on {{ $labels.instance }} has been unreachable for 10 minutes."
+
+      - alert: DARSHANObservabilityHostMetricsUnavailable
+        expr: up{job="vm4-node"} == 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Observability VM host metrics are unavailable"
+          description: "vm4-node on {{ $labels.instance }} has been unreachable for 10 minutes."
+
+      - alert: DARSHANAlertmanagerMetricsUnavailable
+        expr: up{job="vm4-alertmanager"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Alertmanager metrics are unavailable"
+          description: "Alertmanager on {{ $labels.instance }} has been unreachable for 5 minutes."
+
       - alert: DARSHANGrafanaMetricsUnavailable
-        expr: up{job="vm3-grafana"} == 0
+        expr: up{job="vm4-grafana"} == 0
         for: 10m
         labels:
           severity: warning
@@ -111,6 +151,59 @@ groups:
         annotations:
           summary: "Data VM filesystem utilization is high"
           description: "Data VM storage on {{ $labels.instance }} has been above 85% utilization for 10 minutes and may impact PostgreSQL or MinIO."
+
+      # These are rendered from the signed site operations policy. Absolute
+      # free-byte thresholds protect Docker named volumes even where filesystem
+      # percentage looks harmless on very large disks.
+      - alert: DARSHANDataDockerDiskFreeLow
+        expr: min by (instance) (node_filesystem_avail_bytes{job="vm1-node",fstype!~"tmpfs|overlay|squashfs|nsfs"}) < __DATA_MIN_FREE_DISK_BYTES__
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Data VM Docker storage is below its approved free-space threshold"
+          description: "Data VM {{ $labels.instance }} has less than the signed minimum free space required for PostgreSQL and MinIO."
+
+      - alert: DARSHANValkeyDockerDiskFreeLow
+        expr: min by (instance) (node_filesystem_avail_bytes{job="vm-valkey-node",fstype!~"tmpfs|overlay|squashfs|nsfs"}) < __VALKEY_MIN_FREE_DISK_BYTES__
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Valkey VM Docker storage is below its approved free-space threshold"
+          description: "Valkey VM {{ $labels.instance }} has less than the signed minimum free space required for persistent append-only data."
+
+      - alert: DARSHANBackendDockerDiskFreeLow
+        expr: min by (instance) (node_filesystem_avail_bytes{job="vm2-node",fstype!~"tmpfs|overlay|squashfs|nsfs"}) < __BACKEND_MIN_FREE_DISK_BYTES__
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Backend VM Docker storage is below its approved free-space threshold"
+          description: "Backend VM {{ $labels.instance }} has less than the signed minimum free space required for application, worker, and transient workload data."
+
+      - alert: DARSHANCmsDockerDiskFreeLow
+        expr: min by (instance) (node_filesystem_avail_bytes{job="vm3-node",fstype!~"tmpfs|overlay|squashfs|nsfs"}) < __CMS_MIN_FREE_DISK_BYTES__
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "CMS VM Docker storage is below its approved free-space threshold"
+          description: "CMS VM {{ $labels.instance }} has less than the signed minimum free space required for CMS runtime data."
+
+      - alert: DARSHANObservabilityDockerDiskFreeLow
+        expr: min by (instance) (node_filesystem_avail_bytes{job="vm4-node",fstype!~"tmpfs|overlay|squashfs|nsfs"}) < __OBSERVABILITY_MIN_FREE_DISK_BYTES__
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Observability VM Docker storage is below its approved free-space threshold"
+          description: "Observability VM {{ $labels.instance }} has less than the signed minimum free space required for Prometheus, Alertmanager, and Grafana data."
 
       - alert: DARSHANHostMemoryHigh
         expr: darshan:host_memory_utilization:ratio > 0.90

@@ -12,7 +12,7 @@
       "id": 1,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "sum(up{job=~\"vm1-node|vm1-postgres|vm1-minio|vm1-cadvisor\"}) or vector(0)", "refId": "A" }
+        { "expr": "sum(up{job=~\"vm1-node|vm1-postgres|vm1-minio\"}) or vector(0)", "refId": "A" }
       ],
       "title": "Data Machine Targets Up",
       "type": "stat"
@@ -60,7 +60,7 @@
       "id": 5,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "up{job=~\"vm1-node|vm1-postgres|vm1-minio|vm1-cadvisor\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }
+        { "expr": "up{job=~\"vm1-node|vm1-postgres|vm1-minio\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }
       ],
       "title": "Data Machine Scrape Target Health",
       "type": "timeseries"

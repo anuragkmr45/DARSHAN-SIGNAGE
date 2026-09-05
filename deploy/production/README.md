@@ -1,10 +1,15 @@
 # DARSHAN Production Deployment
 
-> This document also covers the older checkout-based Docker-role workflow. For
-> source-free production, edit one private bundle env on the build machine and
-> transfer generated role folders without editing `.env.production`, CMS/player
-> JSON, or TLS files. Use
+> The checkout-based Docker-role workflow is deprecated for production. Edit
+> one private bundle env on the build machine and transfer generated role
+> folders without editing `.env.production`, CMS/player JSON, or TLS files. Use
 > `docs/runbooks/source-free-production-bundle-deployment.md`.
+
+> **Database lifecycle update:** do not follow any older `RUN_PRODUCTION_DB_PUSH`,
+> `RUN_PRODUCTION_SEED`, `npm run db:push`, or `npm run seed` examples in this
+> document. The supported backend lifecycle is checksum-verified migration,
+> one-time protected-secret bootstrap, and explicit legacy adoption as described
+> in `darshan-server/docs/PRODUCTION_DATABASE_LIFECYCLE.md`.
 
 Source-free production uses verified HTTPS for CMS, backend, MinIO, players,
 and Prometheus scrapes. HTTP examples below are compatibility examples for the
@@ -12,13 +17,15 @@ checkout-based workflow and are not valid source-free production values.
 
 Production uses Docker role deployments on normal Proxmox VMs. Proxmox is only the hypervisor; DARSHAN services run in Docker containers inside Ubuntu Server VMs.
 
-Use this production path:
+The only supported production path is the generated, source-free role bundle
+and its generated `deploy.sh` dispatcher. The checkout commands retained below
+are historical/lab reference only; they must not be used for first install,
+upgrade, adoption, or administrator recovery. Do not use legacy LXC/systemd
+scripts for DARSHAN production either.
 
-```text
-deploy/production/docker
-```
-
-Do not use legacy LXC/systemd scripts for DARSHAN production.
+The legacy checkout scripts refuse to run unless the operator explicitly sets
+`DARSHAN_ALLOW_DEPRECATED_CHECKOUT_PRODUCTION=I_UNDERSTAND_SOURCE_FREE_BUNDLE_IS_AUTHORITATIVE`.
+Use that override only for lab or historical compatibility rehearsal.
 
 ## Production Topology
 
@@ -167,8 +174,6 @@ GRAFANA_PORT=3001
 GRAFANA_ROOT_URL=http://192.168.1.102:8080/grafana/
 
 INSTALL_PLAYWRIGHT_CHROMIUM=true
-RUN_PRODUCTION_DB_PUSH=false
-RUN_PRODUCTION_SEED=false
 
 CMS_RUNTIME_CONFIG_SOURCE=../../../../darshan-cms/public/config/app-config.json
 
@@ -203,7 +208,6 @@ JWT_SECRET=<strong-random-secret-min-32-chars>
 JWT_EXPIRY=900
 
 ADMIN_EMAIL=admin@your-company.local
-ADMIN_PASSWORD=<strong-admin-password>
 
 CA_CERT_PATH=./certs/ca.crt
 CA_KEY_PATH=./certs/ca.key
@@ -478,25 +482,21 @@ bash deploy/production/docker/check-backend-runtime-tools.sh
 bash deploy/production/docker/health-check.sh backend
 ```
 
-If this is a first-time empty database and you intentionally want schema/bootstrap operations, set in `deploy/production/docker/.env` on the Backend VM:
-
-```env
-RUN_PRODUCTION_DB_PUSH=true
-RUN_PRODUCTION_SEED=true
-```
-
-Then rerun:
-
-```bash
-bash deploy/production/docker/start-backend.sh
-```
-
-After bootstrap, set both values back to `false`.
+Never set `RUN_PRODUCTION_DB_PUSH` or `RUN_PRODUCTION_SEED`; both mechanisms
+are deprecated and unsafe for production. For an empty database, transfer the
+generated backend role bundle and run its `./deploy.sh`; it chooses
+`install.sh`, runs reviewed migrations and the production-only bootstrap, and
+performs strict readiness and login acceptance. For an existing untracked
+database, `./deploy.sh` refuses it and directs the operator to the explicit
+`adopt-existing.sh` procedure.
 
 Backend health:
 
 ```bash
-curl -fsS http://192.168.1.103:3000/api/v1/health
+curl --fail --silent --show-error \
+  --cacert ./certs/transport-ca.crt \
+  --resolve backend.example.internal:3000:127.0.0.1 \
+  https://backend.example.internal:3000/api/v1/health/ready
 ```
 
 Runtime tools expected inside backend image:
@@ -521,14 +521,20 @@ bash deploy/production/docker/health-check.sh cms
 Browser URL:
 
 ```text
-http://192.168.1.102:8080
+https://cms.signage.example
 ```
 
 CMS proxy checks:
 
 ```bash
-curl -fsS http://192.168.1.102:8080/
-curl -fsS http://192.168.1.102:8080/api/v1/health
+curl --fail --show-error --silent \
+  --cacert /opt/darshan/transport-ca.crt \
+  --resolve cms.signage.example:443:192.168.1.102 \
+  https://cms.signage.example/
+curl --fail --show-error --silent \
+  --cacert /opt/darshan/transport-ca.crt \
+  --resolve cms.signage.example:443:192.168.1.102 \
+  https://cms.signage.example/api/v1/health/ready
 ```
 
 ### 5. Observability VM

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'crypto';
 import { inArray } from 'drizzle-orm';
+import type { FastifyInstance } from 'fastify';
 
 const {
   emitScreensRefreshRequiredMock,
@@ -28,6 +29,8 @@ import {
 } from '@/services/playback-refresh-dispatch';
 
 describe('playback refresh dispatch', () => {
+  const fastify = {} as FastifyInstance;
+
   beforeAll(async () => {
     await initializeDatabase();
   });
@@ -57,7 +60,7 @@ describe('playback refresh dispatch', () => {
       () => randomUUID()
     );
 
-    const result = await dispatchPlaybackRefresh({} as any, {
+    const result = await dispatchPlaybackRefresh(fastify, {
       reason: 'PUBLISH',
       screenIds,
       createdBy: randomUUID(),
@@ -99,7 +102,7 @@ describe('playback refresh dispatch', () => {
     queuePlaybackRefreshDispatchMock.mockResolvedValue('job-id');
 
     const screenIds = [randomUUID(), randomUUID()];
-    const result = await dispatchPlaybackRefresh({} as any, {
+    const result = await dispatchPlaybackRefresh(fastify, {
       reason: 'DEFAULT_MEDIA',
       screenIds,
       createdBy: randomUUID(),
@@ -137,12 +140,100 @@ describe('playback refresh dispatch', () => {
     expect(outboxRows.every((row) => row.event_type === 'COMMAND_AVAILABLE' && row.status === 'PENDING')).toBe(true);
   });
 
+  it('creates lifecycle side effects for a fleet default-media refresh in one robust path', async () => {
+    isJobsInitializedMock.mockReturnValue(true);
+    queuePlaybackRefreshDispatchMock.mockResolvedValue('job-id');
+
+    const screenIds = Array.from({ length: 40 }, () => randomUUID());
+    const result = await dispatchPlaybackRefresh(fastify, {
+      reason: 'DEFAULT_MEDIA',
+      screenIds,
+      createdBy: randomUUID(),
+    });
+
+    expect(result.commandsCreated).toBe(screenIds.length);
+    expect(queuePlaybackRefreshDispatchMock).not.toHaveBeenCalled();
+
+    const db = getDatabase();
+    const commands = await db
+      .select()
+      .from(schema.deviceCommands)
+      .where(inArray(schema.deviceCommands.screen_id, screenIds as string[]));
+
+    expect(commands).toHaveLength(screenIds.length);
+
+    const commandIds = commands.map((command) => command.id);
+    const [history, desiredStates, desiredStateHistory, outboxRows] = await Promise.all([
+      db
+        .select()
+        .from(schema.deviceCommandStatusHistory)
+        .where(inArray(schema.deviceCommandStatusHistory.command_id, commandIds)),
+      db
+        .select()
+        .from(schema.deviceDesiredState)
+        .where(inArray(schema.deviceDesiredState.screen_id, screenIds as string[])),
+      db
+        .select()
+        .from(schema.deviceDesiredStateHistory)
+        .where(inArray(schema.deviceDesiredStateHistory.command_id, commandIds)),
+      db
+        .select()
+        .from(schema.commandOutbox)
+        .where(inArray(schema.commandOutbox.command_id, commandIds)),
+    ]);
+
+    expect(history).toHaveLength(screenIds.length);
+    expect(desiredStates).toHaveLength(screenIds.length);
+    expect(desiredStateHistory).toHaveLength(screenIds.length);
+    expect(outboxRows).toHaveLength(screenIds.length);
+    expect(
+      desiredStates.every(
+        (state) => state.default_media_version !== null && state.last_changed_reason === 'DEFAULT_MEDIA'
+      )
+    ).toBe(true);
+    expect(outboxRows.every((row) => row.event_type === 'COMMAND_AVAILABLE' && row.status === 'PENDING')).toBe(true);
+  });
+
+  it('preserves existing desired snapshot state when default media refreshes are batched', async () => {
+    isJobsInitializedMock.mockReturnValue(false);
+
+    const screenId = randomUUID();
+    const snapshotId = randomUUID();
+    const createdBy = randomUUID();
+
+    await dispatchPlaybackRefresh(fastify, {
+      reason: 'PUBLISH',
+      screenIds: [screenId],
+      createdBy,
+      publishId: randomUUID(),
+      snapshotId,
+    });
+
+    await dispatchPlaybackRefresh(fastify, {
+      reason: 'DEFAULT_MEDIA',
+      screenIds: [screenId],
+      createdBy,
+    });
+
+    const db = getDatabase();
+    const [desiredState] = await db
+      .select()
+      .from(schema.deviceDesiredState)
+      .where(inArray(schema.deviceDesiredState.screen_id, [screenId]));
+
+    expect(desiredState?.snapshot_id).toBe(snapshotId);
+    expect(desiredState?.default_media_version).not.toBeNull();
+    expect(desiredState?.last_changed_reason).toBe('DEFAULT_MEDIA');
+    expect(desiredState?.command_version).toBe(2);
+    expect(desiredState?.state_version).toBe(2);
+  });
+
   it('falls back to inline command creation when queueing fails', async () => {
     isJobsInitializedMock.mockReturnValue(true);
     queuePlaybackRefreshDispatchMock.mockRejectedValue(new Error('pg-boss unavailable'));
 
     const screenIds = [randomUUID(), randomUUID()];
-    const result = await dispatchPlaybackRefresh({} as any, {
+    const result = await dispatchPlaybackRefresh(fastify, {
       reason: 'EMERGENCY',
       screenIds,
       createdBy: randomUUID(),

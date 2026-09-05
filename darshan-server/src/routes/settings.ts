@@ -27,6 +27,7 @@ import {
   GENERAL_SETTINGS_KEY,
   SECURITY_SETTINGS_KEY,
   appearanceSettingsSchema,
+  applyProductionBackupSchedule,
   backupsSettingsSchema,
   brandingSettingsSchema,
   generalSettingsSchema,
@@ -43,9 +44,20 @@ import {
 import { createBackupRun, deleteBackupRun, listBackupRuns } from '@/utils/backup-runs';
 import { queueBackup } from '@/jobs';
 import { resolveAspectRatio } from '@/utils/aspect-ratio';
+import { config as appConfig } from '@/config';
 
 const logger = createLogger('settings-routes');
 const { CREATED, OK } = HTTP_STATUS;
+
+function serializeBackupSettings(settings: BackupsSettings) {
+  const productionManaged = appConfig.NODE_ENV === 'production';
+  return {
+    ...settings,
+    schedule_managed_by_deployment: productionManaged,
+    off_host_copy_required: productionManaged,
+    retention_days: productionManaged ? appConfig.BACKUP_RETENTION_DAYS : null,
+  };
+}
 
 const upsertSettingSchema = z.object({
   key: z.string().min(1),
@@ -306,6 +318,9 @@ export async function settingsRoutes(fastify: FastifyInstance) {
           await ensureMediaIdsExist([value.logo_media_id, value.icon_media_id, value.favicon_media_id]);
         } else if (data.key in knownSections) {
           value = (knownSections as any)[data.key].parse(data.value);
+          if (data.key === BACKUPS_SETTINGS_KEY) {
+            value = applyProductionBackupSchedule(value as BackupsSettings);
+          }
         }
 
         const [record] = await db
@@ -507,7 +522,7 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         await requireAccess(request, 'read', 'OrgSettings');
-        return reply.send(await getSettingsSection(BACKUPS_SETTINGS_KEY));
+        return reply.send(serializeBackupSettings(await getSettingsSection(BACKUPS_SETTINGS_KEY)));
       } catch (error) {
         logger.error(error, 'Get backups settings error');
         return respondWithError(reply, error);
@@ -530,7 +545,7 @@ export async function settingsRoutes(fastify: FastifyInstance) {
         const data = backupsSettingsSchema.parse(request.body);
         const saved = await saveSettingsSection(BACKUPS_SETTINGS_KEY, data);
         setRuntimeLogLevel(saved.log_level);
-        return reply.status(OK).send(saved);
+        return reply.status(OK).send(serializeBackupSettings(saved));
       } catch (error) {
         logger.error(error, 'Update backups settings error');
         return respondWithError(reply, error);

@@ -6,7 +6,6 @@ import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
-import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { isDepartmentScopedRole } from '@/rbac/policy';
@@ -14,7 +13,6 @@ import { createEmergencyRepository } from '@/db/repositories/emergency';
 import { escapeHtml, renderPdfDocument } from '@/utils/pdf-render';
 
 const logger = createLogger('reports-routes');
-const { BAD_REQUEST, FORBIDDEN, UNAUTHORIZED } = HTTP_STATUS;
 
 function formatDateTime(value?: Date | string | null) {
   if (!value) return '—';

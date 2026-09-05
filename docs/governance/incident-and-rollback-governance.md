@@ -34,7 +34,7 @@ This document defines governance rules for incidents, emergency controls, rollba
 |---|---|
 | Realtime rollback | Disable realtime/outbox dispatch where configured, but keep REST polling, heartbeat, command APIs, and DB state intact. |
 | Config rollback | Revert selectors/config files. Do not delete runtime state unless a reset runbook explicitly requires it. |
-| Backend Docker rollback | Roll back image/compose/env with DB compatibility review. Validate `/api/v1/health`, worker/all-role behavior, DB, MinIO, Valkey. |
+| Backend Docker rollback | Roll back image/compose/env with DB compatibility review. Validate `/api/v1/health/ready`, worker/all-role behavior, DB, MinIO, Valkey. |
 | CMS Docker rollback | Roll back static image/runtime config. Validate `/`, nested routes, `/api/v1`, `/socket.io`, and `/grafana` proxy paths. |
 | Player rollback | Install prior package if compatible. Preserve identity/certs/cache/queues unless destructive recovery is approved. |
 | Data rollback | Requires DBA/platform approval. DB and MinIO must remain consistent. |
@@ -62,4 +62,3 @@ This document defines governance rules for incidents, emergency controls, rollba
 - If backend is temporarily unavailable, offline/cache behavior depends on player security/offline config and last validation state.
 - Manual app-data deletion is destructive and must not be the default recovery path.
 - Re-pairing an existing physical screen should use approved recovery/OTP flow and preserve evidence queues unless explicitly cleared.
-

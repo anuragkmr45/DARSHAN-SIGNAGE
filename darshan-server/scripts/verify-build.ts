@@ -13,9 +13,9 @@ let warnings = 0;
 // Load config first (required by some modules)
 console.log('\n⚙️  Loading configuration...');
 try {
-  const { loadConfig } = await import('../src/config/index.js');
-  loadConfig();
-  console.log('   ✅ Configuration loaded');
+  const { getRedactedRuntimeConfigSummary } = await import('../src/config/index.js');
+  const summary = getRedactedRuntimeConfigSummary();
+  console.log(`   ✅ Configuration loaded for ${summary.env.NODE_ENV} / ${summary.env.SIGNHEX_ENVIRONMENT_NAME}`);
 } catch (error: any) {
   console.log('   ⚠️  Configuration not loaded (expected if .env is missing)');
   warnings++;
@@ -117,32 +117,28 @@ for (const route of routes) {
 // Test 5: RBAC functionality
 console.log('\n🔐 Test 5: Testing RBAC...');
 try {
-  const { defineAbilityFor } = await import('../src/rbac/index.js');
-  
-  // Test admin abilities
-  const adminAbility = defineAbilityFor('ADMIN', 'test-user-id');
-  if (adminAbility.can('manage', 'all')) {
-    console.log('   ✅ Admin can manage all');
-  } else {
+  const { createMongoAbility } = await import('@casl/ability');
+  const { checkAbility } = await import('../src/rbac/index.js');
+  const { SYSTEM_ROLE_DEFAULTS } = await import('../src/rbac/system-roles.js');
+
+  const adminAbility = createMongoAbility(SYSTEM_ROLE_DEFAULTS.ADMIN.grants);
+  if (checkAbility(adminAbility, 'manage', 'all')) console.log('   ✅ Admin can manage all');
+  else {
     console.error('   ❌ Admin cannot manage all');
     errors++;
   }
-  
-  // Test operator abilities
-  const operatorAbility = defineAbilityFor('OPERATOR', 'test-user-id');
-  if (operatorAbility.can('create', 'Media')) {
-    console.log('   ✅ Operator can create media');
-  } else {
+
+  const operatorAbility = createMongoAbility(SYSTEM_ROLE_DEFAULTS.OPERATOR.grants);
+  if (checkAbility(operatorAbility, 'create', 'Media')) console.log('   ✅ Operator can create media');
+  else {
     console.error('   ❌ Operator cannot create media');
     errors++;
   }
-  
-  // Test department abilities
-  const deptAbility = defineAbilityFor('DEPARTMENT', 'test-user-id', 'dept-id');
-  if (deptAbility.can('read', 'Request')) {
-    console.log('   ✅ Department can read requests');
-  } else {
-    console.error('   ❌ Department cannot read requests');
+
+  const departmentAbility = createMongoAbility(SYSTEM_ROLE_DEFAULTS.DEPARTMENT.grants);
+  if (checkAbility(departmentAbility, 'read', 'ScheduleRequest')) console.log('   ✅ Department can read schedule requests');
+  else {
+    console.error('   ❌ Department cannot read schedule requests');
     errors++;
   }
 } catch (error: any) {
@@ -176,14 +172,17 @@ console.log(`   Warnings: ${warnings}`);
 if (errors === 0) {
   console.log('\n✅ All verification tests passed!');
   console.log('\n💡 Next steps:');
-  console.log('   1. Start services: docker-compose up -d postgres minio');
-  console.log('   2. Check services: npm run check');
-  console.log('   3. Initialize DB: npm run db:push && npm run seed');
-  console.log('   4. Start server: npm run dev');
+  console.log('   Development:');
+  console.log('     1. Start services: docker compose up -d postgres minio');
+  console.log('     2. Check services: npm run check');
+  console.log('     3. Initialize local DB only: npm run db:push && npm run seed:demo');
+  console.log('     4. Start server: npm run dev');
+  console.log('   Production:');
+  console.log('     Use the generated source-free role bundle: ./deploy.sh');
+  console.log('     Never initialize production with npm run db:push or npm run seed.');
   process.exit(0);
 } else {
   console.log('\n❌ Verification failed with errors');
   console.log('\n💡 Fix the errors above and run: npm run verify');
   process.exit(1);
 }
-

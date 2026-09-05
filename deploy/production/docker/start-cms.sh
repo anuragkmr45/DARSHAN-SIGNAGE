@@ -9,6 +9,7 @@ if [[ "$cms_runtime_config_path" != /* ]]; then
   cms_runtime_config_path="$BASE_DIR/cms/$cms_runtime_config_path"
 fi
 require_file "$cms_runtime_config_path" "Missing CMS runtime config at $CMS_RUNTIME_CONFIG_SOURCE. Copy darshan-cms/public/config/app-config.example.json to darshan-cms/public/config/app-config.json and edit public URLs."
+require_file "$DARSHAN_BACKEND_TRANSPORT_CA_FILE" "Missing backend transport CA at $DARSHAN_BACKEND_TRANSPORT_CA_FILE. The deprecated checkout CMS proxy verifies backend TLS and will not start without it."
 
 echo "Building CMS production image"
 compose_build darshan-cms-prod cms cms

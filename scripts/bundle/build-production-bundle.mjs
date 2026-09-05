@@ -171,6 +171,8 @@ function assertBundleContract() {
     'production/backend/certs/server.key',
     'production/cms/tls/tls.key',
     'production/data/tls/private.key',
+    'production/data/tls/postgres.key',
+    'production/valkey/tls/server.key',
   ])
   for (const { relative, absolute } of files.filter(({ relative }) => relative.endsWith('.key'))) {
     if (!allowedPrivateKeys.has(relative)) fail(`Unexpected private key in runtime bundle: ${relative}`)
@@ -240,6 +242,8 @@ const manifest = {
     cms: certificateFingerprint(path.join(bundleRoot, 'production/cms/tls/tls.crt')),
     backend: certificateFingerprint(path.join(bundleRoot, 'production/backend/certs/server.crt')),
     minio: certificateFingerprint(path.join(bundleRoot, 'production/data/tls/public.crt')),
+    postgres: certificateFingerprint(path.join(bundleRoot, 'production/data/tls/postgres.crt')),
+    valkey: certificateFingerprint(path.join(bundleRoot, 'production/valkey/tls/server.crt')),
   },
   configuration: entries,
   security: {
@@ -251,12 +255,23 @@ const manifest = {
       'production/backend/certs/server.key',
       'production/cms/tls/tls.key',
       'production/data/tls/private.key',
+      'production/data/tls/postgres.key',
+      'production/valkey/tls/server.key',
     ],
     deviceCaPrivateKeyRole: 'production/backend only',
   },
 }
 fs.writeFileSync(path.join(bundleRoot, 'CONFIGURATION_MANIFEST.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 })
-const checksums = walk(bundleRoot).map(({ relative, absolute }) => `${sha256(fs.readFileSync(absolute))}  ./${relative}`).join('\n')
+const checksums = walk(bundleRoot)
+  .filter(({ relative }) => relative !== 'BUNDLE_MANIFEST.sig')
+  .map(({ relative, absolute }) => `${sha256(fs.readFileSync(absolute))}  ./${relative}`).join('\n')
 fs.writeFileSync(path.join(bundleRoot, 'SHA256SUMS.txt'), `${checksums}\n`)
+const signatureResult = spawnSync('openssl', [
+  'dgst', '-sha256', '-sign', config.RELEASE_SIGNING_PRIVATE_KEY,
+  '-out', path.join(bundleRoot, 'BUNDLE_MANIFEST.sig'), path.join(bundleRoot, 'SHA256SUMS.txt'),
+], { encoding: 'utf8', env: baseEnv })
+if (signatureResult.status !== 0) {
+  fail(`Unable to sign the production bundle manifest: ${signatureResult.stderr || signatureResult.stdout}`)
+}
 run('bash', ['verify-bundle.sh'], {}, bundleRoot)
 process.stdout.write(`Production source-free bundle created at ${bundleRoot}\n`)

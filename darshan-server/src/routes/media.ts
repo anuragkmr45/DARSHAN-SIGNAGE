@@ -1,5 +1,4 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import path from 'path';
 import {
   completeUploadSchema,
   completeUploadSessionSchema,
@@ -33,7 +32,6 @@ import {
   deleteObject,
   getPresignedPutUrl,
   getPresignedUploadPartUrl,
-  getPresignedUrl,
   headObject,
   listMultipartUploadParts,
 } from '@/s3';

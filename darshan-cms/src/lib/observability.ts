@@ -62,6 +62,10 @@ export const getMachineRoleLabel = (
       return "CMS VM";
     case "data":
       return "Data VM";
+    case "valkey":
+      return "Valkey VM";
+    case "observability":
+      return "Observability VM";
     case "development":
       return "Development Host";
     default:

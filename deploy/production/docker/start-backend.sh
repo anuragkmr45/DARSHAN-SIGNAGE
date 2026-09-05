@@ -8,7 +8,7 @@ dump_backend_diagnostics() {
   echo
   echo "Backend startup diagnostics"
   echo "==========================="
-  echo "Backend health URL: http://${BACKEND_HOST}:${API_HOST_PORT}/api/v1/health"
+  echo "Backend readiness URL: $(backend_readiness_url)"
   echo
   echo "Backend compose status:"
   compose_ps darshan-backend backend || true
@@ -31,23 +31,10 @@ compose_build darshan-backend backend api
 echo "Checking backend runtime tools"
 "$BASE_DIR/check-backend-runtime-tools.sh"
 
-if [[ "${RUN_PRODUCTION_DB_PUSH:-false}" == "true" ]]; then
-  echo "Running backend schema push"
-  compose_run darshan-backend backend -e DRIZZLE_STRICT=false api npm run db:push
-else
-  echo "Skipping backend schema push (set RUN_PRODUCTION_DB_PUSH=true to run it)"
-fi
-
-if [[ "${RUN_PRODUCTION_SEED:-false}" == "true" ]]; then
-  echo "Running backend seed"
-  compose_run darshan-backend backend api npm run seed
-else
-  echo "Skipping backend seed (set RUN_PRODUCTION_SEED=true to run it)"
-fi
-
-echo "Starting backend project: one API container with worker role enabled"
+echo "Starting checkout-based backend project without changing schema or credentials"
+echo "For production installs, upgrades, or adoption use the generated source-free backend role bundle."
 compose_up darshan-backend backend api
-if ! wait_for_http "Backend API" "http://${BACKEND_HOST}:${API_HOST_PORT}/api/v1/health" 60; then
+if ! wait_for_backend_ready 60; then
   dump_backend_diagnostics
   exit 1
 fi

@@ -10,18 +10,22 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { config as appConfig } from '@/config';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
-import { isLockedOut, recordFailedAttempt, resetAttempts } from '@/auth/login-throttle';
+import { getLoginThrottleStore } from '@/auth/login-throttle';
 import { AppError } from '@/utils/app-error';
 import { createRoleRepository } from '@/db/repositories/role';
 import { getIdleTimeoutSeconds } from '@/utils/settings';
 
 const logger = createLogger('auth-routes');
-const { BAD_REQUEST, FORBIDDEN, NOT_FOUND, TOO_MANY_REQUESTS, UNAUTHORIZED } = HTTP_STATUS;
+const { TOO_MANY_REQUESTS } = HTTP_STATUS;
 
 export async function authRoutes(fastify: FastifyInstance) {
   const userRepo = createUserRepository();
   const sessionRepo = createSessionRepository();
   const roleRepo = createRoleRepository();
+  const loginThrottle = getLoginThrottleStore();
+  fastify.addHook('onClose', async () => {
+    await loginThrottle.close();
+  });
 
   // Login
   fastify.post<{ Body: typeof loginSchema._type }>(
@@ -50,9 +54,17 @@ export async function authRoutes(fastify: FastifyInstance) {
       try {
         const { email, password } = loginSchema.parse(request.body);
 
-        const throttleKey = `${email.toLowerCase()}:${request.ip}`;
-        const locked = isLockedOut(throttleKey, appConfig.LOGIN_LOCKOUT_WINDOW_SECONDS * 1000);
-        if (locked.locked) {
+        const throttleKey = `${email.toLowerCase()}\u0000${request.ip}`;
+        const lockoutWindowMs = appConfig.LOGIN_LOCKOUT_WINDOW_SECONDS * 1000;
+        const locked = await loginThrottle.isLocked(throttleKey, lockoutWindowMs);
+        if (locked.status === 'unavailable' && appConfig.LOGIN_THROTTLE_FAIL_CLOSED) {
+          throw new AppError({
+            statusCode: 503,
+            code: 'AUTH_THROTTLE_UNAVAILABLE',
+            message: 'Login protection is temporarily unavailable. Try again later.',
+          });
+        }
+        if (locked.status === 'available' && locked.locked) {
           throw new AppError({
             statusCode: TOO_MANY_REQUESTS,
             code: 'RATE_LIMITED',
@@ -63,16 +75,25 @@ export async function authRoutes(fastify: FastifyInstance) {
 
         const user = await userRepo.findByEmail(email);
         if (!user) {
-          recordFailedAttempt(throttleKey, appConfig.LOGIN_MAX_ATTEMPTS, appConfig.LOGIN_LOCKOUT_WINDOW_SECONDS * 1000);
+          const failure = await loginThrottle.recordFailure(throttleKey, appConfig.LOGIN_MAX_ATTEMPTS, lockoutWindowMs);
+          if (failure.status === 'unavailable' && appConfig.LOGIN_THROTTLE_FAIL_CLOSED) {
+            throw new AppError({ statusCode: 503, code: 'AUTH_THROTTLE_UNAVAILABLE', message: 'Login protection is temporarily unavailable. Try again later.' });
+          }
           throw AppError.unauthorized('Invalid credentials');
         }
 
         const passwordValid = await verifyPassword(password, user.password_hash);
         if (!passwordValid) {
-          recordFailedAttempt(throttleKey, appConfig.LOGIN_MAX_ATTEMPTS, appConfig.LOGIN_LOCKOUT_WINDOW_SECONDS * 1000);
+          const failure = await loginThrottle.recordFailure(throttleKey, appConfig.LOGIN_MAX_ATTEMPTS, lockoutWindowMs);
+          if (failure.status === 'unavailable' && appConfig.LOGIN_THROTTLE_FAIL_CLOSED) {
+            throw new AppError({ statusCode: 503, code: 'AUTH_THROTTLE_UNAVAILABLE', message: 'Login protection is temporarily unavailable. Try again later.' });
+          }
           throw AppError.unauthorized('Invalid credentials');
         }
-        resetAttempts(throttleKey);
+        const reset = await loginThrottle.reset(throttleKey);
+        if (reset.status === 'unavailable' && appConfig.LOGIN_THROTTLE_FAIL_CLOSED) {
+          throw new AppError({ statusCode: 503, code: 'AUTH_THROTTLE_UNAVAILABLE', message: 'Login protection is temporarily unavailable. Try again later.' });
+        }
 
         const { is_active, id, role_id, first_name, last_name, department_id } = user || {}
 
@@ -126,7 +147,20 @@ export async function authRoutes(fastify: FastifyInstance) {
         reply.header('Set-Cookie', [accessCookie, csrfCookie]);
 
         const includeTokensInBody = appConfig.NODE_ENV === 'development';
-        const responseBody: any = {
+        const responseBody: {
+          user: {
+            id: string;
+            email: string;
+            first_name: string | null;
+            last_name: string | null;
+            role: string;
+            role_id: string;
+            department_id: string | null;
+          };
+          expiresAt: string;
+          token?: string;
+          csrf_token?: string;
+        } = {
           user: {
             id: id,
             email: email,

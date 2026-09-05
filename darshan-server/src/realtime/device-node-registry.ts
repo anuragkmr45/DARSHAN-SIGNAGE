@@ -70,12 +70,14 @@ export class ValkeyDeviceNodeRegistry implements DeviceNodeRegistry {
       url?: string;
       namespace: string;
       tlsEnabled: boolean;
+      caCertPath?: string;
       commandTimeoutMs: number;
     }
   ) {
     this.client = new ValkeyCommandClient({
       url: options.url,
       tlsEnabled: options.tlsEnabled,
+      caCertPath: options.caCertPath,
       commandTimeoutMs: options.commandTimeoutMs,
     });
   }
@@ -169,6 +171,7 @@ export function createDeviceNodeRegistry() {
       url: config.VALKEY_URL,
       namespace: config.VALKEY_NAMESPACE,
       tlsEnabled: config.VALKEY_TLS_ENABLED,
+      caCertPath: config.VALKEY_CA_CERT_PATH,
       commandTimeoutMs: config.REALTIME_VALKEY_PUBLISH_TIMEOUT_MS,
     });
   }

@@ -1,0 +1,93 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "sum(up{job=~\"prometheus|vm4-alertmanager|vm4-node|vm4-grafana\"}) or vector(0)", "refId": "A" }],
+      "title": "Observability Targets Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(up{job=\"prometheus\"}) or vector(0)", "refId": "A" }],
+      "title": "Prometheus Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(up{job=\"vm4-alertmanager\"}) or vector(0)", "refId": "A" }],
+      "title": "Alertmanager Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(up{job=\"vm4-grafana\"}) or vector(0)", "refId": "A" }],
+      "title": "Grafana Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "darshan:host_cpu_utilization:ratio{job=\"vm4-node\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
+        { "expr": "darshan:host_memory_utilization:ratio{job=\"vm4-node\"}", "legendFormat": "{{ instance }} memory", "refId": "B" },
+        { "expr": "darshan:host_filesystem_utilization:ratio{job=\"vm4-node\"}", "legendFormat": "{{ instance }} filesystem", "refId": "C" }
+      ],
+      "title": "Observability Host Utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "process_resident_memory_bytes{job=~\"prometheus|vm4-alertmanager|vm4-grafana\"}", "legendFormat": "{{ job }}", "refId": "A" }
+      ],
+      "title": "Observability Process Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [{ "expr": "up{job=~\"prometheus|vm4-alertmanager|vm4-node|vm4-grafana\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }],
+      "title": "Observability Scrape Target Health",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["darshan", "observability", "machine"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "DARSHAN Observability Machine",
+  "uid": "darshan-vm4-observability",
+  "version": 1
+}

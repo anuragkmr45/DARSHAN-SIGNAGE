@@ -1,28 +1,15 @@
 import { config as appConfig } from '@/config';
 import { initializeDatabase } from '@/db';
 import { initializeJobs, registerJobHandlers, scheduleRecurringJobs, stopJobs } from '@/jobs';
-import { initializeS3, createBucketIfNotExists } from '@/s3';
 import { createServer } from '@/server';
 import { createLogger } from '@/utils/logger';
 import { validateRuntimeDependencies } from '@/utils/runtime-dependencies';
 import { type ProcessRole } from '@/runtime/process-role';
 import { clearQueuedScreenStateRefreshes } from '@/services/screen-state-refresh';
+import { startWorkerHeartbeat, stopWorkerHeartbeat } from '@/runtime/worker-heartbeat';
+import { ensureProductionStorage } from '@/deployment/production-storage';
 
 const logger = createLogger('runtime-bootstrap');
-
-const REQUIRED_BUCKETS = [
-  'media-source',
-  'media-staging',
-  'media-ready',
-  'media-thumbnails',
-  'device-screenshots',
-  'logs-audit',
-  'logs-system',
-  'logs-auth',
-  'logs-heartbeats',
-  'logs-proof-of-play',
-  'archives',
-] as const;
 
 type FastifyInstance = Awaited<ReturnType<typeof createServer>>;
 
@@ -32,10 +19,10 @@ export interface RuntimeContext {
 }
 
 async function ensureBuckets() {
-  for (const bucket of REQUIRED_BUCKETS) {
-    logger.info({ bucket }, 'Ensuring runtime bucket exists');
-    await createBucketIfNotExists(bucket);
-  }
+  // Runtime keeps a safe reconciliation fallback for repaired/recreated
+  // storage, while fresh-install ownership is bootstrap:production.
+  logger.info('Reconciling required runtime buckets');
+  await ensureProductionStorage();
 }
 
 async function initializeSharedRuntime(role: ProcessRole) {
@@ -44,9 +31,6 @@ async function initializeSharedRuntime(role: ProcessRole) {
 
   logger.info({ role }, 'Initializing database');
   await initializeDatabase();
-
-  logger.info({ role }, 'Initializing S3/MinIO client');
-  initializeS3();
 
   logger.info({ role }, 'Initializing pg-boss client');
   await initializeJobs();
@@ -61,6 +45,7 @@ export async function startRuntime(role: ProcessRole): Promise<RuntimeContext> {
     logger.info({ role }, 'Registering background job handlers');
     await registerJobHandlers();
     await scheduleRecurringJobs();
+    startWorkerHeartbeat();
   }
 
   if (role === 'api' || role === 'all') {
@@ -77,6 +62,7 @@ export async function startRuntime(role: ProcessRole): Promise<RuntimeContext> {
 
 export async function stopRuntime(context: RuntimeContext): Promise<void> {
   clearQueuedScreenStateRefreshes();
+  stopWorkerHeartbeat();
   if (context.fastify) {
     await context.fastify.close();
   }

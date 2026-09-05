@@ -320,13 +320,19 @@ Do not delete proof-of-play, request queues, or media cache unless the operator 
 From player:
 
 ```bash
-curl -fsS http://<BACKEND_VM_IP>:3000/api/v1/health
+curl --fail --show-error --silent \
+  --cacert /etc/darshan/player/transport-ca.crt \
+  --resolve <BACKEND_CERT_HOSTNAME>:3000:<BACKEND_VM_IP> \
+  https://<BACKEND_CERT_HOSTNAME>:3000/api/v1/health/ready
 ```
 
 Realtime path:
 
 ```bash
-curl -i http://<BACKEND_VM_IP>:3000/socket.io/
+curl --include --fail --show-error --silent \
+  --cacert /etc/darshan/player/transport-ca.crt \
+  --resolve <BACKEND_CERT_HOSTNAME>:3000:<BACKEND_VM_IP> \
+  "https://<BACKEND_CERT_HOSTNAME>:3000/socket.io/?EIO=4&transport=polling"
 ```
 
 Player diagnostics:

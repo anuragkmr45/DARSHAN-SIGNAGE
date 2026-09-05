@@ -62,7 +62,7 @@ Required classes of values:
 | Ports | `POSTGRES_HOST_PORT`, `MINIO_HOST_PORT`, `VALKEY_HOST_PORT`, `API_HOST_PORT`, `CMS_HTTP_PORT`, `PROMETHEUS_PORT`, `GRAFANA_PORT` |
 | Images | `POSTGRES_IMAGE`, `MINIO_IMAGE`, `VALKEY_IMAGE`, `BACKEND_IMAGE`, `CMS_IMAGE`, `PROMETHEUS_IMAGE`, `GRAFANA_IMAGE` |
 | Data bootstrap | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` |
-| Build/runtime toggles | `INSTALL_PLAYWRIGHT_CHROMIUM`, `RUN_PRODUCTION_DB_PUSH`, `RUN_PRODUCTION_SEED` |
+| Build/runtime toggles | `INSTALL_PLAYWRIGHT_CHROMIUM` |
 | CMS/player public paths | `CMS_RUNTIME_CONFIG_SOURCE`, `PLAYER_BACKEND_BASE_URL`, `PLAYER_SOCKET_IO_URL`, `PLAYER_CONFIG_FILE_PATH` |
 
 `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` must match between Data VM and Backend VM because MinIO uses them as root credentials and backend uses them to access object storage.
@@ -88,7 +88,7 @@ Do not use `DARSHAN_CONFIG_FILE=/etc/darshan/server/config.json` for Docker prod
 Backend app env holds:
 
 - `JWT_SECRET`
-- `ADMIN_EMAIL` and `ADMIN_PASSWORD`
+- `ADMIN_EMAIL`; the first-admin password is supplied only through the protected one-shot bootstrap password file
 - `CA_CERT_PATH` and `CA_KEY_PATH`
 - optional metrics bearer token
 - optional runtime tool overrides

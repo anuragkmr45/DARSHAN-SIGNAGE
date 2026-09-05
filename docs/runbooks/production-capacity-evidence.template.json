@@ -1,0 +1,23 @@
+{
+  "evidence_type": "darshan.production.capacity-certification.v1",
+  "site_name": "site-a",
+  "release_id": "2026-08-23-r1",
+  "status": "approved",
+  "profile_name": "site-a-approved-capacity-profile",
+  "max_players": 500,
+  "valid_until": "2027-02-28T23:59:59.000Z",
+  "model_only": false,
+  "resource_policy_reviewed": true,
+  "approved_by": "site-change-approval-board-or-ticket",
+  "runtime_evidence": [
+    {
+      "kind": "load-test",
+      "artifact_sha256": "replace-with-sha256-of-load-test-report"
+    },
+    {
+      "kind": "hardware-certification",
+      "artifact_sha256": "replace-with-sha256-of-target-hardware-report"
+    }
+  ],
+  "notes": "Keep the real evidence artifacts in the approved site evidence repository. This JSON only records the release/site approval and checksums; do not include secrets."
+}

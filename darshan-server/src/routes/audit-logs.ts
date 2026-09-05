@@ -6,14 +6,12 @@ import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
-import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { escapeHtml, renderPdfDocument } from '@/utils/pdf-render';
 import { getDatabase, schema } from '@/db';
 
 const logger = createLogger('audit-log-routes');
-const { BAD_REQUEST, FORBIDDEN, NOT_FOUND, UNAUTHORIZED } = HTTP_STATUS;
 
 const listAuditLogsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),

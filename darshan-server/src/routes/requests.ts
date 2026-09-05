@@ -4,7 +4,6 @@ import { eq, inArray } from 'drizzle-orm';
 import { createRequestRepository } from '@/db/repositories/request';
 import { createRequestMessageRepository } from '@/db/repositories/request-message';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { createUserRepository } from '@/db/repositories/user';
 import { getDatabase, schema } from '@/db';
@@ -15,7 +14,7 @@ import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('request-routes');
-const { BAD_REQUEST, CREATED, NOT_FOUND, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED } = HTTP_STATUS;
 
 const createRequestSchema = z.object({
   title: z.string().min(1).max(255),

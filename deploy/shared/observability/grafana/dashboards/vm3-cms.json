@@ -12,7 +12,7 @@
       "id": 1,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "sum(up{job=~\"vm3-node|vm3-nginx|vm3-grafana\"}) or vector(0)", "refId": "A" }
+        { "expr": "sum(up{job=~\"vm3-node|vm3-nginx\"}) or vector(0)", "refId": "A" }
       ],
       "title": "CMS Machine Targets Up",
       "type": "stat"
@@ -36,9 +36,9 @@
       "id": 3,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "max(up{job=\"vm3-grafana\"}) or vector(0)", "refId": "A" }
+        { "expr": "max(up{job=\"vm3-node\"}) or vector(0)", "refId": "A" }
       ],
-      "title": "Grafana Metrics Up",
+      "title": "CMS Host Exporter Up",
       "type": "stat"
     },
     {
@@ -60,7 +60,7 @@
       "id": 5,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "up{job=~\"vm3-node|vm3-nginx|vm3-grafana\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }
+        { "expr": "up{job=~\"vm3-node|vm3-nginx\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }
       ],
       "title": "CMS Machine Scrape Target Health",
       "type": "timeseries"
@@ -113,10 +113,9 @@
       "id": 9,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "process_resident_memory_bytes{job=\"vm3-grafana\"}", "legendFormat": "grafana rss", "refId": "A" },
-        { "expr": "process_resident_memory_bytes{job=\"prometheus\"}", "legendFormat": "prometheus rss", "refId": "B" }
+        { "expr": "nginx_http_requests_total{job=\"vm3-nginx\"}", "legendFormat": "nginx requests total", "refId": "A" }
       ],
-      "title": "Observability Process Memory",
+      "title": "CMS Nginx Request Total",
       "type": "timeseries"
     },
     {
@@ -126,7 +125,7 @@
       "id": 10,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "scrape_samples_scraped{job=~\"vm3-node|vm3-nginx|vm3-grafana\"}", "legendFormat": "{{ job }}", "refId": "A" }
+        { "expr": "scrape_samples_scraped{job=~\"vm3-node|vm3-nginx\"}", "legendFormat": "{{ job }}", "refId": "A" }
       ],
       "title": "CMS Exporter Scrape Samples",
       "type": "timeseries"
@@ -138,7 +137,7 @@
       "id": 11,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "scrape_duration_seconds{job=~\"vm3-node|vm3-nginx|vm3-grafana\"}", "legendFormat": "{{ job }}", "refId": "A" }
+        { "expr": "scrape_duration_seconds{job=~\"vm3-node|vm3-nginx\"}", "legendFormat": "{{ job }}", "refId": "A" }
       ],
       "title": "CMS Exporter Scrape Duration",
       "type": "timeseries"

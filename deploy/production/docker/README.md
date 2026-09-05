@@ -1,6 +1,9 @@
-# DARSHAN Docker Production
+# DARSHAN Docker Checkout Workflow (Deprecated for Production)
 
-This is the canonical production deployment path. It runs DARSHAN as Docker Compose roles on five Proxmox VMs or compatible Linux VMs.
+The generated source-free runtime bundle is the authoritative production path.
+This checkout workflow remains only for local/lab diagnosis and cannot run
+migrations, bootstrap an administrator, or adopt a database. Its backend start
+script is restart-only by design.
 
 ## Roles
 
@@ -123,14 +126,9 @@ The helper never overwrites existing certs. It generates a fresh CA only when bo
 
 ## Backend Schema And Seed
 
-`start-backend.sh` does not modify schema or seed data by default.
-
-Set these only when intentionally bootstrapping or updating the database:
-
-```env
-RUN_PRODUCTION_DB_PUSH=true
-RUN_PRODUCTION_SEED=true
-```
+Do not bootstrap or migrate from this checkout workflow. Use the generated
+backend role bundle's `deploy.sh`, `install.sh`, `upgrade.sh`, and explicit
+`adopt-existing.sh` scripts instead.
 
 ## CMS Image
 

@@ -17,7 +17,7 @@ cat <<EOF
 
 DARSHAN production stack is started.
 
-Backend: http://${BACKEND_HOST}:${API_HOST_PORT}/api/v1/health
+Backend readiness: $(backend_readiness_url)
 CMS:     http://${CMS_HOST}:${CMS_HTTP_PORT}
 MinIO:   http://${DATA_HOST}:${MINIO_HOST_PORT}/minio/health/live
 Grafana: http://${OBSERVABILITY_HOST}:${GRAFANA_PORT}/grafana/

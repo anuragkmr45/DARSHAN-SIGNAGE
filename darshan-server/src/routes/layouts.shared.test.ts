@@ -12,7 +12,6 @@ import { HTTP_STATUS } from '@/http-status-codes';
 
 describe('Layout Routes - admin created shared layouts', () => {
   let server: FastifyInstance;
-  let adminToken: string;
   let operatorToken: string;
   let adminUserId: string;
   let operatorUserId: string;
@@ -72,7 +71,7 @@ describe('Layout Routes - admin created shared layouts', () => {
       return issued.token;
     };
 
-    adminToken = await issueToken(adminUserId, adminRoleId, 'ADMIN', `admin-${adminUserId}@example.com`);
+    await issueToken(adminUserId, adminRoleId, 'ADMIN', `admin-${adminUserId}@example.com`);
     operatorToken = await issueToken(operatorUserId, operatorRoleId, 'OPERATOR', `operator-${operatorUserId}@example.com`);
   });
 

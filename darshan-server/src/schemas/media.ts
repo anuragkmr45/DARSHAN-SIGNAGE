@@ -58,7 +58,7 @@ const uploadSessionFileSchema = z.object({
   filename: z
     .string()
     .min(1)
-    .transform((val) => val.replace(/[^\w.\-]+/g, '_')),
+    .transform((val) => val.replace(/[^\w.-]+/g, '_')),
   display_name: z.string().trim().min(1).max(255).optional(),
   content_type: z.enum(allowedContentTypes),
   size: z

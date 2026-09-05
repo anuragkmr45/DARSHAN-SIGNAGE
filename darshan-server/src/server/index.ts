@@ -59,6 +59,7 @@ import { startOutboxDispatcher, stopOutboxDispatcher } from '@/services/outbox-d
 import { registerObservabilityHttp } from '@/observability/http';
 import { ensureObservabilityInitialized } from '@/observability/metrics';
 import { loadServerTlsOptions } from '@/server/tls';
+import { collectReadiness } from '@/runtime/readiness';
 
 const REFRESHED_AUTH_KEY = Symbol.for('darshan.refreshedAuth');
 const DEVICE_SCREENSHOT_BODY_LIMIT_BYTES = 4 * 1024 * 1024;
@@ -398,9 +399,16 @@ export async function createServer() {
     });
   }
 
-  // Health check
+  // Compatibility health endpoint. Production probes use the explicit live and
+  // ready endpoints below so a listening process is not mistaken for a ready system.
   fastify.get('/api/v1/health', async () => {
     return { status: 'ok', timestamp: new Date().toISOString() };
+  });
+  fastify.get('/api/v1/health/live', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+  fastify.get('/api/v1/health/ready', async (_request, reply) => {
+    const report = await collectReadiness();
+    if (!report.ready) reply.code(503);
+    return report;
   });
 
   // Register routes
@@ -440,7 +448,7 @@ export async function createServer() {
   setupDeviceRealtimeGateway(fastify);
   startOutboxDispatcher();
   fastify.addHook('onClose', async () => {
-    stopOutboxDispatcher();
+    await stopOutboxDispatcher();
   });
 
   return fastify;

@@ -44,18 +44,41 @@ export function hasCompleteSignatureHeaders(headers: ParsedDeviceRequestSignatur
   return Boolean(headers.serial && headers.version && headers.timestamp && headers.signature);
 }
 
-export function resolveDeviceAuthMode(): DeviceAuthMode {
-  const requested =
+function requestedDeviceAuthMode(): string {
+  return (
     process.env.DARSHAN_DEVICE_AUTH_MODE?.trim().toLowerCase() ||
     process.env.HEXMON_DEVICE_AUTH_MODE?.trim().toLowerCase() ||
     process.env.DEVICE_AUTH_MODE?.trim().toLowerCase() ||
-    config.DEVICE_AUTH_MODE;
+    config.DEVICE_AUTH_MODE
+  );
+}
+
+export function resolveDeviceAuthMode(): DeviceAuthMode {
+  const requested = requestedDeviceAuthMode();
 
   if ((DEVICE_AUTH_MODES as readonly string[]).includes(requested)) {
+    if (requested === 'legacy' && config.NODE_ENV === 'production') return 'signature';
+    if (requested === 'dual' && !isDeviceLegacyAuthCompatibilityActive()) return 'signature';
     return requested as DeviceAuthMode;
   }
 
   return config.DEVICE_AUTH_MODE;
+}
+
+/**
+ * Compatibility can never become an indefinite production backdoor. Once the
+ * declared dual-mode deadline passes, both HTTP and websocket paths become
+ * signature-only without requiring a restart.
+ */
+export function isDeviceLegacyAuthCompatibilityActive(nowMs = Date.now()) {
+  // Read the same effective mode as the HTTP path. Legacy installations may
+  // still use DARSHAN_/HEXMON_ aliases; consulting only config.DEVICE_AUTH_MODE
+  // would leave such an alias-driven dual rollout active beyond its deadline.
+  if (config.NODE_ENV !== 'production' || requestedDeviceAuthMode() !== 'dual') return true;
+  const raw = config.DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT;
+  if (!raw) return false;
+  const expiryMs = new Date(raw).getTime();
+  return Number.isFinite(expiryMs) && nowMs < expiryMs;
 }
 
 export function resolveDeviceAuthSignatureMaxSkewSeconds() {

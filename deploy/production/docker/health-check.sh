@@ -49,7 +49,7 @@ check_valkey() {
 }
 
 check_backend() {
-  check_http "backend API" "http://${BACKEND_HOST}:${API_HOST_PORT}/api/v1/health"
+  check_backend_ready "backend API readiness"
   compose_ps darshan-backend backend
 }
 
@@ -68,7 +68,7 @@ check_network() {
   check_tcp "Postgres" "$DATA_HOST" "$POSTGRES_HOST_PORT"
   check_http "MinIO" "http://${DATA_HOST}:${MINIO_HOST_PORT}/minio/health/live"
   check_tcp "Valkey" "$VALKEY_HOST" "$VALKEY_HOST_PORT"
-  check_http "backend API" "http://${BACKEND_HOST}:${API_HOST_PORT}/api/v1/health"
+  check_backend_ready "backend API readiness"
   check_http "CMS" "http://${CMS_HOST}:${CMS_HTTP_PORT}/"
   check_http "Prometheus" "http://${OBSERVABILITY_HOST}:${PROMETHEUS_PORT}/-/healthy"
   check_http "Grafana" "http://${OBSERVABILITY_HOST}:${GRAFANA_PORT}/grafana/api/health"

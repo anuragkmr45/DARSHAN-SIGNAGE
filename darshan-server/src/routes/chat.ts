@@ -536,14 +536,14 @@ export async function chatRoutes(fastify: FastifyInstance) {
 
         if (conversation.type === 'FORUM_OPEN') {
           const key = `${payload.sub}:${conversationId}:forum`;
-          const messageLimit = forumLimiter.consume(key);
+          const messageLimit = await forumLimiter.consume(key);
           if (!messageLimit.allowed) {
             throw AppError.rateLimited(
               `Forum message rate limit exceeded. Retry in ${messageLimit.retryAfterSeconds ?? 1}s`
             );
           }
           if (data.attachmentMediaIds?.length) {
-            const attachmentLimit = forumAttachmentLimiter.consume(`${key}:attachments`, data.attachmentMediaIds.length);
+            const attachmentLimit = await forumAttachmentLimiter.consume(`${key}:attachments`, data.attachmentMediaIds.length);
             if (!attachmentLimit.allowed) {
               throw AppError.rateLimited(
                 `Attachment rate limit exceeded. Retry in ${attachmentLimit.retryAfterSeconds ?? 1}s`

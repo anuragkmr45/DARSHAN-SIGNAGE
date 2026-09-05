@@ -10,7 +10,7 @@ import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('sso-config-routes');
-const { BAD_REQUEST, CREATED, FORBIDDEN, NOT_FOUND, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED } = HTTP_STATUS;
 
 const ssoSchema = z.object({
   provider: z.string().default('oidc'),

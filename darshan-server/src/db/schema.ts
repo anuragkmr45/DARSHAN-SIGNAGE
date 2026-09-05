@@ -71,14 +71,27 @@ export const commandStatusEnum = pgEnum('command_status', [
   'DEAD_LETTER',
   'CANCELLED',
 ]);
-export const chatConversationTypeEnum = pgEnum('chat_conversation_type', ['DM', 'GROUP_CLOSED', 'FORUM_OPEN']);
-export const chatConversationStateEnum = pgEnum('chat_conversation_state', ['ACTIVE', 'ARCHIVED', 'DELETED']);
+export const chatConversationTypeEnum = pgEnum('chat_conversation_type', [
+  'DM',
+  'GROUP_CLOSED',
+  'FORUM_OPEN',
+]);
+export const chatConversationStateEnum = pgEnum('chat_conversation_state', [
+  'ACTIVE',
+  'ARCHIVED',
+  'DELETED',
+]);
 export const chatInvitePolicyEnum = pgEnum('chat_invite_policy', [
   'ANY_MEMBER_CAN_INVITE',
   'ADMINS_ONLY_CAN_INVITE',
   'INVITES_DISABLED',
 ]);
-export const chatMemberRoleEnum = pgEnum('chat_member_role', ['OWNER', 'CHAT_ADMIN', 'MOD', 'MEMBER']);
+export const chatMemberRoleEnum = pgEnum('chat_member_role', [
+  'OWNER',
+  'CHAT_ADMIN',
+  'MOD',
+  'MEMBER',
+]);
 export const chatRevisionActionEnum = pgEnum('chat_revision_action', ['EDIT', 'DELETE']);
 export const chatBookmarkTypeEnum = pgEnum('chat_bookmark_type', ['LINK', 'FILE', 'MESSAGE']);
 
@@ -229,7 +242,10 @@ export const mediaUploadSessions = pgTable(
       table.idempotency_key
     ),
     expiresAtIdx: index('media_upload_sessions_expires_at_idx').on(table.expires_at),
-    stateExpiresIdx: index('media_upload_sessions_state_expires_at_idx').on(table.state, table.expires_at),
+    stateExpiresIdx: index('media_upload_sessions_state_expires_at_idx').on(
+      table.state,
+      table.expires_at
+    ),
   })
 );
 
@@ -283,7 +299,9 @@ export const presentationSlotItems = pgTable(
     created_at: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => ({
-    presentationSlotIdx: index('presentation_slot_items_presentation_id_idx').on(table.presentation_id),
+    presentationSlotIdx: index('presentation_slot_items_presentation_id_idx').on(
+      table.presentation_id
+    ),
   })
 );
 
@@ -321,8 +339,14 @@ export const scheduleItems = pgTable(
     start_at: timestamp('start_at').notNull(),
     end_at: timestamp('end_at').notNull(),
     priority: integer('priority').notNull().default(0),
-    screen_ids: jsonb('screen_ids').$type<string[]>().notNull().default([] as string[]),
-    screen_group_ids: jsonb('screen_group_ids').$type<string[]>().notNull().default([] as string[]),
+    screen_ids: jsonb('screen_ids')
+      .$type<string[]>()
+      .notNull()
+      .default([] as string[]),
+    screen_group_ids: jsonb('screen_group_ids')
+      .$type<string[]>()
+      .notNull()
+      .default([] as string[]),
     created_at: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => ({
@@ -384,7 +408,9 @@ export const screens = pgTable(
     current_schedule_id: uuid('current_schedule_id'),
     current_media_id: uuid('current_media_id'),
     current_scene_id: text('current_scene_id'),
-    active_slots: jsonb('active_slots').notNull().default(sql`'[]'::jsonb`),
+    active_slots: jsonb('active_slots')
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     screenshot_interval_seconds: integer('screenshot_interval_seconds'),
     screenshot_enabled: boolean('screenshot_enabled').notNull().default(false),
     created_at: timestamp('created_at').notNull().defaultNow(),
@@ -395,6 +421,27 @@ export const screens = pgTable(
     currentScheduleIdx: index('screens_current_schedule_idx').on(table.current_schedule_id),
     currentMediaIdx: index('screens_current_media_idx').on(table.current_media_id),
     currentSceneIdx: index('screens_current_scene_idx').on(table.current_scene_id),
+  })
+);
+
+// Bounded per-screen evidence used to govern the legacy-to-signature device
+// authentication rollout. These are successful authentication observations,
+// not a high-cardinality request log: each screen has one continuously updated
+// row for HTTP and realtime channels.
+export const deviceAuthRolloutObservations = pgTable(
+  'device_auth_rollout_observations',
+  {
+    screen_id: uuid('screen_id')
+      .primaryKey()
+      .references(() => screens.id, { onDelete: 'cascade' }),
+    last_signed_http_at: timestamp('last_signed_http_at'),
+    last_signed_socket_at: timestamp('last_signed_socket_at'),
+    last_legacy_http_at: timestamp('last_legacy_http_at'),
+    last_legacy_socket_at: timestamp('last_legacy_socket_at'),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    updatedAtIdx: index('device_auth_rollout_observations_updated_idx').on(table.updated_at),
   })
 );
 
@@ -424,21 +471,20 @@ export const screenDisplayStates = pgTable(
   },
   (table) => ({
     profileUpdatedIdx: index('screen_display_states_profile_updated_idx').on(table.updated_at),
-    activeDisplayIdx: index('screen_display_states_active_display_idx').on(table.active_display_key),
+    activeDisplayIdx: index('screen_display_states_active_display_idx').on(
+      table.active_display_key
+    ),
   })
 );
 
 // Screen groups table
-export const screenGroups = pgTable(
-  'screen_groups',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    name: varchar('name', { length: 255 }).notNull(),
-    description: text('description'),
-    created_at: timestamp('created_at').notNull().defaultNow(),
-    updated_at: timestamp('updated_at').notNull().defaultNow(),
-  }
-);
+export const screenGroups = pgTable('screen_groups', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  created_at: timestamp('created_at').notNull().defaultNow(),
+  updated_at: timestamp('updated_at').notNull().defaultNow(),
+});
 
 // Layouts (screen mosaics)
 export const layouts = pgTable(
@@ -487,7 +533,9 @@ export const scheduleRequests = pgTable(
     statusIdx: index('schedule_requests_status_idx').on(table.status),
     scheduleIdx: index('schedule_requests_schedule_id_idx').on(table.schedule_id),
     requesterIdx: index('schedule_requests_requested_by_idx').on(table.requested_by),
-    reservationStateIdx: index('schedule_requests_reservation_state_idx').on(table.reservation_state),
+    reservationStateIdx: index('schedule_requests_reservation_state_idx').on(
+      table.reservation_state
+    ),
   })
 );
 
@@ -515,11 +563,18 @@ export const scheduleReservations = pgTable(
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
-    screenWindowIdx: index('schedule_reservations_screen_window_idx').on(table.screen_id, table.start_at, table.end_at),
+    screenWindowIdx: index('schedule_reservations_screen_window_idx').on(
+      table.screen_id,
+      table.start_at,
+      table.end_at
+    ),
     requestIdx: index('schedule_reservations_request_idx').on(table.schedule_request_id),
     scheduleIdx: index('schedule_reservations_schedule_idx').on(table.schedule_id),
     publishIdx: index('schedule_reservations_publish_idx').on(table.publish_id),
-    stateExpiryIdx: index('schedule_reservations_state_expiry_idx').on(table.state, table.hold_expires_at),
+    stateExpiryIdx: index('schedule_reservations_state_expiry_idx').on(
+      table.state,
+      table.hold_expires_at
+    ),
   })
 );
 
@@ -567,44 +622,53 @@ export const deviceCommands = pgTable(
     screen_id: uuid('screen_id').notNull(),
     type: commandTypeEnum('type').notNull(),
     status: commandStatusEnum('status').notNull().default('PENDING'),
-	    payload: jsonb('payload'),
-	    delivery_token: uuid('delivery_token'),
-	    claimed_at: timestamp('claimed_at'),
-	    acknowledged_at: timestamp('acknowledged_at'),
-	    delivery_attempts: integer('delivery_attempts').notNull().default(0),
-	    priority: integer('priority').notNull().default(0),
-	    expires_at: timestamp('expires_at'),
-	    lease_expires_at: timestamp('lease_expires_at'),
-	    attempt_count: integer('attempt_count').notNull().default(0),
-	    max_attempts: integer('max_attempts').notNull().default(5),
-	    last_error: text('last_error'),
-	    result_payload: jsonb('result_payload'),
-	    correlation_id: uuid('correlation_id'),
-	    idempotency_key: text('idempotency_key'),
-	    desired_snapshot_id: uuid('desired_snapshot_id'),
-	    desired_default_media_version: text('desired_default_media_version'),
-	    desired_emergency_version: text('desired_emergency_version'),
-	    completed_at: timestamp('completed_at'),
-	    cancelled_at: timestamp('cancelled_at'),
-	    dead_lettered_at: timestamp('dead_lettered_at'),
-	    created_by: uuid('created_by').notNull(),
-	    created_at: timestamp('created_at').notNull().defaultNow(),
-	    updated_at: timestamp('updated_at').notNull().defaultNow(),
+    payload: jsonb('payload'),
+    delivery_token: uuid('delivery_token'),
+    claimed_at: timestamp('claimed_at'),
+    acknowledged_at: timestamp('acknowledged_at'),
+    delivery_attempts: integer('delivery_attempts').notNull().default(0),
+    priority: integer('priority').notNull().default(0),
+    expires_at: timestamp('expires_at'),
+    lease_expires_at: timestamp('lease_expires_at'),
+    attempt_count: integer('attempt_count').notNull().default(0),
+    max_attempts: integer('max_attempts').notNull().default(5),
+    last_error: text('last_error'),
+    result_payload: jsonb('result_payload'),
+    correlation_id: uuid('correlation_id'),
+    idempotency_key: text('idempotency_key'),
+    desired_snapshot_id: uuid('desired_snapshot_id'),
+    desired_default_media_version: text('desired_default_media_version'),
+    desired_emergency_version: text('desired_emergency_version'),
+    completed_at: timestamp('completed_at'),
+    cancelled_at: timestamp('cancelled_at'),
+    dead_lettered_at: timestamp('dead_lettered_at'),
+    created_by: uuid('created_by').notNull(),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
     screenIdIdx: index('device_commands_screen_id_idx').on(table.screen_id),
-	    statusIdx: index('device_commands_status_idx').on(table.status),
-	    deliveryTokenIdx: index('device_commands_delivery_token_idx').on(table.delivery_token),
-	    claimStateIdx: index('device_commands_claim_state_idx').on(table.screen_id, table.status, table.claimed_at),
-	    lifecycleClaimIdx: index('device_commands_lifecycle_claim_idx').on(table.screen_id, table.status, table.priority, table.created_at),
-	    expiresAtIdx: index('device_commands_expires_at_idx').on(table.expires_at),
-	    leaseExpiresAtIdx: index('device_commands_lease_expires_at_idx').on(table.lease_expires_at),
-	    correlationIdIdx: index('device_commands_correlation_id_idx').on(table.correlation_id),
-	    idempotencyKeyIdx: uniqueIndex('device_commands_screen_idempotency_key_idx')
-	      .on(table.screen_id, table.idempotency_key)
-	      .where(sql`idempotency_key IS NOT NULL`),
-	  })
-	);
+    statusIdx: index('device_commands_status_idx').on(table.status),
+    deliveryTokenIdx: index('device_commands_delivery_token_idx').on(table.delivery_token),
+    claimStateIdx: index('device_commands_claim_state_idx').on(
+      table.screen_id,
+      table.status,
+      table.claimed_at
+    ),
+    lifecycleClaimIdx: index('device_commands_lifecycle_claim_idx').on(
+      table.screen_id,
+      table.status,
+      table.priority,
+      table.created_at
+    ),
+    expiresAtIdx: index('device_commands_expires_at_idx').on(table.expires_at),
+    leaseExpiresAtIdx: index('device_commands_lease_expires_at_idx').on(table.lease_expires_at),
+    correlationIdIdx: index('device_commands_correlation_id_idx').on(table.correlation_id),
+    idempotencyKeyIdx: uniqueIndex('device_commands_screen_idempotency_key_idx')
+      .on(table.screen_id, table.idempotency_key)
+      .where(sql`idempotency_key IS NOT NULL`),
+  })
+);
 
 export const deviceCommandStatusHistory = pgTable(
   'device_command_status_history',
@@ -621,8 +685,14 @@ export const deviceCommandStatusHistory = pgTable(
     created_at: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => ({
-    commandIdIdx: index('device_command_status_history_command_id_idx').on(table.command_id, table.created_at),
-    screenIdIdx: index('device_command_status_history_screen_id_idx').on(table.screen_id, table.created_at),
+    commandIdIdx: index('device_command_status_history_command_id_idx').on(
+      table.command_id,
+      table.created_at
+    ),
+    screenIdIdx: index('device_command_status_history_screen_id_idx').on(
+      table.screen_id,
+      table.created_at
+    ),
   })
 );
 
@@ -647,10 +717,18 @@ export const commandOutbox = pgTable(
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
-    pendingIdx: index('command_outbox_pending_idx').on(table.status, table.available_at, table.priority, table.created_at),
+    pendingIdx: index('command_outbox_pending_idx').on(
+      table.status,
+      table.available_at,
+      table.priority,
+      table.created_at
+    ),
     screenIdx: index('command_outbox_screen_id_idx').on(table.screen_id, table.created_at),
     commandIdx: index('command_outbox_command_id_idx').on(table.command_id),
-    nextAttemptIdx: index('command_outbox_next_attempt_idx').on(table.status, table.next_attempt_at),
+    nextAttemptIdx: index('command_outbox_next_attempt_idx').on(
+      table.status,
+      table.next_attempt_at
+    ),
   })
 );
 
@@ -693,7 +771,10 @@ export const deviceDesiredStateHistory = pgTable(
     created_at: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => ({
-    screenVersionIdx: index('device_desired_state_history_screen_version_idx').on(table.screen_id, table.state_version),
+    screenVersionIdx: index('device_desired_state_history_screen_version_idx').on(
+      table.screen_id,
+      table.state_version
+    ),
     commandIdx: index('device_desired_state_history_command_id_idx').on(table.command_id),
     createdAtIdx: index('device_desired_state_history_created_at_idx').on(table.created_at),
   })
@@ -728,14 +809,23 @@ export const mediaCacheReports = pgTable(
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
-    screenReportedIdx: index('media_cache_reports_screen_reported_idx').on(table.screen_id, table.reported_at),
-    mediaReportedIdx: index('media_cache_reports_media_reported_idx').on(table.media_id, table.reported_at),
+    screenReportedIdx: index('media_cache_reports_screen_reported_idx').on(
+      table.screen_id,
+      table.reported_at
+    ),
+    mediaReportedIdx: index('media_cache_reports_media_reported_idx').on(
+      table.media_id,
+      table.reported_at
+    ),
     statusSeverityReportedIdx: index('media_cache_reports_status_severity_reported_idx').on(
       table.status,
       table.severity,
       table.reported_at
     ),
-    eventReportedIdx: index('media_cache_reports_event_reported_idx').on(table.event_type, table.reported_at),
+    eventReportedIdx: index('media_cache_reports_event_reported_idx').on(
+      table.event_type,
+      table.reported_at
+    ),
   })
 );
 
@@ -778,7 +868,9 @@ export const proofOfPlay = pgTable(
   (table) => ({
     screenIdIdx: index('proof_of_play_screen_id_idx').on(table.screen_id),
     createdAtIdx: index('proof_of_play_created_at_idx').on(table.created_at),
-    playbackInstanceIdx: index('proof_of_play_playback_instance_idx').on(table.playback_instance_id),
+    playbackInstanceIdx: index('proof_of_play_playback_instance_idx').on(
+      table.playback_instance_id
+    ),
     scheduleIdx: index('proof_of_play_schedule_id_idx').on(table.schedule_id),
     idempotencyIdx: uniqueIndex('proof_of_play_idempotency_key_idx').on(table.idempotency_key),
   })
@@ -979,6 +1071,53 @@ export const emergencyStatus = pgTable('emergency_status', {
   updated_at: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Production deployment lifecycle state. This is intentionally separate from
+// application settings so an installer can make a deterministic decision
+// about whether a database is fresh, adopted, or already bootstrapped.
+export const productionBootstrapStates = pgTable('production_bootstrap_states', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  bootstrap_version: varchar('bootstrap_version', { length: 64 }).notNull(),
+  admin_user_id: uuid('admin_user_id').notNull(),
+  release_id: varchar('release_id', { length: 128 }).notNull(),
+  completed_at: timestamp('completed_at').notNull().defaultNow(),
+  updated_at: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Immutable migration history for production deployment. The deployment
+// runner owns writes to this table; application code only exposes its shape
+// for diagnostics and operational tooling.
+export const schemaMigrations = pgTable('darshan_schema_migrations', {
+  migration_id: varchar('migration_id', { length: 255 }).primaryKey(),
+  checksum_sha256: varchar('checksum_sha256', { length: 64 }).notNull(),
+  release_id: varchar('release_id', { length: 128 }).notNull(),
+  applied_method: varchar('applied_method', { length: 16 }).notNull().default('APPLIED'),
+  approval_ticket: varchar('approval_ticket', { length: 128 }),
+  execution_state: varchar('execution_state', { length: 16 }).notNull().default('SUCCEEDED'),
+  duration_ms: integer('duration_ms').notNull().default(0),
+  applied_at: timestamp('applied_at').notNull().defaultNow(),
+});
+
+// One row per worker identity keeps readiness data bounded while allowing an
+// API process to reject a deployment whose worker is stale or from another release.
+export const workerRuntimeHeartbeats = pgTable(
+  'worker_runtime_heartbeats',
+  {
+    id: varchar('id', { length: 256 }).primaryKey(),
+    deployment_id: varchar('deployment_id', { length: 128 }).notNull(),
+    server_id: varchar('server_id', { length: 128 }).notNull(),
+    release_id: varchar('release_id', { length: 128 }).notNull(),
+    observed_at: timestamp('observed_at').notNull().defaultNow(),
+    started_at: timestamp('started_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    deploymentUpdatedIdx: index('worker_runtime_heartbeats_deployment_updated_idx').on(
+      table.deployment_id,
+      table.updated_at
+    ),
+  })
+);
+
 // Emergency types (admin-defined templates)
 export const emergencyTypes = pgTable(
   'emergency_types',
@@ -1027,6 +1166,27 @@ export const backupRuns = pgTable(
         storage_object_id: string;
       }>
     >(),
+    // The independently operated repository is the authoritative disaster
+    // recovery copy. Keep only its non-secret, checksummed manifest metadata
+    // in Postgres; the actual archive bytes do not live on this VM.
+    off_host_manifest: jsonb('off_host_manifest').$type<{
+      version: 1;
+      run_id: string;
+      created_at: string;
+      release_id: string;
+      off_host_uri: string;
+      off_host_endpoint: string;
+      backup_interval_hours: number;
+      retention_days: number;
+      manifest_key: string;
+      files: Array<{
+        name: string;
+        object_key: string;
+        size: number;
+        sha256: string;
+        content_type: string;
+      }>;
+    }>(),
     created_at: timestamp('created_at').notNull().defaultNow(),
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -1117,7 +1277,10 @@ export const conversations = pgTable(
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
-    participantsIdx: uniqueIndex('conversations_participants_idx').on(table.participant_a, table.participant_b),
+    participantsIdx: uniqueIndex('conversations_participants_idx').on(
+      table.participant_a,
+      table.participant_b
+    ),
   })
 );
 
@@ -1197,7 +1360,10 @@ export const chatMembers = pgTable(
     created_at: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => ({
-    conversationUserIdx: uniqueIndex('chat_members_conversation_user_idx').on(table.conversation_id, table.user_id),
+    conversationUserIdx: uniqueIndex('chat_members_conversation_user_idx').on(
+      table.conversation_id,
+      table.user_id
+    ),
     userIdx: index('chat_members_user_idx').on(table.user_id),
     conversationIdx: index('chat_members_conversation_idx').on(table.conversation_id),
   })
@@ -1221,7 +1387,10 @@ export const chatMessages = pgTable(
     deleted_at: timestamp('deleted_at'),
   },
   (table) => ({
-    conversationSeqUniqueIdx: uniqueIndex('chat_messages_conversation_seq_idx').on(table.conversation_id, table.seq),
+    conversationSeqUniqueIdx: uniqueIndex('chat_messages_conversation_seq_idx').on(
+      table.conversation_id,
+      table.seq
+    ),
     conversationIdx: index('chat_messages_conversation_idx').on(table.conversation_id),
     replyToIdx: index('chat_messages_reply_to_idx').on(table.reply_to_message_id),
     threadRootIdx: index('chat_messages_thread_root_idx').on(table.thread_root_id),
@@ -1259,7 +1428,10 @@ export const chatAttachments = pgTable(
     created_at: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => ({
-    messageMediaIdx: uniqueIndex('chat_attachments_message_media_idx').on(table.message_id, table.media_asset_id),
+    messageMediaIdx: uniqueIndex('chat_attachments_message_media_idx').on(
+      table.message_id,
+      table.media_asset_id
+    ),
     mediaIdx: index('chat_attachments_media_idx').on(table.media_asset_id),
     messageIdx: index('chat_attachments_message_idx').on(table.message_id),
   })
@@ -1318,7 +1490,10 @@ export const chatReceipts = pgTable(
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
-    conversationUserIdx: uniqueIndex('chat_receipts_conversation_user_idx').on(table.conversation_id, table.user_id),
+    conversationUserIdx: uniqueIndex('chat_receipts_conversation_user_idx').on(
+      table.conversation_id,
+      table.user_id
+    ),
     userIdx: index('chat_receipts_user_idx').on(table.user_id),
   })
 );
@@ -1335,7 +1510,10 @@ export const chatModeration = pgTable(
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
-    conversationUserIdx: uniqueIndex('chat_moderation_conversation_user_idx').on(table.conversation_id, table.user_id),
+    conversationUserIdx: uniqueIndex('chat_moderation_conversation_user_idx').on(
+      table.conversation_id,
+      table.user_id
+    ),
     userIdx: index('chat_moderation_user_idx').on(table.user_id),
   })
 );
@@ -1411,8 +1589,14 @@ export const emergencies = pgTable('emergencies', {
   message: text('message').notNull(),
   priority: varchar('priority', { length: 20 }).notNull().default('HIGH'),
   media_id: uuid('media_id'),
-  screen_ids: jsonb('screen_ids').$type<string[]>().notNull().default([] as string[]),
-  screen_group_ids: jsonb('screen_group_ids').$type<string[]>().notNull().default([] as string[]),
+  screen_ids: jsonb('screen_ids')
+    .$type<string[]>()
+    .notNull()
+    .default([] as string[]),
+  screen_group_ids: jsonb('screen_group_ids')
+    .$type<string[]>()
+    .notNull()
+    .default([] as string[]),
   target_all: boolean('target_all').notNull().default(false),
   expires_at: timestamp('expires_at'),
   audit_note: text('audit_note'),

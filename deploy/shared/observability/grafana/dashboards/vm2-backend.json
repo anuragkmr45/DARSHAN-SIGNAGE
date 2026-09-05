@@ -12,7 +12,7 @@
       "id": 1,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
       "targets": [
-        { "expr": "sum(up{job=~\"darshan-server|vm2-node|vm2-cadvisor\"}) or vector(0)", "refId": "A" }
+        { "expr": "sum(up{job=~\"darshan-server|vm2-node\"}) or vector(0)", "refId": "A" }
       ],
       "title": "Backend Machine Targets Up",
       "type": "stat"
@@ -60,7 +60,7 @@
       "id": 5,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
-        { "expr": "up{job=~\"darshan-server|vm2-node|vm2-cadvisor\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }
+        { "expr": "up{job=~\"darshan-server|vm2-node\"}", "legendFormat": "{{ job }} {{ instance }}", "refId": "A" }
       ],
       "title": "Backend Machine Scrape Target Health",
       "type": "timeseries"

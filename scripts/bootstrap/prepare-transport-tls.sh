@@ -9,8 +9,9 @@ Usage:
     --mode internal-ca|provided --site-name <site> --output-dir <dir> \
     --transport-ca-cert <file> [--transport-ca-key <file>] \
     --device-ca-cert <file> --device-ca-key <file> \
-    --cms-host <host> --backend-host <host> --backend-device-host <host> --data-host <host> \
-    [--cms-cert <file> --cms-key <file> --backend-cert <file> --backend-key <file> --minio-cert <file> --minio-key <file>]
+    --cms-host <host> --backend-host <host> --backend-device-host <host> --data-host <host> --valkey-host <host> \
+    [--cms-cert <file> --cms-key <file> --backend-cert <file> --backend-key <file> --minio-cert <file> --minio-key <file> \
+     --postgres-cert <file> --postgres-key <file> --valkey-cert <file> --valkey-key <file>]
 EOF
 }
 
@@ -25,12 +26,17 @@ CMS_HOST=""
 BACKEND_HOST=""
 BACKEND_DEVICE_HOST=""
 DATA_HOST=""
+VALKEY_HOST=""
 CMS_CERT=""
 CMS_KEY=""
 BACKEND_CERT=""
 BACKEND_KEY=""
 MINIO_CERT=""
 MINIO_KEY=""
+POSTGRES_CERT=""
+POSTGRES_KEY=""
+VALKEY_CERT=""
+VALKEY_KEY=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,19 +51,24 @@ while [[ $# -gt 0 ]]; do
     --backend-host) BACKEND_HOST="${2:-}"; shift 2 ;;
     --backend-device-host) BACKEND_DEVICE_HOST="${2:-}"; shift 2 ;;
     --data-host) DATA_HOST="${2:-}"; shift 2 ;;
+    --valkey-host) VALKEY_HOST="${2:-}"; shift 2 ;;
     --cms-cert) CMS_CERT="${2:-}"; shift 2 ;;
     --cms-key) CMS_KEY="${2:-}"; shift 2 ;;
     --backend-cert) BACKEND_CERT="${2:-}"; shift 2 ;;
     --backend-key) BACKEND_KEY="${2:-}"; shift 2 ;;
     --minio-cert) MINIO_CERT="${2:-}"; shift 2 ;;
     --minio-key) MINIO_KEY="${2:-}"; shift 2 ;;
+    --postgres-cert) POSTGRES_CERT="${2:-}"; shift 2 ;;
+    --postgres-key) POSTGRES_KEY="${2:-}"; shift 2 ;;
+    --valkey-cert) VALKEY_CERT="${2:-}"; shift 2 ;;
+    --valkey-key) VALKEY_KEY="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 1 ;;
   esac
 done
 
 [[ "$MODE" == "internal-ca" || "$MODE" == "provided" ]] || { echo "--mode must be internal-ca or provided." >&2; exit 1; }
-for value_name in SITE_NAME OUTPUT_DIR TRANSPORT_CA_CERT DEVICE_CA_CERT DEVICE_CA_KEY CMS_HOST BACKEND_HOST BACKEND_DEVICE_HOST DATA_HOST; do
+for value_name in SITE_NAME OUTPUT_DIR TRANSPORT_CA_CERT DEVICE_CA_CERT DEVICE_CA_KEY CMS_HOST BACKEND_HOST BACKEND_DEVICE_HOST DATA_HOST VALKEY_HOST; do
   [[ -n "${!value_name}" ]] || { echo "$value_name is required." >&2; exit 1; }
 done
 command -v openssl >/dev/null 2>&1 || { echo "openssl is required." >&2; exit 1; }
@@ -106,9 +117,11 @@ assert_leaf() {
   openssl verify -CAfile "$TRANSPORT_CA_CERT" "$cert" >/dev/null || { echo "$label certificate does not verify against the transport CA." >&2; exit 1; }
   openssl x509 -in "$cert" -checkend 2592000 -noout >/dev/null || { echo "$label certificate expires in fewer than 30 days." >&2; exit 1; }
   if [[ "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-    openssl x509 -in "$cert" -checkip "$host" -noout >/dev/null || { echo "$label certificate is missing IP SAN $host." >&2; exit 1; }
+    openssl verify -CAfile "$TRANSPORT_CA_CERT" -verify_ip "$host" "$cert" >/dev/null \
+      || { echo "$label certificate is missing IP SAN $host." >&2; exit 1; }
   else
-    openssl x509 -in "$cert" -checkhost "$host" -noout >/dev/null || { echo "$label certificate is missing DNS SAN $host." >&2; exit 1; }
+    openssl verify -CAfile "$TRANSPORT_CA_CERT" -verify_hostname "$host" "$cert" >/dev/null \
+      || { echo "$label certificate is missing DNS SAN $host." >&2; exit 1; }
   fi
 }
 
@@ -121,9 +134,11 @@ assert_key_matches_cert "Device CA" "$DEVICE_CA_CERT" "$DEVICE_CA_KEY"
 openssl rsa -in "$DEVICE_CA_KEY" -check -noout >/dev/null 2>&1 || { echo "Device CA key must be a valid RSA private key for the current pairing implementation." >&2; exit 1; }
 
 rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR/cms" "$OUTPUT_DIR/backend" "$OUTPUT_DIR/minio/CAs" "$OUTPUT_DIR/device"
+mkdir -p "$OUTPUT_DIR/cms" "$OUTPUT_DIR/backend" "$OUTPUT_DIR/minio/CAs" "$OUTPUT_DIR/postgres" "$OUTPUT_DIR/valkey" "$OUTPUT_DIR/device"
 cp "$TRANSPORT_CA_CERT" "$OUTPUT_DIR/transport-ca.crt"
 cp "$TRANSPORT_CA_CERT" "$OUTPUT_DIR/minio/CAs/transport-ca.crt"
+cp "$TRANSPORT_CA_CERT" "$OUTPUT_DIR/postgres/ca.crt"
+cp "$TRANSPORT_CA_CERT" "$OUTPUT_DIR/valkey/ca.crt"
 cp "$DEVICE_CA_CERT" "$OUTPUT_DIR/device/device-ca.crt"
 cp "$DEVICE_CA_KEY" "$OUTPUT_DIR/device/device-ca.key"
 
@@ -176,22 +191,32 @@ if [[ "$MODE" == "internal-ca" ]]; then
   generate_leaf "cms.$SITE_NAME" "$OUTPUT_DIR/cms/tls.crt" "$OUTPUT_DIR/cms/tls.key" "$CMS_HOST"
   generate_leaf "backend.$SITE_NAME" "$OUTPUT_DIR/backend/server.crt" "$OUTPUT_DIR/backend/server.key" "$BACKEND_HOST" "$BACKEND_DEVICE_HOST"
   generate_leaf "minio.$SITE_NAME" "$OUTPUT_DIR/minio/public.crt" "$OUTPUT_DIR/minio/private.key" "$DATA_HOST"
+  generate_leaf "postgres.$SITE_NAME" "$OUTPUT_DIR/postgres/server.crt" "$OUTPUT_DIR/postgres/server.key" "$DATA_HOST"
+  generate_leaf "valkey.$SITE_NAME" "$OUTPUT_DIR/valkey/server.crt" "$OUTPUT_DIR/valkey/server.key" "$VALKEY_HOST"
 else
   assert_leaf "CMS" "$CMS_CERT" "$CMS_KEY" "$CMS_HOST"
   assert_leaf "Backend" "$BACKEND_CERT" "$BACKEND_KEY" "$BACKEND_HOST"
   assert_leaf "MinIO" "$MINIO_CERT" "$MINIO_KEY" "$DATA_HOST"
+  assert_leaf "PostgreSQL" "$POSTGRES_CERT" "$POSTGRES_KEY" "$DATA_HOST"
+  assert_leaf "Valkey" "$VALKEY_CERT" "$VALKEY_KEY" "$VALKEY_HOST"
   cp "$CMS_CERT" "$OUTPUT_DIR/cms/tls.crt"
   cp "$CMS_KEY" "$OUTPUT_DIR/cms/tls.key"
   cp "$BACKEND_CERT" "$OUTPUT_DIR/backend/server.crt"
   cp "$BACKEND_KEY" "$OUTPUT_DIR/backend/server.key"
   cp "$MINIO_CERT" "$OUTPUT_DIR/minio/public.crt"
   cp "$MINIO_KEY" "$OUTPUT_DIR/minio/private.key"
+  cp "$POSTGRES_CERT" "$OUTPUT_DIR/postgres/server.crt"
+  cp "$POSTGRES_KEY" "$OUTPUT_DIR/postgres/server.key"
+  cp "$VALKEY_CERT" "$OUTPUT_DIR/valkey/server.crt"
+  cp "$VALKEY_KEY" "$OUTPUT_DIR/valkey/server.key"
 fi
 
 assert_leaf "CMS" "$OUTPUT_DIR/cms/tls.crt" "$OUTPUT_DIR/cms/tls.key" "$CMS_HOST"
 assert_leaf "Backend" "$OUTPUT_DIR/backend/server.crt" "$OUTPUT_DIR/backend/server.key" "$BACKEND_HOST"
 assert_leaf "Backend device endpoint" "$OUTPUT_DIR/backend/server.crt" "$OUTPUT_DIR/backend/server.key" "$BACKEND_DEVICE_HOST"
 assert_leaf "MinIO" "$OUTPUT_DIR/minio/public.crt" "$OUTPUT_DIR/minio/private.key" "$DATA_HOST"
+assert_leaf "PostgreSQL" "$OUTPUT_DIR/postgres/server.crt" "$OUTPUT_DIR/postgres/server.key" "$DATA_HOST"
+assert_leaf "Valkey" "$OUTPUT_DIR/valkey/server.crt" "$OUTPUT_DIR/valkey/server.key" "$VALKEY_HOST"
 
 find "$OUTPUT_DIR" -type d -exec chmod 700 {} +
 find "$OUTPUT_DIR" -type f -name '*.key' -exec chmod 600 {} +

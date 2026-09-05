@@ -1,10 +1,12 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  assertProductionFileBackedSecrets,
   buildBackendRuntimeEnv,
   buildRedactedRuntimeConfigSummary,
+  hydrateFileBackedSecrets,
   loadBackendFileConfigEnv,
   resolveBackendConfigFileSelector,
   resolveBackendProfileSelector,
@@ -18,6 +20,28 @@ function makeTempConfigFile(contents: unknown, name = 'backend-config.json') {
 }
 
 describe('backend file config loader', () => {
+  it('requires production credentials to enter through file references only', () => {
+    const safe = {
+      DATABASE_URL_FILE: '/run/secrets/database-url',
+      JWT_SECRET_FILE: '/run/secrets/jwt-secret',
+      MINIO_ACCESS_KEY_FILE: '/run/secrets/minio-access-key',
+      MINIO_SECRET_KEY_FILE: '/run/secrets/minio-secret-key',
+      VALKEY_URL_FILE: '/run/secrets/valkey-url',
+      BACKUP_OFFHOST_ACCESS_KEY_FILE: '/run/secrets/backup-offhost-access-key',
+      BACKUP_OFFHOST_SECRET_KEY_FILE: '/run/secrets/backup-offhost-secret-key',
+    };
+
+    expect(() => assertProductionFileBackedSecrets(safe)).not.toThrow();
+    expect(() => assertProductionFileBackedSecrets({ ...safe, JWT_SECRET: 'unsafe-direct-value' })).toThrow(
+      /JWT_SECRET must be supplied through JWT_SECRET_FILE/
+    );
+    expect(() => {
+      const missing = { ...safe };
+      delete missing.VALKEY_URL_FILE;
+      assertProductionFileBackedSecrets(missing);
+    }).toThrow(/VALKEY_URL_FILE is required/);
+  });
+
   it('keeps env behavior when no config file is selected', () => {
     const runtime = buildBackendRuntimeEnv({
       DATABASE_URL: 'postgresql://user:pass@example.local:5432/darshan',
@@ -102,7 +126,8 @@ describe('backend file config loader', () => {
       resolveBackendConfigFileSelector({
         DARSHAN_CONFIG_FILE: '/tmp/backend-a.json',
         SIGNHEX_CONFIG_FILE: '/tmp/backend-b.json',
-      })
+})
+
     ).toThrow(/different backend config files/);
   });
 
@@ -215,6 +240,8 @@ describe('backend file config loader', () => {
         csrfEnabled: true,
         loginMaxAttempts: 6,
         loginLockoutWindowSeconds: 1200,
+        loginThrottleProvider: 'valkey',
+        loginThrottleFailClosed: true,
         maxUploadMb: 500,
         storageQuotaBytes: 0,
         swaggerUiEnabled: false,
@@ -251,6 +278,8 @@ describe('backend file config loader', () => {
     expect(loaded.env.AUTH_COOKIE_SECURE).toBe('true');
     expect(loaded.env.CSRF_ENABLED).toBe('true');
     expect(loaded.env.LOGIN_MAX_ATTEMPTS).toBe('6');
+    expect(loaded.env.LOGIN_THROTTLE_PROVIDER).toBe('valkey');
+    expect(loaded.env.LOGIN_THROTTLE_FAIL_CLOSED).toBe('true');
     expect(loaded.env.MAX_UPLOAD_MB).toBe('500');
     expect(loaded.env.ENABLE_SWAGGER_UI).toBe('false');
     expect(loaded.env.DEVICE_SOCKET_SIGNED_AUTH_ENABLED).toBe('true');
@@ -314,5 +343,28 @@ describe('backend file config loader', () => {
     expect(() => loadBackendFileConfigEnv({ DARSHAN_CONFIG_FILE: configFile })).toThrow(
       /supports JSON files only/
     );
+  });
+});
+
+describe('file-backed runtime secrets', () => {
+  it('loads a regular protected secret file without leaving its value in input env', () => {
+    const file = makeTempConfigFile('super-secret-value', 'jwt-secret');
+    chmodSync(file, 0o640);
+    const hydrated = hydrateFileBackedSecrets({ JWT_SECRET_FILE: file });
+    expect(hydrated.JWT_SECRET).toBe('super-secret-value');
+    expect(hydrated.JWT_SECRET_FILE).toBe(file);
+  });
+
+  it('rejects direct and file-backed forms configured together', () => {
+    const file = makeTempConfigFile('super-secret-value', 'jwt-secret');
+    chmodSync(file, 0o640);
+    expect(() => hydrateFileBackedSecrets({ JWT_SECRET: 'direct-secret', JWT_SECRET_FILE: file }))
+      .toThrow(/cannot both be configured/);
+  });
+
+  it('rejects world-readable secret files', () => {
+    const file = makeTempConfigFile('super-secret-value', 'jwt-secret');
+    chmodSync(file, 0o644);
+    expect(() => hydrateFileBackedSecrets({ JWT_SECRET_FILE: file })).toThrow(/other users/);
   });
 });

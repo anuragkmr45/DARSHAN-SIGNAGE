@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/export/package-all.sh --release <release-id> [--electron-platform windows|macos|linux|all-supported] [--server-deployment-layout standalone|production-split]
+  bash scripts/export/package-all.sh --release <release-id> [--electron-platform windows|macos|linux|all-supported] [--server-deployment-layout production-split|standalone]
 EOF
 }
 
@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RELEASE_ID=""
 ELECTRON_PLATFORM="all-supported"
-SERVER_DEPLOYMENT_LAYOUT="standalone"
+SERVER_DEPLOYMENT_LAYOUT="production-split"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

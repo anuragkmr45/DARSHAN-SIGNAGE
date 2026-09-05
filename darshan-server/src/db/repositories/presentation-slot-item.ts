@@ -1,4 +1,4 @@
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 
 export class PresentationSlotItemRepository {

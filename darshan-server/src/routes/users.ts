@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { createUserSchema, updateUserSchema, listUsersQuerySchema } from '@/schemas/user';
-import { createUserRepository, type UserRepository } from '@/db/repositories/user';
+import { createUserRepository } from '@/db/repositories/user';
 import { hashPassword } from '@/auth/password';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
@@ -13,7 +13,7 @@ import { createRoleRepository } from '@/db/repositories/role';
 import { canManageUserRecord, canManageUserRoleTarget, canReadUserRecord } from '@/rbac/policy';
 
 const logger = createLogger('user-routes');
-const { CREATED, FORBIDDEN, NOT_FOUND, OK, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED, OK } = HTTP_STATUS;
 
 export async function userRoutes(fastify: FastifyInstance) {
   const userRepo = createUserRepository();
@@ -40,20 +40,6 @@ export async function userRoutes(fastify: FastifyInstance) {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      let user:
-        | {
-            id: string;
-            email: string;
-            first_name: string | null;
-            last_name: string | null;
-            role_id: string;
-            department_id: string | null;
-            is_active: boolean;
-            created_at: Date;
-            updated_at: Date;
-          }
-        | null = null;
-
       try {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) {
@@ -120,20 +106,6 @@ export async function userRoutes(fastify: FastifyInstance) {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      let user:
-        | {
-            id: string;
-            email: string;
-            first_name: string | null;
-            last_name: string | null;
-            role_id: string;
-            department_id: string | null;
-            is_active: boolean;
-            created_at: Date;
-            updated_at: Date;
-          }
-        | null = null;
-
       try {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) {

@@ -5,12 +5,10 @@ import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
-import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('metrics-routes');
-const { BAD_REQUEST, FORBIDDEN, UNAUTHORIZED } = HTTP_STATUS;
 
 export async function metricsRoutes(fastify: FastifyInstance) {
   const db = getDatabase();

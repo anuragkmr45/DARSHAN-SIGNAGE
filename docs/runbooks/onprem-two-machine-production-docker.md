@@ -196,15 +196,24 @@ docker compose --env-file .env.production down --remove-orphans
 From the server machine:
 
 ```bash
-curl -fsS http://192.168.0.6:3000/api/v1/health
-curl -fsS http://192.168.0.6:9000/minio/health/live
-curl -fsS http://192.168.0.6:9090/-/healthy
+curl --fail --show-error --silent \
+  --cacert ./certs/transport-ca.crt \
+  --resolve backend.signage.example:3000:192.168.0.6 \
+  https://backend.signage.example:3000/api/v1/health/ready
+curl --fail --show-error --silent \
+  --cacert ./certs/transport-ca.crt \
+  --resolve minio.signage.example:9000:192.168.0.6 \
+  https://minio.signage.example:9000/minio/health/live
+curl --fail --show-error --silent http://192.168.0.6:9090/-/healthy
 ```
 
 From the player machine:
 
 ```bash
-curl -fsS http://192.168.0.6:3000/api/v1/health
+curl --fail --show-error --silent \
+  --cacert /etc/darshan/player/transport-ca.crt \
+  --resolve backend.signage.example:3000:192.168.0.6 \
+  https://backend.signage.example:3000/api/v1/health/ready
 ```
 
 ## Player Config Example

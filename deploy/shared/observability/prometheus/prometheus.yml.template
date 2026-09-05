@@ -23,10 +23,19 @@ scrape_configs:
           role: observability
           machine: __PROMETHEUS_MACHINE_LABEL__
 
+  - job_name: vm4-alertmanager
+    static_configs:
+      - targets:
+          - "__ALERTMANAGER_HOST__:__ALERTMANAGER_PORT__"
+        labels:
+          role: observability
+          machine: __PROMETHEUS_MACHINE_LABEL__
+
   - job_name: darshan-server
     scheme: __BACKEND_METRICS_SCHEME__
     metrics_path: /metrics
 __BACKEND_METRICS_TLS_CONFIG__
+__BACKEND_METRICS_AUTHORIZATION__
     static_configs:
       - targets:
           - "__BACKEND_METRICS_TARGET__"
@@ -37,7 +46,7 @@ __BACKEND_METRICS_TLS_CONFIG__
   - job_name: vm1-node
     static_configs:
       - targets:
-          - "__VM1_DATA_HOST__:9100"
+          - "__VM1_DATA_HOST__:__NODE_EXPORTER_HOST_PORT__"
         labels:
           role: data
           machine: vm1
@@ -45,7 +54,7 @@ __BACKEND_METRICS_TLS_CONFIG__
   - job_name: vm1-postgres
     static_configs:
       - targets:
-          - "__VM1_DATA_HOST__:9187"
+          - "__VM1_DATA_HOST__:__POSTGRES_EXPORTER_HOST_PORT__"
         labels:
           role: data
           machine: vm1
@@ -61,26 +70,18 @@ __MINIO_METRICS_TLS_CONFIG__
           role: data
           machine: vm1
 
-  - job_name: vm1-cadvisor
+  - job_name: vm-valkey-node
     static_configs:
       - targets:
-          - "__VM1_DATA_HOST__:8080"
+          - "__VALKEY_HOST__:__NODE_EXPORTER_HOST_PORT__"
         labels:
-          role: data
-          machine: vm1
+          role: valkey
+          machine: valkey
 
   - job_name: vm2-node
     static_configs:
       - targets:
-          - "__VM2_BACKEND_HOST__:9100"
-        labels:
-          role: backend
-          machine: vm2
-
-  - job_name: vm2-cadvisor
-    static_configs:
-      - targets:
-          - "__VM2_BACKEND_HOST__:8080"
+          - "__VM2_BACKEND_HOST__:__NODE_EXPORTER_HOST_PORT__"
         labels:
           role: backend
           machine: vm2
@@ -88,7 +89,7 @@ __MINIO_METRICS_TLS_CONFIG__
   - job_name: vm3-node
     static_configs:
       - targets:
-          - "__VM3_CMS_HOST__:9100"
+          - "__VM3_CMS_HOST__:__NODE_EXPORTER_HOST_PORT__"
         labels:
           role: cms
           machine: vm3
@@ -96,12 +97,20 @@ __MINIO_METRICS_TLS_CONFIG__
   - job_name: vm3-nginx
     static_configs:
       - targets:
-          - "__VM3_CMS_HOST__:9113"
+          - "__VM3_CMS_HOST__:__NGINX_EXPORTER_HOST_PORT__"
         labels:
           role: cms
           machine: vm3
 
-  - job_name: vm3-grafana
+  - job_name: vm4-node
+    static_configs:
+      - targets:
+          - "__OBSERVABILITY_HOST__:__NODE_EXPORTER_HOST_PORT__"
+        labels:
+          role: observability
+          machine: vm4
+
+  - job_name: vm4-grafana
     static_configs:
       - targets:
           - "__GRAFANA_METRICS_TARGET__"

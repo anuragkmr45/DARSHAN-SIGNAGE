@@ -111,7 +111,7 @@ describe('chat namespace auth resolution', () => {
 });
 
 describe('chat namespace socket payload hardening', () => {
-  let server: FastifyInstance;
+  let server: FastifyInstance | undefined;
   let baseUrl: string;
   let token: string;
   let socket: ClientSocket | null = null;
@@ -122,7 +122,7 @@ describe('chat namespace socket payload hardening', () => {
     await server.listen({ host: '127.0.0.1', port: 0 });
     const address = server.server.address() as AddressInfo;
     baseUrl = `http://127.0.0.1:${address.port}`;
-  });
+  }, 30_000);
 
   afterEach(() => {
     if (socket) {
@@ -136,7 +136,7 @@ describe('chat namespace socket payload hardening', () => {
       socket.disconnect();
       socket = null;
     }
-    await closeTestServer(server);
+    if (server) await closeTestServer(server);
   });
 
   async function connectChatSocket() {

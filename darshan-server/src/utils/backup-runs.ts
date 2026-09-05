@@ -6,11 +6,23 @@ import { basename, dirname, join, resolve, sep } from 'path';
 import { pipeline } from 'stream/promises';
 import { createGzip } from 'zlib';
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
-import { deleteObject, getPresignedUrl, getS3Client, putObject } from '@/s3';
+import { deleteObject, getPresignedUrl, getS3Client, putFile } from '@/s3';
 import { AppError } from '@/utils/app-error';
 import { getResolvedPgDumpPath, getResolvedTarPath } from '@/utils/runtime-dependencies';
+import { config as appConfig } from '@/config';
+import {
+  createOffHostBackupManifest,
+  getOffHostBackupClient,
+  getOffHostBackupPolicy,
+  pruneOffHostBackups,
+  uploadOffHostFile,
+  uploadOffHostManifest,
+  verifyOffHostBackupManifest,
+  type OffHostBackupManifest,
+} from '@/utils/off-host-backup';
+import { offHostBackupObjectKey } from '@/utils/off-host-backup-location';
 
 const execFileAsync = promisify(execFile);
 const ARCHIVE_BUCKET = 'archives';
@@ -69,7 +81,7 @@ function getObjectString(value: Record<string, unknown>, key: string) {
 }
 
 function parseDatabaseUrl() {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
+  const databaseUrl = appConfig.DATABASE_URL?.trim();
   if (!databaseUrl) {
     throw new Error('DATABASE_URL environment variable is required for PostgreSQL backups.');
   }
@@ -166,6 +178,16 @@ async function createPostgresArchive(backupDir: string) {
     connection.database,
     '--verbose',
   ];
+  const pgDumpEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    PGPASSWORD: connection.password,
+    ...(appConfig.DATABASE_TLS_ENABLED
+      ? {
+          PGSSLMODE: 'verify-full',
+          PGSSLROOTCERT: appConfig.DATABASE_CA_CERT_PATH,
+        }
+      : {}),
+  };
 
   if (pgDumpCommand) {
     try {
@@ -173,7 +195,7 @@ async function createPostgresArchive(backupDir: string) {
         command: pgDumpCommand,
         args: baseArgs,
         outputPath,
-        env: { ...process.env, PGPASSWORD: connection.password },
+        env: pgDumpEnv,
         label: 'pg_dump',
       });
       return outputPath;
@@ -194,10 +216,6 @@ async function createPostgresArchive(backupDir: string) {
         `PGPASSWORD=${connection.password}`,
         POSTGRES_BACKUP_CONTAINER,
         'pg_dump',
-        '-h',
-        'localhost',
-        '-p',
-        connection.port,
         '-U',
         connection.user,
         '-d',
@@ -205,7 +223,7 @@ async function createPostgresArchive(backupDir: string) {
         '--verbose',
       ],
       outputPath,
-      env: process.env,
+      env: pgDumpEnv,
       label: `docker exec ${POSTGRES_BACKUP_CONTAINER} pg_dump`,
     });
     return outputPath;
@@ -255,6 +273,70 @@ async function downloadBucketObjects(bucket: string, destinationDir: string) {
 
     continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
   } while (continuationToken);
+}
+
+async function estimateObjectStorageBackupBytes() {
+  const client = getS3Client();
+  let total = 0;
+  for (const bucket of MINIO_BACKUP_BUCKETS) {
+    let continuationToken: string | undefined;
+    do {
+      const response = await client.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: continuationToken }));
+      for (const object of response.Contents ?? []) {
+        const size = object.Size ?? 0;
+        if (!Number.isSafeInteger(size) || size < 0 || total > Number.MAX_SAFE_INTEGER - size) {
+          throw new Error('Object storage backup size cannot be safely estimated.');
+        }
+        total += size;
+      }
+      continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+    } while (continuationToken);
+  }
+  return total;
+}
+
+async function estimatePostgresBackupBytes() {
+  const db = getDatabase();
+  const result = await db.execute(sql`SELECT pg_database_size(current_database())::text AS bytes`);
+  const row = (result as { rows?: Array<{ bytes?: unknown }> }).rows?.[0];
+  const value = Number(row?.bytes);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error('PostgreSQL backup size cannot be safely estimated.');
+  }
+  return value;
+}
+
+/**
+ * Object backup creation mirrors source objects and then writes a compressed
+ * tar. Reserve both possible representations plus the database dump before
+ * doing any write; this turns an otherwise partial disk-full archive into a
+ * deterministic failed run with a usable error message.
+ */
+export function calculateBackupWorkspaceRequiredBytes(objectBytes: number, databaseBytes: number) {
+  if (!Number.isSafeInteger(objectBytes) || objectBytes < 0 || !Number.isSafeInteger(databaseBytes) || databaseBytes < 0) {
+    throw new Error('Backup workspace inputs must be safe non-negative byte counts.');
+  }
+  const required = objectBytes * 2 + databaseBytes + 1024 * 1024 * 1024;
+  if (!Number.isSafeInteger(required)) throw new Error('Backup workspace requirement exceeds supported byte precision.');
+  return required;
+}
+
+async function assertBackupWorkspaceCapacity(backupDir: string) {
+  const [objectBytes, databaseBytes, fileSystem] = await Promise.all([
+    estimateObjectStorageBackupBytes(),
+    estimatePostgresBackupBytes(),
+    fs.statfs(backupDir),
+  ]);
+  const available = Number(fileSystem.bavail) * Number(fileSystem.bsize);
+  // The object mirror plus its archive can each approach the original object
+  // byte count; a plain SQL dump can approach database size. One GiB covers
+  // gzip/tar metadata, temp files, and small changes during the backup.
+  const required = calculateBackupWorkspaceRequiredBytes(objectBytes, databaseBytes);
+  if (!Number.isSafeInteger(available) || !Number.isSafeInteger(required) || available < required) {
+    throw new Error(
+      `Insufficient free space for a safe backup workspace: requires at least ${required} bytes, but only ${available} bytes are available on the temporary filesystem.`
+    );
+  }
 }
 
 async function createObjectStorageArchive(backupDir: string) {
@@ -323,7 +405,8 @@ export async function markBackupRunCompleted(
     size: number;
     content_type: string;
     storage_object_id: string;
-  }>
+  }>,
+  offHostManifest?: OffHostBackupManifest
 ) {
   const db = getDatabase();
   await db
@@ -333,6 +416,7 @@ export async function markBackupRunCompleted(
       completed_at: new Date(),
       updated_at: new Date(),
       files,
+      off_host_manifest: offHostManifest ?? null,
       error_message: null,
     })
     .where(eq(schema.backupRuns.id, runId));
@@ -441,6 +525,7 @@ export async function runFullBackup(runId: string) {
 
   try {
     await markBackupRunRunning(runId);
+    await assertBackupWorkspaceCapacity(backupDir);
     await createPostgresArchive(backupDir);
     await createObjectStorageArchive(backupDir);
 
@@ -453,22 +538,29 @@ export async function runFullBackup(runId: string) {
       content_type: string;
       storage_object_id: string;
     }>;
+    // Development and QA retain the existing local-archive behavior. A
+    // production run is not marked complete until a verified independent copy
+    // and its checksum manifest exist at the signed off-host destination.
+    const offHostEnabled = appConfig.NODE_ENV === 'production';
+    const offHostClient = offHostEnabled ? getOffHostBackupClient() : null;
+    const offHostPolicy = offHostEnabled ? getOffHostBackupPolicy() : null;
+    const offHostTimestamp = formatBackupTimestamp();
+    const offHostArtifacts = [] as OffHostBackupManifest['files'];
 
     for (const entry of entries) {
       const filePath = join(backupDir, entry);
       const stat = await fs.stat(filePath);
       if (!stat.isFile()) continue;
 
-      const buffer = await fs.readFile(filePath);
       const objectKey = `backups/${runId}/${basename(filePath)}`;
-      const upload = await putObject(ARCHIVE_BUCKET, objectKey, buffer, 'application/gzip');
+      const upload = await putFile(ARCHIVE_BUCKET, objectKey, filePath, 'application/gzip');
       const [storageObject] = await db
         .insert(schema.storageObjects)
         .values({
           bucket: ARCHIVE_BUCKET,
           object_key: objectKey,
           content_type: 'application/gzip',
-          size: buffer.byteLength,
+          size: stat.size,
           sha256: upload.sha256,
         })
         .returning();
@@ -477,13 +569,48 @@ export async function runFullBackup(runId: string) {
         bucket: ARCHIVE_BUCKET,
         object_key: objectKey,
         name: basename(filePath),
-        size: buffer.byteLength,
+        size: stat.size,
         content_type: 'application/gzip',
         storage_object_id: storageObject.id,
       });
+
+      if (offHostClient && offHostPolicy) {
+        const remoteKey = offHostBackupObjectKey(
+          offHostPolicy.location,
+          `runs/${offHostTimestamp}-${runId}/${basename(filePath)}`
+        );
+        offHostArtifacts.push(
+          await uploadOffHostFile(offHostClient, {
+            bucket: offHostPolicy.location.bucket,
+            key: remoteKey,
+            filePath,
+            contentType: 'application/gzip',
+          })
+        );
+      }
     }
 
-    await markBackupRunCompleted(runId, files);
+    let offHostManifest: OffHostBackupManifest | undefined;
+    if (offHostClient && offHostPolicy) {
+      if (offHostArtifacts.length === 0) {
+        throw new Error('Backup did not produce any archives for the required off-host destination.');
+      }
+
+      offHostManifest = createOffHostBackupManifest({
+        runId,
+        timestamp: offHostTimestamp,
+        artifacts: offHostArtifacts,
+        location: offHostPolicy.location,
+        endpoint: offHostPolicy.endpoint,
+        intervalHours: offHostPolicy.intervalHours,
+        retentionDays: offHostPolicy.retentionDays,
+      });
+      await uploadOffHostManifest(offHostClient, offHostManifest);
+      await verifyOffHostBackupManifest(offHostClient, offHostPolicy.location, offHostManifest);
+      await pruneOffHostBackups(offHostClient, offHostPolicy.location, offHostPolicy.retentionDays);
+    }
+
+    await markBackupRunCompleted(runId, files, offHostManifest);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Backup failed';
     await markBackupRunFailed(runId, message);

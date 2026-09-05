@@ -13,18 +13,23 @@ services:
       DARSHAN_PROCESS_ROLE: all
       DARSHAN_CONFIG_FILE: ${DARSHAN_CONFIG_FILE:-/app/config/backend.json}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATA_HOST}:${POSTGRES_HOST_PORT}/${POSTGRES_DB}
+      DATABASE_TLS_ENABLED: ${DATABASE_TLS_ENABLED:-true}
+      DATABASE_CA_CERT_PATH: ${DATABASE_CA_CERT_PATH:-/app/certs/transport-ca.crt}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRY: ${JWT_EXPIRY:-900}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       CA_CERT_PATH: ${CA_CERT_PATH:-./certs/ca.crt}
       CA_KEY_PATH: ${CA_KEY_PATH:-./certs/ca.key}
+      SERVER_TLS_ENABLED: ${SERVER_TLS_ENABLED:-true}
       TLS_CERT_PATH: ${TLS_CERT_PATH:-./certs/server.crt}
       TLS_KEY_PATH: ${TLS_KEY_PATH:-./certs/server.key}
       VALKEY_URL: ${VALKEY_URL:-redis://${VALKEY_HOST}:${VALKEY_HOST_PORT}}
+      VALKEY_TLS_ENABLED: ${VALKEY_TLS_ENABLED:-true}
+      VALKEY_CA_CERT_PATH: ${VALKEY_CA_CERT_PATH:-/app/certs/transport-ca.crt}
       OBSERVABILITY_METRICS_BEARER_TOKEN: ${OBSERVABILITY_METRICS_BEARER_TOKEN:-}
+      BACKEND_PRIVATE_HOST: ${BACKEND_PRIVATE_HOST:-${BACKEND_HOST}}
+      NODE_EXTRA_CA_CERTS: ${NODE_EXTRA_CA_CERTS:-/app/certs/transport-ca.crt}
       FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
       LIBREOFFICE_PATH: ${LIBREOFFICE_PATH:-soffice}
       PG_DUMP_PATH: ${PG_DUMP_PATH:-pg_dump}
@@ -36,6 +41,7 @@ services:
     volumes:
       - ../../../../darshan-server/certs:/app/certs:ro
       - ../../../../darshan-server/config:/app/config:ro
+      - ../../../../darshan-server/secrets:/run/secrets:ro
     command: npm start
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -45,7 +51,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3000/api/v1/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "const https=require('node:https');const fs=require('node:fs');const request=https.request({host:'127.0.0.1',port:3000,path:'/api/v1/health/ready',servername:process.env.BACKEND_PRIVATE_HOST,ca:fs.readFileSync('/app/certs/transport-ca.crt'),rejectUnauthorized:true},response=>process.exit(response.statusCode===200?0:1));request.on('error',()=>process.exit(1));request.end()",
         ]
       interval: 30s
       timeout: 10s

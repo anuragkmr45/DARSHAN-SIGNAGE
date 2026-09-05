@@ -210,6 +210,9 @@ export interface BackupSettings {
   automatic_enabled: boolean;
   interval_hours: number;
   log_level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+  schedule_managed_by_deployment?: boolean;
+  off_host_copy_required?: boolean;
+  retention_days?: number | null;
 }
 
 export interface BackupRunDownload {
@@ -423,7 +426,7 @@ export interface ObservabilityGrafanaLink {
 export interface ObservabilityMachineSummary {
   id: string;
   name: string;
-  role: "data" | "backend" | "cms" | "development";
+  role: "data" | "valkey" | "backend" | "cms" | "observability" | "development";
   status: "healthy" | "degraded" | "critical" | "unknown" | "unconfigured";
   scrape_status: {
     reachable_targets: number;

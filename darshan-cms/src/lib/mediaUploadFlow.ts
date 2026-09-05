@@ -338,30 +338,24 @@ export const uploadMediaWithPresign = async (
         }
       : await readMediaMetadata(finalFile);
 
-  try {
-    if (initialSession.strategy === "single") {
-      const uploadUrl = initialSession.upload_url || (await mediaApi.getUploadSession(initialSession.session_id)).upload_url;
-      if (!uploadUrl) throw new Error("Upload session did not return a single-upload URL.");
-      await uploadViaXhr(uploadUrl, finalFile, contentType, opts?.onProgress);
-    }
-
-    const parts =
-      initialSession.strategy === "multipart"
-        ? await uploadMultipart({ session: initialSession, file: finalFile, contentType, onProgress: opts?.onProgress })
-        : undefined;
-    const completed = await mediaApi.completeUploadSession(initialSession.session_id, { parts, ...metadata });
-    const media = requireCompletedMedia(completed);
-    clearPersistedSessionId(storageKey);
-
-    return {
-      ...processed,
-      media,
-    };
-  } catch (error) {
-    // Keep the session id locally. Retrying the same file resumes server-listed
-    // parts rather than silently starting a second object or media record.
-    throw error;
+  if (initialSession.strategy === "single") {
+    const uploadUrl = initialSession.upload_url || (await mediaApi.getUploadSession(initialSession.session_id)).upload_url;
+    if (!uploadUrl) throw new Error("Upload session did not return a single-upload URL.");
+    await uploadViaXhr(uploadUrl, finalFile, contentType, opts?.onProgress);
   }
+
+  const parts =
+    initialSession.strategy === "multipart"
+      ? await uploadMultipart({ session: initialSession, file: finalFile, contentType, onProgress: opts?.onProgress })
+      : undefined;
+  const completed = await mediaApi.completeUploadSession(initialSession.session_id, { parts, ...metadata });
+  const media = requireCompletedMedia(completed);
+  clearPersistedSessionId(storageKey);
+
+  return {
+    ...processed,
+    media,
+  };
 };
 
 export const getFriendlyUploadError = (error: unknown): string => {

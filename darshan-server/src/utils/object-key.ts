@@ -1,6 +1,7 @@
 import path from 'path';
 import { randomUUID } from 'crypto';
 
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS_REGEX = /[\u0000-\u001f\u007f]/g;
 const ZERO_WIDTH_REGEX = /[\u200b-\u200d\ufeff]/g;
 const SAFE_EXT_REGEX = /^[a-z0-9]{1,10}$/;

@@ -22,7 +22,7 @@ type PrometheusResponse = {
 type MachineDefinition = {
   id: string;
   name: string;
-  role: 'data' | 'backend' | 'cms' | 'development';
+  role: 'data' | 'valkey' | 'backend' | 'cms' | 'observability' | 'development';
   dashboardUid: string;
   expectedJobs: string[];
   services: Array<{
@@ -135,7 +135,7 @@ export type ScreenObservabilitySummary = {
 };
 
 const PROMETHEUS_API_PATH = '/api/v1/query';
-const PROMETHEUS_MACHINE_REGEX = 'vm1|vm2|vm3|dev-local';
+const PROMETHEUS_MACHINE_REGEX = 'vm1|valkey|vm2|vm3|vm4|dev-local';
 
 function normalizeGrafanaBasePath(basePath: string) {
   const trimmed = basePath.trim();
@@ -192,8 +192,10 @@ function buildDashboardUrl(uid: string, queryParams?: Record<string, string | nu
   return `${url.pathname}${url.search}`;
 }
 
-function getMachineDefinitions(): MachineDefinition[] {
-  if (appConfig.OBSERVABILITY_DEPLOYMENT_MODE === 'development') {
+export function getMachineDefinitions(
+  deploymentMode: 'development' | 'qa' | 'production' = appConfig.OBSERVABILITY_DEPLOYMENT_MODE
+): MachineDefinition[] {
+  if (deploymentMode === 'development') {
     return [
       {
         id: 'dev-local',
@@ -215,12 +217,21 @@ function getMachineDefinitions(): MachineDefinition[] {
       name: 'VM1 Data Machine',
       role: 'data',
       dashboardUid: 'darshan-vm1-data',
-      expectedJobs: ['vm1-node', 'vm1-postgres', 'vm1-minio', 'vm1-cadvisor'],
+      expectedJobs: ['vm1-node', 'vm1-postgres', 'vm1-minio'],
       services: [
         { id: 'node', label: 'Host Exporter', job: 'vm1-node' },
         { id: 'postgres', label: 'PostgreSQL Exporter', job: 'vm1-postgres' },
         { id: 'minio', label: 'MinIO Metrics', job: 'vm1-minio' },
-        { id: 'cadvisor', label: 'Container Metrics', job: 'vm1-cadvisor' },
+      ],
+    },
+    {
+      id: 'valkey',
+      name: 'Valkey VM',
+      role: 'valkey',
+      dashboardUid: 'darshan-vm-valkey',
+      expectedJobs: ['vm-valkey-node'],
+      services: [
+        { id: 'node', label: 'Host Exporter', job: 'vm-valkey-node' },
       ],
     },
     {
@@ -228,11 +239,10 @@ function getMachineDefinitions(): MachineDefinition[] {
       name: 'VM2 Backend Machine',
       role: 'backend',
       dashboardUid: 'darshan-vm2-backend',
-      expectedJobs: ['darshan-server', 'vm2-node', 'vm2-cadvisor'],
+      expectedJobs: ['darshan-server', 'vm2-node'],
       services: [
         { id: 'backend', label: 'Backend API', job: 'darshan-server' },
         { id: 'node', label: 'Host Exporter', job: 'vm2-node' },
-        { id: 'cadvisor', label: 'Container Metrics', job: 'vm2-cadvisor' },
       ],
     },
     {
@@ -240,11 +250,23 @@ function getMachineDefinitions(): MachineDefinition[] {
       name: 'VM3 CMS Machine',
       role: 'cms',
       dashboardUid: 'darshan-vm3-cms',
-      expectedJobs: ['vm3-node', 'vm3-nginx', 'vm3-grafana'],
+      expectedJobs: ['vm3-node', 'vm3-nginx'],
       services: [
         { id: 'node', label: 'Host Exporter', job: 'vm3-node' },
         { id: 'nginx', label: 'Nginx Exporter', job: 'vm3-nginx' },
-        { id: 'grafana', label: 'Grafana Metrics', job: 'vm3-grafana' },
+      ],
+    },
+    {
+      id: 'vm4',
+      name: 'Observability VM',
+      role: 'observability',
+      dashboardUid: 'darshan-vm4-observability',
+      expectedJobs: ['prometheus', 'vm4-alertmanager', 'vm4-node', 'vm4-grafana'],
+      services: [
+        { id: 'prometheus', label: 'Prometheus', job: 'prometheus' },
+        { id: 'alertmanager', label: 'Alertmanager', job: 'vm4-alertmanager' },
+        { id: 'node', label: 'Host Exporter', job: 'vm4-node' },
+        { id: 'grafana', label: 'Grafana Metrics', job: 'vm4-grafana' },
       ],
     },
   ];

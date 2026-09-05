@@ -17,7 +17,7 @@ import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
 
 const logger = createLogger('presentation-routes');
-const { BAD_REQUEST, CREATED, FORBIDDEN, NOT_FOUND, NO_CONTENT, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED, NO_CONTENT } = HTTP_STATUS;
 
 const createPresentationSchema = z.object({
   name: z.string().min(1).max(255),

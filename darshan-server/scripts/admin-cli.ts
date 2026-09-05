@@ -1,208 +1,151 @@
-// !/usr/bin/env node
-
+import 'dotenv/config';
 import { program } from 'commander';
-import { eq, lt } from 'drizzle-orm';
-import { initializeDatabase, getDatabase, closeDatabase, schema } from '@/db';
-import { hashPassword } from '@/auth/password';
-import { randomUUID } from 'crypto';
-import { createLogger } from '@/utils/logger';
+import { eq } from 'drizzle-orm';
+import { closeDatabase, getDatabase, initializeDatabase, schema } from '../src/db/index.js';
+import {
+  cleanupExpiredSessions,
+  createAdministrator,
+  deactivateAdministrator,
+  inspectAdministrator,
+  recoverAdministrator,
+} from '../src/deployment/admin-recovery.js';
+import { resolveAdminPasswordInput } from '../src/deployment/admin-secret-input.js';
 
-const logger = createLogger('admin-cli');
+type CommandResult = Record<string, unknown>;
 
-async function getDb() {
-  await initializeDatabase();
-  return getDatabase();
+function writeResult(result: CommandResult, json?: boolean) {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+  process.stdout.write(`${result.status ?? result.code ?? 'ok'}\n`);
 }
 
-program.hook('postAction', async () => {
-  await closeDatabase().catch(() => {});
-});
+async function withDatabase(action: () => Promise<void>) {
+  try {
+    await initializeDatabase();
+    await action();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${JSON.stringify({ status: 'error', code: 'ADMIN_CLI_FAILED', message })}\n`);
+    process.exitCode = 1;
+  } finally {
+    await closeDatabase();
+  }
+}
 
-program.name('darshan-admin').description('DARSHAN Admin CLI').version('1.0.0');
+program.name('darshan-admin').description('DARSHAN production administrator recovery CLI').version('2.0.0');
 
-// Create admin user
+program
+  .command('inspect')
+  .description('Inspect an administrator account without changing it')
+  .requiredOption('-e, --email <email>', 'Administrator email')
+  .option('--json', 'Emit machine-readable output')
+  .action(async (options) => withDatabase(async () => {
+    const accounts = await inspectAdministrator(getDatabase(), options.email);
+    writeResult({ status: accounts.length === 0 ? 'not_found' : 'ok', accounts }, options.json);
+    process.exitCode = accounts.length === 0 ? 2 : 0;
+  }));
+
+function addRecoveryCommand(name: string, description: string) {
+  return program
+    .command(name)
+    .description(description)
+    .requiredOption('-e, --email <email>', 'Administrator email')
+    .option('--password-file <path>', 'Mode-0600 file containing the new password')
+    .option('--prompt-password', 'Read the new password from an interactive non-echoing TTY')
+    .requiredOption('--ticket <ticket>', 'Approved incident or change ticket identifier')
+    .option('--reactivate', 'Explicitly reactivate the account')
+    .option('--grant-super-admin', 'Explicitly assign SUPER_ADMIN')
+    .option('--json', 'Emit machine-readable output')
+    .action(async (options) => withDatabase(async () => {
+      const result = await recoverAdministrator(getDatabase(), {
+        email: options.email,
+        password: await resolveAdminPasswordInput({
+          passwordFile: options.passwordFile,
+          promptPassword: options.promptPassword,
+          prompt: 'Recovery password: ',
+        }),
+        ticket: options.ticket,
+        reactivate: Boolean(options.reactivate),
+        grantSuperAdmin: Boolean(options.grantSuperAdmin),
+      });
+      writeResult(result, options.json);
+      process.exitCode = result.status === 'recovered' ? 0 : 2;
+    }));
+}
+
+addRecoveryCommand('recover', 'Recover an administrator password and revoke all active sessions');
+addRecoveryCommand('reset-password', 'Deprecated alias for recover; plaintext -p is intentionally unsupported');
+
 program
   .command('create-admin')
-  .description('Create an admin user')
-  .option('-e, --email <email>', 'Admin email')
-  .option('-p, --password <password>', 'Admin password')
+  .description('Create an administrator with an existing RBAC role')
+  .requiredOption('-e, --email <email>', 'Administrator email')
+  .option('--password-file <path>', 'Mode-0600 file containing the initial password')
+  .option('--prompt-password', 'Read the initial password from an interactive non-echoing TTY')
+  .requiredOption('--ticket <ticket>', 'Approved incident or change ticket identifier')
+  .option('-r, --role <role>', 'Existing role name', 'ADMIN')
   .option('-f, --first-name <name>', 'First name')
   .option('-l, --last-name <name>', 'Last name')
-  .action(async (options) => {
-    try {
-      const db = await getDb();
+  .option('--json', 'Emit machine-readable output')
+  .action(async (options) => withDatabase(async () => {
+    const result = await createAdministrator(getDatabase(), {
+      email: options.email,
+      password: await resolveAdminPasswordInput({
+        passwordFile: options.passwordFile,
+        promptPassword: options.promptPassword,
+        prompt: 'Initial administrator password: ',
+      }),
+      ticket: options.ticket,
+      roleName: options.role,
+      firstName: options.firstName,
+      lastName: options.lastName,
+    });
+    writeResult(result, options.json);
+    process.exitCode = result.status === 'created' ? 0 : 2;
+  }));
 
-      const email = options.email || (await prompt('Email: '));
-      const password = options.password || (await prompt('Password: ', true));
-      const firstName = options.firstName || (await prompt('First name: '));
-      const lastName = options.lastName || (await prompt('Last name: '));
-
-      const passwordHash = await hashPassword(password);
-
-      const user = await db
-        .insert(schema.users)
-        .values({
-          id: randomUUID(),
-          email,
-          password_hash: passwordHash,
-          first_name: firstName,
-          last_name: lastName,
-          role: 'ADMIN',
-          is_active: true,
-          created_at: new Date(),
-          updated_at: new Date(),
-        })
-        .returning();
-
-      logger.info(`Admin user created: ${user[0].email}`);
-    } catch (error) {
-      logger.error(error, 'Failed to create admin user');
-      process.exit(1);
-    }
-  });
-
-// List users
 program
   .command('list-users')
-  .description('List all users')
-  .option('-r, --role <role>', 'Filter by role')
-  .action(async (options) => {
-    try {
-      const db = await getDb();
+  .description('List users with their resolved role')
+  .option('-r, --role <role>', 'Filter by role name')
+  .option('--json', 'Emit machine-readable output')
+  .action(async (options) => withDatabase(async () => {
+    const users = await getDatabase()
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        isActive: schema.users.is_active,
+        role: schema.roles.name,
+        createdAt: schema.users.created_at,
+      })
+      .from(schema.users)
+      .leftJoin(schema.roles, eq(schema.users.role_id, schema.roles.id));
+    const filtered = options.role ? users.filter((user) => user.role === options.role) : users;
+    if (options.json) writeResult({ status: 'ok', users: filtered }, true);
+    else process.stdout.write(`${JSON.stringify(filtered, null, 2)}\n`);
+  }));
 
-      let query = db.select().from(schema.users);
-
-      if (options.role) {
-        query = query.where(eq(schema.users.role, options.role));
-      }
-
-      const users = await query;
-
-      console.table(
-        users.map((u) => ({
-          id: u.id,
-          email: u.email,
-          role: u.role,
-          active: u.is_active,
-          created: u.created_at.toISOString(),
-        }))
-      );
-    } catch (error) {
-      logger.error(error, 'Failed to list users');
-      process.exit(1);
-    }
-  });
-
-// Reset password
-program
-  .command('reset-password')
-  .description('Reset user password')
-  .option('-e, --email <email>', 'User email')
-  .option('-p, --password <password>', 'New password')
-  .action(async (options) => {
-    try {
-      const db = await getDb();
-
-      const email = options.email || (await prompt('Email: '));
-      const password = options.password || (await prompt('New password: ', true));
-
-      const passwordHash = await hashPassword(password);
-
-      const result = await db
-        .update(schema.users)
-        .set({ password_hash: passwordHash, updated_at: new Date() })
-        .where(eq(schema.users.email, email))
-        .returning();
-
-      if (result.length === 0) {
-        logger.error('User not found');
-        process.exit(1);
-      }
-
-      logger.info(`Password reset for: ${result[0].email}`);
-    } catch (error) {
-      logger.error(error, 'Failed to reset password');
-      process.exit(1);
-    }
-  });
-
-// Deactivate user
 program
   .command('deactivate-user')
-  .description('Deactivate a user')
-  .option('-e, --email <email>', 'User email')
-  .action(async (options) => {
-    try {
-      const db = await getDb();
+  .description('Deactivate an account, revoke its sessions, and preserve at least one SUPER_ADMIN')
+  .requiredOption('-e, --email <email>', 'User email')
+  .requiredOption('--ticket <ticket>', 'Approved incident or change ticket identifier')
+  .option('--json', 'Emit machine-readable output')
+  .action(async (options) => withDatabase(async () => {
+    const result = await deactivateAdministrator(getDatabase(), { email: options.email, ticket: options.ticket });
+    writeResult(result, options.json);
+    process.exitCode = result.status === 'deactivated' || result.status === 'already_deactivated' ? 0 : 2;
+  }));
 
-      const email = options.email || (await prompt('Email: '));
-
-      const result = await db
-        .update(schema.users)
-        .set({ is_active: false, updated_at: new Date() })
-        .where(eq(schema.users.email, email))
-        .returning();
-
-      if (result.length === 0) {
-        logger.error('User not found');
-        process.exit(1);
-      }
-
-      logger.info(`User deactivated: ${result[0].email}`);
-    } catch (error) {
-      logger.error(error, 'Failed to deactivate user');
-      process.exit(1);
-    }
-  });
-
-// Cleanup expired sessions
 program
   .command('cleanup-sessions')
-  .description('Clean up expired sessions')
-  .action(async () => {
-    try {
-      const db = await getDb();
+  .description('Delete expired authentication sessions')
+  .option('--json', 'Emit machine-readable output')
+  .action(async (options) => withDatabase(async () => {
+    const result = await cleanupExpiredSessions(getDatabase());
+    writeResult({ status: 'ok', ...result }, options.json);
+  }));
 
-      const result = await db
-        .delete(schema.sessions)
-        .where(lt(schema.sessions.expires_at, new Date()))
-        .returning();
-
-      logger.info(`Cleaned up ${result.length} expired sessions`);
-    } catch (error) {
-      logger.error(error, 'Failed to cleanup sessions');
-      process.exit(1);
-    }
-  });
-
-// Helper function for prompting
-async function prompt(question: string, hidden = false): Promise<string> {
-  return new Promise((resolve) => {
-    process.stdout.write(question);
-    process.stdin.setEncoding('utf8');
-
-    if (hidden) {
-      process.stdin.setRawMode(true);
-    }
-
-    let input = '';
-    process.stdin.on('data', (char) => {
-      if (char === '\n' || char === '\r' || char === '\u0004') {
-        process.stdin.setRawMode(false);
-        process.stdout.write('\n');
-        resolve(input);
-      } else if (char === '\u0003') {
-        process.exit();
-      } else {
-        input += char;
-        if (!hidden) {
-          process.stdout.write(char);
-        } else {
-          process.stdout.write('*');
-        }
-      }
-    });
-  });
-}
-
-program.parse(process.argv);
+program.parseAsync(process.argv);

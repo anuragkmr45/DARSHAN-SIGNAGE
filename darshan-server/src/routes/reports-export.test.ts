@@ -68,6 +68,7 @@ describe('Reports PDF exports', () => {
       media_id: mediaId,
       started_at: new Date('2026-03-01T10:00:00.000Z'),
       ended_at: new Date('2026-03-01T10:05:00.000Z'),
+      idempotency_key: `reports-export-${randomUUID()}`,
       created_at: new Date('2026-03-01T10:05:30.000Z'),
     });
 

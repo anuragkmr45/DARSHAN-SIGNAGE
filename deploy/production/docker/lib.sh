@@ -5,6 +5,7 @@ BASE_DIR="$ROOT_DIR/deploy/production/docker"
 SERVER_ENV="$ROOT_DIR/darshan-server/.env"
 SITE_ENV="${DARSHAN_DOCKER_ENV:-$BASE_DIR/.env}"
 BACKEND_ENV_LOADED="${BACKEND_ENV_LOADED:-false}"
+DEPRECATED_CHECKOUT_ACK="I_UNDERSTAND_SOURCE_FREE_BUNDLE_IS_AUTHORITATIVE"
 
 require_file() {
   local file="$1"
@@ -21,6 +22,26 @@ require_var() {
     echo "Missing required production value: $name" >&2
     exit 1
   fi
+}
+
+require_deprecated_checkout_ack() {
+  if [[ "${DARSHAN_ALLOW_DEPRECATED_CHECKOUT_PRODUCTION:-}" == "$DEPRECATED_CHECKOUT_ACK" ]]; then
+    return 0
+  fi
+
+  cat >&2 <<EOF
+The checkout-based deploy/production/docker workflow is deprecated for production.
+
+Use the generated source-free role bundle and its ./deploy.sh dispatcher for
+install, restart, upgrade, adoption, readiness, and administrator recovery.
+
+If you are deliberately running this old flow in a lab or historical
+compatibility rehearsal, rerun with:
+
+  DARSHAN_ALLOW_DEPRECATED_CHECKOUT_PRODUCTION=$DEPRECATED_CHECKOUT_ACK
+
+EOF
+  exit 2
 }
 
 load_env_file() {
@@ -73,6 +94,8 @@ EOF
 }
 
 load_production_env() {
+  require_deprecated_checkout_ack
+
   require_file "$SITE_ENV" "Missing $SITE_ENV. Copy deploy/production/docker/.env.example to deploy/production/docker/.env and edit Docker-on-VM host IPs."
 
   load_env_file "$SITE_ENV"
@@ -100,7 +123,11 @@ load_production_env() {
   require_var MINIO_SECRET_KEY
 
   export GRAFANA_ROOT_URL="${GRAFANA_ROOT_URL:-http://${CMS_HOST}:${CMS_HTTP_PORT}/grafana/}"
+  export MINIO_HOST="${MINIO_HOST:-$DATA_HOST}"
   export VALKEY_URL="${VALKEY_URL:-redis://${VALKEY_HOST}:${VALKEY_HOST_PORT}}"
+  export BACKEND_PRIVATE_HOST="${BACKEND_PRIVATE_HOST:-$BACKEND_HOST}"
+  export BACKEND_BIND_ADDRESS="${BACKEND_BIND_ADDRESS:-$BACKEND_HOST}"
+  export DARSHAN_BACKEND_TRANSPORT_CA_FILE="${DARSHAN_BACKEND_TRANSPORT_CA_FILE:-$ROOT_DIR/darshan-server/certs/transport-ca.crt}"
   export CMS_RUNTIME_CONFIG_SOURCE="${CMS_RUNTIME_CONFIG_SOURCE:-$ROOT_DIR/darshan-cms/public/config/app-config.json}"
 }
 
@@ -114,8 +141,15 @@ load_backend_env() {
   load_production_env
 
   require_var JWT_SECRET
-  require_var ADMIN_EMAIL
-  require_var ADMIN_PASSWORD
+  if [[ "${SERVER_TLS_ENABLED:-}" != "true" ]]; then
+    cat >&2 <<EOF
+The deprecated checkout backend path no longer starts a production API without
+SERVER_TLS_ENABLED=true. Use the source-free backend role bundle for normal
+production install, upgrade, restart, adoption, and readiness.
+EOF
+    exit 1
+  fi
+  require_file "$DARSHAN_BACKEND_TRANSPORT_CA_FILE" "Missing backend transport CA file: $DARSHAN_BACKEND_TRANSPORT_CA_FILE"
   BACKEND_ENV_LOADED="true"
   export BACKEND_ENV_LOADED
 }
@@ -174,6 +208,46 @@ wait_for_http() {
     sleep 2
   done
   echo "$name did not become healthy at $url" >&2
+  return 1
+}
+
+backend_readiness_url() {
+  printf 'https://%s:%s/api/v1/health/ready\n' "$BACKEND_PRIVATE_HOST" "$API_HOST_PORT"
+}
+
+check_backend_ready() {
+  local name="${1:-Backend API readiness}"
+  local url
+  url="$(backend_readiness_url)"
+  require_file "$DARSHAN_BACKEND_TRANSPORT_CA_FILE" "Missing backend transport CA file: $DARSHAN_BACKEND_TRANSPORT_CA_FILE"
+  if curl -fsS \
+    --cacert "$DARSHAN_BACKEND_TRANSPORT_CA_FILE" \
+    --resolve "${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}:${BACKEND_BIND_ADDRESS}" \
+    "$url" >/dev/null; then
+    echo "OK $name"
+  else
+    echo "FAIL $name ($url)" >&2
+    return 1
+  fi
+}
+
+wait_for_backend_ready() {
+  local attempts="${1:-30}"
+  local i
+  local url
+  url="$(backend_readiness_url)"
+  require_file "$DARSHAN_BACKEND_TRANSPORT_CA_FILE" "Missing backend transport CA file: $DARSHAN_BACKEND_TRANSPORT_CA_FILE"
+  for ((i = 1; i <= attempts; i++)); do
+    if curl -fsS \
+      --cacert "$DARSHAN_BACKEND_TRANSPORT_CA_FILE" \
+      --resolve "${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}:${BACKEND_BIND_ADDRESS}" \
+      "$url" >/dev/null 2>&1; then
+      echo "Backend API readiness is healthy"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Backend API readiness did not become healthy at $url" >&2
   return 1
 }
 

@@ -20,7 +20,6 @@ import { respondWithError } from '@/utils/errors';
 import { getScheduleDisplayPreflight, publishScheduleSnapshot, resolvePresentations } from '@/routes/schedule-publish-helper';
 import z from 'zod';
 import { AppError } from '@/utils/app-error';
-import { serializeMediaRecord } from '@/utils/media';
 import { canAccessOwnedResource, getDepartmentUserIds, isAdminLike, isDepartmentScopedRole } from '@/rbac/policy';
 import { createScheduleReservationService } from '@/services/scheduling/reservation-service';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';

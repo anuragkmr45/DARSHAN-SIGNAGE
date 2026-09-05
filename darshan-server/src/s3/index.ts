@@ -15,6 +15,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash } from 'crypto';
+import { createReadStream } from 'fs';
 import { config as appConfig } from '@/config';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { observeS3Operation } from '@/observability/metrics';
@@ -83,7 +84,16 @@ export async function createBucketIfNotExists(bucketName: string): Promise<void>
   } catch (error: any) {
     // If bucket doesn't exist (404), create it
     if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === NOT_FOUND) {
-      await observeS3Operation('create_bucket', () => client.send(new CreateBucketCommand({ Bucket: bucketName })));
+      try {
+        await observeS3Operation('create_bucket', () => client.send(new CreateBucketCommand({ Bucket: bucketName })));
+      } catch (createError: any) {
+        // A second bootstrap/runtime may create the bucket between HeadBucket
+        // and CreateBucket. That is a successful idempotent outcome only when
+        // MinIO confirms this credential already owns the bucket.
+        if (createError?.name !== 'BucketAlreadyOwnedByYou' && createError?.Code !== 'BucketAlreadyOwnedByYou') {
+          throw createError;
+        }
+      }
     } else {
       // For other errors (like connection errors), throw them
       throw error;
@@ -116,6 +126,34 @@ export async function putObject(
     etag: response.ETag || '',
     sha256,
   };
+}
+
+/**
+ * Upload a file without materializing the complete payload in the API/worker
+ * heap. The hash is calculated in a first streaming pass so object metadata
+ * remains equivalent to putObject while the upload remains bounded by stream
+ * buffering rather than archive size.
+ */
+export async function putFile(
+  bucket: string,
+  key: string,
+  filePath: string,
+  contentType?: string
+): Promise<{ etag: string; sha256: string }> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  const sha256 = hash.digest('hex');
+  const client = getS3Client();
+  const response = await observeS3Operation('put_object', () => client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: createReadStream(filePath),
+    ContentType: contentType,
+    Metadata: { 'x-sha256': sha256 },
+  })));
+  return { etag: response.ETag || '', sha256 };
 }
 
 export async function putJson(bucket: string, key: string, data: any): Promise<{ etag: string; sha256: string }> {

@@ -1,5 +1,6 @@
 import net from 'net';
 import tls from 'tls';
+import { readFileSync } from 'node:fs';
 import { URL } from 'url';
 
 type RespValue = string | number | null | RespValue[];
@@ -12,6 +13,11 @@ type PendingCommand = {
 type ValkeyClientOptions = {
   url?: string;
   tlsEnabled?: boolean;
+  caCertPath?: string;
+  // The network address may be an IP while the certificate is issued for a
+  // DNS name. Keep connection routing and TLS identity distinct so callers
+  // never need to disable certificate verification for that topology.
+  tlsServerName?: string;
   commandTimeoutMs: number;
 };
 
@@ -43,6 +49,16 @@ function parseEndpoint(url: string, tlsEnabled?: boolean): ParsedEndpoint {
     database: parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.slice(1) : undefined,
     tlsEnabled: tlsEnabled ?? isTlsProtocol,
   };
+}
+
+function loadTrustedCa(caCertPath: string | undefined) {
+  if (!caCertPath) return undefined;
+  try {
+    return readFileSync(caCertPath);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to read VALKEY_CA_CERT_PATH ${caCertPath}: ${detail}`);
+  }
 }
 
 class RespParser {
@@ -114,12 +130,15 @@ class RespParser {
 export class ValkeyCommandClient {
   private socket: net.Socket | tls.TLSSocket | null = null;
   private connecting: Promise<void> | null = null;
-  private readonly parser = new RespParser();
+  private parser = new RespParser();
   private readonly pending: PendingCommand[] = [];
   private readonly endpoint: ParsedEndpoint | null;
+  private readonly trustedCa: Buffer | undefined;
+  private generation = 0;
 
   constructor(private readonly options: ValkeyClientOptions) {
     this.endpoint = options.url ? parseEndpoint(options.url, options.tlsEnabled) : null;
+    this.trustedCa = this.endpoint?.tlsEnabled ? loadTrustedCa(options.caCertPath) : undefined;
   }
 
   get configured() {
@@ -132,7 +151,100 @@ export class ValkeyCommandClient {
     }
 
     await this.connect();
-    if (!this.socket) throw new Error('Valkey command socket is not connected');
+    return await this.writeCommand(parts);
+  }
+
+  async close() {
+    this.generation += 1;
+    const socket = this.socket;
+    this.socket = null;
+    this.connecting = null;
+    socket?.destroy();
+    this.rejectPending(new Error('Valkey command client closed'));
+  }
+
+  private async connect() {
+    if (this.socket && !this.socket.destroyed) return;
+    if (this.connecting) return await this.connecting;
+
+    const generation = this.generation;
+    const connection = new Promise<void>((resolve, reject) => {
+      if (!this.endpoint) {
+        reject(new Error('VALKEY_URL is not configured'));
+        return;
+      }
+
+      const endpoint = this.endpoint;
+      const socket = endpoint.tlsEnabled
+        ? tls.connect({
+            host: endpoint.host,
+            port: endpoint.port,
+            servername: this.options.tlsServerName || endpoint.host,
+            ca: this.trustedCa,
+            rejectUnauthorized: true,
+            minVersion: 'TLSv1.2',
+          })
+        : net.createConnection({ host: endpoint.host, port: endpoint.port });
+
+      const fail = (error: Error) => {
+        socket.destroy();
+        reject(error);
+      };
+
+      socket.once('error', fail);
+      socket.once(endpoint.tlsEnabled ? 'secureConnect' : 'connect', async () => {
+        if (generation !== this.generation) {
+          socket.destroy();
+          reject(new Error('Valkey command client closed while connecting'));
+          return;
+        }
+        socket.off('error', fail);
+        this.socket = socket;
+        this.parser = new RespParser();
+        socket.on('data', (chunk) => {
+          if (generation !== this.generation || this.socket !== socket) return;
+          this.handleData(socket, chunk);
+        });
+        socket.on('error', (error) => {
+          if (generation !== this.generation || this.socket !== socket) return;
+          this.rejectPending(error);
+          this.socket = null;
+        });
+        socket.on('close', () => {
+          if (generation !== this.generation || this.socket !== socket) return;
+          this.rejectPending(new Error('Valkey command socket closed'));
+          this.socket = null;
+        });
+
+        try {
+          if (endpoint.password) {
+            await this.writeCommand(['AUTH', endpoint.password]);
+          }
+          if (endpoint.database) {
+            await this.writeCommand(['SELECT', endpoint.database]);
+          }
+          resolve();
+        } catch (error) {
+          if (this.socket === socket) this.socket = null;
+          socket.destroy();
+          reject(error instanceof Error ? error : new Error('Valkey handshake failed'));
+        }
+      });
+    });
+    this.connecting = connection;
+    void connection.then(() => {
+      if (this.connecting === connection) this.connecting = null;
+    }, () => {
+      if (this.connecting === connection) this.connecting = null;
+    });
+
+    return await connection;
+  }
+
+  private async writeCommand(parts: Array<string | number>) {
+    if (!this.socket || this.socket.destroyed) {
+      throw new Error('Valkey command socket is not connected');
+    }
 
     return await new Promise<RespValue>((resolve, reject) => {
       let pending: PendingCommand | null = null;
@@ -172,68 +284,7 @@ export class ValkeyCommandClient {
     });
   }
 
-  async close() {
-    const socket = this.socket;
-    this.socket = null;
-    this.connecting = null;
-    socket?.destroy();
-    this.rejectPending(new Error('Valkey command client closed'));
-  }
-
-  private async connect() {
-    if (this.socket && !this.socket.destroyed) return;
-    if (this.connecting) return await this.connecting;
-
-    this.connecting = new Promise<void>((resolve, reject) => {
-      if (!this.endpoint) {
-        reject(new Error('VALKEY_URL is not configured'));
-        return;
-      }
-
-      const endpoint = this.endpoint;
-      const socket = endpoint.tlsEnabled
-        ? tls.connect({ host: endpoint.host, port: endpoint.port, servername: endpoint.host })
-        : net.createConnection({ host: endpoint.host, port: endpoint.port });
-
-      const fail = (error: Error) => {
-        socket.destroy();
-        reject(error);
-      };
-
-      socket.once('error', fail);
-      socket.once('connect', async () => {
-        socket.off('error', fail);
-        this.socket = socket;
-        socket.on('data', (chunk) => this.handleData(chunk));
-        socket.on('error', (error) => {
-          this.rejectPending(error);
-          this.socket = null;
-        });
-        socket.on('close', () => {
-          this.rejectPending(new Error('Valkey command socket closed'));
-          if (this.socket === socket) this.socket = null;
-        });
-
-        try {
-          if (endpoint.password) {
-            await this.command(['AUTH', endpoint.password]);
-          }
-          if (endpoint.database) {
-            await this.command(['SELECT', endpoint.database]);
-          }
-          resolve();
-        } catch (error) {
-          reject(error instanceof Error ? error : new Error('Valkey handshake failed'));
-        }
-      });
-    }).finally(() => {
-      this.connecting = null;
-    });
-
-    return await this.connecting;
-  }
-
-  private handleData(chunk: Buffer) {
+  private handleData(socket: net.Socket | tls.TLSSocket, chunk: Buffer) {
     try {
       const values = this.parser.push(chunk);
       for (const value of values) {
@@ -242,6 +293,7 @@ export class ValkeyCommandClient {
       }
     } catch (error) {
       this.rejectPending(error instanceof Error ? error : new Error('Valkey response parse failed'));
+      socket.destroy();
     }
   }
 
@@ -254,12 +306,16 @@ export class ValkeyCommandClient {
 
 export class ValkeySubscriberClient {
   private socket: net.Socket | tls.TLSSocket | null = null;
-  private readonly parser = new RespParser();
+  private parser = new RespParser();
   private readonly endpoint: ParsedEndpoint | null;
+  private readonly trustedCa: Buffer | undefined;
+  private readonly setupPending: PendingCommand[] = [];
   private closed = false;
+  private generation = 0;
 
   constructor(private readonly options: ValkeyClientOptions & { reconnectMinMs: number; reconnectMaxMs: number }) {
     this.endpoint = options.url ? parseEndpoint(options.url, options.tlsEnabled) : null;
+    this.trustedCa = this.endpoint?.tlsEnabled ? loadTrustedCa(options.caCertPath) : undefined;
   }
 
   get configured() {
@@ -272,11 +328,18 @@ export class ValkeySubscriberClient {
     }
 
     this.closed = false;
-    await this.connectAndSubscribe(channels, handler, onError, this.options.reconnectMinMs);
+    this.generation += 1;
+    const generation = this.generation;
+    this.socket?.destroy();
+    this.socket = null;
+    this.rejectSetup(new Error('Valkey subscriber replaced'));
+    await this.connectAndSubscribe(channels, handler, onError, this.options.reconnectMinMs, generation);
   }
 
   async close() {
     this.closed = true;
+    this.generation += 1;
+    this.rejectSetup(new Error('Valkey subscriber closed'));
     this.socket?.destroy();
     this.socket = null;
   }
@@ -285,51 +348,135 @@ export class ValkeySubscriberClient {
     channels: string[],
     handler: (channel: string, payload: string) => void,
     onError: ((error: Error) => void) | undefined,
-    reconnectDelayMs: number
+    reconnectDelayMs: number,
+    generation: number
   ) {
-    if (!this.endpoint || this.closed) return;
+    const endpoint = this.endpoint;
+    if (!endpoint || this.closed || generation !== this.generation) return;
 
-    const socket = this.endpoint.tlsEnabled
-      ? tls.connect({ host: this.endpoint.host, port: this.endpoint.port, servername: this.endpoint.host })
+    const socket = endpoint.tlsEnabled
+      ? tls.connect({
+        host: endpoint.host,
+        port: endpoint.port,
+        servername: this.options.tlsServerName || endpoint.host,
+          ca: this.trustedCa,
+          rejectUnauthorized: true,
+          minVersion: 'TLSv1.2',
+        })
       : net.createConnection({ host: this.endpoint.host, port: this.endpoint.port });
 
     socket.on('data', (chunk) => {
+      if (generation !== this.generation || this.socket !== socket) return;
       try {
         const values = this.parser.push(chunk);
         for (const value of values) {
+          const pending = this.setupPending.shift();
+          if (pending) {
+            pending.resolve(value);
+            continue;
+          }
           if (Array.isArray(value) && value[0] === 'message' && typeof value[1] === 'string' && typeof value[2] === 'string') {
             handler(value[1], value[2]);
           }
         }
       } catch (error) {
-        onError?.(error instanceof Error ? error : new Error('Valkey subscriber parse failed'));
+        const failure = error instanceof Error ? error : new Error('Valkey subscriber parse failed');
+        this.rejectSetup(failure);
+        onError?.(failure);
+        socket.destroy();
       }
     });
 
-    socket.once('error', (error) => {
+    const initialError = (_error: Error) => {
+      socket.destroy();
+    };
+    socket.once('error', initialError);
+    socket.on('error', (error) => {
+      if (generation !== this.generation || (this.socket && this.socket !== socket)) return;
+      this.rejectSetup(error);
       onError?.(error);
     });
 
     socket.once('close', () => {
-      if (this.closed) return;
+      if (generation !== this.generation || (this.socket && this.socket !== socket)) return;
+      this.rejectSetup(new Error('Valkey subscriber socket closed'));
+      if (this.socket === socket) this.socket = null;
+      if (this.closed || generation !== this.generation) return;
       const nextDelay = Math.min(reconnectDelayMs * 2, this.options.reconnectMaxMs);
       setTimeout(() => {
-        void this.connectAndSubscribe(channels, handler, onError, nextDelay);
+        void this.connectAndSubscribe(channels, handler, onError, nextDelay, generation);
       }, reconnectDelayMs).unref?.();
     });
 
     await new Promise<void>((resolve, reject) => {
-      socket.once('connect', () => resolve());
+      const onReady = () => {
+        socket.off('error', reject);
+        resolve();
+      };
+      socket.once(endpoint.tlsEnabled ? 'secureConnect' : 'connect', onReady);
       socket.once('error', reject);
     });
 
+    socket.off('error', initialError);
+    if (this.closed || generation !== this.generation) {
+      socket.destroy();
+      return;
+    }
+
     this.socket = socket;
-    if (this.endpoint.password) {
-      socket.write(encodeCommand(['AUTH', this.endpoint.password]));
+    this.parser = new RespParser();
+    try {
+      if (endpoint.password) {
+        await this.writeSetupCommand(socket, ['AUTH', endpoint.password]);
+      }
+      if (endpoint.database) {
+        await this.writeSetupCommand(socket, ['SELECT', endpoint.database]);
+      }
+      await this.writeSetupCommand(socket, ['SUBSCRIBE', ...channels]);
+    } catch (error) {
+      if (this.socket === socket) socket.destroy();
+      throw error;
     }
-    if (this.endpoint.database) {
-      socket.write(encodeCommand(['SELECT', this.endpoint.database]));
+  }
+
+  private async writeSetupCommand(socket: net.Socket | tls.TLSSocket, parts: Array<string | number>) {
+    return await new Promise<RespValue>((resolve, reject) => {
+      let pending: PendingCommand | null = null;
+      const removePending = () => {
+        if (!pending) return;
+        const index = this.setupPending.indexOf(pending);
+        if (index >= 0) this.setupPending.splice(index, 1);
+        pending = null;
+      };
+      const timer = setTimeout(() => {
+        removePending();
+        reject(new Error(`Valkey subscriber setup timed out: ${parts[0]}`));
+      }, this.options.commandTimeoutMs);
+      pending = {
+        resolve: (value) => {
+          clearTimeout(timer);
+          pending = null;
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          pending = null;
+          reject(error);
+        },
+      };
+      this.setupPending.push(pending);
+      socket.write(encodeCommand(parts), (error) => {
+        if (!error) return;
+        removePending();
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+  }
+
+  private rejectSetup(error: Error) {
+    while (this.setupPending.length > 0) {
+      this.setupPending.shift()?.reject(error);
     }
-    socket.write(encodeCommand(['SUBSCRIBE', ...channels]));
   }
 }

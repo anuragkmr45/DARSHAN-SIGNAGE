@@ -7,6 +7,7 @@ import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { recordDeviceAuthAttempt } from '@/observability/metrics';
+import { recordDeviceAuthRolloutObservation } from '@/deployment/device-auth-rollout';
 import {
   hasAnySignatureHeader,
   hasCompleteSignatureHeaders,
@@ -180,6 +181,19 @@ export async function authenticateDeviceOrThrow(
         fingerprint: cert.serial,
         authMethod,
       };
+
+      try {
+        await recordDeviceAuthRolloutObservation({
+          screenId: deviceId,
+          channel: 'http',
+          method: authMethod === 'signature' ? 'signed' : 'legacy',
+        });
+      } catch (observationError) {
+        // Observation failure must not change a cryptographically valid device
+        // authentication result. It is safe to fail closed at rollout time
+        // because the missing evidence prevents signature-only promotion.
+        logger.warn({ err: observationError, device_id: deviceId }, 'Failed to record device-auth rollout observation');
+      }
 
       recordAuthSuccess(authMethod);
       return { type: 'device' as const };

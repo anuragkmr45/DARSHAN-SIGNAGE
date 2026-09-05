@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
@@ -92,6 +92,8 @@ const backendFileConfigSchema = z
         csrfEnabled: z.boolean().optional(),
         loginMaxAttempts: z.number().int().positive().optional(),
         loginLockoutWindowSeconds: z.number().int().positive().optional(),
+        loginThrottleProvider: z.enum(['memory', 'valkey']).optional(),
+        loginThrottleFailClosed: z.boolean().optional(),
         maxUploadMb: z.number().int().positive().optional(),
         storageQuotaBytes: z.number().int().nonnegative().optional(),
         swaggerUiEnabled: z.boolean().optional(),
@@ -186,6 +188,89 @@ export interface BackendConfigFileDiagnostics {
   };
   profile: BackendProfileSelector;
   mappedEnvKeys: string[];
+}
+
+const fileBackedSecretKeys = [
+  'DATABASE_URL',
+  'JWT_SECRET',
+  'MINIO_ACCESS_KEY',
+  'MINIO_SECRET_KEY',
+  'VALKEY_URL',
+  'REDIS_URL',
+  'OBSERVABILITY_METRICS_BEARER_TOKEN',
+  'BACKUP_OFFHOST_ACCESS_KEY',
+  'BACKUP_OFFHOST_SECRET_KEY',
+] as const;
+
+export const requiredProductionFileBackedSecretKeys = [
+  'DATABASE_URL',
+  'JWT_SECRET',
+  'MINIO_ACCESS_KEY',
+  'MINIO_SECRET_KEY',
+  'VALKEY_URL',
+] as const;
+
+export const requiredProductionWorkerFileBackedSecretKeys = [
+  ...requiredProductionFileBackedSecretKeys,
+  'BACKUP_OFFHOST_ACCESS_KEY',
+  'BACKUP_OFFHOST_SECRET_KEY',
+] as const;
+
+/**
+ * Production credentials must enter a runtime through a protected file mount,
+ * not through the container environment.  Check the original environment,
+ * before hydration, so the presence of a successfully read value cannot hide
+ * an unsafe direct secret.
+ */
+export function assertProductionFileBackedSecrets(
+  sourceEnv: NodeJS.ProcessEnv,
+  keys: readonly string[] = requiredProductionFileBackedSecretKeys
+): void {
+  for (const key of keys) {
+    const fileKey = `${key}_FILE`;
+    if (normalizedEnvValue(sourceEnv[key])) {
+      throw new Error(`Production ${key} must be supplied through ${fileKey}, not directly in the environment`);
+    }
+    if (!normalizedEnvValue(sourceEnv[fileKey])) {
+      throw new Error(`Production ${fileKey} is required`);
+    }
+  }
+}
+
+/**
+ * Resolve Docker/Kubernetes-style `NAME_FILE` references without mutating the
+ * process environment. A direct value and a file reference together are an
+ * error: accepting both makes it too easy to accidentally keep a secret in
+ * container inspection output while believing file-backed secrets are active.
+ */
+export function hydrateFileBackedSecrets(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const hydrated = { ...env };
+  for (const key of fileBackedSecretKeys) {
+    const fileKey = `${key}_FILE`;
+    const rawPath = normalizedEnvValue(env[fileKey]);
+    if (!rawPath) continue;
+    if (normalizedEnvValue(env[key])) {
+      throw new Error(`${key} and ${fileKey} cannot both be configured`);
+    }
+    let stat;
+    try {
+      stat = lstatSync(rawPath);
+    } catch {
+      throw new Error(`${fileKey} does not exist or is not readable`);
+    }
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`${fileKey} must reference a regular file`);
+    }
+    // Group-readable root:docker (0640) files are supported for controlled
+    // runtime mounts. Other users must never be able to read a secret file.
+    if ((stat.mode & 0o007) !== 0) {
+      throw new Error(`${fileKey} must not be readable by other users`);
+    }
+    const value = readFileSync(rawPath, 'utf8').replace(/\r?\n$/, '');
+    if (value.length === 0) throw new Error(`${fileKey} is empty`);
+    hydrated[key] = value;
+  }
+  return hydrated;
 }
 
 function normalizedEnvValue(value: string | undefined) {
@@ -330,6 +415,8 @@ export function mapBackendFileConfigToEnv(config: BackendFileConfig): Record<str
   putIfDefined(env, 'CSRF_ENABLED', config.security?.csrfEnabled);
   putIfDefined(env, 'LOGIN_MAX_ATTEMPTS', config.security?.loginMaxAttempts);
   putIfDefined(env, 'LOGIN_LOCKOUT_WINDOW_SECONDS', config.security?.loginLockoutWindowSeconds);
+  putIfDefined(env, 'LOGIN_THROTTLE_PROVIDER', config.security?.loginThrottleProvider);
+  putIfDefined(env, 'LOGIN_THROTTLE_FAIL_CLOSED', config.security?.loginThrottleFailClosed);
   putIfDefined(env, 'MAX_UPLOAD_MB', config.security?.maxUploadMb);
   putIfDefined(env, 'STORAGE_QUOTA_BYTES', config.security?.storageQuotaBytes);
   putIfDefined(env, 'ENABLE_SWAGGER_UI', config.security?.swaggerUiEnabled);
@@ -433,9 +520,10 @@ export function buildBackendRuntimeEnv(env: NodeJS.ProcessEnv = process.env): {
   env: NodeJS.ProcessEnv;
   diagnostics: BackendConfigFileDiagnostics;
 } {
-  const fileConfig = loadBackendFileConfigEnv(env);
+  const hydratedEnv = hydrateFileBackedSecrets(env);
+  const fileConfig = loadBackendFileConfigEnv(hydratedEnv);
   return {
-    env: { ...fileConfig.env, ...env },
+    env: { ...fileConfig.env, ...hydratedEnv },
     diagnostics: fileConfig.diagnostics,
   };
 }

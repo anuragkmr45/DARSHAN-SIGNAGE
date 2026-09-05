@@ -4,12 +4,10 @@ import { createUserRepository } from '@/db/repositories/user';
 import { hashPassword, validatePasswordStrength } from '@/auth/password';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
-import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('user-activate-route');
-const { BAD_REQUEST, NOT_FOUND } = HTTP_STATUS;
 
 const activateSchema = z.object({
   token: z.string().min(1),

@@ -15,7 +15,7 @@ import { AppError } from '@/utils/app-error';
 import { canManageUserRecord, canManageUserRoleTarget, canReadUserRecord } from '@/rbac/policy';
 
 const logger = createLogger('users-invite-routes');
-const { BAD_REQUEST, CREATED, FORBIDDEN, NOT_FOUND, OK, UNAUTHORIZED } = HTTP_STATUS;
+const { CREATED, OK } = HTTP_STATUS;
 
 const inviteSchema = z.object({
   email: z.string().email(),

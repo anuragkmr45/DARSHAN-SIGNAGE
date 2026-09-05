@@ -1,0 +1,74 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(up{job=\"vm-valkey-node\"}) or vector(0)", "refId": "A" }],
+      "title": "Valkey Host Exporter Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(darshan:host_memory_utilization:ratio{job=\"vm-valkey-node\"}) or vector(0)", "refId": "A" }],
+      "title": "Valkey Host Memory",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(darshan:host_filesystem_utilization:ratio{job=\"vm-valkey-node\"}) or vector(0)", "refId": "A" }],
+      "title": "Valkey Host Filesystem",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "darshan:host_cpu_utilization:ratio{job=\"vm-valkey-node\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
+        { "expr": "darshan:host_memory_utilization:ratio{job=\"vm-valkey-node\"}", "legendFormat": "{{ instance }} memory", "refId": "B" },
+        { "expr": "darshan:host_filesystem_utilization:ratio{job=\"vm-valkey-node\"}", "legendFormat": "{{ instance }} filesystem", "refId": "C" }
+      ],
+      "title": "Valkey Host Utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (instance) (rate(node_network_receive_bytes_total{job=\"vm-valkey-node\",device!~\"lo|docker.*|veth.*|br-.*\"}[5m]))", "legendFormat": "{{ instance }} rx", "refId": "A" },
+        { "expr": "sum by (instance) (rate(node_network_transmit_bytes_total{job=\"vm-valkey-node\",device!~\"lo|docker.*|veth.*|br-.*\"}[5m]))", "legendFormat": "{{ instance }} tx", "refId": "B" }
+      ],
+      "title": "Valkey Host Network",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["darshan", "valkey", "machine"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "DARSHAN Valkey Machine",
+  "uid": "darshan-vm-valkey",
+  "version": 1
+}

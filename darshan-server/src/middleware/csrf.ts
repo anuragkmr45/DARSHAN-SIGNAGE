@@ -11,7 +11,7 @@ const CSRF_EXEMPT_PATHS = new Set([
 export const csrfProtectionPlugin: FastifyPluginAsync = async (fastify) => {
   if (!appConfig.CSRF_ENABLED) return;
 
-  fastify.addHook('preHandler', async (request, reply) => {
+  fastify.addHook('preHandler', async (request, _reply) => {
     if (SAFE_METHODS.has(request.method)) return;
 
     if (request.routerPath && CSRF_EXEMPT_PATHS.has(request.routerPath)) return;

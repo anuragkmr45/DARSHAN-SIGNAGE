@@ -51,7 +51,7 @@ export const deriveMediaDisplayName = (displayName: string | undefined | null, f
 export const sanitizeStorageFilename = (filename: string) =>
   path
     .basename(filename)
-    .replace(/[^\w.\-]+/g, '_')
+    .replace(/[^\w.-]+/g, '_')
     .replace(/_+/g, '_');
 
 const toIso = (value?: Date | string | null) => {

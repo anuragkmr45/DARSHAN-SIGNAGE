@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { and, eq, gte, isNull, lte, or, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { config as appConfig } from '@/config';
@@ -355,8 +355,12 @@ function normalizePairingStatusError(error: unknown) {
 
 export function shouldPersistTelemetryInline(
   nodeEnv: string = appConfig.NODE_ENV,
-  processRole: string | undefined = process.env.DARSHAN_PROCESS_ROLE?.trim() || process.env.HEXMON_PROCESS_ROLE?.trim()
+  processRole?: string
 ) {
+  // Inline persistence is a deliberate development-only single-process mode.
+  // Do not infer `api` from the ambient environment here: callers that have
+  // not established a process role must take the queue path, otherwise a
+  // worker-capable deployment can silently run two persistence paths.
   return nodeEnv === 'development' && processRole === 'api';
 }
 
