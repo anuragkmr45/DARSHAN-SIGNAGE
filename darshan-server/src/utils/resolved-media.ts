@@ -15,9 +15,16 @@ export async function buildResolvedMediaMap(
   }
 
   const mediaRows = await db.select().from(schema.media).where(inArray(schema.media.id, uniqueIds as any));
+  const readyObjectIds = Array.from(
+    new Set(mediaRows.map((media) => media.ready_object_id).filter((id): id is string => Boolean(id)))
+  );
+  const readyObjects = readyObjectIds.length
+    ? await db.select().from(schema.storageObjects).where(inArray(schema.storageObjects.id, readyObjectIds as any))
+    : [];
+  const readyObjectMap = new Map(readyObjects.map((storageObject) => [storageObject.id, storageObject]));
   const resolvedEntries = await Promise.all(
     mediaRows.map(async (media) => {
-      const access = await resolveMediaAccess(media, db, { audience });
+      const access = await resolveMediaAccess(media, db, { audience, readyObjectMap });
       return [
         media.id,
         serializeMediaRecord(media, access.media_url, {

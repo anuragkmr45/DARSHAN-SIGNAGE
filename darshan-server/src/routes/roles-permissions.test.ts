@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { closeTestServer, createTestServer, generateTestToken, testUser } from '@/test/helpers';
 import { HTTP_STATUS } from '@/http-status-codes';
+import { getDatabase, schema } from '@/db';
 
 describe('Role and permission routes', () => {
   let server: FastifyInstance;
@@ -36,6 +37,16 @@ describe('Role and permission routes', () => {
   });
 
   it('lists system roles for authorized callers', async () => {
+    const db = getDatabase();
+    const suffix = Date.now();
+    await db.insert(schema.roles).values(
+      Array.from({ length: 25 }, (_, index) => ({
+        name: `CUSTOM_ROLE_PAGE_PRESSURE_${suffix}_${index}`,
+        permissions: { grants: [] },
+        is_system: false,
+      }))
+    );
+
     const response = await server.inject({
       method: 'GET',
       url: '/api/v1/roles?page=1&limit=20',
@@ -49,6 +60,12 @@ describe('Role and permission routes', () => {
     expect(Array.isArray(body.items)).toBe(true);
     expect(body.items.some((item: any) => item.name === 'SUPER_ADMIN')).toBe(true);
     expect(body.items.some((item: any) => item.name === 'ADMIN')).toBe(true);
+    expect(body.items.slice(0, 4).map((item: any) => item.name)).toEqual([
+      'SUPER_ADMIN',
+      'ADMIN',
+      'DEPARTMENT',
+      'OPERATOR',
+    ]);
   });
 
   it('rejects role creation for plain admins but allows super admins', async () => {

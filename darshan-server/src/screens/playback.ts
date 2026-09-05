@@ -1,12 +1,21 @@
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
-import { resolveDefaultMediaForScreen } from '@/utils/default-media';
+import {
+  getDefaultMediaTargetAssignments,
+  getDefaultMediaVariants,
+  resolveDefaultMediaForScreen,
+  type ResolvedDefaultMedia,
+} from '@/utils/default-media';
+import { resolveAspectRatio } from '@/utils/aspect-ratio';
 import { getPresignedUrl } from '@/s3';
-import { buildResolvedMediaRecord } from '@/utils/resolved-media';
+import { buildResolvedMediaMap, buildResolvedMediaRecord } from '@/utils/resolved-media';
 import { createScheduleReservationRepository } from '@/db/repositories/schedule-reservation';
 
 type ScreenRecord = typeof schema.screens.$inferSelect;
 type ScreenGroupRecord = typeof schema.screenGroups.$inferSelect;
+type EmergencyRecord = typeof schema.emergencies.$inferSelect;
+type ResolvedMediaRecord = Awaited<ReturnType<typeof buildResolvedMediaRecord>>;
+type ScreenshotPreview = Awaited<ReturnType<typeof getLatestScreenshotPreview>>;
 
 type PlaybackSource = 'HEARTBEAT' | 'SCHEDULE' | 'EMERGENCY' | 'DEFAULT' | 'UNKNOWN';
 export type ScreenHealthState = 'ONLINE' | 'OFFLINE' | 'STALE' | 'ERROR' | 'RECOVERY_REQUIRED';
@@ -47,6 +56,12 @@ type BuildScreenPlaybackStateOptions = {
   includePreview?: boolean;
   includeUrls?: boolean;
   groupIds?: string[];
+  latestPublish?: LatestPublishForScreen | null;
+  skipReservationExpiry?: boolean;
+  defaultMedia?: ResolvedDefaultMedia;
+  activeEmergencies?: EmergencyRecord[];
+  currentMediaById?: Map<string, ResolvedMediaRecord>;
+  preview?: ScreenshotPreview;
   lastProofOfPlayAt?: string | null;
   recoveryState?: ScreenRecoveryState;
 };
@@ -303,14 +318,55 @@ export async function getGroupIdsForScreen(
   return rows.map((row) => row.group_id);
 }
 
+async function getGroupIdsByScreenId(
+  screenIds: string[],
+  db = getDatabase()
+): Promise<Map<string, string[]>> {
+  const result = new Map(screenIds.map((screenId) => [screenId, [] as string[]]));
+  if (screenIds.length === 0) return result;
+
+  const rows = await db
+    .select({
+      screen_id: schema.screenGroupMembers.screen_id,
+      group_id: schema.screenGroupMembers.group_id,
+    })
+    .from(schema.screenGroupMembers)
+    .where(inArray(schema.screenGroupMembers.screen_id, screenIds as any));
+
+  for (const row of rows) {
+    const groups = result.get(row.screen_id);
+    if (groups) {
+      groups.push(row.group_id);
+    }
+  }
+
+  return result;
+}
+
+type LatestPublishForScreen = {
+  publish_id: string;
+  schedule_id: string | null;
+  snapshot_id: string;
+  published_at: Date;
+  payload: unknown;
+  reservation_version: number | null;
+  selection_reason: 'active_reservation' | 'upcoming_reservation' | 'latest_publish';
+  reservation_start_at: Date | null;
+  reservation_end_at: Date | null;
+};
+
 export async function getLatestPublishForScreen(
   screenId: string,
-  db = getDatabase()
-) {
+  db = getDatabase(),
+  options: { now?: Date; skipReservationExpiry?: boolean } = {}
+): Promise<LatestPublishForScreen | null> {
   const reservationRepo = createScheduleReservationRepository();
-  await reservationRepo.expireStaleHolds(new Date(), db);
+  const now = options.now ?? new Date();
+  if (!options.skipReservationExpiry) {
+    await reservationRepo.expireStaleHolds(now, db);
+  }
 
-  const active = await reservationRepo.findCurrentPublishedForScreen(screenId, new Date(), db);
+  const active = await reservationRepo.findCurrentPublishedForScreen(screenId, now, db);
   if (active) {
     return {
       publish_id: active.publish_id,
@@ -325,7 +381,7 @@ export async function getLatestPublishForScreen(
     };
   }
 
-  const upcoming = await reservationRepo.findUpcomingPublishedForScreen(screenId, new Date(), db);
+  const upcoming = await reservationRepo.findUpcomingPublishedForScreen(screenId, now, db);
   if (upcoming) {
     return {
       publish_id: upcoming.publish_id,
@@ -376,6 +432,148 @@ export async function getLatestPublishForScreen(
   };
 }
 
+async function getLatestPublishByScreenId(
+  screenIds: string[],
+  db = getDatabase(),
+  now = new Date()
+): Promise<Map<string, LatestPublishForScreen | null>> {
+  const result = new Map(screenIds.map((screenId) => [screenId, null as LatestPublishForScreen | null]));
+  if (screenIds.length === 0) return result;
+
+  const [activeReservations, upcomingReservations, latestPublishes] = await Promise.all([
+    db
+      .select({
+        screen_id: schema.scheduleReservations.screen_id,
+        reservation_version: schema.scheduleReservations.reservation_version,
+        publish_id: schema.scheduleReservations.publish_id,
+        published_at: schema.scheduleReservations.published_at,
+        start_at: schema.scheduleReservations.start_at,
+        end_at: schema.scheduleReservations.end_at,
+        schedule_id: schema.publishes.schedule_id,
+        snapshot_id: schema.publishes.snapshot_id,
+        payload: schema.scheduleSnapshots.payload,
+      })
+      .from(schema.scheduleReservations)
+      .innerJoin(schema.publishes, eq(schema.scheduleReservations.publish_id, schema.publishes.id))
+      .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+      .where(
+        and(
+          inArray(schema.scheduleReservations.screen_id, screenIds as any),
+          eq(schema.scheduleReservations.state, 'PUBLISHED'),
+          eq(schema.publishes.status, 'ACTIVE'),
+          lt(schema.scheduleReservations.start_at, now),
+          gt(schema.scheduleReservations.end_at, now)
+        )
+      )
+      .orderBy(
+        schema.scheduleReservations.screen_id,
+        desc(schema.scheduleReservations.start_at),
+        desc(schema.scheduleReservations.published_at),
+        desc(schema.scheduleReservations.publish_id)
+      ),
+    db
+      .select({
+        screen_id: schema.scheduleReservations.screen_id,
+        reservation_version: schema.scheduleReservations.reservation_version,
+        publish_id: schema.scheduleReservations.publish_id,
+        published_at: schema.scheduleReservations.published_at,
+        start_at: schema.scheduleReservations.start_at,
+        end_at: schema.scheduleReservations.end_at,
+        schedule_id: schema.publishes.schedule_id,
+        snapshot_id: schema.publishes.snapshot_id,
+        payload: schema.scheduleSnapshots.payload,
+      })
+      .from(schema.scheduleReservations)
+      .innerJoin(schema.publishes, eq(schema.scheduleReservations.publish_id, schema.publishes.id))
+      .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+      .where(
+        and(
+          inArray(schema.scheduleReservations.screen_id, screenIds as any),
+          eq(schema.scheduleReservations.state, 'PUBLISHED'),
+          eq(schema.publishes.status, 'ACTIVE'),
+          gt(schema.scheduleReservations.start_at, now)
+        )
+      )
+      .orderBy(
+        schema.scheduleReservations.screen_id,
+        schema.scheduleReservations.start_at,
+        desc(schema.scheduleReservations.published_at),
+        desc(schema.scheduleReservations.publish_id)
+      ),
+    db
+      .select({
+        screen_id: schema.publishTargets.screen_id,
+        publish_id: schema.publishes.id,
+        schedule_id: schema.publishes.schedule_id,
+        snapshot_id: schema.publishes.snapshot_id,
+        published_at: schema.publishes.published_at,
+        payload: schema.scheduleSnapshots.payload,
+      })
+      .from(schema.publishTargets)
+      .innerJoin(schema.publishes, eq(schema.publishTargets.publish_id, schema.publishes.id))
+      .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+      .where(
+        and(
+          inArray(schema.publishTargets.screen_id, screenIds as any),
+          eq(schema.publishes.status, 'ACTIVE'),
+          isNull(schema.publishes.taken_down_at)
+        )
+      )
+      .orderBy(
+        schema.publishTargets.screen_id,
+        desc(schema.publishes.published_at),
+        desc(schema.publishes.id)
+      ),
+  ]);
+
+  for (const row of activeReservations) {
+    if (result.get(row.screen_id)) continue;
+    result.set(row.screen_id, {
+      publish_id: row.publish_id!,
+      schedule_id: row.schedule_id,
+      snapshot_id: row.snapshot_id,
+      published_at: row.published_at!,
+      payload: row.payload,
+      reservation_version: row.reservation_version,
+      selection_reason: 'active_reservation',
+      reservation_start_at: row.start_at,
+      reservation_end_at: row.end_at,
+    });
+  }
+
+  for (const row of upcomingReservations) {
+    if (result.get(row.screen_id)) continue;
+    result.set(row.screen_id, {
+      publish_id: row.publish_id!,
+      schedule_id: row.schedule_id,
+      snapshot_id: row.snapshot_id,
+      published_at: row.published_at!,
+      payload: row.payload,
+      reservation_version: row.reservation_version,
+      selection_reason: 'upcoming_reservation',
+      reservation_start_at: row.start_at,
+      reservation_end_at: row.end_at,
+    });
+  }
+
+  for (const row of latestPublishes) {
+    if (!row.screen_id || result.get(row.screen_id)) continue;
+    result.set(row.screen_id, {
+      publish_id: row.publish_id,
+      schedule_id: row.schedule_id,
+      snapshot_id: row.snapshot_id,
+      published_at: row.published_at,
+      payload: row.payload,
+      reservation_version: null,
+      selection_reason: 'latest_publish',
+      reservation_start_at: null,
+      reservation_end_at: null,
+    });
+  }
+
+  return result;
+}
+
 export function filterItemsForScreen(items: any[], screenId: string, groupIds: string[]) {
   return items.filter((item) => {
     const itemScreens = Array.isArray(item?.screen_ids) ? (item.screen_ids as string[]) : [];
@@ -410,20 +608,27 @@ export function buildTimeline(items: any[], now = new Date()) {
 
 export async function getActiveEmergencyForScreen(
   screenId: string,
-  options: { db?: ReturnType<typeof getDatabase>; includeUrls?: boolean; groupIds?: string[] } = {}
+  options: {
+    db?: ReturnType<typeof getDatabase>;
+    includeUrls?: boolean;
+    groupIds?: string[];
+    activeEmergencies?: EmergencyRecord[];
+  } = {}
 ) {
   const db = options.db ?? getDatabase();
-  const emergencies = await db
-    .select()
-    .from(schema.emergencies)
-    .where(
-      and(
-        eq(schema.emergencies.is_active, true),
-        isNull(schema.emergencies.cleared_at),
-        sql`(${schema.emergencies.expires_at} IS NULL OR ${schema.emergencies.expires_at} > now())`
+  const emergencies =
+    options.activeEmergencies ??
+    (await db
+      .select()
+      .from(schema.emergencies)
+      .where(
+        and(
+          eq(schema.emergencies.is_active, true),
+          isNull(schema.emergencies.cleared_at),
+          sql`(${schema.emergencies.expires_at} IS NULL OR ${schema.emergencies.expires_at} > now())`
+        )
       )
-    )
-    .orderBy(desc(schema.emergencies.created_at));
+      .orderBy(desc(schema.emergencies.created_at)));
 
   if (emergencies.length === 0) return null;
 
@@ -539,6 +744,194 @@ export async function getLatestScreenshotPreview(
     screenshot_url: screenshotUrl,
     stale: Number.isFinite(capturedAtMs) ? now.getTime() - capturedAtMs > SCREENSHOT_PREVIEW_STALE_MS : true,
   };
+}
+
+async function getLatestScreenshotPreviewByScreenId(
+  screenIds: string[],
+  db = getDatabase(),
+  now = new Date()
+): Promise<Map<string, ScreenshotPreview>> {
+  const result = new Map(screenIds.map((screenId) => [screenId, null as ScreenshotPreview]));
+  if (screenIds.length === 0) return result;
+
+  const rows = await db
+    .select({
+      screen_id: schema.screenshots.screen_id,
+      storage_object_id: schema.screenshots.storage_object_id,
+      captured_at: schema.screenshots.created_at,
+      bucket: schema.storageObjects.bucket,
+      object_key: schema.storageObjects.object_key,
+    })
+    .from(schema.screenshots)
+    .innerJoin(schema.storageObjects, eq(schema.screenshots.storage_object_id, schema.storageObjects.id))
+    .where(inArray(schema.screenshots.screen_id, screenIds as any))
+    .orderBy(schema.screenshots.screen_id, desc(schema.screenshots.created_at));
+
+  for (const row of rows) {
+    if (result.get(row.screen_id)) continue;
+    let screenshotUrl: string | null = null;
+    try {
+      screenshotUrl = await getPresignedUrl(row.bucket, row.object_key, 3600);
+    } catch {
+      screenshotUrl = null;
+    }
+
+    const capturedAtIso = toIso(row.captured_at);
+    const capturedAtMs =
+      row.captured_at instanceof Date ? row.captured_at.getTime() : Date.parse(String(row.captured_at));
+
+    result.set(row.screen_id, {
+      storage_object_id: row.storage_object_id,
+      captured_at: capturedAtIso,
+      screenshot_url: screenshotUrl,
+      stale: Number.isFinite(capturedAtMs) ? now.getTime() - capturedAtMs > SCREENSHOT_PREVIEW_STALE_MS : true,
+    });
+  }
+
+  return result;
+}
+
+function collectPresentationMediaIds(presentation: any, ids: Set<string>) {
+  if (!presentation || typeof presentation !== 'object') return;
+  const collect = (entries: unknown) => {
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      const mediaId = typeof entry?.media_id === 'string' ? entry.media_id : null;
+      if (mediaId) ids.add(mediaId);
+    }
+  };
+
+  collect(presentation.items);
+  collect(presentation.slots);
+}
+
+async function buildCurrentMediaById(
+  screens: ScreenRecord[],
+  latestPublishByScreenId: Map<string, LatestPublishForScreen | null>,
+  defaultMediaByScreenId: Map<string, ResolvedDefaultMedia>,
+  activeEmergencies: EmergencyRecord[],
+  db = getDatabase()
+): Promise<Map<string, ResolvedMediaRecord>> {
+  const ids = new Set<string>();
+
+  for (const emergency of activeEmergencies) {
+    const mediaId = typeof (emergency as any).media_id === 'string' ? (emergency as any).media_id : null;
+    if (mediaId) ids.add(mediaId);
+  }
+
+  for (const screen of screens) {
+    const activeSlots = normalizeActiveSlots((screen as any).active_slots);
+    if (activeSlots[0]?.media_id) ids.add(activeSlots[0].media_id);
+    if (screen.current_media_id) ids.add(screen.current_media_id);
+
+    const defaultMedia = defaultMediaByScreenId.get(screen.id);
+    if (defaultMedia?.media_id) ids.add(defaultMedia.media_id);
+
+    const schedulePayload = (latestPublishByScreenId.get(screen.id)?.payload as any)?.schedule;
+    const scheduleItems = Array.isArray(schedulePayload?.items) ? schedulePayload.items : [];
+    for (const item of scheduleItems) {
+      collectPresentationMediaIds(item?.presentation, ids);
+    }
+  }
+
+  const mediaMap = await buildResolvedMediaMap(Array.from(ids), db);
+  return new Map(
+    Array.from(mediaMap.entries()).map(([mediaId, media]) => [
+      mediaId,
+      {
+        ...media,
+        url: media.type === 'WEBPAGE' ? media.source_url ?? null : media.media_url ?? null,
+        fallback_url: media.fallback_media_url ?? null,
+        media_type: media.type,
+      },
+    ])
+  );
+}
+
+async function resolveDefaultMediaByScreenId(
+  screens: ScreenRecord[],
+  groupIdsByScreenId: Map<string, string[]>,
+  db = getDatabase()
+): Promise<Map<string, ResolvedDefaultMedia>> {
+  const result = new Map<string, ResolvedDefaultMedia>();
+  if (screens.length === 0) return result;
+
+  const [assignments, defaults] = await Promise.all([
+    getDefaultMediaTargetAssignments(db),
+    getDefaultMediaVariants(db),
+  ]);
+  const variantsByAspect = new Map(defaults.variants.map((variant) => [variant.aspect_ratio, variant]));
+
+  for (const screen of screens) {
+    const aspect_ratio = resolveAspectRatio(screen);
+    const groupIds = new Set(groupIdsByScreenId.get(screen.id) ?? []);
+    const matchingAssignments = assignments.filter(
+      (assignment) => assignment.aspect_ratio === aspect_ratio && assignment.media
+    );
+
+    const screenAssignment = matchingAssignments.find(
+      (assignment) => assignment.target_type === 'SCREEN' && assignment.target_id === screen.id
+    );
+    if (screenAssignment?.media) {
+      result.set(screen.id, {
+        source: 'SCREEN',
+        aspect_ratio,
+        media_id: screenAssignment.media_id,
+        media: screenAssignment.media,
+        media_url: screenAssignment.media_url,
+      });
+      continue;
+    }
+
+    const groupAssignment = matchingAssignments.find(
+      (assignment) => assignment.target_type === 'GROUP' && groupIds.has(assignment.target_id)
+    );
+    if (groupAssignment?.media) {
+      result.set(screen.id, {
+        source: 'GROUP',
+        aspect_ratio,
+        media_id: groupAssignment.media_id,
+        media: groupAssignment.media,
+        media_url: groupAssignment.media_url,
+      });
+      continue;
+    }
+
+    if (aspect_ratio) {
+      const variant = variantsByAspect.get(aspect_ratio);
+      if (variant?.media) {
+        result.set(screen.id, {
+          source: 'ASPECT_RATIO',
+          aspect_ratio,
+          media_id: variant.media_id,
+          media: variant.media,
+          media_url: variant.media_url,
+        });
+        continue;
+      }
+    }
+
+    if (defaults.global_media) {
+      result.set(screen.id, {
+        source: 'GLOBAL',
+        aspect_ratio,
+        media_id: defaults.global_media_id,
+        media: defaults.global_media,
+        media_url: defaults.global_media_url,
+      });
+      continue;
+    }
+
+    result.set(screen.id, {
+      source: 'NONE',
+      aspect_ratio,
+      media_id: null,
+      media: null,
+      media_url: null,
+    });
+  }
+
+  return result;
 }
 
 function buildScreenRecoveryState(
@@ -837,15 +1230,22 @@ export async function buildScreenPlaybackState(
   const db = options.db ?? getDatabase();
   const now = options.now ?? new Date();
   const groupIds = options.groupIds ?? (await getGroupIdsForScreen(screen.id, db));
-  const latest = await getLatestPublishForScreen(screen.id, db);
+  const latest =
+    options.latestPublish !== undefined
+      ? options.latestPublish
+      : await getLatestPublishForScreen(screen.id, db, {
+          now,
+          skipReservationExpiry: options.skipReservationExpiry,
+        });
   const schedulePayload = (latest?.payload as any)?.schedule;
   const items = filterItemsForScreen(Array.isArray(schedulePayload?.items) ? schedulePayload.items : [], screen.id, groupIds);
   const { activeItems, upcomingItems, bookedUntil } = buildTimeline(items, now);
-  const defaultMedia = await resolveDefaultMediaForScreen(screen, db);
+  const defaultMedia = options.defaultMedia ?? (await resolveDefaultMediaForScreen(screen, db));
   const emergency = await getActiveEmergencyForScreen(screen.id, {
     db,
     includeUrls: options.includeUrls,
     groupIds,
+    activeEmergencies: options.activeEmergencies,
   });
   const activeSlots = normalizeActiveSlots((screen as any).active_slots);
   const currentMediaId =
@@ -857,8 +1257,16 @@ export async function buildScreenPlaybackState(
     null;
   const reportedHeartbeatMediaId = emergency?.media_id ?? activeSlots[0]?.media_id ?? screen.current_media_id ?? null;
   const currentMedia =
-    options.includeMedia && currentMediaId ? await getMediaSummary(currentMediaId, db) : null;
-  const preview = options.includePreview ? await getLatestScreenshotPreview(screen.id, { db, now }) : null;
+    options.includeMedia && currentMediaId
+      ? options.currentMediaById
+        ? options.currentMediaById.get(currentMediaId) ?? null
+        : await getMediaSummary(currentMediaId, db)
+      : null;
+  const preview = options.includePreview
+    ? options.preview !== undefined
+      ? options.preview
+      : await getLatestScreenshotPreview(screen.id, { db, now })
+    : null;
   const recoveryState = options.recoveryState ?? (await getScreenRecoveryState(screen.id, db, now));
   const health = deriveHealthState({
     screen,
@@ -986,6 +1394,8 @@ export async function buildScreensOverviewPayload(options: {
   const db = options.db ?? getDatabase();
   const serverTime = new Date();
   const onlineThreshold = new Date(serverTime.getTime() - HEARTBEAT_STALE_MS);
+  const reservationRepo = createScheduleReservationRepository();
+  await reservationRepo.expireStaleHolds(serverTime, db);
   const screens = options.onlineOnly
     ? await db
         .select()
@@ -993,7 +1403,33 @@ export async function buildScreensOverviewPayload(options: {
         .where(and(eq(schema.screens.status, 'ACTIVE'), gte(schema.screens.last_heartbeat_at, onlineThreshold)))
     : await db.select().from(schema.screens);
   const groups = options.onlineOnly ? [] : await db.select().from(schema.screenGroups);
-  const proofOfPlayMap = await getLastProofOfPlayMap(screens.map((screen) => screen.id), db);
+  const screenIds = screens.map((screen) => screen.id);
+  const [proofOfPlayMap, recoveryStateMap, groupIdsByScreenId, latestPublishByScreenId, activeEmergencies] = await Promise.all([
+    getLastProofOfPlayMap(screenIds, db),
+    buildScreenRecoveryStateMap(screenIds, db, serverTime),
+    getGroupIdsByScreenId(screenIds, db),
+    getLatestPublishByScreenId(screenIds, db, serverTime),
+    db
+      .select()
+      .from(schema.emergencies)
+      .where(
+        and(
+          eq(schema.emergencies.is_active, true),
+          isNull(schema.emergencies.cleared_at),
+          sql`(${schema.emergencies.expires_at} IS NULL OR ${schema.emergencies.expires_at} > ${serverTime})`
+        )
+      )
+      .orderBy(desc(schema.emergencies.created_at)),
+  ]);
+  const defaultMediaByScreenId = await resolveDefaultMediaByScreenId(screens, groupIdsByScreenId, db);
+  const [currentMediaById, previewByScreenId] = await Promise.all([
+    options.includeMedia
+      ? buildCurrentMediaById(screens, latestPublishByScreenId, defaultMediaByScreenId, activeEmergencies, db)
+      : Promise.resolve(new Map<string, ResolvedMediaRecord>()),
+    options.includePreview
+      ? getLatestScreenshotPreviewByScreenId(screenIds, db, serverTime)
+      : Promise.resolve(new Map<string, ScreenshotPreview>()),
+  ]);
 
   const screenSummaries = (
     await Promise.all(
@@ -1003,38 +1439,36 @@ export async function buildScreensOverviewPayload(options: {
         now: serverTime,
         includeMedia: options.includeMedia,
         includePreview: options.includePreview,
+        groupIds: groupIdsByScreenId.get(screen.id) ?? [],
+        latestPublish: latestPublishByScreenId.get(screen.id) ?? null,
+        defaultMedia: defaultMediaByScreenId.get(screen.id),
+        activeEmergencies,
+        currentMediaById,
+        preview: options.includePreview ? previewByScreenId.get(screen.id) ?? null : undefined,
         lastProofOfPlayAt: proofOfPlayMap.get(screen.id) ?? null,
+        recoveryState: recoveryStateMap.get(screen.id),
       })
     )
     )
   ).filter((summary) => (options.onlineOnly ? summary.health_state === 'ONLINE' : true));
 
   const screenSummaryMap = new Map(screenSummaries.map((summary) => [summary.id, summary]));
+  const groupMembersMap = new Map<string, string[]>();
+  for (const [screenId, groupIds] of groupIdsByScreenId.entries()) {
+    for (const groupId of groupIds) {
+      const memberIds = groupMembersMap.get(groupId) ?? [];
+      memberIds.push(screenId);
+      groupMembersMap.set(groupId, memberIds);
+    }
+  }
   const groupSummaries = options.onlineOnly
     ? []
-    : (() => {
-        const groupMembersMap = (db
-          .select()
-          .from(schema.screenGroupMembers)
-          .then((memberRows) =>
-            memberRows.reduce((acc, row) => {
-              const list = acc.get(row.group_id) || [];
-              list.push(row.screen_id);
-              acc.set(row.group_id, list);
-              return acc;
-            }, new Map<string, string[]>())
-          )) as Promise<Map<string, string[]>>;
-        return groupMembersMap.then((resolvedGroupMembersMap) =>
-          groups.map((group) =>
-            summarizeGroupPlayback(group, resolvedGroupMembersMap.get(group.id) || [], screenSummaryMap)
-          )
-        );
-      })();
+    : groups.map((group) => summarizeGroupPlayback(group, groupMembersMap.get(group.id) ?? [], screenSummaryMap));
 
   return {
     server_time: serverTime.toISOString(),
     screens: screenSummaries,
-    groups: await groupSummaries,
+    groups: groupSummaries,
   };
 }
 

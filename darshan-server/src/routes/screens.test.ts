@@ -9,6 +9,7 @@ import { getDatabase, schema } from '@/db';
 import { HTTP_STATUS } from '@/http-status-codes';
 import * as s3 from '@/s3';
 import { recordDisplayProfile } from '@/services/screen-display-state-service';
+import { ScheduleReservationRepository } from '@/db/repositories/schedule-reservation';
 
 async function issueAdminToken() {
   const db = getDatabase();
@@ -454,6 +455,40 @@ describe('Screens routes realtime playback bootstrap', () => {
     expect(screen.playback.current_media.id).toBe(mediaId);
     expect(typeof screen.playback.last_proof_of_play_at).toBe('string');
     expect(screen.publish.publish_id).toBe(publishId);
+  });
+
+  it('builds fleet overview without falling back to per-screen latest-publish queries', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Overview Batched Lookup Screen',
+      status: 'ACTIVE',
+      last_heartbeat_at: new Date(),
+    });
+
+    const findCurrentSpy = vi.spyOn(ScheduleReservationRepository.prototype, 'findCurrentPublishedForScreen');
+    const findUpcomingSpy = vi.spyOn(ScheduleReservationRepository.prototype, 'findUpcomingPublishedForScreen');
+
+    try {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/v1/screens/overview',
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+      });
+
+      expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      const body = JSON.parse(response.body) as any;
+      expect(body.screens.some((entry: any) => entry.id === screenId)).toBe(true);
+      expect(findCurrentSpy).not.toHaveBeenCalled();
+      expect(findUpcomingSpy).not.toHaveBeenCalled();
+    } finally {
+      findCurrentSpy.mockRestore();
+      findUpcomingSpy.mockRestore();
+    }
   });
 
   it('returns only online screens when overview is requested with online_only=true', async () => {

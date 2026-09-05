@@ -42,7 +42,19 @@ export class RoleRepository {
       .from(schema.roles)
       .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-    const items = await query.orderBy(desc(schema.roles.created_at)).limit(limit).offset(offset);
+    const canonicalSystemRoleRank = sql<number>`
+      CASE ${schema.roles.name}
+        WHEN 'SUPER_ADMIN' THEN 0
+        WHEN 'ADMIN' THEN 1
+        WHEN 'DEPARTMENT' THEN 2
+        WHEN 'OPERATOR' THEN 3
+        ELSE 4
+      END
+    `;
+    const items = await query
+      .orderBy(canonicalSystemRoleRank, desc(schema.roles.is_system), desc(schema.roles.created_at))
+      .limit(limit)
+      .offset(offset);
     const total = totalRows.length > 0 ? Number((totalRows[0] as any).count) : 0;
 
     return { items, total, page, limit };
