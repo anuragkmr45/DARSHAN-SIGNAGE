@@ -403,6 +403,27 @@ test('production bundle requires and applies the explicit operations policy', ()
   assert.match(workerBlock, /\.\/worker-secrets:\/run\/worker-secrets:ro/)
 })
 
+test('source-free validator forbids runtime admin password leakage', () => {
+  const validator = fs.readFileSync(repoPath('scripts/verify/validate-source-free-production-bundle.sh'), 'utf8')
+  const forbiddenPatternLine = validator
+    .split('\n')
+    .find((line) => line.includes('forbidden_assignment_regex='))
+
+  assert.ok(forbiddenPatternLine)
+  assert.match(forbiddenPatternLine, /\bADMIN_PASSWORD\b/)
+  assert.doesNotMatch(forbiddenPatternLine, /INITIAL_ADMIN_EMAIL/)
+})
+
+test('production realtime documentation does not recommend always-open legacy socket auth', () => {
+  const productionRealtimeExample = fs.readFileSync(repoPath('docs/environments/production/realtime-sync.env.example'), 'utf8')
+  const productionReadiness = fs.readFileSync(repoPath('docs/implementation/realtime-sync-production-readiness-checklist.md'), 'utf8')
+
+  assert.match(productionRealtimeExample, /^DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=false$/m)
+  assert.doesNotMatch(productionRealtimeExample, /legacy socket auth stays available/)
+  assert.doesNotMatch(productionRealtimeExample, /Keep DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true/)
+  assert.doesNotMatch(productionReadiness, /DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true` remains the compatibility posture/)
+})
+
 test('authoritative backend role keeps restart separate from install, upgrade, and adoption', () => {
   const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
   const startWriter = assembler.slice(

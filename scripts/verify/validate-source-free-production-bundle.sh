@@ -64,7 +64,7 @@ verify_certificate_fingerprints() {
 verify_no_plaintext_runtime_credentials() {
   local bundle_root="$1"
   local forbidden_assignment_regex
-  forbidden_assignment_regex='(^|[[:space:]])(POSTGRES_PASSWORD|POSTGRES_MONITORING_PASSWORD|DATABASE_URL|JWT_SECRET|MINIO_ACCESS_KEY|MINIO_SECRET_KEY|VALKEY_PASSWORD|VALKEY_URL|OBSERVABILITY_METRICS_BEARER_TOKEN|GRAFANA_ADMIN_PASSWORD|BACKUP_OFFHOST_ACCESS_KEY|BACKUP_OFFHOST_SECRET_KEY)([[:space:]]*=|:)'
+  forbidden_assignment_regex='(^|[[:space:]])(POSTGRES_PASSWORD|POSTGRES_MONITORING_PASSWORD|DATABASE_URL|JWT_SECRET|MINIO_ACCESS_KEY|MINIO_SECRET_KEY|VALKEY_PASSWORD|VALKEY_URL|OBSERVABILITY_METRICS_BEARER_TOKEN|GRAFANA_ADMIN_PASSWORD|BACKUP_OFFHOST_ACCESS_KEY|BACKUP_OFFHOST_SECRET_KEY|ADMIN_PASSWORD)([[:space:]]*=|:)'
 
   local artifact
   while IFS= read -r -d '' artifact; do
@@ -327,6 +327,15 @@ PROVIDED_BUNDLE="$WORK_DIR/provided-output/acceptance-provided"
 verify_generated_shell_syntax "$PROVIDED_BUNDLE"
 cmp "$WORK_DIR/pki/transport-ca.crt" "$PROVIDED_BUNDLE/production/cms/tls/transport-ca.crt"
 verify_no_plaintext_runtime_credentials "$PROVIDED_BUNDLE"
+sabotage_env="$PROVIDED_BUNDLE/production/backend/.env.production"
+clean_sabotage_env="$WORK_DIR/backend.env.production.clean"
+cp "$sabotage_env" "$clean_sabotage_env"
+printf '\nADMIN_PASSWORD=leaked-admin-password\n' >> "$sabotage_env"
+if (verify_no_plaintext_runtime_credentials "$PROVIDED_BUNDLE") >"$WORK_DIR/admin-password-leak.log" 2>&1; then
+  echo "Plaintext runtime credential validation accepted ADMIN_PASSWORD leakage." >&2
+  exit 1
+fi
+cp "$clean_sabotage_env" "$sabotage_env"
 verify_runtime_secret_files "$PROVIDED_BUNDLE"
 verify_bootstrap_password_not_shipped "$PROVIDED_BUNDLE"
 grep -q 'credentials_file: /etc/darshan/secrets/backend-metrics-bearer-token' "$PROVIDED_BUNDLE/production/observability/prometheus/prometheus.yml"

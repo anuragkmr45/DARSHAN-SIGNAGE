@@ -59,7 +59,7 @@ Realtime behavior must be enabled in layers. Never enable all flags for the full
 | Delivery UI | backend APIs | `VITE_REALTIME_DELIVERY_STATUS_UI` | Enabled for QA operators first |
 | Media/cache reporting | `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED` | `DARSHAN_MEDIA_CACHE_REPORTING_ENABLED`, `VITE_MEDIA_CACHE_STATUS_UI` | Enabled in QA; production requires retention/alerts |
 | Realtime bus | `REALTIME_BUS_PROVIDER=valkey`, `VALKEY_URL` | none | Required before multi-instance production realtime |
-| Signed `/device` socket auth canary | `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true`, `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=true`, replay protection enabled with fail-open canary posture | `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=true` on selected canary players only | Dual-mode backend; signed auth remains optional and legacy players must still connect |
+| Signed `/device` socket auth canary | QA may use `DEVICE_AUTH_MODE=dual` with `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true`; production defaults to `DEVICE_AUTH_MODE=signature` with `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=false` unless an approved time-boxed compatibility exception exists | `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=true` on selected canary players only | Signed auth is the production target; legacy compatibility must be deliberate, observed, and expiring |
 
 ## QA Recommended Values
 
@@ -149,11 +149,12 @@ Do not enable full-fleet realtime sync across multiple backend instances until V
 
 ## Signed Device Socket Auth Canary
 
-This canary validates signed `/device` Socket.IO authentication without requiring signed auth globally. It preserves deployed legacy player compatibility and does not change source-of-truth behavior.
+This canary validates signed `/device` Socket.IO authentication without changing source-of-truth behavior. In QA it may preserve deployed legacy player compatibility through dual mode. In production, legacy socket auth is only allowed under an approved, time-boxed compatibility exception.
 
 Backend canary values:
 
-- `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true`
+- Production default: `DEVICE_AUTH_MODE=signature` and `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=false`
+- QA or approved production compatibility exception: `DEVICE_AUTH_MODE=dual`, `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true`, and a valid `DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT`
 - `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=true`
 - `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=true`
 - `DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED=false`
@@ -164,7 +165,7 @@ Player canary value:
 
 Canary checks:
 
-1. Confirm existing unsigned players still connect through the `/device` namespace.
+1. For QA/dual-mode exception only, confirm existing unsigned players still connect through the `/device` namespace.
 2. Confirm selected signed players connect in signed mode.
 3. Confirm fresh signed handshakes record replay protection as accepted.
 4. In a controlled environment, test a duplicate signed handshake and record replay rejection evidence if feasible.
@@ -235,7 +236,7 @@ Rollback must not require DB rollback.
 1. Set canary player `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=false`.
 2. Set backend `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=false` if optional signed auth causes rejects.
 3. Set backend `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=false` if replay protection causes rejects.
-4. Keep `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true` for compatibility.
+4. If an approved dual-mode exception is active, roll players back first and close legacy auth before the exception expires.
 5. Set `OUTBOX_DISPATCH_ENABLED=false` if realtime wake dispatch must be stopped.
 6. Set `REALTIME_SYNC_ENABLED=false` if the gateway must be disabled.
 7. Set player `DARSHAN_REALTIME_PLAYER_ENABLED=false` through config management or next installer/config rollout if realtime must be disabled on players.

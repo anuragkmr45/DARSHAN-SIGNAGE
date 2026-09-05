@@ -66,10 +66,11 @@ Latest documentation/static validation after the on-prem/Valkey update on 2026-0
 
 Production realtime canary is not allowed until all required gates are passed or explicitly waived by a human approver with rollback responsibility.
 
-Signed `/device` socket auth canary uses existing dual-mode flags only:
+Signed `/device` socket auth canary must use signature-only production defaults unless a human-approved,
+time-boxed compatibility exception is declared in `DEVICE_AUTH_MODE=dual`.
 
-- Backend `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true` remains the compatibility posture.
-- Backend `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=true` and `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=true` remain the signed canary posture.
+- Backend `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=false` remains the production default posture.
+- Backend `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=true` and `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=true` remain the signed posture.
 - Backend `DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED=false` remains the canary posture unless a separate runtime plan approves fail-closed behavior.
 - Player `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=true` applies only to selected canary players.
 
@@ -82,7 +83,7 @@ Rollback order:
 1. `DARSHAN_REALTIME_SIGNED_AUTH_ENABLED=false` on canary players.
 2. `DEVICE_SOCKET_SIGNED_AUTH_ENABLED=false` if optional signed auth causes rejects.
 3. `DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED=false` if replay protection causes rejects.
-4. Keep `DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true` for compatibility.
+4. If an approved dual-mode exception is active, roll players back to polling/signed-stable first and close legacy auth before the exception expires.
 5. `OUTBOX_DISPATCH_ENABLED=false`
 6. `REALTIME_SYNC_ENABLED=false`
 7. `DARSHAN_REALTIME_PLAYER_ENABLED=false`
