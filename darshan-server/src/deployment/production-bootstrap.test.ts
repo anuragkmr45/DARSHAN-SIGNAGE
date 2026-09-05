@@ -280,6 +280,43 @@ suite('production bootstrap', () => {
     expect(await db.select().from(schema.productionBootstrapStates)).toHaveLength(0);
   });
 
+  it('refuses ambiguous case-insensitive administrator matches during adoption', async () => {
+    const db = database();
+    const [superAdmin] = await db.insert(schema.roles).values({
+      name: 'SUPER_ADMIN',
+      description: 'Existing role',
+      permissions: {},
+      is_system: true,
+    }).returning({ id: schema.roles.id });
+    await db.insert(schema.users).values([
+      {
+        email: 'Legacy.Admin@Example.Test',
+        password_hash: 'existing-password-hash-1',
+        role_id: superAdmin.id,
+        is_active: true,
+      },
+      {
+        email: ' legacy.admin@example.test ',
+        password_hash: 'existing-password-hash-2',
+        role_id: superAdmin.id,
+        is_active: true,
+      },
+    ]);
+
+    await expect(adoptProductionBootstrapState(db, {
+      email: 'legacy.admin@example.test',
+      releaseId: 'release-adoption-test',
+      ticket: 'CHG-DUPLICATE-EMAIL',
+    })).resolves.toMatchObject({
+      status: 'conflict',
+      code: 'PRODUCTION_BOOTSTRAP_CONFLICT',
+      reason: expect.stringContaining('missing or ambiguous'),
+    });
+    expect(await db.select().from(schema.productionBootstrapStates)).toHaveLength(0);
+    expect(await db.select().from(schema.auditLogs)).toHaveLength(0);
+    expect(await db.select().from(schema.systemLogs)).toHaveLength(0);
+  });
+
   it('requires a release identifier before adopting existing bootstrap authority', async () => {
     const db = database();
     const [superAdmin] = await db.insert(schema.roles).values({

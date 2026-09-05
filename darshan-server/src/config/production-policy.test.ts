@@ -99,4 +99,12 @@ describe('production config policy', () => {
       'Production signature-only device authentication forbids DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true.'
     );
   });
+
+  it('rejects production ADMIN_PASSWORD so demo seed cannot become a bootstrap path', async () => {
+    configureProductionEnv({ ADMIN_PASSWORD: 'ShouldNeverBootstrapProd123!' });
+
+    await expect(loadConfig()).rejects.toThrow(
+      'ADMIN_PASSWORD is forbidden in production. Use the one-shot protected bootstrap password file instead.'
+    );
+  });
 });
