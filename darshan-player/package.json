@@ -20,7 +20,7 @@
     "prepare:renderer": "npm run build:renderer && npm run bundle:renderer && npm run copy-assets",
     "prepare:dev": "npm run prepare:main && npm run prepare:renderer",
     "start": "electron .",
-    "start:dev": "npm run prepare:dev && cross-env NODE_ENV=development electron .",
+    "start:dev": "npm run prepare:dev && node scripts/start-dev.js",
     "start:dev:win": "npm run start:dev",
     "start:dev:mac": "npm run start:dev",
     "start:dev:linux": "npm run start:dev",

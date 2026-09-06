@@ -8,6 +8,9 @@ out/
 *.key
 *.p12
 *.SKIPPED.txt
+deploy.txt
+server.txt
+*.secrets.txt
 .DS_Store
 .playwright-mcp/
 .local/

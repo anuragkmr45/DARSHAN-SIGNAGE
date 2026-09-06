@@ -632,6 +632,18 @@ export class PlayerFlow extends EventEmitter {
   }
 
   private async handleBootstrapFailure(error: unknown): Promise<void> {
+    logger.warn(
+      {
+        error,
+        code: error instanceof DeviceApiError ? error.code : undefined,
+        transient: error instanceof DeviceApiError ? error.transient : undefined,
+        details: error instanceof DeviceApiError ? error.detailsPayload : undefined,
+        deviceId: this.pairingService.getDeviceId(),
+        state: this.state,
+      },
+      'Bootstrap authenticated runtime failed'
+    )
+
     const backendPairingStatus = this.pairingService.getBackendPairingStatusFromError(error)
     if (backendPairingStatus && STALE_BACKEND_PAIRING_STATUSES.has(backendPairingStatus)) {
       await this.enterHardRecovery((error as Error).message || `Pairing is invalid (${backendPairingStatus})`)

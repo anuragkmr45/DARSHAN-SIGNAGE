@@ -266,7 +266,27 @@ darshan-player collect-logs
 npm run start:dev
 ```
 
-`npm run start:dev` defaults the player to `runtime.mode=dev` unless a config file explicitly overrides it.
+`npm run start:dev` launches Electron through `scripts/start-dev.js`. The launcher uses an isolated
+development runtime root at `darshan-player/.runtime/dev-player`, defaults to
+`development/local/darshan-api`, and ignores installed site config selectors such as
+`DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/config.json` by default. This prevents a source-tree dev
+run from accidentally pairing with a production/QA site identity and then returning to the OTP
+screen after bootstrap validation.
+
+For LAN development against a different local backend, override only the endpoint values:
+
+```bash
+DARSHAN_API_BASE_URL=http://192.168.29.64:3000 \
+DARSHAN_WS_URL=ws://192.168.29.64:3000/ws \
+DARSHAN_REALTIME_WS_URL=ws://192.168.29.64:3000/ws \
+npm run start:dev
+```
+
+To intentionally test an installed site profile from source, opt in explicitly:
+
+```bash
+DARSHAN_DEV_USE_SITE_CONFIG=true npm run start:dev
+```
 
 Autostart is managed at the user-session level:
 

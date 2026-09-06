@@ -153,7 +153,6 @@ const Auth = () => {
                       placeholder="name@company.com"
                       required
                       disabled={isLoading}
-                      defaultValue="admin@darshan.local"
                     />
                   </div>
                   
@@ -171,7 +170,6 @@ const Auth = () => {
                         type={showLoginPassword ? "text" : "password"}
                         required
                         disabled={isLoading}
-                        defaultValue="LocalDev@123"
                         className="pr-10"
                       />
                       <button
