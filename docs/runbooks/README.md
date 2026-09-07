@@ -30,6 +30,7 @@ This folder is the operator-facing procedure layer for DARSHAN. The codebase and
 | `onprem-player-ghost-pairing-recovery.md` | Pairing recovery and duplicate/orphan identity triage. |
 | `ghost-pairing-onprem-qa-checklist.md` | Manual/browser/runtime QA checklist for pairing hardening. |
 | `realtime-sync-qa-prod-hardening.md` | Realtime canary, rollback, and QA/prod hardening controls. |
+| `realtime-delivery-verification.md` | WebSocket-first delivery, source-free provenance, fallback, and acceptance evidence. |
 | `runtime-evidence-collection.md` | Full-product runtime evidence and no-secret review procedure. |
 | `source-free-production-bundle-deployment.md` | Canonical one-file build flow; generated production VM files require no manual edits. |
 | `product-export-packaging.md` | Source-free product export packaging. |

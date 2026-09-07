@@ -32,7 +32,7 @@ Contract rule: pairing codes and cert material are runtime state. They must not 
 
 1. Player loads local device id, cert metadata, cached snapshot/default-media metadata, queues, and config.
 2. Pairing service calls authenticated backend pairing-status.
-3. If backend returns valid paired state, player starts heartbeat, realtime, command polling, snapshot/default-media refresh, telemetry, and playback.
+3. If backend returns valid paired state, player starts heartbeat, realtime, coordinated command/desired-state delivery, telemetry, and playback.
 4. If backend indicates revoked/orphaned/screen missing/environment mismatch, player enters hard recovery/OTP flow.
 5. If backend is temporarily unavailable after recent validation, offline grace or secure-lock policy determines whether cached playback may continue.
 
@@ -55,7 +55,7 @@ Contract rule: media never moves through Socket.IO. Socket.IO can only wake a RE
 3. Backend sends wake notifications such as `COMMAND_AVAILABLE` or `RESYNC_REQUIRED`.
 4. Player fetches desired state and commands by REST.
 5. Command processor executes commands locally and ACKs via REST.
-6. If realtime is disconnected or disabled, command/snapshot/default-media polling continues.
+6. If realtime is disconnected or disabled, the delivery coordinator uses bounded command and desired-state REST fallback while cached playback continues.
 
 Contract rule: duplicate notifications are safe because command execution is driven by durable command ids and REST fetches.
 
