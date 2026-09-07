@@ -49,6 +49,7 @@ export class SnapshotManager extends EventEmitter {
   private snapshotPath: string
   private lastError?: string
   private serverClockOffsetMs = 0
+  private representationEtag?: string
 
   constructor() {
     super()
@@ -126,7 +127,10 @@ export class SnapshotManager extends EventEmitter {
     this.emit('playlist-updated', playlist)
   }
 
-  async refreshSnapshot(retryOnExpired: boolean = true): Promise<PlaybackPlaylist | null> {
+  async refreshSnapshot(
+    options: { retryOnExpired?: boolean; force?: boolean } = {}
+  ): Promise<PlaybackPlaylist | null> {
+    const retryOnExpired = options.retryOnExpired !== false
     const pairingService = getPairingService()
     const deviceId = pairingService.getDeviceId()
 
@@ -137,9 +141,9 @@ export class SnapshotManager extends EventEmitter {
     try {
       const httpClient = getHttpClient()
       const response = await httpClient.getResponse(`/api/v1/device/${deviceId}/snapshot?include_urls=true`, {
-        headers: this.currentSnapshot?.snapshotId
+        headers: this.representationEtag && !options.force
           ? {
-              'If-None-Match': `"${this.currentSnapshot.snapshotId}"`,
+              'If-None-Match': this.representationEtag,
             }
           : undefined,
         validateStatus: (status) => (status >= 200 && status < 300) || status === 304,
@@ -161,6 +165,8 @@ export class SnapshotManager extends EventEmitter {
 
       const normalized = parseSnapshotResponse(response.data)
       this.updateServerClock(normalized.serverTime)
+      const responseEtag = response.headers?.['etag']
+      this.representationEtag = typeof responseEtag === 'string' ? responseEtag : undefined
       await this.persistSnapshot(normalized)
 
       await this.cacheSnapshotMedia(normalized)
@@ -189,7 +195,7 @@ export class SnapshotManager extends EventEmitter {
 
       if (error instanceof CacheError && error.details?.['reason'] === 'URL_EXPIRED' && retryOnExpired) {
         logger.warn('Media URL expired, refetching snapshot')
-        return await this.refreshSnapshot(false)
+        return await this.refreshSnapshot({ retryOnExpired: false, force: true })
       }
 
       logger.error({ error }, 'Snapshot fetch failed, using offline fallback')
@@ -204,6 +210,15 @@ export class SnapshotManager extends EventEmitter {
 
     try {
       const data = JSON.parse(fs.readFileSync(this.snapshotPath, 'utf-8'))
+      const cacheMetadata = data?.__darshan_cache
+      if (cacheMetadata && typeof cacheMetadata === 'object') {
+        if (typeof cacheMetadata.server_clock_offset_ms === 'number' && Number.isFinite(cacheMetadata.server_clock_offset_ms)) {
+          this.serverClockOffsetMs = cacheMetadata.server_clock_offset_ms
+        }
+        if (typeof cacheMetadata.representation_etag === 'string') {
+          this.representationEtag = cacheMetadata.representation_etag
+        }
+      }
       const normalized = parseSnapshotResponse(data)
       this.currentSnapshot = normalized
       this.buildPlaylist(normalized, 'offline').then((playlist) => {
@@ -218,7 +233,17 @@ export class SnapshotManager extends EventEmitter {
 
   private async persistSnapshot(snapshot: NormalizedSnapshot): Promise<void> {
     const payload = snapshot.raw ?? snapshot
-    await atomicWrite(this.snapshotPath, JSON.stringify(payload, null, 2))
+    const cachedPayload = payload && typeof payload === 'object'
+      ? {
+          ...(payload as Record<string, unknown>),
+          __darshan_cache: {
+            representation_etag: this.representationEtag ?? null,
+            server_clock_offset_ms: this.serverClockOffsetMs,
+            cached_at: new Date().toISOString(),
+          },
+        }
+      : payload
+    await atomicWrite(this.snapshotPath, JSON.stringify(cachedPayload, null, 2))
   }
 
   private async cacheSnapshotMedia(snapshot: NormalizedSnapshot): Promise<void> {
@@ -295,11 +320,17 @@ export class SnapshotManager extends EventEmitter {
     let mode: PlaybackMode = 'normal'
     let items: TimelineItem[] = []
     let nextTransitionAt: number | undefined
+    const emergencyExpiresAtMs = snapshot.emergencyExpiresAt ? Date.parse(snapshot.emergencyExpiresAt) : Number.NaN
+    const emergencyItem =
+      snapshot.emergencyItem &&
+      (!Number.isFinite(emergencyExpiresAtMs) || emergencyExpiresAtMs > this.getServerNowMs())
+        ? snapshot.emergencyItem
+        : undefined
 
-    if (snapshot.contentState === 'empty' && !snapshot.emergencyItem) {
+    if (snapshot.contentState === 'empty' && !emergencyItem) {
       mode = 'empty'
       items = []
-    } else if (snapshot.contentState === 'default' && !snapshot.emergencyItem) {
+    } else if (snapshot.contentState === 'default' && !emergencyItem) {
       if (snapshot.defaultItem) {
         mode = 'default'
         items = await this.attachLocalMedia([snapshot.defaultItem])
@@ -307,9 +338,9 @@ export class SnapshotManager extends EventEmitter {
         mode = 'empty'
         items = []
       }
-    } else if (snapshot.emergencyItem) {
+    } else if (emergencyItem) {
       mode = 'emergency'
-      items = await this.attachLocalMedia([snapshot.emergencyItem])
+      items = await this.attachLocalMedia([emergencyItem])
       nextTransitionAt =
         snapshot.emergencyExpiresAt && Number.isFinite(Date.parse(snapshot.emergencyExpiresAt))
           ? Date.parse(snapshot.emergencyExpiresAt)
@@ -340,7 +371,11 @@ export class SnapshotManager extends EventEmitter {
       items = []
     }
 
-    this.scheduleLocalEvaluation(snapshot, nextTransitionAt)
+    const signedUrlRefreshAt = this.findSignedUrlRefreshAt(snapshot)
+    const forceRefreshAt = signedUrlRefreshAt && (!nextTransitionAt || signedUrlRefreshAt < nextTransitionAt)
+      ? signedUrlRefreshAt
+      : undefined
+    this.scheduleLocalEvaluation(snapshot, forceRefreshAt ?? nextTransitionAt, Boolean(forceRefreshAt))
 
     return {
       mode,
@@ -351,7 +386,7 @@ export class SnapshotManager extends EventEmitter {
     }
   }
 
-  private scheduleLocalEvaluation(snapshot: NormalizedSnapshot, nextTransitionAt?: number): void {
+  private scheduleLocalEvaluation(snapshot: NormalizedSnapshot, nextTransitionAt?: number, forceRefresh = false): void {
     if (this.evaluationTimer) {
       clearTimeout(this.evaluationTimer)
       this.evaluationTimer = undefined
@@ -363,8 +398,48 @@ export class SnapshotManager extends EventEmitter {
 
     const delayMs = Math.max(250, nextTransitionAt - this.getServerNowMs())
     this.evaluationTimer = setTimeout(() => {
+      if (forceRefresh) {
+        void this.refreshSnapshot({ force: true })
+        return
+      }
       void this.rebuildFromCachedSnapshot(snapshot.snapshotId)
     }, delayMs)
+  }
+
+  private findSignedUrlRefreshAt(snapshot: NormalizedSnapshot): number | undefined {
+    const urls = new Set<string>()
+    const collect = (item?: TimelineItem) => {
+      if (!item) return
+      if (item.remoteUrl) urls.add(item.remoteUrl)
+      const fallback = item.meta?.['fallback_url']
+      if (typeof fallback === 'string') urls.add(fallback)
+    }
+    snapshot.items.forEach(collect)
+    snapshot.scheduleWindows.forEach((window) => window.items.forEach(collect))
+    collect(snapshot.defaultItem)
+    collect(snapshot.emergencyItem)
+
+    const candidates: number[] = []
+    for (const rawUrl of urls) {
+      try {
+        const url = new URL(rawUrl)
+        const date = url.searchParams.get('X-Amz-Date') ?? url.searchParams.get('x-amz-date')
+        const expires = Number(url.searchParams.get('X-Amz-Expires') ?? url.searchParams.get('x-amz-expires'))
+        if (!date || !Number.isFinite(expires)) continue
+        const match = date.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/)
+        if (!match) continue
+        const issuedAt = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]))
+        const refreshAt = issuedAt + expires * 1000 - 60_000
+        // Keep already-expired signatures in the candidate set. The scheduler
+        // clamps past boundaries to a near-immediate refresh, which prevents a
+        // persisted representation ETag from validating otherwise stale URLs
+        // after a player restart.
+        if (Number.isFinite(refreshAt)) candidates.push(refreshAt)
+      } catch {
+        // Non-URL and non-S3 media sources do not need signature refresh scheduling.
+      }
+    }
+    return candidates.length > 0 ? Math.min(...candidates) : undefined
   }
 
   private async rebuildFromCachedSnapshot(expectedSnapshotId?: string): Promise<void> {
@@ -392,7 +467,7 @@ export class SnapshotManager extends EventEmitter {
         localPath = await cacheManager.get(mediaId)
       }
 
-      if (!localPath && item.type !== 'url') {
+      if (!localPath && item.type !== 'url' && item.type !== 'message') {
         logger.warn({ mediaId }, 'Media not cached, keeping remote playback source')
       }
 

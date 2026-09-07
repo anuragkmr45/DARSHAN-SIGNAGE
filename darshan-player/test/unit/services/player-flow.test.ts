@@ -941,6 +941,43 @@ describe('Player Flow', () => {
     await playerFlow.stop()
   })
 
+  it('publishes emergency presentation authority before starting its timeline', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+
+    await getDeviceStateStore().update({
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      fingerprint: 'fingerprint-1',
+    })
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+
+    const stubs = createCompleteBootstrapStubs()
+    stubs.snapshotManager.refreshSnapshot.resolves({ mode: 'default', items: [] })
+    const order: string[] = []
+    stubs.playbackEngine.start.callsFake(async () => {
+      order.push('start')
+    })
+    const playerFlow = getPlayerFlow()
+    playerFlow.on('presentation-status', (presentation: { status?: { mode?: string } }) => {
+      if (presentation.status?.mode === 'emergency') order.push('presentation')
+    })
+
+    await playerFlow.start()
+    getSnapshotManager().emit('playlist-updated', {
+      mode: 'emergency',
+      items: [{ id: 'emergency-1', type: 'message', displayMs: 10000, fit: 'contain', muted: false }],
+      lastSnapshotAt: new Date().toISOString(),
+    })
+
+    expect(order).to.deep.equal(['presentation', 'start'])
+    expect(playerFlow.getStatus().mode).to.equal('emergency')
+    await playerFlow.stop()
+  })
+
   it('switches idle playback into default mode when resolved default media appears', async () => {
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')

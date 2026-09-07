@@ -541,6 +541,7 @@ export class RealtimeService extends EventEmitter {
         log_upload: true,
         offline_startup: true,
         background_push: false,
+        features: ['message_emergency_v1', 'webcontents_view_v1'],
       },
       local_state: {
         snapshot_id: getSnapshotManager().getCurrentPlaylist()?.snapshotId ?? storeState.lastDesiredSnapshotId ?? null,
@@ -646,7 +647,7 @@ export class RealtimeService extends EventEmitter {
     }
 
     if (snapshotChanged || emergencyChanged) {
-      await getSnapshotManager().refreshSnapshot()
+      await getSnapshotManager().refreshSnapshot({ force: true })
     }
 
     if (defaultMediaChanged) {

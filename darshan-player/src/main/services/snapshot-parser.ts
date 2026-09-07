@@ -62,6 +62,7 @@ function normalizeMediaType(value?: string): MediaType {
   if (normalized === 'office') return 'office'
   if (normalized === 'url') return 'url'
   if (normalized === 'webpage') return 'url'
+  if (normalized === 'message') return 'message'
   if (normalized.startsWith('image/')) return 'image'
   if (normalized.startsWith('video/')) return 'video'
   if (normalized.includes('pdf')) return 'pdf'
@@ -79,17 +80,24 @@ function normalizeMediaType(value?: string): MediaType {
   return inferTypeFromUrl(value)
 }
 
-function normalizeItem(input: any, mediaUrlMap: SnapshotMediaUrlMap): TimelineItem | null {
+function normalizeItem(
+  input: any,
+  mediaUrlMap: SnapshotMediaUrlMap,
+  options: { emergency?: boolean } = {},
+): TimelineItem | null {
   if (!input || typeof input !== 'object') {
     return null
   }
 
+  const isEmergencyMessage = input.kind === 'MESSAGE' && typeof input.message === 'string'
   const mediaId = input.media_id || input.mediaId || input.id
   const contentType = typeof input.content_type === 'string' ? input.content_type : undefined
   const sourceContentType = typeof input.source_content_type === 'string' ? input.source_content_type : undefined
-  const explicitType = normalizeMediaType(input.type || input.media_type)
+  const explicitType = isEmergencyMessage ? 'message' : normalizeMediaType(input.type || input.media_type)
   const type: MediaType =
-    explicitType === 'url'
+    explicitType === 'message'
+      ? 'message'
+      : explicitType === 'url'
       ? 'url'
       : normalizeMediaType(contentType || sourceContentType || input.type || input.media_type || input.source_url || input.url || input.media_url)
   const remoteUrl =
@@ -125,6 +133,11 @@ function normalizeItem(input: any, mediaUrlMap: SnapshotMediaUrlMap): TimelineIt
             ? input.media_url
             : undefined,
       name: typeof input.name === 'string' ? input.name : undefined,
+      message: options.emergency && typeof input.message === 'string' ? input.message : undefined,
+      emergency_message: options.emergency && typeof input.message === 'string' ? input.message : undefined,
+      severity: options.emergency && typeof input.severity === 'string' ? input.severity : undefined,
+      emergency_version: options.emergency && typeof input.version === 'string' ? input.version : undefined,
+      expires_at: options.emergency && typeof input.expires_at === 'string' ? input.expires_at : undefined,
       content_type: contentType,
       source_content_type: sourceContentType,
     },
@@ -207,15 +220,19 @@ export function parseSnapshotResponse(raw: unknown): NormalizedSnapshot {
   const scheduleWindows = normalizeScheduleWindows(scheduleItems, mediaUrlMap)
 
   const emergencyInput = rootEmergency
+  const responseServerTime = typeof wrapper?.server_time === 'string' ? Date.parse(wrapper.server_time) : Number.NaN
+  const effectiveNow = Number.isFinite(responseServerTime) ? responseServerTime : Date.now()
   const emergencyExpired =
     typeof emergencyInput?.expires_at === 'string' && Number.isFinite(Date.parse(emergencyInput.expires_at))
-      ? Date.parse(emergencyInput.expires_at) <= Date.now()
+      ? Date.parse(emergencyInput.expires_at) <= effectiveNow
       : false
   const emergencyActive =
     !emergencyExpired &&
     emergencyInput &&
-    (emergencyInput.active === true || Boolean(emergencyInput.media_url || emergencyInput.url))
-  const emergencyItem = emergencyActive ? normalizeItem(emergencyInput, mediaUrlMap) || undefined : undefined
+    (emergencyInput.active === true || emergencyInput.is_active === true || Boolean(emergencyInput.media_url || emergencyInput.url))
+  const emergencyItem = emergencyActive
+    ? normalizeItem(emergencyInput, mediaUrlMap, { emergency: true }) || undefined
+    : undefined
 
   const defaultInput = rootDefaultMedia
   const defaultItem = defaultInput ? normalizeItem(defaultInput, mediaUrlMap) || undefined : undefined

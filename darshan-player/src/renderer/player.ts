@@ -18,6 +18,7 @@ import { DefaultMediaPlayer } from './default-media-player'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
 import { createPdfPlaybackElement } from './pdf-playback'
 import { createWebpagePlaybackElement } from './webpage-playback'
+import { DeferredPlaybackGate } from './deferred-playback-gate'
 import {
   clampVideoSeekSeconds,
   resolveScheduledResumePosition,
@@ -33,8 +34,7 @@ import {
   type DisposableMediaNode,
 } from './player-layout-helpers'
 import type { PlaybackProgressEntry, PlaybackProgressIdentity, PlaybackResumeDecision } from '../common/playback-policy'
-
-const { sanitizeLogPayloadForDiagnostics } = require('../common/redaction') as typeof import('../common/redaction')
+import { sanitizeLogPayloadForDiagnostics } from '../common/redaction'
 
 export { resolvePlayerContentSource } from '../common/player-content-source'
 export {
@@ -85,6 +85,7 @@ class Player {
   private pendingTransition?: PendingTransition
   private activeSceneId?: string
   private activeSlotPlaybacks = new Map<string, ActiveSlotPlayback>()
+  private deferredPlayback = new DeferredPlaybackGate<{ item: TimelineItem; scheduleId?: string }>()
 
   constructor() {
     this.initializeElements()
@@ -172,11 +173,23 @@ class Player {
       window.darshan.onMediaChange((data: any) => {
         this.log('debug', 'Received play-media event', data)
         if (!this.canRenderScheduledContent()) {
+          const currentSource = this.latestStatus ? resolvePlayerContentSource(this.latestStatus) : 'none'
+          if (currentSource !== 'none' && data?.item) {
+            this.deferredPlayback.defer(
+              {
+                item: data.item,
+                scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+              },
+              this.latestPresentationRevision,
+            )
+          }
           this.log('debug', 'Ignoring playback event while lifecycle blocks content', {
             state: this.latestStatus?.state,
+            deferred: currentSource !== 'none' && Boolean(data?.item),
           })
           return
         }
+        this.deferredPlayback.clear()
         this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
         this.setActiveSource('schedule')
         this.playMedia(data.item, {
@@ -199,6 +212,7 @@ class Player {
           this.startTransition(data.current, data.next, data.durationMs)
         } else if (data.type === 'clear-active') {
           this.log('debug', 'Received clear-active event', data)
+          this.deferredPlayback.clear()
           this.ignoreFallbackStatusUntil = 0
           this.clearScheduledPlayback(data.reason || 'clear-active')
         } else if (data.type === 'show-fallback') {
@@ -237,6 +251,16 @@ class Player {
     this.latestStatus = presentation.status
     this.updateStatusOverlay(presentation.status)
     this.updateContentSource(presentation.status)
+    const source = resolvePlayerContentSource(presentation.status)
+    const deferred = this.deferredPlayback.resolve(presentation.revision, source)
+    if (deferred) {
+      this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
+      this.setActiveSource('schedule')
+      void this.playMedia(deferred.item, { scheduleId: deferred.scheduleId }).catch((error) => {
+        this.log('error', 'Failed to play deferred media', { error: error.message })
+        this.showFallback(error.message)
+      })
+    }
   }
 
   private async refreshDefaultMedia(reason: string): Promise<void> {
@@ -344,7 +368,9 @@ class Player {
       this.activeSlotPlaybacks.clear()
       this.reportActivePlayback()
 
-      const compat = this.getItemCompatibility(item)
+      const compat: CompatResult = item.type === 'message'
+        ? { status: 'PLAYABLE_NOW', kind: 'UNKNOWN', reason: 'native emergency message' }
+        : this.getItemCompatibility(item)
 
       if (compat.status === 'PLAYABLE_NOW') {
         this.log('debug', 'Media compatibility check', { itemId: item.id, compat })
@@ -359,6 +385,7 @@ class Player {
       }
 
       let element: HTMLElement
+      let shouldWrapEmergencyMedia = item.type !== 'message' && typeof item.meta?.['emergency_message'] === 'string'
       const resumeDecision = await this.resolveSingleItemResumeDecision(item, options.scheduleId)
       const progressContext = this.buildPlaybackProgressContext(item, {
         scheduleId: options.scheduleId,
@@ -379,7 +406,18 @@ class Player {
           element = this.renderDocumentPlaceholder(item, compat)
           break
         case 'url':
-          element = await this.renderURL(item)
+          if (typeof item.meta?.['emergency_message'] === 'string') {
+            const fallbackUrl = item.meta?.['fallback_local_url'] || item.meta?.['fallback_url']
+            element = typeof fallbackUrl === 'string'
+              ? await this.renderImage({ ...item, type: 'image', localUrl: fallbackUrl, remoteUrl: fallbackUrl })
+              : this.renderEmergencyMessage(item)
+            if (typeof fallbackUrl !== 'string') shouldWrapEmergencyMedia = false
+          } else {
+            element = await this.renderURL(item)
+          }
+          break
+        case 'message':
+          element = this.renderEmergencyMessage(item)
           break
         default:
           throw new Error(`Unsupported media type: ${item.type}`)
@@ -387,6 +425,9 @@ class Player {
 
       // Apply fit mode
       this.applyFitMode(element, item.fit)
+      if (shouldWrapEmergencyMedia) {
+        element = this.wrapEmergencyMedia(element, item)
+      }
 
       if (sessionId !== this.playbackSession) {
         this.disposeScheduledElement(element)
@@ -399,6 +440,12 @@ class Player {
       this.currentElement = element
     } catch (error) {
       this.log('error', 'Failed to play media', { error: (error as Error).message })
+      if (item.type !== 'message' && typeof item.meta?.['emergency_message'] === 'string' && sessionId === this.playbackSession) {
+        const fallback = this.renderEmergencyMessage(item)
+        this.showElement(fallback, undefined, 0)
+        this.currentElement = fallback
+        return
+      }
       throw error
     }
   }
@@ -427,6 +474,113 @@ class Player {
       // Set source (from cache or URL)
       img.src = this.getMediaSource(item)
     })
+  }
+
+  private renderEmergencyMessage(item: TimelineItem): HTMLElement {
+    const severity = String(item.meta?.['severity'] ?? 'HIGH').toUpperCase()
+    const colors: Record<string, [string, string]> = {
+      LOW: ['#1d4ed8', '#0f172a'],
+      MEDIUM: ['#d97706', '#451a03'],
+      HIGH: ['#dc2626', '#450a0a'],
+      CRITICAL: ['#991b1b', '#000000'],
+    }
+    const [accent, background] = colors[severity] ?? colors['HIGH']!
+    const container = document.createElement('section')
+    container.setAttribute('role', 'alert')
+    container.setAttribute('aria-live', 'assertive')
+    Object.assign(container.style, {
+      position: 'absolute',
+      inset: '0',
+      width: '100%',
+      height: '100%',
+      display: 'grid',
+      gridTemplateRows: 'auto minmax(0, 1fr) auto',
+      alignItems: 'center',
+      justifyItems: 'center',
+      gap: 'clamp(8px, 2vmin, 28px)',
+      padding: 'clamp(16px, 6vmin, 96px)',
+      overflow: 'hidden',
+      textAlign: 'center',
+      color: '#ffffff',
+      background: `radial-gradient(circle at 50% 20%, ${accent}, ${background} 72%)`,
+    })
+
+    const heading = document.createElement('div')
+    heading.textContent = `${severity} EMERGENCY`
+    Object.assign(heading.style, {
+      fontSize: 'clamp(16px, 3vmin, 42px)',
+      fontWeight: '800',
+      letterSpacing: '0.12em',
+    })
+
+    const message = document.createElement('div')
+    message.textContent = String(item.meta?.['message'] ?? 'Emergency alert')
+    Object.assign(message.style, {
+      maxWidth: '96%',
+      maxHeight: '100%',
+      overflow: 'hidden',
+      fontSize: '72px',
+      lineHeight: '1.12',
+      fontWeight: '750',
+      overflowWrap: 'anywhere',
+    })
+
+    const footer = document.createElement('div')
+    footer.textContent = 'Follow onsite safety instructions immediately'
+    Object.assign(footer.style, {
+      fontSize: 'clamp(12px, 2vmin, 28px)',
+      opacity: '0.88',
+    })
+
+    container.append(heading, message, footer)
+    this.deferStyleCommit(() => {
+      let size = Math.min(72, Math.max(18, Math.floor(container.clientHeight * 0.12)))
+      message.style.fontSize = `${size}px`
+      while (size > 12 && (message.scrollHeight > message.clientHeight || message.scrollWidth > message.clientWidth)) {
+        size -= 2
+        message.style.fontSize = `${size}px`
+      }
+    })
+    return container
+  }
+
+  private wrapEmergencyMedia(media: HTMLElement, item: TimelineItem): HTMLElement {
+    const severity = String(item.meta?.['severity'] ?? 'HIGH').toUpperCase()
+    const accent = severity === 'CRITICAL' ? '#991b1b' : severity === 'HIGH' ? '#dc2626' : severity === 'MEDIUM' ? '#d97706' : '#1d4ed8'
+    const wrapper = document.createElement('section')
+    wrapper.setAttribute('role', 'alert')
+    Object.assign(wrapper.style, {
+      position: 'absolute',
+      inset: '0',
+      width: '100%',
+      height: '100%',
+      overflow: 'hidden',
+      background: '#000000',
+    })
+    wrapper.appendChild(media)
+
+    const overlay = document.createElement('div')
+    Object.assign(overlay.style, {
+      position: 'absolute',
+      left: '0',
+      right: '0',
+      bottom: '0',
+      zIndex: '2',
+      maxHeight: '42%',
+      overflow: 'hidden',
+      padding: 'clamp(12px, 3vmin, 48px)',
+      color: '#ffffff',
+      background: `linear-gradient(90deg, ${accent}f2, #000000e8)`,
+      borderTop: 'clamp(3px, 0.6vmin, 10px) solid #ffffff',
+      fontSize: 'clamp(18px, 4vmin, 64px)',
+      fontWeight: '800',
+      lineHeight: '1.12',
+      textAlign: 'center',
+      overflowWrap: 'anywhere',
+    })
+    overlay.textContent = String(item.meta?.['emergency_message'])
+    wrapper.appendChild(overlay)
+    return wrapper
   }
 
   /**
@@ -497,15 +651,12 @@ class Player {
             return
           }
 
-          let seekTimer: number | undefined
           const onSeeked = () => {
-            if (seekTimer !== undefined) {
-              window.clearTimeout(seekTimer)
-            }
+            window.clearTimeout(seekTimer)
             video.removeEventListener('seeked', onSeeked)
             finalize()
           }
-          seekTimer = window.setTimeout(() => {
+          const seekTimer = window.setTimeout(() => {
             video.removeEventListener('seeked', onSeeked)
             finalize()
           }, 2000)
@@ -836,12 +987,17 @@ class Player {
     // Hide current element
     if (this.currentElement) {
       const previous = this.currentElement
-      prepareElementForFadeOut(previous, safeFadeMs)
-      setTimeout(() => {
-        if (this.mediaContainer && previous.parentElement === this.mediaContainer) {
-          this.disposeScheduledElement(previous)
-        }
-      }, safeFadeMs)
+      if (typeof (previous as DisposableMediaNode).__darshanCleanup === 'function') {
+        this.disposeScheduledElement(previous)
+        this.currentElement = undefined
+      } else {
+        prepareElementForFadeOut(previous, safeFadeMs)
+        setTimeout(() => {
+          if (this.mediaContainer && previous.parentElement === this.mediaContainer) {
+            this.disposeScheduledElement(previous)
+          }
+        }, safeFadeMs)
+      }
     }
 
     // Add and show new element
@@ -1120,6 +1276,8 @@ class Player {
           return this.renderDocumentPlaceholder(item, compat)
         case 'url':
           return await this.renderURL(item)
+        case 'message':
+          return this.renderEmergencyMessage(item)
         default:
           throw new Error(`Unsupported scene media type: ${item.type}`)
       }

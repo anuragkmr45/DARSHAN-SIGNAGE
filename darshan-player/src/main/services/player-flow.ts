@@ -276,7 +276,11 @@ export class PlayerFlow extends EventEmitter {
     }
 
     this.snapshotListenerBound = true
-    getSnapshotManager().on('playlist-updated', (playlist: PlaybackPlaylist) => {
+    // Publish the authoritative mode before PlaybackEngine emits media-change.
+    // The engine subscribes during construction, so a normal `on` listener can
+    // otherwise send the first emergency item while the renderer still owns a
+    // DEFAULT presentation and correctly rejects that item as stale.
+    getSnapshotManager().prependListener('playlist-updated', (playlist: PlaybackPlaylist) => {
       this.handlePlaylistUpdate(playlist)
     })
   }
@@ -476,11 +480,6 @@ export class PlayerFlow extends EventEmitter {
   private handlePlaylistUpdate(playlist: PlaybackPlaylist): void {
     const securePlaybackStatus = getSecurePlaybackGuard().getStatus()
     if (securePlaybackStatus.locked) {
-      if (this.playbackReady) {
-        getPlaybackEngine().stop()
-        this.playbackReady = false
-      }
-
       this.updateStatus({
         mode: 'offline',
         online: false,
@@ -491,19 +490,19 @@ export class PlayerFlow extends EventEmitter {
         error: securePlaybackStatus.reason,
         securityLock: this.toPlayerSecurityLockStatus(securePlaybackStatus),
       })
+      if (this.playbackReady) {
+        this.playbackReady = false
+        getPlaybackEngine().stop()
+      }
       return
     }
 
-    if (requiresTimelinePlayback(playlist)) {
-      if (!this.playbackReady) {
-        void getPlaybackEngine().start()
-        this.playbackReady = true
-      }
-    } else if (this.playbackReady) {
-      getPlaybackEngine().stop()
-      this.playbackReady = false
-    }
+    const timelineRequired = requiresTimelinePlayback(playlist)
+    const shouldStartTimeline = timelineRequired && !this.playbackReady
+    const shouldStopTimeline = !timelineRequired && this.playbackReady
 
+    // Presentation state is authoritative for renderer acceptance. Publish it
+    // before start()/stop() can synchronously emit media-change/clear-active.
     this.updateStatus({
       mode: this.resolveVisiblePlaybackMode(playlist),
       online: playlist.mode !== 'offline',
@@ -513,6 +512,14 @@ export class PlayerFlow extends EventEmitter {
       backendAvailable: playlist.mode !== 'offline',
       securityLock: this.toPlayerSecurityLockStatus(securePlaybackStatus),
     })
+
+    if (shouldStartTimeline) {
+      this.playbackReady = true
+      void getPlaybackEngine().start()
+    } else if (shouldStopTimeline) {
+      this.playbackReady = false
+      getPlaybackEngine().stop()
+    }
   }
 
   private async handleSecurePlaybackStatus(status: SecurePlaybackGuardStatus): Promise<void> {

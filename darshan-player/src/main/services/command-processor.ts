@@ -306,7 +306,7 @@ export class CommandProcessor {
         await new Promise((resolve) => setTimeout(resolve, jitterMs))
       }
     }
-    await getSnapshotManager().refreshSnapshot()
+    await getSnapshotManager().refreshSnapshot({ force: true })
     try {
       await getDefaultMediaService().refreshNow('refresh-command')
     } catch (error) {

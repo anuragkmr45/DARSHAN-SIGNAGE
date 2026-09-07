@@ -207,7 +207,7 @@ export async function getDiskUsage(dirPath: string): Promise<{ used: number; tot
         used: (stats.blocks - stats.bfree) * stats.bsize,
       }
     }
-  } catch (error) {
+  } catch {
     // Fallback: calculate directory size
     const used = await getDirectorySize(dirPath)
     return {

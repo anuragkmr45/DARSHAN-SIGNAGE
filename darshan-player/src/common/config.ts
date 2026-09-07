@@ -241,6 +241,16 @@ export class ConfigManager {
         csp: envValue('DARSHAN_SECURITY_CSP', 'HEXMON_SECURITY_CSP') || buildDefaultPlayerCsp(),
         allowedDomains:
           envValue('DARSHAN_SECURITY_ALLOWED_DOMAINS', 'HEXMON_SECURITY_ALLOWED_DOMAINS')?.split(',') || [],
+        webpageResourceDomains:
+          envValue('DARSHAN_WEBPAGE_RESOURCE_ALLOWLIST', 'HEXMON_WEBPAGE_RESOURCE_ALLOWLIST')?.split(',') || undefined,
+        webpageAllowedCidrs:
+          envValue('DARSHAN_WEBPAGE_ALLOWED_CIDRS', 'HEXMON_WEBPAGE_ALLOWED_CIDRS')?.split(',') || [],
+        webpageAllowedPorts:
+          envValue('DARSHAN_WEBPAGE_ALLOWED_PORTS', 'HEXMON_WEBPAGE_ALLOWED_PORTS')
+            ?.split(',')
+            .map((value) => Number(value.trim()))
+            .filter((value) => Number.isInteger(value) && value > 0 && value <= 65535) || [443],
+        webpageAllowHttp: envFlag(false, 'DARSHAN_WEBPAGE_ALLOW_HTTP', 'HEXMON_WEBPAGE_ALLOW_HTTP'),
         disableEval: envFlag(true, 'DARSHAN_SECURITY_DISABLE_EVAL', 'HEXMON_SECURITY_DISABLE_EVAL'),
         contextIsolation: envFlag(true, 'DARSHAN_SECURITY_CONTEXT_ISOLATION', 'HEXMON_SECURITY_CONTEXT_ISOLATION'),
         nodeIntegration: envFlag(false, 'DARSHAN_SECURITY_NODE_INTEGRATION', 'HEXMON_SECURITY_NODE_INTEGRATION'),
@@ -808,7 +818,19 @@ export class ConfigManager {
       intervals: { ...config.intervals },
       log: { ...config.log },
       power: { ...config.power },
-      security: { ...config.security, allowedDomains: [...config.security.allowedDomains] },
+      security: {
+        ...config.security,
+        allowedDomains: [...config.security.allowedDomains],
+        webpageResourceDomains: config.security.webpageResourceDomains
+          ? [...config.security.webpageResourceDomains]
+          : undefined,
+        webpageAllowedCidrs: config.security.webpageAllowedCidrs
+          ? [...config.security.webpageAllowedCidrs]
+          : undefined,
+        webpageAllowedPorts: config.security.webpageAllowedPorts
+          ? [...config.security.webpageAllowedPorts]
+          : undefined,
+      },
       observability: { ...config.observability },
       pairing: config.pairing ? { ...config.pairing } : undefined,
       duplicateIdentity: config.duplicateIdentity ? { ...config.duplicateIdentity } : undefined,
@@ -925,6 +947,9 @@ export class ConfigManager {
       }
       if (!this.config.transportTls.strictCertificateValidation) {
         errors.push('production transportTls.strictCertificateValidation must be true')
+      }
+      if (this.config.security.webpageAllowHttp) {
+        errors.push('production webpageAllowHttp must be false')
       }
     }
 

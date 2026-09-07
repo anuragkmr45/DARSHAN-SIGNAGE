@@ -394,7 +394,7 @@ export class ProofOfPlayService {
   }
 
   private async trimLiveBuffer(): Promise<void> {
-    let overflowEvents: BufferedProofOfPlayEvent[] = []
+    const overflowEvents: BufferedProofOfPlayEvent[] = []
     let bufferBytes = this.eventBuffer.reduce((total, event) => total + this.estimateEventSize(event), 0)
 
     while (this.eventBuffer.length > POP_REPLAY_BUFFER_MAX_EVENTS || bufferBytes > POP_REPLAY_BUFFER_MAX_BYTES) {
@@ -443,7 +443,7 @@ export class ProofOfPlayService {
   private async enforceSpoolBudget(): Promise<void> {
     const files = this.listSpoolFiles('pop-')
     let totalBytes = files.reduce((total, file) => total + file.sizeBytes, 0)
-    let remainingFiles = [...files]
+    const remainingFiles = [...files]
 
     while (remainingFiles.length > POP_REPLAY_SPOOL_MAX_FILES || totalBytes > this.maxSpoolBytes) {
       const oldest = remainingFiles.shift()

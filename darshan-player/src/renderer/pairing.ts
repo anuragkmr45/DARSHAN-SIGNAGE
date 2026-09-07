@@ -428,7 +428,7 @@ class PairingScreen {
         items.push(this.createDiagnosticItem('Latency', `${diagnostics.latency}ms`, true))
       }
       this.diagnosticsList.innerHTML = items.join('')
-    } catch (error) {
+    } catch {
       this.diagnosticsList.innerHTML = '<li>Failed to run diagnostics</li>'
     }
   }

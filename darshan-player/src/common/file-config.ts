@@ -127,6 +127,22 @@ function numberValue(value: unknown, pathLabel: string, min = 0): number | undef
   return Math.round(value)
 }
 
+function stringArrayValue(value: unknown, pathLabel: string): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)) {
+    throw new Error(`${pathLabel} must be an array of non-empty strings`)
+  }
+  return value.map((entry) => String(entry).trim())
+}
+
+function portArrayValue(value: unknown, pathLabel: string): number[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some((entry) => !Number.isInteger(entry) || entry < 1 || entry > 65535)) {
+    throw new Error(`${pathLabel} must be an array of TCP ports from 1 to 65535`)
+  }
+  return value as number[]
+}
+
 function normalizeUrl(value: string, pathLabel: string, allowedProtocols: string[]): string {
   let parsed: URL
   try {
@@ -350,6 +366,11 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
         'lockAfterOfflineMs',
         'purgeCacheAfterOfflineMs',
         'showSecurityLockScreen',
+        'allowedDomains',
+        'webpageResourceDomains',
+        'webpageAllowedCidrs',
+        'webpageAllowedPorts',
+        'webpageAllowHttp',
       ],
       'player.security'
     )
@@ -361,6 +382,11 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       throw new Error('player.security.offlinePlaybackPolicy must be one of: standard, secure, high_security')
     }
     config.security = {}
+    setNested(config.security, 'allowedDomains', stringArrayValue(security['allowedDomains'], 'player.security.allowedDomains') as any)
+    setNested(config.security, 'webpageResourceDomains', stringArrayValue(security['webpageResourceDomains'], 'player.security.webpageResourceDomains'))
+    setNested(config.security, 'webpageAllowedCidrs', stringArrayValue(security['webpageAllowedCidrs'], 'player.security.webpageAllowedCidrs'))
+    setNested(config.security, 'webpageAllowedPorts', portArrayValue(security['webpageAllowedPorts'], 'player.security.webpageAllowedPorts'))
+    setNested(config.security, 'webpageAllowHttp', booleanValue(security['webpageAllowHttp'], 'player.security.webpageAllowHttp'))
     setNested(config.security, 'offlinePlaybackPolicy', offlinePlaybackPolicy as any)
     setNested(
       config.security,

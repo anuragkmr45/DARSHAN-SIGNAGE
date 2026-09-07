@@ -1,503 +1,172 @@
-const { redactUrlForDiagnostics, sanitizeLogPayloadForDiagnostics } =
-  require('../common/redaction') as typeof import('../common/redaction')
+import { redactUrlForDiagnostics, sanitizeLogPayloadForDiagnostics } from '../common/redaction'
 
-type EmbeddedWebviewElement = HTMLElement & {
-  src: string
-  stop?: () => void
-  setAudioMuted?: (muted: boolean) => void
-  loadURL?: (url: string) => void
-  addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void
-  removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void
-  executeJavaScript?: (code: string, userGesture?: boolean) => Promise<unknown>
-}
+import type { WebpageViewRequest, WebpageViewStatus } from '../common/types'
 
-const WEBPAGE_PARTITION = 'persist:darshan-webpage-playback'
-
-export type ManagedWebpageElement = HTMLElement & {
-  __darshanCleanup?: () => void
-}
-
+export type ManagedWebpageElement = HTMLElement & { __darshanCleanup?: () => void }
 type WebpageLogLevel = 'debug' | 'warn'
 
 export type WebpagePlaybackOptions = {
   liveUrl: string
   fallbackUrl?: string
   fallbackFit?: 'contain' | 'cover' | 'fill'
+  zIndex?: number
   onHealthy?: () => void
   onFallback?: (reason: string) => void
   onLog?: (level: WebpageLogLevel, message: string, data?: Record<string, unknown>) => void
 }
 
 type WebpageProbeResult = {
-  ready: boolean
-  reason: string
-  hasBody: boolean
-  hasVisibleContent: boolean
   width: number
   height: number
   textLength: number
   mediaCount: number
   visibleElementCount: number
-  viewportWidth: number
-  viewportHeight: number
   overflowX: boolean
   overflowY: boolean
 }
 
+let nextGeneration = 0
+const MAX_MOUNT_RETRIES = 60
+
 export function shouldRevealLiveWebpage(
-  probe: Pick<
-    WebpageProbeResult,
-    'width' | 'height' | 'textLength' | 'mediaCount' | 'visibleElementCount' | 'overflowX' | 'overflowY'
-  >
+  probe: Pick<WebpageProbeResult, 'width' | 'height' | 'textLength' | 'mediaCount' | 'visibleElementCount'> &
+    Partial<Pick<WebpageProbeResult, 'overflowX' | 'overflowY'>>
 ): boolean {
-  return (
-    probe.width > 0 &&
-    probe.height > 0 &&
-    (probe.textLength > 24 || probe.mediaCount > 0 || probe.visibleElementCount > 1) &&
-    !probe.overflowX &&
-    !probe.overflowY
-  )
+  return probe.width > 0 && probe.height > 0 &&
+    (probe.textLength > 24 || probe.mediaCount > 0 || probe.visibleElementCount > 1)
 }
-
-const WEBPAGE_READY_PROBE = `
-  (() => {
-    try {
-      const root = document.documentElement;
-      const body = document.body;
-      if (!root || !body) {
-        return {
-          ready: false,
-          reason: 'missing-body',
-          hasBody: Boolean(body),
-          hasVisibleContent: false,
-          width: 0,
-          height: 0,
-          textLength: 0,
-          mediaCount: 0,
-          visibleElementCount: 0,
-          viewportWidth: 0,
-          viewportHeight: 0,
-          overflowX: false,
-          overflowY: false,
-        };
-      }
-
-      const maxWidth = Math.max(root.clientWidth, root.scrollWidth, body.clientWidth, body.scrollWidth);
-      const maxHeight = Math.max(root.clientHeight, root.scrollHeight, body.clientHeight, body.scrollHeight);
-      const viewportWidth = Math.max(0, root.clientWidth, body.clientWidth);
-      const viewportHeight = Math.max(0, root.clientHeight, body.clientHeight);
-      const overflowX = maxWidth > viewportWidth + 2;
-      const overflowY = maxHeight > viewportHeight + 2;
-      const textLength = (body.innerText || '').trim().length;
-      const mediaCount = body.querySelectorAll('img, video, canvas, svg, iframe, embed, object').length;
-      const visibleElements = Array.from(body.querySelectorAll('*')).filter((node) => {
-        if (!(node instanceof HTMLElement) && !(node instanceof SVGElement)) {
-          return false;
-        }
-
-        const tagName = node.tagName.toLowerCase();
-        if (['script', 'style', 'link', 'meta', 'noscript'].includes(tagName)) {
-          return false;
-        }
-
-        const rect = node.getBoundingClientRect();
-        if (rect.width <= 4 || rect.height <= 4) {
-          return false;
-        }
-
-        const style = window.getComputedStyle(node);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-          return false;
-        }
-
-        const directTextLength = (node.textContent || '').trim().length;
-        const hasGraphicSurface = ['img', 'video', 'canvas', 'svg', 'iframe', 'embed', 'object'].includes(tagName);
-        const hasChildren = node.children.length > 0;
-        return directTextLength > 0 || hasGraphicSurface || hasChildren;
-      });
-
-      const visibleElementCount = visibleElements.length;
-      const rootMount = body.querySelector('#root, #app');
-      const rootHydrated = Boolean(rootMount && rootMount.children.length > 0);
-      const hasVisibleContent =
-        textLength > 24 ||
-        mediaCount > 0 ||
-        visibleElementCount > 1 ||
-        rootHydrated;
-
-      const ready =
-        maxWidth > 0 &&
-        maxHeight > 0 &&
-        (textLength > 24 || mediaCount > 0 || visibleElementCount > 1) &&
-        !overflowX &&
-        !overflowY;
-
-      return {
-        ready,
-        reason: maxWidth <= 0 || maxHeight <= 0 ? 'zero-size' : overflowX || overflowY ? 'overflow' : hasVisibleContent ? 'ok' : 'empty-dom',
-        hasBody: true,
-        hasVisibleContent,
-        width: maxWidth,
-        height: maxHeight,
-        textLength,
-        mediaCount,
-        visibleElementCount,
-        viewportWidth,
-        viewportHeight,
-        overflowX,
-        overflowY,
-      };
-    } catch (error) {
-      return {
-        ready: false,
-        reason: error instanceof Error ? error.message : String(error),
-        hasBody: Boolean(document.body),
-        hasVisibleContent: false,
-        width: 0,
-        height: 0,
-        textLength: 0,
-        mediaCount: 0,
-        visibleElementCount: 0,
-        viewportWidth: 0,
-        viewportHeight: 0,
-        overflowX: false,
-        overflowY: false,
-      };
-    }
-  })()
-`
-
-const WEBPAGE_LOCKDOWN_SCRIPT = `
-  (() => {
-    const muteNode = (node) => {
-      try {
-        node.muted = true;
-        node.defaultMuted = true;
-        node.volume = 0;
-        node.autoplay = false;
-      } catch {}
-    };
-
-    const apply = () => {
-      document.querySelectorAll('video, audio').forEach((node) => muteNode(node));
-    };
-
-    apply();
-    const observer = new MutationObserver(() => apply());
-    if (document.documentElement) {
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-    }
-
-    window.open = () => null;
-    return true;
-  })()
-`
 
 function log(options: WebpagePlaybackOptions, level: WebpageLogLevel, message: string, data?: Record<string, unknown>) {
   options.onLog?.(level, message, sanitizeLogPayloadForDiagnostics(data) as Record<string, unknown>)
 }
 
-function isSameOriginNavigation(sourceUrl: string, nextUrl: string) {
-  try {
-    const expected = new URL(sourceUrl)
-    const actual = new URL(nextUrl)
-    const safeProtocol = actual.protocol === 'http:' || actual.protocol === 'https:'
-    return safeProtocol && expected.origin === actual.origin
-  } catch {
-    return false
-  }
+function makeId(): string {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  nextGeneration += 1
+  return `webpage-${Date.now()}-${nextGeneration}`
 }
 
 export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): ManagedWebpageElement {
   const container = document.createElement('div') as ManagedWebpageElement
-  container.style.position = 'absolute'
-  container.style.top = '0'
-  container.style.left = '0'
-  container.style.width = '100%'
-  container.style.height = '100%'
-  container.style.background = '#000'
-  container.style.overflow = 'hidden'
+  Object.assign(container.style, {
+    position: 'absolute', top: '0', left: '0', width: '100%', height: '100%', background: '#000', overflow: 'hidden',
+  })
 
   const fallbackLayer = document.createElement('div')
-  fallbackLayer.style.position = 'absolute'
-  fallbackLayer.style.top = '0'
-  fallbackLayer.style.left = '0'
-  fallbackLayer.style.width = '100%'
-  fallbackLayer.style.height = '100%'
-  fallbackLayer.style.background = '#000'
-  fallbackLayer.style.zIndex = '0'
-  fallbackLayer.style.display = 'flex'
-  fallbackLayer.style.alignItems = 'center'
-  fallbackLayer.style.justifyContent = 'center'
+  Object.assign(fallbackLayer.style, {
+    position: 'absolute', top: '0', left: '0', width: '100%', height: '100%', background: '#000',
+    zIndex: '0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  })
   container.appendChild(fallbackLayer)
 
   if (options.fallbackUrl) {
     const fallbackImage = document.createElement('img')
     fallbackImage.src = options.fallbackUrl
-    fallbackImage.style.width = '100%'
-    fallbackImage.style.height = '100%'
-    fallbackImage.style.objectFit = options.fallbackFit ?? 'contain'
-    fallbackImage.style.background = '#000'
+    Object.assign(fallbackImage.style, {
+      width: '100%', height: '100%', objectFit: options.fallbackFit ?? 'contain', background: '#000',
+    })
     fallbackLayer.appendChild(fallbackImage)
   } else {
     const fallbackLabel = document.createElement('div')
     fallbackLabel.textContent = 'Live webpage unavailable'
-    fallbackLabel.style.color = '#fff'
-    fallbackLabel.style.fontSize = '18px'
-    fallbackLabel.style.fontWeight = '600'
-    fallbackLabel.style.opacity = '0.8'
+    Object.assign(fallbackLabel.style, { color: '#fff', fontSize: '18px', fontWeight: '600', opacity: '0.8' })
     fallbackLayer.appendChild(fallbackLabel)
   }
 
-  const webview = document.createElement('webview') as EmbeddedWebviewElement
-  webview.style.position = 'absolute'
-  webview.style.top = '0'
-  webview.style.left = '0'
-  webview.style.width = '100%'
-  webview.style.height = '100%'
-  webview.style.zIndex = '1'
-  webview.style.opacity = '0'
-  webview.style.transition = 'opacity 180ms ease-in-out'
-  webview.setAttribute('partition', WEBPAGE_PARTITION)
-  webview.setAttribute('webpreferences', 'contextIsolation=yes, sandbox=yes')
-  webview.src = options.liveUrl
-  webview.setAttribute('allowpopups', 'false')
-  container.appendChild(webview)
-
+  const id = makeId()
+  const generation = ++nextGeneration
   let disposed = false
-  let revealedLive = false
-  let healthProbeTimer: number | undefined
-  let healthProbeDeadlineAt = 0
-  let healthySamples = 0
-  let unhealthySamples = 0
-  let probeGeneration = 0
-  let resizeObserver: ResizeObserver | undefined
+  let mounted = false
+  let animationFrame: number | undefined
+  let retryTimer: number | undefined
+  let mountRetryCount = 0
 
-  const clearHealthProbeTimer = () => {
-    if (healthProbeTimer) {
-      window.clearTimeout(healthProbeTimer)
-      healthProbeTimer = undefined
+  const scheduleMountRetry = () => {
+    if (disposed || retryTimer !== undefined || mountRetryCount >= MAX_MOUNT_RETRIES) return
+    mountRetryCount += 1
+    retryTimer = window.setTimeout(() => {
+      retryTimer = undefined
+      syncBounds()
+    }, 1000)
+  }
+
+  const buildRequest = (): WebpageViewRequest | null => {
+    const rect = container.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return null
+    return {
+      id,
+      generation,
+      url: options.liveUrl,
+      bounds: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      zIndex: options.zIndex ?? (Number.parseInt(container.style.zIndex || '0', 10) || 0),
     }
   }
 
-  const showFallback = (reason: string) => {
-    if (disposed) {
-      return
-    }
-
-    clearHealthProbeTimer()
-    revealedLive = false
-    webview.style.opacity = '0'
-    fallbackLayer.style.display = 'flex'
-    log(options, 'warn', 'Webpage fallback active', { reason, url: redactUrlForDiagnostics(options.liveUrl) })
-    options.onFallback?.(reason)
-  }
-
-  const revealLive = () => {
-    if (disposed) {
-      return
-    }
-
-    clearHealthProbeTimer()
-    revealedLive = true
-    fallbackLayer.style.display = 'none'
-    webview.style.opacity = '1'
-    log(options, 'debug', 'Webpage live view healthy', { url: redactUrlForDiagnostics(options.liveUrl) })
-    options.onHealthy?.()
-  }
-
-  const beginHealthProbe = (reason: string) => {
+  const syncBounds = () => {
     if (disposed) return
-    probeGeneration += 1
-    healthySamples = 0
-    unhealthySamples = 0
-    healthProbeDeadlineAt = Date.now() + 12_000
-    clearHealthProbeTimer()
-    log(options, 'debug', 'Webpage health probe reset', { reason, url: redactUrlForDiagnostics(options.liveUrl) })
-    void probeReadiness(probeGeneration)
-  }
-
-  const muteAndLock = () => {
-    try {
-      webview.setAudioMuted?.(true)
-    } catch {
-      // ignore webview audio mute failures
-    }
-
-    void webview.executeJavaScript?.(WEBPAGE_LOCKDOWN_SCRIPT, false).catch(() => {
-      // ignore page script injection failures
-    })
-  }
-
-  const probeReadiness = async (generation: number) => {
-    try {
-      const probe = (await webview.executeJavaScript?.(WEBPAGE_READY_PROBE, false)) as WebpageProbeResult | undefined
-
-      if (disposed || generation !== probeGeneration) return
-
-      if (probe?.ready) {
-        healthySamples += 1
-        unhealthySamples = 0
-        log(options, 'debug', 'Webpage readiness probe passed', {
-          url: redactUrlForDiagnostics(options.liveUrl),
-          width: probe.width,
-          height: probe.height,
-          textLength: probe.textLength,
-          mediaCount: probe.mediaCount,
-          visibleElementCount: probe.visibleElementCount,
-          overflowX: probe.overflowX,
-          overflowY: probe.overflowY,
-        })
-        // An SPA can briefly report a healthy shell while it applies its own
-        // delayed layout. Require two consecutive healthy samples before it
-        // replaces the known-safe fallback surface.
-        if (healthySamples >= 2) {
-          revealLive()
-          return
+    if (animationFrame !== undefined) window.cancelAnimationFrame?.(animationFrame)
+    animationFrame = window.requestAnimationFrame?.(() => {
+      animationFrame = undefined
+      const request = buildRequest()
+      if (!request) return
+      const operation = mounted ? window.darshan.updateWebpageView(request) : window.darshan.mountWebpageView(request)
+      void operation.then((result) => {
+        if (disposed) return
+        mounted = mounted || result.accepted
+        if (!result.accepted) {
+          log(options, 'warn', 'Webpage view request rejected', {
+            reason: result.reason,
+            url: redactUrlForDiagnostics(options.liveUrl),
+          })
+          options.onFallback?.(result.reason ?? 'view-rejected')
+          if (result.reason === 'live-view-cap') scheduleMountRetry()
         }
-        clearHealthProbeTimer()
-        healthProbeTimer = window.setTimeout(() => {
-          void probeReadiness(generation)
-        }, 150)
-        return
-      }
-
-      healthySamples = 0
-      unhealthySamples += 1
-      log(options, 'debug', 'Webpage readiness probe pending', {
-        url: redactUrlForDiagnostics(options.liveUrl),
-        reason: probe?.reason || 'unhealthy',
-        width: probe?.width ?? 0,
-        height: probe?.height ?? 0,
-        textLength: probe?.textLength ?? 0,
-        mediaCount: probe?.mediaCount ?? 0,
-        visibleElementCount: probe?.visibleElementCount ?? 0,
-        overflowX: probe?.overflowX ?? false,
-        overflowY: probe?.overflowY ?? false,
+      }).catch((error) => {
+        log(options, 'warn', 'Webpage view IPC failed', { error, url: redactUrlForDiagnostics(options.liveUrl) })
+        options.onFallback?.('view-ipc-failed')
       })
-      // Once visible, two stable overflow findings are enough to return to
-      // fallback immediately. A single probe can be a page-navigation frame.
-      if (revealedLive && probe?.reason === 'overflow' && unhealthySamples >= 2) {
-        showFallback('probe-overflow')
-        return
-      }
-      if (Date.now() >= healthProbeDeadlineAt) {
-        showFallback(`probe-${probe?.reason || 'unhealthy'}`)
-        return
-      }
-
-      clearHealthProbeTimer()
-      healthProbeTimer = window.setTimeout(() => {
-        void probeReadiness(generation)
-      }, 350)
-    } catch {
-      if (disposed || generation !== probeGeneration) return
-      if (Date.now() >= healthProbeDeadlineAt) {
-        showFallback('probe-execution-failed')
-        return
-      }
-
-      clearHealthProbeTimer()
-      healthProbeTimer = window.setTimeout(() => {
-        void probeReadiness(generation)
-      }, 500)
-    }
-  }
-
-  const handleDomReady = () => {
-    log(options, 'debug', 'Webpage dom-ready', { url: redactUrlForDiagnostics(options.liveUrl) })
-    muteAndLock()
-    beginHealthProbe('dom-ready')
-  }
-
-  const handleStopLoading = () => {
-    log(options, 'debug', 'Webpage did-stop-loading', { url: redactUrlForDiagnostics(options.liveUrl) })
-    beginHealthProbe('did-stop-loading')
-  }
-
-  const handleFailLoad = () => {
-    showFallback('did-fail-load')
-  }
-
-  const handleGone = () => {
-    showFallback('render-process-gone')
-  }
-
-  const handleUnresponsive = () => {
-    showFallback('unresponsive')
-  }
-
-  const handleNavigate = (event: Event) => {
-    const nextUrl = String((event as unknown as { url?: string }).url || '')
-    if (!nextUrl) {
-      return
-    }
-
-    if (isSameOriginNavigation(options.liveUrl, nextUrl)) {
-      beginHealthProbe('same-origin-navigation')
-      return
-    }
-
-    log(options, 'warn', 'Webpage navigation drift blocked', {
-      expected: redactUrlForDiagnostics(options.liveUrl),
-      actual: redactUrlForDiagnostics(nextUrl),
-    })
-
-    try {
-      webview.loadURL?.(options.liveUrl)
-    } catch {
-      showFallback('navigation-drift')
-    }
-  }
-
-  const handleConsoleMessage = (event: Event) => {
-    const consoleEvent = event as unknown as { level?: number; message?: string; line?: number; sourceId?: string }
-    log(options, 'debug', 'Webpage console message', {
-      url: redactUrlForDiagnostics(options.liveUrl),
-      level: consoleEvent.level ?? null,
-      message: consoleEvent.message ?? '',
-      line: consoleEvent.line ?? null,
-      sourceId: consoleEvent.sourceId ?? '',
     })
   }
 
-  webview.addEventListener('dom-ready', handleDomReady)
-  webview.addEventListener('did-stop-loading', handleStopLoading)
-  webview.addEventListener('did-fail-load', handleFailLoad)
-  webview.addEventListener('render-process-gone', handleGone as EventListener)
-  webview.addEventListener('unresponsive', handleUnresponsive as EventListener)
-  webview.addEventListener('did-navigate', handleNavigate as EventListener)
-  webview.addEventListener('did-navigate-in-page', handleNavigate as EventListener)
-  webview.addEventListener('console-message', handleConsoleMessage as EventListener)
+  const removeStatusListener = window.darshan.onWebpageViewStatus((status: WebpageViewStatus) => {
+    if (disposed || status.id !== id || status.generation !== generation) return
+    if (status.state === 'healthy') {
+      mountRetryCount = 0
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer)
+        retryTimer = undefined
+      }
+      fallbackLayer.style.display = 'none'
+      log(options, 'debug', 'Webpage live view healthy', { url: redactUrlForDiagnostics(options.liveUrl) })
+      options.onHealthy?.()
+      return
+    }
+    fallbackLayer.style.display = 'flex'
+    if (status.state === 'fallback' || status.state === 'blocked') {
+      log(options, 'warn', 'Webpage fallback active', {
+        reason: status.reason,
+        url: redactUrlForDiagnostics(options.liveUrl),
+      })
+      options.onFallback?.(status.reason ?? status.state)
+      if (status.reason === 'live-view-cap' || status.reason === 'display-changed') {
+        mounted = false
+        scheduleMountRetry()
+      }
+    }
+  })
 
-  if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(() => beginHealthProbe('slot-resize'))
-    resizeObserver.observe(container)
-  }
-  beginHealthProbe('initial')
+  const resizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(syncBounds)
+  resizeObserver?.observe(container)
+  queueMicrotask(syncBounds)
 
   container.__darshanCleanup = () => {
-    if (disposed) {
-      return
-    }
-
+    if (disposed) return
     disposed = true
-    clearHealthProbeTimer()
     resizeObserver?.disconnect()
-    webview.removeEventListener('dom-ready', handleDomReady)
-    webview.removeEventListener('did-stop-loading', handleStopLoading)
-    webview.removeEventListener('did-fail-load', handleFailLoad)
-    webview.removeEventListener('render-process-gone', handleGone as EventListener)
-    webview.removeEventListener('unresponsive', handleUnresponsive as EventListener)
-    webview.removeEventListener('did-navigate', handleNavigate as EventListener)
-    webview.removeEventListener('did-navigate-in-page', handleNavigate as EventListener)
-    webview.removeEventListener('console-message', handleConsoleMessage as EventListener)
-
-    try {
-      webview.stop?.()
-    } catch {
-      // ignore teardown failures
-    }
+    removeStatusListener()
+    if (animationFrame !== undefined) window.cancelAnimationFrame?.(animationFrame)
+    if (retryTimer !== undefined) window.clearTimeout(retryTimer)
+    window.darshan.destroyWebpageView(id, generation)
   }
 
   return container

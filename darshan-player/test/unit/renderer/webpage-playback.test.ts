@@ -1,168 +1,100 @@
 const { expect } = require('chai')
 
 describe('Webpage playback helpers', () => {
-  const loadWebpagePlaybackModule = () => require('../../../dist/renderer/renderer/webpage-playback.js')
+  const loadModule = () => require('../../../dist/renderer/renderer/webpage-playback.js')
 
   class FakeElement {
     tagName
     style = {}
     children = []
-    attributes = {}
-    listeners = {}
     src = ''
-    loadURL
-    stop = () => {}
-
-    constructor(tagName) {
-      this.tagName = String(tagName).toUpperCase()
-    }
-
-    appendChild(child) {
-      this.children.push(child)
-      child.parentElement = this
-      return child
-    }
-
-    setAttribute(name, value) {
-      this.attributes[name] = String(value)
-    }
-
-    addEventListener(type, listener) {
-      this.listeners[type] = listener
-    }
-
-    removeEventListener(type) {
-      delete this.listeners[type]
-    }
-
-    dispatch(type, event = {}) {
-      const listener = this.listeners[type]
-      if (typeof listener === 'function') {
-        listener(event)
-      }
-    }
+    parentElement
+    textContent = ''
+    constructor(tagName) { this.tagName = String(tagName).toUpperCase() }
+    appendChild(child) { this.children.push(child); child.parentElement = this; return child }
+    getBoundingClientRect() { return { left: 20, top: 30, width: 640, height: 360 } }
   }
 
   let originalDocument
   let originalWindow
+  let statusListener
+  let mountedRequests
+  let updatedRequests
+  let destroyedRequests
 
   beforeEach(() => {
     originalDocument = global.document
     originalWindow = global.window
-    global.document = {
-      createElement: (tagName) => new FakeElement(tagName),
-    }
+    mountedRequests = []
+    updatedRequests = []
+    destroyedRequests = []
+    global.document = { createElement: (tagName) => new FakeElement(tagName) }
     global.window = {
-      setTimeout: () => 0,
-      clearTimeout: () => {},
+      requestAnimationFrame: (callback) => { callback(); return 1 },
+      cancelAnimationFrame: () => {},
+      darshan: {
+        mountWebpageView: async (request) => { mountedRequests.push(request); return { accepted: true } },
+        updateWebpageView: async (request) => { updatedRequests.push(request); return { accepted: true } },
+        destroyWebpageView: (id, generation) => destroyedRequests.push({ id, generation }),
+        onWebpageViewStatus: (callback) => { statusListener = callback; return () => { statusListener = undefined } },
+      },
     }
   })
 
   afterEach(() => {
     global.document = originalDocument
     global.window = originalWindow
+    statusListener = undefined
   })
 
-  it('does not reveal the live page for an empty SPA shell', async () => {
-    const { shouldRevealLiveWebpage } = loadWebpagePlaybackModule()
-
-    const ready = shouldRevealLiveWebpage({
-      width: 1280,
-      height: 720,
-      textLength: 0,
-      mediaCount: 0,
-      visibleElementCount: 1,
-      overflowX: false,
-      overflowY: false,
-    })
-
-    expect(ready).to.equal(false)
+  it('does not reveal an empty page shell', () => {
+    const { shouldRevealLiveWebpage } = loadModule()
+    expect(shouldRevealLiveWebpage({ width: 1280, height: 720, textLength: 0, mediaCount: 0, visibleElementCount: 1 })).to.equal(false)
   })
 
-  it('reveals the live page once visible rendered content exists', async () => {
-    const { shouldRevealLiveWebpage } = loadWebpagePlaybackModule()
-
-    const ready = shouldRevealLiveWebpage({
-      width: 1280,
-      height: 720,
-      textLength: 56,
-      mediaCount: 0,
-      visibleElementCount: 3,
-      overflowX: false,
-      overflowY: false,
-    })
-
-    expect(ready).to.equal(true)
+  it('accepts normal webpage overflow as healthy content', () => {
+    const { shouldRevealLiveWebpage } = loadModule()
+    expect(shouldRevealLiveWebpage({
+      width: 1280, height: 1200, textLength: 56, mediaCount: 0, visibleElementCount: 3,
+      overflowX: false, overflowY: true,
+    })).to.equal(true)
   })
 
-  it('keeps the fallback visible when the webpage overflows its slot', async () => {
-    const { shouldRevealLiveWebpage } = loadWebpagePlaybackModule()
-    expect(
-      shouldRevealLiveWebpage({
-        width: 1280,
-        height: 720,
-        textLength: 56,
-        mediaCount: 0,
-        visibleElementCount: 3,
-        overflowX: true,
-        overflowY: false,
-      })
-    ).to.equal(false)
+  it('mounts a main-process webpage view, reveals it only after health, and destroys it idempotently', async () => {
+    const { createWebpagePlaybackElement } = loadModule()
+    const healthy = []
+    const container = createWebpagePlaybackElement({ liveUrl: 'https://display.example.test/page', onHealthy: () => healthy.push(true) })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(container.children).to.have.length(1)
+    expect(mountedRequests).to.have.length(1)
+    expect(mountedRequests[0]).to.include({ url: 'https://display.example.test/page' })
+    expect(mountedRequests[0].bounds).to.deep.equal({ x: 20, y: 30, width: 640, height: 360 })
+
+    statusListener({ id: mountedRequests[0].id, generation: mountedRequests[0].generation, state: 'healthy' })
+    expect(container.children[0].style.display).to.equal('none')
+    expect(healthy).to.deep.equal([true])
+
+    container.__darshanCleanup()
+    container.__darshanCleanup()
+    expect(destroyedRequests).to.deep.equal([{ id: mountedRequests[0].id, generation: mountedRequests[0].generation }])
   })
 
-  it('redacts credentialed live URLs in renderer webpage logs without changing runtime URL', async () => {
-    const { createWebpagePlaybackElement } = loadWebpagePlaybackModule()
-    const liveUrl = 'https://user:password@backend.internal:3000/page?token=abc#secret'
+  it('redacts a rejected credentialed URL in renderer logs', async () => {
+    global.window.darshan.mountWebpageView = async () => ({ accepted: false, reason: 'url-not-allowed' })
+    const { createWebpagePlaybackElement } = loadModule()
     const logs = []
-
-    const container = createWebpagePlaybackElement({
-      liveUrl,
+    createWebpagePlaybackElement({
+      liveUrl: 'https://user:password@backend.internal/page?token=abc#secret',
       onLog: (level, message, data) => logs.push({ level, message, data }),
     })
-    const webview = container.children[1]
-
-    webview.dispatch('dom-ready')
-
+    await Promise.resolve()
+    await Promise.resolve()
     const serialized = JSON.stringify(logs)
-    expect(webview.src).to.equal(liveUrl)
-    expect(serialized).to.contain('https://backend.internal:3000/page')
-    expect(serialized).not.to.contain('user')
+    expect(serialized).to.contain('https://backend.internal/page')
     expect(serialized).not.to.contain('password')
     expect(serialized).not.to.contain('token')
-    expect(serialized).not.to.contain('abc')
     expect(serialized).not.to.contain('secret')
-    container.__darshanCleanup()
-  })
-
-  it('redacts expected and actual URLs in renderer navigation drift logs', async () => {
-    const { createWebpagePlaybackElement } = loadWebpagePlaybackModule()
-    const liveUrl = 'https://user:password@backend.internal:3000/page?token=abc#secret'
-    const driftUrl = 'https://attacker:secret@elsewhere.internal:3000/path?password=def#fragment'
-    const logs = []
-    let reloadedUrl = ''
-
-    const container = createWebpagePlaybackElement({
-      liveUrl,
-      onLog: (level, message, data) => logs.push({ level, message, data }),
-    })
-    const webview = container.children[1]
-    webview.loadURL = (url) => {
-      reloadedUrl = url
-    }
-
-    webview.dispatch('did-navigate', { url: driftUrl })
-
-    const serialized = JSON.stringify(logs)
-    expect(reloadedUrl).to.equal(liveUrl)
-    expect(serialized).to.contain('https://backend.internal:3000/page')
-    expect(serialized).to.contain('https://elsewhere.internal:3000/path')
-    expect(serialized).not.to.contain('user')
-    expect(serialized).not.to.contain('attacker')
-    expect(serialized).not.to.contain('password')
-    expect(serialized).not.to.contain('token')
-    expect(serialized).not.to.contain('abc')
-    expect(serialized).not.to.contain('def')
-    expect(serialized).not.to.contain('fragment')
-    container.__darshanCleanup()
   })
 })

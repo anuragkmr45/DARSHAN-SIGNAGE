@@ -37,6 +37,9 @@ describe('Snapshot Parser', () => {
       id: 'snap-2',
       emergency: {
         active: true,
+        kind: 'MEDIA',
+        message: 'Shelter in place.',
+        severity: 'HIGH',
         media_id: 'media-emergency',
         media_url: 'https://cdn.example.com/emergency.mp4',
         type: 'video',
@@ -49,6 +52,31 @@ describe('Snapshot Parser', () => {
     expect(parsed.emergencyItem).to.exist
     expect(parsed.emergencyItem?.mediaId).to.equal('media-emergency')
     expect(parsed.emergencyItem?.remoteUrl).to.equal('https://cdn.example.com/emergency.mp4')
+    expect(parsed.emergencyItem?.meta?.emergency_message).to.equal('Shelter in place.')
+  })
+
+  it('should parse a message-only emergency as native message content', () => {
+    const raw = {
+      server_time: '2026-09-07T10:00:00.000Z',
+      content_state: 'empty',
+      snapshot: null,
+      emergency: {
+        id: 'emergency-message-1',
+        active: true,
+        kind: 'MESSAGE',
+        message: 'Evacuate using the nearest marked exit.',
+        severity: 'CRITICAL',
+        version: 'emergency-message-1:1',
+        expires_at: '2026-09-07T10:05:00.000Z',
+      },
+    }
+
+    const parsed = parseSnapshotResponse(raw)
+
+    expect(parsed.emergencyItem?.type).to.equal('message')
+    expect(parsed.emergencyItem?.meta?.message).to.equal('Evacuate using the nearest marked exit.')
+    expect(parsed.emergencyItem?.meta?.severity).to.equal('CRITICAL')
+    expect(parsed.emergencyExpiresAt).to.equal('2026-09-07T10:05:00.000Z')
   })
 
   it('should parse default media fallback', () => {

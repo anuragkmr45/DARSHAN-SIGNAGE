@@ -136,6 +136,97 @@ describe('Snapshot Manager', () => {
     expect(snapshotManager.getLastError()).to.equal(undefined)
   })
 
+  it('should expire a message emergency locally while offline', async () => {
+    const baseTime = new Date('2026-09-07T10:00:00.000Z')
+    clock = sandbox.useFakeTimers({ now: baseTime, shouldAdvanceTime: false })
+
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const httpClient = getHttpClient()
+    sandbox.stub(httpClient, 'getResponse').resolves({
+      status: 200,
+      headers: { etag: 'W/"message-emergency-v1"' },
+      data: {
+        server_time: baseTime.toISOString(),
+        content_state: 'empty',
+        snapshot: null,
+        emergency: {
+          id: 'emergency-message-1',
+          active: true,
+          kind: 'MESSAGE',
+          message: 'Evacuate now.',
+          severity: 'CRITICAL',
+          version: 'emergency-message-1:1',
+          expires_at: '2026-09-07T10:00:01.000Z',
+        },
+      },
+    })
+
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const snapshotManager = getSnapshotManager()
+    const initial = await snapshotManager.refreshSnapshot()
+    expect(initial?.mode).to.equal('emergency')
+    expect(initial?.items[0]?.type).to.equal('message')
+
+    await clock.tickAsync(1000)
+    expect(snapshotManager.getCurrentPlaylist()?.mode).to.equal('empty')
+    expect(snapshotManager.getCurrentPlaylist()?.items).to.deep.equal([])
+  })
+
+  it('should store the response ETag separately and force transition refreshes unconditionally', async () => {
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const httpClient = getHttpClient()
+    const getResponse = sandbox.stub(httpClient, 'getResponse')
+    getResponse.onFirstCall().resolves({
+      status: 200,
+      headers: { etag: 'W/"representation-a"' },
+      data: {
+        server_time: new Date().toISOString(),
+        content_state: 'empty',
+        snapshot: null,
+        emergency: null,
+        default_media: null,
+      },
+    })
+    getResponse.onSecondCall().resolves({ status: 304, headers: {}, data: null })
+    getResponse.onThirdCall().resolves({
+      status: 200,
+      headers: { etag: 'W/"representation-b"' },
+      data: {
+        server_time: new Date().toISOString(),
+        content_state: 'empty',
+        snapshot: null,
+        emergency: null,
+        default_media: null,
+      },
+    })
+
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const snapshotManager = getSnapshotManager()
+    await snapshotManager.refreshSnapshot()
+    await snapshotManager.refreshSnapshot()
+    await snapshotManager.refreshSnapshot({ force: true })
+
+    expect(getResponse.secondCall.args[1]?.headers).to.deep.equal({
+      'If-None-Match': 'W/"representation-a"',
+    })
+    expect(getResponse.thirdCall.args[1]?.headers).to.equal(undefined)
+  })
+
+  it('should schedule an immediate forced refresh for an already-expired persisted signed URL', () => {
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const snapshotManager = getSnapshotManager()
+    const issuedAt = new Date(Date.now() - 20 * 60 * 1000)
+    const signatureDate = issuedAt.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+    const expiredUrl = `https://cdn.example.test/object.png?X-Amz-Date=${signatureDate}&X-Amz-Expires=600`
+    const refreshAt = (snapshotManager as any).findSignedUrlRefreshAt({
+      items: [{ remoteUrl: expiredUrl }],
+      scheduleWindows: [],
+    })
+
+    expect(refreshAt).to.be.a('number')
+    expect(refreshAt).to.be.lessThanOrEqual(Date.now())
+  })
+
   it('should locally switch from default fallback to an active schedule window when the boundary is reached', async () => {
     const baseTime = new Date('2026-03-14T09:00:00.000Z')
     clock = sandbox.useFakeTimers({ now: baseTime, shouldAdvanceTime: false })

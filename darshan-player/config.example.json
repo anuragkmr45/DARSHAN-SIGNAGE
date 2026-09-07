@@ -45,6 +45,10 @@
   "security": {
     "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'",
     "allowedDomains": [],
+    "webpageResourceDomains": [],
+    "webpageAllowedCidrs": [],
+    "webpageAllowedPorts": [443],
+    "webpageAllowHttp": false,
     "disableEval": true,
     "contextIsolation": true,
     "nodeIntegration": false,

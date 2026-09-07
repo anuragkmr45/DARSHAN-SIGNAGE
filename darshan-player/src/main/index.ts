@@ -7,7 +7,7 @@ console.log('=== DARSHAN Player Starting ===')
 console.log('NODE_ENV:', process.env['NODE_ENV'])
 console.log('__dirname:', __dirname)
 
-import { app, BrowserWindow, Menu, session } from 'electron'
+import { app, BrowserWindow, Menu } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -20,12 +20,14 @@ import {
   sanitizeLogPayloadForDiagnostics,
 } from '../common/redaction'
 import { ExponentialBackoff } from '../common/utils'
-import type { ActiveSlotPlayback, AppConfig, PlayerPresentationSnapshot, PlayerStatus } from '../common/types'
+import type { ActiveSlotPlayback, AppConfig, PlayerPresentationSnapshot, PlayerStatus, WebpageViewRequest } from '../common/types'
 import type { PlaybackProgressIdentity } from '../common/playback-policy'
 import { parseOperatorCommand, runOperatorCommand } from './cli'
 import { getRuntimeMode, getRuntimeWindowPolicy } from './runtime-mode'
 import { ensureAutostartRegistration } from './services/autostart'
 import { getDisplayManager } from './services/display-manager'
+import { RendererReadinessGate } from './services/renderer-readiness-gate'
+import { WebpageViewManager } from './services/webpage-view-manager'
 
 console.log('Initializing logger...')
 const logger = getLogger('main')
@@ -59,7 +61,12 @@ if (!gotTheLock) {
 
 let mainWindow: BrowserWindow | null = null
 const restartBackoff = new ExponentialBackoff(1000, 60000, 10)
-const WEBPAGE_PARTITION = 'persist:darshan-webpage-playback'
+const webpageViewManager = new WebpageViewManager(
+  () => mainWindow,
+  () => config.getConfig().security,
+  () => getRuntimeWindowPolicy(getRuntimeMode(config.getConfig())).disableInput,
+  logger
+)
 // The renderer reports its first measured viewport through the preload bridge.
 // A bounded fallback is required for a crashed/old renderer, but normal kiosk
 // startup must not expose a partially laid out pairing or recovery surface.
@@ -70,7 +77,23 @@ let lastReportedActiveSlots = new Map<string, ActiveSlotPlayback>()
 let servicesInitialized = false
 let readyToShowWindow: BrowserWindow | null = null
 let rendererLayoutAcknowledgedWindow: BrowserWindow | null = null
+const rendererReadinessGate = new RendererReadinessGate<BrowserWindow>()
 let rendererLayoutAckTimer: NodeJS.Timeout | undefined
+
+function restorePlaybackAfterRendererLoad(window: BrowserWindow | undefined): void {
+  if (!window || window.isDestroyed() || mainWindow !== window) return
+
+  void import('./services/player-flow.js')
+    .then(({ getPlayerFlow }) => {
+      if (mainWindow === window && !window.isDestroyed()) {
+        getPlayerFlow().attachWindow(window)
+      }
+    })
+    .catch((error) => {
+      rendererReadinessGate.releaseClaim(window)
+      logger.error({ error }, 'Failed to restore playback after renderer load')
+    })
+}
 
 function clearRendererLayoutAckTimer(): void {
   if (rendererLayoutAckTimer) clearTimeout(rendererLayoutAckTimer)
@@ -112,37 +135,6 @@ function broadcastPlayerStatus(status: PlayerStatus): void {
       win.webContents.send('player-presentation', { revision: 0, status, display: getDisplayManager().getProfile() })
     }
   })
-}
-
-function isSafeWebpageUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
-  } catch {
-    return false
-  }
-}
-
-function isSafeLocalPdfUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'file:' && decodeURIComponent(parsed.pathname).toLowerCase().endsWith('.pdf')
-  } catch {
-    return false
-  }
-}
-
-function isSafeEmbeddedContentUrl(url: string): boolean {
-  if (isSafeWebpageUrl(url) || isSafeLocalPdfUrl(url)) {
-    return true
-  }
-
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'chrome-extension:'
-  } catch {
-    return false
-  }
 }
 
 function shouldHardenDebugSurfaces(appConfig?: AppConfig): boolean {
@@ -245,13 +237,6 @@ function getAppIconPath(): string | undefined {
     } catch {
       return false
     }
-  })
-}
-
-function configureWebpageSession(): void {
-  const webpageSession = session.fromPartition(WEBPAGE_PARTITION)
-  webpageSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-    callback(false)
   })
 }
 
@@ -406,7 +391,7 @@ function createWindow(): void {
       contextIsolation: appConfig.security.contextIsolation,
       sandbox: appConfig.security.sandbox,
       devTools: !shouldHardenDebugSurfaces(appConfig),
-      webviewTag: true,
+      webviewTag: false,
       webSecurity: true,
       allowRunningInsecureContent: false,
       experimentalFeatures: false,
@@ -446,14 +431,8 @@ function createWindow(): void {
       .loadFile(rendererPath)
       .then(() => {
         logger.info('Renderer HTML loaded successfully')
-        if (servicesInitialized && mainWindow && !mainWindow.isDestroyed()) {
-          void import('./services/player-flow.js')
-            .then(({ getPlayerFlow }) => {
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                getPlayerFlow().attachWindow(mainWindow)
-              }
-            })
-            .catch((error) => logger.error({ error }, 'Failed to reattach renderer services'))
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          restorePlaybackAfterRendererLoad(rendererReadinessGate.markRendererLoaded(mainWindow))
         }
       })
       .catch((error) => {
@@ -479,11 +458,13 @@ function createWindow(): void {
 
   // Handle window closed
   mainWindow.on('closed', () => {
+    webpageViewManager.destroyAll()
     if (readyToShowWindow === mainWindow) {
       readyToShowWindow = null
       clearRendererLayoutAckTimer()
     }
     if (rendererLayoutAcknowledgedWindow === mainWindow) rendererLayoutAcknowledgedWindow = null
+    if (mainWindow) rendererReadinessGate.clear(mainWindow)
     getDisplayManager().detachWindow(mainWindow ?? undefined)
     mainWindow = null
     logger.info('Main window closed')
@@ -491,8 +472,12 @@ function createWindow(): void {
 
   // Handle crashes - use render-process-gone instead of deprecated 'crashed'
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    webpageViewManager.destroyAll('renderer-crashed')
     logger.error({ reason: details.reason, exitCode: details.exitCode }, 'Renderer process gone')
     handleCrash()
+  })
+  mainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+    if (isMainFrame) webpageViewManager.destroyAll('renderer-navigation')
   })
 
   // Prevent navigation away from the app
@@ -509,25 +494,6 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(() => {
     logger.warn('Prevented new window creation')
     return { action: 'deny' }
-  })
-
-  mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
-    const targetUrl = typeof params['src'] === 'string' ? params['src'] : ''
-    if (!isSafeEmbeddedContentUrl(targetUrl)) {
-      logger.warn({ url: redactUrlOrPathForDiagnostics(targetUrl) }, 'Prevented unsafe embedded playback URL')
-      event.preventDefault()
-      return
-    }
-
-    params['partition'] = WEBPAGE_PARTITION
-    params['allowpopups'] = 'false'
-    delete webPreferences.preload
-    webPreferences.nodeIntegration = false
-    webPreferences.contextIsolation = true
-    webPreferences.sandbox = true
-    webPreferences.webSecurity = true
-    webPreferences.plugins = true
-    webPreferences.allowRunningInsecureContent = false
   })
 
   applyRuntimeInteractionPolicy(mainWindow, appConfig)
@@ -579,6 +545,7 @@ async function initializeServices(): Promise<void> {
 
     await playerFlow.start()
     servicesInitialized = true
+    restorePlaybackAfterRendererLoad(rendererReadinessGate.markServicesReady())
     logger.info('All services initialized successfully')
   } catch (error) {
     logger.fatal({ error }, 'Failed to initialize services')
@@ -760,6 +727,27 @@ function setupIPCHandlers(): void {
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
 
+  const assertPlayerRenderer = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
+      throw new Error('Webpage view request did not originate from the active player renderer')
+    }
+  }
+
+  ipcMain.handle('webpage-view:mount', async (event: Electron.IpcMainInvokeEvent, request: WebpageViewRequest) => {
+    assertPlayerRenderer(event)
+    return webpageViewManager.mount(request)
+  })
+
+  ipcMain.handle('webpage-view:update', async (event: Electron.IpcMainInvokeEvent, request: WebpageViewRequest) => {
+    assertPlayerRenderer(event)
+    return webpageViewManager.update(request)
+  })
+
+  ipcMain.on('webpage-view:destroy', (event: Electron.IpcMainEvent, id: string, generation: number) => {
+    assertPlayerRenderer(event)
+    webpageViewManager.destroy(id, generation)
+  })
+
   ipcMain.handle('get-player-state', async () => {
     const { getPlayerFlow } = await import('./services/player-flow.js')
     return getPlayerFlow().getState()
@@ -909,6 +897,7 @@ function setupIPCHandlers(): void {
  */
 async function cleanup(): Promise<void> {
   logger.info('Cleaning up...')
+  webpageViewManager.destroyAll()
 
   try {
     const { getPlayerFlow } = await import('./services/player-flow.js')
@@ -960,10 +949,11 @@ app.on('ready', async () => {
       Menu.setApplicationMenu(null)
     }
     await applyConfigToPowerManager(config.getConfig())
-    configureWebpageSession()
+    webpageViewManager.configureSession()
     const displayManager = getDisplayManager()
     displayManager.start()
     displayManager.onChange(() => {
+      webpageViewManager.destroyAll('display-changed')
       if (servicesInitialized) {
         void import('./services/player-flow.js')
           .then(({ getPlayerFlow }) => getPlayerFlow().refreshPresentation())
@@ -999,17 +989,6 @@ app.on('web-contents-created', (_event, contents) => {
     })
   }
 
-  if (contents.getType() !== 'webview') {
-    return
-  }
-
-  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  contents.on('will-navigate', (event, url) => {
-    if (!isSafeEmbeddedContentUrl(url)) {
-      logger.warn({ url: redactUrlOrPathForDiagnostics(url) }, 'Blocked unsafe webview navigation')
-      event.preventDefault()
-    }
-  })
 })
 
 app.on('window-all-closed', () => {

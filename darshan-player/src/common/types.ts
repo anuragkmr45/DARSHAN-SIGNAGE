@@ -102,6 +102,10 @@ export interface PowerConfig {
 export interface SecurityConfig {
   csp: string
   allowedDomains: string[]
+  webpageResourceDomains?: string[]
+  webpageAllowedCidrs?: string[]
+  webpageAllowedPorts?: number[]
+  webpageAllowHttp?: boolean
   disableEval: boolean
   contextIsolation: boolean
   nodeIntegration: boolean
@@ -113,6 +117,23 @@ export interface SecurityConfig {
   lockAfterOfflineMs?: number
   purgeCacheAfterOfflineMs?: number
   showSecurityLockScreen?: boolean
+}
+
+export type WebpageViewBounds = { x: number; y: number; width: number; height: number }
+
+export type WebpageViewRequest = {
+  id: string
+  generation: number
+  url: string
+  bounds: WebpageViewBounds
+  zIndex: number
+}
+
+export type WebpageViewStatus = {
+  id: string
+  generation: number
+  state: 'loading' | 'healthy' | 'fallback' | 'blocked'
+  reason?: string
 }
 
 export type SecureOfflinePlaybackPolicy = 'standard' | 'secure' | 'high_security'
@@ -144,7 +165,7 @@ export interface DiagnosticsConfig {
 // Media & Content Types
 // ============================================================================
 
-export type MediaType = 'image' | 'video' | 'pdf' | 'url' | 'office' | 'scene'
+export type MediaType = 'image' | 'video' | 'pdf' | 'url' | 'office' | 'scene' | 'message'
 export type FitMode = 'contain' | 'cover' | 'stretch'
 
 export interface LayoutSceneSlotBounds {
@@ -421,6 +442,7 @@ export interface SnapshotMediaEntry {
 export interface DeviceSnapshot {
   id?: string
   snapshot_id?: string
+  representation_revision?: string
   content_state?: 'scheduled' | 'default' | 'empty'
   server_time?: string
   schedule?: SnapshotSchedule
@@ -429,7 +451,12 @@ export interface DeviceSnapshot {
   mediaUrls?: SnapshotMediaUrlMap
   media?: SnapshotMediaEntry[]
   emergency?: {
+    kind?: 'MESSAGE' | 'MEDIA'
     active?: boolean
+    is_active?: boolean
+    message?: string
+    severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+    version?: string
     expires_at?: string | null
     media_id?: string
     mediaId?: string
