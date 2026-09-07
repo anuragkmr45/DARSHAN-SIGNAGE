@@ -6,6 +6,7 @@ import path from 'node:path'
 const BOOLEAN_FIELDS = new Set([
   'EXPORT_SERVER', 'EXPORT_CMS', 'EXPORT_ELECTRON', 'INSTALL_PLAYWRIGHT_CHROMIUM',
   'VITE_ENABLE_PRODUCTION_LOCKDOWN', 'VITE_REALTIME_DELIVERY_STATUS_UI', 'VITE_MEDIA_CACHE_STATUS_UI',
+  'WEBPAGE_ALLOW_HTTP',
 ])
 
 const PORT_FIELDS = new Set([
@@ -120,6 +121,12 @@ const OUTPUTS = {
   CMS_MIN_FREE_DISK_BYTES: ['OPERATIONS_POLICY.json', 'production/cms/.env.production'],
   OBSERVABILITY_MIN_FREE_DISK_BYTES: ['OPERATIONS_POLICY.json', 'production/observability/.env.production'],
   INITIAL_ADMIN_EMAIL: ['production/backend/.env.production'],
+  MAX_UPLOAD_MB: ['production/backend/.env.production'],
+  WEBPAGE_NAVIGATION_ALLOWLIST: ['production/backend/.env.production', 'production/electron/config.json'],
+  WEBPAGE_RESOURCE_ALLOWLIST: ['production/backend/.env.production', 'production/electron/config.json'],
+  WEBPAGE_ALLOWED_CIDRS: ['production/backend/.env.production', 'production/electron/config.json'],
+  WEBPAGE_ALLOWED_PORTS: ['production/backend/.env.production', 'production/electron/config.json'],
+  WEBPAGE_ALLOW_HTTP: ['production/backend/.env.production', 'production/electron/config.json'],
   VITE_ENABLE_PRODUCTION_LOCKDOWN: ['CMS build artifact'],
   VITE_REALTIME_DELIVERY_STATUS_UI: ['CMS build artifact'],
   VITE_MEDIA_CACHE_STATUS_UI: ['CMS build artifact'],
@@ -144,6 +151,8 @@ const ALLOWED_FIELDS = new Set([
   'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'MINIO_REGION', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'JWT_EXPIRY', 'INITIAL_ADMIN_EMAIL',
   'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
   'DEVICE_AUTH_MODE', 'DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT',
+  'MAX_UPLOAD_MB',
+  'WEBPAGE_NAVIGATION_ALLOWLIST', 'WEBPAGE_RESOURCE_ALLOWLIST', 'WEBPAGE_ALLOWED_CIDRS', 'WEBPAGE_ALLOWED_PORTS', 'WEBPAGE_ALLOW_HTTP',
   'LOG_LEVEL', 'POSTGRES_IMAGE', 'MINIO_IMAGE', 'VALKEY_IMAGE', 'NGINX_IMAGE',
   'NODE_EXPORTER_IMAGE', 'POSTGRES_EXPORTER_IMAGE', 'NGINX_PROMETHEUS_EXPORTER_IMAGE',
   'PROMETHEUS_IMAGE', 'ALERTMANAGER_IMAGE', 'GRAFANA_IMAGE', 'PROMETHEUS_SCRAPE_INTERVAL',
@@ -160,6 +169,7 @@ const REQUIRED_FIELDS = [
   'RELEASE_SIGNING_PRIVATE_KEY',
   'POSTGRES_PASSWORD', 'POSTGRES_MONITORING_PASSWORD', 'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'INITIAL_ADMIN_EMAIL',
   'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+  'WEBPAGE_NAVIGATION_ALLOWLIST',
   ...OPERATIONS_POLICY_FIELDS,
 ]
 
@@ -171,7 +181,7 @@ const DEFAULTS = {
   MINIO_HOST_PORT: '9000', MINIO_CONSOLE_PORT: '9001', VALKEY_HOST_PORT: '6379',
   PROMETHEUS_HOST_PORT: '9090', ALERTMANAGER_HOST_PORT: '9093', GRAFANA_HOST_PORT: '3001',
   NODE_EXPORTER_HOST_PORT: '9100', POSTGRES_EXPORTER_HOST_PORT: '9187', NGINX_EXPORTER_HOST_PORT: '9113',
-  POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', BACKUP_OFFHOST_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info',
+  POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', BACKUP_OFFHOST_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info', MAX_UPLOAD_MB: '500', WEBPAGE_RESOURCE_ALLOWLIST: '', WEBPAGE_ALLOWED_CIDRS: '', WEBPAGE_ALLOWED_PORTS: '443', WEBPAGE_ALLOW_HTTP: 'false',
   POSTGRES_IMAGE: 'postgres:15-alpine', MINIO_IMAGE: 'minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e', VALKEY_IMAGE: 'valkey/valkey:7-alpine',
   NGINX_IMAGE: 'nginx:1.27-alpine', PROMETHEUS_IMAGE: 'prom/prometheus:v3.3.1',
   ALERTMANAGER_IMAGE: 'prom/alertmanager:v0.28.1', GRAFANA_IMAGE: 'grafana/grafana:12.0.2',
@@ -342,6 +352,55 @@ function validatePositiveInteger(name, value, minimum, maximum, addError) {
   const numeric = Number(value)
   if (!Number.isSafeInteger(numeric) || numeric < minimum || numeric > maximum) {
     addError(`${name} must be an integer from ${minimum} to ${maximum}`)
+  }
+}
+
+function validateWebpageHostList(name, value, addError) {
+  const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean)
+  for (const entry of entries) {
+    const wildcard = entry.startsWith('*.')
+    const host = wildcard ? entry.slice(2) : entry
+    if (
+      entry !== entry.toLowerCase()
+      || entry.includes('://')
+      || entry.includes('/')
+      || entry.includes('@')
+      || (wildcard && net.isIP(host) !== 0)
+      || (net.isIP(host) === 0 && !isValidHostname(host))
+    ) {
+      addError(`${name} contains invalid host pattern ${entry}; use lowercase exact hosts or *.example.com wildcards`)
+    }
+  }
+}
+
+function validateWebpageCidrs(value, addError) {
+  const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean)
+  for (const entry of entries) {
+    const [address, prefixText, extra] = entry.split('/')
+    const version = net.isIP(address)
+    const prefix = Number(prefixText)
+    const maximum = version === 4 ? 32 : 128
+    if (extra !== undefined || version === 0 || !/^\d+$/.test(prefixText ?? '') || prefix < 0 || prefix > maximum) {
+      addError(`WEBPAGE_ALLOWED_CIDRS contains invalid CIDR ${entry}`)
+    }
+  }
+}
+
+function validateWebpagePorts(value, addError) {
+  const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean)
+  if (entries.length === 0) {
+    addError('WEBPAGE_ALLOWED_PORTS must contain at least one port')
+    return
+  }
+  const seen = new Set()
+  for (const entry of entries) {
+    const port = Number(entry)
+    if (!/^\d+$/.test(entry) || !Number.isInteger(port) || port < 1 || port > 65535) {
+      addError(`WEBPAGE_ALLOWED_PORTS contains invalid port ${entry}`)
+    } else if (seen.has(port)) {
+      addError(`WEBPAGE_ALLOWED_PORTS contains duplicate port ${entry}`)
+    }
+    seen.add(port)
   }
 }
 
@@ -580,6 +639,16 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   if (!['windows', 'macos', 'linux', 'all-supported'].includes(config.ELECTRON_PLATFORM)) addError('ELECTRON_PLATFORM is invalid')
   if (!['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(config.LOG_LEVEL)) addError('LOG_LEVEL is invalid')
   if (!/^\d+$/.test(config.JWT_EXPIRY) || Number(config.JWT_EXPIRY) < 60) addError('JWT_EXPIRY must be at least 60 seconds')
+  if (!/^\d+$/.test(config.MAX_UPLOAD_MB) || Number(config.MAX_UPLOAD_MB) !== 500) {
+    addError('MAX_UPLOAD_MB must be exactly 500 so the application policy remains below the 512m proxy envelope')
+  }
+  validateWebpageHostList('WEBPAGE_NAVIGATION_ALLOWLIST', config.WEBPAGE_NAVIGATION_ALLOWLIST, addError)
+  validateWebpageHostList('WEBPAGE_RESOURCE_ALLOWLIST', config.WEBPAGE_RESOURCE_ALLOWLIST, addError)
+  validateWebpageCidrs(config.WEBPAGE_ALLOWED_CIDRS, addError)
+  validateWebpagePorts(config.WEBPAGE_ALLOWED_PORTS, addError)
+  if (config.WEBPAGE_ALLOW_HTTP === 'true') {
+    addError('WEBPAGE_ALLOW_HTTP must be false for production bundles')
+  }
   if (config.INITIAL_ADMIN_EMAIL && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.INITIAL_ADMIN_EMAIL)) addError('INITIAL_ADMIN_EMAIL must be valid')
   if (!['dual', 'signature'].includes(config.DEVICE_AUTH_MODE)) {
     addError('DEVICE_AUTH_MODE must be dual or signature for production')

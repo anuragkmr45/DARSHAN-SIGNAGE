@@ -13,25 +13,44 @@ export class EmergencyRepository {
     target_all?: boolean;
     expires_at?: Date | null;
     audit_note?: string | null;
+    idempotency_key?: string | null;
+    request_fingerprint?: string | null;
   }) {
     const db = getDatabase();
-    const result = await db
-      .insert(schema.emergencies)
-      .values({
-        triggered_by: data.triggered_by,
-        message: data.message,
-        priority: data.severity,
-        emergency_type_id: data.emergency_type_id ?? null,
-        media_id: data.media_id ?? null,
-        screen_ids: data.screen_ids ?? [],
-        screen_group_ids: data.screen_group_ids ?? [],
-        target_all: data.target_all ?? false,
-        expires_at: data.expires_at ?? null,
-        audit_note: data.audit_note ?? null,
-        is_active: true,
-      })
-      .returning();
-    return result[0];
+    return await db.transaction(async (tx) => {
+      const [emergency] = await tx
+        .insert(schema.emergencies)
+        .values({
+          triggered_by: data.triggered_by,
+          message: data.message,
+          priority: data.severity,
+          emergency_type_id: data.emergency_type_id ?? null,
+          media_id: data.media_id ?? null,
+          screen_ids: data.screen_ids ?? [],
+          screen_group_ids: data.screen_group_ids ?? [],
+          target_all: data.target_all ?? false,
+          expires_at: data.expires_at ?? null,
+          audit_note: data.audit_note ?? null,
+          idempotency_key: data.idempotency_key ?? null,
+          request_fingerprint: data.request_fingerprint ?? null,
+          is_active: true,
+        })
+        .returning();
+
+      if (!emergency) throw new Error('Emergency insert returned no row');
+      await tx.insert(schema.emergencyTransitionOutbox).values({
+        emergency_id: emergency.id,
+        transition: 'START',
+        transition_version: emergency.transition_version,
+        selector: {
+          target_all: emergency.target_all,
+          screen_ids: emergency.screen_ids,
+          screen_group_ids: emergency.screen_group_ids,
+        },
+        actor_id: data.triggered_by,
+      });
+      return emergency;
+    });
   }
 
   async getActive() {
@@ -95,18 +114,59 @@ export class EmergencyRepository {
 
   async clear(id: string, cleared_by: string, clear_reason?: string | null) {
     const db = getDatabase();
-    const result = await db
-      .update(schema.emergencies)
-      .set({
-        cleared_at: new Date(),
-        cleared_by,
-        clear_reason: clear_reason ?? null,
-        is_active: false,
-        updated_at: new Date(),
-      })
-      .where(eq(schema.emergencies.id, id))
-      .returning();
-    return result[0] || null;
+    return await db.transaction(async (tx) => {
+      const [emergency] = await tx
+        .update(schema.emergencies)
+        .set({
+          cleared_at: new Date(),
+          cleared_by,
+          clear_reason: clear_reason ?? null,
+          is_active: false,
+          transition_version: sql`${schema.emergencies.transition_version} + 1`,
+          updated_at: new Date(),
+        })
+        .where(and(
+          eq(schema.emergencies.id, id),
+          eq(schema.emergencies.is_active, true),
+          isNull(schema.emergencies.cleared_at)
+        ))
+        .returning();
+
+      if (emergency) {
+        await tx.insert(schema.emergencyTransitionOutbox).values({
+          emergency_id: emergency.id,
+          transition: 'CLEAR',
+          transition_version: emergency.transition_version,
+          selector: {
+            target_all: emergency.target_all,
+            screen_ids: emergency.screen_ids,
+            screen_group_ids: emergency.screen_group_ids,
+          },
+          actor_id: cleared_by,
+        });
+        return { emergency, transitioned: true };
+      }
+
+      const [existing] = await tx
+        .select()
+        .from(schema.emergencies)
+        .where(eq(schema.emergencies.id, id))
+        .limit(1);
+      return existing ? { emergency: existing, transitioned: false } : null;
+    });
+  }
+
+  async findByUserAndIdempotencyKey(triggeredBy: string, idempotencyKey: string) {
+    const db = getDatabase();
+    const [result] = await db
+      .select()
+      .from(schema.emergencies)
+      .where(and(
+        eq(schema.emergencies.triggered_by, triggeredBy),
+        eq(schema.emergencies.idempotency_key, idempotencyKey)
+      ))
+      .limit(1);
+    return result || null;
   }
 
   async findById(id: string) {

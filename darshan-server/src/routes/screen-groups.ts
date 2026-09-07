@@ -9,8 +9,13 @@ import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { getDatabase, schema } from '@/db';
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import { getPresignedUrl } from '@/s3';
 import { AppError } from '@/utils/app-error';
+import {
+  attachResolvedMediaToScheduleSnapshot,
+  buildResolvedMediaAssets,
+  buildResolvedMediaMap,
+} from '@/utils/resolved-media';
+import { getActiveEmergencyForScreen } from '@/screens/playback';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
 import { createDeviceCommand } from '@/services/command-lifecycle-service';
 import {
@@ -95,7 +100,7 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
       .filter((i) => {
         const start = new Date(i.start_at);
         const end = new Date(i.end_at);
-        return start <= now && end >= now;
+        return start <= now && end > now;
       })
       .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
 
@@ -282,6 +287,11 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
         const screenIds = members.map((m: any) => m.screen_id);
         const query = snapshotQuerySchema.parse(request.query);
         const includeUrls = query.include_urls?.toLowerCase() === 'true';
+        const emergency = await getActiveEmergencyForScreen(`group:${group.id}`, {
+          db,
+          includeUrls,
+          groupIds: [group.id],
+        });
 
         const [latest] = await db
           .select({
@@ -312,18 +322,21 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
             publish: null,
             snapshot: null,
             media_urls: undefined,
+            media_assets: undefined,
+            emergency,
           });
         }
 
         const rawPayload = (latest.payload as any) || {};
         const schedule = rawPayload.schedule || {};
         const filteredItems = filterItemsForGroup(schedule.items || [], group.id, screenIds);
-        const filteredSnapshot = {
+        let filteredSnapshot = {
           ...rawPayload,
           schedule: { ...schedule, items: filteredItems },
         };
 
         let mediaUrls: Record<string, string | null> | undefined;
+        let mediaAssets: ReturnType<typeof buildResolvedMediaAssets> | undefined;
         if (includeUrls) {
           const mediaIds = new Set<string>();
           const collectMediaIds = (obj: any) => {
@@ -339,36 +352,12 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
 
           const ids = Array.from(mediaIds);
           if (ids.length > 0) {
-            const medias = await db.select().from(schema.media).where(inArray(schema.media.id, ids as any));
-            const readyIds = medias.map((m: any) => m.ready_object_id).filter(Boolean) as string[];
-            const sourceRefs = medias
-              .filter((m: any) => m.source_bucket && m.source_object_key)
-              .map((m: any) => ({ id: m.id, bucket: m.source_bucket, key: m.source_object_key }));
-
-            const storageRows = readyIds.length
-              ? await db.select().from(schema.storageObjects).where(inArray(schema.storageObjects.id, readyIds as any))
-              : [];
-            const storageMap = new Map(storageRows.map((s: any) => [s.id, s]));
-
+            const resolvedMediaMap = await buildResolvedMediaMap(ids, db);
+            filteredSnapshot = attachResolvedMediaToScheduleSnapshot(filteredSnapshot, resolvedMediaMap);
+            mediaAssets = buildResolvedMediaAssets(resolvedMediaMap, { includeSourceUrl: true });
             mediaUrls = {};
-            for (const m of medias as any[]) {
-              try {
-                if (m.ready_object_id) {
-                  const stor = storageMap.get(m.ready_object_id);
-                  if (stor) {
-                    mediaUrls[m.id] = await getPresignedUrl(stor.bucket, stor.object_key, 3600);
-                    continue;
-                  }
-                }
-                const source = sourceRefs.find((s) => s.id === m.id);
-                if (source) {
-                  mediaUrls[m.id] = await getPresignedUrl(source.bucket, source.key, 3600);
-                } else {
-                  mediaUrls[m.id] = null;
-                }
-              } catch {
-                mediaUrls[m.id] = null;
-              }
+            for (const [mediaId, media] of resolvedMediaMap.entries()) {
+              mediaUrls[mediaId] = media.type === 'WEBPAGE' ? media.source_url ?? null : media.media_url ?? null;
             }
           }
         }
@@ -386,6 +375,8 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
           },
           snapshot: filteredSnapshot,
           media_urls: mediaUrls,
+          media_assets: mediaAssets,
+          emergency,
         });
       } catch (error) {
         logger.error(error, 'Get screen group snapshot error');

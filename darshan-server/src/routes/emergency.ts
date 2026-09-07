@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { Server as SocketIOServer } from 'socket.io';
-import { inArray } from 'drizzle-orm';
+import { inArray, sql } from 'drizzle-orm';
 import { createEmergencyRepository } from '@/db/repositories/emergency';
 import { createEmergencyTypeRepository } from '@/db/repositories/emergency-type';
 import { createMediaRepository } from '@/db/repositories/media';
@@ -16,7 +16,9 @@ import { AppError } from '@/utils/app-error';
 import { defineAbilityFor } from '@/rbac';
 import { buildContentDisposition } from '@/utils/object-key';
 import { getOrCreateSocketServer } from '@/realtime/socket-server';
-import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
+import { createHash } from 'node:crypto';
+import { queueEmergencyTransitionReconcile } from '@/jobs';
+import { emitScreensRefreshRequired } from '@/realtime/screens-namespace';
 
 const logger = createLogger('emergency-routes');
 const { CREATED } = HTTP_STATUS;
@@ -26,8 +28,8 @@ const triggerEmergencySchema = z.object({
   message: z.string().min(1).max(1000).optional(),
   severity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
   media_id: z.string().uuid().optional(),
-  screen_ids: z.array(z.string().uuid()).optional(),
-  screen_group_ids: z.array(z.string().uuid()).optional(),
+  screen_ids: z.array(z.string().uuid()).max(1000).optional(),
+  screen_group_ids: z.array(z.string().uuid()).max(1000).optional(),
   target_all: z.boolean().optional(),
   expires_at: z.string().datetime().optional().nullable(),
   audit_note: z.string().min(1).max(1000).optional(),
@@ -165,22 +167,41 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
     }
   };
 
-  const resolveTargetScreenIds = async (screenIds: string[], groupIds: string[], targetAll: boolean) => {
-    if (targetAll) {
-      const rows = await db.select({ id: schema.screens.id }).from(schema.screens);
-      return rows.map((row) => row.id);
-    }
+  const assertMessageEmergencySupported = async (
+    screenIds: string[],
+    groupIds: string[],
+    targetAll: boolean
+  ) => {
+    const columns = {
+      total: sql<number>`count(DISTINCT ${schema.screens.id})`,
+      unsupported: sql<number>`count(DISTINCT ${schema.screens.id}) FILTER (
+        WHERE NOT (COALESCE(${schema.screens.device_info}->'player_capabilities'->'features', '[]'::jsonb) ? 'message_emergency_v1')
+      )`,
+    };
 
-    const resolved = new Set(screenIds);
-    if (groupIds.length > 0) {
-      const memberRows = await db
-        .select({ screen_id: schema.screenGroupMembers.screen_id })
-        .from(schema.screenGroupMembers)
-        .where(inArray(schema.screenGroupMembers.group_id, groupIds as any));
-      memberRows.forEach((row) => resolved.add(row.screen_id));
-    }
+    const [counts] = targetAll
+      ? await db.select(columns).from(schema.screens)
+      : screenIds.length > 0
+        ? await db.select(columns).from(schema.screens).where(inArray(schema.screens.id, screenIds as any))
+        : await db
+            .select(columns)
+            .from(schema.screens)
+            .innerJoin(schema.screenGroupMembers, sql`${schema.screenGroupMembers.screen_id} = ${schema.screens.id}`)
+            .where(inArray(schema.screenGroupMembers.group_id, groupIds as any));
 
-    return Array.from(resolved);
+    const unsupported = Number(counts?.unsupported ?? 0);
+    if (unsupported > 0) {
+      throw new AppError({
+        statusCode: 409,
+        code: 'MESSAGE_EMERGENCY_UNSUPPORTED',
+        message: 'Message-only emergency cannot target players that have not reported message_emergency_v1 support.',
+        details: {
+          targeted_screen_count: Number(counts?.total ?? 0),
+          unsupported_screen_count: unsupported,
+          required_capability: 'message_emergency_v1',
+        },
+      });
+    }
   };
 
   const serializeEmergency = async (emergency: any) => {
@@ -207,6 +228,12 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
       screen_ids: screenIds,
       screen_group_ids: groupIds,
       target_all: targetAll,
+      kind: emergency.media_id ? 'MEDIA' : 'MESSAGE',
+      active:
+        emergency.is_active === true &&
+        emergency.cleared_at == null &&
+        (!emergency.expires_at || new Date(emergency.expires_at).getTime() > Date.now()),
+      version: `${emergency.id}:${emergency.transition_version ?? 1}`,
       scope: getScopeLabel(screenIds, groupIds, targetAll),
       is_active:
         emergency.is_active === true &&
@@ -436,6 +463,12 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         if (!(await requireEmergencyAdmin(payload, reply))) return;
 
+        const rawIdempotencyKey = request.headers['idempotency-key'];
+        const idempotencyKey = (Array.isArray(rawIdempotencyKey) ? rawIdempotencyKey[0] : rawIdempotencyKey)?.trim();
+        if (!idempotencyKey || idempotencyKey.length > 255) {
+          throw AppError.badRequest('Idempotency-Key header is required and must be at most 255 characters');
+        }
+
         const data = triggerEmergencySchema.parse(request.body);
         if (!data.emergency_type_id && !data.message) {
           throw AppError.badRequest('emergency_type_id or message is required');
@@ -460,9 +493,9 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
           if (!media) throw AppError.badRequest('Media not found');
         }
 
-        const uniqueScreenIds = Array.from(new Set(data.screen_ids || []));
-        const uniqueGroupIds = Array.from(new Set(data.screen_group_ids || []));
-        const targetAll = data.target_all === true || (!uniqueScreenIds.length && !uniqueGroupIds.length);
+        const uniqueScreenIds = Array.from(new Set(data.screen_ids || [])).sort();
+        const uniqueGroupIds = Array.from(new Set(data.screen_group_ids || [])).sort();
+        const targetAll = data.target_all === true;
         const scopeCount = Number(targetAll) + Number(uniqueScreenIds.length > 0) + Number(uniqueGroupIds.length > 0);
         if (scopeCount !== 1) {
           throw AppError.badRequest('Emergency target scope must be exactly one of target_all, screen_ids, or screen_group_ids');
@@ -470,14 +503,16 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
         if (!targetAll) {
           await validateTargets(uniqueScreenIds, uniqueGroupIds);
         }
+        if (!mediaId) {
+          await assertMessageEmergencySupported(uniqueScreenIds, uniqueGroupIds, targetAll);
+        }
 
         const expiresAt = data.expires_at ? new Date(data.expires_at) : null;
         if (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now())) {
           throw AppError.badRequest('expires_at must be a future datetime');
         }
 
-        const emergency = await emergencyRepo.create({
-          triggered_by: payload.sub,
+        const requestFingerprint = createHash('sha256').update(JSON.stringify({
           message,
           severity,
           emergency_type_id: type?.id ?? null,
@@ -485,20 +520,55 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
           screen_ids: targetAll ? [] : uniqueScreenIds,
           screen_group_ids: targetAll ? [] : uniqueGroupIds,
           target_all: targetAll,
-          expires_at: expiresAt,
+          expires_at: expiresAt?.toISOString() ?? null,
           audit_note: data.audit_note ?? null,
-        });
-        const affectedScreenIds = await resolveTargetScreenIds(uniqueScreenIds, uniqueGroupIds, targetAll);
+        })).digest('hex');
 
+        const existing = await emergencyRepo.findByUserAndIdempotencyKey(payload.sub, idempotencyKey);
+        if (existing) {
+          if (existing.request_fingerprint !== requestFingerprint) {
+            throw AppError.conflict('Idempotency-Key is already associated with a different emergency');
+          }
+          reply.header('Idempotent-Replay', 'true');
+          return reply.send(await serializeEmergency(existing));
+        }
+
+        let emergency;
+        try {
+          emergency = await emergencyRepo.create({
+            triggered_by: payload.sub,
+            message,
+            severity,
+            emergency_type_id: type?.id ?? null,
+            media_id: mediaId,
+            screen_ids: targetAll ? [] : uniqueScreenIds,
+            screen_group_ids: targetAll ? [] : uniqueGroupIds,
+            target_all: targetAll,
+            expires_at: expiresAt,
+            audit_note: data.audit_note ?? null,
+            idempotency_key: idempotencyKey,
+            request_fingerprint: requestFingerprint,
+          });
+        } catch (error) {
+          if ((error as { code?: string })?.code !== '23505') throw error;
+          const concurrent = await emergencyRepo.findByUserAndIdempotencyKey(payload.sub, idempotencyKey);
+          if (!concurrent || concurrent.request_fingerprint !== requestFingerprint) {
+            throw AppError.conflict('Idempotency-Key is already associated with a different emergency');
+          }
+          reply.header('Idempotent-Replay', 'true');
+          return reply.send(await serializeEmergency(concurrent));
+        }
         const serializedEmergency = await serializeEmergency(emergency);
         io.emit('emergency:triggered', serializedEmergency);
-        await dispatchPlaybackRefresh(fastify, {
+        emitScreensRefreshRequired(fastify, {
           reason: 'EMERGENCY',
-          screenIds: affectedScreenIds,
-          groupIds: uniqueGroupIds,
-          targetAll,
-          createdBy: payload.sub,
-          emergencyVersion: `${emergency.id}:start`,
+          screen_ids: uniqueScreenIds,
+          group_ids: uniqueGroupIds,
+          target_all: targetAll,
+          transition_version: `${emergency.id}:${emergency.transition_version ?? 1}`,
+        });
+        void queueEmergencyTransitionReconcile({}).catch((error) => {
+          logger.warn({ err: error, emergencyId: emergency.id }, 'Emergency transition wake-up failed; durable reconciliation remains pending');
         });
         logger.warn(
           {
@@ -558,11 +628,12 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
 
         const serialized = await Promise.all(activeEmergencies.map((emergency) => serializeEmergency(emergency)));
         serialized.sort((left, right) => {
-          const scopeDelta = getScopeRank(right.scope) - getScopeRank(left.scope);
-          if (scopeDelta !== 0) return scopeDelta;
           const severityDelta = getSeverityRank(right.severity) - getSeverityRank(left.severity);
           if (severityDelta !== 0) return severityDelta;
-          return Date.parse(right.created_at) - Date.parse(left.created_at);
+          const scopeDelta = getScopeRank(right.scope) - getScopeRank(left.scope);
+          if (scopeDelta !== 0) return scopeDelta;
+          const createdDelta = Date.parse(right.created_at) - Date.parse(left.created_at);
+          return createdDelta || right.id.localeCompare(left.id);
         });
 
         return reply.send({
@@ -599,26 +670,27 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
         if (!(await requireEmergencyAdmin(payload, reply))) return;
 
         const clearPayload = clearEmergencySchema.parse(request.body || {});
-        const emergency = await emergencyRepo.clear((request.params as any).id, payload.sub, clearPayload.clear_reason ?? null);
+        const clearResult = await emergencyRepo.clear((request.params as any).id, payload.sub, clearPayload.clear_reason ?? null);
 
-        if (!emergency) {
+        if (!clearResult) {
           throw AppError.notFound('Emergency not found');
         }
-        const affectedScreenIds = await resolveTargetScreenIds(
-          ((emergency as any).screen_ids || []) as string[],
-          ((emergency as any).screen_group_ids || []) as string[],
-          (emergency as any).target_all === true
-        );
-
+        const { emergency, transitioned } = clearResult;
+        if (!transitioned) {
+          reply.header('Idempotent-Replay', 'true');
+          return reply.send(await serializeEmergency(emergency));
+        }
         const serializedEmergency = await serializeEmergency(emergency);
         io.emit('emergency:cleared', serializedEmergency);
-        await dispatchPlaybackRefresh(fastify, {
+        emitScreensRefreshRequired(fastify, {
           reason: 'EMERGENCY',
-          screenIds: affectedScreenIds,
-          groupIds: ((emergency as any).screen_group_ids || []) as string[],
-          targetAll: (emergency as any).target_all === true,
-          createdBy: payload.sub,
-          emergencyVersion: `${emergency.id}:clear`,
+          screen_ids: emergency.screen_ids ?? [],
+          group_ids: emergency.screen_group_ids ?? [],
+          target_all: emergency.target_all === true,
+          transition_version: `${emergency.id}:${emergency.transition_version ?? 1}`,
+        });
+        void queueEmergencyTransitionReconcile({}).catch((error) => {
+          logger.warn({ err: error, emergencyId: emergency.id }, 'Emergency clear wake-up failed; durable reconciliation remains pending');
         });
         logger.info(
           {

@@ -12,7 +12,6 @@ export interface ResolvedScheduleQuickPreset {
   endAt: string;
 }
 
-const PRESET_BUFFER_MS = 30_000;
 const MIN_FREE_SLOT_MS = 60_000;
 
 export function formatLocalDateTime(value: Date): string {
@@ -101,8 +100,8 @@ export function resolveQuickPresetRange(
         }
 
         return {
-          start: Math.max(windowStart, itemStart - PRESET_BUFFER_MS),
-          end: Math.min(windowEnd, itemEnd + PRESET_BUFFER_MS),
+          start: Math.max(windowStart, itemStart),
+          end: Math.min(windowEnd, itemEnd),
         } satisfies BusyInterval;
       })
       .filter((interval): interval is BusyInterval => Boolean(interval) && interval.end > interval.start),

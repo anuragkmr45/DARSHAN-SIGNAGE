@@ -282,6 +282,15 @@ stage_player_bundle() {
   local transport_enabled="false"
   local linux_ca_path=""
   local windows_ca_path=""
+  local webpage_navigation_json
+  local webpage_resource_json
+  local webpage_cidrs_json
+  local webpage_ports_json
+
+  webpage_navigation_json="$(node -e 'const value=process.argv[1]||"";process.stdout.write(JSON.stringify(value.split(",").map(v=>v.trim()).filter(Boolean)))' "$WEBPAGE_NAVIGATION_ALLOWLIST")"
+  webpage_resource_json="$(node -e 'const value=process.argv[1]||"";process.stdout.write(JSON.stringify(value.split(",").map(v=>v.trim()).filter(Boolean)))' "$WEBPAGE_RESOURCE_ALLOWLIST")"
+  webpage_cidrs_json="$(node -e 'const value=process.argv[1]||"";process.stdout.write(JSON.stringify(value.split(",").map(v=>v.trim()).filter(Boolean)))' "$WEBPAGE_ALLOWED_CIDRS")"
+  webpage_ports_json="$(node -e 'const value=process.argv[1]||"";process.stdout.write(JSON.stringify(value.split(",").map(v=>Number(v.trim())).filter(Number.isInteger)))' "$WEBPAGE_ALLOWED_PORTS")"
 
   mkdir -p "$bundle_dir/installers"
 
@@ -334,6 +343,13 @@ stage_player_bundle() {
       "enabled": $transport_enabled,
       "caPath": "$ca_path",
       "strictCertificateValidation": true
+    },
+    "security": {
+      "allowedDomains": $webpage_navigation_json,
+      "webpageResourceDomains": $webpage_resource_json,
+      "webpageAllowedCidrs": $webpage_cidrs_json,
+      "webpageAllowedPorts": $webpage_ports_json,
+      "webpageAllowHttp": $WEBPAGE_ALLOW_HTTP
     }
   }
 }
@@ -1616,7 +1632,12 @@ LOGIN_MAX_ATTEMPTS="${LOGIN_MAX_ATTEMPTS:-5}"
 LOGIN_LOCKOUT_WINDOW_SECONDS="${LOGIN_LOCKOUT_WINDOW_SECONDS:-900}"
 LOGIN_THROTTLE_PROVIDER="${LOGIN_THROTTLE_PROVIDER:-valkey}"
 LOGIN_THROTTLE_FAIL_CLOSED="${LOGIN_THROTTLE_FAIL_CLOSED:-true}"
-MAX_UPLOAD_MB="${MAX_UPLOAD_MB:-200}"
+MAX_UPLOAD_MB="${MAX_UPLOAD_MB:-500}"
+WEBPAGE_NAVIGATION_ALLOWLIST="${WEBPAGE_NAVIGATION_ALLOWLIST:-}"
+WEBPAGE_RESOURCE_ALLOWLIST="${WEBPAGE_RESOURCE_ALLOWLIST:-$WEBPAGE_NAVIGATION_ALLOWLIST}"
+WEBPAGE_ALLOWED_CIDRS="${WEBPAGE_ALLOWED_CIDRS:-}"
+WEBPAGE_ALLOWED_PORTS="${WEBPAGE_ALLOWED_PORTS:-443}"
+WEBPAGE_ALLOW_HTTP="${WEBPAGE_ALLOW_HTTP:-false}"
 STORAGE_QUOTA_BYTES="${STORAGE_QUOTA_BYTES:-0}"
 QA_VALKEY_HOST="${QA_VALKEY_HOST:-${QA_BACKEND_HOST:-}}"
 QA_VALKEY_HOST_PORT="${QA_VALKEY_HOST_PORT:-6379}"
@@ -2357,6 +2378,11 @@ LOGIN_LOCKOUT_WINDOW_SECONDS=$LOGIN_LOCKOUT_WINDOW_SECONDS
 LOGIN_THROTTLE_PROVIDER=$LOGIN_THROTTLE_PROVIDER
 LOGIN_THROTTLE_FAIL_CLOSED=$LOGIN_THROTTLE_FAIL_CLOSED
 MAX_UPLOAD_MB=$MAX_UPLOAD_MB
+WEBPAGE_NAVIGATION_ALLOWLIST=$WEBPAGE_NAVIGATION_ALLOWLIST
+WEBPAGE_RESOURCE_ALLOWLIST=$WEBPAGE_RESOURCE_ALLOWLIST
+WEBPAGE_ALLOWED_CIDRS=$WEBPAGE_ALLOWED_CIDRS
+WEBPAGE_ALLOWED_PORTS=$WEBPAGE_ALLOWED_PORTS
+WEBPAGE_ALLOW_HTTP=$WEBPAGE_ALLOW_HTTP
 STORAGE_QUOTA_BYTES=$STORAGE_QUOTA_BYTES
 DARSHAN_RUNTIME_CONTAINER=true
 HEXMON_RUNTIME_CONTAINER=true
@@ -2834,6 +2860,11 @@ LOGIN_LOCKOUT_WINDOW_SECONDS=$LOGIN_LOCKOUT_WINDOW_SECONDS
 LOGIN_THROTTLE_PROVIDER=$LOGIN_THROTTLE_PROVIDER
 LOGIN_THROTTLE_FAIL_CLOSED=$LOGIN_THROTTLE_FAIL_CLOSED
 MAX_UPLOAD_MB=$MAX_UPLOAD_MB
+WEBPAGE_NAVIGATION_ALLOWLIST=$WEBPAGE_NAVIGATION_ALLOWLIST
+WEBPAGE_RESOURCE_ALLOWLIST=$WEBPAGE_RESOURCE_ALLOWLIST
+WEBPAGE_ALLOWED_CIDRS=$WEBPAGE_ALLOWED_CIDRS
+WEBPAGE_ALLOWED_PORTS=$WEBPAGE_ALLOWED_PORTS
+WEBPAGE_ALLOW_HTTP=$WEBPAGE_ALLOW_HTTP
 STORAGE_QUOTA_BYTES=$STORAGE_QUOTA_BYTES
 DARSHAN_RUNTIME_CONTAINER=true
 HEXMON_RUNTIME_CONTAINER=true

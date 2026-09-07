@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Monitor, ShieldAlert, Users, Zap } from "lucide-react";
 import { emergencyApi } from "@/api/domains/emergency";
+import { ApiError } from "@/api/apiClient";
 import { mediaApi } from "@/api/domains/media";
 import { resolveMediaDisplayName } from "@/lib/media";
 import { screensApi } from "@/api/domains/screens";
@@ -61,6 +62,16 @@ const getScopeLabel = (emergency: EmergencyRecord) => {
   return emergency.scope ?? "Unknown scope";
 };
 
+export const getEmergencyActivationError = (error: unknown) => {
+  if (error instanceof ApiError && error.code === "MESSAGE_EMERGENCY_UNSUPPORTED") {
+    const details = error.details as { unsupported_screen_count?: number; targeted_screen_count?: number } | undefined;
+    if (typeof details?.unsupported_screen_count === "number") {
+      return `${details.unsupported_screen_count} of ${details.targeted_screen_count ?? "the targeted"} screen(s) need a player update before message-only emergencies can be used. Select emergency media or update those players.`;
+    }
+  }
+  return error instanceof Error ? error.message : "Unable to activate emergency takeover.";
+};
+
 export function EmergencyTakeoverModal({
   open,
   onOpenChange,
@@ -83,6 +94,7 @@ export function EmergencyTakeoverModal({
   const [confirmedGlobal, setConfirmedGlobal] = useState(false);
   const [clearTargetId, setClearTargetId] = useState<string | null>(null);
   const [clearReason, setClearReason] = useState("");
+  const triggerOperationRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const emergencyStatusQuery = useQuery({
     queryKey: queryKeys.emergencyStatus,
@@ -142,6 +154,7 @@ export function EmergencyTakeoverModal({
     setConfirmedGlobal(false);
     setClearTargetId(null);
     setClearReason("");
+    triggerOperationRef.current = null;
   };
 
   const invalidateEmergencyState = async () => {
@@ -154,8 +167,8 @@ export function EmergencyTakeoverModal({
   };
 
   const triggerMutation = useMutation({
-    mutationFn: () =>
-      emergencyApi.trigger({
+    mutationFn: () => {
+      const triggerPayload = {
         message: message.trim() || undefined,
         severity,
         media_id: mediaId !== "none" ? mediaId : undefined,
@@ -164,7 +177,13 @@ export function EmergencyTakeoverModal({
         screen_group_ids: scope === "groups" ? selectedGroupIds : undefined,
         expires_at: toIsoDateTime(expiresAt),
         audit_note: auditNote.trim() || undefined,
-      }),
+      };
+      const fingerprint = JSON.stringify(triggerPayload);
+      if (triggerOperationRef.current?.fingerprint !== fingerprint) {
+        triggerOperationRef.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return emergencyApi.trigger(triggerPayload, triggerOperationRef.current.key);
+    },
     onSuccess: async () => {
       toast({
         title: "Emergency activated",
@@ -174,7 +193,7 @@ export function EmergencyTakeoverModal({
       resetForm();
     },
     onError: (error) => {
-      const messageText = error instanceof Error ? error.message : "Unable to activate emergency takeover.";
+      const messageText = getEmergencyActivationError(error);
       toast({ title: "Activation failed", description: messageText, variant: "destructive" });
     },
   });

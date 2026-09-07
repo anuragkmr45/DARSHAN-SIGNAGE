@@ -49,6 +49,15 @@ export interface UploadSessionResponse {
   failure_reason?: string | null;
 }
 
+export interface MediaUploadPolicy {
+  max_bytes: number;
+  max_mb: number;
+  multipart_threshold_bytes: number;
+  part_size_bytes: number;
+  multipart_concurrency: number;
+  allowed_mime_types: string[];
+}
+
 export interface UploadPartUrl {
   part_number: number;
   upload_url: string;
@@ -79,6 +88,12 @@ const normalizePaginatedResponse = <T>(
 };
 
 export const mediaApi = {
+  getUploadPolicy: () =>
+    apiClient.request<MediaUploadPolicy>({
+      path: endpoints.media.uploadPolicy,
+      method: "GET",
+    }),
+
   // Create a metadata-only media entry (no upload).
   createMetadata: (payload: MediaMetadataPayload) =>
     apiClient.request<MediaAsset>({

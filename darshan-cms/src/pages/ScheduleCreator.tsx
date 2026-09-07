@@ -190,7 +190,9 @@ export default function ScheduleCreator() {
 
   const scheduleTimingValidation = useMemo(() => {
     const errors: string[] = [];
-    const nowMs = Date.now();
+    const serverNowMs = reservationPreviewQuery.data?.server_time
+      ? Date.parse(reservationPreviewQuery.data.server_time)
+      : Number.NaN;
     const startMs = wizardState.startAt ? new Date(wizardState.startAt).getTime() : NaN;
     const endMs = wizardState.endAt ? new Date(wizardState.endAt).getTime() : NaN;
 
@@ -200,7 +202,7 @@ export default function ScheduleCreator() {
     if (wizardState.endAt && Number.isNaN(endMs)) {
       errors.push("End time is invalid.");
     }
-    if (wizardState.startAt && !Number.isNaN(startMs) && startMs <= nowMs) {
+    if (wizardState.startAt && !Number.isNaN(startMs) && Number.isFinite(serverNowMs) && startMs <= serverNowMs) {
       errors.push("Start time must be in the future.");
     }
     if (
@@ -213,40 +215,8 @@ export default function ScheduleCreator() {
       errors.push("End time must be after the start time.");
     }
 
-    const isChecking = isScheduleStep
-      ? [...screenSnapshotQueries, ...groupSnapshotQueries].some((query) => query.isLoading) ||
-        reservationPreviewQuery.isLoading
-      : false;
-
-    const snapshotError = isScheduleStep
-      ? [...screenSnapshotQueries, ...groupSnapshotQueries].find((query) => query.isError)?.error
-      : undefined;
+    const isChecking = isScheduleStep ? reservationPreviewQuery.isLoading : false;
     const reservationConflicts = reservationPreviewQuery.data?.reservation_conflicts ?? [];
-
-    const scheduleItems = [...screenSnapshotQueries, ...groupSnapshotQueries].flatMap((query) => {
-      const data = query.data as ScreenSnapshot | undefined;
-      return data?.snapshot?.schedule?.items ?? [];
-    });
-
-    const BUFFER_MS = 30_000;
-    if (!Number.isNaN(startMs) && !Number.isNaN(endMs) && scheduleItems.length > 0) {
-      const conflictCount = scheduleItems.filter((item) => {
-        const itemStart = item.start_at ? Date.parse(item.start_at) : NaN;
-        const itemEnd = item.end_at ? Date.parse(item.end_at) : NaN;
-        if (Number.isNaN(itemStart) || Number.isNaN(itemEnd)) return false;
-        return startMs < itemEnd + BUFFER_MS && endMs > itemStart - BUFFER_MS;
-      }).length;
-
-      if (conflictCount > 0) {
-        errors.push(
-          `Selected timing overlaps existing schedules (${conflictCount}). Keep a 30-second gap from the previous or next schedule.`,
-        );
-      }
-    }
-
-    if (snapshotError) {
-      errors.push("Unable to verify schedule conflicts. Please try again.");
-    }
     if (reservationConflicts.length > 0) {
       errors.push(...reservationConflicts.map(formatConflictLabel));
     }
@@ -262,8 +232,6 @@ export default function ScheduleCreator() {
   }, [
     wizardState.startAt,
     wizardState.endAt,
-    screenSnapshotQueries,
-    groupSnapshotQueries,
     isScheduleStep,
     reservationPreviewQuery.data,
     reservationPreviewQuery.error,

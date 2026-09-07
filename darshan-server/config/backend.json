@@ -42,7 +42,7 @@
     "csrfEnabled": true,
     "loginMaxAttempts": 5,
     "loginLockoutWindowSeconds": 900,
-    "maxUploadMb": 200,
+    "maxUploadMb": 500,
     "storageQuotaBytes": 0,
     "swaggerUiEnabled": false
   },

@@ -89,6 +89,11 @@ const envSchema = z.object({
   BACKUP_OFFHOST_SECRET_KEY: optionalTrimmedString,
   DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH: optionalTrimmedString,
   HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH: optionalTrimmedString,
+  WEBPAGE_NAVIGATION_ALLOWLIST: z.string().default(''),
+  WEBPAGE_RESOURCE_ALLOWLIST: z.string().default(''),
+  WEBPAGE_ALLOWED_CIDRS: z.string().default(''),
+  WEBPAGE_ALLOWED_PORTS: z.string().default('443'),
+  WEBPAGE_ALLOW_HTTP: optionalBooleanString,
   PG_BOSS_SCHEMA: z.string().default('pgboss'),
   RATE_LIMIT_ENABLED: z
     .enum(['true', 'false'])
@@ -141,7 +146,7 @@ const envSchema = z.object({
     .default(15 * 60),
   LOGIN_THROTTLE_PROVIDER: z.enum(['memory', 'valkey']).optional(),
   LOGIN_THROTTLE_FAIL_CLOSED: optionalBooleanString,
-  MAX_UPLOAD_MB: z.coerce.number().int().positive().default(200),
+  MAX_UPLOAD_MB: z.coerce.number().int().positive().default(500),
   STORAGE_QUOTA_BYTES: z.coerce.number().int().nonnegative().default(0),
   ENABLE_SWAGGER_UI: optionalBooleanString,
   OBSERVABILITY_METRICS_ENABLED: optionalBooleanString,

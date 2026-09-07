@@ -78,6 +78,7 @@ export const endpoints = {
   },
   media: {
     base: "/media",
+    uploadPolicy: "/media/upload-policy",
     presignUpload: "/media/presign-upload",
     uploadSessions: "/media/uploads",
     uploadSession: (sessionId: string) => `/media/uploads/${sessionId}`,

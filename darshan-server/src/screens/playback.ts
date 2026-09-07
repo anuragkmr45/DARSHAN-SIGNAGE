@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import {
   getDefaultMediaTargetAssignments,
@@ -8,7 +8,11 @@ import {
 } from '@/utils/default-media';
 import { resolveAspectRatio } from '@/utils/aspect-ratio';
 import { getPresignedUrl } from '@/s3';
-import { buildResolvedMediaMap, buildResolvedMediaRecord } from '@/utils/resolved-media';
+import {
+  buildResolvedMediaMap,
+  buildResolvedMediaRecord,
+  buildResolvedMediaRepresentation,
+} from '@/utils/resolved-media';
 import { createScheduleReservationRepository } from '@/db/repositories/schedule-reservation';
 
 type ScreenRecord = typeof schema.screens.$inferSelect;
@@ -461,7 +465,7 @@ async function getLatestPublishByScreenId(
           inArray(schema.scheduleReservations.screen_id, screenIds as any),
           eq(schema.scheduleReservations.state, 'PUBLISHED'),
           eq(schema.publishes.status, 'ACTIVE'),
-          lt(schema.scheduleReservations.start_at, now),
+          lte(schema.scheduleReservations.start_at, now),
           gt(schema.scheduleReservations.end_at, now)
         )
       )
@@ -591,7 +595,7 @@ export function buildTimeline(items: any[], now = new Date()) {
     .filter((item) => {
       const start = new Date(item.start_at);
       const end = new Date(item.end_at);
-      return start <= now && end >= now;
+      return start <= now && end > now;
     })
     .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
 
@@ -654,9 +658,10 @@ export async function getActiveEmergencyForScreen(
   if (ranked.length === 0) return null;
 
   ranked.sort((left, right) => {
-    if (right.scopeRank !== left.scopeRank) return right.scopeRank - left.scopeRank;
     if (right.severityRank !== left.severityRank) return right.severityRank - left.severityRank;
-    return new Date(right.emergency.created_at).getTime() - new Date(left.emergency.created_at).getTime();
+    if (right.scopeRank !== left.scopeRank) return right.scopeRank - left.scopeRank;
+    const createdDelta = new Date(right.emergency.created_at).getTime() - new Date(left.emergency.created_at).getTime();
+    return createdDelta || right.emergency.id.localeCompare(left.emergency.id);
   });
 
   const { emergency, scopeMatch } = ranked[0];
@@ -683,6 +688,8 @@ export async function getActiveEmergencyForScreen(
     media_url: resolvedEmergencyMedia?.media_url ?? null,
     fallback_url: resolvedEmergencyMedia?.fallback_url ?? null,
     source_url: resolvedEmergencyMedia?.source_url ?? null,
+    playback_url: resolvedEmergencyMedia?.playback_url ?? null,
+    preview_url: resolvedEmergencyMedia?.preview_url ?? null,
     url: resolvedEmergencyMedia?.url ?? null,
     media_type: resolvedEmergencyMedia?.media_type ?? null,
     type:
@@ -694,6 +701,10 @@ export async function getActiveEmergencyForScreen(
     screen_ids: emergencyScreenIds,
     screen_group_ids: emergencyGroupIds,
     target_all: (emergency as any).target_all ?? false,
+    kind: (emergency as any).media_id ? 'MEDIA' : 'MESSAGE',
+    active: true,
+    is_active: true,
+    version: `${emergency.id}:${(emergency as any).transition_version ?? 1}`,
     scope: scopeMatch,
     expires_at: toIso((emergency as any).expires_at),
     audit_note: (emergency as any).audit_note ?? null,
@@ -840,6 +851,7 @@ async function buildCurrentMediaById(
       mediaId,
       {
         ...media,
+        ...buildResolvedMediaRepresentation(media, { includeSourceUrl: true }),
         url: media.type === 'WEBPAGE' ? media.source_url ?? null : media.media_url ?? null,
         fallback_url: media.fallback_media_url ?? null,
         media_type: media.type,
@@ -1556,7 +1568,7 @@ function isActiveAt(item: any, now: Date) {
   const start = Date.parse(String(item?.start_at));
   const end = Date.parse(String(item?.end_at));
   if (Number.isNaN(start) || Number.isNaN(end)) return false;
-  return start <= now.getTime() && end >= now.getTime();
+  return start <= now.getTime() && end > now.getTime();
 }
 
 function clipItemToWindow(

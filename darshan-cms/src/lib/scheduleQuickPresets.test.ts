@@ -34,7 +34,7 @@ describe("scheduleQuickPresets", () => {
 
     expect(resolved).toEqual({
       startAt: "2026-03-18T10:16",
-      endAt: "2026-03-18T10:29",
+      endAt: "2026-03-18T10:30",
     });
   });
 
@@ -65,7 +65,7 @@ describe("scheduleQuickPresets", () => {
 
     expect(resolved).toEqual({
       startAt: "2026-03-18T12:00",
-      endAt: "2026-03-18T13:59",
+      endAt: "2026-03-18T14:00",
     });
   });
 

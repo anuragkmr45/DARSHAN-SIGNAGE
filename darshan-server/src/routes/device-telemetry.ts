@@ -1,5 +1,5 @@
-import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { createHash, randomUUID } from 'crypto';
+import { eq, inArray } from 'drizzle-orm';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { config as appConfig } from '@/config';
@@ -17,7 +17,9 @@ import { serializeMediaRecord } from '@/utils/media';
 import { resolveMediaAccess } from '@/utils/media-access';
 import {
   attachResolvedMediaToScheduleSnapshot,
+  buildResolvedMediaAssets,
   buildResolvedMediaMap,
+  buildResolvedMediaRepresentation,
 } from '@/utils/resolved-media';
 import {
   getActiveEmergencyForScreen as getActiveEmergencyForRuntime,
@@ -469,18 +471,20 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
     }
 
     const mediaAccess = await resolveMediaAccess(resolvedDefaultMedia.media, db, { audience: 'device' });
+    const serialized = serializeMediaRecord(
+      resolvedDefaultMedia.media,
+      includeUrls ? mediaAccess.media_url : null,
+      {
+        content_type: mediaAccess.content_type,
+        source_content_type: mediaAccess.source_content_type,
+        size: mediaAccess.size,
+      }
+    );
     return {
       default_media: {
         media_id: resolvedDefaultMedia.media.id,
-        ...serializeMediaRecord(
-          resolvedDefaultMedia.media,
-          includeUrls ? mediaAccess.media_url : null,
-          {
-            content_type: mediaAccess.content_type,
-            source_content_type: mediaAccess.source_content_type,
-            size: mediaAccess.size,
-          }
-        ),
+        ...serialized,
+        ...buildResolvedMediaRepresentation(serialized),
       },
       default_media_resolution: {
         source: resolvedDefaultMedia.source,
@@ -622,20 +626,26 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const defaultMediaAccess = resolvedDefaultMedia.media
           ? await resolveMediaAccess(resolvedDefaultMedia.media, db, { audience: 'device' })
           : null;
+        const serializedDefaultMedia = resolvedDefaultMedia.media
+          ? serializeMediaRecord(
+              resolvedDefaultMedia.media,
+              defaultMediaAccess?.media_url ?? null,
+              {
+                content_type: defaultMediaAccess?.content_type,
+                source_content_type: defaultMediaAccess?.source_content_type,
+                size: defaultMediaAccess?.size,
+              }
+            )
+          : null;
         return reply.send({
           source: resolvedDefaultMedia.source,
           aspect_ratio: resolvedDefaultMedia.aspect_ratio,
           media_id: resolvedDefaultMedia.media_id,
-          media: resolvedDefaultMedia.media
-            ? serializeMediaRecord(
-                resolvedDefaultMedia.media,
-                defaultMediaAccess?.media_url ?? null,
-                {
-                  content_type: defaultMediaAccess?.content_type,
-                  source_content_type: defaultMediaAccess?.source_content_type,
-                  size: defaultMediaAccess?.size,
-                }
-              )
+          media: serializedDefaultMedia
+            ? {
+                ...serializedDefaultMedia,
+                ...buildResolvedMediaRepresentation(serializedDefaultMedia),
+              }
             : null,
         });
       } catch (error) {
@@ -675,13 +685,49 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const defaultMediaPayload = await serializeResolvedDefaultMedia(resolvedDefaultMedia, includeUrls);
 
         const latest = await getLatestPublishForScreen(deviceId, db);
-
-        if (!emergency && latest?.snapshot_id) {
-          const etag = `"${latest.snapshot_id}"`;
-          reply.header('ETag', etag);
-          if (ifNoneMatchValues.includes(latest.snapshot_id)) {
-            return reply.status(304).send();
-          }
+        const groupIds = (await getGroupIdsForScreen(deviceId)).sort();
+        const rawPayload = (latest?.payload as any) || {};
+        const representationMediaIds = new Set<string>();
+        const collectRepresentationMediaIds = (value: any) => {
+          if (!value || typeof value !== 'object') return;
+          if (typeof value.media_id === 'string') representationMediaIds.add(value.media_id);
+          if (Array.isArray(value.items)) value.items.forEach(collectRepresentationMediaIds);
+          if (Array.isArray(value.slots)) value.slots.forEach(collectRepresentationMediaIds);
+          if (value.presentation) collectRepresentationMediaIds(value.presentation);
+        };
+        collectRepresentationMediaIds(rawPayload);
+        if (resolvedDefaultMedia.media_id) representationMediaIds.add(resolvedDefaultMedia.media_id);
+        if (emergency?.media_id) representationMediaIds.add(emergency.media_id);
+        const representationMedia = representationMediaIds.size > 0
+          ? await db
+              .select({ id: schema.media.id, status: schema.media.status, updated_at: schema.media.updated_at })
+              .from(schema.media)
+              .where(inArray(schema.media.id, Array.from(representationMediaIds) as any))
+          : [];
+        const representationRevision = createHash('sha256')
+          .update(JSON.stringify({
+            snapshot_id: latest?.snapshot_id ?? null,
+            reservation_version: (latest as any)?.reservation_version ?? null,
+            reservation_start_at: (latest as any)?.reservation_start_at ?? null,
+            reservation_end_at: (latest as any)?.reservation_end_at ?? null,
+            groups: groupIds,
+            emergency: emergency
+              ? { id: emergency.id, version: emergency.version, expires_at: emergency.expires_at }
+              : null,
+            default_media: {
+              id: resolvedDefaultMedia.media_id,
+              source: resolvedDefaultMedia.source,
+              updated_at: resolvedDefaultMedia.media?.updated_at ?? null,
+            },
+            media: representationMedia
+              .map((media) => ({ id: media.id, status: media.status, updated_at: media.updated_at }))
+              .sort((left, right) => left.id.localeCompare(right.id)),
+            include_urls: includeUrls,
+          }))
+          .digest('hex');
+        reply.header('ETag', `W/"${representationRevision}"`);
+        if (ifNoneMatchValues.includes('*') || ifNoneMatchValues.includes(representationRevision)) {
+          return reply.status(304).send();
         }
 
         if (!latest) {
@@ -689,17 +735,17 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             device_id: deviceId,
             content_state: defaultMediaPayload.default_media ? 'default' : 'empty',
             server_time: new Date().toISOString(),
+            representation_revision: representationRevision,
             publish: null,
             snapshot: null,
             media_urls: undefined,
+            media_assets: undefined,
             emergency,
             ...defaultMediaPayload,
           });
         }
 
-        const rawPayload = (latest.payload as any) || {};
         const schedule = rawPayload.schedule || {};
-        const groupIds = await getGroupIdsForScreen(deviceId);
         const filteredItems = filterItemsForScreen(schedule.items || [], deviceId, groupIds);
         let filteredSnapshot = {
           ...rawPayload,
@@ -709,6 +755,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           filteredItems.length > 0 || (Array.isArray(rawPayload.items) && rawPayload.items.length > 0);
 
         let mediaUrls: Record<string, string | null> | undefined;
+        let mediaAssets: ReturnType<typeof buildResolvedMediaAssets> | undefined;
         if (includeUrls) {
           const scheduleItems: any[] = filteredItems;
           const mediaIds = new Set<string>();
@@ -726,6 +773,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           if (ids.length > 0) {
             const resolvedMediaMap = await buildResolvedMediaMap(ids, db, 'device');
             filteredSnapshot = attachResolvedMediaToScheduleSnapshot(filteredSnapshot, resolvedMediaMap);
+            mediaAssets = buildResolvedMediaAssets(resolvedMediaMap);
             mediaUrls = {};
             for (const [mediaId, media] of resolvedMediaMap.entries()) {
               mediaUrls[mediaId] =
@@ -738,16 +786,18 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           device_id: deviceId,
           content_state: hasFilteredScheduledContent ? 'scheduled' : defaultMediaPayload.default_media ? 'default' : 'empty',
           server_time: new Date().toISOString(),
-            publish: {
-              publish_id: latest.publish_id,
-              schedule_id: latest.schedule_id,
-              snapshot_id: latest.snapshot_id,
-              published_at: latest.published_at.toISOString?.() ?? latest.published_at,
-              reservation_version: (latest as any).reservation_version ?? null,
-              selection_reason: (latest as any).selection_reason ?? null,
-            },
+          representation_revision: representationRevision,
+          publish: {
+            publish_id: latest.publish_id,
+            schedule_id: latest.schedule_id,
+            snapshot_id: latest.snapshot_id,
+            published_at: latest.published_at.toISOString?.() ?? latest.published_at,
+            reservation_version: (latest as any).reservation_version ?? null,
+            selection_reason: (latest as any).selection_reason ?? null,
+          },
           snapshot: filteredSnapshot,
           media_urls: mediaUrls,
+          media_assets: mediaAssets,
           emergency,
           ...defaultMediaPayload,
         });

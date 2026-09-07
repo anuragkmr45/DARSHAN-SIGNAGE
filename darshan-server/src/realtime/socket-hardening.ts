@@ -79,6 +79,18 @@ export const deviceHelloPayloadSchema = z.object({
       family: z.string().trim().min(1).max(64).optional(),
     })
     .optional(),
+  capabilities: z
+    .object({
+      commands: z.array(shortStringSchema).max(64).optional(),
+      features: z.array(shortStringSchema).max(64).optional(),
+      screenshot: z.boolean().optional(),
+      log_upload: z.boolean().optional(),
+      offline_startup: z.boolean().optional(),
+      background_push: z.boolean().optional(),
+    })
+    .optional(),
+  local_state: z.record(z.unknown()).optional(),
+  sent_at: z.string().datetime().optional(),
 });
 
 export const devicePingPayloadSchema = z

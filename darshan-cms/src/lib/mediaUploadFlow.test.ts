@@ -1,11 +1,18 @@
 import { ApiError } from "@/api/apiClient";
 import { mediaApi } from "@/api/domains/media";
-import { getFriendlyUploadError, uploadMediaWithPresign } from "@/lib/mediaUploadFlow";
+import {
+  getFriendlyUploadError,
+  sha256File,
+  uploadMediaWithPresign,
+  UploadHttpError,
+  UploadPipelineError,
+} from "@/lib/mediaUploadFlow";
 import { maybeCompressForUpload } from "@/lib/mediaCompression";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("@/api/domains/media", () => ({
   mediaApi: {
+    getUploadPolicy: vi.fn(),
     createUploadSession: vi.fn(),
     getUploadSession: vi.fn(),
     presignUploadParts: vi.fn(),
@@ -73,6 +80,14 @@ describe("uploadMediaWithPresign", () => {
     MockXMLHttpRequest.etag = '"part-etag"';
     globalThis.XMLHttpRequest = MockXMLHttpRequest as unknown as typeof XMLHttpRequest;
     globalThis.window = undefined as typeof window;
+    mockedMediaApi.getUploadPolicy.mockResolvedValue({
+      max_bytes: 500 * 1024 * 1024,
+      max_mb: 500,
+      multipart_threshold_bytes: 100 * 1024 * 1024,
+      part_size_bytes: 16 * 1024 * 1024,
+      multipart_concurrency: 3,
+      allowed_mime_types: [],
+    });
   });
 
   afterEach(() => {
@@ -170,6 +185,22 @@ describe("uploadMediaWithPresign", () => {
     expect(result.didCompress).toBe(false);
   });
 
+  test("rejects an oversized prepared file before hashing or session creation", async () => {
+    const file = makeFile("too-large.mp4", "video/mp4", 11);
+    mockedMediaApi.getUploadPolicy.mockResolvedValue({
+      max_bytes: 10,
+      max_mb: 0.00001,
+      multipart_threshold_bytes: 5,
+      part_size_bytes: 5,
+      multipart_concurrency: 3,
+      allowed_mime_types: [],
+    });
+    mockedCompress.mockResolvedValue({ file, didCompress: false, originalSize: file.size, finalSize: file.size });
+
+    await expect(uploadMediaWithPresign(file)).rejects.toMatchObject({ status: 413, stage: "policy" });
+    expect(mockedMediaApi.createUploadSession).not.toHaveBeenCalled();
+  });
+
   test("resumes server-listed multipart state and uploads remaining parts with bounded part URLs", async () => {
     const file = makeFile("large.mp4", "video/mp4", 9);
     mockedCompress.mockResolvedValue({ file, didCompress: false, originalSize: file.size, finalSize: file.size });
@@ -219,15 +250,48 @@ describe("uploadMediaWithPresign", () => {
 });
 
 describe("getFriendlyUploadError", () => {
-  test("keeps 413/415/403 mappings unchanged", () => {
+  test("reports policy rejection without guessing which transport failed", () => {
     expect(getFriendlyUploadError(new ApiError({ status: 413, message: "too large" }))).toBe(
-      "Upload failed: file is too large.",
+      "Upload rejected by an upstream HTTP gateway because its configured size limit was exceeded.",
     );
     expect(getFriendlyUploadError(new ApiError({ status: 415, message: "bad type" }))).toBe(
       "Upload failed: unsupported file type.",
     );
     expect(getFriendlyUploadError(new ApiError({ status: 403, message: "forbidden" }))).toBe(
       "Upload failed: you do not have permission to upload this file.",
+    );
+  });
+
+  test("identifies the rejecting layer and preserves diagnostic metadata", () => {
+    const failure = new UploadPipelineError(
+      "part-upload",
+      new UploadHttpError(413, "payload too large", "part-upload", "request-123", "ENTITY_TOO_LARGE"),
+    );
+
+    expect(failure).toMatchObject({
+      status: 413,
+      code: "ENTITY_TOO_LARGE",
+      requestId: "request-123",
+      retryable: false,
+      remediation: "Start a new upload or contact an administrator with the reference code.",
+    });
+    expect(getFriendlyUploadError(failure)).toBe(
+      "Upload rejected by the object-storage upload gateway because its configured size limit was exceeded. Stage: part-upload. Code: ENTITY_TOO_LARGE. Reference: request-123.",
+    );
+  });
+});
+
+describe("sha256File", () => {
+  test("hashes incrementally across chunk boundaries", async () => {
+    const file = new File([new TextEncoder().encode("abcdefghi")], "payload.bin");
+    expect(await sha256File(file, 3)).toBe(
+      "19cc02f26df43cc571bc9ed7b0c4d29224a3ec229529221725ef76d021c8326f",
+    );
+  });
+
+  test("rejects invalid chunk sizes", async () => {
+    await expect(sha256File(makeFile("payload.bin", "application/octet-stream", 1), 0)).rejects.toThrow(
+      "Hash chunk size must be a positive safe integer.",
     );
   });
 });

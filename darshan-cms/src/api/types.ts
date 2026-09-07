@@ -1594,6 +1594,7 @@ export interface ScheduleReservationPreviewPayload {
 }
 
 export interface ScheduleReservationPreviewResponse {
+  server_time: string;
   resolved_screen_ids: string[];
   reservation_conflicts: ReservationConflictItem[];
 }
@@ -1699,6 +1700,8 @@ export interface DeviceScheduleItem {
   display_ms?: number;
   fit?: "cover" | "contain" | string;
   media_url?: string;
+  preview_url?: string;
+  name?: string;
   sha256?: string;
   muted?: boolean;
   loop?: boolean;
@@ -1716,6 +1719,17 @@ export interface DeviceScheduleSnapshot {
     items?: DeviceScheduleItem[];
   };
   media_urls?: Record<string, string>;
+  media_assets?: Record<string, {
+    id: string;
+    name: string;
+    type: string;
+    playback_url?: string | null;
+    preview_url?: string | null;
+    content_type?: string | null;
+    source_content_type?: string | null;
+    status?: string | null;
+    source_url?: string | null;
+  }>;
   media?: Array<{
     media_id: string;
     url?: string;

@@ -916,7 +916,7 @@ describe('Device telemetry auth runtime validation', () => {
     });
   });
 
-  it('returns ETag for device snapshots and honors If-None-Match when no emergency is active', async () => {
+  it('returns a representation ETag, honors If-None-Match, and invalidates it on group changes', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();
     const serial = `serial-${randomUUID()}`;
@@ -993,12 +993,15 @@ describe('Device telemetry auth runtime validation', () => {
     });
 
     expect(firstResponse.status).toBe(HTTP_STATUS.OK);
-    expect(firstResponse.headers.get('etag')).toBe(`"${snapshotId}"`);
+    const firstEtag = firstResponse.headers.get('etag');
+    expect(firstEtag).toMatch(/^W\/"[a-f0-9]{64}"$/);
+    const firstBody = await firstResponse.json() as { representation_revision: string };
+    expect(firstEtag).toBe(`W/"${firstBody.representation_revision}"`);
 
     const secondResponse = await fetch(`${baseUrl}/api/v1/device/${deviceId}/snapshot`, {
       headers: {
         'x-device-serial': serial,
-        'if-none-match': `"${snapshotId}"`,
+        'if-none-match': firstEtag!,
       },
     });
 
@@ -1007,14 +1010,26 @@ describe('Device telemetry auth runtime validation', () => {
     const weakEtagResponse = await fetch(`${baseUrl}/api/v1/device/${deviceId}/snapshot`, {
       headers: {
         'x-device-serial': serial,
-        'if-none-match': `W/"stale-snapshot", "${snapshotId}"`,
+        'if-none-match': `W/"stale-snapshot", ${firstEtag}`,
       },
     });
 
     expect(weakEtagResponse.status).toBe(304);
+
+    const groupId = randomUUID();
+    await db.insert(schema.screenGroups).values({ id: groupId, name: 'ETag Membership Group' });
+    await db.insert(schema.screenGroupMembers).values({ group_id: groupId, screen_id: deviceId });
+    const changedResponse = await fetch(`${baseUrl}/api/v1/device/${deviceId}/snapshot`, {
+      headers: {
+        'x-device-serial': serial,
+        'if-none-match': firstEtag!,
+      },
+    });
+    expect(changedResponse.status).toBe(HTTP_STATUS.OK);
+    expect(changedResponse.headers.get('etag')).not.toBe(firstEtag);
   });
 
-  it('resolves the winning emergency for a device using global over group over screen precedence', async () => {
+  it('resolves the winning emergency by severity before scope', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();
     const serial = `serial-${randomUUID()}`;
@@ -1114,9 +1129,10 @@ describe('Device telemetry auth runtime validation', () => {
     const body = JSON.parse(response.body);
     expect(body.emergency).toEqual(
       expect.objectContaining({
-        message: 'Global emergency',
-        scope: 'GLOBAL',
-        media_id: mediaGlobal,
+        message: 'Screen emergency',
+        scope: 'SCREEN',
+        severity: 'CRITICAL',
+        media_id: mediaScreen,
       })
     );
   });

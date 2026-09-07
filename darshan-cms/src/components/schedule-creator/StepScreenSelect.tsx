@@ -41,7 +41,7 @@ type TimelineState = {
   error?: string;
 };
 
-type AvailabilityStatus = "busy" | "available" | "unknown";
+type OperationalStatus = "playing" | "idle" | "unknown";
 
 const formatWindow = (startAt?: string, endAt?: string) => {
   if (!startAt || !endAt) return "scheduled window";
@@ -56,7 +56,7 @@ const formatWindow = (startAt?: string, endAt?: string) => {
 const getScheduleItemLabel = (item: ScreenSnapshotScheduleItem) =>
   item?.presentation?.name || item?.presentation_id || item?.id || "Scheduled item";
 
-const getSnapshotInsight = (snapshot: ScreenSnapshot) => {
+export const getSnapshotInsight = (snapshot: ScreenSnapshot) => {
   const items = [...(snapshot.snapshot?.schedule?.items ?? [])]
     .filter((item) => item?.start_at && item?.end_at)
     .sort(
@@ -64,34 +64,45 @@ const getSnapshotInsight = (snapshot: ScreenSnapshot) => {
         Date.parse(left.start_at || "") - Date.parse(right.start_at || "") ||
         Date.parse(left.end_at || "") - Date.parse(right.end_at || ""),
     );
-  const now = Date.now();
-
-  if (snapshot.emergency) {
-    return {
-      status: "busy" as AvailabilityStatus,
-      title: "Emergency takeover active",
-      description: "This target is currently overridden by emergency playback.",
-      items,
-      activeItems: [],
-      nextItem: items.find((item) => Date.parse(item.start_at || "") > now) ?? null,
-    };
-  }
+  const now = snapshot.server_time ? Date.parse(snapshot.server_time) : Number.NaN;
 
   const activeItems = items.filter((item) => {
     const start = Date.parse(item.start_at || "");
     const end = Date.parse(item.end_at || "");
-    return !Number.isNaN(start) && !Number.isNaN(end) && start <= now && now <= end;
+    return Number.isFinite(now) && !Number.isNaN(start) && !Number.isNaN(end) && start <= now && now < end;
   });
   const nextItem = items.find((item) => {
     const start = Date.parse(item.start_at || "");
-    return !Number.isNaN(start) && start > now;
+    return Number.isFinite(now) && !Number.isNaN(start) && start > now;
   }) ?? null;
+
+  if (snapshot.emergency) {
+    return {
+      status: (activeItems.length > 0 ? "playing" : "idle") as OperationalStatus,
+      title: "Emergency override active",
+      description: "Emergency override active; the schedule remains valid and will resume after clear or expiry.",
+      items,
+      activeItems,
+      nextItem,
+    };
+  }
+
+  if (!Number.isFinite(now)) {
+    return {
+      status: "unknown" as OperationalStatus,
+      title: "Operational time unavailable",
+      description: "The backend did not provide server time, so current playback was not inferred.",
+      items,
+      activeItems: [],
+      nextItem: null,
+    };
+  }
 
   if (activeItems.length > 0) {
     const current = activeItems[0];
     return {
-      status: "busy" as AvailabilityStatus,
-      title: "Currently busy",
+      status: "playing" as OperationalStatus,
+      title: "Scheduled playback active",
       description: `${getScheduleItemLabel(current)} is active for ${formatWindow(current.start_at, current.end_at)}.`,
       items,
       activeItems,
@@ -101,8 +112,8 @@ const getSnapshotInsight = (snapshot: ScreenSnapshot) => {
 
   if (nextItem) {
     return {
-      status: "available" as AvailabilityStatus,
-      title: "Available right now",
+      status: "idle" as OperationalStatus,
+      title: "No scheduled playback right now",
       description: `Next scheduled item is ${getScheduleItemLabel(nextItem)} at ${formatWindow(nextItem.start_at, nextItem.end_at)}.`,
       items,
       activeItems,
@@ -112,7 +123,7 @@ const getSnapshotInsight = (snapshot: ScreenSnapshot) => {
 
   if (items.length > 0) {
     return {
-      status: "available" as AvailabilityStatus,
+      status: "idle" as OperationalStatus,
       title: "No active schedule right now",
       description: "This target has schedule history, but nothing is active or upcoming right now.",
       items,
@@ -122,7 +133,7 @@ const getSnapshotInsight = (snapshot: ScreenSnapshot) => {
   }
 
   return {
-    status: "available" as AvailabilityStatus,
+    status: "idle" as OperationalStatus,
     title: "No schedule found",
     description: "This target has no scheduled content right now.",
     items,
@@ -139,7 +150,7 @@ export function StepScreenSelect({
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("screens");
-  const [availabilityMap, setAvailabilityMap] = useState<Record<string, AvailabilityStatus>>({});
+  const [inspectionMap, setInspectionMap] = useState<Record<string, OperationalStatus>>({});
   const [timelineState, setTimelineState] = useState<TimelineState>({
     entityId: null,
     label: null,
@@ -209,25 +220,21 @@ export function StepScreenSelect({
     return screensApi.getSnapshot(id, true);
   };
 
-  const determineAvailability = (snapshot: ScreenSnapshot): AvailabilityStatus => {
-    return getSnapshotInsight(snapshot).status;
-  };
-
-  const handleCheckAvailability = async (type: "screen" | "group", id: string) => {
+  const handleInspectState = async (type: "screen" | "group", id: string) => {
     const key = availabilityKey(type, id);
     setCheckingAvailabilityFor(key);
     try {
       const snapshot = await fetchTimelineSnapshot(type, id);
       const insight = getSnapshotInsight(snapshot);
       const status = insight.status;
-      setAvailabilityMap((prev) => ({ ...prev, [key]: status }));
+      setInspectionMap((prev) => ({ ...prev, [key]: status }));
       toast({
         title: insight.title,
         description: insight.description,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to fetch schedule snapshot.";
-      toast({ title: "Availability check failed", description: message, variant: "destructive" });
+      toast({ title: "Operational inspection failed", description: message, variant: "destructive" });
     } finally {
       setCheckingAvailabilityFor(null);
     }
@@ -299,14 +306,14 @@ export function StepScreenSelect({
     };
   }, [timelineItems]);
 
-  const getAvailabilityBadgeVariant = (status: AvailabilityStatus) => {
+  const getOperationalBadgeVariant = (status: OperationalStatus) => {
     switch (status) {
-      case "busy":
-        return "destructive";
-      case "available":
+      case "playing":
         return "default";
-      default:
+      case "idle":
         return "secondary";
+      default:
+        return "outline";
     }
   };
 
@@ -397,8 +404,8 @@ export function StepScreenSelect({
                 {filteredScreens.map((screen) => {
                   const isSelected = selectedScreenIds.includes(screen.id);
                   const status = screen.status ?? "INACTIVE";
-                  const availabilityStatus =
-                    availabilityMap[availabilityKey("screen", screen.id)] ?? "unknown";
+                  const operationalStatus =
+                    inspectionMap[availabilityKey("screen", screen.id)] ?? "unknown";
                   return (
                     <Card
                       key={screen.id}
@@ -442,12 +449,12 @@ export function StepScreenSelect({
                       </div>
                       <div className="mt-3 space-y-2">
                         <div className="flex items-center gap-2">
-                          <Badge variant={getAvailabilityBadgeVariant(availabilityStatus)}>
-                            {availabilityStatus === "busy"
-                              ? "Status: Busy"
-                              : availabilityStatus === "available"
-                              ? "Status: Available"
-                              : "Status: Unknown"}
+                          <Badge variant={getOperationalBadgeVariant(operationalStatus)}>
+                            {operationalStatus === "playing"
+                              ? "Scheduled playback active"
+                              : operationalStatus === "idle"
+                              ? "No scheduled playback now"
+                              : "Operational state not checked"}
                           </Badge>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -456,14 +463,14 @@ export function StepScreenSelect({
                             variant="outline"
                             onClick={(event) => {
                               event.stopPropagation();
-                              handleCheckAvailability("screen", screen.id);
+                              handleInspectState("screen", screen.id);
                             }}
                             disabled={checkingAvailabilityFor === availabilityKey("screen", screen.id)}
                           >
                             <Check className="h-3 w-3 mr-1" />
                             {checkingAvailabilityFor === availabilityKey("screen", screen.id)
                               ? "Checking..."
-                              : "Check availability"}
+                              : "Inspect current state"}
                           </Button>
                           <Button
                             size="sm"
@@ -506,8 +513,8 @@ export function StepScreenSelect({
                   const activeCount = groupScreenIds.filter(
                     (id) => screensById.get(id)?.status === "ACTIVE",
                   ).length;
-                  const availabilityStatus =
-                    availabilityMap[availabilityKey("group", group.id)] ?? "unknown";
+                  const operationalStatus =
+                    inspectionMap[availabilityKey("group", group.id)] ?? "unknown";
                   return (
                     <Card
                       key={group.id}
@@ -549,12 +556,12 @@ export function StepScreenSelect({
                       </div>
                       <div className="mt-3 space-y-2">
                         <div className="flex items-center gap-2">
-                          <Badge variant={getAvailabilityBadgeVariant(availabilityStatus)}>
-                            {availabilityStatus === "busy"
-                              ? "Status: Busy"
-                              : availabilityStatus === "available"
-                              ? "Status: Available"
-                              : "Status: Unknown"}
+                          <Badge variant={getOperationalBadgeVariant(operationalStatus)}>
+                            {operationalStatus === "playing"
+                              ? "Scheduled playback active"
+                              : operationalStatus === "idle"
+                              ? "No scheduled playback now"
+                              : "Operational state not checked"}
                           </Badge>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -563,14 +570,14 @@ export function StepScreenSelect({
                             variant="outline"
                             onClick={(event) => {
                               event.stopPropagation();
-                              handleCheckAvailability("group", group.id);
+                              handleInspectState("group", group.id);
                             }}
                             disabled={checkingAvailabilityFor === availabilityKey("group", group.id)}
                           >
                             <Check className="h-3 w-3 mr-1" />
                             {checkingAvailabilityFor === availabilityKey("group", group.id)
                               ? "Checking..."
-                              : "Check availability"}
+                              : "Inspect current state"}
                           </Button>
                           <Button
                             size="sm"
@@ -623,8 +630,12 @@ export function StepScreenSelect({
               {timelineInsight ? (
                 <Card className="p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={getAvailabilityBadgeVariant(timelineInsight.status)}>
-                      {timelineInsight.status === "busy" ? "Busy now" : "Available now"}
+                    <Badge variant={getOperationalBadgeVariant(timelineInsight.status)}>
+                      {timelineInsight.status === "playing"
+                        ? "Scheduled playback active"
+                        : timelineInsight.status === "idle"
+                          ? "No scheduled playback now"
+                          : "Operational state unknown"}
                     </Badge>
                     {timelineState.snapshot?.emergency ? (
                       <Badge variant="destructive">Emergency override</Badge>
@@ -649,7 +660,7 @@ export function StepScreenSelect({
                 }))}
                 windowStart={timelineBounds.start}
                 windowEnd={timelineBounds.end}
-                currentTime={new Date().toISOString()}
+                currentTime={timelineState.snapshot?.server_time}
               />
             </div>
           ) : (

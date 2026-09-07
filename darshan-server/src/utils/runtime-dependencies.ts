@@ -208,6 +208,16 @@ export async function validateRuntimeDependencies(role: RuntimeDependencyRole = 
   const report = await inspectRuntimeDependencies(role);
   const missingCritical = report.dependencies.filter((dependency) => dependency.status === 'missing');
 
+  if (
+    appConfig.NODE_ENV === 'production' &&
+    role !== 'api' &&
+    report.dependencies.some((dependency) => dependency.name === 'chromium' && dependency.status === 'available') &&
+    typeof process.getuid === 'function' &&
+    process.getuid() === 0
+  ) {
+    throw new Error('Production webpage capture worker must run as a non-root user so Chromium sandboxing remains enabled.');
+  }
+
   if (missingCritical.length > 0) {
     throw new Error(
       `Missing required runtime dependencies: ${missingCritical

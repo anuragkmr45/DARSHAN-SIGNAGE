@@ -113,6 +113,7 @@ describe('Media upload sessions', () => {
     getPresignedUploadPartUrlMock.mockImplementation(async ({ partNumber }: { partNumber: number }) =>
       `https://cms.example.test/media-staging/part-${partNumber}`
     );
+    listMultipartUploadPartsMock.mockResolvedValue({ Parts: [] });
     completeMultipartUploadMock.mockResolvedValue({});
     headObjectMock.mockResolvedValue({ ContentLength: MULTIPART_SIZE, ContentType: 'image/png' });
     computeObjectSha256Mock.mockResolvedValue(SHA_256);
@@ -137,6 +138,39 @@ describe('Media upload sessions', () => {
         checksum_sha256: params?.checksum ?? SHA_256,
       },
     });
+
+  it('reports the effective 500 MiB upload policy before a browser starts transferring data', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/media/upload-policy',
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(response.body)).toEqual({
+      max_bytes: 500 * 1024 * 1024,
+      max_mb: 500,
+      multipart_threshold_bytes: MULTIPART_SIZE,
+      part_size_bytes: PART_SIZE,
+      multipart_concurrency: 3,
+      allowed_mime_types: [],
+    });
+  });
+
+  it.each([
+    { label: '2.75 MiB', size: Math.round(2.75 * 1024 * 1024), strategy: 'single', status: HTTP_STATUS.CREATED },
+    { label: '99 MiB', size: 99 * 1024 * 1024, strategy: 'single', status: HTTP_STATUS.CREATED },
+    { label: '100 MiB', size: 100 * 1024 * 1024, strategy: 'multipart', status: HTTP_STATUS.CREATED },
+    { label: '101 MiB', size: 101 * 1024 * 1024, strategy: 'multipart', status: HTTP_STATUS.CREATED },
+    { label: '500 MiB', size: 500 * 1024 * 1024, strategy: 'multipart', status: HTTP_STATUS.CREATED },
+    { label: 'over 500 MiB', size: 500 * 1024 * 1024 + 1, strategy: null, status: HTTP_STATUS.UNPROCESSABLE_CONTENT },
+  ])('enforces upload strategy and application limit at $label', async ({ size, strategy, status }) => {
+    const response = await createSession({ size });
+    expect(response.statusCode).toBe(status);
+    if (strategy) {
+      expect(JSON.parse(response.body).strategy).toBe(strategy);
+    }
+  });
 
   it('issues only CMS-origin signed URLs and returns the same session for an identical retry', async () => {
     const idempotencyKey = randomUUID();

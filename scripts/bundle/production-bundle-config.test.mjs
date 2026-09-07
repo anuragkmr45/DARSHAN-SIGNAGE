@@ -105,6 +105,10 @@ MINIO_ACCESS_KEY=darshan1
 MINIO_SECRET_KEY=strong-minio-secret
 JWT_SECRET=01234567890123456789012345678901
 INITIAL_ADMIN_EMAIL=admin@example.test
+WEBPAGE_NAVIGATION_ALLOWLIST=display-content.example.test
+WEBPAGE_RESOURCE_ALLOWLIST=*.assets.example.test
+WEBPAGE_ALLOWED_CIDRS=10.20.0.0/24,fd00:20::/64
+WEBPAGE_ALLOWED_PORTS=443,8443
 BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_DAYS=30
 BACKUP_OFFHOST_DESTINATION=s3://offhost-backups.example.test/darshan/site-a
@@ -170,6 +174,9 @@ EXPORTER_PIDS_LIMIT=128
   assert.equal(loaded.config.CAPACITY_EVIDENCE_VALID_UNTIL, '2099-01-01T00:00:00.000Z')
   assert.equal(loaded.config.CAPACITY_EVIDENCE_SHA256, crypto.createHash('sha256').update(fs.readFileSync(capacityEvidence)).digest('hex'))
   assert.equal(loaded.config.PLAYER_TARGET_PLATFORMS, 'linux')
+  assert.deepEqual(loaded.outputs.WEBPAGE_ALLOWED_CIDRS, ['production/backend/.env.production', 'production/electron/config.json'])
+  assert.deepEqual(loaded.outputs.WEBPAGE_ALLOWED_PORTS, ['production/backend/.env.production', 'production/electron/config.json'])
+  assert.deepEqual(loaded.outputs.WEBPAGE_ALLOW_HTTP, ['production/backend/.env.production', 'production/electron/config.json'])
   assert.equal(loaded.config.SITE_PKI_DIR, secure)
 	  const validText = fs.readFileSync(envFile, 'utf8')
 	  const validCapacityEvidence = fs.readFileSync(capacityEvidence, 'utf8')
@@ -185,6 +192,15 @@ EXPORTER_PIDS_LIMIT=128
   fs.writeFileSync(envFile, validText)
   fs.writeFileSync(envFile, validText.replace('PLAYER_TARGET_PLATFORMS=linux', 'PLAYER_TARGET_PLATFORMS=macos'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /PLAYER_TARGET_PLATFORMS must be/)
+
+  fs.writeFileSync(envFile, validText.replace('WEBPAGE_ALLOWED_PORTS=443,8443', 'WEBPAGE_ALLOWED_PORTS=443,70000'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOWED_PORTS contains invalid port/)
+
+  fs.writeFileSync(envFile, validText.replace('WEBPAGE_ALLOWED_CIDRS=10.20.0.0\/24,fd00:20::\/64', 'WEBPAGE_ALLOWED_CIDRS=10.20.0.0\/99'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOWED_CIDRS contains invalid CIDR/)
+
+  fs.writeFileSync(envFile, `${validText}\nWEBPAGE_ALLOW_HTTP=true\n`)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOW_HTTP must be false for production/)
   fs.writeFileSync(envFile, validText
     .replace('strong-postgres-pass', 'has:a:colon-password')
     .replace('strong-monitoring-password-123', 'has:a:strong-monitoring-password-123')
@@ -328,6 +344,20 @@ test('production state-service artifacts require verified TLS and authenticated 
   assert.match(production, /--resolve "\$\{BACKEND_PRIVATE_HOST\}:\$\{API_HOST_PORT\}:\$\{BACKEND_BIND_ADDRESS\}"/)
   assert.match(production, /curl -fsSI "http:\/\/\$\{CMS_BIND_ADDRESS\}:\$\{CMS_HTTP_PORT\}\//)
   assert.match(production, /curl -fsS "http:\/\/\$\{OBSERVABILITY_BIND_ADDRESS\}:\$\{PROMETHEUS_HOST_PORT\}\/-\/ready"/)
+})
+
+test('generated player configs carry the centrally validated webpage policy', () => {
+  const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
+  const playerWriter = assembler.slice(
+    assembler.indexOf('stage_player_bundle()'),
+    assembler.indexOf('write_skip_placeholder()'),
+  )
+
+  assert.match(playerWriter, /"allowedDomains": \$webpage_navigation_json/)
+  assert.match(playerWriter, /"webpageResourceDomains": \$webpage_resource_json/)
+  assert.match(playerWriter, /"webpageAllowedCidrs": \$webpage_cidrs_json/)
+  assert.match(playerWriter, /"webpageAllowedPorts": \$webpage_ports_json/)
+  assert.match(playerWriter, /"webpageAllowHttp": \$WEBPAGE_ALLOW_HTTP/)
 })
 
 test('production observability deploys every static exporter target from signed role images', () => {

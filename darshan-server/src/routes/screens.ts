@@ -8,7 +8,7 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { getDatabase, schema } from '@/db';
-import { eq, desc, inArray, and, isNull, gte, lte, sql } from 'drizzle-orm';
+import { eq, desc, inArray, and, gte, lte, sql } from 'drizzle-orm';
 import { deleteObject, getObject } from '@/s3';
 import { pruneDefaultMediaTargetsForScreen, resolveDefaultMediaForScreen } from '@/utils/default-media';
 import { AppError } from '@/utils/app-error';
@@ -16,8 +16,9 @@ import { serializeMediaRecord } from '@/utils/media';
 import { resolveMediaAccess } from '@/utils/media-access';
 import {
   attachResolvedMediaToScheduleSnapshot,
+  buildResolvedMediaAssets,
   buildResolvedMediaMap,
-  buildResolvedMediaRecord,
+  buildResolvedMediaRepresentation,
 } from '@/utils/resolved-media';
 import { createDeviceCommand, listRecentDeviceCommands } from '@/services/command-lifecycle-service';
 import { listRecentMediaCacheReports } from '@/services/media-cache-report-service';
@@ -32,6 +33,7 @@ import {
   buildScreensOverviewPayload,
   filterItemsForScreen as filterPublishedItemsForScreen,
   getLastProofOfPlayMap,
+  getActiveEmergencyForScreen,
   getLatestScreenshotPreview,
   getLatestPublishForScreen,
 } from '@/screens/playback';
@@ -169,57 +171,6 @@ export async function screenRoutes(fastify: FastifyInstance) {
     }
   };
 
-  const getActiveEmergencyForScreen = async (screenId: string, includeUrls: boolean) => {
-    const [emergency] = await db
-      .select()
-      .from(schema.emergencies)
-      .where(and(eq(schema.emergencies.is_active, true), isNull(schema.emergencies.cleared_at)))
-      .orderBy(desc(schema.emergencies.created_at))
-      .limit(1);
-    if (!emergency) return null;
-
-    const emergencyScreenIds = ((emergency as any).screen_ids || []) as string[];
-    const emergencyGroupIds = ((emergency as any).screen_group_ids || []) as string[];
-    const hasTargets = emergencyScreenIds.length > 0 || emergencyGroupIds.length > 0;
-    const targetAll = (emergency as any).target_all === true || !hasTargets;
-
-    if (!targetAll) {
-      if (emergencyScreenIds.includes(screenId)) {
-        // ok
-      } else {
-        const groupIds = await getGroupIdsForScreen(screenId);
-        const groupMatch = emergencyGroupIds.some((gid) => groupIds.includes(gid));
-        if (!groupMatch) return null;
-      }
-    }
-
-    const resolvedMedia =
-      includeUrls && (emergency as any).media_id
-        ? await buildResolvedMediaRecord((emergency as any).media_id, db)
-        : null;
-    return {
-      id: emergency.id,
-      emergency_type_id: (emergency as any).emergency_type_id ?? null,
-      triggered_by: emergency.triggered_by,
-      message: emergency.message,
-      severity: emergency.priority,
-      media_id: (emergency as any).media_id ?? null,
-      media_url: resolvedMedia?.media_url ?? null,
-      fallback_url: resolvedMedia?.fallback_url ?? null,
-      source_url: resolvedMedia?.source_url ?? null,
-      url: resolvedMedia?.url ?? null,
-      media_type: resolvedMedia?.media_type ?? null,
-      type: resolvedMedia?.type === 'WEBPAGE' ? 'url' : resolvedMedia?.type ?? null,
-      content_type: resolvedMedia?.content_type ?? null,
-      source_content_type: resolvedMedia?.source_content_type ?? null,
-      screen_ids: emergencyScreenIds,
-      screen_group_ids: emergencyGroupIds,
-      target_all: (emergency as any).target_all ?? false,
-      created_at: emergency.created_at.toISOString?.() ?? emergency.created_at,
-      cleared_at: emergency.cleared_at?.toISOString?.() ?? emergency.cleared_at,
-    };
-  };
-
   const filterItemsForScreen = (items: any[], screenId: string, groupIds: string[]) => {
     return items.filter((i) => {
       const itemScreens = (i.screen_ids || []) as string[];
@@ -237,7 +188,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
       .filter((i) => {
         const start = new Date(i.start_at);
         const end = new Date(i.end_at);
-        return start <= now && end >= now;
+        return start <= now && end > now;
       })
       .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
 
@@ -267,18 +218,20 @@ export async function screenRoutes(fastify: FastifyInstance) {
     }
 
     const mediaAccess = await resolveMediaAccess(resolvedDefaultMedia.media, db);
+    const serialized = serializeMediaRecord(
+      resolvedDefaultMedia.media,
+      includeUrls ? mediaAccess.media_url : null,
+      {
+        content_type: mediaAccess.content_type,
+        source_content_type: mediaAccess.source_content_type,
+        size: mediaAccess.size,
+      }
+    );
     return {
       default_media: {
         media_id: resolvedDefaultMedia.media.id,
-        ...serializeMediaRecord(
-          resolvedDefaultMedia.media,
-          includeUrls ? mediaAccess.media_url : null,
-          {
-            content_type: mediaAccess.content_type,
-            source_content_type: mediaAccess.source_content_type,
-            size: mediaAccess.size,
-          }
-        ),
+        ...serialized,
+        ...buildResolvedMediaRepresentation(serialized, { includeSourceUrl: true }),
       },
       default_media_resolution: {
         source: resolvedDefaultMedia.source,
@@ -767,7 +720,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
           .limit(1);
 
         const latestPublish = await getLatestPublishForScreen(screenId, db);
-        const activeEmergency = await getActiveEmergencyForScreen(screenId, false);
+        const activeEmergency = await getActiveEmergencyForScreen(screenId, { db, includeUrls: false });
         const commandCounts = countRowsByKey(commandStatusRows);
         const outboxCounts = countRowsByKey(outboxStatusRows);
         const lifecycleCounts = Object.entries(commandCounts).reduce<Record<string, number>>((acc, [status, count]) => {
@@ -1061,12 +1014,18 @@ export async function screenRoutes(fastify: FastifyInstance) {
         }
 
         const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
+        const serializedDefaultMedia = resolvedDefaultMedia.media
+          ? serializeMediaRecord(resolvedDefaultMedia.media, resolvedDefaultMedia.media_url)
+          : null;
         return reply.send({
           source: resolvedDefaultMedia.source,
           aspect_ratio: resolvedDefaultMedia.aspect_ratio,
           media_id: resolvedDefaultMedia.media_id,
-          media: resolvedDefaultMedia.media
-            ? serializeMediaRecord(resolvedDefaultMedia.media, resolvedDefaultMedia.media_url)
+          media: serializedDefaultMedia
+            ? {
+                ...serializedDefaultMedia,
+                ...buildResolvedMediaRepresentation(serializedDefaultMedia, { includeSourceUrl: true }),
+              }
             : null,
         });
       } catch (error) {
@@ -1514,7 +1473,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const serverTime = new Date().toISOString();
         const preview = await getLatestScreenshotPreview(screenId, { db });
-        const emergency = await getActiveEmergencyForScreen(screenId, includeUrls);
+        const emergency = await getActiveEmergencyForScreen(screenId, { db, includeUrls });
         const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
         const defaultMediaPayload = await serializeResolvedDefaultMedia(resolvedDefaultMedia, includeUrls);
         const latest = await getLatestPublishForScreen(screenId, db);
@@ -1526,6 +1485,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
             publish: null,
             snapshot: null,
             media_urls: undefined,
+            media_assets: undefined,
             preview,
             emergency,
             ...defaultMediaPayload,
@@ -1542,6 +1502,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
         };
 
         let mediaUrls: Record<string, string | null> | undefined;
+        let mediaAssets: ReturnType<typeof buildResolvedMediaAssets> | undefined;
 
         if (includeUrls) {
           const scheduleItems: any[] = filteredItems;
@@ -1562,6 +1523,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
           if (ids.length > 0) {
             const resolvedMediaMap = await buildResolvedMediaMap(ids, db);
             filteredSnapshot = attachResolvedMediaToScheduleSnapshot(filteredSnapshot, resolvedMediaMap);
+            mediaAssets = buildResolvedMediaAssets(resolvedMediaMap, { includeSourceUrl: true });
             mediaUrls = {};
             for (const [mediaId, media] of resolvedMediaMap.entries()) {
               mediaUrls[mediaId] =
@@ -1583,6 +1545,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
           },
           snapshot: filteredSnapshot,
           media_urls: mediaUrls,
+          media_assets: mediaAssets,
           preview,
           emergency,
           ...defaultMediaPayload,

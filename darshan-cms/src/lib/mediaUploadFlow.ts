@@ -1,8 +1,9 @@
 import { ApiError } from "@/api/apiClient";
-import { mediaApi, type UploadSessionResponse } from "@/api/domains/media";
+import { mediaApi, type MediaUploadPolicy, type UploadSessionResponse } from "@/api/domains/media";
 import type { MediaAsset } from "@/api/types";
 import { maybeCompressForUpload, type CompressionResult } from "@/lib/mediaCompression";
 import { deriveDisplayNameFromFilename } from "@/lib/media";
+import { createSHA256 } from "hash-wasm";
 
 export const allowedMimeTypes = new Set([
   "image/jpeg",
@@ -43,15 +44,66 @@ export interface UploadMediaResult extends CompressionResult {
 
 const sleep = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 const MULTIPART_CONCURRENCY = 3;
+const HASH_CHUNK_BYTES = 4 * 1024 * 1024;
 const SESSION_STORAGE_PREFIX = "darshan.media-upload-session.v1:";
 
 class UploadHttpError extends Error {
   status: number;
+  stage: UploadStage;
+  requestId?: string;
+  code?: string;
+  retryable: boolean;
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    stage: UploadStage = "storage-put",
+    requestId?: string,
+    code?: string,
+  ) {
     super(message);
     this.name = "UploadHttpError";
     this.status = status;
+    this.stage = stage;
+    this.requestId = requestId;
+    this.code = code;
+    this.retryable = status === 0 || status === 408 || status === 429 || status >= 500;
+  }
+}
+
+type UploadStage = "policy" | "session-create" | "storage-put" | "part-presign" | "part-upload" | "complete" | "verification";
+
+const resolveUploadRemediation = (stage: UploadStage, retryable: boolean) => {
+  if (stage === "policy") return "Choose a file within the displayed upload policy.";
+  if (retryable) return "Retry with the same file to resume the saved upload where possible.";
+  if (stage === "verification") return "Review the server verification reason, correct the source, and upload again.";
+  return "Start a new upload or contact an administrator with the reference code.";
+};
+
+class UploadPipelineError extends Error {
+  stage: UploadStage;
+  cause: unknown;
+  status?: number;
+  code?: string;
+  requestId?: string;
+  retryable: boolean;
+  remediation: string;
+
+  constructor(stage: UploadStage, cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Upload failed.");
+    this.name = "UploadPipelineError";
+    this.stage = stage;
+    this.cause = cause;
+    this.status = cause instanceof ApiError || cause instanceof UploadHttpError ? cause.status : undefined;
+    this.code = cause instanceof ApiError || cause instanceof UploadHttpError ? cause.code : undefined;
+    this.requestId = cause instanceof ApiError ? cause.traceId : cause instanceof UploadHttpError ? cause.requestId : undefined;
+    this.retryable =
+      cause instanceof UploadHttpError
+        ? cause.retryable
+        : cause instanceof ApiError
+          ? cause.status === 408 || cause.status === 429 || cause.status >= 500
+          : false;
+    this.remediation = resolveUploadRemediation(stage, this.retryable);
   }
 }
 
@@ -143,15 +195,29 @@ const uploadViaXhr = (
       }
 
       const message = xhr.responseText || "Upload failed.";
-      reject(new UploadHttpError(xhr.status, message));
+      reject(new UploadHttpError(
+        xhr.status,
+        message,
+        "storage-put",
+        xhr.getResponseHeader("X-Request-Id") ?? xhr.getResponseHeader("X-Correlation-Id") ?? undefined,
+      ));
     };
 
     xhr.send(body);
   });
 
-const sha256File = async (file: File): Promise<string> => {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+export const sha256File = async (file: File, chunkBytes = HASH_CHUNK_BYTES): Promise<string> => {
+  if (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
+    throw new Error("Hash chunk size must be a positive safe integer.");
+  }
+
+  const hasher = await createSHA256();
+  hasher.init();
+  for (let offset = 0; offset < file.size; offset += chunkBytes) {
+    const chunk = await file.slice(offset, Math.min(offset + chunkBytes, file.size)).arrayBuffer();
+    hasher.update(new Uint8Array(chunk));
+  }
+  return hasher.digest("hex");
 };
 
 const sessionStorageKey = (file: File, checksum: string) =>
@@ -255,7 +321,12 @@ const uploadMultipart = async (params: {
   const urlByPart = new Map<number, string>();
   for (let start = 0; start < pendingPartNumbers.length; start += 20) {
     const batch = pendingPartNumbers.slice(start, start + 20);
-    const response = await mediaApi.presignUploadParts(session.session_id, batch);
+    let response: Awaited<ReturnType<typeof mediaApi.presignUploadParts>>;
+    try {
+      response = await mediaApi.presignUploadParts(session.session_id, batch);
+    } catch (error) {
+      throw new UploadPipelineError("part-presign", error);
+    }
     response.parts.forEach((part) => urlByPart.set(part.part_number, part.upload_url));
   }
 
@@ -270,13 +341,23 @@ const uploadMultipart = async (params: {
 
       for (let attempt = 0; attempt < 2 && !etag; attempt += 1) {
         try {
-          const uploadUrl =
-            attempt === 0 ? urlByPart.get(partNumber) : (await mediaApi.presignUploadParts(session.session_id, [partNumber])).parts[0]?.upload_url;
+          let uploadUrl = attempt === 0 ? urlByPart.get(partNumber) : undefined;
+          if (attempt > 0) {
+            try {
+              uploadUrl = (await mediaApi.presignUploadParts(session.session_id, [partNumber])).parts[0]?.upload_url;
+            } catch (error) {
+              throw new UploadPipelineError("part-presign", error);
+            }
+          }
           if (!uploadUrl) throw new Error(`No upload URL returned for part ${partNumber}.`);
-          etag = await uploadViaXhr(uploadUrl, part, contentType, (percent) => {
-            progressByPart.set(partNumber, Math.round((part.size * percent) / 100));
-            reportProgress();
-          });
+          try {
+            etag = await uploadViaXhr(uploadUrl, part, contentType, (percent) => {
+              progressByPart.set(partNumber, Math.round((part.size * percent) / 100));
+              reportProgress();
+            });
+          } catch (error) {
+            throw new UploadPipelineError("part-upload", error);
+          }
           if (!etag) throw new Error(`Object storage did not return an ETag for part ${partNumber}.`);
         } catch (error) {
           lastError = error;
@@ -306,18 +387,38 @@ export const uploadMediaWithPresign = async (
     onPrepared?: (result: CompressionResult) => void;
   },
 ): Promise<UploadMediaResult> => {
+  let policy: MediaUploadPolicy;
+  try {
+    policy = await mediaApi.getUploadPolicy();
+  } catch (error) {
+    throw new UploadPipelineError("policy", error);
+  }
   const processed = await maybeCompressForUpload(file);
   const finalFile = processed.file;
   const contentType = finalFile.type || "application/octet-stream";
 
+  if (finalFile.size > policy.max_bytes) {
+    throw new UploadHttpError(
+      413,
+      `The prepared file is ${(finalFile.size / (1024 * 1024)).toFixed(2)} MiB; the server limit is ${policy.max_mb} MiB.`,
+      "policy",
+    );
+  }
+
   opts?.onPrepared?.(processed);
   const checksum = await sha256File(finalFile);
-  const { session: initialSession, storageKey } = await resolveUploadSession({
-    file: finalFile,
-    contentType,
-    displayName: opts?.displayName?.trim() || deriveDisplayNameFromFilename(file.name),
-    checksum,
-  });
+  let resolvedSession: Awaited<ReturnType<typeof resolveUploadSession>>;
+  try {
+    resolvedSession = await resolveUploadSession({
+      file: finalFile,
+      contentType,
+      displayName: opts?.displayName?.trim() || deriveDisplayNameFromFilename(file.name),
+      checksum,
+    });
+  } catch (error) {
+    throw new UploadPipelineError("session-create", error);
+  }
+  const { session: initialSession, storageKey } = resolvedSession;
 
   if (initialSession.state === "COMPLETED") {
     clearPersistedSessionId(storageKey);
@@ -341,14 +442,23 @@ export const uploadMediaWithPresign = async (
   if (initialSession.strategy === "single") {
     const uploadUrl = initialSession.upload_url || (await mediaApi.getUploadSession(initialSession.session_id)).upload_url;
     if (!uploadUrl) throw new Error("Upload session did not return a single-upload URL.");
-    await uploadViaXhr(uploadUrl, finalFile, contentType, opts?.onProgress);
+    try {
+      await uploadViaXhr(uploadUrl, finalFile, contentType, opts?.onProgress);
+    } catch (error) {
+      throw new UploadPipelineError("storage-put", error);
+    }
   }
 
   const parts =
     initialSession.strategy === "multipart"
       ? await uploadMultipart({ session: initialSession, file: finalFile, contentType, onProgress: opts?.onProgress })
       : undefined;
-  const completed = await mediaApi.completeUploadSession(initialSession.session_id, { parts, ...metadata });
+  let completed: UploadSessionResponse;
+  try {
+    completed = await mediaApi.completeUploadSession(initialSession.session_id, { parts, ...metadata });
+  } catch (error) {
+    throw new UploadPipelineError("complete", error);
+  }
   const media = requireCompletedMedia(completed);
   clearPersistedSessionId(storageKey);
 
@@ -359,22 +469,41 @@ export const uploadMediaWithPresign = async (
 };
 
 export const getFriendlyUploadError = (error: unknown): string => {
+  const pipelineError = error instanceof UploadPipelineError ? error : undefined;
+  const rootError = pipelineError?.cause ?? error;
   const status =
-    error instanceof ApiError
-      ? error.status
-      : error instanceof UploadHttpError
-      ? error.status
+    rootError instanceof ApiError
+      ? rootError.status
+      : rootError instanceof UploadHttpError
+      ? rootError.status
       : undefined;
+  const stage = pipelineError?.stage ?? (rootError instanceof UploadHttpError ? rootError.stage : undefined);
+  const requestId = pipelineError?.requestId ?? (rootError instanceof ApiError ? rootError.traceId : rootError instanceof UploadHttpError ? rootError.requestId : undefined);
+  const code = pipelineError?.code ?? (rootError instanceof ApiError ? rootError.code : rootError instanceof UploadHttpError ? rootError.code : undefined);
+  const retryable = pipelineError?.retryable ?? (rootError instanceof UploadHttpError ? rootError.retryable : false);
+  const suffix = `${stage ? ` Stage: ${stage}.` : ""}${code ? ` Code: ${code}.` : ""}${requestId ? ` Reference: ${requestId}.` : ""}`;
 
-  if (status === 413) return "Upload failed: file is too large.";
-  if (status === 415) return "Upload failed: unsupported file type.";
-  if (status === 403) return "Upload failed: you do not have permission to upload this file.";
-  if (status === 408) return "Upload paused because the network timed out. Retry with the same file to resume.";
-  if (status === 409) return "This upload session is no longer active. Please start the upload again.";
-  if (status === 0) return "Network connection interrupted. Retry with the same file to resume the saved upload.";
+  if (status === 413) {
+    const boundary =
+      stage === "policy"
+        ? "the application upload policy"
+        : stage === "storage-put" || stage === "part-upload"
+          ? "the object-storage upload gateway"
+          : stage === "session-create" || stage === "part-presign" || stage === "complete"
+            ? "the CMS/API gateway"
+            : "an upstream HTTP gateway";
+    return `Upload rejected by ${boundary} because its configured size limit was exceeded.${suffix}`;
+  }
+  if (status === 415) return `Upload failed: unsupported file type.${suffix}`;
+  if (status === 403) return `Upload failed: you do not have permission to upload this file.${suffix}`;
+  if (status === 408) return `Upload paused because the network timed out. Retry with the same file to resume.${suffix}`;
+  if (status === 409) return `This upload session is no longer active. Please start the upload again.${suffix}`;
+  if (status === 0) return `Network connection interrupted. Retry with the same file to resume the saved upload.${suffix}`;
 
-  if (error instanceof ApiError) return error.message;
-  if (error instanceof Error) return error.message;
+  const remediation = pipelineError?.remediation;
+  const retryHint = remediation ? ` ${remediation}` : retryable ? " Retry with the same file to resume where possible." : "";
+  if (rootError instanceof ApiError) return `${rootError.message}${retryHint}${suffix}`;
+  if (rootError instanceof Error) return `${rootError.message}${retryHint}${suffix}`;
   return "Upload failed. Please try again.";
 };
 
@@ -390,6 +519,18 @@ const getFriendlyProcessingFailure = (media: MediaAsset): string => {
       return "The URL did not return an HTML webpage. Use a normal webpage URL, not an API or file endpoint.";
     case "WEBPAGE_REQUEST_TIMEOUT":
       return "The webpage took too long to respond during server verification.";
+    case "WEBPAGE_HOST_NOT_ALLOWED":
+    case "WEBPAGE_ADDRESS_BLOCKED":
+    case "WEBPAGE_REDIRECT_BLOCKED":
+    case "WEBPAGE_RESOURCE_BLOCKED":
+    case "WEBPAGE_SCHEME_BLOCKED":
+    case "WEBPAGE_PORT_BLOCKED":
+    case "WEBPAGE_CREDENTIALS_BLOCKED":
+      return "The webpage was blocked by the configured webpage security policy.";
+    case "WEBPAGE_DNS_POLICY_FAILED":
+      return "The webpage hostname could not be resolved safely by the server.";
+    case "WEBPAGE_RESPONSE_TOO_LARGE":
+      return "The webpage document exceeded the server verification size limit.";
     case "WEBPAGE_UNREACHABLE":
       return "The server could not reach this webpage URL during verification.";
     case "WEBPAGE_CAPTURE_FAILED":
@@ -415,13 +556,16 @@ export const waitForMediaReady = async (
       return media;
     }
     if (media.status === "FAILED") {
-      throw new Error(getFriendlyProcessingFailure(media));
+      throw new UploadPipelineError("verification", new Error(getFriendlyProcessingFailure(media)));
     }
 
     await sleep(intervalMs);
   }
 
-  throw new Error("Server verification is taking longer than expected. Please refresh and try again.");
+  throw new UploadPipelineError(
+    "verification",
+    new Error("Server verification is taking longer than expected. Please refresh and try again."),
+  );
 };
 
 export const createLocalPreviewUrl = (file: File) => {
@@ -430,4 +574,4 @@ export const createLocalPreviewUrl = (file: File) => {
   return URL.createObjectURL(file);
 };
 
-export { UploadHttpError };
+export { UploadHttpError, UploadPipelineError };

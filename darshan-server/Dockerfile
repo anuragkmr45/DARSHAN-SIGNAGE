@@ -38,6 +38,11 @@ COPY scripts ./scripts
 # Build TypeScript
 RUN npm run build
 
+# Remote webpage capture must never require Chromium's --no-sandbox escape.
+# The official Node image already provides this unprivileged runtime account.
+RUN mkdir -p /app/logs /app/tmp /ms-playwright && chown -R node:node /app /ms-playwright
+USER node
+
 # Expose ports
 EXPOSE 3000
 

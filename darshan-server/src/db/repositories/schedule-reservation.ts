@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 
 type DBLike = ReturnType<typeof getDatabase> | any;
@@ -295,7 +295,7 @@ export class ScheduleReservationRepository {
           eq(schema.scheduleReservations.screen_id, screenId),
           eq(schema.scheduleReservations.state, 'PUBLISHED'),
           eq(schema.publishes.status, 'ACTIVE'),
-          lt(schema.scheduleReservations.start_at, now),
+          lte(schema.scheduleReservations.start_at, now),
           gt(schema.scheduleReservations.end_at, now)
         )
       )

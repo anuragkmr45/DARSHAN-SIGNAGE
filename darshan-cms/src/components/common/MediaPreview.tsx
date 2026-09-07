@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FileText, Image as ImageIcon, Video as VideoIcon } from "lucide-react";
+import { FileText, Globe2, Image as ImageIcon, Video as VideoIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MediaAsset } from "@/api/types";
 import { resolveMediaDisplayName } from "@/lib/media";
@@ -7,6 +7,7 @@ import { resolveMediaDisplayName } from "@/lib/media";
 type MediaPreviewProps = {
   media?: MediaAsset;
   url?: string;
+  webpageUrl?: string;
   type?: string;
   alt?: string;
   className?: string;
@@ -23,9 +24,25 @@ const resolveObjectFit = (fit: MediaPreviewProps["fit"]) => {
   return "cover";
 };
 
+export const resolveMediaPreviewSource = (media?: MediaAsset, url?: string, type?: string) => {
+  const isWebpage = (media?.type ?? type ?? "").toLowerCase() === "webpage";
+  return isWebpage ? url ?? media?.fallback_media_url : url ?? media?.media_url;
+};
+
+export const resolveWebpageHostname = (media?: MediaAsset, webpageUrl?: string) => {
+  const candidate = webpageUrl ?? media?.source_url;
+  if (!candidate) return "Webpage";
+  try {
+    return new URL(candidate).hostname || "Webpage";
+  } catch {
+    return "Webpage";
+  }
+};
+
 export function MediaPreview({
   media,
   url,
+  webpageUrl,
   type,
   alt,
   className,
@@ -35,8 +52,8 @@ export function MediaPreview({
   videoAutoPlay = false,
   videoLoop = false,
 }: MediaPreviewProps) {
-  const isExplicitWebpage = (media?.type ?? "").toLowerCase() === "webpage";
-  const sourceUrl = url ?? (isExplicitWebpage ? media?.fallback_media_url ?? media?.media_url : media?.media_url) ?? media?.thumbnail_object_id;
+  const isExplicitWebpage = (media?.type ?? type ?? "").toLowerCase() === "webpage";
+  const sourceUrl = resolveMediaPreviewSource(media, url, type);
   const [pdfLoaded, setPdfLoaded] = useState(false);
   const normalizedType = (
     type ??
@@ -122,10 +139,15 @@ export function MediaPreview({
         className,
       )}
     >
-      {showVideo ? <VideoIcon className="h-5 w-5" /> : showImage ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+      {isWebpage ? <Globe2 className="h-5 w-5" /> : showVideo ? <VideoIcon className="h-5 w-5" /> : showImage ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
       <span className="line-clamp-2 max-w-full">
         {alt ?? resolveMediaDisplayName(media) ?? "No preview available"}
       </span>
+      {isWebpage && (media?.source_url || webpageUrl) && (
+        <span className="line-clamp-1 max-w-full opacity-75">
+          {resolveWebpageHostname(media, webpageUrl)}
+        </span>
+      )}
     </div>
   );
 }

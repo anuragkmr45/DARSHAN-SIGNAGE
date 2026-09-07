@@ -15,6 +15,7 @@ import { createBackupRun, getLatestBackupRun, runFullBackup } from '@/utils/back
 import { getCachedSettings } from '@/utils/settings';
 import { buildSourceFilename } from '@/utils/media-processing';
 import { captureWebpagePreview } from '@/utils/webpage-capture';
+import { redactWebpageUrlForLogs, WebpageUrlPolicyError } from '@/utils/webpage-url-policy';
 import { getLibreOfficeExecutable, getResolvedFfmpegPath } from '@/utils/runtime-dependencies';
 import {
   type HeartbeatTelemetryJob,
@@ -29,6 +30,7 @@ import {
   createPlaybackRefreshCommands,
   type PlaybackRefreshCommandBatch,
 } from '@/services/playback-refresh-commands';
+import { reconcileEmergencyTransitions } from '@/services/emergency-transition-outbox';
 
 const logger = createLogger('jobs');
 
@@ -151,6 +153,9 @@ async function upsertStorageObject(params: {
 }
 
 function getWebpageFailureReason(error: unknown) {
+  if (error instanceof WebpageUrlPolicyError) {
+    return error.code;
+  }
   if (error instanceof Error && error.name === 'AbortError') {
     return 'WEBPAGE_REQUEST_TIMEOUT';
   }
@@ -167,6 +172,10 @@ function getWebpageFailureReason(error: unknown) {
 
   if (message.toLowerCase().includes('did not return html')) {
     return 'WEBPAGE_NON_HTML_CONTENT';
+  }
+
+  if (message.toLowerCase().includes('response exceeded')) {
+    return 'WEBPAGE_RESPONSE_TOO_LARGE';
   }
 
   if (message.toLowerCase().includes('fetch failed')) {
@@ -230,7 +239,7 @@ type PgBossError = Error & {
   code?: string;
 };
 
-const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check'] as const;
+const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'emergency:reconcile'] as const;
 const WORK_QUEUE_NAMES = [
   'playback:refresh-dispatch',
   'telemetry:heartbeat',
@@ -245,6 +254,7 @@ const WORK_QUEUE_NAMES = [
   'chat:media-cleanup',
   'backup',
   'backup:check',
+  'emergency:reconcile',
 ] as const;
 
 function getPgBossSchemaSql() {
@@ -410,9 +420,21 @@ export interface BackupCheckJob {
 
 export interface PlaybackRefreshDispatchJob extends PlaybackRefreshCommandBatch {}
 
+export interface EmergencyReconcileJob {
+  transitionId?: string;
+}
+
 export async function queuePlaybackRefreshDispatch(job: PlaybackRefreshDispatchJob, options?: any) {
   return sendJob('playback:refresh-dispatch', job, {
     retryLimit: 3,
+    retryDelay: 15,
+    ...options,
+  });
+}
+
+export async function queueEmergencyTransitionReconcile(job: EmergencyReconcileJob = {}, options?: any) {
+  return sendJob('emergency:reconcile', job, {
+    retryLimit: 5,
     retryDelay: 15,
     ...options,
   });
@@ -659,6 +681,12 @@ export async function registerJobHandlers() {
   await registerObservedWorker<PlaybackRefreshDispatchJob>('playback:refresh-dispatch', async (batch) => {
     for (const job of batch) {
       await createPlaybackRefreshCommands(job.data);
+    }
+  });
+
+  await registerObservedWorker<EmergencyReconcileJob>('emergency:reconcile', async (batch) => {
+    for (const job of batch) {
+      await reconcileEmergencyTransitions({ transitionId: job.data.transitionId, maxRows: 25 });
     }
   });
 
@@ -1016,7 +1044,10 @@ export async function registerJobHandlers() {
           })
           .where(eq(schema.media.id, mediaId));
       } catch (error) {
-        logger.error({ error, mediaId, sourceUrl }, 'Webpage verification/capture failed');
+        logger.error(
+          { error, mediaId, sourceOrigin: redactWebpageUrlForLogs(sourceUrl) },
+          'Webpage verification/capture failed'
+        );
         const failureReason = getWebpageFailureReason(error);
         await db
           .update(schema.media)
@@ -1360,11 +1391,13 @@ export async function scheduleRecurringJobs() {
     await jobs.unschedule('cleanup').catch(() => { });
     await jobs.unschedule('archive').catch(() => { });
     await jobs.unschedule('backup:check').catch(() => { });
+    await jobs.unschedule('emergency:reconcile').catch(() => { });
 
     // Now schedule safely (queues exist)
     await jobs.schedule('cleanup', '15 * * * *', { type: 'expired_sessions' });      // hourly upload/session expiry cleanup
     await jobs.schedule('archive', '0 3 * * 0', { type: 'logs', startDate: '', endDate: '' }); // Sun 3 AM
     await jobs.schedule('backup:check', '0 * * * *', { trigger: 'scheduled-check' }); // hourly
+    await jobs.schedule('emergency:reconcile', '* * * * *', {}); // every minute
 
     logger.info('Recurring jobs scheduled successfully');
   } catch (error) {

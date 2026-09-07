@@ -62,6 +62,7 @@ import {
   queueFFmpegTranscode,
   queueWebpageVerifyCapture,
 } from '@/jobs';
+import { assertWebpageUrlAllowed, WebpageUrlPolicyError } from '@/utils/webpage-url-policy';
 
 const logger = createLogger('media-routes');
 const { CREATED, FORBIDDEN, OK } = HTTP_STATUS;
@@ -80,6 +81,33 @@ export async function mediaRoutes(fastify: FastifyInstance) {
   const uploadSessionRepo = createMediaUploadSessionRepository();
   const userRepo = createUserRepository();
   const db = getDatabase();
+
+  fastify.get(
+    apiEndpoints.media.uploadPolicy,
+    {
+      schema: {
+        description: 'Get the effective media upload limits and multipart policy',
+        tags: ['Media'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        await requireMediaCreateAbility(request);
+        return reply.send({
+          max_bytes: appConfig.MAX_UPLOAD_MB * 1024 * 1024,
+          max_mb: appConfig.MAX_UPLOAD_MB,
+          multipart_threshold_bytes: UPLOAD_MULTIPART_THRESHOLD_BYTES,
+          part_size_bytes: UPLOAD_PART_SIZE_BYTES,
+          multipart_concurrency: 3,
+          allowed_mime_types: [],
+        });
+      } catch (error) {
+        logger.error(error, 'Get upload policy error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
 
   const isDeleteBypassRole = (roleName?: string) =>
     roleName === 'ADMIN' || roleName === 'SUPER_ADMIN';
@@ -928,6 +956,14 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const data = createMediaSchema.parse(request.body);
         if (data.type === 'WEBPAGE') {
           const normalizedUrl = normalizeWebpageUrl(data.source_url, appConfig.NODE_ENV);
+          try {
+            await assertWebpageUrlAllowed(normalizedUrl, 'navigation');
+          } catch (error) {
+            if (error instanceof WebpageUrlPolicyError) {
+              throw new AppError({ statusCode: 400, code: error.code, message: error.message });
+            }
+            throw error;
+          }
           const media = await mediaRepo.create({
             name: normalizeDisplayName(data.display_name || data.name),
             type: 'WEBPAGE',

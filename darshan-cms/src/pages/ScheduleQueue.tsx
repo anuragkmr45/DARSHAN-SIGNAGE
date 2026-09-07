@@ -358,13 +358,14 @@ export default function ScheduleQueue() {
                           {deviceScheduleQuery.data.schedule.items.map((item) => (
                             <div key={item.id} className="flex gap-3 rounded-lg border border-border/60 p-3 bg-card">
                               <MediaPreview
-                                url={item.media_url}
+                                url={item.type === "webpage" ? item.preview_url : item.media_url}
+                                webpageUrl={item.type === "webpage" ? item.media_url : undefined}
                                 type={item.type}
-                                alt={item.media_id}
+                                alt={item.name ?? "Media preview"}
                                 className="h-20 w-28 flex-shrink-0"
                               />
                               <div className="flex-1 space-y-1 text-sm">
-                                <p className="font-medium">{item.media_id}</p>
+                                <p className="font-medium">{item.name ?? "Untitled media"}</p>
                                 {item.type && (
                                   <p className="text-xs text-muted-foreground">Type: {item.type}</p>
                                 )}

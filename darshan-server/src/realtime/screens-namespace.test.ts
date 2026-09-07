@@ -490,6 +490,7 @@ describe('screens namespace realtime updates', () => {
       id: screenId,
       name: 'Heartbeat Screen',
       status: 'OFFLINE',
+      device_info: { player_capabilities: { features: ['message_emergency_v1'] } },
     });
 
     await db.insert(schema.media).values({
@@ -563,6 +564,7 @@ describe('screens namespace realtime updates', () => {
       url: '/api/v1/emergency/trigger',
       headers: {
         authorization: `Bearer ${adminToken}`,
+        'idempotency-key': randomUUID(),
       },
       payload: {
         message: 'Emergency test',

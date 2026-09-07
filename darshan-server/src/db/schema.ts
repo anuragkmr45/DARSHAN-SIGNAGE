@@ -1598,6 +1598,9 @@ export const emergencies = pgTable('emergencies', {
     .notNull()
     .default([] as string[]),
   target_all: boolean('target_all').notNull().default(false),
+  idempotency_key: varchar('idempotency_key', { length: 255 }),
+  request_fingerprint: varchar('request_fingerprint', { length: 64 }),
+  transition_version: integer('transition_version').notNull().default(1),
   expires_at: timestamp('expires_at'),
   audit_note: text('audit_note'),
   is_active: boolean('is_active').notNull().default(true),
@@ -1608,4 +1611,42 @@ export const emergencies = pgTable('emergencies', {
   clear_reason: text('clear_reason'),
   created_at: timestamp('created_at').notNull().defaultNow(),
   updated_at: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  triggerIdempotencyIdx: uniqueIndex('emergencies_trigger_user_idempotency_idx')
+    .on(table.triggered_by, table.idempotency_key)
+    .where(sql`${table.idempotency_key} IS NOT NULL`),
+}));
+
+export const emergencyTransitionOutbox = pgTable(
+  'emergency_transition_outbox',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    emergency_id: uuid('emergency_id').notNull(),
+    transition: varchar('transition', { length: 16 }).notNull(),
+    transition_version: integer('transition_version').notNull(),
+    selector: jsonb('selector')
+      .$type<{ target_all: boolean; screen_ids: string[]; screen_group_ids: string[] }>()
+      .notNull(),
+    actor_id: uuid('actor_id'),
+    status: varchar('status', { length: 16 }).notNull().default('PENDING'),
+    attempts: integer('attempts').notNull().default(0),
+    max_attempts: integer('max_attempts').notNull().default(20),
+    available_at: timestamp('available_at').notNull().defaultNow(),
+    claimed_at: timestamp('claimed_at'),
+    completed_at: timestamp('completed_at'),
+    last_error: text('last_error'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    transitionIdx: uniqueIndex('emergency_transition_outbox_transition_idx').on(
+      table.emergency_id,
+      table.transition_version
+    ),
+    pendingIdx: index('emergency_transition_outbox_pending_idx').on(
+      table.status,
+      table.available_at,
+      table.created_at
+    ),
+  })
+);

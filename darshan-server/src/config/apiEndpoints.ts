@@ -34,6 +34,7 @@ export const apiEndpoints = {
     delete: withBase('/departments/:id'),
   },
   media: {
+    uploadPolicy: withBase('/media/upload-policy'),
     presignUpload: withBase('/media/presign-upload'),
     uploadSessions: withBase('/media/uploads'),
     uploadSession: withBase('/media/uploads/:sessionId'),

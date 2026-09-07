@@ -34,6 +34,8 @@ import {
 import { authenticateDeviceSocketHandshake, type DeviceSocketAuthFailure } from '@/realtime/device-socket-auth';
 import { recordDeviceAuthRolloutObservation } from '@/deployment/device-auth-rollout';
 import { createLogger } from '@/utils/logger';
+import { getDatabase, schema } from '@/db';
+import { eq, sql } from 'drizzle-orm';
 
 const logger = createLogger('device-realtime-gateway');
 let deviceNodeRefreshTimer: NodeJS.Timeout | null = null;
@@ -57,6 +59,14 @@ type DeviceHelloPayload = {
   session_id?: string;
   app?: { version?: string };
   platform?: { family?: string };
+  capabilities?: {
+    commands?: string[];
+    features?: string[];
+    screenshot?: boolean;
+    log_upload?: boolean;
+    offline_startup?: boolean;
+    background_push?: boolean;
+  };
 };
 
 function sendDeviceError(socket: Socket, ack: SocketAck | undefined, response: Record<string, unknown>) {
@@ -212,6 +222,22 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
           appVersion: typeof payload?.app?.version === 'string' ? payload.app.version : null,
           platformFamily: typeof payload?.platform?.family === 'string' ? payload.platform.family : null,
         });
+        if (payload.capabilities) {
+          const capabilityDocument = JSON.stringify({
+            player_capabilities: payload.capabilities,
+            player_capabilities_observed_at: new Date().toISOString(),
+          });
+          void getDatabase()
+            .update(schema.screens)
+            .set({
+              device_info: sql`COALESCE(${schema.screens.device_info}, '{}'::jsonb) || ${capabilityDocument}::jsonb`,
+              updated_at: new Date(),
+            })
+            .where(eq(schema.screens.id, deviceId))
+            .catch((error) => {
+              logger.warn({ err: error, device_id: deviceId }, 'Failed to persist player capability report');
+            });
+        }
         void registerDeviceForFanout(deviceId);
 
         const response = buildHelloAck({

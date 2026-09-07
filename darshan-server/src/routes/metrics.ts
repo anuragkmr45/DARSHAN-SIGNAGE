@@ -66,7 +66,7 @@ export async function metricsRoutes(fastify: FastifyInstance) {
           .select({ count: sql<number>`count(*)` })
           .from(schema.schedules)
           .where(
-            sql`${schema.schedules.is_active} = true AND ${schema.schedules.start_at} <= ${now} AND ${schema.schedules.end_at} >= ${now}`
+            sql`${schema.schedules.is_active} = true AND ${schema.schedules.start_at} <= ${now} AND ${schema.schedules.end_at} > ${now}`
           );
 
         const [heartbeatsLast5m] = await db
@@ -105,7 +105,7 @@ export async function metricsRoutes(fastify: FastifyInstance) {
                     AND ${schema.publishes.taken_down_at} IS NULL
                     AND ${schema.schedules.is_active} = true
                     AND ${schema.schedules.start_at} <= ${now}
-                    AND ${schema.schedules.end_at} >= ${now}
+                    AND ${schema.schedules.end_at} > ${now}
                 )
                 OR EXISTS (
                   SELECT 1
@@ -122,7 +122,7 @@ export async function metricsRoutes(fastify: FastifyInstance) {
                     AND ${schema.publishes.taken_down_at} IS NULL
                     AND ${schema.schedules.is_active} = true
                     AND ${schema.schedules.start_at} <= ${now}
-                    AND ${schema.schedules.end_at} >= ${now}
+                    AND ${schema.schedules.end_at} > ${now}
                 )
                 OR (
                   ${schema.screens.current_schedule_id} IS NOT NULL
@@ -134,7 +134,7 @@ export async function metricsRoutes(fastify: FastifyInstance) {
                     WHERE ${schema.schedules.id} = ${schema.screens.current_schedule_id}
                       AND ${schema.schedules.is_active} = true
                       AND ${schema.schedules.start_at} <= ${now}
-                      AND ${schema.schedules.end_at} >= ${now}
+                      AND ${schema.schedules.end_at} > ${now}
                   )
                 )
               )`

@@ -65,7 +65,10 @@ export async function scheduleReservationRoutes(fastify: FastifyInstance) {
           allowPrivateRefs: isAdminLike(payload.role),
         });
 
-        return reply.send(result);
+        return reply.send({
+          server_time: new Date().toISOString(),
+          ...result,
+        });
       } catch (error) {
         logger.error(error, 'Preview schedule reservations error');
         return respondWithError(reply, error);

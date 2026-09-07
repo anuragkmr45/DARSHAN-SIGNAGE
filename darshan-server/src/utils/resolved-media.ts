@@ -4,6 +4,47 @@ import { resolveMediaAccess } from '@/utils/media-access';
 import { serializeMediaRecord } from '@/utils/media';
 import type { S3UrlAudience } from '@/s3';
 
+export type ResolvedMediaAsset = {
+  id: string;
+  name: string;
+  type: string;
+  playback_url: string | null;
+  preview_url: string | null;
+  content_type: string | null;
+  source_content_type: string | null;
+  status: string | null;
+  source_url?: string | null;
+};
+
+export function buildResolvedMediaRepresentation(
+  media: ReturnType<typeof serializeMediaRecord>,
+  options: { includeSourceUrl?: boolean } = {}
+): ResolvedMediaAsset {
+  const isWebpage = media.type === 'WEBPAGE';
+  return {
+    id: media.id,
+    name: media.name || media.filename || 'Untitled media',
+    type: media.type ?? 'UNKNOWN',
+    playback_url: isWebpage ? media.source_url ?? null : media.media_url ?? null,
+    preview_url: isWebpage ? media.fallback_media_url ?? null : media.media_url ?? null,
+    content_type: media.content_type ?? null,
+    source_content_type: media.source_content_type ?? null,
+    status: media.status ?? null,
+    ...(options.includeSourceUrl ? { source_url: media.source_url ?? null } : {}),
+  };
+}
+
+export function buildResolvedMediaAssets(
+  mediaMap: Map<string, ReturnType<typeof serializeMediaRecord>>,
+  options: { includeSourceUrl?: boolean } = {}
+): Record<string, ResolvedMediaAsset> {
+  const assets: Record<string, ResolvedMediaAsset> = {};
+  for (const [id, media] of mediaMap.entries()) {
+    assets[id] = buildResolvedMediaRepresentation(media, options);
+  }
+  return assets;
+}
+
 export async function buildResolvedMediaMap(
   mediaIds: string[],
   db = getDatabase(),
@@ -138,10 +179,12 @@ export async function buildResolvedMediaRecord(
     source_content_type: access.source_content_type,
     size: access.size,
   });
+  const representation = buildResolvedMediaRepresentation(serialized, { includeSourceUrl: audience === 'cms' });
   return {
     ...serialized,
-    url: serialized.type === 'WEBPAGE' ? serialized.source_url ?? null : serialized.media_url ?? null,
-    fallback_url: serialized.fallback_media_url ?? null,
+    ...representation,
+    url: representation.playback_url,
+    fallback_url: representation.preview_url,
     media_type: serialized.type,
   };
 }

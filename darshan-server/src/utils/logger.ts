@@ -21,6 +21,16 @@ const PINO_LEVEL_NAMES: Record<number, string> = {
 };
 
 let runtimeLogLevel = appConfig.LOG_LEVEL;
+const developmentTransport =
+  appConfig.NODE_ENV === 'development'
+    ? pino.transport({
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          singleLine: false,
+        },
+      })
+    : undefined;
 
 function pushRecentLog(entry: {
   logger: string;
@@ -44,43 +54,36 @@ export function createLogger(name: string): Logger {
     return loggers.get(name)!;
   }
 
-  const logger = pino({
-    level: runtimeLogLevel,
-    base: { name },
-    hooks: {
-      logMethod(args, method, level) {
-        const context =
-          args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])
-            ? (args[0] as Record<string, unknown>)
-            : undefined;
-        const message =
-          typeof args[0] === 'string'
-            ? args[0]
-            : typeof args[1] === 'string'
-              ? args[1]
-              : 'Log event';
+  const logger = pino(
+    {
+      level: runtimeLogLevel,
+      base: { name },
+      hooks: {
+        logMethod(args, method, level) {
+          const context =
+            args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])
+              ? (args[0] as Record<string, unknown>)
+              : undefined;
+          const message =
+            typeof args[0] === 'string'
+              ? args[0]
+              : typeof args[1] === 'string'
+                ? args[1]
+                : 'Log event';
 
-        pushRecentLog({
-          logger: name,
-          level: PINO_LEVEL_NAMES[level] ?? String(level),
-          message,
-          context,
-        });
+          pushRecentLog({
+            logger: name,
+            level: PINO_LEVEL_NAMES[level] ?? String(level),
+            message,
+            context,
+          });
 
-        method.apply(this, args as Parameters<typeof method>);
+          method.apply(this, args as Parameters<typeof method>);
+        },
       },
     },
-    transport:
-      appConfig.NODE_ENV === 'development'
-        ? {
-            target: 'pino-pretty',
-            options: {
-              colorize: true,
-              singleLine: false,
-            },
-          }
-        : undefined,
-  });
+    developmentTransport
+  );
 
   loggers.set(name, logger);
   return logger;

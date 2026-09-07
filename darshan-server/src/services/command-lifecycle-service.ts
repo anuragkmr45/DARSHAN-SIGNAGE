@@ -442,7 +442,10 @@ function buildCreateCommandValues(input: CreateDeviceCommandInput) {
   };
 }
 
-export async function createDeviceCommands(inputs: CreateDeviceCommandInput[]) {
+export async function createDeviceCommands(
+  inputs: CreateDeviceCommandInput[],
+  options: { ignoreIdempotencyConflicts?: boolean } = {}
+) {
   const db = getDatabase();
   if (inputs.length === 0) {
     return [];
@@ -450,14 +453,27 @@ export async function createDeviceCommands(inputs: CreateDeviceCommandInput[]) {
 
   return await db.transaction(async (tx) => {
     const commandValues = inputs.map(buildCreateCommandValues);
-    const commands = await tx
-      .insert(schema.deviceCommands)
-      .values(commandValues)
-      .returning();
+    const insert = tx.insert(schema.deviceCommands).values(commandValues);
+    const commands = await (options.ignoreIdempotencyConflicts
+      ? insert.onConflictDoNothing().returning()
+      : insert.returning());
+
+    if (commands.length === 0) {
+      return [];
+    }
+
+    const inputByScreenId = new Map(inputs.map((input) => [input.screenId, input]));
+    const insertedInputs = commands.map((command) => {
+      const input = inputByScreenId.get(command.screen_id);
+      if (!input) {
+        throw new Error(`Unable to match inserted command to input for screen ${command.screen_id}`);
+      }
+      return input;
+    });
 
     await insertCreateCommandHistory(tx, commands);
-    const desiredStates = await recordDesiredStatesForCommands(tx, commands, inputs);
-    await insertCommandOutboxEvents(tx, commands, inputs, desiredStates);
+    const desiredStates = await recordDesiredStatesForCommands(tx, commands, insertedInputs);
+    await insertCommandOutboxEvents(tx, commands, insertedInputs, desiredStates);
 
     return commands;
   });

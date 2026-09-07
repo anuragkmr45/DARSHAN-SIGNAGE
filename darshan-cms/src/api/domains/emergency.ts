@@ -15,11 +15,12 @@ export interface EmergencyTriggerPayload {
 }
 
 export const emergencyApi = {
-  trigger: (payload: EmergencyTriggerPayload) =>
+  trigger: (payload: EmergencyTriggerPayload, idempotencyKey = crypto.randomUUID()) =>
     apiClient.request<EmergencyStatus>({
       path: endpoints.emergency.trigger,
       method: "POST",
       body: payload,
+      headers: { "Idempotency-Key": idempotencyKey },
     }),
 
   status: () =>

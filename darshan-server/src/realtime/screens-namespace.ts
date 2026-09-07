@@ -536,6 +536,8 @@ export function emitScreensRefreshRequired(
     reason: 'PUBLISH' | 'EMERGENCY' | 'GROUP_MEMBERSHIP' | 'TAKE_DOWN' | 'DEFAULT_MEDIA' | 'DISPLAY_SELECTION';
     screen_ids?: string[];
     group_ids?: string[];
+    target_all?: boolean;
+    transition_version?: string;
   }
 ) {
   const io = getOrCreateSocketServer(fastify);
@@ -549,6 +551,8 @@ export function emitScreensRefreshRequired(
     reason: payload.reason,
     screen_ids: payload.screen_ids || [],
     group_ids: payload.group_ids || [],
+    target_all: payload.target_all === true,
+    transition_version: payload.transition_version ?? null,
   });
   recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:refresh:required');
 }
