@@ -44,6 +44,7 @@ export interface RealtimeConfig {
   deviceNamespace: string
   commandSafetyPollMs: number
   desiredStatePollMs: number
+  degradedStatePollMs: number
   reconnectMinMs: number
   reconnectMaxMs: number
   pingIntervalMs: number
@@ -965,6 +966,10 @@ export interface DeviceStateRecord {
   hardRecoveryDeadlineAt?: string
   pairingRequestInDoubtAt?: string
   recentCommands?: RecentCommandRecord[]
+  /** Highest desired-state version fetched from the server, even if applying it failed. */
+  lastObservedStateVersion?: number
+  /** Highest desired-state version fully applied to local resources. */
+  lastAppliedStateVersion?: number
   lastDesiredStateVersion?: number
   lastDesiredCommandVersion?: number
   lastDesiredSnapshotId?: string | null

@@ -363,7 +363,7 @@ describe('Command Processor', () => {
     commandProcessor.stop()
   })
 
-  it('should use realtime safety polling when the realtime connection is healthy', async () => {
+  it('should suppress command polling while WebSocket and heartbeat delivery are healthy until the safety interval', async () => {
     const clock = sandbox.useFakeTimers({
       now: new Date('2026-04-07T10:00:00.000Z'),
       shouldAdvanceTime: false,
@@ -377,7 +377,7 @@ describe('Command Processor', () => {
       realtime: {
         ...getConfigManager().getConfig().realtime,
         enabled: true,
-        commandSafetyPollMs: 60000,
+        commandSafetyPollMs: 30000,
       },
     })
 
@@ -389,15 +389,16 @@ describe('Command Processor', () => {
     const pollStub = sandbox.stub(commandProcessor as any, 'pollCommands').resolves()
 
     commandProcessor.setRealtimeHealthy(true)
+    commandProcessor.markHeartbeatCommandCheck()
     commandProcessor.start()
     await clock.tickAsync(0)
-    expect(pollStub.callCount).to.equal(1)
+    expect(pollStub.callCount).to.equal(0)
 
-    await clock.tickAsync(59999)
-    expect(pollStub.callCount).to.equal(1)
+    await clock.tickAsync(29999)
+    expect(pollStub.callCount).to.equal(0)
 
     await clock.tickAsync(1)
-    expect(pollStub.callCount).to.equal(2)
+    expect(pollStub.callCount).to.equal(1)
 
     commandProcessor.stop()
   })

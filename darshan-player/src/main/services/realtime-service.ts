@@ -76,6 +76,18 @@ export type DesiredStateResponse = {
   }
 }
 
+function isDesiredStateResponse(value: unknown): value is DesiredStateResponse {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as { device_id?: unknown; state?: Record<string, unknown> }
+  const state = candidate.state
+  if (typeof candidate.device_id !== 'string' || !state) return false
+  if (typeof state['state_version'] !== 'number' || !Number.isFinite(state['state_version'])) return false
+  if (typeof state['command_version'] !== 'number' || !Number.isFinite(state['command_version'])) return false
+  return [state['snapshot_id'], state['default_media_version'], state['emergency_version']].every(
+    (entry) => entry === null || typeof entry === 'string'
+  )
+}
+
 export interface RealtimeTransport extends EventEmitter {
   connect(): Promise<void>
   disconnect(): void
@@ -171,6 +183,7 @@ export class SocketIoDeviceTransport extends EventEmitter implements RealtimeTra
   private readonly namespace: string
   private readonly authProvider: RealtimeSocketAuthProvider
   private connected = false
+  private intentionalDisconnect = false
 
   constructor(input: { wsUrl: string; namespace: string; auth: RealtimeSocketAuth | RealtimeSocketAuthProvider }) {
     super()
@@ -194,6 +207,16 @@ export class SocketIoDeviceTransport extends EventEmitter implements RealtimeTra
       const timeout = setTimeout(() => {
         if (!settled) {
           settled = true
+          const socket = this.ws
+          if (socket) {
+            // Leave the error listener attached while closing. `ws` emits an
+            // error when a CONNECTING socket is closed; removing listeners
+            // first turns that expected teardown into an uncaught exception.
+            socket.close(1000, 'Realtime connect timeout')
+            if (this.ws === socket) {
+              this.ws = null
+            }
+          }
           reject(new Error('Realtime Socket.IO transport connect timeout'))
         }
       }, 10000)
@@ -257,11 +280,15 @@ export class SocketIoDeviceTransport extends EventEmitter implements RealtimeTra
 
       this.ws.on('close', (code, reason) => {
         this.connected = false
-        this.emit('disconnect', { code, reason: reason.toString() })
+        const intentional = this.intentionalDisconnect
+        this.intentionalDisconnect = false
+        this.emit('disconnect', { code, reason: reason.toString(), intentional })
       })
 
       this.ws.on('error', (error) => {
-        this.emit('error', error)
+        if (!this.intentionalDisconnect) {
+          this.emit('error', error)
+        }
         if (!settled) {
           settled = true
           clearTimeout(timeout)
@@ -274,6 +301,7 @@ export class SocketIoDeviceTransport extends EventEmitter implements RealtimeTra
   disconnect(): void {
     this.connected = false
     if (this.ws) {
+      this.intentionalDisconnect = true
       this.ws.close(1000, 'Client disconnect')
       this.ws = null
     }
@@ -298,8 +326,12 @@ export class RealtimeService extends EventEmitter {
   private reconnectTimer?: NodeJS.Timeout
   private desiredStateTimer?: NodeJS.Timeout
   private helloAckTimer?: NodeJS.Timeout
+  private reconciliationPromise?: Promise<DesiredStateResponse | null>
+  private reconciliationQueued = false
+  private reconciliationReasons = new Set<string>()
   private started = false
   private readonly reconnectBackoff: ExponentialBackoff
+  private readonly degradedStateBackoff: ExponentialBackoff
   private readonly signedAuthFallbackLogs = new Set<SocketAuthFallbackReason>()
 
   constructor(transport?: RealtimeTransport) {
@@ -310,6 +342,12 @@ export class RealtimeService extends EventEmitter {
       realtime?.reconnectMaxMs || 60000,
       10,
       0.2
+    )
+    this.degradedStateBackoff = new ExponentialBackoff(
+      Math.max(realtime?.degradedStatePollMs || 30000, 5000),
+      60000,
+      10,
+      0.1
     )
     this.transport = transport
   }
@@ -329,6 +367,10 @@ export class RealtimeService extends EventEmitter {
 
     this.started = true
     this.state = 'disconnected'
+    this.degradedStateBackoff.reset()
+    // On a successful HELLO/ACK reconciliation runs immediately. If the
+    // connection fails or drops, the bounded degraded loop is scheduled by
+    // that transition; do not race normal bootstrap with a second REST pull.
     void this.connect()
   }
 
@@ -388,6 +430,34 @@ export class RealtimeService extends EventEmitter {
   }
 
   async reconcileDesiredState(reason: string): Promise<DesiredStateResponse | null> {
+    if (this.reconciliationPromise) {
+      this.reconciliationQueued = true
+      this.reconciliationReasons.add(reason)
+      return this.reconciliationPromise
+    }
+
+    this.reconciliationReasons.add(reason)
+    const reconcile = async (): Promise<DesiredStateResponse | null> => {
+      let latest: DesiredStateResponse | null = null
+      do {
+        this.reconciliationQueued = false
+        const reasons = [...this.reconciliationReasons]
+        this.reconciliationReasons.clear()
+        latest = await this.fetchAndApplyDesiredState(reasons.join(','))
+      } while (this.reconciliationQueued)
+      return latest
+    }
+
+    const promise = reconcile().finally(() => {
+      if (this.reconciliationPromise === promise) {
+        this.reconciliationPromise = undefined
+      }
+    })
+    this.reconciliationPromise = promise
+    return promise
+  }
+
+  private async fetchAndApplyDesiredState(reason: string): Promise<DesiredStateResponse | null> {
     const deviceId = getPairingService().getDeviceId()
     if (!deviceId) {
       return null
@@ -401,6 +471,10 @@ export class RealtimeService extends EventEmitter {
           maxDelayMs: 10000,
         },
       })
+
+      if (!isDesiredStateResponse(desired) || desired.device_id !== deviceId) {
+        throw new Error('Invalid desired-state response')
+      }
 
       await this.applyDesiredState(desired, reason)
       return desired
@@ -426,9 +500,13 @@ export class RealtimeService extends EventEmitter {
       this.sendHello()
       this.startHelloAckTimeout()
     } catch (error) {
+      if (!this.started) {
+        return
+      }
       logger.warn({ error }, 'Realtime connection failed; polling fallback remains active')
       this.state = 'disconnected'
       getCommandProcessor().setRealtimeHealthy(false)
+      this.scheduleDesiredStatePoll()
       this.scheduleReconnect()
     }
   }
@@ -499,9 +577,13 @@ export class RealtimeService extends EventEmitter {
       void this.handleNotification(payload as RealtimeNotification)
     })
     transport.on('disconnect', (event) => {
+      if (!this.started) {
+        return
+      }
       logger.warn({ event }, 'Realtime disconnected; returning to fallback polling')
       this.state = 'disconnected'
       getCommandProcessor().setRealtimeHealthy(false)
+      this.scheduleDesiredStatePoll()
       this.scheduleReconnect()
     })
     transport.on('error', (error) => {
@@ -564,6 +646,7 @@ export class RealtimeService extends EventEmitter {
       this.transport?.disconnect()
       this.state = 'disconnected'
       getCommandProcessor().setRealtimeHealthy(false)
+      this.scheduleDesiredStatePoll()
       this.scheduleReconnect()
     }, 10000)
   }
@@ -577,7 +660,6 @@ export class RealtimeService extends EventEmitter {
     this.state = 'connected'
     getCommandProcessor().setRealtimeHealthy(true)
     await getDeviceStateStore().update({ lastRealtimeConnectedAt: new Date().toISOString() })
-    await getCommandProcessor().pollNow('realtime')
     await this.reconcileDesiredState('realtime-connected')
     this.scheduleDesiredStatePoll()
     this.emit('connected')
@@ -595,8 +677,8 @@ export class RealtimeService extends EventEmitter {
     }, delay)
   }
 
-  private scheduleDesiredStatePoll(): void {
-    if (!this.started || this.state !== 'connected') {
+  private scheduleDesiredStatePoll(initialDelayMs?: number): void {
+    if (!this.started) {
       return
     }
 
@@ -604,10 +686,21 @@ export class RealtimeService extends EventEmitter {
       clearTimeout(this.desiredStateTimer)
     }
 
-    const interval = getConfigManager().getConfig().realtime?.desiredStatePollMs || 300000
+    const realtime = getConfigManager().getConfig().realtime
+    const interval =
+      initialDelayMs ??
+      (this.isHealthy()
+        ? realtime?.desiredStatePollMs || 300000
+        : this.degradedStateBackoff.getDelay())
     this.desiredStateTimer = setTimeout(() => {
-      this.reconcileDesiredState('safety-poll')
-        .catch((error) => logger.warn({ error }, 'Desired-state safety poll failed'))
+      const reason = this.isHealthy() ? 'safety-poll' : 'realtime-degraded-fallback'
+      this.reconcileDesiredState(reason)
+        .then((result) => {
+          if (result && !this.isHealthy()) {
+            this.degradedStateBackoff.reset()
+          }
+        })
+        .catch((error) => logger.warn({ error, reason }, 'Desired-state reconciliation failed'))
         .finally(() => this.scheduleDesiredStatePoll())
     }, interval)
   }
@@ -634,6 +727,21 @@ export class RealtimeService extends EventEmitter {
     const current = getDeviceStateStore().getState()
     const state = desired.state
 
+    if (state.state_version < (current.lastObservedStateVersion ?? current.lastDesiredStateVersion ?? 0)) {
+      logger.warn(
+        { incomingStateVersion: state.state_version, observedStateVersion: current.lastObservedStateVersion },
+        'Ignoring stale desired-state response'
+      )
+      return
+    }
+
+    await getDeviceStateStore().update({
+      lastObservedStateVersion: Math.max(
+        current.lastObservedStateVersion ?? current.lastDesiredStateVersion ?? 0,
+        state.state_version
+      ),
+    })
+
     const commandChanged = state.command_version > (current.lastDesiredCommandVersion ?? 0)
     const snapshotChanged = state.snapshot_id !== (current.lastDesiredSnapshotId ?? null)
     const defaultMediaChanged = state.default_media_version !== (current.lastDesiredDefaultMediaVersion ?? null)
@@ -648,10 +756,16 @@ export class RealtimeService extends EventEmitter {
 
     if (snapshotChanged || emergencyChanged) {
       await getSnapshotManager().refreshSnapshot({ force: true })
+      if (!getSnapshotManager().didLastRefreshSucceed()) {
+        throw new Error('Snapshot refresh did not reach the backend')
+      }
     }
 
     if (defaultMediaChanged) {
       await getDefaultMediaService().refreshNow(`desired-state:${reason}`)
+      if (!getDefaultMediaService().didLastRefreshSucceed()) {
+        throw new Error('Default media refresh did not reach the backend')
+      }
     }
 
     if (displayChanged && displaySelection) {
@@ -663,6 +777,7 @@ export class RealtimeService extends EventEmitter {
     }
 
     await getDeviceStateStore().update({
+      lastAppliedStateVersion: state.state_version,
       lastDesiredStateVersion: state.state_version,
       lastDesiredCommandVersion: state.command_version,
       lastDesiredSnapshotId: state.snapshot_id,

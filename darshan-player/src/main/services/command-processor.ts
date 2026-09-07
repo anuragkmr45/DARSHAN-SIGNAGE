@@ -19,7 +19,6 @@ const logger = getLogger('command-processor')
 
 const HEARTBEAT_STALE_MULTIPLIER = 2
 const FALLBACK_POLL_JITTER_FACTOR = 0.2
-const HEALTHY_POLL_JITTER_FACTOR = 0.1
 const REFRESH_COMMAND_JITTER_MS = 3000
 
 export class CommandProcessor {
@@ -32,6 +31,7 @@ export class CommandProcessor {
   private rateLimitWindowMs = 60000
   private fallbackPollBackoff = this.createFallbackPollBackoff()
   private realtimeHealthy = false
+  private lastCommandCheckAt = 0
 
   start(): void {
     if (this.isPolling) {
@@ -70,10 +70,21 @@ export class CommandProcessor {
     await this.pollCommands(source)
   }
 
+  /** A successful heartbeat carries the same command delta as /commands. */
+  markHeartbeatCommandCheck(atMs = Date.now()): void {
+    this.lastCommandCheckAt = atMs
+    if (this.isPolling && this.realtimeHealthy) {
+      this.scheduleNextEvaluation(0)
+    }
+  }
+
   setRealtimeHealthy(healthy: boolean): void {
     this.realtimeHealthy = healthy
     if (!healthy) {
       this.fallbackPollBackoff = this.createFallbackPollBackoff()
+    }
+    if (this.isPolling) {
+      this.scheduleNextEvaluation(0)
     }
   }
 
@@ -97,6 +108,7 @@ export class CommandProcessor {
         },
       })
       await this.ingestCommands(response.commands || [], source)
+      this.lastCommandCheckAt = Date.now()
     } catch (error) {
       if (
         error instanceof DeviceApiError &&
@@ -136,12 +148,33 @@ export class CommandProcessor {
       return
     }
 
-    const healthyDelayMs = this.getHealthyHeartbeatDelay()
+    const healthyHeartbeatRemainingMs = this.getHealthyHeartbeatDelay()
+    if (this.realtimeHealthy && healthyHeartbeatRemainingMs > 0) {
+      const safetyPollRemainingMs = this.getSafetyPollRemainingMs()
+      if (safetyPollRemainingMs > 0) {
+        // The WebSocket has completed HELLO/ACK and heartbeats are current.
+        // Do not turn the REST command endpoint into a periodic primary path.
+        this.scheduleNextEvaluation(Math.min(safetyPollRemainingMs, healthyHeartbeatRemainingMs))
+        return
+      }
+
+      try {
+        await this.pollCommands('poll')
+        // Keep the scheduler correct even when a test double or a future
+        // transport implementation owns the actual fetch accounting.
+        this.lastCommandCheckAt = Date.now()
+        this.fallbackPollBackoff.reset()
+        this.scheduleNextEvaluation(Math.min(this.getSafetyPollRemainingMs(), this.getHealthyHeartbeatDelay()))
+      } catch {
+        this.scheduleNextEvaluation(this.fallbackPollBackoff.getDelay())
+      }
+      return
+    }
 
     try {
       await this.pollCommands()
       this.fallbackPollBackoff.reset()
-      this.scheduleNextEvaluation(healthyDelayMs > 0 ? this.getHealthyPollDelay() : this.fallbackPollBackoff.getDelay())
+      this.scheduleNextEvaluation(this.fallbackPollBackoff.getDelay())
     } catch {
       this.scheduleNextEvaluation(this.fallbackPollBackoff.getDelay())
     }
@@ -178,15 +211,13 @@ export class CommandProcessor {
     return new ExponentialBackoff(baseDelayMs, maxDelayMs, 10, FALLBACK_POLL_JITTER_FACTOR)
   }
 
-  private getHealthyPollDelay(): number {
+  private getSafetyPollRemainingMs(): number {
     const config = getConfigManager().getConfig()
-    const realtimeSafetyPollMs =
-      config.realtime?.enabled && this.realtimeHealthy
-        ? config.realtime.commandSafetyPollMs
-        : config.intervals.commandPollMs
-    const baseDelayMs = Math.max(realtimeSafetyPollMs, 5000)
-    const jitter = baseDelayMs * HEALTHY_POLL_JITTER_FACTOR * (Math.random() * 2 - 1)
-    return Math.max(0, Math.round(baseDelayMs + jitter))
+    const safetyPollMs = Math.max(config.realtime?.commandSafetyPollMs || config.intervals.commandPollMs, 5000)
+    if (!this.lastCommandCheckAt) {
+      return 0
+    }
+    return Math.max(0, this.lastCommandCheckAt + safetyPollMs - Date.now())
   }
 
   private normalizeCommand(command: Command): Command {

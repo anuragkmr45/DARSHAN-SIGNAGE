@@ -193,6 +193,9 @@ EXPORTER_PIDS_LIMIT=128
   fs.writeFileSync(envFile, validText.replace('PLAYER_TARGET_PLATFORMS=linux', 'PLAYER_TARGET_PLATFORMS=macos'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /PLAYER_TARGET_PLATFORMS must be/)
 
+  fs.writeFileSync(envFile, validText.replace('WEBPAGE_NAVIGATION_ALLOWLIST=display-content.example.test\n', ''))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_NAVIGATION_ALLOWLIST is required/)
+
   fs.writeFileSync(envFile, validText.replace('WEBPAGE_ALLOWED_PORTS=443,8443', 'WEBPAGE_ALLOWED_PORTS=443,70000'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOWED_PORTS contains invalid port/)
 

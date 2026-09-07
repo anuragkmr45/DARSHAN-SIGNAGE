@@ -63,6 +63,7 @@ export_require_command tar
 export_require_directory "CMS repo" "$CMS_REPO_DIR"
 export_require_file "CMS package.json" "$CMS_REPO_DIR/package.json"
 export_require_file "CMS nginx template" "$TEMPLATE_SOURCE"
+export_assert_clean_git_tree "$CMS_REPO_DIR"
 
 export_ensure_npm_dependencies "$CMS_REPO_DIR"
 export_make_clean_dir "$OUTPUT_DIR"
@@ -246,5 +247,6 @@ chmod +x \
   "$OUTPUT_DIR/update.sh" \
   "$OUTPUT_DIR/health-check.sh"
 
+export_write_artifact_manifest "$OUTPUT_DIR" "$CMS_REPO_DIR" "$RELEASE_ID" cms linux any
 export_write_checksums "$OUTPUT_DIR"
 export_common_log "CMS package created at $OUTPUT_DIR"

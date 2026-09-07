@@ -48,6 +48,7 @@ export class SnapshotManager extends EventEmitter {
   private isPolling = false
   private snapshotPath: string
   private lastError?: string
+  private lastRefreshSucceeded = false
   private serverClockOffsetMs = 0
   private representationEtag?: string
 
@@ -59,22 +60,27 @@ export class SnapshotManager extends EventEmitter {
     this.loadCachedSnapshot()
   }
 
-  start(): void {
+  start(options: { networkPolling?: boolean } = {}): void {
     if (this.isPolling) {
       return
     }
 
-    const config = getConfigManager().getConfig()
-    const intervalMs = config.intervals.schedulePollMs
+    const networkPolling = options.networkPolling !== false
+    const intervalMs = getConfigManager().getConfig().intervals.schedulePollMs
 
     this.isPolling = true
+    if (!networkPolling) {
+      logger.info('Snapshot manager started; realtime desired-state reconciliation owns network refreshes')
+      return
+    }
+
     this.refreshSnapshot().catch((error) => {
       logger.error({ error }, 'Initial snapshot fetch failed')
     }).finally(() => {
       this.scheduleNextPoll(intervalMs)
     })
 
-    logger.info({ intervalMs }, 'Snapshot manager started')
+    logger.info({ intervalMs }, 'Snapshot manager started with fallback network polling')
   }
 
   stop(): void {
@@ -99,6 +105,10 @@ export class SnapshotManager extends EventEmitter {
 
   getLastError(): string | undefined {
     return this.lastError
+  }
+
+  didLastRefreshSucceed(): boolean {
+    return this.lastRefreshSucceeded
   }
 
   clearIdentityBoundState(): void {
@@ -154,6 +164,7 @@ export class SnapshotManager extends EventEmitter {
         const playlist = await this.buildPlaylist(this.currentSnapshot, 'normal')
         this.currentPlaylist = playlist
         this.lastError = undefined
+        this.lastRefreshSucceeded = true
         this.emit('playlist-updated', playlist)
         return playlist
       }
@@ -175,6 +186,7 @@ export class SnapshotManager extends EventEmitter {
       this.currentSnapshot = normalized
       this.currentPlaylist = playlist
       this.lastError = undefined
+      this.lastRefreshSucceeded = true
 
       this.emit('playlist-updated', playlist)
       return playlist
@@ -190,6 +202,7 @@ export class SnapshotManager extends EventEmitter {
 
       if (status === 404) {
         logger.warn('Snapshot not found (404), clearing scheduled content instead of reusing cached snapshot')
+        this.lastRefreshSucceeded = true
         return this.applyIntentionalNoContent(undefined, 'empty', 'No published snapshot available')
       }
 
@@ -199,6 +212,7 @@ export class SnapshotManager extends EventEmitter {
       }
 
       logger.error({ error }, 'Snapshot fetch failed, using offline fallback')
+      this.lastRefreshSucceeded = false
       return this.applyOfflineFallback((error as Error).message)
     }
   }

@@ -39,6 +39,7 @@ export class DefaultMediaService extends EventEmitter {
   private cachePath: string
   private isRunning = false
   private refreshPromise?: Promise<DefaultMediaResponse>
+  private lastRefreshSucceeded = false
 
   constructor() {
     super()
@@ -53,13 +54,19 @@ export class DefaultMediaService extends EventEmitter {
     logger.info('Default media service initialized')
   }
 
-  start(): void {
+  start(options: { networkPolling?: boolean } = {}): void {
     if (this.isRunning) {
       return
     }
 
+    const networkPolling = options.networkPolling !== false
     const intervalMs = getConfigManager().getConfig().intervals.defaultMediaPollMs || 300000
     this.isRunning = true
+
+    if (!networkPolling) {
+      logger.info('Default media service started; realtime desired-state reconciliation owns network refreshes')
+      return
+    }
 
     this.refreshNow('startup').catch((error) => {
       logger.warn({ error }, 'Initial default media fetch failed')
@@ -67,7 +74,7 @@ export class DefaultMediaService extends EventEmitter {
       this.scheduleNextPoll(intervalMs)
     })
 
-    logger.info({ intervalMs }, 'Default media polling started')
+    logger.info({ intervalMs }, 'Default media polling started as a fallback')
   }
 
   stop(): void {
@@ -80,6 +87,10 @@ export class DefaultMediaService extends EventEmitter {
 
   getCurrent(): DefaultMediaResponse {
     return this.current
+  }
+
+  didLastRefreshSucceed(): boolean {
+    return this.lastRefreshSucceeded
   }
 
   clearIdentityBoundState(): void {
@@ -136,6 +147,7 @@ export class DefaultMediaService extends EventEmitter {
       const changed = this.hasChanged(this.current, next)
 
       this.current = next
+      this.lastRefreshSucceeded = true
       this.persistCache(next).catch((error) => {
         logger.warn({ error }, 'Failed to persist default media cache')
       })
@@ -153,6 +165,7 @@ export class DefaultMediaService extends EventEmitter {
       )
       return next
     } catch (error) {
+      this.lastRefreshSucceeded = false
       logger.warn({ error, reason }, 'Failed to refresh default media')
       return this.current
     }

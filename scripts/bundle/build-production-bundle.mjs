@@ -139,6 +139,15 @@ assertDirectory('CMS_PACKAGE_DIR', config.CMS_PACKAGE_DIR)
 assertDirectory('PLAYER_ARTIFACTS_DIR', config.PLAYER_ARTIFACTS_DIR)
 if (config.EXPORT_ELECTRON === 'true') assertPlayerArtifacts(config.PLAYER_ARTIFACTS_DIR)
 
+run('node', [
+  'scripts/bundle/verify-package-provenance.mjs',
+  '--release', config.RELEASE_ID,
+  '--server', config.SERVER_PACKAGE_DIR,
+  '--cms', config.CMS_PACKAGE_DIR,
+  '--player', config.PLAYER_ARTIFACTS_DIR,
+  '--platforms', config.PLAYER_TARGET_PLATFORMS,
+])
+
 const assemblerArgs = ['scripts/bundle/assemble-runtime-bundle.sh']
 if (skipDocker) assemblerArgs.push('--skip-docker')
 assemblerArgs.push('--profile', 'production', config.SITE_NAME)
@@ -146,6 +155,30 @@ run('bash', assemblerArgs, toAssemblerEnvironment(config))
 
 const bundleRoot = path.join(config.BUNDLE_OUTPUT_BASE, config.SITE_NAME)
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex')
+
+function readArtifactManifest(directory) {
+  return JSON.parse(fs.readFileSync(path.join(directory, 'ARTIFACT_MANIFEST.json'), 'utf8'))
+}
+
+function findArtifactManifestDirectories(directory) {
+  const result = []
+  const pending = [directory]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const absolute = path.join(current, entry.name)
+      if (entry.isDirectory()) pending.push(absolute)
+      else if (entry.isFile() && entry.name === 'ARTIFACT_MANIFEST.json') result.push(current)
+    }
+  }
+  return result.sort()
+}
+
+const componentProvenance = {
+  server: readArtifactManifest(config.SERVER_PACKAGE_DIR),
+  cms: readArtifactManifest(config.CMS_PACKAGE_DIR),
+  players: findArtifactManifestDirectories(config.PLAYER_ARTIFACTS_DIR).map(readArtifactManifest),
+}
 
 function walk(directory, prefix = '') {
   const results = []
@@ -235,6 +268,7 @@ const manifest = {
   siteName: config.SITE_NAME,
   profile: 'production',
   sourceConfigSha256: sha256(loaded.sourceText),
+  componentProvenance,
   transportTlsMode: config.TRANSPORT_TLS_MODE,
   certificateFingerprints: {
     transportCa: certificateFingerprint(config.TRANSPORT_CA_CERT_FILE),

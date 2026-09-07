@@ -31,6 +31,51 @@ EOF
 printf 'test Windows installer\n' > "$WORK_DIR/packages/r1/electron/player.exe"
 printf 'test Ubuntu installer\n' > "$WORK_DIR/packages/r1/electron/player.deb"
 
+write_artifact_manifest() {
+  local directory="$1"
+  local component="$2"
+  local platform="$3"
+  local architecture="$4"
+  node - "$directory" "$component" "$platform" "$architecture" <<'NODE'
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const [directory, component, platform, architecture] = process.argv.slice(2);
+const walk = (dir, prefix = '') => fs.readdirSync(dir, { withFileTypes: true })
+  .sort((a, b) => a.name.localeCompare(b.name))
+  .flatMap((entry) => {
+    const relative = path.posix.join(prefix, entry.name);
+    const absolute = path.join(dir, entry.name);
+    if (entry.isDirectory()) return walk(absolute, relative);
+    if (entry.isFile() && entry.name !== 'ARTIFACT_MANIFEST.json' && entry.name !== 'SHA256SUMS.txt') {
+      return [{ path: relative, sha256: crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex') }];
+    }
+    return [];
+  });
+fs.writeFileSync(path.join(directory, 'ARTIFACT_MANIFEST.json'), `${JSON.stringify({
+  schemaVersion: 1,
+  releaseId: 'r1',
+  component,
+  platform,
+  architecture,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  sourceCommit: 'a'.repeat(40),
+  sourceTreeClean: true,
+  lockfile: 'package-lock.json',
+  lockfileSha256: 'b'.repeat(64),
+  files: walk(directory),
+}, null, 2)}\n`);
+NODE
+}
+
+mkdir -p "$WORK_DIR/packages/r1/electron/windows" "$WORK_DIR/packages/r1/electron/linux"
+mv "$WORK_DIR/packages/r1/electron/player.exe" "$WORK_DIR/packages/r1/electron/windows/player.exe"
+mv "$WORK_DIR/packages/r1/electron/player.deb" "$WORK_DIR/packages/r1/electron/linux/player.deb"
+write_artifact_manifest "$WORK_DIR/packages/r1/server" server linux any
+write_artifact_manifest "$WORK_DIR/packages/r1/cms" cms linux any
+write_artifact_manifest "$WORK_DIR/packages/r1/electron/windows" electron windows x64
+write_artifact_manifest "$WORK_DIR/packages/r1/electron/linux" electron linux amd64
+
 bash "$ROOT_DIR/scripts/bootstrap/create-site-pki.sh" \
   --site-name acceptance \
   --output-dir "$WORK_DIR/pki"
@@ -191,6 +236,8 @@ MINIO_ACCESS_KEY=DarshanAccess1
 MINIO_SECRET_KEY=StrongMinioSecret-123
 JWT_SECRET=01234567890123456789012345678901
 INITIAL_ADMIN_EMAIL=admin@example.test
+WEBPAGE_NAVIGATION_ALLOWLIST=display-content.acceptance.test
+WEBPAGE_RESOURCE_ALLOWLIST=assets.acceptance.test
 BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_DAYS=30
 BACKUP_OFFHOST_DESTINATION=s3://offhost-backups.acceptance.test/darshan/$site_name
@@ -252,6 +299,10 @@ bash "$ROOT_DIR/scripts/bundle/build-production-bundle.sh" --skip-docker "$WORK_
 
 INTERNAL_BUNDLE="$WORK_DIR/internal-output/acceptance-internal"
 verify_generated_shell_syntax "$INTERNAL_BUNDLE"
+rg -qx 'REALTIME_SOCKET_TRANSPORT=websocket' "$INTERNAL_BUNDLE/production/backend/.env.production"
+rg -qx 'REALTIME_SOCKET_ALLOW_POLLING=false' "$INTERNAL_BUNDLE/production/backend/.env.production"
+rg -qx 'REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS=false' "$INTERNAL_BUNDLE/production/backend/.env.production"
+rg -q 'CMS public Socket.IO WebSocket upgrade failed' "$INTERNAL_BUNDLE/production/cms/health-check.sh"
 node -e '
 const policy = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
 if (policy.backup?.offHostDestination !== process.argv[2]) process.exit(1);

@@ -298,6 +298,7 @@ export class HeartbeatService {
       if (Array.isArray(response.commands) && response.commands.length > 0) {
         await getCommandProcessor().ingestCommands(response.commands, 'heartbeat')
       }
+      getCommandProcessor().markHeartbeatCommandCheck()
 
       logger.debug({ deviceId }, 'Heartbeat sent successfully')
       metrics.safeRecordHeartbeat('success', (Date.now() - startedAt) / 1000)

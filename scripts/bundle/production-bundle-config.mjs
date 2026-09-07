@@ -356,7 +356,7 @@ function validatePositiveInteger(name, value, minimum, maximum, addError) {
 }
 
 function validateWebpageHostList(name, value, addError) {
-  const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean)
+  const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
   for (const entry of entries) {
     const wildcard = entry.startsWith('*.')
     const host = wildcard ? entry.slice(2) : entry
@@ -374,7 +374,7 @@ function validateWebpageHostList(name, value, addError) {
 }
 
 function validateWebpageCidrs(value, addError) {
-  const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean)
+  const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
   for (const entry of entries) {
     const [address, prefixText, extra] = entry.split('/')
     const version = net.isIP(address)

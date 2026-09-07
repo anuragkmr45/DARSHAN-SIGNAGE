@@ -413,8 +413,9 @@ export class PlayerFlow extends EventEmitter {
     this.runtimeLoopsStarted = true
     getCommandProcessor().start()
     await getTelemetryService().start()
-    getSnapshotManager().start()
-    getDefaultMediaService().start()
+    const realtimeEnabled = getConfigManager().getConfig().realtime?.enabled === true
+    getSnapshotManager().start({ networkPolling: !realtimeEnabled })
+    getDefaultMediaService().start({ networkPolling: !realtimeEnabled })
     getRealtimeService().start()
     this.startScreenshotLoop()
   }

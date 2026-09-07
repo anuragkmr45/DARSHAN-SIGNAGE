@@ -72,6 +72,7 @@ fi
 export_require_command npm
 export_require_directory "Electron repo" "$PLAYER_REPO_DIR"
 export_require_file "Electron package.json" "$PLAYER_REPO_DIR/package.json"
+export_assert_clean_git_tree "$PLAYER_REPO_DIR"
 
 export_ensure_npm_dependencies "$PLAYER_REPO_DIR"
 
@@ -131,7 +132,9 @@ if [[ "${#FOUND_ARTIFACTS[@]}" -eq 0 ]]; then
 fi
 
 for artifact in "${FOUND_ARTIFACTS[@]}"; do
-  cp "$artifact" "$OUTPUT_DIR/$(basename "$artifact")"
+  artifact_name="$(basename "$artifact")"
+  artifact_extension="${artifact_name##*.}"
+  cp "$artifact" "$OUTPUT_DIR/darshan-player-${RELEASE_ID}-${TARGET_PLATFORM}-${PACKAGE_ARCH}.${artifact_extension}"
 done
 
 cat > "$OUTPUT_DIR/package.env" <<EOF
@@ -174,7 +177,9 @@ This folder contains packaged player artifacts only. Do not copy the source repo
 EOF
 
 for artifact in "${FOUND_ARTIFACTS[@]}"; do
-  printf -- '- `%s`\n' "$(basename "$artifact")" >> "$OUTPUT_DIR/README.md"
+  artifact_name="$(basename "$artifact")"
+  artifact_extension="${artifact_name##*.}"
+  printf -- '- `%s`\n' "darshan-player-${RELEASE_ID}-${TARGET_PLATFORM}-${PACKAGE_ARCH}.${artifact_extension}" >> "$OUTPUT_DIR/README.md"
 done
 
 cat >> "$OUTPUT_DIR/README.md" <<'EOF'
@@ -188,5 +193,6 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 5. Pair the device and verify it appears in the CMS.
 EOF
 
+export_write_artifact_manifest "$OUTPUT_DIR" "$PLAYER_REPO_DIR" "$RELEASE_ID" electron "$TARGET_PLATFORM" "$PACKAGE_ARCH"
 export_write_checksums "$OUTPUT_DIR"
 export_common_log "Electron package created at $OUTPUT_DIR"

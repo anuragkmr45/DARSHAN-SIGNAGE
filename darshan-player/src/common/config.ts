@@ -176,6 +176,11 @@ export class ConfigManager {
           'DARSHAN_REALTIME_DESIRED_STATE_POLL_MS',
           'HEXMON_REALTIME_DESIRED_STATE_POLL_MS'
         ),
+        degradedStatePollMs: envNumber(
+          30000,
+          'DARSHAN_REALTIME_DEGRADED_STATE_POLL_MS',
+          'HEXMON_REALTIME_DEGRADED_STATE_POLL_MS'
+        ),
         reconnectMinMs: envNumber(1000, 'DARSHAN_REALTIME_RECONNECT_MIN_MS', 'HEXMON_REALTIME_RECONNECT_MIN_MS'),
         reconnectMaxMs: envNumber(60000, 'DARSHAN_REALTIME_RECONNECT_MAX_MS', 'HEXMON_REALTIME_RECONNECT_MAX_MS'),
         pingIntervalMs: envNumber(25000, 'DARSHAN_REALTIME_WS_PING_INTERVAL_MS', 'HEXMON_REALTIME_WS_PING_INTERVAL_MS'),
@@ -442,6 +447,8 @@ export class ConfigManager {
         deviceNamespace: overrides.realtime?.deviceNamespace ?? defaults.realtime?.deviceNamespace ?? '/device',
         commandSafetyPollMs: overrides.realtime?.commandSafetyPollMs ?? defaults.realtime?.commandSafetyPollMs ?? 60000,
         desiredStatePollMs: overrides.realtime?.desiredStatePollMs ?? defaults.realtime?.desiredStatePollMs ?? 300000,
+        degradedStatePollMs:
+          overrides.realtime?.degradedStatePollMs ?? defaults.realtime?.degradedStatePollMs ?? 30000,
         reconnectMinMs: overrides.realtime?.reconnectMinMs ?? defaults.realtime?.reconnectMinMs ?? 1000,
         reconnectMaxMs: overrides.realtime?.reconnectMaxMs ?? defaults.realtime?.reconnectMaxMs ?? 60000,
         pingIntervalMs: overrides.realtime?.pingIntervalMs ?? defaults.realtime?.pingIntervalMs ?? 25000,
@@ -519,6 +526,13 @@ export class ConfigManager {
         300000,
         'DARSHAN_REALTIME_DESIRED_STATE_POLL_MS',
         'HEXMON_REALTIME_DESIRED_STATE_POLL_MS'
+      )
+    }
+    if (envPresent('DARSHAN_REALTIME_DEGRADED_STATE_POLL_MS', 'HEXMON_REALTIME_DEGRADED_STATE_POLL_MS')) {
+      realtime.degradedStatePollMs = envNumber(
+        30000,
+        'DARSHAN_REALTIME_DEGRADED_STATE_POLL_MS',
+        'HEXMON_REALTIME_DEGRADED_STATE_POLL_MS'
       )
     }
     if (envPresent('DARSHAN_REALTIME_RECONNECT_MIN_MS', 'HEXMON_REALTIME_RECONNECT_MIN_MS')) {
@@ -738,6 +752,7 @@ export class ConfigManager {
         deviceNamespace: config.realtime?.deviceNamespace || '/device',
         commandSafetyPollMs: Math.max(config.realtime?.commandSafetyPollMs || 60000, 10000),
         desiredStatePollMs: Math.max(config.realtime?.desiredStatePollMs || 300000, 30000),
+        degradedStatePollMs: Math.max(config.realtime?.degradedStatePollMs || 30000, 5000),
         reconnectMinMs: Math.max(config.realtime?.reconnectMinMs || 1000, 250),
         reconnectMaxMs: Math.max(config.realtime?.reconnectMaxMs || 60000, config.realtime?.reconnectMinMs || 1000),
         pingIntervalMs: Math.max(config.realtime?.pingIntervalMs || 25000, 5000),

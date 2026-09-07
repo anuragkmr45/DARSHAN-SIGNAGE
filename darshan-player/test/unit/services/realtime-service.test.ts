@@ -323,12 +323,14 @@ describe('Realtime Service', () => {
     }
     const getStub = sandbox.stub(httpClient, 'get').resolves(desiredState)
     const snapshotStub = sandbox.stub(snapshotManager, 'refreshSnapshot').resolves({ mode: 'normal', items: [] })
+    sandbox.stub(snapshotManager, 'didLastRefreshSucceed').returns(true)
     const defaultStub = sandbox.stub(defaultMediaService, 'refreshNow').resolves({
       source: 'NONE',
       aspect_ratio: null,
       media_id: null,
       media: null,
     })
+    sandbox.stub(defaultMediaService, 'didLastRefreshSucceed').returns(true)
 
     const realtimeService = new RealtimeService()
     await realtimeService.handleNotification({

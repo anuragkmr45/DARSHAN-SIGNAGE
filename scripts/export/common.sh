@@ -115,3 +115,24 @@ export_write_checksums() {
   echo "Either sha256sum or shasum is required to generate SHA256SUMS.txt." >&2
   exit 1
 }
+
+export_assert_clean_git_tree() {
+  local repo_dir="$1"
+  export_require_command git
+  if [[ -n "$(git -C "$repo_dir" status --porcelain)" ]]; then
+    echo "Refusing to package a dirty source tree: $repo_dir" >&2
+    exit 1
+  fi
+}
+
+export_write_artifact_manifest() {
+  local output_dir="$1"
+  local repo_dir="$2"
+  local release_id="$3"
+  local component="$4"
+  local platform="${5:-any}"
+  local architecture="${6:-any}"
+  node "$PLATFORM_ROOT/scripts/export/artifact-manifest.mjs" write \
+    --output "$output_dir" --repo "$repo_dir" --release "$release_id" \
+    --component "$component" --platform "$platform" --arch "$architecture"
+}

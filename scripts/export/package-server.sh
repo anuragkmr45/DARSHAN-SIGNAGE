@@ -79,6 +79,7 @@ export_require_command docker
 export_require_directory "Server repo" "$SERVER_REPO_DIR"
 export_require_file "Server Dockerfile" "$SERVER_REPO_DIR/Dockerfile"
 export_require_file "Server env template" "$SERVER_REPO_DIR/.env.example"
+export_assert_clean_git_tree "$SERVER_REPO_DIR"
 
 export_make_clean_dir "$OUTPUT_DIR"
 mkdir -p "$IMAGES_DIR" "$CERTS_DIR" "$OBSERVABILITY_DIR"
@@ -549,5 +550,6 @@ chmod +x \
   "$OUTPUT_DIR/acceptance-check.sh" \
   "$OUTPUT_DIR/health-check.sh"
 
+export_write_artifact_manifest "$OUTPUT_DIR" "$SERVER_REPO_DIR" "$RELEASE_ID" server linux any
 export_write_checksums "$OUTPUT_DIR"
 export_common_log "Server package created at $OUTPUT_DIR"

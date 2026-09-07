@@ -336,8 +336,9 @@ stage_player_bundle() {
       "enabled": true,
       "signedAuthEnabled": true,
       "deviceNamespace": "/device",
-      "commandSafetyPollMs": 60000,
-      "desiredStatePollMs": 300000
+      "commandSafetyPollMs": 300000,
+      "desiredStatePollMs": 300000,
+      "degradedStatePollMs": 30000
     },
     "transportTls": {
       "enabled": $transport_enabled,
@@ -1789,6 +1790,12 @@ if [[ "${#missing_player_artifacts[@]}" -gt 0 ]]; then
   exit 1
 fi
 
+if profile_enabled production && [[ -n "$SERVER_PACKAGE_DIR" && -n "$CMS_PACKAGE_DIR" ]]; then
+  node "$PLATFORM_ROOT/scripts/bundle/verify-package-provenance.mjs" \
+    --release "$DARSHAN_RELEASE_ID" --server "$SERVER_PACKAGE_DIR" --cms "$CMS_PACKAGE_DIR" \
+    --player "$PLAYER_ARTIFACTS_DIR" --platforms "$PLAYER_TARGET_PLATFORMS"
+fi
+
 CMS_QA_ORIGIN=""
 CMS_PRODUCTION_ORIGIN=""
 if profile_enabled qa; then
@@ -2874,6 +2881,9 @@ DEVICE_DESIRED_STATE_ENABLED=$DEVICE_DESIRED_STATE_ENABLED
 DARSHAN_REALTIME_SYNC_ENABLED=$DARSHAN_REALTIME_SYNC_ENABLED
 REALTIME_SYNC_ENABLED=$REALTIME_SYNC_ENABLED
 REALTIME_BUS_PROVIDER=$REALTIME_BUS_PROVIDER
+REALTIME_SOCKET_TRANSPORT=websocket
+REALTIME_SOCKET_ALLOW_POLLING=false
+REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS=false
 DEVICE_AUTH_MODE=$DEVICE_AUTH_MODE
 DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT=$DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT
 DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=$PROD_DEVICE_SOCKET_LEGACY_AUTH_ALLOWED
@@ -3618,6 +3628,17 @@ server {
     return 404;
   }
 
+  location = /config/app-config.json {
+    add_header Cache-Control "no-store";
+    try_files \$uri =404;
+  }
+
+  location ^~ /assets/ {
+    try_files \$uri =404;
+    access_log off;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+  }
+
   location / {
     try_files \$uri \$uri/ /index.html;
     add_header Cache-Control "no-store";
@@ -3770,6 +3791,24 @@ require_docker_free_bytes() {
   }
 }
 require_docker_free_bytes "$CMS_MIN_FREE_DISK_BYTES"
+require_websocket_upgrade() {
+  local response
+  # A raw Engine.IO WebSocket upgrade verifies the complete public nginx
+  # upgrade path without accepting polling as an accidental fallback.
+  response="$(curl --silent --show-error --http1.1 --max-time 3 \
+    --cacert ./tls/transport-ca.crt \
+    --resolve "${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}:${CMS_BIND_ADDRESS}" \
+    -H 'Connection: Upgrade' \
+    -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: ZGFyc2hhbi1yZWFsdGltZS1wcm9iZQ==' \
+    -D - -o /dev/null \
+    "https://${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}/socket.io/?EIO=4&transport=websocket" 2>/dev/null || true)"
+  grep -Eq '^HTTP/[0-9.]+ 101 ' <<<"$response" || {
+    echo "CMS public Socket.IO WebSocket upgrade failed" >&2
+    return 1
+  }
+}
 curl -fsSI "http://${CMS_BIND_ADDRESS}:${CMS_HTTP_PORT}/" | grep -q "301"
 curl --fail --silent --show-error \
   --cacert ./tls/transport-ca.crt \
@@ -3779,6 +3818,7 @@ curl --fail --silent --show-error \
   --cacert ./tls/transport-ca.crt \
   --resolve "${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}:${CMS_BIND_ADDRESS}" \
   "https://${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}/api/v1/health/ready" >/dev/null
+require_websocket_upgrade
 require_metric "http://${CMS_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}/metrics" '^node_exporter_build_info'
 require_metric "http://${CMS_BIND_ADDRESS}:${NGINX_EXPORTER_HOST_PORT}/metrics" '^nginx_up 1$'
 echo "Production CMS healthy."

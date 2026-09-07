@@ -1,5 +1,6 @@
 import * as os from 'os'
 import { randomUUID } from 'crypto'
+import WebSocket from 'ws'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
 import { redactUrlForDiagnostics } from '../../common/redaction'
@@ -21,6 +22,7 @@ import {
 import { getCertificateManager } from './cert-manager'
 import { getHttpClient } from './network/http-client'
 import { getDeviceStateStore } from './device-state-store'
+import { createTransportHttpsAgent } from './network/transport-tls'
 
 const logger = getLogger('pairing-service')
 const runtimeSessionId = randomUUID()
@@ -447,8 +449,44 @@ export class PairingService {
       logger.warn({ error }, 'API reachability test failed')
     }
 
-    diagnostics.wsReachable = false
+    diagnostics.wsReachable = await this.probeRealtimeWebSocket()
     return diagnostics
+  }
+
+  private async probeRealtimeWebSocket(): Promise<boolean> {
+    const config = getConfigManager().getConfig()
+    if (config.realtime?.enabled !== true) {
+      return false
+    }
+
+    try {
+      const endpoint = new URL(config.realtime.wsUrl || config.wsUrl || config.apiBase)
+      endpoint.protocol = endpoint.protocol === 'https:' || endpoint.protocol === 'wss:' ? 'wss:' : 'ws:'
+      endpoint.pathname = '/socket.io/'
+      endpoint.search = 'EIO=4&transport=websocket'
+      endpoint.hash = ''
+
+      return await new Promise<boolean>((resolve) => {
+        const socket = new WebSocket(endpoint.toString(), {
+          handshakeTimeout: 5000,
+          agent: createTransportHttpsAgent(config.transportTls),
+        })
+        let settled = false
+        const finish = (reachable: boolean) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timeout)
+          socket.close()
+          resolve(reachable)
+        }
+        const timeout = setTimeout(() => finish(false), 5000)
+        socket.once('open', () => finish(true))
+        socket.once('error', () => finish(false))
+      })
+    } catch (error) {
+      logger.warn({ error }, 'Realtime WebSocket diagnostic probe failed')
+      return false
+    }
   }
 
   isRetryablePairingRequestError(error: unknown): boolean {
