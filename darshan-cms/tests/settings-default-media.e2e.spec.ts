@@ -30,9 +30,12 @@ const rolesPayload = {
 };
 
 type MockState = {
-  globalMedia: (typeof mediaCatalog)[number] | null;
-  globalMediaId: string | null;
-  variants: Record<string, (typeof mediaCatalog)[number] | null>;
+  assignments: Array<{
+    target_type: "SCREEN" | "GROUP";
+    target_id: string;
+    media_id: string;
+    aspect_ratio: string;
+  }>;
 };
 
 const mediaCatalog = [
@@ -69,17 +72,21 @@ const mediaCatalog = [
   },
 ];
 
-const aspectRatiosResponse = {
-  items: [
-    { id: "screen-1", name: "Lobby", aspect_ratio: "16:9", aspect_ratio_name: "Widescreen" },
-    { id: "screen-2", name: "Portrait Kiosk", aspect_ratio: "9:16", aspect_ratio_name: "Portrait" },
-  ],
-  defaults: [
-    { id: null, name: "Widescreen", aspect_ratio: "16:9", aspect_ratio_name: "Widescreen", is_fallback: true },
-    { id: null, name: "Portrait", aspect_ratio: "9:16", aspect_ratio_name: "Portrait", is_fallback: true },
-    { id: null, name: "Square", aspect_ratio: "1:1", aspect_ratio_name: "Square", is_fallback: true },
-  ],
-};
+const screens = [
+  { id: "screen-1", name: "Lobby", location: "First floor", aspect_ratio: "16:9" },
+  { id: "screen-2", name: "Portrait Kiosk", location: "Reception", aspect_ratio: "9:16" },
+];
+
+const groups = [
+  { id: "group-1", name: "Lobby group", screen_ids: ["screen-1"] },
+];
+
+const serializeAssignments = (assignments: MockState["assignments"]) => ({
+  assignments: assignments.map((assignment) => ({
+    ...assignment,
+    media: mediaCatalog.find((media) => media.id === assignment.media_id) ?? null,
+  })),
+});
 
 const login = async (page: Page) => {
   await page.goto("/login");
@@ -119,68 +126,65 @@ const installApiMocks = async (page: Page, state: MockState) => {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ unread_total: 0 }) });
     }
 
-    if (pathname === "/api/v1/settings/default-media" && method === "GET") {
+    // Settings renders every settings query before its tab contents are
+    // selected. Supply the full contract so this fixture models the backend,
+    // rather than relying on the route handler's intentionally empty fallback.
+    if (pathname === "/api/v1/settings/general" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ company_name: "Darshan", timezone: "UTC", language: "en" }) });
+    }
+
+    if (pathname === "/api/v1/settings/branding" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ app_name: "DARSHAN CMS", logo_media_id: null, icon_media_id: null, favicon_media_id: null, logo_url: null, icon_url: null, favicon_url: null }) });
+    }
+
+    if (pathname === "/api/v1/settings/security" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ idle_timeout_minutes: 30, password_policy: { min_length: 12, require_uppercase: true, require_lowercase: true, require_number: true, require_special: true } }) });
+    }
+
+    if (pathname === "/api/v1/settings/appearance" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ theme_mode: "light", accent_preset: "crimson", sidebar_mode: "expanded" }) });
+    }
+
+    if (pathname === "/api/v1/settings/backups" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ automatic_enabled: false, interval_hours: 24, log_level: "info" }) });
+    }
+
+    if ((pathname === "/api/v1/settings/backups/history" || pathname === "/api/v1/settings/logs") && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    }
+
+    if (pathname === "/api/v1/settings/default-media/targets" && method === "GET") {
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          media_id: state.globalMediaId,
-          media: state.globalMedia,
-        }),
+        body: JSON.stringify(serializeAssignments(state.assignments)),
       });
     }
 
-    if (pathname === "/api/v1/settings/default-media" && method === "PUT") {
-      const payload = route.request().postDataJSON() as { media_id: string | null };
-      state.globalMediaId = payload.media_id;
-      state.globalMedia = mediaCatalog.find((item) => item.id === payload.media_id) ?? null;
+    if (pathname === "/api/v1/settings/default-media/targets" && method === "PUT") {
+      const payload = route.request().postDataJSON() as { assignments: MockState["assignments"] };
+      state.assignments = payload.assignments;
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ media_id: state.globalMediaId, media: state.globalMedia }),
+        body: JSON.stringify(serializeAssignments(state.assignments)),
       });
     }
 
-    if (pathname === "/api/v1/settings/default-media/variants" && method === "GET") {
+    if (pathname === "/api/v1/screens" && method === "GET") {
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          global_media_id: state.globalMediaId,
-          global_media: state.globalMedia,
-          variants: Object.entries(state.variants).map(([aspect_ratio, media]) => ({
-            aspect_ratio,
-            media_id: media?.id ?? null,
-            media,
-          })),
-        }),
+        body: JSON.stringify({ items: screens, page: 1, limit: 100, total: screens.length }),
       });
     }
 
-    if (pathname === "/api/v1/settings/default-media/variants" && method === "PUT") {
-      const payload = route.request().postDataJSON() as { variants: Record<string, string | null> };
-      state.variants = Object.fromEntries(
-        Object.entries(payload.variants)
-          .filter(([, mediaId]) => mediaId)
-          .map(([aspectRatio, mediaId]) => [aspectRatio, mediaCatalog.find((item) => item.id === mediaId) ?? null]),
-      );
+    if (pathname === "/api/v1/screen-groups" && method === "GET") {
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          global_media_id: state.globalMediaId,
-          global_media: state.globalMedia,
-          variants: Object.entries(state.variants).map(([aspect_ratio, media]) => ({
-            aspect_ratio,
-            media_id: media?.id ?? null,
-            media,
-          })),
-        }),
+        body: JSON.stringify({ items: groups, page: 1, limit: 100, total: groups.length }),
       });
-    }
-
-    if (pathname === "/api/v1/screens/aspect-ratios" && method === "GET") {
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(aspectRatiosResponse) });
     }
 
     if (pathname === "/api/v1/media" && method === "GET") {
@@ -195,54 +199,57 @@ const installApiMocks = async (page: Page, state: MockState) => {
   });
 };
 
-test.describe("Settings default media variants", () => {
-  test("renders global and aspect-ratio-specific fallback sections", async ({ page }) => {
+const openDefaultMedia = async (page: Page) => {
+  await page.goto("/settings");
+  await page.getByRole("tab", { name: "Default Media", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Default Media", exact: true })).toBeVisible();
+};
+
+const currentAssignmentsSection = (page: Page) =>
+  page
+    .getByRole("heading", { name: "Current assignments", exact: true })
+    .locator("xpath=..")
+    .locator("xpath=..")
+    .locator("xpath=..");
+
+test.describe("Settings default media targets", () => {
+  test("renders target-scoped assignments and scope rules", async ({ page }) => {
     const state: MockState = {
-      globalMediaId: "media-global",
-      globalMedia: mediaCatalog[0],
-      variants: {
-        "16:9": mediaCatalog[1],
-      },
+      assignments: [{ target_type: "SCREEN", target_id: "screen-1", media_id: "media-16-9", aspect_ratio: "16:9" }],
     };
 
     await installApiMocks(page, state);
     await login(page);
-    await page.goto("/settings");
+    await openDefaultMedia(page);
 
-    await expect(page.getByRole("heading", { name: "Default Media", exact: true })).toBeVisible();
-    await expect(page.getByText("Fallback precedence")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Global default media", exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Aspect-ratio fallback variants", exact: true })).toBeVisible();
-    await expect(page.getByLabel("Clear default media for 16:9")).toBeVisible();
-    await expect(page.getByText("Configured", { exact: true })).toBeVisible();
-    await expect(page.getByText("global-fallback.png", { exact: true })).toBeVisible();
-    await expect(page.getByText("Widescreen")).toBeVisible();
-    await expect(page.getByText("Portrait")).toBeVisible();
+    await expect(page.getByText("Scope rules")).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Specific Screens", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Select screens", exact: true })).toBeVisible();
+    await expect(page.locator("label").filter({ hasText: /^Lobby/ }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Current assignments", exact: true })).toBeVisible();
+    await expect(currentAssignmentsSection(page).getByText("Lobby Loop", { exact: true })).toBeVisible();
   });
 
-  test("assigns and clears aspect-ratio-specific default media", async ({ page }) => {
+  test("assigns and clears screen-targeted default media", async ({ page }) => {
     const state: MockState = {
-      globalMediaId: "media-global",
-      globalMedia: mediaCatalog[0],
-      variants: {},
+      assignments: [],
     };
 
     await installApiMocks(page, state);
     await login(page);
-    await page.goto("/settings");
+    await openDefaultMedia(page);
 
-    await page.getByLabel("Assign default media for 16:9").click();
-    const dialog = page.getByRole("dialog", { name: /select default media for 16:9/i });
+    await page.locator("label").filter({ hasText: /^Lobby/ }).first().click();
+    await page.getByRole("button", { name: "Assign media", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: /select media for screen selection \(16:9\)/i });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("lobby-loop.mp4", { exact: true })).toBeVisible();
-    await dialog.getByText("lobby-loop.mp4", { exact: true }).click();
-    await expect(page.getByLabel("Clear default media for 16:9")).toBeVisible();
-    await expect(page.getByText("Configured", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Lobby Loop", { exact: true })).toBeVisible();
+    await dialog.getByText("Lobby Loop", { exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Current assignments", exact: true })).toBeVisible();
+    await expect(currentAssignmentsSection(page).getByText("Lobby Loop", { exact: true })).toBeVisible();
 
-    await page.getByLabel("Clear default media for 16:9").click();
+    await currentAssignmentsSection(page).getByRole("button", { name: "Clear", exact: true }).click();
     await page.getByRole("button", { name: "Clear" }).click();
-    await expect(page.getByText("lobby-loop.mp4", { exact: true })).not.toBeVisible();
-    await expect(page.getByLabel("Assign default media for 16:9")).toBeVisible();
-    await expect(page.getByLabel("Clear default media for 16:9")).not.toBeVisible();
+    await expect(page.getByText("No default media assignments configured.")).toBeVisible();
   });
 });

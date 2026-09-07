@@ -30,6 +30,7 @@ import {
   recordRealtimeSocketDisconnect,
   recordRealtimeSocketReject,
   recordRealtimeSocketServerEvent,
+  recordPlayerRealtimeDiagnostics,
   recordTelemetryIngest,
   recordWebsocketNotificationPayloadTooLarge,
   resetObservabilityMetricsForTests,
@@ -167,6 +168,16 @@ describe('backend observability instrumentation', () => {
     recordDeviceNodeRegistryWrite('valkey', 'refresh', 'error');
     recordDeviceNodeRegistryMiss('valkey');
     recordRealtimeBusFallback('valkey_unavailable');
+    recordPlayerRealtimeDiagnostics({
+      connectionState: 'WSS_HEALTHY',
+      playerReleaseId: 'development',
+      serverReleaseId: 'development',
+    });
+    recordPlayerRealtimeDiagnostics({
+      connectionState: 'REST_FALLBACK',
+      playerReleaseId: 'old-release',
+      serverReleaseId: 'old-release',
+    });
     recordDeviceCommandAck('success', 0.025);
     recordDeviceCommandAck('failure', 0.05);
     recordMediaCacheReport({ eventType: 'DOWNLOAD_FAILED', severity: 'ERROR', result: 'accepted' });
@@ -242,6 +253,12 @@ describe('backend observability instrumentation', () => {
     );
     expect(output).toContain('darshan_server_device_node_registry_misses_total{provider="valkey"} 1');
     expect(output).toContain('darshan_server_realtime_bus_fallback_total{reason="valkey_unavailable"} 1');
+    expect(output).toContain(
+      'darshan_server_player_realtime_diagnostics_total{connection_state="WSS_HEALTHY",player_release_alignment="match",server_release_alignment="match"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_player_realtime_diagnostics_total{connection_state="REST_FALLBACK",player_release_alignment="mismatch",server_release_alignment="mismatch"} 1'
+    );
     expect(output).toContain('darshan_server_device_command_acks_total{result="success"} 1');
     expect(output).toContain('darshan_server_device_command_acks_total{result="failure"} 1');
     expect(output).toContain(
@@ -271,6 +288,7 @@ describe('backend observability instrumentation', () => {
     expect(categorizeRealtimeSocketDisconnectReason('transport close')).toBe('transport_close');
     expect(categorizeRealtimeSocketDisconnectReason('unexpected user supplied reason')).toBe('unknown');
     expect(output).toContain('darshan_server_realtime_socket_connect_total{namespace="/chat"} 1');
+    expect(output).toContain('darshan_server_realtime_socket_connections{namespace="/device"} 0');
     expect(output).toContain('darshan_server_realtime_socket_disconnect_total{namespace="/chat",reason="transport_close"} 1');
     expect(output).toContain('darshan_server_realtime_socket_client_events_total{namespace="/chat",event="chat:typing"} 1');
     expect(output).toContain('darshan_server_realtime_socket_server_events_total{namespace="/chat",event="chat:typing"} 1');

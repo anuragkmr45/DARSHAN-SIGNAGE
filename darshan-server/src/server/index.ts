@@ -203,7 +203,15 @@ function sanitizeErrorMessage(message?: string) {
   return safe;
 }
 
-export async function createServer() {
+export interface CreateServerOptions {
+  /**
+   * The API process owns the periodic command-outbox dispatcher in production.
+   * Isolated HTTP tests can opt out so they can exercise dispatch deterministically.
+   */
+  startOutboxDispatcher?: boolean;
+}
+
+export async function createServer(options: CreateServerOptions = {}) {
   const tlsOptions = loadServerTlsOptions({
     enabled: appConfig.SERVER_TLS_ENABLED,
     certificatePath: appConfig.TLS_CERT_PATH,
@@ -446,7 +454,9 @@ export async function createServer() {
   await fastify.register(permissionRoutes);
 
   setupDeviceRealtimeGateway(fastify);
-  startOutboxDispatcher();
+  if (options.startOutboxDispatcher !== false) {
+    startOutboxDispatcher();
+  }
   fastify.addHook('onClose', async () => {
     await stopOutboxDispatcher();
   });

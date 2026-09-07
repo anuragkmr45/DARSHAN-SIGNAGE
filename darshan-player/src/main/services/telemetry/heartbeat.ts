@@ -15,6 +15,7 @@ import { getLifecycleEvents } from '../lifecycle-events'
 import { getCommandProcessor } from '../command-processor'
 import { getPlayerMetrics } from './player-metrics'
 import { getSecurePlaybackGuard } from '../secure-playback-guard'
+import { getRealtimeService } from '../realtime-service'
 
 const logger = getLogger('heartbeat')
 
@@ -216,6 +217,7 @@ export class HeartbeatService {
       runtime_session_id: getPairingService().getRuntimeSessionId(),
       player_version: getPairingService().getDeviceInfo().appVersion,
       display_profile_v1: getDisplayManager().getProfile(),
+      realtime_diagnostics: getRealtimeService().getDiagnostics(),
     }
   }
 

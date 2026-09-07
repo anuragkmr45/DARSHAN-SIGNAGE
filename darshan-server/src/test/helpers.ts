@@ -10,7 +10,9 @@ import { SYSTEM_ROLE_DEFAULTS } from '@/rbac/system-roles';
 export async function createTestServer(): Promise<FastifyInstance> {
   await initializeDatabase();
   await seedTestData();
-  const server = await createServer();
+  // Tests invoke background work explicitly. Keeping the production dispatcher
+  // off here prevents it from consuming fixtures between assertion steps.
+  const server = await createServer({ startOutboxDispatcher: false });
   server.addHook('onClose', async () => {
     await closeDatabase();
   });

@@ -19,7 +19,11 @@ const logger = getLogger('command-processor')
 
 const HEARTBEAT_STALE_MULTIPLIER = 2
 const FALLBACK_POLL_JITTER_FACTOR = 0.2
-const REFRESH_COMMAND_JITTER_MS = 3000
+// A deterministic sub-second spread keeps a large fleet from synchronising
+// identical refresh work while preserving the publish-to-render latency budget.
+// Never use Math.random() here: retry timing must be reproducible and an
+// ordinary refresh must not spend several seconds waiting before it starts.
+const REFRESH_COMMAND_STAGGER_MAX_MS = 750
 
 export class CommandProcessor {
   private pollTimer?: NodeJS.Timeout
@@ -332,9 +336,9 @@ export class CommandProcessor {
   private async handleRefreshSchedule(command: Command): Promise<CommandResult> {
     const reason = typeof command.params?.['reason'] === 'string' ? String(command.params?.['reason']) : undefined
     if (reason !== 'EMERGENCY' && reason !== 'TAKE_DOWN' && reason !== 'DEFAULT_MEDIA') {
-      const jitterMs = Math.max(0, Math.round(Math.random() * REFRESH_COMMAND_JITTER_MS))
-      if (jitterMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, jitterMs))
+      const staggerMs = this.getRefreshCommandStaggerMs(command.id)
+      if (staggerMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, staggerMs))
       }
     }
     await getSnapshotManager().refreshSnapshot({ force: true })
@@ -348,6 +352,15 @@ export class CommandProcessor {
       message: 'Schedule refreshed',
       timestamp: new Date().toISOString(),
     }
+  }
+
+  private getRefreshCommandStaggerMs(commandId: string): number {
+    let hash = 2166136261
+    for (const character of commandId) {
+      hash ^= character.charCodeAt(0)
+      hash = Math.imul(hash, 16777619)
+    }
+    return (hash >>> 0) % (REFRESH_COMMAND_STAGGER_MAX_MS + 1)
   }
 
   private async handleScreenshot(): Promise<CommandResult> {

@@ -113,6 +113,8 @@ describe('player file config loader', () => {
           name: 'onprem-qa',
           deploymentId: 'qa-lab-1',
           expectedServerId: 'backend-a',
+          releaseId: 'qa-lab-1-r7',
+          sourceCommit: '0123456789abcdef0123456789abcdef01234567',
         },
         backend: {
           baseUrl: 'http://192.168.0.5:3000',
@@ -167,6 +169,8 @@ describe('player file config loader', () => {
     expect(config.mtls.enabled).to.equal(true)
     expect(config.environment.name).to.equal('onprem-qa')
     expect(config.environment.deploymentId).to.equal('qa-lab-1')
+    expect(config.environment.releaseId).to.equal('qa-lab-1-r7')
+    expect(config.environment.sourceCommit).to.equal('0123456789abcdef0123456789abcdef01234567')
     expect(config.pairing.offlineValidationGraceMs).to.equal(123456)
     expect(config.security.offlinePlaybackPolicy).to.equal('secure')
     expect(config.security.backendRequiredForPlayback).to.equal(true)

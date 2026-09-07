@@ -37,6 +37,7 @@ interface UseScreensRealtimeOptions {
   onStateUpdate?: (payload: ScreenStateUpdateEvent) => void;
   onPreviewUpdate?: (payload: ScreenPreviewUpdateEvent) => void;
   onRefreshRequired?: (payload: ScreenRefreshRequiredEvent) => void;
+  onScheduleRequestsChanged?: () => void;
 }
 
 export const useScreensRealtime = ({
@@ -50,6 +51,7 @@ export const useScreensRealtime = ({
   onStateUpdate: handleStateUpdate,
   onPreviewUpdate: handlePreviewUpdate,
   onRefreshRequired: handleRefreshRequired,
+  onScheduleRequestsChanged: handleScheduleRequestsChanged,
 }: UseScreensRealtimeOptions) => {
   const queryClient = useQueryClient();
   const authToken = useAppSelector((state) => state.auth.token);
@@ -163,6 +165,10 @@ export const useScreensRealtime = ({
       setIsConnected(true);
       subscribe();
       runSync();
+      // Realtime messages are notifications, not the source of truth.  A
+      // reconnect can have missed a schedule mutation while this browser was
+      // offline, so let schedule consumers reconcile their API-backed data.
+      handleScheduleRequestsChanged?.();
       void refetchOverview();
       void refetchList();
       void refetchGroups();
@@ -173,6 +179,7 @@ export const useScreensRealtime = ({
       setIsConnected(true);
       subscribe();
       runSync();
+      handleScheduleRequestsChanged?.();
       void refetchOverview();
       void refetchList();
       void refetchGroups();
@@ -289,6 +296,9 @@ export const useScreensRealtime = ({
         });
       }, SCREENS_REFRESH_DEBOUNCE_MS);
     };
+    const onScheduleRequestsChanged = () => {
+      handleScheduleRequestsChanged?.();
+    };
 
     socket.on("connect", onConnect);
     socket.on("reconnect", onReconnect);
@@ -297,6 +307,7 @@ export const useScreensRealtime = ({
     socket.on("screens:state:update", onStateUpdate);
     socket.on("screens:preview:update", onPreviewUpdate);
     socket.on("screens:refresh:required", onRefreshRequired);
+    socket.on("schedule-requests:changed", onScheduleRequestsChanged);
 
     if (socket.connected) {
       onConnect();
@@ -316,6 +327,7 @@ export const useScreensRealtime = ({
       socket.off("screens:state:update", onStateUpdate);
       socket.off("screens:preview:update", onPreviewUpdate);
       socket.off("screens:refresh:required", onRefreshRequired);
+      socket.off("schedule-requests:changed", onScheduleRequestsChanged);
     };
   }, [
     activeScreenId,
@@ -324,6 +336,7 @@ export const useScreensRealtime = ({
     enabled,
     handlePreviewUpdate,
     handleRefreshRequired,
+    handleScheduleRequestsChanged,
     handleStateUpdate,
     includePreview,
     groupsQueryKey,

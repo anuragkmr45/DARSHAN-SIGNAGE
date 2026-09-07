@@ -83,20 +83,10 @@ const login = async (page: Page) => {
 
 const openScreensPage = async (page: Page) => {
   await page.goto("/screens");
+  // Screens is a route-level lazy chunk. A direct navigation must wait for its
+  // actual UI, not merely for the document navigation to finish.
+  await expect(page.locator("main").getByRole("heading", { name: "Screens", exact: true })).toBeVisible({ timeout: 15_000 });
 };
-
-const buildOverview = (state: MockState) => ({
-  server_time: "2026-03-12T12:00:00.000Z",
-  screens: state.screens,
-  groups: state.groups,
-  now_playing: [],
-  stats: {
-    total_screens: state.screens.length,
-    active_screens: state.screens.filter((screen) => screen.health_state === "ONLINE").length,
-    offline_screens: state.screens.filter((screen) => screen.health_state === "OFFLINE").length,
-    total_groups: state.groups.length,
-  },
-});
 
 const installApiMocks = async (page: Page, state: MockState) => {
   await page.route("**/api/v1/**", async (route: Route) => {
@@ -156,8 +146,50 @@ const installApiMocks = async (page: Page, state: MockState) => {
       });
     }
 
-    if (pathname === "/api/v1/screens/overview" && method === "GET") {
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(buildOverview(state)) });
+    // The screens workspace uses paginated summary endpoints. Keep these
+    // fixtures aligned with the production client.
+    if (pathname === "/api/v1/screens/summary" && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          server_time: "2026-03-12T12:00:00.000Z",
+          total: state.screens.length,
+          online: state.screens.filter((screen) => screen.health_state === "ONLINE").length,
+          recovery: state.screens.filter((screen) => screen.health_state === "RECOVERY_REQUIRED").length,
+          stale: state.screens.filter((screen) => screen.health_state === "STALE").length,
+          offline: state.screens.filter((screen) => screen.health_state === "OFFLINE").length,
+          error: state.screens.filter((screen) => screen.health_state === "ERROR").length,
+        }),
+      });
+    }
+
+    if (pathname === "/api/v1/screens" && method === "GET") {
+      const pageNum = Number(searchParams.get("page") || 1);
+      const limit = Number(searchParams.get("limit") || 100);
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          server_time: "2026-03-12T12:00:00.000Z",
+          items: state.screens,
+          pagination: { page: pageNum, limit, total: state.screens.length },
+        }),
+      });
+    }
+
+    if (pathname === "/api/v1/screen-groups" && method === "GET") {
+      const pageNum = Number(searchParams.get("page") || 1);
+      const limit = Number(searchParams.get("limit") || 100);
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          server_time: "2026-03-12T12:00:00.000Z",
+          items: state.groups,
+          pagination: { page: pageNum, limit, total: state.groups.length },
+        }),
+      });
     }
 
     if (/^\/api\/v1\/screens\/[^/]+$/.test(pathname) && method === "GET") {

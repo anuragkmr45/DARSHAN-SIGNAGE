@@ -155,6 +155,42 @@ describe('Default Media Service', () => {
     expect(service.getCurrent().media_id).to.equal('media-global')
   })
 
+  it('discards an in-flight default-media response after identity is cleared', async () => {
+    const { DefaultMediaService } = require('../../../src/main/services/settings/default-media-service.ts')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getSettingsClient } = require('../../../src/main/services/settings/settings-client')
+    const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+
+    const pairingService = getPairingService()
+    const settingsClient = getSettingsClient()
+    let resolveFetch
+    const pendingFetch = new Promise((resolve) => { resolveFetch = resolve })
+    sandbox.stub(pairingService, 'isPairedDevice').returns(true)
+    sandbox.stub(pairingService, 'getDeviceId').returns('device-123')
+    sandbox.stub(settingsClient, 'getDefaultMedia').returns(pendingFetch)
+    sandbox.stub(getCacheManager(), 'add').resolves()
+    sandbox.stub(getCacheManager(), 'get').resolves(undefined)
+
+    const service = new DefaultMediaService()
+    const pendingRefresh = service.refreshNow('race-test')
+    service.clearIdentityBoundState()
+    resolveFetch({
+      source: 'GLOBAL',
+      aspect_ratio: null,
+      media_id: 'stale-media',
+      media: {
+        id: 'stale-media',
+        name: 'Stale response',
+        type: 'IMAGE',
+        media_url: 'https://cdn.example.com/stale.png',
+      },
+    })
+
+    await pendingRefresh
+    expect(service.getCurrent().media_id).to.equal(null)
+    expect(service.getCurrent().source).to.equal('NONE')
+  })
+
   it('caches webpage fallback previews without trying to cache the live source url', async () => {
     const { DefaultMediaService } = require('../../../src/main/services/settings/default-media-service.ts')
     const { getPairingService } = require('../../../src/main/services/pairing-service')

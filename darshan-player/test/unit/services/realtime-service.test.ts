@@ -27,6 +27,7 @@ class FakeRealtimeTransport extends EventEmitter {
           device_id: payload.device_id,
           protocol_version: '1.0',
           server_time: new Date().toISOString(),
+          server_release_id: 'test-r1',
         })
       })
     }
@@ -53,6 +54,10 @@ describe('Realtime Service', () => {
           apiBase: 'https://api-test.darshan.com',
           wsUrl: 'wss://api-test.darshan.com/ws',
           deviceId: 'device-1',
+          environment: {
+            releaseId: 'test-r1',
+            sourceCommit: '0123456789abcdef0123456789abcdef01234567',
+          },
           realtime: {
             enabled: true,
             deviceNamespace: '/device',
@@ -398,6 +403,17 @@ describe('Realtime Service', () => {
     expect(realtimeService.getState()).to.equal('connected')
     expect(commandProcessor.isRealtimeHealthy()).to.equal(true)
     expect(getDeviceStateStore().getState().lastRealtimeConnectedAt).to.be.a('string')
+    const diagnostics = realtimeService.getDiagnostics()
+    expect(diagnostics).to.include({
+      release_id: 'test-r1',
+      source_commit: '0123456789abcdef0123456789abcdef01234567',
+      server_release_id: 'test-r1',
+      connection_state: 'WSS_HEALTHY',
+      reconnect_count: 1,
+      reconciliation_failure_count: 0,
+    })
+    expect(diagnostics.last_hello_ack_at).to.be.a('string')
+    expect(diagnostics.last_reconciliation_at).to.be.a('string')
 
     realtimeService.stop()
   })

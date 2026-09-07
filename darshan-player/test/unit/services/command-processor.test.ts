@@ -230,6 +230,21 @@ describe('Command Processor', () => {
     expect(store.hasRecentCommand('cmd-2')).to.equal(true)
   })
 
+  it('uses a deterministic bounded stagger for ordinary refresh commands', () => {
+    const { getCommandProcessor } = require('../../../src/main/services/command-processor')
+    const commandProcessor = getCommandProcessor()
+
+    const first = (commandProcessor as any).getRefreshCommandStaggerMs('command-stagger-1')
+    const repeated = (commandProcessor as any).getRefreshCommandStaggerMs('command-stagger-1')
+    const another = (commandProcessor as any).getRefreshCommandStaggerMs('command-stagger-2')
+
+    expect(first).to.equal(repeated)
+    expect(first).to.be.at.least(0)
+    expect(first).to.be.at.most(750)
+    expect(another).to.be.at.least(0)
+    expect(another).to.be.at.most(750)
+  })
+
   it('should include the local execution outcome when acknowledging a failed command', async () => {
     const { getCommandProcessor } = require('../../../src/main/services/command-processor')
     const { getHttpClient } = require('../../../src/main/services/network/http-client')

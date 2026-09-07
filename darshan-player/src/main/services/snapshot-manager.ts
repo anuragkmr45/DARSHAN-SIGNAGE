@@ -51,6 +51,9 @@ export class SnapshotManager extends EventEmitter {
   private lastRefreshSucceeded = false
   private serverClockOffsetMs = 0
   private representationEtag?: string
+  // Every refresh captures this generation. A pairing reset or newer refresh
+  // invalidates older async work before it can replace visible playback.
+  private refreshGeneration = 0
 
   constructor() {
     super()
@@ -112,6 +115,7 @@ export class SnapshotManager extends EventEmitter {
   }
 
   clearIdentityBoundState(): void {
+    this.refreshGeneration += 1
     if (this.evaluationTimer) {
       clearTimeout(this.evaluationTimer)
       this.evaluationTimer = undefined
@@ -119,6 +123,7 @@ export class SnapshotManager extends EventEmitter {
 
     this.currentSnapshot = undefined
     this.lastError = undefined
+    this.lastRefreshSucceeded = false
 
     if (fs.existsSync(this.snapshotPath)) {
       try {
@@ -140,6 +145,7 @@ export class SnapshotManager extends EventEmitter {
   async refreshSnapshot(
     options: { retryOnExpired?: boolean; force?: boolean } = {}
   ): Promise<PlaybackPlaylist | null> {
+    const generation = ++this.refreshGeneration
     const retryOnExpired = options.retryOnExpired !== false
     const pairingService = getPairingService()
     const deviceId = pairingService.getDeviceId()
@@ -160,6 +166,7 @@ export class SnapshotManager extends EventEmitter {
       })
 
       if (response.status === 304 && this.currentSnapshot) {
+        if (generation !== this.refreshGeneration) return this.currentPlaylist ?? null
         logger.debug({ snapshotId: this.currentSnapshot.snapshotId }, 'Snapshot not modified, reusing cached payload')
         const playlist = await this.buildPlaylist(this.currentSnapshot, 'normal')
         this.currentPlaylist = playlist
@@ -175,14 +182,22 @@ export class SnapshotManager extends EventEmitter {
       }
 
       const normalized = parseSnapshotResponse(response.data)
-      this.updateServerClock(normalized.serverTime)
       const responseEtag = response.headers?.['etag']
-      this.representationEtag = typeof responseEtag === 'string' ? responseEtag : undefined
-      await this.persistSnapshot(normalized)
-
+      if (generation !== this.refreshGeneration) {
+        logger.debug({ generation }, 'Discarding stale snapshot response before cache hydration')
+        return this.currentPlaylist ?? null
+      }
       await this.cacheSnapshotMedia(normalized)
       const playlist = await this.buildPlaylist(normalized, 'normal')
 
+      if (generation !== this.refreshGeneration) {
+        logger.debug({ generation }, 'Discarding stale snapshot refresh result')
+        return this.currentPlaylist ?? null
+      }
+
+      this.updateServerClock(normalized.serverTime)
+      this.representationEtag = typeof responseEtag === 'string' ? responseEtag : undefined
+      await this.persistSnapshot(normalized)
       this.currentSnapshot = normalized
       this.currentPlaylist = playlist
       this.lastError = undefined
@@ -191,6 +206,10 @@ export class SnapshotManager extends EventEmitter {
       this.emit('playlist-updated', playlist)
       return playlist
     } catch (error: any) {
+      if (generation !== this.refreshGeneration) {
+        logger.debug({ generation }, 'Discarding stale snapshot refresh failure')
+        return this.currentPlaylist ?? null
+      }
       if (error instanceof DeviceApiError && (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN' || error.code === 'NOT_FOUND')) {
         getLifecycleEvents().emitRuntimeAuthFailure({
           source: 'snapshot',

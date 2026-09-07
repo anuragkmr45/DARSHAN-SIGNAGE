@@ -226,12 +226,13 @@ test.describe("Scheduling and emergency operator flow", () => {
 
     await login(page);
     await page.goto("/schedule/new");
+    await expect(page.getByRole("heading", { name: "Create Schedule", exact: true })).toBeVisible({ timeout: 15_000 });
 
     await page.getByText("Lobby Layout", { exact: true }).click();
     await page.getByRole("button", { name: /^next$/i }).click();
 
     await page.getByRole("button", { name: "Add Media", exact: true }).click();
-    await page.getByText("hero-loop.mp4", { exact: true }).click();
+    await page.getByText("Hero Loop", { exact: true }).click();
     await page.getByRole("button", { name: /^next$/i }).click();
 
     await page.getByText("Lobby Screen", { exact: true }).click();

@@ -200,7 +200,11 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
   const environment = rawPlayer['environment']
   if (environment !== undefined) {
     assertPlainObject(environment, 'player.environment')
-    assertKnownKeys(environment, ['name', 'deploymentId', 'expectedServerId'], 'player.environment')
+    assertKnownKeys(
+      environment,
+      ['name', 'deploymentId', 'expectedServerId', 'releaseId', 'sourceCommit'],
+      'player.environment'
+    )
     config.environment = {}
     setNested(config.environment, 'name', stringValue(environment['name'], 'player.environment.name'))
     setNested(
@@ -212,6 +216,12 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       config.environment,
       'expectedServerId',
       stringValue(environment['expectedServerId'], 'player.environment.expectedServerId')
+    )
+    setNested(config.environment, 'releaseId', stringValue(environment['releaseId'], 'player.environment.releaseId'))
+    setNested(
+      config.environment,
+      'sourceCommit',
+      stringValue(environment['sourceCommit'], 'player.environment.sourceCommit')
     )
     mappedConfigKeys.push('environment')
   }

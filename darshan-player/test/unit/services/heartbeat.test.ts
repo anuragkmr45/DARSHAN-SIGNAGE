@@ -188,6 +188,11 @@ describe('Heartbeat Service', () => {
       is_charging: true,
       power_source: 'AC',
     })
+    expect(payload.realtime_diagnostics).to.include({
+      connection_state: 'OFFLINE',
+      reconnect_count: 0,
+      reconciliation_failure_count: 0,
+    })
     expect(payload.displays).to.deep.equal([
       {
         id: '1',

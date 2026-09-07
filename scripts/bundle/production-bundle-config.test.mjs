@@ -361,6 +361,9 @@ test('generated player configs carry the centrally validated webpage policy', ()
   assert.match(playerWriter, /"webpageAllowedCidrs": \$webpage_cidrs_json/)
   assert.match(playerWriter, /"webpageAllowedPorts": \$webpage_ports_json/)
   assert.match(playerWriter, /"webpageAllowHttp": \$WEBPAGE_ALLOW_HTTP/)
+  assert.match(playerWriter, /"releaseId": "\$DARSHAN_RELEASE_ID"/)
+  assert.match(playerWriter, /"sourceCommit": "\$PLAYER_SOURCE_COMMIT"/)
+  assert.match(assembler, /Could not derive one verified player source commit/)
 })
 
 test('production observability deploys every static exporter target from signed role images', () => {

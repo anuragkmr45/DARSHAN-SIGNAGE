@@ -92,6 +92,22 @@ const formatMegabytes = (value?: number | null) =>
 const formatGigabytes = (value?: number | null) =>
   typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} GB` : "N/A";
 
+const getRealtimeConnectionLabel = (value?: string) => {
+  switch (value) {
+    case "WSS_HEALTHY": return "WSS healthy";
+    case "REST_FALLBACK": return "REST fallback";
+    case "VERSION_MISMATCH": return "Version mismatch";
+    case "OFFLINE": return "Offline";
+    default: return "Not reported";
+  }
+};
+
+const getRealtimeConnectionBadgeClass = (value?: string) => {
+  if (value === "WSS_HEALTHY") return "border-emerald-500 text-emerald-700";
+  if (value === "REST_FALLBACK") return "border-amber-500 text-amber-700";
+  return "border-red-500 text-red-700";
+};
+
 function TelemetryField({
   label,
   value,
@@ -292,7 +308,16 @@ export function ScreenDetailsModal({
   const nowPlayingError = nowPlayingQuery.error instanceof ApiError ? nowPlayingQuery.error : null;
   const availability = availabilityQuery.data;
   const snapshot = snapshotQuery.data;
-  const deliveryStatus = deliveryStatusQuery.data;
+  // Delivery diagnostics may be absent while a backend is being upgraded. Do
+  // not let an incomplete optional diagnostics response take down the whole
+  // screen-details modal; expose its existing unavailable state instead.
+  const deliveryStatus =
+    deliveryStatusQuery.data?.commands &&
+    Array.isArray(deliveryStatusQuery.data.commands.recent) &&
+    deliveryStatusQuery.data?.outbox &&
+    Array.isArray(deliveryStatusQuery.data.outbox.recent)
+      ? deliveryStatusQuery.data
+      : undefined;
   const mediaCacheReports = mediaCacheReportsQuery.data?.reports ?? [];
   const snapshotRefetch = snapshotQuery.refetch;
   const latestPreview = snapshot?.preview ?? nowPlaying?.preview ?? null;
@@ -794,6 +819,34 @@ export function ScreenDetailsModal({
                           <TelemetryField label="CPU cores" value={telemetry.cpu_cores ? String(telemetry.cpu_cores) : "N/A"} />
                           <TelemetryField label="Load avg" value={[telemetry.cpu_load_1m, telemetry.cpu_load_5m, telemetry.cpu_load_15m].some((value) => typeof value === "number") ? `${formatNumber(telemetry.cpu_load_1m, 2)} / ${formatNumber(telemetry.cpu_load_5m, 2)} / ${formatNumber(telemetry.cpu_load_15m, 2)}` : "N/A"} />
                         </div>
+
+                        <Card className="border-dashed p-3" data-testid="screen-realtime-diagnostics">
+                          <div className="mb-2 flex items-center gap-2">
+                            <RadioTower className="h-4 w-4 text-primary" />
+                            <h4 className="font-medium">Realtime delivery</h4>
+                            <Badge
+                              variant="outline"
+                              className={getRealtimeConnectionBadgeClass(telemetry.realtime_diagnostics?.connection_state)}
+                            >
+                              {getRealtimeConnectionLabel(telemetry.realtime_diagnostics?.connection_state)}
+                            </Badge>
+                          </div>
+                          {telemetry.realtime_diagnostics ? (
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                              <TelemetryField label="Release" value={telemetry.realtime_diagnostics.release_id || "Not reported"} />
+                              <TelemetryField label="Backend release" value={telemetry.realtime_diagnostics.server_release_id || "Not reported"} />
+                              <TelemetryField label="Source commit" value={telemetry.realtime_diagnostics.source_commit || "Not reported"} />
+                              <TelemetryField label="HELLO acknowledged" value={formatDateTime(telemetry.realtime_diagnostics.last_hello_ack_at)} />
+                              <TelemetryField label="Last reconciliation" value={formatDateTime(telemetry.realtime_diagnostics.last_reconciliation_at)} />
+                              <TelemetryField label="Last fallback fetch" value={formatDateTime(telemetry.realtime_diagnostics.last_fallback_fetch_at)} />
+                              <TelemetryField label="State version" value={`${telemetry.realtime_diagnostics.applied_state_version ?? "?"} applied / ${telemetry.realtime_diagnostics.observed_state_version ?? "?"} observed`} />
+                              <TelemetryField label="Reconnects" value={String(telemetry.realtime_diagnostics.reconnect_count ?? 0)} />
+                              <TelemetryField label="Reconciliation failures" value={String(telemetry.realtime_diagnostics.reconciliation_failure_count ?? 0)} />
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">This player has not reported realtime delivery diagnostics yet.</p>
+                          )}
+                        </Card>
 
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                           <TelemetryField label="RAM usage" value={formatPercent(telemetry.memory_usage)} />

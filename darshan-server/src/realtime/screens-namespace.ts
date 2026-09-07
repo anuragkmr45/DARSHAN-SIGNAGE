@@ -556,3 +556,14 @@ export function emitScreensRefreshRequired(
   });
   recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:refresh:required');
 }
+
+/**
+ * Notification only: Schedule Queue must re-read its REST data. No request,
+ * screen, or user details are sent over the socket, avoiding a second source
+ * of truth and avoiding cross-department data disclosure.
+ */
+export function emitScheduleRequestsChanged(fastify: FastifyInstance) {
+  const io = getOrCreateSocketServer(fastify);
+  io.of(SCREENS_NAMESPACE).to(screensAllRoom()).emit('schedule-requests:changed');
+  recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'schedule-requests:changed');
+}

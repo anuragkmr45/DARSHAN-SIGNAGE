@@ -171,6 +171,7 @@ describe('device realtime gateway and outbox dispatcher', () => {
       device_id: deviceId,
       session_id: 'test-session',
       protocol_version: '1.0',
+      server_release_id: expect.any(String),
     });
     expect(deviceConnectionRegistry.getConnections(deviceId)).toHaveLength(1);
   });
@@ -200,6 +201,7 @@ describe('device realtime gateway and outbox dispatcher', () => {
       protocol_version: '1.0',
       device_id: deviceId,
       session_id: 'signed-session',
+      server_release_id: expect.any(String),
     });
 
     expect(ack).toMatchObject({

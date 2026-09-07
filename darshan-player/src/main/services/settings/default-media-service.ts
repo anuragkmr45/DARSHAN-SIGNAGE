@@ -39,7 +39,9 @@ export class DefaultMediaService extends EventEmitter {
   private cachePath: string
   private isRunning = false
   private refreshPromise?: Promise<DefaultMediaResponse>
+  private refreshPromiseGeneration?: number
   private lastRefreshSucceeded = false
+  private refreshGeneration = 0
 
   constructor() {
     super()
@@ -94,6 +96,8 @@ export class DefaultMediaService extends EventEmitter {
   }
 
   clearIdentityBoundState(): void {
+    this.refreshGeneration += 1
+    this.lastRefreshSucceeded = false
     const hadMedia = Boolean(this.current.media_id)
     this.current = { source: 'NONE', aspect_ratio: null, media_id: null, media: null }
 
@@ -121,18 +125,24 @@ export class DefaultMediaService extends EventEmitter {
   }
 
   async refreshNow(reason: string): Promise<DefaultMediaResponse> {
-    if (this.refreshPromise) {
+    const generation = this.refreshGeneration
+    if (this.refreshPromise && this.refreshPromiseGeneration === generation) {
       return this.refreshPromise
     }
 
-    this.refreshPromise = this.fetchAndUpdate(reason).finally(() => {
-      this.refreshPromise = undefined
+    const refreshPromise = this.fetchAndUpdate(reason, generation).finally(() => {
+      if (this.refreshPromise === refreshPromise) {
+        this.refreshPromise = undefined
+        this.refreshPromiseGeneration = undefined
+      }
     })
+    this.refreshPromise = refreshPromise
+    this.refreshPromiseGeneration = generation
 
-    return this.refreshPromise
+    return refreshPromise
   }
 
-  private async fetchAndUpdate(reason: string): Promise<DefaultMediaResponse> {
+  private async fetchAndUpdate(reason: string, generation: number): Promise<DefaultMediaResponse> {
     const pairingService = getPairingService()
     const deviceId = pairingService.getDeviceId()
     if (!pairingService.isPairedDevice() || !deviceId) {
@@ -143,7 +153,15 @@ export class DefaultMediaService extends EventEmitter {
     try {
       const settingsClient = getSettingsClient()
       const fetched = await settingsClient.getDefaultMedia(deviceId)
+      if (generation !== this.refreshGeneration) {
+        logger.debug({ generation, reason }, 'Discarding stale default media response before hydration')
+        return this.current
+      }
       const next = await this.hydrateWithCache(fetched)
+      if (generation !== this.refreshGeneration) {
+        logger.debug({ generation, reason }, 'Discarding stale default media refresh result')
+        return this.current
+      }
       const changed = this.hasChanged(this.current, next)
 
       this.current = next
@@ -165,6 +183,10 @@ export class DefaultMediaService extends EventEmitter {
       )
       return next
     } catch (error) {
+      if (generation !== this.refreshGeneration) {
+        logger.debug({ generation, reason }, 'Discarding stale default media refresh failure')
+        return this.current
+      }
       this.lastRefreshSucceeded = false
       logger.warn({ error, reason }, 'Failed to refresh default media')
       return this.current

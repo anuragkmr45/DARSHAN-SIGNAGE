@@ -120,7 +120,11 @@ function PreviewCard({
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
           <RadioTower className="h-4 w-4" />
-          <span>Preview captured {formatRelativeTime(preview?.captured_at)}</span>
+          <span>
+            {preview?.screenshot_url
+              ? `Preview captured ${formatRelativeTime(preview.captured_at)}`
+              : "No screenshot yet"}
+          </span>
         </div>
       </CardContent>
     </Card>

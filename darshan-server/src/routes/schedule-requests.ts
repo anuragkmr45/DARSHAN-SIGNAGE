@@ -16,6 +16,7 @@ import { AppError } from '@/utils/app-error';
 import { canAccessOwnedResource, getDepartmentUserIds, isAdminLike, isDepartmentScopedRole } from '@/rbac/policy';
 import { createScheduleReservationService } from '@/services/scheduling/reservation-service';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
+import { emitScheduleRequestsChanged } from '@/realtime/screens-namespace';
 
 const logger = createLogger('schedule-request-routes');
 const { CREATED } = HTTP_STATUS;
@@ -590,6 +591,8 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
           return updatedRequest ?? createdRequest;
         });
 
+        emitScheduleRequestsChanged(fastify);
+
         if (include.size === 0) {
           return reply.status(CREATED).send({
             id: created.id,
@@ -789,6 +792,8 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
           .where(eq(schema.scheduleRequests.id, req.id))
           .returning();
 
+        emitScheduleRequestsChanged(fastify);
+
         return reply.send({
           id: updated.id,
           schedule_id: updated.schedule_id,
@@ -900,6 +905,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             .where(eq(schema.scheduleRequests.id, req.id));
           return row;
         });
+        emitScheduleRequestsChanged(fastify);
         return reply.send({
           id: updated!.id,
           status: updated!.status,
@@ -983,6 +989,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
           publishId: publishResult.publish.id,
           snapshotId: publishResult.snapshot.id,
         });
+        emitScheduleRequestsChanged(fastify);
 
         const aspectOverride = publishData.aspect_override;
         if (aspectOverride?.acknowledged && aspectOverride.issue_hash) {
@@ -1051,6 +1058,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
           );
         });
         const updated = await repo.findById(req.id);
+        emitScheduleRequestsChanged(fastify);
         return reply.send({
           id: updated!.id,
           status: updated!.status,
@@ -1106,6 +1114,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         });
 
         const updated = await repo.findById(req.id);
+        emitScheduleRequestsChanged(fastify);
         return reply.send({
           id: updated!.id,
           status: updated!.status,
@@ -1161,6 +1170,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         }
 
         const updated = await repo.findById(req.id);
+        emitScheduleRequestsChanged(fastify);
         return reply.send({
           id: updated!.id,
           status: updated!.status,

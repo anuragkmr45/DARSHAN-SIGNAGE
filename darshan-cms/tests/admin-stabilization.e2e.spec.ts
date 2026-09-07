@@ -484,11 +484,15 @@ test.describe("admin stabilization surfaces", () => {
     await expect(page.getByRole("button", { name: /test connection/i })).toHaveCount(0);
     await page.locator("#issuer").fill("https://issuer.updated.test");
     await page.getByRole("button", { name: /save configuration/i }).click();
+    await expect(page.getByText("Configuration saved", { exact: true })).toBeVisible();
     await page.reload();
+    await expect(page.getByRole("heading", { name: "SSO / OIDC Configuration", exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.locator("#issuer")).toHaveValue("https://issuer.updated.test");
     await page.getByRole("button", { name: /disconnect/i }).click();
+    await expect(page.getByText("Configuration deactivated", { exact: true })).toBeVisible();
     await page.reload();
-    await expect(page.getByText("Active")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "SSO / OIDC Configuration", exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Active", { exact: true })).toHaveCount(0);
 
     await page.goto("/requests");
     await expect(page.getByText("Front desk announcement")).toBeVisible();

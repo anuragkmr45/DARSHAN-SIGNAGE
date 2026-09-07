@@ -285,6 +285,46 @@ groups:
           summary: "Realtime fanout fallback rate is elevated"
           description: "Players are relying on durable DB/REST/polling fallback because Valkey fanout is unavailable or device-node mappings are missing."
 
+      - alert: DARSHANRealtimeExpectedDeviceConnectionsMissing
+        expr: darshan:fleet_total_players >= 1 and sum by (site) (darshan_server_realtime_socket_connections{namespace="/device"}) == 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "No expected player realtime connections are present"
+          description: "The fleet has known players but no active /device WebSocket connections. Players should enter bounded REST fallback; investigate TLS, proxy Upgrade forwarding, and network reachability."
+
+      - alert: DARSHANRealtimeReconnectStorm
+        expr: darshan:realtime_device_disconnect_rate_per_second > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Player realtime reconnect storm detected"
+          description: "Device Socket.IO disconnects have exceeded 30 per minute for 10 minutes. Investigate network instability, proxy restarts, and backend saturation."
+
+      - alert: DARSHANRealtimeFallbackPlayersHigh
+        expr: darshan:player_realtime_fallback_ratio > 0.25
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Too many players are in REST fallback mode"
+          description: "More than 25% of recent player heartbeat diagnostics report REST fallback instead of healthy WSS."
+
+      - alert: DARSHANMixedPlayerReleaseIds
+        expr: darshan:player_release_mismatch_rate_per_second > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Player release differs from the backend release"
+          description: "Recent player heartbeat diagnostics report a player release ID different from the installed backend release. Verify source-free artifact provenance and staged rollout status."
+
       - alert: DARSHANRealtimeAuthFailuresHigh
         expr: sum by (site) (rate(darshan_server_device_realtime_auth_total{result="failure"}[5m])) > 0.5
         for: 10m

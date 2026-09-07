@@ -819,6 +819,20 @@ export interface ScreenStatus {
       battery_percent?: number;
       is_charging?: boolean;
       power_source?: "AC" | "BATTERY" | "USB" | "UNKNOWN";
+      realtime_diagnostics?: {
+        release_id?: string;
+        source_commit?: string;
+        server_release_id?: string;
+        connection_state?: "WSS_HEALTHY" | "REST_FALLBACK" | "OFFLINE" | "VERSION_MISMATCH";
+        last_hello_ack_at?: string;
+        last_event_at?: string;
+        last_reconciliation_at?: string;
+        last_fallback_fetch_at?: string;
+        observed_state_version?: number;
+        applied_state_version?: number;
+        reconnect_count?: number;
+        reconciliation_failure_count?: number;
+      };
       metrics?: Record<string, unknown>;
     } | null;
   } | null;

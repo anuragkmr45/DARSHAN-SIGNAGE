@@ -154,6 +154,8 @@ export class ConfigManager {
         name: envValue('DARSHAN_ENVIRONMENT_NAME', 'SIGNHEX_ENVIRONMENT_NAME'),
         deploymentId: envValue('DARSHAN_DEPLOYMENT_ID', 'SIGNHEX_DEPLOYMENT_ID'),
         expectedServerId: envValue('DARSHAN_EXPECTED_SERVER_ID', 'SIGNHEX_EXPECTED_SERVER_ID'),
+        releaseId: envValue('DARSHAN_RELEASE_ID', 'SIGNHEX_RELEASE_ID'),
+        sourceCommit: envValue('DARSHAN_SOURCE_COMMIT', 'SIGNHEX_SOURCE_COMMIT'),
       },
       runtime: {
         mode: runtimeMode,
@@ -497,6 +499,12 @@ export class ConfigManager {
     }
     if (envPresent('DARSHAN_EXPECTED_SERVER_ID', 'SIGNHEX_EXPECTED_SERVER_ID')) {
       environment.expectedServerId = envValue('DARSHAN_EXPECTED_SERVER_ID', 'SIGNHEX_EXPECTED_SERVER_ID')
+    }
+    if (envPresent('DARSHAN_RELEASE_ID', 'SIGNHEX_RELEASE_ID')) {
+      environment.releaseId = envValue('DARSHAN_RELEASE_ID', 'SIGNHEX_RELEASE_ID')
+    }
+    if (envPresent('DARSHAN_SOURCE_COMMIT', 'SIGNHEX_SOURCE_COMMIT')) {
+      environment.sourceCommit = envValue('DARSHAN_SOURCE_COMMIT', 'SIGNHEX_SOURCE_COMMIT')
     }
     if (Object.values(environment).some(Boolean)) overrides.environment = environment
 

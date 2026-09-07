@@ -81,13 +81,19 @@ export function AppSettingsBootstrap() {
 
   useEffect(() => {
     if (!appearance) return;
-    setTheme(appearance.theme_mode);
+    if (appearance.theme_mode) {
+      setTheme(appearance.theme_mode);
+    }
     const root = document.documentElement;
-    const preset = ACCENT_PRESETS[appearance.accent_preset];
+    // Appearance is operational configuration and can be absent or partial
+    // during an upgrade. It must never blank the authenticated application.
+    const preset = ACCENT_PRESETS[appearance.accent_preset] ?? ACCENT_PRESETS.crimson;
     Object.entries(preset).forEach(([key, value]) => {
       root.style.setProperty(key, value);
     });
-    root.dataset.sidebarMode = appearance.sidebar_mode;
+    if (appearance.sidebar_mode) {
+      root.dataset.sidebarMode = appearance.sidebar_mode;
+    }
   }, [appearance, setTheme]);
 
   return null;

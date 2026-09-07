@@ -1,4 +1,4 @@
-import { Bell, LogOut, Radio } from "lucide-react";
+import { Bell, LogOut, Radio, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
@@ -96,6 +96,16 @@ export function AppHeader() {
           </div>
 
           <div className="order-1 ml-auto flex shrink-0 items-center gap-2 lg:order-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative"
+              aria-label="Global search unavailable"
+              title="Global search is not available yet"
+              disabled
+            >
+              <Search className="h-5 w-5" />
+            </Button>
             <Button
               variant="ghost"
               size="icon"

@@ -19,6 +19,15 @@ export default defineConfig(({ mode }) => ({
   build: {
     sourcemap: false,
     minify: "esbuild",
+    manifest: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          query: ["@tanstack/react-query", "@reduxjs/toolkit", "react-redux", "redux-persist"],
+        },
+      },
+    },
   },
   esbuild: {
     drop: mode === "production" ? ["debugger"] : [],

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Plus, Calendar, Clock, Zap, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import type { ScheduleRequestListItem } from "@/api/types";
 import { useAppSelector } from "@/store/hooks";
 import { canManageEmergency } from "@/lib/access";
 import { useDebounce } from "@/hooks/use-debounce";
+import { useScreensRealtime } from "@/hooks/screens/useScreensRealtime";
 
 const PAGE_SIZE = 10;
 
@@ -88,6 +89,7 @@ const toEndOfDayIso = (value: string) => (value ? new Date(`${value}T23:59:59.99
 
 export default function ScheduleQueue() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const currentUser = useAppSelector((state) => state.auth.user);
   const showEmergencyTakeover = canManageEmergency(currentUser);
@@ -120,6 +122,23 @@ export default function ScheduleQueue() {
     }),
     [debouncedSearchQuery, dateField, dateFromIso, dateToIso],
   );
+
+  const invalidateScheduleData = useCallback(() => {
+    // Publish, take-down, emergency and default-media changes are emitted on
+    // the authorized screens namespace. Refresh the schedule views from the
+    // API rather than trusting a notification payload as business state.
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["schedule-requests"] }),
+      queryClient.invalidateQueries({ queryKey: ["device-schedule"] }),
+    ]);
+  }, [queryClient]);
+
+  useScreensRealtime({
+    enabled: Boolean(currentUser),
+    syncMode: "invalidate",
+    onRefreshRequired: invalidateScheduleData,
+    onScheduleRequestsChanged: invalidateScheduleData,
+  });
 
   const summaryQuery = useQuery({
     queryKey: queryKeys.scheduleRequestSummary(sharedFilters),

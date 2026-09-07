@@ -95,6 +95,28 @@ groups:
           sum by (site) (
             rate(darshan_server_device_commands_claimed_total{source="poll"}[5m])
           )
+      - record: darshan:realtime_device_disconnect_rate_per_second
+        expr: |
+          sum by (site) (
+            rate(darshan_server_realtime_socket_disconnect_total{namespace="/device"}[5m])
+          )
+      - record: darshan:player_realtime_fallback_ratio
+        expr: |
+          sum by (site) (
+            rate(darshan_server_player_realtime_diagnostics_total{connection_state="REST_FALLBACK"}[5m])
+          )
+          /
+          clamp_min(
+            sum by (site) (
+              rate(darshan_server_player_realtime_diagnostics_total[5m])
+            ),
+            1
+          )
+      - record: darshan:player_release_mismatch_rate_per_second
+        expr: |
+          sum by (site) (
+            rate(darshan_server_player_realtime_diagnostics_total{player_release_alignment="mismatch"}[5m])
+          )
       - record: darshan:device_command_ack_failure_ratio
         expr: |
           sum by (site) (

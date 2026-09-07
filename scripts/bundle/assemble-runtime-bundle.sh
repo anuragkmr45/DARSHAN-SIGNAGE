@@ -323,7 +323,9 @@ stage_player_bundle() {
     "environment": {
       "name": "$runtime_mode",
       "deploymentId": "$SITE_NAME",
-      "expectedServerId": "backend-$SITE_NAME"
+      "expectedServerId": "backend-$SITE_NAME",
+      "releaseId": "$DARSHAN_RELEASE_ID",
+      "sourceCommit": "$PLAYER_SOURCE_COMMIT"
     },
     "backend": {
       "baseUrl": "$endpoint_scheme://$backend_host:$endpoint_port",
@@ -1794,6 +1796,22 @@ if profile_enabled production && [[ -n "$SERVER_PACKAGE_DIR" && -n "$CMS_PACKAGE
   node "$PLATFORM_ROOT/scripts/bundle/verify-package-provenance.mjs" \
     --release "$DARSHAN_RELEASE_ID" --server "$SERVER_PACKAGE_DIR" --cms "$CMS_PACKAGE_DIR" \
     --player "$PLAYER_ARTIFACTS_DIR" --platforms "$PLAYER_TARGET_PLATFORMS"
+fi
+
+# The verified player manifest is the source of runtime build identity. The
+# assembly checkout itself may not be the native builder that produced it.
+PLAYER_SOURCE_COMMIT=""
+if profile_enabled production; then
+  PLAYER_SOURCE_COMMIT="$(node -e '
+    const fs = require("fs"); const path = require("path");
+    const root = process.argv[1]; const manifests = [];
+    const walk = (dir) => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const target = path.join(dir, entry.name); if (entry.isDirectory()) walk(target); else if (entry.name === "ARTIFACT_MANIFEST.json") manifests.push(target); } };
+    walk(root); const commits = new Set(manifests.map((file) => JSON.parse(fs.readFileSync(file, "utf8")).sourceCommit).filter((value) => typeof value === "string" && /^[0-9a-f]{40}$/i.test(value)));
+    if (commits.size !== 1) process.exit(2); process.stdout.write([...commits][0]);
+  ' "$PLAYER_ARTIFACTS_DIR")" || {
+    echo "Could not derive one verified player source commit from $PLAYER_ARTIFACTS_DIR." >&2
+    exit 1
+  }
 fi
 
 CMS_QA_ORIGIN=""

@@ -384,13 +384,13 @@ export default function Dashboard() {
   const machineSummaries = observabilityOverview?.machines ?? [];
   const observabilityGrafanaLinks = observabilityOverview?.grafana?.links;
   const machineTelemetryUnavailable =
-    !isObservabilityLoading && observabilityOverview?.alerts.available === false;
-  const observabilityAvailable = observabilityOverview?.alerts.available === true;
-  const fleetTotalPlayers = observabilityOverview?.fleet.total_players;
+    !isObservabilityLoading && observabilityOverview?.alerts?.available === false;
+  const observabilityAvailable = observabilityOverview?.alerts?.available === true;
+  const fleetTotalPlayers = observabilityOverview?.fleet?.total_players;
   const hasFleetData = hasMetricNumber(fleetTotalPlayers);
   const hasRegisteredPlayers = hasMetricNumber(fleetTotalPlayers) && fleetTotalPlayers > 0;
-  const playerTargetsReachable = observabilityOverview?.fleet.reachable_players;
-  const playerTargetsConfigured = observabilityOverview?.fleet.configured_player_targets;
+  const playerTargetsReachable = observabilityOverview?.fleet?.reachable_players;
+  const playerTargetsConfigured = observabilityOverview?.fleet?.configured_player_targets;
   const hasPlayerScrapeTargets = hasMetricNumber(playerTargetsConfigured) && playerTargetsConfigured > 0;
 
   const kpiData = useMemo(() => {
@@ -506,11 +506,11 @@ export default function Dashboard() {
       });
     }
 
-    if ((observabilityOverview?.alerts.firing ?? 0) > 0) {
+    if ((observabilityOverview?.alerts?.firing ?? 0) > 0) {
       items.push({
         id: "observability-alerts",
-        type: observabilityOverview?.alerts.highest_severity === "critical" ? "error" : "warning",
-        message: `${observabilityOverview?.alerts.firing ?? 0} observability alert${(observabilityOverview?.alerts.firing ?? 0) === 1 ? "" : "s"} currently firing`,
+        type: observabilityOverview?.alerts?.highest_severity === "critical" ? "error" : "warning",
+        message: `${observabilityOverview?.alerts?.firing ?? 0} observability alert${(observabilityOverview?.alerts?.firing ?? 0) === 1 ? "" : "s"} currently firing`,
         action: "Open Grafana",
         onClick: () => {
           if (observabilityGrafanaLinks?.players_fleet) {
@@ -521,7 +521,7 @@ export default function Dashboard() {
     }
 
     return items;
-  }, [offlineScreens, observabilityGrafanaLinks?.players_fleet, observabilityOverview?.alerts.firing, observabilityOverview?.alerts.highest_severity, quotaPercent, navigate]);
+  }, [offlineScreens, observabilityGrafanaLinks?.players_fleet, observabilityOverview?.alerts?.firing, observabilityOverview?.alerts?.highest_severity, quotaPercent, navigate]);
 
   const onlineScreens = screensMetrics.online_last_5m ?? screensMetrics.online ?? 0;
   const longOfflineCount = offlineScreens?.count ?? 0;
@@ -673,7 +673,7 @@ export default function Dashboard() {
                   {isObservabilityLoading
                     ? "Loading fleet state"
                     : hasRegisteredPlayers
-                      ? `Active ${observabilityOverview?.fleet.active_players ?? 0} · Offline ${observabilityOverview?.fleet.offline_players ?? 0}`
+                      ? `Active ${observabilityOverview?.fleet?.active_players ?? 0} · Offline ${observabilityOverview?.fleet?.offline_players ?? 0}`
                       : hasFleetData
                         ? "No players registered"
                         : observabilityAvailable
@@ -703,10 +703,10 @@ export default function Dashboard() {
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Alert state</p>
                 <div className="mt-1 flex items-center gap-2">
-                  <Badge variant="outline" className={observabilityOverview ? getMachineStatusTone(observabilityOverview.alerts.status) : "border-slate-400 text-slate-700"}>
-                    {isObservabilityLoading ? "Loading..." : observabilityOverview?.alerts.status ?? "unknown"}
+                  <Badge variant="outline" className={observabilityOverview?.alerts ? getMachineStatusTone(observabilityOverview.alerts.status) : "border-slate-400 text-slate-700"}>
+                    {isObservabilityLoading ? "Loading..." : observabilityOverview?.alerts?.status ?? "unknown"}
                   </Badge>
-                  <span className="text-sm font-medium">{observabilityOverview?.alerts.firing ?? 0} firing</span>
+                  <span className="text-sm font-medium">{observabilityOverview?.alerts?.firing ?? 0} firing</span>
                 </div>
               </div>
               <div className="rounded-lg border p-3">

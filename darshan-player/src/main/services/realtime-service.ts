@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto'
 import WebSocket from 'ws'
 import { getConfigManager } from '../../common/config'
 import { getLogger } from '../../common/logger'
-import { CommandType } from '../../common/types'
+import { CommandType, PlayerRealtimeDiagnostics } from '../../common/types'
 import { ExponentialBackoff } from '../../common/utils'
 import { DEVICE_SOCKET_AUTH_VERSION, getCertificateManager } from './cert-manager'
 import { getCommandProcessor } from './command-processor'
@@ -333,6 +333,14 @@ export class RealtimeService extends EventEmitter {
   private readonly reconnectBackoff: ExponentialBackoff
   private readonly degradedStateBackoff: ExponentialBackoff
   private readonly signedAuthFallbackLogs = new Set<SocketAuthFallbackReason>()
+  private lastHelloAckAt?: string
+  private lastEventAt?: string
+  private lastReconciliationAt?: string
+  private lastFallbackFetchAt?: string
+  private reconnectCount = 0
+  private reconciliationFailureCount = 0
+  private serverReleaseId?: string
+  private releaseMismatch = false
 
   constructor(transport?: RealtimeTransport) {
     super()
@@ -401,11 +409,50 @@ export class RealtimeService extends EventEmitter {
     return this.state === 'connected' && this.transport?.isConnected() === true
   }
 
+  /**
+   * Returns bounded, non-secret delivery evidence for the normal heartbeat.
+   * The backend persists this with telemetry and CMS reads it from the latest
+   * heartbeat; it must never be used as playback authority.
+   */
+  getDiagnostics(): PlayerRealtimeDiagnostics {
+    const config = getConfigManager().getConfig()
+    const deviceState = getDeviceStateStore().getState()
+    const observed = deviceState.lastObservedStateVersion ?? deviceState.lastDesiredStateVersion
+    const applied = deviceState.lastAppliedStateVersion ?? deviceState.lastDesiredStateVersion
+    const hasVersionMismatch =
+      this.releaseMismatch ||
+      (typeof observed === 'number' && typeof applied === 'number' && observed > applied)
+    const connectionState = hasVersionMismatch
+      ? 'VERSION_MISMATCH'
+      : this.isHealthy()
+        ? 'WSS_HEALTHY'
+        : this.started
+          ? 'REST_FALLBACK'
+          : 'OFFLINE'
+
+    return {
+      release_id: config.environment?.releaseId,
+      source_commit: config.environment?.sourceCommit,
+      server_release_id: this.serverReleaseId,
+      connection_state: connectionState,
+      last_hello_ack_at: this.lastHelloAckAt,
+      last_event_at: this.lastEventAt,
+      last_reconciliation_at: this.lastReconciliationAt,
+      last_fallback_fetch_at: this.lastFallbackFetchAt,
+      observed_state_version: observed,
+      applied_state_version: applied,
+      reconnect_count: this.reconnectCount,
+      reconciliation_failure_count: this.reconciliationFailureCount,
+    }
+  }
+
   async handleNotification(notification: RealtimeNotification): Promise<void> {
     if (!this.isValidNotification(notification)) {
       logger.warn({ type: notification?.type }, 'Ignoring invalid realtime notification')
       return
     }
+
+    this.lastEventAt = new Date().toISOString()
 
     switch (notification.type) {
       case 'COMMAND_AVAILABLE':
@@ -464,6 +511,9 @@ export class RealtimeService extends EventEmitter {
     }
 
     try {
+      if (!this.isHealthy()) {
+        this.lastFallbackFetchAt = new Date().toISOString()
+      }
       const desired = await getHttpClient().get<DesiredStateResponse>(`/api/v1/device/${deviceId}/desired-state`, {
         retryPolicy: {
           maxAttempts: 3,
@@ -477,8 +527,10 @@ export class RealtimeService extends EventEmitter {
       }
 
       await this.applyDesiredState(desired, reason)
+      this.lastReconciliationAt = new Date().toISOString()
       return desired
     } catch (error) {
+      this.reconciliationFailureCount += 1
       logger.warn({ error, reason }, 'Desired-state reconciliation failed')
       return null
     }
@@ -493,6 +545,7 @@ export class RealtimeService extends EventEmitter {
     this.transport = transport
     this.bindTransport(transport)
     this.state = 'connecting'
+    this.reconnectCount += 1
 
     try {
       await transport.connect()
@@ -651,13 +704,21 @@ export class RealtimeService extends EventEmitter {
     }, 10000)
   }
 
-  private async handleHelloAck(_notification: RealtimeNotification): Promise<void> {
+  private async handleHelloAck(notification: RealtimeNotification): Promise<void> {
     if (this.helloAckTimer) {
       clearTimeout(this.helloAckTimer)
       this.helloAckTimer = undefined
     }
 
     this.state = 'connected'
+    this.lastHelloAckAt = new Date().toISOString()
+    this.serverReleaseId =
+      typeof notification['server_release_id'] === 'string' ? notification['server_release_id'] : undefined
+    const playerReleaseId = getConfigManager().getConfig().environment?.releaseId
+    this.releaseMismatch = Boolean(playerReleaseId && this.serverReleaseId && playerReleaseId !== this.serverReleaseId)
+    if (this.releaseMismatch) {
+      logger.warn({ playerReleaseId, serverReleaseId: this.serverReleaseId }, 'Player and backend release identities differ')
+    }
     getCommandProcessor().setRealtimeHealthy(true)
     await getDeviceStateStore().update({ lastRealtimeConnectedAt: new Date().toISOString() })
     await this.reconcileDesiredState('realtime-connected')

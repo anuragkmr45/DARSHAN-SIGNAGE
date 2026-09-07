@@ -55,6 +55,14 @@ tests:
         values: "0+1x21"
       - series: 'darshan_server_device_commands_claimed_total{source="poll",site="dev"}'
         values: "0+2x21"
+      - series: 'darshan_server_realtime_socket_connections{namespace="/device",site="dev"}'
+        values: "0+0x21"
+      - series: 'darshan_server_realtime_socket_disconnect_total{namespace="/device",reason="transport_close",site="dev"}'
+        values: "0+60x21"
+      - series: 'darshan_server_player_realtime_diagnostics_total{connection_state="WSS_HEALTHY",player_release_alignment="match",server_release_alignment="match",site="dev"}'
+        values: "0+100x21"
+      - series: 'darshan_server_player_realtime_diagnostics_total{connection_state="REST_FALLBACK",player_release_alignment="mismatch",server_release_alignment="mismatch",site="dev"}'
+        values: "0+100x21"
       - series: 'darshan_server_device_realtime_auth_total{result="failure",reason="Missing device identity",site="dev"}'
         values: "0+60x21"
       - series: 'darshan_server_device_command_acks_total{result="success",site="dev"}'
@@ -191,6 +199,50 @@ tests:
             exp_annotations:
               summary: "Realtime notification payload rejected"
               description: "One or more websocket notification payloads exceeded the configured hard limit."
+      - eval_time: 20m
+        alertname: DARSHANRealtimeExpectedDeviceConnectionsMissing
+        exp_alerts:
+          - exp_labels:
+              alertname: DARSHANRealtimeExpectedDeviceConnectionsMissing
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "No expected player realtime connections are present"
+              description: "The fleet has known players but no active /device WebSocket connections. Players should enter bounded REST fallback; investigate TLS, proxy Upgrade forwarding, and network reachability."
+      - eval_time: 20m
+        alertname: DARSHANRealtimeReconnectStorm
+        exp_alerts:
+          - exp_labels:
+              alertname: DARSHANRealtimeReconnectStorm
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Player realtime reconnect storm detected"
+              description: "Device Socket.IO disconnects have exceeded 30 per minute for 10 minutes. Investigate network instability, proxy restarts, and backend saturation."
+      - eval_time: 20m
+        alertname: DARSHANRealtimeFallbackPlayersHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: DARSHANRealtimeFallbackPlayersHigh
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Too many players are in REST fallback mode"
+              description: "More than 25% of recent player heartbeat diagnostics report REST fallback instead of healthy WSS."
+      - eval_time: 20m
+        alertname: DARSHANMixedPlayerReleaseIds
+        exp_alerts:
+          - exp_labels:
+              alertname: DARSHANMixedPlayerReleaseIds
+              severity: warning
+              site: dev
+              team: platform
+            exp_annotations:
+              summary: "Player release differs from the backend release"
+              description: "Recent player heartbeat diagnostics report a player release ID different from the installed backend release. Verify source-free artifact provenance and staged rollout status."
       - eval_time: 20m
         alertname: DARSHANRealtimeAuthFailuresHigh
         exp_alerts:

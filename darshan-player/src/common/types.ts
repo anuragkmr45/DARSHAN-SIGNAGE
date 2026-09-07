@@ -32,6 +32,10 @@ export interface PlayerEnvironmentConfig {
   name?: string
   deploymentId?: string
   expectedServerId?: string
+  /** Immutable source-free release identity, emitted by the bundle assembler. */
+  releaseId?: string
+  /** Full Git commit used to build the packaged player artifact. */
+  sourceCommit?: string
 }
 
 export interface RuntimeConfig {
@@ -617,6 +621,27 @@ export interface HeartbeatPayload {
   battery_percent?: number
   is_charging?: boolean
   power_source?: PowerSource
+  realtime_diagnostics?: PlayerRealtimeDiagnostics
+}
+
+/**
+ * Small, non-secret delivery health report sent with the normal signed
+ * heartbeat. It is intentionally diagnostic only: playback state continues
+ * to be resolved from the authoritative desired-state REST endpoint.
+ */
+export interface PlayerRealtimeDiagnostics {
+  release_id?: string
+  source_commit?: string
+  server_release_id?: string
+  connection_state: 'WSS_HEALTHY' | 'REST_FALLBACK' | 'OFFLINE' | 'VERSION_MISMATCH'
+  last_hello_ack_at?: string
+  last_event_at?: string
+  last_reconciliation_at?: string
+  last_fallback_fetch_at?: string
+  observed_state_version?: number
+  applied_state_version?: number
+  reconnect_count: number
+  reconciliation_failure_count: number
 }
 
 export type RequestQueueCategory = 'heartbeat' | 'screenshot' | 'command-ack' | 'default'

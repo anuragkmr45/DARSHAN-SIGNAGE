@@ -104,6 +104,8 @@ type RealtimeBusNodeMessageResult = 'received' | 'delivered' | 'socket_missing' 
 type DeviceNodeRegistryOperation = 'register' | 'refresh' | 'unregister';
 type DeviceNodeRegistryResult = 'success' | 'error' | 'unavailable';
 type RealtimeBusFallbackReason = 'valkey_unavailable' | 'device_node_missing';
+type PlayerRealtimeConnectionState = 'WSS_HEALTHY' | 'REST_FALLBACK' | 'OFFLINE' | 'VERSION_MISMATCH';
+type PlayerReleaseAlignment = 'match' | 'mismatch' | 'missing';
 type RealtimeSocketAuthResult = 'success' | 'failure';
 type RealtimeSocketNamespace = '/device' | '/screens' | '/chat' | '/notifications' | 'unknown';
 type RealtimeSocketDisconnectReason =
@@ -458,11 +460,20 @@ const websocketConnectionsGauge = new Gauge({
   registers: [registry],
 });
 
+const REALTIME_SOCKET_NAMESPACES = new Set<string>(['/device', '/screens', '/chat', '/notifications']);
+
 const realtimeSocketConnectionsGauge = new Gauge({
   name: 'darshan_server_realtime_socket_connections',
   help: 'Current realtime Socket.IO connections by namespace.',
   labelNames: ['namespace'],
   registers: [registry],
+  collect: function collectRealtimeSocketConnections() {
+    // Include an explicit zero for every known namespace, so alert queries can
+    // detect absent expected device connections immediately after a restart.
+    for (const namespace of REALTIME_SOCKET_NAMESPACES) {
+      this.set({ namespace }, realtimeSocketConnectionCounts.get(namespace) ?? 0);
+    }
+  },
 });
 const realtimeSocketConnectionCounts = new Map<string, number>();
 
@@ -507,7 +518,6 @@ const realtimeSocketAuthCounter = new Counter({
   labelNames: ['namespace', 'result', 'reason'],
   registers: [registry],
 });
-const REALTIME_SOCKET_NAMESPACES = new Set<string>(['/device', '/screens', '/chat', '/notifications']);
 const REALTIME_SOCKET_EVENTS = new Set<string>([
   'HELLO',
   'HELLO_ACK',
@@ -523,6 +533,7 @@ const REALTIME_SOCKET_EVENTS = new Set<string>([
   'screens:state:update',
   'screens:preview:update',
   'screens:refresh:required',
+  'schedule-requests:changed',
   'chat:subscribe',
   'chat:typing',
   'chat:read',
@@ -668,6 +679,13 @@ const realtimeBusFallbackCounter = new Counter({
   name: 'darshan_server_realtime_bus_fallback_total',
   help: 'Realtime wake attempts that relied on DB/REST/polling fallback because fanout was unavailable or no device node was known.',
   labelNames: ['reason'],
+  registers: [registry],
+});
+
+const playerRealtimeDiagnosticsCounter = new Counter({
+  name: 'darshan_server_player_realtime_diagnostics_total',
+  help: 'Player heartbeat delivery diagnostics with bounded state and release-alignment labels.',
+  labelNames: ['connection_state', 'player_release_alignment', 'server_release_alignment'],
   registers: [registry],
 });
 
@@ -1196,6 +1214,25 @@ export function recordDeviceNodeRegistryMiss(provider: RealtimeBusProvider) {
 export function recordRealtimeBusFallback(reason: RealtimeBusFallbackReason) {
   safeRecord(() => {
     realtimeBusFallbackCounter.inc({ reason });
+  });
+}
+
+function getPlayerReleaseAlignment(reportedReleaseId: string | undefined): PlayerReleaseAlignment {
+  if (!reportedReleaseId) return 'missing';
+  return reportedReleaseId === appConfig.DARSHAN_RELEASE_ID ? 'match' : 'mismatch';
+}
+
+export function recordPlayerRealtimeDiagnostics(params: {
+  connectionState: PlayerRealtimeConnectionState;
+  playerReleaseId?: string;
+  serverReleaseId?: string;
+}) {
+  safeRecord(() => {
+    playerRealtimeDiagnosticsCounter.inc({
+      connection_state: params.connectionState,
+      player_release_alignment: getPlayerReleaseAlignment(params.playerReleaseId),
+      server_release_alignment: getPlayerReleaseAlignment(params.serverReleaseId),
+    });
   });
 }
 

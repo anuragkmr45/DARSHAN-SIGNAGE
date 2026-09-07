@@ -35,15 +35,15 @@ function formatDateTime(value?: string | null) {
 function getTotalOrphans(report?: DevicePairingOrphanReport) {
   if (!report) return 0;
   return (
-    report.counts.device_certificates +
-    report.counts.device_pairings +
-    report.counts.heartbeats +
-    report.counts.device_commands
+    (report.counts?.device_certificates ?? 0) +
+    (report.counts?.device_pairings ?? 0) +
+    (report.counts?.heartbeats ?? 0) +
+    (report.counts?.device_commands ?? 0)
   );
 }
 
 function getDuplicateConflictCount(report?: DevicePairingOrphanReport) {
-  return report?.counts.duplicate_identity_conflicts ?? report?.duplicate_identity?.conflicts.length ?? 0;
+  return report?.counts?.duplicate_identity_conflicts ?? report?.duplicate_identity?.conflicts?.length ?? 0;
 }
 
 function getTotalFindings(report?: DevicePairingOrphanReport) {
@@ -54,7 +54,7 @@ function buildRows(report?: DevicePairingOrphanReport): OrphanRow[] {
   if (!report) return [];
 
   return [
-    ...report.orphans.device_certificates.map((row) => ({
+    ...(report.orphans?.device_certificates ?? []).map((row) => ({
       key: `cert-${row.id}`,
       reason: row.reason,
       deviceId: row.screen_id,
@@ -64,7 +64,7 @@ function buildRows(report?: DevicePairingOrphanReport): OrphanRow[] {
       serialSuffix: row.serial_suffix,
       isRevoked: row.is_revoked,
     })),
-    ...report.orphans.device_pairings.map((row) => ({
+    ...(report.orphans?.device_pairings ?? []).map((row) => ({
       key: `pairing-${row.id}`,
       reason: row.reason,
       deviceId: row.device_id,
@@ -72,14 +72,14 @@ function buildRows(report?: DevicePairingOrphanReport): OrphanRow[] {
       detail: row.used ? "Used pairing references a missing screen" : "Open pairing references a missing screen",
       timestamp: row.expires_at || row.created_at,
     })),
-    ...report.orphans.heartbeats.map((row) => ({
+    ...(report.orphans?.heartbeats ?? []).map((row) => ({
       key: `heartbeat-${row.screen_id}`,
       reason: row.reason,
       deviceId: row.screen_id,
       detail: `${row.row_count} heartbeat rows reference a missing screen`,
       timestamp: row.latest_created_at,
     })),
-    ...report.orphans.device_commands.map((row) => ({
+    ...(report.orphans?.device_commands ?? []).map((row) => ({
       key: `command-${row.screen_id}`,
       reason: row.reason,
       deviceId: row.screen_id,
@@ -197,19 +197,19 @@ export function PairingHealthPanel({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-md border p-3">
           <p className="text-xs text-muted-foreground">Certificates</p>
-          <p className="text-xl font-semibold">{report?.counts.device_certificates ?? "—"}</p>
+          <p className="text-xl font-semibold">{report?.counts?.device_certificates ?? "—"}</p>
         </div>
         <div className="rounded-md border p-3">
           <p className="text-xs text-muted-foreground">Pairing records</p>
-          <p className="text-xl font-semibold">{report?.counts.device_pairings ?? "—"}</p>
+          <p className="text-xl font-semibold">{report?.counts?.device_pairings ?? "—"}</p>
         </div>
         <div className="rounded-md border p-3">
           <p className="text-xs text-muted-foreground">Heartbeats</p>
-          <p className="text-xl font-semibold">{report?.counts.heartbeats ?? "—"}</p>
+          <p className="text-xl font-semibold">{report?.counts?.heartbeats ?? "—"}</p>
         </div>
         <div className="rounded-md border p-3">
           <p className="text-xs text-muted-foreground">Commands</p>
-          <p className="text-xl font-semibold">{report?.counts.device_commands ?? "—"}</p>
+          <p className="text-xl font-semibold">{report?.counts?.device_commands ?? "—"}</p>
         </div>
         <div className="rounded-md border p-3">
           <p className="text-xs text-muted-foreground">Duplicate identity</p>

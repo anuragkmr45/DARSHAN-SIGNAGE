@@ -103,10 +103,28 @@ describe('Device telemetry auth runtime validation', () => {
           uptime: 100,
           memory_usage: 10,
           cpu_usage: 5,
+          realtime_diagnostics: {
+            release_id: 'site-a-2026-09-08-r1',
+            source_commit: '0123456789abcdef0123456789abcdef01234567',
+            connection_state: 'WSS_HEALTHY',
+            last_hello_ack_at: '2026-09-08T00:00:00.000Z',
+            observed_state_version: 7,
+            applied_state_version: 7,
+            reconnect_count: 2,
+            reconciliation_failure_count: 0,
+          },
         },
       });
 
       expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      expect(queueHeartbeatSpy.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+        payload: expect.objectContaining({
+          realtime_diagnostics: expect.objectContaining({
+            connection_state: 'WSS_HEALTHY',
+            source_commit: '0123456789abcdef0123456789abcdef01234567',
+          }),
+        }),
+      }));
       const [observation] = await db
         .select()
         .from(schema.deviceAuthRolloutObservations)
