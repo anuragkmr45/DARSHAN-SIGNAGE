@@ -1,4 +1,4 @@
-import { randomUUID, X509Certificate } from 'node:crypto';
+import { generateKeyPairSync, randomUUID, sign, X509Certificate } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import forge from 'node-forge';
@@ -12,6 +12,7 @@ import { DevicePairingRepository } from '@/db/repositories/device-pairing';
 import { ScreenRepository } from '@/db/repositories/screen';
 import { testUser } from '@/test/helpers';
 import { recordDeviceIdentitySession } from '@/services/device-identity-session-service';
+import { capabilityFingerprint } from '@/contracts/native-player';
 
 function buildCsr(options: { deviceId?: string; bits?: number } = {}) {
   const keyPair = forge.pki.rsa.generateKeyPair(options.bits ?? 2048);
@@ -852,5 +853,120 @@ describe('Device Pairing Routes', () => {
       .from(schema.devicePairings)
       .where(eq(schema.devicePairings.id, requestBody.id));
     expect(pairingRow?.used).toBe(false);
+  });
+
+  it('enrolls a native P-256 installation without weakening Electron RSA pairing', async () => {
+    const capabilityManifest = {
+      schema_version: 1,
+      platform: 'ANDROID' as const,
+      os_version: '16',
+      app_version: '1.0.0',
+      build_number: '100',
+      runtime_profile: 'CLOUD_HANDHELD' as const,
+      display: { width: 1920, height: 1080, density: 2, orientation: 'LANDSCAPE' as const },
+      media: {
+        image_mime_types: ['image/jpeg'],
+        video_codecs: ['avc1'],
+        video_containers: ['mp4'],
+        max_concurrent_videos: 1,
+        document_page_images: true,
+      },
+      webpage: { interactive: true, server_capture_fallback: true },
+      storage: { cache_limit_bytes: 1_000_000_000, range_downloads: true, atomic_rename: true },
+      security: { key_algorithm: 'ES256' as const, hardware_backed_key: true, attestation: 'ANDROID_KEY' as const },
+      kiosk: { requested_state: 'STANDARD' as const, enforced_state: 'STANDARD' as const, provider: 'NONE' },
+      screenshots: { supported: true },
+      push: { supported: true },
+      interaction_protocol_version: 0 as const,
+    };
+    const installationId = randomUUID();
+    const requestRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device-pairing/request',
+      payload: {
+        device_label: 'Native Display',
+        expires_in: 600,
+        native_player: {
+          contract_version: '1.0',
+          installation_id: installationId,
+          installation_epoch: 1,
+          runtime_profile: 'CLOUD_HANDHELD',
+          capability_manifest: capabilityManifest,
+          capability_hash: capabilityFingerprint(capabilityManifest),
+        },
+      },
+    });
+    expect(requestRes.statusCode).toBe(HTTP_STATUS.CREATED);
+    const requestBody = JSON.parse(requestRes.body);
+    expect(requestBody.native_enrollment.attestation_challenge).toEqual(expect.any(String));
+    expect(requestBody.specs.device_info.native_player.attestation_challenge).toBeUndefined();
+
+    const confirmRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device-pairing/confirm',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { pairing_code: requestBody.pairing_code, name: 'Native Screen' },
+    });
+    expect(confirmRes.statusCode).toBe(HTTP_STATUS.OK);
+
+    const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const proofPayload = [
+      'DARSHAN_NATIVE_ENROLLMENT_V2',
+      requestBody.id,
+      installationId,
+      '1',
+      requestBody.native_enrollment.attestation_challenge,
+    ].join('\n');
+    const proof = sign('sha256', Buffer.from(proofPayload), keys.privateKey).toString('base64');
+    const completeRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device-pairing/complete',
+      payload: {
+        pairing_code: requestBody.pairing_code,
+        credential_version: 2,
+        installation_id: installationId,
+        installation_epoch: 1,
+        public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+        challenge_proof: proof,
+        attestation: { type: 'ANDROID_KEY', evidence: { pending_server_verification: true } },
+      },
+    });
+    expect(completeRes.statusCode).toBe(HTTP_STATUS.CREATED);
+    const completeBody = JSON.parse(completeRes.body);
+    expect(completeBody.credential.algorithm).toBe('ES256');
+    expect(completeBody.credential.id).toMatch(/^[0-9a-f-]{36}$/);
+
+    const db = getDatabase();
+    const installations = await db
+      .select()
+      .from(schema.deviceInstallations)
+      .where(eq(schema.deviceInstallations.installation_id, installationId));
+    const credentials = await db
+      .select()
+      .from(schema.deviceCredentials)
+      .where(eq(schema.deviceCredentials.installation_id, installationId));
+    const observations = await db
+      .select()
+      .from(schema.deviceCapabilityObservations)
+      .where(eq(schema.deviceCapabilityObservations.installation_id, installationId));
+    expect(installations).toHaveLength(1);
+    expect(installations[0]?.status).toBe('ACTIVE');
+    expect(credentials).toHaveLength(1);
+    expect(credentials[0]?.public_key_pem).toContain('BEGIN PUBLIC KEY');
+    expect(observations).toHaveLength(1);
+
+    const replay = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device-pairing/complete',
+      payload: {
+        pairing_code: requestBody.pairing_code,
+        credential_version: 2,
+        installation_id: installationId,
+        installation_epoch: 1,
+        public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+        challenge_proof: proof,
+      },
+    });
+    expect(replay.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
   });
 });

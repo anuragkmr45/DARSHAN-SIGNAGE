@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { createHash, randomBytes, randomUUID } from 'crypto';
+import { createHash, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'crypto';
 import { readFile } from 'fs/promises';
 import { and, eq } from 'drizzle-orm';
 import { config } from '@/config';
@@ -20,6 +20,12 @@ import { recordPairingCodeAllocation, recordPairingCsrValidation } from '@/obser
 import { detectDevicePairingOrphans } from '@/services/device-pairing-orphan-service';
 import { recordDisplayProfile } from '@/services/screen-display-state-service';
 import { displayProfileV1Schema } from '@/utils/display-profile';
+import {
+  capabilityFingerprint,
+  capabilityManifestV1Schema,
+  NATIVE_PLAYER_CONTRACT_VERSION,
+  runtimeProfileSchema,
+} from '@/contracts/native-player';
 
 const logger = createLogger('device-pairing-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -77,6 +83,101 @@ function redactOperationalIdentifier(value: string) {
   };
 }
 
+function isNativePairingCompletion(
+  value: z.infer<typeof completePairingSchema>
+): value is z.infer<typeof nativeCompletePairingSchema> {
+  return 'credential_version' in value && value.credential_version === 2;
+}
+
+function readNativePairingMetadata(value: unknown) {
+  const parsed = z
+    .object({
+      contract_version: z.literal(NATIVE_PLAYER_CONTRACT_VERSION),
+      installation_id: z.string().uuid(),
+      installation_epoch: z.number().int().positive(),
+      runtime_profile: runtimeProfileSchema,
+      capability_manifest: capabilityManifestV1Schema,
+      capability_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      attestation_challenge: z.string().min(32).max(512),
+    })
+    .strict()
+    .safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function redactNativePairingSecrets(pairingInfo: Record<string, any>) {
+  const result = { ...pairingInfo };
+  const nativePlayer = result.native_player;
+  if (nativePlayer && typeof nativePlayer === 'object' && !Array.isArray(nativePlayer)) {
+    const { attestation_challenge: _challenge, ...safeNativePlayer } = nativePlayer as Record<string, unknown>;
+    result.native_player = safeNativePlayer;
+  }
+  return result;
+}
+
+function buildNativeChallengePayload(params: {
+  pairingId: string;
+  installationId: string;
+  installationEpoch: number;
+  challenge: string;
+}) {
+  return [
+    'DARSHAN_NATIVE_ENROLLMENT_V2',
+    params.pairingId,
+    params.installationId,
+    String(params.installationEpoch),
+    params.challenge,
+  ].join('\n');
+}
+
+function verifyNativeEnrollmentProof(params: {
+  pairingId: string;
+  metadata: NonNullable<ReturnType<typeof readNativePairingMetadata>>;
+  publicKeyPem: string;
+  installationId: string;
+  installationEpoch: number;
+  signature: string;
+}) {
+  if (
+    params.metadata.installation_id !== params.installationId ||
+    params.metadata.installation_epoch !== params.installationEpoch
+  ) {
+    throw AppError.conflict('Native installation identity does not match the pairing request');
+  }
+
+  let publicKey: ReturnType<typeof createPublicKey>;
+  try {
+    publicKey = createPublicKey(params.publicKeyPem);
+  } catch {
+    throw AppError.badRequest('Native credential public key is invalid');
+  }
+
+  const details = publicKey.asymmetricKeyDetails;
+  if (publicKey.asymmetricKeyType !== 'ec' || details?.namedCurve !== 'prime256v1') {
+    throw AppError.badRequest('Native credential must use a P-256 public key');
+  }
+
+  const payload = buildNativeChallengePayload({
+    pairingId: params.pairingId,
+    installationId: params.installationId,
+    installationEpoch: params.installationEpoch,
+    challenge: params.metadata.attestation_challenge,
+  });
+  const signature = Buffer.from(params.signature, 'base64');
+  const isValid = signature.length === 64
+    ? verifySignature('sha256', Buffer.from(payload), { key: publicKey, dsaEncoding: 'ieee-p1363' }, signature)
+    : verifySignature('sha256', Buffer.from(payload), publicKey, signature);
+  if (!signature.length || !isValid) {
+    throw AppError.forbidden('Native enrollment challenge proof is invalid', {
+      reason: 'NATIVE_ENROLLMENT_PROOF_INVALID',
+    });
+  }
+
+  return {
+    publicKeyPem: publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+  };
+}
+
 function getServerIdentity() {
   return {
     environment: config.SIGNHEX_ENVIRONMENT_NAME,
@@ -91,10 +192,57 @@ const generatePairingCodeSchema = z.object({
   expires_in: z.number().int().positive().default(3600), // 1 hour
 });
 
-const completePairingSchema = z.object({
+const legacyCompletePairingSchema = z.object({
   pairing_code: z.string().min(1),
   csr: z.string().min(1), // Certificate Signing Request
 });
+
+const nativePlayerPairingSchema = z
+  .object({
+    contract_version: z.literal(NATIVE_PLAYER_CONTRACT_VERSION),
+    installation_id: z.string().uuid(),
+    installation_epoch: z.number().int().positive().max(2 ** 31 - 1),
+    runtime_profile: runtimeProfileSchema,
+    capability_manifest: capabilityManifestV1Schema,
+    capability_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.runtime_profile !== value.capability_manifest.runtime_profile) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['runtime_profile'],
+        message: 'Native runtime profile must match the capability manifest',
+      });
+    }
+    if (capabilityFingerprint(value.capability_manifest) !== value.capability_hash) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['capability_hash'],
+        message: 'Native capability fingerprint does not match the supplied manifest',
+      });
+    }
+  });
+
+const nativeCompletePairingSchema = z
+  .object({
+    pairing_code: z.string().min(1),
+    credential_version: z.literal(2),
+    installation_id: z.string().uuid(),
+    installation_epoch: z.number().int().positive().max(2 ** 31 - 1),
+    public_key_pem: z.string().trim().min(64).max(8_192),
+    challenge_proof: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).max(2_048),
+    attestation: z
+      .object({
+        type: z.enum(['NONE', 'ANDROID_KEY', 'PLAY_INTEGRITY', 'APP_ATTEST']),
+        evidence: z.unknown().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+const completePairingSchema = z.union([legacyCompletePairingSchema, nativeCompletePairingSchema]);
 
 const requestPairingSchema = z.object({
   device_label: z.string().optional(),
@@ -107,6 +255,7 @@ const requestPairingSchema = z.object({
   codecs: z.array(z.string()).optional(),
   device_info: z.record(z.any()).optional(),
   display_profile_v1: displayProfileV1Schema.optional(),
+  native_player: nativePlayerPairingSchema.optional(),
 });
 
 const pairingStatusQuerySchema = z.object({
@@ -184,7 +333,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     pairing: typeof schema.devicePairings.$inferSelect,
     pairingInfo: Record<string, any>
   ) => {
-    const screenDeviceInfo: Record<string, any> = { ...(pairingInfo || {}) };
+    const screenDeviceInfo: Record<string, any> = redactNativePairingSecrets(pairingInfo || {});
     delete screenDeviceInfo.pairing;
     if (pairing.model && screenDeviceInfo.model == null) screenDeviceInfo.model = pairing.model;
     if (pairing.codecs && screenDeviceInfo.codecs == null) screenDeviceInfo.codecs = pairing.codecs;
@@ -377,6 +526,51 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     };
   };
 
+  const synchronizeScreenFromPairing = async (
+    currentPairing: typeof schema.devicePairings.$inferSelect,
+    executor: any
+  ) => {
+    const { deviceId, pairingInfo, screenName, screenLocation } = validateConfirmedPairing(currentPairing);
+    const existingScreen = await screenRepo.findById(deviceId, executor);
+    const screenDeviceInfo = buildScreenDeviceInfo(currentPairing, pairingInfo);
+    if (!existingScreen) {
+      await screenRepo.create(
+        {
+          id: deviceId,
+          name: screenName,
+          location: screenLocation ?? undefined,
+          aspect_ratio: currentPairing.aspect_ratio ?? null,
+          width: currentPairing.width ?? null,
+          height: currentPairing.height ?? null,
+          orientation: currentPairing.orientation ?? null,
+          device_info: screenDeviceInfo,
+        },
+        executor
+      );
+    } else {
+      await screenRepo.update(
+        deviceId,
+        {
+          name: screenName,
+          location: screenLocation ?? existingScreen.location ?? undefined,
+          aspect_ratio: currentPairing.aspect_ratio ?? existingScreen.aspect_ratio ?? null,
+          width: currentPairing.width ?? existingScreen.width ?? null,
+          height: currentPairing.height ?? existingScreen.height ?? null,
+          orientation: currentPairing.orientation ?? existingScreen.orientation ?? null,
+          device_info:
+            screenDeviceInfo != null
+              ? {
+                  ...((existingScreen.device_info as Record<string, any> | null) ?? {}),
+                  ...screenDeviceInfo,
+                }
+              : existingScreen.device_info ?? null,
+        },
+        executor
+      );
+    }
+    return { deviceId, pairingInfo };
+  };
+
   // Generate pairing code
   fastify.post<{ Body: typeof generatePairingCodeSchema._type }>(
     apiEndpoints.devicePairing.generate,
@@ -474,6 +668,16 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         const data = requestPairingSchema.parse(request.body);
         const deviceId = randomUUID();
         const expiresAt = new Date(Date.now() + data.expires_in * 1000);
+        const requestedDeviceInfo = { ...(data.device_info ?? {}) } as Record<string, unknown>;
+        // The native-player namespace is server-owned so a caller cannot inject
+        // an enrollment challenge through the generic device-info extension.
+        delete requestedDeviceInfo.native_player;
+        const nativeEnrollment = data.native_player
+          ? {
+              ...data.native_player,
+              attestation_challenge: randomBytes(32).toString('base64url'),
+            }
+          : null;
 
         const { pairing, pairingCode } = await createPairingWithRetries(
           {
@@ -486,8 +690,9 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             model: data.model,
             codecs: data.codecs,
             device_info: {
-              ...(data.device_info ?? {}),
+              ...requestedDeviceInfo,
               ...(data.display_profile_v1 ? { display_profile_v1: data.display_profile_v1 } : {}),
+              ...(nativeEnrollment ? { native_player: nativeEnrollment } : {}),
             },
           },
           () => (Math.floor(Math.random() * 900000) + 100000).toString(),
@@ -517,8 +722,19 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             orientation: pairing.orientation ?? null,
             model: pairing.model ?? null,
             codecs: pairing.codecs ?? null,
-            device_info: pairing.device_info ?? null,
+            device_info: redactNativePairingSecrets((pairing.device_info ?? {}) as Record<string, any>),
           },
+          ...(nativeEnrollment
+            ? {
+                native_enrollment: {
+                  contract_version: nativeEnrollment.contract_version,
+                  installation_id: nativeEnrollment.installation_id,
+                  installation_epoch: nativeEnrollment.installation_epoch,
+                  attestation_challenge: nativeEnrollment.attestation_challenge,
+                  supported_hello_versions: ['1.0', '1.1'],
+                },
+              }
+            : {}),
         });
       } catch (error) {
         logger.error(error, 'Device pairing request error');
@@ -558,6 +774,149 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('Invalid or expired pairing code');
         }
         const { deviceId } = validateConfirmedPairing(pairing);
+
+        if (isNativePairingCompletion(data)) {
+          const pairingInfo = (pairing.device_info ?? {}) as Record<string, unknown>;
+          const nativeMetadata = readNativePairingMetadata(pairingInfo.native_player);
+          if (!nativeMetadata) {
+            throw AppError.conflict('This pairing code was not requested by a native player');
+          }
+          const verifiedCredential = verifyNativeEnrollmentProof({
+            pairingId: pairing.id,
+            metadata: nativeMetadata,
+            publicKeyPem: data.public_key_pem,
+            installationId: data.installation_id,
+            installationEpoch: data.installation_epoch,
+            signature: data.challenge_proof,
+          });
+          const now = new Date();
+
+          const nativeResult = await db.transaction(async (tx) => {
+            const currentPairing = await pairingRepo.findActiveById(pairing.id, tx);
+            if (!currentPairing) {
+              throw AppError.conflict('This pairing code is no longer active. Generate a fresh pairing code and try again.');
+            }
+            const currentPairingInfo = (currentPairing.device_info ?? {}) as Record<string, unknown>;
+            const currentNativeMetadata = readNativePairingMetadata(currentPairingInfo.native_player);
+            if (!currentNativeMetadata) {
+              throw AppError.conflict('This pairing no longer has valid native enrollment metadata');
+            }
+            const { deviceId: currentDeviceId, pairingInfo: confirmedPairingInfo } = await synchronizeScreenFromPairing(
+              currentPairing,
+              tx
+            );
+            const consumedPairing = await pairingRepo.markAsUsedIfActive(currentPairing.id, tx);
+            if (!consumedPairing) {
+              throw AppError.conflict('This pairing code is no longer active. Generate a fresh pairing code and try again.');
+            }
+
+            await tx
+              .insert(schema.deviceInstallations)
+              .values({
+                screen_id: currentDeviceId,
+                installation_id: currentNativeMetadata.installation_id,
+                installation_epoch: currentNativeMetadata.installation_epoch,
+                client_kind: 'NATIVE_PLAYER',
+                platform: currentNativeMetadata.capability_manifest.platform,
+                runtime_profile: currentNativeMetadata.runtime_profile,
+                status: 'ACTIVE',
+                capability_hash: currentNativeMetadata.capability_hash,
+                capability_manifest: currentNativeMetadata.capability_manifest,
+                last_seen_at: now,
+                updated_at: now,
+              })
+              .onConflictDoUpdate({
+                target: [schema.deviceInstallations.installation_id, schema.deviceInstallations.installation_epoch],
+                set: {
+                  screen_id: currentDeviceId,
+                  platform: currentNativeMetadata.capability_manifest.platform,
+                  runtime_profile: currentNativeMetadata.runtime_profile,
+                  status: 'ACTIVE',
+                  capability_hash: currentNativeMetadata.capability_hash,
+                  capability_manifest: currentNativeMetadata.capability_manifest,
+                  last_seen_at: now,
+                  updated_at: now,
+                  revoked_at: null,
+                },
+              });
+
+            await tx
+              .update(schema.deviceCredentials)
+              .set({ is_revoked: true, revoked_at: now })
+              .where(
+                and(
+                  eq(schema.deviceCredentials.installation_id, currentNativeMetadata.installation_id),
+                  eq(schema.deviceCredentials.installation_epoch, currentNativeMetadata.installation_epoch),
+                  eq(schema.deviceCredentials.is_revoked, false)
+                )
+              );
+
+            const [credential] = await tx
+              .insert(schema.deviceCredentials)
+              .values({
+                screen_id: currentDeviceId,
+                installation_id: currentNativeMetadata.installation_id,
+                installation_epoch: currentNativeMetadata.installation_epoch,
+                algorithm: 'ES256',
+                public_key_pem: verifiedCredential.publicKeyPem,
+                auth_version: 'signature_v2',
+                trust_level: 'UNVERIFIED',
+                attestation_type: data.attestation?.type ?? null,
+                attestation_evidence: data.attestation?.evidence ?? null,
+              })
+              .returning({ credential_id: schema.deviceCredentials.credential_id, trust_level: schema.deviceCredentials.trust_level });
+
+            await tx
+              .insert(schema.deviceCapabilityObservations)
+              .values({
+                screen_id: currentDeviceId,
+                installation_id: currentNativeMetadata.installation_id,
+                capability_hash: currentNativeMetadata.capability_hash,
+                capability_manifest: currentNativeMetadata.capability_manifest,
+              })
+              .onConflictDoNothing();
+
+            return {
+              deviceId: currentDeviceId,
+              capabilityHash: currentNativeMetadata.capability_hash,
+              runtimeProfile: currentNativeMetadata.runtime_profile,
+              credential,
+              pairingInfo: confirmedPairingInfo,
+            };
+          });
+
+          const pairingProfile = (pairing.device_info as Record<string, unknown> | null)?.display_profile_v1;
+          const parsedPairingProfile = displayProfileV1Schema.safeParse(pairingProfile);
+          if (parsedPairingProfile.success) {
+            await recordDisplayProfile(nativeResult.deviceId, parsedPairingProfile.data);
+          }
+
+          logger.info(
+            {
+              deviceId: nativeResult.deviceId,
+              pairingId: pairing.id,
+              credentialId: redactOperationalIdentifier(nativeResult.credential.credential_id),
+              runtimeProfile: nativeResult.runtimeProfile,
+            },
+            'Native device pairing completed'
+          );
+
+          return reply.status(CREATED).send({
+            success: true,
+            message: 'Native device pairing completed. Credential issued.',
+            device_id: nativeResult.deviceId,
+            installation_id: data.installation_id,
+            installation_epoch: data.installation_epoch,
+            credential: {
+              id: nativeResult.credential.credential_id,
+              auth_version: 'signature_v2',
+              algorithm: 'ES256',
+              trust_level: nativeResult.credential.trust_level,
+            },
+            capability_hash: nativeResult.capabilityHash,
+            runtime_profile: nativeResult.runtimeProfile,
+          });
+        }
 
         const csr = data.csr.trim();
         if (!csr.startsWith('-----BEGIN CERTIFICATE REQUEST-----') || !csr.endsWith('-----END CERTIFICATE REQUEST-----')) {
@@ -609,8 +968,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             throw AppError.conflict('This pairing code is no longer active. Generate a fresh pairing code and try again.');
           }
 
-          const { deviceId: currentDeviceId, pairingInfo, screenName, screenLocation } =
-            validateConfirmedPairing(currentPairing);
+          const { deviceId: currentDeviceId } = validateConfirmedPairing(currentPairing);
 
           const consumedPairing = await pairingRepo.markAsUsedIfActive(currentPairing.id, tx);
           if (!consumedPairing) {
@@ -631,43 +989,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             tx
           );
 
-          const existingScreen = await screenRepo.findById(currentDeviceId, tx);
-          const screenDeviceInfo = buildScreenDeviceInfo(currentPairing, pairingInfo);
-          if (!existingScreen) {
-            await screenRepo.create(
-              {
-                id: currentDeviceId,
-                name: screenName,
-                location: screenLocation ?? undefined,
-                aspect_ratio: currentPairing.aspect_ratio ?? null,
-                width: currentPairing.width ?? null,
-                height: currentPairing.height ?? null,
-                orientation: currentPairing.orientation ?? null,
-                device_info: screenDeviceInfo,
-              },
-              tx
-            );
-          } else {
-            await screenRepo.update(
-              currentDeviceId,
-              {
-                name: screenName,
-                location: screenLocation ?? existingScreen.location ?? undefined,
-                aspect_ratio: currentPairing.aspect_ratio ?? existingScreen.aspect_ratio ?? null,
-                width: currentPairing.width ?? existingScreen.width ?? null,
-                height: currentPairing.height ?? existingScreen.height ?? null,
-                orientation: currentPairing.orientation ?? existingScreen.orientation ?? null,
-                device_info:
-                  screenDeviceInfo != null
-                    ? {
-                        ...((existingScreen.device_info as Record<string, any> | null) ?? {}),
-                        ...screenDeviceInfo,
-                      }
-                    : existingScreen.device_info ?? null,
-              },
-              tx
-            );
-          }
+          await synchronizeScreenFromPairing(currentPairing, tx);
         });
 
         const pairingProfile = (pairing.device_info as Record<string, unknown> | null)?.display_profile_v1;
@@ -955,6 +1277,26 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
           )
           .returning({ id: schema.deviceCertificates.id });
 
+        const revokedNativeCredentials = await db
+          .update(schema.deviceCredentials)
+          .set({
+            is_revoked: true,
+            revoked_at: now,
+            trust_level: 'REVOKED',
+          })
+          .where(
+            and(
+              eq(schema.deviceCredentials.screen_id, deviceId),
+              eq(schema.deviceCredentials.is_revoked, false)
+            )
+          )
+          .returning({ id: schema.deviceCredentials.id });
+
+        await db
+          .update(schema.deviceInstallations)
+          .set({ status: 'REVOKED', revoked_at: now, updated_at: now })
+          .where(eq(schema.deviceInstallations.screen_id, deviceId));
+
         const invalidatedPairings = await db
           .update(schema.devicePairings)
           .set({
@@ -984,6 +1326,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             reason: body.reason,
             noteProvided: Boolean(body.note),
             revokedCertificates: revokedCertificates.length,
+            revokedNativeCredentials: revokedNativeCredentials.length,
             invalidatedPairings: invalidatedPairings.length,
           },
           'Device pairing revoked by admin'
@@ -992,8 +1335,12 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         return reply.status(OK).send({
           device_id: deviceId,
           screen: screen ? { id: screen.id, name: screen.name } : null,
-          status: revokedCertificates.length > 0 ? 'PAIRING_REVOKED' : 'NO_ACTIVE_CREDENTIAL',
+          status:
+            revokedCertificates.length > 0 || revokedNativeCredentials.length > 0
+              ? 'PAIRING_REVOKED'
+              : 'NO_ACTIVE_CREDENTIAL',
           revoked_certificates: revokedCertificates.length,
+          revoked_native_credentials: revokedNativeCredentials.length,
           invalidated_pairings: invalidatedPairings.length,
           recommended_action: 'PAIR_AGAIN',
           server_identity: getServerIdentity(),
@@ -1069,7 +1416,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
               orientation: (p as any).orientation ?? null,
               model: (p as any).model ?? null,
               codecs: (p as any).codecs ?? null,
-              device_info: (p as any).device_info ?? null,
+              device_info: redactNativePairingSecrets(((p as any).device_info ?? {}) as Record<string, any>),
             },
           })),
           pagination: {

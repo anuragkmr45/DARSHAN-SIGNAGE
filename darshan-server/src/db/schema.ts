@@ -614,6 +614,156 @@ export const deviceCertificates = pgTable(
   })
 );
 
+// Additive native-player installation state.  These records deliberately do
+// not replace deviceCertificates: Electron's RSA/mTLS rollout remains on its
+// existing contract while mobile clients use installation-scoped credentials.
+export const deviceInstallations = pgTable(
+  'device_installations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    screen_id: uuid('screen_id').notNull(),
+    installation_id: uuid('installation_id').notNull(),
+    installation_epoch: integer('installation_epoch').notNull().default(1),
+    client_kind: varchar('client_kind', { length: 32 }).notNull(),
+    platform: varchar('platform', { length: 32 }).notNull(),
+    runtime_profile: varchar('runtime_profile', { length: 64 }).notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('PENDING'),
+    capability_hash: varchar('capability_hash', { length: 64 }),
+    capability_manifest: jsonb('capability_manifest'),
+    first_seen_at: timestamp('first_seen_at').notNull().defaultNow(),
+    last_seen_at: timestamp('last_seen_at').notNull().defaultNow(),
+    revoked_at: timestamp('revoked_at'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    installationEpochIdx: uniqueIndex('device_installations_installation_epoch_idx').on(
+      table.installation_id,
+      table.installation_epoch
+    ),
+    screenIdx: index('device_installations_screen_id_idx').on(table.screen_id, table.status),
+    capabilityHashIdx: index('device_installations_capability_hash_idx').on(table.capability_hash),
+  })
+);
+
+export const deviceCredentials = pgTable(
+  'device_credentials',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    credential_id: uuid('credential_id').notNull().defaultRandom(),
+    screen_id: uuid('screen_id').notNull(),
+    installation_id: uuid('installation_id').notNull(),
+    installation_epoch: integer('installation_epoch').notNull(),
+    algorithm: varchar('algorithm', { length: 32 }).notNull(),
+    public_key_pem: text('public_key_pem').notNull(),
+    auth_version: varchar('auth_version', { length: 32 }).notNull().default('signature_v2'),
+    trust_level: varchar('trust_level', { length: 32 }).notNull().default('UNVERIFIED'),
+    attestation_type: varchar('attestation_type', { length: 32 }),
+    attestation_evidence: jsonb('attestation_evidence'),
+    is_revoked: boolean('is_revoked').notNull().default(false),
+    expires_at: timestamp('expires_at'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    rotated_at: timestamp('rotated_at'),
+    revoked_at: timestamp('revoked_at'),
+  },
+  (table) => ({
+    credentialIdIdx: uniqueIndex('device_credentials_credential_id_idx').on(table.credential_id),
+    activeInstallationIdx: index('device_credentials_active_installation_idx').on(
+      table.installation_id,
+      table.installation_epoch,
+      table.is_revoked
+    ),
+    screenIdx: index('device_credentials_screen_id_idx').on(table.screen_id, table.is_revoked),
+  })
+);
+
+export const deviceAuthNonces = pgTable(
+  'device_auth_nonces',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    credential_id: uuid('credential_id').notNull(),
+    nonce: varchar('nonce', { length: 128 }).notNull(),
+    expires_at: timestamp('expires_at').notNull(),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    credentialNonceIdx: uniqueIndex('device_auth_nonces_credential_nonce_idx').on(table.credential_id, table.nonce),
+    expiryIdx: index('device_auth_nonces_expires_at_idx').on(table.expires_at),
+  })
+);
+
+export const deviceCapabilityObservations = pgTable(
+  'device_capability_observations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    screen_id: uuid('screen_id').notNull(),
+    installation_id: uuid('installation_id').notNull(),
+    capability_hash: varchar('capability_hash', { length: 64 }).notNull(),
+    capability_manifest: jsonb('capability_manifest').notNull(),
+    observed_at: timestamp('observed_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    screenObservedIdx: index('device_capability_observations_screen_observed_idx').on(table.screen_id, table.observed_at),
+    installationHashIdx: uniqueIndex('device_capability_observations_installation_hash_idx').on(
+      table.installation_id,
+      table.capability_hash
+    ),
+  })
+);
+
+export const devicePushEndpoints = pgTable(
+  'device_push_endpoints',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    screen_id: uuid('screen_id').notNull(),
+    installation_id: uuid('installation_id').notNull(),
+    provider: varchar('provider', { length: 32 }).notNull(),
+    token: text('token').notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('ACTIVE'),
+    last_seen_at: timestamp('last_seen_at').notNull().defaultNow(),
+    invalidated_at: timestamp('invalidated_at'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    providerTokenIdx: uniqueIndex('device_push_endpoints_provider_token_idx').on(table.provider, table.token),
+    screenStatusIdx: index('device_push_endpoints_screen_status_idx').on(table.screen_id, table.status),
+  })
+);
+
+export const mediaRenditions = pgTable(
+  'media_renditions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    media_id: uuid('media_id').notNull(),
+    source_revision: varchar('source_revision', { length: 128 }).notNull(),
+    role: varchar('role', { length: 64 }).notNull(),
+    state: varchar('state', { length: 32 }).notNull().default('PENDING'),
+    mime_type: varchar('mime_type', { length: 255 }).notNull(),
+    container: varchar('container', { length: 64 }),
+    codecs: varchar('codecs', { length: 128 }).array().notNull().default([]),
+    width: integer('width'),
+    height: integer('height'),
+    frame_rate_milli: integer('frame_rate_milli'),
+    bitrate: integer('bitrate'),
+    size_bytes: bigint('size_bytes', { mode: 'number' }),
+    sha256: varchar('sha256', { length: 64 }),
+    bucket: varchar('bucket', { length: 255 }),
+    object_key: varchar('object_key', { length: 1024 }),
+    required_capabilities: jsonb('required_capabilities').notNull().default({}),
+    page_manifest: jsonb('page_manifest'),
+    capture_expires_at: timestamp('capture_expires_at'),
+    failure_reason: varchar('failure_reason', { length: 120 }),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceRoleIdx: uniqueIndex('media_renditions_source_role_idx').on(table.media_id, table.source_revision, table.role),
+    mediaStateIdx: index('media_renditions_media_state_idx').on(table.media_id, table.state),
+    hashIdx: index('media_renditions_sha256_idx').on(table.sha256),
+  })
+);
+
 // Device commands
 export const deviceCommands = pgTable(
   'device_commands',

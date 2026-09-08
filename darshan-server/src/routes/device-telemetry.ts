@@ -355,6 +355,18 @@ function normalizePairingStatusError(error: unknown) {
     );
   }
 
+  if (reason && reason.startsWith('NATIVE_DEVICE_')) {
+    const replayed = reason === 'NATIVE_DEVICE_SIGNATURE_REPLAYED';
+    return pairingStatusError(
+      replayed ? HTTP_STATUS.FORBIDDEN : HTTP_STATUS.UNAUTHORIZED,
+      reason,
+      replayed
+        ? 'This native request has already been processed. Reconcile player state before retrying.'
+        : 'This native device request could not be verified. Re-pair if the problem continues.',
+      { reason }
+    );
+  }
+
   if (
     error.statusCode === HTTP_STATUS.UNAUTHORIZED ||
     error.statusCode === HTTP_STATUS.FORBIDDEN ||

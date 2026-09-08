@@ -1,6 +1,6 @@
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, lt } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { AppError } from '@/utils/app-error';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
@@ -11,20 +11,54 @@ import { recordDeviceAuthRolloutObservation } from '@/deployment/device-auth-rol
 import {
   hasAnySignatureHeader,
   hasCompleteSignatureHeaders,
+  hasCompleteNativeSignatureHeaders,
   parseDeviceRequestSignatureHeaders,
   resolveDeviceAuthMode,
   resolveDeviceAuthSignatureMaxSkewSeconds,
   verifyDeviceRequestSignature,
+  verifyNativeDeviceRequestSignature,
 } from '@/utils/device-request-auth';
 
 const logger = createLogger('device-auth');
 const deviceIdSchema = z.string().uuid();
+const credentialIdSchema = z.string().uuid();
+const nonceSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
+let lastNativeNonceCleanupAt = 0;
 
 type DeviceAuthOptions = {
   allowUserToken?: boolean;
 };
 
 const getDeviceRequestUrl = (request: FastifyRequest) => request.raw.url || request.url || '/';
+
+async function recordNativeNonceOrThrow(params: {
+  db: ReturnType<typeof getDatabase>;
+  credentialId: string;
+  nonce: string;
+  expiresAt: Date;
+}) {
+  const nowMs = Date.now();
+  // This table is a replay ledger, not telemetry. A bounded periodic cleanup
+  // keeps it finite without adding a delete query to every signed request.
+  if (nowMs - lastNativeNonceCleanupAt >= 60_000) {
+    lastNativeNonceCleanupAt = nowMs;
+    await params.db.delete(schema.deviceAuthNonces).where(lt(schema.deviceAuthNonces.expires_at, new Date(nowMs)));
+  }
+  const inserted = await params.db
+    .insert(schema.deviceAuthNonces)
+    .values({
+      credential_id: params.credentialId,
+      nonce: params.nonce,
+      expires_at: params.expiresAt,
+    })
+    .onConflictDoNothing()
+    .returning({ id: schema.deviceAuthNonces.id });
+  if (inserted.length !== 1) {
+    throw AppError.forbidden('Native device request nonce has already been used', {
+      reason: 'NATIVE_DEVICE_SIGNATURE_REPLAYED',
+    });
+  }
+}
 
 function normalizeAuthFailureReason(error: unknown) {
   if (error instanceof AppError && error.details && !Array.isArray(error.details)) {
@@ -56,8 +90,9 @@ export async function authenticateDeviceOrThrow(
   const hasSignatureHeaders = hasAnySignatureHeader(signatureHeaders);
   const bearerToken = options.allowUserToken ? extractTokenFromHeader(request.headers.authorization) : null;
   const certSerial = signatureHeaders.serial;
+  const nativeCredentialId = signatureHeaders.credentialId;
   const recordAuthSuccess = (
-    authMethod: 'legacy_serial' | 'signature' | 'user_token' | 'missing_identity'
+    authMethod: 'legacy_serial' | 'signature' | 'native_signature' | 'user_token' | 'missing_identity'
   ) => {
     recordDeviceAuthAttempt({
       configuredMode: authMode,
@@ -66,7 +101,9 @@ export async function authenticateDeviceOrThrow(
       reason: 'authorized',
     });
   };
-  const initialAuthMethod: 'legacy_serial' | 'signature' | 'user_token' | 'missing_identity' = certSerial
+  const initialAuthMethod: 'legacy_serial' | 'signature' | 'native_signature' | 'user_token' | 'missing_identity' = nativeCredentialId
+    ? 'native_signature'
+    : certSerial
     ? authMode === 'signature' || hasSignatureHeaders
       ? 'signature'
       : 'legacy_serial'
@@ -77,6 +114,109 @@ export async function authenticateDeviceOrThrow(
     : 'missing_identity';
 
   try {
+    if (certSerial && nativeCredentialId) {
+      throw AppError.badRequest('Only one device credential header may be supplied', {
+        reason: 'AMBIGUOUS_DEVICE_CREDENTIAL',
+      });
+    }
+
+    if (nativeCredentialId) {
+      if (!hasCompleteNativeSignatureHeaders(signatureHeaders)) {
+        throw AppError.unauthorized('Missing native device request signature', {
+          reason: 'MISSING_NATIVE_DEVICE_SIGNATURE',
+        });
+      }
+      const parsedCredentialId = credentialIdSchema.safeParse(nativeCredentialId);
+      const parsedNonce = nonceSchema.safeParse(signatureHeaders.nonce);
+      if (!parsedCredentialId.success || !parsedNonce.success) {
+        throw AppError.badRequest('Invalid native device signature identity', {
+          reason: 'NATIVE_DEVICE_SIGNATURE_IDENTITY_INVALID',
+        });
+      }
+      const signatureTimestamp = Number.parseInt(signatureHeaders.timestamp!, 10);
+      if (!Number.isFinite(signatureTimestamp)) {
+        throw AppError.badRequest('Invalid native device signature timestamp', {
+          reason: 'NATIVE_DEVICE_SIGNATURE_TIMESTAMP_INVALID',
+        });
+      }
+      const maxSkewMs = resolveDeviceAuthSignatureMaxSkewSeconds() * 1000;
+      if (Math.abs(Date.now() - signatureTimestamp) > maxSkewMs) {
+        throw AppError.forbidden('Native device request signature expired', {
+          reason: 'NATIVE_DEVICE_SIGNATURE_EXPIRED',
+          timestamp: signatureHeaders.timestamp,
+        });
+      }
+
+      const db = getDatabase();
+      const [credential] = await db
+        .select()
+        .from(schema.deviceCredentials)
+        .where(eq(schema.deviceCredentials.credential_id, parsedCredentialId.data))
+        .limit(1);
+      if (!credential || credential.screen_id !== deviceId) {
+        throw AppError.forbidden('Invalid native device credentials', {
+          reason: 'NATIVE_DEVICE_CREDENTIALS_INVALID',
+        });
+      }
+      if (credential.is_revoked || credential.revoked_at || credential.trust_level === 'REVOKED') {
+        throw AppError.forbidden('Native device credentials revoked', {
+          reason: 'NATIVE_DEVICE_CREDENTIALS_REVOKED',
+        });
+      }
+      if (credential.expires_at && credential.expires_at.getTime() <= Date.now()) {
+        throw AppError.forbidden('Native device credentials expired', {
+          reason: 'NATIVE_DEVICE_CREDENTIALS_EXPIRED',
+        });
+      }
+
+      const validSignature = verifyNativeDeviceRequestSignature({
+        method: request.method,
+        url: getDeviceRequestUrl(request),
+        deviceId,
+        credentialId: parsedCredentialId.data,
+        timestamp: signatureHeaders.timestamp!,
+        nonce: parsedNonce.data,
+        body: request.body,
+        signature: signatureHeaders.signature!,
+        publicKeyPem: credential.public_key_pem,
+        version: signatureHeaders.version!,
+      });
+      if (!validSignature) {
+        throw AppError.forbidden('Invalid native device request signature', {
+          reason: 'NATIVE_DEVICE_SIGNATURE_INVALID',
+        });
+      }
+
+      await recordNativeNonceOrThrow({
+        db,
+        credentialId: parsedCredentialId.data,
+        nonce: parsedNonce.data,
+        expiresAt: new Date(Date.now() + maxSkewMs),
+      });
+
+      const [screen] = await db
+        .select({ id: schema.screens.id })
+        .from(schema.screens)
+        .where(eq(schema.screens.id, deviceId))
+        .limit(1);
+      if (!screen) {
+        throw AppError.notFound('Device not registered', {
+          reason: 'DEVICE_NOT_REGISTERED',
+          credential_present: true,
+        });
+      }
+
+      request.device = {
+        id: deviceId,
+        authType: 'device',
+        credentialId: credential.id,
+        fingerprint: credential.credential_id,
+        authMethod: 'native_signature',
+      };
+      recordAuthSuccess('native_signature');
+      return { type: 'device' as const };
+    }
+
     if (certSerial) {
       const db = getDatabase();
       const certificates = await db

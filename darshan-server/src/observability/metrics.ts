@@ -66,13 +66,13 @@ type PairingCsrValidationReason =
   | 'device_mismatch'
   | 'unknown';
 type DeviceAuthMode = 'legacy' | 'dual' | 'signature';
-type DeviceAuthMethod = 'legacy_serial' | 'signature' | 'user_token' | 'missing_identity';
+type DeviceAuthMethod = 'legacy_serial' | 'signature' | 'native_signature' | 'user_token' | 'missing_identity';
 type DeviceAuthResult = 'success' | 'failure';
 type DeviceCommandClaimSource = 'heartbeat' | 'poll';
 type DeviceCommandAckResult = 'success' | 'failure' | 'error';
 type OutboxDispatchResult = 'dispatched' | 'deferred' | 'failed' | 'skipped_disabled';
 type RealtimeAuthResult = 'success' | 'failure';
-type DeviceSocketAuthMode = 'legacy' | 'signed' | 'unknown';
+type DeviceSocketAuthMode = 'legacy' | 'signed' | 'native_signature' | 'unknown';
 type DeviceSocketAuthReason =
   | 'authorized'
   | 'missing_identity'
@@ -570,7 +570,7 @@ const REALTIME_SOCKET_AUTH_REASONS = new Set<string>([
   'invalid_token',
   'unauthorized',
 ]);
-const DEVICE_SOCKET_AUTH_MODES = new Set<string>(['legacy', 'signed', 'unknown']);
+const DEVICE_SOCKET_AUTH_MODES = new Set<string>(['legacy', 'signed', 'native_signature', 'unknown']);
 const DEVICE_SOCKET_AUTH_REASONS = new Set<string>([
   'authorized',
   'missing_identity',

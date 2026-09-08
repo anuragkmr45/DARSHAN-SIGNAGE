@@ -1,10 +1,11 @@
-import { createSign, generateKeyPairSync, randomBytes, randomUUID } from 'crypto';
+import { createSign, generateKeyPairSync, randomBytes, randomUUID, sign } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { config } from '@/config';
 import { getDatabase, schema } from '@/db';
 import {
   authenticateDeviceSocketHandshake,
+  buildNativeDeviceSocketSignaturePayload,
   buildDeviceSocketSignaturePayload,
 } from '@/realtime/device-socket-auth';
 import type { DeviceSocketReplayStore } from '@/realtime/device-socket-replay';
@@ -25,6 +26,36 @@ function signPayload(privateKey: string, payload: string) {
   signer.update(payload);
   signer.end();
   return signer.sign(privateKey, 'base64');
+}
+
+function generateNativeKeys() {
+  return generateKeyPairSync('ec', {
+    namedCurve: 'prime256v1',
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
+}
+
+function nativeSignedSocketAuth(input: { deviceId: string; credentialId: string; privateKey: string; timestamp?: string; nonce?: string }) {
+  const timestamp = input.timestamp ?? String(Date.now());
+  const nonce = input.nonce ?? randomBytes(24).toString('base64url');
+  return {
+    device_id: input.deviceId,
+    credential_id: input.credentialId,
+    auth_version: 'v2',
+    auth_timestamp: timestamp,
+    auth_nonce: nonce,
+    auth_signature: sign(
+      'sha256',
+      Buffer.from(buildNativeDeviceSocketSignaturePayload({
+        deviceId: input.deviceId,
+        credentialId: input.credentialId,
+        timestamp,
+        nonce,
+      })),
+      input.privateKey
+    ).toString('base64'),
+  };
 }
 
 function signedSocketAuth(input: {
@@ -120,6 +151,34 @@ async function seedDevice(options: {
   return { deviceId, serial };
 }
 
+async function seedNativeDevice(publicKeyPem: string) {
+  const db = getDatabase();
+  const deviceId = randomUUID();
+  const installationId = randomUUID();
+  const credentialId = randomUUID();
+  await db.insert(schema.screens).values({ id: deviceId, name: 'Native socket auth device', status: 'OFFLINE' });
+  await db.insert(schema.deviceInstallations).values({
+    screen_id: deviceId,
+    installation_id: installationId,
+    installation_epoch: 1,
+    client_kind: 'NATIVE_PLAYER',
+    platform: 'ANDROID_TV',
+    runtime_profile: 'CLOUD_TV_STANDARD',
+    status: 'ACTIVE',
+  });
+  await db.insert(schema.deviceCredentials).values({
+    credential_id: credentialId,
+    screen_id: deviceId,
+    installation_id: installationId,
+    installation_epoch: 1,
+    algorithm: 'ES256',
+    public_key_pem: publicKeyPem,
+    auth_version: 'signature_v2',
+    trust_level: 'SOFTWARE_KEY',
+  });
+  return { deviceId, installationId, credentialId };
+}
+
 describe('device socket auth verifier', () => {
   let server: FastifyInstance;
   const seededDeviceIds: string[] = [];
@@ -131,6 +190,8 @@ describe('device socket auth verifier', () => {
   afterEach(async () => {
     const db = getDatabase();
     for (const deviceId of seededDeviceIds.splice(0)) {
+      await db.delete(schema.deviceCredentials).where(eq(schema.deviceCredentials.screen_id, deviceId));
+      await db.delete(schema.deviceInstallations).where(eq(schema.deviceInstallations.screen_id, deviceId));
       await db.delete(schema.deviceCertificates).where(eq(schema.deviceCertificates.screen_id, deviceId));
       await db.delete(schema.screens).where(eq(schema.screens.id, deviceId));
     }
@@ -213,6 +274,54 @@ describe('device socket auth verifier', () => {
       reason: 'authorized',
       deviceId,
       serial,
+    });
+  });
+
+  it('accepts an ES256 native credential once and rejects a replay without falling back to legacy auth', async () => {
+    const keys = generateNativeKeys();
+    const device = await seedNativeDevice(keys.publicKey);
+    seededDeviceIds.push(device.deviceId);
+    const now = Date.now();
+    const nonce = randomBytes(24).toString('base64url');
+    const auth = nativeSignedSocketAuth({
+      deviceId: device.deviceId,
+      credentialId: device.credentialId,
+      privateKey: keys.privateKey,
+      timestamp: String(now),
+      nonce,
+    });
+    const replayStore = new FakeReplayStore(() => now);
+
+    await expect(authenticateDeviceSocketHandshake({ auth }, { nowMs: () => now, replayStore })).resolves.toMatchObject({
+      ok: true,
+      mode: 'native_signature',
+      reason: 'authorized',
+      deviceId: device.deviceId,
+      serial: null,
+      credentialId: device.credentialId,
+    });
+    await expect(authenticateDeviceSocketHandshake({ auth }, { nowMs: () => now, replayStore })).resolves.toEqual({
+      ok: false,
+      mode: 'native_signature',
+      reason: 'replay_detected',
+    });
+  });
+
+  it('rejects a native socket proof whose device or credential binding was changed', async () => {
+    const keys = generateNativeKeys();
+    const device = await seedNativeDevice(keys.publicKey);
+    seededDeviceIds.push(device.deviceId);
+    const auth = nativeSignedSocketAuth({
+      deviceId: device.deviceId,
+      credentialId: device.credentialId,
+      privateKey: keys.privateKey,
+    });
+    auth.device_id = randomUUID();
+
+    await expect(authenticateDeviceSocketHandshake({ auth })).resolves.toEqual({
+      ok: false,
+      mode: 'native_signature',
+      reason: 'invalid_credentials',
     });
   });
 

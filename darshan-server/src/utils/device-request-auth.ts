@@ -1,10 +1,13 @@
-import { createVerify, randomBytes, X509Certificate } from 'crypto';
+import { createHash, createVerify, createPublicKey, randomBytes, verify as verifySignature, X509Certificate } from 'crypto';
 import forge from 'node-forge';
 import { config } from '@/config';
 import { AppError } from '@/utils/app-error';
+import { canonicalizeNativePlayerContract } from '@/contracts/native-player';
 
 export const DEVICE_REQUEST_SIGNATURE_VERSION = 'v1';
+export const NATIVE_DEVICE_REQUEST_SIGNATURE_VERSION = 'v2';
 const DEVICE_REQUEST_SIGNATURE_PREFIX = 'DARSHAN_DEVICE_AUTH_V1';
+const NATIVE_DEVICE_REQUEST_SIGNATURE_PREFIX = 'DARSHAN_DEVICE_AUTH_V2';
 const LEGACY_DEVICE_REQUEST_SIGNATURE_PREFIX = 'HEXMON_DEVICE_AUTH_V1';
 const DEVICE_AUTH_MODES = ['legacy', 'dual', 'signature'] as const;
 
@@ -12,8 +15,10 @@ export type DeviceAuthMode = (typeof DEVICE_AUTH_MODES)[number];
 
 export type ParsedDeviceRequestSignatureHeaders = {
   serial: string | null;
+  credentialId: string | null;
   version: string | null;
   timestamp: string | null;
+  nonce: string | null;
   signature: string | null;
 };
 
@@ -30,18 +35,24 @@ export function parseDeviceRequestSignatureHeaders(
       readHeaderValue(headers['x-device-serial']) ||
       readHeaderValue(headers['x-device-cert-serial']) ||
       readHeaderValue(headers['x-device-cert']),
+    credentialId: readHeaderValue(headers['x-device-credential-id']),
     version: readHeaderValue(headers['x-device-auth-version']),
     timestamp: readHeaderValue(headers['x-device-timestamp']),
+    nonce: readHeaderValue(headers['x-device-nonce']),
     signature: readHeaderValue(headers['x-device-signature']),
   };
 }
 
 export function hasAnySignatureHeader(headers: ParsedDeviceRequestSignatureHeaders) {
-  return Boolean(headers.version || headers.timestamp || headers.signature);
+  return Boolean(headers.version || headers.timestamp || headers.nonce || headers.signature);
 }
 
 export function hasCompleteSignatureHeaders(headers: ParsedDeviceRequestSignatureHeaders) {
   return Boolean(headers.serial && headers.version && headers.timestamp && headers.signature);
+}
+
+export function hasCompleteNativeSignatureHeaders(headers: ParsedDeviceRequestSignatureHeaders) {
+  return Boolean(headers.credentialId && headers.version && headers.timestamp && headers.nonce && headers.signature);
 }
 
 function requestedDeviceAuthMode(): string {
@@ -108,6 +119,32 @@ export function buildDeviceRequestSignaturePayload(params: {
   ].join('\n');
 }
 
+export function canonicalizeDeviceRequestBody(body: unknown) {
+  return canonicalizeNativePlayerContract(body === undefined ? null : body);
+}
+
+export function buildNativeDeviceRequestSignaturePayload(params: {
+  method: string;
+  url: string;
+  deviceId: string;
+  credentialId: string;
+  timestamp: string;
+  nonce: string;
+  body: unknown;
+}) {
+  const bodyHash = createHash('sha256').update(canonicalizeDeviceRequestBody(params.body)).digest('hex');
+  return [
+    NATIVE_DEVICE_REQUEST_SIGNATURE_PREFIX,
+    params.method.trim().toUpperCase(),
+    params.url.trim(),
+    params.deviceId.trim(),
+    params.credentialId.trim(),
+    params.timestamp.trim(),
+    params.nonce.trim(),
+    bodyHash,
+  ].join('\n');
+}
+
 export function verifyDeviceRequestSignature(params: {
   method: string;
   url: string;
@@ -142,6 +179,49 @@ export function verifyDeviceRequestSignature(params: {
       return false;
     }
   });
+}
+
+export function verifyNativeDeviceRequestSignature(params: {
+  method: string;
+  url: string;
+  deviceId: string;
+  credentialId: string;
+  timestamp: string;
+  nonce: string;
+  body: unknown;
+  signature: string;
+  publicKeyPem: string;
+  version: string;
+}) {
+  if (params.version !== NATIVE_DEVICE_REQUEST_SIGNATURE_VERSION) {
+    throw AppError.forbidden('Unsupported native device auth signature version', {
+      reason: 'NATIVE_DEVICE_SIGNATURE_VERSION_UNSUPPORTED',
+      version: params.version,
+    });
+  }
+
+  let publicKey: ReturnType<typeof createPublicKey>;
+  try {
+    publicKey = createPublicKey(params.publicKeyPem);
+  } catch {
+    return false;
+  }
+  if (publicKey.asymmetricKeyType !== 'ec' || publicKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') {
+    return false;
+  }
+  const payload = buildNativeDeviceRequestSignaturePayload(params);
+  const signature = Buffer.from(params.signature, 'base64');
+  try {
+    // Android's Signature API returns DER ECDSA. Apple's SecKey returns the
+    // fixed-width IEEE-P1363 r||s form. Both are valid representations of the
+    // same P-256 proof; accept only the exact 64-byte P1363 form for iOS.
+    if (signature.length === 64) {
+      return verifySignature('sha256', Buffer.from(payload), { key: publicKey, dsaEncoding: 'ieee-p1363' }, signature);
+    }
+    return verifySignature('sha256', Buffer.from(payload), publicKey, signature);
+  } catch {
+    return false;
+  }
 }
 
 export function extractDeviceAuthPublicKeyFromCsr(csrPem: string) {

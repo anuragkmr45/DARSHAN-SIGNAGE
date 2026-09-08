@@ -142,12 +142,13 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
     if (result.ok) {
       (socket.data as any).deviceId = result.deviceId;
       (socket.data as any).deviceSerial = result.serial;
+      (socket.data as any).deviceCredentialId = result.credentialId;
       (socket.data as any).deviceAuthMode = result.mode;
       try {
         await recordDeviceAuthRolloutObservation({
           screenId: result.deviceId,
           channel: 'socket',
-          method: result.mode === 'signed' ? 'signed' : 'legacy',
+          method: result.mode === 'legacy' ? 'legacy' : 'signed',
         });
       } catch (observationError) {
         // The handshake is already cryptographically authenticated. Retain
