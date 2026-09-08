@@ -667,68 +667,31 @@ pkill -f 'darshan-player|DARSHAN-Player' || true
 pgrep -af 'darshan-player|DARSHAN-Player' || echo "player stopped"
 ```
 
-### 4. Create The Player Config
+### 4. Install The Generated Player Site Profile
 
-Create on each player/RPi/AXON:
-
-```bash
-sudo mkdir -p /etc/darshan/player
-sudo nano /etc/darshan/player/config.json
-```
-
-Use:
-
-```json
-{
-  "player": {
-    "environment": {
-      "name": "production",
-      "deploymentId": "site-a",
-      "expectedServerId": "backend-a"
-    },
-    "runtime": {
-      "mode": "production"
-    },
-    "backend": {
-      "baseUrl": "http://172.22.128.109:3000",
-      "socketIoUrl": "http://172.22.128.109:3000/socket.io/"
-    },
-    "realtime": {
-      "enabled": true,
-      "signedAuthEnabled": false,
-      "deviceNamespace": "/device",
-      "commandSafetyPollMs": 60000,
-      "desiredStatePollMs": 300000
-    },
-    "polling": {
-      "heartbeatMs": 30000,
-      "commandPollMs": 5000,
-      "snapshotPollMs": 300000,
-      "defaultMediaPollMs": 300000
-    },
-    "pairing": {
-      "offlineValidationGraceMs": 604800000,
-      "backendFirstRolloutMode": true
-    },
-    "duplicateIdentity": {
-      "enabled": true,
-      "enforcement": "warn"
-    },
-    "cache": {
-      "maxBytes": 10737418240
-    },
-    "diagnostics": {
-      "showEnvironmentIdentity": true
-    }
-  }
-}
-```
-
-Validate the JSON:
+For a source-free production bundle, do not create a player config manually and
+never copy a QA config to a production device. The generated `electron` folder
+contains the release-specific HTTPS/WSS endpoint, strict transport CA trust,
+and release identity. From that folder, run:
 
 ```bash
-node -e "JSON.parse(require('fs').readFileSync('/etc/darshan/player/config.json','utf8')); console.log('config json OK')"
+sudo ./install-linux-config.sh
 ```
+
+It installs only the public site profile and transport CA at:
+
+```text
+/etc/darshan/player/config.json
+/etc/darshan/transport-ca.crt
+```
+
+It does not modify device identity, certificates, cache, or paired state. Use
+its `--config-destination` and `--ca-destination` options only for a reviewed
+nonstandard installation path.
+
+On Windows, run `install-windows-config.ps1` as Administrator from the same
+generated `electron` folder. It installs the matching files beneath
+`C:\ProgramData\DARSHAN`.
 
 ### 5. Start The Installed Player
 

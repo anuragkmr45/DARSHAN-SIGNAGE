@@ -198,6 +198,29 @@ Players must report:
 - cache max bytes
 - offline startup support
 
+## Native Enrollment Trust
+
+Native enrollment uses an ES256 key and a server-issued, single-pairing
+challenge. The player requests a pairing code with provisional key-security
+facts, waits for CMS approval, then creates its credential against that exact
+challenge and signs the completion payload. Completion may update only the
+`security` portion of the approved capability manifest; display, media,
+renderer, kiosk, storage, and runtime-profile changes are rejected.
+
+Android standard profiles can enroll without hardware attestation, but their
+credential is recorded as `UNVERIFIED`. Android managed profiles require a
+TEE/StrongBox Android Key Attestation chain whose public key and challenge
+match the completion request and whose root SHA-256 fingerprint is configured
+in `NATIVE_ANDROID_ATTESTATION_TRUSTED_ROOT_SHA256`. An unset or unmatched
+root may never authorize managed kiosk mode. Do not add a production root
+fingerprint until it has been verified from the device/OEM trust material.
+
+iOS/iPadOS/tvOS currently use an explicitly unverified native key path; a
+future App Attest adapter must be independently verified before managed Apple
+profiles are enabled. Raw attestation chains are not retained after
+verification: only a bounded status, root fingerprint, and security level are
+stored with the device credential.
+
 ## Remote Command Support Matrix
 
 | Command | Electron | Android TV | Android mobile | iOS/iPadOS | tvOS | Browser |

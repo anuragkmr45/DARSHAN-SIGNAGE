@@ -476,18 +476,18 @@ before opening the CMS URL shown in `cms-origin.txt`.
 Ubuntu:
 
 ```bash
-cd /opt/darshan/2026-08-23-r1
-sudo apt install -y ./electron/installers/*.deb
-sudo install -d -m 755 /etc/darshan/player
-sudo install -m 644 electron/config.json /etc/darshan/player/config.json
-sudo install -m 644 electron/transport-ca.crt /etc/darshan/transport-ca.crt
+cd /opt/darshan/2026-08-23-r1/electron
+sudo apt install -y ./installers/*.deb
+sudo ./install-linux-config.sh
 ```
 
-Windows installs `config.windows.json` as
-`C:\ProgramData\DARSHAN\config.json` and `transport-ca.crt` as
-`C:\ProgramData\DARSHAN\transport-ca.crt`. Current players discover these
-standard site-config paths automatically; selector environment variables remain
-supported for nonstandard paths.
+Windows installs the matching player artifact, then runs
+`install-windows-config.ps1` as Administrator from the generated `electron`
+folder. The generated installers place `config.windows.json` and
+`transport-ca.crt` beneath `C:\ProgramData\DARSHAN`. They do not alter paired
+device identity, certificates, cache, or playback state. Current players
+discover these standard site-config paths automatically; selector environment
+variables remain supported for reviewed nonstandard paths.
 
 Start/reboot the player, pair through CMS, then verify HTTPS API, WSS realtime,
 MinIO media download/cache, heartbeat, schedule/default media, and offline
