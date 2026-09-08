@@ -181,3 +181,18 @@ export function getOrCreateSocketServer(fastify: FastifyInstance): SocketIOServe
 export function getSocketServer(): SocketIOServer | null {
   return socketServer;
 }
+
+/**
+ * Close Socket.IO before closing Fastify's HTTP server.  A WebSocket is an
+ * active HTTP connection, so relying on Fastify's onClose hooks creates a
+ * shutdown cycle: Fastify waits for the socket while the hook that would
+ * close it has not run yet.  This operation is intentionally idempotent so
+ * route-level cleanup hooks and process shutdown can both call it safely.
+ */
+export async function closeSocketServer(): Promise<void> {
+  const io = socketServer;
+  if (!io) return;
+  socketServer = null;
+  setWebsocketConnections(0);
+  await io.close();
+}

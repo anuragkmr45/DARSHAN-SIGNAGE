@@ -7,10 +7,12 @@ const {
   emitScreensRefreshRequiredMock,
   isJobsInitializedMock,
   queuePlaybackRefreshDispatchMock,
+  sendConnectedDeviceResyncMock,
 } = vi.hoisted(() => ({
   emitScreensRefreshRequiredMock: vi.fn(),
   isJobsInitializedMock: vi.fn(),
   queuePlaybackRefreshDispatchMock: vi.fn(),
+  sendConnectedDeviceResyncMock: vi.fn(),
 }));
 
 vi.mock('@/realtime/screens-namespace', () => ({
@@ -20,6 +22,10 @@ vi.mock('@/realtime/screens-namespace', () => ({
 vi.mock('@/jobs', () => ({
   isJobsInitialized: isJobsInitializedMock,
   queuePlaybackRefreshDispatch: queuePlaybackRefreshDispatchMock,
+}));
+
+vi.mock('@/realtime/device-gateway', () => ({
+  sendConnectedDeviceResync: sendConnectedDeviceResyncMock,
 }));
 
 import { closeDatabase, getDatabase, initializeDatabase, schema } from '@/db';
@@ -39,6 +45,8 @@ describe('playback refresh dispatch', () => {
     isJobsInitializedMock.mockReset();
     queuePlaybackRefreshDispatchMock.mockReset();
     emitScreensRefreshRequiredMock.mockReset();
+    sendConnectedDeviceResyncMock.mockReset();
+    sendConnectedDeviceResyncMock.mockResolvedValue({ localConnections: 0, broadcastQueued: true });
     const db = getDatabase();
     await db.delete(schema.commandOutbox);
     await db.delete(schema.deviceDesiredStateHistory);
@@ -192,6 +200,34 @@ describe('playback refresh dispatch', () => {
       )
     ).toBe(true);
     expect(outboxRows.every((row) => row.event_type === 'COMMAND_AVAILABLE' && row.status === 'PENDING')).toBe(true);
+  });
+
+  it('broadcasts and queues a fleet-wide default-media refresh without synchronously materializing command rows', async () => {
+    isJobsInitializedMock.mockReturnValue(true);
+    queuePlaybackRefreshDispatchMock.mockResolvedValue('job-id');
+    const db = getDatabase();
+    const screenId = randomUUID();
+    await db.insert(schema.screens).values({ id: screenId, name: 'Fleet wake scalability test', status: 'ACTIVE' });
+    try {
+      const result = await dispatchPlaybackRefresh(fastify, {
+        reason: 'DEFAULT_MEDIA',
+        targetAll: true,
+        createdBy: randomUUID(),
+      });
+
+      expect(result.commandsCreated).toBe(0);
+      expect(sendConnectedDeviceResyncMock).toHaveBeenCalledWith({ reason: 'DEFAULT_MEDIA', resources: ['desired_state', 'snapshot'] });
+      expect(queuePlaybackRefreshDispatchMock).toHaveBeenCalled();
+      expect(queuePlaybackRefreshDispatchMock.mock.calls.every(([, options]) =>
+        options?.singletonKey === 'playback-refresh:default-media:fleet' && options.singletonSeconds === 30
+      )).toBe(true);
+      expect(emitScreensRefreshRequiredMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ reason: 'DEFAULT_MEDIA', screen_ids: [], target_all: true })
+      );
+    } finally {
+      await db.delete(schema.screens).where(inArray(schema.screens.id, [screenId]));
+    }
   });
 
   it('preserves existing desired snapshot state when default media refreshes are batched', async () => {

@@ -873,7 +873,7 @@ describe('Device Pairing Routes', () => {
       },
       webpage: { interactive: true, server_capture_fallback: true },
       storage: { cache_limit_bytes: 1_000_000_000, range_downloads: true, atomic_rename: true },
-      security: { key_algorithm: 'ES256' as const, hardware_backed_key: true, attestation: 'ANDROID_KEY' as const },
+      security: { key_algorithm: 'ES256' as const, hardware_backed_key: false, attestation: 'NONE' as const },
       kiosk: { requested_state: 'STANDARD' as const, enforced_state: 'STANDARD' as const, provider: 'NONE' },
       screenshots: { supported: true },
       push: { supported: true },
@@ -917,7 +917,27 @@ describe('Device Pairing Routes', () => {
       '1',
       requestBody.native_enrollment.attestation_challenge,
     ].join('\n');
-    const proof = sign('sha256', Buffer.from(proofPayload), keys.privateKey).toString('base64');
+    // iOS SecKey returns IEEE-P1363 r||s signatures, unlike Android's DER
+    // Signature API. Enrollment must accept both exact valid encodings.
+    const proof = sign('sha256', Buffer.from(proofPayload), { key: keys.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64');
+    const alteredDisplayManifest = { ...capabilityManifest, display: { ...capabilityManifest.display, width: 1280 } };
+    const alteredCompletion = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device-pairing/complete',
+      payload: {
+        pairing_code: requestBody.pairing_code,
+        credential_version: 2,
+        installation_id: installationId,
+        installation_epoch: 1,
+        public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+        challenge_proof: proof,
+        capability_manifest: alteredDisplayManifest,
+        capability_hash: capabilityFingerprint(alteredDisplayManifest),
+        attestation: { type: 'NONE' },
+      },
+    });
+    expect(alteredCompletion.statusCode).toBe(HTTP_STATUS.CONFLICT);
+
     const completeRes = await server.inject({
       method: 'POST',
       url: '/api/v1/device-pairing/complete',
@@ -928,7 +948,9 @@ describe('Device Pairing Routes', () => {
         installation_epoch: 1,
         public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
         challenge_proof: proof,
-        attestation: { type: 'ANDROID_KEY', evidence: { pending_server_verification: true } },
+        capability_manifest: capabilityManifest,
+        capability_hash: capabilityFingerprint(capabilityManifest),
+        attestation: { type: 'NONE' },
       },
     });
     expect(completeRes.statusCode).toBe(HTTP_STATUS.CREATED);

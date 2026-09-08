@@ -1273,7 +1273,7 @@ describe('Device telemetry auth runtime validation', () => {
     );
   });
 
-  it('persists screenshot uploads as storage objects and screenshot rows', async () => {
+  it('persists an idempotent screenshot upload as one storage object and screenshot row', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();
     const serial = `serial-${randomUUID()}`;
@@ -1294,6 +1294,7 @@ describe('Device telemetry auth runtime validation', () => {
     });
 
     const timestamp = new Date().toISOString();
+    const captureId = randomUUID();
     const response = await server.inject({
       method: 'POST',
       url: '/api/v1/device/screenshot',
@@ -1304,6 +1305,7 @@ describe('Device telemetry auth runtime validation', () => {
         device_id: deviceId,
         timestamp,
         image_data: Buffer.from('fake-png-data').toString('base64'),
+        idempotency_key: captureId,
       },
     });
 
@@ -1312,6 +1314,7 @@ describe('Device telemetry auth runtime validation', () => {
     expect(body.success).toBe(true);
     expect(typeof body.storage_object_id).toBe('string');
     expect(body.timestamp).toBe(timestamp);
+    expect(body.storage_object_id).toBe(captureId);
     expect(putObjectSpy).toHaveBeenCalledOnce();
     expect(presignedSpy).toHaveBeenCalledOnce();
 
@@ -1331,6 +1334,23 @@ describe('Device telemetry auth runtime validation', () => {
       .limit(1);
     expect(screenshot).toBeTruthy();
     expect(screenshot.screen_id).toBe(deviceId);
+
+    const duplicate = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device/screenshot',
+      headers: { 'x-device-serial': serial },
+      payload: {
+        device_id: deviceId,
+        timestamp,
+        image_data: Buffer.from('fake-png-data').toString('base64'),
+        idempotency_key: captureId,
+      },
+    });
+    expect(duplicate.statusCode).toBe(HTTP_STATUS.CREATED);
+    expect(JSON.parse(duplicate.body).storage_object_id).toBe(captureId);
+    expect(putObjectSpy).toHaveBeenCalledOnce();
+    const screenshots = await db.select().from(schema.screenshots).where(eq(schema.screenshots.storage_object_id, captureId));
+    expect(screenshots).toHaveLength(1);
 
     putObjectSpy.mockRestore();
     presignedSpy.mockRestore();

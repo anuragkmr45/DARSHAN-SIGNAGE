@@ -1,4 +1,5 @@
 import { z, type ZodType } from 'zod';
+import { nativePlayerContractVersionSchema, runtimeProfileSchema } from '@/contracts/native-player';
 import { Socket } from 'socket.io';
 import { config } from '@/config';
 import { recordRealtimeSocketReject } from '@/observability/metrics';
@@ -88,6 +89,20 @@ export const deviceHelloPayloadSchema = z.object({
       offline_startup: z.boolean().optional(),
       background_push: z.boolean().optional(),
     })
+    .optional(),
+  /** Required for authenticated native protocol 1.1 sessions. The gateway
+   * compares it with the credential and installation records. */
+  native_player: z
+    .object({
+      credential_id: uuidSchema,
+      installation_id: uuidSchema,
+      installation_epoch: z.number().int().positive().max(2 ** 31 - 1),
+      runtime_profile: runtimeProfileSchema,
+      capability_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      release_id: z.string().trim().min(1).max(128).optional(),
+      protocol_versions: z.array(nativePlayerContractVersionSchema).min(1).max(3),
+    })
+    .strict()
     .optional(),
   local_state: z.record(z.unknown()).optional(),
   sent_at: z.string().datetime().optional(),

@@ -77,6 +77,24 @@ export class DeviceConnectionRegistry {
     return sent;
   }
 
+  /**
+   * Broadcasts a notification to the connections owned by this API node. The
+   * payload is built per device so the client-side wake guard still receives
+   * its authenticated device ID; a fleet broadcast never exposes a shared
+   * device-less message to player code.
+   */
+  emitToAll(event: string, payloadForDevice: (deviceId: string) => unknown) {
+    let sent = 0;
+    for (const [deviceId, deviceConnections] of this.byDevice.entries()) {
+      const payload = payloadForDevice(deviceId);
+      for (const entry of deviceConnections.values()) {
+        entry.socket.emit(event, payload);
+        sent += 1;
+      }
+    }
+    return sent;
+  }
+
   stats() {
     let connectionCount = 0;
     for (const entries of this.byDevice.values()) {

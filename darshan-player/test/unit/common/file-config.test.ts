@@ -123,6 +123,8 @@ describe('player file config loader', () => {
         realtime: {
           enabled: true,
           commandSafetyPollMs: 120000,
+          desiredStatePollMs: 300000,
+          degradedStatePollMs: 30000,
         },
         polling: {
           heartbeatMs: 45000,
@@ -171,6 +173,8 @@ describe('player file config loader', () => {
     expect(config.environment.deploymentId).to.equal('qa-lab-1')
     expect(config.environment.releaseId).to.equal('qa-lab-1-r7')
     expect(config.environment.sourceCommit).to.equal('0123456789abcdef0123456789abcdef01234567')
+    expect(config.realtime.desiredStatePollMs).to.equal(300000)
+    expect(config.realtime.degradedStatePollMs).to.equal(30000)
     expect(config.pairing.offlineValidationGraceMs).to.equal(123456)
     expect(config.security.offlinePlaybackPolicy).to.equal('secure')
     expect(config.security.backendRequiredForPlayback).to.equal(true)

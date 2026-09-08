@@ -9,7 +9,7 @@ export type RuntimeDependencyStatus = 'available' | 'missing' | 'optional';
 export type RuntimeDependencyRole = 'all' | 'api' | 'worker';
 
 export interface RuntimeDependency {
-  name: 'ffmpeg' | 'libreoffice' | 'chromium' | 'pg_dump' | 'tar';
+  name: 'ffmpeg' | 'libreoffice' | 'poppler' | 'chromium' | 'pg_dump' | 'tar';
   status: RuntimeDependencyStatus;
   path?: string;
   detail?: string;
@@ -81,6 +81,20 @@ export function getLibreOfficeExecutable() {
   return resolveLibreOfficePath();
 }
 
+function resolvePopplerPath() {
+  return dedupeCandidates([appConfig.PDFTOPPM_PATH, 'pdftoppm']).map(findExecutableCandidate).find(Boolean) || null;
+}
+
+function resolvePdfInfoPath() {
+  return dedupeCandidates([appConfig.PDFINFO_PATH, 'pdfinfo']).map(findExecutableCandidate).find(Boolean) || null;
+}
+
+/** Both commands are required: pdftoppm renders bounded page images and
+ * pdfinfo prevents silently truncating an oversized document. */
+export function getPopplerExecutables() {
+  return { pdftoppm: resolvePopplerPath(), pdfinfo: resolvePdfInfoPath() };
+}
+
 export function getResolvedFfmpegPath() {
   return resolveFfmpegPath();
 }
@@ -143,12 +157,13 @@ function getRequiredDependencyNames(role: RuntimeDependencyRole) {
     return new Set<RuntimeDependency['name']>();
   }
 
-  return new Set<RuntimeDependency['name']>(['ffmpeg', 'libreoffice', 'pg_dump', 'tar']);
+  return new Set<RuntimeDependency['name']>(['ffmpeg', 'libreoffice', 'poppler', 'pg_dump', 'tar']);
 }
 
 export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = 'all'): Promise<RuntimeDependencyReport> {
   const ffmpegPath = resolveFfmpegPath();
   const libreOfficePath = resolveLibreOfficePath();
+  const poppler = getPopplerExecutables();
   const pgDumpPath = resolvePgDumpPath();
   const tarPath = resolveTarPath();
   const requiredNames = getRequiredDependencyNames(role);
@@ -177,6 +192,12 @@ export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = '
         status: libreOfficePath ? 'available' : requiredNames.has('libreoffice') ? 'missing' : 'optional',
         path: libreOfficePath || undefined,
         detail: libreOfficePath ? undefined : 'Install LibreOffice/soffice or set LIBREOFFICE_PATH to the executable.',
+      },
+      {
+        name: 'poppler',
+        status: poppler.pdftoppm && poppler.pdfinfo ? 'available' : requiredNames.has('poppler') ? 'missing' : 'optional',
+        path: poppler.pdftoppm && poppler.pdfinfo ? `${poppler.pdftoppm};${poppler.pdfinfo}` : undefined,
+        detail: poppler.pdftoppm && poppler.pdfinfo ? undefined : 'Install poppler-utils or set PDFTOPPM_PATH and PDFINFO_PATH.',
       },
       {
         name: 'chromium',
@@ -222,7 +243,7 @@ export async function validateRuntimeDependencies(role: RuntimeDependencyRole = 
     throw new Error(
       `Missing required runtime dependencies: ${missingCritical
         .map((dependency) => dependency.name)
-        .join(', ')}. Install the missing tools on the host or configure FFMPEG_PATH, LIBREOFFICE_PATH, PG_DUMP_PATH, TAR_PATH, and DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH as needed.`
+        .join(', ')}. Install the missing tools on the host or configure FFMPEG_PATH, LIBREOFFICE_PATH, PDFTOPPM_PATH, PDFINFO_PATH, PG_DUMP_PATH, TAR_PATH, and DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH as needed.`
     );
   } else {
     logger.info(

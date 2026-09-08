@@ -224,6 +224,10 @@ export async function createServer(options: CreateServerOptions = {}) {
 
   const fastify = Fastify({
     ...(tlsOptions ? { https: tlsOptions } : {}),
+    // Socket.IO is explicitly closed by runtime shutdown. This is the final
+    // bounded fallback for idle keep-alive connections during a deploy, not
+    // the primary WebSocket lifecycle mechanism.
+    forceCloseConnections: true,
     logger: {
       level: getRuntimeLogLevelSetting(),
       transport: {

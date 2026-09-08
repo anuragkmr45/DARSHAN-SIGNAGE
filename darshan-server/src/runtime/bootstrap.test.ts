@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const initializeDatabase = vi.fn();
+const closeDatabase = vi.fn();
 const initializeS3 = vi.fn();
 const createBucketIfNotExists = vi.fn();
 const initializeJobs = vi.fn();
@@ -10,12 +11,14 @@ const stopJobs = vi.fn();
 const validateRuntimeDependencies = vi.fn();
 const startWorkerHeartbeat = vi.fn();
 const stopWorkerHeartbeat = vi.fn();
+const closeSocketServer = vi.fn();
 const listen = vi.fn();
 const close = vi.fn();
 const createServer = vi.fn(async () => ({ listen, close }));
 
 vi.mock('@/db', () => ({
   initializeDatabase,
+  closeDatabase,
 }));
 
 vi.mock('@/s3', () => ({
@@ -39,6 +42,7 @@ vi.mock('@/utils/runtime-dependencies', () => ({
 }));
 
 vi.mock('@/runtime/worker-heartbeat', () => ({ startWorkerHeartbeat, stopWorkerHeartbeat }));
+vi.mock('@/realtime/socket-server', () => ({ closeSocketServer }));
 
 describe('runtime bootstrap', () => {
   beforeEach(() => {
@@ -81,7 +85,9 @@ describe('runtime bootstrap', () => {
     await stopRuntime({ role: 'api', fastify: { close } as any });
 
     expect(close).toHaveBeenCalled();
-    expect(stopJobs).toHaveBeenCalled();
+    expect(stopJobs).toHaveBeenCalledWith({ graceful: false });
+    expect(closeDatabase).toHaveBeenCalled();
     expect(stopWorkerHeartbeat).toHaveBeenCalled();
+    expect(closeSocketServer).toHaveBeenCalled();
   });
 });

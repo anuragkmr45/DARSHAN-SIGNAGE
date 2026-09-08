@@ -92,6 +92,15 @@ export async function publishWakeToDevice(deviceId: string, message: RealtimeWak
   };
 }
 
+/**
+ * Broadcasts a compact wake to every API node. Nodes turn it into separate
+ * device-bound notifications only for their locally connected players.
+ */
+export async function publishWakeBroadcast(message: RealtimeWakeMessage) {
+  const current = getRealtimeFanoutState();
+  return await current.bus.publishBroadcast(message);
+}
+
 export async function closeRealtimeFanout() {
   if (!state) return;
   await Promise.all([state.bus.close(), state.deviceNodes.close()]);

@@ -130,6 +130,21 @@ describe('Screens routes realtime playback bootstrap', () => {
     expect(body.error.message).toContain('device completes pairing');
   });
 
+  it('rejects screenshot intervals that could exhaust device and API resources', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    await db.insert(schema.screens).values({ id: screenId, name: 'Bounded Screenshot Screen', status: 'ACTIVE' });
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/screens/${screenId}/screenshot-settings`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { enabled: true, interval_seconds: 1 },
+    });
+    expect(response.statusCode).toBe(HTTP_STATUS.UNPROCESSABLE_CONTENT);
+    const commands = await db.select().from(schema.deviceCommands).where(eq(schema.deviceCommands.screen_id, screenId));
+    expect(commands).toHaveLength(0);
+  });
+
   it('returns display authority state and dispatches an idempotent active-display command', async () => {
     const db = getDatabase();
     const screenId = randomUUID();

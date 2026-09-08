@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Pool, type PoolClient } from 'pg';
@@ -99,6 +99,7 @@ suite('production migration ledger', () => {
         '0040_device_auth_rollout_observations.sql',
         '0041_off_host_backup_manifest.sql',
         '0042_emergency_transition_reliability.sql',
+        '0043_native_player_platform.sql',
       ] });
       expect(adopted.applied).toHaveLength(36);
       expect(adopted.applied.at(-1)).toMatchObject({ migration_id: '0034_display_authority.sql', applied_method: 'ADOPTED', approval_ticket: 'CHG-500' });
@@ -135,6 +136,69 @@ suite('production migration ledger', () => {
       })).rejects.toMatchObject({ code: 'MIGRATION_ADOPTION_REJECTED' });
       const displayState = await connection.query(`SELECT to_regclass('screen_display_states') AS name`);
       expect(displayState.rows[0]?.name).toBeNull();
+    } finally {
+      connection.release();
+    }
+  });
+
+  it('replays migration 0042 when a verified legacy emergency constraint already exists', async () => {
+    const connection = await client();
+    try {
+      await connection.query(`
+        CREATE TABLE emergencies (
+          id uuid PRIMARY KEY,
+          target_all boolean NOT NULL DEFAULT false,
+          screen_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+          screen_group_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+          triggered_by uuid
+        );
+        ALTER TABLE emergencies
+          ADD CONSTRAINT emergencies_exactly_one_target_scope_check CHECK (
+            (CASE WHEN target_all THEN 1 ELSE 0 END)
+              + (CASE WHEN jsonb_array_length(COALESCE(screen_ids, '[]'::jsonb)) > 0 THEN 1 ELSE 0 END)
+              + (CASE WHEN jsonb_array_length(COALESCE(screen_group_ids, '[]'::jsonb)) > 0 THEN 1 ELSE 0 END) = 1
+          );
+      `);
+      const migration = await readFile(path.resolve(process.cwd(), 'drizzle/migrations/0042_emergency_transition_reliability.sql'), 'utf8');
+
+      await connection.query(migration);
+      await connection.query(migration);
+
+      const constraint = await connection.query<{ convalidated: boolean }>(`
+        SELECT convalidated
+        FROM pg_constraint
+        WHERE conrelid = 'emergencies'::regclass
+          AND conname = 'emergencies_exactly_one_target_scope_check'
+      `);
+      expect(constraint.rows).toEqual([{ convalidated: true }]);
+      const outbox = await connection.query(`SELECT to_regclass('emergency_transition_outbox') AS name`);
+      expect(outbox.rows[0]?.name).toBe('emergency_transition_outbox');
+    } finally {
+      connection.release();
+    }
+  });
+
+  it('refuses to treat an unvalidated legacy emergency constraint as safe', async () => {
+    const connection = await client();
+    try {
+      await connection.query(`
+        CREATE TABLE emergencies (
+          id uuid PRIMARY KEY,
+          target_all boolean NOT NULL DEFAULT false,
+          screen_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+          screen_group_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+          triggered_by uuid
+        );
+        ALTER TABLE emergencies
+          ADD CONSTRAINT emergencies_exactly_one_target_scope_check CHECK (
+            (CASE WHEN target_all THEN 1 ELSE 0 END)
+              + (CASE WHEN jsonb_array_length(COALESCE(screen_ids, '[]'::jsonb)) > 0 THEN 1 ELSE 0 END)
+              + (CASE WHEN jsonb_array_length(COALESCE(screen_group_ids, '[]'::jsonb)) > 0 THEN 1 ELSE 0 END) = 1
+          ) NOT VALID;
+      `);
+      const migration = await readFile(path.resolve(process.cwd(), 'drizzle/migrations/0042_emergency_transition_reliability.sql'), 'utf8');
+
+      await expect(connection.query(migration)).rejects.toThrow('Emergency target scope constraint exists but is not validated');
     } finally {
       connection.release();
     }

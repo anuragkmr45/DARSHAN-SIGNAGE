@@ -21,12 +21,31 @@ BEGIN
   END IF;
 END $$;
 
-ALTER TABLE "emergencies"
-  ADD CONSTRAINT "emergencies_exactly_one_target_scope_check" CHECK (
-    (CASE WHEN "target_all" THEN 1 ELSE 0 END)
-      + (CASE WHEN jsonb_array_length(COALESCE("screen_ids", '[]'::jsonb)) > 0 THEN 1 ELSE 0 END)
-      + (CASE WHEN jsonb_array_length(COALESCE("screen_group_ids", '[]'::jsonb)) > 0 THEN 1 ELSE 0 END) = 1
-  );
+-- Legacy installations can already contain this constraint because an earlier
+-- deployment applied the schema statement before its migration ledger was
+-- introduced. A named, validated constraint is the same invariant; do not
+-- make a safe migration retry fail merely because that prior statement ran.
+DO $$
+DECLARE
+  existing_validated boolean;
+BEGIN
+  SELECT convalidated
+    INTO existing_validated
+    FROM pg_constraint
+   WHERE conname = 'emergencies_exactly_one_target_scope_check'
+     AND conrelid = 'emergencies'::regclass;
+
+  IF existing_validated IS NULL THEN
+    ALTER TABLE "emergencies"
+      ADD CONSTRAINT "emergencies_exactly_one_target_scope_check" CHECK (
+        (CASE WHEN "target_all" THEN 1 ELSE 0 END)
+          + (CASE WHEN jsonb_array_length(COALESCE("screen_ids", '[]'::jsonb)) > 0 THEN 1 ELSE 0 END)
+          + (CASE WHEN jsonb_array_length(COALESCE("screen_group_ids", '[]'::jsonb)) > 0 THEN 1 ELSE 0 END) = 1
+      );
+  ELSIF NOT existing_validated THEN
+    RAISE EXCEPTION 'Emergency target scope constraint exists but is not validated; validate it before migration 0042';
+  END IF;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "emergencies_trigger_user_idempotency_idx"
   ON "emergencies" ("triggered_by", "idempotency_key")

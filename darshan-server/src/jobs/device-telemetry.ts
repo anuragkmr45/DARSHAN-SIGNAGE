@@ -25,7 +25,7 @@ export interface HeartbeatTelemetryJob {
 export interface ProofOfPlayTelemetryJob {
   deviceId: string;
   mediaId: string;
-  scheduleId: string;
+  scheduleId: string | null;
   playbackInstanceId: string;
   sceneId?: string | null;
   slotId?: string | null;
@@ -72,7 +72,7 @@ export function buildScreenshotObjectKey(
 export function buildProofOfPlayIdempotencyKey(input: {
   deviceId: string;
   mediaId: string;
-  scheduleId: string;
+  scheduleId: string | null;
   playbackInstanceId?: string | null;
   startTime: string;
   endTime: string;
@@ -84,7 +84,7 @@ export function buildProofOfPlayIdempotencyKey(input: {
       [
         input.deviceId,
         input.mediaId,
-        input.scheduleId,
+        input.scheduleId ?? '',
         input.playbackInstanceId ?? '',
         input.startTime,
         input.endTime,
@@ -215,7 +215,7 @@ export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) 
     .values({
       screen_id: job.deviceId,
       media_id: job.mediaId,
-      presentation_id: job.scheduleId,
+      presentation_id: null,
       schedule_id: job.scheduleId,
       scene_id: job.sceneId ?? null,
       slot_id: job.slotId ?? null,

@@ -1,5 +1,5 @@
 import { config as appConfig } from '@/config';
-import { initializeDatabase } from '@/db';
+import { closeDatabase, initializeDatabase } from '@/db';
 import { initializeJobs, registerJobHandlers, scheduleRecurringJobs, stopJobs } from '@/jobs';
 import { createServer } from '@/server';
 import { createLogger } from '@/utils/logger';
@@ -8,6 +8,7 @@ import { type ProcessRole } from '@/runtime/process-role';
 import { clearQueuedScreenStateRefreshes } from '@/services/screen-state-refresh';
 import { startWorkerHeartbeat, stopWorkerHeartbeat } from '@/runtime/worker-heartbeat';
 import { ensureProductionStorage } from '@/deployment/production-storage';
+import { closeSocketServer } from '@/realtime/socket-server';
 
 const logger = createLogger('runtime-bootstrap');
 
@@ -63,8 +64,13 @@ export async function startRuntime(role: ProcessRole): Promise<RuntimeContext> {
 export async function stopRuntime(context: RuntimeContext): Promise<void> {
   clearQueuedScreenStateRefreshes();
   stopWorkerHeartbeat();
+  // Socket.IO owns long-lived player/CMS connections. Close it before
+  // Fastify, otherwise Fastify waits indefinitely for those connections and
+  // never reaches its own onClose cleanup hooks.
+  await closeSocketServer();
   if (context.fastify) {
     await context.fastify.close();
   }
-  await stopJobs();
+  await stopJobs({ graceful: context.role !== 'api' });
+  await closeDatabase();
 }

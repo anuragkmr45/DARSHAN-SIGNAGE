@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
@@ -12,6 +12,12 @@ import {
   DEFAULT_MEDIA_TARGETS_SETTING_KEY,
   DEFAULT_MEDIA_VARIANTS_SETTING_KEY,
 } from '@/utils/default-media';
+
+const dispatchPlaybackRefreshMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@/services/playback-refresh-dispatch', () => ({
+  dispatchPlaybackRefresh: dispatchPlaybackRefreshMock,
+}));
 
 async function issueSuperAdminToken() {
   const db = getDatabase();
@@ -39,6 +45,8 @@ describe('Settings routes - dimension-wise default media', () => {
   });
 
   beforeEach(async () => {
+    dispatchPlaybackRefreshMock.mockReset();
+    dispatchPlaybackRefreshMock.mockResolvedValue({ resolvedScreenIds: [], commandsCreated: 0 });
     const db = getDatabase();
     await db
       .delete(schema.settings)
@@ -387,7 +395,7 @@ describe('Settings routes - dimension-wise default media', () => {
     expect(body.error.message).toContain('must contain screens with the same aspect ratio');
   });
 
-  it('queues immediate refresh commands for all screens when default media settings change', async () => {
+  it('queues durable fleet reconciliation without synchronously creating one command per screen when default media settings change', async () => {
     const db = getDatabase();
     const globalMediaId = randomUUID();
     const variantMediaId = randomUUID();
@@ -499,8 +507,13 @@ describe('Settings routes - dimension-wise default media', () => {
         (command.payload as { reason?: string } | null)?.reason === 'DEFAULT_MEDIA'
     );
 
-    expect(refreshCommands).toHaveLength(6);
-    expect(refreshCommands.filter((command) => command.screen_id === screenOneId)).toHaveLength(3);
-    expect(refreshCommands.filter((command) => command.screen_id === screenTwoId)).toHaveLength(3);
+    // The API only commits the setting and broadcasts a compact REST-resync
+    // wake. The worker creates durable per-screen command/audit rows outside
+    // this request, preventing a fleet-sized transaction from timing out CMS.
+    expect(refreshCommands).toHaveLength(0);
+    expect(dispatchPlaybackRefreshMock).toHaveBeenCalledTimes(3);
+    expect(dispatchPlaybackRefreshMock.mock.calls.every(([, input]) =>
+      input.reason === 'DEFAULT_MEDIA' && input.targetAll === true && input.createdBy === testUser.id
+    )).toBe(true);
   });
 });

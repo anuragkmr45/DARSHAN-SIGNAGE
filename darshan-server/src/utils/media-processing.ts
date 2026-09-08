@@ -60,8 +60,12 @@ export function requiresDocumentConversion(input: {
     return false;
   }
 
+  // PDFs skip the LibreOffice conversion step, but they must still enter the
+  // document job so Poppler can produce the checksummed page manifest used by
+  // native mobile/TV players. Returning false here marked PDFs READY without
+  // any playable native rendition.
   if (isPdfDocument(input)) {
-    return false;
+    return true;
   }
 
   const normalizedMime = normalizeMime(input.sourceContentType);

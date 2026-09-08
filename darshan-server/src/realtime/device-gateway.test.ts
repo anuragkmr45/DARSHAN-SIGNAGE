@@ -1,4 +1,4 @@
-import { createSign, generateKeyPairSync, randomBytes, randomUUID } from 'crypto';
+import { createSign, generateKeyPairSync, randomBytes, randomUUID, sign } from 'crypto';
 import { AddressInfo } from 'net';
 import { FastifyInstance } from 'fastify';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
@@ -8,7 +8,7 @@ import { closeTestServer, createTestServer } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { setupDeviceRealtimeGateway } from '@/realtime/device-gateway';
 import { deviceConnectionRegistry } from '@/realtime/device-connection-registry';
-import { buildDeviceSocketSignaturePayload } from '@/realtime/device-socket-auth';
+import { buildDeviceSocketSignaturePayload, buildNativeDeviceSocketSignaturePayload } from '@/realtime/device-socket-auth';
 import { dispatchPendingCommandOutboxBatch } from '@/services/outbox-dispatcher';
 import { getRecentLogs } from '@/utils/logger';
 
@@ -83,6 +83,21 @@ function signedSocketAuth(input: {
   };
 }
 
+function nativeSignedSocketAuth(input: { deviceId: string; credentialId: string; privateKey: string }) {
+  const timestamp = Date.now().toString();
+  const nonce = randomBytes(24).toString('base64url');
+  return {
+    device_id: input.deviceId,
+    credential_id: input.credentialId,
+    auth_version: 'v2',
+    auth_timestamp: timestamp,
+    auth_nonce: nonce,
+    auth_signature: sign('sha256', Buffer.from(buildNativeDeviceSocketSignaturePayload({
+      deviceId: input.deviceId, credentialId: input.credentialId, timestamp, nonce,
+    })), input.privateKey).toString('base64'),
+  };
+}
+
 async function seedDevice(options: { publicKeyPem?: string | null } = {}) {
   const db = getDatabase();
   const deviceId = randomUUID();
@@ -105,6 +120,23 @@ async function seedDevice(options: { publicKeyPem?: string | null } = {}) {
   });
 
   return { db, deviceId, serial };
+}
+
+async function seedNativeDevice(publicKeyPem: string, capabilityHash = 'a'.repeat(64)) {
+  const db = getDatabase();
+  const deviceId = randomUUID();
+  const installationId = randomUUID();
+  const credentialId = randomUUID();
+  await db.insert(schema.screens).values({ id: deviceId, name: 'Native realtime device', status: 'OFFLINE' });
+  await db.insert(schema.deviceInstallations).values({
+    screen_id: deviceId, installation_id: installationId, installation_epoch: 1,
+    client_kind: 'NATIVE_PLAYER', platform: 'ANDROID', runtime_profile: 'CLOUD_HANDHELD', status: 'ACTIVE', capability_hash: capabilityHash,
+  });
+  await db.insert(schema.deviceCredentials).values({
+    credential_id: credentialId, screen_id: deviceId, installation_id: installationId, installation_epoch: 1,
+    algorithm: 'ES256', public_key_pem: publicKeyPem, auth_version: 'signature_v2', trust_level: 'SOFTWARE_KEY',
+  });
+  return { db, deviceId, installationId, credentialId, capabilityHash };
 }
 
 describe('device realtime gateway and outbox dispatcher', () => {
@@ -210,6 +242,62 @@ describe('device realtime gateway and outbox dispatcher', () => {
       session_id: 'signed-session',
     });
     expect(deviceConnectionRegistry.getConnections(deviceId)).toHaveLength(1);
+  });
+
+  it('binds native HELLO 1.1 to the enrolled installation and accepts native 1.0 during compatibility rollout', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1', publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    const native = await seedNativeDevice(publicKey);
+    socket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'], auth: nativeSignedSocketAuth({ deviceId: native.deviceId, credentialId: native.credentialId, privateKey }), reconnection: false, forceNew: true,
+    });
+    await waitForSocketConnect(socket);
+    const ack = await emitWithAck<any>(socket, 'HELLO', {
+      type: 'HELLO', protocol_version: '1.1', device_id: native.deviceId, session_id: 'native-session',
+      native_player: {
+        credential_id: native.credentialId, installation_id: native.installationId, installation_epoch: 1,
+        runtime_profile: 'CLOUD_HANDHELD', capability_hash: native.capabilityHash, release_id: 'native-r1', protocol_versions: ['1.0', '1.1'],
+      },
+    });
+    expect(ack).toMatchObject({ type: 'HELLO_ACK', protocol_version: '1.1', supported_protocol_versions: ['1.0', '1.1'] });
+    expect(deviceConnectionRegistry.getConnections(native.deviceId)).toHaveLength(1);
+    socket.disconnect();
+    socket = null;
+
+    const legacyNativeSocket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'], auth: nativeSignedSocketAuth({ deviceId: native.deviceId, credentialId: native.credentialId, privateKey }), reconnection: false, forceNew: true,
+    });
+    await waitForSocketConnect(legacyNativeSocket);
+    const legacyAck = await emitWithAck<any>(legacyNativeSocket, 'HELLO', { type: 'HELLO', protocol_version: '1.0', device_id: native.deviceId });
+    expect(legacyAck).toMatchObject({ type: 'HELLO_ACK', protocol_version: '1.0' });
+    legacyNativeSocket.disconnect();
+    await native.db.delete(schema.deviceCredentials).where(eq(schema.deviceCredentials.screen_id, native.deviceId));
+    await native.db.delete(schema.deviceInstallations).where(eq(schema.deviceInstallations.screen_id, native.deviceId));
+    await native.db.delete(schema.screens).where(eq(schema.screens.id, native.deviceId));
+  });
+
+  it('rejects a native HELLO whose capability fingerprint does not match enrollment', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1', publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    const native = await seedNativeDevice(publicKey);
+    socket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'], auth: nativeSignedSocketAuth({ deviceId: native.deviceId, credentialId: native.credentialId, privateKey }), reconnection: false, forceNew: true,
+    });
+    await waitForSocketConnect(socket);
+    const ack = await emitWithAck<any>(socket, 'HELLO', {
+      type: 'HELLO', protocol_version: '1.1', device_id: native.deviceId,
+      native_player: {
+        credential_id: native.credentialId, installation_id: native.installationId, installation_epoch: 1,
+        runtime_profile: 'CLOUD_HANDHELD', capability_hash: 'b'.repeat(64), protocol_versions: ['1.0', '1.1'],
+      },
+    });
+    expect(ack).toMatchObject({ type: 'ERROR', code: 'HELLO_INVALID', retryable: false });
+    expect(deviceConnectionRegistry.getConnections(native.deviceId)).toHaveLength(0);
+    await native.db.delete(schema.deviceCredentials).where(eq(schema.deviceCredentials.screen_id, native.deviceId));
+    await native.db.delete(schema.deviceInstallations).where(eq(schema.deviceInstallations.screen_id, native.deviceId));
+    await native.db.delete(schema.screens).where(eq(schema.screens.id, native.deviceId));
   });
 
   it('rejects failed signed socket auth without falling back to legacy or leaking signed fields in logs', async () => {

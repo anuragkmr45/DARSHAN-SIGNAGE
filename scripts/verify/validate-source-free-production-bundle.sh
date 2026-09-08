@@ -303,6 +303,20 @@ rg -qx 'REALTIME_SOCKET_TRANSPORT=websocket' "$INTERNAL_BUNDLE/production/backen
 rg -qx 'REALTIME_SOCKET_ALLOW_POLLING=false' "$INTERNAL_BUNDLE/production/backend/.env.production"
 rg -qx 'REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS=false' "$INTERNAL_BUNDLE/production/backend/.env.production"
 rg -q 'CMS public Socket.IO WebSocket upgrade failed' "$INTERNAL_BUNDLE/production/cms/health-check.sh"
+for player_file in config.json config.windows.json; do
+  node - "$INTERNAL_BUNDLE/production/electron/$player_file" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const config = JSON.parse(fs.readFileSync(file, 'utf8')).player;
+if (!config?.backend?.baseUrl?.startsWith('https://')) process.exit(1);
+if (!config?.backend?.socketIoUrl?.startsWith('wss://')) process.exit(1);
+if (Object.hasOwn(config?.realtime ?? {}, 'degradedStatePollMs')) process.exit(1);
+NODE
+done
+[[ -x "$INTERNAL_BUNDLE/production/electron/install-linux-config.sh" ]]
+[[ -f "$INTERNAL_BUNDLE/production/electron/install-windows-config.ps1" ]]
+rg -q 'transport-ca\.crt' "$INTERNAL_BUNDLE/production/electron/install-linux-config.sh"
+rg -q 'config\.windows\.json' "$INTERNAL_BUNDLE/production/electron/install-windows-config.ps1"
 node -e '
 const policy = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
 if (policy.backup?.offHostDestination !== process.argv[2]) process.exit(1);

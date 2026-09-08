@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import Fastify from 'fastify';
 
 const ORIGINAL_ENV = { ...process.env };
 const secretDirectory = mkdtempSync(join(tmpdir(), 'darshan-socket-server-test-'));
@@ -197,6 +198,22 @@ describe('socket-server origin handling', () => {
     const { getSocketServerOptions } = await loadSocketServer();
 
     expect(getSocketServerOptions().transports).toEqual(['websocket']);
+  });
+
+  it('closes the shared Socket.IO server once before Fastify shutdown', async () => {
+    applyRequiredEnv();
+    process.env.NODE_ENV = 'development';
+    const { closeSocketServer, getOrCreateSocketServer, getSocketServer } = await loadSocketServer();
+    const fastify = Fastify();
+    const io = getOrCreateSocketServer(fastify);
+    const close = vi.spyOn(io, 'close');
+
+    await closeSocketServer();
+    await closeSocketServer();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(getSocketServer()).toBeNull();
+    await fastify.close();
   });
 
   it('rejects memory-backed login throttling in production', async () => {

@@ -2,8 +2,9 @@ import { createHash } from 'crypto';
 import { FastifyInstance } from 'fastify';
 import { inArray } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
-import { isJobsInitialized, queuePlaybackRefreshDispatch } from '@/jobs';
+import { isJobsInitialized, queuePlaybackRefreshDispatch, type PlaybackRefreshDispatchJob } from '@/jobs';
 import { emitScreensRefreshRequired } from '@/realtime/screens-namespace';
+import { sendConnectedDeviceResync } from '@/realtime/device-gateway';
 import {
   createPlaybackRefreshCommands,
   REFRESH_COMMAND_DEDUPE_MS,
@@ -59,8 +60,9 @@ async function resolveScreenIds(
 
 function buildPlaybackRefreshJob(
   params: DispatchPlaybackRefreshParams,
-  screenIds: string[]
-): PlaybackRefreshCommandBatch {
+  screenIds: string[],
+  options: { targetAll?: boolean; groupIds?: string[] } = {}
+): PlaybackRefreshDispatchJob {
   return {
     reason: params.reason,
     screenIds,
@@ -69,6 +71,8 @@ function buildPlaybackRefreshJob(
     snapshotId: params.snapshotId ?? null,
     defaultMediaVersion: params.defaultMediaVersion ?? null,
     emergencyVersion: params.emergencyVersion ?? null,
+    ...(options.targetAll ? { targetAll: true } : {}),
+    ...(options.groupIds && options.groupIds.length > 0 ? { groupIds: options.groupIds } : {}),
   };
 }
 
@@ -95,14 +99,62 @@ export async function dispatchPlaybackRefresh(
   fastify: FastifyInstance,
   params: DispatchPlaybackRefreshParams
 ) {
-  const resolvedScreenIds = await resolveScreenIds(params);
   const groupIds = Array.from(new Set((params.groupIds || []).filter(Boolean)));
+  const isFleetDefaultMediaRefresh = params.reason === 'DEFAULT_MEDIA' && params.targetAll === true;
+  // A fleet default change has a compact selector job. Do not read and
+  // serialize the complete screen table in the API request path.
+  const resolvedScreenIds = isFleetDefaultMediaRefresh ? [] : await resolveScreenIds(params);
 
   emitScreensRefreshRequired(fastify, {
     reason: params.reason,
-    screen_ids: resolvedScreenIds,
+    // CMS clients only need a re-fetch signal for a fleet change. Sending a
+    // 10k-device ID list through Socket.IO makes the notification itself a
+    // scalability and payload-limit failure.
+    screen_ids: isFleetDefaultMediaRefresh ? [] : resolvedScreenIds,
     group_ids: groupIds,
+    target_all: params.targetAll === true,
   });
+
+  if (isFleetDefaultMediaRefresh) {
+    try {
+      await sendConnectedDeviceResync({ reason: 'DEFAULT_MEDIA', resources: ['desired_state', 'snapshot'] });
+    } catch (error) {
+      // Command creation/polling remain authoritative recovery paths. A
+      // transient realtime-bus outage must not make a valid CMS setting write
+      // fail after it has committed.
+      logger.warn({ err: error }, 'Fleet default-media wake failed; command and polling recovery remain active');
+    }
+
+    if (isJobsInitialized()) {
+      try {
+        await queuePlaybackRefreshDispatch(
+          buildPlaybackRefreshJob(params, [], { targetAll: true }),
+          {
+            singletonKey: 'playback-refresh:default-media:fleet',
+            singletonSeconds: 30,
+          }
+        );
+        return { resolvedScreenIds, commandsCreated: 0 };
+      } catch (error) {
+        logger.warn({ err: error, reason: params.reason }, 'Fleet default-media refresh queue failed; falling back to inline command creation');
+      }
+    }
+
+    // No worker is available (or its enqueue failed). Correctness wins over
+    // latency in this degraded condition: create the durable command state
+    // synchronously so every player still converges through polling.
+    const fallbackScreenIds = await resolveScreenIds(params);
+    const inlineResult = await createPlaybackRefreshCommands({
+      reason: params.reason,
+      screenIds: fallbackScreenIds,
+      createdBy: params.createdBy,
+      publishId: params.publishId ?? null,
+      snapshotId: params.snapshotId ?? null,
+      defaultMediaVersion: params.defaultMediaVersion ?? null,
+      emergencyVersion: params.emergencyVersion ?? null,
+    });
+    return { resolvedScreenIds: fallbackScreenIds, commandsCreated: inlineResult.commandsCreated };
+  }
 
   if (resolvedScreenIds.length === 0) {
     return {
@@ -111,7 +163,8 @@ export async function dispatchPlaybackRefresh(
     };
   }
 
-  const requiresImmediateCommandCreation = params.reason === 'TAKE_DOWN' || params.reason === 'DEFAULT_MEDIA';
+  const requiresImmediateCommandCreation =
+    params.reason === 'TAKE_DOWN' || (params.reason === 'DEFAULT_MEDIA' && !isFleetDefaultMediaRefresh);
 
   if (requiresImmediateCommandCreation || !isJobsInitialized()) {
     const inlineResult = await createPlaybackRefreshCommands({
@@ -136,7 +189,7 @@ export async function dispatchPlaybackRefresh(
     for (const screenIdChunk of chunkScreenIds(resolvedScreenIds, PLAYBACK_REFRESH_JOB_CHUNK_SIZE)) {
       const job = buildPlaybackRefreshJob(params, screenIdChunk);
       const queueOptions =
-        params.reason === 'TAKE_DOWN' || params.reason === 'DEFAULT_MEDIA'
+        params.reason === 'TAKE_DOWN'
           ? undefined
           : {
               singletonKey: buildPlaybackRefreshJobSingletonKey(job),

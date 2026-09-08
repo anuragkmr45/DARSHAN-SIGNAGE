@@ -20,10 +20,12 @@ import { recordPairingCodeAllocation, recordPairingCsrValidation } from '@/obser
 import { detectDevicePairingOrphans } from '@/services/device-pairing-orphan-service';
 import { recordDisplayProfile } from '@/services/screen-display-state-service';
 import { displayProfileV1Schema } from '@/utils/display-profile';
+import { assertAndroidAttestationNotRevoked, parseTrustedAttestationRootFingerprints, verifyAndroidKeyAttestation } from '@/services/android-key-attestation';
 import {
   capabilityFingerprint,
   capabilityManifestV1Schema,
-  NATIVE_PLAYER_CONTRACT_VERSION,
+  canonicalizeNativePlayerContract,
+  nativePlayerContractVersionSchema,
   runtimeProfileSchema,
 } from '@/contracts/native-player';
 
@@ -92,7 +94,7 @@ function isNativePairingCompletion(
 function readNativePairingMetadata(value: unknown) {
   const parsed = z
     .object({
-      contract_version: z.literal(NATIVE_PLAYER_CONTRACT_VERSION),
+      contract_version: nativePlayerContractVersionSchema,
       installation_id: z.string().uuid(),
       installation_epoch: z.number().int().positive(),
       runtime_profile: runtimeProfileSchema,
@@ -109,7 +111,8 @@ function redactNativePairingSecrets(pairingInfo: Record<string, any>) {
   const result = { ...pairingInfo };
   const nativePlayer = result.native_player;
   if (nativePlayer && typeof nativePlayer === 'object' && !Array.isArray(nativePlayer)) {
-    const { attestation_challenge: _challenge, ...safeNativePlayer } = nativePlayer as Record<string, unknown>;
+    const safeNativePlayer = { ...(nativePlayer as Record<string, unknown>) };
+    delete safeNativePlayer.attestation_challenge;
     result.native_player = safeNativePlayer;
   }
   return result;
@@ -199,7 +202,7 @@ const legacyCompletePairingSchema = z.object({
 
 const nativePlayerPairingSchema = z
   .object({
-    contract_version: z.literal(NATIVE_PLAYER_CONTRACT_VERSION),
+    contract_version: nativePlayerContractVersionSchema,
     installation_id: z.string().uuid(),
     installation_epoch: z.number().int().positive().max(2 ** 31 - 1),
     runtime_profile: runtimeProfileSchema,
@@ -232,6 +235,10 @@ const nativeCompletePairingSchema = z
     installation_epoch: z.number().int().positive().max(2 ** 31 - 1),
     public_key_pem: z.string().trim().min(64).max(8_192),
     challenge_proof: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/).max(2_048),
+    // A key cannot be attested until it is bound to the server challenge. The
+    // completion can therefore replace the provisional security facts only.
+    capability_manifest: capabilityManifestV1Schema.optional(),
+    capability_hash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     attestation: z
       .object({
         type: z.enum(['NONE', 'ANDROID_KEY', 'PLAY_INTEGRITY', 'APP_ATTEST']),
@@ -240,9 +247,108 @@ const nativeCompletePairingSchema = z
       .strict()
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.capability_manifest === undefined) !== (value.capability_hash === undefined)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['capability_manifest'], message: 'Completion capability manifest and hash must be supplied together' });
+      return;
+    }
+    if (value.capability_manifest && capabilityFingerprint(value.capability_manifest) !== value.capability_hash) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['capability_hash'], message: 'Completion capability fingerprint does not match the supplied manifest' });
+    }
+  });
 
 const completePairingSchema = z.union([legacyCompletePairingSchema, nativeCompletePairingSchema]);
+
+function resolveNativeCompletionMetadata(
+  requested: NonNullable<ReturnType<typeof readNativePairingMetadata>>,
+  completion: z.infer<typeof nativeCompletePairingSchema>
+) {
+  if (!completion.capability_manifest || !completion.capability_hash) return requested;
+  const finalManifest = completion.capability_manifest;
+  if (finalManifest.runtime_profile !== requested.runtime_profile) {
+    throw AppError.conflict('Native completion cannot change the requested runtime profile');
+  }
+  // The CMS approved all non-security capabilities in the initial request.
+  // Letting completion mutate them would create a TOCTOU capability bypass.
+  const requestedWithFinalSecurity = { ...requested.capability_manifest, security: finalManifest.security };
+  if (canonicalizeNativePlayerContract(requestedWithFinalSecurity) !== canonicalizeNativePlayerContract(finalManifest)) {
+    throw AppError.conflict('Native completion may update only security capabilities');
+  }
+  return { ...requested, capability_manifest: finalManifest, capability_hash: completion.capability_hash };
+}
+
+async function verifyNativeAttestation(input: {
+  completion: z.infer<typeof nativeCompletePairingSchema>;
+  metadata: NonNullable<ReturnType<typeof readNativePairingMetadata>>;
+  publicKeyPem: string;
+}): Promise<{ trustLevel: 'UNVERIFIED' | 'HARDWARE_KEY'; type: string | null; evidence: Record<string, unknown> | null }> {
+  const type = input.completion.attestation?.type ?? 'NONE';
+  const managed = input.metadata.runtime_profile.endsWith('_MANAGED');
+  if (type !== 'ANDROID_KEY') {
+    if (managed) {
+      throw AppError.forbidden('Managed native profiles require verified Android Key Attestation', {
+        reason: 'MANAGED_ATTESTATION_REQUIRED',
+      });
+    }
+    // Explicitly preserve the unavailable/reduced-trust distinction. A client
+    // that cannot attest may still run standard signage, but is never silently
+    // promoted to a hardware-verified credential.
+    return { trustLevel: 'UNVERIFIED', type: type === 'NONE' ? null : type, evidence: type === 'NONE' ? null : { status: 'UNVERIFIED_UNSUPPORTED_TYPE' } };
+  }
+
+  const evidence = input.completion.attestation?.evidence;
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    throw AppError.badRequest('Android Key Attestation evidence is required');
+  }
+  const chain = (evidence as Record<string, unknown>).certificate_chain_pem;
+  if (!Array.isArray(chain) || !chain.every((certificate) => typeof certificate === 'string')) {
+    throw AppError.badRequest('Android Key Attestation certificate chain is required');
+  }
+  if (input.metadata.capability_manifest.platform !== 'ANDROID' && input.metadata.capability_manifest.platform !== 'ANDROID_TV') {
+    throw AppError.badRequest('Android Key Attestation is not valid for this platform');
+  }
+  if (!input.metadata.capability_manifest.security.hardware_backed_key || input.metadata.capability_manifest.security.attestation !== 'ANDROID_KEY') {
+    throw AppError.conflict('Android Key Attestation does not match the requested player capabilities');
+  }
+
+  let verified;
+  try {
+    verified = verifyAndroidKeyAttestation({
+      certificateChainPem: chain,
+      expectedChallenge: input.metadata.attestation_challenge,
+      expectedPublicKeyPem: input.publicKeyPem,
+      trustedRootFingerprints256: parseTrustedAttestationRootFingerprints(config.NATIVE_ANDROID_ATTESTATION_TRUSTED_ROOT_SHA256),
+    });
+  } catch (error) {
+    logger.warn({ reason: error instanceof Error ? error.message : 'unknown' }, 'Android Key Attestation rejected during native enrollment');
+    throw AppError.forbidden('Android Key Attestation validation failed', { reason: 'ANDROID_KEY_ATTESTATION_INVALID' });
+  }
+  try {
+    await assertAndroidAttestationNotRevoked(verified.certificateSerials, { url: 'https://android.googleapis.com/attestation/status' });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'unknown';
+    // A positively revoked key is never allowed. A transient CRL failure can
+    // only fall back to the explicit standard/reduced-trust tier.
+    if (reason.includes('revoked or suspended') || managed) {
+      throw AppError.forbidden('Android Key Attestation revocation status could not be accepted', { reason: 'ANDROID_KEY_REVOCATION_UNAVAILABLE' });
+    }
+    logger.warn({ reason }, 'Android Key Attestation enrolled at reduced trust because revocation status is unavailable');
+    return { trustLevel: 'UNVERIFIED', type, evidence: { status: 'REVOCATION_UNAVAILABLE', root_fingerprint256: verified.rootFingerprint256, security_level: verified.securityLevel } };
+  }
+
+  const evidenceSummary = {
+    status: verified.trusted ? 'VERIFIED' : 'UNTRUSTED_ROOT',
+    root_fingerprint256: verified.rootFingerprint256,
+    security_level: verified.securityLevel,
+  };
+  if (managed && !verified.trusted) {
+    throw AppError.forbidden('Managed native profiles require an Android Key Attestation chain rooted in this deployment trust store', {
+      reason: 'MANAGED_ATTESTATION_ROOT_UNTRUSTED',
+    });
+  }
+  return { trustLevel: verified.trusted ? 'HARDWARE_KEY' : 'UNVERIFIED', type, evidence: evidenceSummary };
+}
 
 const requestPairingSchema = z.object({
   device_label: z.string().optional(),
@@ -781,13 +887,19 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
           if (!nativeMetadata) {
             throw AppError.conflict('This pairing code was not requested by a native player');
           }
+          const completionMetadata = resolveNativeCompletionMetadata(nativeMetadata, data);
           const verifiedCredential = verifyNativeEnrollmentProof({
             pairingId: pairing.id,
-            metadata: nativeMetadata,
+            metadata: completionMetadata,
             publicKeyPem: data.public_key_pem,
             installationId: data.installation_id,
             installationEpoch: data.installation_epoch,
             signature: data.challenge_proof,
+          });
+          const attestation = await verifyNativeAttestation({
+            completion: data,
+            metadata: completionMetadata,
+            publicKeyPem: verifiedCredential.publicKeyPem,
           });
           const now = new Date();
 
@@ -800,6 +912,10 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             const currentNativeMetadata = readNativePairingMetadata(currentPairingInfo.native_player);
             if (!currentNativeMetadata) {
               throw AppError.conflict('This pairing no longer has valid native enrollment metadata');
+            }
+            const currentCompletionMetadata = resolveNativeCompletionMetadata(currentNativeMetadata, data);
+            if (canonicalizeNativePlayerContract(currentCompletionMetadata) !== canonicalizeNativePlayerContract(completionMetadata)) {
+              throw AppError.conflict('Native pairing metadata changed before credential issuance');
             }
             const { deviceId: currentDeviceId, pairingInfo: confirmedPairingInfo } = await synchronizeScreenFromPairing(
               currentPairing,
@@ -814,14 +930,14 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
               .insert(schema.deviceInstallations)
               .values({
                 screen_id: currentDeviceId,
-                installation_id: currentNativeMetadata.installation_id,
-                installation_epoch: currentNativeMetadata.installation_epoch,
+                installation_id: currentCompletionMetadata.installation_id,
+                installation_epoch: currentCompletionMetadata.installation_epoch,
                 client_kind: 'NATIVE_PLAYER',
-                platform: currentNativeMetadata.capability_manifest.platform,
-                runtime_profile: currentNativeMetadata.runtime_profile,
+                platform: currentCompletionMetadata.capability_manifest.platform,
+                runtime_profile: currentCompletionMetadata.runtime_profile,
                 status: 'ACTIVE',
-                capability_hash: currentNativeMetadata.capability_hash,
-                capability_manifest: currentNativeMetadata.capability_manifest,
+                capability_hash: currentCompletionMetadata.capability_hash,
+                capability_manifest: currentCompletionMetadata.capability_manifest,
                 last_seen_at: now,
                 updated_at: now,
               })
@@ -829,11 +945,11 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
                 target: [schema.deviceInstallations.installation_id, schema.deviceInstallations.installation_epoch],
                 set: {
                   screen_id: currentDeviceId,
-                  platform: currentNativeMetadata.capability_manifest.platform,
-                  runtime_profile: currentNativeMetadata.runtime_profile,
+                  platform: currentCompletionMetadata.capability_manifest.platform,
+                  runtime_profile: currentCompletionMetadata.runtime_profile,
                   status: 'ACTIVE',
-                  capability_hash: currentNativeMetadata.capability_hash,
-                  capability_manifest: currentNativeMetadata.capability_manifest,
+                  capability_hash: currentCompletionMetadata.capability_hash,
+                  capability_manifest: currentCompletionMetadata.capability_manifest,
                   last_seen_at: now,
                   updated_at: now,
                   revoked_at: null,
@@ -845,8 +961,8 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
               .set({ is_revoked: true, revoked_at: now })
               .where(
                 and(
-                  eq(schema.deviceCredentials.installation_id, currentNativeMetadata.installation_id),
-                  eq(schema.deviceCredentials.installation_epoch, currentNativeMetadata.installation_epoch),
+                  eq(schema.deviceCredentials.installation_id, currentCompletionMetadata.installation_id),
+                  eq(schema.deviceCredentials.installation_epoch, currentCompletionMetadata.installation_epoch),
                   eq(schema.deviceCredentials.is_revoked, false)
                 )
               );
@@ -855,14 +971,14 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
               .insert(schema.deviceCredentials)
               .values({
                 screen_id: currentDeviceId,
-                installation_id: currentNativeMetadata.installation_id,
-                installation_epoch: currentNativeMetadata.installation_epoch,
+                installation_id: currentCompletionMetadata.installation_id,
+                installation_epoch: currentCompletionMetadata.installation_epoch,
                 algorithm: 'ES256',
                 public_key_pem: verifiedCredential.publicKeyPem,
                 auth_version: 'signature_v2',
-                trust_level: 'UNVERIFIED',
-                attestation_type: data.attestation?.type ?? null,
-                attestation_evidence: data.attestation?.evidence ?? null,
+                trust_level: attestation.trustLevel,
+                attestation_type: attestation.type,
+                attestation_evidence: attestation.evidence,
               })
               .returning({ credential_id: schema.deviceCredentials.credential_id, trust_level: schema.deviceCredentials.trust_level });
 
@@ -870,16 +986,16 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
               .insert(schema.deviceCapabilityObservations)
               .values({
                 screen_id: currentDeviceId,
-                installation_id: currentNativeMetadata.installation_id,
-                capability_hash: currentNativeMetadata.capability_hash,
-                capability_manifest: currentNativeMetadata.capability_manifest,
+                installation_id: currentCompletionMetadata.installation_id,
+                capability_hash: currentCompletionMetadata.capability_hash,
+                capability_manifest: currentCompletionMetadata.capability_manifest,
               })
               .onConflictDoNothing();
 
             return {
               deviceId: currentDeviceId,
-              capabilityHash: currentNativeMetadata.capability_hash,
-              runtimeProfile: currentNativeMetadata.runtime_profile,
+              capabilityHash: currentCompletionMetadata.capability_hash,
+              runtimeProfile: currentCompletionMetadata.runtime_profile,
               credential,
               pairingInfo: confirmedPairingInfo,
             };

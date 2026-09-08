@@ -1,13 +1,18 @@
 import { randomUUID } from 'crypto';
 import { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { eq, inArray } from 'drizzle-orm';
 import { createServer } from '@/server';
 import { generateAccessToken } from '@/auth/jwt';
 import { closeDatabase, getDatabase, initializeDatabase, schema } from '@/db';
 import { createSessionRepository } from '@/db/repositories/session';
 import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
+
+vi.mock('@/s3', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/s3')>()),
+  deleteObject: vi.fn().mockResolvedValue(undefined),
+}));
 
 type RolePermissions = {
   grants: Array<{ action: string; subject: string }>;
@@ -279,6 +284,88 @@ describe('Media Routes - delete ownership and usage protection', () => {
       .from(schema.media)
       .where(eq(schema.media.id, media.id));
     expect(deleted).toBeUndefined();
+  });
+
+  it('retains media metadata when object storage cleanup fails so deletion can be retried', async () => {
+    const media = await insertMedia(ownerUserId);
+    const db = getDatabase();
+    await db
+      .update(schema.media)
+      .set({ source_bucket: 'media-source', source_object_key: `retry-test/${media.id}` })
+      .where(eq(schema.media.id, media.id));
+    const s3 = await import('@/s3');
+    vi.mocked(s3.deleteObject).mockRejectedValueOnce(new Error('storage unavailable'));
+
+    const response = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/media/${media.id}?hard=true`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+
+    try {
+      expect(response.statusCode).toBe(HTTP_STATUS.SERVICE_UNAVAILABLE);
+      expect(JSON.parse(response.body).error.code).toBe('MEDIA_STORAGE_CLEANUP_FAILED');
+      const [retained] = await db.select().from(schema.media).where(eq(schema.media.id, media.id));
+      expect(retained?.id).toBe(media.id);
+    } finally {
+      vi.mocked(s3.deleteObject).mockResolvedValue(undefined);
+    }
+  });
+
+  it('removes document rendition metadata with its owning media record', async () => {
+    const media = await insertMedia(ownerUserId);
+    const hash = 'a'.repeat(64);
+    const db = getDatabase();
+    const manifestKey = `delete-test/${media.id}/manifest.json`;
+    const pageKey = `delete-test/${media.id}/page-0001.jpg`;
+    await db.insert(schema.storageObjects).values([
+      { bucket: 'media-ready', object_key: manifestKey },
+      { bucket: 'media-ready', object_key: pageKey },
+    ]);
+    await db.insert(schema.mediaRenditions).values({
+      media_id: media.id,
+      source_revision: `delete-test-${randomUUID()}`,
+      role: 'DOCUMENT_PAGE_MANIFEST',
+      state: 'READY',
+      mime_type: 'application/json',
+      codecs: [],
+      size_bytes: 1,
+      sha256: hash,
+      bucket: 'media-ready',
+      object_key: manifestKey,
+      page_manifest: {
+        schema_version: 1,
+        page_duration_ms: 10_000,
+        pages: [
+          {
+            index: 1,
+            bucket: 'media-ready',
+            object_key: pageKey,
+            mime_type: 'image/jpeg',
+            size_bytes: 1,
+            sha256: hash,
+          },
+        ],
+      },
+    });
+
+    const response = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/media/${media.id}?hard=true`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    const renditions = await db
+      .select()
+      .from(schema.mediaRenditions)
+      .where(eq(schema.mediaRenditions.media_id, media.id));
+    expect(renditions).toHaveLength(0);
+    const storageRows = await db
+      .select()
+      .from(schema.storageObjects)
+      .where(inArray(schema.storageObjects.object_key, [manifestKey, pageKey]));
+    expect(storageRows).toHaveLength(0);
   });
 
   it('blocks non-owner delete and exposes uploader identity', async () => {

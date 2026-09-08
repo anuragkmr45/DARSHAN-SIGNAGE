@@ -153,4 +153,24 @@ describe('device telemetry proof-of-play idempotency', () => {
     expect(rows).toHaveLength(1);
     expect(putObjectMock).toHaveBeenCalledOnce();
   });
+
+  it('preserves null schedule provenance for default or emergency fallback playback', async () => {
+    const db = getDatabase();
+    const deviceId = randomUUID();
+    const serial = `serial-${randomUUID()}`;
+    const mediaId = randomUUID();
+    const startTime = new Date(Date.now() - 10_000).toISOString();
+    const endTime = new Date().toISOString();
+    await db.insert(schema.screens).values({ id: deviceId, name: 'Fallback PoP Device', status: 'ACTIVE' });
+    await db.insert(schema.deviceCertificates).values({ screen_id: deviceId, serial, certificate_pem: 'dummy-cert', expires_at: new Date(Date.now() + 60_000) });
+
+    const response = await server.inject({
+      method: 'POST', url: '/api/v1/device/proof-of-play', headers: { 'x-device-serial': serial },
+      payload: { device_id: deviceId, media_id: mediaId, start_time: startTime, end_time: endTime, duration: 10, completed: true },
+    });
+    expect(response.statusCode).toBe(HTTP_STATUS.CREATED);
+    const idempotencyKey = buildProofOfPlayIdempotencyKey({ deviceId, mediaId, scheduleId: null, startTime, endTime, duration: 10, completed: true });
+    const [row] = await db.select().from(schema.proofOfPlay).where(eq(schema.proofOfPlay.idempotency_key, idempotencyKey));
+    expect(row).toMatchObject({ screen_id: deviceId, media_id: mediaId, schedule_id: null, presentation_id: null });
+  });
 });

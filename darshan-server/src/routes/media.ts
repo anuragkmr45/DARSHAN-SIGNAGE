@@ -44,6 +44,7 @@ import { getDatabase, schema } from '@/db';
 import { eq, inArray } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
 import { config as appConfig } from '@/config';
+import { documentPageManifestV1Schema } from '@/contracts/native-player';
 import {
   buildObjectKey,
   normalizeDisplayName,
@@ -1258,8 +1259,17 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const deletedObjects: { bucket: string; key: string; success: boolean; error?: string }[] = [];
 
         const addStorageObject = (obj: { bucket: string; key: string; id?: string }) => {
-          const mapKey = obj.id ?? `${obj.bucket}:${obj.key}`;
-          storageObjects.set(mapKey, obj);
+          // Identity is the storage location, not the optional database ID. A
+          // source record and a rendition can legitimately refer to the same
+          // object; retain its ID when one is known so it is removed exactly
+          // once after the object cleanup succeeds.
+          const mapKey = `${obj.bucket}:${obj.key}`;
+          const existing = storageObjects.get(mapKey);
+          storageObjects.set(mapKey, {
+            ...existing,
+            ...obj,
+            id: obj.id ?? existing?.id,
+          });
         };
 
         if (media.source_bucket && media.source_object_key) {
@@ -1290,6 +1300,52 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           if (obj) addStorageObject({ bucket: obj.bucket, key: obj.object_key, id: obj.id });
         }
 
+        // Renditions are independent immutable objects, not just pointers in
+        // the legacy media row. Leaving them behind on delete leaks document
+        // pages, webpage captures, and compatibility assets indefinitely.
+        const renditions = await db
+          .select()
+          .from(schema.mediaRenditions)
+          .where(eq(schema.mediaRenditions.media_id, media.id));
+        for (const rendition of renditions) {
+          if (rendition.bucket && rendition.object_key) {
+            addStorageObject({ bucket: rendition.bucket, key: rendition.object_key });
+          }
+          if (rendition.role === 'DOCUMENT_PAGE_MANIFEST') {
+            const manifest = documentPageManifestV1Schema.safeParse(rendition.page_manifest);
+            if (manifest.success) {
+              for (const page of manifest.data.pages) {
+                addStorageObject({ bucket: page.bucket, key: page.object_key });
+              }
+            }
+          }
+        }
+
+        // Rendition and document-page rows are not linked from the legacy
+        // media columns. Resolve their storage records by location so a hard
+        // delete cannot leave database-only storage references behind.
+        const unresolvedObjectKeys = [...storageObjects.values()]
+          .filter((obj) => !obj.id)
+          .map((obj) => obj.key);
+        if (unresolvedObjectKeys.length > 0) {
+          const persistedObjects = await db
+            .select()
+            .from(schema.storageObjects)
+            .where(inArray(schema.storageObjects.object_key, unresolvedObjectKeys));
+          for (const persistedObject of persistedObjects) {
+            const mapped = storageObjects.get(
+              `${persistedObject.bucket}:${persistedObject.object_key}`
+            );
+            if (mapped) {
+              addStorageObject({
+                bucket: persistedObject.bucket,
+                key: persistedObject.object_key,
+                id: persistedObject.id,
+              });
+            }
+          }
+        }
+
         for (const obj of storageObjects.values()) {
           try {
             await deleteObject(obj.bucket, obj.key);
@@ -1303,6 +1359,23 @@ export async function mediaRoutes(fastify: FastifyInstance) {
               error: (err as Error).message,
             });
           }
+        }
+
+        // Do not sever database ownership when object storage is unavailable.
+        // S3 deletes are idempotent, so retaining the media/rendition records
+        // makes the whole operation safely retryable instead of orphaning
+        // objects that can no longer be addressed by normal cleanup tools.
+        if (deletedObjects.some((object) => !object.success)) {
+          throw new AppError({
+            statusCode: 503,
+            code: 'MEDIA_STORAGE_CLEANUP_FAILED',
+            message: 'Media storage cleanup did not complete. Please retry the delete operation.',
+            details: { failed_object_count: deletedObjects.filter((object) => !object.success).length },
+          });
+        }
+
+        if (renditions.length > 0) {
+          await db.delete(schema.mediaRenditions).where(eq(schema.mediaRenditions.media_id, media.id));
         }
 
         // Remove storage object rows for ready/thumbnail if present

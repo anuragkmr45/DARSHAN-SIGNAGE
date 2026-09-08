@@ -104,13 +104,21 @@ async function issueToken(user: UserRecord, role: RoleRecord): Promise<string> {
   return issued.token;
 }
 
-async function apiRequest(baseUrl: string, token: string, method: string, path: string, body?: unknown) {
+async function apiRequest(
+  baseUrl: string,
+  token: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {}
+) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...extraHeaders,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -229,6 +237,11 @@ async function run() {
       id: screenId,
       name: 'Realtime Dry Run Screen',
       status: 'OFFLINE',
+      device_info: {
+        player_capabilities: {
+          features: ['message_emergency_v1'],
+        },
+      },
     });
     await putObject('media-source', mediaObjectKey, Buffer.from('dry-run-video-payload'), 'video/mp4');
     await db.insert(schema.media).values({
@@ -405,7 +418,7 @@ async function run() {
     const emergency = await apiRequest(baseUrl, adminToken, 'POST', '/api/v1/emergency/trigger', {
       message: 'Realtime dry run emergency',
       screen_ids: [screenId],
-    });
+    }, { 'Idempotency-Key': `screens-dry-run-emergency-${randomUUID()}` });
     if (emergency.status !== 201) {
       throw new Error(`Emergency trigger failed: ${emergency.status} ${JSON.stringify(emergency.data)}`);
     }

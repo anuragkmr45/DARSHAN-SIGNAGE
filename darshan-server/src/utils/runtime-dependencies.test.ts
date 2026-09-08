@@ -61,12 +61,16 @@ describe('runtime dependency resolution', () => {
     const sofficePath = createExecutable(binDir, 'custom-soffice');
     const pgDumpPath = createExecutable(binDir, 'custom-pg-dump');
     const tarPath = createExecutable(binDir, 'custom-tar');
+    const pdftoppmPath = createExecutable(binDir, 'custom-pdftoppm');
+    const pdfinfoPath = createExecutable(binDir, 'custom-pdfinfo');
     const chromiumPath = createExecutable(binDir, 'custom-chromium');
 
     process.env.FFMPEG_PATH = ffmpegPath;
     process.env.LIBREOFFICE_PATH = sofficePath;
     process.env.PG_DUMP_PATH = pgDumpPath;
     process.env.TAR_PATH = tarPath;
+    process.env.PDFTOPPM_PATH = pdftoppmPath;
+    process.env.PDFINFO_PATH = pdfinfoPath;
     process.env.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH = chromiumPath;
     process.env.PATH = '';
     applyMinimumEnv();
@@ -79,6 +83,7 @@ describe('runtime dependency resolution', () => {
     expect(report.dependencies.find((dependency) => dependency.name === 'libreoffice')?.path).toBe(sofficePath);
     expect(report.dependencies.find((dependency) => dependency.name === 'pg_dump')?.path).toBe(pgDumpPath);
     expect(report.dependencies.find((dependency) => dependency.name === 'tar')?.path).toBe(tarPath);
+    expect(report.dependencies.find((dependency) => dependency.name === 'poppler')?.path).toBe(`${pdftoppmPath};${pdfinfoPath}`);
     expect(report.dependencies.find((dependency) => dependency.name === 'chromium')?.path).toBe(chromiumPath);
   });
 
@@ -128,6 +133,8 @@ describe('runtime dependency resolution', () => {
     createExecutable(binDir, 'soffice');
     createExecutable(binDir, 'pg_dump');
     createExecutable(binDir, 'tar');
+    createExecutable(binDir, 'pdftoppm');
+    createExecutable(binDir, 'pdfinfo');
 
     process.env.PATH = binDir;
     applyMinimumEnv();
@@ -146,6 +153,8 @@ describe('runtime dependency resolution', () => {
     createExecutable(binDir, 'soffice');
     createExecutable(binDir, 'pg_dump');
     createExecutable(binDir, 'tar');
+    createExecutable(binDir, 'pdftoppm');
+    createExecutable(binDir, 'pdfinfo');
 
     process.env.PATH = binDir;
     process.env.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH = join(tmpdir(), 'missing-explicit-chromium');

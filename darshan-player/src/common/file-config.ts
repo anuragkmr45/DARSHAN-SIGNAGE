@@ -267,7 +267,14 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
     assertPlainObject(realtime, 'player.realtime')
     assertKnownKeys(
       realtime,
-      ['enabled', 'signedAuthEnabled', 'deviceNamespace', 'commandSafetyPollMs', 'desiredStatePollMs'],
+      [
+        'enabled',
+        'signedAuthEnabled',
+        'deviceNamespace',
+        'commandSafetyPollMs',
+        'desiredStatePollMs',
+        'degradedStatePollMs',
+      ],
       'player.realtime'
     )
     config.realtime = { ...(config.realtime || {}) }
@@ -291,6 +298,11 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       config.realtime!,
       'desiredStatePollMs',
       numberValue(realtime['desiredStatePollMs'], 'player.realtime.desiredStatePollMs', 30000) as any
+    )
+    setNested(
+      config.realtime!,
+      'degradedStatePollMs',
+      numberValue(realtime['degradedStatePollMs'], 'player.realtime.degradedStatePollMs', 5000) as any
     )
     mappedConfigKeys.push('realtime')
   }

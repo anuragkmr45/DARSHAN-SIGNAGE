@@ -71,9 +71,18 @@ const envSchema = z.object({
   DEVICE_SOCKET_AUTH_REPLAY_PROTECTION_ENABLED: optionalBooleanString,
   DEVICE_SOCKET_AUTH_REPLAY_CACHE_TTL_MS: z.coerce.number().int().positive().default(300_000),
   DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED: optionalBooleanString,
+  // Comma-separated SHA-256 fingerprints of Android Key Attestation roots
+  // trusted by this deployment. A chain without a configured root can be
+  // recorded as reduced trust but can never authorize managed kiosk mode.
+  NATIVE_ANDROID_ATTESTATION_TRUSTED_ROOT_SHA256: z.string().default(''),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   FFMPEG_PATH: z.string().default('ffmpeg'),
   LIBREOFFICE_PATH: z.string().default('soffice'),
+  PDFTOPPM_PATH: z.string().default('pdftoppm'),
+  PDFINFO_PATH: z.string().default('pdfinfo'),
+  DOCUMENT_MAX_PAGE_COUNT: z.coerce.number().int().min(1).max(500).default(100),
+  DOCUMENT_PAGE_RENDER_DPI: z.coerce.number().int().min(72).max(300).default(144),
+  DOCUMENT_PAGE_DEFAULT_DURATION_MS: z.coerce.number().int().min(1_000).max(120_000).default(10_000),
   PG_DUMP_PATH: z.string().default('pg_dump'),
   TAR_PATH: z.string().default('tar'),
   BACKUP_INTERVAL_HOURS: z.coerce.number().int().min(1).max(168).optional(),

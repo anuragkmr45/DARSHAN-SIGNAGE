@@ -64,6 +64,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-darshan}
+      MINIO_ENDPOINT: minio
     ports:
       - '${API_HOST_PORT:-3000}:3000'
     depends_on:
@@ -97,6 +98,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # `.env` intentionally targets localhost for host-run development. A
+    # Compose worker runs in its own network namespace, so it must use the
+    # PostgreSQL service hostname just as the API service does.
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-darshan}
+      MINIO_ENDPOINT: minio
     depends_on:
       postgres:
         condition: service_healthy

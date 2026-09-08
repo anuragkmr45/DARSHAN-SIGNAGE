@@ -15,7 +15,7 @@ import { getPresignedUrl } from '@/s3';
 import { AppError } from '@/utils/app-error';
 import { defineAbilityFor } from '@/rbac';
 import { buildContentDisposition } from '@/utils/object-key';
-import { getOrCreateSocketServer } from '@/realtime/socket-server';
+import { closeSocketServer, getOrCreateSocketServer } from '@/realtime/socket-server';
 import { createHash } from 'node:crypto';
 import { queueEmergencyTransitionReconcile } from '@/jobs';
 import { emitScreensRefreshRequired } from '@/realtime/screens-namespace';
@@ -67,9 +67,8 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
   const db = getDatabase();
   const io: SocketIOServer = getOrCreateSocketServer(fastify);
 
-  fastify.addHook('onClose', (_, done) => {
-    io.close();
-    done();
+  fastify.addHook('onClose', async () => {
+    await closeSocketServer();
   });
 
   const requireEmergencyAdmin = async (payload: any, _reply: FastifyReply) => {

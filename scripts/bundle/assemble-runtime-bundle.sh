@@ -339,8 +339,7 @@ stage_player_bundle() {
       "signedAuthEnabled": true,
       "deviceNamespace": "/device",
       "commandSafetyPollMs": 300000,
-      "desiredStatePollMs": 300000,
-      "degradedStatePollMs": 30000
+      "desiredStatePollMs": 300000
     },
     "transportTls": {
       "enabled": $transport_enabled,
@@ -362,6 +361,86 @@ EOF
   write_player_config "$bundle_dir/config.json" "$linux_ca_path"
   if [[ "$runtime_mode" == "production" ]]; then
     write_player_config "$bundle_dir/config.windows.json" "$windows_ca_path"
+
+    cat > "$bundle_dir/install-linux-config.sh" <<'EOF'
+#!/usr/bin/env bash
+# Install only the public, signed site configuration that accompanies this
+# player bundle. The installer itself is deliberately separate: package
+# installation must never silently overwrite an existing paired device's
+# site configuration.
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: sudo ./install-linux-config.sh [--config-destination <absolute-path>] [--ca-destination <absolute-path>]
+
+Defaults:
+  config: /etc/darshan/player/config.json
+  CA:     /etc/darshan/transport-ca.crt
+USAGE
+}
+
+config_destination=/etc/darshan/player/config.json
+ca_destination=/etc/darshan/transport-ca.crt
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config-destination)
+      config_destination="${2:-}"
+      shift 2
+      ;;
+    --ca-destination)
+      ca_destination="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo 'Run this installer with sudo so it can write the machine site configuration.' >&2
+  exit 1
+fi
+for destination in "$config_destination" "$ca_destination"; do
+  if [[ "$destination" != /* || "$destination" == *'..'* ]]; then
+    echo "Destination must be an absolute normalized path: $destination" >&2
+    exit 2
+  fi
+done
+
+install -d -m 0755 "$(dirname "$config_destination")" "$(dirname "$ca_destination")"
+install -m 0644 ./config.json "$config_destination"
+install -m 0644 ./transport-ca.crt "$ca_destination"
+printf 'Installed player configuration at %s and transport CA at %s.\n' "$config_destination" "$ca_destination"
+EOF
+    chmod 750 "$bundle_dir/install-linux-config.sh"
+
+    cat > "$bundle_dir/install-windows-config.ps1" <<'EOF'
+[CmdletBinding()]
+param(
+  [string]$ConfigDestination = "$env:ProgramData\\DARSHAN\\config.json",
+  [string]$CaDestination = "$env:ProgramData\\DARSHAN\\transport-ca.crt"
+)
+
+$ErrorActionPreference = 'Stop'
+foreach ($destination in @($ConfigDestination, $CaDestination)) {
+  if (-not [System.IO.Path]::IsPathRooted($destination)) {
+    throw "Destination must be an absolute path: $destination"
+  }
+  $parent = Split-Path -Parent $destination
+  New-Item -ItemType Directory -Force -Path $parent | Out-Null
+}
+
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'config.windows.json') -Destination $ConfigDestination -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'transport-ca.crt') -Destination $CaDestination -Force
+Write-Output "Installed player configuration at $ConfigDestination and transport CA at $CaDestination."
+EOF
   fi
 
   cat > "$bundle_dir/README.md" <<EOF
@@ -400,9 +479,9 @@ WS:  $socket_scheme://$backend_host:$endpoint_port/socket.io/
 
 ## Minimum workflow
 
-1. Copy one installer from \`./installers\` to the target player machine.
-2. On Ubuntu, install \`config.json\` as \`/etc/darshan/player/config.json\`. On Windows, install \`config.windows.json\` as \`C:\\ProgramData\\DARSHAN\\config.json\`.
-3. For production, copy \`transport-ca.crt\` to the exact \`transportTls.caPath\` in that generated config.
+1. Copy one installer from \`./installers\` to the target player machine and install it.
+2. For production, run \`sudo ./install-linux-config.sh\` from this folder on Ubuntu. On Windows, run \`install-windows-config.ps1\` as Administrator from this folder.
+3. The generated installer copies both the site config and \`transport-ca.crt\` to the exact paths declared in the config. It intentionally does not overwrite paired identity or cache state.
 4. Keep \`runtime.mode\` as \`$runtime_mode\` and do not disable certificate validation. Current packages discover these standard site-config paths automatically; explicit selector env vars remain supported.
 5. Pair the device against the backend host, not the CMS host.
 6. Verify fullscreen kiosk behavior and confirm the device appears in the CMS.

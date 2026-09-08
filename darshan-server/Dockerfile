@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   curl \
   ffmpeg \
   libreoffice \
+  poppler-utils \
   postgresql-client \
   tar \
   && rm -rf /var/lib/apt/lists/*

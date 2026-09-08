@@ -4,11 +4,11 @@ import { createHash } from 'crypto';
 import { execFile as execFileCallback } from 'child_process';
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { extname, join } from 'path';
 import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { config as appConfig } from '@/config';
-import { abortMultipartUpload, deleteObject, getObject, putObject } from '@/s3';
+import { abortMultipartUpload, deleteObject, getObject, putFile, putObject } from '@/s3';
 import { createLogger } from '@/utils/logger';
 import { createMediaRepository } from '@/db/repositories/media';
 import { createBackupRun, getLatestBackupRun, runFullBackup } from '@/utils/backup-runs';
@@ -16,7 +16,7 @@ import { getCachedSettings } from '@/utils/settings';
 import { buildSourceFilename } from '@/utils/media-processing';
 import { captureWebpagePreview } from '@/utils/webpage-capture';
 import { redactWebpageUrlForLogs, WebpageUrlPolicyError } from '@/utils/webpage-url-policy';
-import { getLibreOfficeExecutable, getResolvedFfmpegPath } from '@/utils/runtime-dependencies';
+import { getLibreOfficeExecutable, getPopplerExecutables, getResolvedFfmpegPath } from '@/utils/runtime-dependencies';
 import {
   type HeartbeatTelemetryJob,
   type ProofOfPlayTelemetryJob,
@@ -43,6 +43,7 @@ const HLS_SEGMENT_CONTENT_TYPE = 'video/mp2t';
 const THUMBNAIL_CONTENT_TYPE = 'image/jpeg';
 const NDJSON_CONTENT_TYPE = 'application/x-ndjson';
 const DOCUMENT_READY_CONTENT_TYPE = 'application/pdf';
+const DOCUMENT_PAGE_CONTENT_TYPE = 'image/jpeg';
 const WEBPAGE_FALLBACK_CONTENT_TYPE = 'image/png';
 
 const QUALITY_OPTIONS: Record<FFmpegTranscodeJob['quality'], string[]> = {
@@ -230,7 +231,59 @@ async function convertDocumentWithLibreOffice(inputPath: string, outputDir: stri
 }
 
 async function convertDocumentToPdf(inputPath: string, outputDir: string) {
+  if (extname(inputPath).toLowerCase() === '.pdf') return inputPath;
   return convertDocumentWithLibreOffice(inputPath, outputDir);
+}
+
+type DocumentPageOutput = Readonly<{ index: number; path: string }>;
+
+async function getPdfPageCount(pdfPath: string, pdfinfo: string): Promise<number> {
+  const { stdout } = await runCommand(pdfinfo, [pdfPath]);
+  const match = stdout.match(/^Pages:\s*(\d+)\s*$/mi);
+  const count = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isSafeInteger(count) || count < 1) throw new Error('Unable to determine PDF page count');
+  return count;
+}
+
+/** Render a bounded document into offline-safe JPEG pages.  The page count is
+ * checked before rendering so an attacker cannot make a worker silently
+ * truncate a large document or exhaust disk/CPU by accident. */
+async function renderPdfPages(pdfPath: string, outputDir: string): Promise<DocumentPageOutput[]> {
+  const { pdftoppm, pdfinfo } = getPopplerExecutables();
+  if (!pdftoppm || !pdfinfo) throw new Error('Poppler pdftoppm/pdfinfo is not available');
+  const pageCount = await getPdfPageCount(pdfPath, pdfinfo);
+  if (pageCount > appConfig.DOCUMENT_MAX_PAGE_COUNT) {
+    throw new Error(`Document has ${pageCount} pages; limit is ${appConfig.DOCUMENT_MAX_PAGE_COUNT}`);
+  }
+  const prefix = join(outputDir, 'page');
+  await runCommand(pdftoppm, [
+    '-jpeg',
+    '-r', String(appConfig.DOCUMENT_PAGE_RENDER_DPI),
+    '-jpegopt', 'quality=85,progressive=y,optimize=y',
+    '-f', '1',
+    '-l', String(pageCount),
+    pdfPath,
+    prefix,
+  ]);
+  // Poppler pads its output filename width to the number of pages (for
+  // example page-01.jpg for a twelve-page document), so discover the files
+  // rather than constructing an unstable filename convention.
+  const pages = (await fs.readdir(outputDir, { withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => {
+      const match = entry.name.match(/^page-(\d+)\.jpg$/);
+      return match ? { index: Number(match[1]), path: join(outputDir, entry.name) } : null;
+    })
+    .filter((page): page is DocumentPageOutput => Boolean(page && Number.isSafeInteger(page.index) && page.index > 0))
+    .sort((left, right) => left.index - right.index);
+  if (pages.length !== pageCount || pages.some((page, offset) => page.index !== offset + 1)) {
+    throw new Error(`PDF renderer produced an incomplete page set (${pages.length}/${pageCount})`);
+  }
+  for (const page of pages) {
+    const info = await fs.stat(page.path);
+    if (info.size <= 0) throw new Error(`PDF renderer produced an empty page ${page.index}`);
+  }
+  return pages;
 }
 
 let boss: PgBoss | null = null;
@@ -358,9 +411,15 @@ export function isJobsInitialized() {
   return boss !== null;
 }
 
-export async function stopJobs(): Promise<void> {
+export async function stopJobs(options: { graceful?: boolean; timeoutMs?: number } = {}): Promise<void> {
   if (boss) {
-    await boss.stop();
+    // API-only processes never execute job handlers, so waiting for work in
+    // progress only delays a deployment shutdown. Workers keep a bounded
+    // graceful drain and pg-boss will fail/requeue outstanding work after it.
+    await boss.stop({
+      graceful: options.graceful ?? true,
+      timeout: options.timeoutMs ?? 30_000,
+    });
     boss = null;
     logger.info('pg-boss stopped');
   }
@@ -418,7 +477,46 @@ export interface BackupCheckJob {
   trigger: 'scheduled-check';
 }
 
-export interface PlaybackRefreshDispatchJob extends PlaybackRefreshCommandBatch {}
+export interface PlaybackRefreshDispatchJob extends PlaybackRefreshCommandBatch {
+  /** Resolve the fleet at worker execution time rather than loading every
+   * screen into the API request that changed a global setting. */
+  targetAll?: boolean;
+  groupIds?: string[];
+}
+
+const PLAYBACK_REFRESH_WORKER_CHUNK_SIZE = 100;
+
+/** Materializes durable per-screen command/audit state in bounded worker
+ * transactions. The queue payload may be a compact fleet selector. */
+export async function processPlaybackRefreshDispatchJob(job: PlaybackRefreshDispatchJob) {
+  const db = getDatabase();
+  const screenIds = new Set(job.screenIds.filter(Boolean));
+
+  if (job.targetAll) {
+    const screens = await db.select({ id: schema.screens.id }).from(schema.screens);
+    screens.forEach((screen) => screenIds.add(screen.id));
+  }
+
+  const groupIds = Array.from(new Set((job.groupIds ?? []).filter(Boolean)));
+  if (groupIds.length > 0) {
+    const members = await db
+      .select({ screen_id: schema.screenGroupMembers.screen_id })
+      .from(schema.screenGroupMembers)
+      .where(inArray(schema.screenGroupMembers.group_id, groupIds));
+    members.forEach((member) => screenIds.add(member.screen_id));
+  }
+
+  const resolvedScreenIds = Array.from(screenIds);
+  let commandsCreated = 0;
+  for (let index = 0; index < resolvedScreenIds.length; index += PLAYBACK_REFRESH_WORKER_CHUNK_SIZE) {
+    const result = await createPlaybackRefreshCommands({
+      ...job,
+      screenIds: resolvedScreenIds.slice(index, index + PLAYBACK_REFRESH_WORKER_CHUNK_SIZE),
+    });
+    commandsCreated += result.commandsCreated;
+  }
+  return { resolvedScreenIds, commandsCreated };
+}
 
 export interface EmergencyReconcileJob {
   transitionId?: string;
@@ -680,7 +778,7 @@ export async function registerJobHandlers() {
 
   await registerObservedWorker<PlaybackRefreshDispatchJob>('playback:refresh-dispatch', async (batch) => {
     for (const job of batch) {
-      await createPlaybackRefreshCommands(job.data);
+      await processPlaybackRefreshDispatchJob(job.data);
     }
   });
 
@@ -929,6 +1027,7 @@ export async function registerJobHandlers() {
     for (const job of batch) {
       const { mediaId, sourceObjectId } = job.data;
       let tempDir: string | null = null;
+      const uploadedPageKeys: string[] = [];
 
       try {
         const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId));
@@ -967,16 +1066,91 @@ export async function registerJobHandlers() {
         await fs.writeFile(inputPath, sourceBuffer);
 
         const outputPdfPath = await convertDocumentToPdf(inputPath, tempDir);
-        const outputBuffer = await fs.readFile(outputPdfPath);
         const readyKey = `${mediaId}/ready.pdf`;
-        const upload = await putObject(READY_BUCKET, readyKey, outputBuffer, DOCUMENT_READY_CONTENT_TYPE);
+        const upload = await putFile(READY_BUCKET, readyKey, outputPdfPath, DOCUMENT_READY_CONTENT_TYPE);
         const readyObject = await upsertStorageObject({
           bucket: READY_BUCKET,
           objectKey: readyKey,
           contentType: DOCUMENT_READY_CONTENT_TYPE,
-          size: outputBuffer.length,
+          size: (await fs.stat(outputPdfPath)).size,
           sha256: upload.sha256,
         });
+
+        const renderedPages = await renderPdfPages(outputPdfPath, tempDir);
+        const sourceRevision = upload.sha256;
+        const manifestPages: Array<Record<string, unknown>> = [];
+        for (const page of renderedPages) {
+          const objectKey = `${mediaId}/document-pages/${sourceRevision}/page-${String(page.index).padStart(4, '0')}.jpg`;
+          const pageUpload = await putFile(READY_BUCKET, objectKey, page.path, DOCUMENT_PAGE_CONTENT_TYPE);
+          uploadedPageKeys.push(objectKey);
+          const pageSize = (await fs.stat(page.path)).size;
+          // Storage object ownership is retained even though the manifest is
+          // the player-facing reference. This keeps orphan collection and
+          // forensic integrity checks consistent with all other media.
+          await upsertStorageObject({
+            bucket: READY_BUCKET,
+            objectKey,
+            contentType: DOCUMENT_PAGE_CONTENT_TYPE,
+            size: pageSize,
+            sha256: pageUpload.sha256,
+          });
+          manifestPages.push({
+            index: page.index,
+            bucket: READY_BUCKET,
+            object_key: objectKey,
+            mime_type: DOCUMENT_PAGE_CONTENT_TYPE,
+            size_bytes: pageSize,
+            sha256: pageUpload.sha256,
+          });
+        }
+        const firstPage = manifestPages[0];
+        if (!firstPage) throw new Error('Document renderer produced no pages');
+        const pageManifest = {
+          schema_version: 1,
+          page_duration_ms: appConfig.DOCUMENT_PAGE_DEFAULT_DURATION_MS,
+          pages: manifestPages,
+        };
+
+        await db
+          .insert(schema.mediaRenditions)
+          .values({
+            media_id: mediaId,
+            source_revision: sourceRevision,
+            role: 'DOCUMENT_PAGE_MANIFEST',
+            state: 'READY',
+            mime_type: DOCUMENT_PAGE_CONTENT_TYPE,
+            container: null,
+            codecs: [],
+            width: null,
+            height: null,
+            size_bytes: Number(firstPage.size_bytes),
+            sha256: String(firstPage.sha256),
+            bucket: String(firstPage.bucket),
+            object_key: String(firstPage.object_key),
+            required_capabilities: { document_page_images: true },
+            page_manifest: pageManifest,
+            failure_reason: null,
+            updated_at: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: [schema.mediaRenditions.media_id, schema.mediaRenditions.source_revision, schema.mediaRenditions.role],
+            set: {
+              state: 'READY',
+              mime_type: DOCUMENT_PAGE_CONTENT_TYPE,
+              container: null,
+              codecs: [],
+              width: null,
+              height: null,
+              size_bytes: Number(firstPage.size_bytes),
+              sha256: String(firstPage.sha256),
+              bucket: String(firstPage.bucket),
+              object_key: String(firstPage.object_key),
+              required_capabilities: { document_page_images: true },
+              page_manifest: pageManifest,
+              failure_reason: null,
+              updated_at: new Date(),
+            },
+          });
 
         await db
           .update(schema.media)
@@ -988,7 +1162,15 @@ export async function registerJobHandlers() {
           })
           .where(eq(schema.media.id, mediaId));
       } catch (error) {
-        logger.error({ error, mediaId }, 'Document conversion failed');
+        // Use Pino's canonical `err` key so structured logs retain the error
+        // name, message, stack and child-process diagnostics. `error` was
+        // serialized as an empty object in container logs, which made a
+        // production document failure impossible to diagnose.
+        logger.error({ err: error, mediaId }, 'Document conversion failed');
+        // Objects are written before the database row can atomically expose
+        // them. Remove only this attempt's content-addressed page keys on a
+        // failed conversion; an earlier READY rendition remains untouched.
+        await Promise.allSettled(uploadedPageKeys.map((objectKey) => deleteObject(READY_BUCKET, objectKey)));
         await db
           .update(schema.media)
           .set({

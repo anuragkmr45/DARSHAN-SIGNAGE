@@ -6,6 +6,7 @@ import { createScheduleItemRepository, ScheduleItemRepository } from '@/db/repos
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
 import { areAspectsCompatible, parseAspectRatio } from '@/utils/display-profile';
+import { getNativeCompatibilityIssues } from '@/services/native-media-renditions';
 
 type DB = ReturnType<typeof getDatabase>;
 
@@ -358,6 +359,37 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
       },
     ])
   );
+
+  const allPresentationEntries = Array.from(presMap.values()).flatMap((presentation: any) => [
+    ...(presentation.items || []),
+    ...(presentation.slots || []),
+  ]);
+  const nativeMediaIds = Array.from(
+    new Set(allPresentationEntries.map((entry: any) => entry?.media_id).filter((mediaId: unknown): mediaId is string => typeof mediaId === 'string'))
+  );
+  // Sequential presentation items never overlap. Slots do overlap, therefore
+  // only simultaneous video slots increase the required decoder count.
+  const concurrentVideoCount = Math.max(
+    0,
+    ...Array.from(presMap.values()).map((presentation: any) =>
+      Math.max(
+        (presentation.slots || []).filter((slot: any) => String(slot?.media?.type ?? '').trim().toUpperCase() === 'VIDEO').length,
+        (presentation.items || []).some((item: any) => String(item?.media?.type ?? '').trim().toUpperCase() === 'VIDEO') ? 1 : 0
+      )
+    )
+  );
+  const nativeCompatibilityIssues = await getNativeCompatibilityIssues({
+    screenIds: Array.from(resolvedScreenIds),
+    mediaIds: nativeMediaIds,
+    concurrentVideoCount,
+    db,
+  });
+  if (nativeCompatibilityIssues.length) {
+    throw AppError.conflict('One or more native target screens lack a compatible verified media rendition.', {
+      reason: 'UNSUPPORTED_NATIVE_MEDIA_CAPABILITY',
+      unsupported_targets: nativeCompatibilityIssues,
+    });
+  }
 
   const unsupportedTargets: Array<{
     screen_id: string;

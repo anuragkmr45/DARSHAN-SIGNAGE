@@ -41,8 +41,9 @@ const listGroupsQuerySchema = z.object({
   include_summary: z.enum(['true', 'false']).optional(),
 });
 
+const MIN_SCREENSHOT_INTERVAL_SECONDS = 15;
 const screenshotSettingsSchema = z.object({
-  interval_seconds: z.number().int().positive().max(86400).optional(),
+  interval_seconds: z.number().int().min(MIN_SCREENSHOT_INTERVAL_SECONDS).max(86400).optional(),
   enabled: z.boolean().optional(),
 });
 

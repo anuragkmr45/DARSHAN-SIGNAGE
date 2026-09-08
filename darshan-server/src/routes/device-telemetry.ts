@@ -51,6 +51,7 @@ import {
   resolveCommandPriority,
 } from '@/services/command-lifecycle-service';
 import { getDeviceDesiredState } from '@/services/device-desired-state-service';
+import { buildNativeDeviceSnapshot } from '@/services/native-device-snapshot';
 import { createMediaCacheReport } from '@/services/media-cache-report-service';
 import {
   extractDeviceIdentitySessionInput,
@@ -161,7 +162,9 @@ const heartbeatSchema = z.object({
 const proofOfPlaySchema = z.object({
   device_id: z.string().min(1),
   media_id: z.string().min(1),
-  schedule_id: z.string().min(1),
+  // Default and message-free emergency fallback have no schedule provenance.
+  // Keep it null rather than fabricating a schedule UUID in audit evidence.
+  schedule_id: z.string().uuid().optional(),
   playback_instance_id: z.string().uuid().optional(),
   scene_id: z.string().optional(),
   slot_id: z.string().optional(),
@@ -177,6 +180,8 @@ const screenshotSchema = z.object({
   timestamp: z.string().datetime(),
   image_data: z.string(), // base64 encoded
   mime_type: z.string().optional(),
+  // A player command ID (or generated periodic-capture ID) makes retries safe.
+  idempotency_key: z.string().uuid().optional(),
 });
 
 const mediaCacheReportSchema = z.object({
@@ -710,21 +715,47 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         }
 
         const emergency = await getActiveEmergencyForRuntime(deviceId, { db, includeUrls });
+        const desiredState = await getDeviceDesiredState(deviceId);
         const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
         const defaultMediaPayload = await serializeResolvedDefaultMedia(resolvedDefaultMedia, includeUrls);
+        const nativeEmergency = emergency
+          ? {
+              id: emergency.id,
+              version: emergency.version,
+              assetId: emergency.media_id,
+              // Preserve the operator message even for media-backed alerts.
+              // A player may safely fall back to this text if native asset
+              // verification/rendering fails during a critical takeover.
+              message: emergency.message,
+              expiresAt: emergency.expires_at,
+            }
+          : null;
+        const nativeDefaultContent = resolvedDefaultMedia.media_id
+          ? {
+              assetId: resolvedDefaultMedia.media_id,
+              // The source and timestamp ensure a reassignment or in-place
+              // media update produces a new native desired generation.
+              version: `${resolvedDefaultMedia.source}:${resolvedDefaultMedia.media_id}:${resolvedDefaultMedia.media?.updated_at?.toISOString?.() ?? ''}`,
+            }
+          : null;
 
         const latest = await getLatestPublishForScreen(deviceId, db);
         const groupIds = (await getGroupIdsForScreen(deviceId)).sort();
         const rawPayload = (latest?.payload as any) || {};
         const representationMediaIds = new Set<string>();
+        const visitedRepresentationNodes = new Set<object>();
         const collectRepresentationMediaIds = (value: any) => {
           if (!value || typeof value !== 'object') return;
+          if (visitedRepresentationNodes.has(value)) return;
+          visitedRepresentationNodes.add(value);
           if (typeof value.media_id === 'string') representationMediaIds.add(value.media_id);
-          if (Array.isArray(value.items)) value.items.forEach(collectRepresentationMediaIds);
-          if (Array.isArray(value.slots)) value.slots.forEach(collectRepresentationMediaIds);
-          if (value.presentation) collectRepresentationMediaIds(value.presentation);
+          for (const child of Object.values(value)) collectRepresentationMediaIds(child);
         };
         collectRepresentationMediaIds(rawPayload);
+        // A v2 schedule generation must be self-contained. Default/emergency
+        // media remain separately resolved control-plane states, rather than
+        // making an otherwise valid scheduled generation unplayable.
+        const scheduledMediaIds = new Set(representationMediaIds);
         if (resolvedDefaultMedia.media_id) representationMediaIds.add(resolvedDefaultMedia.media_id);
         if (emergency?.media_id) representationMediaIds.add(emergency.media_id);
         const representationMedia = representationMediaIds.size > 0
@@ -760,6 +791,18 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         }
 
         if (!latest) {
+          const nativeSnapshot = await buildNativeDeviceSnapshot({
+            screenId: deviceId,
+            snapshotId: null,
+            desiredStateVersion: Number(desiredState?.state_version ?? 0),
+            scheduleId: null,
+            mediaIds: [nativeEmergency?.assetId, nativeDefaultContent?.assetId].filter((id): id is string => Boolean(id)),
+            scheduleItems: [],
+            emergency: nativeEmergency,
+            defaultContent: nativeDefaultContent,
+            serverTime: new Date().toISOString(),
+            db,
+          });
           return reply.send({
             device_id: deviceId,
             content_state: defaultMediaPayload.default_media ? 'default' : 'empty',
@@ -770,6 +813,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             media_urls: undefined,
             media_assets: undefined,
             emergency,
+            native_snapshot: nativeSnapshot,
             ...defaultMediaPayload,
           });
         }
@@ -811,6 +855,19 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           }
         }
 
+        const nativeSnapshot = await buildNativeDeviceSnapshot({
+          screenId: deviceId,
+          snapshotId: latest.snapshot_id,
+          desiredStateVersion: Number(desiredState?.state_version ?? 0),
+          scheduleId: latest.schedule_id,
+          mediaIds: [...scheduledMediaIds, ...[nativeEmergency?.assetId, nativeDefaultContent?.assetId].filter((id): id is string => Boolean(id))],
+          scheduleItems: filteredItems,
+          emergency: nativeEmergency,
+          defaultContent: nativeDefaultContent,
+          serverTime: new Date().toISOString(),
+          db,
+        });
+
         return reply.send({
           device_id: deviceId,
           content_state: hasFilteredScheduledContent ? 'scheduled' : defaultMediaPayload.default_media ? 'default' : 'empty',
@@ -828,6 +885,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           media_urls: mediaUrls,
           media_assets: mediaAssets,
           emergency,
+          native_snapshot: nativeSnapshot,
           ...defaultMediaPayload,
         });
       } catch (error) {
@@ -1045,7 +1103,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const idempotencyKey = buildProofOfPlayIdempotencyKey({
           deviceId: data.device_id,
           mediaId: data.media_id,
-          scheduleId: data.schedule_id,
+          scheduleId: data.schedule_id ?? null,
           playbackInstanceId: data.playback_instance_id ?? null,
           startTime: data.start_time,
           endTime: data.end_time,
@@ -1055,7 +1113,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const proofOfPlayJob = {
           deviceId: data.device_id,
           mediaId: data.media_id,
-          scheduleId: data.schedule_id,
+          scheduleId: data.schedule_id ?? null,
           playbackInstanceId: data.playback_instance_id ?? randomUUID(),
           sceneId: data.scene_id ?? null,
           slotId: data.slot_id ?? null,
@@ -1111,7 +1169,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
       try {
         const data = screenshotSchema.parse(request.body);
         await authenticateDeviceOrThrow(request, data.device_id);
-        const storageObjectId = randomUUID();
+        const storageObjectId = data.idempotency_key || randomUUID();
         const objectKey = buildScreenshotObjectKey(
           data.device_id,
           data.timestamp,
