@@ -973,6 +973,8 @@ export interface RecentCommandRecord {
   firstSeenAt: string
   lastSeenAt: string
   source: CommandSource
+  completedAt?: string
+  lastResult?: CommandResult
   acknowledgedAt?: string
 }
 

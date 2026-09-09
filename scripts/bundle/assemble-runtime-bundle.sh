@@ -1800,6 +1800,10 @@ if profile_enabled production; then
     exit 1
   fi
   require_file "RELEASE_SIGNING_PRIVATE_KEY" "$RELEASE_SIGNING_PRIVATE_KEY"
+  if [[ -z "$SERVER_PACKAGE_DIR" || -z "$CMS_PACKAGE_DIR" ]]; then
+    echo "Production source-free profile requires SERVER_PACKAGE_DIR and CMS_PACKAGE_DIR so server, CMS, and player provenance can be verified together." >&2
+    exit 1
+  fi
 fi
 
 if [[ "$DEVICE_AUTH_MODE" == "dual" ]]; then
@@ -1871,7 +1875,7 @@ if [[ "${#missing_player_artifacts[@]}" -gt 0 ]]; then
   exit 1
 fi
 
-if profile_enabled production && [[ -n "$SERVER_PACKAGE_DIR" && -n "$CMS_PACKAGE_DIR" ]]; then
+if profile_enabled production; then
   node "$PLATFORM_ROOT/scripts/bundle/verify-package-provenance.mjs" \
     --release "$DARSHAN_RELEASE_ID" --server "$SERVER_PACKAGE_DIR" --cms "$CMS_PACKAGE_DIR" \
     --player "$PLAYER_ARTIFACTS_DIR" --platforms "$PLAYER_TARGET_PLATFORMS"

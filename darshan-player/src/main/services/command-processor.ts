@@ -59,6 +59,15 @@ export class CommandProcessor {
   async ingestCommands(rawCommands: Command[], source: CommandSource): Promise<void> {
     for (const rawCommand of rawCommands) {
       const command = this.normalizeCommand(rawCommand)
+      const completedResult = getDeviceStateStore().getCompletedCommandResult(command.id)
+      if (completedResult) {
+        logger.info({ commandId: command.id, source }, 'Re-acknowledging completed command redelivery')
+        getPlayerMetrics().recordCommandOutcome(command.type, source, 'deduplicated')
+        await getDeviceStateStore().recordCommandSeen(command.id, source, command.deliveryToken)
+        await this.acknowledgeCommand(command.id, command.deliveryToken, completedResult)
+        continue
+      }
+
       if (getDeviceStateStore().hasRecentCommand(command.id, command.deliveryToken)) {
         logger.debug({ commandId: command.id, source }, 'Skipping previously seen command')
         getPlayerMetrics().recordCommandOutcome(command.type, source, 'deduplicated')
@@ -305,16 +314,19 @@ export class CommandProcessor {
         }
       }
 
+      await getDeviceStateStore().recordCommandCompleted(command.id, command.deliveryToken, result)
       await this.acknowledgeCommand(command.id, command.deliveryToken, result)
       this.updateRateLimit(command.type)
     } catch (error) {
       logger.error({ error, commandId: command.id }, 'Command processing failed')
-      getPlayerMetrics().recordCommandOutcome(command.type, source, 'error')
-      await this.acknowledgeCommand(command.id, command.deliveryToken, {
+      const result: CommandResult = {
         success: false,
         error: (error as Error).message,
         timestamp: new Date().toISOString(),
-      })
+      }
+      getPlayerMetrics().recordCommandOutcome(command.type, source, 'error')
+      await getDeviceStateStore().recordCommandCompleted(command.id, command.deliveryToken, result)
+      await this.acknowledgeCommand(command.id, command.deliveryToken, result)
     } finally {
       this.processingCommands.delete(command.id)
     }

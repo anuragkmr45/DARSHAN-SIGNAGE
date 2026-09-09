@@ -493,6 +493,9 @@ test('authoritative backend role keeps restart separate from install, upgrade, a
   assert.match(lifecycle, /bootstrap-secrets\/admin-password/)
   assert.match(lifecycle, /\/run\/darshan-bootstrap\/admin-password/)
   assert.doesNotMatch(lifecycle, /\/run\/secrets\/initial-admin-password/)
+  assert.match(assembler, /Production source-free profile requires SERVER_PACKAGE_DIR and CMS_PACKAGE_DIR/)
+  assert.match(assembler, /if profile_enabled production;\s+then\s+node "\$PLATFORM_ROOT\/scripts\/bundle\/verify-package-provenance\.mjs"/)
+  assert.doesNotMatch(assembler, /profile_enabled production && \[\[ -n "\$SERVER_PACKAGE_DIR" && -n "\$CMS_PACKAGE_DIR" \]\]/)
 
   const deploy = lifecycle.slice(
     lifecycle.indexOf('cat > "$target_dir/deploy.sh"'),

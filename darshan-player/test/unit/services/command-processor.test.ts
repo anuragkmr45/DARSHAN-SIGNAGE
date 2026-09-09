@@ -85,7 +85,7 @@ describe('Command Processor', () => {
       media_id: null,
       media: null,
     })
-    sandbox.stub(httpClient, 'post').resolves({ success: true, timestamp: new Date().toISOString() })
+    const ackStub = sandbox.stub(httpClient, 'post').resolves({ success: true, timestamp: new Date().toISOString() })
 
     const command = {
       id: 'cmd-1',
@@ -100,6 +100,7 @@ describe('Command Processor', () => {
 
     expect(refreshStub.calledOnce).to.be.true
     expect(defaultRefreshStub.calledOnceWithExactly('refresh-command')).to.be.true
+    expect(ackStub.calledOnce).to.equal(true)
   })
 
   it('should process consecutive refresh commands without rate limiting default media updates', async () => {
@@ -228,6 +229,70 @@ describe('Command Processor', () => {
 
     const store = getDeviceStateStore()
     expect(store.hasRecentCommand('cmd-2')).to.equal(true)
+  })
+
+  it('should re-ack a completed command redelivery without executing it again after an ACK failure', async () => {
+    const { resetDeviceStateStore, getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    resetDeviceStateStore()
+    await getDeviceStateStore().clearIdentity()
+
+    const { getCommandProcessor } = require('../../../src/main/services/command-processor')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getRequestQueue } = require('../../../src/main/services/network/request-queue')
+    const { getDefaultMediaService } = require('../../../src/main/services/settings/default-media-service')
+
+    const commandProcessor = getCommandProcessor()
+    const snapshotManager = getSnapshotManager()
+    const httpClient = getHttpClient()
+    const requestQueue = getRequestQueue()
+    const defaultMediaService = getDefaultMediaService()
+
+    const refreshStub = sandbox.stub(snapshotManager, 'refreshSnapshot').resolves({ mode: 'normal', items: [], scheduleId: 'sched-1' })
+    const defaultRefreshStub = sandbox.stub(defaultMediaService, 'refreshNow').resolves({
+      source: 'NONE',
+      aspect_ratio: null,
+      media_id: null,
+      media: null,
+    })
+    const postStub = sandbox.stub(httpClient, 'post')
+    postStub.onFirstCall().rejects(new Error('temporary ACK outage'))
+    postStub.onSecondCall().resolves({ success: true, timestamp: new Date().toISOString() })
+    const enqueueStub = sandbox.stub(requestQueue, 'enqueue').resolves(true)
+
+    await commandProcessor.ingestCommands(
+      [
+        {
+          id: 'cmd-redelivered-after-ack-loss',
+          type: 'REFRESH',
+          deliveryToken: 'lease-1',
+          payload: { reason: 'DEFAULT_MEDIA' },
+        },
+      ],
+      'heartbeat'
+    )
+    await commandProcessor.ingestCommands(
+      [
+        {
+          id: 'cmd-redelivered-after-ack-loss',
+          type: 'REFRESH',
+          deliveryToken: 'lease-2',
+          payload: { reason: 'DEFAULT_MEDIA' },
+        },
+      ],
+      'poll'
+    )
+
+    expect(refreshStub.calledOnce).to.equal(true)
+    expect(defaultRefreshStub.calledOnceWithExactly('refresh-command')).to.equal(true)
+    expect(enqueueStub.calledOnce).to.equal(true)
+    expect(postStub.callCount).to.equal(2)
+    expect(postStub.secondCall.args[0]).to.equal('/api/v1/device/device-1/commands/cmd-redelivered-after-ack-loss/ack')
+    expect(postStub.secondCall.args[1]).to.include({
+      delivery_token: 'lease-2',
+      success: true,
+      message: 'Schedule refreshed',
+    })
   })
 
   it('uses a deterministic bounded stagger for ordinary refresh commands', () => {

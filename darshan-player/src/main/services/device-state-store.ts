@@ -3,7 +3,7 @@ import * as path from 'path'
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import { getConfigManager } from '../../common/config'
-import { CommandSource, DeviceStateRecord, PlayerState, RecentCommandRecord } from '../../common/types'
+import { CommandResult, CommandSource, DeviceStateRecord, PlayerState, RecentCommandRecord } from '../../common/types'
 import { atomicWrite, ensureDir } from '../../common/utils'
 import { getLogger } from '../../common/logger'
 
@@ -11,6 +11,8 @@ const logger = getLogger('device-state-store')
 
 const MAX_RECENT_COMMANDS = 200
 const RECENT_COMMAND_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+const MAX_COMMAND_RESULT_JSON_BYTES = 16 * 1024
+const MAX_COMMAND_RESULT_TEXT_LENGTH = 2048
 
 export interface IdentitySnapshot {
   deviceIdPresent: boolean
@@ -178,9 +180,10 @@ export class DeviceStateStore {
   async recordCommandAcknowledged(commandId: string, deliveryToken?: string): Promise<void> {
     const now = new Date().toISOString()
     const next = (this.state.recentCommands || []).map((entry) =>
-      entry.id === commandId && ((entry.deliveryToken || '') === (deliveryToken || '') || !deliveryToken)
+      entry.id === commandId
         ? {
             ...entry,
+            deliveryToken: deliveryToken || entry.deliveryToken,
             acknowledgedAt: now,
             lastSeenAt: now,
           }
@@ -190,6 +193,52 @@ export class DeviceStateStore {
     await this.update({
       recentCommands: this.pruneRecentCommands(next),
     })
+  }
+
+  async recordCommandCompleted(commandId: string, deliveryToken: string | undefined, result: CommandResult): Promise<void> {
+    const now = new Date().toISOString()
+    const persistedResult = this.toPersistedCommandResult(result)
+    const current = this.state.recentCommands || []
+    const existingIndex = current.findIndex((entry) => entry.id === commandId)
+    let next: RecentCommandRecord[]
+
+    if (existingIndex >= 0) {
+      next = current.map((entry, index) =>
+        index === existingIndex
+          ? {
+              ...entry,
+              deliveryToken: deliveryToken || entry.deliveryToken,
+              lastSeenAt: now,
+              completedAt: now,
+              lastResult: persistedResult,
+            }
+          : entry
+      )
+    } else {
+      next = [
+        ...current,
+        {
+          id: commandId,
+          deliveryToken,
+          firstSeenAt: now,
+          lastSeenAt: now,
+          source: 'poll',
+          completedAt: now,
+          lastResult: persistedResult,
+        },
+      ]
+    }
+
+    await this.update({
+      recentCommands: this.pruneRecentCommands(next),
+    })
+  }
+
+  getCompletedCommandResult(commandId: string): CommandResult | null {
+    const record = (this.state.recentCommands || []).find(
+      (entry) => entry.id === commandId && !entry.acknowledgedAt && entry.completedAt && entry.lastResult
+    )
+    return record?.lastResult ? { ...record.lastResult, data: record.lastResult.data ? { ...record.lastResult.data } : undefined } : null
   }
 
   hasRecentCommand(commandId: string, deliveryToken?: string): boolean {
@@ -272,6 +321,37 @@ export class DeviceStateStore {
     }
 
     return filtered.slice(filtered.length - MAX_RECENT_COMMANDS)
+  }
+
+  private toPersistedCommandResult(result: CommandResult): CommandResult {
+    const persisted: CommandResult = {
+      success: result.success,
+      timestamp: result.timestamp,
+      ...(typeof result.message === 'string' ? { message: this.truncateResultText(result.message) } : {}),
+      ...(typeof result.error === 'string' ? { error: this.truncateResultText(result.error) } : {}),
+      ...(result.data ? { data: { ...result.data } } : {}),
+    }
+
+    const encoded = Buffer.byteLength(JSON.stringify(persisted), 'utf8')
+    if (encoded <= MAX_COMMAND_RESULT_JSON_BYTES) {
+      return persisted
+    }
+
+    return {
+      ...persisted,
+      data: {
+        omitted: true,
+        reason: 'COMMAND_RESULT_TOO_LARGE_FOR_LOCAL_LEDGER',
+        originalBytes: encoded,
+      },
+    }
+  }
+
+  private truncateResultText(value: string): string {
+    if (value.length <= MAX_COMMAND_RESULT_TEXT_LENGTH) {
+      return value
+    }
+    return `${value.slice(0, MAX_COMMAND_RESULT_TEXT_LENGTH)}…`
   }
 }
 
