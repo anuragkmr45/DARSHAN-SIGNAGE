@@ -178,6 +178,11 @@ describe('backend observability instrumentation', () => {
       playerReleaseId: 'old-release',
       serverReleaseId: 'old-release',
     });
+    recordPlayerRealtimeDiagnostics({
+      connectionState: 'CONNECTED',
+      playerReleaseId: 'development',
+      serverReleaseId: undefined,
+    });
     recordDeviceCommandAck('success', 0.025);
     recordDeviceCommandAck('failure', 0.05);
     recordMediaCacheReport({ eventType: 'DOWNLOAD_FAILED', severity: 'ERROR', result: 'accepted' });
@@ -258,6 +263,9 @@ describe('backend observability instrumentation', () => {
     );
     expect(output).toContain(
       'darshan_server_player_realtime_diagnostics_total{connection_state="REST_FALLBACK",player_release_alignment="mismatch",server_release_alignment="mismatch"} 1'
+    );
+    expect(output).toContain(
+      'darshan_server_player_realtime_diagnostics_total{connection_state="CONNECTED",player_release_alignment="match",server_release_alignment="missing"} 1'
     );
     expect(output).toContain('darshan_server_device_command_acks_total{result="success"} 1');
     expect(output).toContain('darshan_server_device_command_acks_total{result="failure"} 1');

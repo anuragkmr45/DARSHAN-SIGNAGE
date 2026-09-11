@@ -227,6 +227,23 @@ const installApiMocks = async (page: Page, state: MockState) => {
               cpu_usage: 14.2,
               memory_total_mb: 4096,
               memory_used_mb: 1024,
+              realtime_diagnostics: {
+                release_id: "native-player-0.1.0",
+                connection_state: "CONNECTED",
+                socket_generation: 6,
+                connect_count: 2,
+                disconnect_count: 1,
+                connect_error_count: 1,
+                accepted_wake_count: 8,
+                ignored_wake_count: 2,
+                flushed_wake_count: 5,
+                last_connected_at: "2026-03-12T11:58:10.000Z",
+                last_disconnected_at: "2026-03-12T11:58:00.000Z",
+                last_disconnect_reason: "transport close",
+                last_connect_error: "previous proxy upgrade failure",
+                last_wake_at: "2026-03-12T11:59:30.000Z",
+                last_wake_type: "RESYNC_REQUIRED",
+              },
             },
           },
         }),
@@ -492,6 +509,11 @@ test.describe("Screens operator flow", () => {
     await expect(page.getByText(/Recovery pending/)).toBeVisible();
 
     await page.getByRole("button", { name: "Details" }).click();
+    await page.getByRole("tab", { name: "Status" }).click();
+    await expect(page.getByTestId("screen-realtime-diagnostics")).toContainText("Native connected");
+    await expect(page.getByTestId("screen-realtime-diagnostics")).toContainText("Wakes accepted");
+    await expect(page.getByTestId("screen-realtime-diagnostics")).toContainText("8");
+    await expect(page.getByTestId("screen-realtime-diagnostics")).toContainText("previous proxy upgrade failure");
     await expect(page.getByRole("tab", { name: "Observability" })).toBeVisible();
     await page.getByRole("tab", { name: "Observability" }).click();
     await expect(page.getByText(/Player scrape up/i)).toBeVisible();

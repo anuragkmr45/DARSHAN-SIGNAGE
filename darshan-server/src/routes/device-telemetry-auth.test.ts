@@ -106,7 +106,20 @@ describe('Device telemetry auth runtime validation', () => {
           realtime_diagnostics: {
             release_id: 'site-a-2026-09-08-r1',
             source_commit: '0123456789abcdef0123456789abcdef01234567',
-            connection_state: 'WSS_HEALTHY',
+            connection_state: 'CONNECTED',
+            socket_generation: 4,
+            connect_count: 3,
+            disconnect_count: 1,
+            connect_error_count: 1,
+            accepted_wake_count: 8,
+            ignored_wake_count: 2,
+            flushed_wake_count: 5,
+            last_connected_at: '2026-09-08T00:00:01.000Z',
+            last_disconnected_at: '2026-09-08T00:00:02.000Z',
+            last_disconnect_reason: 'transport close',
+            last_connect_error: 'previous TLS failure',
+            last_wake_at: '2026-09-08T00:00:03.000Z',
+            last_wake_type: 'RESYNC_REQUIRED',
             last_hello_ack_at: '2026-09-08T00:00:00.000Z',
             observed_state_version: 7,
             applied_state_version: 7,
@@ -120,8 +133,12 @@ describe('Device telemetry auth runtime validation', () => {
       expect(queueHeartbeatSpy.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
         payload: expect.objectContaining({
           realtime_diagnostics: expect.objectContaining({
-            connection_state: 'WSS_HEALTHY',
+            connection_state: 'CONNECTED',
             source_commit: '0123456789abcdef0123456789abcdef01234567',
+            socket_generation: 4,
+            accepted_wake_count: 8,
+            flushed_wake_count: 5,
+            last_wake_type: 'RESYNC_REQUIRED',
           }),
         }),
       }));

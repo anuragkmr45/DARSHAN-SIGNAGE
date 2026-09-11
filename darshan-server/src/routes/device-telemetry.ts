@@ -60,6 +60,7 @@ import {
 import { recordDisplayProfile } from '@/services/screen-display-state-service';
 import { getScreenDisplayState, serializeDisplayState } from '@/services/screen-display-state-service';
 import { displayProfileV1Schema } from '@/utils/display-profile';
+import { playerRealtimeDiagnosticsSchema } from '@/contracts/player-realtime-diagnostics';
 
 const logger = createLogger('device-telemetry-routes');
 const { CREATED } = HTTP_STATUS;
@@ -73,21 +74,6 @@ const activeSlotSchema = z.object({
   schedule_id: z.string().nullable().optional(),
   playback_instance_id: z.string().uuid(),
   started_at: z.string().datetime(),
-});
-
-const realtimeDiagnosticsSchema = z.object({
-  release_id: z.string().trim().min(1).max(128).optional(),
-  source_commit: z.string().regex(/^[0-9a-f]{7,64}$/i).optional(),
-  server_release_id: z.string().trim().min(1).max(128).optional(),
-  connection_state: z.enum(['WSS_HEALTHY', 'REST_FALLBACK', 'OFFLINE', 'VERSION_MISMATCH']),
-  last_hello_ack_at: z.string().datetime().optional(),
-  last_event_at: z.string().datetime().optional(),
-  last_reconciliation_at: z.string().datetime().optional(),
-  last_fallback_fetch_at: z.string().datetime().optional(),
-  observed_state_version: z.number().int().nonnegative().optional(),
-  applied_state_version: z.number().int().nonnegative().optional(),
-  reconnect_count: z.number().int().nonnegative().max(1_000_000),
-  reconciliation_failure_count: z.number().int().nonnegative().max(1_000_000),
 });
 
 const heartbeatSchema = z.object({
@@ -156,7 +142,7 @@ const heartbeatSchema = z.object({
   power_source: z.enum(['AC', 'BATTERY', 'USB', 'UNKNOWN']).optional(),
   metrics: z.record(z.any()).optional(),
   display_profile_v1: displayProfileV1Schema.optional(),
-  realtime_diagnostics: realtimeDiagnosticsSchema.optional(),
+  realtime_diagnostics: playerRealtimeDiagnosticsSchema.optional(),
 });
 
 const proofOfPlaySchema = z.object({

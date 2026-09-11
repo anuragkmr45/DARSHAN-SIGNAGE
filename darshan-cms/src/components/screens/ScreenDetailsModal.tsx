@@ -96,6 +96,9 @@ const getRealtimeConnectionLabel = (value?: string) => {
   switch (value) {
     case "WSS_HEALTHY": return "WSS healthy";
     case "REST_FALLBACK": return "REST fallback";
+    case "CONNECTED": return "Native connected";
+    case "CONNECTING": return "Native connecting";
+    case "DISCONNECTED": return "Native disconnected";
     case "VERSION_MISMATCH": return "Version mismatch";
     case "OFFLINE": return "Offline";
     default: return "Not reported";
@@ -103,8 +106,8 @@ const getRealtimeConnectionLabel = (value?: string) => {
 };
 
 const getRealtimeConnectionBadgeClass = (value?: string) => {
-  if (value === "WSS_HEALTHY") return "border-emerald-500 text-emerald-700";
-  if (value === "REST_FALLBACK") return "border-amber-500 text-amber-700";
+  if (value === "WSS_HEALTHY" || value === "CONNECTED") return "border-emerald-500 text-emerald-700";
+  if (value === "REST_FALLBACK" || value === "CONNECTING") return "border-amber-500 text-amber-700";
   return "border-red-500 text-red-700";
 };
 
@@ -840,7 +843,18 @@ export function ScreenDetailsModal({
                               <TelemetryField label="Last reconciliation" value={formatDateTime(telemetry.realtime_diagnostics.last_reconciliation_at)} />
                               <TelemetryField label="Last fallback fetch" value={formatDateTime(telemetry.realtime_diagnostics.last_fallback_fetch_at)} />
                               <TelemetryField label="State version" value={`${telemetry.realtime_diagnostics.applied_state_version ?? "?"} applied / ${telemetry.realtime_diagnostics.observed_state_version ?? "?"} observed`} />
-                              <TelemetryField label="Reconnects" value={String(telemetry.realtime_diagnostics.reconnect_count ?? 0)} />
+                              <TelemetryField label="Socket generation" value={String(telemetry.realtime_diagnostics.socket_generation ?? "N/A")} />
+                              <TelemetryField label="Connects" value={String(telemetry.realtime_diagnostics.connect_count ?? telemetry.realtime_diagnostics.reconnect_count ?? 0)} />
+                              <TelemetryField label="Disconnects" value={String(telemetry.realtime_diagnostics.disconnect_count ?? "N/A")} />
+                              <TelemetryField label="Connect errors" value={String(telemetry.realtime_diagnostics.connect_error_count ?? "N/A")} />
+                              <TelemetryField label="Wakes accepted" value={String(telemetry.realtime_diagnostics.accepted_wake_count ?? "N/A")} />
+                              <TelemetryField label="Wakes ignored" value={String(telemetry.realtime_diagnostics.ignored_wake_count ?? "N/A")} />
+                              <TelemetryField label="Wakes flushed" value={String(telemetry.realtime_diagnostics.flushed_wake_count ?? "N/A")} />
+                              <TelemetryField label="Last connected" value={formatDateTime(telemetry.realtime_diagnostics.last_connected_at)} />
+                              <TelemetryField label="Last disconnected" value={formatDateTime(telemetry.realtime_diagnostics.last_disconnected_at)} />
+                              <TelemetryField label="Last wake" value={telemetry.realtime_diagnostics.last_wake_at ? `${formatDateTime(telemetry.realtime_diagnostics.last_wake_at)} · ${telemetry.realtime_diagnostics.last_wake_type ?? "unknown"}` : "N/A"} />
+                              <TelemetryField label="Last disconnect reason" value={telemetry.realtime_diagnostics.last_disconnect_reason || "N/A"} />
+                              <TelemetryField label="Last connect error" value={telemetry.realtime_diagnostics.last_connect_error || "N/A"} />
                               <TelemetryField label="Reconciliation failures" value={String(telemetry.realtime_diagnostics.reconciliation_failure_count ?? 0)} />
                             </div>
                           ) : (

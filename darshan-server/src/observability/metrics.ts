@@ -1,6 +1,7 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config as appConfig } from '@/config';
+import type { PlayerRealtimeConnectionState } from '@/contracts/player-realtime-diagnostics';
 import { getDatabasePool } from '@/db';
 
 const registry = new Registry();
@@ -104,7 +105,6 @@ type RealtimeBusNodeMessageResult = 'received' | 'delivered' | 'socket_missing' 
 type DeviceNodeRegistryOperation = 'register' | 'refresh' | 'unregister';
 type DeviceNodeRegistryResult = 'success' | 'error' | 'unavailable';
 type RealtimeBusFallbackReason = 'valkey_unavailable' | 'device_node_missing';
-type PlayerRealtimeConnectionState = 'WSS_HEALTHY' | 'REST_FALLBACK' | 'OFFLINE' | 'VERSION_MISMATCH';
 type PlayerReleaseAlignment = 'match' | 'mismatch' | 'missing';
 type RealtimeSocketAuthResult = 'success' | 'failure';
 type RealtimeSocketNamespace = '/device' | '/screens' | '/chat' | '/notifications' | 'unknown';
