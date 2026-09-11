@@ -13,6 +13,7 @@ import { ScreenRepository } from '@/db/repositories/screen';
 import { testUser } from '@/test/helpers';
 import { recordDeviceIdentitySession } from '@/services/device-identity-session-service';
 import { capabilityFingerprint } from '@/contracts/native-player';
+import { getRecentLogs } from '@/utils/logger';
 
 function buildCsr(options: { deviceId?: string; bits?: number } = {}) {
   const keyPair = forge.pki.rsa.generateKeyPair(options.bits ?? 2048);
@@ -116,6 +117,12 @@ describe('Device Pairing Routes', () => {
     const body = JSON.parse(response.body);
     expect(body.pairing_code).toMatch(/^\d{6}$/);
     expect(createSpy).toHaveBeenCalledTimes(2);
+    const recentLogs = getRecentLogs({ limit: 20 }).filter((entry) =>
+      ['Device pairing requested', 'Pairing code collision detected; retrying'].includes(entry.message)
+    );
+    const encodedLogs = JSON.stringify(recentLogs);
+    expect(encodedLogs).not.toContain(body.pairing_code);
+    expect(encodedLogs).not.toContain('pairingCode');
   });
 
   it('retries recovery pairing generation when the active code collides', async () => {
@@ -155,6 +162,12 @@ describe('Device Pairing Routes', () => {
     const body = JSON.parse(response.body);
     expect(body.pairing_code).toMatch(/^[A-F0-9]{6}$/);
     expect(createSpy).toHaveBeenCalledTimes(2);
+    const recentLogs = getRecentLogs({ limit: 20 }).filter((entry) =>
+      ['Pairing code generated', 'Pairing code collision detected; retrying'].includes(entry.message)
+    );
+    const encodedLogs = JSON.stringify(recentLogs);
+    expect(encodedLogs).not.toContain(body.pairing_code);
+    expect(encodedLogs).not.toContain('pairingCode');
   });
 
   it('lists orphan device pairing state without exposing full credential material', async () => {

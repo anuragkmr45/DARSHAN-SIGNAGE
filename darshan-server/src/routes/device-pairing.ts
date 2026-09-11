@@ -411,10 +411,10 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         recordPairingCodeAllocation(context.mode, 'collision_retry');
         logger.warn(
           {
-            pairingCode,
             attempt,
             mode: context.mode,
             deviceId: context.deviceId ?? null,
+            codeCollision: true,
           },
           'Pairing code collision detected; retrying'
         );
@@ -707,9 +707,9 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         logger.info(
           {
             deviceId: data.device_id,
-            pairingCode: responseBody.pairing_code,
             expiresAt: responseBody.expires_at,
             retiredPairingCount: responseBody.retired_pairing_count,
+            codeIssued: true,
           },
           'Pairing code generated'
         );
@@ -809,7 +809,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         );
 
         logger.info(
-          { deviceId, pairingCode, expiresAt, ip: request.ip, label: data.device_label },
+          { deviceId, expiresAt, ip: request.ip, label: data.device_label, codeIssued: true },
           'Device pairing requested'
         );
 
@@ -1286,7 +1286,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         const responseBody = await issuePairingCode(deviceId, expiresIn);
         const diagnostics = await buildRecoveryDiagnostics(deviceId);
 
-        logger.info({ deviceId, pairingCode: responseBody.pairing_code }, 'Recovery pairing code generated');
+        logger.info({ deviceId, codeIssued: true }, 'Recovery pairing code generated');
 
         return reply.status(CREATED).send({
           id: responseBody.pairing.id,
