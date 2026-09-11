@@ -12,6 +12,7 @@
     "start:api": "node dist/index.js --role=api",
     "start:worker": "node dist/index.js --role=worker",
     "test": "npx tsx scripts/api-test-report.ts",
+    "test:unit:nodb": "vitest run --config vitest.unit.config.ts",
     "test:db:reset": "tsx scripts/test-database.ts reset",
     "test:integration": "bash scripts/run-integration-tests.sh",
     "lint": "eslint src --ext .ts",
