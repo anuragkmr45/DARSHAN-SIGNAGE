@@ -4,6 +4,7 @@ import type { MediaAsset } from "@/api/types";
 import { maybeCompressForUpload, type CompressionResult } from "@/lib/mediaCompression";
 import { deriveDisplayNameFromFilename } from "@/lib/media";
 import { createSHA256 } from "hash-wasm";
+import { createUuid } from "@/lib/uuid";
 
 export const allowedMimeTypes = new Set([
   "image/jpeg",
@@ -247,8 +248,6 @@ const clearPersistedSessionId = (key: string) => {
   }
 };
 
-const newIdempotencyKey = () => crypto.randomUUID();
-
 const partByteLength = (fileSize: number, partSize: number, partNumber: number) =>
   Math.min(partSize, fileSize - (partNumber - 1) * partSize);
 
@@ -288,7 +287,7 @@ const resolveUploadSession = async (params: {
       size: params.file.size,
       checksum_sha256: params.checksum,
     },
-    newIdempotencyKey(),
+    createUuid(),
   );
   persistSessionId(storageKey, session.session_id);
   return { session, storageKey };

@@ -1,4 +1,5 @@
 import { apiClient } from "../apiClient";
+import { createUuid } from "@/lib/uuid";
 import { endpoints } from "../endpoints";
 import type { EmergencyStatus, PaginatedResponse, PaginationParams } from "../types";
 
@@ -15,7 +16,7 @@ export interface EmergencyTriggerPayload {
 }
 
 export const emergencyApi = {
-  trigger: (payload: EmergencyTriggerPayload, idempotencyKey = crypto.randomUUID()) =>
+  trigger: (payload: EmergencyTriggerPayload, idempotencyKey = createUuid()) =>
     apiClient.request<EmergencyStatus>({
       path: endpoints.emergency.trigger,
       method: "POST",

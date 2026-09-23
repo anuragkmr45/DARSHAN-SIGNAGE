@@ -93,9 +93,18 @@ describe("uploadMediaWithPresign", () => {
   afterEach(() => {
     globalThis.XMLHttpRequest = originalXmlHttpRequest;
     globalThis.window = originalWindow;
+    vi.unstubAllGlobals();
   });
 
-  test("creates a verified single-part session, uploads through its CMS URL, and completes it", async () => {
+  test.each([true, false])("creates, uploads, and completes a single-part session (native randomUUID available: %s)", async (nativeUuidAvailable) => {
+    if (!nativeUuidAvailable) {
+      // Model LAN HTTP: native UUID is absent, but cryptographic randomness remains available.
+      vi.stubGlobal("crypto", {
+        getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto),
+      });
+      expect(globalThis.crypto.randomUUID).toBeUndefined();
+    }
+
     const originalFile = makeFile("poster.png", "image/png", 800_000);
     const compressedFile = makeFile("poster.webp", "image/webp", 220_000);
 
@@ -133,7 +142,7 @@ describe("uploadMediaWithPresign", () => {
         size: 220_000,
         checksum_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
-      expect.any(String),
+      expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
     );
     expect(MockXMLHttpRequest.instances[0].send).toHaveBeenCalledWith(compressedFile);
     expect(mockedMediaApi.completeUploadSession).toHaveBeenCalledWith("session-media-1", {
