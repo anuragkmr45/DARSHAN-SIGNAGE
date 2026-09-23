@@ -5,6 +5,7 @@ import { emergencyApi } from "@/api/domains/emergency";
 import { ApiError } from "@/api/apiClient";
 import { mediaApi } from "@/api/domains/media";
 import { resolveMediaDisplayName } from "@/lib/media";
+import { createUuid } from "@/lib/uuid";
 import { screensApi } from "@/api/domains/screens";
 import { queryKeys } from "@/api/queryKeys";
 import type { EmergencyRecord } from "@/api/types";
@@ -180,7 +181,7 @@ export function EmergencyTakeoverModal({
       };
       const fingerprint = JSON.stringify(triggerPayload);
       if (triggerOperationRef.current?.fingerprint !== fingerprint) {
-        triggerOperationRef.current = { fingerprint, key: crypto.randomUUID() };
+        triggerOperationRef.current = { fingerprint, key: createUuid() };
       }
       return emergencyApi.trigger(triggerPayload, triggerOperationRef.current.key);
     },

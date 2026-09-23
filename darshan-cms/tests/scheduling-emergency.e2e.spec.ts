@@ -251,7 +251,12 @@ test.describe("Scheduling and emergency operator flow", () => {
     expect(capturedSchedulePayload?.timezone).toBe("Asia/Kolkata");
   });
 
-  test("emergency modal triggers and clears audited emergencies", async ({ page }) => {
+  test("emergency modal triggers and clears audited emergencies without native randomUUID", async ({ page }) => {
+    await page.addInitScript(() => {
+      // Exercise the browser UUID implementation as on an HTTP LAN origin.
+      Object.defineProperty(window.crypto, "randomUUID", { value: undefined, configurable: true });
+    });
+
     const state = {
       activeEmergencies: [
         {
@@ -272,6 +277,7 @@ test.describe("Scheduling and emergency operator flow", () => {
     };
 
     let capturedTriggerPayload: Record<string, unknown> | null = null;
+    let capturedIdempotencyKey: string | undefined;
     let capturedClearPayload: Record<string, unknown> | null = null;
 
     await page.route("**/api/v1/**", async (route: Route) => {
@@ -362,6 +368,7 @@ test.describe("Scheduling and emergency operator flow", () => {
 
       if (pathname === "/api/v1/emergency/trigger" && method === "POST") {
         capturedTriggerPayload = route.request().postDataJSON() as Record<string, unknown>;
+        capturedIdempotencyKey = route.request().headers()["idempotency-key"];
         const created = {
           id: "emergency-2",
           message: String(capturedTriggerPayload.message ?? ""),
@@ -434,6 +441,8 @@ test.describe("Scheduling and emergency operator flow", () => {
     await dialog.getByRole("button", { name: /activate emergency/i }).click();
 
     await expect.poll(() => capturedTriggerPayload).not.toBeNull();
+    expect(await page.evaluate(() => typeof window.crypto.randomUUID)).toBe("undefined");
+    expect(capturedIdempotencyKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(capturedTriggerPayload?.screen_group_ids).toEqual(["group-1"]);
     expect(capturedTriggerPayload?.severity).toBe("CRITICAL");
     expect(capturedTriggerPayload?.audit_note).toBe("Fire drill initiated by facilities");
