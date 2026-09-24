@@ -1,7 +1,7 @@
 # Emergency QA Checklist
 
 ## Backend contract reference
-- Backend contract source: `../darshan-server/docs/EMERGENCY_TAKEOVER_FRONTEND_AND_PLAYER_CONTRACT.md`
+- Backend contract source: `../../docs/contracts/emergency-takeover-contract.md`
 - CMS trigger/clear flow must stay aligned with:
   - `POST /api/v1/emergency/trigger`
   - `GET /api/v1/emergency/status`

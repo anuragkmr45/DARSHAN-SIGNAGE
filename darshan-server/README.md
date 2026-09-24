@@ -7,8 +7,8 @@ For on-prem runtime-bundle deployment, start with the canonical runbooks in the 
 - product export packaging: `docs/runbooks/product-export-packaging.md`
 - QA: `docs/runbooks/onprem-qa-setup.md`
 - Production: `docs/runbooks/onprem-production-setup.md`
-See [PLATFORM_SUPPORT.md](./PLATFORM_SUPPORT.md) for the current production and development support matrix.
-See [MACOS_RUNTIME.md](./MACOS_RUNTIME.md) and [UBUNTU_RUNTIME.md](./UBUNTU_RUNTIME.md) for host-run setup guides.
+See the [backend platform support matrix](../docs/environments/backend-platform-support.md) for the current production and development support matrix.
+See the [macOS](../docs/environments/macos-backend-runtime.md) and [Ubuntu](../docs/environments/ubuntu-backend-runtime.md) host-run setup guides.
 See `docs/runbooks/onprem-bundle-builder.md` for the unified QA + production runtime bundle workflow.
 
 Supported on-prem production contract:

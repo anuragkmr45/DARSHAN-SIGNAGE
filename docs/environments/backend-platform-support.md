@@ -46,4 +46,4 @@ Missing dependencies are treated as startup errors on both macOS and Linux so me
 - Object storage backup remains in-process
 - PostgreSQL backup uses `pg_dump` from `PG_DUMP_PATH` or the host `PATH`
 - Docker fallback for `pg_dump` may still be used when available, but host-installed `pg_dump` is the primary supported path
-- For host-run setup and verification, use [MACOS_RUNTIME.md](./MACOS_RUNTIME.md) and [UBUNTU_RUNTIME.md](./UBUNTU_RUNTIME.md).
+- For host-run setup and verification, use [macOS runtime](macos-backend-runtime.md) and [Ubuntu runtime](ubuntu-backend-runtime.md).

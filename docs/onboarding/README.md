@@ -10,6 +10,7 @@ This folder helps new engineers, operators, and field installers understand DARS
 |---|---|---|
 | New engineer | `codebase-tour.md` | `backend-cms-player-onboarding.md`, `docs/architecture/product-architecture.md` |
 | Backend/CMS/player developer | `backend-cms-player-onboarding.md` | `docs/contracts/README.md`, `docs/implementation/IMPLEMENTATION_TRACEABILITY.md` |
+| Backend developer | `backend-quick-start.md` | `backend-setup-guide.md`, `backend-development-guide.md`, `docs/environments/backend-platform-support.md` |
 | Production operator | `production-docker-on-vm-onboarding.md` | `deploy/production/README.md`, `docs/environments/production/README.md` |
 | Player field installer | `player-field-onboarding.md` | `docs/support/player-troubleshooting.md`, `docs/support/screen-operations-runbook.md` |
 | Support engineer | `docs/support/README.md` | `docs/governance/runtime-evidence-governance.md` |

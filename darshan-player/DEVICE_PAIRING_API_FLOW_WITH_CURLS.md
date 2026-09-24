@@ -1,6 +1,6 @@
 # Device Pairing API Flow With Curls
 
-This document is the curl-first companion to [`DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md`](/Users/anuragkumar/Desktop/darshan/darshan-server/docs/DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md).
+This document is the curl-first companion to [Device pairing and runtime lifecycle](../docs/contracts/device-pairing-and-runtime-lifecycle.md).
 
 It reflects current code behavior in:
 - [`src/routes/device-pairing.ts`](/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts)
@@ -1207,5 +1207,5 @@ Important runtime header note:
 
 ## Related Docs
 
-- [`DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md`](/Users/anuragkumar/Desktop/darshan/darshan-server/docs/DEVICE_PAIRING_AND_DEVICE_RUNTIME_LIFECYCLE.md)
+- [Device pairing and runtime lifecycle](../docs/contracts/device-pairing-and-runtime-lifecycle.md)
 - `docs/contracts/device-player-guide.md`

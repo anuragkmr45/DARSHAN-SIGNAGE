@@ -18,6 +18,7 @@ This is the main navigation page for DARSHAN documentation. Use it to find the r
 |---|---|---|
 | Understand the full product architecture | [architecture/product-architecture.md](architecture/product-architecture.md) | Whole-product map from code truth. |
 | Understand repo layout and ownership | [architecture/repository-topology.md](architecture/repository-topology.md) | Folders, apps, and boundaries. |
+| Set up the backend from a source checkout | [onboarding/backend-quick-start.md](onboarding/backend-quick-start.md), [onboarding/backend-development-guide.md](onboarding/backend-development-guide.md) | Local backend setup and development workflow. |
 | Check backend/CMS/player contracts | [contracts/README.md](contracts/README.md) | Index for API, CMS, player, realtime, and deployment contracts. |
 | Deploy production on five Docker VMs | [../deploy/production/README.md](../deploy/production/README.md), [runbooks/onprem-production-setup.md](runbooks/onprem-production-setup.md) | Use Docker-on-VM production path. |
 | Operate the production Docker roles | [support/production-docker-support.md](support/production-docker-support.md), [../deploy/production/docker/README.md](../deploy/production/docker/README.md) | Support and role-level operations. |

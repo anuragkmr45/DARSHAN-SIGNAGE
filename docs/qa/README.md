@@ -25,6 +25,10 @@ This folder is the QA planning and regression layer for DARSHAN. Code is authori
 | `QA_TRACEABILITY.md` | Mapping from feature domains to code, tests, and QA docs. | Current index. |
 | `DARSHAN_MASTER_CODEX_PROMPT_PACK.md` | Historical broad QA prompt pack. | Preserved reference, not the current execution contract. |
 | `QA_REFRESH_HANDOFF.md` | Summary of this code-truth refresh. | Current handoff. |
+| `backend-api-testing-guide.md` | Backend API testing commands and coverage guidance. | Current local testing guide. |
+| `backend-test-database.md` | Backend test database setup and isolation notes. | Current test support guide. |
+| `scheduling-emergency-test-matrix.md` | Scheduling and emergency regression matrix. | Current domain matrix. |
+| `screen-lifecycle-test-matrix.md` | Screen lifecycle regression matrix. | Current domain matrix. |
 
 ## Current Production QA Boundary
 

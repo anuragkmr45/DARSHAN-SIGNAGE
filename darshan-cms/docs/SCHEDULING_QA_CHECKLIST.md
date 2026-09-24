@@ -1,7 +1,7 @@
 # Scheduling QA Checklist
 
 ## Backend contract reference
-- Backend contract source: `../darshan-server/docs/SCHEDULING_FRONTEND_AND_PLAYER_CONTRACT.md`
+- Backend contract source: `../../docs/contracts/scheduling-frontend-player-contract.md`
 - CMS uses UTC execution timestamps and stores `timezone` for audit/display only.
 
 ## Operator checks

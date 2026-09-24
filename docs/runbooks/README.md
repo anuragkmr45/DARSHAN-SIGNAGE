@@ -35,6 +35,11 @@ This folder is the operator-facing procedure layer for DARSHAN. The codebase and
 | `source-free-production-bundle-deployment.md` | Canonical one-file build flow; generated production VM files require no manual edits. |
 | `product-export-packaging.md` | Source-free product export packaging. |
 | `onprem-bundle-builder.md` | Runtime bundle assembly. |
+| `backend-local-services.md` | Start and stop local backend support services. |
+| `production-database-lifecycle.md` | Database migration, bootstrap, adoption, and recovery lifecycle. |
+| `player-api-curl-cookbook.md` | Player-facing backend API curl examples. |
+| `scheduling-emergency-e2e.md` | End-to-end scheduling and emergency verification. |
+| `chat-legacy-backfill.md` | Legacy chat data backfill procedure. |
 | `observability-*.md` | Observability install, upgrade, incident, rollback, networking, backup, and offline images. |
 | `RUNBOOK_TRACEABILITY.md` | Code/deploy traceability and classification for all runbooks. |
 | `RUNBOOK_REFRESH_HANDOFF.md` | Handoff for this docs-only refresh. |

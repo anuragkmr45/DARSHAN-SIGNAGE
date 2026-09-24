@@ -2,7 +2,7 @@
 
 This document is the code-truth runbook for screen inventory, device pairing, device authentication, runtime playback, telemetry, proof-of-play, and emergency takeover in the current backend.
 
-For curl-by-curl request and response examples, use [`DEVICE_PAIRING_API_FLOW_WITH_CURLS.md`](/Users/anuragkumar/Desktop/darshan/darshan-server/docs/DEVICE_PAIRING_API_FLOW_WITH_CURLS.md).
+For curl-by-curl request and response examples, use [Device pairing API curl flow](device-pairing-api-curl-flow.md).
 
 Primary code references:
 - [`src/routes/device-pairing.ts`](/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts)
@@ -598,7 +598,7 @@ Check:
 
 ## Existing Doc Mismatches
 - `docs/contracts/device-player-guide.md`
-- [`docs/DESKTOP_PLAYER_INTEGRATION.md`](/Users/anuragkumar/Desktop/darshan/darshan-server/docs/DESKTOP_PLAYER_INTEGRATION.md)
+- [Desktop player integration](desktop-player-integration.md)
 - `docs/contracts/player-flow.md`
 
 These docs are directionally useful, but current code truth differs in these places:

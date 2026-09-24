@@ -9,7 +9,7 @@
 > `RUN_PRODUCTION_SEED`, `npm run db:push`, or `npm run seed` examples in this
 > document. The supported backend lifecycle is checksum-verified migration,
 > one-time protected-secret bootstrap, and explicit legacy adoption as described
-> in `darshan-server/docs/PRODUCTION_DATABASE_LIFECYCLE.md`.
+> in `docs/runbooks/production-database-lifecycle.md`.
 
 Source-free production uses verified HTTPS for CMS, backend, MinIO, players,
 and Prometheus scrapes. HTTP examples below are compatibility examples for the

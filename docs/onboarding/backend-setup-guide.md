@@ -1542,7 +1542,7 @@ If you're still experiencing issues:
 
 4. **Check documentation:**
    - `README.md` - Project overview
-   - `DEVELOPMENT_GUIDE.md` - Development workflow
+   - `docs/onboarding/backend-development-guide.md` - Development workflow
    - `FIXES_APPLIED.md` - Recent fixes
    - API docs: http://localhost:3000/docs
 
@@ -1559,7 +1559,7 @@ If you're still experiencing issues:
 
 - **Project Documentation:**
   - `README.md` - Project overview and features
-  - `DEVELOPMENT_GUIDE.md` - Development workflow and tips
+  - `docs/onboarding/backend-development-guide.md` - Development workflow and tips
   - `FIXES_APPLIED.md` - Recent bug fixes
   - `COMPREHENSIVE_CHECK_REPORT.md` - Project status
 

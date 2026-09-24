@@ -67,6 +67,9 @@ Production uses host or VM IPs, not per-container LAN IPs.
 | File | Purpose |
 |---|---|
 | `development.md` | Development environment contract from scripts and config loaders. |
+| `backend-platform-support.md` | Backend operating-system support matrix. |
+| `macos-backend-runtime.md` | macOS host-run setup and verification. |
+| `ubuntu-backend-runtime.md` | Ubuntu host-run setup and verification. |
 | `qa/README.md` | QA environment contract and release gates. |
 | `production/README.md` | Production Docker-on-VM environment contract. |
 | `ENVIRONMENT_TRACEABILITY.md` | Feature-by-feature environment traceability table with code references. |

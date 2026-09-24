@@ -4,7 +4,7 @@
 
 **⚡ Get up and running in 5 minutes!**
 
-This is a condensed version of the full [SETUP_GUIDE.md](./SETUP_GUIDE.md). For detailed instructions, troubleshooting, and production deployment, please refer to the complete guide.
+This is a condensed version of the full [backend setup guide](backend-setup-guide.md). For detailed instructions, troubleshooting, and production deployment, please refer to the complete guide.
 
 ---
 
@@ -264,8 +264,8 @@ Now that your development environment is set up:
    - Read the API documentation
 
 3. ✅ **Read the documentation**
-   - [SETUP_GUIDE.md](./SETUP_GUIDE.md) - Complete setup guide
-   - [DEVELOPMENT_GUIDE.md](./DEVELOPMENT_GUIDE.md) - Development workflow
+   - [Backend setup guide](backend-setup-guide.md) - Complete setup guide
+   - [Backend development guide](backend-development-guide.md) - Development workflow
    - [README.md](./README.md) - Project overview
 
 4. ✅ **Start building**
@@ -281,8 +281,8 @@ Now that your development environment is set up:
 
 ### Documentation
 
-- **[SETUP_GUIDE.md](./SETUP_GUIDE.md)** - Complete setup and deployment guide
-- **[DEVELOPMENT_GUIDE.md](./DEVELOPMENT_GUIDE.md)** - Development workflow and tips
+- **[Backend setup guide](backend-setup-guide.md)** - Complete setup and deployment guide
+- **[Backend development guide](backend-development-guide.md)** - Development workflow and tips
 - **[FIXES_APPLIED.md](./FIXES_APPLIED.md)** - Recent bug fixes
 - **[README.md](./README.md)** - Project overview
 
@@ -291,7 +291,7 @@ Now that your development environment is set up:
 If you encounter issues:
 
 1. Check the [Common Issues](#common-issues) section above
-2. Read the full troubleshooting guide in [SETUP_GUIDE.md](./SETUP_GUIDE.md#6-common-issues-and-solutions)
+2. Read the full troubleshooting guide in the [backend setup guide](backend-setup-guide.md#6-common-issues-and-solutions)
 3. Check application logs: `npm run dev` (watch the console output)
 4. Enable debug logging: Set `LOG_LEVEL=debug` in `.env`
 5. Run verification: `npm run check` and `npm run verify`
@@ -316,7 +316,7 @@ For production deployment instructions, including:
 - Database migration strategies
 - Monitoring and logging
 
-**Please refer to the complete [SETUP_GUIDE.md](./SETUP_GUIDE.md#4-production-environment-setup)**
+**Please refer to the complete [backend setup guide](backend-setup-guide.md#4-production-environment-setup)**
 
 ---
 
@@ -456,7 +456,7 @@ server/
 | `ADMIN_PASSWORD` | Yes | - | Default admin password |
 | `LOG_LEVEL` | No | info | Log level |
 
-**For complete environment variables reference, see:** [SETUP_GUIDE.md](./SETUP_GUIDE.md#73-environment-variables-quick-reference)
+**For complete environment variables reference, see:** [backend setup guide](backend-setup-guide.md#73-environment-variables-quick-reference)
 
 ---
 
@@ -477,4 +477,4 @@ You're all set! Your DARSHAN Backend is now running.
 
 **Document Version:** 1.0.0  
 **Last Updated:** 2025-11-05  
-**For detailed instructions:** [SETUP_GUIDE.md](./SETUP_GUIDE.md)
+**For detailed instructions:** [backend setup guide](backend-setup-guide.md)

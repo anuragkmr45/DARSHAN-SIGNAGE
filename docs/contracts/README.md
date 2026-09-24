@@ -30,6 +30,18 @@ When source inspection cannot prove behavior on a real host, hardware, browser, 
 | `device-player-guide.md` | Code-backed implementation guide for player/device runtime behavior. |
 | `player-flow.md` | Current player flow sequence and API groups without stale example payload promises. |
 | `display-authority-and-responsive-kiosk.md` | Display selection authority, V1 profile, responsive kiosk surfaces, publish preflight, rollout, and runtime-evidence boundary. |
+| `backend-api-catalog.md` | Endpoint catalog grouped by backend domain. |
+| `chat-*.md` | Chat API, CMS integration, frontend deltas, and share-link contracts. |
+| `device-pairing-and-runtime-lifecycle.md` | Pairing, device authentication, runtime playback, and telemetry lifecycle. |
+| `device-pairing-api-curl-flow.md` | Curl examples for the device-pairing flow. |
+| `desktop-player-integration.md` | Backend-to-desktop-player integration behavior. |
+| `default-media-variants.md` | Default-media behavior and variants. |
+| `emergency-takeover-contract.md` | CMS, backend, and player emergency-takeover contract. |
+| `media-delete-contract.md` | Media deletion behavior and dependent-resource contract. |
+| `notification-badge-count-guide.md` | Notification badge-count API and consumer behavior. |
+| `scheduling-and-emergency-spec.md` | Scheduling and emergency behavior specification. |
+| `scheduling-frontend-player-contract.md` | Scheduling contract across CMS, backend, and player. |
+| `screens-realtime-playback-guide.md` | Realtime screen playback contract and consumers. |
 
 Related architecture map:
 

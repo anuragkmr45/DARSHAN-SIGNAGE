@@ -22,6 +22,7 @@ This folder contains implementation phase notes, handoffs, test plans, and curre
 |---|---|---|
 | `IMPLEMENTATION_TRACEABILITY.md` | current | Code-backed map from product domains to source files, docs, runtime owners, and support docs. |
 | `IMPLEMENTATION_REFRESH_HANDOFF.md` | current | Summary of this code-truth refresh, commands run, and remaining gaps. |
+| `backend-implementation-helper.md` | reference | Backend implementation notes and development helpers. |
 | `config-*` | historical plus current config references | CONFIG phase handoffs and env reduction notes. Use `docs/environments` and `docs/examples` for current operator-facing config. |
 | `ghost-pairing-*` | historical implementation evidence | Pairing hardening plans, decisions, and evidence. Use `docs/architecture/player-pairing-identity.md` and `docs/contracts/player-runtime-contracts.md` for current behavior. |
 | `realtime-sync-*` | historical implementation evidence | Realtime sync phases, risks, tests, and Valkey work. Use `docs/architecture/enterprise-realtime-sync.md` and `docs/contracts/realtime-command-contracts.md` for current contracts. |
