@@ -461,7 +461,7 @@ Tests may fail if ports are in use. Ensure no other instances are running.
 
 ## Manual QA Checklist
 
-Use this checklist to validate the Electron pairing and authenticated runtime flow against `DEVICE_PAIRING_API_FLOW_WITH_CURLS.md`.
+Use this checklist to validate the Electron pairing and authenticated runtime flow against [Device pairing API curl flow](../contracts/device-pairing-api-curl-flow.md).
 
 ### Pairing And Provisioning
 

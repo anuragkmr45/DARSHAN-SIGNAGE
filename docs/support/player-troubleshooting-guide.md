@@ -472,8 +472,8 @@ valgrind --leak-check=full darshan-player
 
 ## Additional Resources
 
-- [Installation Guide](./INSTALL.md)
-- [Security Guide](./SECURITY.md)
+- [Installation Guide](../runbooks/player-installation.md)
+- [Security Guide](../governance/player-security-policy.md)
 - [API Documentation](./API.md)
 - [FAQ](https://docs.darshan.com/faq)
 

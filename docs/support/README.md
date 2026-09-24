@@ -10,6 +10,7 @@ This folder contains operator and support playbooks derived from current code an
 |---|---|
 | `screen-operations-runbook.md` | Screen lifecycle, pairing, recovery, online/offline, screenshot and default media triage. |
 | `player-troubleshooting.md` | Player device, pairing, config, offline/restart, playback, cache, screenshot, and logs. |
+| `player-troubleshooting-guide.md` | Detailed Player troubleshooting reference, including legacy service diagnostics. |
 | `cms-operator-support.md` | CMS route/operator issues, auth, media, schedule, screens, emergency, chat/notifications, reports/settings. |
 | `production-docker-support.md` | Docker-on-VM production role triage and health checks. |
 | `runtime-evidence-and-no-secret-review.md` | Evidence collection and no-secret review before sharing logs/screenshots/support bundles. |

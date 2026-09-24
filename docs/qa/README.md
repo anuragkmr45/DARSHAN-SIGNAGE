@@ -29,6 +29,11 @@ This folder is the QA planning and regression layer for DARSHAN. Code is authori
 | `backend-test-database.md` | Backend test database setup and isolation notes. | Current test support guide. |
 | `scheduling-emergency-test-matrix.md` | Scheduling and emergency regression matrix. | Current domain matrix. |
 | `screen-lifecycle-test-matrix.md` | Screen lifecycle regression matrix. | Current domain matrix. |
+| `cms-emergency-qa-checklist.md` | CMS emergency takeover operator checks. | Current CMS checklist. |
+| `cms-scheduling-qa-checklist.md` | CMS schedule-creation operator checks. | Current CMS checklist. |
+| `cms-screen-lifecycle-test-matrix.md` | CMS screen lifecycle coverage matrix. | Current CMS matrix. |
+| `player-screen-lifecycle-test-matrix.md` | Player screen lifecycle coverage matrix. | Current Player matrix. |
+| `player-testing-guide.md` | Player test commands, test structure, and manual QA checklist. | Current Player guide. |
 
 ## Current Production QA Boundary
 

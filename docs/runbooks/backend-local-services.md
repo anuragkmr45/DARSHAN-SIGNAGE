@@ -180,7 +180,7 @@ If ports 3000, 5432, or 9000 are in use:
 
 If you're having trouble setting up services:
 
-1. Check `SETUP.md` for detailed instructions
+1. Check the [backend setup guide](../onboarding/backend-setup-guide.md) for detailed instructions
 2. Review error messages from `npm run check`
 3. Verify firewall settings allow local connections
 4. Check Windows services are running
@@ -200,4 +200,3 @@ npm run db:push
 npm run seed
 npm run dev
 ```
-

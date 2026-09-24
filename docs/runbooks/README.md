@@ -26,6 +26,7 @@ This folder is the operator-facing procedure layer for DARSHAN. The codebase and
 | `onprem-qa-setup.md` | QA runtime bundle and on-prem QA topology. |
 | `onprem-config-management.md` | Config/env boundary and site config preparation. |
 | `player-deployment.md` | Build, install, configure, autostart, update, and diagnose packaged player. |
+| `player-installation.md` | Legacy and source-checkout player installation reference. |
 | `player-clean-reinstall-reset.md` | Controlled player identity reset and clean reinstall. |
 | `onprem-player-ghost-pairing-recovery.md` | Pairing recovery and duplicate/orphan identity triage. |
 | `ghost-pairing-onprem-qa-checklist.md` | Manual/browser/runtime QA checklist for pairing hardening. |

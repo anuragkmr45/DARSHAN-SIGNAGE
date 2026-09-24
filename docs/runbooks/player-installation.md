@@ -1,6 +1,6 @@
 # Installation Instructions
 
-> Note: the current supported production model is a Windows or Ubuntu desktop-session install. This document still contains the older Ubuntu/systemd workflow for legacy environments. For the current support matrix and runtime defaults, start with [README.md](./README.md) and [PLATFORM_SUPPORT.md](./PLATFORM_SUPPORT.md).
+> Note: the current supported production model is a Windows or Ubuntu desktop-session install. This document still contains the older Ubuntu/systemd workflow for legacy environments. For the current support matrix and runtime defaults, start with the [player README](../../darshan-player/README.md) and [player platform support](../environments/player-platform-support.md).
 
 ## Prerequisites
 
@@ -362,8 +362,8 @@ sudo systemctl restart darshan-player
 ## Support
 
 For additional help:
-- Check [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
-- Check [README.md](./README.md)
+- Check the [player troubleshooting guide](../support/player-troubleshooting-guide.md)
+- Check the [player README](../../darshan-player/README.md)
 - Check logs in `/var/cache/darshan/logs/`
 - Contact support@darshan.com
 

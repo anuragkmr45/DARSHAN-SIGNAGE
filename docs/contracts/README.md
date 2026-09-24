@@ -42,6 +42,7 @@ When source inspection cannot prove behavior on a real host, hardware, browser, 
 | `scheduling-and-emergency-spec.md` | Scheduling and emergency behavior specification. |
 | `scheduling-frontend-player-contract.md` | Scheduling contract across CMS, backend, and player. |
 | `screens-realtime-playback-guide.md` | Realtime screen playback contract and consumers. |
+| `player-runtime-recovery.md` | Player boot, recovery, cached playback, and proof-of-play policy. |
 
 Related architecture map:
 

@@ -49,4 +49,4 @@ Do not declare Windows fully signed off until these rows are manually executed o
 - log collection
 - autostart
 
-Use `docs/windows-runtime-validation-checklist.md` as the execution record.
+Use `player-windows-runtime-validation-checklist.md` as the execution record.

@@ -45,16 +45,16 @@ Audited buckets:
    Why it matters:
    - the code is structured for Windows support, but there is no audit evidence here for NSIS install, packaged-mode startup, login-item autostart, kiosk enforcement, webview stability, or screenshot capture on a real Windows machine
    Required before Windows release:
-   - run the checklist in `docs/windows-runtime-validation-checklist.md` on Windows 10/11 x64
+   - run the checklist in `player-windows-runtime-validation-checklist.md` on Windows 10/11 x64
 
 ### Medium
 
 2. Legacy Linux docs and shell scripts are still prominent enough to mislead operators.
    Files:
-   - `INSTALL.md`
-   - `SETUP.md`
-   - `TROUBLESHOOTING.md`
-   - `SECURITY.md`
+   - `docs/runbooks/player-installation.md`
+   - `docs/onboarding/player-setup-guide.md`
+   - `docs/support/player-troubleshooting-guide.md`
+   - `docs/governance/player-security-policy.md`
    - `scripts/postinstall.sh`
    - `scripts/postremove.sh`
    - `scripts/pair-device.sh`
@@ -263,21 +263,21 @@ Audited buckets:
 
 | File | Classification | Notes |
 | --- | --- | --- |
-| `README.md` | Canonical and current | Best current entry point for cross-platform support |
-| `PLATFORM_SUPPORT.md` | Canonical and current | Best current support-matrix doc |
-| `UBUNTU_SETUP.md` | Ubuntu-specific, current | Correctly scoped to Ubuntu |
-| `INSTALL.md` | Linux-heavy legacy/mixed | Should not be treated as the primary Windows path |
-| `QUICKSTART.md` | Mixed; needs clearer scoping | Contains Linux-heavy packaging/install examples |
-| `SECURITY.md` | Mixed; Linux path examples remain | Security model is useful, path examples are Linux-specific |
-| `SETUP.md` | Linux-heavy legacy/mixed | Should not be treated as the primary Windows path |
-| `TEST.md` | Mixed | Already notes that some cases are Linux-specific |
-| `TROUBLESHOOTING.md` | Linux-heavy legacy/mixed | Must not be mistaken for the Windows operator guide |
+| `darshan-player/README.md` | Canonical and current | Best current entry point for cross-platform support |
+| `docs/environments/player-platform-support.md` | Canonical and current | Best support-matrix doc |
+| `docs/environments/player-ubuntu-setup.md` | Ubuntu-specific, current | Correctly scoped to Ubuntu |
+| `docs/runbooks/player-installation.md` | Linux-heavy legacy/mixed | Should not be treated as the primary Windows path |
+| `docs/onboarding/player-quick-start.md` | Mixed; needs clearer scoping | Contains Linux-heavy packaging/install examples |
+| `docs/governance/player-security-policy.md` | Mixed; Linux path examples remain | Security model is useful, path examples are Linux-specific |
+| `docs/onboarding/player-setup-guide.md` | Linux-heavy legacy/mixed | Should not be treated as the primary Windows path |
+| `docs/qa/player-testing-guide.md` | Mixed | Already notes that some cases are Linux-specific |
+| `docs/support/player-troubleshooting-guide.md` | Linux-heavy legacy/mixed | Must not be mistaken for the Windows operator guide |
 
 ## Remediation Backlog
 
 ### Must-fix before Windows release
 
-- Execute the full checklist in `docs/windows-runtime-validation-checklist.md` on a real Windows 10/11 x64 machine or VM.
+- Execute the full checklist in `player-windows-runtime-validation-checklist.md` on a real Windows 10/11 x64 machine or VM.
 - Capture results for:
   - `npm run package:win`
   - NSIS install, upgrade, uninstall
@@ -297,16 +297,16 @@ Audited buckets:
   - `src/main/services/operator-tools.ts`
   - `src/main/services/cert-manager.ts`
 - Add at least one packaged-mode Windows smoke test or scripted validation harness if CI runner support becomes available.
-- Review `QUICKSTART.md` so Windows packaging/install steps are separated more cleanly from Linux package examples.
+- Review `docs/onboarding/player-quick-start.md` so Windows packaging/install steps are separated more cleanly from Linux package examples.
 
 ### Docs/tests only
 
 - Mark legacy shell scripts and `systemd` assets more explicitly as Ubuntu/Linux legacy support only.
 - Add direct links from support docs to:
-  - `docs/windows-compatibility-audit.md`
-  - `docs/windows-feature-validation-matrix.md`
-  - `docs/windows-runtime-validation-checklist.md`
-- Keep `README.md` and `PLATFORM_SUPPORT.md` as the canonical Windows support entry points.
+  - `docs/environments/player-windows-compatibility-audit.md`
+  - `docs/environments/player-windows-feature-validation-matrix.md`
+  - `docs/environments/player-windows-runtime-validation-checklist.md`
+- Keep `darshan-player/README.md` and `docs/environments/player-platform-support.md` as the canonical Windows support entry points.
 
 ## Local Verification Recorded In This Audit
 

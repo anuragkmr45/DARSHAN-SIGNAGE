@@ -13,6 +13,7 @@ This folder helps new engineers, operators, and field installers understand DARS
 | Backend developer | `backend-quick-start.md` | `backend-setup-guide.md`, `backend-development-guide.md`, `docs/environments/backend-platform-support.md` |
 | Production operator | `production-docker-on-vm-onboarding.md` | `deploy/production/README.md`, `docs/environments/production/README.md` |
 | Player field installer | `player-field-onboarding.md` | `docs/support/player-troubleshooting.md`, `docs/support/screen-operations-runbook.md` |
+| Player developer | `player-quick-start.md` | `player-setup-guide.md`, `player-contributing.md`, `docs/qa/player-testing-guide.md` |
 | Support engineer | `docs/support/README.md` | `docs/governance/runtime-evidence-governance.md` |
 
 ## Product Shape

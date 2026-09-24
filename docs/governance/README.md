@@ -25,6 +25,7 @@ If source inspection cannot prove behavior on real VMs, player hardware, browser
 | `file-classification-rules.md` | Where source, config, secrets, runtime state, Docker data, and examples belong. |
 | `change-control-and-release-governance.md` | PR/review expectations, promotion gates, release evidence, rollback evidence, production blockers. |
 | `security-and-secret-governance.md` | Secret/config boundary, CMS browser visibility, player identity, certs, redaction, support-bundle review. |
+| `player-security-policy.md` | Player security features, operator practices, vulnerability reporting, and maintenance checklist. |
 | `runtime-evidence-governance.md` | Evidence rules for Node 20, browser QA, packaged player QA, health checks, media, realtime, screenshots, PoP, observability. |
 | `data-and-runtime-state-governance.md` | Data ownership, Docker volumes, player local state, reset/delete rules, backup/restore ownership. |
 | `incident-and-rollback-governance.md` | Emergency, realtime rollback, player recovery, config rollback, deployment rollback, evidence capture. |
@@ -72,4 +73,3 @@ The following always require live evidence:
 - These docs do not authorize production readiness.
 - These docs do not authorize destructive resets, DB wipes, cache wipes, or player identity deletion.
 - These docs do not change behavior.
-

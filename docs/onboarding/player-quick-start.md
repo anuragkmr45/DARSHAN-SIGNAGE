@@ -346,7 +346,7 @@ chmod 600 ~/.config/darshan/config.json
 
 ## Getting Help
 
-- Check the [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) guide
+- Check the [player troubleshooting guide](../support/player-troubleshooting-guide.md)
 - Review the implementation guide
 - Check the logs for error messages
 
@@ -403,7 +403,7 @@ Before deploying:
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines.
+See [player contributing guidance](player-contributing.md) for contribution guidelines.
 
 ## License
 

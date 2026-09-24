@@ -13,8 +13,8 @@
 | --- | --- | --- | --- | --- |
 | Linux packaging (`package:deb`) | `package.json` | No native packaging test in this audit | Run `npm run package:deb` on Ubuntu | Manual Ubuntu validation required |
 | Linux packaging (`package:appimage`) | `package.json`, `src/main/services/autostart.ts` | No native packaging test in this audit | Run `npm run package:appimage` on Ubuntu and validate `APPIMAGE`-aware exec path | Manual Ubuntu validation required |
-| `.deb` install/launch | `package.json`, `UBUNTU_SETUP.md` | None | Fresh install and launch on Ubuntu desktop session | Manual Ubuntu validation required |
-| `AppImage` launch | `package.json`, `UBUNTU_SETUP.md` | None | Fresh launch on Ubuntu desktop session | Manual Ubuntu validation required |
+| `.deb` install/launch | `package.json`, `player-ubuntu-setup.md` | None | Fresh install and launch on Ubuntu desktop session | Manual Ubuntu validation required |
+| `AppImage` launch | `package.json`, `player-ubuntu-setup.md` | None | Fresh launch on Ubuntu desktop session | Manual Ubuntu validation required |
 | First launch with no backend config | `src/common/config.ts`, `src/main/index.ts`, `src/renderer/pairing.ts` | `test/unit/common/config.test.ts` covers config fallback behavior | Verify packaged app stays in configuration-required/pairing state on Ubuntu | Static pass + manual Ubuntu validation required |
 | Ubuntu runtime root / app-data pathing | `src/common/platform-paths.ts` | `test/unit/common/platform-paths.test.ts` | Verify config, cache, certs, logs, screenshots, and spool live under the runtime root | Static pass + automated coverage |
 | Legacy Linux import | `src/common/platform-paths.ts` | `test/unit/common/platform-paths.test.ts` | Create `/etc/darshan`, `/var/lib/darshan`, `/var/cache/darshan` state and validate one-time import | Static pass + automated coverage |
@@ -23,7 +23,7 @@
 | Single instance / relaunch focus | `src/main/index.ts` | No direct automated coverage reviewed | Launch twice and confirm the existing window is focused correctly | Manual Ubuntu validation required |
 | XDG autostart | `src/main/services/autostart.ts` | No Linux-branch test reviewed | Verify `~/.config/autostart/darshan-player.desktop` creation and `Exec=` correctness for installed binary and AppImage | Manual Ubuntu validation required |
 | X11 power management | `src/main/services/power-manager.ts` | No Linux-branch test reviewed | Validate `xset` discovery, `preventBlanking`, and `dpmsControl` on X11 | Manual Ubuntu validation required |
-| Wayland degraded path | `src/main/services/power-manager.ts`, `UBUNTU_SETUP.md` | No Linux-branch test reviewed | Validate clean startup and capability reporting with no `xset` / Wayland session | Manual Ubuntu validation required |
+| Wayland degraded path | `src/main/services/power-manager.ts`, `player-ubuntu-setup.md` | No Linux-branch test reviewed | Validate clean startup and capability reporting with no `xset` / Wayland session | Manual Ubuntu validation required |
 | Pairing request/submit flow | `src/main/services/pairing-service.ts`, `src/renderer/pairing.ts`, `src/main/services/cert-manager.ts` | `test/integration/pairing-flow.test.ts` covers logic, not packaged Ubuntu runtime | Pair against a real backend from Ubuntu and confirm cert storage | Static pass + manual Ubuntu validation required |
 | Certificate storage and reuse | `src/main/services/cert-manager.ts`, `src/common/platform-paths.ts` | No Ubuntu-specific coverage reviewed | Verify certificate files are written, reused, and survive relaunch | Manual Ubuntu validation required |
 | Image playback | `src/renderer/player.ts`, `src/renderer/default-media-player.ts` | Renderer/unit coverage exists, not Ubuntu-native | Validate image playback on Ubuntu | Manual Ubuntu validation required |
@@ -54,4 +54,4 @@ Do not declare Ubuntu fully signed off until these rows are manually executed on
 - Wayland degraded path
 - upgrade and uninstall
 
-Use `docs/ubuntu-runtime-validation-checklist.md` as the execution record.
+Use `player-ubuntu-runtime-validation-checklist.md` as the execution record.

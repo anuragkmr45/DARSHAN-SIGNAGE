@@ -9,9 +9,9 @@ This is the current supported production path for the player on Ubuntu:
 
 For the current Ubuntu audit findings and native validation matrix, also use:
 
-- [docs/ubuntu-compatibility-audit.md](./docs/ubuntu-compatibility-audit.md)
-- [docs/ubuntu-feature-validation-matrix.md](./docs/ubuntu-feature-validation-matrix.md)
-- [docs/ubuntu-runtime-validation-checklist.md](./docs/ubuntu-runtime-validation-checklist.md)
+- [Ubuntu compatibility audit](player-ubuntu-compatibility-audit.md)
+- [Ubuntu feature validation matrix](player-ubuntu-feature-validation-matrix.md)
+- [Ubuntu runtime validation checklist](player-ubuntu-runtime-validation-checklist.md)
 
 ## 1. Install
 
@@ -166,4 +166,4 @@ After every Ubuntu release or player package change, verify:
 
 - Ubuntu production support is a desktop-session install, not a systemd service.
 - Display power control is intentionally X11-only and degrades cleanly on Wayland.
-- Use [PLATFORM_SUPPORT.md](./PLATFORM_SUPPORT.md) for the support contract and [README.md](./README.md) for the main player overview.
+- Use [player platform support](player-platform-support.md) for the support contract and the [player README](../../darshan-player/README.md) for the main player overview.

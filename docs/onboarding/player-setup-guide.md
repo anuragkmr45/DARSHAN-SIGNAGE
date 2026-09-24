@@ -854,7 +854,7 @@ sudo reboot
 
 ### Troubleshooting Production Issues
 
-See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for comprehensive troubleshooting guide.
+See the [player troubleshooting guide](../support/player-troubleshooting-guide.md) for comprehensive troubleshooting guidance.
 
 #### Quick Diagnostics
 
@@ -914,12 +914,12 @@ sudo ufw status
 
 ## Additional Resources
 
-- [Installation Guide](./INSTALL.md)
+- [Installation Guide](../runbooks/player-installation.md)
 - Deployment guide: `docs/runbooks/player-deployment.md`
-- [Troubleshooting Guide](./TROUBLESHOOTING.md)
-- [Security Guide](./SECURITY.md)
+- [Troubleshooting Guide](../support/player-troubleshooting-guide.md)
+- [Security Guide](../governance/player-security-policy.md)
 - [API Documentation](./API.md)
-- [Testing Guide](./TEST.md)
+- [Testing Guide](../qa/player-testing-guide.md)
 
 ---
 

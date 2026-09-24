@@ -16,13 +16,13 @@
   - Ubuntu: XDG autostart desktop entry
 - The player no longer depends on Linux-only postinstall scripts for the primary supported install path.
 - For the current Windows audit findings and the native validation checklist, use:
-  - [docs/windows-compatibility-audit.md](./docs/windows-compatibility-audit.md)
-  - [docs/windows-feature-validation-matrix.md](./docs/windows-feature-validation-matrix.md)
-  - [docs/windows-runtime-validation-checklist.md](./docs/windows-runtime-validation-checklist.md)
+  - [Windows compatibility audit](player-windows-compatibility-audit.md)
+  - [Windows feature validation matrix](player-windows-feature-validation-matrix.md)
+  - [Windows runtime validation checklist](player-windows-runtime-validation-checklist.md)
 - For the current Ubuntu audit findings and the native validation checklist, use:
-  - [docs/ubuntu-compatibility-audit.md](./docs/ubuntu-compatibility-audit.md)
-  - [docs/ubuntu-feature-validation-matrix.md](./docs/ubuntu-feature-validation-matrix.md)
-  - [docs/ubuntu-runtime-validation-checklist.md](./docs/ubuntu-runtime-validation-checklist.md)
+  - [Ubuntu compatibility audit](player-ubuntu-compatibility-audit.md)
+  - [Ubuntu feature validation matrix](player-ubuntu-feature-validation-matrix.md)
+  - [Ubuntu runtime validation checklist](player-ubuntu-runtime-validation-checklist.md)
 
 ## Operator Commands
 
@@ -55,4 +55,4 @@ The new primary runtime root is the Electron app-data directory.
 - Display power control remains Linux/X11-specific and degrades cleanly on Windows and Wayland.
 - Display enumeration now uses Electron APIs on all supported platforms.
 - Cache clearing and log collection are implemented in Node/Electron code and no longer depend on Linux shell tooling.
-- For the Ubuntu step-by-step install and verification flow, use [UBUNTU_SETUP.md](./UBUNTU_SETUP.md).
+- For the Ubuntu step-by-step install and verification flow, use [player Ubuntu setup](player-ubuntu-setup.md).

@@ -7,17 +7,17 @@ For on-prem deployment and support, start with the canonical runbooks in the `DA
 - product export packaging: `docs/runbooks/product-export-packaging.md`
 - QA: `docs/runbooks/onprem-qa-setup.md`
 - Production: `docs/runbooks/onprem-production-setup.md`
-See [PLATFORM_SUPPORT.md](./PLATFORM_SUPPORT.md) for the current production and development support matrix.
+See the [player platform support matrix](../docs/environments/player-platform-support.md) for the current production and development support matrix.
 For Windows-specific audit status and native validation steps, see:
 
-- [docs/windows-compatibility-audit.md](./docs/windows-compatibility-audit.md)
-- [docs/windows-feature-validation-matrix.md](./docs/windows-feature-validation-matrix.md)
-- [docs/windows-runtime-validation-checklist.md](./docs/windows-runtime-validation-checklist.md)
+- [Windows compatibility audit](../docs/environments/player-windows-compatibility-audit.md)
+- [Windows feature validation matrix](../docs/environments/player-windows-feature-validation-matrix.md)
+- [Windows runtime validation checklist](../docs/environments/player-windows-runtime-validation-checklist.md)
 For Ubuntu-specific audit status and native validation steps, see:
 
-- [docs/ubuntu-compatibility-audit.md](./docs/ubuntu-compatibility-audit.md)
-- [docs/ubuntu-feature-validation-matrix.md](./docs/ubuntu-feature-validation-matrix.md)
-- [docs/ubuntu-runtime-validation-checklist.md](./docs/ubuntu-runtime-validation-checklist.md)
+- [Ubuntu compatibility audit](../docs/environments/player-ubuntu-compatibility-audit.md)
+- [Ubuntu feature validation matrix](../docs/environments/player-ubuntu-feature-validation-matrix.md)
+- [Ubuntu runtime validation checklist](../docs/environments/player-ubuntu-runtime-validation-checklist.md)
 
 Supported on-prem production contract:
 
@@ -440,11 +440,11 @@ npm run package:appimage # AppImage only
 
 ## Troubleshooting
 
-See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for common issues and solutions.
+See the [player troubleshooting guide](../docs/support/player-troubleshooting-guide.md) for common issues and solutions.
 
 ## Security
 
-See [SECURITY.md](./SECURITY.md) for security considerations and reporting vulnerabilities.
+See the [player security policy](../docs/governance/player-security-policy.md) for security considerations and reporting vulnerabilities.
 
 ## License
 

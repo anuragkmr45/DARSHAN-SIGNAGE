@@ -72,16 +72,16 @@ Audited buckets:
      - X11 `xset` capability behavior
      - Wayland degraded behavior
    Required before Ubuntu release:
-   - run the checklist in `docs/ubuntu-runtime-validation-checklist.md` on Ubuntu 22.04 or 24.04
+   - run the checklist in `player-ubuntu-runtime-validation-checklist.md` on Ubuntu 22.04 or 24.04
 
 ### Medium
 
 2. Legacy Linux docs and shell/service assets are still prominent enough to mislead operators.
    Files:
-   - `INSTALL.md`
-   - `SETUP.md`
-   - `TROUBLESHOOTING.md`
-   - `SECURITY.md`
+   - `docs/runbooks/player-installation.md`
+   - `docs/onboarding/player-setup-guide.md`
+   - `docs/support/player-troubleshooting-guide.md`
+   - `docs/governance/player-security-policy.md`
    - `scripts/postinstall.sh`
    - `scripts/postremove.sh`
    - `scripts/pair-device.sh`
@@ -97,7 +97,7 @@ Audited buckets:
    Files:
    - `src/main/services/power-manager.ts`
    - `src/main/services/operator-tools.ts`
-   - `UBUNTU_SETUP.md`
+   - `docs/environments/player-ubuntu-setup.md`
    Why it matters:
    - X11 is the only path with `xset`/DPMS display-power control
    - Wayland is expected to degrade safely
@@ -292,21 +292,21 @@ Audited buckets:
 
 | File | Classification | Notes |
 | --- | --- | --- |
-| `README.md` | Canonical and current | Best cross-platform entry point |
-| `PLATFORM_SUPPORT.md` | Canonical and current | Best support-matrix doc |
-| `UBUNTU_SETUP.md` | Canonical and current | Best Ubuntu step-by-step guide |
-| `INSTALL.md` | Mixed / legacy-heavy | Should not be treated as the primary Ubuntu support contract |
-| `QUICKSTART.md` | Mixed | Contains Linux build/install examples but not the cleanest production path |
-| `SECURITY.md` | Mixed | Security model is useful; path examples remain legacy-Linux heavy |
-| `SETUP.md` | Mixed / legacy-heavy | Should not be treated as the primary Ubuntu contract |
-| `TEST.md` | Mixed | Contains useful test notes, some Linux-specific |
-| `TROUBLESHOOTING.md` | Mixed / legacy-heavy | Must not be mistaken for the primary Ubuntu support guide |
+| `darshan-player/README.md` | Canonical and current | Best cross-platform entry point |
+| `docs/environments/player-platform-support.md` | Canonical and current | Best support-matrix doc |
+| `docs/environments/player-ubuntu-setup.md` | Canonical and current | Best Ubuntu step-by-step guide |
+| `docs/runbooks/player-installation.md` | Mixed / legacy-heavy | Should not be treated as the primary Ubuntu support contract |
+| `docs/onboarding/player-quick-start.md` | Mixed | Contains Linux build/install examples but not the cleanest production path |
+| `docs/governance/player-security-policy.md` | Mixed | Security model is useful; path examples remain legacy-Linux heavy |
+| `docs/onboarding/player-setup-guide.md` | Mixed / legacy-heavy | Should not be treated as the primary Ubuntu contract |
+| `docs/qa/player-testing-guide.md` | Mixed | Contains useful test notes, some Linux-specific |
+| `docs/support/player-troubleshooting-guide.md` | Mixed / legacy-heavy | Must not be mistaken for the primary Ubuntu support guide |
 
 ## Remediation Backlog
 
 ### Must-fix before Ubuntu release
 
-- Execute the full checklist in `docs/ubuntu-runtime-validation-checklist.md` on a real Ubuntu 22.04 or 24.04 machine or VM.
+- Execute the full checklist in `player-ubuntu-runtime-validation-checklist.md` on a real Ubuntu 22.04 or 24.04 machine or VM.
 - Capture results for:
   - `npm run package:deb`
   - `npm run package:appimage`
@@ -335,15 +335,15 @@ Audited buckets:
 - Make the distinction between:
   - supported Ubuntu desktop-session path
   - legacy `systemd`/old-path compatibility assets
-  more obvious in mixed docs such as `INSTALL.md`, `SETUP.md`, and `TROUBLESHOOTING.md`.
+  more obvious in mixed docs such as `docs/runbooks/player-installation.md`, `docs/onboarding/player-setup-guide.md`, and `docs/support/player-troubleshooting-guide.md`.
 
 ### Docs/tests only
 
-- Keep `README.md`, `PLATFORM_SUPPORT.md`, and `UBUNTU_SETUP.md` as the canonical Ubuntu entry points.
+- Keep `darshan-player/README.md`, `docs/environments/player-platform-support.md`, and `docs/environments/player-ubuntu-setup.md` as the canonical Ubuntu entry points.
 - Add direct support links to:
-  - `docs/ubuntu-compatibility-audit.md`
-  - `docs/ubuntu-feature-validation-matrix.md`
-  - `docs/ubuntu-runtime-validation-checklist.md`
+  - `docs/environments/player-ubuntu-compatibility-audit.md`
+  - `docs/environments/player-ubuntu-feature-validation-matrix.md`
+  - `docs/environments/player-ubuntu-runtime-validation-checklist.md`
 - Mark legacy shell scripts and `darshan-player.service` more explicitly as legacy-only.
 
 ## Local Verification Recorded In This Audit

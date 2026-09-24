@@ -483,7 +483,7 @@ git push origin feature/my-feature
 ### Project Documentation
 
 - `README.md` - Project overview
-- `SETUP.md` - Setup instructions
+- `backend-setup-guide.md` - Setup instructions
 - `FIXES_APPLIED.md` - Recent fixes
 - `COMPREHENSIVE_CHECK_REPORT.md` - Project status
 - `PROJECT_STATUS_DASHBOARD.md` - Visual dashboard
