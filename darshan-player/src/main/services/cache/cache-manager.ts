@@ -14,6 +14,7 @@ interface PrefetchItem {
   mediaId: string
   url: string
   sha256?: string
+  contentType?: string
   source?: MediaCacheReportSource
   snapshotId?: string
   scheduleId?: string
@@ -22,6 +23,7 @@ interface PrefetchItem {
 }
 
 export interface CacheAddContext {
+  contentType?: string
   source?: MediaCacheReportSource
   snapshotId?: string
   scheduleId?: string
@@ -80,10 +82,21 @@ export class CacheManager {
     }
   }
 
-  private getFilePath(mediaId: string, url?: string): string {
+  private getFilePath(mediaId: string, url?: string, contentType?: string): string {
     const safeId = sanitizeFilename(mediaId)
-    const ext = this.getFileExtension(url)
+    const ext = this.getContentTypeExtension(contentType) || this.getFileExtension(url)
     return path.join(this.cacheDir, `${safeId}${ext}`)
+  }
+
+  private getContentTypeExtension(contentType?: string): string {
+    const normalized = contentType?.split(';')[0]?.trim().toLowerCase()
+    if (normalized === 'application/pdf') return '.pdf'
+    if (normalized === 'image/jpeg') return '.jpg'
+    if (normalized === 'image/png') return '.png'
+    if (normalized === 'image/webp') return '.webp'
+    if (normalized === 'video/mp4') return '.mp4'
+    if (normalized === 'video/quicktime') return '.mov'
+    return ''
   }
 
   private getFileExtension(url?: string): string {
@@ -214,7 +227,7 @@ export class CacheManager {
         })
       }
 
-      const filePath = this.getFilePath(mediaId, url)
+      const filePath = this.getFilePath(mediaId, url, context.contentType)
       await atomicWrite(filePath, data)
 
       const entry: CacheEntry = {
@@ -271,13 +284,35 @@ export class CacheManager {
     return false
   }
 
-  async get(mediaId: string): Promise<string | undefined> {
+  async get(mediaId: string, contentType?: string): Promise<string | undefined> {
     const exists = await this.has(mediaId)
     if (!exists) {
       return undefined
     }
 
-    return this.entries.get(mediaId)?.localPath
+    const entry = this.entries.get(mediaId)
+    if (!entry) return undefined
+
+    const preferredExtension = this.getContentTypeExtension(contentType)
+    if (!preferredExtension || entry.localPath.toLowerCase().endsWith(preferredExtension)) {
+      return entry.localPath
+    }
+
+    const normalizedPath = path.join(this.cacheDir, `${sanitizeFilename(mediaId)}${preferredExtension}`)
+    try {
+      if (fs.existsSync(normalizedPath)) {
+        if (entry.localPath !== normalizedPath && fs.existsSync(entry.localPath)) {
+          fs.unlinkSync(entry.localPath)
+        }
+      } else {
+        await fs.promises.rename(entry.localPath, normalizedPath)
+      }
+      entry.localPath = normalizedPath
+      return normalizedPath
+    } catch (error) {
+      logger.warn({ mediaId, localPath: entry.localPath, normalizedPath, error }, 'Failed to normalize cached media extension')
+      return entry.localPath
+    }
   }
 
   async prefetch(items: PrefetchItem[]): Promise<void> {
@@ -304,6 +339,7 @@ export class CacheManager {
         try {
           if (!(await this.has(current.mediaId))) {
             await this.add(current.mediaId, current.url, current.sha256, {
+              contentType: current.contentType,
               source: current.source || 'PREFETCH',
               snapshotId: current.snapshotId,
               scheduleId: current.scheduleId,

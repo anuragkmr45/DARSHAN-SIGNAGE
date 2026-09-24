@@ -11,6 +11,7 @@ import {
   DEFAULT_MEDIA_SETTING_KEY,
   DEFAULT_MEDIA_TARGETS_SETTING_KEY,
   DEFAULT_MEDIA_VARIANTS_SETTING_KEY,
+  resolveDefaultMediaForScreen,
 } from '@/utils/default-media';
 
 async function issueSuperAdminToken() {
@@ -162,6 +163,103 @@ describe('Settings routes - dimension-wise default media', () => {
     const body = JSON.parse(response.body);
     expect(body.success).toBe(false);
     expect(body.error.message).toBe('Media not found');
+  });
+
+  it('rejects non-ready defaults and ignores legacy non-ready assignments at playback time', async () => {
+    const db = getDatabase();
+    const processingMediaId = randomUUID();
+    const failedMediaId = randomUUID();
+    const readyMediaId = randomUUID();
+    const screenId = randomUUID();
+
+    await db.insert(schema.media).values([
+      {
+        id: processingMediaId,
+        name: 'Converting document',
+        type: 'DOCUMENT',
+        status: 'PROCESSING',
+        source_content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        created_by: testUser.id,
+      },
+      {
+        id: failedMediaId,
+        name: 'Failed document',
+        type: 'DOCUMENT',
+        status: 'FAILED',
+        source_content_type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        created_by: testUser.id,
+      },
+      {
+        id: readyMediaId,
+        name: 'Ready global fallback',
+        type: 'IMAGE',
+        status: 'READY',
+        created_by: testUser.id,
+      },
+    ]);
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Legacy default media screen',
+      status: 'ACTIVE',
+      aspect_ratio: '16:9',
+    });
+
+    const globalResponse = await server.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/default-media',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { media_id: processingMediaId },
+    });
+    expect(globalResponse.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
+    expect(JSON.parse(globalResponse.body).error.details).toEqual({
+      reason: 'MEDIA_NOT_READY',
+      media_ids: [processingMediaId],
+    });
+
+    const variantsResponse = await server.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/default-media/variants',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { variants: { '16:9': failedMediaId } },
+    });
+    expect(variantsResponse.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
+    expect(JSON.parse(variantsResponse.body).error.details.reason).toBe('MEDIA_NOT_READY');
+
+    const targetsResponse = await server.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/default-media/targets',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        assignments: [{
+          target_type: 'SCREEN',
+          target_id: screenId,
+          media_id: processingMediaId,
+          aspect_ratio: '16:9',
+        }],
+      },
+    });
+    expect(targetsResponse.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
+    expect(JSON.parse(targetsResponse.body).error.details.reason).toBe('MEDIA_NOT_READY');
+
+    // Simulate settings written by an older release before READY enforcement.
+    await db.insert(schema.settings).values([
+      { key: DEFAULT_MEDIA_SETTING_KEY, value: readyMediaId },
+      { key: DEFAULT_MEDIA_VARIANTS_SETTING_KEY, value: { '16:9': failedMediaId } },
+      {
+        key: DEFAULT_MEDIA_TARGETS_SETTING_KEY,
+        value: [{
+          target_type: 'SCREEN',
+          target_id: screenId,
+          media_id: processingMediaId,
+          aspect_ratio: '16:9',
+        }],
+      },
+    ]);
+
+    await expect(resolveDefaultMediaForScreen({ id: screenId, aspect_ratio: '16:9' }, db)).resolves.toMatchObject({
+      source: 'GLOBAL',
+      media_id: readyMediaId,
+    });
   });
 
   it('stores target-based default media assignments and resolves them for screens', async () => {

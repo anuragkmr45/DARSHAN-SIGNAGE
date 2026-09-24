@@ -82,6 +82,7 @@ test('production config derives HTTPS and separates transport from device CA', (
   const envFile = path.join(root, 'bundle.env')
   fs.writeFileSync(envFile, `RELEASE_ID=r1
 SITE_NAME=site-a
+VOLUME_PROVISIONING_MODE=create
 EXPORT_SERVER=false
 EXPORT_CMS=false
 EXPORT_ELECTRON=false
@@ -345,8 +346,9 @@ test('production state-service artifacts require verified TLS and authenticated 
   assert.match(production, /"\$\{CMS_BIND_ADDRESS\}:\$\{CMS_HTTPS_PORT\}:443"/)
   assert.match(production, /--resolve "\$\{DATA_PRIVATE_HOST:-localhost\}:\$\{MINIO_HOST_PORT\}:\$\{DATA_BIND_ADDRESS\}"/)
   assert.match(production, /--resolve "\$\{BACKEND_PRIVATE_HOST\}:\$\{API_HOST_PORT\}:\$\{BACKEND_BIND_ADDRESS\}"/)
-  assert.match(production, /curl -fsSI "http:\/\/\$\{CMS_BIND_ADDRESS\}:\$\{CMS_HTTP_PORT\}\//)
-  assert.match(production, /curl -fsS "http:\/\/\$\{OBSERVABILITY_BIND_ADDRESS\}:\$\{PROMETHEUS_HOST_PORT\}\/-\/ready"/)
+  assert.doesNotMatch(production, /"\$\{CMS_BIND_ADDRESS\}:\$\{CMS_HTTP_PORT\}:80"/)
+  assert.match(production, /tls_curl "\$PROMETHEUS_HOST_PORT" \/-\/ready/)
+  assert.match(production, /https:\/\/\$\{host\}:\$\{METRICS_GATEWAY_HOST_PORT\}\$\{path\}/)
 })
 
 test('generated player configs carry the centrally validated webpage policy', () => {
@@ -396,7 +398,9 @@ test('production observability deploys every static exporter target from signed 
   for (const job of ['vm4-alertmanager', 'vm1-node', 'vm1-postgres', 'vm1-minio', 'vm-valkey-node', 'vm2-node', 'vm3-node', 'vm3-nginx', 'vm4-node', 'vm4-grafana']) {
     assert.match(template, new RegExp(`job_name: ${job}`))
   }
-  assert.match(template, /__VALKEY_HOST__:__NODE_EXPORTER_HOST_PORT__/)
+  assert.match(template, /__VALKEY_HOST__:__REMOTE_NODE_EXPORTER_PORT__/)
+  assert.match(template, /__REMOTE_EXPORTER_TLS_CONFIG__/)
+  assert.match(template, /__OBSERVABILITY_SCRAPE_TLS_CONFIG__/)
   assert.match(assembler, /"\$PROD_VALKEY_DIR\/images"/)
   assert.ok([...production.matchAll(/^  node-exporter:/gm)].length >= 4)
 })
@@ -427,16 +431,18 @@ test('production bundle requires and applies the explicit operations policy', ()
   assert.match(assembler, /pids_limit: \$\{BACKEND_WORKER_PIDS_LIMIT\}/)
   assert.match(assembler, /require_docker_free_bytes "\$DATA_MIN_FREE_DISK_BYTES"/)
   assert.match(assembler, /require_docker_free_bytes "\$OBSERVABILITY_MIN_FREE_DISK_BYTES"/)
-  assert.match(assembler, /manifest\.off_host_uri !== expected\.destination/)
-  assert.match(assembler, /manifest\.backup_interval_hours/)
-  assert.match(assembler, /manifest\.retention_days/)
+  const evidenceVerifier = fs.readFileSync(repoPath('darshan-server/src/deployment/restore-evidence.ts'), 'utf8')
+  assert.match(evidenceVerifier, /evidence\.off_host_uri !== expected\.destination/)
+  assert.match(evidenceVerifier, /evidence\.backup_interval_hours/)
+  assert.match(evidenceVerifier, /evidence\.retention_days/)
   assert.match(assembler, /backup-offhost-access-key/)
   assert.match(assembler, /BACKUP_OFFHOST_ACCESS_KEY_FILE: \/run\/worker-secrets\/backup-offhost-access-key/)
   const productionBackendCompose = assembler.slice(assembler.indexOf('cat > "$PROD_BACKEND_DIR/docker-compose.yml"'))
   const apiBlock = productionBackendCompose.slice(productionBackendCompose.indexOf('  api:'), productionBackendCompose.indexOf('  worker:'))
   const workerBlock = productionBackendCompose.slice(productionBackendCompose.indexOf('  worker:'), productionBackendCompose.indexOf('  node-exporter:'))
   assert.doesNotMatch(apiBlock, /worker-secrets/)
-  assert.match(workerBlock, /\.\/worker-secrets:\/run\/worker-secrets:ro/)
+  assert.match(workerBlock, /\.\/worker-secrets:\/run\/darshan-input-worker-secrets:ro/)
+  assert.match(workerBlock, /\/run\/worker-secrets:mode=0700/)
 })
 
 test('source-free validator forbids runtime admin password leakage', () => {
@@ -467,7 +473,8 @@ test('authoritative backend role keeps restart separate from install, upgrade, a
     assembler.indexOf('write_backend_lifecycle_scripts()'),
   )
   assert.match(startWriter, /docker compose --env-file \$env_file -f docker-compose\.yml up -d/)
-  assert.match(startWriter, /exec \.\/wait-ready\.sh/)
+  assert.match(startWriter, /^\.\/wait-ready\.sh$/m)
+  assert.match(startWriter, /mark_active_release/)
   assert.doesNotMatch(startWriter, /db:migrate|migration:apply|bootstrap:production|db:push/)
 
   const lifecycle = assembler.slice(
@@ -482,11 +489,13 @@ test('authoritative backend role keeps restart separate from install, upgrade, a
   assert.match(lifecycle, /find \.\/certs \.\/tls -type f/)
   assert.match(lifecycle, /db:status/)
   assert.match(lifecycle, /MIGRATION_ADOPTION_REQUIRED|adoptionRequired/)
-  assert.match(lifecycle, /restore_verified/)
-  assert.match(lifecycle, /restored_from_run_id/)
-  assert.match(lifecycle, /verified_at/)
-  assert.match(lifecycle, /manifest_key/)
-  assert.match(lifecycle, /Math\.max\(24, expected\.intervalHours\)/)
+  const evidenceVerifier = fs.readFileSync(repoPath('darshan-server/src/deployment/restore-evidence.ts'), 'utf8')
+  assert.match(evidenceVerifier, /restore_verified/)
+  assert.match(evidenceVerifier, /restored_from_run_id/)
+  assert.match(evidenceVerifier, /verified_at/)
+  assert.match(evidenceVerifier, /manifest_key/)
+  assert.match(evidenceVerifier, /Math\.max\(24, expected\.intervalHours\)/)
+  assert.match(lifecycle, /production:verify-restore-evidence/)
   assert.match(lifecycle, /bootstrap-secrets\/admin-password/)
   assert.match(lifecycle, /\/run\/darshan-bootstrap\/admin-password/)
   assert.doesNotMatch(lifecycle, /\/run\/secrets\/initial-admin-password/)
@@ -497,16 +506,17 @@ test('authoritative backend role keeps restart separate from install, upgrade, a
   )
   const adoption = lifecycle.slice(lifecycle.indexOf('cat > "$target_dir/adopt-existing.sh"'))
   const recovery = lifecycle.slice(lifecycle.indexOf('cat > "$target_dir/recover-admin.sh"'))
-  assert.match(deploy, /\.\/verify-role\.sh\n\.\/load-images\.sh\n\.\/wait-dependencies\.sh/)
-  assert.match(adoption, /\.\/verify-role\.sh\n\.\/load-images\.sh\n\.\/wait-dependencies\.sh/)
+  for (const script of [deploy, adoption]) {
+    assert.match(script, /\.\/verify-role\.sh[\s\S]*\.\/compatibility-check\.sh[\s\S]*\.\/load-images\.sh --verify-loaded[\s\S]*\.\/wait-dependencies\.sh/)
+  }
   assert.match(adoption, /DARSHAN_BACKUP_MANIFEST/)
   assert.match(adoption, /A regular restore-verified backup manifest is required/)
   assert.match(adoption, /! -L "\\\$DARSHAN_BACKUP_MANIFEST"/)
   assert.match(adoption, /db:adopt/)
   assert.match(adoption, /db:migrate/)
   assert.match(adoption, /bootstrap:adopt-existing/)
-  assert.match(adoption, /exec \.\/wait-ready\.sh/)
-  assert.match(recovery, /admin:recover/)
+  assert.match(adoption, /^\s*\.\/wait-ready\.sh$/m)
+  assert.match(recovery, /production:admin/)
   assert.match(recovery, /--password-file/)
   assert.match(recovery, /Recovery password file must have mode 0600/)
   assert.match(recovery, /Recovery password file must be inside \.\/secrets/)
@@ -551,9 +561,10 @@ test('production transfer runbook keeps role archives private and cleans staging
 
   assert.match(runbook, /install -d -m 700 "\$transfer_dir"/)
   assert.match(runbook, /umask 077/)
-  assert.match(runbook, /chmod 600 "\$\{transfer_dir\}\/\$\{SITE_NAME\}-\$\{RELEASE_ID\}-\$\{role\}\.tgz"/)
-  assert.match(runbook, /chmod 600 "\$\{SITE_NAME\}-\$\{RELEASE_ID\}-transfer\.sha256"/)
-  assert.match(runbook, /chmod 600 site-a-2026-08-23-r1-<role>\.tgz site-a-2026-08-23-r1-transfer\.sha256/)
-  assert.match(runbook, /rm -f site-a-2026-08-23-r1-<role>\.tgz site-a-2026-08-23-r1-transfer\.sha256/)
+  assert.match(runbook, /chmod 600 "\$\{transfer_dir\}\/\$\{ARCHIVE\}"/)
+  assert.match(runbook, /"\$\{transfer_dir\}\/TRANSFER_MANIFEST\.sha256"/)
+  assert.match(runbook, /chmod 700 "\$\{transfer_dir\}\/install-signed-role\.sh"/)
+  assert.match(runbook, /rm -f selected-transfer\.sha256 "\$ARCHIVE"/)
+  assert.match(runbook, /TRANSFER_MANIFEST\.sha256 TRANSFER_MANIFEST\.sig install-signed-role\.sh/)
   assert.match(runbook, /rmdir "\$transfer_dir"/)
 })

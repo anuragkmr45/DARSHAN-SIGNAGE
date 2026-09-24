@@ -48,16 +48,19 @@ describe('production command contracts', () => {
     expect(migrateCli).toContain('caCertPath: appConfig.DATABASE_CA_CERT_PATH');
   });
 
-  it('generates source-free lifecycle scripts with the canonical db command names', () => {
+  it('generates source-free lifecycle scripts with compiled production db commands', () => {
     const assembler = readFileSync(path.resolve(process.cwd(), '../scripts/bundle/assemble-runtime-bundle.sh'), 'utf8');
     const lifecycle = assembler.slice(
       assembler.indexOf('write_backend_lifecycle_scripts()'),
       assembler.indexOf('write_stop_script()')
     );
 
-    expect(lifecycle).toContain('npm run --silent db:status');
-    expect(lifecycle).toContain('npm run --silent db:migrate');
-    expect(lifecycle).toContain('npm run --silent db:adopt');
+    expect(lifecycle).toContain('npm run --silent production:db:status');
+    expect(lifecycle).toContain('npm run --silent production:db:migrate');
+    expect(lifecycle).toContain('npm run --silent production:db:adopt');
+    expect(lifecycle).not.toContain('npm run --silent db:status');
+    expect(lifecycle).not.toContain('npm run --silent db:migrate');
+    expect(lifecycle).not.toContain('npm run --silent db:adopt');
     expect(lifecycle).not.toContain('npm run --silent migration:plan');
     expect(lifecycle).not.toContain('npm run --silent migration:apply');
     expect(lifecycle).not.toContain('npm run --silent migration:adopt');
@@ -73,15 +76,15 @@ describe('production command contracts', () => {
       assembler.indexOf('write_stop_script()')
     );
 
-    expect(lifecycle).toContain('Password file must contain one non-empty line.');
+    expect(lifecycle).toContain('password file must contain one non-empty line');
     expect(lifecycle).toContain('A protected regular password file is required.');
     expect(lifecycle).toContain('Fresh installation requires a regular bootstrap-secrets/admin-password file.');
     expect(lifecycle).toContain('/run/darshan-bootstrap/admin-password');
     expect(lifecycle).not.toContain('/run/secrets/initial-admin-password');
     expect(lifecycle).toContain('--resolve "\\${CMS_PUBLIC_HOST}:\\${CMS_HTTPS_PORT}:\\${CMS_BIND_ADDRESS}"');
     expect(lifecycle).toContain('A protected regular recovery password file is required.');
-    expect(lifecycle).toContain('text.replace(/\\\\r?\\\\n$/, "")');
-    expect(lifecycle).toContain('/[\\\\r\\\\n\\\\0]/.test(password)');
+    expect(lifecycle).toContain('sub("\\\\r?\\\\n\\$"; "")');
+    expect(lifecycle).toContain('test("[\\\\r\\\\n\\\\u0000]")');
     expect(lifecycle).not.toContain('fs.readFileSync(process.argv[1], "utf8").trimEnd()');
 
     const standaloneAcceptance = serverPackage.slice(

@@ -116,6 +116,7 @@ describe('off-host S3 backup storage', () => {
       endpoint: 'https://s3.backups.example.test',
       intervalHours: 24,
       retentionDays: 30,
+      releaseId: 'release-1',
     });
     const manifestBody = Buffer.from(`${JSON.stringify(manifest)}\n`);
     client.objects.set(`${location.bucket}/${manifest.manifest_key}`, {
@@ -145,6 +146,7 @@ describe('off-host S3 backup storage', () => {
       endpoint: 'https://s3.backups.example.test',
       intervalHours: 24,
       retentionDays: 30,
+      releaseId: 'release-1',
     });
 
     await expect(verifyOffHostBackupManifest(client, location, manifest)).rejects.toThrow(/unexpected size/);
@@ -175,6 +177,7 @@ describe('off-host S3 backup storage', () => {
       endpoint: 'https://s3.backups.example.test',
       intervalHours: 24,
       retentionDays: 30,
+      releaseId: 'release-1',
     });
 
     await expect(verifyOffHostBackupManifest(client, location, manifest)).rejects.toThrow(/invalid backup artifact/);
@@ -204,6 +207,7 @@ describe('off-host S3 backup storage', () => {
       endpoint: 'https://s3.backups.example.test',
       intervalHours: 24,
       retentionDays: 30,
+      releaseId: 'release-1',
     });
 
     await expect(verifyOffHostBackupManifest(client, location, manifest)).rejects.toThrow(/invalid backup artifact/);
@@ -220,6 +224,7 @@ describe('off-host S3 backup storage', () => {
       endpoint: 'https://s3.backups.example.test',
       intervalHours: 24,
       retentionDays: 30,
+      releaseId: 'release-1',
     });
 
     await expect(verifyOffHostBackupManifest(client, location, manifest)).rejects.toThrow(/at least one backup artifact/);
@@ -249,6 +254,7 @@ describe('off-host S3 backup storage', () => {
       endpoint: 'https://s3.backups.example.test',
       intervalHours: 24,
       retentionDays: 30,
+      releaseId: 'release-1',
     });
 
     await expect(verifyOffHostBackupManifest(client, location, manifest)).rejects.toThrow(/invalid backup artifact/);
@@ -265,6 +271,7 @@ describe('off-host S3 backup storage', () => {
       endpoint: 'https://s3.backups.example.test',
       intervalHours: 24,
       retentionDays: 30,
+      releaseId: 'release-1',
     });
     const manifestBody = Buffer.from(`${JSON.stringify(manifest)}\n`);
     client.objects.set(`${location.bucket}/${manifest.manifest_key}`, {
@@ -287,6 +294,7 @@ describe('off-host S3 backup storage', () => {
       endpoint: 'https://s3.backups.example.test',
       intervalHours: 24,
       retentionDays: 30,
+      releaseId: 'release-1',
     });
     const tampered = { ...manifest, manifest_key: 'darshan/site-a/runs/20260904-other/manifest.json' };
     const manifestBody = Buffer.from(`${JSON.stringify(tampered)}\n`);

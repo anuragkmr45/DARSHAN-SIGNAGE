@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "outDir": "./dist-production"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "dist-production", "dist-cli", "**/*.test.ts"]
+}

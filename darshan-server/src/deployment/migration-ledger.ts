@@ -11,6 +11,7 @@ import {
 
 const LEDGER_TABLE = 'darshan_schema_migrations';
 const DRIZZLE_TABLE = '__drizzle_migrations';
+const DEPLOYMENT_RUN_TABLE = 'darshan_deployment_runs';
 const LOCK_NAME = 'darshan:production-migration-ledger';
 const IDENTIFIER_PATTERN = /^\d{4}_[A-Za-z0-9][A-Za-z0-9_.-]*\.sql$/;
 const BASELINE_METADATA_PATTERN = /^\d{4}-\d{2}-\d{2}\.json$/;
@@ -295,9 +296,9 @@ async function listUnmanagedObjects(client: PoolClient): Promise<string[]> {
     FROM information_schema.tables
     WHERE table_schema = current_schema()
       AND table_type = 'BASE TABLE'
-      AND table_name NOT IN ($1, $2)
+      AND table_name NOT IN ($1, $2, $3)
     ORDER BY table_name ASC
-  `, [LEDGER_TABLE, DRIZZLE_TABLE]);
+  `, [LEDGER_TABLE, DRIZZLE_TABLE, DEPLOYMENT_RUN_TABLE]);
   return result.rows.map((row) => row.table_name);
 }
 
@@ -309,25 +310,25 @@ async function databaseFingerprint(client: PoolClient): Promise<string> {
       SELECT table_name, column_name, ordinal_position, data_type, udt_name, is_nullable, column_default
       FROM information_schema.columns
       WHERE table_schema = current_schema()
-        AND table_name NOT IN ($1, $2)
+        AND table_name NOT IN ($1, $2, $3)
       ORDER BY table_name, ordinal_position
-    `, [LEDGER_TABLE, DRIZZLE_TABLE]);
+    `, [LEDGER_TABLE, DRIZZLE_TABLE, DEPLOYMENT_RUN_TABLE]);
   const constraints = await client.query<QueryResultRow>(`
       SELECT rel.relname AS table_name, con.conname AS constraint_name, pg_get_constraintdef(con.oid, true) AS definition
       FROM pg_constraint con
       INNER JOIN pg_class rel ON rel.oid = con.conrelid
       INNER JOIN pg_namespace ns ON ns.oid = rel.relnamespace
       WHERE ns.nspname = current_schema()
-        AND rel.relname NOT IN ($1, $2)
+        AND rel.relname NOT IN ($1, $2, $3)
       ORDER BY rel.relname, con.conname
-    `, [LEDGER_TABLE, DRIZZLE_TABLE]);
+    `, [LEDGER_TABLE, DRIZZLE_TABLE, DEPLOYMENT_RUN_TABLE]);
   const indexes = await client.query<QueryResultRow>(`
       SELECT tablename AS table_name, indexname AS index_name, indexdef
       FROM pg_indexes
       WHERE schemaname = current_schema()
-        AND tablename NOT IN ($1, $2)
+        AND tablename NOT IN ($1, $2, $3)
       ORDER BY tablename, indexname
-    `, [LEDGER_TABLE, DRIZZLE_TABLE]);
+    `, [LEDGER_TABLE, DRIZZLE_TABLE, DEPLOYMENT_RUN_TABLE]);
   return sha256(JSON.stringify({ columns: columns.rows, constraints: constraints.rows, indexes: indexes.rows }));
 }
 

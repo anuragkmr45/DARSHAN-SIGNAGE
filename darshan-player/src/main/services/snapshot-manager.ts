@@ -302,6 +302,7 @@ export class SnapshotManager extends EventEmitter {
       mediaId: string
       url: string
       sha256?: string
+      contentType?: string
       source?: 'SNAPSHOT' | 'DEFAULT_MEDIA' | 'EMERGENCY'
       snapshotId?: string
       scheduleId?: string
@@ -332,6 +333,8 @@ export class SnapshotManager extends EventEmitter {
         mediaId: item.mediaId,
         url: cacheUrl,
         sha256: item.sha256,
+        contentType:
+          typeof item.meta?.['content_type'] === 'string' ? String(item.meta?.['content_type']) : undefined,
         source,
         snapshotId: snapshot.snapshotId,
         scheduleId: snapshot.scheduleId,
@@ -495,17 +498,15 @@ export class SnapshotManager extends EventEmitter {
     const hydrated: TimelineItem[] = []
     for (const item of items) {
       const mediaId = item.mediaId || item.objectKey
+      const contentType =
+        typeof item.meta?.['content_type'] === 'string' ? String(item.meta?.['content_type']) : undefined
       let localPath: string | undefined
       if (mediaId) {
-        localPath = await cacheManager.get(mediaId)
+        localPath = await cacheManager.get(mediaId, contentType)
       }
 
       if (!localPath && item.type !== 'url' && item.type !== 'message') {
         logger.warn({ mediaId }, 'Media not cached, keeping remote playback source')
-      }
-
-      if (localPath) {
-        localPath = await this.normalizeLocalMediaPath(item, localPath)
       }
 
       const fallbackLocalUrl = localPath ? pathToFileURL(localPath).toString() : undefined
@@ -524,32 +525,6 @@ export class SnapshotManager extends EventEmitter {
     }
 
     return hydrated
-  }
-
-  private async normalizeLocalMediaPath(item: TimelineItem, localPath: string): Promise<string> {
-    if (item.type !== 'pdf') {
-      return localPath
-    }
-
-    const sourceContentType =
-      typeof item.meta?.['source_content_type'] === 'string' ? String(item.meta?.['source_content_type']) : undefined
-    const alreadyPdf = /\.pdf$/i.test(localPath)
-    if (alreadyPdf || sourceContentType !== 'application/pdf') {
-      return localPath
-    }
-
-    const normalizedPath = `${localPath}.pdf`
-    if (fs.existsSync(normalizedPath)) {
-      return normalizedPath
-    }
-
-    try {
-      await fs.promises.copyFile(localPath, normalizedPath)
-      return normalizedPath
-    } catch (error) {
-      logger.warn({ localPath, normalizedPath, error }, 'Failed to create normalized PDF cache alias')
-      return localPath
-    }
   }
 
   private buildLayoutSceneItems(

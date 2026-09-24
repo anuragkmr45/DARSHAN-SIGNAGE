@@ -45,8 +45,9 @@ const envSchema = z.object({
     .transform((v) => v === 'true')
     .default('false'),
   MINIO_REGION: z.string().default('us-east-1'),
-  // Public, path-style S3 endpoint used only by browser-origin CMS traffic.
-  // It is normally the CMS HTTPS origin fronting MinIO through Nginx.
+  // Recipient-facing, path-style S3 endpoint used for browser and player
+  // transfers. It is normally the CMS HTTPS origin fronting MinIO through
+  // Nginx; service-to-service storage operations still use MINIO_ENDPOINT.
   MINIO_PUBLIC_ENDPOINT: z.preprocess((value) => {
     if (typeof value !== 'string') return value;
     const trimmed = value.trim();
@@ -112,6 +113,8 @@ const envSchema = z.object({
   SIGNHEX_ENVIRONMENT_NAME: z.string().trim().min(1).default('development'),
   SIGNHEX_SERVER_ID: z.string().trim().min(1).default('darshan-api'),
   DARSHAN_RELEASE_ID: z.string().trim().min(1).default('development'),
+  DARSHAN_SOURCE_COMMIT: z.string().trim().regex(/^(?:development|[a-f0-9]{40})$/i).default('development'),
+  DARSHAN_COMPATIBILITY_GENERATION: z.coerce.number().int().positive().default(1),
   WORKER_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(1_000).max(300_000).default(15_000),
   WORKER_HEARTBEAT_STALE_MS: z.coerce.number().int().min(5_000).max(900_000).default(60_000),
   DUPLICATE_IDENTITY_DETECTION_ENABLED: optionalBooleanString,

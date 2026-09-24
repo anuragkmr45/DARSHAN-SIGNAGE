@@ -7,6 +7,7 @@ const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils.ts')
 
 class FakeRealtimeTransport extends EventEmitter {
   connected = false
+  compatibilityGeneration = 1
   events: Array<{ event: string; payload: any }> = []
 
   async connect() {
@@ -28,6 +29,7 @@ class FakeRealtimeTransport extends EventEmitter {
           protocol_version: '1.0',
           server_time: new Date().toISOString(),
           server_release_id: 'test-r1',
+          compatibility_generation: this.compatibilityGeneration,
         })
       })
     }
@@ -57,6 +59,7 @@ describe('Realtime Service', () => {
           environment: {
             releaseId: 'test-r1',
             sourceCommit: '0123456789abcdef0123456789abcdef01234567',
+            compatibilityGeneration: 1,
           },
           realtime: {
             enabled: true,
@@ -408,12 +411,54 @@ describe('Realtime Service', () => {
       release_id: 'test-r1',
       source_commit: '0123456789abcdef0123456789abcdef01234567',
       server_release_id: 'test-r1',
+      compatibility_generation: 1,
       connection_state: 'WSS_HEALTHY',
       reconnect_count: 1,
       reconciliation_failure_count: 0,
     })
     expect(diagnostics.last_hello_ack_at).to.be.a('string')
     expect(diagnostics.last_reconciliation_at).to.be.a('string')
+
+    realtimeService.stop()
+  })
+
+  it('rejects a backend with a different compatibility generation', async () => {
+    const { RealtimeService } = require('../../../src/main/services/realtime-service')
+    const { getCommandProcessor } = require('../../../src/main/services/command-processor')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+
+    const transport = new FakeRealtimeTransport()
+    transport.compatibilityGeneration = 2
+    const commandProcessor = getCommandProcessor()
+    const httpClient = getHttpClient()
+    sandbox.stub(commandProcessor, 'pollNow').resolves()
+    sandbox.stub(httpClient, 'get').resolves({
+      device_id: 'device-1',
+      state: {
+        state_version: 0,
+        command_version: 0,
+        snapshot_id: null,
+        default_media_version: null,
+        emergency_version: null,
+        last_command_id: null,
+        last_command_type: null,
+        last_command_reason: null,
+        last_changed_reason: null,
+        updated_at: null,
+      },
+    })
+
+    const realtimeService = new RealtimeService(transport)
+    realtimeService.start()
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(realtimeService.getState()).to.equal('disconnected')
+    expect(commandProcessor.isRealtimeHealthy()).to.equal(false)
+    expect(realtimeService.getDiagnostics()).to.include({
+      compatibility_generation: 2,
+      connection_state: 'VERSION_MISMATCH',
+    })
 
     realtimeService.stop()
   })

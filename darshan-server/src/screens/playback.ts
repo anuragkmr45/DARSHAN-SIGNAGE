@@ -677,6 +677,12 @@ export async function getActiveEmergencyForScreen(
     options.includeUrls && (emergency as any).media_id
       ? await buildResolvedMediaRecord((emergency as any).media_id, db)
       : null;
+  const requestedMediaId = (emergency as any).media_id ?? null;
+  const mediaIsPlayable = options.includeUrls
+    ? resolvedEmergencyMedia?.status === 'READY' && Boolean(resolvedEmergencyMedia.playback_url)
+    : Boolean(requestedMediaId);
+  const effectiveMedia = mediaIsPlayable ? resolvedEmergencyMedia : null;
+  const effectiveMediaId = mediaIsPlayable ? requestedMediaId : null;
 
   return {
     id: emergency.id,
@@ -684,24 +690,24 @@ export async function getActiveEmergencyForScreen(
     triggered_by: emergency.triggered_by,
     message: emergency.message,
     severity: emergency.priority,
-    media_id: (emergency as any).media_id ?? null,
-    media_url: resolvedEmergencyMedia?.media_url ?? null,
-    fallback_url: resolvedEmergencyMedia?.fallback_url ?? null,
-    source_url: resolvedEmergencyMedia?.source_url ?? null,
-    playback_url: resolvedEmergencyMedia?.playback_url ?? null,
-    preview_url: resolvedEmergencyMedia?.preview_url ?? null,
-    url: resolvedEmergencyMedia?.url ?? null,
-    media_type: resolvedEmergencyMedia?.media_type ?? null,
+    media_id: effectiveMediaId,
+    media_url: effectiveMedia?.media_url ?? null,
+    fallback_url: effectiveMedia?.fallback_url ?? null,
+    source_url: effectiveMedia?.source_url ?? null,
+    playback_url: effectiveMedia?.playback_url ?? null,
+    preview_url: effectiveMedia?.preview_url ?? null,
+    url: effectiveMedia?.url ?? null,
+    media_type: effectiveMedia?.media_type ?? null,
     type:
-      resolvedEmergencyMedia?.type === 'WEBPAGE'
+      effectiveMedia?.type === 'WEBPAGE'
         ? 'url'
-        : resolvedEmergencyMedia?.type ?? null,
-    content_type: resolvedEmergencyMedia?.content_type ?? null,
-    source_content_type: resolvedEmergencyMedia?.source_content_type ?? null,
+        : effectiveMedia?.type ?? null,
+    content_type: effectiveMedia?.content_type ?? null,
+    source_content_type: effectiveMedia?.source_content_type ?? null,
     screen_ids: emergencyScreenIds,
     screen_group_ids: emergencyGroupIds,
     target_all: (emergency as any).target_all ?? false,
-    kind: (emergency as any).media_id ? 'MEDIA' : 'MESSAGE',
+    kind: effectiveMediaId ? 'MEDIA' : 'MESSAGE',
     active: true,
     is_active: true,
     version: `${emergency.id}:${(emergency as any).transition_version ?? 1}`,

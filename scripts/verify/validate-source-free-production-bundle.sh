@@ -81,11 +81,13 @@ bash "$ROOT_DIR/scripts/bootstrap/create-site-pki.sh" \
   --output-dir "$WORK_DIR/pki"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$WORK_DIR/release-signing.key" >/dev/null 2>&1
 chmod 600 "$WORK_DIR/release-signing.key"
+openssl pkey -in "$WORK_DIR/release-signing.key" -pubout -out "$WORK_DIR/release-signing.pem" >/dev/null 2>&1
+chmod 644 "$WORK_DIR/release-signing.pem"
 
 verify_certificate_fingerprints() {
   local bundle_root="$1"
   local role role_dir manifest
-  for role in data valkey backend cms observability; do
+  for role in data valkey backend cms observability recovery; do
     role_dir="$bundle_root/production/$role"
     [[ -d "$role_dir" ]] || continue
     manifest="$role_dir/CERTIFICATE_FINGERPRINTS.sha256"
@@ -199,6 +201,7 @@ EOF
   cat > "$destination" <<EOF
 RELEASE_ID=r1
 SITE_NAME=$site_name
+VOLUME_PROVISIONING_MODE=create
 EXPORT_SERVER=false
 EXPORT_CMS=false
 EXPORT_ELECTRON=false
@@ -297,8 +300,20 @@ write_config "$WORK_DIR/internal.env" acceptance-internal "$WORK_DIR/internal-ou
 printf 'TRANSPORT_CA_KEY_FILE=%s\n' "$WORK_DIR/pki/transport-ca.key" >> "$WORK_DIR/internal.env"
 bash "$ROOT_DIR/scripts/bundle/build-production-bundle.sh" --skip-docker "$WORK_DIR/internal.env"
 
-INTERNAL_BUNDLE="$WORK_DIR/internal-output/acceptance-internal"
+INTERNAL_BUNDLE="$WORK_DIR/internal-output/acceptance-internal/r1"
 verify_generated_shell_syntax "$INTERNAL_BUNDLE"
+openssl dgst -sha256 -verify "$WORK_DIR/release-signing.pem" \
+  -signature "$INTERNAL_BUNDLE/transfer/TRANSFER_MANIFEST.sig" \
+  "$INTERNAL_BUNDLE/transfer/TRANSFER_MANIFEST.sha256" >/dev/null
+(cd "$INTERNAL_BUNDLE/transfer" && sha256sum -c TRANSFER_MANIFEST.sha256 >/dev/null)
+grep -Eq '  install-signed-role\.sh$' "$INTERNAL_BUNDLE/transfer/TRANSFER_MANIFEST.sha256" || {
+  echo "Root-executed transfer installer is not covered by the signed transfer manifest." >&2
+  exit 1
+}
+[[ "$(find "$INTERNAL_BUNDLE/transfer" -maxdepth 1 -type f -name '*.tgz' | wc -l)" == "6" ]] || {
+  echo "Signed transfer set does not contain all six server roles." >&2
+  exit 1
+}
 rg -qx 'REALTIME_SOCKET_TRANSPORT=websocket' "$INTERNAL_BUNDLE/production/backend/.env.production"
 rg -qx 'REALTIME_SOCKET_ALLOW_POLLING=false' "$INTERNAL_BUNDLE/production/backend/.env.production"
 rg -qx 'REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS=false' "$INTERNAL_BUNDLE/production/backend/.env.production"
@@ -315,7 +330,7 @@ if (policy.containerLogging?.driver !== "local" || policy.containerLogging?.maxS
 if (policy.minimumDockerDataFreeBytes?.data !== 21474836480) process.exit(1);
 if (policy.containerLimits?.postgres?.memory !== "4g" || policy.containerLimits?.backendWorker?.pids !== 512) process.exit(1);
 ' "$INTERNAL_BUNDLE/OPERATIONS_POLICY.json" 's3://offhost-backups.acceptance.test/darshan/acceptance-internal'
-for role in data valkey backend cms observability; do
+for role in data valkey backend cms observability recovery; do
   cmp -s "$INTERNAL_BUNDLE/OPERATIONS_POLICY.json" "$INTERNAL_BUNDLE/production/$role/OPERATIONS_POLICY.json" || {
     echo "Production operations policy is missing or differs in role: $role" >&2
     exit 1
@@ -331,6 +346,20 @@ verify_certificate_fingerprints "$INTERNAL_BUNDLE"
 verify_no_plaintext_runtime_credentials "$INTERNAL_BUNDLE"
 verify_runtime_secret_files "$INTERNAL_BUNDLE"
 verify_bootstrap_password_not_shipped "$INTERNAL_BUNDLE"
+grep -q 'for file in prepare-host.sh preflight.sh; do' \
+  "$INTERNAL_BUNDLE/production/recovery/verify-role.sh" || {
+  echo "Recovery verification incorrectly requires persistent-role deployment controls." >&2
+  exit 1
+}
+if grep -q 'deployment-control.sh' "$INTERNAL_BUNDLE/production/recovery/verify-role.sh"; then
+  echo "Stateless recovery verification references deployment-control.sh." >&2
+  exit 1
+fi
+grep -q 'for file in prepare-host.sh preflight.sh deployment-control.sh; do' \
+  "$INTERNAL_BUNDLE/production/data/verify-role.sh" || {
+  echo "Persistent-role verification no longer requires deployment controls." >&2
+  exit 1
+}
 
 if bash "$ROOT_DIR/scripts/bootstrap/prepare-transport-tls.sh" \
   --mode provided \
@@ -344,6 +373,7 @@ if bash "$ROOT_DIR/scripts/bootstrap/prepare-transport-tls.sh" \
   --backend-device-host player-api.acceptance.test \
   --data-host minio.acceptance.test \
   --valkey-host valkey.acceptance.test \
+  --observability-host observe.acceptance.test \
   --cms-cert "$INTERNAL_BUNDLE/production/cms/tls/tls.crt" \
   --cms-key "$INTERNAL_BUNDLE/production/cms/tls/tls.key" \
   --backend-cert "$INTERNAL_BUNDLE/production/cms/tls/tls.crt" \
@@ -354,6 +384,8 @@ if bash "$ROOT_DIR/scripts/bootstrap/prepare-transport-tls.sh" \
   --postgres-key "$INTERNAL_BUNDLE/production/data/tls/postgres.key" \
   --valkey-cert "$INTERNAL_BUNDLE/production/valkey/tls/server.crt" \
   --valkey-key "$INTERNAL_BUNDLE/production/valkey/tls/server.key" \
+  --observability-cert "$INTERNAL_BUNDLE/production/observability/certs/server.crt" \
+  --observability-key "$INTERNAL_BUNDLE/production/observability/certs/server.key" \
   >"$WORK_DIR/wrong-san.log" 2>&1; then
   echo "Provided-mode validation accepted a backend certificate with the wrong SAN." >&2
   exit 1
@@ -371,10 +403,12 @@ POSTGRES_TLS_CERT_FILE=$INTERNAL_BUNDLE/production/data/tls/postgres.crt
 POSTGRES_TLS_KEY_FILE=$INTERNAL_BUNDLE/production/data/tls/postgres.key
 VALKEY_TLS_CERT_FILE=$INTERNAL_BUNDLE/production/valkey/tls/server.crt
 VALKEY_TLS_KEY_FILE=$INTERNAL_BUNDLE/production/valkey/tls/server.key
+OBSERVABILITY_TLS_CERT_FILE=$INTERNAL_BUNDLE/production/observability/certs/server.crt
+OBSERVABILITY_TLS_KEY_FILE=$INTERNAL_BUNDLE/production/observability/certs/server.key
 EOF
 bash "$ROOT_DIR/scripts/bundle/build-production-bundle.sh" --skip-docker "$WORK_DIR/provided.env"
 
-PROVIDED_BUNDLE="$WORK_DIR/provided-output/acceptance-provided"
+PROVIDED_BUNDLE="$WORK_DIR/provided-output/acceptance-provided/r1"
 verify_generated_shell_syntax "$PROVIDED_BUNDLE"
 cmp "$WORK_DIR/pki/transport-ca.crt" "$PROVIDED_BUNDLE/production/cms/tls/transport-ca.crt"
 verify_no_plaintext_runtime_credentials "$PROVIDED_BUNDLE"
@@ -391,13 +425,11 @@ verify_runtime_secret_files "$PROVIDED_BUNDLE"
 verify_bootstrap_password_not_shipped "$PROVIDED_BUNDLE"
 grep -q 'credentials_file: /etc/darshan/secrets/backend-metrics-bearer-token' "$PROVIDED_BUNDLE/production/observability/prometheus/prometheus.yml"
 for target in \
-  'minio.acceptance.test:9100' \
-  'minio.acceptance.test:9187' \
-  'valkey.acceptance.test:9100' \
-  'backend.acceptance.test:9100' \
-  'cms.acceptance.test:9100' \
-  'cms.acceptance.test:9113' \
-  'observe.acceptance.test:9100'; do
+  'minio.acceptance.test:9443' \
+  'valkey.acceptance.test:9443' \
+  'backend.acceptance.test:9443' \
+  'cms.acceptance.test:9443' \
+  'node-exporter:9100'; do
   grep -q -- "$target" "$PROVIDED_BUNDLE/production/observability/prometheus/prometheus.yml" || {
     echo "Rendered Prometheus configuration is missing deployed exporter target: $target" >&2
     exit 1
@@ -419,7 +451,7 @@ bootstrap_secret="$PROVIDED_BUNDLE/production/backend/bootstrap-secrets/admin-pa
 chmod 600 "$bootstrap_secret"
 (
   cd "$PROVIDED_BUNDLE/production/backend"
-  openssl dgst -sha256 -verify RELEASE_SIGNING_PUBLIC_KEY.pem -signature ROLE_MANIFEST.sig ROLE_MANIFEST.sha256 >/dev/null
+  openssl dgst -sha256 -verify "$WORK_DIR/release-signing.pem" -signature ROLE_MANIFEST.sig ROLE_MANIFEST.sha256 >/dev/null
   sha256sum -c ROLE_MANIFEST.sha256 >/dev/null
 )
 rm -f "$bootstrap_secret"
@@ -430,19 +462,25 @@ fi
 verify_certificate_fingerprints "$PROVIDED_BUNDLE"
 
 printf 'tamper\n' >> "$PROVIDED_BUNDLE/BUNDLE_OVERVIEW.md"
-if (cd "$PROVIDED_BUNDLE" && ./verify-bundle.sh >/dev/null 2>&1); then
+if (cd "$PROVIDED_BUNDLE" && DARSHAN_RELEASE_TRUST_KEY="$WORK_DIR/release-signing.pem" ./verify-bundle.sh >/dev/null 2>&1); then
   echo "Bundle checksum verification accepted a modified file." >&2
   exit 1
 fi
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  for role in data valkey backend cms observability; do
+  for role in data valkey backend cms observability recovery; do
     role_dir="$PROVIDED_BUNDLE/production/$role"
-    docker compose --env-file "$role_dir/.env.production" -f "$role_dir/docker-compose.yml" config --quiet
+    env_file="$role_dir/.env.production"
+    [[ "$role" != recovery ]] || env_file="$role_dir/.env.recovery"
+    docker compose --env-file "$env_file" -f "$role_dir/docker-compose.yml" config --quiet
   done
 fi
 
 if [[ "${DARSHAN_VERIFY_IMAGE_LOADER:-false}" == "true" ]]; then
+  [[ "$(id -u)" == "0" ]] || {
+    echo "DARSHAN_VERIFY_IMAGE_LOADER=true requires an isolated root-capable CI host so production ownership checks and host preparation are exercised exactly." >&2
+    exit 1
+  }
   docker image inspect nginx:alpine >/dev/null
   docker image inspect postgres:15-alpine >/dev/null
   docker image inspect minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e >/dev/null
@@ -451,7 +489,15 @@ if [[ "${DARSHAN_VERIFY_IMAGE_LOADER:-false}" == "true" ]]; then
   docker image inspect grafana/grafana:12.0.2 >/dev/null
   docker image save -o "$WORK_DIR/packages/r1/server/images/backend.tar" nginx:alpine
 
-  write_config "$WORK_DIR/docker.env" acceptance-docker "$WORK_DIR/docker-output" internal-ca
+  docker_site="acceptance-docker-$$"
+  write_config "$WORK_DIR/docker.env" "$docker_site" "$WORK_DIR/docker-output" internal-ca
+  sed -i \
+    -e 's/^DATA_MIN_FREE_DISK_BYTES=.*/DATA_MIN_FREE_DISK_BYTES=1073741824/' \
+    -e 's/^VALKEY_MIN_FREE_DISK_BYTES=.*/VALKEY_MIN_FREE_DISK_BYTES=1073741824/' \
+    -e 's/^BACKEND_MIN_FREE_DISK_BYTES=.*/BACKEND_MIN_FREE_DISK_BYTES=1073741824/' \
+    -e 's/^CMS_MIN_FREE_DISK_BYTES=.*/CMS_MIN_FREE_DISK_BYTES=1073741824/' \
+    -e 's/^OBSERVABILITY_MIN_FREE_DISK_BYTES=.*/OBSERVABILITY_MIN_FREE_DISK_BYTES=1073741824/' \
+    "$WORK_DIR/docker.env"
   cat >> "$WORK_DIR/docker.env" <<EOF
 TRANSPORT_CA_KEY_FILE=$WORK_DIR/pki/transport-ca.key
 # Use the actual Prometheus image so this signed-bundle pass validates the
@@ -462,27 +508,21 @@ GRAFANA_IMAGE=grafana/grafana:12.0.2
 EOF
   bash "$ROOT_DIR/scripts/bundle/build-production-bundle.sh" "$WORK_DIR/docker.env"
 
-  DOCKER_BUNDLE="$WORK_DIR/docker-output/acceptance-docker"
+  DOCKER_BUNDLE="$WORK_DIR/docker-output/$docker_site/r1"
   docker run --rm --entrypoint promtool \
     -v "$DOCKER_BUNDLE/production/observability/prometheus:/etc/darshan/prometheus:ro" \
     -v "$DOCKER_BUNDLE/production/observability/secrets:/etc/darshan/secrets:ro" \
     -v "$DOCKER_BUNDLE/production/observability/certs/transport-ca.crt:/etc/darshan/tls/transport-ca.crt:ro" \
     prom/prometheus:v3.3.1 check config /etc/darshan/prometheus/prometheus.yml
-  (
-    umask 077
-    printf '%s\n' 'acceptance-only-password' > "$DOCKER_BUNDLE/production/backend/bootstrap-secrets/admin-password"
-  )
-  chmod 600 "$DOCKER_BUNDLE/production/backend/bootstrap-secrets/admin-password"
-  printf '%s\n' 'services:' '  api: [' > "$DOCKER_BUNDLE/production/backend/docker-compose.override.yml"
-  for role in data valkey backend cms observability; do
+  for role in data valkey backend cms observability recovery; do
     (
       cd "$DOCKER_BUNDLE/production/$role"
-      ./verify-role.sh
+      DARSHAN_RELEASE_TRUST_KEY="$WORK_DIR/release-signing.pem" ./verify-role.sh
+      DARSHAN_RELEASE_TRUST_KEY="$WORK_DIR/release-signing.pem" ./prepare-host.sh
       ./load-images.sh
       ./load-images.sh --verify-loaded
     )
   done
-  rm -f "$DOCKER_BUNDLE/production/backend/bootstrap-secrets/admin-password"
   grep -q $'\tminio/minio:darshan-' "$DOCKER_BUNDLE/production/data/images/IMAGE_MANIFEST.tsv"
 
   # Exercise the signed state-service roles, not merely their Compose syntax.
@@ -496,30 +536,41 @@ EOF
     cms_dir="$DOCKER_BUNDLE/production/cms"
     observability_dir="$DOCKER_BUNDLE/production/observability"
     cleanup_state_services() {
-      (cd "$valkey_dir" && docker compose --env-file .env.production -f docker-compose.yml down -v --remove-orphans) >/dev/null 2>&1 || true
-      (cd "$data_dir" && docker compose --env-file .env.production -f docker-compose.yml down -v --remove-orphans) >/dev/null 2>&1 || true
+      (cd "$valkey_dir" && docker compose --env-file .env.production -f docker-compose.yml down --remove-orphans) >/dev/null 2>&1 || true
+      (cd "$data_dir" && docker compose --env-file .env.production -f docker-compose.yml down --remove-orphans) >/dev/null 2>&1 || true
     }
     cleanup_cms() {
-      (cd "$cms_dir" && docker compose --env-file .env.production -f docker-compose.yml down -v --remove-orphans) >/dev/null 2>&1 || true
+      (cd "$cms_dir" && docker compose --env-file .env.production -f docker-compose.yml down --remove-orphans) >/dev/null 2>&1 || true
     }
     cleanup_backend() {
       (cd "$backend_dir" && docker compose --env-file .env.production -f docker-compose.yml down --remove-orphans) >/dev/null 2>&1 || true
     }
     cleanup_observability() {
-      (cd "$observability_dir" && docker compose --env-file .env.production -f docker-compose.yml down -v --remove-orphans) >/dev/null 2>&1 || true
+      (cd "$observability_dir" && docker compose --env-file .env.production -f docker-compose.yml down --remove-orphans) >/dev/null 2>&1 || true
     }
     cleanup_all() {
       cleanup_observability
       cleanup_cms
       cleanup_backend
       cleanup_state_services
+      local volume
+      for volume in \
+        "darshan-${docker_site}-postgres-data" \
+        "darshan-${docker_site}-minio-data" \
+        "darshan-${docker_site}-valkey-data" \
+        "darshan-${docker_site}-prometheus-data" \
+        "darshan-${docker_site}-alertmanager-data" \
+        "darshan-${docker_site}-grafana-data"; do
+        docker volume rm "$volume" >/dev/null 2>&1 || true
+      done
+      rm -rf "/var/lib/darshan/deployments/$docker_site" "/var/lib/darshan/$docker_site"
     }
     trap cleanup_all EXIT
 
     # Use the generated data lifecycle, not a raw Compose up: it must create
     # the least-privilege monitoring role before the PostgreSQL exporter is
     # declared healthy.
-    (cd "$data_dir" && ./start.sh)
+    (cd "$data_dir" && DARSHAN_RELEASE_TRUST_KEY="$WORK_DIR/release-signing.pem" ./start.sh)
     # Data and Valkey run on different VMs in production but share this one
     # acceptance host. Start only Valkey for its transport test so both roles
     # do not contend for the same signed node-exporter host port.
@@ -652,13 +703,16 @@ EOF
     # CMS exporters. This preserves exact role Compose behavior without hiding
     # single-host port collisions that cannot occur on the intended VM split.
     cleanup_state_services
-    (cd "$valkey_dir" && ./start.sh)
+    (cd "$valkey_dir" && DARSHAN_RELEASE_TRUST_KEY="$WORK_DIR/release-signing.pem" ./start.sh)
     (cd "$valkey_dir" && ./health-check.sh)
     cleanup_state_services
 
-    (cd "$backend_dir" && docker compose --env-file .env.production -f docker-compose.yml up -d node-exporter)
+    (cd "$backend_dir" && docker compose --env-file .env.production -f docker-compose.yml up -d node-exporter metrics-gateway)
     for _ in $(seq 1 30); do
-      backend_node_metrics="$(curl --fail --silent --show-error "http://${TEST_BIND_ADDRESS}:9100/metrics" 2>/dev/null || true)"
+      backend_node_metrics="$(curl --fail --silent --show-error \
+        --cacert "$backend_dir/certs/transport-ca.crt" \
+        --resolve "backend.acceptance.test:9443:${TEST_BIND_ADDRESS}" \
+        "https://backend.acceptance.test:9443/node/metrics" 2>/dev/null || true)"
       [[ "$backend_node_metrics" == *node_exporter_build_info* ]] && break
       sleep 1
     done
@@ -669,9 +723,12 @@ EOF
     }
     cleanup_backend
 
-    (cd "$cms_dir" && ./start.sh)
+    (cd "$cms_dir" && docker compose --env-file .env.production -f docker-compose.yml up -d)
     for _ in $(seq 1 30); do
-      nginx_metrics="$(curl --fail --silent --show-error "http://${TEST_BIND_ADDRESS}:9113/metrics" 2>/dev/null || true)"
+      nginx_metrics="$(curl --fail --silent --show-error \
+        --cacert "$cms_dir/tls/transport-ca.crt" \
+        --resolve "cms.acceptance.test:9443:${TEST_BIND_ADDRESS}" \
+        "https://cms.acceptance.test:9443/nginx/metrics" 2>/dev/null || true)"
       if [[ "$nginx_metrics" == *$'\nnginx_up 1'* || "$nginx_metrics" == nginx_up\ 1* ]]; then
         break
       fi
@@ -686,9 +743,15 @@ EOF
     cleanup_cms
     (cd "$observability_dir" && docker compose --env-file .env.production -f docker-compose.yml up -d)
     for _ in $(seq 1 45); do
-      prometheus_ready="$(curl --fail --silent --show-error "http://${TEST_BIND_ADDRESS}:9090/-/ready" 2>/dev/null || true)"
-      grafana_health="$(curl --fail --silent --show-error "http://${TEST_BIND_ADDRESS}:3001/api/health" 2>/dev/null || true)"
-      alertmanager_ready="$(curl --fail --silent --show-error "http://${TEST_BIND_ADDRESS}:9093/-/ready" 2>/dev/null || true)"
+      prometheus_ready="$(curl --fail --silent --show-error --cacert "$observability_dir/certs/transport-ca.crt" \
+        --resolve "observe.acceptance.test:9090:${TEST_BIND_ADDRESS}" \
+        "https://observe.acceptance.test:9090/-/ready" 2>/dev/null || true)"
+      grafana_health="$(curl --fail --silent --show-error --cacert "$observability_dir/certs/transport-ca.crt" \
+        --resolve "observe.acceptance.test:3001:${TEST_BIND_ADDRESS}" \
+        "https://observe.acceptance.test:3001/api/health" 2>/dev/null || true)"
+      alertmanager_ready="$(curl --fail --silent --show-error --cacert "$observability_dir/certs/transport-ca.crt" \
+        --resolve "observe.acceptance.test:9093:${TEST_BIND_ADDRESS}" \
+        "https://observe.acceptance.test:9093/-/ready" 2>/dev/null || true)"
       [[ -n "$prometheus_ready" && -n "$grafana_health" && -n "$alertmanager_ready" ]] && break
       sleep 1
     done
@@ -697,7 +760,10 @@ EOF
       (cd "$observability_dir" && docker compose --env-file .env.production -f docker-compose.yml logs --no-color prometheus alertmanager grafana) >&2 || true
       exit 1
     }
-    grafana_user="$(curl --fail --silent --show-error --user 'darshan-admin:StrongGrafanaPassword-123' "http://${TEST_BIND_ADDRESS}:3001/api/user" 2>/dev/null || true)"
+    grafana_user="$(curl --fail --silent --show-error --cacert "$observability_dir/certs/transport-ca.crt" \
+      --resolve "observe.acceptance.test:3001:${TEST_BIND_ADDRESS}" \
+      --user 'darshan-admin:StrongGrafanaPassword-123' \
+      "https://observe.acceptance.test:3001/api/user" 2>/dev/null || true)"
     [[ "$grafana_user" == *'"login":"darshan-admin"'* ]] || {
       echo "Grafana did not accept the protected initial admin credential." >&2
       (cd "$observability_dir" && docker compose --env-file .env.production -f docker-compose.yml logs --no-color grafana) >&2 || true

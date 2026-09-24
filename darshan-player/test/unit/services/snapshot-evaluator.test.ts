@@ -103,6 +103,40 @@ describe('Snapshot Evaluator', () => {
     expect(windows[0].items[1].type).to.equal('office')
   })
 
+  it('uses the resolved PDF representation for converted office documents', () => {
+    const windows = normalizeScheduleWindows(
+      [
+        {
+          id: 'schedule-item-converted',
+          start_at: '2026-03-14T09:00:00.000Z',
+          end_at: '2026-03-14T10:00:00.000Z',
+          presentation: {
+            id: 'presentation-converted',
+            slots: [
+              {
+                id: 'slot-converted',
+                slot_id: 'main',
+                media_id: 'media-converted',
+                duration_seconds: 8,
+                media: {
+                  id: 'media-converted',
+                  name: 'Quarterly report.docx',
+                  type: 'DOCUMENT',
+                  content_type: 'application/pdf',
+                  source_content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                },
+              },
+            ],
+          },
+        },
+      ],
+      { 'media-converted': 'https://cms.example/media-ready/media-converted/ready.pdf' },
+    )
+
+    expect(windows[0].items[0].type).to.equal('pdf')
+    expect(windows[0].items[0].meta.content_type).to.equal('application/pdf')
+  })
+
   it('selects the highest priority active window and computes the next transition boundary', () => {
     const evaluation = evaluateScheduleWindows(
       [

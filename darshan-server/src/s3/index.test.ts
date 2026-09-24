@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
+  clients: [] as Array<{ endpoint: string }>,
 }));
 
 class MockCommand {
@@ -9,7 +10,10 @@ class MockCommand {
 }
 
 vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: vi.fn().mockImplementation(() => ({ send: mocks.send })),
+  S3Client: vi.fn().mockImplementation((config: { endpoint: string }) => {
+    mocks.clients.push(config);
+    return { send: mocks.send, endpoint: config.endpoint };
+  }),
   PutObjectCommand: MockCommand,
   GetObjectCommand: MockCommand,
   DeleteObjectCommand: MockCommand,
@@ -24,6 +28,19 @@ vi.mock('@aws-sdk/client-s3', () => ({
   CopyObjectCommand: MockCommand,
 }));
 
+vi.mock('@/config', () => ({
+  config: {
+    NODE_ENV: 'test',
+    MINIO_ENDPOINT: 'data.internal',
+    MINIO_PORT: 9000,
+    MINIO_ACCESS_KEY: 'test-access-key',
+    MINIO_SECRET_KEY: 'test-secret-key',
+    MINIO_USE_SSL: true,
+    MINIO_REGION: 'us-east-1',
+    MINIO_PUBLIC_ENDPOINT: 'https://cms.internal',
+  },
+}));
+
 vi.mock('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: vi.fn(),
 }));
@@ -36,6 +53,7 @@ describe('createBucketIfNotExists', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
+    mocks.clients.length = 0;
   });
 
   async function loadS3() {
@@ -43,6 +61,18 @@ describe('createBucketIfNotExists', () => {
     s3.initializeS3();
     return s3;
   }
+
+  it('uses the CMS HTTPS gateway for both CMS and player presigned URLs', async () => {
+    const { getS3Client, getS3ClientForAudience } = await loadS3();
+
+    expect(mocks.clients.map((client) => client.endpoint)).toEqual([
+      'https://data.internal:9000',
+      'https://cms.internal',
+    ]);
+    expect(getS3Client()).not.toBe(getS3ClientForAudience('cms'));
+    expect(getS3ClientForAudience('cms')).toBe(getS3ClientForAudience('device'));
+    expect((getS3ClientForAudience('device') as any).endpoint).toBe('https://cms.internal');
+  });
 
   it('does not create a bucket that already exists', async () => {
     mocks.send.mockResolvedValueOnce({});

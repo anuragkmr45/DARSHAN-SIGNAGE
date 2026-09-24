@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { spawn } from 'node:child_process';
+import { createHash, createSign } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, mkdtemp, opendir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, opendir, readFile, rm, statfs, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -14,25 +16,15 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { program } from 'commander';
+import { BACKUP_BUCKETS, isBackupObjectAllowed } from '../src/deployment/backup-contract.js';
 import {
+  createOffHostBackupPolicy,
   downloadVerifiedOffHostArtifact,
   getOffHostBackupClient,
-  getOffHostBackupPolicy,
   readOffHostManifest,
   verifyOffHostBackupManifest,
   type OffHostBackupArtifact,
 } from '../src/utils/off-host-backup.js';
-
-const MINIO_BACKUP_BUCKETS = new Set([
-  'media-source',
-  'media-ready',
-  'media-thumbnails',
-  'device-screenshots',
-  'logs-audit',
-  'logs-system',
-  'logs-heartbeats',
-  'logs-proof-of-play',
-]);
 
 async function readProtectedFile(filePath: string, label: string) {
   const details = await lstat(filePath);
@@ -42,6 +34,56 @@ async function readProtectedFile(filePath: string, label: string) {
   const value = (await readFile(filePath, 'utf8')).replace(/\r?\n$/, '');
   if (!value) throw new Error(`${label} is empty.`);
   return value;
+}
+
+function normalizedEndpoint(value: string) {
+  const url = new URL(value);
+  const port = url.port || (url.protocol === 'https:' ? '443' : url.protocol === 'http:' ? '80' : '');
+  return `${url.protocol}//${url.hostname.toLowerCase()}:${port}${url.pathname.replace(/\/$/, '')}`;
+}
+
+async function resolvedAddresses(hostname: string) {
+  return new Set((await lookup(hostname, { all: true })).map((entry) => entry.address));
+}
+
+async function assertIsolatedRecoveryTargets(input: {
+  targetDatabaseUrl: string;
+  targetS3Endpoint: string;
+  productionDatabaseHost: string;
+  productionDatabasePort: string;
+  productionDatabaseName: string;
+  productionS3Endpoint: string;
+}) {
+  const productionDatabaseHost = input.productionDatabaseHost.toLowerCase();
+  const productionDatabasePort = input.productionDatabasePort || '5432';
+  const productionDatabaseName = input.productionDatabaseName.replace(/^\//, '');
+  if (!productionDatabaseHost || !productionDatabaseName || !/^\d{1,5}$/.test(productionDatabasePort)) {
+    throw new Error('Signed production database identity is invalid.');
+  }
+  const targetDatabase = new URL(input.targetDatabaseUrl);
+  const targetDatabaseName = decodeURIComponent(targetDatabase.pathname.slice(1));
+  const productionAddresses = await resolvedAddresses(productionDatabaseHost);
+  const targetAddresses = await resolvedAddresses(targetDatabase.hostname);
+  const databaseAddressOverlap = [...targetAddresses].some((address) => productionAddresses.has(address));
+  const databaseMatches =
+    (productionDatabaseHost === targetDatabase.hostname.toLowerCase() || databaseAddressOverlap) &&
+    productionDatabasePort === (targetDatabase.port || '5432') &&
+    productionDatabaseName === targetDatabaseName;
+  if (databaseMatches) throw new Error('Recovery target database resolves to the configured production database.');
+
+  const productionObjectEndpoint = new URL(input.productionS3Endpoint);
+  const targetObjectEndpoint = new URL(input.targetS3Endpoint);
+  const productionObjectAddresses = await resolvedAddresses(productionObjectEndpoint.hostname);
+  const targetObjectAddresses = await resolvedAddresses(targetObjectEndpoint.hostname);
+  const objectAddressOverlap = [...targetObjectAddresses].some((address) => productionObjectAddresses.has(address));
+  if (
+    normalizedEndpoint(input.targetS3Endpoint) === normalizedEndpoint(input.productionS3Endpoint) ||
+    (objectAddressOverlap &&
+      (targetObjectEndpoint.port || '443') === (productionObjectEndpoint.port || '443') &&
+      targetObjectEndpoint.pathname.replace(/\/$/, '') === productionObjectEndpoint.pathname.replace(/\/$/, ''))
+  ) {
+    throw new Error('Recovery target S3 endpoint resolves to the configured production object store.');
+  }
 }
 
 function targetS3Client(input: { endpoint: string; region: string; accessKeyId: string; secretAccessKey: string }) {
@@ -164,6 +206,36 @@ async function runCommand(command: string, args: string[], label: string) {
   return Buffer.concat(stdout).toString('utf8');
 }
 
+function postgresEnvironment(targetUrl: string) {
+  const target = databaseConnection(targetUrl);
+  return {
+    target,
+    env: {
+      ...process.env,
+      PGPASSWORD: target.password,
+      ...(target.sslMode ? { PGSSLMODE: target.sslMode } : {}),
+      ...(target.sslRootCert ? { PGSSLROOTCERT: target.sslRootCert } : {}),
+    },
+  };
+}
+
+async function runTargetSql(targetUrl: string, sqlText: string, label: string) {
+  const { target, env } = postgresEnvironment(targetUrl);
+  const child = spawn('psql', [
+    '--no-password',
+    '--set', 'ON_ERROR_STOP=1',
+    '-Atqc', sqlText,
+    '-h', target.host,
+    '-p', target.port,
+    '-U', target.user,
+    '-d', target.database,
+  ], { stdio: ['ignore', 'pipe', 'inherit'], env });
+  const stdout: Buffer[] = [];
+  child.stdout?.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
+  await waitFor(child, label);
+  return Buffer.concat(stdout).toString('utf8').trim();
+}
+
 async function walkFiles(root: string): Promise<string[]> {
   const files: string[] = [];
   const directory = await opendir(root);
@@ -176,33 +248,131 @@ async function walkFiles(root: string): Promise<string[]> {
   return files;
 }
 
-async function restoreObjectStorage(archivePath: string, target: S3Client, workDir: string) {
+type PreparedRecoveryObject = {
+  bucket: string;
+  key: string;
+  filePath: string;
+  size: number;
+  sha256: string;
+};
+
+async function hashFile(filePath: string) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+async function prepareObjectStorageArchive(archivePath: string, workDir: string): Promise<PreparedRecoveryObject[]> {
   const listing = await runCommand('tar', ['-tzf', archivePath], 'tar list');
   for (const entry of listing.split(/\r?\n/)) {
     if (entry) safeTarPath(entry);
+  }
+  const typeListing = await runCommand('tar', ['-tvzf', archivePath], 'tar type list');
+  let expandedBytes = 0n;
+  for (const line of typeListing.split(/\r?\n/)) {
+    if (line && line[0] !== '-' && line[0] !== 'd') {
+      throw new Error('Recovery archive contains a link, device, socket, or other unsupported entry.');
+    }
+    if (line && line[0] === '-') {
+      const fields = line.trim().split(/\s+/);
+      if (!/^\d+$/.test(fields[2] ?? '')) throw new Error('Recovery archive size listing is invalid.');
+      expandedBytes += BigInt(fields[2]);
+    }
+  }
+  const filesystem = await statfs(workDir);
+  const availableBytes = BigInt(filesystem.bavail) * BigInt(filesystem.bsize);
+  const requiredBytes = expandedBytes + 1024n * 1024n * 1024n;
+  if (availableBytes < requiredBytes) {
+    throw new Error(`Recovery workspace has insufficient free space: available=${availableBytes} required=${requiredBytes}.`);
   }
 
   const extractionRoot = join(workDir, 'objects');
   await mkdir(extractionRoot, { recursive: true, mode: 0o700 });
   await runCommand('tar', ['-xzf', archivePath, '--no-same-owner', '--no-same-permissions', '-C', extractionRoot], 'tar extract');
 
+  const prepared: PreparedRecoveryObject[] = [];
   for (const filePath of await walkFiles(extractionRoot)) {
     const backupRelativePath = relative(extractionRoot, filePath).split(sep);
     const [bucket, ...keyParts] = backupRelativePath;
-    if (!bucket || !MINIO_BACKUP_BUCKETS.has(bucket) || keyParts.length === 0 || keyParts.some((part) => !part || part === '.' || part === '..')) {
+    const key = keyParts.join('/');
+    if (!bucket || keyParts.length === 0 || !isBackupObjectAllowed(bucket, key)) {
       throw new Error(`Recovery archive contains an unexpected object path: ${relative(extractionRoot, filePath)}`);
     }
-    const key = keyParts.join('/');
     const details = await lstat(filePath);
-    await target.send(new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: createReadStream(filePath),
-      ContentLength: details.size,
-    }));
-    const head = await target.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    if (head.ContentLength !== details.size) throw new Error(`Recovery target object ${bucket}/${key} has an unexpected size.`);
+    prepared.push({ bucket, key, filePath, size: details.size, sha256: await hashFile(filePath) });
   }
+  return prepared.sort((left, right) => `${left.bucket}/${left.key}`.localeCompare(`${right.bucket}/${right.key}`));
+}
+
+async function restoreObjectStorage(objects: PreparedRecoveryObject[], target: S3Client) {
+  const aggregate = createHash('sha256');
+  let totalBytes = 0;
+  for (const object of objects) {
+    await target.send(new PutObjectCommand({
+      Bucket: object.bucket,
+      Key: object.key,
+      Body: createReadStream(object.filePath),
+      ContentLength: object.size,
+      Metadata: { 'x-sha256': object.sha256 },
+    }));
+    const head = await target.send(new HeadObjectCommand({ Bucket: object.bucket, Key: object.key }));
+    if (head.ContentLength !== object.size || head.Metadata?.['x-sha256'] !== object.sha256) {
+      throw new Error(`Recovery target object ${object.bucket}/${object.key} failed size/hash verification.`);
+    }
+    totalBytes += object.size;
+    aggregate.update(`${object.bucket}\0${object.key}\0${object.size}\0${object.sha256}\n`);
+  }
+  return { object_count: objects.length, total_bytes: totalBytes, inventory_sha256: aggregate.digest('hex') };
+}
+
+async function reconcileRestoredRuntimeState(targetUrl: string) {
+  const schemaName = process.env.PG_BOSS_SCHEMA?.trim() || 'pgboss';
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(schemaName)) throw new Error('PG_BOSS_SCHEMA is not a safe PostgreSQL identifier.');
+  const schemaLiteral = schemaName.replace(/'/g, "''");
+  const schemaIdentifier = schemaName.replace(/"/g, '""');
+  await runTargetSql(targetUrl, `
+DO $recovery$
+BEGIN
+  IF to_regclass('public.backup_runs') IS NOT NULL THEN
+    UPDATE backup_runs
+       SET status = 'FAILED', completed_at = now(), updated_at = now(),
+           error_message = 'Interrupted by disaster-recovery restore'
+     WHERE status IN ('PENDING', 'RUNNING');
+    UPDATE backup_runs SET files = '[]'::jsonb, updated_at = now() WHERE files IS NOT NULL;
+  END IF;
+  IF to_regclass('public.storage_objects') IS NOT NULL THEN
+    DELETE FROM storage_objects WHERE bucket = 'archives' AND object_key LIKE 'backups/%';
+  END IF;
+  IF to_regclass('public.media_upload_sessions') IS NOT NULL THEN
+    UPDATE media_upload_sessions
+       SET state = 'EXPIRED', aborted_at = now(), updated_at = now(), failure_reason = 'RECOVERY_RECONCILIATION'
+     WHERE state IN ('INITIALIZING', 'ACTIVE', 'FINALIZING');
+  END IF;
+  IF to_regclass('${schemaLiteral}.job') IS NOT NULL THEN
+    UPDATE "${schemaIdentifier}".job
+       SET state = 'retry', start_after = now(), started_on = NULL
+     WHERE state = 'active';
+  END IF;
+END
+$recovery$;
+`, 'recovery state reconciliation');
+}
+
+async function verifyRestoredApplicationState(targetUrl: string) {
+  const output = await runTargetSql(targetUrl, `
+SELECT json_build_object(
+  'users', (SELECT count(*) FROM users),
+  'roles', (SELECT count(*) FROM roles),
+  'storage_objects', (SELECT count(*) FROM storage_objects),
+  'unfinished_backups', (SELECT count(*) FROM backup_runs WHERE status IN ('PENDING', 'RUNNING')),
+  'unfinished_uploads', (SELECT count(*) FROM media_upload_sessions WHERE state IN ('INITIALIZING', 'ACTIVE', 'FINALIZING'))
+)::text;
+`, 'recovery application consistency');
+  const result = JSON.parse(output) as Record<string, number>;
+  if (result.unfinished_backups !== 0 || result.unfinished_uploads !== 0) {
+    throw new Error('Recovery application consistency check found unfinished backup or upload state.');
+  }
+  return result;
 }
 
 function findArtifact(files: OffHostBackupArtifact[], expression: RegExp, label: string) {
@@ -215,16 +385,40 @@ program
   .name('darshan-restore-offhost-backup')
   .description('Restore a verified off-host backup only into explicitly named clean recovery targets')
   .requiredOption('--manifest-key <key>', 'Full object key of the off-host backup manifest')
+  .requiredOption('--source-uri <uri>', 'Signed off-host S3 URI')
+  .requiredOption('--source-endpoint <url>', 'Signed off-host HTTPS endpoint')
+  .requiredOption('--source-region <region>', 'Signed off-host S3 region')
+  .requiredOption('--source-access-key-file <path>', 'Protected file containing recovery-authority off-host read access key')
+  .requiredOption('--source-secret-key-file <path>', 'Protected file containing recovery-authority off-host read secret key')
+  .requiredOption('--expected-site <site>', 'Signed site identity for the evidence')
+  .requiredOption('--expected-interval-hours <hours>', 'Signed backup interval', (value) => Number(value))
+  .requiredOption('--expected-retention-days <days>', 'Signed backup retention', (value) => Number(value))
+  .requiredOption('--production-database-host <host>', 'Signed production PostgreSQL host identity')
+  .requiredOption('--production-database-port <port>', 'Signed production PostgreSQL port identity')
+  .requiredOption('--production-database-name <name>', 'Signed production PostgreSQL database identity')
+  .requiredOption('--production-s3-endpoint <url>', 'Signed production object-store endpoint identity')
   .requiredOption('--target-database-url-file <path>', 'Protected file containing a PostgreSQL URL for a clean recovery database')
   .requiredOption('--target-s3-endpoint <url>', 'HTTPS endpoint for a clean recovery S3/MinIO target')
   .requiredOption('--target-s3-region <region>', 'Region for the clean recovery S3/MinIO target')
   .requiredOption('--target-s3-access-key-file <path>', 'Protected file containing recovery S3 access key')
   .requiredOption('--target-s3-secret-key-file <path>', 'Protected file containing recovery S3 secret key')
   .requiredOption('--evidence-output <path>', 'New protected output file for restore-rehearsal evidence')
+  .requiredOption('--attestation-private-key-file <path>', 'Protected recovery-authority RSA private key')
+  .requiredOption('--target-id <id>', 'Approved non-production recovery target identity')
   .requiredOption('--confirm-run-id <id>', 'Must exactly match the manifest run ID')
   .action(async (options) => {
-    const policy = getOffHostBackupPolicy();
-    const client = getOffHostBackupClient();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/.test(options.targetId)) throw new Error('target-id must contain 3-128 safe characters.');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(options.expectedSite)) throw new Error('expected-site is invalid.');
+    const policy = createOffHostBackupPolicy({
+      destination: options.sourceUri,
+      endpoint: options.sourceEndpoint,
+      region: options.sourceRegion,
+      accessKeyId: await readProtectedFile(options.sourceAccessKeyFile, 'Recovery off-host access-key file'),
+      secretAccessKey: await readProtectedFile(options.sourceSecretKeyFile, 'Recovery off-host secret-key file'),
+      intervalHours: options.expectedIntervalHours,
+      retentionDays: options.expectedRetentionDays,
+    });
+    const client = getOffHostBackupClient(policy);
     const manifest = await readOffHostManifest(client, policy.location, options.manifestKey);
     if (manifest.run_id !== options.confirmRunId) throw new Error('confirm-run-id does not match the selected off-host backup run.');
     if (
@@ -238,6 +432,15 @@ program
     await verifyOffHostBackupManifest(client, policy.location, manifest);
 
     const targetDatabaseUrl = await readProtectedFile(options.targetDatabaseUrlFile, 'Recovery target database URL file');
+    await assertIsolatedRecoveryTargets({
+      targetDatabaseUrl,
+      targetS3Endpoint: options.targetS3Endpoint,
+      productionDatabaseHost: options.productionDatabaseHost,
+      productionDatabasePort: options.productionDatabasePort,
+      productionDatabaseName: options.productionDatabaseName,
+      productionS3Endpoint: options.productionS3Endpoint,
+    });
+    const attestationPrivateKey = await readProtectedFile(options.attestationPrivateKeyFile, 'Recovery attestation private key');
     const target = targetS3Client({
       endpoint: options.targetS3Endpoint,
       region: options.targetS3Region,
@@ -252,20 +455,37 @@ program
       const objectPath = join(workDir, 'objects.tar.gz');
       await downloadVerifiedOffHostArtifact(client, policy.location, databaseArchive, databasePath);
       await downloadVerifiedOffHostArtifact(client, policy.location, objectArchive, objectPath);
+      const preparedObjects = await prepareObjectStorageArchive(objectPath, workDir);
       await assertEmptyTargetDatabase(targetDatabaseUrl);
-      for (const bucket of MINIO_BACKUP_BUCKETS) await ensureEmptyTargetBucket(target, bucket);
+      for (const bucket of BACKUP_BUCKETS) await ensureEmptyTargetBucket(target, bucket);
       await restoreDatabase(databasePath, targetDatabaseUrl);
-      await restoreObjectStorage(objectPath, target, workDir);
+      const object_restore = await restoreObjectStorage(preparedObjects, target);
+      await reconcileRestoredRuntimeState(targetDatabaseUrl);
+      const application_checks = await verifyRestoredApplicationState(targetDatabaseUrl);
 
-      const evidence = {
+      const unsignedEvidence = {
+        evidence_version: 2,
         restore_verified: true,
         verified_at: new Date().toISOString(),
+        site_name: options.expectedSite,
+        target_id: options.targetId,
         off_host_uri: manifest.off_host_uri,
         off_host_endpoint: manifest.off_host_endpoint,
         backup_interval_hours: manifest.backup_interval_hours,
         retention_days: manifest.retention_days,
         manifest_key: manifest.manifest_key,
+        manifest_sha256: createHash('sha256').update(JSON.stringify(manifest)).digest('hex'),
         restored_from_run_id: manifest.run_id,
+        object_restore,
+        application_checks,
+      };
+      const signer = createSign('RSA-SHA256');
+      signer.update(JSON.stringify(unsignedEvidence));
+      signer.end();
+      const evidence = {
+        ...unsignedEvidence,
+        attestation_algorithm: 'RSA-SHA256',
+        attestation_signature: signer.sign(attestationPrivateKey, 'base64'),
       };
       await mkdir(dirname(resolve(options.evidenceOutput)), { recursive: true, mode: 0o700 });
       await writeFile(options.evidenceOutput, `${JSON.stringify(evidence, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });

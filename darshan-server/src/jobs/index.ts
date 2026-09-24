@@ -18,6 +18,11 @@ import { captureWebpagePreview } from '@/utils/webpage-capture';
 import { redactWebpageUrlForLogs, WebpageUrlPolicyError } from '@/utils/webpage-url-policy';
 import { getLibreOfficeExecutable, getResolvedFfmpegPath } from '@/utils/runtime-dependencies';
 import {
+  buildLibreOfficeConversionArgs,
+  getLibreOfficeOutputPath,
+  LIBREOFFICE_CONVERSION_TIMEOUT_MS,
+} from '@/utils/libreoffice-conversion';
+import {
   type HeartbeatTelemetryJob,
   type ProofOfPlayTelemetryJob,
   type ScreenshotTelemetryJob,
@@ -104,9 +109,9 @@ async function cleanupTempDir(dir: string | null) {
   }
 }
 
-async function runCommand(command: string, args: string[]) {
+async function runCommand(command: string, args: string[], timeout: number) {
   return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFileCallback(command, args, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFileCallback(command, args, { maxBuffer: 10 * 1024 * 1024, timeout, killSignal: 'SIGKILL' }, (error, stdout, stderr) => {
       if (error) {
         reject(
           Object.assign(error, {
@@ -209,24 +214,23 @@ async function convertDocumentWithLibreOffice(inputPath: string, outputDir: stri
     throw new Error('LibreOffice/soffice is not available');
   }
 
-  await runCommand(libreOfficeExecutable, [
-    '--headless',
-    '--nologo',
-    '--nofirststartwizard',
-    '--convert-to',
-    'pdf',
-    '--outdir',
-    outputDir,
-    inputPath,
-  ]);
+  const profileDir = join(outputDir, 'libreoffice-profile');
+  await fs.mkdir(profileDir, { mode: 0o700 });
+  await runCommand(
+    libreOfficeExecutable,
+    buildLibreOfficeConversionArgs(inputPath, outputDir, profileDir),
+    LIBREOFFICE_CONVERSION_TIMEOUT_MS
+  );
 
-  const entries = await fs.readdir(outputDir);
-  const pdfFile = entries.find((entry) => entry.toLowerCase().endsWith('.pdf'));
-  if (!pdfFile) {
+  const outputPath = getLibreOfficeOutputPath(inputPath, outputDir);
+  try {
+    const output = await fs.stat(outputPath);
+    if (!output.isFile() || output.size === 0) throw new Error('empty output');
+  } catch {
     throw new Error('LibreOffice did not produce a PDF output');
   }
 
-  return join(outputDir, pdfFile);
+  return outputPath;
 }
 
 async function convertDocumentToPdf(inputPath: string, outputDir: string) {
@@ -1402,6 +1406,9 @@ export async function scheduleRecurringJobs() {
     logger.info('Recurring jobs scheduled successfully');
   } catch (error) {
     logger.error(error, 'Failed to schedule recurring jobs');
+    if (appConfig.NODE_ENV === 'production') {
+      throw error;
+    }
     logger.warn('Server will continue without scheduled jobs');
   }
 }

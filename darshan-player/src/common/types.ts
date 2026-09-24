@@ -36,6 +36,8 @@ export interface PlayerEnvironmentConfig {
   releaseId?: string
   /** Full Git commit used to build the packaged player artifact. */
   sourceCommit?: string
+  /** Cross-component contract generation; mismatches fail closed in production. */
+  compatibilityGeneration?: number
 }
 
 export interface RuntimeConfig {
@@ -633,6 +635,7 @@ export interface PlayerRealtimeDiagnostics {
   release_id?: string
   source_commit?: string
   server_release_id?: string
+  compatibility_generation?: number | null
   connection_state: 'WSS_HEALTHY' | 'REST_FALLBACK' | 'OFFLINE' | 'VERSION_MISMATCH'
   last_hello_ack_at?: string
   last_event_at?: string

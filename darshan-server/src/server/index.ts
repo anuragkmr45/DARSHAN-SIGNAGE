@@ -413,6 +413,13 @@ export async function createServer(options: CreateServerOptions = {}) {
     return { status: 'ok', timestamp: new Date().toISOString() };
   });
   fastify.get('/api/v1/health/live', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+  fastify.get('/api/v1/health/identity', async () => ({
+    service: 'backend',
+    site: appConfig.SIGNHEX_DEPLOYMENT_ID,
+    release_id: appConfig.DARSHAN_RELEASE_ID,
+    source_commit: appConfig.DARSHAN_SOURCE_COMMIT,
+    compatibility_generation: appConfig.DARSHAN_COMPATIBILITY_GENERATION,
+  }));
   fastify.get('/api/v1/health/ready', async (_request, reply) => {
     const report = await collectReadiness();
     if (!report.ready) reply.code(503);

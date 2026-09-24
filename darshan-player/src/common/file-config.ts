@@ -202,7 +202,7 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
     assertPlainObject(environment, 'player.environment')
     assertKnownKeys(
       environment,
-      ['name', 'deploymentId', 'expectedServerId', 'releaseId', 'sourceCommit'],
+      ['name', 'deploymentId', 'expectedServerId', 'releaseId', 'sourceCommit', 'compatibilityGeneration'],
       'player.environment'
     )
     config.environment = {}
@@ -222,6 +222,11 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       config.environment,
       'sourceCommit',
       stringValue(environment['sourceCommit'], 'player.environment.sourceCommit')
+    )
+    setNested(
+      config.environment,
+      'compatibilityGeneration',
+      numberValue(environment['compatibilityGeneration'], 'player.environment.compatibilityGeneration', 1)
     )
     mappedConfigKeys.push('environment')
   }

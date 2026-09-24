@@ -10,12 +10,16 @@ rule_files:
 
 alerting:
   alertmanagers:
-    - static_configs:
+    - scheme: __OBSERVABILITY_METRICS_SCHEME__
+__OBSERVABILITY_ALERTING_TLS_CONFIG__
+      static_configs:
         - targets:
             - "__ALERTMANAGER_HOST__:__ALERTMANAGER_PORT__"
 
 scrape_configs:
   - job_name: prometheus
+    scheme: __OBSERVABILITY_METRICS_SCHEME__
+__OBSERVABILITY_SCRAPE_TLS_CONFIG__
     static_configs:
       - targets:
           - "__PROMETHEUS_SELF_TARGET__"
@@ -24,6 +28,8 @@ scrape_configs:
           machine: __PROMETHEUS_MACHINE_LABEL__
 
   - job_name: vm4-alertmanager
+    scheme: __OBSERVABILITY_METRICS_SCHEME__
+__OBSERVABILITY_SCRAPE_TLS_CONFIG__
     static_configs:
       - targets:
           - "__ALERTMANAGER_HOST__:__ALERTMANAGER_PORT__"
@@ -44,17 +50,23 @@ __BACKEND_METRICS_AUTHORIZATION__
           machine: vm2
 
   - job_name: vm1-node
+    scheme: __REMOTE_EXPORTER_SCHEME__
+    metrics_path: __NODE_EXPORTER_METRICS_PATH__
+__REMOTE_EXPORTER_TLS_CONFIG__
     static_configs:
       - targets:
-          - "__VM1_DATA_HOST__:__NODE_EXPORTER_HOST_PORT__"
+          - "__VM1_DATA_HOST__:__REMOTE_NODE_EXPORTER_PORT__"
         labels:
           role: data
           machine: vm1
 
   - job_name: vm1-postgres
+    scheme: __REMOTE_EXPORTER_SCHEME__
+    metrics_path: __POSTGRES_EXPORTER_METRICS_PATH__
+__REMOTE_EXPORTER_TLS_CONFIG__
     static_configs:
       - targets:
-          - "__VM1_DATA_HOST__:__POSTGRES_EXPORTER_HOST_PORT__"
+          - "__VM1_DATA_HOST__:__REMOTE_POSTGRES_EXPORTER_PORT__"
         labels:
           role: data
           machine: vm1
@@ -71,33 +83,45 @@ __MINIO_METRICS_TLS_CONFIG__
           machine: vm1
 
   - job_name: vm-valkey-node
+    scheme: __REMOTE_EXPORTER_SCHEME__
+    metrics_path: __NODE_EXPORTER_METRICS_PATH__
+__REMOTE_EXPORTER_TLS_CONFIG__
     static_configs:
       - targets:
-          - "__VALKEY_HOST__:__NODE_EXPORTER_HOST_PORT__"
+          - "__VALKEY_HOST__:__REMOTE_NODE_EXPORTER_PORT__"
         labels:
           role: valkey
           machine: valkey
 
   - job_name: vm2-node
+    scheme: __REMOTE_EXPORTER_SCHEME__
+    metrics_path: __NODE_EXPORTER_METRICS_PATH__
+__REMOTE_EXPORTER_TLS_CONFIG__
     static_configs:
       - targets:
-          - "__VM2_BACKEND_HOST__:__NODE_EXPORTER_HOST_PORT__"
+          - "__VM2_BACKEND_HOST__:__REMOTE_NODE_EXPORTER_PORT__"
         labels:
           role: backend
           machine: vm2
 
   - job_name: vm3-node
+    scheme: __REMOTE_EXPORTER_SCHEME__
+    metrics_path: __NODE_EXPORTER_METRICS_PATH__
+__REMOTE_EXPORTER_TLS_CONFIG__
     static_configs:
       - targets:
-          - "__VM3_CMS_HOST__:__NODE_EXPORTER_HOST_PORT__"
+          - "__VM3_CMS_HOST__:__REMOTE_NODE_EXPORTER_PORT__"
         labels:
           role: cms
           machine: vm3
 
   - job_name: vm3-nginx
+    scheme: __REMOTE_EXPORTER_SCHEME__
+    metrics_path: __NGINX_EXPORTER_METRICS_PATH__
+__REMOTE_EXPORTER_TLS_CONFIG__
     static_configs:
       - targets:
-          - "__VM3_CMS_HOST__:__NGINX_EXPORTER_HOST_PORT__"
+          - "__VM3_CMS_HOST__:__REMOTE_NGINX_EXPORTER_PORT__"
         labels:
           role: cms
           machine: vm3
@@ -105,12 +129,14 @@ __MINIO_METRICS_TLS_CONFIG__
   - job_name: vm4-node
     static_configs:
       - targets:
-          - "__OBSERVABILITY_HOST__:__NODE_EXPORTER_HOST_PORT__"
+          - "__OBSERVABILITY_NODE_TARGET__"
         labels:
           role: observability
           machine: vm4
 
   - job_name: vm4-grafana
+    scheme: __OBSERVABILITY_METRICS_SCHEME__
+__OBSERVABILITY_SCRAPE_TLS_CONFIG__
     static_configs:
       - targets:
           - "__GRAFANA_METRICS_TARGET__"

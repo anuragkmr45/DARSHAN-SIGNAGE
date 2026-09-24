@@ -134,6 +134,7 @@ const backendFileConfigSchema = z
     media: z
       .object({
         endpoint: urlWithoutCredentials.optional(),
+        // Recipient-facing HTTPS media gateway for CMS and player transfers.
         publicEndpoint: urlWithoutCredentials.optional(),
         region: z.string().trim().min(1).optional(),
         cacheReportingEnabled: z.boolean().optional(),

@@ -152,7 +152,7 @@ export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = '
   const pgDumpPath = resolvePgDumpPath();
   const tarPath = resolveTarPath();
   const requiredNames = getRequiredDependencyNames(role);
-  const chromiumRequired = hasConfiguredChromiumPath();
+  const chromiumRequired = appConfig.NODE_ENV === 'production' || hasConfiguredChromiumPath();
   let chromiumPath: string | null = null;
   let chromiumDetail: string | undefined;
 

@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": ".",
+    "outDir": "./dist-cli"
+  },
+  "include": [
+    "src/**/*.ts",
+    "scripts/admin-cli.ts",
+    "scripts/check-services.ts",
+    "scripts/device-auth-rollout-status.ts",
+    "scripts/migrate-production.ts",
+    "scripts/production-bootstrap-adopt.ts",
+    "scripts/production-bootstrap.ts",
+    "scripts/repair-pgboss-queues.ts",
+    "scripts/restore-offhost-backup.ts",
+    "scripts/runtime-doctor.ts",
+    "scripts/verify-offhost-backup.ts",
+    "scripts/deployment-run-state.ts",
+    "scripts/verify-restore-evidence.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-production", "dist-cli", "src/**/*.test.ts"]
+}

@@ -99,6 +99,7 @@ suite('production migration ledger', () => {
         '0040_device_auth_rollout_observations.sql',
         '0041_off_host_backup_manifest.sql',
         '0042_emergency_transition_reliability.sql',
+        '0043_deployment_run_state.sql',
       ] });
       expect(adopted.applied).toHaveLength(36);
       expect(adopted.applied.at(-1)).toMatchObject({ migration_id: '0034_display_authority.sql', applied_method: 'ADOPTED', approval_ticket: 'CHG-500' });

@@ -280,6 +280,7 @@ export class DefaultMediaService extends EventEmitter {
     try {
       if (cacheUrl) {
         await cacheManager.add(mediaId, cacheUrl, undefined, {
+          contentType: media.content_type,
           source: 'DEFAULT_MEDIA',
           defaultMediaVersion: media.id,
           playbackMode: 'default',
@@ -289,7 +290,7 @@ export class DefaultMediaService extends EventEmitter {
       logger.warn({ error, mediaId }, 'Failed to cache resolved default media')
     }
 
-    const localPath = await cacheManager.get(mediaId)
+    const localPath = await cacheManager.get(mediaId, media.content_type)
     if (!localPath) {
       return payload
     }
@@ -314,7 +315,7 @@ export class DefaultMediaService extends EventEmitter {
 
     try {
       const cacheManager = getCacheManager()
-      const localPath = await cacheManager.get(mediaId)
+      const localPath = await cacheManager.get(mediaId, media.content_type)
       if (!localPath) {
         return payload
       }

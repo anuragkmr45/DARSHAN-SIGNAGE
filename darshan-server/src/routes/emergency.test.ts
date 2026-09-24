@@ -62,6 +62,54 @@ describe('Emergency routes production contract', () => {
     await closeTestServer(server);
   });
 
+  it('rejects emergency media until document processing reaches READY', async () => {
+    const db = getDatabase();
+    const mediaId = randomUUID();
+    const screenId = randomUUID();
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: 'Unconverted emergency document',
+      type: 'DOCUMENT',
+      status: 'PROCESSING',
+      source_content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      created_by: testUser.id,
+    });
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Emergency document screen',
+      status: 'ACTIVE',
+    });
+
+    const triggerResponse = await server.inject({
+      method: 'POST',
+      url: '/api/v1/emergency/trigger',
+      headers: emergencyHeaders(adminToken),
+      payload: {
+        message: 'Document is not converted yet',
+        media_id: mediaId,
+        screen_ids: [screenId],
+      },
+    });
+    expect(triggerResponse.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
+    expect(JSON.parse(triggerResponse.body).error.details).toEqual({
+      reason: 'MEDIA_NOT_READY',
+      media_id: mediaId,
+    });
+
+    const typeResponse = await server.inject({
+      method: 'POST',
+      url: '/api/v1/emergency-types',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: `Unready document type ${mediaId}`,
+        message: 'Document type is not ready',
+        media_id: mediaId,
+      },
+    });
+    expect(typeResponse.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
+    expect(JSON.parse(typeResponse.body).error.details.reason).toBe('MEDIA_NOT_READY');
+  });
+
   it('allows multiple concurrent active emergencies and exposes sorted status details', async () => {
     const db = getDatabase();
     const groupId = randomUUID();

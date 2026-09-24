@@ -14,31 +14,19 @@ import { getResolvedPgDumpPath, getResolvedTarPath } from '@/utils/runtime-depen
 import { config as appConfig } from '@/config';
 import {
   createOffHostBackupManifest,
+  createOffHostBackupPolicy,
   getOffHostBackupClient,
-  getOffHostBackupPolicy,
-  pruneOffHostBackups,
   uploadOffHostFile,
   uploadOffHostManifest,
   verifyOffHostBackupManifest,
   type OffHostBackupManifest,
 } from '@/utils/off-host-backup';
 import { offHostBackupObjectKey } from '@/utils/off-host-backup-location';
+import { BACKUP_OBJECT_SOURCES, isBackupObjectAllowed, type BackupObjectSource } from '@/deployment/backup-contract';
 
 const execFileAsync = promisify(execFile);
 const ARCHIVE_BUCKET = 'archives';
 const POSTGRES_BACKUP_CONTAINER = process.env.POSTGRES_BACKUP_CONTAINER?.trim() || 'darshan-postgres';
-const MINIO_BACKUP_BUCKETS = [
-  'media-source',
-  'media-ready',
-  'media-thumbnails',
-  'device-screenshots',
-  'logs-audit',
-  'logs-system',
-  'logs-auth',
-  'logs-heartbeats',
-  'logs-proof-of-play',
-] as const;
-
 export type BackupRunRecord = typeof schema.backupRuns.$inferSelect;
 
 async function ensureTempDir() {
@@ -234,14 +222,15 @@ async function createPostgresArchive(backupDir: string) {
   }
 }
 
-async function downloadBucketObjects(bucket: string, destinationDir: string) {
+async function downloadBucketObjects(source: BackupObjectSource, destinationDir: string) {
   const client = getS3Client();
   let continuationToken: string | undefined;
 
   do {
     const response = await client.send(
       new ListObjectsV2Command({
-        Bucket: bucket,
+        Bucket: source.bucket,
+        Prefix: source.prefix,
         ContinuationToken: continuationToken,
       })
     );
@@ -250,8 +239,15 @@ async function downloadBucketObjects(bucket: string, destinationDir: string) {
       if (!object.Key) continue;
 
       if (object.Key.endsWith('/')) {
-        await fs.mkdir(resolveBackupPath(destinationDir, object.Key), { recursive: true });
+        const directoryKey = object.Key.slice(0, -1);
+        if (!isBackupObjectAllowed(source.bucket, directoryKey)) {
+          throw new Error(`Object key is outside the versioned backup contract: ${source.bucket}/${JSON.stringify(object.Key)}`);
+        }
+        await fs.mkdir(resolveBackupPath(destinationDir, directoryKey), { recursive: true });
         continue;
+      }
+      if (!isBackupObjectAllowed(source.bucket, object.Key)) {
+        throw new Error(`Object key is outside the versioned backup contract: ${source.bucket}/${JSON.stringify(object.Key)}`);
       }
 
       const targetPath = resolveBackupPath(destinationDir, object.Key);
@@ -259,13 +255,13 @@ async function downloadBucketObjects(bucket: string, destinationDir: string) {
 
       const objectResponse = await client.send(
         new GetObjectCommand({
-          Bucket: bucket,
+          Bucket: source.bucket,
           Key: object.Key,
         })
       );
 
       if (!objectResponse.Body) {
-        throw new Error(`Received empty body while backing up ${bucket}/${object.Key}`);
+        throw new Error(`Received empty body while backing up ${source.bucket}/${object.Key}`);
       }
 
       await pipeline(objectResponse.Body as NodeJS.ReadableStream, createWriteStream(targetPath));
@@ -278,10 +274,14 @@ async function downloadBucketObjects(bucket: string, destinationDir: string) {
 async function estimateObjectStorageBackupBytes() {
   const client = getS3Client();
   let total = 0;
-  for (const bucket of MINIO_BACKUP_BUCKETS) {
+  for (const source of BACKUP_OBJECT_SOURCES) {
     let continuationToken: string | undefined;
     do {
-      const response = await client.send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: continuationToken }));
+      const response = await client.send(new ListObjectsV2Command({
+        Bucket: source.bucket,
+        Prefix: source.prefix,
+        ContinuationToken: continuationToken,
+      }));
       for (const object of response.Contents ?? []) {
         const size = object.Size ?? 0;
         if (!Number.isSafeInteger(size) || size < 0 || total > Number.MAX_SAFE_INTEGER - size) {
@@ -347,10 +347,10 @@ async function createObjectStorageArchive(backupDir: string) {
 
   await fs.mkdir(mirrorRoot, { recursive: true });
 
-  for (const bucket of MINIO_BACKUP_BUCKETS) {
-    const bucketDir = join(mirrorRoot, bucket);
+  for (const source of BACKUP_OBJECT_SOURCES) {
+    const bucketDir = join(mirrorRoot, source.bucket);
     await fs.mkdir(bucketDir, { recursive: true });
-    await downloadBucketObjects(bucket, bucketDir);
+    await downloadBucketObjects(source, bucketDir);
   }
 
   if (!tarCommand) {
@@ -542,8 +542,16 @@ export async function runFullBackup(runId: string) {
     // production run is not marked complete until a verified independent copy
     // and its checksum manifest exist at the signed off-host destination.
     const offHostEnabled = appConfig.NODE_ENV === 'production';
-    const offHostClient = offHostEnabled ? getOffHostBackupClient() : null;
-    const offHostPolicy = offHostEnabled ? getOffHostBackupPolicy() : null;
+    const offHostPolicy = offHostEnabled ? createOffHostBackupPolicy({
+      destination: appConfig.BACKUP_OFFHOST_DESTINATION ?? '',
+      endpoint: appConfig.BACKUP_OFFHOST_ENDPOINT ?? '',
+      region: appConfig.BACKUP_OFFHOST_REGION ?? '',
+      accessKeyId: appConfig.BACKUP_OFFHOST_ACCESS_KEY ?? '',
+      secretAccessKey: appConfig.BACKUP_OFFHOST_SECRET_KEY ?? '',
+      intervalHours: appConfig.BACKUP_INTERVAL_HOURS ?? 0,
+      retentionDays: appConfig.BACKUP_RETENTION_DAYS ?? 0,
+    }) : null;
+    const offHostClient = offHostPolicy ? getOffHostBackupClient(offHostPolicy) : null;
     const offHostTimestamp = formatBackupTimestamp();
     const offHostArtifacts = [] as OffHostBackupManifest['files'];
 
@@ -604,10 +612,10 @@ export async function runFullBackup(runId: string) {
         endpoint: offHostPolicy.endpoint,
         intervalHours: offHostPolicy.intervalHours,
         retentionDays: offHostPolicy.retentionDays,
+        releaseId: appConfig.DARSHAN_RELEASE_ID,
       });
-      await uploadOffHostManifest(offHostClient, offHostManifest);
+      await uploadOffHostManifest(offHostClient, offHostPolicy.location, offHostManifest);
       await verifyOffHostBackupManifest(offHostClient, offHostPolicy.location, offHostManifest);
-      await pruneOffHostBackups(offHostClient, offHostPolicy.location, offHostPolicy.retentionDays);
     }
 
     await markBackupRunCompleted(runId, files, offHostManifest);

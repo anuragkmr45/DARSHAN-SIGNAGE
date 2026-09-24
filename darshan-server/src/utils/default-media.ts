@@ -20,6 +20,8 @@ type DefaultMediaRecord = {
 
 type DefaultMediaVariantsMap = Record<string, string>;
 
+const isReadyMedia = (media: MediaRecord | null | undefined): media is MediaRecord => media?.status === 'READY';
+
 export type DefaultMediaTargetAssignment = {
   target_type: DefaultMediaTargetType;
   target_id: string;
@@ -275,7 +277,7 @@ export async function resolveDefaultMediaForScreen(
   if (screenId) {
     const assignments = await getDefaultMediaTargetAssignments(db);
     const matchingAssignments = assignments.filter(
-      (assignment) => assignment.aspect_ratio === aspect_ratio && assignment.media
+      (assignment) => assignment.aspect_ratio === aspect_ratio && isReadyMedia(assignment.media)
     );
 
     const screenAssignment = matchingAssignments.find(
@@ -317,7 +319,7 @@ export async function resolveDefaultMediaForScreen(
 
     if (aspectMediaId) {
       const aspectMedia = await loadMediaRecord(aspectMediaId, db);
-      if (aspectMedia.media) {
+      if (isReadyMedia(aspectMedia.media)) {
         return {
           source: 'ASPECT_RATIO',
           aspect_ratio,
@@ -330,7 +332,7 @@ export async function resolveDefaultMediaForScreen(
   }
 
   const globalDefault = await getDefaultMedia(db);
-  if (globalDefault?.media) {
+  if (isReadyMedia(globalDefault?.media)) {
     return {
       source: 'GLOBAL',
       aspect_ratio,

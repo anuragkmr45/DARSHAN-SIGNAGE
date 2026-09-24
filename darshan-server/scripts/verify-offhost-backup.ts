@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { program } from 'commander';
+import { config as appConfig } from '../src/config/index.js';
 import {
+  createOffHostBackupPolicy,
   getOffHostBackupClient,
-  getOffHostBackupPolicy,
   readOffHostManifest,
   verifyOffHostBackupManifest,
 } from '../src/utils/off-host-backup.js';
@@ -13,8 +14,16 @@ program
   .requiredOption('--manifest-key <key>', 'Full object key of the backup manifest')
   .option('--json', 'Emit compact machine-readable JSON')
   .action(async (options) => {
-    const policy = getOffHostBackupPolicy();
-    const client = getOffHostBackupClient();
+    const policy = createOffHostBackupPolicy({
+      destination: appConfig.BACKUP_OFFHOST_DESTINATION ?? '',
+      endpoint: appConfig.BACKUP_OFFHOST_ENDPOINT ?? '',
+      region: appConfig.BACKUP_OFFHOST_REGION ?? '',
+      accessKeyId: appConfig.BACKUP_OFFHOST_ACCESS_KEY ?? '',
+      secretAccessKey: appConfig.BACKUP_OFFHOST_SECRET_KEY ?? '',
+      intervalHours: appConfig.BACKUP_INTERVAL_HOURS ?? 0,
+      retentionDays: appConfig.BACKUP_RETENTION_DAYS ?? 0,
+    });
+    const client = getOffHostBackupClient(policy);
     const manifest = await readOffHostManifest(client, policy.location, options.manifestKey);
     if (
       manifest.off_host_uri !== policy.location.uri ||

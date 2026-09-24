@@ -23,7 +23,7 @@ import { observeS3Operation } from '@/observability/metrics';
 const { NOT_FOUND } = HTTP_STATUS;
 
 let s3Client: S3Client | null = null;
-let publicS3Client: S3Client | null = null;
+let recipientS3Client: S3Client | null = null;
 
 export type S3UrlAudience = 'cms' | 'device';
 
@@ -46,12 +46,14 @@ function getInternalEndpoint(): string {
 export function initializeS3(): S3Client {
   if (appConfig.NODE_ENV === 'production' && !appConfig.MINIO_PUBLIC_ENDPOINT) {
     throw new Error(
-      'MINIO_PUBLIC_ENDPOINT is required in production so CMS browser transfers stay on the CMS gateway origin.'
+      'MINIO_PUBLIC_ENDPOINT is required in production so browser and player transfers stay on the CMS HTTPS media gateway.'
     );
   }
 
   s3Client = createS3Client(getInternalEndpoint());
-  publicS3Client = appConfig.MINIO_PUBLIC_ENDPOINT ? createS3Client(appConfig.MINIO_PUBLIC_ENDPOINT) : null;
+  recipientS3Client = appConfig.MINIO_PUBLIC_ENDPOINT
+    ? createS3Client(appConfig.MINIO_PUBLIC_ENDPOINT)
+    : s3Client;
 
   return s3Client;
 }
@@ -64,15 +66,17 @@ export function getS3Client(): S3Client {
 }
 
 /**
- * Returns a signer whose host matches the intended recipient. CMS browser
- * transfers are signed for the public Nginx gateway; player traffic continues
- * to receive URLs for the device-accessible object endpoint.
+ * Presigned URLs leave the Backend trust boundary and must use the recipient-
+ * accessible media gateway. Internal S3 operations continue to use s3Client.
+ * The audience remains explicit at call sites so distinct recipient gateways
+ * can be introduced later without changing the media APIs.
  */
 export function getS3ClientForAudience(audience: S3UrlAudience = 'device'): S3Client {
-  if (audience === 'cms' && publicS3Client) {
-    return publicS3Client;
+  if (!recipientS3Client) {
+    throw new Error('S3 client not initialized. Call initializeS3() first.');
   }
-  return getS3Client();
+  void audience;
+  return recipientS3Client;
 }
 
 export async function createBucketIfNotExists(bucketName: string): Promise<void> {

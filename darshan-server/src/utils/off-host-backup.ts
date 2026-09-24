@@ -16,7 +16,6 @@ import { createWriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { config as appConfig } from '@/config';
 import { offHostBackupObjectKey, parseOffHostBackupLocation, type OffHostBackupLocation } from './off-host-backup-location';
 
 const MULTIPART_PART_BYTES = 64 * 1024 * 1024;
@@ -52,6 +51,26 @@ type UploadFileInput = {
   contentType: string;
 };
 
+export type OffHostBackupPolicyInput = {
+  destination: string;
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  intervalHours: number;
+  retentionDays: number;
+};
+
+export type OffHostBackupPolicy = {
+  location: OffHostBackupLocation;
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  intervalHours: number;
+  retentionDays: number;
+};
+
 function readableBody(body: unknown): Readable {
   if (body instanceof Readable) return body;
   if (body && typeof (body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === 'function') {
@@ -60,22 +79,21 @@ function readableBody(body: unknown): Readable {
   throw new Error('Off-host S3 response did not include a readable object body.');
 }
 
-function assertConfiguredBackupPolicy() {
-  const {
-    BACKUP_OFFHOST_DESTINATION: destination,
-    BACKUP_OFFHOST_ENDPOINT: endpoint,
-    BACKUP_OFFHOST_REGION: region,
-    BACKUP_OFFHOST_ACCESS_KEY: accessKeyId,
-    BACKUP_OFFHOST_SECRET_KEY: secretAccessKey,
-    BACKUP_INTERVAL_HOURS: intervalHours,
-    BACKUP_RETENTION_DAYS: retentionDays,
-  } = appConfig;
+export function createOffHostBackupPolicy(input: OffHostBackupPolicyInput): OffHostBackupPolicy {
+  const { destination, endpoint, region, accessKeyId, secretAccessKey, intervalHours, retentionDays } = input;
   if (!destination || !endpoint || !region || !accessKeyId || !secretAccessKey || !intervalHours || !retentionDays) {
     throw new Error('Off-host backup is not fully configured. Production requires an S3 destination, endpoint, credentials, interval, and retention.');
   }
+  const endpointUrl = new URL(endpoint);
+  if (endpointUrl.protocol !== 'https:' || endpointUrl.username || endpointUrl.password || endpointUrl.search || endpointUrl.hash) {
+    throw new Error('Off-host backup endpoint must be a credential-free HTTPS URL.');
+  }
+  if (!Number.isSafeInteger(intervalHours) || intervalHours < 1 || !Number.isSafeInteger(retentionDays) || retentionDays < 1) {
+    throw new Error('Off-host backup interval and retention must be positive integers.');
+  }
   return {
     location: parseOffHostBackupLocation(destination),
-    endpoint,
+    endpoint: endpointUrl.toString().replace(/\/$/, ''),
     region,
     accessKeyId,
     secretAccessKey,
@@ -84,8 +102,7 @@ function assertConfiguredBackupPolicy() {
   };
 }
 
-export function getOffHostBackupClient(): S3Client {
-  const policy = assertConfiguredBackupPolicy();
+export function getOffHostBackupClient(policy: OffHostBackupPolicy): S3Client {
   return new S3Client({
     endpoint: policy.endpoint,
     region: policy.region,
@@ -95,20 +112,6 @@ export function getOffHostBackupClient(): S3Client {
       secretAccessKey: policy.secretAccessKey,
     },
   });
-}
-
-export function getOffHostBackupLocation(): OffHostBackupLocation {
-  return assertConfiguredBackupPolicy().location;
-}
-
-export function getOffHostBackupPolicy() {
-  const policy = assertConfiguredBackupPolicy();
-  return {
-    location: policy.location,
-    endpoint: policy.endpoint,
-    intervalHours: policy.intervalHours,
-    retentionDays: policy.retentionDays,
-  };
 }
 
 async function sha256File(filePath: string): Promise<string> {
@@ -212,13 +215,14 @@ export function createOffHostBackupManifest(input: {
   endpoint: string;
   intervalHours: number;
   retentionDays: number;
+  releaseId: string;
 }): OffHostBackupManifest {
   const manifestKey = offHostBackupObjectKey(input.location, `runs/${input.timestamp}-${input.runId}/manifest.json`);
   return {
     version: 1,
     run_id: input.runId,
     created_at: new Date().toISOString(),
-    release_id: appConfig.DARSHAN_RELEASE_ID,
+    release_id: input.releaseId,
     off_host_uri: input.location.uri,
     off_host_endpoint: input.endpoint,
     backup_interval_hours: input.intervalHours,
@@ -228,11 +232,15 @@ export function createOffHostBackupManifest(input: {
   };
 }
 
-export async function uploadOffHostManifest(client: S3CommandClient, manifest: OffHostBackupManifest): Promise<void> {
+export async function uploadOffHostManifest(
+  client: S3CommandClient,
+  location: OffHostBackupLocation,
+  manifest: OffHostBackupManifest
+): Promise<void> {
   const body = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
   const sha256 = createHash('sha256').update(body).digest('hex');
   await client.send(new PutObjectCommand({
-    Bucket: getOffHostBackupLocation().bucket,
+    Bucket: location.bucket,
     Key: manifest.manifest_key,
     Body: body,
     ContentLength: body.length,
@@ -241,7 +249,7 @@ export async function uploadOffHostManifest(client: S3CommandClient, manifest: O
     ChecksumSHA256: base64Sha256(sha256),
   }));
   await verifyUploadedObject(client, {
-    bucket: getOffHostBackupLocation().bucket,
+    bucket: location.bucket,
     key: manifest.manifest_key,
     size: body.length,
     sha256,

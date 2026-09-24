@@ -156,6 +156,7 @@ export class ConfigManager {
         expectedServerId: envValue('DARSHAN_EXPECTED_SERVER_ID', 'SIGNHEX_EXPECTED_SERVER_ID'),
         releaseId: envValue('DARSHAN_RELEASE_ID', 'SIGNHEX_RELEASE_ID'),
         sourceCommit: envValue('DARSHAN_SOURCE_COMMIT', 'SIGNHEX_SOURCE_COMMIT'),
+        compatibilityGeneration: envNumber(1, 'DARSHAN_COMPATIBILITY_GENERATION'),
       },
       runtime: {
         mode: runtimeMode,

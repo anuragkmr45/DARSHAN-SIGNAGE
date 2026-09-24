@@ -1,3 +1,26 @@
+FROM node:20-bookworm AS build
+
+WORKDIR /app
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+COPY package*.json ./
+COPY tsconfig*.json ./
+RUN npm ci
+
+COPY src ./src
+COPY scripts ./scripts
+COPY drizzle ./drizzle
+RUN npm run build:production \
+  && node scripts/build-production-package.mjs > runtime-package.json
+
+FROM node:20-bookworm AS production-dependencies
+
+WORKDIR /app
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
 FROM node:20-bookworm
 
 WORKDIR /app
@@ -15,36 +38,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libreoffice \
   postgresql-client \
   tar \
+  util-linux \
   && rm -rf /var/lib/apt/lists/*
 
-# Copy package files
-COPY package*.json ./
-COPY tsconfig.json ./
-COPY drizzle.config.ts ./
+COPY --from=production-dependencies /app/node_modules ./node_modules
 
-# Install dependencies
-RUN npm install
 RUN if [ "$INSTALL_PLAYWRIGHT_CHROMIUM" = "true" ]; then \
     npx playwright install --with-deps chromium; \
   else \
-    echo "Skipping Playwright Chromium install. Set INSTALL_PLAYWRIGHT_CHROMIUM=true when webpage/PDF rendering is required."; \
-  fi
+    echo "Skipping Playwright Chromium install. Production bundle validation rejects this setting."; \
+  fi \
+  && find /app/node_modules -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.map' \) -delete \
+  && mkdir -p /ms-playwright \
+  && chown -R node:node /ms-playwright
 
-# Copy source code
-COPY src ./src
-COPY drizzle ./drizzle
-COPY scripts ./scripts
+COPY --from=build /app/runtime-package.json ./package.json
+COPY --from=build /app/dist-production ./dist
+COPY --from=build /app/dist-cli ./dist-cli
+COPY --from=build /app/drizzle ./drizzle
+COPY docker/runtime-entrypoint.sh /usr/local/bin/darshan-runtime-entrypoint
 
-# Build TypeScript
-RUN npm run build
+RUN chmod 0755 /usr/local/bin/darshan-runtime-entrypoint \
+  && mkdir -p /app/logs /app/tmp \
+  && chown -R node:node /app
 
-# Remote webpage capture must never require Chromium's --no-sandbox escape.
-# The official Node image already provides this unprivileged runtime account.
-RUN mkdir -p /app/logs /app/tmp /ms-playwright && chown -R node:node /app /ms-playwright
-USER node
-
-# Expose ports
+# Chromium must retain its sandbox. API and worker processes therefore run as
+# the unprivileged account supplied by the official Node image.
 EXPOSE 3000
-
-# Start application
+ENTRYPOINT ["/usr/local/bin/darshan-runtime-entrypoint"]
 CMD ["npm", "start"]

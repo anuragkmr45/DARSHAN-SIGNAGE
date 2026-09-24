@@ -1,7 +1,11 @@
 [server]
+protocol = https
+http_port = 3000
 domain = __CMS_PUBLIC_HOST__
 root_url = __GRAFANA_ROOT_URL__
 serve_from_sub_path = true
+cert_file = /run/darshan-grafana-runtime/tls/server.crt
+cert_key = /run/darshan-grafana-runtime/tls/server.key
 
 [security]
 allow_embedding = true

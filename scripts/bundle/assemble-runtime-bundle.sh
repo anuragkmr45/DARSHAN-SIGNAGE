@@ -325,7 +325,8 @@ stage_player_bundle() {
       "deploymentId": "$SITE_NAME",
       "expectedServerId": "backend-$SITE_NAME",
       "releaseId": "$DARSHAN_RELEASE_ID",
-      "sourceCommit": "$PLAYER_SOURCE_COMMIT"
+      "sourceCommit": "$PLAYER_SOURCE_COMMIT",
+      "compatibilityGeneration": $DARSHAN_COMPATIBILITY_GENERATION
     },
     "backend": {
       "baseUrl": "$endpoint_scheme://$backend_host:$endpoint_port",
@@ -456,6 +457,9 @@ case "${1:-}" in
   --verify-loaded) verify_only=true ;;
   *) echo "Usage: $0 [--verify-loaded]" >&2; exit 2 ;;
 esac
+if [[ "$verify_only" != "true" && -x ./preflight.sh ]]; then
+  ./preflight.sh image-load
+fi
 
 normalize_architecture() {
   case "$1" in
@@ -570,12 +574,29 @@ write_start_script() {
   cat > "$destination" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ -f ./deployment-control.sh ]]; then
+  source ./deployment-control.sh
+  acquire_deployment_lock
+  require_prepared_host
+fi
 ./verify-role.sh
+if [[ -x ./compatibility-check.sh ]]; then
+  ./compatibility-check.sh
+fi
 if ! ./load-images.sh --verify-loaded; then
   echo "Required image is absent or differs from signed release metadata; reloading role archives."
   ./load-images.sh
 fi
 docker compose --env-file $env_file -f docker-compose.yml up -d
+if [[ -f ./deployment-control.sh ]]; then
+  healthy=false
+  for attempt in \$(seq 1 30); do
+    if ./health-check.sh; then healthy=true; break; fi
+    sleep 2
+  done
+  [[ "\$healthy" == "true" ]] || { echo "Role did not become healthy within 60 seconds." >&2; exit 1; }
+  mark_active_release
+fi
 EOF
 }
 
@@ -585,6 +606,12 @@ write_data_start_script() {
   cat > "$destination" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+
+if [[ -f ./deployment-control.sh ]]; then
+  source ./deployment-control.sh
+  acquire_deployment_lock
+  require_prepared_host
+fi
 
 ./verify-role.sh
 if ! ./load-images.sh --verify-loaded; then
@@ -609,10 +636,18 @@ for attempt in \$(seq 1 30); do
 done
 ./configure-monitoring-role.sh
 docker compose --env-file $env_file -f docker-compose.yml up -d postgres-exporter
-if ! ./health-check.sh; then
-  echo "Data role health check failed; exporter logs follow." >&2
+healthy=false
+for attempt in \$(seq 1 30); do
+  if ./health-check.sh; then healthy=true; break; fi
+  sleep 2
+done
+if [[ "\$healthy" != "true" ]]; then
+  echo "Data role health check failed after 60 seconds; exporter logs follow." >&2
   docker compose --env-file $env_file -f docker-compose.yml logs --no-color node-exporter postgres-exporter >&2 || true
   exit 1
+fi
+if [[ -f ./deployment-control.sh ]]; then
+  mark_active_release
 fi
 EOF
 }
@@ -666,6 +701,12 @@ write_role_verification_script() {
   local target_dir="$1"
   local env_file="$2"
   local signed_role="$3"
+  local signed_control_files="prepare-host.sh preflight.sh deployment-control.sh"
+  if [[ "$env_file" == ".env.recovery" ]]; then
+    # Recovery is a stateless one-shot role. It is host-prepared and capacity
+    # checked, but it never owns an active-release marker or persistent service.
+    signed_control_files="prepare-host.sh preflight.sh"
+  fi
   cat > "$target_dir/verify-role.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -673,6 +714,14 @@ set -euo pipefail
 for file in docker-compose.yml load-images.sh start.sh stop.sh; do
   [[ -f "\$file" ]] || { echo "Required role file is missing: \$file" >&2; exit 1; }
 done
+if [[ -f ./COMPATIBILITY.json ]]; then
+  source ./$env_file
+  jq -e --arg site "\$SITE_NAME" --arg role "\$DARSHAN_ROLE_NAME" --arg release "\$DARSHAN_RELEASE_ID" \
+    --argjson generation "\$DARSHAN_COMPATIBILITY_GENERATION" '
+    .schemaVersion == 1 and .siteName == \$site and .role == \$role and .releaseId == \$release and
+    .compatibilityGeneration == \$generation and (.sourceCommit | test("^[a-f0-9]{40}\$"))
+  ' ./COMPATIBILITY.json >/dev/null || { echo "Signed compatibility metadata does not match this role." >&2; exit 1; }
+fi
 check_mode() {
   local file="\$1" expected="\$2"
   [[ "\$(stat -c '%a' "\$file")" == "\$expected" ]] || { echo "Unsafe file mode for \$file; expected \$expected." >&2; exit 1; }
@@ -705,10 +754,17 @@ while IFS= read -r private_key; do
   check_mode "\$private_key" 600
 done < <(find ./certs ./tls -type f \( -name '*.key' -o -name 'private.key' \) 2>/dev/null || true)
 if [[ "$signed_role" == "true" ]]; then
-  for file in RELEASE_SIGNING_PUBLIC_KEY.pem ROLE_MANIFEST.sha256 ROLE_MANIFEST.sig; do
+  for file in $signed_control_files; do
+    [[ -f "\$file" && -x "\$file" ]] || { echo "Required signed host-control script is missing or not executable: \$file" >&2; exit 1; }
+  done
+  for file in ROLE_MANIFEST.sha256 ROLE_MANIFEST.sig; do
     [[ -f "\$file" ]] || { echo "Signed release metadata is missing: \$file" >&2; exit 1; }
   done
-  openssl dgst -sha256 -verify RELEASE_SIGNING_PUBLIC_KEY.pem -signature ROLE_MANIFEST.sig ROLE_MANIFEST.sha256 >/dev/null
+  trust_key="\${DARSHAN_RELEASE_TRUST_KEY:-/etc/darshan/trust/release-signing.pem}"
+  [[ -f "\$trust_key" && ! -L "\$trust_key" ]] || { echo "Pinned release trust key is missing or unsafe: \$trust_key" >&2; exit 1; }
+  [[ "\$(stat -c '%u' "\$trust_key")" == "0" ]] || { echo "Pinned release trust key must be owned by root: \$trust_key" >&2; exit 1; }
+  (( (8#\$(stat -c '%a' "\$trust_key") & 8#022) == 0 )) || { echo "Pinned release trust key must not be group/other writable: \$trust_key" >&2; exit 1; }
+  openssl dgst -sha256 -verify "\$trust_key" -signature ROLE_MANIFEST.sig ROLE_MANIFEST.sha256 >/dev/null
   sha256sum -c ROLE_MANIFEST.sha256
 fi
 verify_certificate_fingerprints
@@ -729,14 +785,28 @@ cat > "$destination" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -f ./deployment-control.sh ]]; then
+  source ./deployment-control.sh
+  acquire_deployment_lock
+  require_prepared_host
+fi
+
 [[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
+source ./$env_file
+: "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
 ./verify-role.sh
+if [[ -x ./compatibility-check.sh ]]; then
+  ./compatibility-check.sh
+fi
 if ! ./load-images.sh --verify-loaded; then
   echo "Required image is absent or differs from signed release metadata; reloading role archives."
   ./load-images.sh
 fi
 docker compose --env-file $env_file -f docker-compose.yml up -d
-exec ./wait-ready.sh
+./wait-ready.sh
+if [[ -f ./deployment-control.sh ]]; then
+  mark_active_release
+fi
 EOF
 }
 
@@ -780,6 +850,9 @@ retry();
 probe_dependency "PostgreSQL" "DATABASE_URL" "5432"
 probe_dependency "MinIO" "MINIO_INTERNAL_URL" "9000"
 probe_dependency "Valkey" "VALKEY_URL" "6379"
+if [[ -x ./compatibility-check.sh ]]; then
+  ./compatibility-check.sh
+fi
 EOF
 
   cat > "$target_dir/wait-ready.sh" <<EOF
@@ -812,10 +885,18 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 [[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
-for file in docker-compose.yml load-images.sh start.sh wait-ready.sh wait-dependencies.sh install.sh upgrade.sh deploy.sh adopt-existing.sh recover-admin.sh acceptance-check.sh; do
+  for file in docker-compose.yml load-images.sh start.sh wait-ready.sh wait-dependencies.sh install.sh finalize-install.sh upgrade.sh deploy.sh adopt-existing.sh recover-admin.sh acceptance-check.sh deployment-state.sh; do
   [[ -f "\$file" ]] || { echo "Required backend role file is missing: \$file" >&2; exit 1; }
 done
-[[ -x start.sh && -x install.sh && -x upgrade.sh && -x deploy.sh && -x recover-admin.sh ]] || { echo "Backend lifecycle scripts must be executable." >&2; exit 1; }
+if [[ -f ./COMPATIBILITY.json ]]; then
+  source ./$env_file
+  jq -e --arg site "\$SITE_NAME" --arg role "\$DARSHAN_ROLE_NAME" --arg release "\$DARSHAN_RELEASE_ID" \
+    --argjson generation "\$DARSHAN_COMPATIBILITY_GENERATION" '
+    .schemaVersion == 1 and .siteName == \$site and .role == \$role and .releaseId == \$release and
+    .compatibilityGeneration == \$generation and (.sourceCommit | test("^[a-f0-9]{40}\$"))
+  ' ./COMPATIBILITY.json >/dev/null || { echo "Signed compatibility metadata does not match this role." >&2; exit 1; }
+fi
+[[ -x start.sh && -x deployment-state.sh && -x install.sh && -x finalize-install.sh && -x upgrade.sh && -x deploy.sh && -x recover-admin.sh ]] || { echo "Backend lifecycle scripts must be executable." >&2; exit 1; }
 check_mode() {
   local file="\$1" expected="\$2"
   [[ "\$(stat -c '%a' "\$file")" == "\$expected" ]] || { echo "Unsafe file mode for \$file; expected \$expected." >&2; exit 1; }
@@ -852,10 +933,17 @@ if grep -Eq '^ADMIN_PASSWORD=' "$env_file"; then
   exit 1
 fi
 if [[ "$signed_role" == "true" ]]; then
-  for file in RELEASE_SIGNING_PUBLIC_KEY.pem ROLE_MANIFEST.sha256 ROLE_MANIFEST.sig; do
+  for file in prepare-host.sh preflight.sh deployment-control.sh; do
+    [[ -f "\$file" && -x "\$file" ]] || { echo "Required signed host-control script is missing or not executable: \$file" >&2; exit 1; }
+  done
+  for file in ROLE_MANIFEST.sha256 ROLE_MANIFEST.sig; do
     [[ -f "\$file" ]] || { echo "Signed release metadata is missing: \$file" >&2; exit 1; }
   done
-  openssl dgst -sha256 -verify RELEASE_SIGNING_PUBLIC_KEY.pem -signature ROLE_MANIFEST.sig ROLE_MANIFEST.sha256 >/dev/null
+  trust_key="\${DARSHAN_RELEASE_TRUST_KEY:-/etc/darshan/trust/release-signing.pem}"
+  [[ -f "\$trust_key" && ! -L "\$trust_key" ]] || { echo "Pinned release trust key is missing or unsafe: \$trust_key" >&2; exit 1; }
+  [[ "\$(stat -c '%u' "\$trust_key")" == "0" ]] || { echo "Pinned release trust key must be owned by root: \$trust_key" >&2; exit 1; }
+  (( (8#\$(stat -c '%a' "\$trust_key") & 8#022) == 0 )) || { echo "Pinned release trust key must not be group/other writable: \$trust_key" >&2; exit 1; }
+  openssl dgst -sha256 -verify "\$trust_key" -signature ROLE_MANIFEST.sig ROLE_MANIFEST.sha256 >/dev/null
   sha256sum -c ROLE_MANIFEST.sha256
 fi
 verify_certificate_fingerprints
@@ -868,16 +956,53 @@ docker compose --env-file $env_file -f docker-compose.yml config -q
 echo "Backend role structure and Compose configuration verified."
 EOF
 
+  cat > "$target_dir/deployment-state.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
+source ./$env_file
+: "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
+: "\${SITE_NAME:?SITE_NAME is required}"
+[[ -s ./ROLE_MANIFEST.sha256 ]] || { echo "Signed role manifest is missing." >&2; exit 1; }
+manifest_sha256="\$(sha256sum ./ROLE_MANIFEST.sha256 | awk '{print \$1}')"
+action="\${1:-}"
+shift || true
+case "\$action" in
+  status)
+    exec docker compose --env-file $env_file -f docker-compose.yml run --rm api \
+      npm run --silent production:deployment-state -- status --release-id "\$DARSHAN_RELEASE_ID"
+    ;;
+  begin)
+    mode="\${1:-}"; shift || true
+    [[ "\$mode" =~ ^(INSTALL|UPGRADE|ADOPT)\$ ]] || { echo "Deployment mode must be INSTALL, UPGRADE, or ADOPT." >&2; exit 2; }
+    exec docker compose --env-file $env_file -f docker-compose.yml run --rm api \
+      npm run --silent production:deployment-state -- begin --release-id "\$DARSHAN_RELEASE_ID" \
+      --site-name "\$SITE_NAME" --manifest-sha256 "\$manifest_sha256" --mode "\$mode" "\$@"
+    ;;
+  mark)
+    step="\${1:-}"; shift || true
+    [[ "\$step" =~ ^[A-Z][A-Z0-9_]{0,63}\$ ]] || { echo "A valid deployment step is required." >&2; exit 2; }
+    exec docker compose --env-file $env_file -f docker-compose.yml run --rm api \
+      npm run --silent production:deployment-state -- mark --release-id "\$DARSHAN_RELEASE_ID" \
+      --site-name "\$SITE_NAME" --manifest-sha256 "\$manifest_sha256" --step "\$step" "\$@"
+    ;;
+  *) echo "Usage: \$0 status | begin <INSTALL|UPGRADE|ADOPT> [--ticket ID] | mark <STEP> [--complete]" >&2; exit 2 ;;
+esac
+EOF
+
   cat > "$target_dir/acceptance-check.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 password_file=""
+scope="full"
 while [[ \$# -gt 0 ]]; do
   case "\$1" in
     --password-file) password_file="\${2:-}"; shift 2 ;;
-    *) echo "Usage: \$0 --password-file <mode-0600-file>" >&2; exit 2 ;;
+    --scope) scope="\${2:-}"; shift 2 ;;
+    *) echo "Usage: \$0 --password-file <mode-0600-file> [--scope backend|full]" >&2; exit 2 ;;
   esac
 done
+[[ "\$scope" == "backend" || "\$scope" == "full" ]] || { echo "Acceptance scope must be backend or full." >&2; exit 2; }
 [[ -n "\$password_file" && -f "\$password_file" && ! -L "\$password_file" ]] || { echo "A protected regular password file is required." >&2; exit 1; }
 [[ "\$(stat -c '%a' "\$password_file")" == "600" ]] || { echo "Password file must have mode 0600." >&2; exit 1; }
 source ./$env_file
@@ -885,16 +1010,12 @@ source ./$env_file
 
 post_login() {
   local url="\$1"; shift
-  local status
-status=\$(node -e '
-const fs = require("node:fs");
-const text = fs.readFileSync(process.argv[1], "utf8");
-const password = text.replace(/\\r?\\n$/, "");
-if (!password || /[\\r\\n\\0]/.test(password)) {
-  throw new Error("Password file must contain one non-empty line.");
-}
-process.stdout.write(JSON.stringify({ email: process.argv[2], password }));
-' "\$password_file" "\$INITIAL_ADMIN_EMAIL" | curl --silent --show-error --output /dev/null --write-out '%{http_code}' --header 'Content-Type: application/json' --data-binary @- "\$@" "\$url")
+  local status payload
+  payload=\$(jq -cn --arg email "\$INITIAL_ADMIN_EMAIL" --rawfile password "\$password_file" '
+    (\$password | sub("\\r?\\n\$"; "")) as \$clean
+    | if (\$clean == "" or (\$clean | test("[\\r\\n\\u0000]"))) then error("password file must contain one non-empty line")
+      else {email: \$email, password: \$clean} end')
+  status=\$(printf '%s' "\$payload" | curl --silent --show-error --output /dev/null --write-out '%{http_code}' --header 'Content-Type: application/json' --data-binary @- "\$@" "\$url")
   [[ "\$status" == "200" ]] || { echo "Login acceptance failed with HTTP \$status for \$url" >&2; exit 1; }
 }
 
@@ -903,16 +1024,20 @@ if [[ "\${SERVER_TLS_ENABLED:-false}" == "true" ]]; then
   : "\${BACKEND_BIND_ADDRESS:?BACKEND_BIND_ADDRESS is required for TLS acceptance}"
 	  backend_url="https://\${BACKEND_PRIVATE_HOST}:\${API_HOST_PORT}/api/v1/auth/login"
 	  post_login "\$backend_url" --cacert ./certs/transport-ca.crt --resolve "\${BACKEND_PRIVATE_HOST}:\${API_HOST_PORT}:\${BACKEND_BIND_ADDRESS}"
-	  : "\${CMS_ACCEPTANCE_URL:?CMS_ACCEPTANCE_URL is required for CMS acceptance}"
-	  : "\${CMS_PUBLIC_HOST:?CMS_PUBLIC_HOST is required for CMS TLS acceptance}"
-	  : "\${CMS_BIND_ADDRESS:?CMS_BIND_ADDRESS is required for CMS TLS acceptance}"
-	  post_login "\${CMS_ACCEPTANCE_URL%/}/api/v1/auth/login" --cacert ./certs/transport-ca.crt --resolve "\${CMS_PUBLIC_HOST}:\${CMS_HTTPS_PORT}:\${CMS_BIND_ADDRESS}"
+    if [[ "\$scope" == "full" ]]; then
+      : "\${CMS_ACCEPTANCE_URL:?CMS_ACCEPTANCE_URL is required for CMS acceptance}"
+      : "\${CMS_PUBLIC_HOST:?CMS_PUBLIC_HOST is required for CMS TLS acceptance}"
+      : "\${CMS_BIND_ADDRESS:?CMS_BIND_ADDRESS is required for CMS TLS acceptance}"
+      post_login "\${CMS_ACCEPTANCE_URL%/}/api/v1/auth/login" --cacert ./certs/transport-ca.crt --resolve "\${CMS_PUBLIC_HOST}:\${CMS_HTTPS_PORT}:\${CMS_BIND_ADDRESS}"
+    fi
 else
   post_login "http://127.0.0.1:\${API_HOST_PORT}/api/v1/auth/login"
-  : "\${CMS_ACCEPTANCE_URL:?CMS_ACCEPTANCE_URL is required for CMS acceptance}"
-  post_login "\${CMS_ACCEPTANCE_URL%/}/api/v1/auth/login"
+  if [[ "\$scope" == "full" ]]; then
+    : "\${CMS_ACCEPTANCE_URL:?CMS_ACCEPTANCE_URL is required for CMS acceptance}"
+    post_login "\${CMS_ACCEPTANCE_URL%/}/api/v1/auth/login"
+  fi
 fi
-echo "Backend and CMS login acceptance passed."
+echo "\$scope login acceptance passed."
 EOF
 
   cat > "$target_dir/install.sh" <<EOF
@@ -924,15 +1049,64 @@ set -euo pipefail
 source ./$env_file
 : "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
 : "\${INITIAL_ADMIN_EMAIL:?INITIAL_ADMIN_EMAIL is required}"
+source ./deployment-control.sh
+acquire_deployment_lock
+require_prepared_host
 ./verify-role.sh
-./load-images.sh
+if [[ -x ./compatibility-check.sh ]]; then
+  ./compatibility-check.sh
+fi
+if ! ./load-images.sh --verify-loaded; then
+  ./load-images.sh
+fi
 ./wait-dependencies.sh
-docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent db:migrate -- --release-id "\$DARSHAN_RELEASE_ID" --json
-docker compose --env-file $env_file -f docker-compose.yml run --rm --volume "\$(pwd)/bootstrap-secrets/admin-password:/run/darshan-bootstrap/admin-password:ro" api npm run --silent bootstrap:production -- --email "\$INITIAL_ADMIN_EMAIL" --release-id "\$DARSHAN_RELEASE_ID" --password-file /run/darshan-bootstrap/admin-password --json
-./start.sh
-./acceptance-check.sh --password-file ./bootstrap-secrets/admin-password
+./deployment-state.sh begin INSTALL
+state="\$(./deployment-state.sh status)"
+mode="\$(jq -r '.run.mode // empty' <<<"\$state")"
+status="\$(jq -r '.run.status // empty' <<<"\$state")"
+step="\$(jq -r '.run.last_step // empty' <<<"\$state")"
+[[ "\$mode" == "INSTALL" && "\$status" == "RUNNING" ]] || { echo "Install state is not a matching RUNNING installation." >&2; exit 1; }
+if [[ "\$step" == "BEGIN" ]]; then
+  docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent production:db:migrate -- --release-id "\$DARSHAN_RELEASE_ID" --json
+  ./deployment-state.sh mark MIGRATIONS_APPLIED
+  step=MIGRATIONS_APPLIED
+fi
+if [[ "\$step" == "MIGRATIONS_APPLIED" ]]; then
+  docker compose --env-file $env_file -f docker-compose.yml run --rm --volume "\$(pwd)/bootstrap-secrets:/run/darshan-input-bootstrap:ro" api npm run --silent production:bootstrap -- --email "\$INITIAL_ADMIN_EMAIL" --release-id "\$DARSHAN_RELEASE_ID" --password-file /run/darshan-bootstrap/admin-password --json
+  ./deployment-state.sh mark BOOTSTRAP_COMPLETE
+  step=BOOTSTRAP_COMPLETE
+fi
+if [[ "\$step" == "BOOTSTRAP_COMPLETE" ]]; then
+  ./start.sh
+  ./deployment-state.sh mark BACKEND_READY
+  step=BACKEND_READY
+fi
+if [[ "\$step" == "BACKEND_READY" ]]; then
+  ./acceptance-check.sh --scope backend --password-file ./bootstrap-secrets/admin-password
+  ./deployment-state.sh mark BACKEND_ACCEPTED
+  step=BACKEND_ACCEPTED
+fi
+[[ "\$step" == "BACKEND_ACCEPTED" ]] || { echo "Unexpected install step: \$step" >&2; exit 1; }
+echo "Backend installation is accepted. Start CMS, then run ./finalize-install.sh on this Backend VM."
+EOF
+
+  cat > "$target_dir/finalize-install.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
+[[ -f ./bootstrap-secrets/admin-password && ! -L ./bootstrap-secrets/admin-password ]] || { echo "Final installation acceptance requires bootstrap-secrets/admin-password." >&2; exit 1; }
+[[ "\$(stat -c '%a' ./bootstrap-secrets/admin-password)" == "600" ]] || { echo "bootstrap-secrets/admin-password must have mode 0600." >&2; exit 1; }
+source ./deployment-control.sh
+acquire_deployment_lock
+require_prepared_host
+state="\$(./deployment-state.sh status)"
+[[ "\$(jq -r '.run.mode // empty' <<<"\$state")" == "INSTALL" ]] || { echo "The recorded deployment is not an installation." >&2; exit 1; }
+[[ "\$(jq -r '.run.status // empty' <<<"\$state")" == "RUNNING" ]] || { echo "The installation is not awaiting final acceptance." >&2; exit 1; }
+[[ "\$(jq -r '.run.last_step // empty' <<<"\$state")" == "BACKEND_ACCEPTED" ]] || { echo "Backend acceptance must complete before final acceptance." >&2; exit 1; }
+./acceptance-check.sh --scope full --password-file ./bootstrap-secrets/admin-password
+./deployment-state.sh mark FULL_ACCEPTANCE_COMPLETE --complete
 rm -f ./bootstrap-secrets/admin-password
-echo "Fresh installation completed; bootstrap password file was removed."
+echo "Fresh installation completed; Backend and CMS login passed and the bootstrap password file was removed."
 EOF
 
   cat > "$target_dir/upgrade.sh" <<EOF
@@ -942,51 +1116,94 @@ set -euo pipefail
 source ./$env_file
 : "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
 : "\${DARSHAN_BACKUP_MANIFEST:?Set DARSHAN_BACKUP_MANIFEST to a restore-verified off-host backup manifest}"
+: "\${DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY:=/etc/darshan/trust/recovery-attestation.pem}"
 [[ -f "\$DARSHAN_BACKUP_MANIFEST" && ! -L "\$DARSHAN_BACKUP_MANIFEST" ]] || { echo "A regular restore-verified backup manifest is required: \$DARSHAN_BACKUP_MANIFEST" >&2; exit 1; }
-node -e '
-const manifest = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-const expected = { destination: process.argv[2], intervalHours: Number(process.argv[3]), retentionDays: Number(process.argv[4]) };
-const destination = new URL(expected.destination);
-const prefix = destination.pathname.split("/").filter(Boolean).map(decodeURIComponent).join("/") + "/runs/";
-const verifiedAt = Date.parse(manifest.verified_at);
-const maxAgeMs = Math.max(24, expected.intervalHours) * 60 * 60 * 1000;
-if (
-  manifest.restore_verified !== true ||
-  manifest.off_host_uri !== expected.destination ||
-  Number(manifest.backup_interval_hours) !== expected.intervalHours ||
-  Number(manifest.retention_days) !== expected.retentionDays ||
-  typeof manifest.manifest_key !== "string" ||
-  !manifest.manifest_key.startsWith(prefix) ||
-  !manifest.manifest_key.endsWith("/manifest.json") ||
-  typeof manifest.restored_from_run_id !== "string" ||
-  manifest.restored_from_run_id.trim().length === 0 ||
-  !Number.isFinite(verifiedAt) ||
-  verifiedAt > Date.now() + 5 * 60 * 1000 ||
-  Date.now() - verifiedAt > maxAgeMs
-) process.exit(1);
-' "\$DARSHAN_BACKUP_MANIFEST" "\$BACKUP_OFFHOST_DESTINATION" "\$BACKUP_INTERVAL_HOURS" "\$BACKUP_RETENTION_DAYS" || { echo "Backup manifest must prove a successful restore rehearsal for this signed off-host destination, interval, and retention policy." >&2; exit 1; }
+[[ -f "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY" && ! -L "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY" ]] || { echo "Pinned recovery attestation key is missing or unsafe." >&2; exit 1; }
+[[ "\$(stat -c '%u' "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY")" == "0" ]] || { echo "Pinned recovery attestation key must be owned by root." >&2; exit 1; }
+(( (8#\$(stat -c '%a' "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY") & 8#022) == 0 )) || { echo "Pinned recovery attestation key must not be group/other writable." >&2; exit 1; }
+source ./deployment-control.sh
+acquire_deployment_lock
+require_prepared_host
 ./verify-role.sh
-./load-images.sh
+if [[ -x ./compatibility-check.sh ]]; then
+  ./compatibility-check.sh
+fi
+if ! ./load-images.sh --verify-loaded; then
+  ./load-images.sh
+fi
+evidence_path="\$(readlink -f "\$DARSHAN_BACKUP_MANIFEST")"
+recovery_key_path="\$(readlink -f "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY")"
+docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps \
+  --volume "\$evidence_path:/run/darshan-input-evidence/evidence.json:ro" \
+  --volume "\$recovery_key_path:/run/darshan-input-evidence/recovery-attestation.pem:ro" api \
+  npm run --silent production:verify-restore-evidence -- \
+  --evidence /run/darshan-evidence/evidence.json --public-key /run/darshan-evidence/recovery-attestation.pem \
+  --destination "\$BACKUP_OFFHOST_DESTINATION" --endpoint "\$BACKUP_OFFHOST_ENDPOINT" --interval-hours "\$BACKUP_INTERVAL_HOURS" \
+  --retention-days "\$BACKUP_RETENTION_DAYS" --site "\$SIGNHEX_DEPLOYMENT_ID" || { echo "Backup evidence must carry a valid recovery-authority signature and prove a successful isolated restore for this site policy." >&2; exit 1; }
 ./wait-dependencies.sh
-docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent db:migrate -- --release-id "\$DARSHAN_RELEASE_ID" --json
-docker compose --env-file $env_file -f docker-compose.yml up -d --force-recreate
-exec ./wait-ready.sh
+./deployment-state.sh begin UPGRADE
+state="\$(./deployment-state.sh status)"
+step="\$(jq -r '.run.last_step // empty' <<<"\$state")"
+if [[ "\$step" == "BEGIN" ]]; then
+  docker compose --env-file $env_file -f docker-compose.yml stop api worker
+  ./deployment-state.sh mark MAINTENANCE_STARTED
+  step=MAINTENANCE_STARTED
+fi
+if [[ "\$step" == "MAINTENANCE_STARTED" ]]; then
+  docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent production:db:migrate -- --release-id "\$DARSHAN_RELEASE_ID" --json
+  ./deployment-state.sh mark MIGRATIONS_APPLIED
+  step=MIGRATIONS_APPLIED
+fi
+if [[ "\$step" == "MIGRATIONS_APPLIED" ]]; then
+  docker compose --env-file $env_file -f docker-compose.yml up -d --force-recreate
+  ./wait-ready.sh
+  ./health-check.sh
+  mark_active_release
+  ./deployment-state.sh mark BACKEND_READY --complete
+  step=BACKEND_READY
+fi
+[[ "\$step" == "BACKEND_READY" ]] || { echo "Unexpected upgrade step: \$step" >&2; exit 1; }
 EOF
 
   cat > "$target_dir/deploy.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 [[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
+source ./$env_file
+: "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
+source ./deployment-control.sh
+acquire_deployment_lock
+require_prepared_host
 ./verify-role.sh
-./load-images.sh
+if [[ -x ./compatibility-check.sh ]]; then
+  ./compatibility-check.sh
+fi
+if ! ./load-images.sh --verify-loaded; then
+  ./load-images.sh
+fi
 ./wait-dependencies.sh
-plan=\$(docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent db:status -- --json | tail -n 1)
-action=\$(PLAN_JSON="\$plan" node -e '
-const p = JSON.parse(process.env.PLAN_JSON);
-if (p.adoptionRequired) process.stdout.write("adopt");
-else if (p.ledgerPresent) process.stdout.write("upgrade");
-else process.stdout.write("install");
-')
+state=\$(./deployment-state.sh status)
+completed=\$(jq -r '.run | select(.status == "COMPLETE") | .release_id // empty' <<<"\$state")
+if [[ "\$completed" == "\$DARSHAN_RELEASE_ID" ]]; then
+  ./health-check.sh
+  echo "This signed release is already complete and healthy."
+  exit 0
+fi
+resume_mode=\$(jq -r '.run | select(.status == "RUNNING") | .mode // empty' <<<"\$state")
+case "\$resume_mode" in
+  INSTALL)
+    resume_step=\$(jq -r '.run.last_step' <<<"\$state")
+    if [[ "\$resume_step" == "BACKEND_ACCEPTED" ]]; then
+      echo "Backend is accepted; start CMS and run ./finalize-install.sh."
+      exit 0
+    fi
+    exec ./install.sh
+    ;;
+  UPGRADE) exec ./upgrade.sh ;;
+  ADOPT) echo "An adoption run is incomplete; rerun ./adopt-existing.sh with the original approved ticket." >&2; exit 2 ;;
+esac
+plan=\$(docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent production:db:status -- --json | tail -n 1)
+action=\$(jq -r 'if .adoptionRequired then "adopt" elif .ledgerPresent then "upgrade" else "install" end' <<<"\$plan")
 case "\$action" in
   install) exec ./install.sh ;;
   upgrade) exec ./upgrade.sh ;;
@@ -1011,44 +1228,61 @@ source ./$env_file
 : "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
 : "\${INITIAL_ADMIN_EMAIL:?INITIAL_ADMIN_EMAIL is required to record the existing SUPER_ADMIN}"
 : "\${DARSHAN_BACKUP_MANIFEST:?Set DARSHAN_BACKUP_MANIFEST to a restore-verified off-host backup manifest}"
+: "\${DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY:=/etc/darshan/trust/recovery-attestation.pem}"
 [[ -f "\$DARSHAN_BACKUP_MANIFEST" && ! -L "\$DARSHAN_BACKUP_MANIFEST" ]] || { echo "A regular restore-verified backup manifest is required: \$DARSHAN_BACKUP_MANIFEST" >&2; exit 1; }
-node -e '
-const manifest = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-const expected = { destination: process.argv[2], intervalHours: Number(process.argv[3]), retentionDays: Number(process.argv[4]) };
-const destination = new URL(expected.destination);
-const prefix = destination.pathname.split("/").filter(Boolean).map(decodeURIComponent).join("/") + "/runs/";
-const verifiedAt = Date.parse(manifest.verified_at);
-const maxAgeMs = Math.max(24, expected.intervalHours) * 60 * 60 * 1000;
-if (
-  manifest.restore_verified !== true ||
-  manifest.off_host_uri !== expected.destination ||
-  Number(manifest.backup_interval_hours) !== expected.intervalHours ||
-  Number(manifest.retention_days) !== expected.retentionDays ||
-  typeof manifest.manifest_key !== "string" ||
-  !manifest.manifest_key.startsWith(prefix) ||
-  !manifest.manifest_key.endsWith("/manifest.json") ||
-  typeof manifest.restored_from_run_id !== "string" ||
-  manifest.restored_from_run_id.trim().length === 0 ||
-  !Number.isFinite(verifiedAt) ||
-  verifiedAt > Date.now() + 5 * 60 * 1000 ||
-  Date.now() - verifiedAt > maxAgeMs
-) process.exit(1);
-' "\$DARSHAN_BACKUP_MANIFEST" "\$BACKUP_OFFHOST_DESTINATION" "\$BACKUP_INTERVAL_HOURS" "\$BACKUP_RETENTION_DAYS" || { echo "Backup manifest must prove a successful restore rehearsal for this signed off-host destination, interval, and retention policy." >&2; exit 1; }
+[[ -f "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY" && ! -L "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY" ]] || { echo "Pinned recovery attestation key is missing or unsafe." >&2; exit 1; }
+[[ "\$(stat -c '%u' "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY")" == "0" ]] || { echo "Pinned recovery attestation key must be owned by root." >&2; exit 1; }
+(( (8#\$(stat -c '%a' "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY") & 8#022) == 0 )) || { echo "Pinned recovery attestation key must not be group/other writable." >&2; exit 1; }
+source ./deployment-control.sh
+acquire_deployment_lock
+require_prepared_host
 ./verify-role.sh
-./load-images.sh
+if [[ -x ./compatibility-check.sh ]]; then
+  ./compatibility-check.sh
+fi
+if ! ./load-images.sh --verify-loaded; then
+  ./load-images.sh
+fi
+evidence_path="\$(readlink -f "\$DARSHAN_BACKUP_MANIFEST")"
+recovery_key_path="\$(readlink -f "\$DARSHAN_RECOVERY_ATTESTATION_PUBLIC_KEY")"
+docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps \
+  --volume "\$evidence_path:/run/darshan-input-evidence/evidence.json:ro" \
+  --volume "\$recovery_key_path:/run/darshan-input-evidence/recovery-attestation.pem:ro" api \
+  npm run --silent production:verify-restore-evidence -- \
+  --evidence /run/darshan-evidence/evidence.json --public-key /run/darshan-evidence/recovery-attestation.pem \
+  --destination "\$BACKUP_OFFHOST_DESTINATION" --endpoint "\$BACKUP_OFFHOST_ENDPOINT" --interval-hours "\$BACKUP_INTERVAL_HOURS" \
+  --retention-days "\$BACKUP_RETENTION_DAYS" --site "\$SIGNHEX_DEPLOYMENT_ID" || { echo "Backup evidence must carry a valid recovery-authority signature and prove a successful isolated restore for this site policy." >&2; exit 1; }
 ./wait-dependencies.sh
-plan=\$(docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent db:status -- --json | tail -n 1)
-readarray -t fingerprints < <(PLAN_JSON="\$plan" node -e '
-const p = JSON.parse(process.env.PLAN_JSON);
-if (!p.adoptionRequired) process.exit(2);
-process.stdout.write(p.manifestFingerprint + "\\n" + p.databaseFingerprint + "\\n");
-')
-[[ \${#fingerprints[@]} -eq 2 ]] || { echo "Database is not eligible for adoption." >&2; exit 1; }
-docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent db:adopt -- --release-id "\$DARSHAN_RELEASE_ID" --ticket "\$ticket" --manifest-fingerprint "\${fingerprints[0]}" --database-fingerprint "\${fingerprints[1]}" --json
-docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent db:migrate -- --release-id "\$DARSHAN_RELEASE_ID" --json
-docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent bootstrap:adopt-existing -- --email "\$INITIAL_ADMIN_EMAIL" --release-id "\$DARSHAN_RELEASE_ID" --ticket "\$ticket" --json
-./start.sh
-exec ./wait-ready.sh
+./deployment-state.sh begin ADOPT --ticket "\$ticket"
+state="\$(./deployment-state.sh status)"
+step="\$(jq -r '.run.last_step // empty' <<<"\$state")"
+recorded_ticket="\$(jq -r '.run.approval_ticket // empty' <<<"\$state")"
+[[ "\$recorded_ticket" == "\$ticket" ]] || { echo "The approved ticket does not match the interrupted adoption run." >&2; exit 1; }
+if [[ "\$step" == "BEGIN" ]]; then
+  plan=\$(docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent production:db:status -- --json | tail -n 1)
+  mapfile -t fingerprints < <(jq -er 'select(.adoptionRequired == true) | .manifestFingerprint, .databaseFingerprint' <<<"\$plan")
+  [[ \${#fingerprints[@]} -eq 2 ]] || { echo "Database is not eligible for adoption." >&2; exit 1; }
+  docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent production:db:adopt -- --release-id "\$DARSHAN_RELEASE_ID" --ticket "\$ticket" --manifest-fingerprint "\${fingerprints[0]}" --database-fingerprint "\${fingerprints[1]}" --json
+  ./deployment-state.sh mark DATABASE_ADOPTED
+  step=DATABASE_ADOPTED
+fi
+if [[ "\$step" == "DATABASE_ADOPTED" ]]; then
+  docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent production:db:migrate -- --release-id "\$DARSHAN_RELEASE_ID" --json
+  ./deployment-state.sh mark MIGRATIONS_APPLIED
+  step=MIGRATIONS_APPLIED
+fi
+if [[ "\$step" == "MIGRATIONS_APPLIED" ]]; then
+  docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent production:bootstrap:adopt-existing -- --email "\$INITIAL_ADMIN_EMAIL" --release-id "\$DARSHAN_RELEASE_ID" --ticket "\$ticket" --json
+  ./deployment-state.sh mark BOOTSTRAP_ADOPTED
+  step=BOOTSTRAP_ADOPTED
+fi
+if [[ "\$step" == "BOOTSTRAP_ADOPTED" ]]; then
+  ./start.sh
+  ./wait-ready.sh
+  ./deployment-state.sh mark BACKEND_READY --complete
+  step=BACKEND_READY
+fi
+[[ "\$step" == "BACKEND_READY" ]] || { echo "Unexpected adoption step: \$step" >&2; exit 1; }
 EOF
 
   cat > "$target_dir/recover-admin.sh" <<EOF
@@ -1085,7 +1319,7 @@ secret_name="\${resolved_password_file#"\$secrets_root"/}"
 container_password_file="/run/secrets/\$secret_name"
 
 ./verify-role.sh
-docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent admin:recover -- -e "\$email" --password-file "\$container_password_file" --ticket "\$ticket" "\${extra_args[@]}" --json
+docker compose --env-file $env_file -f docker-compose.yml run --rm api npm run --silent production:admin -- -e "\$email" --password-file "\$container_password_file" --ticket "\$ticket" "\${extra_args[@]}" --json
 echo "Administrator recovery command completed. Remove the local recovery password file after retaining required incident evidence."
 EOF
 }
@@ -1096,7 +1330,217 @@ write_stop_script() {
   cat > "$destination" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ -f ./deployment-control.sh ]]; then
+  source ./deployment-control.sh
+  acquire_deployment_lock
+  require_active_release
+fi
 docker compose --env-file $env_file -f docker-compose.yml down
+if [[ -f ./deployment-control.sh ]]; then
+  clear_active_release
+fi
+EOF
+}
+
+write_production_role_controls() {
+  local target_dir="$1"
+  local role="$2"
+  cat > "$target_dir/deployment-control.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source ./.env.production
+: "\${SITE_NAME:?SITE_NAME is required}"
+: "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
+: "\${DARSHAN_ROLE_NAME:?DARSHAN_ROLE_NAME is required}"
+[[ "\$DARSHAN_ROLE_NAME" == "$role" ]] || { echo "Signed role identity mismatch." >&2; exit 1; }
+role_root="\$(pwd -P)"
+state_root="/var/lib/darshan/deployments/\$SITE_NAME"
+runtime_state="\$state_root/runtime"
+prepared_marker="\$state_root/prepared/\$DARSHAN_ROLE_NAME-\$DARSHAN_RELEASE_ID"
+active_marker="\$runtime_state/\$DARSHAN_ROLE_NAME.active"
+
+acquire_deployment_lock() {
+  [[ -d "\$runtime_state" ]] || { echo "Host is not prepared; run sudo ./prepare-host.sh first." >&2; exit 1; }
+  lock_path="\$runtime_state/\$DARSHAN_ROLE_NAME.lock"
+  if [[ "\${DARSHAN_DEPLOYMENT_LOCK_HELD:-}" == "\$SITE_NAME:\$DARSHAN_ROLE_NAME" && -e /proc/\$\$/fd/9 && "\$(readlink -f /proc/\$\$/fd/9)" == "\$(readlink -f "\$lock_path")" ]]; then
+    flock -n 9 || { echo "Inherited deployment lock is no longer held." >&2; exit 1; }
+    return
+  fi
+  exec 9>"\$lock_path"
+  flock -n 9 || { echo "Another \$DARSHAN_ROLE_NAME lifecycle operation is active." >&2; exit 1; }
+  export DARSHAN_DEPLOYMENT_LOCK_HELD="\$SITE_NAME:\$DARSHAN_ROLE_NAME"
+}
+
+require_prepared_host() {
+  [[ -f "\$prepared_marker" && ! -L "\$prepared_marker" ]] || { echo "This release is not host-prepared; run sudo ./prepare-host.sh." >&2; exit 1; }
+  [[ "\$(stat -c '%u:%a' "\$prepared_marker")" == "0:644" ]] || { echo "Prepared-host marker ownership or mode is unsafe." >&2; exit 1; }
+  [[ "\$(cat "\$prepared_marker")" == "\$role_root" ]] || { echo "Prepared-host marker belongs to a different release path." >&2; exit 1; }
+}
+
+mark_active_release() {
+  local temporary="\$runtime_state/.\$DARSHAN_ROLE_NAME.active.\$\$"
+  printf '%s\n%s\n' "\$DARSHAN_RELEASE_ID" "\$role_root" > "\$temporary"
+  chmod 0640 "\$temporary"
+  mv -f "\$temporary" "\$active_marker"
+}
+
+require_active_release() {
+  [[ -f "\$active_marker" && ! -L "\$active_marker" ]] || { echo "No active \$DARSHAN_ROLE_NAME release is recorded." >&2; exit 1; }
+  mapfile -t active < "\$active_marker"
+  [[ "\${active[0]:-}" == "\$DARSHAN_RELEASE_ID" && "\${active[1]:-}" == "\$role_root" ]] || {
+    echo "Refusing lifecycle action from a stale release folder. Active: \${active[0]:-unknown} \${active[1]:-unknown}" >&2
+    exit 1
+  }
+}
+
+clear_active_release() {
+  rm -f "\$active_marker"
+}
+EOF
+
+  cat > "$target_dir/prepare-host.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "\$(id -u)" == "0" ]] || { echo "prepare-host.sh must run with sudo/root." >&2; exit 1; }
+source ./.env.production
+: "\${SITE_NAME:?SITE_NAME is required}"
+: "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
+: "\${DARSHAN_ROLE_NAME:?DARSHAN_ROLE_NAME is required}"
+[[ "\$DARSHAN_ROLE_NAME" == "$role" ]] || { echo "Signed role identity mismatch." >&2; exit 1; }
+getent group docker >/dev/null || { echo "Required docker group does not exist." >&2; exit 1; }
+for command in docker openssl curl tar sha256sum df flock stat jq readlink getent; do
+  command -v "\$command" >/dev/null || { echo "Required host command is missing: \$command" >&2; exit 1; }
+done
+docker compose version >/dev/null
+./verify-role.sh
+
+volume_names=()
+case "$role" in
+  data) volume_names=("\$POSTGRES_VOLUME_NAME" "\$MINIO_VOLUME_NAME") ;;
+  valkey) volume_names=("\$VALKEY_VOLUME_NAME") ;;
+  observability) volume_names=("\$PROMETHEUS_VOLUME_NAME" "\$ALERTMANAGER_VOLUME_NAME" "\$GRAFANA_VOLUME_NAME") ;;
+esac
+: "\${VOLUME_PROVISIONING_MODE:=create}"
+for volume in "\${volume_names[@]}"; do
+  [[ "\$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{1,127}\$ ]] || { echo "Unsafe Docker volume name: \$volume" >&2; exit 1; }
+  if docker volume inspect "\$volume" >/dev/null 2>&1; then
+    continue
+  fi
+  [[ "\$VOLUME_PROVISIONING_MODE" == "create" ]] || { echo "Required existing Docker volume is absent: \$volume" >&2; exit 1; }
+  docker volume create --label "com.darshan.site=\$SITE_NAME" --label "com.darshan.role=\$DARSHAN_ROLE_NAME" "\$volume" >/dev/null
+done
+
+state_root="/var/lib/darshan/deployments/\$SITE_NAME"
+install -d -m 0755 -o root -g root "\$state_root" "\$state_root/prepared"
+install -d -m 0770 -o root -g docker "\$state_root/runtime"
+if [[ "$role" == "backend" ]]; then
+  [[ "\$BACKEND_WORKER_SCRATCH_DIR" == "/var/lib/darshan/\$SITE_NAME/worker-scratch" ]] || { echo "Unexpected worker scratch path." >&2; exit 1; }
+  install -d -m 0700 -o 1000 -g 1000 "\$BACKEND_WORKER_SCRATCH_DIR"
+  install -d -m 0770 -o root -g docker ./bootstrap-secrets
+fi
+role_root="\$(pwd -P)"
+marker="\$state_root/prepared/\$DARSHAN_ROLE_NAME-\$DARSHAN_RELEASE_ID"
+printf '%s\n' "\$role_root" > "\$marker"
+chown root:root "\$marker"
+chmod 0644 "\$marker"
+echo "Prepared host for \$DARSHAN_ROLE_NAME release \$DARSHAN_RELEASE_ID."
+EOF
+
+  cat > "$target_dir/preflight.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "\${1:-}" == "image-load" ]] || { echo "Usage: \$0 image-load" >&2; exit 2; }
+source ./.env.production
+case "$role" in
+  data) minimum_free="\$DATA_MIN_FREE_DISK_BYTES" ;;
+  valkey) minimum_free="\$VALKEY_MIN_FREE_DISK_BYTES" ;;
+  backend) minimum_free="\$BACKEND_MIN_FREE_DISK_BYTES" ;;
+  cms) minimum_free="\$CMS_MIN_FREE_DISK_BYTES" ;;
+  observability) minimum_free="\$OBSERVABILITY_MIN_FREE_DISK_BYTES" ;;
+esac
+[[ "\$minimum_free" =~ ^[0-9]+\$ ]] || { echo "Signed minimum-free-space policy is invalid." >&2; exit 1; }
+docker_root="\$(docker info --format '{{.DockerRootDir}}')"
+available="\$(df -B1 --output=avail "\$docker_root" | awk 'NR == 2 { print \$1 }')"
+archive_bytes=0
+while IFS= read -r -d '' image; do
+  size="\$(stat -c '%s' "\$image")"
+  archive_bytes=\$((archive_bytes + size))
+done < <(find ./images -maxdepth 1 -type f -name '*.tar' -print0)
+required=\$((minimum_free + archive_bytes * 2))
+[[ "\$available" =~ ^[0-9]+\$ && "\$available" -ge "\$required" ]] || {
+  echo "Image-load preflight failed before Docker mutation: role=$role root=\$docker_root available=\${available:-unknown} required=\$required archive_bytes=\$archive_bytes formula=minimum_free+2x_archives" >&2
+  exit 1
+}
+if [[ "$role" == "backend" ]]; then
+  scratch_available="\$(df -B1 --output=avail "\$BACKEND_WORKER_SCRATCH_DIR" | awk 'NR == 2 { print \$1 }')"
+  [[ "\$scratch_available" =~ ^[0-9]+\$ && "\$scratch_available" -ge "\$BACKEND_MIN_FREE_DISK_BYTES" ]] || {
+    echo "Worker scratch filesystem is below the signed minimum free-space policy." >&2; exit 1;
+  }
+fi
+echo "Image-load capacity preflight passed."
+EOF
+}
+
+write_compatibility_check() {
+  local destination="$1"
+  local role="$2"
+  local ca_path
+  case "$role" in
+    backend|observability) ca_path=./certs/transport-ca.crt ;;
+    cms) ca_path=./tls/transport-ca.crt ;;
+    *) return 0 ;;
+  esac
+  cat > "$destination" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+source ./.env.production
+
+check_document() {
+  local expected_role="\$1" payload="\$2"
+  jq -e --arg site "\$SITE_NAME" --arg role "\$expected_role" \
+    --argjson generation "\$DARSHAN_COMPATIBILITY_GENERATION" '
+    .site == \$site and .role == \$role and .compatibility_generation == \$generation
+  ' <<<"\$payload" >/dev/null || {
+    echo "Compatibility check failed for \$expected_role." >&2
+    exit 1
+  }
+}
+
+check_gateway() {
+  local expected_role="\$1" host="\$2" bind="\$3" payload
+  payload="\$(curl --fail --silent --show-error --cacert $ca_path \
+    --resolve "\${host}:\${METRICS_GATEWAY_HOST_PORT}:\${bind}" \
+    "https://\${host}:\${METRICS_GATEWAY_HOST_PORT}/darshan/compatibility")"
+  check_document "\$expected_role" "\$payload"
+}
+
+check_backend() {
+  local payload
+  payload="\$(curl --fail --silent --show-error --cacert $ca_path \
+    --resolve "\${BACKEND_PRIVATE_HOST}:\${API_HOST_PORT}:\${BACKEND_BIND_ADDRESS}" \
+    "https://\${BACKEND_PRIVATE_HOST}:\${API_HOST_PORT}/api/v1/health/identity")"
+  jq -e --arg site "\$SITE_NAME" --argjson generation "\$DARSHAN_COMPATIBILITY_GENERATION" '
+    .site == \$site and .service == "backend" and .compatibility_generation == \$generation
+  ' <<<"\$payload" >/dev/null || { echo "Compatibility check failed for backend." >&2; exit 1; }
+}
+
+case "$role" in
+  backend)
+    check_gateway data "\$DATA_PRIVATE_HOST" "\$DATA_BIND_ADDRESS"
+    check_gateway valkey "\$VALKEY_PRIVATE_HOST" "\$VALKEY_BIND_ADDRESS"
+    ;;
+  cms)
+    check_backend
+    check_gateway data "\$DATA_PRIVATE_HOST" "\$DATA_BIND_ADDRESS"
+    ;;
+  observability)
+    check_gateway data "\$DATA_PRIVATE_HOST" "\$DATA_BIND_ADDRESS"
+    check_gateway valkey "\$VALKEY_PRIVATE_HOST" "\$VALKEY_BIND_ADDRESS"
+    check_gateway backend "\$BACKEND_PRIVATE_HOST" "\$BACKEND_BIND_ADDRESS"
+    check_gateway cms "\$CMS_PUBLIC_HOST" "\$CMS_BIND_ADDRESS"
+    ;;
+esac
+echo "Dependency compatibility generation verified for $role."
 EOF
 }
 
@@ -1116,7 +1560,6 @@ write_runtime_secret() {
 
 sign_role_manifest() {
   local role_dir="$1"
-  cp "$BUNDLE_ROOT/RELEASE_SIGNING_PUBLIC_KEY.pem" "$role_dir/RELEASE_SIGNING_PUBLIC_KEY.pem"
   (
     cd "$role_dir"
     mapfile -t certs < <(find . -type f -name '*.crt' -print | LC_ALL=C sort)
@@ -1207,7 +1650,27 @@ render_prometheus_config() {
   local postgres_exporter_port="${24:-9187}"
   local nginx_exporter_port="${25:-9113}"
   local valkey_host="${26:-}"
+  local remote_exporter_scheme="${27:-http}"
+  local metrics_gateway_port="${28:-}"
+  local observability_metrics_scheme="${29:-http}"
+  local observability_tls_server_name="${30:-}"
+  local observability_node_target="${31:-${observability_host}:${node_exporter_port}}"
+  local remote_node_port="$node_exporter_port"
+  local remote_postgres_port="$postgres_exporter_port"
+  local remote_nginx_port="$nginx_exporter_port"
+  local node_metrics_path="/metrics"
+  local postgres_metrics_path="/metrics"
+  local nginx_metrics_path="/metrics"
   local rendered_tmp="$TEMP_WORK_DIR/prometheus-rendered-$environment_name.yml"
+
+  if [[ -n "$metrics_gateway_port" ]]; then
+    remote_node_port="$metrics_gateway_port"
+    remote_postgres_port="$metrics_gateway_port"
+    remote_nginx_port="$metrics_gateway_port"
+    node_metrics_path="/node/metrics"
+    postgres_metrics_path="/postgres/metrics"
+    nginx_metrics_path="/nginx/metrics"
+  fi
 
   sed \
     -e "s/__SITE_NAME__/${site_name}/g" \
@@ -1233,13 +1696,32 @@ render_prometheus_config() {
     -e "s/__NODE_EXPORTER_HOST_PORT__/${node_exporter_port}/g" \
     -e "s/__POSTGRES_EXPORTER_HOST_PORT__/${postgres_exporter_port}/g" \
     -e "s/__NGINX_EXPORTER_HOST_PORT__/${nginx_exporter_port}/g" \
+    -e "s#__NODE_EXPORTER_METRICS_PATH__#${node_metrics_path}#g" \
+    -e "s#__POSTGRES_EXPORTER_METRICS_PATH__#${postgres_metrics_path}#g" \
+    -e "s#__NGINX_EXPORTER_METRICS_PATH__#${nginx_metrics_path}#g" \
+    -e "s/__REMOTE_EXPORTER_SCHEME__/${remote_exporter_scheme}/g" \
+    -e "s/__REMOTE_NODE_EXPORTER_PORT__/${remote_node_port}/g" \
+    -e "s/__REMOTE_POSTGRES_EXPORTER_PORT__/${remote_postgres_port}/g" \
+    -e "s/__REMOTE_NGINX_EXPORTER_PORT__/${remote_nginx_port}/g" \
+    -e "s/__OBSERVABILITY_METRICS_SCHEME__/${observability_metrics_scheme}/g" \
+    -e "s/__OBSERVABILITY_NODE_TARGET__/${observability_node_target}/g" \
     "$PLATFORM_ROOT/deploy/shared/observability/prometheus/prometheus.yml.template" > "$rendered_tmp"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
-      *__BACKEND_METRICS_TLS_CONFIG__*|*__MINIO_METRICS_TLS_CONFIG__*)
+      *__BACKEND_METRICS_TLS_CONFIG__*|*__MINIO_METRICS_TLS_CONFIG__*|*__REMOTE_EXPORTER_TLS_CONFIG__*)
         if [[ -n "$transport_ca_path" ]]; then
           printf '    tls_config:\n      ca_file: %s\n' "$transport_ca_path"
+        fi
+        ;;
+      *__OBSERVABILITY_ALERTING_TLS_CONFIG__*)
+        if [[ "$observability_metrics_scheme" == "https" ]]; then
+          printf '      tls_config:\n        ca_file: %s\n        server_name: %s\n' "$transport_ca_path" "$observability_tls_server_name"
+        fi
+        ;;
+      *__OBSERVABILITY_SCRAPE_TLS_CONFIG__*)
+        if [[ "$observability_metrics_scheme" == "https" ]]; then
+          printf '    tls_config:\n      ca_file: %s\n      server_name: %s\n' "$transport_ca_path" "$observability_tls_server_name"
         fi
         ;;
       *__BACKEND_METRICS_AUTHORIZATION__*)
@@ -1250,6 +1732,33 @@ render_prometheus_config() {
       *) printf '%s\n' "$line" ;;
     esac
   done < "$rendered_tmp" > "$destination"
+}
+
+render_grafana_datasource() {
+  local destination="$1"
+  local upstream_url="$2"
+  local tls_server_name="$3"
+  local ca_file="$4"
+
+  cat > "$destination" <<EOF
+apiVersion: 1
+
+datasources:
+  - name: DARSHAN Prometheus
+    uid: darshan-prometheus
+    type: prometheus
+    access: proxy
+    url: $upstream_url
+    isDefault: true
+    editable: false
+    jsonData:
+      tlsSkipVerify: false
+      serverName: $tls_server_name
+      tlsAuthWithCACert: true
+    secureJsonData:
+      tlsCACert: |
+EOF
+  sed 's/^/        /' "$ca_file" >> "$destination"
 }
 
 render_grafana_ini() {
@@ -1279,6 +1788,8 @@ render_alert_rules() {
 write_observability_compose() {
   local destination="$1"
   cat > "$destination" <<'EOF'
+name: ${COMPOSE_PROJECT_NAME}
+
 x-darshan-log: &darshan-log
   logging:
     driver: local
@@ -1321,11 +1832,15 @@ services:
         cp -R /run/darshan-prometheus-input/prometheus/. "$${runtime}/prometheus/"
         cp /run/darshan-prometheus-input/secrets/backend-metrics-bearer-token "$${runtime}/secrets/backend-metrics-bearer-token"
         cp /run/darshan-prometheus-input/tls/transport-ca.crt "$${runtime}/tls/transport-ca.crt"
+        cp /run/darshan-prometheus-input/tls/server.crt "$${runtime}/tls/server.crt"
+        cp /run/darshan-prometheus-input/tls/server.key "$${runtime}/tls/server.key"
         chmod 0750 "$${runtime}" "$${runtime}/prometheus" "$${runtime}/secrets" "$${runtime}/tls"
         chmod 0400 "$${runtime}/secrets/backend-metrics-bearer-token"
+        chmod 0400 "$${runtime}/tls/server.key"
         chown -R nobody:nobody "$${runtime}"
         exec chpst -u nobody:nobody /bin/prometheus \
           --config.file=/etc/darshan/prometheus/prometheus.yml \
+          --web.config.file=/etc/darshan/prometheus/web-config.yml \
           --storage.tsdb.path=/prometheus \
           --storage.tsdb.retention.time="$${PROMETHEUS_RETENTION_TIME:-30d}" \
           --storage.tsdb.wal-compression \
@@ -1361,15 +1876,41 @@ services:
     pull_policy: never
     restart: unless-stopped
     <<: [*darshan-log, *alertmanager-resources]
+    user: "0:0"
     ports:
       - "${OBSERVABILITY_BIND_ADDRESS}:${ALERTMANAGER_HOST_PORT:-9093}:9093"
-    command:
-      - --config.file=/etc/darshan/alertmanager/alertmanager.yml
-      - --storage.path=/alertmanager
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+        runtime=/etc/darshan
+        install -d -m 0750 -o root -g root "$${runtime}/alertmanager" "$${runtime}/tls"
+        cp -R /run/darshan-alertmanager-input/alertmanager/. "$${runtime}/alertmanager/"
+        cp /run/darshan-alertmanager-input/tls/server.crt "$${runtime}/tls/server.crt"
+        cp /run/darshan-alertmanager-input/tls/server.key "$${runtime}/tls/server.key"
+        chmod 0750 "$${runtime}" "$${runtime}/alertmanager" "$${runtime}/tls"
+        chmod 0400 "$${runtime}/tls/server.key"
+        chown -R nobody:nobody "$${runtime}" /alertmanager
+        exec chpst -u nobody:nobody /bin/alertmanager \
+          --config.file=/etc/darshan/alertmanager/alertmanager.yml \
+          --web.config.file=/etc/darshan/alertmanager/web-config.yml \
+          --storage.path=/alertmanager
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/darshan/alertmanager/alertmanager.yml:ro
-      - ./alertmanager/templates:/etc/darshan/alertmanager/templates:ro
+      - ./alertmanager:/run/darshan-alertmanager-input/alertmanager:ro
+      - ./certs:/run/darshan-alertmanager-input/tls:ro
       - alertmanager_data:/alertmanager
+    tmpfs:
+      - /etc/darshan:mode=0750,uid=0,gid=0
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
 
   grafana:
     image: ${GRAFANA_IMAGE}
@@ -1392,16 +1933,20 @@ services:
       - |
         set -eu
         runtime=/run/darshan-grafana-runtime
-        install -d -m 0750 -o root -g root "$${runtime}/config" "$${runtime}/secrets"
+        install -d -m 0750 -o root -g root "$${runtime}/config" "$${runtime}/secrets" "$${runtime}/tls"
         cp -R /run/darshan-grafana-input/grafana/. "$${runtime}/config/"
         cp /run/darshan-grafana-input/secrets/grafana-admin-password "$${runtime}/secrets/admin-password"
-        chmod 0750 "$${runtime}" "$${runtime}/config" "$${runtime}/secrets"
+        cp /run/darshan-grafana-input/tls/server.crt "$${runtime}/tls/server.crt"
+        cp /run/darshan-grafana-input/tls/server.key "$${runtime}/tls/server.key"
+        chmod 0750 "$${runtime}" "$${runtime}/config" "$${runtime}/secrets" "$${runtime}/tls"
         chmod 0400 "$${runtime}/secrets/admin-password"
+        chmod 0400 "$${runtime}/tls/server.key"
         chown -R 472:0 "$${runtime}"
         chown 472:0 /var/lib/grafana
         exec su -s /bin/sh grafana -c 'exec /run.sh'
     volumes:
       - ./grafana:/run/darshan-grafana-input/grafana:ro
+      - ./certs:/run/darshan-grafana-input/tls:ro
       - ./secrets:/run/darshan-grafana-input/secrets:ro
       - grafana_data:/var/lib/grafana
     tmpfs:
@@ -1426,8 +1971,6 @@ services:
       - --path.rootfs=/host
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     pid: host
-    ports:
-      - "${OBSERVABILITY_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}:9100"
     volumes:
       # A plain read-only bind works on hosts whose root mount is private.
       # `rslave` would fail the entire role before the exporter starts there.
@@ -1442,14 +1985,24 @@ services:
 
 volumes:
   prometheus_data:
+    external: true
+    name: ${PROMETHEUS_VOLUME_NAME}
   alertmanager_data:
+    external: true
+    name: ${ALERTMANAGER_VOLUME_NAME}
   grafana_data:
+    external: true
+    name: ${GRAFANA_VOLUME_NAME}
 EOF
 }
 
 TEMP_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/darshan-platform.XXXXXX")"
+PARTIAL_BUNDLE_ROOT=""
 cleanup_temp_work_dir() {
   rm -rf "$TEMP_WORK_DIR"
+  if [[ -n "$PARTIAL_BUNDLE_ROOT" ]]; then
+    rm -rf "$PARTIAL_BUNDLE_ROOT"
+  fi
 }
 trap cleanup_temp_work_dir EXIT
 
@@ -1542,6 +2095,12 @@ GRAFANA_HOST_PORT="${GRAFANA_HOST_PORT:-3001}"
 NODE_EXPORTER_HOST_PORT="${NODE_EXPORTER_HOST_PORT:-9100}"
 POSTGRES_EXPORTER_HOST_PORT="${POSTGRES_EXPORTER_HOST_PORT:-9187}"
 NGINX_EXPORTER_HOST_PORT="${NGINX_EXPORTER_HOST_PORT:-9113}"
+METRICS_GATEWAY_HOST_PORT="${METRICS_GATEWAY_HOST_PORT:-9443}"
+DARSHAN_COMPATIBILITY_GENERATION="${DARSHAN_COMPATIBILITY_GENERATION:-1}"
+[[ "$DARSHAN_COMPATIBILITY_GENERATION" =~ ^[1-9][0-9]*$ ]] || {
+  echo "DARSHAN_COMPATIBILITY_GENERATION must be a positive integer." >&2
+  exit 1
+}
 PROMETHEUS_SCRAPE_INTERVAL="${PROMETHEUS_SCRAPE_INTERVAL:-30s}"
 PROMETHEUS_EVALUATION_INTERVAL="${PROMETHEUS_EVALUATION_INTERVAL:-30s}"
 PROMETHEUS_RETENTION_TIME="${PROMETHEUS_RETENTION_TIME:-30d}"
@@ -1561,6 +2120,8 @@ POSTGRES_TLS_CERT_FILE="${POSTGRES_TLS_CERT_FILE:-}"
 POSTGRES_TLS_KEY_FILE="${POSTGRES_TLS_KEY_FILE:-}"
 VALKEY_TLS_CERT_FILE="${VALKEY_TLS_CERT_FILE:-}"
 VALKEY_TLS_KEY_FILE="${VALKEY_TLS_KEY_FILE:-}"
+OBSERVABILITY_TLS_CERT_FILE="${OBSERVABILITY_TLS_CERT_FILE:-}"
+OBSERVABILITY_TLS_KEY_FILE="${OBSERVABILITY_TLS_KEY_FILE:-}"
 DEVICE_CA_CERT_FILE="${DEVICE_CA_CERT_FILE:-}"
 DEVICE_CA_KEY_FILE="${DEVICE_CA_KEY_FILE:-}"
 
@@ -1667,6 +2228,13 @@ REALTIME_VALKEY_RECONNECT_MIN_MS="${REALTIME_VALKEY_RECONNECT_MIN_MS:-500}"
 REALTIME_VALKEY_RECONNECT_MAX_MS="${REALTIME_VALKEY_RECONNECT_MAX_MS:-30000}"
 REALTIME_VALKEY_PUBLISH_TIMEOUT_MS="${REALTIME_VALKEY_PUBLISH_TIMEOUT_MS:-1000}"
 RELEASE_SIGNING_PRIVATE_KEY="${RELEASE_SIGNING_PRIVATE_KEY:-}"
+VOLUME_PROVISIONING_MODE="${VOLUME_PROVISIONING_MODE:-create}"
+POSTGRES_VOLUME_NAME="${POSTGRES_VOLUME_NAME:-darshan-$SITE_NAME-postgres-data}"
+MINIO_VOLUME_NAME="${MINIO_VOLUME_NAME:-darshan-$SITE_NAME-minio-data}"
+VALKEY_VOLUME_NAME="${VALKEY_VOLUME_NAME:-darshan-$SITE_NAME-valkey-data}"
+PROMETHEUS_VOLUME_NAME="${PROMETHEUS_VOLUME_NAME:-darshan-$SITE_NAME-prometheus-data}"
+ALERTMANAGER_VOLUME_NAME="${ALERTMANAGER_VOLUME_NAME:-darshan-$SITE_NAME-alertmanager-data}"
+GRAFANA_VOLUME_NAME="${GRAFANA_VOLUME_NAME:-darshan-$SITE_NAME-grafana-data}"
 
 OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/dist/onprem}"
 
@@ -1823,7 +2391,14 @@ if profile_enabled production; then
   CMS_PRODUCTION_ORIGIN="$(build_origin "$CMS_PUBLIC_SCHEME" "$CMS_PUBLIC_HOST" "$CMS_HTTPS_PORT")"
 fi
 
-BUNDLE_ROOT="$OUTPUT_BASE/$SITE_NAME"
+FINAL_BUNDLE_ROOT="$OUTPUT_BASE/$SITE_NAME/$DARSHAN_RELEASE_ID"
+if [[ -e "$FINAL_BUNDLE_ROOT" ]]; then
+  echo "Release output already exists and will not be overwritten: $FINAL_BUNDLE_ROOT" >&2
+  exit 1
+fi
+mkdir -p "$OUTPUT_BASE/$SITE_NAME"
+PARTIAL_BUNDLE_ROOT="$(mktemp -d "$OUTPUT_BASE/$SITE_NAME/.$DARSHAN_RELEASE_ID.partial.XXXXXX")"
+BUNDLE_ROOT="$PARTIAL_BUNDLE_ROOT"
 QA_ROOT="$BUNDLE_ROOT/qa"
 PRODUCTION_ROOT="$BUNDLE_ROOT/production"
 QA_DATA_DIR="$QA_ROOT/data"
@@ -1836,10 +2411,8 @@ PROD_VALKEY_DIR="$PRODUCTION_ROOT/valkey"
 PROD_BACKEND_DIR="$PRODUCTION_ROOT/backend"
 PROD_CMS_DIR="$PRODUCTION_ROOT/cms"
 PROD_OBSERVABILITY_DIR="$PRODUCTION_ROOT/observability"
+PROD_RECOVERY_DIR="$PRODUCTION_ROOT/recovery"
 PROD_ELECTRON_DIR="$PRODUCTION_ROOT/electron"
-
-rm -rf "$BUNDLE_ROOT"
-mkdir -p "$BUNDLE_ROOT"
 
 if profile_enabled qa; then
   mkdir -p \
@@ -1873,6 +2446,9 @@ if profile_enabled production; then
     "$PROD_CMS_DIR/tls" \
     "$PROD_CMS_DIR/www" \
     "$PROD_CMS_DIR/admin-browser" \
+    "$PROD_RECOVERY_DIR/images" \
+    "$PROD_RECOVERY_DIR/inputs" \
+    "$PROD_RECOVERY_DIR/evidence" \
     "$PROD_ELECTRON_DIR"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     mkdir -p \
@@ -1928,6 +2504,7 @@ fi
 
 if profile_enabled production; then
   copy_archive_to_targets "$BACKEND_IMAGE_ARCHIVE" "$PROD_BACKEND_DIR/images"
+  copy_archive_to_targets "$BACKEND_IMAGE_ARCHIVE" "$PROD_RECOVERY_DIR/images"
 fi
 
 if [[ -n "$POSTGRES_PACKAGE_ARCHIVE" ]]; then
@@ -2016,14 +2593,17 @@ if [[ -n "$NGINX_PACKAGE_ARCHIVE" ]]; then
     copy_archive_to_targets "$NGINX_PACKAGE_ARCHIVE" "$QA_CMS_DIR/images"
   fi
   if profile_enabled production; then
-    copy_archive_to_targets "$NGINX_PACKAGE_ARCHIVE" "$PROD_CMS_DIR/images"
+    copy_archive_to_targets "$NGINX_PACKAGE_ARCHIVE" \
+      "$PROD_DATA_DIR/images" "$PROD_VALKEY_DIR/images" "$PROD_BACKEND_DIR/images" "$PROD_CMS_DIR/images" "$PROD_OBSERVABILITY_DIR/images"
   fi
 elif [[ "$SKIP_DOCKER" == "true" ]]; then
   if profile_enabled qa; then
     write_skip_placeholder "$QA_CMS_DIR/images" "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
   fi
   if profile_enabled production; then
-    write_skip_placeholder "$PROD_CMS_DIR/images" "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
+    for image_dir in "$PROD_DATA_DIR/images" "$PROD_VALKEY_DIR/images" "$PROD_BACKEND_DIR/images" "$PROD_CMS_DIR/images" "$PROD_OBSERVABILITY_DIR/images"; do
+      write_skip_placeholder "$image_dir" "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
+    done
   fi
 else
   echo "Preparing base image: $NGINX_IMAGE"
@@ -2033,7 +2613,8 @@ else
     copy_archive_to_targets "$NGINX_IMAGE_ARCHIVE_TEMP" "$QA_CMS_DIR/images"
   fi
   if profile_enabled production; then
-    copy_archive_to_targets "$NGINX_IMAGE_ARCHIVE_TEMP" "$PROD_CMS_DIR/images"
+    copy_archive_to_targets "$NGINX_IMAGE_ARCHIVE_TEMP" \
+      "$PROD_DATA_DIR/images" "$PROD_VALKEY_DIR/images" "$PROD_BACKEND_DIR/images" "$PROD_CMS_DIR/images" "$PROD_OBSERVABILITY_DIR/images"
   fi
 fi
 
@@ -2118,17 +2699,19 @@ fi
 
 if [[ "$SKIP_DOCKER" != "true" ]] && profile_enabled production; then
   if [[ -f "$PROD_DATA_DIR/images/$POSTGRES_IMAGE_ARCHIVE_NAME" && -f "$PROD_DATA_DIR/images/$MINIO_IMAGE_ARCHIVE_NAME" && \
-    -f "$PROD_DATA_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" && -f "$PROD_DATA_DIR/images/$POSTGRES_EXPORTER_IMAGE_ARCHIVE_NAME" ]]; then
+    -f "$PROD_DATA_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" && -f "$PROD_DATA_DIR/images/$POSTGRES_EXPORTER_IMAGE_ARCHIVE_NAME" && -f "$PROD_DATA_DIR/images/$NGINX_IMAGE_ARCHIVE_NAME" ]]; then
     write_image_metadata_manifest "$PROD_DATA_DIR/images" \
       "$POSTGRES_IMAGE_ARCHIVE_NAME" "$POSTGRES_IMAGE" \
       "$MINIO_IMAGE_ARCHIVE_NAME" "$MINIO_RUNTIME_IMAGE" \
       "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE" \
-      "$POSTGRES_EXPORTER_IMAGE_ARCHIVE_NAME" "$POSTGRES_EXPORTER_IMAGE"
+      "$POSTGRES_EXPORTER_IMAGE_ARCHIVE_NAME" "$POSTGRES_EXPORTER_IMAGE" \
+      "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
   fi
-  if [[ -f "$PROD_VALKEY_DIR/images/$VALKEY_IMAGE_ARCHIVE_NAME" && -f "$PROD_VALKEY_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" ]]; then
+  if [[ -f "$PROD_VALKEY_DIR/images/$VALKEY_IMAGE_ARCHIVE_NAME" && -f "$PROD_VALKEY_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" && -f "$PROD_VALKEY_DIR/images/$NGINX_IMAGE_ARCHIVE_NAME" ]]; then
     write_image_metadata_manifest "$PROD_VALKEY_DIR/images" \
       "$VALKEY_IMAGE_ARCHIVE_NAME" "$VALKEY_IMAGE" \
-      "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE"
+      "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE" \
+      "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
   fi
   if [[ -f "$PROD_CMS_DIR/images/$NGINX_IMAGE_ARCHIVE_NAME" && -f "$PROD_CMS_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" && \
     -f "$PROD_CMS_DIR/images/$NGINX_PROMETHEUS_EXPORTER_IMAGE_ARCHIVE_NAME" ]]; then
@@ -2137,21 +2720,28 @@ if [[ "$SKIP_DOCKER" != "true" ]] && profile_enabled production; then
       "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE" \
       "$NGINX_PROMETHEUS_EXPORTER_IMAGE_ARCHIVE_NAME" "$NGINX_PROMETHEUS_EXPORTER_IMAGE"
   fi
-  if [[ -f "$PROD_BACKEND_DIR/images/$BACKEND_IMAGE_ARCHIVE_NAME" && -f "$PROD_BACKEND_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" ]]; then
+  if [[ -f "$PROD_BACKEND_DIR/images/$BACKEND_IMAGE_ARCHIVE_NAME" && -f "$PROD_BACKEND_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" && -f "$PROD_BACKEND_DIR/images/$NGINX_IMAGE_ARCHIVE_NAME" ]]; then
     write_image_metadata_manifest "$PROD_BACKEND_DIR/images" \
       "$BACKEND_IMAGE_ARCHIVE_NAME" "$BACKEND_IMAGE_REF" \
-      "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE"
+      "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE" \
+      "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
+  fi
+  if [[ -f "$PROD_RECOVERY_DIR/images/$BACKEND_IMAGE_ARCHIVE_NAME" ]]; then
+    write_image_metadata_manifest "$PROD_RECOVERY_DIR/images" \
+      "$BACKEND_IMAGE_ARCHIVE_NAME" "$BACKEND_IMAGE_REF"
   fi
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" && \
     -f "$PROD_OBSERVABILITY_DIR/images/$PROMETHEUS_IMAGE_ARCHIVE_NAME" && \
     -f "$PROD_OBSERVABILITY_DIR/images/$ALERTMANAGER_IMAGE_ARCHIVE_NAME" && \
     -f "$PROD_OBSERVABILITY_DIR/images/$GRAFANA_IMAGE_ARCHIVE_NAME" && \
-    -f "$PROD_OBSERVABILITY_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" ]]; then
+    -f "$PROD_OBSERVABILITY_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" && \
+    -f "$PROD_OBSERVABILITY_DIR/images/$NGINX_IMAGE_ARCHIVE_NAME" ]]; then
     write_image_metadata_manifest "$PROD_OBSERVABILITY_DIR/images" \
       "$PROMETHEUS_IMAGE_ARCHIVE_NAME" "$PROMETHEUS_IMAGE" \
       "$ALERTMANAGER_IMAGE_ARCHIVE_NAME" "$ALERTMANAGER_IMAGE" \
       "$GRAFANA_IMAGE_ARCHIVE_NAME" "$GRAFANA_IMAGE" \
-      "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE"
+      "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE" \
+      "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
   fi
 fi
 
@@ -2207,6 +2797,7 @@ if profile_enabled production; then
     --backend-device-host "$BACKEND_DEVICE_HOST"
     --data-host "$DATA_PRIVATE_HOST"
     --valkey-host "$VALKEY_PRIVATE_HOST"
+    --observability-host "$OBSERVABILITY_PRIVATE_HOST"
   )
   if [[ "$TRANSPORT_TLS_MODE" == "internal-ca" ]]; then
     TLS_PREPARE_ARGS+=(--transport-ca-key "$TRANSPORT_CA_KEY_FILE")
@@ -2217,6 +2808,7 @@ if profile_enabled production; then
       --minio-cert "$MINIO_TLS_CERT_FILE" --minio-key "$MINIO_TLS_KEY_FILE"
       --postgres-cert "$POSTGRES_TLS_CERT_FILE" --postgres-key "$POSTGRES_TLS_KEY_FILE"
       --valkey-cert "$VALKEY_TLS_CERT_FILE" --valkey-key "$VALKEY_TLS_KEY_FILE"
+      --observability-cert "$OBSERVABILITY_TLS_CERT_FILE" --observability-key "$OBSERVABILITY_TLS_KEY_FILE"
     )
   fi
   bash "$BOOTSTRAP_DIR/prepare-transport-tls.sh" "${TLS_PREPARE_ARGS[@]}"
@@ -2228,6 +2820,7 @@ if profile_enabled production; then
   cp "$TLS_PREPARED_DIR/backend/server.crt" "$PROD_BACKEND_DIR/certs/server.crt"
   cp "$TLS_PREPARED_DIR/backend/server.key" "$PROD_BACKEND_DIR/certs/server.key"
   cp "$TLS_PREPARED_DIR/transport-ca.crt" "$PROD_BACKEND_DIR/certs/transport-ca.crt"
+  cp "$TLS_PREPARED_DIR/transport-ca.crt" "$PROD_RECOVERY_DIR/inputs/transport-ca.crt"
   cp "$TLS_PREPARED_DIR/device/device-ca.crt" "$PROD_BACKEND_DIR/certs/device-ca.crt"
   cp "$TLS_PREPARED_DIR/device/device-ca.key" "$PROD_BACKEND_DIR/certs/device-ca.key"
   cp "$TLS_PREPARED_DIR/minio/public.crt" "$PROD_DATA_DIR/tls/public.crt"
@@ -2241,6 +2834,8 @@ if profile_enabled production; then
   cp "$TLS_PREPARED_DIR/valkey/ca.crt" "$PROD_VALKEY_DIR/tls/ca.crt"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     cp "$TLS_PREPARED_DIR/transport-ca.crt" "$PROD_OBSERVABILITY_DIR/certs/transport-ca.crt"
+    cp "$TLS_PREPARED_DIR/observability/server.crt" "$PROD_OBSERVABILITY_DIR/certs/server.crt"
+    cp "$TLS_PREPARED_DIR/observability/server.key" "$PROD_OBSERVABILITY_DIR/certs/server.key"
   fi
 
   cat > "$PROD_BACKEND_DIR/certs/README.md" <<'EOF'
@@ -2314,6 +2909,9 @@ EOF
 
   printf '%s\n' "$CMS_PRODUCTION_ORIGIN" > "$PROD_CMS_DIR/admin-browser/cms-origin.txt"
   chmod 600 "$PROD_CMS_DIR/tls/tls.key" "$PROD_BACKEND_DIR/certs/server.key" "$PROD_BACKEND_DIR/certs/device-ca.key" "$PROD_DATA_DIR/tls/private.key" "$PROD_DATA_DIR/tls/postgres.key" "$PROD_VALKEY_DIR/tls/server.key"
+  if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
+    chmod 600 "$PROD_OBSERVABILITY_DIR/certs/server.key"
+  fi
 fi
 
 if profile_enabled qa; then
@@ -2344,6 +2942,8 @@ if profile_enabled qa; then
   cat > "$QA_DATA_DIR/.env.qa" <<EOF
 POSTGRES_IMAGE=$POSTGRES_IMAGE
 MINIO_IMAGE=$MINIO_RUNTIME_IMAGE
+NGINX_IMAGE=$NGINX_IMAGE
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 POSTGRES_USER=$POSTGRES_USER
 POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password
 POSTGRES_DB=$POSTGRES_DB
@@ -2356,11 +2956,15 @@ EOF
 
   cat > "$QA_VALKEY_DIR/.env.qa" <<EOF
 VALKEY_IMAGE=$VALKEY_IMAGE
+NGINX_IMAGE=$NGINX_IMAGE
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 VALKEY_HOST_PORT=$QA_VALKEY_HOST_PORT
 EOF
 
   cat > "$QA_BACKEND_DIR/.env.qa" <<EOF
 BACKEND_IMAGE=$BACKEND_IMAGE_REF
+NGINX_IMAGE=$NGINX_IMAGE
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 NODE_ENV=production
 HOST=$HOST
 PORT=$PORT
@@ -2378,7 +2982,6 @@ OBSERVABILITY_METRICS_BEARER_TOKEN_FILE=/run/secrets/observability-metrics-beare
 MINIO_USE_SSL=$MINIO_USE_SSL
 MINIO_REGION=$MINIO_REGION
 INITIAL_ADMIN_EMAIL=$INITIAL_ADMIN_EMAIL
-DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
 CA_CERT_PATH=$CA_CERT_PATH
 LOG_LEVEL=$LOG_LEVEL
 ENABLE_SWAGGER_UI=false
@@ -2435,6 +3038,7 @@ EOF
 
   cat > "$QA_CMS_DIR/.env.qa" <<EOF
 NGINX_IMAGE=$NGINX_IMAGE
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 QA_CMS_HTTP_PORT=$QA_CMS_HTTP_PORT
 BACKEND_UPSTREAM_HOST=$QA_BACKEND_HOST
 BACKEND_UPSTREAM_PORT=$QA_API_HOST_PORT
@@ -2548,8 +3152,6 @@ services:
       - --path.rootfs=/host
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     pid: host
-    ports:
-      - "${BACKEND_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}:9100"
     volumes:
       - /:/host:ro
     read_only: true
@@ -2559,6 +3161,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
 EOF
 
   cat > "$QA_CMS_DIR/docker-compose.yml" <<'EOF'
@@ -2767,8 +3370,18 @@ if profile_enabled production; then
   write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-secret-key" "$BACKUP_OFFHOST_SECRET_KEY"
 
   cat > "$PROD_DATA_DIR/.env.production" <<EOF
+COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-data
+SITE_NAME=$SITE_NAME
+DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
+DARSHAN_ROLE_NAME=data
+DARSHAN_COMPATIBILITY_GENERATION=$DARSHAN_COMPATIBILITY_GENERATION
+VOLUME_PROVISIONING_MODE=$VOLUME_PROVISIONING_MODE
+POSTGRES_VOLUME_NAME=$POSTGRES_VOLUME_NAME
+MINIO_VOLUME_NAME=$MINIO_VOLUME_NAME
 POSTGRES_IMAGE=$POSTGRES_IMAGE
 MINIO_IMAGE=$MINIO_RUNTIME_IMAGE
+NGINX_IMAGE=$NGINX_IMAGE
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 POSTGRES_USER=$POSTGRES_USER
 POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password
 POSTGRES_MONITORING_USER=$POSTGRES_MONITORING_USER
@@ -2804,7 +3417,16 @@ DATA_MIN_FREE_DISK_BYTES=$DATA_MIN_FREE_DISK_BYTES
 EOF
 
   cat > "$PROD_VALKEY_DIR/.env.production" <<EOF
+COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-valkey
+SITE_NAME=$SITE_NAME
+DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
+DARSHAN_ROLE_NAME=valkey
+DARSHAN_COMPATIBILITY_GENERATION=$DARSHAN_COMPATIBILITY_GENERATION
+VOLUME_PROVISIONING_MODE=$VOLUME_PROVISIONING_MODE
+VALKEY_VOLUME_NAME=$VALKEY_VOLUME_NAME
 VALKEY_IMAGE=$VALKEY_IMAGE
+NGINX_IMAGE=$NGINX_IMAGE
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 VALKEY_HOST_PORT=$VALKEY_HOST_PORT
 VALKEY_BIND_ADDRESS=$VALKEY_BIND_ADDRESS
 VALKEY_PRIVATE_HOST=$VALKEY_PRIVATE_HOST
@@ -2824,7 +3446,13 @@ VALKEY_MIN_FREE_DISK_BYTES=$VALKEY_MIN_FREE_DISK_BYTES
 EOF
 
   cat > "$PROD_BACKEND_DIR/.env.production" <<EOF
+COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-backend
+SITE_NAME=$SITE_NAME
+DARSHAN_ROLE_NAME=backend
+DARSHAN_COMPATIBILITY_GENERATION=$DARSHAN_COMPATIBILITY_GENERATION
 BACKEND_IMAGE=$BACKEND_IMAGE_REF
+NGINX_IMAGE=$NGINX_IMAGE
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 NODE_ENV=production
 HOST=$HOST
 PORT=$PORT
@@ -2852,6 +3480,7 @@ MINIO_USE_SSL=$MINIO_USE_SSL
 MINIO_REGION=$MINIO_REGION
 INITIAL_ADMIN_EMAIL=$INITIAL_ADMIN_EMAIL
 DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
+DARSHAN_SOURCE_COMMIT=$PLAYER_SOURCE_COMMIT
 CA_CERT_PATH=$CA_CERT_PATH
 CA_KEY_PATH=$CA_KEY_PATH
 SERVER_TLS_ENABLED=$SERVER_TLS_ENABLED
@@ -2878,6 +3507,9 @@ CORS_ORIGINS=$CMS_PRODUCTION_ORIGIN
 SOCKET_ALLOWED_ORIGINS=$CMS_PRODUCTION_ORIGIN
 APP_PUBLIC_BASE_URL=$CMS_PRODUCTION_ORIGIN
 CMS_ACCEPTANCE_URL=$CMS_PRODUCTION_ORIGIN
+CMS_PUBLIC_HOST=$CMS_PUBLIC_HOST
+CMS_BIND_ADDRESS=$CMS_BIND_ADDRESS
+CMS_HTTPS_PORT=$CMS_HTTPS_PORT
 CSRF_ENABLED=$CSRF_ENABLED
 PASSWORD_MIN_LENGTH=$PASSWORD_MIN_LENGTH
 LOGIN_MAX_ATTEMPTS=$LOGIN_MAX_ATTEMPTS
@@ -2939,10 +3571,172 @@ EXPORTER_CPU_LIMIT=$EXPORTER_CPU_LIMIT
 EXPORTER_MEMORY_LIMIT=$EXPORTER_MEMORY_LIMIT
 EXPORTER_PIDS_LIMIT=$EXPORTER_PIDS_LIMIT
 BACKEND_MIN_FREE_DISK_BYTES=$BACKEND_MIN_FREE_DISK_BYTES
+BACKEND_WORKER_SCRATCH_DIR=/var/lib/darshan/$SITE_NAME/worker-scratch
+EOF
+
+  cat > "$PROD_RECOVERY_DIR/.env.recovery" <<EOF
+COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-recovery
+SITE_NAME=$SITE_NAME
+DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
+DARSHAN_ROLE_NAME=recovery
+DARSHAN_COMPATIBILITY_GENERATION=$DARSHAN_COMPATIBILITY_GENERATION
+BACKEND_IMAGE=$BACKEND_IMAGE_REF
+BACKUP_OFFHOST_DESTINATION=$BACKUP_OFFHOST_DESTINATION
+BACKUP_OFFHOST_ENDPOINT=$BACKUP_OFFHOST_ENDPOINT
+BACKUP_OFFHOST_REGION=$BACKUP_OFFHOST_REGION
+BACKUP_INTERVAL_HOURS=$BACKUP_INTERVAL_HOURS
+BACKUP_RETENTION_DAYS=$BACKUP_RETENTION_DAYS
+PRODUCTION_DATABASE_HOST=$DATA_PRIVATE_HOST
+PRODUCTION_DATABASE_PORT=$POSTGRES_HOST_PORT
+PRODUCTION_DATABASE_NAME=$POSTGRES_DB
+PRODUCTION_S3_ENDPOINT=https://$DATA_PRIVATE_HOST:$MINIO_HOST_PORT
+RECOVERY_MIN_FREE_DISK_BYTES=$BACKEND_MIN_FREE_DISK_BYTES
+EOF
+
+  cat > "$PROD_RECOVERY_DIR/docker-compose.yml" <<'EOF'
+services:
+  recovery:
+    image: ${BACKEND_IMAGE}
+    pull_policy: never
+    environment:
+      DARSHAN_CONTAINER_ROLE: recovery
+      NODE_EXTRA_CA_CERTS: /run/darshan-recovery/transport-ca.crt
+    volumes:
+      - ./inputs:/run/darshan-input-recovery:ro
+      - ./evidence:/run/darshan-recovery-output
+    entrypoint: ["/usr/local/bin/darshan-runtime-entrypoint"]
+    command: ["/bin/true"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1700
+      - /run/darshan-recovery:rw,noexec,nosuid,nodev,mode=0700,uid=0,gid=0
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+EOF
+
+  cat > "$PROD_RECOVERY_DIR/preflight.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "\${1:-}" == "image-load" ]] || { echo "Usage: \$0 image-load" >&2; exit 2; }
+source ./.env.recovery
+docker_root="$(docker info --format '{{.DockerRootDir}}')"
+available="$(df -B1 --output=avail "$docker_root" | awk 'NR == 2 { print $1 }')"
+archive_bytes="$(find ./images -maxdepth 1 -type f -name '*.tar' -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }')"
+required=$((RECOVERY_MIN_FREE_DISK_BYTES + archive_bytes * 2))
+[[ "$available" =~ ^[0-9]+$ && "$available" -ge "$required" ]] || {
+  echo "Recovery image-load preflight failed: available=${available:-unknown} required=$required root=$docker_root" >&2
+  exit 1
+}
+EOF
+
+  cat > "$PROD_RECOVERY_DIR/prepare-host.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$(id -u)" == "0" ]] || { echo "prepare-host.sh must run with sudo/root." >&2; exit 1; }
+for command in docker openssl tar sha256sum df stat jq; do
+  command -v "$command" >/dev/null || { echo "Required host command is missing: $command" >&2; exit 1; }
+done
+docker compose version >/dev/null
+./verify-role.sh
+chown root:root ./inputs
+chmod 0700 ./inputs
+chmod 0644 ./inputs/transport-ca.crt
+chown 1000:1000 ./evidence
+chmod 0700 ./evidence
+echo "Recovery role prepared. Install recovery-only credentials with sudo and mode 0600 under ./inputs."
+EOF
+
+  cat > "$PROD_RECOVERY_DIR/start.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+./verify-role.sh
+if ! ./load-images.sh --verify-loaded; then
+  ./load-images.sh
+fi
+echo "Recovery image is loaded. This role has no persistent service; run ./restore-rehearsal.sh."
+EOF
+
+  cat > "$PROD_RECOVERY_DIR/stop.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+source ./.env.recovery
+docker compose --env-file .env.recovery -f docker-compose.yml down --remove-orphans
+EOF
+
+  cat > "$PROD_RECOVERY_DIR/restore-rehearsal.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+manifest_key=""
+confirm_run_id=""
+target_id=""
+target_s3_endpoint=""
+target_s3_region=""
+while (( $# > 0 )); do
+  case "$1" in
+    --manifest-key) manifest_key="${2:-}"; shift 2 ;;
+    --confirm-run-id) confirm_run_id="${2:-}"; shift 2 ;;
+    --target-id) target_id="${2:-}"; shift 2 ;;
+    --target-s3-endpoint) target_s3_endpoint="${2:-}"; shift 2 ;;
+    --target-s3-region) target_s3_region="${2:-}"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+[[ -n "$manifest_key" && -n "$confirm_run_id" && -n "$target_id" && -n "$target_s3_endpoint" && -n "$target_s3_region" ]] || {
+  echo "Usage: $0 --manifest-key <key> --confirm-run-id <id> --target-id <id> --target-s3-endpoint <https-url> --target-s3-region <region>" >&2
+  exit 2
+}
+[[ "$confirm_run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$ ]] || { echo "Unsafe backup run ID." >&2; exit 1; }
+source ./.env.recovery
+./verify-role.sh
+for file in source-access-key source-secret-key target-database-url target-s3-access-key target-s3-secret-key attestation-private-key; do
+  path="./inputs/$file"
+  [[ -f "$path" && ! -L "$path" && "$(stat -c '%u:%a' "$path")" == "0:600" ]] || {
+    echo "Recovery input must be a root-owned mode-0600 regular file: $path" >&2
+    exit 1
+  }
+done
+output="./evidence/$confirm_run_id.json"
+[[ ! -e "$output" ]] || { echo "Evidence output already exists and will not be overwritten: $output" >&2; exit 1; }
+./start.sh
+docker compose --env-file .env.recovery -f docker-compose.yml run --rm --no-deps recovery \
+  npm run --silent production:backup:restore-offhost -- \
+  --manifest-key "$manifest_key" \
+  --source-uri "$BACKUP_OFFHOST_DESTINATION" \
+  --source-endpoint "$BACKUP_OFFHOST_ENDPOINT" \
+  --source-region "$BACKUP_OFFHOST_REGION" \
+  --source-access-key-file /run/darshan-recovery/source-access-key \
+  --source-secret-key-file /run/darshan-recovery/source-secret-key \
+  --expected-site "$SITE_NAME" \
+  --expected-interval-hours "$BACKUP_INTERVAL_HOURS" \
+  --expected-retention-days "$BACKUP_RETENTION_DAYS" \
+  --production-database-host "$PRODUCTION_DATABASE_HOST" \
+  --production-database-port "$PRODUCTION_DATABASE_PORT" \
+  --production-database-name "$PRODUCTION_DATABASE_NAME" \
+  --production-s3-endpoint "$PRODUCTION_S3_ENDPOINT" \
+  --target-database-url-file /run/darshan-recovery/target-database-url \
+  --target-s3-endpoint "$target_s3_endpoint" \
+  --target-s3-region "$target_s3_region" \
+  --target-s3-access-key-file /run/darshan-recovery/target-s3-access-key \
+  --target-s3-secret-key-file /run/darshan-recovery/target-s3-secret-key \
+  --evidence-output "/run/darshan-recovery-output/$confirm_run_id.json" \
+  --attestation-private-key-file /run/darshan-recovery/attestation-private-key \
+  --target-id "$target_id" \
+  --confirm-run-id "$confirm_run_id"
+[[ -f "$output" && ! -L "$output" ]] || { echo "Recovery command did not create evidence." >&2; exit 1; }
+chmod 0600 "$output"
+echo "Signed restore evidence created: $output"
 EOF
 
   cat > "$PROD_CMS_DIR/.env.production" <<EOF
+COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-cms
+SITE_NAME=$SITE_NAME
+DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
+DARSHAN_ROLE_NAME=cms
+DARSHAN_COMPATIBILITY_GENERATION=$DARSHAN_COMPATIBILITY_GENERATION
 NGINX_IMAGE=$NGINX_IMAGE
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 CMS_PUBLIC_SCHEME=$CMS_PUBLIC_SCHEME
 CMS_PUBLIC_ORIGIN=$CMS_PRODUCTION_ORIGIN
 CMS_PUBLIC_HOST=$CMS_PUBLIC_HOST
@@ -2975,6 +3769,14 @@ EOF
 
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     cat > "$PROD_OBSERVABILITY_DIR/.env.production" <<EOF
+COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-observability
+DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
+DARSHAN_ROLE_NAME=observability
+DARSHAN_COMPATIBILITY_GENERATION=$DARSHAN_COMPATIBILITY_GENERATION
+VOLUME_PROVISIONING_MODE=$VOLUME_PROVISIONING_MODE
+PROMETHEUS_VOLUME_NAME=$PROMETHEUS_VOLUME_NAME
+ALERTMANAGER_VOLUME_NAME=$ALERTMANAGER_VOLUME_NAME
+GRAFANA_VOLUME_NAME=$GRAFANA_VOLUME_NAME
 SITE_NAME=$SITE_NAME
 ENVIRONMENT=production
 VM1_DATA_HOST=$DATA_PRIVATE_HOST
@@ -2994,6 +3796,7 @@ CMS_BIND_ADDRESS=$CMS_BIND_ADDRESS
 BACKEND_DEVICE_HOST=$BACKEND_DEVICE_HOST
 NODE_EXPORTER_IMAGE=$NODE_EXPORTER_IMAGE
 NODE_EXPORTER_HOST_PORT=$NODE_EXPORTER_HOST_PORT
+METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 PROMETHEUS_IMAGE=$PROMETHEUS_IMAGE
 PROMETHEUS_HOST_PORT=$PROMETHEUS_HOST_PORT
 PROMETHEUS_SCRAPE_INTERVAL=$PROMETHEUS_SCRAPE_INTERVAL
@@ -3007,7 +3810,7 @@ GRAFANA_IMAGE=$GRAFANA_IMAGE
 GRAFANA_HOST_PORT=$GRAFANA_HOST_PORT
 GRAFANA_ADMIN_USER=$GRAFANA_ADMIN_USER
 GRAFANA_ADMIN_PASSWORD_FILE=/run/darshan-grafana-runtime/secrets/admin-password
-PROMETHEUS_UPSTREAM_URL=http://prometheus:9090
+PROMETHEUS_UPSTREAM_URL=https://prometheus:9090
 GRAFANA_ROOT_URL=$CMS_PRODUCTION_ORIGIN/grafana/
 CONTAINER_LOG_MAX_SIZE=$CONTAINER_LOG_MAX_SIZE
 CONTAINER_LOG_MAX_FILES=$CONTAINER_LOG_MAX_FILES
@@ -3055,18 +3858,43 @@ EOF
       "$NODE_EXPORTER_HOST_PORT" \
       "$POSTGRES_EXPORTER_HOST_PORT" \
       "$NGINX_EXPORTER_HOST_PORT" \
-      "$VALKEY_PRIVATE_HOST"
+      "$VALKEY_PRIVATE_HOST" \
+      "https" \
+      "$METRICS_GATEWAY_HOST_PORT" \
+      "https" \
+      "$OBSERVABILITY_PRIVATE_HOST" \
+      "node-exporter:9100"
 
     render_alert_rules "$PROD_OBSERVABILITY_DIR/prometheus/rules/alerts.yml"
 
     cp "$PLATFORM_ROOT/deploy/shared/observability/alertmanager/alertmanager.yml.template" \
       "$PROD_OBSERVABILITY_DIR/alertmanager/alertmanager.yml"
 
+    cat > "$PROD_OBSERVABILITY_DIR/prometheus/web-config.yml" <<'EOF'
+tls_server_config:
+  cert_file: /etc/darshan/tls/server.crt
+  key_file: /etc/darshan/tls/server.key
+  min_version: TLS12
+EOF
+
+    cat > "$PROD_OBSERVABILITY_DIR/alertmanager/web-config.yml" <<'EOF'
+tls_server_config:
+  cert_file: /etc/darshan/tls/server.crt
+  key_file: /etc/darshan/tls/server.key
+  min_version: TLS12
+EOF
+
     render_grafana_ini \
       "$PROD_OBSERVABILITY_DIR/grafana/grafana.ini" \
       "$CMS_PUBLIC_HOST" \
       "$CMS_PRODUCTION_ORIGIN/grafana/" \
       "true"
+
+    render_grafana_datasource \
+      "$PROD_OBSERVABILITY_DIR/grafana/provisioning/datasources/prometheus.yml" \
+      "https://prometheus:9090" \
+      "$OBSERVABILITY_PRIVATE_HOST" \
+      "$TLS_PREPARED_DIR/transport-ca.crt"
 
     write_observability_compose "$PROD_OBSERVABILITY_DIR/docker-compose.yml"
   fi
@@ -3081,7 +3909,92 @@ hostssl all             all             ::0/0                   scram-sha-256
 hostnossl all           all             ::0/0                   reject
 EOF
 
+  cat > "$PROD_DATA_DIR/metrics-gateway.conf" <<EOF
+pid /tmp/nginx.pid;
+events {}
+http {
+  access_log off;
+  server {
+    listen 9443 ssl;
+    ssl_certificate /etc/darshan/tls/server.crt;
+    ssl_certificate_key /etc/darshan/tls/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location = /healthz { return 200 "ok\n"; }
+    location = /darshan/compatibility {
+      default_type application/json;
+      return 200 '{"site":"$SITE_NAME","role":"data","release_id":"$DARSHAN_RELEASE_ID","source_commit":"$PLAYER_SOURCE_COMMIT","compatibility_generation":$DARSHAN_COMPATIBILITY_GENERATION}';
+    }
+    location = /node/metrics { proxy_pass http://node-exporter:9100/metrics; }
+    location = /postgres/metrics { proxy_pass http://postgres-exporter:9187/metrics; }
+    location / { return 404; }
+  }
+}
+EOF
+  cat > "$PROD_VALKEY_DIR/metrics-gateway.conf" <<EOF
+pid /tmp/nginx.pid;
+events {}
+http {
+  access_log off;
+  server {
+    listen 9443 ssl;
+    ssl_certificate /etc/darshan/tls/server.crt;
+    ssl_certificate_key /etc/darshan/tls/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location = /healthz { return 200 "ok\n"; }
+    location = /darshan/compatibility {
+      default_type application/json;
+      return 200 '{"site":"$SITE_NAME","role":"valkey","release_id":"$DARSHAN_RELEASE_ID","source_commit":"$PLAYER_SOURCE_COMMIT","compatibility_generation":$DARSHAN_COMPATIBILITY_GENERATION}';
+    }
+    location = /node/metrics { proxy_pass http://node-exporter:9100/metrics; }
+    location / { return 404; }
+  }
+}
+EOF
+  cat > "$PROD_BACKEND_DIR/metrics-gateway.conf" <<EOF
+pid /tmp/nginx.pid;
+events {}
+http {
+  access_log off;
+  server {
+    listen 9443 ssl;
+    ssl_certificate /etc/darshan/tls/server.crt;
+    ssl_certificate_key /etc/darshan/tls/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location = /healthz { return 200 "ok\n"; }
+    location = /darshan/compatibility {
+      default_type application/json;
+      return 200 '{"site":"$SITE_NAME","role":"backend","release_id":"$DARSHAN_RELEASE_ID","source_commit":"$PLAYER_SOURCE_COMMIT","compatibility_generation":$DARSHAN_COMPATIBILITY_GENERATION}';
+    }
+    location = /node/metrics { proxy_pass http://node-exporter:9100/metrics; }
+    location / { return 404; }
+  }
+}
+EOF
+  cat > "$PROD_CMS_DIR/metrics-gateway.conf" <<EOF
+pid /tmp/nginx.pid;
+events {}
+http {
+  access_log off;
+  server {
+    listen 9443 ssl;
+    ssl_certificate /etc/darshan/tls/server.crt;
+    ssl_certificate_key /etc/darshan/tls/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location = /healthz { return 200 "ok\n"; }
+    location = /darshan/compatibility {
+      default_type application/json;
+      return 200 '{"site":"$SITE_NAME","role":"cms","release_id":"$DARSHAN_RELEASE_ID","source_commit":"$PLAYER_SOURCE_COMMIT","compatibility_generation":$DARSHAN_COMPATIBILITY_GENERATION}';
+    }
+    location = /node/metrics { proxy_pass http://node-exporter:9100/metrics; }
+    location = /nginx/metrics { proxy_pass http://nginx-exporter:9113/metrics; }
+    location / { return 404; }
+  }
+}
+EOF
+
   cat > "$PROD_DATA_DIR/docker-compose.yml" <<'EOF'
+name: ${COMPOSE_PROJECT_NAME}
+
 x-darshan-log: &darshan-log
   logging:
     driver: local
@@ -3178,8 +4091,6 @@ services:
         done
         exec chpst -u nobody:nobody /bin/postgres_exporter \
           --web.listen-address=":${POSTGRES_EXPORTER_HOST_PORT}"
-    ports:
-      - "${DATA_BIND_ADDRESS}:${POSTGRES_EXPORTER_HOST_PORT}:${POSTGRES_EXPORTER_HOST_PORT}"
     extra_hosts:
       - "${DATA_PRIVATE_HOST}:${DATA_BIND_ADDRESS}"
     volumes:
@@ -3206,8 +4117,6 @@ services:
       - --path.rootfs=/host
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     pid: host
-    ports:
-      - "${DATA_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}:9100"
     volumes:
       - /:/host:ro
     read_only: true
@@ -3215,6 +4124,33 @@ services:
       - /tmp:mode=1777
     cap_drop:
       - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  metrics-gateway:
+    image: ${NGINX_IMAGE}
+    pull_policy: never
+    restart: unless-stopped
+    <<: [*darshan-log, *exporter-resources]
+    depends_on:
+      - node-exporter
+      - postgres-exporter
+    ports:
+      - "${DATA_BIND_ADDRESS}:${METRICS_GATEWAY_HOST_PORT}:9443"
+    volumes:
+      - ./metrics-gateway.conf:/etc/nginx/nginx.conf:ro
+      - ./tls/public.crt:/etc/darshan/tls/server.crt:ro
+      - ./tls/private.key:/etc/darshan/tls/server.key:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:mode=0755
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
     security_opt:
       - no-new-privileges:true
 
@@ -3239,10 +4175,16 @@ services:
 
 volumes:
   darshan_postgres_data:
+    external: true
+    name: ${POSTGRES_VOLUME_NAME}
   darshan_minio_data:
+    external: true
+    name: ${MINIO_VOLUME_NAME}
 EOF
 
   cat > "$PROD_VALKEY_DIR/docker-compose.yml" <<'EOF'
+name: ${COMPOSE_PROJECT_NAME}
+
 x-darshan-log: &darshan-log
   logging:
     driver: local
@@ -3322,8 +4264,6 @@ services:
       - --path.rootfs=/host
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     pid: host
-    ports:
-      - "${VALKEY_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}:9100"
     volumes:
       - /:/host:ro
     read_only: true
@@ -3334,11 +4274,41 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  metrics-gateway:
+    image: ${NGINX_IMAGE}
+    pull_policy: never
+    restart: unless-stopped
+    <<: [*darshan-log, *exporter-resources]
+    depends_on:
+      - node-exporter
+    ports:
+      - "${VALKEY_BIND_ADDRESS}:${METRICS_GATEWAY_HOST_PORT}:9443"
+    volumes:
+      - ./metrics-gateway.conf:/etc/nginx/nginx.conf:ro
+      - ./tls/server.crt:/etc/darshan/tls/server.crt:ro
+      - ./tls/server.key:/etc/darshan/tls/server.key:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:mode=0755
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   darshan_valkey_data:
+    external: true
+    name: ${VALKEY_VOLUME_NAME}
 EOF
 
   cat > "$PROD_BACKEND_DIR/docker-compose.yml" <<'EOF'
+name: ${COMPOSE_PROJECT_NAME}
+
 x-darshan-log: &darshan-log
   logging:
     driver: local
@@ -3363,14 +4333,22 @@ services:
     image: ${BACKEND_IMAGE}
     pull_policy: never
     restart: unless-stopped
+    user: "0:0"
     <<: [*darshan-log, *backend-api-resources]
     env_file:
       - .env.production
+    environment:
+      DARSHAN_CONTAINER_ROLE: api
     ports:
       - "${BACKEND_BIND_ADDRESS}:${API_HOST_PORT}:3000"
     volumes:
-      - ./certs:/app/certs:ro
-      - ./secrets:/run/secrets:ro
+      - ./certs:/run/darshan-input-certs:ro
+      - ./secrets:/run/darshan-input-secrets:ro
+    tmpfs:
+      - /app/certs:mode=0700,uid=0,gid=0
+      - /run/secrets:mode=0700,uid=0,gid=0
+      - /run/darshan-bootstrap:mode=0700,uid=0,gid=0
+      - /run/darshan-evidence:mode=0700,uid=0,gid=0
     # Preserve TLS service names while ensuring containers route through the
     # deliberate private VM interfaces instead of relying on Docker DNS.
     extra_hosts:
@@ -3393,16 +4371,24 @@ services:
     image: ${BACKEND_IMAGE}
     pull_policy: never
     restart: unless-stopped
+    user: "0:0"
     <<: [*darshan-log, *backend-worker-resources]
     env_file:
       - .env.production
     environment:
+      DARSHAN_CONTAINER_ROLE: worker
+      TMPDIR: /var/lib/darshan-worker/tmp
       BACKUP_OFFHOST_ACCESS_KEY_FILE: /run/worker-secrets/backup-offhost-access-key
       BACKUP_OFFHOST_SECRET_KEY_FILE: /run/worker-secrets/backup-offhost-secret-key
     volumes:
-      - ./certs:/app/certs:ro
-      - ./secrets:/run/secrets:ro
-      - ./worker-secrets:/run/worker-secrets:ro
+      - ./certs:/run/darshan-input-certs:ro
+      - ./secrets:/run/darshan-input-secrets:ro
+      - ./worker-secrets:/run/darshan-input-worker-secrets:ro
+      - ${BACKEND_WORKER_SCRATCH_DIR}:/var/lib/darshan-worker
+    tmpfs:
+      - /app/certs:mode=0700,uid=0,gid=0
+      - /run/secrets:mode=0700,uid=0,gid=0
+      - /run/worker-secrets:mode=0700,uid=0,gid=0
     extra_hosts:
       - "${DATA_PRIVATE_HOST}:${DATA_BIND_ADDRESS}"
       - "${VALKEY_PRIVATE_HOST}:${VALKEY_BIND_ADDRESS}"
@@ -3417,8 +4403,6 @@ services:
       - --path.rootfs=/host
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     pid: host
-    ports:
-      - "${BACKEND_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}:9100"
     volumes:
       - /:/host:ro
     read_only: true
@@ -3428,9 +4412,37 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+  metrics-gateway:
+    image: ${NGINX_IMAGE}
+    pull_policy: never
+    restart: unless-stopped
+    <<: [*darshan-log, *exporter-resources]
+    depends_on:
+      - node-exporter
+    ports:
+      - "${BACKEND_BIND_ADDRESS}:${METRICS_GATEWAY_HOST_PORT}:9443"
+    volumes:
+      - ./metrics-gateway.conf:/etc/nginx/nginx.conf:ro
+      - ./certs/server.crt:/etc/darshan/tls/server.crt:ro
+      - ./certs/server.key:/etc/darshan/tls/server.key:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:mode=0755
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
 EOF
 
   cat > "$PROD_CMS_DIR/docker-compose.yml" <<'EOF'
+name: ${COMPOSE_PROJECT_NAME}
+
 x-darshan-log: &darshan-log
   logging:
     driver: local
@@ -3453,7 +4465,6 @@ services:
     restart: unless-stopped
     <<: [*darshan-log, *cms-resources]
     ports:
-      - "${CMS_BIND_ADDRESS}:${CMS_HTTP_PORT}:80"
       - "${CMS_BIND_ADDRESS}:${CMS_HTTPS_PORT}:443"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
@@ -3476,8 +4487,6 @@ services:
     command:
       - --nginx.scrape-uri=http://cms:8080/nginx_status
       - --web.listen-address=:9113
-    ports:
-      - "${CMS_BIND_ADDRESS}:${NGINX_EXPORTER_HOST_PORT}:9113"
     read_only: true
     tmpfs:
       - /tmp:mode=1777
@@ -3495,8 +4504,6 @@ services:
       - --path.rootfs=/host
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
     pid: host
-    ports:
-      - "${CMS_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}:9100"
     volumes:
       - /:/host:ro
     read_only: true
@@ -3504,6 +4511,33 @@ services:
       - /tmp:mode=1777
     cap_drop:
       - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  metrics-gateway:
+    image: ${NGINX_IMAGE}
+    pull_policy: never
+    restart: unless-stopped
+    <<: [*darshan-log, *exporter-resources]
+    depends_on:
+      - node-exporter
+      - nginx-exporter
+    ports:
+      - "${CMS_BIND_ADDRESS}:${METRICS_GATEWAY_HOST_PORT}:9443"
+    volumes:
+      - ./metrics-gateway.conf:/etc/nginx/nginx.conf:ro
+      - ./tls/tls.crt:/etc/darshan/tls/server.crt:ro
+      - ./tls/tls.key:/etc/darshan/tls/server.key:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:mode=0755
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
     security_opt:
       - no-new-privileges:true
 EOF
@@ -3515,7 +4549,10 @@ EOF
     "environment": {
       "name": "production",
       "deploymentId": "$SITE_NAME",
-      "cmsId": "cms-$SITE_NAME"
+      "cmsId": "cms-$SITE_NAME",
+      "releaseId": "$DARSHAN_RELEASE_ID",
+      "sourceCommit": "$PLAYER_SOURCE_COMMIT",
+      "compatibilityGeneration": $DARSHAN_COMPATIBILITY_GENERATION
     },
     "api": {
       "baseUrl": "$CMS_PRODUCTION_ORIGIN"
@@ -3546,13 +4583,6 @@ server {
   location / {
     return 404;
   }
-}
-
-server {
-  listen 80;
-  server_name _;
-
-  return 301 $CMS_PRODUCTION_ORIGIN\$request_uri;
 }
 
 server {
@@ -3629,8 +4659,13 @@ server {
   }
 
   location /grafana/ {
-    proxy_pass http://$PROD_GRAFANA_UPSTREAM_HOST:$PROD_GRAFANA_UPSTREAM_PORT/;
+    proxy_pass https://$PROD_GRAFANA_UPSTREAM_HOST:$PROD_GRAFANA_UPSTREAM_PORT/;
     proxy_http_version 1.1;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $OBSERVABILITY_PRIVATE_HOST;
+    proxy_ssl_trusted_certificate /etc/nginx/tls/transport-ca.crt;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 3;
     proxy_set_header Host \$host;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -3668,12 +4703,14 @@ EOF
   write_load_images_script "$PROD_VALKEY_DIR/load-images.sh"
   write_load_images_script "$PROD_BACKEND_DIR/load-images.sh"
   write_load_images_script "$PROD_CMS_DIR/load-images.sh"
+  write_load_images_script "$PROD_RECOVERY_DIR/load-images.sh"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     write_load_images_script "$PROD_OBSERVABILITY_DIR/load-images.sh"
   fi
   write_role_verification_script "$PROD_DATA_DIR" ".env.production" "true"
   write_role_verification_script "$PROD_VALKEY_DIR" ".env.production" "true"
   write_role_verification_script "$PROD_CMS_DIR" ".env.production" "true"
+  write_role_verification_script "$PROD_RECOVERY_DIR" ".env.recovery" "true"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     write_role_verification_script "$PROD_OBSERVABILITY_DIR" ".env.production" "true"
   fi
@@ -3693,16 +4730,28 @@ EOF
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     write_stop_script "$PROD_OBSERVABILITY_DIR/stop.sh" ".env.production"
   fi
+  write_production_role_controls "$PROD_DATA_DIR" data
+  write_production_role_controls "$PROD_VALKEY_DIR" valkey
+  write_production_role_controls "$PROD_BACKEND_DIR" backend
+  write_production_role_controls "$PROD_CMS_DIR" cms
+  write_compatibility_check "$PROD_BACKEND_DIR/compatibility-check.sh" backend
+  write_compatibility_check "$PROD_CMS_DIR/compatibility-check.sh" cms
+  if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
+    write_production_role_controls "$PROD_OBSERVABILITY_DIR" observability
+    write_compatibility_check "$PROD_OBSERVABILITY_DIR/compatibility-check.sh" observability
+  fi
 
   cat > "$PROD_DATA_DIR/health-check.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 source ./.env.production
 require_metric() {
-  local url="$1" pattern="$2"
+  local host="$1" bind="$2" path="$3" pattern="$4"
   # Keep the pipe reader open after grep finds a match. With pipefail, a plain
   # `curl | grep -q` reports curl's SIGPIPE (exit 23) as a false health error.
-  curl --fail --silent --show-error "$url" | {
+  curl --fail --silent --show-error --cacert ./tls/CAs/transport-ca.crt \
+    --resolve "${host}:${METRICS_GATEWAY_HOST_PORT}:${bind}" \
+    "https://${host}:${METRICS_GATEWAY_HOST_PORT}${path}" | {
     grep -Eq "$pattern"
     matched=$?
     cat >/dev/null
@@ -3728,8 +4777,8 @@ curl --fail --silent --show-error \
   --cacert ./tls/CAs/transport-ca.crt \
   --resolve "${DATA_PRIVATE_HOST:-localhost}:${MINIO_HOST_PORT}:${DATA_BIND_ADDRESS}" \
   "https://${DATA_PRIVATE_HOST:-localhost}:${MINIO_HOST_PORT}/minio/health/live" >/dev/null
-require_metric "http://${DATA_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}/metrics" '^node_exporter_build_info'
-require_metric "http://${DATA_BIND_ADDRESS}:${POSTGRES_EXPORTER_HOST_PORT}/metrics" '^pg_up 1(\.0+)?$'
+require_metric "$DATA_PRIVATE_HOST" "$DATA_BIND_ADDRESS" /node/metrics '^node_exporter_build_info'
+require_metric "$DATA_PRIVATE_HOST" "$DATA_BIND_ADDRESS" /postgres/metrics '^pg_up 1(\.0+)?$'
 echo "Production data tier healthy."
 EOF
 
@@ -3738,8 +4787,10 @@ EOF
 set -euo pipefail
 source ./.env.production
 require_metric() {
-  local url="$1" pattern="$2"
-  curl --fail --silent --show-error "$url" | {
+  local host="$1" bind="$2" path="$3" pattern="$4"
+  curl --fail --silent --show-error --cacert ./tls/ca.crt \
+    --resolve "${host}:${METRICS_GATEWAY_HOST_PORT}:${bind}" \
+    "https://${host}:${METRICS_GATEWAY_HOST_PORT}${path}" | {
     grep -Eq "$pattern"
     matched=$?
     cat >/dev/null
@@ -3760,7 +4811,7 @@ docker compose --env-file .env.production -f docker-compose.yml exec -T valkey s
   REDISCLI_AUTH="$(cat /run/secrets/valkey-password)" \
     valkey-cli --tls --sni "$1" --cacert /run/darshan-tls/ca.crt -h 127.0.0.1 -p "$2" ping | grep -qx PONG
 ' sh "$VALKEY_PRIVATE_HOST" "$VALKEY_TLS_PORT"
-require_metric "http://${VALKEY_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}/metrics" '^node_exporter_build_info'
+require_metric "$VALKEY_PRIVATE_HOST" "$VALKEY_BIND_ADDRESS" /node/metrics '^node_exporter_build_info'
 echo "Production Valkey stack healthy."
 EOF
 
@@ -3769,8 +4820,10 @@ EOF
 set -euo pipefail
 source ./.env.production
 require_metric() {
-  local url="$1" pattern="$2"
-  curl --fail --silent --show-error "$url" | { grep -Eq "$pattern"; matched=$?; cat >/dev/null; exit "$matched"; }
+  local host="$1" bind="$2" path="$3" pattern="$4"
+  curl --fail --silent --show-error --cacert ./certs/transport-ca.crt \
+    --resolve "${host}:${METRICS_GATEWAY_HOST_PORT}:${bind}" \
+    "https://${host}:${METRICS_GATEWAY_HOST_PORT}${path}" | { grep -Eq "$pattern"; matched=$?; cat >/dev/null; exit "$matched"; }
 }
 require_docker_free_bytes() {
   local required="$1" docker_root available
@@ -3787,7 +4840,7 @@ curl --fail --silent --show-error \
   --resolve "${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}:${BACKEND_BIND_ADDRESS}" \
   "https://${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}/api/v1/health/ready" >/dev/null
 docker compose --env-file .env.production -f docker-compose.yml ps --services --status running | grep -qx worker
-require_metric "http://${BACKEND_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}/metrics" '^node_exporter_build_info'
+require_metric "$BACKEND_PRIVATE_HOST" "$BACKEND_BIND_ADDRESS" /node/metrics '^node_exporter_build_info'
 echo "Production backend healthy."
 EOF
 
@@ -3796,8 +4849,10 @@ EOF
 set -euo pipefail
 source ./.env.production
 require_metric() {
-  local url="$1" pattern="$2"
-  curl --fail --silent --show-error "$url" | { grep -Eq "$pattern"; matched=$?; cat >/dev/null; exit "$matched"; }
+  local host="$1" bind="$2" path="$3" pattern="$4"
+  curl --fail --silent --show-error --cacert ./tls/transport-ca.crt \
+    --resolve "${host}:${METRICS_GATEWAY_HOST_PORT}:${bind}" \
+    "https://${host}:${METRICS_GATEWAY_HOST_PORT}${path}" | { grep -Eq "$pattern"; matched=$?; cat >/dev/null; exit "$matched"; }
 }
 require_docker_free_bytes() {
   local required="$1" docker_root available
@@ -3819,7 +4874,7 @@ require_websocket_upgrade() {
     -H 'Connection: Upgrade' \
     -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' \
-    -H 'Sec-WebSocket-Key: ZGFyc2hhbi1yZWFsdGltZS1wcm9iZQ==' \
+    -H 'Sec-WebSocket-Key: ZGFyc2hhbi1wcm9iZS0wMQ==' \
     -D - -o /dev/null \
     "https://${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}/socket.io/?EIO=4&transport=websocket" 2>/dev/null || true)"
   grep -Eq '^HTTP/[0-9.]+ 101 ' <<<"$response" || {
@@ -3827,7 +4882,6 @@ require_websocket_upgrade() {
     return 1
   }
 }
-curl -fsSI "http://${CMS_BIND_ADDRESS}:${CMS_HTTP_PORT}/" | grep -q "301"
 curl --fail --silent --show-error \
   --cacert ./tls/transport-ca.crt \
   --resolve "${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}:${CMS_BIND_ADDRESS}" \
@@ -3837,8 +4891,8 @@ curl --fail --silent --show-error \
   --resolve "${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}:${CMS_BIND_ADDRESS}" \
   "https://${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT}/api/v1/health/ready" >/dev/null
 require_websocket_upgrade
-require_metric "http://${CMS_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}/metrics" '^node_exporter_build_info'
-require_metric "http://${CMS_BIND_ADDRESS}:${NGINX_EXPORTER_HOST_PORT}/metrics" '^nginx_up 1$'
+require_metric "$CMS_PUBLIC_HOST" "$CMS_BIND_ADDRESS" /node/metrics '^node_exporter_build_info'
+require_metric "$CMS_PUBLIC_HOST" "$CMS_BIND_ADDRESS" /nginx/metrics '^nginx_up 1$'
 echo "Production CMS healthy."
 EOF
 
@@ -3861,17 +4915,20 @@ require_docker_free_bytes() {
   }
 }
 require_docker_free_bytes "$OBSERVABILITY_MIN_FREE_DISK_BYTES"
-curl -fsS "http://${OBSERVABILITY_BIND_ADDRESS}:${PROMETHEUS_HOST_PORT}/-/ready" >/dev/null
-curl -fsS "http://${OBSERVABILITY_BIND_ADDRESS}:${ALERTMANAGER_HOST_PORT}/-/ready" >/dev/null
-curl -fsS "http://${OBSERVABILITY_BIND_ADDRESS}:${GRAFANA_HOST_PORT}/api/health" >/dev/null
-require_metric "http://${OBSERVABILITY_BIND_ADDRESS}:${NODE_EXPORTER_HOST_PORT}/metrics" '^node_exporter_build_info'
+tls_curl() {
+  local port="$1" path="$2"
+  curl --fail --silent --show-error \
+    --cacert ./certs/transport-ca.crt \
+    --resolve "${OBSERVABILITY_PRIVATE_HOST}:${port}:${OBSERVABILITY_BIND_ADDRESS}" \
+    "https://${OBSERVABILITY_PRIVATE_HOST}:${port}${path}"
+}
+tls_curl "$PROMETHEUS_HOST_PORT" /-/ready >/dev/null
+tls_curl "$ALERTMANAGER_HOST_PORT" /-/ready >/dev/null
+tls_curl "$GRAFANA_HOST_PORT" /api/health >/dev/null
 for job in prometheus vm4-alertmanager darshan-server vm1-node vm1-postgres vm1-minio vm-valkey-node vm2-node vm3-node vm3-nginx vm4-node vm4-grafana; do
-  TARGETS_JSON="$(curl --fail --silent --show-error "http://${OBSERVABILITY_BIND_ADDRESS}:${PROMETHEUS_HOST_PORT}/api/v1/query?query=up%7Bjob%3D%22${job}%22%7D")" \
-    node -e '
-      const result = JSON.parse(process.env.TARGETS_JSON);
-      const values = result?.data?.result?.map((entry) => Number(entry?.value?.[1])) ?? [];
-      if (!result?.status || result.status !== "success" || values.length === 0 || values.some((value) => value !== 1)) process.exit(1);
-    ' || { echo "Prometheus target is not healthy: ${job}" >&2; exit 1; }
+  targets_json="$(tls_curl "$PROMETHEUS_HOST_PORT" "/api/v1/query?query=up%7Bjob%3D%22${job}%22%7D")"
+  jq -e '.status == "success" and (.data.result | length > 0) and ([.data.result[].value[1] | tonumber] | all(. == 1))' \
+    <<<"$targets_json" >/dev/null || { echo "Prometheus target is not healthy: ${job}" >&2; exit 1; }
 done
 echo "Production observability stack healthy."
 EOF
@@ -3895,9 +4952,10 @@ This folder runs PostgreSQL and MinIO only.
 - PostgreSQL: $POSTGRES_HOST_PORT/tcp
 - MinIO API: $MINIO_HOST_PORT/tcp
 - MinIO Console: $MINIO_CONSOLE_PORT/tcp
-- Node exporter: $NODE_EXPORTER_HOST_PORT/tcp, only from the Observability VM
-- PostgreSQL exporter: $POSTGRES_EXPORTER_HOST_PORT/tcp, only from the Observability VM
-- Observability templates: ./observability/
+- TLS metrics gateway: $METRICS_GATEWAY_HOST_PORT/tcp, only from the Observability VM
+
+Node and PostgreSQL exporters are private Compose services. Prometheus reaches
+them only through the TLS metrics gateway.
 EOF
 
   cat > "$PROD_VALKEY_DIR/README.md" <<EOF
@@ -3916,7 +4974,7 @@ This folder runs Valkey as the notification-only realtime bus.
 ## Reachability
 
 - Valkey: TLS-only, authenticated TCP on $VALKEY_HOST_PORT/tcp at $VALKEY_PRIVATE_HOST
-- Node exporter: $NODE_EXPORTER_HOST_PORT/tcp, only from the Observability VM
+- TLS metrics gateway: $METRICS_GATEWAY_HOST_PORT/tcp, only from the Observability VM
 
 The production health check verifies the transport CA, server identity, TLS
 encryption, and the Valkey password. Do not use a plaintext \`valkey-cli ping\`
@@ -3940,9 +4998,10 @@ This folder runs the DARSHAN backend bundle with API and worker behavior from th
 \`\`\`
 
 For a fresh installation, create the protected one-time password in
-\`secrets/\` then run \`./deploy.sh\`. For an upgrade, set
-\`DARSHAN_BACKUP_MANIFEST\` to an off-host backup manifest that records a
-successful restore rehearsal, then run \`./deploy.sh\`.
+\`bootstrap-secrets/admin-password\` then run \`./deploy.sh\`. Start CMS and
+run \`./finalize-install.sh\` to complete full acceptance. For an upgrade, set
+\`DARSHAN_BACKUP_MANIFEST\` to independently signed restore evidence, then run
+\`./deploy.sh\` during the approved maintenance window.
 
 ## Reachability
 
@@ -3951,8 +5010,33 @@ successful restore rehearsal, then run \`./deploy.sh\`.
 - Valkey bus target: \`rediss://\` with an authenticated URL supplied only by
   \`secrets/valkey-url\`; PostgreSQL and Valkey transport CAs are verified
 - Worker: background jobs only, no public port
-- Node exporter: $NODE_EXPORTER_HOST_PORT/tcp, only from the Observability VM
-- Prometheus templates: ./observability/prometheus/
+- TLS metrics gateway: $METRICS_GATEWAY_HOST_PORT/tcp, only from the Observability VM
+EOF
+
+  cat > "$PROD_RECOVERY_DIR/README.md" <<EOF
+# Production Recovery Bundle
+
+This stateless role performs an isolated restore rehearsal. It contains no
+production database, MinIO, JWT, or worker credentials and starts no persistent
+service.
+
+## Workflow
+
+\`\`\`bash
+sudo ./prepare-host.sh
+./load-images.sh
+# Install the six root-owned mode-0600 input files documented in the runbook.
+./restore-rehearsal.sh \\
+  --manifest-key '<signed-manifest-object-key>' \\
+  --confirm-run-id '<backup-run-id>' \\
+  --target-id '<approved-isolated-target-id>' \\
+  --target-s3-endpoint 'https://<recovery-s3-host>' \\
+  --target-s3-region '<region>'
+\`\`\`
+
+The command refuses the signed production PostgreSQL and object-store targets,
+requires clean recovery targets, verifies every downloaded artifact and restored
+object, and writes signed evidence under \`./evidence/\` only after success.
 EOF
 
   cat > "$PROD_CMS_DIR/README.md" <<EOF
@@ -3972,10 +5056,9 @@ This folder runs the prebuilt CMS through Nginx with HTTPS termination.
 
 - CMS: $CMS_PRODUCTION_ORIGIN
 - API/socket proxy target: https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT
-- Grafana upstream target: http://$PROD_GRAFANA_UPSTREAM_HOST:$PROD_GRAFANA_UPSTREAM_PORT
+- Grafana upstream target: https://$PROD_GRAFANA_UPSTREAM_HOST:$PROD_GRAFANA_UPSTREAM_PORT
 - Grafana path: $CMS_PRODUCTION_ORIGIN/grafana/
-- Node exporter: $NODE_EXPORTER_HOST_PORT/tcp, only from the Observability VM
-- Nginx exporter: $NGINX_EXPORTER_HOST_PORT/tcp, only from the Observability VM
+- TLS metrics gateway: $METRICS_GATEWAY_HOST_PORT/tcp, only from the Observability VM
 
 The Nginx status listener is internal to the CMS Docker network and is
 not published on the VM.
@@ -3997,18 +5080,18 @@ This folder runs Prometheus, Alertmanager, and Grafana on the dedicated observab
 
 ## Reachability
 
-- Prometheus: http://$OBSERVABILITY_PRIVATE_HOST:$PROMETHEUS_HOST_PORT
-- Alertmanager: http://$OBSERVABILITY_PRIVATE_HOST:$ALERTMANAGER_HOST_PORT
-- Grafana internal host: http://$OBSERVABILITY_PRIVATE_HOST:$GRAFANA_HOST_PORT
+- Prometheus: https://$OBSERVABILITY_PRIVATE_HOST:$PROMETHEUS_HOST_PORT
+- Alertmanager: https://$OBSERVABILITY_PRIVATE_HOST:$ALERTMANAGER_HOST_PORT
+- Grafana internal host: https://$OBSERVABILITY_PRIVATE_HOST:$GRAFANA_HOST_PORT
 - Grafana operator path: $CMS_PRODUCTION_ORIGIN/grafana/
 - Backend scrape target: https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT/metrics
 - MinIO scrape target: https://$DATA_PRIVATE_HOST:$MINIO_HOST_PORT/minio/v2/metrics/cluster
-- Node exporter: $NODE_EXPORTER_HOST_PORT/tcp (local Prometheus self-monitoring)
-- Static node/exporter scrape targets: Data, Valkey, Backend, CMS, and this VM
+- Static TLS metrics-gateway targets: Data, Valkey, Backend, and CMS
+- Local node exporter is private to the Observability Compose network
 
 The generated health check requires every static target to report an up value
 of one.
-The site firewall must allow the exporter ports only from this VM.
+The site firewall must allow the TLS metrics-gateway port only from this VM.
 EOF
   fi
 
@@ -4085,7 +5168,7 @@ if profile_enabled production; then
 EOF
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     cat >> "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF
-  - observability: http://$OBSERVABILITY_PRIVATE_HOST:$PROMETHEUS_HOST_PORT
+  - observability: https://$OBSERVABILITY_PRIVATE_HOST:$PROMETHEUS_HOST_PORT
 EOF
   fi
   cat >> "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF
@@ -4094,6 +5177,7 @@ EOF
     - \`production/valkey/\`
     - \`production/backend/\`
     - \`production/cms/\`
+    - \`production/recovery/\`
     - \`production/electron/\`
 EOF
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
@@ -4162,9 +5246,10 @@ if [[ ! -f "SHA256SUMS.txt" ]]; then
   exit 1
 fi
 
-if [[ -f "BUNDLE_MANIFEST.sig" || -f "RELEASE_SIGNING_PUBLIC_KEY.pem" ]]; then
-  [[ -f "BUNDLE_MANIFEST.sig" && -f "RELEASE_SIGNING_PUBLIC_KEY.pem" ]] || { echo "Incomplete release signature metadata." >&2; exit 1; }
-  openssl dgst -sha256 -verify RELEASE_SIGNING_PUBLIC_KEY.pem -signature BUNDLE_MANIFEST.sig SHA256SUMS.txt >/dev/null
+if [[ -f "BUNDLE_MANIFEST.sig" ]]; then
+  trust_key="${DARSHAN_RELEASE_TRUST_KEY:-/etc/darshan/trust/release-signing.pem}"
+  [[ -f "$trust_key" && ! -L "$trust_key" ]] || { echo "Pinned release trust key is missing or unsafe: $trust_key" >&2; exit 1; }
+  openssl dgst -sha256 -verify "$trust_key" -signature BUNDLE_MANIFEST.sig SHA256SUMS.txt >/dev/null
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
@@ -4200,7 +5285,9 @@ if profile_enabled qa; then
     "$QA_BACKEND_DIR/wait-dependencies.sh" \
     "$QA_BACKEND_DIR/wait-ready.sh" \
     "$QA_BACKEND_DIR/verify-role.sh" \
+    "$QA_BACKEND_DIR/deployment-state.sh" \
     "$QA_BACKEND_DIR/install.sh" \
+    "$QA_BACKEND_DIR/finalize-install.sh" \
     "$QA_BACKEND_DIR/upgrade.sh" \
     "$QA_BACKEND_DIR/deploy.sh" \
     "$QA_BACKEND_DIR/adopt-existing.sh" \
@@ -4218,22 +5305,34 @@ fi
 if profile_enabled production; then
   chmod +x \
     "$PROD_DATA_DIR/load-images.sh" \
+    "$PROD_DATA_DIR/prepare-host.sh" \
+    "$PROD_DATA_DIR/preflight.sh" \
+    "$PROD_DATA_DIR/deployment-control.sh" \
     "$PROD_DATA_DIR/start.sh" \
     "$PROD_DATA_DIR/configure-monitoring-role.sh" \
     "$PROD_DATA_DIR/verify-role.sh" \
     "$PROD_DATA_DIR/stop.sh" \
     "$PROD_DATA_DIR/health-check.sh" \
     "$PROD_VALKEY_DIR/load-images.sh" \
+    "$PROD_VALKEY_DIR/prepare-host.sh" \
+    "$PROD_VALKEY_DIR/preflight.sh" \
+    "$PROD_VALKEY_DIR/deployment-control.sh" \
     "$PROD_VALKEY_DIR/start.sh" \
     "$PROD_VALKEY_DIR/verify-role.sh" \
     "$PROD_VALKEY_DIR/stop.sh" \
     "$PROD_VALKEY_DIR/health-check.sh" \
     "$PROD_BACKEND_DIR/load-images.sh" \
+    "$PROD_BACKEND_DIR/prepare-host.sh" \
+    "$PROD_BACKEND_DIR/preflight.sh" \
+    "$PROD_BACKEND_DIR/deployment-control.sh" \
+    "$PROD_BACKEND_DIR/compatibility-check.sh" \
     "$PROD_BACKEND_DIR/start.sh" \
     "$PROD_BACKEND_DIR/wait-dependencies.sh" \
     "$PROD_BACKEND_DIR/wait-ready.sh" \
     "$PROD_BACKEND_DIR/verify-role.sh" \
+    "$PROD_BACKEND_DIR/deployment-state.sh" \
     "$PROD_BACKEND_DIR/install.sh" \
+    "$PROD_BACKEND_DIR/finalize-install.sh" \
     "$PROD_BACKEND_DIR/upgrade.sh" \
     "$PROD_BACKEND_DIR/deploy.sh" \
     "$PROD_BACKEND_DIR/adopt-existing.sh" \
@@ -4242,13 +5341,28 @@ if profile_enabled production; then
     "$PROD_BACKEND_DIR/stop.sh" \
     "$PROD_BACKEND_DIR/health-check.sh" \
     "$PROD_CMS_DIR/load-images.sh" \
+    "$PROD_CMS_DIR/prepare-host.sh" \
+    "$PROD_CMS_DIR/preflight.sh" \
+    "$PROD_CMS_DIR/deployment-control.sh" \
+    "$PROD_CMS_DIR/compatibility-check.sh" \
     "$PROD_CMS_DIR/start.sh" \
     "$PROD_CMS_DIR/verify-role.sh" \
     "$PROD_CMS_DIR/stop.sh" \
-    "$PROD_CMS_DIR/health-check.sh"
+    "$PROD_CMS_DIR/health-check.sh" \
+    "$PROD_RECOVERY_DIR/load-images.sh" \
+    "$PROD_RECOVERY_DIR/prepare-host.sh" \
+    "$PROD_RECOVERY_DIR/preflight.sh" \
+    "$PROD_RECOVERY_DIR/start.sh" \
+    "$PROD_RECOVERY_DIR/verify-role.sh" \
+    "$PROD_RECOVERY_DIR/restore-rehearsal.sh" \
+    "$PROD_RECOVERY_DIR/stop.sh"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     chmod +x \
       "$PROD_OBSERVABILITY_DIR/load-images.sh" \
+      "$PROD_OBSERVABILITY_DIR/prepare-host.sh" \
+      "$PROD_OBSERVABILITY_DIR/preflight.sh" \
+      "$PROD_OBSERVABILITY_DIR/deployment-control.sh" \
+      "$PROD_OBSERVABILITY_DIR/compatibility-check.sh" \
       "$PROD_OBSERVABILITY_DIR/start.sh" \
       "$PROD_OBSERVABILITY_DIR/verify-role.sh" \
       "$PROD_OBSERVABILITY_DIR/stop.sh" \
@@ -4320,23 +5434,53 @@ EOF
   # Role folders are transferred independently. Copy the same non-secret,
   # signed policy into each role before role manifests are created so no VM has
   # to trust a detached root-bundle file that was never transferred to it.
-  for role_dir in "$PROD_DATA_DIR" "$PROD_VALKEY_DIR" "$PROD_BACKEND_DIR" "$PROD_CMS_DIR"; do
+  for role_dir in "$PROD_DATA_DIR" "$PROD_VALKEY_DIR" "$PROD_BACKEND_DIR" "$PROD_CMS_DIR" "$PROD_RECOVERY_DIR"; do
     cp "$BUNDLE_ROOT/OPERATIONS_POLICY.json" "$role_dir/OPERATIONS_POLICY.json"
   done
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     cp "$BUNDLE_ROOT/OPERATIONS_POLICY.json" "$PROD_OBSERVABILITY_DIR/OPERATIONS_POLICY.json"
   fi
+
+  for role in data valkey backend cms observability recovery; do
+    case "$role" in
+      data) role_dir="$PROD_DATA_DIR" ;;
+      valkey) role_dir="$PROD_VALKEY_DIR" ;;
+      backend) role_dir="$PROD_BACKEND_DIR" ;;
+      cms) role_dir="$PROD_CMS_DIR" ;;
+      observability) role_dir="$PROD_OBSERVABILITY_DIR" ;;
+      recovery) role_dir="$PROD_RECOVERY_DIR" ;;
+    esac
+    [[ -d "$role_dir" ]] || continue
+    cat > "$role_dir/COMPATIBILITY.json" <<EOF
+{
+  "schemaVersion": 1,
+  "siteName": "$SITE_NAME",
+  "role": "$role",
+  "releaseId": "$DARSHAN_RELEASE_ID",
+  "sourceCommit": "$PLAYER_SOURCE_COMMIT",
+  "compatibilityGeneration": $DARSHAN_COMPATIBILITY_GENERATION,
+  "requires": {
+    "data": $DARSHAN_COMPATIBILITY_GENERATION,
+    "valkey": $DARSHAN_COMPATIBILITY_GENERATION,
+    "backend": $DARSHAN_COMPATIBILITY_GENERATION,
+    "cms": $DARSHAN_COMPATIBILITY_GENERATION,
+    "observability": $DARSHAN_COMPATIBILITY_GENERATION,
+    "player": $DARSHAN_COMPATIBILITY_GENERATION
+  }
+}
+EOF
+  done
 fi
 
 if profile_enabled production; then
   chmod 750 "$BUNDLE_ROOT" "$PRODUCTION_ROOT"
   find "$PRODUCTION_ROOT" -type d -exec chmod 750 {} +
   find "$PRODUCTION_ROOT" \( -path '*/secrets/*' -o -path '*/worker-secrets/*' \) -type f -exec chmod 640 {} +
-  openssl pkey -in "$RELEASE_SIGNING_PRIVATE_KEY" -pubout -out "$BUNDLE_ROOT/RELEASE_SIGNING_PUBLIC_KEY.pem"
   sign_role_manifest "$PROD_DATA_DIR"
   sign_role_manifest "$PROD_VALKEY_DIR"
-  sign_role_manifest "$PROD_BACKEND_DIR"
-  sign_role_manifest "$PROD_CMS_DIR"
+    sign_role_manifest "$PROD_BACKEND_DIR"
+    sign_role_manifest "$PROD_CMS_DIR"
+    sign_role_manifest "$PROD_RECOVERY_DIR"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     sign_role_manifest "$PROD_OBSERVABILITY_DIR"
   fi
@@ -4365,4 +5509,6 @@ if profile_enabled production; then
   openssl dgst -sha256 -sign "$RELEASE_SIGNING_PRIVATE_KEY" -out "$BUNDLE_ROOT/BUNDLE_MANIFEST.sig" "$BUNDLE_ROOT/SHA256SUMS.txt"
 fi
 
-echo "Bundle created at: $BUNDLE_ROOT"
+mv "$BUNDLE_ROOT" "$FINAL_BUNDLE_ROOT"
+PARTIAL_BUNDLE_ROOT=""
+echo "Bundle created at: $FINAL_BUNDLE_ROOT"

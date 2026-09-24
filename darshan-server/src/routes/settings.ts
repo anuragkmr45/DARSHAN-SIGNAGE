@@ -114,6 +114,37 @@ async function ensureMediaIdsExist(ids: Array<string | null | undefined>) {
   }
 }
 
+function assertDefaultMediaReady(media: { id: string; status?: string | null }) {
+  if (media.status !== 'READY') {
+    throw AppError.badRequest('Default media must be READY before it can be assigned.', {
+      reason: 'MEDIA_NOT_READY',
+      media_ids: [media.id],
+    });
+  }
+}
+
+async function ensureReadyDefaultMediaIds(ids: Array<string | null | undefined>) {
+  const requestedIds = Array.from(new Set(ids.filter((value): value is string => Boolean(value))));
+  if (requestedIds.length === 0) return;
+
+  const db = getDatabase();
+  const rows = await db
+    .select({ id: schema.media.id, status: schema.media.status })
+    .from(schema.media)
+    .where(inArray(schema.media.id, requestedIds as string[]));
+  if (rows.length !== requestedIds.length) {
+    throw AppError.notFound('Media not found');
+  }
+
+  const nonReadyIds = rows.filter((media) => media.status !== 'READY').map((media) => media.id).sort();
+  if (nonReadyIds.length > 0) {
+    throw AppError.badRequest('Default media must be READY before it can be assigned.', {
+      reason: 'MEDIA_NOT_READY',
+      media_ids: nonReadyIds,
+    });
+  }
+}
+
 async function serializeBranding(settings: BrandingSettings) {
   const mediaMap = await resolveBrandingMediaMap([
     settings.logo_media_id,
@@ -135,7 +166,7 @@ async function validateDefaultMediaTargets(
   if (assignments.length === 0) return;
 
   const db = getDatabase();
-  await ensureMediaIdsExist(assignments.map((assignment) => assignment.media_id));
+  await ensureReadyDefaultMediaIds(assignments.map((assignment) => assignment.media_id));
 
   const screenAssignments = assignments.filter((assignment) => assignment.target_type === 'SCREEN');
   const groupAssignments = assignments.filter((assignment) => assignment.target_type === 'GROUP');
@@ -699,6 +730,7 @@ export async function settingsRoutes(fastify: FastifyInstance) {
         if (!media) {
           throw AppError.notFound('Media not found');
         }
+        assertDefaultMediaReady(media);
 
         await db
           .insert(schema.settings)
@@ -762,14 +794,7 @@ export async function settingsRoutes(fastify: FastifyInstance) {
           new Set(Object.values(data.variants).filter((value): value is string => typeof value === 'string' && value.length > 0))
         );
 
-        if (requestedIds.length > 0) {
-          const medias = await db.select({ id: schema.media.id }).from(schema.media).where(inArray(schema.media.id, requestedIds as string[]));
-          const found = new Set(medias.map((media) => media.id));
-          const missing = requestedIds.find((mediaId) => !found.has(mediaId));
-          if (missing) {
-            throw AppError.notFound('Media not found');
-          }
-        }
+        await ensureReadyDefaultMediaIds(requestedIds);
 
         const normalized = Object.entries(data.variants).reduce<Record<string, string>>((acc, [aspectRatio, mediaId]) => {
           if (mediaId) {

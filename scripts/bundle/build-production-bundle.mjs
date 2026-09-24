@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -119,6 +120,14 @@ const commonExportEnv = {
   INSTALL_PLAYWRIGHT_CHROMIUM: config.INSTALL_PLAYWRIGHT_CHROMIUM,
 }
 
+const finalBundleRoot = path.join(config.BUNDLE_OUTPUT_BASE, config.SITE_NAME, config.RELEASE_ID)
+if (fs.existsSync(finalBundleRoot)) fail(`Release output already exists and will not be overwritten: ${finalBundleRoot}`)
+fs.mkdirSync(path.dirname(finalBundleRoot), { recursive: true })
+let stagingOutputBase = fs.mkdtempSync(path.join(config.BUNDLE_OUTPUT_BASE, '.build-'))
+process.on('exit', () => {
+  if (stagingOutputBase) fs.rmSync(stagingOutputBase, { recursive: true, force: true })
+})
+
 if (config.EXPORT_SERVER === 'true') {
   run('bash', ['scripts/export/package-server.sh', '--release', config.RELEASE_ID, '--deployment-layout', 'production-split'], commonExportEnv)
 }
@@ -151,10 +160,41 @@ run('node', [
 const assemblerArgs = ['scripts/bundle/assemble-runtime-bundle.sh']
 if (skipDocker) assemblerArgs.push('--skip-docker')
 assemblerArgs.push('--profile', 'production', config.SITE_NAME)
-run('bash', assemblerArgs, toAssemblerEnvironment(config))
+run('bash', assemblerArgs, { ...toAssemblerEnvironment(config), OUTPUT_BASE: stagingOutputBase })
 
-const bundleRoot = path.join(config.BUNDLE_OUTPUT_BASE, config.SITE_NAME)
+const bundleRoot = path.join(stagingOutputBase, config.SITE_NAME, config.RELEASE_ID)
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex')
+
+function createTransferArchives() {
+  const transferDir = path.join(bundleRoot, 'transfer')
+  fs.mkdirSync(transferDir, { mode: 0o700 })
+  const roles = ['data', 'valkey', 'backend', 'cms', 'observability', 'recovery']
+  for (const role of roles) {
+    const roleDirectory = path.join(bundleRoot, 'production', role)
+    if (!fs.existsSync(roleDirectory)) continue
+    const archive = `${config.SITE_NAME}-${config.RELEASE_ID}-${role}.tgz`
+    run('tar', [
+      '--sort=name', '--owner=0', '--group=0', '--numeric-owner',
+      '-czf', path.join(transferDir, archive), '-C', path.join(bundleRoot, 'production'), role,
+    ], {})
+  }
+  fs.copyFileSync(path.join(repoRoot, 'scripts/bundle/install-signed-role.sh'), path.join(transferDir, 'install-signed-role.sh'))
+  fs.chmodSync(path.join(transferDir, 'install-signed-role.sh'), 0o750)
+  const payloads = fs.readdirSync(transferDir)
+    .filter((name) => name.endsWith('.tgz') || name === 'install-signed-role.sh')
+    .sort()
+  const transferManifest = payloads
+    .map((name) => `${sha256(fs.readFileSync(path.join(transferDir, name)))}  ${name}`)
+    .join('\n')
+  fs.writeFileSync(path.join(transferDir, 'TRANSFER_MANIFEST.sha256'), `${transferManifest}\n`, { mode: 0o600 })
+  const signature = spawnSync('openssl', [
+    'dgst', '-sha256', '-sign', config.RELEASE_SIGNING_PRIVATE_KEY,
+    '-out', path.join(transferDir, 'TRANSFER_MANIFEST.sig'), path.join(transferDir, 'TRANSFER_MANIFEST.sha256'),
+  ], { encoding: 'utf8', env: baseEnv })
+  if (signature.status !== 0) fail(`Unable to sign transfer manifest: ${signature.stderr || signature.stdout}`)
+}
+
+createTransferArchives()
 
 function readArtifactManifest(directory) {
   return JSON.parse(fs.readFileSync(path.join(directory, 'ARTIFACT_MANIFEST.json'), 'utf8'))
@@ -205,6 +245,7 @@ function assertBundleContract() {
     'production/cms/tls/tls.key',
     'production/data/tls/private.key',
     'production/data/tls/postgres.key',
+    'production/observability/certs/server.key',
     'production/valkey/tls/server.key',
   ])
   for (const { relative, absolute } of files.filter(({ relative }) => relative.endsWith('.key'))) {
@@ -278,6 +319,7 @@ const manifest = {
     minio: certificateFingerprint(path.join(bundleRoot, 'production/data/tls/public.crt')),
     postgres: certificateFingerprint(path.join(bundleRoot, 'production/data/tls/postgres.crt')),
     valkey: certificateFingerprint(path.join(bundleRoot, 'production/valkey/tls/server.crt')),
+    observability: certificateFingerprint(path.join(bundleRoot, 'production/observability/certs/server.crt')),
   },
   configuration: entries,
   security: {
@@ -290,6 +332,7 @@ const manifest = {
       'production/cms/tls/tls.key',
       'production/data/tls/private.key',
       'production/data/tls/postgres.key',
+      'production/observability/certs/server.key',
       'production/valkey/tls/server.key',
     ],
     deviceCaPrivateKeyRole: 'production/backend only',
@@ -307,5 +350,20 @@ const signatureResult = spawnSync('openssl', [
 if (signatureResult.status !== 0) {
   fail(`Unable to sign the production bundle manifest: ${signatureResult.stderr || signatureResult.stdout}`)
 }
-run('bash', ['verify-bundle.sh'], {}, bundleRoot)
-process.stdout.write(`Production source-free bundle created at ${bundleRoot}\n`)
+const trustWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'darshan-release-trust-'))
+const buildTrustKey = path.join(trustWorkDir, 'release-signing.pem')
+try {
+  const publicKeyResult = spawnSync('openssl', [
+    'pkey', '-in', config.RELEASE_SIGNING_PRIVATE_KEY, '-pubout', '-out', buildTrustKey,
+  ], { encoding: 'utf8', env: baseEnv })
+  if (publicKeyResult.status !== 0) {
+    fail(`Unable to derive the release verification key: ${publicKeyResult.stderr || publicKeyResult.stdout}`)
+  }
+  run('bash', ['verify-bundle.sh'], { DARSHAN_RELEASE_TRUST_KEY: buildTrustKey }, bundleRoot)
+} finally {
+  fs.rmSync(trustWorkDir, { recursive: true, force: true })
+}
+fs.renameSync(bundleRoot, finalBundleRoot)
+fs.rmSync(stagingOutputBase, { recursive: true, force: true })
+stagingOutputBase = ''
+process.stdout.write(`Production source-free bundle created at ${finalBundleRoot}\n`)

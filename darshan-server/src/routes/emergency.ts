@@ -83,6 +83,18 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
     return true;
   };
 
+  const requireReadyEmergencyMedia = async (mediaId: string) => {
+    const media = await mediaRepo.findById(mediaId);
+    if (!media) throw AppError.badRequest('Media not found');
+    if (media.status !== 'READY') {
+      throw AppError.badRequest('Emergency media must be READY before it can be assigned.', {
+        reason: 'MEDIA_NOT_READY',
+        media_id: mediaId,
+      });
+    }
+    return media;
+  };
+
   const getScopeLabel = (screenIds: string[], groupIds: string[], targetAll: boolean) => {
     if (targetAll || (!screenIds.length && !groupIds.length)) return 'GLOBAL';
     if (groupIds.length > 0 && screenIds.length === 0) return 'GROUP';
@@ -121,7 +133,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
   const resolveMediaUrl = async (mediaId?: string | null) => {
     if (!mediaId) return null;
     const media = await mediaRepo.findById(mediaId);
-    if (!media) return null;
+    if (!media || media.status !== 'READY') return null;
     const filename = (media as any).original_filename ?? media.name ?? 'file';
     const contentDisposition = buildContentDisposition(filename, 'inline');
     try {
@@ -261,8 +273,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
 
         const data = emergencyTypeSchema.parse(request.body);
         if (data.media_id) {
-          const media = await mediaRepo.findById(data.media_id);
-          if (!media) throw AppError.badRequest('Media not found');
+          await requireReadyEmergencyMedia(data.media_id);
         }
 
         const created = await emergencyTypeRepo.create({
@@ -390,8 +401,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
 
         const data = emergencyTypeUpdateSchema.parse(request.body);
         if (Object.prototype.hasOwnProperty.call(data, 'media_id') && data.media_id) {
-          const media = await mediaRepo.findById(data.media_id);
-          if (!media) throw AppError.badRequest('Media not found');
+          await requireReadyEmergencyMedia(data.media_id);
         }
 
         const updated = await emergencyTypeRepo.update((request.params as any).id, data);
@@ -489,8 +499,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
         const mediaId = data.media_id ?? type?.media_id ?? null;
 
         if (mediaId) {
-          const media = await mediaRepo.findById(mediaId);
-          if (!media) throw AppError.badRequest('Media not found');
+          await requireReadyEmergencyMedia(mediaId);
         }
 
         const uniqueScreenIds = Array.from(new Set(data.screen_ids || [])).sort();

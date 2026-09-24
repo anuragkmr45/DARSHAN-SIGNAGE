@@ -101,6 +101,7 @@ function buildHelloAck(input: {
     device_id: input.deviceId,
     connection_id: input.connectionId,
     server_release_id: config.DARSHAN_RELEASE_ID,
+    compatibility_generation: config.DARSHAN_COMPATIBILITY_GENERATION,
     recommended_intervals: {
       heartbeat_ms: 30_000,
       command_safety_poll_ms: 60_000,

@@ -2,6 +2,28 @@ import { describe, expect, it } from 'vitest';
 import { buildResolvedMediaAssets } from '@/utils/resolved-media';
 
 describe('resolved media assets', () => {
+  it('exposes a converted Office document as a playable PDF', () => {
+    const map = new Map([
+      ['document-1', {
+        id: 'document-1',
+        name: 'Quarterly report.docx',
+        type: 'DOCUMENT',
+        status: 'READY',
+        media_url: 'https://cms.example.test/media-ready/document-1/ready.pdf',
+        content_type: 'application/pdf',
+        source_content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      } as any],
+    ]);
+
+    expect(buildResolvedMediaAssets(map)['document-1']).toMatchObject({
+      type: 'DOCUMENT',
+      status: 'READY',
+      playback_url: 'https://cms.example.test/media-ready/document-1/ready.pdf',
+      content_type: 'application/pdf',
+      source_content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+  });
+
   it('keeps live webpage playback separate from its captured preview', () => {
     const map = new Map([
       ['web-1', {

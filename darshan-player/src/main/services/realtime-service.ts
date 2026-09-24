@@ -340,7 +340,9 @@ export class RealtimeService extends EventEmitter {
   private reconnectCount = 0
   private reconciliationFailureCount = 0
   private serverReleaseId?: string
+  private serverCompatibilityGeneration?: number
   private releaseMismatch = false
+  private compatibilityMismatch = false
 
   constructor(transport?: RealtimeTransport) {
     super()
@@ -421,6 +423,7 @@ export class RealtimeService extends EventEmitter {
     const applied = deviceState.lastAppliedStateVersion ?? deviceState.lastDesiredStateVersion
     const hasVersionMismatch =
       this.releaseMismatch ||
+      this.compatibilityMismatch ||
       (typeof observed === 'number' && typeof applied === 'number' && observed > applied)
     const connectionState = hasVersionMismatch
       ? 'VERSION_MISMATCH'
@@ -434,6 +437,7 @@ export class RealtimeService extends EventEmitter {
       release_id: config.environment?.releaseId,
       source_commit: config.environment?.sourceCommit,
       server_release_id: this.serverReleaseId,
+      compatibility_generation: this.serverCompatibilityGeneration,
       connection_state: connectionState,
       last_hello_ack_at: this.lastHelloAckAt,
       last_event_at: this.lastEventAt,
@@ -714,6 +718,28 @@ export class RealtimeService extends EventEmitter {
     this.lastHelloAckAt = new Date().toISOString()
     this.serverReleaseId =
       typeof notification['server_release_id'] === 'string' ? notification['server_release_id'] : undefined
+    this.serverCompatibilityGeneration =
+      typeof notification['compatibility_generation'] === 'number'
+        ? notification['compatibility_generation']
+        : undefined
+    const playerCompatibilityGeneration = getConfigManager().getConfig().environment?.compatibilityGeneration
+    this.compatibilityMismatch =
+      playerCompatibilityGeneration !== undefined &&
+      this.serverCompatibilityGeneration !== playerCompatibilityGeneration
+    if (
+      this.compatibilityMismatch
+    ) {
+      logger.error(
+        { playerCompatibilityGeneration, serverCompatibilityGeneration: this.serverCompatibilityGeneration },
+        'Player/backend compatibility generation mismatch; rejecting realtime session'
+      )
+      this.transport?.disconnect()
+      this.state = 'disconnected'
+      getCommandProcessor().setRealtimeHealthy(false)
+      this.scheduleDesiredStatePoll()
+      this.scheduleReconnect()
+      return
+    }
     const playerReleaseId = getConfigManager().getConfig().environment?.releaseId
     this.releaseMismatch = Boolean(playerReleaseId && this.serverReleaseId && playerReleaseId !== this.serverReleaseId)
     if (this.releaseMismatch) {

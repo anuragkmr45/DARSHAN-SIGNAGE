@@ -12,9 +12,15 @@ describe('Cache Manager', () => {
   let tempDir: string
   let cacheDir: string
   let sandbox: sinon.SinonSandbox
+  let originalDarshanPlayerConfigFile: string | undefined
+  let originalSignhexPlayerConfigFile: string | undefined
 
   beforeEach(() => {
     sandbox = sinon.createSandbox()
+    originalDarshanPlayerConfigFile = process.env.DARSHAN_PLAYER_CONFIG_FILE
+    originalSignhexPlayerConfigFile = process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
     tempDir = createTempDir('cache-test-')
     cacheDir = path.join(tempDir, 'cache')
     fs.mkdirSync(cacheDir, { recursive: true })
@@ -38,12 +44,29 @@ describe('Cache Manager', () => {
       },
     }
     fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify(testConfig, null, 2))
+
+    // Other Mocha specs are loaded before this hook and may initialize the
+    // process-wide config singleton. Each cache test must use its own fixture.
+    require('../../../src/common/config').resetConfigManager()
   })
 
   afterEach(() => {
     sandbox.restore()
     cleanupTempDir(tempDir)
     delete process.env.HEXMON_CONFIG_PATH
+
+    require('../../../src/common/config').resetConfigManager()
+
+    if (originalDarshanPlayerConfigFile === undefined) {
+      delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    } else {
+      process.env.DARSHAN_PLAYER_CONFIG_FILE = originalDarshanPlayerConfigFile
+    }
+    if (originalSignhexPlayerConfigFile === undefined) {
+      delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
+    } else {
+      process.env.SIGNHEX_PLAYER_CONFIG_FILE = originalSignhexPlayerConfigFile
+    }
 
     // Clear module cache
     delete require.cache[require.resolve('../../../src/main/services/cache/cache-manager')]
@@ -84,6 +107,39 @@ describe('Cache Manager', () => {
 
       expect(filePath).to.exist
       expect(fs.existsSync(filePath!)).to.be.true
+    })
+
+    it('should name converted document cache entries from the resolved PDF content type', async () => {
+      const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+      const cacheManager = getCacheManager()
+      const data = Buffer.from('%PDF-1.7 converted document')
+
+      sandbox.stub(cacheManager, 'download' as any).resolves(data)
+
+      await cacheManager.add('converted-document', 'https://example.com/media/download?signature=one', undefined, {
+        contentType: 'application/pdf',
+      })
+      const filePath = await cacheManager.get('converted-document', 'application/pdf')
+
+      expect(filePath).to.match(/converted-document\.pdf$/)
+      expect(fs.existsSync(filePath!)).to.equal(true)
+    })
+
+    it('should migrate an extensionless legacy PDF cache entry before secure local playback', async () => {
+      const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+      const cacheManager = getCacheManager()
+      const data = Buffer.from('%PDF-1.7 legacy cache')
+
+      sandbox.stub(cacheManager, 'download' as any).resolves(data)
+
+      await cacheManager.add('legacy-document', 'https://example.com/media/download')
+      const legacyPath = await cacheManager.get('legacy-document')
+      expect(legacyPath).to.not.match(/\.pdf$/)
+
+      const normalizedPath = await cacheManager.get('legacy-document', 'application/pdf')
+      expect(normalizedPath).to.match(/legacy-document\.pdf$/)
+      expect(fs.existsSync(normalizedPath!)).to.equal(true)
+      expect(fs.existsSync(legacyPath!)).to.equal(false)
     })
 
     it('should verify integrity with SHA-256', async () => {

@@ -3,6 +3,10 @@ import crypto from 'node:crypto'
 import net from 'node:net'
 import path from 'node:path'
 
+// Bump this source-controlled value only when a release intentionally breaks
+// cross-role or player wire compatibility. It is not an operator input.
+export const PRODUCTION_COMPATIBILITY_GENERATION = 1
+
 const BOOLEAN_FIELDS = new Set([
   'EXPORT_SERVER', 'EXPORT_CMS', 'EXPORT_ELECTRON', 'INSTALL_PLAYWRIGHT_CHROMIUM',
   'VITE_ENABLE_PRODUCTION_LOCKDOWN', 'VITE_REALTIME_DELIVERY_STATUS_UI', 'VITE_MEDIA_CACHE_STATUS_UI',
@@ -13,6 +17,7 @@ const PORT_FIELDS = new Set([
   'CMS_HTTPS_PORT', 'CMS_HTTP_PORT', 'API_HOST_PORT', 'POSTGRES_HOST_PORT', 'MINIO_HOST_PORT',
   'MINIO_CONSOLE_PORT', 'VALKEY_HOST_PORT', 'PROMETHEUS_HOST_PORT', 'ALERTMANAGER_HOST_PORT', 'GRAFANA_HOST_PORT',
   'NODE_EXPORTER_HOST_PORT', 'POSTGRES_EXPORTER_HOST_PORT', 'NGINX_EXPORTER_HOST_PORT',
+  'METRICS_GATEWAY_HOST_PORT',
 ])
 
 const HOST_FIELDS = new Set([
@@ -34,6 +39,7 @@ const PATH_FIELDS = new Set([
   'TRANSPORT_CA_CERT_FILE', 'TRANSPORT_CA_KEY_FILE', 'CMS_TLS_CERT_FILE', 'CMS_TLS_KEY_FILE',
   'BACKEND_TLS_CERT_FILE', 'BACKEND_TLS_KEY_FILE', 'MINIO_TLS_CERT_FILE', 'MINIO_TLS_KEY_FILE',
   'POSTGRES_TLS_CERT_FILE', 'POSTGRES_TLS_KEY_FILE', 'VALKEY_TLS_CERT_FILE', 'VALKEY_TLS_KEY_FILE',
+  'OBSERVABILITY_TLS_CERT_FILE', 'OBSERVABILITY_TLS_KEY_FILE',
   'DEVICE_CA_CERT_FILE', 'DEVICE_CA_KEY_FILE',
   'RELEASE_SIGNING_PRIVATE_KEY',
   'CAPACITY_EVIDENCE_FILE',
@@ -45,6 +51,7 @@ const SECRET_FIELDS = new Set([
   'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
   'TRANSPORT_CA_KEY_FILE', 'CMS_TLS_KEY_FILE', 'BACKEND_TLS_KEY_FILE', 'MINIO_TLS_KEY_FILE',
   'POSTGRES_TLS_KEY_FILE', 'VALKEY_TLS_KEY_FILE', 'DEVICE_CA_KEY_FILE',
+  'OBSERVABILITY_TLS_KEY_FILE',
   'RELEASE_SIGNING_PRIVATE_KEY',
 ])
 
@@ -61,6 +68,10 @@ const DISK_FREE_FIELDS = [
   'DATA_MIN_FREE_DISK_BYTES', 'VALKEY_MIN_FREE_DISK_BYTES', 'BACKEND_MIN_FREE_DISK_BYTES',
   'CMS_MIN_FREE_DISK_BYTES', 'OBSERVABILITY_MIN_FREE_DISK_BYTES',
 ]
+const VOLUME_FIELDS = [
+  'POSTGRES_VOLUME_NAME', 'MINIO_VOLUME_NAME', 'VALKEY_VOLUME_NAME',
+  'PROMETHEUS_VOLUME_NAME', 'ALERTMANAGER_VOLUME_NAME', 'GRAFANA_VOLUME_NAME',
+]
 const OPERATIONS_POLICY_FIELDS = [
   'CAPACITY_EVIDENCE_FILE',
   'BACKUP_INTERVAL_HOURS', 'BACKUP_RETENTION_DAYS', 'BACKUP_OFFHOST_DESTINATION',
@@ -68,6 +79,8 @@ const OPERATIONS_POLICY_FIELDS = [
   'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES',
   ...DISK_FREE_FIELDS,
   ...RESOURCE_LIMIT_FIELDS,
+  'VOLUME_PROVISIONING_MODE',
+  ...VOLUME_FIELDS,
 ]
 
 const OUTPUTS = {
@@ -113,6 +126,13 @@ const OUTPUTS = {
   CAPACITY_EVIDENCE_FILE: ['OPERATIONS_POLICY.json', 'CONFIGURATION_MANIFEST.json'],
   BACKUP_OFFHOST_ACCESS_KEY: ['production/backend/worker-secrets/backup-offhost-access-key'],
   BACKUP_OFFHOST_SECRET_KEY: ['production/backend/worker-secrets/backup-offhost-secret-key'],
+  VOLUME_PROVISIONING_MODE: ['OPERATIONS_POLICY.json', 'production/*/.env.production'],
+  POSTGRES_VOLUME_NAME: ['production/data/.env.production'],
+  MINIO_VOLUME_NAME: ['production/data/.env.production'],
+  VALKEY_VOLUME_NAME: ['production/valkey/.env.production'],
+  PROMETHEUS_VOLUME_NAME: ['production/observability/.env.production'],
+  ALERTMANAGER_VOLUME_NAME: ['production/observability/.env.production'],
+  GRAFANA_VOLUME_NAME: ['production/observability/.env.production'],
   CONTAINER_LOG_MAX_SIZE: ['OPERATIONS_POLICY.json'],
   CONTAINER_LOG_MAX_FILES: ['OPERATIONS_POLICY.json'],
   DATA_MIN_FREE_DISK_BYTES: ['OPERATIONS_POLICY.json', 'production/data/.env.production'],
@@ -141,15 +161,17 @@ const ALLOWED_FIELDS = new Set([
   'CMS_HTTPS_PORT', 'CMS_HTTP_PORT',
   'API_HOST_PORT', 'POSTGRES_HOST_PORT', 'MINIO_HOST_PORT', 'MINIO_CONSOLE_PORT', 'VALKEY_HOST_PORT',
   'PROMETHEUS_HOST_PORT', 'ALERTMANAGER_HOST_PORT', 'GRAFANA_HOST_PORT',
-  'NODE_EXPORTER_HOST_PORT', 'POSTGRES_EXPORTER_HOST_PORT', 'NGINX_EXPORTER_HOST_PORT', 'TRANSPORT_TLS_MODE',
+  'NODE_EXPORTER_HOST_PORT', 'POSTGRES_EXPORTER_HOST_PORT', 'NGINX_EXPORTER_HOST_PORT', 'METRICS_GATEWAY_HOST_PORT', 'TRANSPORT_TLS_MODE',
   'TRANSPORT_CA_CERT_FILE', 'TRANSPORT_CA_KEY_FILE', 'CMS_TLS_CERT_FILE', 'CMS_TLS_KEY_FILE',
   'BACKEND_TLS_CERT_FILE', 'BACKEND_TLS_KEY_FILE', 'MINIO_TLS_CERT_FILE', 'MINIO_TLS_KEY_FILE',
   'POSTGRES_TLS_CERT_FILE', 'POSTGRES_TLS_KEY_FILE', 'VALKEY_TLS_CERT_FILE', 'VALKEY_TLS_KEY_FILE',
+  'OBSERVABILITY_TLS_CERT_FILE', 'OBSERVABILITY_TLS_KEY_FILE',
   'DEVICE_CA_CERT_FILE', 'DEVICE_CA_KEY_FILE', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_MONITORING_USER', 'POSTGRES_MONITORING_PASSWORD', 'POSTGRES_DB',
   'RELEASE_SIGNING_PRIVATE_KEY',
   'CAPACITY_EVIDENCE_FILE',
   'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'MINIO_REGION', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'JWT_EXPIRY', 'INITIAL_ADMIN_EMAIL',
   'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+  'VOLUME_PROVISIONING_MODE', ...VOLUME_FIELDS,
   'DEVICE_AUTH_MODE', 'DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT',
   'MAX_UPLOAD_MB',
   'WEBPAGE_NAVIGATION_ALLOWLIST', 'WEBPAGE_RESOURCE_ALLOWLIST', 'WEBPAGE_ALLOWED_CIDRS', 'WEBPAGE_ALLOWED_PORTS', 'WEBPAGE_ALLOW_HTTP',
@@ -169,6 +191,7 @@ const REQUIRED_FIELDS = [
   'RELEASE_SIGNING_PRIVATE_KEY',
   'POSTGRES_PASSWORD', 'POSTGRES_MONITORING_PASSWORD', 'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'INITIAL_ADMIN_EMAIL',
   'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+  'VOLUME_PROVISIONING_MODE',
   'WEBPAGE_NAVIGATION_ALLOWLIST',
   ...OPERATIONS_POLICY_FIELDS,
 ]
@@ -181,6 +204,7 @@ const DEFAULTS = {
   MINIO_HOST_PORT: '9000', MINIO_CONSOLE_PORT: '9001', VALKEY_HOST_PORT: '6379',
   PROMETHEUS_HOST_PORT: '9090', ALERTMANAGER_HOST_PORT: '9093', GRAFANA_HOST_PORT: '3001',
   NODE_EXPORTER_HOST_PORT: '9100', POSTGRES_EXPORTER_HOST_PORT: '9187', NGINX_EXPORTER_HOST_PORT: '9113',
+  METRICS_GATEWAY_HOST_PORT: '9443',
   POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', BACKUP_OFFHOST_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info', MAX_UPLOAD_MB: '500', WEBPAGE_RESOURCE_ALLOWLIST: '', WEBPAGE_ALLOWED_CIDRS: '', WEBPAGE_ALLOWED_PORTS: '443', WEBPAGE_ALLOW_HTTP: 'false',
   POSTGRES_IMAGE: 'postgres:15-alpine', MINIO_IMAGE: 'minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e', VALKEY_IMAGE: 'valkey/valkey:7-alpine',
   NGINX_IMAGE: 'nginx:1.27-alpine', PROMETHEUS_IMAGE: 'prom/prometheus:v3.3.1',
@@ -586,6 +610,8 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
       config.POSTGRES_TLS_KEY_FILE ||= path.join(config.SITE_PKI_DIR, 'postgres.key')
       config.VALKEY_TLS_CERT_FILE ||= path.join(config.SITE_PKI_DIR, 'valkey.crt')
       config.VALKEY_TLS_KEY_FILE ||= path.join(config.SITE_PKI_DIR, 'valkey.key')
+      config.OBSERVABILITY_TLS_CERT_FILE ||= path.join(config.SITE_PKI_DIR, 'observability.crt')
+      config.OBSERVABILITY_TLS_KEY_FILE ||= path.join(config.SITE_PKI_DIR, 'observability.key')
     }
   }
   if (config.RELEASE_ID && config.PACKAGE_OUTPUT_BASE) {
@@ -600,6 +626,13 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   config.DATA_BIND_ADDRESS ||= config.DATA_PRIVATE_HOST
   config.VALKEY_BIND_ADDRESS ||= config.VALKEY_PRIVATE_HOST
   config.OBSERVABILITY_BIND_ADDRESS ||= config.OBSERVABILITY_PRIVATE_HOST
+  const defaultVolumePrefix = config.SITE_NAME ? `darshan-${config.SITE_NAME}` : 'darshan-site'
+  config.POSTGRES_VOLUME_NAME ||= `${defaultVolumePrefix}-postgres-data`
+  config.MINIO_VOLUME_NAME ||= `${defaultVolumePrefix}-minio-data`
+  config.VALKEY_VOLUME_NAME ||= `${defaultVolumePrefix}-valkey-data`
+  config.PROMETHEUS_VOLUME_NAME ||= `${defaultVolumePrefix}-prometheus-data`
+  config.ALERTMANAGER_VOLUME_NAME ||= `${defaultVolumePrefix}-alertmanager-data`
+  config.GRAFANA_VOLUME_NAME ||= `${defaultVolumePrefix}-grafana-data`
   for (const name of REQUIRED_FIELDS) {
     if (!config[name] && !parsed.invalidKeys.has(name)) addError(`${name} is required`)
   }
@@ -611,6 +644,15 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   }
   if (config.PLAYER_TARGET_PLATFORMS && !/^(?:linux|windows|linux,windows|windows,linux)$/.test(config.PLAYER_TARGET_PLATFORMS)) {
     addError('PLAYER_TARGET_PLATFORMS must be linux, windows, or windows,linux')
+  }
+  if (!['create', 'require-existing'].includes(config.VOLUME_PROVISIONING_MODE)) {
+    addError('VOLUME_PROVISIONING_MODE must be create or require-existing')
+  }
+  for (const name of VOLUME_FIELDS) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(config[name] || '')) addError(`${name} must be a valid Docker volume name`)
+    if (config.VOLUME_PROVISIONING_MODE === 'require-existing' && !parsed.explicit.has(name)) {
+      addError(`${name} must be explicitly inventoried when VOLUME_PROVISIONING_MODE=require-existing`)
+    }
   }
   if (config.POSTGRES_USER && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.POSTGRES_USER)) {
     addError('POSTGRES_USER must be a PostgreSQL identifier')
@@ -698,9 +740,9 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
     requiredFiles.push(
       'CMS_TLS_CERT_FILE', 'CMS_TLS_KEY_FILE', 'BACKEND_TLS_CERT_FILE', 'BACKEND_TLS_KEY_FILE',
       'MINIO_TLS_CERT_FILE', 'MINIO_TLS_KEY_FILE', 'POSTGRES_TLS_CERT_FILE', 'POSTGRES_TLS_KEY_FILE',
-      'VALKEY_TLS_CERT_FILE', 'VALKEY_TLS_KEY_FILE'
+      'VALKEY_TLS_CERT_FILE', 'VALKEY_TLS_KEY_FILE', 'OBSERVABILITY_TLS_CERT_FILE', 'OBSERVABILITY_TLS_KEY_FILE'
     )
-    privateKeys.push('CMS_TLS_KEY_FILE', 'BACKEND_TLS_KEY_FILE', 'MINIO_TLS_KEY_FILE', 'POSTGRES_TLS_KEY_FILE', 'VALKEY_TLS_KEY_FILE')
+    privateKeys.push('CMS_TLS_KEY_FILE', 'BACKEND_TLS_KEY_FILE', 'MINIO_TLS_KEY_FILE', 'POSTGRES_TLS_KEY_FILE', 'VALKEY_TLS_KEY_FILE', 'OBSERVABILITY_TLS_KEY_FILE')
   }
   for (const name of requiredFiles) {
     if (!config[name]) {
@@ -723,6 +765,7 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
 export function toAssemblerEnvironment(config) {
   return {
     ...config,
+    DARSHAN_COMPATIBILITY_GENERATION: String(PRODUCTION_COMPATIBILITY_GENERATION),
     CMS_PUBLIC_SCHEME: 'https', MINIO_USE_SSL: 'true',
     ONPREM_CERT_MODE: config.TRANSPORT_TLS_MODE === 'internal-ca' ? 'generate' : 'provided',
     OUTPUT_BASE: config.BUNDLE_OUTPUT_BASE,
