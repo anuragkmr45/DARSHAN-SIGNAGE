@@ -1,0 +1,5263 @@
+{
+  "analysisDate": "2026-09-24",
+  "commit": "a6e401d2479cd0dee34c33552671cd0f86d4d173",
+  "branch": "release-01",
+  "trackedFiles": 1215,
+  "counts": {
+    ".dockerignore": 1,
+    ".gitignore": 1,
+    "README.md": 1,
+    "darshan-cms": 289,
+    "darshan-player": 164,
+    "darshan-server": 370,
+    "deploy": 72,
+    "docs": 280,
+    "manifests": 3,
+    "scripts": 26,
+    "standards": 8
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/metrics",
+      "file": "darshan-server/src/observability/http.ts",
+      "line": 53,
+      "description": "",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/api-keys",
+      "file": "darshan-server/src/routes/api-keys.ts",
+      "line": 26,
+      "description": "Create API key (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'ApiKey'"
+      ],
+      "validationCalls": [
+        "createApiKeySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/api-keys",
+      "file": "darshan-server/src/routes/api-keys.ts",
+      "line": 61,
+      "description": "List API keys (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ApiKey'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/api-keys/:id/rotate",
+      "file": "darshan-server/src/routes/api-keys.ts",
+      "line": 88,
+      "description": "Rotate API key secret (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'ApiKey'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/api-keys/:id/revoke",
+      "file": "darshan-server/src/routes/api-keys.ts",
+      "line": 116,
+      "description": "Revoke API key (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'ApiKey'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/audit-logs",
+      "file": "darshan-server/src/routes/audit-logs.ts",
+      "line": 76,
+      "description": "List audit logs (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'AuditLog'"
+      ],
+      "validationCalls": [
+        "listAuditLogsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/audit-logs/export",
+      "file": "darshan-server/src/routes/audit-logs.ts",
+      "line": 125,
+      "description": "Export audit logs as PDF",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'AuditLog'"
+      ],
+      "validationCalls": [
+        "listAuditLogsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/audit-logs/:id",
+      "file": "darshan-server/src/routes/audit-logs.ts",
+      "line": 240,
+      "description": "Get audit log by ID (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'AuditLog'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "file": "darshan-server/src/routes/auth.ts",
+      "line": 31,
+      "description": "Login with email and password",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "loginSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "file": "darshan-server/src/routes/auth.ts",
+      "line": 189,
+      "description": "Logout and revoke token",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "file": "darshan-server/src/routes/auth.ts",
+      "line": 223,
+      "description": "Get current authenticated user",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/dm",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 324,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "createDmSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 343,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "createConversationSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chat/conversations",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 374,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chat/conversations/:id",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 389,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/share-link",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 424,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chat/conversations/:id/messages",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 442,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listMessagesQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chat/conversations/:id/thread/:parentMessageId",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 465,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listMessagesQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/messages",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 495,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate",
+        "assertAttachmentAccess"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Media'"
+      ],
+      "validationCalls": [
+        "sendMessageSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/chat/messages/:id",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 631,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "editMessageSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/chat/messages/:id",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 711,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/messages/:id/reactions",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 792,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "reactionSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/messages/:id/pin",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 833,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/messages/:id/unpin",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 865,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chat/conversations/:id/pins",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 892,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/bookmarks",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 911,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "bookmarkSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chat/conversations/:id/bookmarks",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 950,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/chat/bookmarks/:id",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 969,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/read",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 1010,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "readSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/invite",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 1031,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "inviteSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/members/remove",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 1070,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "removeMemberSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/chat/conversations/:id",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 1097,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "updateConversationSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/archive",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 1140,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/unarchive",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 1164,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/chat/conversations/:id",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 1188,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chat/conversations/:id/moderation",
+      "file": "darshan-server/src/routes/chat.ts",
+      "line": 1238,
+      "description": "",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "moderationSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/conversations",
+      "file": "darshan-server/src/routes/conversations.ts",
+      "line": 27,
+      "description": "Start or get a 1:1 conversation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Conversation'"
+      ],
+      "validationCalls": [
+        "startConversationSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/conversations",
+      "file": "darshan-server/src/routes/conversations.ts",
+      "line": 54,
+      "description": "List conversations for current user",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Conversation'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/conversations/:id/messages",
+      "file": "darshan-server/src/routes/conversations.ts",
+      "line": 80,
+      "description": "List messages in a conversation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Conversation'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/conversations/:id/messages",
+      "file": "darshan-server/src/routes/conversations.ts",
+      "line": 108,
+      "description": "Send message in a conversation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Conversation'"
+      ],
+      "validationCalls": [
+        "sendMessageSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/conversations/:id/read",
+      "file": "darshan-server/src/routes/conversations.ts",
+      "line": 135,
+      "description": "Mark conversation as read",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Conversation'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/departments",
+      "file": "darshan-server/src/routes/departments.ts",
+      "line": 30,
+      "description": "Create a new department (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Department'"
+      ],
+      "validationCalls": [
+        "createDepartmentSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/departments",
+      "file": "darshan-server/src/routes/departments.ts",
+      "line": 71,
+      "description": "List departments with pagination",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Department'"
+      ],
+      "validationCalls": [
+        "listDepartmentsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/departments/:id",
+      "file": "darshan-server/src/routes/departments.ts",
+      "line": 121,
+      "description": "Get department by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Department'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/departments/:id",
+      "file": "darshan-server/src/routes/departments.ts",
+      "line": 163,
+      "description": "Update department (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Department'"
+      ],
+      "validationCalls": [
+        "createDepartmentSchema.partial().parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/departments/:id",
+      "file": "darshan-server/src/routes/departments.ts",
+      "line": 208,
+      "description": "Delete department (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'Department'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device-pairing/generate",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 381,
+      "description": "Generate pairing code for device (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'DevicePairing'"
+      ],
+      "validationCalls": [
+        "generatePairingCodeSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device-pairing/status",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 432,
+      "description": "Check if a device is already paired",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "pairingStatusQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device-pairing/request",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 463,
+      "description": "Request a pairing code from device after connectivity check",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "requestPairingSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device-pairing/complete",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 531,
+      "description": "Complete device pairing with CSR",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "completePairingSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device-pairing/confirm",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 705,
+      "description": "Confirm pairing code (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Screen'"
+      ],
+      "validationCalls": [
+        "confirmPairingSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device-pairing/recovery/:deviceId",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 782,
+      "description": "Get recovery diagnostics for an existing device/screen (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Screen'"
+      ],
+      "validationCalls": [
+        "z.string().uuid().parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device-pairing/recovery/:deviceId",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 815,
+      "description": "Start credential recovery for an existing screen/device (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'DevicePairing'"
+      ],
+      "validationCalls": [
+        "z.string().uuid().parse",
+        "z\n          .object({ expires_in: z.number().int().positive().default(900) })\n          .parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device-pairing/orphans",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 873,
+      "description": "Detect device pairing records that reference missing screen rows (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'DevicePairing'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device-pairing/:deviceId/revoke",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 908,
+      "description": "Revoke active pairing credentials for an existing screen/device (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'manage', 'DevicePairing'",
+        "'delete', 'Screen'",
+        "'manage', 'all'"
+      ],
+      "validationCalls": [
+        "z.string().uuid().parse",
+        "revokePairingSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device-pairing",
+      "file": "darshan-server/src/routes/device-pairing.ts",
+      "line": 1009,
+      "description": "List device pairings (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'DevicePairing'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device/:deviceId/pairing-status",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 513,
+      "description": "Validate whether an authenticated device pairing is still valid and CMS-visible",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device/:deviceId/screenshot-policy",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 595,
+      "description": "Return screenshot capture policy for an authenticated device",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device/:deviceId/default-media",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 625,
+      "description": "Resolve target-based default media for a device",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device/:deviceId/snapshot",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 676,
+      "description": "Get latest publish snapshot targeting this device",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "snapshotQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device/:deviceId/commands",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 829,
+      "description": "Create a device command (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Screen'"
+      ],
+      "validationCalls": [
+        "createCommandSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device/heartbeat",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 893,
+      "description": "Device heartbeat (device auth required)",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "heartbeatSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device/proof-of-play",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 1019,
+      "description": "Report proof of play (device auth required)",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "proofOfPlaySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device/screenshot",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 1089,
+      "description": "Upload device screenshot (device auth required)",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "screenshotSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device/:deviceId/media-cache-report",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 1148,
+      "description": "Report media/cache failure metadata for an authenticated device",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "mediaCacheReportSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device/:deviceId/desired-state",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 1245,
+      "description": "Get desired state versions for device reconciliation",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/device/:deviceId/commands",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 1311,
+      "description": "Get pending commands for device (device auth required)",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/device/:deviceId/commands/:commandId/ack",
+      "file": "darshan-server/src/routes/device-telemetry.ts",
+      "line": 1349,
+      "description": "Acknowledge command execution (device auth required)",
+      "localAuthCalls": [
+        "authenticateDeviceOrThrow"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "ackCommandSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emergency-types",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 258,
+      "description": "Create an emergency type (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "emergencyTypeSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emergency-types",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 305,
+      "description": "List emergency types (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listEmergencyTypesQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emergency-types/:id",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 349,
+      "description": "Get emergency type by ID (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/emergency-types/:id",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 386,
+      "description": "Update emergency type (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "emergencyTypeUpdateSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/emergency-types/:id",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 428,
+      "description": "Delete emergency type (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emergency/trigger",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 457,
+      "description": "Trigger emergency alert (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "triggerEmergencySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emergency/status",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 608,
+      "description": "Get current emergency status (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "Date.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/emergency/:id/clear",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 662,
+      "description": "Clear emergency alert (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "clearEmergencySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/emergency/history",
+      "file": "darshan-server/src/routes/emergency.ts",
+      "line": 729,
+      "description": "List emergency history (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "requireEmergencyAdmin"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/layouts",
+      "file": "darshan-server/src/routes/layouts.ts",
+      "line": 72,
+      "description": "Create a new layout (mosaic)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Layout'"
+      ],
+      "validationCalls": [
+        "layoutSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/layouts",
+      "file": "darshan-server/src/routes/layouts.ts",
+      "line": 121,
+      "description": "List layouts",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Layout'"
+      ],
+      "validationCalls": [
+        "listLayoutsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/layouts/:id",
+      "file": "darshan-server/src/routes/layouts.ts",
+      "line": 182,
+      "description": "Get layout by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Layout'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/layouts/:id",
+      "file": "darshan-server/src/routes/layouts.ts",
+      "line": 227,
+      "description": "Update layout",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Layout'"
+      ],
+      "validationCalls": [
+        "layoutSchema.partial().parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/layouts/:id",
+      "file": "darshan-server/src/routes/layouts.ts",
+      "line": 284,
+      "description": "Delete layout",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'Layout'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/media/upload-policy",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 85,
+      "description": "Get the effective media upload limits and multipart policy",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/media/uploads",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 531,
+      "description": "Create or resume an idempotent, verified media upload session",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "createUploadSessionSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/media/uploads/:sessionId",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 644,
+      "description": "Get resumable upload session state",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "uploadSessionParamsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/media/uploads/:sessionId/parts/presign",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 666,
+      "description": "Issue short-lived CMS-origin URLs for upload parts",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "uploadSessionParamsSchema.parse",
+        "uploadPartPresignSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/media/uploads/:sessionId/complete",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 711,
+      "description": "Verify, promote, and finalize an upload session",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "uploadSessionParamsSchema.parse",
+        "completeUploadSessionSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/media/uploads/:sessionId",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 829,
+      "description": "Abort and clean up an incomplete upload session",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "uploadSessionParamsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/media/presign-upload",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 859,
+      "description": "Get presigned URL for direct media upload to MinIO",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Media'"
+      ],
+      "validationCalls": [
+        "presignUploadSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/media",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 933,
+      "description": "Create media metadata",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Media'"
+      ],
+      "validationCalls": [
+        "createMediaSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/media",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 999,
+      "description": "List media with pagination and filtering",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listMediaQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/media/:id",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 1112,
+      "description": "Get media by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/media/:id/complete",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 1150,
+      "description": "Finalize media upload and verify object",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Media'"
+      ],
+      "validationCalls": [
+        "completeUploadSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/media/:id",
+      "file": "darshan-server/src/routes/media.ts",
+      "line": 1197,
+      "description": "Delete media (soft delete by default, hard delete with ?hard=true)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'Media'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/metrics/overview",
+      "file": "darshan-server/src/routes/metrics.ts",
+      "line": 16,
+      "description": "Dashboard metrics overview",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/notifications",
+      "file": "darshan-server/src/routes/notifications.ts",
+      "line": 35,
+      "description": "List notifications for current user",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listNotificationsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/notifications/unread-count",
+      "file": "darshan-server/src/routes/notifications.ts",
+      "line": 81,
+      "description": "Unread notification count for current user",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/notifications/:id",
+      "file": "darshan-server/src/routes/notifications.ts",
+      "line": 105,
+      "description": "Get notification by ID",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/notifications/:id/read",
+      "file": "darshan-server/src/routes/notifications.ts",
+      "line": 147,
+      "description": "Mark notification as read",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/notifications/read-all",
+      "file": "darshan-server/src/routes/notifications.ts",
+      "line": 201,
+      "description": "Mark all notifications as read",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/notifications/:id",
+      "file": "darshan-server/src/routes/notifications.ts",
+      "line": 227,
+      "description": "Delete notification",
+      "localAuthCalls": [
+        "authenticate"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/observability/overview",
+      "file": "darshan-server/src/routes/observability.ts",
+      "line": 34,
+      "description": "CMS-safe observability overview for dashboard cards and machine summaries.",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/observability/machines",
+      "file": "darshan-server/src/routes/observability.ts",
+      "line": 54,
+      "description": "Machine-level observability summaries for CMS infrastructure views.",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/observability/screens/:id",
+      "file": "darshan-server/src/routes/observability.ts",
+      "line": 77,
+      "description": "Per-screen observability summary for CMS current-state and Grafana drill-down.",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/permissions/metadata",
+      "file": "darshan-server/src/routes/permissions.ts",
+      "line": 13,
+      "description": "Get permissions metadata (actions + subjects)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Role'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/presentations",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 58,
+      "description": "Create a new presentation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "createPresentationSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/presentations",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 104,
+      "description": "List presentations with pagination",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listPresentationsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/presentations/:id",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 151,
+      "description": "Get presentation by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/presentations/:id/items",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 223,
+      "description": "List media items within a presentation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Presentation'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/presentations/:id/items",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 284,
+      "description": "Add media to a presentation playlist",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Presentation'"
+      ],
+      "validationCalls": [
+        "presentationItemSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/presentations/:id/items/:itemId",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 350,
+      "description": "Delete a media item from a presentation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Presentation'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/presentations/:id/slots",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 386,
+      "description": "List slot media items for a presentation layout",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Presentation'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/presentations/:id/slots",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 434,
+      "description": "Add media to a presentation slot",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Presentation'"
+      ],
+      "validationCalls": [
+        "presentationSlotItemSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/presentations/:id/slots/:slotItemId",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 510,
+      "description": "Delete a slot media item from a presentation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Presentation'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/presentations/:id",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 545,
+      "description": "Update presentation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "createPresentationSchema.partial().parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/presentations/:id",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 592,
+      "description": "Delete presentation",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/proof-of-play",
+      "file": "darshan-server/src/routes/proof-of-play.ts",
+      "line": 52,
+      "description": "List proof-of-play records",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ProofOfPlay'"
+      ],
+      "validationCalls": [
+        "listSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/proof-of-play/export",
+      "file": "darshan-server/src/routes/proof-of-play.ts",
+      "line": 159,
+      "description": "Export proof-of-play records as CSV",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ProofOfPlay'"
+      ],
+      "validationCalls": [
+        "listSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/schedules",
+      "file": "darshan-server/src/routes/reports.ts",
+      "line": 128,
+      "description": "Aggregated schedule activity report grouped by screen and screen group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/summary",
+      "file": "darshan-server/src/routes/reports.ts",
+      "line": 306,
+      "description": "Reports summary KPIs",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/export",
+      "file": "darshan-server/src/routes/reports.ts",
+      "line": 360,
+      "description": "Export current reports snapshot as PDF",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/requests-by-department",
+      "file": "darshan-server/src/routes/reports.ts",
+      "line": 560,
+      "description": "Pending requests grouped by department",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/offline-screens",
+      "file": "darshan-server/src/routes/reports.ts",
+      "line": 636,
+      "description": "Screens offline for more than 24 hours",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/storage",
+      "file": "darshan-server/src/routes/reports.ts",
+      "line": 690,
+      "description": "Storage usage and media expiry notice",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/system-health",
+      "file": "darshan-server/src/routes/reports.ts",
+      "line": 734,
+      "description": "System health extras (jobs, publishes, operators)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/trends",
+      "file": "darshan-server/src/routes/reports.ts",
+      "line": 803,
+      "description": "Reports trends for dashboards",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Dashboard'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/requests",
+      "file": "darshan-server/src/routes/requests.ts",
+      "line": 60,
+      "description": "Create a new request",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "createRequestSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/requests",
+      "file": "darshan-server/src/routes/requests.ts",
+      "line": 105,
+      "description": "List requests with pagination",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listRequestsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/requests/:id",
+      "file": "darshan-server/src/routes/requests.ts",
+      "line": 157,
+      "description": "Get request by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/requests/:id",
+      "file": "darshan-server/src/routes/requests.ts",
+      "line": 207,
+      "description": "Update request",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "createRequestSchema.partial().parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/requests/:id/messages",
+      "file": "darshan-server/src/routes/requests.ts",
+      "line": 252,
+      "description": "Add message to request",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "createMessageSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/requests/:id/messages",
+      "file": "darshan-server/src/routes/requests.ts",
+      "line": 306,
+      "description": "List messages for request",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/roles",
+      "file": "darshan-server/src/routes/roles.ts",
+      "line": 53,
+      "description": "Create a new role (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Role'"
+      ],
+      "validationCalls": [
+        "createRoleSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/roles",
+      "file": "darshan-server/src/routes/roles.ts",
+      "line": 98,
+      "description": "List roles with pagination",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Role'"
+      ],
+      "validationCalls": [
+        "listRolesQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/roles/:id",
+      "file": "darshan-server/src/routes/roles.ts",
+      "line": 146,
+      "description": "Get role by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Role'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/roles/:id",
+      "file": "darshan-server/src/routes/roles.ts",
+      "line": 183,
+      "description": "Update role (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Role'"
+      ],
+      "validationCalls": [
+        "updateRoleSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/roles/:id",
+      "file": "darshan-server/src/routes/roles.ts",
+      "line": 229,
+      "description": "Delete role (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'Role'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedule-requests",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 538,
+      "description": "Create a schedule publish request (draft)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'ScheduleRequest'"
+      ],
+      "validationCalls": [
+        "createRequestSchema.parse",
+        "createRequestQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/schedule-requests/status-summary",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 620,
+      "description": "Get counts per schedule request status",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScheduleRequest'",
+        "'manage', 'all'"
+      ],
+      "validationCalls": [
+        "scheduleRequestFilterQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/schedule-requests",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 674,
+      "description": "List schedule requests",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScheduleRequest'",
+        "'manage', 'all'"
+      ],
+      "validationCalls": [
+        "listRequestQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/schedule-requests/:id",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 753,
+      "description": "Update a schedule request (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleRequestAccess"
+      ],
+      "localPermissionChecks": [
+        "'update', 'ScheduleRequest'"
+      ],
+      "validationCalls": [
+        "updateRequestSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/schedule-requests/:id",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 820,
+      "description": "Get schedule request by ID",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleRequestAccess"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScheduleRequest'"
+      ],
+      "validationCalls": [
+        "getRequestQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedule-requests/:id/approve",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 872,
+      "description": "Approve a schedule request (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedule-requests/:id/publish",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 926,
+      "description": "Publish a schedule based on an approved request",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "publishRequestSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedule-requests/:id/reject",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 1027,
+      "description": "Reject a schedule request (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedule-requests/:id/cancel",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 1078,
+      "description": "Cancel a pending or approved schedule request",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedule-requests/:id/take-down",
+      "file": "darshan-server/src/routes/schedule-requests.ts",
+      "line": 1134,
+      "description": "Take down a published schedule request (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedule-reservations/preview",
+      "file": "darshan-server/src/routes/schedule-reservations.ts",
+      "line": 38,
+      "description": "Preview authoritative scheduling conflicts and active reservations",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScheduleRequest'",
+        "'create', 'ScheduleRequest'"
+      ],
+      "validationCalls": [
+        "previewSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedules/display-preflight",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 122,
+      "description": "Analyze target display aspect compatibility before publish",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Schedule'"
+      ],
+      "validationCalls": [
+        "displayPreflightSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedules",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 158,
+      "description": "Create a new schedule",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Schedule'"
+      ],
+      "validationCalls": [
+        "createScheduleSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/schedules/:id/publishes",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 215,
+      "description": "Get publish history and target status for a schedule",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/publishes/:publishId/targets/:targetId",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 265,
+      "description": "Update publish target status",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Schedule'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/schedules",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 314,
+      "description": "List schedules with pagination",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listSchedulesQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/schedules/:id",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 370,
+      "description": "Get schedule by ID",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/schedules/:id/items",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 411,
+      "description": "List schedule items (presentation slots)",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Schedule'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedules/:id/items",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 513,
+      "description": "Add a presentation to a schedule time window",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Schedule'"
+      ],
+      "validationCalls": [
+        "scheduleItemSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/schedules/:id/items/:itemId",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 597,
+      "description": "Delete a schedule item",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Schedule'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/schedules/:id",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 634,
+      "description": "Update schedule",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Schedule'"
+      ],
+      "validationCalls": [
+        "updateScheduleSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/schedules/:id/publish",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 714,
+      "description": "Publish schedule to screens",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Schedule'"
+      ],
+      "validationCalls": [
+        "publishScheduleSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishes/:id/take-down",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 867,
+      "description": "Take down a publish record and remove it from targeted screens",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "takeDownPublishSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/publishes/:id",
+      "file": "darshan-server/src/routes/schedules.ts",
+      "line": 932,
+      "description": "Get publish record and target statuses",
+      "localAuthCalls": [
+        "verifyAccessToken",
+        "assertScheduleAccess"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/screen-groups",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 119,
+      "description": "Create a screen group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'ScreenGroup'"
+      ],
+      "validationCalls": [
+        "screenGroupSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screen-groups/:id/availability",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 161,
+      "description": "Get availability (current/next) for all screens in a group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScreenGroup'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screen-groups/:id/snapshot",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 266,
+      "description": "Get latest publish snapshot targeting this screen group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScreenGroup'"
+      ],
+      "validationCalls": [
+        "snapshotQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/screen-groups/:id/screenshot-settings",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 389,
+      "description": "Set screenshot interval for all screens in a group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'ScreenGroup'"
+      ],
+      "validationCalls": [
+        "screenshotSettingsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/screen-groups/:id/screenshot",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 456,
+      "description": "Trigger screenshot capture for all screens in a group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'ScreenGroup'"
+      ],
+      "validationCalls": [
+        "screenshotTriggerSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screen-groups/available-screens",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 505,
+      "description": "List screens that are not assigned to a group (includes current group members if group_id is provided)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScreenGroup'"
+      ],
+      "validationCalls": [
+        "availableScreensQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screen-groups",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 573,
+      "description": "List screen groups",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScreenGroup'"
+      ],
+      "validationCalls": [
+        "listGroupsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screen-groups/:id",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 665,
+      "description": "Get screen group by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScreenGroup'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/screen-groups/:id",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 702,
+      "description": "Update screen group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'ScreenGroup'"
+      ],
+      "validationCalls": [
+        "screenGroupSchema.partial().parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screen-groups/:id/now-playing",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 749,
+      "description": "Get now-playing info for all screens in a group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'ScreenGroup'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/screen-groups/:id",
+      "file": "darshan-server/src/routes/screen-groups.ts",
+      "line": 838,
+      "description": "Delete screen group",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'ScreenGroup'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/screens",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 244,
+      "description": "Create a new screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Screen'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 278,
+      "description": "List screens with pagination",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listScreensQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/summary",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 368,
+      "description": "Get fleet-level screen health counts without loading full overview payloads",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/aspect-ratios",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 394,
+      "description": "List screens with their aspect ratios",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Screen'"
+      ],
+      "validationCalls": [
+        "aspectRatiosQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/overview",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 446,
+      "description": "List all screens and groups with now-playing, availability, and telemetry",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "overviewQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/schedule-timeline",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 483,
+      "description": "Get a dashboard-ready 24-hour schedule timeline for currently active scheduled screens",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "scheduleTimelineQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/commands/recent",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 518,
+      "description": "List recent device commands for a screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Screen'"
+      ],
+      "validationCalls": [
+        "recentCommandsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/media-cache-reports/recent",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 597,
+      "description": "List recent media/cache failure reports for a screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Screen'"
+      ],
+      "validationCalls": [
+        "mediaCacheReportsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/delivery-status",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 662,
+      "description": "Get realtime command and delivery status for a screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Screen'"
+      ],
+      "validationCalls": [
+        "deliveryStatusQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/display-state",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 868,
+      "description": "Get the desired and device-observed display state for a screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Screen'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/screens/:id/display-selection",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 896,
+      "description": "Select the primary or one observed output for a screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Screen'"
+      ],
+      "validationCalls": [
+        "displaySelectionSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 943,
+      "description": "Get screen by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/default-media",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 993,
+      "description": "Resolve default media for a screen by aspect ratio/global fallback",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/status",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1039,
+      "description": "Get screen status (with current schedule/media)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/heartbeats",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1112,
+      "description": "List heartbeat history for a screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "listHeartbeatsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/screens/:id/screenshot-settings",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1203,
+      "description": "Set screenshot interval for a screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Screen'"
+      ],
+      "validationCalls": [
+        "screenshotSettingsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/screens/:id/screenshot",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1262,
+      "description": "Trigger screenshot capture for a screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Screen'"
+      ],
+      "validationCalls": [
+        "screenshotTriggerSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/now-playing",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1309,
+      "description": "Get current/active schedule items for a screen (based on latest publish)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "nowPlayingQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/availability",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1375,
+      "description": "Get current/next schedule items targeting this screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/screens/:id/snapshot",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1449,
+      "description": "Get latest publish snapshot targeting this screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "snapshotQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/screens/:id",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1561,
+      "description": "Update screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Screen'"
+      ],
+      "validationCalls": [
+        "createScreenSchema.partial().parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/screens/:id",
+      "file": "darshan-server/src/routes/screens.ts",
+      "line": 1615,
+      "description": "Delete screen",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'Screen'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/security/client-events",
+      "file": "darshan-server/src/routes/security-events.ts",
+      "line": 25,
+      "description": "Record authenticated client-side security telemetry events",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "clientEventSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 303,
+      "description": "List org settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/settings",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 324,
+      "description": "Upsert org setting",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "upsertSettingSchema.parse",
+        "brandingSettingsSchema.parse",
+        "(knownSections as any)[data.key].parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/general",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 378,
+      "description": "Get general organization settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/settings/general",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 398,
+      "description": "Update general organization settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "generalSettingsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/branding",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 419,
+      "description": "Get branding settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/settings/branding",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 439,
+      "description": "Update branding settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "brandingSettingsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/security",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 462,
+      "description": "Get security settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/settings/security",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 482,
+      "description": "Update security settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "securitySettingsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/appearance",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 503,
+      "description": "Get appearance settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/settings/appearance",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 523,
+      "description": "Update appearance settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "appearanceSettingsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/backups",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 544,
+      "description": "Get backups settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/settings/backups",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 564,
+      "description": "Update backups settings",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "backupsSettingsSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/settings/backups/run",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 587,
+      "description": "Queue a manual backup run",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/settings/backups/:id",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 613,
+      "description": "Delete a completed or failed backup run and its archive files",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/backups/history",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 634,
+      "description": "List recent backup runs",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/logs",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 654,
+      "description": "List recent application logs",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "logsQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/default-media",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 675,
+      "description": "Get default media setting",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/settings/default-media",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 706,
+      "description": "Update default media setting",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "defaultMediaUpdateSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/default-media/variants",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 760,
+      "description": "Get default media variants by aspect ratio",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/settings/default-media/variants",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 780,
+      "description": "Update default media variants by aspect ratio",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "defaultMediaVariantsUpdateSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/settings/default-media/targets",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 832,
+      "description": "Get target-based default media assignments",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/settings/default-media/targets",
+      "file": "darshan-server/src/routes/settings.ts",
+      "line": 852,
+      "description": "Update target-based default media assignments",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "defaultMediaTargetsUpdateSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/sso-config",
+      "file": "darshan-server/src/routes/sso-config.ts",
+      "line": 31,
+      "description": "Upsert SSO config (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'manage', 'SsoConfig'",
+        "'update', 'SsoConfig'"
+      ],
+      "validationCalls": [
+        "ssoSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/sso-config",
+      "file": "darshan-server/src/routes/sso-config.ts",
+      "line": 60,
+      "description": "List active SSO configs (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'SsoConfig'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/sso-config/:id/deactivate",
+      "file": "darshan-server/src/routes/sso-config.ts",
+      "line": 86,
+      "description": "Deactivate SSO config (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'SsoConfig'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/activate",
+      "file": "darshan-server/src/routes/users-activate.ts",
+      "line": 20,
+      "description": "Activate invited user with token",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [
+        "activateSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/invite",
+      "file": "darshan-server/src/routes/users-invite.ts",
+      "line": 76,
+      "description": "Invite user (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'User'"
+      ],
+      "validationCalls": [
+        "inviteSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/invite",
+      "file": "darshan-server/src/routes/users-invite.ts",
+      "line": 154,
+      "description": "List user invites with filters (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'User'"
+      ],
+      "validationCalls": [
+        "listInvitesQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/invite/pending",
+      "file": "darshan-server/src/routes/users-invite.ts",
+      "line": 241,
+      "description": "List pending user invites (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'User'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/:id/reset-password",
+      "file": "darshan-server/src/routes/users-invite.ts",
+      "line": 286,
+      "description": "Reset user password (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'User'"
+      ],
+      "validationCalls": [
+        "resetPasswordSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users",
+      "file": "darshan-server/src/routes/users.ts",
+      "line": 33,
+      "description": "Create a new user (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'User'"
+      ],
+      "validationCalls": [
+        "createUserSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users",
+      "file": "darshan-server/src/routes/users.ts",
+      "line": 99,
+      "description": "List users with pagination and filtering",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'User'"
+      ],
+      "validationCalls": [
+        "listUsersQuerySchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/:id",
+      "file": "darshan-server/src/routes/users.ts",
+      "line": 173,
+      "description": "Get user by ID",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'User'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/users/:id",
+      "file": "darshan-server/src/routes/users.ts",
+      "line": 230,
+      "description": "Update user (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'User'"
+      ],
+      "validationCalls": [
+        "updateUserSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/users/:id",
+      "file": "darshan-server/src/routes/users.ts",
+      "line": 318,
+      "description": "Delete user (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'User'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks",
+      "file": "darshan-server/src/routes/webhooks.ts",
+      "line": 67,
+      "description": "Create webhook (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'create', 'Webhook'"
+      ],
+      "validationCalls": [
+        "webhookSchema.parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/webhooks",
+      "file": "darshan-server/src/routes/webhooks.ts",
+      "line": 94,
+      "description": "List webhooks (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'read', 'Webhook'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/webhooks/:id",
+      "file": "darshan-server/src/routes/webhooks.ts",
+      "line": 120,
+      "description": "Update webhook (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Webhook'"
+      ],
+      "validationCalls": [
+        "webhookSchema.partial().parse"
+      ],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/webhooks/:id",
+      "file": "darshan-server/src/routes/webhooks.ts",
+      "line": 147,
+      "description": "Delete webhook (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'delete', 'Webhook'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks/:id/test",
+      "file": "darshan-server/src/routes/webhooks.ts",
+      "line": 174,
+      "description": "Test webhook delivery (admin only)",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Webhook'"
+      ],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/health",
+      "file": "darshan-server/src/server/index.ts",
+      "line": 412,
+      "description": "",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/health/live",
+      "file": "darshan-server/src/server/index.ts",
+      "line": 415,
+      "description": "",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/health/identity",
+      "file": "darshan-server/src/server/index.ts",
+      "line": 416,
+      "description": "",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/health/ready",
+      "file": "darshan-server/src/server/index.ts",
+      "line": 423,
+      "description": "",
+      "localAuthCalls": [],
+      "localPermissionChecks": [],
+      "validationCalls": [],
+      "coverage": "Pending test design; not executed"
+    }
+  ],
+  "tables": [
+    {
+      "symbol": "roles",
+      "table": "roles",
+      "line": 99,
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "permissions",
+        "is_system",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "users",
+      "table": "users",
+      "line": 115,
+      "fields": [
+        "id",
+        "email",
+        "password_hash",
+        "first_name",
+        "last_name",
+        "role_id",
+        "department_id",
+        "is_active",
+        "ext",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "departments",
+      "table": "departments",
+      "line": 137,
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "sessions",
+      "table": "sessions",
+      "line": 146,
+      "fields": [
+        "id",
+        "user_id",
+        "access_jti",
+        "expires_at",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "storageObjects",
+      "table": "storage_objects",
+      "line": 162,
+      "fields": [
+        "id",
+        "bucket",
+        "object_key",
+        "content_type",
+        "size",
+        "sha256",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "media",
+      "table": "media",
+      "line": 179,
+      "fields": [
+        "id",
+        "name",
+        "type",
+        "status",
+        "source_object_id",
+        "source_bucket",
+        "source_object_key",
+        "source_content_type",
+        "source_size",
+        "source_url",
+        "ready_object_id",
+        "thumbnail_object_id",
+        "status_reason",
+        "duration_seconds",
+        "width",
+        "height",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "mediaUploadSessions",
+      "table": "media_upload_sessions",
+      "line": 211,
+      "fields": [
+        "id",
+        "media_id",
+        "created_by",
+        "idempotency_key",
+        "state",
+        "strategy",
+        "original_filename",
+        "display_name",
+        "content_type",
+        "expected_size",
+        "checksum_sha256",
+        "part_size",
+        "staging_bucket",
+        "staging_object_key",
+        "canonical_bucket",
+        "canonical_object_key",
+        "multipart_upload_id",
+        "expires_at",
+        "completed_at",
+        "aborted_at",
+        "failure_reason",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "presentations",
+      "table": "presentations",
+      "line": 253,
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "layout_id",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "presentationItems",
+      "table": "presentation_items",
+      "line": 271,
+      "fields": [
+        "id",
+        "presentation_id",
+        "media_id",
+        "order",
+        "duration_seconds",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "presentationSlotItems",
+      "table": "presentation_slot_items",
+      "line": 287,
+      "fields": [
+        "id",
+        "presentation_id",
+        "slot_id",
+        "media_id",
+        "order",
+        "duration_seconds",
+        "fit_mode",
+        "audio_enabled",
+        "loop_enabled",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "schedules",
+      "table": "schedules",
+      "line": 309,
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "timezone",
+        "start_at",
+        "end_at",
+        "revision",
+        "is_active",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "scheduleItems",
+      "table": "schedule_items",
+      "line": 333,
+      "fields": [
+        "id",
+        "schedule_id",
+        "presentation_id",
+        "start_at",
+        "end_at",
+        "priority",
+        "screen_ids",
+        "screen_group_ids",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "scheduleSnapshots",
+      "table": "schedule_snapshots",
+      "line": 359,
+      "fields": [
+        "id",
+        "schedule_id",
+        "payload",
+        "storage_object_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "publishes",
+      "table": "publishes",
+      "line": 375,
+      "fields": [
+        "id",
+        "schedule_id",
+        "snapshot_id",
+        "published_by",
+        "status",
+        "taken_down_at",
+        "taken_down_by",
+        "takedown_reason",
+        "published_at"
+      ]
+    },
+    {
+      "symbol": "screens",
+      "table": "screens",
+      "line": 395,
+      "fields": [
+        "id",
+        "name",
+        "location",
+        "aspect_ratio",
+        "width",
+        "height",
+        "orientation",
+        "device_info",
+        "status",
+        "last_heartbeat_at",
+        "current_schedule_id",
+        "current_media_id",
+        "current_scene_id",
+        "active_slots",
+        "screenshot_interval_seconds",
+        "screenshot_enabled",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "deviceAuthRolloutObservations",
+      "table": "device_auth_rollout_observations",
+      "line": 431,
+      "fields": [
+        "screen_id",
+        "last_signed_http_at",
+        "last_signed_socket_at",
+        "last_legacy_http_at",
+        "last_legacy_socket_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "screenDisplayStates",
+      "table": "screen_display_states",
+      "line": 453,
+      "fields": [
+        "screen_id",
+        "desired_selection",
+        "selection_version",
+        "active_display_key",
+        "placement",
+        "display_profile",
+        "profile_hash",
+        "profile_revision",
+        "runtime_session_id",
+        "observation_seq",
+        "observed_at",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "screenGroups",
+      "table": "screen_groups",
+      "line": 481,
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "layouts",
+      "table": "layouts",
+      "line": 490,
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "aspect_ratio",
+        "spec",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "scheduleRequests",
+      "table": "schedule_requests",
+      "line": 509,
+      "fields": [
+        "id",
+        "schedule_id",
+        "schedule_payload",
+        "status",
+        "review_notes",
+        "notes",
+        "reservation_token",
+        "reservation_version",
+        "reservation_state",
+        "hold_expires_at",
+        "published_at",
+        "taken_down_at",
+        "taken_down_by",
+        "takedown_reason",
+        "requested_by",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "scheduleReservations",
+      "table": "schedule_reservations",
+      "line": 542,
+      "fields": [
+        "id",
+        "screen_id",
+        "schedule_id",
+        "schedule_item_id",
+        "schedule_request_id",
+        "owner_user_id",
+        "state",
+        "start_at",
+        "end_at",
+        "hold_expires_at",
+        "reservation_token",
+        "reservation_version",
+        "publish_id",
+        "approved_at",
+        "published_at",
+        "released_at",
+        "release_reason",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "screenGroupMembers",
+      "table": "screen_group_members",
+      "line": 582,
+      "fields": [
+        "id",
+        "group_id",
+        "screen_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "deviceCertificates",
+      "table": "device_certificates",
+      "line": 596,
+      "fields": [
+        "id",
+        "screen_id",
+        "serial",
+        "certificate_pem",
+        "public_key_pem",
+        "auth_version",
+        "is_revoked",
+        "expires_at",
+        "created_at",
+        "revoked_at"
+      ]
+    },
+    {
+      "symbol": "deviceCommands",
+      "table": "device_commands",
+      "line": 618,
+      "fields": [
+        "id",
+        "screen_id",
+        "type",
+        "status",
+        "payload",
+        "delivery_token",
+        "claimed_at",
+        "acknowledged_at",
+        "delivery_attempts",
+        "priority",
+        "expires_at",
+        "lease_expires_at",
+        "attempt_count",
+        "max_attempts",
+        "last_error",
+        "result_payload",
+        "correlation_id",
+        "idempotency_key",
+        "desired_snapshot_id",
+        "desired_default_media_version",
+        "desired_emergency_version",
+        "completed_at",
+        "cancelled_at",
+        "dead_lettered_at",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "deviceCommandStatusHistory",
+      "table": "device_command_status_history",
+      "line": 673,
+      "fields": [
+        "id",
+        "command_id",
+        "screen_id",
+        "old_status",
+        "new_status",
+        "reason",
+        "attempt_count",
+        "delivery_token",
+        "metadata",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "commandOutbox",
+      "table": "command_outbox",
+      "line": 699,
+      "fields": [
+        "id",
+        "screen_id",
+        "command_id",
+        "event_type",
+        "reason",
+        "payload",
+        "status",
+        "priority",
+        "available_at",
+        "next_attempt_at",
+        "attempt_count",
+        "max_attempts",
+        "dispatched_at",
+        "last_error",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "deviceDesiredState",
+      "table": "device_desired_state",
+      "line": 735,
+      "fields": [
+        "screen_id",
+        "snapshot_id",
+        "default_media_version",
+        "emergency_version",
+        "command_version",
+        "state_version",
+        "last_command_id",
+        "last_command_type",
+        "last_command_reason",
+        "last_changed_reason",
+        "metadata",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "deviceDesiredStateHistory",
+      "table": "device_desired_state_history",
+      "line": 758,
+      "fields": [
+        "id",
+        "screen_id",
+        "state_version",
+        "command_version",
+        "snapshot_id",
+        "default_media_version",
+        "emergency_version",
+        "command_id",
+        "reason",
+        "metadata",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "mediaCacheReports",
+      "table": "media_cache_reports",
+      "line": 783,
+      "fields": [
+        "id",
+        "screen_id",
+        "media_id",
+        "event_type",
+        "severity",
+        "source",
+        "status",
+        "error_code",
+        "http_status",
+        "message",
+        "cache_key",
+        "url_host",
+        "url_path_hash",
+        "snapshot_id",
+        "schedule_id",
+        "default_media_version",
+        "playback_mode",
+        "attempt_count",
+        "metadata",
+        "reported_at",
+        "received_at",
+        "resolved_at",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "heartbeats",
+      "table": "heartbeats",
+      "line": 833,
+      "fields": [
+        "id",
+        "screen_id",
+        "status",
+        "storage_object_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "proofOfPlay",
+      "table": "proof_of_play",
+      "line": 850,
+      "fields": [
+        "id",
+        "screen_id",
+        "media_id",
+        "presentation_id",
+        "schedule_id",
+        "scene_id",
+        "slot_id",
+        "item_id",
+        "playback_instance_id",
+        "started_at",
+        "ended_at",
+        "storage_object_id",
+        "idempotency_key",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "screenshots",
+      "table": "screenshots",
+      "line": 880,
+      "fields": [
+        "id",
+        "screen_id",
+        "storage_object_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "requests",
+      "table": "requests",
+      "line": 895,
+      "fields": [
+        "id",
+        "title",
+        "description",
+        "status",
+        "priority",
+        "created_by",
+        "assigned_to",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "requestStatusHistory",
+      "table": "request_status_history",
+      "line": 915,
+      "fields": [
+        "id",
+        "request_id",
+        "old_status",
+        "new_status",
+        "changed_by",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "requestMessages",
+      "table": "request_messages",
+      "line": 931,
+      "fields": [
+        "id",
+        "request_id",
+        "author_id",
+        "content",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "requestAttachments",
+      "table": "request_attachments",
+      "line": 946,
+      "fields": [
+        "id",
+        "request_id",
+        "message_id",
+        "storage_object_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "notifications",
+      "table": "notifications",
+      "line": 961,
+      "fields": [
+        "id",
+        "user_id",
+        "title",
+        "message",
+        "type",
+        "data",
+        "is_read",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "userNotificationCounters",
+      "table": "user_notification_counters",
+      "line": 983,
+      "fields": [
+        "user_id",
+        "unread_total",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "auditLogs",
+      "table": "audit_logs",
+      "line": 994,
+      "fields": [
+        "id",
+        "user_id",
+        "action",
+        "entity_type",
+        "entity_id",
+        "ip_address",
+        "storage_object_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "systemLogs",
+      "table": "system_logs",
+      "line": 1013,
+      "fields": [
+        "id",
+        "level",
+        "message",
+        "context",
+        "storage_object_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "loginAttempts",
+      "table": "login_attempts",
+      "line": 1030,
+      "fields": [
+        "id",
+        "email",
+        "success",
+        "ip_address",
+        "storage_object_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "logArchives",
+      "table": "log_archives",
+      "line": 1047,
+      "fields": [
+        "id",
+        "log_type",
+        "window_start",
+        "window_end",
+        "record_count",
+        "storage_object_id",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "emergencyStatus",
+      "table": "emergency_status",
+      "line": 1064,
+      "fields": [
+        "id",
+        "is_active",
+        "triggered_by",
+        "triggered_at",
+        "cleared_by",
+        "cleared_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "productionBootstrapStates",
+      "table": "production_bootstrap_states",
+      "line": 1077,
+      "fields": [
+        "id",
+        "bootstrap_version",
+        "admin_user_id",
+        "release_id",
+        "completed_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "schemaMigrations",
+      "table": "darshan_schema_migrations",
+      "line": 1089,
+      "fields": [
+        "migration_id",
+        "checksum_sha256",
+        "release_id",
+        "applied_method",
+        "approval_ticket",
+        "execution_state",
+        "duration_ms",
+        "applied_at"
+      ]
+    },
+    {
+      "symbol": "workerRuntimeHeartbeats",
+      "table": "worker_runtime_heartbeats",
+      "line": 1102,
+      "fields": [
+        "id",
+        "deployment_id",
+        "server_id",
+        "release_id",
+        "observed_at",
+        "started_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "emergencyTypes",
+      "table": "emergency_types",
+      "line": 1122,
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "message",
+        "severity",
+        "media_id",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "settings",
+      "table": "settings",
+      "line": 1141,
+      "fields": [
+        "id",
+        "key",
+        "value",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "backupRuns",
+      "table": "backup_runs",
+      "line": 1149,
+      "fields": [
+        "id",
+        "trigger_type",
+        "status",
+        "triggered_by",
+        "started_at",
+        "completed_at",
+        "error_message",
+        "files",
+        "off_host_manifest",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "apiKeys",
+      "table": "api_keys",
+      "line": 1200,
+      "fields": [
+        "id",
+        "name",
+        "scopes",
+        "roles",
+        "token_prefix",
+        "secret_hash",
+        "created_by",
+        "expires_at",
+        "is_revoked",
+        "last_used_at",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "webhookSubscriptions",
+      "table": "webhook_subscriptions",
+      "line": 1224,
+      "fields": [
+        "id",
+        "name",
+        "event_types",
+        "target_url",
+        "secret",
+        "headers",
+        "is_active",
+        "last_status",
+        "last_status_at",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "ssoConfigs",
+      "table": "sso_configs",
+      "line": 1247,
+      "fields": [
+        "id",
+        "provider",
+        "issuer",
+        "client_id",
+        "client_secret",
+        "authorization_url",
+        "token_url",
+        "jwks_url",
+        "redirect_uri",
+        "scopes",
+        "is_active",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "conversations",
+      "table": "conversations",
+      "line": 1270,
+      "fields": [
+        "id",
+        "participant_a",
+        "participant_b",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "conversationMessages",
+      "table": "conversation_messages",
+      "line": 1287,
+      "fields": [
+        "id",
+        "conversation_id",
+        "author_id",
+        "content",
+        "attachments",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "conversationReads",
+      "table": "conversation_reads",
+      "line": 1303,
+      "fields": [
+        "id",
+        "conversation_id",
+        "user_id",
+        "last_read_at",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "chatConversations",
+      "table": "chat_conversations",
+      "line": 1321,
+      "fields": [
+        "id",
+        "type",
+        "dm_pair_key",
+        "title",
+        "topic",
+        "purpose",
+        "created_by",
+        "state",
+        "invite_policy",
+        "last_seq",
+        "metadata",
+        "created_at",
+        "updated_at",
+        "archived_at",
+        "deleted_at"
+      ]
+    },
+    {
+      "symbol": "chatMembers",
+      "table": "chat_members",
+      "line": 1350,
+      "fields": [
+        "id",
+        "conversation_id",
+        "user_id",
+        "role",
+        "is_system",
+        "joined_at",
+        "left_at",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "chatMessages",
+      "table": "chat_messages",
+      "line": 1372,
+      "fields": [
+        "id",
+        "conversation_id",
+        "seq",
+        "sender_id",
+        "body_text",
+        "body_rich",
+        "also_to_channel",
+        "reply_to_message_id",
+        "thread_root_id",
+        "thread_reply_count",
+        "created_at",
+        "edited_at",
+        "deleted_at"
+      ]
+    },
+    {
+      "symbol": "chatPins",
+      "table": "chat_pins",
+      "line": 1400,
+      "fields": [
+        "id",
+        "conversation_id",
+        "message_id",
+        "pinned_by",
+        "pinned_at"
+      ]
+    },
+    {
+      "symbol": "chatAttachments",
+      "table": "chat_attachments",
+      "line": 1419,
+      "fields": [
+        "id",
+        "message_id",
+        "media_asset_id",
+        "kind",
+        "ord",
+        "metadata",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "chatBookmarks",
+      "table": "chat_bookmarks",
+      "line": 1440,
+      "fields": [
+        "id",
+        "conversation_id",
+        "type",
+        "label",
+        "emoji",
+        "url",
+        "media_asset_id",
+        "message_id",
+        "created_by",
+        "metadata",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "chatReactions",
+      "table": "chat_reactions",
+      "line": 1463,
+      "fields": [
+        "id",
+        "message_id",
+        "user_id",
+        "emoji",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "chatReceipts",
+      "table": "chat_receipts",
+      "line": 1482,
+      "fields": [
+        "id",
+        "conversation_id",
+        "user_id",
+        "last_read_seq",
+        "last_delivered_seq",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "chatModeration",
+      "table": "chat_moderation",
+      "line": 1501,
+      "fields": [
+        "id",
+        "conversation_id",
+        "user_id",
+        "muted_until",
+        "banned_until",
+        "reason",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "chatMessageRevisions",
+      "table": "chat_message_revisions",
+      "line": 1521,
+      "fields": [
+        "id",
+        "message_id",
+        "editor_id",
+        "action",
+        "old_body_text",
+        "old_body_rich",
+        "new_body_text",
+        "new_body_rich",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "publishTargets",
+      "table": "publish_targets",
+      "line": 1541,
+      "fields": [
+        "id",
+        "publish_id",
+        "screen_id",
+        "screen_group_id",
+        "status",
+        "error",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "devicePairings",
+      "table": "device_pairings",
+      "line": 1560,
+      "fields": [
+        "id",
+        "device_id",
+        "pairing_code",
+        "used",
+        "used_at",
+        "expires_at",
+        "width",
+        "height",
+        "aspect_ratio",
+        "orientation",
+        "model",
+        "codecs",
+        "device_info",
+        "created_at"
+      ]
+    },
+    {
+      "symbol": "emergencies",
+      "table": "emergencies",
+      "line": 1586,
+      "fields": [
+        "id",
+        "emergency_type_id",
+        "message",
+        "priority",
+        "media_id",
+        "screen_ids",
+        "screen_group_ids",
+        "target_all",
+        "idempotency_key",
+        "request_fingerprint",
+        "transition_version",
+        "expires_at",
+        "audit_note",
+        "is_active",
+        "triggered_by",
+        "triggered_at",
+        "cleared_by",
+        "cleared_at",
+        "clear_reason",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    {
+      "symbol": "emergencyTransitionOutbox",
+      "table": "emergency_transition_outbox",
+      "line": 1620,
+      "fields": [
+        "id",
+        "emergency_id",
+        "transition",
+        "transition_version",
+        "selector",
+        "actor_id",
+        "status",
+        "attempts",
+        "max_attempts",
+        "available_at",
+        "claimed_at",
+        "completed_at",
+        "last_error",
+        "created_at",
+        "updated_at"
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "symbol": "requestStatusEnum",
+      "name": "request_status",
+      "values": [
+        "OPEN",
+        "IN_PROGRESS",
+        "PENDING_APPROVAL",
+        "APPROVED",
+        "REJECTED",
+        "COMPLETED"
+      ]
+    },
+    {
+      "symbol": "scheduleRequestStatusEnum",
+      "name": "schedule_request_status",
+      "values": [
+        "PENDING",
+        "APPROVED",
+        "REJECTED",
+        "CANCELLED",
+        "PUBLISHED",
+        "TAKEN_DOWN",
+        "EXPIRED"
+      ]
+    },
+    {
+      "symbol": "scheduleReservationStateEnum",
+      "name": "schedule_reservation_state",
+      "values": [
+        "HELD",
+        "RESERVED",
+        "PUBLISHED",
+        "RELEASED",
+        "EXPIRED",
+        "CANCELLED"
+      ]
+    },
+    {
+      "symbol": "publishStatusEnum",
+      "name": "publish_status",
+      "values": [
+        "ACTIVE",
+        "TAKEN_DOWN"
+      ]
+    },
+    {
+      "symbol": "mediaTypeEnum",
+      "name": "media_type",
+      "values": [
+        "IMAGE",
+        "VIDEO",
+        "DOCUMENT",
+        "WEBPAGE"
+      ]
+    },
+    {
+      "symbol": "mediaStatusEnum",
+      "name": "media_status",
+      "values": [
+        "PENDING",
+        "PROCESSING",
+        "READY",
+        "FAILED"
+      ]
+    },
+    {
+      "symbol": "screenStatusEnum",
+      "name": "screen_status",
+      "values": [
+        "ACTIVE",
+        "INACTIVE",
+        "OFFLINE"
+      ]
+    },
+    {
+      "symbol": "commandTypeEnum",
+      "name": "command_type",
+      "values": [
+        "REBOOT",
+        "REFRESH",
+        "TEST_PATTERN",
+        "TAKE_SCREENSHOT",
+        "SET_SCREENSHOT_INTERVAL",
+        "REFRESH_SCHEDULE",
+        "SCREENSHOT",
+        "CLEAR_CACHE",
+        "PING",
+        "RESYNC",
+        "SET_ACTIVE_DISPLAY"
+      ]
+    },
+    {
+      "symbol": "commandStatusEnum",
+      "name": "command_status",
+      "values": [
+        "PENDING",
+        "SENT",
+        "ACKNOWLEDGED",
+        "COMPLETED",
+        "FAILED",
+        "LEASED",
+        "PROCESSING",
+        "ACKED_SUCCESS",
+        "ACKED_FAILURE",
+        "EXPIRED",
+        "DEAD_LETTER",
+        "CANCELLED"
+      ]
+    },
+    {
+      "symbol": "chatConversationTypeEnum",
+      "name": "chat_conversation_type",
+      "values": [
+        "DM",
+        "GROUP_CLOSED",
+        "FORUM_OPEN"
+      ]
+    },
+    {
+      "symbol": "chatConversationStateEnum",
+      "name": "chat_conversation_state",
+      "values": [
+        "ACTIVE",
+        "ARCHIVED",
+        "DELETED"
+      ]
+    },
+    {
+      "symbol": "chatInvitePolicyEnum",
+      "name": "chat_invite_policy",
+      "values": [
+        "ANY_MEMBER_CAN_INVITE",
+        "ADMINS_ONLY_CAN_INVITE",
+        "INVITES_DISABLED"
+      ]
+    },
+    {
+      "symbol": "chatMemberRoleEnum",
+      "name": "chat_member_role",
+      "values": [
+        "OWNER",
+        "CHAT_ADMIN",
+        "MOD",
+        "MEMBER"
+      ]
+    },
+    {
+      "symbol": "chatRevisionActionEnum",
+      "name": "chat_revision_action",
+      "values": [
+        "EDIT",
+        "DELETE"
+      ]
+    },
+    {
+      "symbol": "chatBookmarkTypeEnum",
+      "name": "chat_bookmark_type",
+      "values": [
+        "LINK",
+        "FILE",
+        "MESSAGE"
+      ]
+    }
+  ],
+  "cmsRoutes": [
+    {
+      "path": "/",
+      "file": "darshan-cms/src/App.tsx",
+      "line": 26
+    },
+    {
+      "path": "/login",
+      "file": "darshan-cms/src/App.tsx",
+      "line": 27
+    },
+    {
+      "path": "/*",
+      "file": "darshan-cms/src/App.tsx",
+      "line": 28
+    },
+    {
+      "path": "/dashboard",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 52
+    },
+    {
+      "path": "/schedule",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 53
+    },
+    {
+      "path": "/schedule/new",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 54
+    },
+    {
+      "path": "/layouts",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 55
+    },
+    {
+      "path": "/layouts/new",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 56
+    },
+    {
+      "path": "/layouts/:id",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 57
+    },
+    {
+      "path": "/requests",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 58
+    },
+    {
+      "path": "/departments",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 59
+    },
+    {
+      "path": "/operators",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 60
+    },
+    {
+      "path": "/users",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 61
+    },
+    {
+      "path": "/chat",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 62
+    },
+    {
+      "path": "/chat/:conversationId",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 63
+    },
+    {
+      "path": "/chat/:conversationId/thread/:threadRootId",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 64
+    },
+    {
+      "path": "/conversations",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 65
+    },
+    {
+      "path": "/conversations/:conversationId",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 66
+    },
+    {
+      "path": "/conversations/:conversationId/thread/:threadRootId",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 67
+    },
+    {
+      "path": "/notifications",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 68
+    },
+    {
+      "path": "/screens",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 69
+    },
+    {
+      "path": "/media",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 70
+    },
+    {
+      "path": "/reports",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 71
+    },
+    {
+      "path": "/settings",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 72
+    },
+    {
+      "path": "/api-keys",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 73
+    },
+    {
+      "path": "/webhooks",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 74
+    },
+    {
+      "path": "/sso-config",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 75
+    },
+    {
+      "path": "/proof-of-play",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 76
+    },
+    {
+      "path": "*",
+      "file": "darshan-cms/src/AuthenticatedAppShell.tsx",
+      "line": 77
+    }
+  ],
+  "existingTestFiles": [
+    "darshan-cms/src/api/apiClient.test.ts",
+    "darshan-cms/src/api/domains/adminOps.test.ts",
+    "darshan-cms/src/api/domains/devicePairing.test.ts",
+    "darshan-cms/src/api/domains/deviceSchedule.test.ts",
+    "darshan-cms/src/api/domains/emergency.test.ts",
+    "darshan-cms/src/components/common/AspectFrame.test.ts",
+    "darshan-cms/src/components/common/MediaPreview.test.ts",
+    "darshan-cms/src/components/schedule-creator/StepScreenSelect.test.ts",
+    "darshan-cms/src/config/runtimeConfig.test.ts",
+    "darshan-cms/src/hooks/chat/__tests__/cursorMerge.test.ts",
+    "darshan-cms/src/hooks/chat/__tests__/useChatRealtime.test.ts",
+    "darshan-cms/src/hooks/screens/screensRealtimeUtils.test.ts",
+    "darshan-cms/src/lib/access.test.ts",
+    "darshan-cms/src/lib/authorization.test.ts",
+    "darshan-cms/src/lib/mediaCompression.test.ts",
+    "darshan-cms/src/lib/mediaDeleteErrors.test.ts",
+    "darshan-cms/src/lib/mediaUploadFlow.test.ts",
+    "darshan-cms/src/lib/observability.test.ts",
+    "darshan-cms/src/lib/realtimeSockets.test.ts",
+    "darshan-cms/src/lib/scheduleQuickPresets.test.ts",
+    "darshan-cms/src/lib/screenLiveMirror.test.ts",
+    "darshan-cms/src/lib/screens.test.ts",
+    "darshan-cms/tests/admin-stabilization.e2e.spec.ts",
+    "darshan-cms/tests/chat.e2e.spec.ts",
+    "darshan-cms/tests/dashboard-active-scheduled.e2e.spec.ts",
+    "darshan-cms/tests/dashboard-online-screens.e2e.spec.ts",
+    "darshan-cms/tests/scheduling-emergency.e2e.spec.ts",
+    "darshan-cms/tests/screens.e2e.spec.ts",
+    "darshan-cms/tests/settings-default-media.e2e.spec.ts",
+    "darshan-player/test/e2e/pairing-presentation.test.ts",
+    "darshan-player/test/fault-injection/network-failures.test.ts",
+    "darshan-player/test/integration/pairing-flow.test.ts",
+    "darshan-player/test/integration/runtime-mode-config.test.ts",
+    "darshan-player/test/performance/resource-usage.test.ts",
+    "darshan-player/test/performance/timeline-jitter.test.ts",
+    "darshan-player/test/unit/common/config.test.ts",
+    "darshan-player/test/unit/common/display-profile.test.ts",
+    "darshan-player/test/unit/common/file-config.test.ts",
+    "darshan-player/test/unit/common/logger.test.ts",
+    "darshan-player/test/unit/common/media-compat.test.ts",
+    "darshan-player/test/unit/common/offline-security-policy.test.ts",
+    "darshan-player/test/unit/common/platform-paths.test.ts",
+    "darshan-player/test/unit/common/playback-policy.test.ts",
+    "darshan-player/test/unit/common/player-content-source.test.ts",
+    "darshan-player/test/unit/common/redaction.test.ts",
+    "darshan-player/test/unit/common/utils.test.ts",
+    "darshan-player/test/unit/main/cli.test.ts",
+    "darshan-player/test/unit/main/operator-tools.test.ts",
+    "darshan-player/test/unit/main/runtime-mode.test.ts",
+    "darshan-player/test/unit/renderer/default-media-player.test.ts",
+    "darshan-player/test/unit/renderer/deferred-playback-gate.test.ts",
+    "darshan-player/test/unit/renderer/pdf-playback.test.ts",
+    "darshan-player/test/unit/renderer/player-layout.test.ts",
+    "darshan-player/test/unit/renderer/webpage-playback.test.ts",
+    "darshan-player/test/unit/scripts/start-dev.test.ts",
+    "darshan-player/test/unit/services/cache-manager.test.ts",
+    "darshan-player/test/unit/services/cert-manager.test.ts",
+    "darshan-player/test/unit/services/command-processor.test.ts",
+    "darshan-player/test/unit/services/default-media-service.test.ts",
+    "darshan-player/test/unit/services/display-manager.test.ts",
+    "darshan-player/test/unit/services/health-server.test.ts",
+    "darshan-player/test/unit/services/heartbeat.test.ts",
+    "darshan-player/test/unit/services/http-client.test.ts",
+    "darshan-player/test/unit/services/log-shipper.test.ts",
+    "darshan-player/test/unit/services/media-cache-reporter.test.ts",
+    "darshan-player/test/unit/services/pairing-service.test.ts",
+    "darshan-player/test/unit/services/playback-engine.test.ts",
+    "darshan-player/test/unit/services/playback-progress-store.test.ts",
+    "darshan-player/test/unit/services/player-flow.test.ts",
+    "darshan-player/test/unit/services/pop-service.test.ts",
+    "darshan-player/test/unit/services/power-manager.test.ts",
+    "darshan-player/test/unit/services/realtime-service.test.ts",
+    "darshan-player/test/unit/services/renderer-readiness-gate.test.ts",
+    "darshan-player/test/unit/services/request-queue.test.ts",
+    "darshan-player/test/unit/services/screenshot-service.test.ts",
+    "darshan-player/test/unit/services/secure-playback-guard.test.ts",
+    "darshan-player/test/unit/services/settings-client.test.ts",
+    "darshan-player/test/unit/services/snapshot-evaluator.test.ts",
+    "darshan-player/test/unit/services/snapshot-manager.test.ts",
+    "darshan-player/test/unit/services/snapshot-parser.test.ts",
+    "darshan-player/test/unit/services/timeline-scheduler.test.ts",
+    "darshan-player/test/unit/services/transport-tls.test.ts",
+    "darshan-player/test/unit/services/webpage-network-policy.test.ts",
+    "darshan-player/test/unit/services/webpage-view-manager.test.ts",
+    "darshan-server/src/auth/login-throttle.test.ts",
+    "darshan-server/src/auth/password.test.ts",
+    "darshan-server/src/chat/attachment-auth.test.ts",
+    "darshan-server/src/chat/backfill-legacy.test.ts",
+    "darshan-server/src/chat/notify.test.ts",
+    "darshan-server/src/chat/rate-limit.test.ts",
+    "darshan-server/src/config/file-config.test.ts",
+    "darshan-server/src/config/production-policy.test.ts",
+    "darshan-server/src/db/test-database-safety.test.ts",
+    "darshan-server/src/deployment/admin-cli-contracts.test.ts",
+    "darshan-server/src/deployment/admin-recovery.test.ts",
+    "darshan-server/src/deployment/admin-secret-input.test.ts",
+    "darshan-server/src/deployment/backup-contract.test.ts",
+    "darshan-server/src/deployment/deployment-run-state.test.ts",
+    "darshan-server/src/deployment/device-auth-rollout.test.ts",
+    "darshan-server/src/deployment/migration-ledger.test.ts",
+    "darshan-server/src/deployment/production-bootstrap.test.ts",
+    "darshan-server/src/deployment/production-command-contracts.test.ts",
+    "darshan-server/src/deployment/production-storage.test.ts",
+    "darshan-server/src/deployment/protected-secret.test.ts",
+    "darshan-server/src/deployment/restore-evidence.test.ts",
+    "darshan-server/src/http-status-codes.test.ts",
+    "darshan-server/src/jobs/chat-media-cleanup.test.ts",
+    "darshan-server/src/jobs/device-telemetry.test.ts",
+    "darshan-server/src/observability/metrics.test.ts",
+    "darshan-server/src/observability/prometheus-summary.test.ts",
+    "darshan-server/src/rbac/policy.test.ts",
+    "darshan-server/src/realtime/chat-namespace.test.ts",
+    "darshan-server/src/realtime/device-gateway.test.ts",
+    "darshan-server/src/realtime/device-socket-auth.test.ts",
+    "darshan-server/src/realtime/device-socket-replay.test.ts",
+    "darshan-server/src/realtime/notifications-namespace.test.ts",
+    "darshan-server/src/realtime/realtime-bus.test.ts",
+    "darshan-server/src/realtime/screens-namespace.test.ts",
+    "darshan-server/src/realtime/socket-server.test.ts",
+    "darshan-server/src/realtime/valkey-realtime-bus.integration.test.ts",
+    "darshan-server/src/realtime/valkey-resp-client.test.ts",
+    "darshan-server/src/routes/admin-ops-contracts.test.ts",
+    "darshan-server/src/routes/audit-logs.test.ts",
+    "darshan-server/src/routes/auth-throttle.test.ts",
+    "darshan-server/src/routes/auth.test.ts",
+    "darshan-server/src/routes/chat.test.ts",
+    "darshan-server/src/routes/conversations.test.ts",
+    "darshan-server/src/routes/departments.test.ts",
+    "darshan-server/src/routes/device-pairing-recovery.test.ts",
+    "darshan-server/src/routes/device-pairing.test.ts",
+    "darshan-server/src/routes/device-telemetry-auth.test.ts",
+    "darshan-server/src/routes/device-telemetry-commands.test.ts",
+    "darshan-server/src/routes/device-telemetry-media-cache-report.test.ts",
+    "darshan-server/src/routes/device-telemetry-proof-of-play.test.ts",
+    "darshan-server/src/routes/device-telemetry-runtime.test.ts",
+    "darshan-server/src/routes/device-telemetry-screen-refresh.test.ts",
+    "darshan-server/src/routes/emergency.test.ts",
+    "darshan-server/src/routes/layouts.shared.test.ts",
+    "darshan-server/src/routes/media-complete.test.ts",
+    "darshan-server/src/routes/media-ready-list.test.ts",
+    "darshan-server/src/routes/media-upload-session.test.ts",
+    "darshan-server/src/routes/media.test.ts",
+    "darshan-server/src/routes/notifications.test.ts",
+    "darshan-server/src/routes/observability.test.ts",
+    "darshan-server/src/routes/proof-of-play.test.ts",
+    "darshan-server/src/routes/reports-export.test.ts",
+    "darshan-server/src/routes/reports-schedules.test.ts",
+    "darshan-server/src/routes/roles-permissions.test.ts",
+    "darshan-server/src/routes/schedule-request-filters.test.ts",
+    "darshan-server/src/routes/schedule-reservations.test.ts",
+    "darshan-server/src/routes/schedules.publish.test.ts",
+    "darshan-server/src/routes/schedules.routes.test.ts",
+    "darshan-server/src/routes/screen-groups.test.ts",
+    "darshan-server/src/routes/screens.test.ts",
+    "darshan-server/src/routes/security-events.test.ts",
+    "darshan-server/src/routes/settings-backups.test.ts",
+    "darshan-server/src/routes/settings-default-media-auth.test.ts",
+    "darshan-server/src/routes/settings.test.ts",
+    "darshan-server/src/routes/users-invite.test.ts",
+    "darshan-server/src/routes/users.test.ts",
+    "darshan-server/src/runtime/bootstrap.test.ts",
+    "darshan-server/src/runtime/process-role.test.ts",
+    "darshan-server/src/runtime/readiness.test.ts",
+    "darshan-server/src/runtime/worker-heartbeat.test.ts",
+    "darshan-server/src/s3/index.test.ts",
+    "darshan-server/src/server/tls.test.ts",
+    "darshan-server/src/services/outbox-dispatcher.test.ts",
+    "darshan-server/src/services/playback-refresh-dispatch.test.ts",
+    "darshan-server/src/services/screen-display-state-service.test.ts",
+    "darshan-server/src/services/screen-state-refresh.test.ts",
+    "darshan-server/src/utils/backup-runs-capacity.test.ts",
+    "darshan-server/src/utils/device-request-auth-mode.test.ts",
+    "darshan-server/src/utils/display-profile.test.ts",
+    "darshan-server/src/utils/errors.test.ts",
+    "darshan-server/src/utils/libreoffice-conversion.test.ts",
+    "darshan-server/src/utils/object-key.test.ts",
+    "darshan-server/src/utils/off-host-backup-location.test.ts",
+    "darshan-server/src/utils/off-host-backup.test.ts",
+    "darshan-server/src/utils/resolved-media.test.ts",
+    "darshan-server/src/utils/runtime-dependencies.test.ts",
+    "darshan-server/src/utils/webpage-url-policy.test.ts",
+    "scripts/bundle/production-bundle-config.test.mjs"
+  ],
+  "migrationFiles": [
+    "darshan-server/drizzle/migrations/0000_free_supernaut.sql",
+    "darshan-server/drizzle/migrations/0001_brown_prism.sql",
+    "darshan-server/drizzle/migrations/0002_romantic_unicorn.sql",
+    "darshan-server/drizzle/migrations/0003_absurd_ravenous.sql",
+    "darshan-server/drizzle/migrations/0004_schedule_requests_targets.sql",
+    "darshan-server/drizzle/migrations/0005_emergency_types_and_targets.sql",
+    "darshan-server/drizzle/migrations/0006_heartbeats_status.sql",
+    "darshan-server/drizzle/migrations/0007_screenshot_settings_and_command_types.sql",
+    "darshan-server/drizzle/migrations/0008_chat_core.sql",
+    "darshan-server/drizzle/migrations/0008_media_original_filename.sql",
+    "darshan-server/drizzle/migrations/0009_chat_backfill_legacy_conversations.sql",
+    "darshan-server/drizzle/migrations/0010_chat_message_revisions.sql",
+    "darshan-server/drizzle/migrations/0011_notifications_payload_fields.sql",
+    "darshan-server/drizzle/migrations/0012_chat_dm_pair_active_unique.sql",
+    "darshan-server/drizzle/migrations/0013_chat_fk_integrity.sql",
+    "darshan-server/drizzle/migrations/0014_chat_pins_bookmarks_and_also_to_channel.sql",
+    "darshan-server/drizzle/migrations/0015_notification_unread_counters.sql",
+    "darshan-server/drizzle/migrations/0016_device_certificate_expiry.sql",
+    "darshan-server/drizzle/migrations/0017_scheduling_emergency_contract.sql",
+    "darshan-server/drizzle/migrations/0018_media_display_name.sql",
+    "darshan-server/drizzle/migrations/0019_layouts_created_by.sql",
+    "darshan-server/drizzle/migrations/0020_settings_backups.sql",
+    "darshan-server/drizzle/migrations/0021_schedule_reservations.sql",
+    "darshan-server/drizzle/migrations/0022_presentation_slot_loop_enabled.sql",
+    "darshan-server/drizzle/migrations/0023_schedule_request_takedown.sql",
+    "darshan-server/drizzle/migrations/0024_publish_takedown_status.sql",
+    "darshan-server/drizzle/migrations/0025_media_webpages_and_conversion.sql",
+    "darshan-server/drizzle/migrations/0026_telemetry_async_persistence.sql",
+    "darshan-server/drizzle/migrations/0027_device_pairings_active_code.sql",
+    "darshan-server/drizzle/migrations/0028_device_certificate_signature_auth.sql",
+    "darshan-server/drizzle/migrations/0029_runtime_remediation_p0_p1.sql",
+    "darshan-server/drizzle/migrations/0030_command_lifecycle_normalization.sql",
+    "darshan-server/drizzle/migrations/0031_command_outbox_desired_state.sql",
+    "darshan-server/drizzle/migrations/0032_media_cache_failure_reporting.sql",
+    "darshan-server/drizzle/migrations/0033_media_upload_sessions.sql",
+    "darshan-server/drizzle/migrations/0034_display_authority.sql",
+    "darshan-server/drizzle/migrations/0035_production_bootstrap_state.sql",
+    "darshan-server/drizzle/migrations/0036_schema_migration_ledger.sql",
+    "darshan-server/drizzle/migrations/0037_worker_runtime_heartbeat.sql",
+    "darshan-server/drizzle/migrations/0038_schema_migration_execution_metadata.sql",
+    "darshan-server/drizzle/migrations/0039_repair_chat_dm_tombstone_unique_index.sql",
+    "darshan-server/drizzle/migrations/0040_device_auth_rollout_observations.sql",
+    "darshan-server/drizzle/migrations/0041_off_host_backup_manifest.sql",
+    "darshan-server/drizzle/migrations/0042_emergency_transition_reliability.sql",
+    "darshan-server/drizzle/migrations/0043_deployment_run_state.sql"
+  ],
+  "limits": [
+    "Static inventory only; no application modules imported, services started, or tests executed.",
+    "Explicit fastify registrations only; plugin-generated Swagger, Socket.IO transport, and dynamic framework routes are separate surfaces.",
+    "Local auth call extraction is not an authorization audit; inherited middleware and helper guards must be traced.",
+    "69 pgTable declarations do not include deployment-run SQL-only tables or pg-boss internal schema.",
+    "Tracked tests are not evidence of passing execution or complete test coverage."
+  ]
+}
