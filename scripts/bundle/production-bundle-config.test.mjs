@@ -389,14 +389,24 @@ test('production web media runtime settings are emitted by generated artifacts',
   const sharedCmsTemplate = fs.readFileSync(repoPath('deploy/shared/cms-nginx.default.conf.template'), 'utf8')
   const productionCmsTemplate = fs.readFileSync(repoPath('deploy/production/docker/cms/nginx/default.conf.template'), 'utf8')
   const bundleConfig = fs.readFileSync(repoPath('scripts/bundle/production-bundle-config.mjs'), 'utf8')
+  const serverPackage = fs.readFileSync(repoPath('scripts/export/package-server.sh'), 'utf8')
+  const standaloneWorker = serverPackage.slice(
+    serverPackage.indexOf('  worker:'),
+    serverPackage.indexOf('    depends_on:', serverPackage.indexOf('  worker:')),
+  )
 
   assert.match(backendCompose, /TMPDIR: \/tmp/)
+  assert.match(backendCompose, /DARSHAN_PROCESS_ROLE: worker/)
+  assert.match(standaloneWorker, /DARSHAN_PROCESS_ROLE: worker/)
   assert.match(backendCompose, /HOME: \/tmp\/darshan-worker-home/)
   assert.match(backendCompose, /XDG_CONFIG_HOME: \/tmp\/darshan-worker-home\/\.config/)
   assert.match(backendCompose, /XDG_CACHE_HOME: \/tmp\/darshan-worker-home\/\.cache/)
+  assert.match(backendCompose, /DARSHAN_EXPECTED_WORKER_UID: "1000"/)
+  assert.match(backendCompose, /DARSHAN_EXPECTED_WORKER_GID: "1000"/)
   assert.doesNotMatch(backendCompose, /TMPDIR: \/var\/lib\/darshan-worker\/tmp/)
   assert.match(assembler, /chromium-runtime-check\.sh/)
   assert.match(assembler, /production:verify-chromium-runtime/)
+  assert.match(assembler, /run --rm --no-deps worker/)
   assert.match(cmsNginx, /client_max_body_size 1000M;/)
   assert.match(sharedCmsTemplate, /client_max_body_size 1000M;/)
   assert.match(productionCmsTemplate, /client_max_body_size 1000M;/)

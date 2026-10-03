@@ -1,4 +1,5 @@
 import type { Browser, CDPSession, Response } from 'playwright';
+import { CHROMIUM_RUNTIME_LAUNCH_ARGS } from '@/utils/chromium-runtime';
 import { getResolvedChromiumExecutable } from '@/utils/runtime-dependencies';
 import { assertWebpageUrlAllowed, WebpageUrlPolicyError } from '@/utils/webpage-url-policy';
 
@@ -29,7 +30,7 @@ async function getBrowser() {
         const browser = await chromium.launch({
           headless: true,
           executablePath,
-          args: ['--disable-dev-shm-usage'],
+          args: [...CHROMIUM_RUNTIME_LAUNCH_ARGS],
         });
 
         browser.on('disconnected', () => {

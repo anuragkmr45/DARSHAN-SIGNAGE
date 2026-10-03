@@ -46,6 +46,10 @@ prepare_worker_runtime_dirs() {
   esac
   TMPDIR="${TMPDIR:-/tmp}"
   export HOME XDG_CONFIG_HOME XDG_CACHE_HOME TMPDIR
+  if [ "$TMPDIR" = /tmp ]; then
+    install -d -m 1777 /tmp
+    chmod 1777 /tmp
+  fi
   install -d -m 0700 -o node -g node "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
 }
 

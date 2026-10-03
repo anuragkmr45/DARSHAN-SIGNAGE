@@ -248,11 +248,14 @@ services:
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       DARSHAN_RUNTIME_CONTAINER: "true"
+      DARSHAN_PROCESS_ROLE: worker
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       HOME: /tmp/darshan-worker-home
       XDG_CONFIG_HOME: /tmp/darshan-worker-home/.config
       XDG_CACHE_HOME: /tmp/darshan-worker-home/.cache
       TMPDIR: /tmp
+      DARSHAN_EXPECTED_WORKER_UID: "1000"
+      DARSHAN_EXPECTED_WORKER_GID: "1000"
       COMMAND_OUTBOX_WRITE_ENABLED: "true"
       DEVICE_DESIRED_STATE_ENABLED: "true"
       DARSHAN_REALTIME_SYNC_ENABLED: "true"

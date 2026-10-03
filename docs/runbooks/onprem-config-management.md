@@ -165,9 +165,10 @@ The production worker also sets `HOME=/tmp/darshan-worker-home`,
 `XDG_CONFIG_HOME=/tmp/darshan-worker-home/.config`,
 `XDG_CACHE_HOME=/tmp/darshan-worker-home/.cache`, and `TMPDIR=/tmp` so
 Chromium and Crashpad have writable runtime state after the container drops to
-the `node` user. Backend role acceptance runs `./chromium-runtime-check.sh`,
-which launches bundled Playwright Chromium and navigates to
-`https://example.com/`.
+the `node` user. Backend role acceptance runs `./chromium-runtime-check.sh`
+through the worker entrypoint, verifies UID/GID `1000:1000`, rejects root-only
+smoke checks, launches bundled Playwright Chromium, navigates to
+`https://example.com/`, and takes a screenshot.
 
 CONFIG-2 player non-secret site config:
 

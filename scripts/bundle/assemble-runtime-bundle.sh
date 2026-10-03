@@ -4386,10 +4386,13 @@ services:
       - .env.production
     environment:
       DARSHAN_CONTAINER_ROLE: worker
+      DARSHAN_PROCESS_ROLE: worker
       HOME: /tmp/darshan-worker-home
       XDG_CONFIG_HOME: /tmp/darshan-worker-home/.config
       XDG_CACHE_HOME: /tmp/darshan-worker-home/.cache
       TMPDIR: /tmp
+      DARSHAN_EXPECTED_WORKER_UID: "1000"
+      DARSHAN_EXPECTED_WORKER_GID: "1000"
       BACKUP_OFFHOST_ACCESS_KEY_FILE: /run/worker-secrets/backup-offhost-access-key
       BACKUP_OFFHOST_SECRET_KEY_FILE: /run/worker-secrets/backup-offhost-secret-key
     volumes:
