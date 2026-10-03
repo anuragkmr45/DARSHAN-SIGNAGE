@@ -32,6 +32,27 @@ describe('production command contracts', () => {
     expect(bootstrapAdoptCli).toContain(".requiredOption('--release-id <release>'");
   });
 
+  it('prepares and verifies a writable Chromium runtime home for production workers', () => {
+    const packageJson = JSON.parse(readText('package.json')) as PackageJson;
+    const entrypoint = readText('docker/runtime-entrypoint.sh');
+    const chromiumSmoke = readText('scripts/verify-chromium-runtime.ts');
+
+    expect(packageJson.scripts).toMatchObject({
+      'production:verify-chromium-runtime': 'node dist-cli/scripts/verify-chromium-runtime.js',
+    });
+    expect(entrypoint).toContain('prepare_worker_runtime_dirs()');
+    expect(entrypoint).toContain('HOME=/tmp/darshan-worker-home');
+    expect(entrypoint).toContain('XDG_CONFIG_HOME="$HOME/.config"');
+    expect(entrypoint).toContain('XDG_CACHE_HOME="$HOME/.cache"');
+    expect(entrypoint).toContain('export HOME XDG_CONFIG_HOME XDG_CACHE_HOME TMPDIR');
+    expect(entrypoint).toContain('install -d -m 0700 -o node -g node "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"');
+    expect(entrypoint).toMatch(/if \[ "\$role" = worker \]; then\n\s+prepare_worker_runtime_dirs/);
+    expect(chromiumSmoke).toContain("const SMOKE_URL = 'https://example.com/';");
+    expect(chromiumSmoke).toContain("ensureWritableDirectory('XDG_CONFIG_HOME'");
+    expect(chromiumSmoke).toContain('chromium.launch');
+    expect(chromiumSmoke).toContain('page.goto(SMOKE_URL');
+  });
+
   it('keeps compatibility migration commands but makes status a first-class read-only command', () => {
     const packageJson = JSON.parse(readText('package.json')) as PackageJson;
     const migrateCli = readText('scripts/migrate-production.ts');

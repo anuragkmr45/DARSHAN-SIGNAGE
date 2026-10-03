@@ -391,7 +391,12 @@ test('production web media runtime settings are emitted by generated artifacts',
   const bundleConfig = fs.readFileSync(repoPath('scripts/bundle/production-bundle-config.mjs'), 'utf8')
 
   assert.match(backendCompose, /TMPDIR: \/tmp/)
+  assert.match(backendCompose, /HOME: \/tmp\/darshan-worker-home/)
+  assert.match(backendCompose, /XDG_CONFIG_HOME: \/tmp\/darshan-worker-home\/\.config/)
+  assert.match(backendCompose, /XDG_CACHE_HOME: \/tmp\/darshan-worker-home\/\.cache/)
   assert.doesNotMatch(backendCompose, /TMPDIR: \/var\/lib\/darshan-worker\/tmp/)
+  assert.match(assembler, /chromium-runtime-check\.sh/)
+  assert.match(assembler, /production:verify-chromium-runtime/)
   assert.match(cmsNginx, /client_max_body_size 1000M;/)
   assert.match(sharedCmsTemplate, /client_max_body_size 1000M;/)
   assert.match(productionCmsTemplate, /client_max_body_size 1000M;/)

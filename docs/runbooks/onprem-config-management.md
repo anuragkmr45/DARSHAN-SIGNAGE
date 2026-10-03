@@ -161,6 +161,14 @@ CMS production Nginx permits request bodies up to `1000M` so browser uploads
 can reach the backend consistently. The backend application policy remains
 `MAX_UPLOAD_MB=500`.
 
+The production worker also sets `HOME=/tmp/darshan-worker-home`,
+`XDG_CONFIG_HOME=/tmp/darshan-worker-home/.config`,
+`XDG_CACHE_HOME=/tmp/darshan-worker-home/.cache`, and `TMPDIR=/tmp` so
+Chromium and Crashpad have writable runtime state after the container drops to
+the `node` user. Backend role acceptance runs `./chromium-runtime-check.sh`,
+which launches bundled Playwright Chromium and navigates to
+`https://example.com/`.
+
 CONFIG-2 player non-secret site config:
 
 ```json

@@ -34,6 +34,21 @@ copy_inputs() {
   fi
 }
 
+prepare_worker_runtime_dirs() {
+  case "${HOME:-}" in
+    ""|/root|/root/*) HOME=/tmp/darshan-worker-home ;;
+  esac
+  case "${XDG_CONFIG_HOME:-}" in
+    ""|/root|/root/*) XDG_CONFIG_HOME="$HOME/.config" ;;
+  esac
+  case "${XDG_CACHE_HOME:-}" in
+    ""|/root|/root/*) XDG_CACHE_HOME="$HOME/.cache" ;;
+  esac
+  TMPDIR="${TMPDIR:-/tmp}"
+  export HOME XDG_CONFIG_HOME XDG_CACHE_HOME TMPDIR
+  install -d -m 0700 -o node -g node "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+}
+
 if [ "$role" = recovery ]; then
   copy_inputs /run/darshan-input-recovery /run/darshan-recovery true
 else
@@ -46,6 +61,7 @@ else
     copy_inputs /run/darshan-input-evidence /run/darshan-evidence true
   fi
   if [ "$role" = worker ]; then
+    prepare_worker_runtime_dirs
     copy_inputs /run/darshan-input-worker-secrets /run/worker-secrets true
     install -d -m 0700 -o node -g node /var/lib/darshan-worker/tmp
   fi

@@ -18,6 +18,7 @@
     "scripts/repair-pgboss-queues.ts",
     "scripts/restore-offhost-backup.ts",
     "scripts/runtime-doctor.ts",
+    "scripts/verify-chromium-runtime.ts",
     "scripts/verify-offhost-backup.ts",
     "scripts/deployment-run-state.ts",
     "scripts/verify-restore-evidence.ts"

@@ -62,6 +62,7 @@
     "production:device-auth-rollout:status": "node dist-cli/scripts/device-auth-rollout-status.js",
     "production:admin": "node dist-cli/scripts/admin-cli.js",
     "production:doctor": "node dist-cli/scripts/runtime-doctor.js",
+    "production:verify-chromium-runtime": "node dist-cli/scripts/verify-chromium-runtime.js",
     "production:jobs:repair-pgboss-queues": "node dist-cli/scripts/repair-pgboss-queues.js",
     "reset:data": "bash scripts/reset-local-data.sh"
   },

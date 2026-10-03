@@ -884,7 +884,7 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 [[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
-  for file in docker-compose.yml load-images.sh start.sh wait-ready.sh wait-dependencies.sh install.sh finalize-install.sh upgrade.sh deploy.sh adopt-existing.sh recover-admin.sh acceptance-check.sh deployment-state.sh; do
+  for file in docker-compose.yml load-images.sh start.sh wait-ready.sh wait-dependencies.sh install.sh finalize-install.sh upgrade.sh deploy.sh adopt-existing.sh recover-admin.sh acceptance-check.sh deployment-state.sh chromium-runtime-check.sh; do
   [[ -f "\$file" ]] || { echo "Required backend role file is missing: \$file" >&2; exit 1; }
 done
 if [[ -f ./COMPATIBILITY.json ]]; then
@@ -989,6 +989,14 @@ case "\$action" in
 esac
 EOF
 
+  cat > "$target_dir/chromium-runtime-check.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
+docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps worker \
+  npm run --silent production:verify-chromium-runtime
+EOF
+
   cat > "$target_dir/acceptance-check.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -1006,6 +1014,8 @@ done
 [[ "\$(stat -c '%a' "\$password_file")" == "600" ]] || { echo "Password file must have mode 0600." >&2; exit 1; }
 source ./$env_file
 : "\${INITIAL_ADMIN_EMAIL:?INITIAL_ADMIN_EMAIL is required}"
+
+./chromium-runtime-check.sh
 
 post_login() {
   local url="\$1"; shift
@@ -4376,6 +4386,9 @@ services:
       - .env.production
     environment:
       DARSHAN_CONTAINER_ROLE: worker
+      HOME: /tmp/darshan-worker-home
+      XDG_CONFIG_HOME: /tmp/darshan-worker-home/.config
+      XDG_CACHE_HOME: /tmp/darshan-worker-home/.cache
       TMPDIR: /tmp
       BACKUP_OFFHOST_ACCESS_KEY_FILE: /run/worker-secrets/backup-offhost-access-key
       BACKUP_OFFHOST_SECRET_KEY_FILE: /run/worker-secrets/backup-offhost-secret-key

@@ -36,6 +36,9 @@ services:
       TAR_PATH: ${TAR_PATH:-tar}
       PLAYWRIGHT_BROWSERS_PATH: ${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}
       DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH: ${DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-}
+      HOME: /tmp/darshan-worker-home
+      XDG_CONFIG_HOME: /tmp/darshan-worker-home/.config
+      XDG_CACHE_HOME: /tmp/darshan-worker-home/.cache
       TMPDIR: /tmp
     ports:
       - "${API_HOST_PORT}:3000"
