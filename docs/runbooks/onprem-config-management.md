@@ -147,6 +147,20 @@ Source-free production player config additionally requires HTTPS/WSS and:
 Current packages automatically discover `/etc/darshan/player/config.json` on
 Linux and `C:\\ProgramData\\DARSHAN\\config.json` on Windows.
 
+For production webpage media, `WEBPAGE_NAVIGATION_ALLOWLIST=*` and
+`WEBPAGE_RESOURCE_ALLOWLIST=*` mean any public HTTPS hostname after the server
+and player still enforce credential blocking, HTTPS-only navigation, port
+allowlists, DNS revalidation, and loopback/link-local/private address blocking.
+The generated player config should contain `allowedDomains: ["*"]`,
+`webpageResourceDomains: ["*"]`, `webpageAllowedCidrs: []`,
+`webpageAllowedPorts: [443]`, and `webpageAllowHttp: false`. Do not add
+`player.realtime.degradedStatePollMs` to the file-config JSON; current players
+derive that value from runtime defaults.
+
+CMS production Nginx permits request bodies up to `1000M` so browser uploads
+can reach the backend consistently. The backend application policy remains
+`MAX_UPLOAD_MB=500`.
+
 CONFIG-2 player non-secret site config:
 
 ```json

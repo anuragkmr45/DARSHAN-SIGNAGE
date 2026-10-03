@@ -21,6 +21,7 @@ export class WebpageUrlPolicyError extends Error {
 const csv = (value: string) => value.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
 
 export function webpageHostMatches(hostname: string, pattern: string) {
+  if (pattern === '*') return true;
   if (pattern.startsWith('*.')) {
     const suffix = pattern.slice(2);
     return hostname.length > suffix.length && hostname.endsWith(`.${suffix}`);

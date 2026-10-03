@@ -294,6 +294,55 @@ describe('player file config loader', () => {
     expect(() => loadPlayerFileConfig()).to.throw(/offlinePlaybackPolicy must be one of/)
   })
 
+  it('accepts the generated production webpage policy config shape', () => {
+    const siteConfigPath = path.join(tempDir, 'production-player-config.json')
+    writeJson(siteConfigPath, {
+      player: {
+        environment: {
+          name: 'production',
+          deploymentId: 'site-a',
+          expectedServerId: 'backend-site-a',
+          releaseId: '2026-10-03-r2',
+          sourceCommit: 'development',
+          compatibilityGeneration: 1,
+        },
+        backend: {
+          baseUrl: 'https://backend.site.test:3000',
+          socketIoUrl: 'wss://backend.site.test:3000',
+        },
+        runtime: { mode: 'production' },
+        realtime: {
+          enabled: true,
+          signedAuthEnabled: true,
+          deviceNamespace: '/device',
+          commandSafetyPollMs: 300000,
+          desiredStatePollMs: 300000,
+        },
+        transportTls: {
+          enabled: true,
+          caPath: '/etc/darshan/player/transport-ca.crt',
+          strictCertificateValidation: true,
+        },
+        security: {
+          allowedDomains: ['*'],
+          webpageResourceDomains: ['*'],
+          webpageAllowedCidrs: [],
+          webpageAllowedPorts: [443],
+          webpageAllowHttp: false,
+        },
+      },
+    })
+    process.env.DARSHAN_PLAYER_CONFIG_FILE = siteConfigPath
+
+    const { loadPlayerFileConfig } = require('../../../src/common/file-config')
+    const fileConfig = loadPlayerFileConfig()
+
+    expect(fileConfig.config.security.allowedDomains).to.deep.equal(['*'])
+    expect(fileConfig.config.security.webpageResourceDomains).to.deep.equal(['*'])
+    expect(fileConfig.config.security.webpageAllowedPorts).to.deep.equal([443])
+    expect(fileConfig.config.security.webpageAllowHttp).to.equal(false)
+  })
+
   it('rejects credentialed URLs and YAML in CONFIG-2', () => {
     const credentialedPath = path.join(tempDir, 'credentialed.json')
     writeJson(credentialedPath, { player: { backend: { baseUrl: 'http://user:pass@backend.local:3000' } } })

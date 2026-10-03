@@ -96,6 +96,27 @@ describe('runtime dependency resolution', () => {
     expect(report.dependencies.find((dependency) => dependency.name === 'chromium')?.path).toBe(chromiumPath);
   });
 
+  it('finds Chromium in the Playwright browser cache when no explicit path is configured', async () => {
+    const browserRoot = mkdtempSync(join(tmpdir(), 'darshan-ms-playwright-'));
+    const chromiumDir = join(browserRoot, 'chromium-1234', 'chrome-linux64');
+    mkdirSync(chromiumDir, { recursive: true });
+    const chromiumPath = createExecutable(chromiumDir, 'chrome');
+
+    vi.doMock('playwright', () => ({
+      chromium: {
+        executablePath: () => join(tmpdir(), 'missing-playwright-chromium'),
+      },
+    }));
+
+    process.env.PLAYWRIGHT_BROWSERS_PATH = browserRoot;
+    applyMinimumEnv();
+
+    const { inspectRuntimeDependencies } = await import('@/utils/runtime-dependencies');
+    const report = await inspectRuntimeDependencies('api');
+
+    expect(report.dependencies.find((dependency) => dependency.name === 'chromium')?.path).toBe(chromiumPath);
+  });
+
   it('fails fast when required host-run dependencies are missing', async () => {
     vi.doMock('playwright', () => ({
       chromium: {

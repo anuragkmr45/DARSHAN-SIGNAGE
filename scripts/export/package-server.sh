@@ -196,6 +196,7 @@ services:
       MINIO_PORT: 9000
       DARSHAN_RUNTIME_CONTAINER: "true"
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      TMPDIR: /tmp
       COMMAND_OUTBOX_WRITE_ENABLED: "true"
       DEVICE_DESIRED_STATE_ENABLED: "true"
       DARSHAN_REALTIME_SYNC_ENABLED: "true"
@@ -248,6 +249,7 @@ services:
       MINIO_PORT: 9000
       DARSHAN_RUNTIME_CONTAINER: "true"
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      TMPDIR: /tmp
       COMMAND_OUTBOX_WRITE_ENABLED: "true"
       DEVICE_DESIRED_STATE_ENABLED: "true"
       DARSHAN_REALTIME_SYNC_ENABLED: "true"

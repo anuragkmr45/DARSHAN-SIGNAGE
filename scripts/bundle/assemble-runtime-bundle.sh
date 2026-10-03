@@ -340,8 +340,7 @@ stage_player_bundle() {
       "signedAuthEnabled": true,
       "deviceNamespace": "/device",
       "commandSafetyPollMs": 300000,
-      "desiredStatePollMs": 300000,
-      "degradedStatePollMs": 30000
+      "desiredStatePollMs": 300000
     },
     "transportTls": {
       "enabled": $transport_enabled,
@@ -4377,7 +4376,7 @@ services:
       - .env.production
     environment:
       DARSHAN_CONTAINER_ROLE: worker
-      TMPDIR: /var/lib/darshan-worker/tmp
+      TMPDIR: /tmp
       BACKUP_OFFHOST_ACCESS_KEY_FILE: /run/worker-secrets/backup-offhost-access-key
       BACKUP_OFFHOST_SECRET_KEY_FILE: /run/worker-secrets/backup-offhost-secret-key
     volumes:
@@ -4602,6 +4601,7 @@ server {
   add_header Strict-Transport-Security "max-age=31536000" always;
   add_header X-Content-Type-Options "nosniff" always;
   add_header X-Frame-Options "DENY" always;
+  client_max_body_size 1000M;
 
   location /api/v1/ {
     proxy_pass https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT/api/v1/;

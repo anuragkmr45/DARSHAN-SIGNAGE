@@ -82,6 +82,7 @@ const privateAddress = (address: string): boolean => {
 
 export function hostMatches(hostname: string, rawPattern: string): boolean {
   const pattern = rawPattern.trim().toLowerCase()
+  if (pattern === '*') return true
   if (pattern.startsWith('*.')) {
     const suffix = pattern.slice(2)
     return hostname.length > suffix.length && hostname.endsWith(`.${suffix}`)

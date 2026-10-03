@@ -26,6 +26,52 @@ describe('webpage URL policy primitives', () => {
     expect(webpageHostMatches('evil-example.com', '*.example.com')).toBe(false);
   });
 
+  it('allows any public HTTPS hostname when the global wildcard is configured', async () => {
+    expect(webpageHostMatches('www.youtube.com', '*')).toBe(true);
+    expect(webpageHostMatches('www.pexels.com', '*')).toBe(true);
+
+    const wildcardPolicy = {
+      ...productionPolicy,
+      WEBPAGE_NAVIGATION_ALLOWLIST: '*',
+      WEBPAGE_RESOURCE_ALLOWLIST: '*',
+    };
+
+    await expect(assertWebpageUrlAllowed(
+      'https://www.youtube.com/watch?v=test',
+      'navigation',
+      {
+        policy: wildcardPolicy,
+        resolveAddresses: async () => ['203.0.113.10'],
+      },
+    )).resolves.toBeInstanceOf(URL);
+
+    await expectCode(assertWebpageUrlAllowed(
+      'https://private.example.test/',
+      'navigation',
+      {
+        policy: wildcardPolicy,
+        resolveAddresses: async () => ['10.0.0.5'],
+      },
+    ), 'WEBPAGE_ADDRESS_BLOCKED');
+
+    await expectCode(assertWebpageUrlAllowed(
+      'https://127.0.0.1/',
+      'navigation',
+      {
+        policy: { ...wildcardPolicy, WEBPAGE_ALLOWED_CIDRS: '0.0.0.0/0' },
+      },
+    ), 'WEBPAGE_ADDRESS_BLOCKED');
+
+    await expectCode(assertWebpageUrlAllowed(
+      'https://metadata.example.test/',
+      'navigation',
+      {
+        policy: wildcardPolicy,
+        resolveAddresses: async () => ['169.254.169.254'],
+      },
+    ), 'WEBPAGE_ADDRESS_BLOCKED');
+  });
+
   it('matches IPv4 and IPv6 CIDRs without accepting adjacent networks', () => {
     expect(ipMatchesCidr('192.168.29.64', '192.168.29.0/24')).toBe(true);
     expect(ipMatchesCidr('192.168.30.1', '192.168.29.0/24')).toBe(false);

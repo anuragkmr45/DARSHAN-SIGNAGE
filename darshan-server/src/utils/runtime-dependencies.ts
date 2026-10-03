@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync } from 'fs';
+import { accessSync, constants, existsSync, readdirSync } from 'fs';
 import { delimiter, isAbsolute, join, resolve, sep } from 'path';
 import { createLogger } from '@/utils/logger';
 import { config as appConfig } from '@/config';
@@ -62,6 +62,43 @@ function findExecutableCandidate(candidate: string) {
   return null;
 }
 
+function findPlaywrightChromiumExecutable() {
+  const roots = dedupeCandidates([process.env.PLAYWRIGHT_BROWSERS_PATH, '/ms-playwright']);
+  const executableNames =
+    process.platform === 'win32'
+      ? ['chrome.exe', 'msedge.exe']
+      : process.platform === 'darwin'
+        ? ['Chromium.app/Contents/MacOS/Chromium']
+        : ['chrome'];
+
+  for (const root of roots) {
+    let entries: string[];
+    try {
+      entries = readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.toLowerCase().includes('chromium'))
+        .map((entry) => entry.name)
+        .sort();
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const installRoot = join(root, entry);
+      const candidates = [
+        ...executableNames.map((name) => join(installRoot, 'chrome-linux64', name)),
+        ...executableNames.map((name) => join(installRoot, 'chrome-linux', name)),
+        ...executableNames.map((name) => join(installRoot, name)),
+      ];
+      const executable = candidates.map(findExecutableCandidate).find(Boolean);
+      if (executable) {
+        return executable;
+      }
+    }
+  }
+
+  return null;
+}
+
 function resolveFfmpegPath() {
   return dedupeCandidates([appConfig.FFMPEG_PATH, 'ffmpeg']).map(findExecutableCandidate).find(Boolean) || null;
 }
@@ -105,7 +142,16 @@ async function resolveChromiumPath() {
       return candidate;
     }
   } catch (error) {
+    const installedExecutable = findPlaywrightChromiumExecutable();
+    if (installedExecutable) {
+      return installedExecutable;
+    }
     throw new Error(`Playwright Chromium is not available: ${normalizeErrorMessage(error)}`);
+  }
+
+  const installedExecutable = findPlaywrightChromiumExecutable();
+  if (installedExecutable) {
+    return installedExecutable;
   }
 
   throw new Error('Playwright Chromium executable is not installed. Run "npx playwright install chromium" or set DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH.');

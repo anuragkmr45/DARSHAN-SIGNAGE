@@ -15,7 +15,11 @@ import { createBackupRun, getLatestBackupRun, runFullBackup } from '@/utils/back
 import { getCachedSettings } from '@/utils/settings';
 import { buildSourceFilename } from '@/utils/media-processing';
 import { captureWebpagePreview } from '@/utils/webpage-capture';
-import { redactWebpageUrlForLogs, WebpageUrlPolicyError } from '@/utils/webpage-url-policy';
+import {
+  assertWebpageUrlAllowed,
+  redactWebpageUrlForLogs,
+  WebpageUrlPolicyError,
+} from '@/utils/webpage-url-policy';
 import { getLibreOfficeExecutable, getResolvedFfmpegPath } from '@/utils/runtime-dependencies';
 import {
   buildLibreOfficeConversionArgs,
@@ -157,19 +161,116 @@ async function upsertStorageObject(params: {
   return storageObject;
 }
 
-function getWebpageFailureReason(error: unknown) {
+export type WebpageProcessingStage =
+  | 'media-load'
+  | 'webpage-policy'
+  | 'webpage-capture'
+  | 'fallback-upload'
+  | 'storage-object-upsert'
+  | 'media-ready-update';
+
+export class WebpageProcessingStageError extends Error {
+  public readonly cause?: unknown;
+
+  constructor(public readonly stage: WebpageProcessingStage, public readonly originalError: unknown) {
+    const message = originalError instanceof Error ? originalError.message : String(originalError);
+    super(message || `Webpage processing failed during ${stage}`);
+    this.name = 'WebpageProcessingStageError';
+    this.cause = originalError;
+  }
+}
+
+async function runWebpageStage<T>(stage: WebpageProcessingStage, action: () => Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof WebpageProcessingStageError) {
+      throw error;
+    }
+    throw new WebpageProcessingStageError(stage, error);
+  }
+}
+
+function getWebpageProcessingCause(error: unknown) {
+  return error instanceof WebpageProcessingStageError ? error.originalError : error;
+}
+
+export function getWebpageProcessingStage(error: unknown): WebpageProcessingStage {
+  if (error instanceof WebpageProcessingStageError) {
+    return error.stage;
+  }
   if (error instanceof WebpageUrlPolicyError) {
-    return error.code;
+    return 'webpage-policy';
   }
-  if (error instanceof Error && error.name === 'AbortError') {
+  return 'webpage-capture';
+}
+
+function sanitizeWebpageErrorText(value: string, sourceUrl?: string) {
+  const sourceOrigin = sourceUrl ? redactWebpageUrlForLogs(sourceUrl) : undefined;
+  let sanitized = sourceUrl && sourceOrigin ? value.split(sourceUrl).join(sourceOrigin) : value;
+
+  return sanitized.replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (rawMatch) => {
+    let match = rawMatch;
+    let suffix = '';
+    while (/[),.;\]]$/.test(match)) {
+      suffix = `${match.at(-1)}${suffix}`;
+      match = match.slice(0, -1);
+    }
+    return `${redactWebpageUrlForLogs(match)}${suffix}`;
+  });
+}
+
+function getErrorCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return undefined;
+  }
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' || typeof code === 'number' ? String(code) : undefined;
+}
+
+export function serializeWebpageProcessingError(error: unknown, sourceUrl?: string) {
+  const cause = getWebpageProcessingCause(error);
+  const name = cause instanceof Error ? cause.name : typeof cause;
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const stack = cause instanceof Error ? cause.stack : undefined;
+  const code = getErrorCode(cause);
+
+  return {
+    name,
+    message: sanitizeWebpageErrorText(message, sourceUrl),
+    ...(code ? { code } : {}),
+    ...(stack ? { stack: sanitizeWebpageErrorText(stack, sourceUrl) } : {}),
+  };
+}
+
+function getWebpageFailureReason(error: unknown) {
+  const stage = getWebpageProcessingStage(error);
+  if (stage === 'media-load') {
+    return 'WEBPAGE_MEDIA_LOAD_FAILED';
+  }
+  if (stage === 'fallback-upload') {
+    return 'WEBPAGE_FALLBACK_UPLOAD_FAILED';
+  }
+  if (stage === 'storage-object-upsert') {
+    return 'WEBPAGE_STORAGE_OBJECT_UPSERT_FAILED';
+  }
+  if (stage === 'media-ready-update') {
+    return 'WEBPAGE_MEDIA_READY_UPDATE_FAILED';
+  }
+
+  const cause = getWebpageProcessingCause(error);
+  if (cause instanceof WebpageUrlPolicyError) {
+    return cause.code;
+  }
+  if (cause instanceof Error && cause.name === 'AbortError') {
     return 'WEBPAGE_REQUEST_TIMEOUT';
   }
 
-  if (error instanceof Error && error.name === 'TimeoutError') {
+  if (cause instanceof Error && cause.name === 'TimeoutError') {
     return 'WEBPAGE_REQUEST_TIMEOUT';
   }
 
-  const message = error instanceof Error ? error.message : String(error);
+  const message = cause instanceof Error ? cause.message : String(cause);
   const statusMatch = message.match(/status\s+(\d{3})/i);
   if (statusMatch) {
     return `WEBPAGE_HTTP_${statusMatch[1]}`;
@@ -198,14 +299,109 @@ function getWebpageFailureReason(error: unknown) {
   return 'WEBPAGE_CAPTURE_FAILED';
 }
 
-async function verifyWebpageSource(sourceUrl: string) {
-  const capture = await captureWebpagePreview(sourceUrl);
+async function verifyWebpageSource(
+  sourceUrl: string,
+  dependencies: {
+    assertUrlAllowed?: typeof assertWebpageUrlAllowed;
+    capturePreview?: typeof captureWebpagePreview;
+  } = {}
+) {
+  const assertUrlAllowed = dependencies.assertUrlAllowed ?? assertWebpageUrlAllowed;
+  const capturePreview = dependencies.capturePreview ?? captureWebpagePreview;
+  await runWebpageStage('webpage-policy', () => assertUrlAllowed(sourceUrl, 'navigation'));
+  const capture = await runWebpageStage('webpage-capture', () => capturePreview(sourceUrl));
   return {
     finalUrl: capture.finalUrl,
     contentType: capture.contentType,
     title: capture.title,
     screenshot: capture.screenshot,
   };
+}
+
+type WebpageJobLogger = Pick<typeof logger, 'warn' | 'error'>;
+
+export async function processWebpageVerifyCaptureJob(
+  job: WebpageVerifyCaptureJob,
+  dependencies: {
+    db?: ReturnType<typeof getDatabase>;
+    logger?: WebpageJobLogger;
+    verifySource?: typeof verifyWebpageSource;
+    putObject?: typeof putObject;
+    upsertStorageObject?: typeof upsertStorageObject;
+    now?: () => Date;
+  } = {}
+) {
+  const db = dependencies.db ?? getDatabase();
+  const jobLogger = dependencies.logger ?? logger;
+  const now = dependencies.now ?? (() => new Date());
+  const verifySource = dependencies.verifySource ?? verifyWebpageSource;
+  const putReadyObject = dependencies.putObject ?? putObject;
+  const upsertReadyStorageObject = dependencies.upsertStorageObject ?? upsertStorageObject;
+  const { mediaId, sourceUrl } = job;
+
+  try {
+    const [media] = await runWebpageStage('media-load', async () =>
+      db.select().from(schema.media).where(eq(schema.media.id, mediaId))
+    );
+    if (!media) {
+      jobLogger.warn({ mediaId }, 'Media not found for webpage verification');
+      return;
+    }
+
+    const verification = await verifySource(sourceUrl);
+    const previewBuffer = verification.screenshot;
+    const fallbackKey = `${mediaId}/webpage-fallback.png`;
+    const upload = await runWebpageStage('fallback-upload', () =>
+      putReadyObject(
+        READY_BUCKET,
+        fallbackKey,
+        previewBuffer,
+        WEBPAGE_FALLBACK_CONTENT_TYPE
+      )
+    );
+    const readyObject = await runWebpageStage('storage-object-upsert', () =>
+      upsertReadyStorageObject({
+        bucket: READY_BUCKET,
+        objectKey: fallbackKey,
+        contentType: WEBPAGE_FALLBACK_CONTENT_TYPE,
+        size: previewBuffer.length,
+        sha256: upload.sha256,
+      })
+    );
+
+    await runWebpageStage('media-ready-update', async () => {
+      await db
+        .update(schema.media)
+        .set({
+          source_url: verification.finalUrl,
+          ready_object_id: readyObject.id,
+          status: 'READY',
+          status_reason: null,
+          updated_at: now(),
+        })
+        .where(eq(schema.media.id, mediaId));
+    });
+  } catch (error) {
+    const stage = getWebpageProcessingStage(error);
+    jobLogger.error(
+      {
+        stage,
+        error: serializeWebpageProcessingError(error, sourceUrl),
+        mediaId,
+        sourceOrigin: redactWebpageUrlForLogs(sourceUrl),
+      },
+      'Webpage verification/capture failed'
+    );
+    const failureReason = getWebpageFailureReason(error);
+    await db
+      .update(schema.media)
+      .set({
+        status: 'FAILED',
+        status_reason: failureReason,
+        updated_at: now(),
+      })
+      .where(eq(schema.media.id, mediaId));
+  }
 }
 
 async function convertDocumentWithLibreOffice(inputPath: string, outputDir: string) {
@@ -1008,60 +1204,8 @@ export async function registerJobHandlers() {
   });
 
   await registerObservedWorker<WebpageVerifyCaptureJob>('webpage:verify-capture', async (batch) => {
-    const db = getDatabase();
-
     for (const job of batch) {
-      const { mediaId, sourceUrl } = job.data;
-
-      try {
-        const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId));
-        if (!media) {
-          logger.warn({ mediaId }, 'Media not found for webpage verification');
-          continue;
-        }
-
-        const verification = await verifyWebpageSource(sourceUrl);
-        const previewBuffer = verification.screenshot;
-        const fallbackKey = `${mediaId}/webpage-fallback.png`;
-        const upload = await putObject(
-          READY_BUCKET,
-          fallbackKey,
-          previewBuffer,
-          WEBPAGE_FALLBACK_CONTENT_TYPE
-        );
-        const readyObject = await upsertStorageObject({
-          bucket: READY_BUCKET,
-          objectKey: fallbackKey,
-          contentType: WEBPAGE_FALLBACK_CONTENT_TYPE,
-          size: previewBuffer.length,
-          sha256: upload.sha256,
-        });
-
-        await db
-          .update(schema.media)
-          .set({
-            source_url: verification.finalUrl,
-            ready_object_id: readyObject.id,
-            status: 'READY',
-            status_reason: null,
-            updated_at: new Date(),
-          })
-          .where(eq(schema.media.id, mediaId));
-      } catch (error) {
-        logger.error(
-          { error, mediaId, sourceOrigin: redactWebpageUrlForLogs(sourceUrl) },
-          'Webpage verification/capture failed'
-        );
-        const failureReason = getWebpageFailureReason(error);
-        await db
-          .update(schema.media)
-          .set({
-            status: 'FAILED',
-            status_reason: failureReason,
-            updated_at: new Date(),
-          })
-          .where(eq(schema.media.id, mediaId));
-      }
+      await processWebpageVerifyCaptureJob(job.data);
     }
   });
 

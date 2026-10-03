@@ -41,6 +41,47 @@ describe('Webpage Network Policy', () => {
     expect(hostMatches('evil-example.com', '*.example.com')).to.equal(false)
   })
 
+  it('allows any public HTTPS hostname when the global wildcard is configured', async () => {
+    expect(hostMatches('www.youtube.com', '*')).to.equal(true)
+    expect(hostMatches('www.pexels.com', '*')).to.equal(true)
+
+    const navigation = await assertPlayerWebpageUrlAllowed(
+      'https://www.youtube.com/watch?v=test',
+      'navigation',
+      {
+        ...baseSecurity,
+        allowedDomains: ['*'],
+        webpageResourceDomains: ['*'],
+        webpageAllowedPorts: [443],
+      },
+      async () => ['203.0.113.10'],
+    )
+
+    expect(navigation.hostname).to.equal('www.youtube.com')
+
+    await expectPolicyFailure(assertPlayerWebpageUrlAllowed(
+      'https://10.0.0.5/',
+      'navigation',
+      {
+        ...baseSecurity,
+        allowedDomains: ['*'],
+        webpageResourceDomains: ['*'],
+        webpageAllowedPorts: [443],
+      },
+    ), 'Private webpage address is not allowlisted')
+
+    await expectPolicyFailure(assertPlayerWebpageUrlAllowed(
+      'https://127.0.0.1/',
+      'navigation',
+      {
+        ...baseSecurity,
+        allowedDomains: ['*'],
+        webpageAllowedCidrs: ['0.0.0.0/0'],
+        webpageAllowedPorts: [443],
+      },
+    ), 'Webpage resolved to a prohibited address')
+  })
+
   it('matches IPv4, IPv6, and IPv4-mapped IPv6 CIDRs correctly', () => {
     expect(ipMatchesCidr('192.168.29.64', '192.168.29.0/24')).to.equal(true)
     expect(ipMatchesCidr('192.168.30.1', '192.168.29.0/24')).to.equal(false)

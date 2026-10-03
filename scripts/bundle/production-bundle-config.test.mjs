@@ -197,6 +197,11 @@ EXPORTER_PIDS_LIMIT=128
   fs.writeFileSync(envFile, validText.replace('WEBPAGE_NAVIGATION_ALLOWLIST=display-content.example.test\n', ''))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_NAVIGATION_ALLOWLIST is required/)
 
+  fs.writeFileSync(envFile, validText
+    .replace('WEBPAGE_NAVIGATION_ALLOWLIST=display-content.example.test', 'WEBPAGE_NAVIGATION_ALLOWLIST=*')
+    .replace('WEBPAGE_RESOURCE_ALLOWLIST=*.assets.example.test', 'WEBPAGE_RESOURCE_ALLOWLIST=*'))
+  assert.equal(loadProductionBundleConfig(envFile, root).config.WEBPAGE_NAVIGATION_ALLOWLIST, '*')
+
   fs.writeFileSync(envFile, validText.replace('WEBPAGE_ALLOWED_PORTS=443,8443', 'WEBPAGE_ALLOWED_PORTS=443,70000'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOWED_PORTS contains invalid port/)
 
@@ -365,7 +370,33 @@ test('generated player configs carry the centrally validated webpage policy', ()
   assert.match(playerWriter, /"webpageAllowHttp": \$WEBPAGE_ALLOW_HTTP/)
   assert.match(playerWriter, /"releaseId": "\$DARSHAN_RELEASE_ID"/)
   assert.match(playerWriter, /"sourceCommit": "\$PLAYER_SOURCE_COMMIT"/)
+  assert.doesNotMatch(playerWriter, /degradedStatePollMs/)
   assert.match(assembler, /Could not derive one verified player source commit/)
+})
+
+test('production web media runtime settings are emitted by generated artifacts', () => {
+  const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
+  const backendComposeStart = assembler.indexOf('cat > "$PROD_BACKEND_DIR/docker-compose.yml"')
+  const cmsNginxStart = assembler.indexOf('cat > "$PROD_CMS_DIR/nginx/default.conf"')
+  const backendCompose = assembler.slice(
+    backendComposeStart,
+    assembler.indexOf('  node-exporter:', backendComposeStart),
+  )
+  const cmsNginx = assembler.slice(
+    cmsNginxStart,
+    assembler.indexOf('write_load_images_script "$PROD_DATA_DIR/load-images.sh"', cmsNginxStart),
+  )
+  const sharedCmsTemplate = fs.readFileSync(repoPath('deploy/shared/cms-nginx.default.conf.template'), 'utf8')
+  const productionCmsTemplate = fs.readFileSync(repoPath('deploy/production/docker/cms/nginx/default.conf.template'), 'utf8')
+  const bundleConfig = fs.readFileSync(repoPath('scripts/bundle/production-bundle-config.mjs'), 'utf8')
+
+  assert.match(backendCompose, /TMPDIR: \/tmp/)
+  assert.doesNotMatch(backendCompose, /TMPDIR: \/var\/lib\/darshan-worker\/tmp/)
+  assert.match(cmsNginx, /client_max_body_size 1000M;/)
+  assert.match(sharedCmsTemplate, /client_max_body_size 1000M;/)
+  assert.match(productionCmsTemplate, /client_max_body_size 1000M;/)
+  assert.match(bundleConfig, /MAX_UPLOAD_MB must be exactly 500/)
+  assert.doesNotMatch(bundleConfig, /512m proxy envelope/)
 })
 
 test('production observability deploys every static exporter target from signed role images', () => {

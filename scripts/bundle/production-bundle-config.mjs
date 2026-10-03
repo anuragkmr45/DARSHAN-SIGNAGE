@@ -382,6 +382,7 @@ function validatePositiveInteger(name, value, minimum, maximum, addError) {
 function validateWebpageHostList(name, value, addError) {
   const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
   for (const entry of entries) {
+    if (entry === '*') continue
     const wildcard = entry.startsWith('*.')
     const host = wildcard ? entry.slice(2) : entry
     if (
@@ -392,7 +393,7 @@ function validateWebpageHostList(name, value, addError) {
       || (wildcard && net.isIP(host) !== 0)
       || (net.isIP(host) === 0 && !isValidHostname(host))
     ) {
-      addError(`${name} contains invalid host pattern ${entry}; use lowercase exact hosts or *.example.com wildcards`)
+      addError(`${name} contains invalid host pattern ${entry}; use *, lowercase exact hosts, or *.example.com wildcards`)
     }
   }
 }
@@ -682,7 +683,7 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   if (!['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(config.LOG_LEVEL)) addError('LOG_LEVEL is invalid')
   if (!/^\d+$/.test(config.JWT_EXPIRY) || Number(config.JWT_EXPIRY) < 60) addError('JWT_EXPIRY must be at least 60 seconds')
   if (!/^\d+$/.test(config.MAX_UPLOAD_MB) || Number(config.MAX_UPLOAD_MB) !== 500) {
-    addError('MAX_UPLOAD_MB must be exactly 500 so the application policy remains below the 512m proxy envelope')
+    addError('MAX_UPLOAD_MB must be exactly 500 so the application policy remains below the 1000M CMS proxy envelope')
   }
   validateWebpageHostList('WEBPAGE_NAVIGATION_ALLOWLIST', config.WEBPAGE_NAVIGATION_ALLOWLIST, addError)
   validateWebpageHostList('WEBPAGE_RESOURCE_ALLOWLIST', config.WEBPAGE_RESOURCE_ALLOWLIST, addError)

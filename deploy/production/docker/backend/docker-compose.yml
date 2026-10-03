@@ -36,6 +36,7 @@ services:
       TAR_PATH: ${TAR_PATH:-tar}
       PLAYWRIGHT_BROWSERS_PATH: ${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}
       DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH: ${DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-}
+      TMPDIR: /tmp
     ports:
       - "${API_HOST_PORT}:3000"
     volumes:
