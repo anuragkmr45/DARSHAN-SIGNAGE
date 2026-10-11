@@ -11,6 +11,7 @@ services:
     healthCheckPath: /api/v1/health/live
     maxShutdownDelaySeconds: 120
     envVars:
+      - fromGroup: darshan-cloud-secrets
       - key: NODE_ENV
         value: production
       - key: DARSHAN_PROCESS_ROLE

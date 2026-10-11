@@ -129,9 +129,9 @@ STORAGE_QUOTA_BYTES=943718400
 
 The access keys bypass Storage RLS and must only be stored as Render secret files. This option shares Supabase's 1 GB storage and egress quotas, so R2 is usually the better primary media store.
 
-## 2. Create Render secret files
+## 2. Create the Render secret environment group
 
-In the Render service dashboard, add these secret files. Enter only the value, with no shell quotes and preferably no trailing blank line.
+Before creating the Blueprint, open **Environment Groups** in the Render dashboard and create a group named exactly `darshan-cloud-secrets`. Add these as **secret files**, not ordinary environment variables. Enter only the value, with no shell quotes and preferably no trailing blank line. The Blueprint attaches this existing group to the service on its first deployment.
 
 | File name | Contents |
 | --- | --- |
@@ -142,7 +142,7 @@ In the Render service dashboard, add these secret files. Enter only the value, w
 | `valkey-url` | Upstash native `rediss://` URL |
 | `bootstrap-admin-password` | One-time strong initial administrator password |
 
-The Docker runtime user is added to Render's secret-file group (`1000`). Production code rejects direct secret environment variables, world-readable files, plaintext Redis, and unverified database TLS.
+The Docker runtime user is added to Render's secret-file group (`1000`). Production code rejects direct secret environment variables, world-readable files, plaintext Redis, and unverified database TLS. Do not deploy the Blueprint until this group and all six files exist.
 
 ## 3. Deploy the Blueprint
 
@@ -163,7 +163,7 @@ The startup sequence applies checksum-verified migrations, performs the idempote
 After the first successful bootstrap:
 
 1. Sign in and confirm `/api/v1/health/ready` returns HTTP 200.
-2. Delete the `bootstrap-admin-password` secret file from Render.
+2. Delete the `bootstrap-admin-password` secret file from the `darshan-cloud-secrets` environment group.
 3. Redeploy once and confirm readiness again. Startup will skip administrator bootstrap while retaining the recorded bootstrap state.
 
 The entrypoint derives the public origin from Render's `RENDER_EXTERNAL_HOSTNAME`, so CMS API calls, cookies, CORS, and Socket.IO use the same HTTPS origin. `MINIO_PUBLIC_ENDPOINT` and backup credentials default to the selected S3 endpoint/credentials for the free evaluation layout.
