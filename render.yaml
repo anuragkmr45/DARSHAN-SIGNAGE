@@ -58,4 +58,4 @@ services:
       - key: OBSERVABILITY_GRAFANA_EMBED_ENABLED
         value: "false"
       - key: DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
-        value: ""
+        value: /usr/local/bin/darshan-chromium

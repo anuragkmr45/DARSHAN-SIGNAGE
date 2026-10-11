@@ -18,13 +18,14 @@ Supabase DB       Upstash Redis   Cloudflare R2 (recommended)
                                   or Supabase Storage
 ```
 
-One Render service serves the CMS and API from the same origin. This avoids a second frontend service and removes most browser CORS configuration. Media travels directly between browsers/players and object storage using short-lived signed URLs; it does not consume Render's ephemeral disk.
+One Render service serves the CMS and API from the same origin. This avoids a second frontend service and removes most browser CORS configuration. Media travels directly between browsers/players and object storage using short-lived signed URLs; it does not consume Render's ephemeral disk. The Docker image also contains Playwright Chromium for server-side webpage captures, FFmpeg for compatible video renditions, and LibreOffice/Poppler for document conversion.
 
 ## Important suitability limit
 
 This free layout is for development, demos, and acceptance testing. It is not an always-on signage production tier:
 
 - Render Free has 0.1 CPU and 512 MB RAM and sleeps after 15 minutes without inbound HTTP or WebSocket activity. Cold start is approximately one minute. Scheduled jobs and the combined worker stop while it sleeps.
+- Chromium, FFmpeg, and LibreOffice jobs are intentionally event-driven. Do not run repeated webpage captures or concurrent conversions on the 512 MB Free instance; a heavy job can exceed its CPU or memory allowance.
 - Render's filesystem is ephemeral. This profile keeps authoritative data in Supabase and S3, but an in-progress conversion or backup is lost if the container stops.
 - Supabase can pause a low-activity Free project after a seven-day low-activity period.
 - Upstash Free is capped by monthly command count. Device heartbeats, sockets, replay protection, and login throttling all consume commands.

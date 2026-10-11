@@ -34,7 +34,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DARSHAN_RUNTIME_CONTAINER=true \
     DARSHAN_CONFIG_FILE=/app/config/backend.cloud.json \
     CMS_STATIC_DIR=/app/cms \
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -56,7 +56,12 @@ COPY --from=server-build --chown=node:node /app/drizzle ./drizzle
 COPY --from=server-build --chown=node:node /app/tsconfig.json /app/tsconfig.scripts.json ./
 COPY --from=cms-build --chown=node:node /build/darshan-cms/dist ./cms
 COPY --chown=node:node deploy/cloud/render/backend.cloud.json ./config/backend.cloud.json
-RUN mkdir -p /app/logs /app/tmp && chown node:node /app/logs /app/tmp
+RUN npx playwright install --with-deps chromium \
+    && node -e "const fs=require('node:fs');const {chromium}=require('playwright');fs.symlinkSync(chromium.executablePath(),'/usr/local/bin/darshan-chromium')" \
+    && chmod -R a+rX /ms-playwright \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/logs /app/tmp \
+    && chown node:node /app/logs /app/tmp
 
 USER node
 EXPOSE 10000
