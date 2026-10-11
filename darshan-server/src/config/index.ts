@@ -45,6 +45,14 @@ const envSchema = z.object({
     .transform((v) => v === 'true')
     .default('false'),
   MINIO_REGION: z.string().default('us-east-1'),
+  // Provider-neutral S3 endpoint. Unlike the legacy MINIO_ENDPOINT fields,
+  // this retains base paths such as Supabase Storage's /storage/v1/s3.
+  S3_ENDPOINT: z.preprocess((value) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }, z.string().url().optional()),
+  S3_FORCE_PATH_STYLE: optionalBooleanString,
   // Public, path-style S3 endpoint used only by browser-origin CMS traffic.
   // It is normally the CMS HTTPS origin fronting MinIO through Nginx.
   MINIO_PUBLIC_ENDPOINT: z.preprocess((value) => {
@@ -191,6 +199,7 @@ const envSchema = z.object({
   OUTBOX_DISPATCH_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
   OUTBOX_DISPATCH_LEASE_MS: z.coerce.number().int().positive().default(60_000),
   DARSHAN_MEDIA_CACHE_REPORTING_ENABLED: optionalBooleanString,
+  CMS_STATIC_DIR: optionalTrimmedString,
 });
 
 export function resolveValkeyUrl(input: {
@@ -319,7 +328,8 @@ function assertProductionBackupPolicy(input: z.infer<typeof envSchema>) {
 }
 
 function isBackgroundWorkerProcess() {
-  return process.env.DARSHAN_PROCESS_ROLE === 'worker' || process.env.HEXMON_PROCESS_ROLE === 'worker' || process.argv.includes('--role=worker');
+  const role = process.env.DARSHAN_PROCESS_ROLE ?? process.env.HEXMON_PROCESS_ROLE;
+  return role === 'worker' || role === 'all' || process.argv.includes('--role=worker') || process.argv.includes('--role=all');
 }
 
 function isReadableRegularFile(filePath: string | undefined) {
@@ -376,6 +386,7 @@ export const config = Object.freeze({
   DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED: parsed.data.DEVICE_SOCKET_AUTH_REPLAY_FAIL_CLOSED ?? false,
   DUPLICATE_IDENTITY_DETECTION_ENABLED: parsed.data.DUPLICATE_IDENTITY_DETECTION_ENABLED ?? true,
   DARSHAN_MEDIA_CACHE_REPORTING_ENABLED: parsed.data.DARSHAN_MEDIA_CACHE_REPORTING_ENABLED ?? true,
+  S3_FORCE_PATH_STYLE: parsed.data.S3_FORCE_PATH_STYLE ?? true,
 });
 export type Config = typeof config;
 

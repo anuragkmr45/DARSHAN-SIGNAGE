@@ -10,6 +10,7 @@ DARSHAN production uses Docker role deployments on normal Proxmox VMs. Proxmox i
 
 | Path | Purpose | Runtime model |
 |---|---|---|
+| `deploy/cloud` | Cloud evaluation profile for `feature/native-mobile-tv-platform` only | One Render Docker web service with Supabase, Upstash, and S3-compatible storage; see [cloud/README.md](cloud/README.md) |
 | `deploy/development` | Developer-only support services and observability checks | Docker Compose |
 | `deploy/qa` | QA deployment notes and promotion inputs | Same Docker-on-VM role split as production |
 | `deploy/production/docker` | Production deployment path | Docker Compose role folders, one role per VM |

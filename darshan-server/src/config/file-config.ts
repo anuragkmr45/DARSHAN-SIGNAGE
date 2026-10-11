@@ -136,6 +136,7 @@ const backendFileConfigSchema = z
         endpoint: urlWithoutCredentials.optional(),
         publicEndpoint: urlWithoutCredentials.optional(),
         region: z.string().trim().min(1).optional(),
+        forcePathStyle: z.boolean().optional(),
         cacheReportingEnabled: z.boolean().optional(),
       })
       .strict()
@@ -446,11 +447,15 @@ export function mapBackendFileConfigToEnv(config: BackendFileConfig): Record<str
 
   if (config.media?.endpoint) {
     const endpoint = parseMediaEndpoint(config.media.endpoint);
+    // Keep the complete URL for generic S3 providers while continuing to
+    // populate the legacy MinIO fields for existing on-prem deployments.
+    putIfDefined(env, 'S3_ENDPOINT', config.media.endpoint);
     putIfDefined(env, 'MINIO_ENDPOINT', endpoint.host);
     putIfDefined(env, 'MINIO_PORT', endpoint.port);
     putIfDefined(env, 'MINIO_USE_SSL', endpoint.useSsl);
   }
   putIfDefined(env, 'MINIO_REGION', config.media?.region);
+  putIfDefined(env, 'S3_FORCE_PATH_STYLE', config.media?.forcePathStyle);
   putIfDefined(env, 'MINIO_PUBLIC_ENDPOINT', config.media?.publicEndpoint);
   putIfDefined(env, 'DARSHAN_MEDIA_CACHE_REPORTING_ENABLED', config.media?.cacheReportingEnabled);
 

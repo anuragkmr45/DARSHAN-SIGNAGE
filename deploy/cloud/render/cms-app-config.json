@@ -1,0 +1,19 @@
+{
+  "cms": {
+    "environment": {
+      "name": "production",
+      "deploymentId": "render-cloud",
+      "cmsId": "cms-cloud"
+    },
+    "api": {
+      "baseUrl": "/"
+    },
+    "realtime": {
+      "socketBaseUrl": "/",
+      "socketTransports": ["websocket", "polling"]
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}

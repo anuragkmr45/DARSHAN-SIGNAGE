@@ -35,11 +35,12 @@ function createS3Client(endpoint: string): S3Client {
       accessKeyId: appConfig.MINIO_ACCESS_KEY,
       secretAccessKey: appConfig.MINIO_SECRET_KEY,
     },
-    forcePathStyle: true,
+    forcePathStyle: appConfig.S3_FORCE_PATH_STYLE,
   });
 }
 
-function getInternalEndpoint(): string {
+export function getInternalEndpoint(): string {
+  if (appConfig.S3_ENDPOINT) return appConfig.S3_ENDPOINT.replace(/\/$/, '');
   return `http${appConfig.MINIO_USE_SSL ? 's' : ''}://${appConfig.MINIO_ENDPOINT}:${appConfig.MINIO_PORT}`;
 }
 

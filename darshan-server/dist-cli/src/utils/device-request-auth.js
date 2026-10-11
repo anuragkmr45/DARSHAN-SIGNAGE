@@ -1,0 +1,209 @@
+import { createVerify, randomBytes, X509Certificate } from 'crypto';
+import forge from 'node-forge';
+import { config } from '../config/index.js';
+import { AppError } from './app-error.js';
+export const DEVICE_REQUEST_SIGNATURE_VERSION = 'v1';
+const DEVICE_REQUEST_SIGNATURE_PREFIX = 'DARSHAN_DEVICE_AUTH_V1';
+const LEGACY_DEVICE_REQUEST_SIGNATURE_PREFIX = 'HEXMON_DEVICE_AUTH_V1';
+const DEVICE_AUTH_MODES = ['legacy', 'dual', 'signature'];
+function readHeaderValue(value) {
+    if (Array.isArray(value))
+        return value[0] ?? null;
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+export function parseDeviceRequestSignatureHeaders(headers) {
+    return {
+        serial: readHeaderValue(headers['x-device-serial']) ||
+            readHeaderValue(headers['x-device-cert-serial']) ||
+            readHeaderValue(headers['x-device-cert']),
+        version: readHeaderValue(headers['x-device-auth-version']),
+        timestamp: readHeaderValue(headers['x-device-timestamp']),
+        signature: readHeaderValue(headers['x-device-signature']),
+    };
+}
+export function hasAnySignatureHeader(headers) {
+    return Boolean(headers.version || headers.timestamp || headers.signature);
+}
+export function hasCompleteSignatureHeaders(headers) {
+    return Boolean(headers.serial && headers.version && headers.timestamp && headers.signature);
+}
+function requestedDeviceAuthMode() {
+    return (process.env.DARSHAN_DEVICE_AUTH_MODE?.trim().toLowerCase() ||
+        process.env.HEXMON_DEVICE_AUTH_MODE?.trim().toLowerCase() ||
+        process.env.DEVICE_AUTH_MODE?.trim().toLowerCase() ||
+        config.DEVICE_AUTH_MODE);
+}
+export function resolveDeviceAuthMode() {
+    const requested = requestedDeviceAuthMode();
+    if (DEVICE_AUTH_MODES.includes(requested)) {
+        if (requested === 'legacy' && config.NODE_ENV === 'production')
+            return 'signature';
+        if (requested === 'dual' && !isDeviceLegacyAuthCompatibilityActive())
+            return 'signature';
+        return requested;
+    }
+    return config.DEVICE_AUTH_MODE;
+}
+/**
+ * Compatibility can never become an indefinite production backdoor. Once the
+ * declared dual-mode deadline passes, both HTTP and websocket paths become
+ * signature-only without requiring a restart.
+ */
+export function isDeviceLegacyAuthCompatibilityActive(nowMs = Date.now()) {
+    // Read the same effective mode as the HTTP path. Legacy installations may
+    // still use DARSHAN_/HEXMON_ aliases; consulting only config.DEVICE_AUTH_MODE
+    // would leave such an alias-driven dual rollout active beyond its deadline.
+    if (config.NODE_ENV !== 'production' || requestedDeviceAuthMode() !== 'dual')
+        return true;
+    const raw = config.DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT;
+    if (!raw)
+        return false;
+    const expiryMs = new Date(raw).getTime();
+    return Number.isFinite(expiryMs) && nowMs < expiryMs;
+}
+export function resolveDeviceAuthSignatureMaxSkewSeconds() {
+    const raw = process.env.DARSHAN_DEVICE_AUTH_SIGNATURE_MAX_SKEW_SECONDS?.trim() ||
+        process.env.HEXMON_DEVICE_AUTH_SIGNATURE_MAX_SKEW_SECONDS?.trim() ||
+        process.env.DEVICE_AUTH_SIGNATURE_MAX_SKEW_SECONDS?.trim();
+    if (!raw)
+        return config.DEVICE_AUTH_SIGNATURE_MAX_SKEW_SECONDS;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : config.DEVICE_AUTH_SIGNATURE_MAX_SKEW_SECONDS;
+}
+export function buildDeviceRequestSignaturePayload(params) {
+    return [
+        params.prefix ?? DEVICE_REQUEST_SIGNATURE_PREFIX,
+        params.method.trim().toUpperCase(),
+        params.url.trim(),
+        params.deviceId.trim(),
+        params.timestamp.trim(),
+    ].join('\n');
+}
+export function verifyDeviceRequestSignature(params) {
+    if (params.version !== DEVICE_REQUEST_SIGNATURE_VERSION) {
+        throw AppError.forbidden('Unsupported device auth signature version', {
+            reason: 'DEVICE_SIGNATURE_VERSION_UNSUPPORTED',
+            version: params.version,
+        });
+    }
+    return [DEVICE_REQUEST_SIGNATURE_PREFIX, LEGACY_DEVICE_REQUEST_SIGNATURE_PREFIX].some((prefix) => {
+        const payload = buildDeviceRequestSignaturePayload({
+            method: params.method,
+            url: params.url,
+            deviceId: params.deviceId,
+            timestamp: params.timestamp,
+            prefix,
+        });
+        try {
+            const verifier = createVerify('RSA-SHA256');
+            verifier.update(payload);
+            verifier.end();
+            return verifier.verify(params.publicKeyPem, params.signature, 'base64');
+        }
+        catch {
+            return false;
+        }
+    });
+}
+export function extractDeviceAuthPublicKeyFromCsr(csrPem) {
+    try {
+        const csr = forge.pki.certificationRequestFromPem(csrPem);
+        if (!csr.verify()) {
+            throw AppError.badRequest('CSR verification failed');
+        }
+        if (!csr.publicKey) {
+            throw AppError.badRequest('CSR is missing a public key');
+        }
+        const commonNameField = csr.subject.getField('CN') ?? csr.subject.getField('commonName');
+        const subjectCommonName = typeof commonNameField?.value === 'string' && commonNameField.value.trim().length > 0
+            ? commonNameField.value.trim()
+            : null;
+        if (!subjectCommonName) {
+            throw AppError.badRequest('CSR subject commonName is required');
+        }
+        const rsaPublicKey = csr.publicKey;
+        const rsaBits = typeof rsaPublicKey?.n?.bitLength === 'function' ? rsaPublicKey.n.bitLength() : null;
+        if (rsaBits != null && rsaBits < 2048) {
+            throw AppError.badRequest('CSR RSA public key must be at least 2048 bits');
+        }
+        return {
+            publicKeyPem: forge.pki.publicKeyToPem(csr.publicKey),
+            subjectCommonName,
+        };
+    }
+    catch (error) {
+        if (error instanceof AppError) {
+            throw error;
+        }
+        throw AppError.badRequest('Invalid CSR format');
+    }
+}
+function generateCertificateSerialNumber() {
+    const bytes = randomBytes(16);
+    bytes[0] = bytes[0] & 0x7f;
+    if (bytes.every((value) => value === 0)) {
+        bytes[bytes.length - 1] = 1;
+    }
+    return bytes.toString('hex').toUpperCase();
+}
+export function issueDeviceCertificateFromCsr(params) {
+    try {
+        const csr = forge.pki.certificationRequestFromPem(params.csrPem);
+        if (!csr.verify()) {
+            throw AppError.badRequest('CSR verification failed');
+        }
+        if (!csr.publicKey) {
+            throw AppError.badRequest('CSR is missing a public key');
+        }
+        const caCert = forge.pki.certificateFromPem(params.caCertPem);
+        const caPrivateKey = forge.pki.privateKeyFromPem(params.caKeyPem);
+        const certificate = forge.pki.createCertificate();
+        certificate.publicKey = csr.publicKey;
+        certificate.serialNumber = generateCertificateSerialNumber();
+        certificate.validity.notBefore = params.notBefore ?? new Date(Date.now() - 5 * 60 * 1000);
+        certificate.validity.notAfter = params.notAfter;
+        certificate.setSubject(csr.subject.attributes);
+        certificate.setIssuer(caCert.subject.attributes);
+        certificate.setExtensions([
+            { name: 'basicConstraints', cA: false },
+            {
+                name: 'keyUsage',
+                digitalSignature: true,
+                keyEncipherment: true,
+                dataEncipherment: false,
+                keyCertSign: false,
+            },
+            {
+                name: 'extKeyUsage',
+                clientAuth: true,
+            },
+            {
+                name: 'subjectKeyIdentifier',
+            },
+            {
+                name: 'authorityKeyIdentifier',
+                keyIdentifier: true,
+                authorityCertIssuer: true,
+                serialNumber: caCert.serialNumber,
+            },
+        ]);
+        certificate.sign(caPrivateKey, forge.md.sha256.create());
+        const certificatePem = forge.pki.certificateToPem(certificate);
+        const x509 = new X509Certificate(certificatePem);
+        const caX509 = new X509Certificate(params.caCertPem);
+        if (x509.issuer !== caX509.subject || !x509.verify(caX509.publicKey)) {
+            throw AppError.internal('Issued certificate failed CA verification');
+        }
+        return {
+            certificatePem,
+            serialNumber: x509.serialNumber,
+            fingerprint256: x509.fingerprint256 ?? x509.fingerprint,
+        };
+    }
+    catch (error) {
+        if (error instanceof AppError) {
+            throw error;
+        }
+        throw AppError.internal('Failed to issue a device certificate from the CSR');
+    }
+}

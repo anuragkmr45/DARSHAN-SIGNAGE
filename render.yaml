@@ -1,0 +1,61 @@
+services:
+  - type: web
+    name: darshan-cloud
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: feature/native-mobile-tv-platform
+    autoDeployTrigger: commit
+    dockerfilePath: ./deploy/cloud/render/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/health/live
+    maxShutdownDelaySeconds: 120
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DARSHAN_PROCESS_ROLE
+        value: all
+      - key: DARSHAN_CONFIG_FILE
+        value: /app/config/backend.cloud.json
+      - key: DATABASE_TLS_ENABLED
+        value: "true"
+      - key: DATABASE_CA_CERT_PATH
+        value: /etc/ssl/certs/ca-certificates.crt
+      - key: DEVICE_AUTH_MODE
+        value: signature
+      - key: DATABASE_URL_FILE
+        value: /etc/secrets/database-url
+      - key: JWT_SECRET_FILE
+        value: /etc/secrets/jwt-secret
+      - key: MINIO_ACCESS_KEY_FILE
+        value: /etc/secrets/storage-access-key
+      - key: MINIO_SECRET_KEY_FILE
+        value: /etc/secrets/storage-secret-key
+      - key: VALKEY_URL_FILE
+        value: /etc/secrets/valkey-url
+      - key: S3_ENDPOINT
+        sync: false
+      - key: MINIO_REGION
+        sync: false
+      - key: STORAGE_QUOTA_BYTES
+        sync: false
+      - key: BACKUP_INTERVAL_HOURS
+        value: "24"
+      - key: BACKUP_RETENTION_DAYS
+        value: "7"
+      - key: BACKUP_OFFHOST_DESTINATION
+        sync: false
+      - key: CLOUD_BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: CLOUD_BOOTSTRAP_PASSWORD_FILE
+        value: /etc/secrets/bootstrap-admin-password
+      - key: LOG_LEVEL
+        value: info
+      - key: OBSERVABILITY_METRICS_ENABLED
+        value: "true"
+      - key: OBSERVABILITY_GRAFANA_ENABLED
+        value: "false"
+      - key: OBSERVABILITY_GRAFANA_EMBED_ENABLED
+        value: "false"
+      - key: DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
+        value: ""

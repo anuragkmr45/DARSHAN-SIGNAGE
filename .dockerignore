@@ -5,6 +5,7 @@
 
 **/node_modules
 **/dist
+**/dist-*
 **/out
 **/.cache
 **/coverage
@@ -15,6 +16,10 @@
 *.tar
 *.tgz
 *.zip
+*.apk
+*.aab
+*.keystore
+*.jks
 *.pem
 *.crt
 *.key

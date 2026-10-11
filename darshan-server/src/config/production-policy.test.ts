@@ -107,4 +107,10 @@ describe('production config policy', () => {
       'ADMIN_PASSWORD is forbidden in production. Use the one-shot protected bootstrap password file instead.'
     );
   });
+
+  it('requires off-host backup credentials for the combined API and worker role', async () => {
+    configureProductionEnv({ DARSHAN_PROCESS_ROLE: 'all' });
+
+    await expect(loadConfig()).rejects.toThrow('BACKUP_OFFHOST_ACCESS_KEY_FILE is required');
+  });
 });

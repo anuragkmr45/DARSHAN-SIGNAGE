@@ -215,22 +215,25 @@ describe('backend file config loader', () => {
     );
   });
 
-  it('maps media endpoint into existing MinIO env-compatible keys', () => {
+  it('maps a complete S3 media endpoint and keeps legacy MinIO compatibility keys', () => {
     const configFile = makeTempConfigFile({
       media: {
-        endpoint: 'https://minio.local:9443',
+        endpoint: 'https://storage.local:9443/storage/v1/s3',
         publicEndpoint: 'https://cms.local',
         region: 'us-east-1',
+        forcePathStyle: true,
       },
     });
 
     const loaded = loadBackendFileConfigEnv({ DARSHAN_CONFIG_FILE: configFile });
 
-    expect(loaded.env.MINIO_ENDPOINT).toBe('minio.local');
+    expect(loaded.env.S3_ENDPOINT).toBe('https://storage.local:9443/storage/v1/s3');
+    expect(loaded.env.MINIO_ENDPOINT).toBe('storage.local');
     expect(loaded.env.MINIO_PORT).toBe('9443');
     expect(loaded.env.MINIO_USE_SSL).toBe('true');
     expect(loaded.env.MINIO_PUBLIC_ENDPOINT).toBe('https://cms.local');
     expect(loaded.env.MINIO_REGION).toBe('us-east-1');
+    expect(loaded.env.S3_FORCE_PATH_STYLE).toBe('true');
   });
 
   it('maps non-secret runtime feature flags from config file', () => {

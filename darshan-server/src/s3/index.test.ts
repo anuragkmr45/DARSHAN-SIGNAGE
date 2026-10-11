@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
+  client: vi.fn(),
 }));
 
 class MockCommand {
@@ -9,7 +10,7 @@ class MockCommand {
 }
 
 vi.mock('@aws-sdk/client-s3', () => ({
-  S3Client: vi.fn().mockImplementation(() => ({ send: mocks.send })),
+  S3Client: mocks.client.mockImplementation(() => ({ send: mocks.send })),
   PutObjectCommand: MockCommand,
   GetObjectCommand: MockCommand,
   DeleteObjectCommand: MockCommand,
@@ -22,6 +23,21 @@ vi.mock('@aws-sdk/client-s3', () => ({
   AbortMultipartUploadCommand: MockCommand,
   ListPartsCommand: MockCommand,
   CopyObjectCommand: MockCommand,
+}));
+
+vi.mock('@/config', () => ({
+  config: {
+    NODE_ENV: 'test',
+    MINIO_REGION: 'project-region',
+    MINIO_ACCESS_KEY: 'test-access-key',
+    MINIO_SECRET_KEY: 'test-secret-key',
+    MINIO_USE_SSL: true,
+    MINIO_ENDPOINT: 'legacy-storage.test',
+    MINIO_PORT: 9443,
+    MINIO_PUBLIC_ENDPOINT: undefined,
+    S3_ENDPOINT: 'https://project.storage.test/storage/v1/s3/',
+    S3_FORCE_PATH_STYLE: true,
+  },
 }));
 
 vi.mock('@aws-sdk/s3-request-presigner', () => ({
@@ -43,6 +59,16 @@ describe('createBucketIfNotExists', () => {
     s3.initializeS3();
     return s3;
   }
+
+  it('preserves a provider endpoint base path when creating the S3 client', async () => {
+    await loadS3();
+
+    expect(mocks.client).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: 'https://project.storage.test/storage/v1/s3',
+      forcePathStyle: true,
+      region: 'project-region',
+    }));
+  });
 
   it('does not create a bucket that already exists', async () => {
     mocks.send.mockResolvedValueOnce({});

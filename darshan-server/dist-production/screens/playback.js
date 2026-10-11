@@ -1,0 +1,1240 @@
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import { getDatabase, schema } from '../db/index.js';
+import { getDefaultMediaTargetAssignments, getDefaultMediaVariants, resolveDefaultMediaForScreen, } from '../utils/default-media.js';
+import { resolveAspectRatio } from '../utils/aspect-ratio.js';
+import { getPresignedUrl } from '../s3/index.js';
+import { buildResolvedMediaMap, buildResolvedMediaRecord, buildResolvedMediaRepresentation, } from '../utils/resolved-media.js';
+import { createScheduleReservationRepository } from '../db/repositories/schedule-reservation.js';
+function toIso(value) {
+    if (!value)
+        return null;
+    if (value instanceof Date)
+        return value.toISOString();
+    return value;
+}
+const HEARTBEAT_STALE_MS = 5 * 60 * 1000;
+const SCREENSHOT_PREVIEW_STALE_MS = 90 * 1000;
+function getEmergencySeverityRank(priority) {
+    switch ((priority || '').toUpperCase()) {
+        case 'CRITICAL':
+            return 4;
+        case 'HIGH':
+            return 3;
+        case 'MEDIUM':
+            return 2;
+        case 'LOW':
+            return 1;
+        default:
+            return 0;
+    }
+}
+function resolveEmergencyScopeMatch(emergency, screenId, groupIds) {
+    const emergencyScreenIds = Array.isArray(emergency.screen_ids)
+        ? emergency.screen_ids
+        : [];
+    const emergencyGroupIds = Array.isArray(emergency.screen_group_ids)
+        ? emergency.screen_group_ids
+        : [];
+    const hasTargets = emergencyScreenIds.length > 0 || emergencyGroupIds.length > 0;
+    const targetAll = emergency.target_all === true || !hasTargets;
+    if (targetAll)
+        return 'GLOBAL';
+    if (emergencyGroupIds.some((groupId) => groupIds.includes(groupId)))
+        return 'GROUP';
+    if (emergencyScreenIds.includes(screenId))
+        return 'SCREEN';
+    return null;
+}
+function getEmergencyScopeRank(scope) {
+    switch (scope) {
+        case 'GLOBAL':
+            return 3;
+        case 'GROUP':
+            return 2;
+        case 'SCREEN':
+            return 1;
+        default:
+            return 0;
+    }
+}
+function pickPrimaryMediaIdFromPresentation(presentation) {
+    if (!presentation || typeof presentation !== 'object')
+        return null;
+    const itemMedia = Array.isArray(presentation.items)
+        ? presentation.items.find((item) => typeof item?.media_id === 'string' && item.media_id)
+        : null;
+    if (itemMedia?.media_id)
+        return itemMedia.media_id;
+    const slotMedia = Array.isArray(presentation.slots)
+        ? presentation.slots.find((slot) => typeof slot?.media_id === 'string' && slot.media_id)
+        : null;
+    if (slotMedia?.media_id)
+        return slotMedia.media_id;
+    return null;
+}
+function itemIncludesMediaId(item, mediaId) {
+    if (!item || !mediaId)
+        return false;
+    const presentation = item.presentation;
+    if (!presentation || typeof presentation !== 'object')
+        return false;
+    const matchesCollection = (entries) => Array.isArray(entries) && entries.some((entry) => entry?.media_id === mediaId);
+    return matchesCollection(presentation.items) || matchesCollection(presentation.slots);
+}
+function normalizeMediaDisplayName(media) {
+    if (typeof media?.display_name === 'string' && media.display_name.trim().length > 0) {
+        return media.display_name.trim();
+    }
+    if (typeof media?.name === 'string' && media.name.trim().length > 0) {
+        return media.name.trim();
+    }
+    if (typeof media?.filename === 'string' && media.filename.trim().length > 0) {
+        return media.filename.trim();
+    }
+    return null;
+}
+function buildScheduleItemMediaSummary(entry) {
+    const media = entry?.media ?? entry ?? null;
+    const id = typeof media?.id === 'string' && media.id
+        ? media.id
+        : typeof entry?.media_id === 'string' && entry.media_id
+            ? entry.media_id
+            : null;
+    if (!id)
+        return null;
+    return {
+        id,
+        name: normalizeMediaDisplayName(media),
+        type: typeof media?.type === 'string' && media.type ? media.type : null,
+        thumbnail_url: typeof media?.fallback_media_url === 'string' && media.fallback_media_url
+            ? media.fallback_media_url
+            : typeof media?.media_url === 'string' && media.media_url
+                ? media.media_url
+                : null,
+    };
+}
+function dedupeScheduleItemMedia(items) {
+    const seen = new Set();
+    const deduped = [];
+    for (const item of items) {
+        if (seen.has(item.id))
+            continue;
+        seen.add(item.id);
+        deduped.push(item);
+    }
+    return deduped;
+}
+function normalizeActiveSlots(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    const normalized = [];
+    for (const entry of value) {
+        if (!entry || typeof entry !== 'object') {
+            continue;
+        }
+        const slot = entry;
+        if (typeof slot.scene_id !== 'string' ||
+            typeof slot.slot_id !== 'string' ||
+            typeof slot.item_id !== 'string' ||
+            typeof slot.playback_instance_id !== 'string' ||
+            typeof slot.started_at !== 'string') {
+            continue;
+        }
+        normalized.push({
+            scene_id: slot.scene_id,
+            slot_id: slot.slot_id,
+            item_id: slot.item_id,
+            media_id: typeof slot.media_id === 'string' ? slot.media_id : null,
+            schedule_id: typeof slot.schedule_id === 'string' ? slot.schedule_id : null,
+            playback_instance_id: slot.playback_instance_id,
+            started_at: slot.started_at,
+        });
+    }
+    return normalized;
+}
+export function buildScheduleItemSummary(item) {
+    const presentation = item?.presentation ?? null;
+    const layout = presentation?.layout ?? null;
+    const itemMedia = Array.isArray(presentation?.items) ? presentation.items : [];
+    const slotMedia = Array.isArray(presentation?.slots) ? presentation.slots : [];
+    const media = dedupeScheduleItemMedia([...itemMedia, ...slotMedia]
+        .map((entry) => buildScheduleItemMediaSummary(entry))
+        .filter((entry) => Boolean(entry)));
+    return {
+        item_id: typeof item?.id === 'string' && item.id
+            ? item.id
+            : `${typeof item?.presentation_id === 'string' ? item.presentation_id : 'item'}:${item?.start_at ?? 'unknown'}`,
+        start_at: toIso(item?.start_at),
+        end_at: toIso(item?.end_at),
+        presentation_id: typeof item?.presentation_id === 'string' && item.presentation_id ? item.presentation_id : null,
+        presentation_name: typeof presentation?.name === 'string' && presentation.name.trim().length > 0
+            ? presentation.name.trim()
+            : null,
+        layout_id: typeof layout?.id === 'string' && layout.id ? layout.id : null,
+        layout_name: typeof layout?.name === 'string' && layout.name.trim().length > 0 ? layout.name.trim() : null,
+        media,
+    };
+}
+export function buildScheduleItemSummaries(items) {
+    return items.map((item) => buildScheduleItemSummary(item));
+}
+export async function getGroupIdsForScreen(screenId, db = getDatabase()) {
+    const rows = await db
+        .select({ group_id: schema.screenGroupMembers.group_id })
+        .from(schema.screenGroupMembers)
+        .where(eq(schema.screenGroupMembers.screen_id, screenId));
+    return rows.map((row) => row.group_id);
+}
+async function getGroupIdsByScreenId(screenIds, db = getDatabase()) {
+    const result = new Map(screenIds.map((screenId) => [screenId, []]));
+    if (screenIds.length === 0)
+        return result;
+    const rows = await db
+        .select({
+        screen_id: schema.screenGroupMembers.screen_id,
+        group_id: schema.screenGroupMembers.group_id,
+    })
+        .from(schema.screenGroupMembers)
+        .where(inArray(schema.screenGroupMembers.screen_id, screenIds));
+    for (const row of rows) {
+        const groups = result.get(row.screen_id);
+        if (groups) {
+            groups.push(row.group_id);
+        }
+    }
+    return result;
+}
+export async function getLatestPublishForScreen(screenId, db = getDatabase(), options = {}) {
+    const reservationRepo = createScheduleReservationRepository();
+    const now = options.now ?? new Date();
+    if (!options.skipReservationExpiry) {
+        await reservationRepo.expireStaleHolds(now, db);
+    }
+    const active = await reservationRepo.findCurrentPublishedForScreen(screenId, now, db);
+    if (active) {
+        return {
+            publish_id: active.publish_id,
+            schedule_id: active.schedule_id,
+            snapshot_id: active.snapshot_id,
+            published_at: active.published_at,
+            payload: active.payload,
+            reservation_version: active.reservation_version,
+            selection_reason: 'active_reservation',
+            reservation_start_at: active.start_at,
+            reservation_end_at: active.end_at,
+        };
+    }
+    const upcoming = await reservationRepo.findUpcomingPublishedForScreen(screenId, now, db);
+    if (upcoming) {
+        return {
+            publish_id: upcoming.publish_id,
+            schedule_id: upcoming.schedule_id,
+            snapshot_id: upcoming.snapshot_id,
+            published_at: upcoming.published_at,
+            payload: upcoming.payload,
+            reservation_version: upcoming.reservation_version,
+            selection_reason: 'upcoming_reservation',
+            reservation_start_at: upcoming.start_at,
+            reservation_end_at: upcoming.end_at,
+        };
+    }
+    const [latestPublish] = await db
+        .select({
+        publish_id: schema.publishes.id,
+        schedule_id: schema.publishes.schedule_id,
+        snapshot_id: schema.publishes.snapshot_id,
+        published_at: schema.publishes.published_at,
+        payload: schema.scheduleSnapshots.payload,
+    })
+        .from(schema.publishTargets)
+        .innerJoin(schema.publishes, eq(schema.publishTargets.publish_id, schema.publishes.id))
+        .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+        .where(and(eq(schema.publishTargets.screen_id, screenId), eq(schema.publishes.status, 'ACTIVE'), isNull(schema.publishes.taken_down_at)))
+        .orderBy(desc(schema.publishes.published_at), desc(schema.publishes.id))
+        .limit(1);
+    if (!latestPublish)
+        return null;
+    return {
+        publish_id: latestPublish.publish_id,
+        schedule_id: latestPublish.schedule_id,
+        snapshot_id: latestPublish.snapshot_id,
+        published_at: latestPublish.published_at,
+        payload: latestPublish.payload,
+        reservation_version: null,
+        selection_reason: 'latest_publish',
+        reservation_start_at: null,
+        reservation_end_at: null,
+    };
+}
+async function getLatestPublishByScreenId(screenIds, db = getDatabase(), now = new Date()) {
+    const result = new Map(screenIds.map((screenId) => [screenId, null]));
+    if (screenIds.length === 0)
+        return result;
+    const [activeReservations, upcomingReservations, latestPublishes] = await Promise.all([
+        db
+            .select({
+            screen_id: schema.scheduleReservations.screen_id,
+            reservation_version: schema.scheduleReservations.reservation_version,
+            publish_id: schema.scheduleReservations.publish_id,
+            published_at: schema.scheduleReservations.published_at,
+            start_at: schema.scheduleReservations.start_at,
+            end_at: schema.scheduleReservations.end_at,
+            schedule_id: schema.publishes.schedule_id,
+            snapshot_id: schema.publishes.snapshot_id,
+            payload: schema.scheduleSnapshots.payload,
+        })
+            .from(schema.scheduleReservations)
+            .innerJoin(schema.publishes, eq(schema.scheduleReservations.publish_id, schema.publishes.id))
+            .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+            .where(and(inArray(schema.scheduleReservations.screen_id, screenIds), eq(schema.scheduleReservations.state, 'PUBLISHED'), eq(schema.publishes.status, 'ACTIVE'), lte(schema.scheduleReservations.start_at, now), gt(schema.scheduleReservations.end_at, now)))
+            .orderBy(schema.scheduleReservations.screen_id, desc(schema.scheduleReservations.start_at), desc(schema.scheduleReservations.published_at), desc(schema.scheduleReservations.publish_id)),
+        db
+            .select({
+            screen_id: schema.scheduleReservations.screen_id,
+            reservation_version: schema.scheduleReservations.reservation_version,
+            publish_id: schema.scheduleReservations.publish_id,
+            published_at: schema.scheduleReservations.published_at,
+            start_at: schema.scheduleReservations.start_at,
+            end_at: schema.scheduleReservations.end_at,
+            schedule_id: schema.publishes.schedule_id,
+            snapshot_id: schema.publishes.snapshot_id,
+            payload: schema.scheduleSnapshots.payload,
+        })
+            .from(schema.scheduleReservations)
+            .innerJoin(schema.publishes, eq(schema.scheduleReservations.publish_id, schema.publishes.id))
+            .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+            .where(and(inArray(schema.scheduleReservations.screen_id, screenIds), eq(schema.scheduleReservations.state, 'PUBLISHED'), eq(schema.publishes.status, 'ACTIVE'), gt(schema.scheduleReservations.start_at, now)))
+            .orderBy(schema.scheduleReservations.screen_id, schema.scheduleReservations.start_at, desc(schema.scheduleReservations.published_at), desc(schema.scheduleReservations.publish_id)),
+        db
+            .select({
+            screen_id: schema.publishTargets.screen_id,
+            publish_id: schema.publishes.id,
+            schedule_id: schema.publishes.schedule_id,
+            snapshot_id: schema.publishes.snapshot_id,
+            published_at: schema.publishes.published_at,
+            payload: schema.scheduleSnapshots.payload,
+        })
+            .from(schema.publishTargets)
+            .innerJoin(schema.publishes, eq(schema.publishTargets.publish_id, schema.publishes.id))
+            .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
+            .where(and(inArray(schema.publishTargets.screen_id, screenIds), eq(schema.publishes.status, 'ACTIVE'), isNull(schema.publishes.taken_down_at)))
+            .orderBy(schema.publishTargets.screen_id, desc(schema.publishes.published_at), desc(schema.publishes.id)),
+    ]);
+    for (const row of activeReservations) {
+        if (result.get(row.screen_id))
+            continue;
+        result.set(row.screen_id, {
+            publish_id: row.publish_id,
+            schedule_id: row.schedule_id,
+            snapshot_id: row.snapshot_id,
+            published_at: row.published_at,
+            payload: row.payload,
+            reservation_version: row.reservation_version,
+            selection_reason: 'active_reservation',
+            reservation_start_at: row.start_at,
+            reservation_end_at: row.end_at,
+        });
+    }
+    for (const row of upcomingReservations) {
+        if (result.get(row.screen_id))
+            continue;
+        result.set(row.screen_id, {
+            publish_id: row.publish_id,
+            schedule_id: row.schedule_id,
+            snapshot_id: row.snapshot_id,
+            published_at: row.published_at,
+            payload: row.payload,
+            reservation_version: row.reservation_version,
+            selection_reason: 'upcoming_reservation',
+            reservation_start_at: row.start_at,
+            reservation_end_at: row.end_at,
+        });
+    }
+    for (const row of latestPublishes) {
+        if (!row.screen_id || result.get(row.screen_id))
+            continue;
+        result.set(row.screen_id, {
+            publish_id: row.publish_id,
+            schedule_id: row.schedule_id,
+            snapshot_id: row.snapshot_id,
+            published_at: row.published_at,
+            payload: row.payload,
+            reservation_version: null,
+            selection_reason: 'latest_publish',
+            reservation_start_at: null,
+            reservation_end_at: null,
+        });
+    }
+    return result;
+}
+export function filterItemsForScreen(items, screenId, groupIds) {
+    return items.filter((item) => {
+        const itemScreens = Array.isArray(item?.screen_ids) ? item.screen_ids : [];
+        const itemGroups = Array.isArray(item?.screen_group_ids) ? item.screen_group_ids : [];
+        const hasTargets = itemScreens.length > 0 || itemGroups.length > 0;
+        if (!hasTargets)
+            return true;
+        if (itemScreens.includes(screenId))
+            return true;
+        return itemGroups.some((groupId) => groupIds.includes(groupId));
+    });
+}
+export function buildTimeline(items, now = new Date()) {
+    const activeItems = items
+        .filter((item) => {
+        const start = new Date(item.start_at);
+        const end = new Date(item.end_at);
+        return start <= now && end > now;
+    })
+        .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+    const upcomingItems = items
+        .filter((item) => new Date(item.start_at) > now)
+        .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+    const bookedUntil = items.length
+        ? new Date(Math.max(...items.map((item) => new Date(item.end_at).getTime()))).toISOString()
+        : null;
+    return { activeItems, upcomingItems, bookedUntil };
+}
+export async function getActiveEmergencyForScreen(screenId, options = {}) {
+    const db = options.db ?? getDatabase();
+    const emergencies = options.activeEmergencies ??
+        (await db
+            .select()
+            .from(schema.emergencies)
+            .where(and(eq(schema.emergencies.is_active, true), isNull(schema.emergencies.cleared_at), sql `(${schema.emergencies.expires_at} IS NULL OR ${schema.emergencies.expires_at} > now())`))
+            .orderBy(desc(schema.emergencies.created_at)));
+    if (emergencies.length === 0)
+        return null;
+    const groupIds = options.groupIds ?? (await getGroupIdsForScreen(screenId, db));
+    const ranked = emergencies
+        .map((emergency) => {
+        const scopeMatch = resolveEmergencyScopeMatch(emergency, screenId, groupIds);
+        if (!scopeMatch)
+            return null;
+        return {
+            emergency,
+            scopeMatch,
+            scopeRank: getEmergencyScopeRank(scopeMatch),
+            severityRank: getEmergencySeverityRank(emergency.priority),
+        };
+    })
+        .filter(Boolean);
+    if (ranked.length === 0)
+        return null;
+    ranked.sort((left, right) => {
+        if (right.severityRank !== left.severityRank)
+            return right.severityRank - left.severityRank;
+        if (right.scopeRank !== left.scopeRank)
+            return right.scopeRank - left.scopeRank;
+        const createdDelta = new Date(right.emergency.created_at).getTime() - new Date(left.emergency.created_at).getTime();
+        return createdDelta || right.emergency.id.localeCompare(left.emergency.id);
+    });
+    const { emergency, scopeMatch } = ranked[0];
+    const emergencyScreenIds = Array.isArray(emergency.screen_ids)
+        ? emergency.screen_ids
+        : [];
+    const emergencyGroupIds = Array.isArray(emergency.screen_group_ids)
+        ? emergency.screen_group_ids
+        : [];
+    const resolvedEmergencyMedia = options.includeUrls && emergency.media_id
+        ? await buildResolvedMediaRecord(emergency.media_id, db)
+        : null;
+    const requestedMediaId = emergency.media_id ?? null;
+    const mediaIsPlayable = options.includeUrls
+        ? resolvedEmergencyMedia?.status === 'READY' && Boolean(resolvedEmergencyMedia.playback_url)
+        : Boolean(requestedMediaId);
+    const effectiveMedia = mediaIsPlayable ? resolvedEmergencyMedia : null;
+    const effectiveMediaId = mediaIsPlayable ? requestedMediaId : null;
+    return {
+        id: emergency.id,
+        emergency_type_id: emergency.emergency_type_id ?? null,
+        triggered_by: emergency.triggered_by,
+        message: emergency.message,
+        severity: emergency.priority,
+        media_id: effectiveMediaId,
+        media_url: effectiveMedia?.media_url ?? null,
+        fallback_url: effectiveMedia?.fallback_url ?? null,
+        source_url: effectiveMedia?.source_url ?? null,
+        playback_url: effectiveMedia?.playback_url ?? null,
+        preview_url: effectiveMedia?.preview_url ?? null,
+        url: effectiveMedia?.url ?? null,
+        media_type: effectiveMedia?.media_type ?? null,
+        type: effectiveMedia?.type === 'WEBPAGE'
+            ? 'url'
+            : effectiveMedia?.type ?? null,
+        content_type: effectiveMedia?.content_type ?? null,
+        source_content_type: effectiveMedia?.source_content_type ?? null,
+        screen_ids: emergencyScreenIds,
+        screen_group_ids: emergencyGroupIds,
+        target_all: emergency.target_all ?? false,
+        kind: effectiveMediaId ? 'MEDIA' : 'MESSAGE',
+        active: true,
+        is_active: true,
+        version: `${emergency.id}:${emergency.transition_version ?? 1}`,
+        scope: scopeMatch,
+        expires_at: toIso(emergency.expires_at),
+        audit_note: emergency.audit_note ?? null,
+        created_at: toIso(emergency.created_at),
+        cleared_at: toIso(emergency.cleared_at),
+    };
+}
+async function getMediaSummary(id, db = getDatabase()) {
+    return await buildResolvedMediaRecord(id, db);
+}
+export async function getLatestScreenshotPreview(screenId, options = {}) {
+    const db = options.db ?? getDatabase();
+    const now = options.now ?? new Date();
+    const [latest] = await db
+        .select({
+        storage_object_id: schema.screenshots.storage_object_id,
+        captured_at: schema.screenshots.created_at,
+        bucket: schema.storageObjects.bucket,
+        object_key: schema.storageObjects.object_key,
+    })
+        .from(schema.screenshots)
+        .innerJoin(schema.storageObjects, eq(schema.screenshots.storage_object_id, schema.storageObjects.id))
+        .where(eq(schema.screenshots.screen_id, screenId))
+        .orderBy(desc(schema.screenshots.created_at))
+        .limit(1);
+    if (!latest)
+        return null;
+    let screenshotUrl = null;
+    try {
+        screenshotUrl = await getPresignedUrl(latest.bucket, latest.object_key, 3600);
+    }
+    catch {
+        screenshotUrl = null;
+    }
+    const capturedAtIso = toIso(latest.captured_at);
+    const capturedAtMs = latest.captured_at instanceof Date ? latest.captured_at.getTime() : Date.parse(String(latest.captured_at));
+    return {
+        storage_object_id: latest.storage_object_id,
+        captured_at: capturedAtIso,
+        screenshot_url: screenshotUrl,
+        stale: Number.isFinite(capturedAtMs) ? now.getTime() - capturedAtMs > SCREENSHOT_PREVIEW_STALE_MS : true,
+    };
+}
+async function getLatestScreenshotPreviewByScreenId(screenIds, db = getDatabase(), now = new Date()) {
+    const result = new Map(screenIds.map((screenId) => [screenId, null]));
+    if (screenIds.length === 0)
+        return result;
+    const rows = await db
+        .select({
+        screen_id: schema.screenshots.screen_id,
+        storage_object_id: schema.screenshots.storage_object_id,
+        captured_at: schema.screenshots.created_at,
+        bucket: schema.storageObjects.bucket,
+        object_key: schema.storageObjects.object_key,
+    })
+        .from(schema.screenshots)
+        .innerJoin(schema.storageObjects, eq(schema.screenshots.storage_object_id, schema.storageObjects.id))
+        .where(inArray(schema.screenshots.screen_id, screenIds))
+        .orderBy(schema.screenshots.screen_id, desc(schema.screenshots.created_at));
+    for (const row of rows) {
+        if (result.get(row.screen_id))
+            continue;
+        let screenshotUrl = null;
+        try {
+            screenshotUrl = await getPresignedUrl(row.bucket, row.object_key, 3600);
+        }
+        catch {
+            screenshotUrl = null;
+        }
+        const capturedAtIso = toIso(row.captured_at);
+        const capturedAtMs = row.captured_at instanceof Date ? row.captured_at.getTime() : Date.parse(String(row.captured_at));
+        result.set(row.screen_id, {
+            storage_object_id: row.storage_object_id,
+            captured_at: capturedAtIso,
+            screenshot_url: screenshotUrl,
+            stale: Number.isFinite(capturedAtMs) ? now.getTime() - capturedAtMs > SCREENSHOT_PREVIEW_STALE_MS : true,
+        });
+    }
+    return result;
+}
+function collectPresentationMediaIds(presentation, ids) {
+    if (!presentation || typeof presentation !== 'object')
+        return;
+    const collect = (entries) => {
+        if (!Array.isArray(entries))
+            return;
+        for (const entry of entries) {
+            const mediaId = typeof entry?.media_id === 'string' ? entry.media_id : null;
+            if (mediaId)
+                ids.add(mediaId);
+        }
+    };
+    collect(presentation.items);
+    collect(presentation.slots);
+}
+async function buildCurrentMediaById(screens, latestPublishByScreenId, defaultMediaByScreenId, activeEmergencies, db = getDatabase()) {
+    const ids = new Set();
+    for (const emergency of activeEmergencies) {
+        const mediaId = typeof emergency.media_id === 'string' ? emergency.media_id : null;
+        if (mediaId)
+            ids.add(mediaId);
+    }
+    for (const screen of screens) {
+        const activeSlots = normalizeActiveSlots(screen.active_slots);
+        if (activeSlots[0]?.media_id)
+            ids.add(activeSlots[0].media_id);
+        if (screen.current_media_id)
+            ids.add(screen.current_media_id);
+        const defaultMedia = defaultMediaByScreenId.get(screen.id);
+        if (defaultMedia?.media_id)
+            ids.add(defaultMedia.media_id);
+        const schedulePayload = latestPublishByScreenId.get(screen.id)?.payload?.schedule;
+        const scheduleItems = Array.isArray(schedulePayload?.items) ? schedulePayload.items : [];
+        for (const item of scheduleItems) {
+            collectPresentationMediaIds(item?.presentation, ids);
+        }
+    }
+    const mediaMap = await buildResolvedMediaMap(Array.from(ids), db);
+    return new Map(Array.from(mediaMap.entries()).map(([mediaId, media]) => [
+        mediaId,
+        {
+            ...media,
+            ...buildResolvedMediaRepresentation(media, { includeSourceUrl: true }),
+            url: media.type === 'WEBPAGE' ? media.source_url ?? null : media.media_url ?? null,
+            fallback_url: media.fallback_media_url ?? null,
+            media_type: media.type,
+        },
+    ]));
+}
+async function resolveDefaultMediaByScreenId(screens, groupIdsByScreenId, db = getDatabase()) {
+    const result = new Map();
+    if (screens.length === 0)
+        return result;
+    const [assignments, defaults] = await Promise.all([
+        getDefaultMediaTargetAssignments(db),
+        getDefaultMediaVariants(db),
+    ]);
+    const variantsByAspect = new Map(defaults.variants.map((variant) => [variant.aspect_ratio, variant]));
+    for (const screen of screens) {
+        const aspect_ratio = resolveAspectRatio(screen);
+        const groupIds = new Set(groupIdsByScreenId.get(screen.id) ?? []);
+        const matchingAssignments = assignments.filter((assignment) => assignment.aspect_ratio === aspect_ratio && assignment.media);
+        const screenAssignment = matchingAssignments.find((assignment) => assignment.target_type === 'SCREEN' && assignment.target_id === screen.id);
+        if (screenAssignment?.media) {
+            result.set(screen.id, {
+                source: 'SCREEN',
+                aspect_ratio,
+                media_id: screenAssignment.media_id,
+                media: screenAssignment.media,
+                media_url: screenAssignment.media_url,
+            });
+            continue;
+        }
+        const groupAssignment = matchingAssignments.find((assignment) => assignment.target_type === 'GROUP' && groupIds.has(assignment.target_id));
+        if (groupAssignment?.media) {
+            result.set(screen.id, {
+                source: 'GROUP',
+                aspect_ratio,
+                media_id: groupAssignment.media_id,
+                media: groupAssignment.media,
+                media_url: groupAssignment.media_url,
+            });
+            continue;
+        }
+        if (aspect_ratio) {
+            const variant = variantsByAspect.get(aspect_ratio);
+            if (variant?.media) {
+                result.set(screen.id, {
+                    source: 'ASPECT_RATIO',
+                    aspect_ratio,
+                    media_id: variant.media_id,
+                    media: variant.media,
+                    media_url: variant.media_url,
+                });
+                continue;
+            }
+        }
+        if (defaults.global_media) {
+            result.set(screen.id, {
+                source: 'GLOBAL',
+                aspect_ratio,
+                media_id: defaults.global_media_id,
+                media: defaults.global_media,
+                media_url: defaults.global_media_url,
+            });
+            continue;
+        }
+        result.set(screen.id, {
+            source: 'NONE',
+            aspect_ratio,
+            media_id: null,
+            media: null,
+            media_url: null,
+        });
+    }
+    return result;
+}
+function buildScreenRecoveryState(activePairing, latestCertificate, now = new Date()) {
+    const pairingInfo = (activePairing?.device_info || {});
+    const pairingMeta = (pairingInfo?.pairing || {});
+    const activePairingMode = typeof pairingMeta.mode === 'string' && pairingMeta.mode.trim().length > 0 ? pairingMeta.mode.trim() : null;
+    const activePairingConfirmed = pairingMeta.confirmed === true;
+    const activePairingState = activePairing
+        ? {
+            id: activePairing.id,
+            created_at: toIso(activePairing.created_at),
+            expires_at: toIso(activePairing.expires_at),
+            confirmed: activePairingConfirmed,
+            mode: activePairingMode,
+        }
+        : null;
+    let authState = 'VALID';
+    let authReason = 'Device credentials are valid.';
+    if (!latestCertificate) {
+        authState = 'MISSING_CERTIFICATE';
+        authReason = 'No device certificate exists for this screen.';
+    }
+    else if (latestCertificate.is_revoked || latestCertificate.revoked_at) {
+        authState = 'REVOKED_CERTIFICATE';
+        authReason = 'The latest device certificate has been revoked.';
+    }
+    else if (latestCertificate.expires_at && latestCertificate.expires_at.getTime() <= now.getTime()) {
+        authState = 'EXPIRED_CERTIFICATE';
+        authReason = 'The latest device certificate has expired.';
+    }
+    return {
+        active_pairing: activePairingState,
+        auth_diagnostics: {
+            state: authState,
+            reason: authReason,
+            latest_certificate_expires_at: toIso(latestCertificate?.expires_at),
+            latest_certificate_revoked_at: toIso(latestCertificate?.revoked_at),
+            latest_certificate_serial: latestCertificate?.serial ?? null,
+        },
+    };
+}
+export async function buildScreenRecoveryStateMap(screenIds, db = getDatabase(), now = new Date()) {
+    if (screenIds.length === 0) {
+        return new Map();
+    }
+    const activePairings = await db
+        .select({
+        id: schema.devicePairings.id,
+        device_id: schema.devicePairings.device_id,
+        created_at: schema.devicePairings.created_at,
+        expires_at: schema.devicePairings.expires_at,
+        device_info: schema.devicePairings.device_info,
+    })
+        .from(schema.devicePairings)
+        .where(and(inArray(schema.devicePairings.device_id, screenIds), eq(schema.devicePairings.used, false), gt(schema.devicePairings.expires_at, now)))
+        .orderBy(desc(schema.devicePairings.created_at));
+    const latestCertificates = await db
+        .select({
+        screen_id: schema.deviceCertificates.screen_id,
+        serial: schema.deviceCertificates.serial,
+        expires_at: schema.deviceCertificates.expires_at,
+        revoked_at: schema.deviceCertificates.revoked_at,
+        is_revoked: schema.deviceCertificates.is_revoked,
+        created_at: schema.deviceCertificates.created_at,
+    })
+        .from(schema.deviceCertificates)
+        .where(inArray(schema.deviceCertificates.screen_id, screenIds))
+        .orderBy(desc(schema.deviceCertificates.created_at));
+    const activePairingByScreenId = new Map();
+    for (const pairing of activePairings) {
+        if (!pairing.device_id || activePairingByScreenId.has(pairing.device_id))
+            continue;
+        activePairingByScreenId.set(pairing.device_id, pairing);
+    }
+    const latestCertificateByScreenId = new Map();
+    for (const certificate of latestCertificates) {
+        if (latestCertificateByScreenId.has(certificate.screen_id))
+            continue;
+        latestCertificateByScreenId.set(certificate.screen_id, certificate);
+    }
+    return new Map(screenIds.map((screenId) => [
+        screenId,
+        buildScreenRecoveryState(activePairingByScreenId.get(screenId), latestCertificateByScreenId.get(screenId), now),
+    ]));
+}
+async function getScreenRecoveryState(screenId, db = getDatabase(), now = new Date()) {
+    const recoveryStateMap = await buildScreenRecoveryStateMap([screenId], db, now);
+    return (recoveryStateMap.get(screenId) ?? {
+        active_pairing: null,
+        auth_diagnostics: {
+            state: 'MISSING_CERTIFICATE',
+            reason: 'No device certificate exists for this screen.',
+            latest_certificate_expires_at: null,
+            latest_certificate_revoked_at: null,
+            latest_certificate_serial: null,
+        },
+    });
+}
+function deriveHealthState(params) {
+    if (params.authDiagnostics.state !== 'VALID' ||
+        (params.activePairing?.mode === 'RECOVERY' && params.activePairing)) {
+        return {
+            health_state: 'RECOVERY_REQUIRED',
+            health_reason: params.activePairing?.mode === 'RECOVERY'
+                ? 'Recovery pairing is in progress for this screen.'
+                : 'The screen requires credential recovery before it can authenticate again.',
+        };
+    }
+    if (params.screen.status === 'OFFLINE') {
+        return {
+            health_state: 'OFFLINE',
+            health_reason: 'The screen is reporting offline.',
+        };
+    }
+    if (params.screen.status === 'INACTIVE') {
+        return {
+            health_state: 'ERROR',
+            health_reason: 'The screen reported an error or inactive state.',
+        };
+    }
+    if (!params.screen.last_heartbeat_at) {
+        return {
+            health_state: 'STALE',
+            health_reason: 'The screen has not reported a heartbeat yet.',
+        };
+    }
+    if (params.now.getTime() - params.screen.last_heartbeat_at.getTime() > HEARTBEAT_STALE_MS) {
+        return {
+            health_state: 'STALE',
+            health_reason: 'The last heartbeat is older than the freshness threshold.',
+        };
+    }
+    return {
+        health_state: 'ONLINE',
+        health_reason: 'The screen is healthy and reporting recent heartbeats.',
+    };
+}
+export async function getLastProofOfPlayMap(screenIds, db = getDatabase()) {
+    if (screenIds.length === 0)
+        return new Map();
+    const rows = await db
+        .select({
+        screen_id: schema.proofOfPlay.screen_id,
+        last_created_at: sql `max(${schema.proofOfPlay.created_at})`,
+    })
+        .from(schema.proofOfPlay)
+        .where(inArray(schema.proofOfPlay.screen_id, screenIds))
+        .groupBy(schema.proofOfPlay.screen_id);
+    return new Map(rows
+        .filter((row) => row.last_created_at)
+        .map((row) => [row.screen_id, toIso(row.last_created_at)]));
+}
+function derivePlaybackState(params) {
+    const fallbackItem = params.activeItems.find((item) => params.currentMediaId && itemIncludesMediaId(item, params.currentMediaId)) ??
+        params.activeItems[0] ??
+        null;
+    const fallbackMediaIdFromItem = fallbackItem
+        ? pickPrimaryMediaIdFromPresentation(fallbackItem.presentation)
+        : null;
+    const resolvedCurrentMediaId = params.emergency?.media_id ??
+        params.activeSlots[0]?.media_id ??
+        params.reportedHeartbeatMediaId ??
+        fallbackMediaIdFromItem ??
+        params.defaultMedia?.media_id ??
+        null;
+    const reportedHeartbeatScheduleId = params.screen.current_schedule_id ?? null;
+    const reportedHeartbeatSceneId = params.activeSlots[0]?.scene_id ??
+        (typeof params.screen.current_scene_id === 'string' ? String(params.screen.current_scene_id) : null);
+    let source = 'UNKNOWN';
+    if (params.emergency?.media_id)
+        source = 'EMERGENCY';
+    else if (params.activeSlots.length > 0 || params.reportedHeartbeatMediaId || reportedHeartbeatScheduleId)
+        source = 'HEARTBEAT';
+    else if (fallbackItem)
+        source = 'SCHEDULE';
+    else if (params.defaultMedia?.media_id)
+        source = 'DEFAULT';
+    let playbackScheduleId = null;
+    if (source === 'HEARTBEAT') {
+        playbackScheduleId = params.activeSlots[0]?.schedule_id ?? reportedHeartbeatScheduleId ?? params.latest?.schedule_id ?? null;
+    }
+    else if (source === 'SCHEDULE') {
+        playbackScheduleId = params.latest?.schedule_id ?? null;
+    }
+    const primaryActiveSlot = params.activeSlots[0] ?? null;
+    const playback = {
+        source,
+        is_live: Boolean(resolvedCurrentMediaId || fallbackItem || params.emergency || params.defaultMedia?.media_id),
+        current_media_id: resolvedCurrentMediaId,
+        current_schedule_id: playbackScheduleId,
+        current_scene_id: reportedHeartbeatSceneId,
+        active_slots: params.activeSlots,
+        current_item_id: primaryActiveSlot?.item_id ?? fallbackItem?.id ?? null,
+        started_at: primaryActiveSlot?.started_at ?? toIso(fallbackItem?.start_at),
+        ends_at: toIso(fallbackItem?.end_at),
+        heartbeat_received_at: toIso(params.screen.last_heartbeat_at),
+        last_proof_of_play_at: params.lastProofOfPlayAt ?? null,
+    };
+    if (params.includeMedia) {
+        playback.current_media = params.currentMedia ?? null;
+    }
+    return playback;
+}
+export async function buildScreenPlaybackState(screen, options = {}) {
+    const db = options.db ?? getDatabase();
+    const now = options.now ?? new Date();
+    const groupIds = options.groupIds ?? (await getGroupIdsForScreen(screen.id, db));
+    const latest = options.latestPublish !== undefined
+        ? options.latestPublish
+        : await getLatestPublishForScreen(screen.id, db, {
+            now,
+            skipReservationExpiry: options.skipReservationExpiry,
+        });
+    const schedulePayload = latest?.payload?.schedule;
+    const items = filterItemsForScreen(Array.isArray(schedulePayload?.items) ? schedulePayload.items : [], screen.id, groupIds);
+    const { activeItems, upcomingItems, bookedUntil } = buildTimeline(items, now);
+    const defaultMedia = options.defaultMedia ?? (await resolveDefaultMediaForScreen(screen, db));
+    const emergency = await getActiveEmergencyForScreen(screen.id, {
+        db,
+        includeUrls: options.includeUrls,
+        groupIds,
+        activeEmergencies: options.activeEmergencies,
+    });
+    const activeSlots = normalizeActiveSlots(screen.active_slots);
+    const currentMediaId = emergency?.media_id ??
+        activeSlots[0]?.media_id ??
+        screen.current_media_id ??
+        pickPrimaryMediaIdFromPresentation(activeItems[0]?.presentation) ??
+        defaultMedia?.media_id ??
+        null;
+    const reportedHeartbeatMediaId = emergency?.media_id ?? activeSlots[0]?.media_id ?? screen.current_media_id ?? null;
+    const currentMedia = options.includeMedia && currentMediaId
+        ? options.currentMediaById
+            ? options.currentMediaById.get(currentMediaId) ?? null
+            : await getMediaSummary(currentMediaId, db)
+        : null;
+    const preview = options.includePreview
+        ? options.preview !== undefined
+            ? options.preview
+            : await getLatestScreenshotPreview(screen.id, { db, now })
+        : null;
+    const recoveryState = options.recoveryState ?? (await getScreenRecoveryState(screen.id, db, now));
+    const health = deriveHealthState({
+        screen,
+        authDiagnostics: recoveryState.auth_diagnostics,
+        activePairing: recoveryState.active_pairing,
+        now,
+    });
+    return {
+        id: screen.id,
+        name: screen.name,
+        location: screen.location ?? null,
+        aspect_ratio: screen.aspect_ratio ?? null,
+        width: screen.width ?? null,
+        height: screen.height ?? null,
+        orientation: screen.orientation ?? null,
+        device_info: screen.device_info ?? null,
+        status: screen.status,
+        health_state: health.health_state,
+        health_reason: health.health_reason,
+        auth_diagnostics: recoveryState.auth_diagnostics,
+        active_pairing: recoveryState.active_pairing,
+        last_heartbeat_at: toIso(screen.last_heartbeat_at),
+        current_schedule_id: screen.current_schedule_id ?? null,
+        current_media_id: screen.current_media_id ?? null,
+        current_scene_id: typeof screen.current_scene_id === 'string' ? String(screen.current_scene_id) : null,
+        active_slots: activeSlots,
+        active_items: activeItems,
+        upcoming_items: upcomingItems,
+        booked_until: bookedUntil,
+        current_schedule: latest
+            ? {
+                id: latest.schedule_id ?? schedulePayload?.id ?? null,
+                name: typeof schedulePayload?.name === 'string' && schedulePayload.name.trim().length > 0
+                    ? schedulePayload.name.trim()
+                    : null,
+            }
+            : null,
+        publish: latest
+            ? {
+                publish_id: latest.publish_id,
+                schedule_id: latest.schedule_id,
+                snapshot_id: latest.snapshot_id,
+                published_at: toIso(latest.published_at),
+                reservation_version: latest.reservation_version ?? null,
+                selection_reason: latest.selection_reason ?? null,
+                schedule_start_at: schedulePayload?.start_at ?? null,
+                schedule_end_at: schedulePayload?.end_at ?? null,
+                schedule_name: typeof schedulePayload?.name === 'string' && schedulePayload.name.trim().length > 0
+                    ? schedulePayload.name.trim()
+                    : null,
+            }
+            : null,
+        playback: derivePlaybackState({
+            screen,
+            activeItems,
+            latest,
+            emergency,
+            defaultMedia,
+            currentMediaId,
+            reportedHeartbeatMediaId,
+            lastProofOfPlayAt: options.lastProofOfPlayAt ?? null,
+            includeMedia: options.includeMedia,
+            currentMedia,
+            activeSlots,
+        }),
+        emergency,
+        preview,
+        created_at: screen.created_at,
+        updated_at: screen.updated_at,
+    };
+}
+function dedupeItems(items) {
+    const seen = new Set();
+    const result = [];
+    for (const item of items) {
+        const key = typeof item?.id === 'string' ? item.id : JSON.stringify(item);
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        result.push(item);
+    }
+    return result.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+}
+export function summarizeGroupPlayback(group, memberIds, screenSummaries) {
+    const memberStates = memberIds
+        .map((screenId) => screenSummaries.get(screenId))
+        .filter(Boolean);
+    const activeItems = dedupeItems(memberStates.flatMap((state) => state.active_items || []));
+    const upcomingItems = dedupeItems(memberStates.flatMap((state) => state.upcoming_items || []));
+    const bookedUntilCandidates = memberStates
+        .map((state) => state.booked_until)
+        .filter((value) => Boolean(value))
+        .map((value) => new Date(value).getTime());
+    return {
+        id: group.id,
+        name: group.name,
+        description: group.description,
+        screen_ids: memberIds,
+        active_items: activeItems,
+        upcoming_items: upcomingItems,
+        booked_until: bookedUntilCandidates.length
+            ? new Date(Math.max(...bookedUntilCandidates)).toISOString()
+            : null,
+    };
+}
+export async function buildScreensOverviewPayload(options) {
+    const db = options.db ?? getDatabase();
+    const serverTime = new Date();
+    const onlineThreshold = new Date(serverTime.getTime() - HEARTBEAT_STALE_MS);
+    const reservationRepo = createScheduleReservationRepository();
+    await reservationRepo.expireStaleHolds(serverTime, db);
+    const screens = options.onlineOnly
+        ? await db
+            .select()
+            .from(schema.screens)
+            .where(and(eq(schema.screens.status, 'ACTIVE'), gte(schema.screens.last_heartbeat_at, onlineThreshold)))
+        : await db.select().from(schema.screens);
+    const groups = options.onlineOnly ? [] : await db.select().from(schema.screenGroups);
+    const screenIds = screens.map((screen) => screen.id);
+    const [proofOfPlayMap, recoveryStateMap, groupIdsByScreenId, latestPublishByScreenId, activeEmergencies] = await Promise.all([
+        getLastProofOfPlayMap(screenIds, db),
+        buildScreenRecoveryStateMap(screenIds, db, serverTime),
+        getGroupIdsByScreenId(screenIds, db),
+        getLatestPublishByScreenId(screenIds, db, serverTime),
+        db
+            .select()
+            .from(schema.emergencies)
+            .where(and(eq(schema.emergencies.is_active, true), isNull(schema.emergencies.cleared_at), sql `(${schema.emergencies.expires_at} IS NULL OR ${schema.emergencies.expires_at} > ${serverTime})`))
+            .orderBy(desc(schema.emergencies.created_at)),
+    ]);
+    const defaultMediaByScreenId = await resolveDefaultMediaByScreenId(screens, groupIdsByScreenId, db);
+    const [currentMediaById, previewByScreenId] = await Promise.all([
+        options.includeMedia
+            ? buildCurrentMediaById(screens, latestPublishByScreenId, defaultMediaByScreenId, activeEmergencies, db)
+            : Promise.resolve(new Map()),
+        options.includePreview
+            ? getLatestScreenshotPreviewByScreenId(screenIds, db, serverTime)
+            : Promise.resolve(new Map()),
+    ]);
+    const screenSummaries = (await Promise.all(screens.map((screen) => buildScreenPlaybackState(screen, {
+        db,
+        now: serverTime,
+        includeMedia: options.includeMedia,
+        includePreview: options.includePreview,
+        groupIds: groupIdsByScreenId.get(screen.id) ?? [],
+        latestPublish: latestPublishByScreenId.get(screen.id) ?? null,
+        defaultMedia: defaultMediaByScreenId.get(screen.id),
+        activeEmergencies,
+        currentMediaById,
+        preview: options.includePreview ? previewByScreenId.get(screen.id) ?? null : undefined,
+        lastProofOfPlayAt: proofOfPlayMap.get(screen.id) ?? null,
+        recoveryState: recoveryStateMap.get(screen.id),
+    })))).filter((summary) => (options.onlineOnly ? summary.health_state === 'ONLINE' : true));
+    const screenSummaryMap = new Map(screenSummaries.map((summary) => [summary.id, summary]));
+    const groupMembersMap = new Map();
+    for (const [screenId, groupIds] of groupIdsByScreenId.entries()) {
+        for (const groupId of groupIds) {
+            const memberIds = groupMembersMap.get(groupId) ?? [];
+            memberIds.push(screenId);
+            groupMembersMap.set(groupId, memberIds);
+        }
+    }
+    const groupSummaries = options.onlineOnly
+        ? []
+        : groups.map((group) => summarizeGroupPlayback(group, groupMembersMap.get(group.id) ?? [], screenSummaryMap));
+    return {
+        server_time: serverTime.toISOString(),
+        screens: screenSummaries,
+        groups: groupSummaries,
+    };
+}
+export async function buildScreensFleetSummary(options = {}) {
+    const db = options.db ?? getDatabase();
+    const now = options.now ?? new Date();
+    const screens = await db.select().from(schema.screens);
+    const recoveryStateMap = await buildScreenRecoveryStateMap(screens.map((screen) => screen.id), db, now);
+    const summary = {
+        server_time: now.toISOString(),
+        total: screens.length,
+        online: 0,
+        recovery: 0,
+        stale: 0,
+        offline: 0,
+        error: 0,
+    };
+    for (const screen of screens) {
+        const recoveryState = recoveryStateMap.get(screen.id);
+        const health = deriveHealthState({
+            screen,
+            authDiagnostics: recoveryState?.auth_diagnostics ?? {
+                state: 'MISSING_CERTIFICATE',
+                reason: 'No device certificate exists for this screen.',
+                latest_certificate_expires_at: null,
+                latest_certificate_revoked_at: null,
+                latest_certificate_serial: null,
+            },
+            activePairing: recoveryState?.active_pairing ?? null,
+            now,
+        });
+        switch (health.health_state) {
+            case 'ONLINE':
+                summary.online += 1;
+                break;
+            case 'RECOVERY_REQUIRED':
+                summary.recovery += 1;
+                break;
+            case 'STALE':
+                summary.stale += 1;
+                break;
+            case 'OFFLINE':
+                summary.offline += 1;
+                break;
+            case 'ERROR':
+                summary.error += 1;
+                break;
+            default:
+                break;
+        }
+    }
+    return summary;
+}
+export async function buildScreenPlaybackStateById(screenId, options = {}) {
+    const db = options.db ?? getDatabase();
+    const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
+    if (!screen)
+        return null;
+    const lastProofOfPlayMap = await getLastProofOfPlayMap([screenId], db);
+    return buildScreenPlaybackState(screen, {
+        ...options,
+        db,
+        lastProofOfPlayAt: options.lastProofOfPlayAt ?? lastProofOfPlayMap.get(screenId) ?? null,
+    });
+}
+function isActiveAt(item, now) {
+    const start = Date.parse(String(item?.start_at));
+    const end = Date.parse(String(item?.end_at));
+    if (Number.isNaN(start) || Number.isNaN(end))
+        return false;
+    return start <= now.getTime() && end > now.getTime();
+}
+function clipItemToWindow(item, windowStartMs, windowEndMs, now) {
+    const start = Date.parse(String(item?.start_at));
+    const end = Date.parse(String(item?.end_at));
+    if (Number.isNaN(start) || Number.isNaN(end))
+        return null;
+    if (end <= windowStartMs || start >= windowEndMs)
+        return null;
+    const clippedStart = Math.max(start, windowStartMs);
+    const clippedEnd = Math.min(end, windowEndMs);
+    if (clippedEnd <= clippedStart)
+        return null;
+    return {
+        id: typeof item?.id === 'string' ? item.id : `${item?.presentation_id || 'item'}:${clippedStart}`,
+        presentation_id: typeof item?.presentation_id === 'string' ? item.presentation_id : null,
+        presentation_name: typeof item?.presentation?.name === 'string' && item.presentation.name.trim().length > 0
+            ? item.presentation.name.trim()
+            : null,
+        start_at: new Date(clippedStart).toISOString(),
+        end_at: new Date(clippedEnd).toISOString(),
+        priority: Number.isFinite(item?.priority) ? Number(item.priority) : 0,
+        is_current: isActiveAt(item, now),
+    };
+}
+export async function buildScreenScheduleTimelinePayload(options) {
+    const db = options.db ?? getDatabase();
+    const now = options.now ?? new Date();
+    const windowStart = options.windowStart;
+    const windowEnd = new Date(windowStart.getTime() + options.windowHours * 60 * 60 * 1000);
+    const screens = options.onlyActiveNow
+        ? await db
+            .select()
+            .from(schema.screens)
+            .where(and(eq(schema.screens.status, 'ACTIVE'), isNotNull(schema.screens.current_schedule_id)))
+        : await db.select().from(schema.screens);
+    const proofOfPlayMap = await getLastProofOfPlayMap(screens.map((screen) => screen.id), db);
+    const windowStartMs = windowStart.getTime();
+    const windowEndMs = windowEnd.getTime();
+    const rows = await Promise.all(screens.map(async (screen) => {
+        const groupIds = await getGroupIdsForScreen(screen.id, db);
+        const latest = await getLatestPublishForScreen(screen.id, db);
+        const schedulePayload = latest?.payload?.schedule;
+        const publishedItems = filterItemsForScreen(Array.isArray(schedulePayload?.items) ? schedulePayload.items : [], screen.id, groupIds);
+        const hasActiveNow = publishedItems.some((item) => isActiveAt(item, now));
+        if (options.onlyActiveNow && !hasActiveNow) {
+            return null;
+        }
+        const timelineItems = publishedItems
+            .map((item) => clipItemToWindow(item, windowStartMs, windowEndMs, now))
+            .filter((item) => Boolean(item))
+            .sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at) || b.priority - a.priority);
+        if (options.onlyActiveNow && timelineItems.length === 0) {
+            return null;
+        }
+        const summary = await buildScreenPlaybackState(screen, {
+            db,
+            now,
+            includeMedia: true,
+            lastProofOfPlayAt: proofOfPlayMap.get(screen.id) ?? null,
+        });
+        return {
+            id: summary.id,
+            name: summary.name,
+            location: summary.location,
+            health_state: summary.health_state,
+            health_reason: summary.health_reason,
+            playback: summary.playback,
+            publish: summary.publish,
+            timeline_items: timelineItems,
+        };
+    }));
+    return {
+        server_time: now.toISOString(),
+        window_start: windowStart.toISOString(),
+        window_end: windowEnd.toISOString(),
+        screens: rows
+            .filter((row) => Boolean(row))
+            .sort((left, right) => left.name.localeCompare(right.name)),
+    };
+}
+export async function countActiveScheduledScreensNow(options) {
+    const now = options.now ?? new Date();
+    const payload = await buildScreenScheduleTimelinePayload({
+        db: options.db,
+        now,
+        windowStart: new Date(now.getTime() - 60 * 60 * 1000),
+        windowHours: 24,
+        onlyActiveNow: true,
+    });
+    return payload.screens.length;
+}

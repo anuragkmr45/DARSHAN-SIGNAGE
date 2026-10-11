@@ -60,6 +60,7 @@ import { registerObservabilityHttp } from '@/observability/http';
 import { ensureObservabilityInitialized } from '@/observability/metrics';
 import { loadServerTlsOptions } from '@/server/tls';
 import { collectReadiness } from '@/runtime/readiness';
+import { registerCmsStaticRoutes } from '@/server/cms-static';
 
 const REFRESHED_AUTH_KEY = Symbol.for('darshan.refreshedAuth');
 const DEVICE_SCREENSHOT_BODY_LIMIT_BYTES = 4 * 1024 * 1024;
@@ -334,6 +335,10 @@ export async function createServer(options: CreateServerOptions = {}) {
     throw AppError.notFound('Route not found');
   });
 
+  const browserStorageOrigin = appConfig.MINIO_PUBLIC_ENDPOINT
+    ? new URL(appConfig.MINIO_PUBLIC_ENDPOINT).origin
+    : undefined;
+
   // Security middleware
   await fastify.register(helmet, {
     contentSecurityPolicy: {
@@ -342,6 +347,8 @@ export async function createServer(options: CreateServerOptions = {}) {
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
         imgSrc: ["'self'", 'data:', 'https:'],
+        mediaSrc: ["'self'", 'blob:', ...(browserStorageOrigin ? [browserStorageOrigin] : [])],
+        connectSrc: ["'self'", ...(browserStorageOrigin ? [browserStorageOrigin] : [])],
       },
     },
     frameguard: { action: 'deny' },
@@ -456,6 +463,8 @@ export async function createServer(options: CreateServerOptions = {}) {
   await fastify.register(scheduleReservationRoutes);
   await fastify.register(roleRoutes);
   await fastify.register(permissionRoutes);
+
+  await registerCmsStaticRoutes(fastify, appConfig.CMS_STATIC_DIR);
 
   setupDeviceRealtimeGateway(fastify);
   if (options.startOutboxDispatcher !== false) {
