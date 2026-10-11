@@ -38,7 +38,7 @@ Use at least an always-on paid Render instance for a live display fleet. A paid 
 | --- | --- | --- |
 | Render Web Service | 0.1 CPU, 512 MB RAM | CMS, API, combined worker |
 | Supabase Free | 500 MB database, 1 GB object storage, 5 GB uncached + 5 GB cached egress | PostgreSQL; optional small object store |
-| Upstash Redis Free | 256 MB, 500,000 commands/month, 10 GB bandwidth | TLS Valkey/Redis state, Pub/Sub, throttling |
+| Upstash Redis Free | 250 MB, 500,000 commands/month, 10 GB bandwidth | TLS Valkey/Redis state, Pub/Sub, throttling |
 | Cloudflare R2 | 10 GB-month, 1M Class A and 10M Class B operations/month | Recommended media/documents/log objects |
 | Cloudinary Free | 25 pooled monthly credits | Not selected by this profile |
 
@@ -75,7 +75,7 @@ Do not use the REST URL or token. Store the TCP URL as the Render secret file `v
 
 ### Object storage: recommended R2
 
-Create an R2 API credential that can create/list buckets and read/write/delete objects. Use:
+Create the eleven private buckets listed below in the R2 dashboard first. Do not enable public or `r2.dev` access. Then create an R2 S3 API credential with **Object Read & Write** access scoped to all eleven buckets. Use:
 
 ```text
 S3_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
@@ -85,7 +85,7 @@ STORAGE_QUOTA_BYTES=8589934592
 
 Store the R2 access key and secret as `storage-access-key` and `storage-secret-key` Render secret files.
 
-The bootstrap reconciles these required buckets:
+The bootstrap verifies and reconciles these required buckets:
 
 ```text
 media-source
@@ -101,7 +101,7 @@ logs-proof-of-play
 archives
 ```
 
-If the credential cannot create buckets, create all eleven in the provider dashboard before the first deploy. The credential must still support `HeadBucket`, object CRUD, copy, list, and multipart operations.
+The credential must support `HeadBucket`, object CRUD, copy, list, and multipart operations. Creating the buckets before issuing the scoped credential avoids requiring account-wide bucket administration at runtime.
 
 After Render assigns the service URL, configure CORS on the object buckets used by browser uploads/downloads. Replace the origin below with the exact Render or custom-domain origin:
 
