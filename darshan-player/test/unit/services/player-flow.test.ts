@@ -334,6 +334,61 @@ describe('Player Flow', () => {
     await playerFlow.stop()
   })
 
+  it('should preserve cached playback state during an offline bootstrap retry', async () => {
+    const { DeviceApiError } = require('../../../src/common/types')
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+
+    const deviceId = '11111111-1111-4111-8111-111111111111'
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({
+      deviceId,
+      fingerprint: 'fingerprint-1',
+      lastPairingValidationStatus: 'VALID',
+      lastPairingValidatedAt: new Date().toISOString(),
+      lastValidatedDeviceId: deviceId,
+    })
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(getSnapshotManager(), 'getCurrentPlaylist').returns({
+      mode: 'normal',
+      items: [{ id: 'cached-scene', type: 'scene' }],
+      scheduleId: 'cached-schedule',
+      lastSnapshotAt: new Date().toISOString(),
+    })
+    sandbox.stub(getPlaybackEngine(), 'start').resolves()
+    sandbox.stub(getHttpClient(), 'get').rejects(
+      new DeviceApiError({
+        code: 'NETWORK_ERROR',
+        message: 'connect ECONNREFUSED',
+        transient: true,
+      })
+    )
+
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+    ;(playerFlow as any).stopBootstrapRetryTimer()
+    expect(playerFlow.getState()).to.equal('OFFLINE_USING_LAST_VALID_PAIRING')
+    expect(playerFlow.getStatus().mode).to.equal('normal')
+
+    const observed: Array<{ state: string; mode: string }> = []
+    playerFlow.on('status', (status: any) => observed.push({ state: status.state, mode: status.mode }))
+    await (playerFlow as any).bootstrapAuthenticatedRuntime()
+    ;(playerFlow as any).stopBootstrapRetryTimer()
+
+    expect(playerFlow.getState()).to.equal('OFFLINE_USING_LAST_VALID_PAIRING')
+    expect(playerFlow.getStatus().mode).to.equal('normal')
+    expect(observed.some((status) => status.state === 'BOOTSTRAP_AUTH' || status.mode === 'empty')).to.equal(false)
+    await playerFlow.stop()
+  })
+
   it('should preserve identity when an old backend is missing the pairing-status endpoint', async () => {
     const { DeviceApiError } = require('../../../src/common/types')
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')

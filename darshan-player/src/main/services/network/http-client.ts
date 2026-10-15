@@ -369,7 +369,9 @@ export class HttpClient {
     return new DeviceApiError({
       code: 'NETWORK_ERROR',
       message,
-      transient: /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ERR_NETWORK/i.test(`${code} ${message}`),
+      transient: /ECONNREFUSED|ECONNABORTED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ERR_NETWORK/i.test(
+        `${code} ${message}`
+      ),
       detailsPayload: { code },
     })
   }

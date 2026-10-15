@@ -1,17 +1,17 @@
 # System Understanding
 
-Status: PROVISIONAL QA HANDOFF. User-confirmed decisions and current code behavior are recorded separately. Code-derived expectations for every business topic are in `12_CODE_BASELINE_EXPECTATIONS.md`; actual runtime results are blank for QA.
+Status: PROVISIONAL QA HANDOFF. User-confirmed decisions and current code behavior are recorded separately. Code-derived expectations for every business topic are in `12_CODE_BASELINE_EXPECTATIONS.md`; targeted PDF/video runtime results are linked from `05_TEST_CASES.csv`, while the rest remains for QA.
 
 ## Baseline And Scope
 
 - Product: DARSHAN digital signage, CMS administration, and Electron playback.
-- Branch/commit: `release-01` / `607440c12a8b476149253aac77bbbdcf3c1d960b`, plus the 2026-10-15 document-page-selection working tree.
-- Inspection date: 2026-09-24. This describes checked-in implementation, not the state of a running site.
-- 1,215 tracked files: CMS 289; player 164; server 370; deployment 72; documentation 280; scripts 26; standards 8; manifests 3; three root files.
+- Branch/commit: `release-01` / `8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2`, plus the 2026-10-15 video-loop reliability working tree.
+- Inspection and targeted feature runtime refreshed: 2026-10-15. This describes the working tree and a disposable local run, not the state of a production site.
+- 1,262 tracked files; 1,269 Git-visible files after the feature/evidence delta: CMS 291; player 166; server 390; QA artifacts 20; deployment 72; documentation 280; scripts 26; standards 8; manifests 3; `.codex` 10; three root files.
 - 239 explicit Fastify route registrations, all resolved to paths by static parsing. Some registrations are configuration-dependent, including `/metrics`.
 - 29 CMS route declarations, including shell/catch-all and legacy route aliases. This is not a count of 29 distinct product screens.
 - 69 `pgTable` declarations and 15 enums in `darshan-server/src/db/schema.ts`; 45 SQL migration files. The SQL-only `darshan_deployment_runs` table and pg-boss internals are additional data surfaces.
-- 182 tracked `*.test`/`*.spec` files: server 97, CMS 29, player 55, bundle configuration 1. None were executed.
+- 193 Git-visible TypeScript/JavaScript `*.test`/`*.spec` files: server 106, CMS 30, player 56, bundle configuration 1. Targeted browser/Linux Electron/DB execution is recorded in `evidence/runtime-2026-10-15/runtime-validation.md`; test-file presence alone is not proof.
 - No tracked GitHub Actions, GitLab CI, Jenkinsfile, or Azure Pipelines file was found in the inspected file index. This does not establish whether external CI exists.
 
 Primary machine-readable inventory: `evidence/repository-inventory.json`.
@@ -21,6 +21,7 @@ Primary machine-readable inventory: `evidence/repository-inventory.json`.
 Business source: user answers BQ-001 through BQ-006 and follow-ups to BQ-002/003/004/008/009, 2026-09-24. These are intended outcomes, not runtime test results. Detailed comparison: `evidence/policy-behavior-review.md`.
 
 - Documents: the current requirement supersedes first-page-only playback. An author selects one static physical page per presentation occurrence; legacy/missing values remain page 1 and there is no automatic page progression. Supported document extensions are `.pdf`, `.ppt`, `.pptx`, `.doc`, `.docx`, `.xls`, `.xlsx`, and `.csv`.
+- Video loop: an enabled video occurrence repeats complete decoded-media cycles while it remains active. A successful single-item frame is not remounted on its configured display-duration tick; multi-item slots still advance at the occurrence boundary, and schedule/takeover/secure-lock cleanup is a hard stop.
 - SUPER_ADMIN: every SUPER_ADMIN account is protected from deletion; SUPER_ADMIN must manage users across all roles. Last-active-account demotion/disablement is a separate edge policy still to settle.
 - Emergency: screen-management permission is sufficient for delegated actions on all explicitly selected screens. Additional global/group/clear-scope behavior is not assumed approved.
 - Offline player: lock after two minutes of backend outage, remove cached media and stop emergency playback too. Current generated defaults do not enable that policy.
@@ -175,7 +176,7 @@ These values came from the user's earlier deployment information. Fleet size, me
 
 Prioritize authorization across UI/REST/realtime, persistent privilege changes, offline identity/security policy, schedule concurrency/time boundaries, emergency delivery, media integrity and conversion, PoP loss/semantics, staged update/restore consistency, TLS trust/routing, low disk and worker resource pressure. Integration screens and old documentation can overstate capability.
 
-These are risk hypotheses and source-observed inconsistencies, not runtime-confirmed defects. No release pass/fail judgment is being made by this static planning package.
+These are risk hypotheses and source-observed inconsistencies unless the dated runtime report says otherwise. The targeted run found and corrected three feature-related runtime defects, but it is not a release pass/fail judgment for the full product.
 
 ## 2026-10-15 Document Page Selection Delta
 
@@ -183,7 +184,7 @@ The architecture now adds `media.page_count`, occurrence-level `page_number`, im
 
 ## Existing QA Evidence And Gaps
 
-- Backend route tests use a dedicated test database guard and disable file parallelism; running them would mutate a database. They were read, not run.
+- Backend route tests use a dedicated test database guard and disable file parallelism. The focused page/loop suites ran against a freshly migrated disposable `_test` database; unrelated route suites remain unexecuted.
 - CMS Playwright configuration targets Chromium and may start Vite. Representative screen tests intercept routes and use mocked responses. Such cases do not prove actual VM/API/player integration.
 - Player tests include unit, integration, fault, browser and performance files. Their names do not prove real hardware or outage execution.
 - The source-free validator builds fixtures and has optional Docker actions. Its backend role check starts node-exporter/metrics gateway, not a complete fresh API/worker/CMS/player site acceptance. It was not run.
@@ -191,6 +192,6 @@ The architecture now adds `media.page_count`, occurrence-level `page_number`, im
 
 ## Analysis Limits
 
-This is a repository-wide surface inventory plus risk-focused end-to-end static tracing, not a claim to have read and proved every source line. No live VM, certificate store, production archive, browser, player hardware, external identity provider or S3 destination was accessed. No secret/configuration values from private environments were needed. Existing tests, coverage configuration and historical results are not current execution evidence.
+This is a repository-wide surface inventory plus risk-focused tracing and targeted disposable feature execution, not a claim to have read and proved every source line. No live VM, certificate store, production archive, physical player hardware, external identity provider or production S3 destination was accessed. No secret/configuration values from private environments were needed. Only the dated runtime report is current execution evidence.
 
 The detailed cases, traceability, security/performance/reliability plans, data requirements, suites and release gates are present in this package. QA's next step is authorized execution and evidence capture. An external target or business acceptance decision not supplied by code or user remains explicitly TBD; test observations must not silently approve it.

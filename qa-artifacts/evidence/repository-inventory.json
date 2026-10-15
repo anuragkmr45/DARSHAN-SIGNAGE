@@ -1,21 +1,21 @@
 {
   "analysisDate": "2026-10-15",
-  "commit": "607440c12a8b476149253aac77bbbdcf3c1d960b + document-page-selection working tree",
+  "commit": "8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2 + video-loop reliability working tree",
   "branch": "release-01",
-  "trackedFiles": 1243,
-  "workspaceFilesReviewed": 1259,
+  "trackedFiles": 1262,
+  "workspaceFilesReviewed": 1269,
   "counts": {
     ".codex": 10,
     ".dockerignore": 1,
     ".gitignore": 1,
     "README.md": 1,
-    "darshan-cms": 289,
-    "darshan-player": 164,
-    "darshan-server": 385,
+    "darshan-cms": 291,
+    "darshan-player": 166,
+    "darshan-server": 390,
     "deploy": 72,
     "docs": 280,
     "manifests": 3,
-    "qa-artifacts": 19,
+    "qa-artifacts": 20,
     "scripts": 26,
     "standards": 8
   },
@@ -1563,7 +1563,7 @@
       "method": "POST",
       "path": "/api/v1/presentations",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 58,
+      "line": 79,
       "description": "Create a new presentation",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1578,7 +1578,7 @@
       "method": "GET",
       "path": "/api/v1/presentations",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 104,
+      "line": 125,
       "description": "List presentations with pagination",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1593,7 +1593,7 @@
       "method": "GET",
       "path": "/api/v1/presentations/:id",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 151,
+      "line": 172,
       "description": "Get presentation by ID",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1606,7 +1606,7 @@
       "method": "GET",
       "path": "/api/v1/presentations/:id/items",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 223,
+      "line": 245,
       "description": "List media items within a presentation",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1621,7 +1621,7 @@
       "method": "POST",
       "path": "/api/v1/presentations/:id/items",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 284,
+      "line": 308,
       "description": "Add media to a presentation playlist",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1638,7 +1638,7 @@
       "method": "DELETE",
       "path": "/api/v1/presentations/:id/items/:itemId",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 350,
+      "line": 381,
       "description": "Delete a media item from a presentation",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1653,7 +1653,7 @@
       "method": "GET",
       "path": "/api/v1/presentations/:id/slots",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 386,
+      "line": 417,
       "description": "List slot media items for a presentation layout",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1668,7 +1668,7 @@
       "method": "POST",
       "path": "/api/v1/presentations/:id/slots",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 434,
+      "line": 467,
       "description": "Add media to a presentation slot",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1677,15 +1677,17 @@
         "'update', 'Presentation'"
       ],
       "validationCalls": [
-        "presentationSlotItemSchema.parse"
+        "presentationSlotItemSchema.parse",
+        "normalizeDocumentPage",
+        "normalizeVideoLoopEnabled"
       ],
-      "coverage": "Pending test design; not executed"
+      "coverage": "Cases API-05 and API-07 partially tested in focused DB-backed and runtime execution; broader authorization/concurrency matrix remains open"
     },
     {
       "method": "PUT",
       "path": "/api/v1/presentations/:id/slots",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 557,
+      "line": 562,
       "description": "Atomically replace all media occurrences assigned to presentation layout slots",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1695,15 +1697,16 @@
       ],
       "validationCalls": [
         "replacePresentationSlotsSchema.parse",
-        "normalizeDocumentPage"
+        "normalizeDocumentPage",
+        "normalizeVideoLoopEnabled"
       ],
-      "coverage": "Cases API-05 and CONC-06 planned; DB-backed execution Not Tested"
+      "coverage": "Cases API-05 and API-07 partially tested against a disposable DB; CONC-06 remains Not Tested"
     },
     {
       "method": "DELETE",
       "path": "/api/v1/presentations/:id/slots/:slotItemId",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 510,
+      "line": 661,
       "description": "Delete a slot media item from a presentation",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1718,7 +1721,7 @@
       "method": "PATCH",
       "path": "/api/v1/presentations/:id",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 545,
+      "line": 696,
       "description": "Update presentation",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -1733,7 +1736,7 @@
       "method": "DELETE",
       "path": "/api/v1/presentations/:id",
       "file": "darshan-server/src/routes/presentations.ts",
-      "line": 592,
+      "line": 743,
       "description": "Delete presentation",
       "localAuthCalls": [
         "verifyAccessToken"
@@ -5063,6 +5066,7 @@
     "darshan-cms/src/lib/mediaUploadFlow.test.ts",
     "darshan-cms/src/lib/observability.test.ts",
     "darshan-cms/src/lib/realtimeSockets.test.ts",
+    "darshan-cms/src/lib/scheduleCreatorState.test.ts",
     "darshan-cms/src/lib/scheduleQuickPresets.test.ts",
     "darshan-cms/src/lib/screenLiveMirror.test.ts",
     "darshan-cms/src/lib/screens.test.ts",
@@ -5097,6 +5101,7 @@
     "darshan-player/test/unit/renderer/deferred-playback-gate.test.ts",
     "darshan-player/test/unit/renderer/pdf-playback.test.ts",
     "darshan-player/test/unit/renderer/player-layout.test.ts",
+    "darshan-player/test/unit/renderer/scheduled-video-lifecycle.test.ts",
     "darshan-player/test/unit/renderer/webpage-playback.test.ts",
     "darshan-player/test/unit/scripts/start-dev.test.ts",
     "darshan-player/test/unit/services/cache-manager.test.ts",
@@ -5154,6 +5159,7 @@
     "darshan-server/src/jobs/chat-media-cleanup.test.ts",
     "darshan-server/src/jobs/device-telemetry-idempotency.unit.test.ts",
     "darshan-server/src/jobs/device-telemetry.test.ts",
+    "darshan-server/src/jobs/webpage-processing.test.ts",
     "darshan-server/src/observability/metrics.test.ts",
     "darshan-server/src/observability/prometheus-summary.test.ts",
     "darshan-server/src/rbac/policy.test.ts",
@@ -5231,6 +5237,7 @@
     "darshan-server/src/utils/off-host-backup.test.ts",
     "darshan-server/src/utils/resolved-media.test.ts",
     "darshan-server/src/utils/runtime-dependencies.test.ts",
+    "darshan-server/src/utils/video-loop.unit.test.ts",
     "darshan-server/src/utils/webpage-url-policy.test.ts",
     "scripts/bundle/production-bundle-config.test.mjs"
   ],
@@ -5283,10 +5290,10 @@
     "darshan-server/drizzle/migrations/0044_document_page_selection.sql"
   ],
   "limits": [
-    "Inventory is static. No application services, browser, Electron runtime, Docker stack, database migration, DB-backed suite, load tool, or deployment command was run; only builds and database-free unit tests were executed.",
+    "Inventory enumeration is static. A separate targeted disposable CMS/API/browser/Linux Electron/DB run is documented in evidence/runtime-2026-10-15/runtime-validation.md; no production deployment or load test was run.",
     "Explicit fastify registrations only; plugin-generated Swagger, Socket.IO transport, and dynamic framework routes are separate surfaces.",
     "Local auth call extraction is not an authorization audit; inherited middleware and helper guards must be traced.",
     "69 pgTable declarations do not include deployment-run SQL-only tables or pg-boss internal schema.",
-    "Tracked tests are not evidence of passing execution or complete test coverage. Only the explicitly reported isolated unit subsets passed."
+    "Test-file presence is not evidence of passing execution or complete coverage. Only explicitly reported cases have partial runtime status; all other runtime cases remain Not Tested."
   ]
 }

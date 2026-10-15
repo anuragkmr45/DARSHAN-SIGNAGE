@@ -1,8 +1,8 @@
 # Document Page Selection — Architecture And Simulation Review
 
 Review date: 2026-10-15  
-Baseline: `release-01` at `607440c12a8b476149253aac77bbbdcf3c1d960b`, plus the uncommitted feature implementation in this workspace.  
-Method: repeated static data-flow review, TypeScript production builds, and isolated database-free unit tests. No application, browser, Electron process, Docker service, queue worker, database migration, integration database, or physical display was started.
+Baseline: `release-01` at `8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2`, plus the uncommitted document-page and video-loop reliability implementation in this workspace.
+Method: repeated static data-flow review and deterministic checks, followed by a disposable local CMS/API/database/object-store/browser/Linux Electron run. Detailed execution results and screenshots are in `runtime-2026-10-15/runtime-validation.md`. No Windows or representative physical-display test was run.
 
 ## Intended behavior
 
@@ -30,38 +30,39 @@ Migration `0044_document_page_selection.sql` adds nullable positive integers to 
 | Case | Source-predicted result | Runtime status |
 | --- | --- | --- |
 | Legacy null selection | Normalize and snapshot as page 1 | Not Tested |
-| Page 1 / final page | Accepted when within final PDF count | Not Tested |
-| Page 0, negative, fraction, or above count | CMS blocks progression; API rejects | Not Tested |
+| Page 1 / final page | Accepted when within final PDF count | Runtime observed for pages 1 and 19 |
+| Page 0, negative, fraction, or above count | CMS blocks progression; API rejects | DB-backed API subset passed; full browser-invalid matrix open |
 | Count still unknown | Page 1 only; page >1 rejected | Not Tested |
-| Same document twice | Independent occurrence IDs and page values survive atomic save | Not Tested |
+| Same document twice | Independent occurrence IDs and page values survive atomic save | Runtime observed for pages 10 and 19 |
 | Native PDF | Remains PROCESSING until PDF.js inspection succeeds | Not Tested |
 | Office/CSV input | Count comes from converted `ready.pdf` | Not Tested |
 | Password-protected/malformed/zero-page PDF | FAILED with stable inspection reason; cannot be scheduled READY | Not Tested |
-| Invalid layout slot / duplicate slot order / non-READY media | Entire replacement rejected; old assignment should remain | Not Tested |
+| Invalid layout slot / duplicate slot order / non-READY media | Entire replacement rejected; old assignment should remain | DB-backed invalid page/non-document and duplicate-order subset passed |
 | Concurrent atomic replacement | Transaction avoids partial row sets; last successful serialized replacement requires DB concurrency verification | Not Tested |
 | Publish after media replacement/count drift | Publish revalidation rejects stale out-of-range selection | Not Tested |
 | Old player + page 1 | Compatible | Not Tested |
 | Old player + page >1 | Publish conflict `UNSUPPORTED_DOCUMENT_PAGE_SELECTION` | Not Tested |
 | PDF URL expires or cache misses | Existing retry/cache behavior applies; renderer shows error if no readable PDF | Not Tested |
 | Resize/high-DPI/multi-slot PDFs | Contain-fit render; player raster budget bounds two-canvas allocations | Not Tested |
-| Playback changes only page | Playlist fingerprint changes and new page should render | Not Tested |
+| Playback changes only page | Playlist fingerprint changes and new page should render | Runtime observed across pages 1/10/19 |
 | Offline PoP replay | Selected page remains in buffered/spooled event | Not Tested |
-| Duplicate PoP for different pages | Different idempotency keys | Not Tested |
+| Duplicate PoP for different pages | Different idempotency keys | Runtime observed; 33 rows had 33 distinct keys |
 | CMS draft from older version | Restored occurrence gets a client ID and page 1 | Not Tested |
 | Non-document with `page_number` | API rejects as not applicable | Not Tested |
 
 ## Static verification performed
 
-- Server normal and production/CLI TypeScript builds: passed.
-- CMS production build and bundle budget: passed; PDF.js is a lazy chunk and worker asset.
-- Player main/renderer build and bundle: passed.
-- Server database-free page validation, PDF inspection, migration-contract, backfill-safety and PoP-idempotency tests: 21 passed.
-- CMS normalization/preview-helper tests: 8 passed.
-- Player PDF/snapshot/fingerprint/offline-cache/PoP-page subsets: 54 passed.
-- The server DB-backed test harness refused the configured non-test database as designed. Atomic presentation replacement, publish capability/snapshot, telemetry persistence, and PoP list/export tests were authored but not run.
+- Server production/CLI TypeScript build: passed.
+- CMS production build and bundle budget: passed; PDF.js is a lazy chunk and worker asset. The full CMS unit suite passed 110 tests, including the source-connected selected-page preview option.
+- Player main/renderer build and bundle: passed. The full player unit suite passed 352 tests, its integration suite passed 5 tests, and its fault-injection suite passed 14 tests.
+- Server database-free unit suite passed 25 tests, including page validation, PDF inspection, migration-contract, backfill-safety, PoP idempotency, video-loop normalization, presentation resolution and immutable snapshot serialization.
+- Player and CMS lint passed with existing warnings and no errors. Server-wide lint still has one pre-existing `prefer-const` error in `darshan-server/src/jobs/index.ts`; it is not in the document-page or video-loop delta.
+- A dedicated `darshan_feature_test` database was freshly migrated through all 46 migrations. The focused page/loop server suites passed 9 tests. Broader publish capability, telemetry list/export and migration/backfill matrices remain open.
 
-These checks prove compilation and selected pure logic only. They are not evidence that conversion, transactions, migrations, publishing, real browser canvas output, native player output, offline replay, PoP persistence, or backfill works in a deployed environment.
+The exact build, unit, integration, fault and lint outcomes for this working tree are summarized in `runtime-2026-10-15/runtime-validation.md`. The targeted run started disposable local services and a real Electron process; it did not use production infrastructure or a physical Windows/Ubuntu display installation.
+
+The run provides targeted evidence for browser canvas output, DB-backed replacement, publishing, Linux Electron output and PoP persistence. It does not prove Office conversion/backfill, hostile concurrency, mixed old/new fleet behavior, full offline spool replay/export, long-run rendering or supported-platform compatibility.
 
 ## Remaining execution gates
 
-Run `FILE-03`, `FILE-04`, `FILE-06`, `UI-05`, `API-05`, `API-06`, `DATA-05`, `CONC-06`, `PLAYER-10`, `OBS-03`, `COMP-04`, and `PERF-05` in the isolated QA environment described by the test-data plan. Apply the migration only to a disposable database first. Validate Windows and Ubuntu physical output before release. Review `R-21` through `R-23` before enabling the CMS control for a mixed fleet.
+Complete the still-open portions of `FILE-03`, `FILE-04`, `FILE-06`, `UI-05`, `API-05`, `API-06`, `DATA-05`, `CONC-06`, `PLAYER-10`, `OBS-03`, `COMP-04`, and `PERF-05` in the approved QA environment. Apply migration/backfill only to a disposable database first. Validate fresh-package Windows and Ubuntu physical output, long-run rendering and mixed-fleet capability gating before release. Review `R-21` through `R-23` before enabling the CMS control for a mixed fleet.

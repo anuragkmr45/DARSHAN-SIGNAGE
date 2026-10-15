@@ -514,7 +514,7 @@
     "errors": [
       { "status": 404, "code": "NOT_FOUND", "when": "Presentation not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.slotItems)"
+    "notes": "Each item includes loop_enabled. Only VIDEO media can return true; missing legacy and non-video values normalize to false. Ref: darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.slotItems)"
   },
   {
     "domain": "presentations",
@@ -525,9 +525,10 @@
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/presentations.ts (slot item response)",
     "errors": [
       { "status": 400, "code": "BAD_REQUEST", "when": "Presentation has no layout" },
-      { "status": 404, "code": "NOT_FOUND", "when": "Presentation or media not found" }
+      { "status": 404, "code": "NOT_FOUND", "when": "Presentation or media not found" },
+      { "status": 422, "code": "VALIDATION_ERROR", "when": "Explicit order conflicts with another item in the same slot" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/presentations.ts fastify.post(apiEndpoints.presentations.slotItems)"
+    "notes": "loop_enabled is occurrence-specific and normalizes to false for non-video media. Ref: darshan-server/src/routes/presentations.ts fastify.post(apiEndpoints.presentations.slotItems)"
   },
   {
     "domain": "presentations",
@@ -543,7 +544,7 @@
       { "status": 422, "code": "DOCUMENT_PAGE_COUNT_UNAVAILABLE", "when": "A page other than 1 is selected before page count is known" },
       { "status": 422, "code": "DOCUMENT_PAGE_NOT_APPLICABLE", "when": "page_number is supplied for non-document media" }
     ],
-    "notes": "Atomically replaces all slot occurrences. page_number defaults to 1 for documents and is occurrence-specific, so the same media may be assigned more than once with different pages. Ref: darshan-server/src/routes/presentations.ts fastify.put(apiEndpoints.presentations.slotItems)"
+    "notes": "Atomically replaces all slot occurrences. page_number defaults to 1 for documents and is occurrence-specific. loop_enabled is occurrence-specific for VIDEO media and normalizes to false for non-video media. The same media may be assigned more than once with independent values. Ref: darshan-server/src/routes/presentations.ts fastify.put(apiEndpoints.presentations.slotItems)"
   },
   {
     "domain": "presentations",

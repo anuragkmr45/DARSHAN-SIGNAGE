@@ -152,4 +152,27 @@ describe('HTTP Client', () => {
     expect(serialized).not.to.contain('diag-token')
     expect(serialized).not.to.contain('diag-fragment')
   })
+
+  it('classifies an Axios request timeout as a transient network error', async () => {
+    const axios = require('axios')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const httpClient = getHttpClient()
+    const client = httpClient.getAxiosInstance()
+
+    client.defaults.adapter = async (config: any) => {
+      throw new axios.AxiosError('timeout of 30000ms exceeded', 'ECONNABORTED', config)
+    }
+
+    let rejected: any
+    try {
+      await httpClient.get('/api/v1/device-pairing/status', { retry: false })
+    } catch (error) {
+      rejected = error
+    }
+
+    expect(rejected).to.exist
+    expect(rejected.code).to.equal('NETWORK_ERROR')
+    expect(rejected.transient).to.equal(true)
+    expect(rejected.detailsPayload).to.deep.equal({ code: 'ECONNABORTED' })
+  })
 })

@@ -48,6 +48,11 @@ import type { Layout } from "@/pages/Layouts";
 import type { SlotMedia } from "@/pages/ScheduleCreator";
 import { resolveMediaDisplayName } from "@/lib/media";
 import { createUuid } from "@/lib/uuid";
+import {
+  resolveSlotMediaPreviewOptions,
+  resolveVideoLoopLabel,
+  updateSlotMediaOccurrence,
+} from "@/lib/scheduleCreatorState";
 
 interface StepMediaAssignProps {
   layout: Layout;
@@ -98,6 +103,7 @@ function SlotMediaPreview({
   item: Pick<SlotMedia, "mediaName" | "mediaType" | "mediaUrl" | "mediaContentType" | "fitMode" | "loopEnabled" | "pageNumber">;
   className: string;
 }) {
+  const previewOptions = resolveSlotMediaPreviewOptions(item);
   return (
     <MediaPreview
       url={item.mediaUrl ?? undefined}
@@ -108,8 +114,8 @@ function SlotMediaPreview({
       videoControls={false}
       videoMuted
       videoAutoPlay={item.mediaType === "VIDEO"}
-      videoLoop={item.mediaType === "VIDEO" ? item.loopEnabled : false}
-      pdfPage={item.mediaType === "DOCUMENT" ? item.pageNumber ?? 1 : undefined}
+      videoLoop={previewOptions.videoLoop}
+      pdfPage={previewOptions.pdfPage}
     />
   );
 }
@@ -241,26 +247,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
     clientItemId: string,
     updates: Partial<SlotMedia>,
   ) => {
-    onUpdateSlotMedia(
-      slotMedia.map((item) => {
-        if (item.clientItemId === clientItemId) {
-          return {
-            ...item,
-            ...updates,
-            loopEnabled:
-              item.mediaType === "VIDEO"
-                ? (updates.loopEnabled ?? item.loopEnabled)
-                : false,
-          };
-        }
-
-        if (updates.audioEnabled && item.clientItemId !== clientItemId) {
-          return { ...item, audioEnabled: false };
-        }
-
-        return item;
-      }),
-    );
+    onUpdateSlotMedia(updateSlotMediaOccurrence(slotMedia, clientItemId, updates));
   };
 
   const handleUploadNavigate = () => {
@@ -310,9 +297,9 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                         Audio
                       </Badge>
                     ) : null}
-                    {primaryMedia.mediaType === "VIDEO" && primaryMedia.loopEnabled ? (
+                    {primaryMedia.mediaType === "VIDEO" ? (
                       <Badge variant="secondary" className="text-[10px]">
-                        Loop
+                        {resolveVideoLoopLabel(primaryMedia.mediaType, primaryMedia.loopEnabled)}
                       </Badge>
                     ) : null}
                     {slotItems.length > 1 ? (
@@ -416,9 +403,9 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                                 <Badge variant="outline" className="text-xs">
                                   Display {item.durationSeconds}s
                                 </Badge>
-                                {item.mediaType === "VIDEO" && item.loopEnabled ? (
+                                {item.mediaType === "VIDEO" ? (
                                   <Badge variant="secondary" className="text-xs">
-                                    Loop enabled
+                                    {resolveVideoLoopLabel(item.mediaType, item.loopEnabled)}
                                   </Badge>
                                 ) : null}
                                 {item.mediaType === "DOCUMENT" ? (
@@ -536,7 +523,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                                 />
                                 <Label htmlFor={`loop-${item.clientItemId}`} className="flex items-center gap-1 text-xs">
                                   <Repeat className="h-3 w-3" />
-                                  Loop video
+                                  Loop video {item.loopEnabled ? "On" : "Off"}
                                 </Label>
                               </div>
                             </div>

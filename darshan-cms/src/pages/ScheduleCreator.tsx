@@ -15,13 +15,12 @@ import { scheduleReservationsApi } from "@/api/domains/scheduleReservations";
 import { screensApi } from "@/api/domains/screens";
 import { queryKeys } from "@/api/queryKeys";
 import type {
-  PresentationSlotPayload,
   ReservationConflictItem,
   ScheduleItemPayload,
   ScreenSnapshot,
 } from "@/api/types";
 import { resolveQuickPresetRange, type ScheduleQuickPresetId } from "@/lib/scheduleQuickPresets";
-import { createUuid } from "@/lib/uuid";
+import { buildPresentationSlotPayloads, normalizeRestoredSlotMedia } from "@/lib/scheduleCreatorState";
 
 import { StepLayoutSelect } from "@/components/schedule-creator/StepLayoutSelect";
 import { StepMediaAssign } from "@/components/schedule-creator/StepMediaAssign";
@@ -117,31 +116,6 @@ const initialState: ScheduleWizardState = {
   endAt: "",
   priority: 0,
   approvalNotes: "",
-};
-
-const normalizeRestoredSlotMedia = (items: unknown): SlotMedia[] => {
-  if (!Array.isArray(items)) return [];
-  return items.map((raw) => {
-    const item = raw as Partial<SlotMedia>;
-    const isDocument = item.mediaType === "DOCUMENT";
-    const requestedPage = Number(item.pageNumber ?? 1);
-    const pageCount = typeof item.pageCount === "number" && item.pageCount > 0 ? Math.trunc(item.pageCount) : null;
-    const pageNumber =
-      isDocument &&
-      Number.isSafeInteger(requestedPage) &&
-      requestedPage > 0 &&
-      (pageCount ? requestedPage <= pageCount : requestedPage === 1)
-        ? requestedPage
-        : isDocument
-          ? 1
-          : undefined;
-    return {
-      ...(item as SlotMedia),
-      clientItemId: typeof item.clientItemId === "string" && item.clientItemId ? item.clientItemId : createUuid(),
-      pageNumber,
-      pageCount,
-    };
-  });
 };
 
 const formatConflictLabel = (conflict: ReservationConflictItem) => {
@@ -478,16 +452,7 @@ export default function ScheduleCreator() {
         return;
       }
 
-      const payloadItems: PresentationSlotPayload[] = wizardState.slotMedia.map((item) => ({
-        slot_id: item.slotId,
-        media_id: item.mediaId,
-        order: item.order,
-        duration_seconds: item.durationSeconds,
-        fit_mode: item.fitMode,
-        audio_enabled: item.audioEnabled,
-        loop_enabled: item.loopEnabled,
-        page_number: item.mediaType === "DOCUMENT" ? item.pageNumber ?? 1 : undefined,
-      }));
+      const payloadItems = buildPresentationSlotPayloads(wizardState.slotMedia);
 
       try {
         await createPresentationSlotsMutation.mutateAsync({

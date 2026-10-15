@@ -4,7 +4,7 @@ Status: SOURCE-BEHAVIOR ANSWERED FOR ALL 20 TOPICS. User-approved rules are iden
 
 Source behavior for all BQ-001 through BQ-020 has been recorded. A question's remaining `TBD` means business approval or an actual site target is missing, not that code behavior is unknown. QA can characterize the implementation now; release acceptance for an undecided policy remains separate. Do not include passwords, keys, production tokens or customer data.
 
-Unless a section says otherwise, historical observed behavior refers to the earlier static baseline. BQ-001 was refreshed against `release-01` commit `607440c12a8b476149253aac77bbbdcf3c1d960b` plus the 2026-10-15 feature working tree. Source references are repository-relative; no live application execution occurred.
+Unless a section says otherwise, historical observed behavior refers to the earlier static baseline. BQ-001 and the cross-cutting playback baseline were refreshed against `release-01` commit `8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2` plus the 2026-10-15 video-loop reliability working tree. Source references are repository-relative; no live application execution occurred.
 
 ## Batch 1: Core Behavior And Scope
 

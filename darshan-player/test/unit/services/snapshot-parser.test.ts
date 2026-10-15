@@ -48,6 +48,20 @@ describe('Snapshot Parser', () => {
     expect(legacy.items[0].pageNumber).to.equal(1)
   })
 
+  it('enables looping only for an explicit boolean true on video media', () => {
+    const parsed = parseSnapshotResponse({
+      id: 'snap-loop-normalization',
+      items: [
+        { id: 'video-loop', media_id: 'video-loop', type: 'video', loop_enabled: true },
+        { id: 'video-string', media_id: 'video-string', type: 'video', loop_enabled: 'true' },
+        { id: 'image-loop', media_id: 'image-loop', type: 'image', loop_enabled: true },
+        { id: 'video-legacy', media_id: 'video-legacy', type: 'video' },
+      ],
+    })
+
+    expect(parsed.items.map((item: any) => item.loop)).to.deep.equal([true, false, false, false])
+  })
+
   it('should parse emergency media override', () => {
     const raw = {
       id: 'snap-2',

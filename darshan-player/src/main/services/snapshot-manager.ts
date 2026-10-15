@@ -582,7 +582,10 @@ export class SnapshotManager extends EventEmitter {
 
     const nowMs = this.getServerNowMs()
     const endAtMs = window.endAt ? Date.parse(window.endAt) : Number.NaN
-    const remainingMs = Number.isFinite(endAtMs) ? Math.max(1000, endAtMs - nowMs) : 10000
+    // The scene item is the main-process hard-stop guard. Preserve the real
+    // remaining window even in the final sub-second interval so the scheduler
+    // cannot extend playback by the old one-second minimum.
+    const remainingMs = Number.isFinite(endAtMs) ? Math.max(1, endAtMs - nowMs) : 10000
 
     const scene: LayoutScene = {
       layoutId: window.layout?.id,

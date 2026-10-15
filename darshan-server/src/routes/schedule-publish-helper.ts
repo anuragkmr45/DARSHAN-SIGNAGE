@@ -6,6 +6,7 @@ import { createScheduleItemRepository, ScheduleItemRepository } from '@/db/repos
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
 import { areAspectsCompatible, parseAspectRatio } from '@/utils/display-profile';
+import { normalizeVideoLoopEnabled } from '@/utils/video-loop';
 
 type DB = ReturnType<typeof getDatabase>;
 
@@ -108,7 +109,7 @@ export async function resolvePresentations(presentationIds: string[], db: DB = g
       duration_seconds: i.duration_seconds,
       fit_mode: i.fit_mode,
       audio_enabled: i.audio_enabled,
-      loop_enabled: i.loop_enabled ?? false,
+      loop_enabled: normalizeVideoLoopEnabled(mediaMap.get(i.media_id)?.type, i.loop_enabled),
       page_number: i.page_number ?? (mediaMap.get(i.media_id)?.type === 'DOCUMENT' ? 1 : null),
       media: mediaMap.get(i.media_id) || null,
       created_at: i.created_at,
@@ -117,6 +118,34 @@ export async function resolvePresentations(presentationIds: string[], db: DB = g
   });
 
   return grouped;
+}
+
+type SnapshotPresentationSlotInput = {
+  id: string;
+  slot_id: string;
+  media_id: string;
+  order: number;
+  duration_seconds?: number | null;
+  fit_mode?: string | null;
+  audio_enabled?: boolean | null;
+  loop_enabled?: boolean | null;
+  page_number?: number | null;
+  media?: Parameters<typeof serializeMediaRecord>[0] | null;
+};
+
+export function serializePresentationSlotForSnapshot(slot: SnapshotPresentationSlotInput) {
+  return {
+    id: slot.id,
+    slot_id: slot.slot_id,
+    media_id: slot.media_id,
+    order: slot.order,
+    duration_seconds: slot.duration_seconds,
+    fit_mode: slot.fit_mode,
+    audio_enabled: slot.audio_enabled,
+    loop_enabled: normalizeVideoLoopEnabled(slot.media?.type, slot.loop_enabled),
+    page_number: slot.page_number ?? (slot.media?.type === 'DOCUMENT' ? 1 : null),
+    media: slot.media ? serializeMediaRecord(slot.media) : null,
+  };
 }
 
 export interface PublishScheduleParams {
@@ -643,18 +672,7 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
                   page_number: pi.page_number ?? (pi.media?.type === 'DOCUMENT' ? 1 : null),
                   media: pi.media ? serializeMediaRecord(pi.media) : null,
                 })),
-                slots: (pres.slots || []).map((si: any) => ({
-                  id: si.id,
-                  slot_id: si.slot_id,
-                  media_id: si.media_id,
-                  order: si.order,
-                  duration_seconds: si.duration_seconds,
-                  fit_mode: si.fit_mode,
-                  audio_enabled: si.audio_enabled,
-                  loop_enabled: si.loop_enabled ?? false,
-                  page_number: si.page_number ?? (si.media?.type === 'DOCUMENT' ? 1 : null),
-                  media: si.media ? serializeMediaRecord(si.media) : null,
-                })),
+                slots: (pres.slots || []).map(serializePresentationSlotForSnapshot),
               }
             : null,
         };

@@ -20,19 +20,19 @@ import { createPdfPlaybackElement } from './pdf-playback'
 import { createWebpagePlaybackElement } from './webpage-playback'
 import { DeferredPlaybackGate } from './deferred-playback-gate'
 import {
-  clampVideoSeekSeconds,
   resolveScheduledResumePosition,
-  shouldRepeatScheduledItem,
 } from '../common/playback-policy'
 import { resolvePlayerContentSource, shouldDisplaySecurityLock } from '../common/player-content-source'
 import {
   computeSceneStageFrame,
   prepareElementForFadeIn,
   prepareElementForFadeOut,
-  shouldUseManualVideoReplay,
+  resolveSceneSlotRecoveryDelayMs,
+  shouldAdvanceSceneSlot,
   teardownScheduledElementTree,
   type DisposableMediaNode,
 } from './player-layout-helpers'
+import { attachScheduledVideoLifecycle, configureScheduledVideoElement } from './scheduled-video-lifecycle'
 import type { PlaybackProgressEntry, PlaybackProgressIdentity, PlaybackResumeDecision } from '../common/playback-policy'
 import { sanitizeLogPayloadForDiagnostics } from '../common/redaction'
 
@@ -42,7 +42,8 @@ export {
   prepareElementForFadeIn,
   prepareElementForFadeOut,
   resolveOpacityTransitionStyle,
-  shouldUseManualVideoReplay,
+  resolveSceneSlotRecoveryDelayMs,
+  shouldAdvanceSceneSlot,
   teardownScheduledElementTree,
 } from './player-layout-helpers'
 
@@ -586,116 +587,69 @@ class Player {
   /**
    * Render video
    */
-  private async renderVideo(item: TimelineItem, resume?: PlaybackResumeInstruction): Promise<HTMLElement> {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement('video')
-      const source = this.getMediaSource(item)
-      const useManualReplay = shouldUseManualVideoReplay(item)
-      let resolved = false
-      let started = false
-      video.style.position = 'absolute'
-      video.style.top = '0'
-      video.style.left = '0'
-      video.style.width = '100%'
-      video.style.height = '100%'
-      video.muted = item.muted
-      video.loop = !useManualReplay && item.loop
+  private async renderVideo(
+    item: TimelineItem,
+    resume?: PlaybackResumeInstruction,
+    onRuntimeError?: (error: Error) => void,
+    signal?: AbortSignal,
+  ): Promise<HTMLElement> {
+    const video = document.createElement('video')
+    const source = this.getMediaSource(item)
+    video.style.position = 'absolute'
+    video.style.top = '0'
+    video.style.left = '0'
+    video.style.width = '100%'
+    video.style.height = '100%'
+    configureScheduledVideoElement(video, {
+      muted: item.muted,
+      autoplay: resume?.autoplay !== false,
+      loop: item.loop,
+    })
 
-      this.log('debug', 'Preparing video playback', {
+    this.log('debug', 'Preparing video playback', {
+      itemId: item.id,
+      displayMs: item.displayMs,
+      loop: item.loop,
+      resumeSource: resume?.source,
+      resumeSeekMs: resume?.seekMs,
+      resumeCompleted: resume?.completed,
+      source,
+      slotId: typeof item.meta?.['slotId'] === 'string' ? item.meta?.['slotId'] : null,
+    })
+
+    const lifecycle = attachScheduledVideoLifecycle(video, {
+      itemId: item.id,
+      displayMs: item.displayMs,
+      loop: item.loop,
+      autoplay: resume?.autoplay !== false,
+      seekMs: resume?.seekMs ?? 0,
+      onRuntimeError,
+      onLog: (level, message, data) => this.log(level, message, data),
+    })
+    ;(video as DisposableMediaNode).__darshanCleanup = lifecycle.dispose
+    const onAbort = (): void => this.disposeScheduledElement(video)
+    if (signal?.aborted) {
+      onAbort()
+      throw new Error('VIDEO_PLAYBACK_DISPOSED')
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    video.src = source
+
+    try {
+      await lifecycle.ready
+      this.log('debug', 'Video loaded', {
         itemId: item.id,
-        displayMs: item.displayMs,
-        loop: item.loop,
         resumeSource: resume?.source,
         resumeSeekMs: resume?.seekMs,
-        resumeCompleted: resume?.completed,
-        source,
-        slotId: typeof item.meta?.['slotId'] === 'string' ? item.meta?.['slotId'] : null,
+        completed: resume?.completed,
       })
-
-      const finalize = () => {
-        if (resolved) {
-          return
-        }
-        resolved = true
-        this.log('debug', 'Video loaded', {
-          itemId: item.id,
-          resumeSource: resume?.source,
-          resumeSeekMs: resume?.seekMs,
-          completed: resume?.completed,
-        })
-
-        if (resume?.autoplay === false) {
-          video.pause()
-          resolve(video)
-          return
-        }
-
-        started = true
-        video.play().catch((error) => {
-          this.log('error', 'Failed to play video', { error: error.message })
-        })
-        resolve(video)
-      }
-
-      video.onloadedmetadata = () => {
-        const seekSeconds = clampVideoSeekSeconds(resume?.seekMs ?? 0, video.duration, item.displayMs)
-        if (seekSeconds > 0.1) {
-          try {
-            video.currentTime = seekSeconds
-          } catch (error) {
-            this.log('warn', 'Failed to seek scheduled video before playback', {
-              itemId: item.id,
-              error: (error as Error).message,
-            })
-            finalize()
-            return
-          }
-
-          const onSeeked = () => {
-            window.clearTimeout(seekTimer)
-            video.removeEventListener('seeked', onSeeked)
-            finalize()
-          }
-          const seekTimer = window.setTimeout(() => {
-            video.removeEventListener('seeked', onSeeked)
-            finalize()
-          }, 2000)
-          video.addEventListener('seeked', onSeeked)
-          return
-        }
-
-        finalize()
-      }
-
-      video.onloadeddata = () => {
-        if (!resolved && !video.seeking) {
-          finalize()
-        }
-      }
-
-      video.onerror = () => {
-        reject(new Error(`Failed to load video: ${item.mediaId || item.objectKey || item.url}`))
-      }
-
-      if (useManualReplay) {
-        video.onended = () => {
-          this.log('debug', 'Manually replaying loop-enabled video', {
-            itemId: item.id,
-            displayMs: item.displayMs,
-            source,
-          })
-          if (!started) {
-            return
-          }
-          video.currentTime = 0
-          video.play().catch((error) => {
-            this.log('error', 'Failed to replay loop-enabled video', { error: error.message, itemId: item.id })
-          })
-        }
-      }
-
-      video.src = source
-    })
+      return video
+    } catch (error) {
+      this.disposeScheduledElement(video)
+      throw error
+    } finally {
+      signal?.removeEventListener('abort', onAbort)
+    }
   }
 
   private async resolveSingleItemResumeDecision(
@@ -788,7 +742,7 @@ class Player {
 
     const interval = window.setInterval(() => sendProgress(false), 5000)
     const onPause = () => sendProgress(false)
-    const onEnded = () => sendProgress(true)
+    const onEnded = () => sendProgress(item.loop !== true)
     video.addEventListener('pause', onPause)
     video.addEventListener('ended', onEnded)
 
@@ -797,7 +751,7 @@ class Player {
       window.clearInterval(interval)
       video.removeEventListener('pause', onPause)
       video.removeEventListener('ended', onEnded)
-      sendProgress(video.ended)
+      sendProgress(item.loop !== true && video.ended)
       previousCleanup?.()
     }
   }
@@ -882,6 +836,8 @@ class Player {
     const cleanupCallbacks: Array<() => void> = []
     const stageResizeObserver = new ResizeObserver(reflowStage)
     stageResizeObserver.observe(container)
+    let cleanedUp = false
+    let sceneEndTimer: number | undefined
 
     scene.slots.forEach((slot) => {
       const slotContainer = document.createElement('div')
@@ -905,9 +861,28 @@ class Player {
     })
 
     const cleanup = () => {
+      if (cleanedUp) {
+        return
+      }
+      cleanedUp = true
+      if (sceneEndTimer !== undefined) {
+        window.clearTimeout(sceneEndTimer)
+        sceneEndTimer = undefined
+      }
       stageResizeObserver.disconnect()
       cleanupCallbacks.forEach((cleanup) => cleanup())
       cleanupCallbacks.length = 0
+    }
+
+    const sceneEndsAtMs = scene.endsAt ? Date.parse(scene.endsAt) : Number.NaN
+    if (Number.isFinite(sceneEndsAtMs)) {
+      const delayMs = Math.max(0, sceneEndsAtMs - (Date.now() + (scene.serverTimeOffsetMs || 0)))
+      sceneEndTimer = window.setTimeout(() => {
+        sceneEndTimer = undefined
+        if (!cleanedUp && this.activeSceneId === sceneItem.id) {
+          this.clearScheduledPlayback('scene-window-ended')
+        }
+      }, delayMs)
     }
 
     return {
@@ -1235,8 +1210,10 @@ class Player {
     serverTimeOffsetMs: number = 0
   ): () => void {
     const timers = new Set<number>()
+    const pendingRenderControllers = new Set<AbortController>()
     let disposed = false
     let activeElement: HTMLElement | undefined
+    let renderGeneration = 0
 
     const slotContext: PlaybackProgressIdentity = {
       scheduleId: scheduleId || null,
@@ -1255,7 +1232,12 @@ class Player {
       })
     }
 
-    const renderIntoSlot = async (item: TimelineItem, resume?: PlaybackResumeInstruction): Promise<HTMLElement> => {
+    const renderIntoSlot = async (
+      item: TimelineItem,
+      resume?: PlaybackResumeInstruction,
+      onVideoRuntimeError?: (error: Error) => void,
+      signal?: AbortSignal,
+    ): Promise<HTMLElement> => {
       const compat = this.getItemCompatibility(item)
       if (compat.status === 'ACCEPTED_BUT_NOT_SUPPORTED_YET') {
         return this.renderDocumentPlaceholder(item, compat)
@@ -1269,7 +1251,7 @@ class Player {
         case 'image':
           return await this.renderImage(item)
         case 'video':
-          return await this.renderVideo(item, resume)
+          return await this.renderVideo(item, resume, onVideoRuntimeError, signal)
         case 'pdf':
           return await this.renderPDF(item)
         case 'office':
@@ -1297,6 +1279,44 @@ class Player {
       if (!item) {
         return
       }
+      const generation = ++renderGeneration
+      const renderAbortController = new AbortController()
+      pendingRenderControllers.add(renderAbortController)
+      let nextElement: HTMLElement | undefined
+      let pendingRuntimeError: Error | undefined
+      let runtimeFailureHandled = false
+
+      const handleVideoRuntimeError = (error: Error) => {
+        if (!nextElement) {
+          pendingRuntimeError = error
+          return
+        }
+        if (disposed || runtimeFailureHandled || generation !== renderGeneration || activeElement !== nextElement) {
+          return
+        }
+        runtimeFailureHandled = true
+        this.log('error', 'Scheduled video failed while active in scene slot', {
+          slotId: slot.id,
+          itemId: item.id,
+          error: error.message,
+        })
+
+        this.disposeScheduledElement(nextElement)
+        const placeholder = this.createMediaPreviewCard(item, 'Preview unavailable', error.message)
+        placeholder.style.opacity = '1'
+        container.appendChild(placeholder)
+        activeElement = placeholder
+        this.clearActiveSlotPlayback(slot.id)
+
+        if (!shouldAdvanceSceneSlot(slot.items.length)) {
+          const retryDelayMs = resolveSceneSlotRecoveryDelayMs(item.displayMs)
+          const timer = window.setTimeout(() => {
+            timers.delete(timer)
+            void showSlotItem(normalizedIndex)
+          }, retryDelayMs)
+          timers.add(timer)
+        }
+      }
 
       try {
         this.log('debug', 'Rendering scene slot item', {
@@ -1316,14 +1336,21 @@ class Player {
                 startsAt: sceneStartsAt,
                 serverTimeOffsetMs,
               })
-        const nextElement = await renderIntoSlot(item, resumeDecision)
-        if (disposed) {
-          this.disposeScheduledElement(nextElement)
+        const renderedElement = await renderIntoSlot(
+          item,
+          resumeDecision,
+          handleVideoRuntimeError,
+          renderAbortController.signal,
+        )
+        pendingRenderControllers.delete(renderAbortController)
+        nextElement = renderedElement
+        if (disposed || generation !== renderGeneration) {
+          this.disposeScheduledElement(renderedElement)
           return
         }
         if (item.type === 'video') {
           this.attachVideoProgressReporter(
-            nextElement,
+            renderedElement,
             item,
             this.buildPlaybackProgressContext(item, {
               scheduleId: scheduleId || null,
@@ -1334,16 +1361,16 @@ class Player {
             })
           )
         }
-        this.applyFitMode(nextElement, item.fit)
+        this.applyFitMode(renderedElement, item.fit)
         const slotFadeMs = Math.max(0, item.transitionDurationMs || 0)
-        const deferSlotFadeIn = prepareElementForFadeIn(nextElement, slotFadeMs)
-        container.appendChild(nextElement)
+        const deferSlotFadeIn = prepareElementForFadeIn(renderedElement, slotFadeMs)
+        container.appendChild(renderedElement)
         if (deferSlotFadeIn) {
           this.deferStyleCommit(() => {
-            nextElement.style.opacity = '1'
+            renderedElement.style.opacity = '1'
           })
         } else {
-          nextElement.style.opacity = '1'
+          renderedElement.style.opacity = '1'
         }
 
         if (activeElement && activeElement.parentElement === container) {
@@ -1358,7 +1385,7 @@ class Player {
           timers.add(fadeTimer)
         }
 
-        activeElement = nextElement
+        activeElement = renderedElement
         if (resumeDecision.completed) {
           this.clearActiveSlotPlayback(slot.id)
         } else {
@@ -1373,7 +1400,7 @@ class Player {
             page_number: item.type === 'pdf' ? item.pageNumber ?? 1 : undefined,
           })
         }
-        if (shouldRepeatScheduledItem(slot.items.length, item) && !resumeDecision.completed) {
+        if (shouldAdvanceSceneSlot(slot.items.length) && !resumeDecision.completed) {
           const delayMs = delayOverrideMs ?? resumeDecision.remainingMs ?? Math.max(250, item.displayMs)
           const timer = window.setTimeout(() => {
             timers.delete(timer)
@@ -1387,7 +1414,15 @@ class Player {
           }, delayMs)
           timers.add(timer)
         }
+
+        if (pendingRuntimeError) {
+          handleVideoRuntimeError(pendingRuntimeError)
+        }
       } catch (error) {
+        pendingRenderControllers.delete(renderAbortController)
+        if (disposed || generation !== renderGeneration) {
+          return
+        }
         this.log('error', 'Failed to render scene slot media', {
           slotId: slot.id,
           itemId: item.id,
@@ -1397,20 +1432,23 @@ class Player {
         const placeholder = this.createMediaPreviewCard(item, 'Preview unavailable', (error as Error).message)
         placeholder.style.opacity = '1'
         while (container.firstChild) {
-          container.removeChild(container.firstChild)
+          this.disposeScheduledElement(container.firstChild as HTMLElement)
         }
         container.appendChild(placeholder)
         activeElement = placeholder
         this.clearActiveSlotPlayback(slot.id)
-        const delayMs = delayOverrideMs ?? Math.max(250, item.displayMs)
+        const shouldAdvance = shouldAdvanceSceneSlot(slot.items.length)
+        const delayMs = !shouldAdvance
+          ? resolveSceneSlotRecoveryDelayMs(item.displayMs)
+          : delayOverrideMs ?? Math.max(250, item.displayMs)
         const timer = window.setTimeout(() => {
           timers.delete(timer)
-          if (sceneStartsAt) {
+          if (shouldAdvance && sceneStartsAt) {
             void resolveScenePosition().then((nextPosition) => {
               void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
             })
           } else {
-            void showSlotItem(normalizedIndex + 1)
+            void showSlotItem(shouldAdvance ? normalizedIndex + 1 : normalizedIndex)
           }
         }, delayMs)
         timers.add(timer)
@@ -1423,7 +1461,10 @@ class Player {
 
     return () => {
       disposed = true
+      renderGeneration += 1
       this.clearActiveSlotPlayback(slot.id)
+      pendingRenderControllers.forEach((controller) => controller.abort())
+      pendingRenderControllers.clear()
       timers.forEach((timer) => window.clearTimeout(timer))
       timers.clear()
 

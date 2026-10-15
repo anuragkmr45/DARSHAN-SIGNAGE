@@ -342,11 +342,16 @@ export class PlayerFlow extends EventEmitter {
     this.stopBootstrapRetryTimer()
     this.bindSnapshotListener()
 
-    await this.transitionState('BOOTSTRAP_AUTH', {
-      error: 'Validating device pairing with backend...',
-      backendAvailable: false,
-      awaitingManualRecovery: false,
-    })
+    // A background reconnect attempt must not replace valid cached playback
+    // with the bootstrap surface. Keep the offline lifecycle authoritative
+    // until the backend has actually accepted the stored identity.
+    if (this.state !== 'OFFLINE_USING_LAST_VALID_PAIRING') {
+      await this.transitionState('BOOTSTRAP_AUTH', {
+        error: 'Validating device pairing with backend...',
+        backendAvailable: false,
+        awaitingManualRecovery: false,
+      })
+    }
 
     try {
       const pairingStatus = await this.validateBackendPairingStatus()

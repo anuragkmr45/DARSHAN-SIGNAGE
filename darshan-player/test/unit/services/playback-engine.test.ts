@@ -58,6 +58,29 @@ describe('Playback Engine', () => {
     expect(clearCurrentPlayback.calledOnce).to.equal(true)
   })
 
+  it('clears an active layout scene when its authoritative timeline ends', () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const send = sandbox.spy()
+    const engine = getPlaybackEngine()
+    engine.initialize({ webContents: { send } })
+    engine.currentItem = {
+      id: 'scene:window-1',
+      type: 'scene',
+      displayMs: 30_000,
+      fit: 'contain',
+      muted: true,
+      loop: false,
+      transitionDurationMs: 0,
+    }
+
+    engine.scheduler.emit('timeline-complete')
+
+    expect(send.calledWith('playback-update', {
+      type: 'clear-active',
+      reason: 'scene-window-complete',
+    })).to.equal(true)
+  })
+
   it('ignores equivalent timeline playlist updates when only presigned asset urls changed', async () => {
     const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
     const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')

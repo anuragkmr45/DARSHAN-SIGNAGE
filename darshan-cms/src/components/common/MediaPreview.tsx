@@ -112,8 +112,12 @@ function PdfCanvasPreview({ source, pageNumber, title }: { source: string; pageN
       observer?.disconnect();
       if (frame !== undefined) window.cancelAnimationFrame(frame);
       try { renderTask?.cancel?.(); } catch { /* render already settled */ }
-      void documentProxy?.destroy?.().catch(() => undefined);
-      void loadingTask?.destroy?.().catch(() => undefined);
+      // PdfDocument.destroy() delegates to its loading task/worker. Destroying
+      // both proxies races the same worker shutdown and can surface an
+      // unhandled "Worker was terminated" rejection while changing wizard
+      // steps. Before the document resolves, only the loading task exists.
+      const destroyPromise = documentProxy?.destroy?.() ?? loadingTask?.destroy?.();
+      void destroyPromise?.catch(() => undefined);
     };
   }, [source, pageNumber]);
 

@@ -195,7 +195,13 @@ export class PlaybackEngine extends EventEmitter {
     })
 
     this.scheduler.on('timeline-complete', () => {
-      logger.debug('Timeline completed')
+      logger.debug({ itemType: this.currentItem?.type }, 'Timeline completed')
+      if (this.currentItem?.type === 'scene' && this.mainWindow) {
+        this.mainWindow.webContents.send('playback-update', {
+          type: 'clear-active',
+          reason: 'scene-window-complete',
+        })
+      }
     })
   }
 

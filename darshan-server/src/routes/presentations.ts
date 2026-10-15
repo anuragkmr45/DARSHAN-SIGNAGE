@@ -16,6 +16,7 @@ import { inArray } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
 import { normalizeDocumentPage } from '@/utils/document-page-selection';
+import { normalizeVideoLoopEnabled } from '@/utils/video-loop';
 
 const logger = createLogger('presentation-routes');
 const { CREATED, NO_CONTENT } = HTTP_STATUS;
@@ -225,7 +226,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             page_number: i.page_number ?? (mediaMap.get(i.media_id)?.type === 'DOCUMENT' ? 1 : null),
             fit_mode: i.fit_mode,
             audio_enabled: i.audio_enabled,
-            loop_enabled: i.loop_enabled ?? false,
+            loop_enabled: normalizeVideoLoopEnabled(mediaMap.get(i.media_id)?.type, i.loop_enabled),
             created_at: i.created_at.toISOString?.() ?? i.created_at,
             media: mediaMap.get(i.media_id) ? serializeMediaRecord(mediaMap.get(i.media_id) as any) : null,
           })),
@@ -450,6 +451,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             page_number: i.page_number ?? (mediaMap.get(i.media_id)?.type === 'DOCUMENT' ? 1 : null),
             fit_mode: i.fit_mode,
             audio_enabled: i.audio_enabled,
+            loop_enabled: normalizeVideoLoopEnabled(mediaMap.get(i.media_id)?.type, i.loop_enabled),
             created_at: i.created_at.toISOString?.() ?? i.created_at,
             media: mediaMap.get(i.media_id) ? serializeMediaRecord(mediaMap.get(i.media_id) as any) : null,
           })),
@@ -505,6 +507,13 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             const inSlot = existing.filter((i: any) => i.slot_id === data.slot_id);
             return inSlot.length ? Math.max(...inSlot.map((i: any) => i.order || 0)) + 1 : 0;
           })();
+        if (existing.some((item: any) => item.slot_id === data.slot_id && item.order === order)) {
+          throw AppError.validation({
+            reason: 'PRESENTATION_SLOT_ORDER_CONFLICT',
+            slot_id: data.slot_id,
+            order,
+          });
+        }
 
         const item = await slotItemRepo.create({
           presentation_id: presentation.id,
@@ -514,7 +523,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           duration_seconds: data.duration_seconds,
           fit_mode: data.fit_mode,
           audio_enabled: data.audio_enabled,
-          loop_enabled: data.loop_enabled,
+          loop_enabled: normalizeVideoLoopEnabled(media.type, data.loop_enabled),
           page_number: pageNumber,
         });
 
@@ -527,7 +536,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           duration_seconds: item.duration_seconds,
           fit_mode: item.fit_mode,
           audio_enabled: item.audio_enabled,
-          loop_enabled: item.loop_enabled ?? false,
+          loop_enabled: normalizeVideoLoopEnabled(media.type, item.loop_enabled),
           page_number: item.page_number ?? (media.type === 'DOCUMENT' ? 1 : null),
           created_at: item.created_at.toISOString?.() ?? item.created_at,
           media: {
@@ -615,7 +624,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             duration_seconds: item.duration_seconds,
             fit_mode: item.fit_mode,
             audio_enabled: item.audio_enabled,
-            loop_enabled: item.loop_enabled,
+            loop_enabled: normalizeVideoLoopEnabled(media.type, item.loop_enabled),
             page_number: normalizeDocumentPage(media, item.page_number),
           };
         });
@@ -633,7 +642,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
               duration_seconds: item.duration_seconds,
               fit_mode: item.fit_mode,
               audio_enabled: item.audio_enabled,
-              loop_enabled: item.loop_enabled ?? false,
+              loop_enabled: normalizeVideoLoopEnabled(mediaMap.get(item.media_id)?.type, item.loop_enabled),
               page_number: item.page_number ?? (mediaMap.get(item.media_id)?.type === 'DOCUMENT' ? 1 : null),
               created_at: item.created_at.toISOString?.() ?? item.created_at,
               media: mediaMap.get(item.media_id)

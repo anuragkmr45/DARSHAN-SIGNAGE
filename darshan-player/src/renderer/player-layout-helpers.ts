@@ -1,5 +1,3 @@
-import type { TimelineItem } from '../common/types'
-
 export function parseAspectRatio(aspectRatio?: string): number | null {
   if (!aspectRatio || typeof aspectRatio !== 'string') {
     return null
@@ -17,6 +15,14 @@ export function parseAspectRatio(aspectRatio?: string): number | null {
   }
 
   return width / height
+}
+
+export function shouldAdvanceSceneSlot(itemCount: number): boolean {
+  return Number.isInteger(itemCount) && itemCount > 1
+}
+
+export function resolveSceneSlotRecoveryDelayMs(displayMs: number): number {
+  return Math.min(30_000, Math.max(1000, Number(displayMs) || 0))
 }
 
 export function computeSceneStageFrame(
@@ -54,10 +60,6 @@ export function computeSceneStageFrame(
     left: 0,
     top: (viewportHeight - height) / 2,
   }
-}
-
-export function shouldUseManualVideoReplay(item: TimelineItem): boolean {
-  return item.type === 'video' && item.loop === true
 }
 
 type TransitionStyleTarget = {

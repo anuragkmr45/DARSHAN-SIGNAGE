@@ -4,8 +4,10 @@ import type {
   PaginatedResponse,
   PaginationParams,
   Presentation,
+  PresentationDetail,
   PresentationSlot,
   PresentationSlotPayload,
+  PresentationSlotsResponse,
 } from "../types";
 
 export const presentationsApi = {
@@ -24,8 +26,14 @@ export const presentationsApi = {
     }),
 
   getById: (presentationId: string) =>
-    apiClient.request<Presentation>({
+    apiClient.request<PresentationDetail>({
       path: endpoints.presentations.byId(presentationId),
+      method: "GET",
+    }),
+
+  listSlots: (presentationId: string) =>
+    apiClient.request<PresentationSlotsResponse>({
+      path: endpoints.presentations.slots(presentationId),
       method: "GET",
     }),
 

@@ -640,7 +640,7 @@ export interface PresentationSlotPayload {
 
 export interface PresentationSlot {
   id: string;
-  presentation_id: string;
+  presentation_id?: string;
   slot_id: string;
   media_id: string;
   order: number;
@@ -651,6 +651,14 @@ export interface PresentationSlot {
   page_number?: number | null;
   created_at?: string;
   media?: MediaAsset;
+}
+
+export interface PresentationDetail extends Presentation {
+  slots: PresentationSlot[];
+}
+
+export interface PresentationSlotsResponse {
+  items: PresentationSlot[];
 }
 
 export interface Screen {

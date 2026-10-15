@@ -12,6 +12,7 @@ describe('presentation document page selection', () => {
   const presentationId = randomUUID();
   const documentId = randomUUID();
   const imageId = randomUUID();
+  const videoId = randomUUID();
 
   beforeAll(async () => {
     server = await createTestServer();
@@ -46,6 +47,15 @@ describe('presentation document page selection', () => {
         type: 'IMAGE',
         status: 'READY',
         source_content_type: 'image/png',
+        created_by: testUser.id,
+      },
+      {
+        id: videoId,
+        name: 'Loop fixture.mp4',
+        type: 'VIDEO',
+        status: 'READY',
+        source_content_type: 'video/mp4',
+        duration_seconds: 3,
         created_by: testUser.id,
       },
     ]);
@@ -124,5 +134,58 @@ describe('presentation document page selection', () => {
         eq(schema.presentationSlotItems.presentation_id, presentationId),
         eq(schema.presentationSlotItems.media_id, imageId)
       ))).toEqual([]);
+  });
+
+  it('round-trips video loop flags and normalizes non-video over-posting', async () => {
+    const response = await replace([
+      { slot_id: 'main', media_id: videoId, order: 0, duration_seconds: 12, loop_enabled: true },
+      { slot_id: 'main', media_id: imageId, order: 1, duration_seconds: 5, loop_enabled: true },
+    ]);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).items).toEqual([
+      expect.objectContaining({ media_id: videoId, order: 0, loop_enabled: true }),
+      expect.objectContaining({ media_id: imageId, order: 1, loop_enabled: false }),
+    ]);
+
+    const listResponse = await server.inject({
+      method: 'GET',
+      url: `/api/v1/presentations/${presentationId}/slots`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(JSON.parse(listResponse.body).items).toEqual([
+      expect.objectContaining({ media_id: videoId, loop_enabled: true }),
+      expect.objectContaining({ media_id: imageId, loop_enabled: false }),
+    ]);
+
+    const detailResponse = await server.inject({
+      method: 'GET',
+      url: `/api/v1/presentations/${presentationId}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(JSON.parse(detailResponse.body).slots).toEqual([
+      expect.objectContaining({ media_id: videoId, loop_enabled: true }),
+      expect.objectContaining({ media_id: imageId, loop_enabled: false }),
+    ]);
+  });
+
+  it('rejects duplicate explicit order in the single-item slot endpoint', async () => {
+    await replace([
+      { slot_id: 'main', media_id: videoId, order: 0, duration_seconds: 12, loop_enabled: true },
+    ]);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/presentations/${presentationId}/slots`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { slot_id: 'main', media_id: videoId, order: 0, duration_seconds: 12, loop_enabled: true },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(JSON.parse(response.body).error).toMatchObject({
+      details: { reason: 'PRESENTATION_SLOT_ORDER_CONFLICT', slot_id: 'main', order: 0 },
+    });
   });
 });

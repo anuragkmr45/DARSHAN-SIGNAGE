@@ -33,6 +33,7 @@ import type { DisplayPreflightResponse, MediaAsset, PresentationSlot, ScheduleRe
 import { MediaPreview } from "@/components/common/MediaPreview";
 import { AspectFrame } from "@/components/common/AspectFrame";
 import { resolveMediaDisplayName } from "@/lib/media";
+import { resolveVideoLoopLabel } from "@/lib/scheduleCreatorState";
 
 interface RequestDetailDrawerProps {
   request: ScheduleRequestListItem;
@@ -653,22 +654,29 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   {presentationSlots.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No presentation slots provided.</p>
                   ) : (
-                    presentationSlots.map((slot) => (
-                      <div key={slot.id} className="rounded-md border p-3 text-sm">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline">Slot {slot.slot_id}</Badge>
-                          {slot.duration_seconds ? (
-                            <Badge variant="secondary">{formatDuration(slot.duration_seconds)}</Badge>
-                          ) : null}
-                          <Badge variant="secondary">{slot.fit_mode}</Badge>
-                          <Badge variant="secondary">Audio {slot.audio_enabled ? "On" : "Off"}</Badge>
-                          {typeof slot.page_number === "number" ? (
-                            <Badge variant="secondary">Page {slot.page_number}</Badge>
-                          ) : null}
+                    presentationSlots.map((slot) => {
+                      const loopLabel = resolveVideoLoopLabel(
+                        slot.media?.type ?? mediaById.get(slot.media_id)?.type,
+                        slot.loop_enabled,
+                      );
+                      return (
+                        <div key={slot.id} className="rounded-md border p-3 text-sm">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">Slot {slot.slot_id}</Badge>
+                            {slot.duration_seconds ? (
+                              <Badge variant="secondary">{formatDuration(slot.duration_seconds)}</Badge>
+                            ) : null}
+                            <Badge variant="secondary">{slot.fit_mode}</Badge>
+                            <Badge variant="secondary">Audio {slot.audio_enabled ? "On" : "Off"}</Badge>
+                            {loopLabel ? <Badge variant="secondary">{loopLabel}</Badge> : null}
+                            {typeof slot.page_number === "number" ? (
+                              <Badge variant="secondary">Page {slot.page_number}</Badge>
+                            ) : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-2">Media ID: {slot.media_id}</p>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-2">Media ID: {slot.media_id}</p>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </CardContent>
               </Card>

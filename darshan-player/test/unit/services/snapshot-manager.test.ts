@@ -325,7 +325,7 @@ describe('Snapshot Manager', () => {
             {
               id: 'window-layout-1',
               start_at: '2026-03-14T09:00:00.000Z',
-              end_at: '2026-03-14T09:30:00.000Z',
+              end_at: '2026-03-14T09:00:05.100Z',
               priority: 20,
               presentation: {
                 id: 'presentation-layout-1',
@@ -364,6 +364,7 @@ describe('Snapshot Manager', () => {
                     duration_seconds: 12,
                     fit_mode: 'cover',
                     audio_enabled: true,
+                    loop_enabled: true,
                     media: {
                       id: 'media-right',
                       name: 'Right Video',
@@ -395,7 +396,10 @@ describe('Snapshot Manager', () => {
     expect(playlist?.items).to.have.length(1)
     expect(playlist?.items[0]?.type).to.equal('scene')
     expect(playlist?.items[0]?.mediaId).to.equal(undefined)
-    expect((playlist?.items[0]?.meta as any)?.scene?.slots).to.have.length(2)
+    expect(playlist?.items[0]?.displayMs).to.equal(100)
+    const scene = (playlist?.items[0]?.meta as any)?.scene
+    expect(scene?.slots).to.have.length(2)
+    expect(scene?.slots.find((slot: any) => slot.id === 'right')?.items[0]?.loop).to.equal(true)
   })
 
   it('should keep scheduled items playable from remote URLs when cache is cold', async () => {

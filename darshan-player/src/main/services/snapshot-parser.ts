@@ -109,7 +109,8 @@ function normalizeItem(
   const fit = normalizeFit(input.fit || input.fit_mode)
   const muted = Boolean(input.muted ?? false)
   const transitionDurationMs = Number(input.transition_ms ?? input.transitionDurationMs ?? 0) || 0
-  const loop = Boolean(input.loop ?? input.loop_enabled ?? false)
+  const requestedLoop = input.loop ?? input.loop_enabled
+  const loop = type === 'video' && requestedLoop === true
   const explicitPage = input.page_number ?? input.pageNumber
   const pageNumber =
     type !== 'pdf'

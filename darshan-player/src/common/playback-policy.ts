@@ -67,14 +67,23 @@ export function resolveScheduledResumePosition(input: PlaybackResumeInput): Play
     const persistedIndex = findPersistedItemIndex(items, persisted)
     if (persistedIndex >= 0) {
       const item = items[persistedIndex]
+      if (!item) {
+        return {
+          ...initialDecision(),
+          remainingMs: getItemDurationMs(items[0]),
+        }
+      }
       const durationMs = getItemDurationMs(item)
-      const elapsedMsInItem = Math.min(Math.max(0, persisted.positionMs), durationMs)
-      const completed = persisted.completed === true || elapsedMsInItem >= durationMs
+      const persistedPositionMs = Math.max(0, persisted.positionMs)
+      const elapsedMsInItem = item.loop === true
+        ? persistedPositionMs % durationMs
+        : Math.min(persistedPositionMs, durationMs)
+      const completed = item.loop === true ? false : persisted.completed === true || elapsedMsInItem >= durationMs
       return {
         index: persistedIndex,
         remainingMs: completed ? DEFAULT_REMAINING_MS : Math.max(MIN_REMAINING_MS, durationMs - elapsedMsInItem),
         elapsedMsInItem,
-        seekMs: completed ? getFinalFrameSeekMs(durationMs) : elapsedMsInItem,
+        seekMs: completed ? getFinalFrameSeekMs(durationMs) : item.loop === true ? persistedPositionMs : elapsedMsInItem,
         autoplay: !completed,
         completed,
         source: 'persisted',
@@ -128,8 +137,21 @@ export function matchesPlaybackProgressIdentity(
   })
 }
 
-export function clampVideoSeekSeconds(targetMs: number, mediaDurationSeconds?: number, itemDisplayMs?: number): number {
+export function resolveVideoSeekSeconds(
+  targetMs: number,
+  mediaDurationSeconds?: number,
+  itemDisplayMs?: number,
+  loop: boolean = false,
+): number {
   const targetSeconds = Math.max(0, safeNumber(targetMs, 0) / 1000)
+  if (loop) {
+    if (!Number.isFinite(mediaDurationSeconds) || Number(mediaDurationSeconds) <= 0) {
+      return 0
+    }
+
+    return targetSeconds % Number(mediaDurationSeconds)
+  }
+
   const mediaLimitSeconds =
     Number.isFinite(mediaDurationSeconds) && Number(mediaDurationSeconds) > 0
       ? Number(mediaDurationSeconds)
@@ -144,11 +166,36 @@ export function clampVideoSeekSeconds(targetMs: number, mediaDurationSeconds?: n
   return Math.min(targetSeconds, Math.max(0, mediaLimitSeconds - FINAL_FRAME_BACKOFF_MS / 1000))
 }
 
+/**
+ * Backwards-compatible alias for callers that only need non-loop final-frame clamping.
+ */
+export function clampVideoSeekSeconds(targetMs: number, mediaDurationSeconds?: number, itemDisplayMs?: number): number {
+  return resolveVideoSeekSeconds(targetMs, mediaDurationSeconds, itemDisplayMs, false)
+}
+
 function resolveFromElapsed(
   items: Array<Pick<TimelineItem, 'id' | 'displayMs' | 'loop' | 'mediaId' | 'objectKey'>>,
   elapsedMs: number,
   source: PlaybackResumeSource,
 ): PlaybackResumeDecision {
+  if (items.length === 1 && items[0]?.loop === true) {
+    const durationMs = getItemDurationMs(items[0])
+    const cycleOffsetMs = elapsedMs % durationMs
+
+    return {
+      index: 0,
+      remainingMs: Math.max(MIN_REMAINING_MS, durationMs - cycleOffsetMs),
+      elapsedMsInItem: cycleOffsetMs,
+      // A single looping item stays continuously mounted. Preserve the full
+      // wall-clock elapsed value so the renderer can reduce it by the decoded
+      // media duration after metadata is available.
+      seekMs: elapsedMs,
+      autoplay: true,
+      completed: false,
+      source,
+    }
+  }
+
   if (items.length === 1 && items[0]?.loop !== true) {
     const durationMs = getItemDurationMs(items[0])
     const completed = elapsedMs >= durationMs

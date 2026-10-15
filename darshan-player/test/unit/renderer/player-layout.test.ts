@@ -48,32 +48,17 @@ describe('Player layout helpers', () => {
     expect(source).to.equal('schedule')
   })
 
-  it('uses manual replay for loop-enabled scheduled videos', async () => {
-    const { shouldUseManualVideoReplay } = require('../../../src/renderer/player-layout-helpers.ts')
+  it('advances only multi-item scene slots and bounds single-item recovery delay', () => {
+    const {
+      resolveSceneSlotRecoveryDelayMs,
+      shouldAdvanceSceneSlot,
+    } = require('../../../src/renderer/player-layout-helpers.ts')
 
-    expect(
-      shouldUseManualVideoReplay({
-        id: 'video-1',
-        type: 'video',
-        displayMs: 30000,
-        fit: 'cover',
-        muted: true,
-        loop: true,
-        transitionDurationMs: 0,
-      })
-    ).to.equal(true)
-
-    expect(
-      shouldUseManualVideoReplay({
-        id: 'video-2',
-        type: 'video',
-        displayMs: 30000,
-        fit: 'cover',
-        muted: true,
-        loop: false,
-        transitionDurationMs: 0,
-      })
-    ).to.equal(false)
+    expect(shouldAdvanceSceneSlot(1)).to.equal(false)
+    expect(shouldAdvanceSceneSlot(2)).to.equal(true)
+    expect(resolveSceneSlotRecoveryDelayMs(250)).to.equal(1000)
+    expect(resolveSceneSlotRecoveryDelayMs(10_000)).to.equal(10_000)
+    expect(resolveSceneSlotRecoveryDelayMs(120_000)).to.equal(30_000)
   })
 
   it('applies configured opacity transition styles to entering and exiting scheduled elements', async () => {

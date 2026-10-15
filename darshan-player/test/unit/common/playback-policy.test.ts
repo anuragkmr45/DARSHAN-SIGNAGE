@@ -59,7 +59,7 @@ describe('Playback policy helpers', () => {
     expect(decision.completed).to.equal(true)
   })
 
-  it('uses modulo wall-clock position for a loop-enabled single video', () => {
+  it('preserves full wall-clock elapsed time for decoded-duration loop seeking', () => {
     const { resolveScheduledResumePosition } = require('../../../src/common/playback-policy.ts')
     const startsAt = new Date('2026-06-19T10:00:00.000Z').toISOString()
     const decision = resolveScheduledResumePosition({
@@ -76,7 +76,35 @@ describe('Playback policy helpers', () => {
     })
 
     expect(decision.index).to.equal(0)
-    expect(decision.seekMs).to.equal(16000)
+    expect(decision.elapsedMsInItem).to.equal(16000)
+    expect(decision.seekMs).to.equal(480000)
+    expect(decision.autoplay).to.equal(true)
+    expect(decision.completed).to.equal(false)
+  })
+
+  it('ignores a stale completed marker when restoring a loop-enabled video', () => {
+    const { resolveScheduledResumePosition } = require('../../../src/common/playback-policy.ts')
+    const nowMs = Date.parse('2026-06-19T10:00:00.000Z')
+    const decision = resolveScheduledResumePosition({
+      nowMs,
+      persisted: {
+        itemId: 'item-video',
+        mediaId: 'media-video',
+        positionMs: 12_000,
+        completed: true,
+        updatedAt: new Date(nowMs - 1000).toISOString(),
+      },
+      items: [
+        {
+          id: 'item-video',
+          mediaId: 'media-video',
+          displayMs: 30_000,
+          loop: true,
+        },
+      ],
+    })
+
+    expect(decision.seekMs).to.equal(12_000)
     expect(decision.autoplay).to.equal(true)
     expect(decision.completed).to.equal(false)
   })
@@ -172,5 +200,13 @@ describe('Playback policy helpers', () => {
 
     expect(clampVideoSeekSeconds(480000, 464, 464000)).to.equal(463.75)
     expect(clampVideoSeekSeconds(120000, 464, 464000)).to.equal(120)
+  })
+
+  it('reduces a looping seek by the decoded media duration', () => {
+    const { resolveVideoSeekSeconds } = require('../../../src/common/playback-policy.ts')
+
+    expect(resolveVideoSeekSeconds(35_000, 10, 60_000, true)).to.equal(5)
+    expect(resolveVideoSeekSeconds(35_000, Number.NaN, 60_000, true)).to.equal(0)
+    expect(resolveVideoSeekSeconds(35_000, 0, 60_000, true)).to.equal(0)
   })
 })

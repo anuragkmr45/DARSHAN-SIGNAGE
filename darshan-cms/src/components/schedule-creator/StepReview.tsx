@@ -17,6 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { MediaPreview } from "@/components/common/MediaPreview";
 import { AspectFrame } from "@/components/common/AspectFrame";
 import type { ScheduleWizardState, SlotMedia } from "@/pages/ScheduleCreator";
+import { resolveSlotMediaPreviewOptions, resolveVideoLoopLabel } from "@/lib/scheduleCreatorState";
 
 interface StepReviewProps {
   state: ScheduleWizardState;
@@ -25,6 +26,7 @@ interface StepReviewProps {
 }
 
 function SlotMediaPreview({ item, className }: { item: SlotMedia; className: string }) {
+  const previewOptions = resolveSlotMediaPreviewOptions(item);
   return (
     <MediaPreview
       url={item.mediaUrl ?? item.mediaThumbnail}
@@ -35,8 +37,8 @@ function SlotMediaPreview({ item, className }: { item: SlotMedia; className: str
       videoControls={false}
       videoMuted
       videoAutoPlay={item.mediaType === "VIDEO"}
-      videoLoop={item.mediaType === "VIDEO" ? item.loopEnabled : false}
-      pdfPage={item.mediaType === "DOCUMENT" ? item.pageNumber ?? 1 : undefined}
+      videoLoop={previewOptions.videoLoop}
+      pdfPage={previewOptions.pdfPage}
     />
   );
 }
@@ -77,10 +79,10 @@ function LayoutPreview({ state }: { state: ScheduleWizardState }) {
                 <>
                   <SlotMediaPreview item={primaryMedia} className="h-full w-full" />
                   <div className="absolute bottom-2 right-2 flex flex-wrap gap-1">
-                    {primaryMedia.mediaType === "VIDEO" && primaryMedia.loopEnabled ? (
+                    {primaryMedia.mediaType === "VIDEO" ? (
                       <Badge variant="secondary" className="h-5 text-[10px]">
                         <Repeat className="mr-1 h-3 w-3" />
-                        Loop
+                        {resolveVideoLoopLabel(primaryMedia.mediaType, primaryMedia.loopEnabled)}
                       </Badge>
                     ) : null}
                     {primaryMedia.audioEnabled ? (
@@ -167,10 +169,10 @@ function MediaDetailsCard({
                         <Clock className="h-3 w-3" />
                         Display {item.durationSeconds}s
                       </div>
-                      {item.mediaType === "VIDEO" && item.loopEnabled ? (
-                        <div className="flex items-center gap-1 text-xs text-primary">
+                      {item.mediaType === "VIDEO" ? (
+                        <div className={`flex items-center gap-1 text-xs ${item.loopEnabled ? "text-primary" : "text-muted-foreground"}`}>
                           <Repeat className="h-3 w-3" />
-                          Loop
+                          {resolveVideoLoopLabel(item.mediaType, item.loopEnabled)}
                         </div>
                       ) : null}
                       {item.audioEnabled ? (

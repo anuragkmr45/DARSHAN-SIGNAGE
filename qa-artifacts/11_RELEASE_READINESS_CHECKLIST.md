@@ -1,6 +1,15 @@
 # Release Readiness Checklist
 
-This is a future release gate, not a current sign-off. Record owner, date, build/release ID, link to evidence and decision for each item. Builds and isolated unit subsets are not release evidence; no runtime application test or production deployment occurred while preparing this update.
+This is a release gate, not a current sign-off. Record owner, date, build/release ID, link to evidence and decision for each item. Targeted disposable Linux runtime evidence now exists in `evidence/runtime-2026-10-15/runtime-validation.md`; it does not replace the complete platform, security, recovery, soak or production-deployment gates.
+
+## Current Targeted Feature Evidence
+
+- [x] Disposable Linux CMS/API/Electron flow demonstrated independent PDF pages, video Loop On/Off, multiple items, simultaneous slots, corrupt-media advance, schedule hard stop, cached offline restart/recovery, take-down and page-aware PoP persistence.
+- [x] CMS/server/player focused tests and builds passed; Linux AppImage and amd64 `.deb` were created with recorded hashes.
+- [ ] Fresh-machine installation/reboot tests for the generated Linux packages remain pending.
+- [ ] Windows x64 package/install/kiosk/playback and supported physical display matrix remain pending.
+- [ ] Long soak, approved performance limits, two-minute secure lock/cache purge, mixed-version capability rollout, accessibility and full product/security regression remain pending.
+- [ ] Repository-wide server lint requires disposition of the unrelated existing `src/jobs/index.ts:211` `prefer-const` error; feature-scope lint has 0 errors.
 
 ## Build And Environment
 
@@ -25,6 +34,7 @@ This is a future release gate, not a current sign-off. Record owner, date, build
 - [ ] Delegated selected-screen emergencies are accessible from CMS and constrained to approved targets; a two-minute backend outage stops schedule/default/emergency playback and erases media cache. `AUTHZ-03`, `PLAYER-03..04`.
 - [ ] Migration `0044` is rehearsed; the document page-count backfill dry-run is reviewed before apply; malformed/encrypted failures are resolved; rollback retains nullable compatibility columns until affected snapshots/PoP age out. `DATA-05`, `FILE-06`.
 - [ ] Media upload, conversion, selected-page CMS preview, immutable snapshot, capable-player playback, page-aware PoP, webpage preview, chat and reports pass smoke/UAT on actual target hardware. `10_SMOKE_REGRESSION_UAT.md`.
+- [ ] Video-only loop selection survives CMS draft/review/request and API/snapshot round trips; a short video completes at least three native cycles on one mounted occurrence, coexists with the selected PDF page, stops at schedule/takeover/secure-lock boundaries, and has no hidden audio, retry storm, stale callback or material resource growth. `UI-06`, `API-07`, `PLAYER-11`, `PLAYER-12`, `OBS-04`, `PERF-06`; R-24.
 - [ ] Every target player has advertised `pdf_page_selection_v1`, or schedules using page >1 are demonstrably blocked. Page 1 remains compatible during rollout. `API-06`, `COMP-04`.
 - [ ] Presentation and exposed Requests API authorization gaps have been assessed. Requests functional workflow, SSO runtime login, API-key business authentication and automatic webhook delivery are not release acceptance features.
 - [ ] Human policies remaining in BQ-007/011/012/013/014/015/016/017/018/019/020 are answered or recorded as explicit accepted scope limits. A `TBD` affecting data exposure, recovery, capacity or critical playback cannot be silently converted to Pass.

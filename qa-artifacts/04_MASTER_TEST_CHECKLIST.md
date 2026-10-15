@@ -1,6 +1,6 @@
 # Master Human QA Checklist
 
-Baseline: `release-01` / `607440c12a8b476149253aac77bbbdcf3c1d960b` plus the 2026-10-15 document-page-selection working-tree delta. Planning only. Execute only on authorized isolated test environments. Each checkbox names detailed rows in `05_TEST_CASES.csv`; record actual status, evidence and defect IDs there. `01_BUSINESS_RULES.md` defines requirement provenance; an implemented rule is not automatically an approved acceptance rule.
+Baseline: `release-01` / `8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2` plus the 2026-10-15 video-loop reliability working-tree delta. This remains the master plan; a targeted disposable Linux feature run has partial evidence in `evidence/runtime-2026-10-15/runtime-validation.md`. Execute remaining work only on authorized isolated test environments. Each checkbox names detailed rows in `05_TEST_CASES.csv`; record actual status, evidence and defect IDs there. `01_BUSINESS_RULES.md` defines requirement provenance; an implemented rule is not automatically an approved acceptance rule.
 
 ## Identity, Access And Privacy
 
@@ -18,6 +18,9 @@ Baseline: `release-01` / `607440c12a8b476149253aac77bbbdcf3c1d960b` plus the 202
 - [ ] `FILE-03`, `FILE-04`, `FILE-06`: native PDF and converted `.ppt/.pptx/.doc/.docx/.xls/.xlsx/.csv` stay PROCESSING until final-PDF page inspection; encrypted/malformed output fails; valid page counts match the playable PDF.
 - [ ] `UI-05`, `API-05`, `API-06`, `DATA-05`, `CONC-06`: each occurrence defaults to page 1, accepts only an in-range integer, can reuse one document with different pages, previews the chosen page, saves atomically, freezes it in the snapshot, and handles legacy nulls.
 - [ ] `PLAYER-08`, `PLAYER-10`, `COMP-04`, `PERF-05`: the selected page—not always page 1—renders with correct contain fit on approved browsers/displays; page-only updates refresh playback; multi-slot/high-DPI PDFs remain within the raster budget; do not expect all-page progression.
+- [ ] `UI-06`, `API-07`: Loop video is occurrence-specific, visible in author/review/request views, survives draft/API/publish round trips, defaults legacy values to Off, normalizes non-video over-posting to false, and rejects duplicate explicit same-slot order without a partial replacement.
+- [ ] `PLAYER-11`: a loop-enabled single video repeats complete native media cycles on one mounted element and active identity until schedule end; Loop Off plays once; item display duration does not remount the successful single item.
+- [ ] `PLAYER-12`: late join/restart uses decoded-duration modulo; rejected play, load/decode error, stall and unexpected end recover visibly and within bounds; multiple slots remain independent; multi-item slots advance; video plus selected-PDF playback and every takeover/end path clean up safely.
 - [ ] `FILE-05`: delete permission, reference conflict, soft/hard object removal, partial S3 failure, chat cleanup and no accidental recycle promise; BQ-020 recoverability is TBD.
 - [ ] `FUN-01..02`, `UI-01`: layout bounds/slots, presentation timing/order/fit/audio, CMS form validation and error recovery.
 - [ ] `FUN-08`, `PLAYER-09`: public/private HTTPS policy, redirects, resource hosts, invalid trust, login/error page readiness, preview fallback and crash recovery. The code has no preview-age gate or login handoff; required page classes/acceptable preview age remain BQ-011.
@@ -38,6 +41,7 @@ Baseline: `release-01` / `607440c12a8b476149253aac77bbbdcf3c1d960b` plus the 202
 - [ ] `FUN-09..10`, `CONC-04`: DM/group/forum membership, moderation, attachments, message order, notifications, unread counters and reconnect.
 - [ ] `DATA-04`, `PLAYER-07`: actual PoP duration, deduplication, 100-event/512-KiB memory and 32-file/derived-byte spool budgets, discard counters, replay and media-purge preservation. The code does not guarantee lossless offline evidence; acceptable loss remains BQ-013.
 - [ ] `OBS-03`: selected document page remains intact through live telemetry, offline spool/replay, idempotency, PoP database/list/CMS and CSV export; non-document/legacy rows remain compatible.
+- [ ] `OBS-04`: internal native loop cycles retain one active occurrence identity, failures and boundary reasons are diagnosable once without signed URL/secret leakage, and PoP meaning is explicitly characterized before acceptance.
 - [ ] `FUN-11`, `UI-04`: current online fraction versus historical uptime, null/zero denominator, PoP ended_at status, UTC/database/browser timezone differences, filters and PDF export. Reporting meaning/day remains BQ-014.
 - [ ] `UI-02..03`: route/action visibility, direct URL permission enforcement, keyboard/focus/labels/errors and assistive technology against the BQ-016 target.
 
@@ -49,7 +53,7 @@ Baseline: `release-01` / `607440c12a8b476149253aac77bbbdcf3c1d960b` plus the 202
 - [ ] `BKP-01..03`: actual full off-host backup, contract buckets including logs-auth, independent clean restore, hashes, signed evidence, archive safety, failed migration recovery and old/new schema compatibility. RPO/RTO and retention remain BQ-015/018.
 - [ ] `OBS-01..02`: liveness versus readiness, worker heartbeat, dependency failures, metrics/auth/TLS/alert evaluation and log redaction.
 - [ ] `REL-01..02`: Valkey/WSS outage fallback, API/worker outage, retry/restart, idempotent processing and convergence without silently using stale content.
-- [ ] `PERF-01..04`: plan baseline load, saturation/stress, reconnect/emergency spike and multi-day soak on isolated representative hardware. No performance execution occurred; fleet size, SLO and accepted loss thresholds remain BQ-017.
+- [ ] `PERF-01..04`, `PERF-06`: plan baseline load, saturation/stress, reconnect/emergency spike, multi-day soak, and long-running multi-slot video loops on isolated representative hardware. No performance execution occurred; fleet size, SLO and accepted loss thresholds remain BQ-017.
 - [ ] `BKP-01`, `PERF-04`: compare actual archive/retention behavior with required data-class lifetimes. A configured retention value is not evidence that pruning runs. BQ-015/020 remain business inputs.
 
 ## Case Design Rules
