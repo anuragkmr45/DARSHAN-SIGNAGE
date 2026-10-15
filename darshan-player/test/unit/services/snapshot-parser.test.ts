@@ -32,6 +32,22 @@ describe('Snapshot Parser', () => {
     expect(parsed.items[0].remoteUrl).to.equal('https://cdn.example.com/media-1.jpg')
   })
 
+  it('normalizes selected PDF pages and legacy missing values', () => {
+    const selected = parseSnapshotResponse({
+      id: 'snap-pdf-page',
+      items: [{ id: 'pdf-1', media_id: 'pdf-1', type: 'pdf', page_number: 4 }],
+      media_urls: { 'pdf-1': 'https://cdn.example.com/document.pdf' },
+    })
+    const legacy = parseSnapshotResponse({
+      id: 'snap-pdf-legacy',
+      items: [{ id: 'pdf-1', media_id: 'pdf-1', type: 'pdf' }],
+      media_urls: { 'pdf-1': 'https://cdn.example.com/document.pdf' },
+    })
+
+    expect(selected.items[0].pageNumber).to.equal(4)
+    expect(legacy.items[0].pageNumber).to.equal(1)
+  })
+
   it('should parse emergency media override', () => {
     const raw = {
       id: 'snap-2',

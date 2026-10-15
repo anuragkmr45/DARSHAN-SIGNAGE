@@ -54,7 +54,6 @@ import { resolveMediaAccess } from '@/utils/media-access';
 import {
   inferUploadMediaType,
   normalizeWebpageUrl,
-  requiresDocumentConversion,
 } from '@/utils/media-processing';
 import {
   queueDocumentConvert,
@@ -383,14 +382,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       return processingMedia;
     }
 
-    if (
-      requiresDocumentConversion({
-        type: media.type,
-        sourceContentType,
-        filename: media.name,
-        objectKey: media.source_object_key,
-      })
-    ) {
+    if (media.type === 'DOCUMENT') {
       const processingMedia = await mediaRepo.update(media.id, {
         ...updateBase,
         status: 'PROCESSING',

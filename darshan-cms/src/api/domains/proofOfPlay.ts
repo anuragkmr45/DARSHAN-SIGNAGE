@@ -13,6 +13,7 @@ const normalizeProofOfPlay = (item: Record<string, unknown>): ProofOfPlay => {
     media_id: String(item.media_id ?? ""),
     schedule_id: typeof item.schedule_id === "string" ? item.schedule_id : undefined,
     presentation_id: typeof item.presentation_id === "string" ? item.presentation_id : undefined,
+    page_number: typeof item.page_number === "number" ? item.page_number : null,
     status: endedAt ? "COMPLETED" : "INCOMPLETE",
     played_at: startedAt || createdAt || new Date(0).toISOString(),
     started_at: startedAt,

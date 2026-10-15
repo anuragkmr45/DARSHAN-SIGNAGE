@@ -817,7 +817,7 @@ class Player {
    * Render PDF
    */
   private async renderPDF(item: TimelineItem): Promise<HTMLElement> {
-    return createPdfPlaybackElement(this.getMediaSource(item))
+    return createPdfPlaybackElement(this.getMediaSource(item), item.pageNumber ?? 1)
   }
 
   /**
@@ -1370,6 +1370,7 @@ class Player {
             schedule_id: scheduleId || null,
             playback_instance_id: globalThis.crypto.randomUUID(),
             started_at: new Date(Date.now() + serverTimeOffsetMs).toISOString(),
+            page_number: item.type === 'pdf' ? item.pageNumber ?? 1 : undefined,
           })
         }
         if (shouldRepeatScheduledItem(slot.items.length, item) && !resumeDecision.completed) {

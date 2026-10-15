@@ -462,6 +462,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
                       media_id: pi.media_id,
                       order: pi.order,
                       duration_seconds: pi.duration_seconds,
+                      page_number: pi.page_number ?? (pi.media?.type === 'DOCUMENT' ? 1 : null),
                       media: pi.media
                         ? {
                             id: pi.media.id,
@@ -472,6 +473,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
                             source_object_key: pi.media.source_object_key,
                             ready_object_id: pi.media.ready_object_id,
                             thumbnail_object_id: pi.media.thumbnail_object_id,
+                            page_count: pi.media.page_count ?? null,
                           }
                         : null,
                     })),
@@ -484,6 +486,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
                       fit_mode: si.fit_mode,
                       audio_enabled: si.audio_enabled,
                       loop_enabled: si.loop_enabled ?? false,
+                      page_number: si.page_number ?? (si.media?.type === 'DOCUMENT' ? 1 : null),
                       media: si.media
                         ? {
                             id: si.media.id,
@@ -494,6 +497,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
                             source_object_key: si.media.source_object_key,
                             ready_object_id: si.media.ready_object_id,
                             thumbnail_object_id: si.media.thumbnail_object_id,
+                            page_count: si.media.page_count ?? null,
                           }
                         : null,
                     })),

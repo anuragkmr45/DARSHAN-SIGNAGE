@@ -454,6 +454,51 @@ describe('Snapshot Manager', () => {
     expect(playlist?.items[0]?.localUrl).to.equal(undefined)
   })
 
+  it('should restore a selected PDF page from the cached offline snapshot', async () => {
+    const baseTime = new Date('2026-03-14T09:00:05.000Z')
+    clock = sandbox.useFakeTimers({ now: baseTime, shouldAdvanceTime: false })
+    const snapshotFile = path.join(cacheDir, 'last-snapshot.json')
+    fs.writeFileSync(
+      snapshotFile,
+      JSON.stringify({
+        snapshot_id: 'snap-pdf-page',
+        schedule: {
+          id: 'sched-pdf-page',
+          items: [{
+            id: 'window-pdf-page',
+            start_at: '2026-03-14T09:00:00.000Z',
+            end_at: '2026-03-14T09:30:00.000Z',
+            presentation: {
+              id: 'presentation-pdf-page',
+              items: [{
+                id: 'presentation-item-pdf-page',
+                media_id: 'document-1',
+                order: 0,
+                duration_seconds: 15,
+                page_number: 4,
+                media: {
+                  id: 'document-1',
+                  name: 'Runbook.pdf',
+                  type: 'DOCUMENT',
+                  content_type: 'application/pdf',
+                },
+              }],
+            },
+          }],
+        },
+        media_urls: { 'document-1': 'https://cdn.example.com/runbook.pdf' },
+      })
+    )
+
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const snapshotManager = getSnapshotManager()
+    await clock.tickAsync(0)
+
+    const playlist = snapshotManager.getCurrentPlaylist()
+    expect(playlist?.items[0]?.type).to.equal('pdf')
+    expect(playlist?.items[0]?.pageNumber).to.equal(4)
+  })
+
   it('should clear identity-bound cached snapshot state during hard reset', async () => {
     const snapshotFile = path.join(cacheDir, 'last-snapshot.json')
     fs.writeFileSync(

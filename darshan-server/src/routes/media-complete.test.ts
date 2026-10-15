@@ -13,11 +13,13 @@ const {
   getPresignedUrlMock,
   queueFFmpegTranscodeMock,
   queueFFmpegThumbnailMock,
+  queueDocumentConvertMock,
 } = vi.hoisted(() => ({
   headObjectMock: vi.fn(),
   getPresignedUrlMock: vi.fn(),
   queueFFmpegTranscodeMock: vi.fn(),
   queueFFmpegThumbnailMock: vi.fn(),
+  queueDocumentConvertMock: vi.fn(),
 }));
 
 vi.mock('@/s3', async () => {
@@ -35,6 +37,7 @@ vi.mock('@/jobs', async () => {
     ...actual,
     queueFFmpegTranscode: queueFFmpegTranscodeMock,
     queueFFmpegThumbnail: queueFFmpegThumbnailMock,
+    queueDocumentConvert: queueDocumentConvertMock,
   };
 });
 
@@ -115,9 +118,11 @@ describe('Media Routes - authoritative upload finalization', () => {
     getPresignedUrlMock.mockReset();
     queueFFmpegTranscodeMock.mockReset();
     queueFFmpegThumbnailMock.mockReset();
+    queueDocumentConvertMock.mockReset();
     getPresignedUrlMock.mockResolvedValue('http://signed.test/object');
     queueFFmpegTranscodeMock.mockResolvedValue(undefined);
     queueFFmpegThumbnailMock.mockResolvedValue(undefined);
+    queueDocumentConvertMock.mockResolvedValue(undefined);
   });
 
   const insertMedia = async (params: {
@@ -231,6 +236,31 @@ describe('Media Routes - authoritative upload finalization', () => {
       .where(eq(schema.media.id, media.id));
     expect(updated?.status).toBe('PROCESSING');
     expect(updated?.source_object_id).toBeTruthy();
+  });
+
+  it('returns PROCESSING for native PDF uploads until page metadata is inspected', async () => {
+    const media = await insertMedia({ type: 'DOCUMENT', sourceSize: 2048 });
+    headObjectMock.mockResolvedValue({
+      ContentLength: 2048,
+      ContentType: 'application/pdf',
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/media/${media.id}/complete`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+      payload: {
+        content_type: 'application/pdf',
+        size: 2048,
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(response.body)).toMatchObject({ status: 'PROCESSING', page_count: null });
+    expect(queueDocumentConvertMock).toHaveBeenCalledWith({
+      mediaId: media.id,
+      sourceObjectId: expect.any(String),
+    });
   });
 
   it('rejects completion when the storage object is missing', async () => {

@@ -166,6 +166,7 @@ const proofOfPlaySchema = z.object({
   scene_id: z.string().optional(),
   slot_id: z.string().optional(),
   item_id: z.string().optional(),
+  page_number: z.number().int().positive().optional(),
   start_time: z.string().datetime(),
   end_time: z.string().datetime(),
   duration: z.number().int().positive(),
@@ -1039,6 +1040,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           endTime: data.end_time,
           duration: data.duration,
           completed: data.completed,
+          pageNumber: data.page_number ?? null,
         });
         const proofOfPlayJob = {
           deviceId: data.device_id,
@@ -1048,6 +1050,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           sceneId: data.scene_id ?? null,
           slotId: data.slot_id ?? null,
           itemId: data.item_id ?? null,
+          pageNumber: data.page_number ?? null,
           startTime: data.start_time,
           endTime: data.end_time,
           duration: data.duration,

@@ -246,6 +246,7 @@ export class PlaybackEngine extends EventEmitter {
     logger.info(
       {
         itemId: item.id,
+        pageNumber: item.type === 'pdf' ? item.pageNumber ?? 1 : undefined,
         type: item.type,
         displayMs: item.displayMs,
       },
@@ -268,6 +269,7 @@ export class PlaybackEngine extends EventEmitter {
         mediaId,
         playbackInstanceId: this.currentPlaybackInstanceId,
         itemId: item.id,
+        pageNumber: item.type === 'pdf' ? item.pageNumber ?? 1 : undefined,
         startedAt: new Date(scheduledItem.startTime).toISOString(),
       })
     }
@@ -429,6 +431,7 @@ export class PlaybackEngine extends EventEmitter {
       fit: item.fit,
       muted: item.muted,
       loop: item.loop,
+      pageNumber: item.type === 'pdf' ? item.pageNumber ?? 1 : null,
       sha256: item.sha256 ?? null,
       transitionDurationMs: item.transitionDurationMs,
       remoteUrl:

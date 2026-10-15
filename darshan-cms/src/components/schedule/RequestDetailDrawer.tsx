@@ -29,7 +29,7 @@ import { useToast } from "@/hooks/use-toast";
 import { scheduleRequestsApi } from "@/api/domains/scheduleRequests";
 import { schedulesApi } from "@/api/domains/schedules";
 import { queryKeys } from "@/api/queryKeys";
-import type { DisplayPreflightResponse, MediaAsset, ScheduleRequestListItem } from "@/api/types";
+import type { DisplayPreflightResponse, MediaAsset, PresentationSlot, ScheduleRequestListItem } from "@/api/types";
 import { MediaPreview } from "@/components/common/MediaPreview";
 import { AspectFrame } from "@/components/common/AspectFrame";
 import { resolveMediaDisplayName } from "@/lib/media";
@@ -142,9 +142,11 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
 
   const mediaById = useMemo(() => new Map(mediaItems.map((media) => [media.id, media])), [mediaItems]);
   const slotMediaById = useMemo(() => {
-    const map = new Map<string, MediaAsset | undefined>();
-    slotsForPresentation.forEach((slot) => {
-      map.set(slot.slot_id, mediaById.get(slot.media_id));
+    const map = new Map<string, { slot: PresentationSlot; media: MediaAsset | undefined }>();
+    [...slotsForPresentation]
+      .sort((left, right) => left.order - right.order)
+      .forEach((slot) => {
+      if (!map.has(slot.slot_id)) map.set(slot.slot_id, { slot, media: mediaById.get(slot.media_id) });
     });
     return map;
   }, [slotsForPresentation, mediaById]);
@@ -660,6 +662,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                           ) : null}
                           <Badge variant="secondary">{slot.fit_mode}</Badge>
                           <Badge variant="secondary">Audio {slot.audio_enabled ? "On" : "Off"}</Badge>
+                          {typeof slot.page_number === "number" ? (
+                            <Badge variant="secondary">Page {slot.page_number}</Badge>
+                          ) : null}
                         </div>
                         <p className="text-xs text-muted-foreground mt-2">Media ID: {slot.media_id}</p>
                       </div>
@@ -753,7 +758,8 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                     className="relative w-[280px] max-w-full overflow-hidden rounded-lg border-2 bg-muted/30 mx-auto"
                   >
                     {layoutSlots.map((slot) => {
-                      const media = slotMediaById.get(slot.id);
+                      const slotEntry = slotMediaById.get(slot.id);
+                      const media = slotEntry?.media;
                       const mediaLabel = resolveMediaDisplayName(media);
                       const contentType = media?.content_type || media?.source_content_type || "";
                       const isImage =
@@ -773,18 +779,14 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                             height: `${slot.h * 100}%`,
                           }}
                         >
-                          {isImage ? (
-                            <img
-                              src={media?.media_url ?? ""}
-                              alt={mediaLabel || "Media"}
+                          {isImage || isVideo || Boolean(media?.media_url) ? (
+                            <MediaPreview
+                              media={media}
                               className="h-full w-full object-contain"
-                            />
-                          ) : isVideo ? (
-                            <video
-                              src={media?.media_url ?? ""}
-                              className="h-full w-full object-contain"
-                              muted
-                              preload="metadata"
+                              fit="contain"
+                              pdfPage={slotEntry?.slot.page_number ?? 1}
+                              videoControls={false}
+                              videoMuted
                             />
                           ) : (
                             <div className="h-full w-full flex flex-col items-center justify-center gap-1 p-2 text-center text-xs text-muted-foreground">
@@ -821,8 +823,12 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                         aspectRatio={screen.aspect_ratio}
                         className="w-full overflow-hidden rounded-md border border-border/30 mb-3"
                       >
-                          {screenPreviewMedia ? (
-                            <MediaPreview media={screenPreviewMedia} className="w-full h-full object-contain" />
+                          {screenPreviewMedia?.media ? (
+                            <MediaPreview
+                              media={screenPreviewMedia.media}
+                              pdfPage={screenPreviewMedia.slot.page_number ?? 1}
+                              className="w-full h-full object-contain"
+                            />
                           ) : (
                           <div className="h-full w-full flex items-center justify-center text-xs text-muted-foreground">
                             No preview

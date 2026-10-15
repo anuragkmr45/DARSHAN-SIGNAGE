@@ -112,6 +112,7 @@ describe('device telemetry proof-of-play idempotency', () => {
       end_time: endTime,
       duration: 15,
       completed: true,
+      page_number: 4,
     };
 
     const firstResponse = await server.inject({
@@ -143,6 +144,7 @@ describe('device telemetry proof-of-play idempotency', () => {
       endTime,
       duration: 15,
       completed: true,
+      pageNumber: 4,
     });
 
     const rows = await db
@@ -151,6 +153,7 @@ describe('device telemetry proof-of-play idempotency', () => {
       .where(eq(schema.proofOfPlay.idempotency_key, idempotencyKey));
 
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.page_number).toBe(4);
     expect(putObjectMock).toHaveBeenCalledOnce();
   });
 });

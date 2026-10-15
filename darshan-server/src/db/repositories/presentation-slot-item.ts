@@ -20,10 +20,39 @@ export class PresentationSlotItemRepository {
     fit_mode?: string;
     audio_enabled?: boolean;
     loop_enabled?: boolean;
+    page_number?: number | null;
   }) {
     const db = getDatabase();
     const [item] = await db.insert(schema.presentationSlotItems).values(data).returning();
     return item;
+  }
+
+  async replaceByPresentation(
+    presentationId: string,
+    items: Array<{
+      slot_id: string;
+      media_id: string;
+      order: number;
+      duration_seconds?: number;
+      fit_mode?: string;
+      audio_enabled?: boolean;
+      loop_enabled?: boolean;
+      page_number?: number | null;
+    }>
+  ) {
+    const db = getDatabase();
+    return db.transaction(async (tx) => {
+      await tx
+        .delete(schema.presentationSlotItems)
+        .where(eq(schema.presentationSlotItems.presentation_id, presentationId));
+
+      if (items.length === 0) return [];
+
+      return tx
+        .insert(schema.presentationSlotItems)
+        .values(items.map((item) => ({ ...item, presentation_id: presentationId })))
+        .returning();
+    });
   }
 
   async findById(id: string) {

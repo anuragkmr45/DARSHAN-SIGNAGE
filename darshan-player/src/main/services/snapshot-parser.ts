@@ -110,6 +110,15 @@ function normalizeItem(
   const muted = Boolean(input.muted ?? false)
   const transitionDurationMs = Number(input.transition_ms ?? input.transitionDurationMs ?? 0) || 0
   const loop = Boolean(input.loop ?? input.loop_enabled ?? false)
+  const explicitPage = input.page_number ?? input.pageNumber
+  const pageNumber =
+    type !== 'pdf'
+      ? undefined
+      : explicitPage == null
+        ? 1
+        : typeof explicitPage === 'number' && Number.isSafeInteger(explicitPage) && explicitPage > 0
+          ? explicitPage
+          : 0
 
   const id = input.id || mediaId || `item-${Math.random().toString(36).slice(2, 8)}`
 
@@ -122,6 +131,7 @@ function normalizeItem(
     fit,
     muted,
     loop,
+    pageNumber,
     sha256: input.sha256,
     meta: {
       ...(input.meta && typeof input.meta === 'object' ? input.meta : {}),

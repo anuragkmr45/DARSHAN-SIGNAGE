@@ -12,6 +12,7 @@ export interface LiveMirrorMedia {
   loop: boolean;
   muted: boolean;
   contentType?: string;
+  pageNumber?: number;
 }
 
 export interface LiveMirrorSlot {
@@ -43,6 +44,7 @@ type SnapshotMediaLike = Partial<MediaAsset> & {
   fit_mode?: string | null;
   loop_enabled?: boolean | null;
   audio_enabled?: boolean | null;
+  page_number?: number | null;
 };
 
 type SnapshotPresentationEntry = SnapshotMediaLike & {
@@ -130,6 +132,7 @@ const buildLiveMirrorMedia = (
     loop: entry.loop_enabled === true,
     muted: entry.audio_enabled === true ? false : true,
     contentType: resolveMediaMimeType(entry),
+    pageNumber: kind === "pdf" ? Number(entry.page_number ?? 1) : undefined,
   };
 };
 

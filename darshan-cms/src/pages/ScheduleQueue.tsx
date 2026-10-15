@@ -382,6 +382,7 @@ export default function ScheduleQueue() {
                                 type={item.type}
                                 alt={item.name ?? "Media preview"}
                                 className="h-20 w-28 flex-shrink-0"
+                                pdfPage={item.page_number ?? 1}
                               />
                               <div className="flex-1 space-y-1 text-sm">
                                 <p className="font-medium">{item.name ?? "Untitled media"}</p>
@@ -395,6 +396,9 @@ export default function ScheduleQueue() {
                                 )}
                                 {item.fit && (
                                   <p className="text-xs text-muted-foreground">Fit: {item.fit}</p>
+                                )}
+                                {typeof item.page_number === "number" && (
+                                  <p className="text-xs text-muted-foreground">Page: {item.page_number}</p>
                                 )}
                                 {typeof item.muted === "boolean" && (
                                   <p className="text-xs text-muted-foreground">

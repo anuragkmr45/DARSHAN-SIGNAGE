@@ -7,6 +7,7 @@
   "include": [
     "src/**/*.ts",
     "scripts/admin-cli.ts",
+    "scripts/backfill-document-page-counts.ts",
     "scripts/production-bootstrap.ts",
     "scripts/migrate-production.ts",
     "scripts/seed.ts"

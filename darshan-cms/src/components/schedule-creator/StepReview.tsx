@@ -36,6 +36,7 @@ function SlotMediaPreview({ item, className }: { item: SlotMedia; className: str
       videoMuted
       videoAutoPlay={item.mediaType === "VIDEO"}
       videoLoop={item.mediaType === "VIDEO" ? item.loopEnabled : false}
+      pdfPage={item.mediaType === "DOCUMENT" ? item.pageNumber ?? 1 : undefined}
     />
   );
 }
@@ -140,7 +141,7 @@ function MediaDetailsCard({
             <div className="space-y-2">
               {slot.media.map((item, index) => (
                 <div
-                  key={`${item.slotId}-${item.mediaId}-${index}`}
+                  key={item.clientItemId}
                   className="flex items-center gap-3 rounded-md bg-muted/50 p-2"
                 >
                   <SlotMediaPreview item={item} className="h-14 w-16 flex-shrink-0" />
@@ -157,6 +158,11 @@ function MediaDetailsCard({
                       <Badge variant="outline" className="text-xs">
                         {item.fitMode}
                       </Badge>
+                      {item.mediaType === "DOCUMENT" ? (
+                        <Badge variant="secondary" className="text-xs">
+                          Page {item.pageNumber ?? 1}{item.pageCount ? ` of ${item.pageCount}` : ""}
+                        </Badge>
+                      ) : null}
                       <div className="flex items-center gap-1 text-xs text-muted-foreground">
                         <Clock className="h-3 w-3" />
                         Display {item.durationSeconds}s

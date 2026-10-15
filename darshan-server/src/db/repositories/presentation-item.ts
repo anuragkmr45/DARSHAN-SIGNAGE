@@ -16,6 +16,7 @@ export class PresentationItemRepository {
     media_id: string;
     order: number;
     duration_seconds?: number;
+    page_number?: number | null;
   }) {
     const db = getDatabase();
     const [item] = await db.insert(schema.presentationItems).values(data).returning();

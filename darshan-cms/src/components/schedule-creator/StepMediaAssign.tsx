@@ -13,7 +13,7 @@ import {
   Upload,
   Repeat,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +47,7 @@ import { ApiError } from "@/api/apiClient";
 import type { Layout } from "@/pages/Layouts";
 import type { SlotMedia } from "@/pages/ScheduleCreator";
 import { resolveMediaDisplayName } from "@/lib/media";
+import { createUuid } from "@/lib/uuid";
 
 interface StepMediaAssignProps {
   layout: Layout;
@@ -94,7 +95,7 @@ function SlotMediaPreview({
   item,
   className,
 }: {
-  item: Pick<SlotMedia, "mediaName" | "mediaType" | "mediaUrl" | "mediaContentType" | "fitMode" | "loopEnabled">;
+  item: Pick<SlotMedia, "mediaName" | "mediaType" | "mediaUrl" | "mediaContentType" | "fitMode" | "loopEnabled" | "pageNumber">;
   className: string;
 }) {
   return (
@@ -108,6 +109,7 @@ function SlotMediaPreview({
       videoMuted
       videoAutoPlay={item.mediaType === "VIDEO"}
       videoLoop={item.mediaType === "VIDEO" ? item.loopEnabled : false}
+      pdfPage={item.mediaType === "DOCUMENT" ? item.pageNumber ?? 1 : undefined}
     />
   );
 }
@@ -142,6 +144,49 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
   }, [isError, error, toast]);
 
   const mediaItems = useMemo(() => (Array.isArray(data?.items) ? data.items : []), [data]);
+  const missingDocumentPageCountIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          slotMedia
+            .filter((item) => item.mediaType === "DOCUMENT" && item.pageCount == null)
+            .map((item) => item.mediaId),
+        ),
+      ),
+    [slotMedia],
+  );
+  const restoredDocumentQueries = useQueries({
+    queries: missingDocumentPageCountIds.map((mediaId) => ({
+      queryKey: ["media", "schedule-creator", "page-count", mediaId],
+      queryFn: () => mediaApi.getById(mediaId),
+      staleTime: 30_000,
+      retry: false,
+    })),
+  });
+
+  useEffect(() => {
+    const resolvedCounts = new Map<string, number>();
+    restoredDocumentQueries.forEach((query, index) => {
+      const pageCount = query.data?.page_count;
+      if (typeof pageCount === "number" && Number.isSafeInteger(pageCount) && pageCount > 0) {
+        resolvedCounts.set(missingDocumentPageCountIds[index], pageCount);
+      }
+    });
+    if (resolvedCounts.size === 0) return;
+
+    let changed = false;
+    const hydrated = slotMedia.map((item) => {
+      const pageCount = item.pageCount ?? resolvedCounts.get(item.mediaId);
+      if (pageCount == null || pageCount === item.pageCount) return item;
+      changed = true;
+      return {
+        ...item,
+        pageCount,
+        pageNumber: Math.min(Math.max(item.pageNumber ?? 1, 1), pageCount),
+      };
+    });
+    if (changed) onUpdateSlotMedia(hydrated);
+  }, [missingDocumentPageCountIds, onUpdateSlotMedia, restoredDocumentQueries, slotMedia]);
 
   const filteredMedia = useMemo(() => {
     const query = mediaSearch.trim().toLowerCase();
@@ -163,6 +208,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
     const hasAudioElsewhere = slotMedia.some((item) => item.slotId !== selectedSlotId && item.audioEnabled);
 
     const newSlotMedia: SlotMedia = {
+      clientItemId: createUuid(),
       slotId: selectedSlotId,
       mediaId: media.id,
       mediaName: resolveMediaDisplayName(media),
@@ -172,9 +218,11 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
       mediaContentType: media.content_type ?? media.source_content_type ?? null,
       order: newOrder,
       durationSeconds: media.duration_seconds || 10,
-      fitMode: "cover",
+      fitMode: mediaType === "DOCUMENT" ? "contain" : "cover",
       audioEnabled: !hasAudioElsewhere && mediaType === "VIDEO",
       loopEnabled: false,
+      pageNumber: mediaType === "DOCUMENT" ? 1 : undefined,
+      pageCount: mediaType === "DOCUMENT" ? media.page_count ?? null : null,
     };
 
     onUpdateSlotMedia([...slotMedia, newSlotMedia]);
@@ -185,18 +233,17 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
     });
   };
 
-  const handleRemoveMedia = (slotId: string, mediaId: string) => {
-    onUpdateSlotMedia(slotMedia.filter((item) => !(item.slotId === slotId && item.mediaId === mediaId)));
+  const handleRemoveMedia = (clientItemId: string) => {
+    onUpdateSlotMedia(slotMedia.filter((item) => item.clientItemId !== clientItemId));
   };
 
   const handleUpdateMediaSettings = (
-    slotId: string,
-    mediaId: string,
+    clientItemId: string,
     updates: Partial<SlotMedia>,
   ) => {
     onUpdateSlotMedia(
       slotMedia.map((item) => {
-        if (item.slotId === slotId && item.mediaId === mediaId) {
+        if (item.clientItemId === clientItemId) {
           return {
             ...item,
             ...updates,
@@ -207,7 +254,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
           };
         }
 
-        if (updates.audioEnabled && item.slotId !== slotId) {
+        if (updates.audioEnabled && item.clientItemId !== clientItemId) {
           return { ...item, audioEnabled: false };
         }
 
@@ -344,7 +391,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
               ) : (
                 <div className="space-y-3">
                   {getSlotMedia(selectedSlotId).map((item, index) => (
-                    <Card key={`${item.slotId}-${item.mediaId}`} className="p-3">
+                    <Card key={item.clientItemId} className="p-3">
                       <div className="flex items-start gap-3">
                         <div className="flex cursor-grab items-center gap-2 text-muted-foreground">
                           <GripVertical className="h-4 w-4" />
@@ -374,6 +421,11 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                                     Loop enabled
                                   </Badge>
                                 ) : null}
+                                {item.mediaType === "DOCUMENT" ? (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Page {item.pageNumber ?? 1}{item.pageCount ? ` of ${item.pageCount}` : ""}
+                                  </Badge>
+                                ) : null}
                               </div>
                             </div>
                           </div>
@@ -386,7 +438,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                                 min={1}
                                 value={item.durationSeconds}
                                 onChange={(event) =>
-                                  handleUpdateMediaSettings(item.slotId, item.mediaId, {
+                                  handleUpdateMediaSettings(item.clientItemId, {
                                     durationSeconds: parseInt(event.target.value, 10) || 10,
                                   })
                                 }
@@ -394,12 +446,56 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                               />
                             </div>
 
+                            {item.mediaType === "DOCUMENT" ? (
+                              <div className="space-y-1">
+                                <Label htmlFor={`page-${item.clientItemId}`} className="text-xs">
+                                  Document page{item.pageCount ? ` (1–${item.pageCount})` : ""}
+                                </Label>
+                                {item.pageCount ? (
+                                  <>
+                                    <Input
+                                      id={`page-${item.clientItemId}`}
+                                      aria-label={`Page for ${item.mediaName}`}
+                                      aria-invalid={
+                                        !Number.isSafeInteger(item.pageNumber) ||
+                                        (item.pageNumber ?? 0) < 1 ||
+                                        (item.pageNumber ?? 0) > item.pageCount
+                                      }
+                                      type="number"
+                                      min={1}
+                                      max={item.pageCount}
+                                      step={1}
+                                      value={item.pageNumber ?? 1}
+                                      onChange={(event) => {
+                                        const pageNumber = Number(event.target.value);
+                                        handleUpdateMediaSettings(item.clientItemId, {
+                                          pageNumber: Number.isSafeInteger(pageNumber) ? pageNumber : 0,
+                                        });
+                                      }}
+                                      className="h-8"
+                                    />
+                                    {!Number.isSafeInteger(item.pageNumber) ||
+                                    (item.pageNumber ?? 0) < 1 ||
+                                    (item.pageNumber ?? 0) > item.pageCount ? (
+                                      <p className="text-[11px] text-destructive" role="alert">
+                                        Enter a whole page number from 1 to {item.pageCount}.
+                                      </p>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <p className="rounded border bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+                                    Page 1 — page count is still being prepared.
+                                  </p>
+                                )}
+                              </div>
+                            ) : null}
+
                             <div className="space-y-1">
                               <Label className="text-xs">Fit mode</Label>
                               <Select
                                 value={item.fitMode}
                                 onValueChange={(value: "cover" | "contain") =>
-                                  handleUpdateMediaSettings(item.slotId, item.mediaId, { fitMode: value })
+                                  handleUpdateMediaSettings(item.clientItemId, { fitMode: value })
                                 }
                               >
                                 <SelectTrigger className="h-8">
@@ -418,13 +514,13 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                             <div className="flex flex-wrap items-center gap-4">
                               <div className="flex items-center gap-2">
                                 <Switch
-                                  id={`audio-${item.mediaId}`}
+                                  id={`audio-${item.clientItemId}`}
                                   checked={item.audioEnabled}
                                   onCheckedChange={(checked) =>
-                                    handleUpdateMediaSettings(item.slotId, item.mediaId, { audioEnabled: checked })
+                                    handleUpdateMediaSettings(item.clientItemId, { audioEnabled: checked })
                                   }
                                 />
-                                <Label htmlFor={`audio-${item.mediaId}`} className="flex items-center gap-1 text-xs">
+                                <Label htmlFor={`audio-${item.clientItemId}`} className="flex items-center gap-1 text-xs">
                                   {item.audioEnabled ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3" />}
                                   Audio {item.audioEnabled ? "On" : "Off"}
                                 </Label>
@@ -432,13 +528,13 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
 
                               <div className="flex items-center gap-2">
                                 <Switch
-                                  id={`loop-${item.mediaId}`}
+                                  id={`loop-${item.clientItemId}`}
                                   checked={item.loopEnabled}
                                   onCheckedChange={(checked) =>
-                                    handleUpdateMediaSettings(item.slotId, item.mediaId, { loopEnabled: checked })
+                                    handleUpdateMediaSettings(item.clientItemId, { loopEnabled: checked })
                                   }
                                 />
-                                <Label htmlFor={`loop-${item.mediaId}`} className="flex items-center gap-1 text-xs">
+                                <Label htmlFor={`loop-${item.clientItemId}`} className="flex items-center gap-1 text-xs">
                                   <Repeat className="h-3 w-3" />
                                   Loop video
                                 </Label>
@@ -451,7 +547,8 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                           variant="ghost"
                           size="icon"
                           className="text-destructive hover:text-destructive"
-                          onClick={() => handleRemoveMedia(item.slotId, item.mediaId)}
+                          aria-label={`Remove ${item.mediaName}`}
+                          onClick={() => handleRemoveMedia(item.clientItemId)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

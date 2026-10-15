@@ -13,7 +13,8 @@ import { createLogger } from '@/utils/logger';
 import { createMediaRepository } from '@/db/repositories/media';
 import { createBackupRun, getLatestBackupRun, runFullBackup } from '@/utils/backup-runs';
 import { getCachedSettings } from '@/utils/settings';
-import { buildSourceFilename } from '@/utils/media-processing';
+import { buildSourceFilename, isPdfDocument, requiresDocumentConversion } from '@/utils/media-processing';
+import { inspectPdfPageCount, PdfInspectionError } from '@/utils/pdf-metadata';
 import { captureWebpagePreview } from '@/utils/webpage-capture';
 import {
   assertWebpageUrlAllowed,
@@ -1166,22 +1167,45 @@ export async function registerJobHandlers() {
         const inputPath = join(tempDir, sourceFilename);
         await fs.writeFile(inputPath, sourceBuffer);
 
-        const outputPdfPath = await convertDocumentToPdf(inputPath, tempDir);
-        const outputBuffer = await fs.readFile(outputPdfPath);
-        const readyKey = `${mediaId}/ready.pdf`;
-        const upload = await putObject(READY_BUCKET, readyKey, outputBuffer, DOCUMENT_READY_CONTENT_TYPE);
-        const readyObject = await upsertStorageObject({
-          bucket: READY_BUCKET,
-          objectKey: readyKey,
-          contentType: DOCUMENT_READY_CONTENT_TYPE,
-          size: outputBuffer.length,
-          sha256: upload.sha256,
+        const nativePdf = isPdfDocument({
+          sourceContentType: media.source_content_type,
+          filename: media.name,
+          objectKey: sourceKey,
         });
+        const shouldConvert = requiresDocumentConversion({
+          type: media.type,
+          sourceContentType: media.source_content_type,
+          filename: media.name,
+          objectKey: sourceKey,
+        });
+        if (!nativePdf && !shouldConvert) {
+          throw new PdfInspectionError('DOCUMENT_PDF_INVALID', 'Unsupported document format');
+        }
+
+        const outputBuffer = nativePdf
+          ? sourceBuffer
+          : await fs.readFile(await convertDocumentToPdf(inputPath, tempDir));
+        const pageCount = await inspectPdfPageCount(outputBuffer);
+
+        let readyObjectId: string | null = media.ready_object_id ?? null;
+        if (!nativePdf) {
+          const readyKey = `${mediaId}/ready.pdf`;
+          const upload = await putObject(READY_BUCKET, readyKey, outputBuffer, DOCUMENT_READY_CONTENT_TYPE);
+          const readyObject = await upsertStorageObject({
+            bucket: READY_BUCKET,
+            objectKey: readyKey,
+            contentType: DOCUMENT_READY_CONTENT_TYPE,
+            size: outputBuffer.length,
+            sha256: upload.sha256,
+          });
+          readyObjectId = readyObject.id;
+        }
 
         await db
           .update(schema.media)
           .set({
-            ready_object_id: readyObject.id,
+            ready_object_id: readyObjectId,
+            page_count: pageCount,
             status: 'READY',
             status_reason: null,
             updated_at: new Date(),
@@ -1189,11 +1213,12 @@ export async function registerJobHandlers() {
           .where(eq(schema.media.id, mediaId));
       } catch (error) {
         logger.error({ error, mediaId }, 'Document conversion failed');
+        const statusReason = error instanceof PdfInspectionError ? error.code : 'DOCUMENT_CONVERSION_FAILED';
         await db
           .update(schema.media)
           .set({
             status: 'FAILED',
-            status_reason: 'DOCUMENT_CONVERSION_FAILED',
+            status_reason: statusReason,
             updated_at: new Date(),
           })
           .where(eq(schema.media.id, mediaId));

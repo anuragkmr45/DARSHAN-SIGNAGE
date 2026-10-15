@@ -219,6 +219,74 @@ describe('Schedule publish codec validation', () => {
     expect(body.error.details?.invalid_references?.[0]?.issue).toBe('MEDIA_NOT_READY');
   });
 
+  it('gates non-default document pages by player capability and freezes the page in the snapshot', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    const mediaId = randomUUID();
+    const presentationId = randomUUID();
+    const scheduleId = randomUUID();
+    const now = new Date();
+    const startAt = new Date(now.getTime() + 5 * 60 * 1000);
+    const endAt = new Date(now.getTime() + 30 * 60 * 1000);
+
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Document page screen',
+      status: 'OFFLINE',
+      device_info: { player_capabilities: { features: [] } },
+    });
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: 'Three page handbook.pdf',
+      type: 'DOCUMENT',
+      status: 'READY',
+      created_by: testUser.id,
+      source_content_type: 'application/pdf',
+      page_count: 3,
+    });
+    await db.insert(schema.presentations).values({
+      id: presentationId,
+      name: 'Selected page presentation',
+      created_by: testUser.id,
+    });
+    await db.insert(schema.presentationItems).values({
+      id: randomUUID(), presentation_id: presentationId, media_id: mediaId, order: 0,
+      duration_seconds: 10, page_number: 2,
+    });
+    await db.insert(schema.schedules).values({
+      id: scheduleId, name: 'Selected page schedule', start_at: startAt, end_at: endAt,
+      is_active: true, created_by: testUser.id,
+    });
+    await db.insert(schema.scheduleItems).values({
+      id: randomUUID(), schedule_id: scheduleId, presentation_id: presentationId,
+      start_at: startAt, end_at: endAt, priority: 0, screen_ids: [screenId], screen_group_ids: [],
+    });
+
+    const publish = () => server.inject({
+      method: 'POST',
+      url: `/api/v1/schedules/${scheduleId}/publish`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { screen_ids: [screenId] },
+    });
+
+    const blocked = await publish();
+    expect(blocked.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(blocked.body).error.details?.reason).toBe('UNSUPPORTED_DOCUMENT_PAGE_SELECTION');
+
+    await db.update(schema.screens).set({
+      device_info: { player_capabilities: { features: ['pdf_page_selection_v1'] } },
+    }).where(eq(schema.screens.id, screenId));
+
+    const accepted = await publish();
+    expect(accepted.statusCode).toBe(HTTP_STATUS.OK);
+    const [snapshot] = await db
+      .select()
+      .from(schema.scheduleSnapshots)
+      .where(eq(schema.scheduleSnapshots.schedule_id, scheduleId));
+    const payload = snapshot?.payload as any;
+    expect(payload.schedule.items[0].presentation.items[0].page_number).toBe(2);
+  });
+
   it('requires a hash-matched operator acknowledgement before publishing across incompatible display aspects', async () => {
     const db = getDatabase();
     const screenId = randomUUID();

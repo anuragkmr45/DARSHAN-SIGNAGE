@@ -66,6 +66,7 @@ describe('Snapshot Evaluator', () => {
                 duration_seconds: 8,
                 fit_mode: 'contain',
                 audio_enabled: false,
+                page_number: 3,
                 media: {
                   id: 'media-pdf',
                   name: 'Booklet',
@@ -100,6 +101,7 @@ describe('Snapshot Evaluator', () => {
 
     expect(windows).to.have.length(1)
     expect(windows[0].items[0].type).to.equal('pdf')
+    expect(windows[0].items[0].pageNumber).to.equal(3)
     expect(windows[0].items[1].type).to.equal('office')
   })
 
@@ -134,6 +136,7 @@ describe('Snapshot Evaluator', () => {
     )
 
     expect(windows[0].items[0].type).to.equal('pdf')
+    expect(windows[0].items[0].pageNumber).to.equal(1)
     expect(windows[0].items[0].meta.content_type).to.equal('application/pdf')
   })
 

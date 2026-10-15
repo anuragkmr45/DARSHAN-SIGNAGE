@@ -13,6 +13,7 @@
     "start:api": "node dist/index.js --role=api",
     "start:worker": "node dist/index.js --role=worker",
     "test": "npx tsx scripts/api-test-report.ts",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:db:reset": "tsx scripts/test-database.ts reset",
     "test:integration": "bash scripts/run-integration-tests.sh",
     "lint": "eslint src --ext .ts",
@@ -43,6 +44,7 @@
     "doctor:runtime": "node --import tsx scripts/runtime-doctor.ts",
     "verify": "tsx scripts/verify-build.ts",
     "chat:backfill-legacy": "tsx scripts/chat-backfill-legacy.ts",
+    "document-pages:backfill": "tsx scripts/backfill-document-page-counts.ts",
     "chat:dry-run": "tsx scripts/chat-dry-run.ts",
     "schedule:dry-run": "tsx scripts/schedule-dry-run.ts",
     "emergency:dry-run": "tsx scripts/emergency-dry-run.ts",
@@ -64,6 +66,7 @@
     "production:doctor": "node dist-cli/scripts/runtime-doctor.js",
     "production:verify-chromium-runtime": "node dist-cli/scripts/verify-chromium-runtime.js",
     "production:jobs:repair-pgboss-queues": "node dist-cli/scripts/repair-pgboss-queues.js",
+    "production:document-pages:backfill": "node dist-cli/scripts/backfill-document-page-counts.js",
     "reset:data": "bash scripts/reset-local-data.sh"
   },
   "keywords": [
@@ -96,6 +99,7 @@
     "node-forge": "^1.4.0",
     "pg": "^8.11.3",
     "pg-boss": "^10.0.1",
+    "pdfjs-dist": "4.10.38",
     "pino": "^8.17.2",
     "pino-http": "^8.6.1",
     "playwright": "^1.58.2",

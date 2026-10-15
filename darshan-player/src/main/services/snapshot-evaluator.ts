@@ -57,11 +57,15 @@ function inferTypeFromValue(input: {
     normalizedMime === 'text/csv' ||
     normalizedMime === 'application/msword' ||
     normalizedMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    normalizedMime === 'application/vnd.ms-excel' ||
+    normalizedMime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
     extension === 'ppt' ||
     extension === 'pptx' ||
     extension === 'csv' ||
     extension === 'doc' ||
-    extension === 'docx'
+    extension === 'docx' ||
+    extension === 'xls' ||
+    extension === 'xlsx'
   ) {
     return 'office'
   }
@@ -92,6 +96,7 @@ function buildTimelineItem(input: {
   fit?: string
   muted?: boolean
   loopEnabled?: boolean
+  pageNumber?: unknown
   sourceUrl?: string | null
   fallbackUrl?: string | null
   meta?: Record<string, unknown>
@@ -102,21 +107,33 @@ function buildTimelineItem(input: {
     return null
   }
 
+  const type = inferTypeFromValue({
+    mediaType: input.mediaType,
+    contentType: input.contentType,
+    sourceContentType: input.sourceContentType,
+    mediaName: input.mediaName,
+    remoteUrl,
+  })
+  const explicitPage = input.pageNumber
+  const normalizedPage =
+    type !== 'pdf'
+      ? undefined
+      : explicitPage == null
+        ? 1
+        : typeof explicitPage === 'number' && Number.isSafeInteger(explicitPage) && explicitPage > 0
+          ? explicitPage
+          : 0
+
   return {
     id: input.id || mediaId,
     mediaId,
     remoteUrl,
-    type: inferTypeFromValue({
-      mediaType: input.mediaType,
-      contentType: input.contentType,
-      sourceContentType: input.sourceContentType,
-      mediaName: input.mediaName,
-      remoteUrl,
-    }),
+    type,
     displayMs: Math.max(1, Number(input.durationSeconds || 10)) * 1000,
     fit: normalizeFit(input.fit),
     muted: Boolean(input.muted),
     loop: Boolean(input.loopEnabled),
+    pageNumber: normalizedPage,
     transitionDurationMs: 0,
     meta: {
       ...input.meta,
@@ -161,6 +178,7 @@ export function buildWindowItems(
         sourceUrl: entry.media?.source_url ?? entry.media?.url ?? null,
         fallbackUrl: entry.media?.fallback_url ?? null,
         durationSeconds: entry.duration_seconds,
+        pageNumber: entry.page_number,
         fit: 'contain',
         muted: true,
         loopEnabled: false,
@@ -187,6 +205,7 @@ export function buildWindowItems(
         sourceUrl: entry.media?.source_url ?? entry.media?.url ?? null,
         fallbackUrl: entry.media?.fallback_url ?? null,
         durationSeconds: entry.duration_seconds,
+        pageNumber: entry.page_number,
         fit: entry.fit_mode,
         muted: entry.audio_enabled === true ? false : true,
         loopEnabled: entry.loop_enabled === true,

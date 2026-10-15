@@ -117,6 +117,22 @@ describe('Proof-of-Play Service', () => {
 
       expect(event.completed).to.be.false
     })
+
+    it('preserves the selected document page in a completed event', () => {
+      const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+      const popService = getProofOfPlayService()
+
+      popService.recordStart({
+        scheduleId: 'schedule-1',
+        mediaId: 'document-1',
+        playbackInstanceId: 'playback-page-4',
+        pageNumber: 4,
+      })
+      popService.recordEnd('playback-page-4', true)
+
+      const buffer = (popService as any).eventBuffer
+      expect(buffer[0].page_number).to.equal(4)
+    })
   })
 
   describe('Deduplication', () => {
@@ -186,6 +202,7 @@ describe('Proof-of-Play Service', () => {
         {
           schedule_id: 'schedule-1',
           media_id: 'media-1',
+          page_number: 3,
           start_time: new Date().toISOString(),
           end_time: new Date().toISOString(),
           duration: 1,
@@ -206,6 +223,7 @@ describe('Proof-of-Play Service', () => {
       await popService.flushEvents()
 
       expect(postStub.calledOnce).to.be.true
+      expect(postStub.firstCall.args[1].page_number).to.equal(3)
       expect(fs.existsSync(spoolFile)).to.be.false // Should be deleted after flush
     })
   })

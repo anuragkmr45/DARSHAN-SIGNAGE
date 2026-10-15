@@ -71,6 +71,22 @@ describe('device telemetry persistence workers', () => {
     putObjectMock.mockResolvedValue({ etag: 'etag-test', sha256: 'sha-test' });
   });
 
+  it('uses the selected document page in proof-of-play idempotency', () => {
+    const base = {
+      deviceId: randomUUID(),
+      mediaId: randomUUID(),
+      scheduleId: randomUUID(),
+      startTime: new Date(Date.now() - 15_000).toISOString(),
+      endTime: new Date().toISOString(),
+      duration: 15,
+      completed: true,
+    };
+
+    expect(buildProofOfPlayIdempotencyKey({ ...base, pageNumber: 1 })).not.toBe(
+      buildProofOfPlayIdempotencyKey({ ...base, pageNumber: 2 })
+    );
+  });
+
   it('deduplicates proof-of-play duplicate delivery by idempotency key', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();

@@ -129,6 +129,7 @@ export const mediaResponseSchema = z.object({
   duration_seconds: z.number().optional(),
   width: z.number().optional(),
   height: z.number().optional(),
+  page_count: z.number().int().positive().nullable().optional(),
   created_by: z.string().uuid(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),

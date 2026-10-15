@@ -66,6 +66,17 @@ const mediaPayload = {
       media_url: "https://cdn.example.com/hero-loop.mp4",
       duration_seconds: 15,
     },
+    {
+      id: "document-1",
+      name: "Operations Handbook",
+      filename: "operations-handbook.pdf",
+      type: "DOCUMENT",
+      status: "READY",
+      content_type: "application/pdf",
+      source_content_type: "application/pdf",
+      media_url: "https://cdn.example.com/operations-handbook.pdf",
+      page_count: 5,
+    },
   ],
   page: 1,
   limit: 100,
@@ -106,6 +117,7 @@ const login = async (page: Page) => {
 test.describe("Scheduling and emergency operator flow", () => {
   test("schedule creator persists audit timezone when creating a schedule", async ({ page }) => {
     let capturedSchedulePayload: Record<string, unknown> | null = null;
+    let capturedSlotPayload: { items?: Array<Record<string, unknown>> } | null = null;
 
     await page.route("**/api/v1/**", async (route: Route) => {
       const url = new URL(route.request().url());
@@ -156,16 +168,12 @@ test.describe("Scheduling and emergency operator flow", () => {
         });
       }
 
-      if (pathname === "/api/v1/presentations/presentation-1/slots" && method === "POST") {
+      if (pathname === "/api/v1/presentations/presentation-1/slots" && method === "PUT") {
+        capturedSlotPayload = route.request().postDataJSON() as { items?: Array<Record<string, unknown>> };
         return route.fulfill({
-          status: 201,
+          status: 200,
           contentType: "application/json",
-          body: JSON.stringify({
-            id: "slot-assignment-1",
-            presentation_id: "presentation-1",
-            slot_id: "main",
-            media_id: "media-1",
-          }),
+          body: JSON.stringify({ items: capturedSlotPayload.items ?? [] }),
         });
       }
 
@@ -232,8 +240,15 @@ test.describe("Scheduling and emergency operator flow", () => {
     await page.getByRole("button", { name: /^next$/i }).click();
 
     await page.getByRole("button", { name: "Add Media", exact: true }).click();
-    await page.getByText("Hero Loop", { exact: true }).click();
+    await page.getByRole("dialog").getByText("Operations Handbook", { exact: true }).click();
+    await page.getByLabel("Page for Operations Handbook").fill("2");
+    await page.getByRole("button", { name: "Add Media", exact: true }).click();
+    await page.getByRole("dialog").getByText("Operations Handbook", { exact: true }).click();
+    await page.getByLabel("Page for Operations Handbook").nth(1).fill("5");
+    await expect(page.getByText("Page 2 of 5", { exact: true })).toBeVisible();
+    await expect(page.getByText("Page 5 of 5", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: /^next$/i }).click();
+    expect(capturedSlotPayload?.items?.map((item) => item.page_number)).toEqual([2, 5]);
 
     await page.getByText("Lobby Screen", { exact: true }).click();
     await page.getByRole("button", { name: /^next$/i }).click();

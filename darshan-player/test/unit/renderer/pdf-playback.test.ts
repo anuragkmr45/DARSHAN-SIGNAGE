@@ -74,4 +74,12 @@ describe('PDF playback helpers', () => {
 
     expect(PDF_WORKER_SOURCE).to.equal('./pdf.worker.mjs')
   })
+
+  it('accepts a selected physical page and rejects invalid or out-of-range pages', () => {
+    const { validatePdfPageSelection } = require('../../../src/renderer/pdf-playback')
+
+    expect(() => validatePdfPageSelection(3, 5)).not.to.throw()
+    expect(() => validatePdfPageSelection(0, 5)).to.throw('Invalid PDF page selection')
+    expect(() => validatePdfPageSelection(6, 5)).to.throw('exceeds document page count')
+  })
 })

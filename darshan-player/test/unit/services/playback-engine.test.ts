@@ -112,6 +112,67 @@ describe('Playback Engine', () => {
     expect(startPlaylistStub.called).to.equal(false)
   })
 
+  it('changes the playlist fingerprint when only the selected PDF page changes', () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const engine = getPlaybackEngine()
+    const base = {
+      mode: 'normal',
+      scheduleId: 'schedule-1',
+      items: [{
+        id: 'pdf-item', type: 'pdf', mediaId: 'media-pdf', remoteUrl: 'https://cdn.example/doc.pdf',
+        displayMs: 10000, fit: 'contain', muted: true, loop: false, transitionDurationMs: 0,
+        pageNumber: 1,
+      }],
+    }
+
+    const pageOne = engine.fingerprintPlaylist(base)
+    const pageTwo = engine.fingerprintPlaylist({
+      ...base,
+      items: [{ ...base.items[0], pageNumber: 2 }],
+    })
+    const legacyPageOne = engine.fingerprintPlaylist({
+      ...base,
+      items: [{ ...base.items[0], pageNumber: undefined }],
+    })
+
+    expect(pageOne).not.to.equal(pageTwo)
+    expect(pageOne).to.equal(legacyPageOne)
+  })
+
+  it('records the selected PDF page for direct timeline proof-of-play', async () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+    const engine = getPlaybackEngine()
+    const recordStart = sandbox.stub(getProofOfPlayService(), 'recordStart')
+    engine.currentScheduleId = 'schedule-1'
+    engine.mainWindow = { webContents: { send: sandbox.spy() } }
+
+    const now = Date.now()
+    await engine.handlePlayItem({
+      item: {
+        id: 'pdf-item',
+        type: 'pdf',
+        mediaId: 'media-pdf',
+        remoteUrl: 'https://cdn.example/doc.pdf',
+        displayMs: 10000,
+        fit: 'contain',
+        muted: true,
+        loop: false,
+        transitionDurationMs: 0,
+        pageNumber: 3,
+      },
+      startTime: now,
+      endTime: now + 10000,
+      index: 0,
+    })
+
+    expect(recordStart.calledWithMatch({
+      scheduleId: 'schedule-1',
+      mediaId: 'media-pdf',
+      pageNumber: 3,
+    })).to.equal(true)
+  })
+
   it('ignores equivalent scene playlist updates when only remaining scene time changed', async () => {
     const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
     const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')

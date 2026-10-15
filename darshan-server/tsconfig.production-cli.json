@@ -10,6 +10,7 @@
   "include": [
     "src/**/*.ts",
     "scripts/admin-cli.ts",
+    "scripts/backfill-document-page-counts.ts",
     "scripts/check-services.ts",
     "scripts/device-auth-rollout-status.ts",
     "scripts/migrate-production.ts",

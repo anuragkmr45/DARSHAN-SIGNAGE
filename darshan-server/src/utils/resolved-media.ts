@@ -13,6 +13,7 @@ export type ResolvedMediaAsset = {
   content_type: string | null;
   source_content_type: string | null;
   status: string | null;
+  page_count: number | null;
   source_url?: string | null;
 };
 
@@ -30,6 +31,7 @@ export function buildResolvedMediaRepresentation(
     content_type: media.content_type ?? null,
     source_content_type: media.source_content_type ?? null,
     status: media.status ?? null,
+    page_count: media.page_count ?? null,
     ...(options.includeSourceUrl ? { source_url: media.source_url ?? null } : {}),
   };
 }

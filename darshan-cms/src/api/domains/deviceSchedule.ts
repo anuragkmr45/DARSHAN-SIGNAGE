@@ -21,6 +21,7 @@ type RawDeviceSnapshotResponse = {
             duration_seconds?: number;
             fit_mode?: string;
             audio_enabled?: boolean;
+            page_number?: number | null;
             media?: {
               id?: string;
               type?: string;
@@ -33,6 +34,7 @@ type RawDeviceSnapshotResponse = {
             duration_seconds?: number;
             fit_mode?: string;
             audio_enabled?: boolean;
+            page_number?: number | null;
             media?: {
               id?: string;
               type?: string;
@@ -54,6 +56,7 @@ type RawDeviceSnapshotResponse = {
     source_content_type?: string | null;
     status?: string | null;
     source_url?: string | null;
+    page_count?: number | null;
   }>;
   emergency?: unknown;
   default_media?: unknown;
@@ -87,6 +90,7 @@ export const normalizeDeviceItems = (payload: RawDeviceSnapshotResponse): Device
           media_url: asset?.playback_url ?? mediaUrls[mediaId] ?? entry.media?.media_url ?? undefined,
           preview_url: asset?.preview_url ?? undefined,
           muted: typeof entry.audio_enabled === "boolean" ? !entry.audio_enabled : undefined,
+          page_number: typeof entry.page_number === "number" ? entry.page_number : undefined,
         } satisfies DeviceScheduleItem;
       });
   });

@@ -295,6 +295,7 @@ export interface ProofOfPlay {
   media_id: string;
   schedule_id?: string;
   presentation_id?: string;
+  page_number?: number | null;
   status: "COMPLETED" | "INCOMPLETE";
   played_at: string;
   started_at?: string | null;
@@ -634,6 +635,7 @@ export interface PresentationSlotPayload {
   fit_mode: PresentationFitMode;
   audio_enabled: boolean;
   loop_enabled: boolean;
+  page_number?: number;
 }
 
 export interface PresentationSlot {
@@ -646,6 +648,7 @@ export interface PresentationSlot {
   fit_mode: PresentationFitMode;
   audio_enabled: boolean;
   loop_enabled: boolean;
+  page_number?: number | null;
   created_at?: string;
   media?: MediaAsset;
 }
@@ -1172,7 +1175,13 @@ export interface ScreenAvailability {
 
 export interface ScreenSnapshotScheduleItem extends ScheduleItem {
   presentation?: Presentation & {
-    items?: Array<{ id: string; media_id: string; duration_seconds?: number }>;
+    items?: Array<{
+      id: string;
+      media_id: string;
+      duration_seconds?: number;
+      page_number?: number | null;
+      media?: MediaAsset | null;
+    }>;
     slots?: Array<{
       id: string;
       slot_id: string;
@@ -1181,6 +1190,7 @@ export interface ScreenSnapshotScheduleItem extends ScheduleItem {
       fit_mode?: PresentationFitMode;
       audio_enabled?: boolean;
       loop_enabled?: boolean;
+      page_number?: number | null;
       media?: MediaAsset | null;
     }>;
   };
@@ -1529,6 +1539,7 @@ export interface MediaAsset {
   duration_seconds?: number;
   width?: number;
   height?: number;
+  page_count?: number | null;
   ready_object_id?: string | null;
   thumbnail_object_id?: string | null;
   source_bucket?: string;
@@ -1719,6 +1730,7 @@ export interface DeviceScheduleItem {
   sha256?: string;
   muted?: boolean;
   loop?: boolean;
+  page_number?: number | null;
   [key: string]: unknown;
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, ImageOff, Link2 } from "lucide-react";
+import { MediaPreview } from "@/components/common/MediaPreview";
 import type { ScreenSnapshot } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { getServerClockOffsetMs, getServerNowFromOffset } from "@/hooks/screens/screensRealtimeUtils";
@@ -111,9 +112,11 @@ function LiveMirrorMediaSurface({
 
   if (media.kind === "pdf" && media.url) {
     return (
-      <iframe
-        src={media.url}
-        title={media.label}
+      <MediaPreview
+        url={media.url}
+        type="application/pdf"
+        alt={media.label}
+        pdfPage={media.pageNumber ?? 1}
         className="h-full w-full border-0 bg-white"
       />
     );

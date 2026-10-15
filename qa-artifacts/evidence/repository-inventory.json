@@ -1,18 +1,21 @@
 {
-  "analysisDate": "2026-09-24",
-  "commit": "a6e401d2479cd0dee34c33552671cd0f86d4d173",
+  "analysisDate": "2026-10-15",
+  "commit": "607440c12a8b476149253aac77bbbdcf3c1d960b + document-page-selection working tree",
   "branch": "release-01",
-  "trackedFiles": 1215,
+  "trackedFiles": 1243,
+  "workspaceFilesReviewed": 1259,
   "counts": {
+    ".codex": 10,
     ".dockerignore": 1,
     ".gitignore": 1,
     "README.md": 1,
     "darshan-cms": 289,
     "darshan-player": 164,
-    "darshan-server": 370,
+    "darshan-server": 385,
     "deploy": 72,
     "docs": 280,
     "manifests": 3,
+    "qa-artifacts": 19,
     "scripts": 26,
     "standards": 8
   },
@@ -1677,6 +1680,24 @@
         "presentationSlotItemSchema.parse"
       ],
       "coverage": "Pending test design; not executed"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/presentations/:id/slots",
+      "file": "darshan-server/src/routes/presentations.ts",
+      "line": 557,
+      "description": "Atomically replace all media occurrences assigned to presentation layout slots",
+      "localAuthCalls": [
+        "verifyAccessToken"
+      ],
+      "localPermissionChecks": [
+        "'update', 'Presentation'"
+      ],
+      "validationCalls": [
+        "replacePresentationSlotsSchema.parse",
+        "normalizeDocumentPage"
+      ],
+      "coverage": "Cases API-05 and CONC-06 planned; DB-backed execution Not Tested"
     },
     {
       "method": "DELETE",
@@ -5122,6 +5143,7 @@
     "darshan-server/src/deployment/backup-contract.test.ts",
     "darshan-server/src/deployment/deployment-run-state.test.ts",
     "darshan-server/src/deployment/device-auth-rollout.test.ts",
+    "darshan-server/src/deployment/document-page-migration.unit.test.ts",
     "darshan-server/src/deployment/migration-ledger.test.ts",
     "darshan-server/src/deployment/production-bootstrap.test.ts",
     "darshan-server/src/deployment/production-command-contracts.test.ts",
@@ -5130,6 +5152,7 @@
     "darshan-server/src/deployment/restore-evidence.test.ts",
     "darshan-server/src/http-status-codes.test.ts",
     "darshan-server/src/jobs/chat-media-cleanup.test.ts",
+    "darshan-server/src/jobs/device-telemetry-idempotency.unit.test.ts",
     "darshan-server/src/jobs/device-telemetry.test.ts",
     "darshan-server/src/observability/metrics.test.ts",
     "darshan-server/src/observability/prometheus-summary.test.ts",
@@ -5168,6 +5191,7 @@
     "darshan-server/src/routes/notifications.test.ts",
     "darshan-server/src/routes/observability.test.ts",
     "darshan-server/src/routes/proof-of-play.test.ts",
+    "darshan-server/src/routes/presentations-page-selection.test.ts",
     "darshan-server/src/routes/reports-export.test.ts",
     "darshan-server/src/routes/reports-schedules.test.ts",
     "darshan-server/src/routes/roles-permissions.test.ts",
@@ -5190,15 +5214,19 @@
     "darshan-server/src/s3/index.test.ts",
     "darshan-server/src/server/tls.test.ts",
     "darshan-server/src/services/outbox-dispatcher.test.ts",
+    "darshan-server/src/services/document-page-count-backfill.unit.test.ts",
     "darshan-server/src/services/playback-refresh-dispatch.test.ts",
     "darshan-server/src/services/screen-display-state-service.test.ts",
     "darshan-server/src/services/screen-state-refresh.test.ts",
     "darshan-server/src/utils/backup-runs-capacity.test.ts",
     "darshan-server/src/utils/device-request-auth-mode.test.ts",
+    "darshan-server/src/utils/document-page-backfill-options.unit.test.ts",
+    "darshan-server/src/utils/document-page-selection.test.ts",
     "darshan-server/src/utils/display-profile.test.ts",
     "darshan-server/src/utils/errors.test.ts",
     "darshan-server/src/utils/libreoffice-conversion.test.ts",
     "darshan-server/src/utils/object-key.test.ts",
+    "darshan-server/src/utils/pdf-metadata.test.ts",
     "darshan-server/src/utils/off-host-backup-location.test.ts",
     "darshan-server/src/utils/off-host-backup.test.ts",
     "darshan-server/src/utils/resolved-media.test.ts",
@@ -5251,13 +5279,14 @@
     "darshan-server/drizzle/migrations/0040_device_auth_rollout_observations.sql",
     "darshan-server/drizzle/migrations/0041_off_host_backup_manifest.sql",
     "darshan-server/drizzle/migrations/0042_emergency_transition_reliability.sql",
-    "darshan-server/drizzle/migrations/0043_deployment_run_state.sql"
+    "darshan-server/drizzle/migrations/0043_deployment_run_state.sql",
+    "darshan-server/drizzle/migrations/0044_document_page_selection.sql"
   ],
   "limits": [
-    "Static inventory only; no application modules imported, services started, or tests executed.",
+    "Inventory is static. No application services, browser, Electron runtime, Docker stack, database migration, DB-backed suite, load tool, or deployment command was run; only builds and database-free unit tests were executed.",
     "Explicit fastify registrations only; plugin-generated Swagger, Socket.IO transport, and dynamic framework routes are separate surfaces.",
     "Local auth call extraction is not an authorization audit; inherited middleware and helper guards must be traced.",
     "69 pgTable declarations do not include deployment-run SQL-only tables or pg-boss internal schema.",
-    "Tracked tests are not evidence of passing execution or complete test coverage."
+    "Tracked tests are not evidence of passing execution or complete test coverage. Only the explicitly reported isolated unit subsets passed."
   ]
 }

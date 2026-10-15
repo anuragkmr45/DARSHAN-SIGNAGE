@@ -213,6 +213,7 @@ function mapPresentationSlot(s: any) {
     fit_mode: s.fit_mode ?? null,
     audio_enabled: s.audio_enabled ?? false,
     loop_enabled: s.loop_enabled ?? false,
+    page_number: s.page_number ?? null,
     created_at: toIso(s.created_at),
   };
 }
@@ -226,6 +227,7 @@ function mapMedia(m: any) {
     duration_seconds: m.duration_seconds ?? null,
     width: m.width ?? null,
     height: m.height ?? null,
+    page_count: m.page_count ?? null,
     source_content_type: m.source_content_type ?? null,
     created_by: m.created_by,
     created_at: toIso(m.created_at),

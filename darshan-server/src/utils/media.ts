@@ -17,6 +17,7 @@ type MediaRecord = {
   duration_seconds?: number | null;
   width?: number | null;
   height?: number | null;
+  page_count?: number | null;
   created_by?: string | null;
   created_at?: Date | string | null;
   updated_at?: Date | string | null;
@@ -92,6 +93,7 @@ export const serializeMediaRecord = (
     duration_seconds: media.duration_seconds ?? undefined,
     width: media.width ?? undefined,
     height: media.height ?? undefined,
+    page_count: media.page_count ?? null,
     created_by: media.created_by ?? undefined,
     created_at: toIso(media.created_at),
     updated_at: toIso(media.updated_at),

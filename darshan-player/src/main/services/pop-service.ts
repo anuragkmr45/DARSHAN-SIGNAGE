@@ -35,6 +35,7 @@ interface ActivePlayback {
   sceneId?: string
   slotId?: string
   itemId?: string
+  pageNumber?: number
   startTimestamp: string
 }
 
@@ -45,6 +46,7 @@ interface PlaybackStartInput {
   sceneId?: string
   slotId?: string
   itemId?: string
+  pageNumber?: number
   startedAt?: string
 }
 
@@ -79,6 +81,7 @@ function stripReplayMetadata(event: BufferedProofOfPlayEvent | ProofOfPlayEvent)
     scene_id: event.scene_id,
     slot_id: event.slot_id,
     item_id: event.item_id,
+    page_number: event.page_number,
     start_time: event.start_time,
     end_time: event.end_time,
     duration: event.duration,
@@ -150,6 +153,7 @@ export class ProofOfPlayService {
       sceneId: normalizedInput.sceneId,
       slotId: normalizedInput.slotId,
       itemId: normalizedInput.itemId,
+      pageNumber: normalizedInput.pageNumber,
       startTimestamp,
     })
 
@@ -232,6 +236,7 @@ export class ProofOfPlayService {
       scene_id: active.sceneId,
       slot_id: active.slotId,
       item_id: active.itemId,
+      page_number: active.pageNumber,
       start_time: active.startTimestamp,
       end_time: endTimestamp,
       duration: durationSeconds,
@@ -690,6 +695,10 @@ export class ProofOfPlayService {
       scene_id: event.scene_id || event.sceneId,
       slot_id: event.slot_id || event.slotId,
       item_id: event.item_id || event.itemId,
+      page_number:
+        typeof (event.page_number ?? event.pageNumber) === 'number'
+          ? event.page_number ?? event.pageNumber
+          : undefined,
       start_time: event.start_time || event.startTimestamp || event.start_timestamp || new Date().toISOString(),
       end_time: event.end_time || event.endTimestamp || event.end_timestamp || new Date().toISOString(),
       duration: normalizedDuration,

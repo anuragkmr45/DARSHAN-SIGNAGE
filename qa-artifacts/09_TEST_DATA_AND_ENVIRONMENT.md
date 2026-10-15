@@ -18,11 +18,11 @@ Use distinct accounts and browser profiles for concurrent sessions. Store creden
 
 | Domain | Required fixtures |
 | --- | --- |
-| Media | Valid JPEG/PNG/WebP, MP4/QuickTime, PDF with 2+ pages, Office documents with several slides/pages, corrupt/encrypted/unsupported file, MIME mismatch, size just below/at/above production limit, hashes and multipart parts. Use synthetic media without customer data. |
-| Layout/presentation | One-slot and multi-slot layouts, portrait/landscape geometry at boundaries, READY/unready media, duration/loop/audio variants, content owned by each actor/department. |
+| Media | Valid JPEG/PNG/WebP, MP4/QuickTime, PDF fixtures with 1, 2, 5 and many pages, and each accepted document extension `.pdf/.ppt/.pptx/.doc/.docx/.xls/.xlsx/.csv`. Include mixed orientation, merged cells, hidden sheets, varied slide/page sizes, very-large PDFs, corrupt/zero-page-like/encrypted/unsupported files, MIME mismatch, and a controlled source reconversion whose final page count changes. Include size boundaries, hashes and multipart parts. Record the expected physical count of every final PDF. Use synthetic media without customer data. |
+| Layout/presentation | One-slot and multi-slot layouts, portrait/landscape geometry at boundaries, READY/unready media, duration/loop/audio variants, duplicate occurrences of the same document selecting pages 1 and last, legacy null page rows, invalid slot/order/page rows, content owned by each actor/department. |
 | Schedule/reservation | Adjacent and overlapping `[start,end)` windows, overlapping groups resolving to same concrete screen, stale revision, expired hold, approved/published/taken-down states, DST and timezone boundary dates. |
 | Emergency/defaults | Severity ties, all/group/selected-screen scopes, message capability and no-capability devices, READY/unready media, screen/group/aspect/global defaults, saved group order A/B then edited A. |
-| Device/PoP | Pairing codes and revocation, signed request replay, commands with old/current leases, real playback start/end, crash gap, more than 100 buffered events and enough events to exceed spool limits on disposable storage. |
+| Device/PoP | Pairing codes and revocation, one player with and one without `pdf_page_selection_v1`, signed request replay, commands with old/current leases, real page-1/page-N playback start/end, crash gap, more than 100 buffered events and enough events to exceed spool limits on disposable storage. |
 | Chat/notifications | DM/group/forum, attachments, mentions, edited/deleted/archived messages, concurrent send/read, muted/banned members, out-of-order delivery. |
 | Reports | Zero screens, ACTIVE/OFFLINE counts, PoP `ended_at` null/non-null, dates straddling UTC/local midnight, empty page, nonempty export, audit rows. |
 | Backups | Nonempty DB and each contracted object source including `logs-auth` and `archives/logs/`; exclude staging and recursive backup archives. Record source counts/hashes for restore comparison. |
@@ -34,6 +34,7 @@ Use distinct accounts and browser profiles for concurrent sessions. Store creden
 - Provide test PKI for CMS, Backend, MinIO, PostgreSQL, Valkey, player identity and signed roles. Include a wrong CA/expired certificate set for negative cases.
 - Provide controllable network rules to isolate Valkey, WSS, backend, MinIO or off-host backup independently. Record actual firewall source/port rules for BQ-019.
 - Use disposable PostgreSQL/MinIO/S3 targets for migrations, backup, restore, low disk and archive tests. The isolated recovery VM must reject nonempty/production targets.
+- Run the document count backfill without `--apply` first, archive its JSON result, compare counts manually, then use `--apply` only on the disposable migrated database. Include a failed object and prove it is reported rather than force-updated.
 - Supply real Windows x64 and Ubuntu user-session player hardware with approved portrait/landscape/multi-display fixtures; X11 and Wayland where the site requires them. Browser matrix and accessibility tools are BQ-016 inputs.
 - Capture logs, metrics, screenshots, request/response redactions, DB row counts, object hashes, queue/backup manifests, certificate subjects and video of physical display transitions as case evidence. Never include bearer tokens, private keys or real credentials.
 - Seed realistic data volume for capacity work only after BQ-017 workload and capacity evidence are approved. Back up disposable state before destructive fault/recovery scenarios and clean test objects afterward.

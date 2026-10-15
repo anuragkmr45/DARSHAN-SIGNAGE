@@ -76,6 +76,7 @@ const baseSnapshot: ScreenSnapshot = {
                 fit_mode: "contain",
                 loop_enabled: false,
                 audio_enabled: false,
+                page_number: 4,
                 media: {
                   id: "sidebar-1",
                   type: "DOCUMENT",
@@ -105,6 +106,7 @@ describe("screenLiveMirror", () => {
     expect(earlyState.slots).toHaveLength(2);
     expect(earlyState.slots.find((slot) => slot.id === "hero")?.media?.id).toBe("hero-1");
     expect(earlyState.slots.find((slot) => slot.id === "sidebar")?.media?.kind).toBe("pdf");
+    expect(earlyState.slots.find((slot) => slot.id === "sidebar")?.media?.pageNumber).toBe(4);
 
     const laterState = buildLiveMirrorState(baseSnapshot, Date.parse("2026-03-24T12:00:15.000Z"), "16:9");
     const heroMedia = laterState.slots.find((slot) => slot.id === "hero")?.media;

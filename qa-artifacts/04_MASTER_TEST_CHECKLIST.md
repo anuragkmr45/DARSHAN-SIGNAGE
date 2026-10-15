@@ -1,6 +1,6 @@
 # Master Human QA Checklist
 
-Baseline: `release-01` / `a6e401d2479cd0dee34c33552671cd0f86d4d173`. Planning only. Execute only on authorized isolated test environments. Each checkbox names detailed rows in `05_TEST_CASES.csv`; record actual status, evidence and defect IDs there. `01_BUSINESS_RULES.md` defines requirement provenance; an implemented rule is not automatically an approved acceptance rule.
+Baseline: `release-01` / `607440c12a8b476149253aac77bbbdcf3c1d960b` plus the 2026-10-15 document-page-selection working-tree delta. Planning only. Execute only on authorized isolated test environments. Each checkbox names detailed rows in `05_TEST_CASES.csv`; record actual status, evidence and defect IDs there. `01_BUSINESS_RULES.md` defines requirement provenance; an implemented rule is not automatically an approved acceptance rule.
 
 ## Identity, Access And Privacy
 
@@ -15,7 +15,9 @@ Baseline: `release-01` / `a6e401d2479cd0dee34c33552671cd0f86d4d173`. Planning on
 ## Content Authoring And Media
 
 - [ ] `FILE-01..03`: supported/unsupported MIME, 500 MiB production cap, hashing, multipart resume, exact object size/parts, retries, conversion tools and worker failure.
-- [ ] `FILE-04`, `PLAYER-08`: first page of PDF/converted Office shown, with correct fit on portrait/landscape; do not expect all-page progression.
+- [ ] `FILE-03`, `FILE-04`, `FILE-06`: native PDF and converted `.ppt/.pptx/.doc/.docx/.xls/.xlsx/.csv` stay PROCESSING until final-PDF page inspection; encrypted/malformed output fails; valid page counts match the playable PDF.
+- [ ] `UI-05`, `API-05`, `API-06`, `DATA-05`, `CONC-06`: each occurrence defaults to page 1, accepts only an in-range integer, can reuse one document with different pages, previews the chosen page, saves atomically, freezes it in the snapshot, and handles legacy nulls.
+- [ ] `PLAYER-08`, `PLAYER-10`, `COMP-04`, `PERF-05`: the selected page—not always page 1—renders with correct contain fit on approved browsers/displays; page-only updates refresh playback; multi-slot/high-DPI PDFs remain within the raster budget; do not expect all-page progression.
 - [ ] `FILE-05`: delete permission, reference conflict, soft/hard object removal, partial S3 failure, chat cleanup and no accidental recycle promise; BQ-020 recoverability is TBD.
 - [ ] `FUN-01..02`, `UI-01`: layout bounds/slots, presentation timing/order/fit/audio, CMS form validation and error recovery.
 - [ ] `FUN-08`, `PLAYER-09`: public/private HTTPS policy, redirects, resource hosts, invalid trust, login/error page readiness, preview fallback and crash recovery. The code has no preview-age gate or login handoff; required page classes/acceptable preview age remain BQ-011.
@@ -35,12 +37,14 @@ Baseline: `release-01` / `a6e401d2479cd0dee34c33552671cd0f86d4d173`. Planning on
 
 - [ ] `FUN-09..10`, `CONC-04`: DM/group/forum membership, moderation, attachments, message order, notifications, unread counters and reconnect.
 - [ ] `DATA-04`, `PLAYER-07`: actual PoP duration, deduplication, 100-event/512-KiB memory and 32-file/derived-byte spool budgets, discard counters, replay and media-purge preservation. The code does not guarantee lossless offline evidence; acceptable loss remains BQ-013.
+- [ ] `OBS-03`: selected document page remains intact through live telemetry, offline spool/replay, idempotency, PoP database/list/CMS and CSV export; non-document/legacy rows remain compatible.
 - [ ] `FUN-11`, `UI-04`: current online fraction versus historical uptime, null/zero denominator, PoP ended_at status, UTC/database/browser timezone differences, filters and PDF export. Reporting meaning/day remains BQ-014.
 - [ ] `UI-02..03`: route/action visibility, direct URL permission enforcement, keyboard/focus/labels/errors and assistive technology against the BQ-016 target.
 
 ## Data, Operations And Release
 
 - [ ] `DATA-01..03`, `DEP-03`: migrations/checksums/order, transactional publish/emergency data, object-backed snapshots and no partial success.
+- [ ] `DATA-05`: migration `0044`, dry-run/apply backfill, nullable legacy semantics, positive checks and rollback compatibility are verified on a disposable database/object store before production rollout.
 - [ ] `DEP-01..07`: signed role/transfer verification, malicious archive rejection, five-VM first install, resumability, source-free content, compatibility, backend-only update, legacy adoption, low disk, TLS and operational acceptance.
 - [ ] `BKP-01..03`: actual full off-host backup, contract buckets including logs-auth, independent clean restore, hashes, signed evidence, archive safety, failed migration recovery and old/new schema compatibility. RPO/RTO and retention remain BQ-015/018.
 - [ ] `OBS-01..02`: liveness versus readiness, worker heartbeat, dependency failures, metrics/auth/TLS/alert evaluation and log redaction.

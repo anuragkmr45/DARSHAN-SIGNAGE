@@ -207,6 +207,7 @@ export interface ActiveSlotPlayback {
   schedule_id?: string | null
   playback_instance_id: string
   started_at: string
+  page_number?: number
 }
 
 // CMS default media types
@@ -313,6 +314,7 @@ export interface TimelineItem {
   fit: FitMode
   muted: boolean
   loop: boolean
+  pageNumber?: number
   sha256?: string
   meta?: Record<string, unknown>
   transitionDurationMs: number
@@ -403,6 +405,7 @@ export interface SnapshotPresentationItem {
   media_id?: string
   order?: number
   duration_seconds?: number
+  page_number?: number
   media?: SnapshotPresentationMedia | null
 }
 
@@ -415,6 +418,7 @@ export interface SnapshotPresentationSlotItem {
   fit_mode?: FitMode | (string & {})
   audio_enabled?: boolean
   loop_enabled?: boolean
+  page_number?: number
   media?: SnapshotPresentationMedia | null
 }
 
@@ -751,6 +755,7 @@ export interface ProofOfPlayEvent {
   scene_id?: string
   slot_id?: string
   item_id?: string
+  page_number?: number
   start_time: string
   end_time: string
   duration: number

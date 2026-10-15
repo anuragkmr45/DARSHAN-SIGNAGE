@@ -48,4 +48,11 @@ export const presentationsApi = {
       method: "POST",
       body: payload,
     }),
+
+  replaceSlots: (presentationId: string, items: PresentationSlotPayload[]) =>
+    apiClient.request<{ items: PresentationSlot[] }>({
+      path: endpoints.presentations.slots(presentationId),
+      method: "PUT",
+      body: { items },
+    }),
 };

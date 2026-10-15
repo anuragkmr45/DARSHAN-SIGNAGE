@@ -1,6 +1,6 @@
 # Release Readiness Checklist
 
-This is a future release gate, not a current sign-off. Record owner, date, build/release ID, link to evidence and decision for each item. No test execution or production deployment occurred while preparing this package.
+This is a future release gate, not a current sign-off. Record owner, date, build/release ID, link to evidence and decision for each item. Builds and isolated unit subsets are not release evidence; no runtime application test or production deployment occurred while preparing this update.
 
 ## Build And Environment
 
@@ -23,7 +23,9 @@ This is a future release gate, not a current sign-off. Record owner, date, build
 - [ ] All release `P0` cases pass with execution evidence and reviewed defects. Open Critical/High risks in `03_RISK_REGISTER.csv` have explicit disposition; no source-only finding is counted as a passed runtime test.
 - [ ] Immediate access withdrawal, all-role SUPER_ADMIN management, every-SUPER_ADMIN delete block and immutable built-in roles are verified on UI, REST and sockets. `AUTHN-04`, `AUTHZ-01..02`.
 - [ ] Delegated selected-screen emergencies are accessible from CMS and constrained to approved targets; a two-minute backend outage stops schedule/default/emergency playback and erases media cache. `AUTHZ-03`, `PLAYER-03..04`.
-- [ ] Media upload, conversion, PDF page-1 rendering, webpage preview, schedule publish, chat and reports pass smoke/UAT on actual target hardware. `10_SMOKE_REGRESSION_UAT.md`.
+- [ ] Migration `0044` is rehearsed; the document page-count backfill dry-run is reviewed before apply; malformed/encrypted failures are resolved; rollback retains nullable compatibility columns until affected snapshots/PoP age out. `DATA-05`, `FILE-06`.
+- [ ] Media upload, conversion, selected-page CMS preview, immutable snapshot, capable-player playback, page-aware PoP, webpage preview, chat and reports pass smoke/UAT on actual target hardware. `10_SMOKE_REGRESSION_UAT.md`.
+- [ ] Every target player has advertised `pdf_page_selection_v1`, or schedules using page >1 are demonstrably blocked. Page 1 remains compatible during rollout. `API-06`, `COMP-04`.
 - [ ] Presentation and exposed Requests API authorization gaps have been assessed. Requests functional workflow, SSO runtime login, API-key business authentication and automatic webhook delivery are not release acceptance features.
 - [ ] Human policies remaining in BQ-007/011/012/013/014/015/016/017/018/019/020 are answered or recorded as explicit accepted scope limits. A `TBD` affecting data exposure, recovery, capacity or critical playback cannot be silently converted to Pass.
 

@@ -531,6 +531,22 @@
   },
   {
     "domain": "presentations",
+    "method": "PUT",
+    "path": "/api/v1/presentations/:id/slots",
+    "auth": "jwt + Presentation:update",
+    "requestSchemaRef": "darshan-server/src/routes/presentations.ts#replacePresentationSlotsSchema",
+    "responseSchemaRef": "darshan-server/src/routes/presentations.ts (atomic slot replacement response)",
+    "errors": [
+      { "status": 400, "code": "BAD_REQUEST", "when": "Presentation has no layout" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Presentation, layout, or media not found" },
+      { "status": 422, "code": "DOCUMENT_PAGE_OUT_OF_RANGE", "when": "Selected document page is not a positive integer or exceeds media.page_count" },
+      { "status": 422, "code": "DOCUMENT_PAGE_COUNT_UNAVAILABLE", "when": "A page other than 1 is selected before page count is known" },
+      { "status": 422, "code": "DOCUMENT_PAGE_NOT_APPLICABLE", "when": "page_number is supplied for non-document media" }
+    ],
+    "notes": "Atomically replaces all slot occurrences. page_number defaults to 1 for documents and is occurrence-specific, so the same media may be assigned more than once with different pages. Ref: darshan-server/src/routes/presentations.ts fastify.put(apiEndpoints.presentations.slotItems)"
+  },
+  {
+    "domain": "presentations",
     "method": "DELETE",
     "path": "/api/v1/presentations/:id/slots/:slotItemId",
     "auth": "jwt",

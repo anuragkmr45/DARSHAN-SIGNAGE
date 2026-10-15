@@ -5,7 +5,7 @@ Status: PROVISIONAL QA HANDOFF. User-confirmed decisions and current code behavi
 ## Baseline And Scope
 
 - Product: DARSHAN digital signage, CMS administration, and Electron playback.
-- Branch/commit: `release-01` / `a6e401d2479cd0dee34c33552671cd0f86d4d173`.
+- Branch/commit: `release-01` / `607440c12a8b476149253aac77bbbdcf3c1d960b`, plus the 2026-10-15 document-page-selection working tree.
 - Inspection date: 2026-09-24. This describes checked-in implementation, not the state of a running site.
 - 1,215 tracked files: CMS 289; player 164; server 370; deployment 72; documentation 280; scripts 26; standards 8; manifests 3; three root files.
 - 239 explicit Fastify route registrations, all resolved to paths by static parsing. Some registrations are configuration-dependent, including `/metrics`.
@@ -20,7 +20,7 @@ Primary machine-readable inventory: `evidence/repository-inventory.json`.
 
 Business source: user answers BQ-001 through BQ-006 and follow-ups to BQ-002/003/004/008/009, 2026-09-24. These are intended outcomes, not runtime test results. Detailed comparison: `evidence/policy-behavior-review.md`.
 
-- Documents: first-page-only playback is intentional.
+- Documents: the current requirement supersedes first-page-only playback. An author selects one static physical page per presentation occurrence; legacy/missing values remain page 1 and there is no automatic page progression. Supported document extensions are `.pdf`, `.ppt`, `.pptx`, `.doc`, `.docx`, `.xls`, `.xlsx`, and `.csv`.
 - SUPER_ADMIN: every SUPER_ADMIN account is protected from deletion; SUPER_ADMIN must manage users across all roles. Last-active-account demotion/disablement is a separate edge policy still to settle.
 - Emergency: screen-management permission is sufficient for delegated actions on all explicitly selected screens. Additional global/group/clear-scope behavior is not assumed approved.
 - Offline player: lock after two minutes of backend outage, remove cached media and stop emergency playback too. Current generated defaults do not enable that policy.
@@ -97,9 +97,9 @@ These are scope/use-case IDs, not executed test cases. Each final case will refe
 | UC-006 | Process video/documents and inspect previews; content author | Missing tools, worker retry, corrupt/encrypted file, partial object promotion, PDF page count | Server `darshan-server/src/jobs/index.ts`; player `darshan-player/src/renderer/pdf-playback.ts`; CMS `darshan-cms/src/components/common/MediaPreview.tsx` |
 | UC-007 | Add/display webpage media; content author and player | Rejected destination, redirect/resource block, TLS failure, offline fallback, empty/crashed page | Server `darshan-server/src/utils/webpage-capture.ts`; player `darshan-player/src/main/services/webpage-view-manager.ts` |
 | UC-008 | Create/edit/share layouts; content author | Duplicate/out-of-bounds slots, wrong owner, display mismatch | Server `darshan-server/src/routes/layouts.ts`; CMS `darshan-cms/src/pages/LayoutEditor.tsx` |
-| UC-009 | Compose ordered presentation/slot media; content author | Unready/missing media, duration/loop/audio combinations, in-use edits | Server `darshan-server/src/routes/presentations.ts`; CMS schedule-creator components |
-| UC-010 | Create schedule, preview conflicts and submit hold; operator | Adjacent/overlapping windows, timezones, group expansion, concurrent submit | Server `darshan-server/src/routes/schedules.ts`, `schedule-reservations.ts`, `services/scheduling/reservation-service.ts` |
-| UC-011 | Approve/reject/publish request or direct admin publish | Expired hold, stale revision, duplicate publish, missing target/media, approval separation | Server `darshan-server/src/routes/schedule-requests.ts`, `schedule-publish-helper.ts` |
+| UC-009 | Compose ordered presentation/slot media and select a static page per document occurrence; content author | Unready/missing media, invalid/unknown page range, same document with different pages, atomic replacement, in-use edits | Server `darshan-server/src/routes/presentations.ts`; CMS schedule-creator components |
+| UC-010 | Create schedule, preview selected document pages/conflicts and submit hold; operator | Adjacent/overlapping windows, timezones, group expansion, concurrent submit, legacy page default | Server `darshan-server/src/routes/schedules.ts`, `schedule-reservations.ts`, `services/scheduling/reservation-service.ts` |
+| UC-011 | Approve/reject/publish request or direct admin publish | Expired hold, stale revision, duplicate publish, missing target/media, invalid page, incapable player, approval separation | Server `darshan-server/src/routes/schedule-requests.ts`, `schedule-publish-helper.ts` |
 | UC-012 | Cancel/take down published content; owner/admin | Repeated takedown, disconnected player, reservation release, pending refresh | Server `darshan-server/src/services/scheduling/reservation-service.ts`; player snapshot manager |
 | UC-013 | Pair a new physical player; field operator and CMS admin | Expired/duplicate code, CSR failure, unconfirmed pairing, wrong site | Server `darshan-server/src/routes/device-pairing.ts`; player `darshan-player/src/main/services/pairing-service.ts`, `player-flow.ts` |
 | UC-014 | Recover/revoke/delete an existing device identity | Partial local identity, revoked cert, orphan screen, offline backend, safe cache/queue handling | Server pairing/recovery services; player flow and cert manager |
@@ -176,6 +176,10 @@ These values came from the user's earlier deployment information. Fleet size, me
 Prioritize authorization across UI/REST/realtime, persistent privilege changes, offline identity/security policy, schedule concurrency/time boundaries, emergency delivery, media integrity and conversion, PoP loss/semantics, staged update/restore consistency, TLS trust/routing, low disk and worker resource pressure. Integration screens and old documentation can overstate capability.
 
 These are risk hypotheses and source-observed inconsistencies, not runtime-confirmed defects. No release pass/fail judgment is being made by this static planning package.
+
+## 2026-10-15 Document Page Selection Delta
+
+The architecture now adds `media.page_count`, occurrence-level `page_number`, immutable snapshot propagation, a `pdf_page_selection_v1` player capability gate, selected-page PDF.js rendering in CMS/player, and page-aware proof-of-play. Native PDFs and converted Office/CSV files both obtain their count from the final playable PDF. See `evidence/document-page-selection-review.md` for the simulated flow, corner cases, and explicit non-execution limits.
 
 ## Existing QA Evidence And Gaps
 

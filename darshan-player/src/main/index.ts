@@ -834,6 +834,7 @@ function setupIPCHandlers(): void {
             sceneId: slot.scene_id,
             slotId: slot.slot_id,
             itemId: slot.item_id,
+            pageNumber: slot.page_number,
             startedAt: slot.started_at,
           })
         }

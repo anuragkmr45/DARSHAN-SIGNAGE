@@ -195,6 +195,7 @@ export const media = pgTable(
     duration_seconds: integer('duration_seconds'),
     width: integer('width'),
     height: integer('height'),
+    page_count: integer('page_count'),
     created_by: uuid('created_by').notNull(),
     created_at: timestamp('created_at').notNull().defaultNow(),
     updated_at: timestamp('updated_at').notNull().defaultNow(),
@@ -276,6 +277,7 @@ export const presentationItems = pgTable(
     media_id: uuid('media_id').notNull(),
     order: integer('order').notNull(),
     duration_seconds: integer('duration_seconds'),
+    page_number: integer('page_number'),
     created_at: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => ({
@@ -296,6 +298,7 @@ export const presentationSlotItems = pgTable(
     fit_mode: varchar('fit_mode', { length: 50 }),
     audio_enabled: boolean('audio_enabled').default(false),
     loop_enabled: boolean('loop_enabled').default(false),
+    page_number: integer('page_number'),
     created_at: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => ({
@@ -858,6 +861,7 @@ export const proofOfPlay = pgTable(
     scene_id: text('scene_id'),
     slot_id: varchar('slot_id', { length: 255 }),
     item_id: text('item_id'),
+    page_number: integer('page_number'),
     playback_instance_id: uuid('playback_instance_id'),
     started_at: timestamp('started_at').notNull(),
     ended_at: timestamp('ended_at'),

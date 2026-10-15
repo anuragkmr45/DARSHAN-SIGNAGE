@@ -226,6 +226,7 @@ const ProofOfPlay = () => {
                 <TableRow>
                   <TableHead>Screen</TableHead>
                   <TableHead>Media</TableHead>
+                  <TableHead>Page</TableHead>
                   <TableHead>Started</TableHead>
                   <TableHead>Ended</TableHead>
                   <TableHead>Status</TableHead>
@@ -241,6 +242,7 @@ const ProofOfPlay = () => {
                       </div>
                     </TableCell>
                     <TableCell>{item.media_id}</TableCell>
+                    <TableCell>{item.page_number ?? "—"}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatDateTime(item.started_at || item.played_at)}
                     </TableCell>

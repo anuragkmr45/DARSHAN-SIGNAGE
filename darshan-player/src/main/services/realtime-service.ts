@@ -680,7 +680,7 @@ export class RealtimeService extends EventEmitter {
         log_upload: true,
         offline_startup: true,
         background_push: false,
-        features: ['message_emergency_v1', 'webcontents_view_v1'],
+        features: ['message_emergency_v1', 'webcontents_view_v1', 'pdf_page_selection_v1'],
       },
       local_state: {
         snapshot_id: getSnapshotManager().getCurrentPlaylist()?.snapshotId ?? storeState.lastDesiredSnapshotId ?? null,

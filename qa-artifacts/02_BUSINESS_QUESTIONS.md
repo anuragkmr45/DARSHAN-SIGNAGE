@@ -4,27 +4,27 @@ Status: SOURCE-BEHAVIOR ANSWERED FOR ALL 20 TOPICS. User-approved rules are iden
 
 Source behavior for all BQ-001 through BQ-020 has been recorded. A question's remaining `TBD` means business approval or an actual site target is missing, not that code behavior is unknown. QA can characterize the implementation now; release acceptance for an undecided policy remains separate. Do not include passwords, keys, production tokens or customer data.
 
-All observed behavior below refers to commit `a6e401d2479cd0dee34c33552671cd0f86d4d173`, not a live execution. Source references are repository-relative.
+Unless a section says otherwise, historical observed behavior refers to the earlier static baseline. BQ-001 was refreshed against `release-01` commit `607440c12a8b476149253aac77bbbdcf3c1d960b` plus the 2026-10-15 feature working tree. Source references are repository-relative; no live application execution occurred.
 
 ## Batch 1: Core Behavior And Scope
 
 ### BQ-001: Document Playback
 
-Question: Should a PDF or Office document converted to PDF display only its first page, or automatically show every page/slide? If every page, should the assigned duration apply to the whole document or to each page?
+Question: Should a PDF or Office document converted to PDF display only its first page, allow an author-selected static page, or automatically show every page/slide?
 
 Why this changes testing: A player showing only page 1 can be either correct or a blocking feature defect. Duration and page progression affect scheduling and PoP expectations.
 
-Observed implementation: The player PDF rendering path calls `getPage(1)` and does not progress through pages. Office conversion produces a PDF consumed by document playback.
+Observed implementation updated 2026-10-15: scheduling stores one selected physical page per occurrence, previews and player playback render that page, and Office/CSV conversion produces the PDF whose physical page count sets the valid range. There is no automatic progression. Legacy missing values mean page 1.
 
 Evidence: `darshan-player/src/renderer/pdf-playback.ts::render`; `darshan-server/src/jobs/index.ts` document conversion handler; `darshan-server/src/utils/libreoffice-conversion.ts`.
 
-Choices: first page only; all pages with per-document duration; all pages with per-page duration; another explicit rule.
+Choices: resolved to author-selected static page per occurrence, defaulting to page 1; all-page progression remains out of scope.
 
 Affected areas: UC-006, UC-009, UC-017, UC-020; BR-017, BR-051; document fixtures, timing, renderer and UAT.
 
-Answer: "first page". Business source: user answer BQ-001, 2026-09-24.
+Answer: superseded by the user feature request on 2026-10-15: let the author choose the page while scheduling and show that page in preview and playback. The selection is static per occurrence; page 1 remains the compatibility default.
 
-Resolution: RESOLVED. First-page-only document playback is the acceptance requirement. Not advancing to page 2 is not a defect. Successful conversion/rendering, timing and error handling still require verification; this answer is not a test result.
+Resolution: RESOLVED. Author-selected static page playback per scheduling occurrence is the acceptance requirement; page 1 is only the legacy/default selection. Automatic progression through later pages is not required. Successful conversion/rendering, timing and error handling still require verification; this answer is not a test result.
 
 ### BQ-002: Administrator Hierarchy
 
@@ -379,6 +379,7 @@ Human input still needed: Whether a user-facing recycle/undelete period is requi
 | Batch | Questions | Status | Business source |
 | --- | --- | --- | --- |
 | 1 | BQ-001, BQ-005, BQ-006 | Resolved for stated release scope | User answers, 2026-09-24 |
+| Document-page delta | BQ-001 | Superseded: occurrence-level static page selection; legacy defaults to page 1 | User request, 2026-10-15 |
 | 1 follow-up | BQ-002, BQ-003 | Core rules resolved; separate edge-policy limits documented | User follow-up answers, 2026-09-24 |
 | 1 follow-up | BQ-004 | Two-minute lock, media erasure, emergency stop confirmed | User follow-up answer, 2026-09-24 |
 | 2a | BQ-008 | Fixed built-ins/custom-role customization confirmed | User answer, 2026-09-24 |

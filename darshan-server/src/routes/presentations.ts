@@ -15,6 +15,7 @@ import { getDatabase, schema } from '@/db';
 import { inArray } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
+import { normalizeDocumentPage } from '@/utils/document-page-selection';
 
 const logger = createLogger('presentation-routes');
 const { CREATED, NO_CONTENT } = HTTP_STATUS;
@@ -34,6 +35,7 @@ const presentationItemSchema = z.object({
   media_id: z.string().uuid(),
   order: z.number().int().nonnegative().optional(),
   duration_seconds: z.number().int().positive().optional(),
+  page_number: z.number().int().positive().optional(),
 });
 
 const presentationSlotItemSchema = z.object({
@@ -44,7 +46,25 @@ const presentationSlotItemSchema = z.object({
   fit_mode: z.string().optional(),
   audio_enabled: z.boolean().optional(),
   loop_enabled: z.boolean().optional(),
+  page_number: z.number().int().positive().optional(),
 });
+
+const replacePresentationSlotsSchema = z.object({
+  items: z.array(presentationSlotItemSchema),
+});
+
+function layoutSlotIds(spec: unknown): Set<string> {
+  const slots = Array.isArray(spec)
+    ? spec
+    : spec && typeof spec === 'object' && Array.isArray((spec as { slots?: unknown }).slots)
+      ? (spec as { slots: unknown[] }).slots
+      : [];
+  return new Set(
+    slots
+      .map((slot) => (slot && typeof slot === 'object' ? (slot as { id?: unknown }).id : undefined))
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+  );
+}
 
 export async function presentationRoutes(fastify: FastifyInstance) {
   const presRepo = createPresentationRepository();
@@ -202,6 +222,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             media_id: i.media_id,
             order: i.order,
             duration_seconds: i.duration_seconds,
+            page_number: i.page_number ?? (mediaMap.get(i.media_id)?.type === 'DOCUMENT' ? 1 : null),
             fit_mode: i.fit_mode,
             audio_enabled: i.audio_enabled,
             loop_enabled: i.loop_enabled ?? false,
@@ -257,6 +278,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
               media_id: i.media_id,
               order: i.order,
               duration_seconds: i.duration_seconds,
+              page_number: i.page_number ?? (media?.type === 'DOCUMENT' ? 1 : null),
               created_at: i.created_at.toISOString?.() ?? i.created_at,
               media: media
                 ? {
@@ -268,6 +290,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
                     source_object_key: media.source_object_key,
                     ready_object_id: media.ready_object_id,
                     thumbnail_object_id: media.thumbnail_object_id,
+                    page_count: media.page_count ?? null,
                   }
                 : null,
             };
@@ -306,6 +329,10 @@ export async function presentationRoutes(fastify: FastifyInstance) {
 
         const media = await mediaRepo.findById(data.media_id);
         if (!media) throw AppError.notFound('Media not found');
+        if (media.status !== 'READY') {
+          throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
+        }
+        const pageNumber = normalizeDocumentPage(media, data.page_number);
 
         const existing = await presItemRepo.listByPresentation(presentation.id);
         const desiredOrder =
@@ -319,6 +346,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           media_id: data.media_id,
           order: desiredOrder,
           duration_seconds: data.duration_seconds,
+          page_number: pageNumber,
         });
 
         return reply.status(CREATED).send({
@@ -327,6 +355,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           media_id: item.media_id,
           order: item.order,
           duration_seconds: item.duration_seconds,
+          page_number: item.page_number ?? (media.type === 'DOCUMENT' ? 1 : null),
           created_at: item.created_at.toISOString?.() ?? item.created_at,
           media: {
             id: media.id,
@@ -337,6 +366,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             source_object_key: media.source_object_key,
             ready_object_id: media.ready_object_id,
             thumbnail_object_id: media.thumbnail_object_id,
+            page_count: media.page_count ?? null,
           },
         });
       } catch (error) {
@@ -417,6 +447,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             media_id: i.media_id,
             order: i.order,
             duration_seconds: i.duration_seconds,
+            page_number: i.page_number ?? (mediaMap.get(i.media_id)?.type === 'DOCUMENT' ? 1 : null),
             fit_mode: i.fit_mode,
             audio_enabled: i.audio_enabled,
             created_at: i.created_at.toISOString?.() ?? i.created_at,
@@ -456,15 +487,24 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         }
 
         const data = presentationSlotItemSchema.parse(request.body);
+        const layout = await layoutRepo.findById((presentation as any).layout_id);
+        if (!layout || !layoutSlotIds(layout.spec).has(data.slot_id)) {
+          throw AppError.validation({ reason: 'LAYOUT_SLOT_NOT_FOUND', slot_id: data.slot_id });
+        }
         const media = await mediaRepo.findById(data.media_id);
         if (!media) throw AppError.notFound('Media not found');
+        if (media.status !== 'READY') {
+          throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
+        }
+        const pageNumber = normalizeDocumentPage(media, data.page_number);
 
         const existing = await slotItemRepo.listByPresentation(presentation.id);
         const order =
           data.order ??
-          (existing.length
-            ? Math.max(...existing.filter((i: any) => i.slot_id === data.slot_id).map((i: any) => i.order || 0)) + 1
-            : 0);
+          (() => {
+            const inSlot = existing.filter((i: any) => i.slot_id === data.slot_id);
+            return inSlot.length ? Math.max(...inSlot.map((i: any) => i.order || 0)) + 1 : 0;
+          })();
 
         const item = await slotItemRepo.create({
           presentation_id: presentation.id,
@@ -475,6 +515,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           fit_mode: data.fit_mode,
           audio_enabled: data.audio_enabled,
           loop_enabled: data.loop_enabled,
+          page_number: pageNumber,
         });
 
         return reply.status(CREATED).send({
@@ -487,6 +528,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           fit_mode: item.fit_mode,
           audio_enabled: item.audio_enabled,
           loop_enabled: item.loop_enabled ?? false,
+          page_number: item.page_number ?? (media.type === 'DOCUMENT' ? 1 : null),
           created_at: item.created_at.toISOString?.() ?? item.created_at,
           media: {
             id: media.id,
@@ -497,10 +539,110 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             source_object_key: media.source_object_key,
             ready_object_id: media.ready_object_id,
             thumbnail_object_id: media.thumbnail_object_id,
+            page_count: media.page_count ?? null,
           },
         });
       } catch (error) {
         logger.error(error, 'Add presentation slot item error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  // Atomically replace all layout-slot items for a presentation.
+  fastify.put<{ Params: { id: string }; Body: typeof replacePresentationSlotsSchema._type }>(
+    apiEndpoints.presentations.slotItems,
+    {
+      schema: {
+        description: 'Atomically replace all media assigned to presentation layout slots',
+        tags: ['Presentations'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('update', 'Presentation')) throw AppError.forbidden('Forbidden');
+
+        const presentation = await presRepo.findById((request.params as any).id);
+        if (!presentation) throw AppError.notFound('Presentation not found');
+        if (!(presentation as any).layout_id) {
+          throw AppError.badRequest('Presentation has no layout assigned');
+        }
+
+        const layout = await layoutRepo.findById((presentation as any).layout_id);
+        if (!layout) throw AppError.notFound('Presentation layout not found');
+        const allowedSlotIds = layoutSlotIds(layout.spec);
+        const data = replacePresentationSlotsSchema.parse(request.body);
+        const mediaIds = Array.from(new Set(data.items.map((item) => item.media_id)));
+        const mediaRows = mediaIds.length
+          ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
+          : [];
+        const mediaMap = new Map(mediaRows.map((media) => [media.id, media]));
+        const usedOrders = new Map<string, Set<number>>();
+        const nextOrders = new Map<string, number>();
+
+        const normalizedItems = data.items.map((item) => {
+          if (!allowedSlotIds.has(item.slot_id)) {
+            throw AppError.validation({ reason: 'LAYOUT_SLOT_NOT_FOUND', slot_id: item.slot_id });
+          }
+          const media = mediaMap.get(item.media_id);
+          if (!media) throw AppError.notFound('Media not found', { media_id: item.media_id });
+          if (media.status !== 'READY') {
+            throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
+          }
+
+          const order = item.order ?? nextOrders.get(item.slot_id) ?? 0;
+          const orders = usedOrders.get(item.slot_id) ?? new Set<number>();
+          if (orders.has(order)) {
+            throw AppError.validation({
+              reason: 'PRESENTATION_SLOT_ORDER_CONFLICT',
+              slot_id: item.slot_id,
+              order,
+            });
+          }
+          orders.add(order);
+          usedOrders.set(item.slot_id, orders);
+          nextOrders.set(item.slot_id, Math.max(nextOrders.get(item.slot_id) ?? 0, order + 1));
+
+          return {
+            slot_id: item.slot_id,
+            media_id: item.media_id,
+            order,
+            duration_seconds: item.duration_seconds,
+            fit_mode: item.fit_mode,
+            audio_enabled: item.audio_enabled,
+            loop_enabled: item.loop_enabled,
+            page_number: normalizeDocumentPage(media, item.page_number),
+          };
+        });
+
+        const replaced = await slotItemRepo.replaceByPresentation(presentation.id, normalizedItems);
+        return reply.send({
+          items: replaced
+            .sort((left, right) => left.slot_id.localeCompare(right.slot_id) || left.order - right.order)
+            .map((item) => ({
+              id: item.id,
+              presentation_id: item.presentation_id,
+              slot_id: item.slot_id,
+              media_id: item.media_id,
+              order: item.order,
+              duration_seconds: item.duration_seconds,
+              fit_mode: item.fit_mode,
+              audio_enabled: item.audio_enabled,
+              loop_enabled: item.loop_enabled ?? false,
+              page_number: item.page_number ?? (mediaMap.get(item.media_id)?.type === 'DOCUMENT' ? 1 : null),
+              created_at: item.created_at.toISOString?.() ?? item.created_at,
+              media: mediaMap.get(item.media_id)
+                ? serializeMediaRecord(mediaMap.get(item.media_id) as any)
+                : null,
+            })),
+        });
+      } catch (error) {
+        logger.error(error, 'Replace presentation slot items error');
         return respondWithError(reply, error);
       }
     }

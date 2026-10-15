@@ -16,6 +16,13 @@ function normalizeCodecList(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function normalizeFeatureList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => (typeof entry === 'string' ? entry.trim().toLowerCase() : ''))
+    .filter(Boolean);
+}
+
 function inferRequiredCodecs(media: any): string[] {
   const contentType = typeof media?.source_content_type === 'string' ? media.source_content_type.toLowerCase() : '';
   if (!contentType.startsWith('video/')) return [];
@@ -79,6 +86,7 @@ export async function resolvePresentations(presentationIds: string[], db: DB = g
       media_id: i.media_id,
       order: i.order,
       duration_seconds: i.duration_seconds,
+      page_number: i.page_number ?? (mediaMap.get(i.media_id)?.type === 'DOCUMENT' ? 1 : null),
       media: mediaMap.get(i.media_id) || null,
       created_at: i.created_at,
     });
@@ -101,6 +109,7 @@ export async function resolvePresentations(presentationIds: string[], db: DB = g
       fit_mode: i.fit_mode,
       audio_enabled: i.audio_enabled,
       loop_enabled: i.loop_enabled ?? false,
+      page_number: i.page_number ?? (mediaMap.get(i.media_id)?.type === 'DOCUMENT' ? 1 : null),
       media: mediaMap.get(i.media_id) || null,
       created_at: i.created_at,
     });
@@ -243,7 +252,13 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
     });
   }
 
-  const invalidPresentationRefs: Array<{ presentation_id: string; issue: string; media_id?: string | null }> = [];
+  const invalidPresentationRefs: Array<{
+    presentation_id: string;
+    issue: string;
+    media_id?: string | null;
+    requested_page?: number | null;
+    page_count?: number | null;
+  }> = [];
   for (const presentation of presMap.values()) {
     if ((presentation as any)?.layout_id && !presentation.layout) {
       invalidPresentationRefs.push({
@@ -268,6 +283,36 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
           media_id: item.media.id,
         });
       }
+      const pageNumber = item.page_number ?? (item.media.type === 'DOCUMENT' ? 1 : null);
+      if (item.media.type !== 'DOCUMENT' && pageNumber != null) {
+        invalidPresentationRefs.push({
+          presentation_id: presentation.id,
+          issue: 'DOCUMENT_PAGE_NOT_APPLICABLE',
+          media_id: item.media.id,
+          requested_page: pageNumber,
+          page_count: item.media.page_count ?? null,
+        });
+      } else if (item.media.type === 'DOCUMENT' && item.media.page_count == null && pageNumber !== 1) {
+        invalidPresentationRefs.push({
+          presentation_id: presentation.id,
+          issue: 'DOCUMENT_PAGE_COUNT_UNAVAILABLE',
+          media_id: item.media.id,
+          requested_page: pageNumber,
+          page_count: null,
+        });
+      } else if (
+        item.media.type === 'DOCUMENT' &&
+        item.media.page_count != null &&
+        (pageNumber == null || pageNumber < 1 || pageNumber > item.media.page_count)
+      ) {
+        invalidPresentationRefs.push({
+          presentation_id: presentation.id,
+          issue: 'DOCUMENT_PAGE_OUT_OF_RANGE',
+          media_id: item.media.id,
+          requested_page: pageNumber,
+          page_count: item.media.page_count,
+        });
+      }
     }
 
     for (const slot of presentation.slots || []) {
@@ -284,6 +329,36 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
           presentation_id: presentation.id,
           issue: 'MEDIA_NOT_READY',
           media_id: slot.media.id,
+        });
+      }
+      const pageNumber = slot.page_number ?? (slot.media.type === 'DOCUMENT' ? 1 : null);
+      if (slot.media.type !== 'DOCUMENT' && pageNumber != null) {
+        invalidPresentationRefs.push({
+          presentation_id: presentation.id,
+          issue: 'DOCUMENT_PAGE_NOT_APPLICABLE',
+          media_id: slot.media.id,
+          requested_page: pageNumber,
+          page_count: slot.media.page_count ?? null,
+        });
+      } else if (slot.media.type === 'DOCUMENT' && slot.media.page_count == null && pageNumber !== 1) {
+        invalidPresentationRefs.push({
+          presentation_id: presentation.id,
+          issue: 'DOCUMENT_PAGE_COUNT_UNAVAILABLE',
+          media_id: slot.media.id,
+          requested_page: pageNumber,
+          page_count: null,
+        });
+      } else if (
+        slot.media.type === 'DOCUMENT' &&
+        slot.media.page_count != null &&
+        (pageNumber == null || pageNumber < 1 || pageNumber > slot.media.page_count)
+      ) {
+        invalidPresentationRefs.push({
+          presentation_id: presentation.id,
+          issue: 'DOCUMENT_PAGE_OUT_OF_RANGE',
+          media_id: slot.media.id,
+          requested_page: pageNumber,
+          page_count: slot.media.page_count,
         });
       }
     }
@@ -355,6 +430,10 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
         id: row.id,
         name: row.name,
         codecs: normalizeCodecList((row.device_info as Record<string, unknown> | null)?.codecs),
+        features: normalizeFeatureList(
+          ((row.device_info as Record<string, any> | null)?.player_capabilities as Record<string, unknown> | undefined)
+            ?.features
+        ),
       },
     ])
   );
@@ -412,6 +491,45 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
         unsupported_targets: unsupportedTargets,
       }
     );
+  }
+
+  const incompatiblePageTargets: Array<{
+    screen_id: string;
+    screen_name: string;
+    presentation_id: string;
+    media_id: string;
+    requested_page: number;
+  }> = [];
+  scheduleItems.forEach((item: any) => {
+    const targetedScreens = new Set<string>();
+    (item.screen_ids || []).forEach((screenId: string) => targetedScreens.add(screenId));
+    resolveGroupScreens(item.screen_group_ids || []).forEach((screenId) => targetedScreens.add(screenId));
+    if (targetedScreens.size === 0) resolvedScreenIds.forEach((screenId) => targetedScreens.add(screenId));
+    const presentation = presMap.get(item.presentation_id);
+    const pageItems = [
+      ...((presentation?.items || []) as any[]),
+      ...((presentation?.slots || []) as any[]),
+    ].filter((entry) => entry?.media?.type === 'DOCUMENT' && (entry.page_number ?? 1) > 1);
+
+    pageItems.forEach((entry) => {
+      targetedScreens.forEach((screenId) => {
+        const screenInfo = screenMap.get(screenId);
+        if (screenInfo?.features.includes('pdf_page_selection_v1')) return;
+        incompatiblePageTargets.push({
+          screen_id: screenId,
+          screen_name: screenInfo?.name ?? 'Unknown screen',
+          presentation_id: presentation.id,
+          media_id: entry.media_id,
+          requested_page: entry.page_number,
+        });
+      });
+    });
+  });
+  if (incompatiblePageTargets.length > 0) {
+    throw AppError.conflict('One or more target screens cannot display a selected document page.', {
+      reason: 'UNSUPPORTED_DOCUMENT_PAGE_SELECTION',
+      unsupported_targets: incompatiblePageTargets,
+    });
   }
 
   const displayRows = await db
@@ -522,6 +640,7 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
                   media_id: pi.media_id,
                   order: pi.order,
                   duration_seconds: pi.duration_seconds,
+                  page_number: pi.page_number ?? (pi.media?.type === 'DOCUMENT' ? 1 : null),
                   media: pi.media ? serializeMediaRecord(pi.media) : null,
                 })),
                 slots: (pres.slots || []).map((si: any) => ({
@@ -533,6 +652,7 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
                   fit_mode: si.fit_mode,
                   audio_enabled: si.audio_enabled,
                   loop_enabled: si.loop_enabled ?? false,
+                  page_number: si.page_number ?? (si.media?.type === 'DOCUMENT' ? 1 : null),
                   media: si.media ? serializeMediaRecord(si.media) : null,
                 })),
               }

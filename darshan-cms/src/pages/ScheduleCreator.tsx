@@ -21,6 +21,7 @@ import type {
   ScreenSnapshot,
 } from "@/api/types";
 import { resolveQuickPresetRange, type ScheduleQuickPresetId } from "@/lib/scheduleQuickPresets";
+import { createUuid } from "@/lib/uuid";
 
 import { StepLayoutSelect } from "@/components/schedule-creator/StepLayoutSelect";
 import { StepMediaAssign } from "@/components/schedule-creator/StepMediaAssign";
@@ -35,6 +36,7 @@ import type { Layout } from "@/pages/Layouts";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SlotMedia {
+  clientItemId: string;
   slotId: string;
   mediaId: string;
   mediaName: string;
@@ -47,6 +49,8 @@ export interface SlotMedia {
   fitMode: "cover" | "contain";
   audioEnabled: boolean;
   loopEnabled: boolean;
+  pageNumber?: number;
+  pageCount?: number | null;
 }
 
 export interface ScheduleWizardState {
@@ -113,6 +117,31 @@ const initialState: ScheduleWizardState = {
   endAt: "",
   priority: 0,
   approvalNotes: "",
+};
+
+const normalizeRestoredSlotMedia = (items: unknown): SlotMedia[] => {
+  if (!Array.isArray(items)) return [];
+  return items.map((raw) => {
+    const item = raw as Partial<SlotMedia>;
+    const isDocument = item.mediaType === "DOCUMENT";
+    const requestedPage = Number(item.pageNumber ?? 1);
+    const pageCount = typeof item.pageCount === "number" && item.pageCount > 0 ? Math.trunc(item.pageCount) : null;
+    const pageNumber =
+      isDocument &&
+      Number.isSafeInteger(requestedPage) &&
+      requestedPage > 0 &&
+      (pageCount ? requestedPage <= pageCount : requestedPage === 1)
+        ? requestedPage
+        : isDocument
+          ? 1
+          : undefined;
+    return {
+      ...(item as SlotMedia),
+      clientItemId: typeof item.clientItemId === "string" && item.clientItemId ? item.clientItemId : createUuid(),
+      pageNumber,
+      pageCount,
+    };
+  });
 };
 
 const formatConflictLabel = (conflict: ReservationConflictItem) => {
@@ -307,10 +336,7 @@ export default function ScheduleCreator() {
         presentationId: string;
         items: PresentationSlotPayload[];
       }) => {
-        const responses = await Promise.all(
-          payload.items.map((item) => presentationsApi.createSlot(payload.presentationId, item))
-        );
-        return responses;
+        return presentationsApi.replaceSlots(payload.presentationId, payload.items);
       },
     },
     "Unable to save presentation slots."
@@ -356,7 +382,7 @@ export default function ScheduleCreator() {
       })
       .map(
         (item) =>
-          `${item.slotId}|${item.mediaId}|${item.order}|${item.durationSeconds}|${item.fitMode}|${item.audioEnabled}|${item.loopEnabled}`
+          `${item.clientItemId}|${item.slotId}|${item.mediaId}|${item.order}|${item.durationSeconds}|${item.fitMode}|${item.audioEnabled}|${item.loopEnabled}|${item.pageNumber ?? ""}`
       )
       .join(";");
   };
@@ -383,8 +409,11 @@ export default function ScheduleCreator() {
       case 1:
         return wizardState.selectedLayout !== null;
       case 2:
-        // At least one slot should have media
-        return wizardState.slotMedia.length > 0;
+        return wizardState.slotMedia.length > 0 && wizardState.slotMedia.every((item) => {
+          if (item.mediaType !== "DOCUMENT") return true;
+          const page = item.pageNumber ?? 1;
+          return Number.isSafeInteger(page) && page > 0 && (item.pageCount == null || page <= item.pageCount);
+        });
       case 3:
         return wizardState.selectedScreenIds.length > 0 || wizardState.selectedGroupIds.length > 0;
       case 4:
@@ -457,6 +486,7 @@ export default function ScheduleCreator() {
         fit_mode: item.fitMode,
         audio_enabled: item.audioEnabled,
         loop_enabled: item.loopEnabled,
+        page_number: item.mediaType === "DOCUMENT" ? item.pageNumber ?? 1 : undefined,
       }));
 
       try {
@@ -617,7 +647,11 @@ export default function ScheduleCreator() {
         try {
           const parsed = JSON.parse(stored) as { state: ScheduleWizardState; step?: number };
           if (parsed?.state) {
-            setWizardState(parsed.state);
+            setWizardState({
+              ...initialState,
+              ...parsed.state,
+              slotMedia: normalizeRestoredSlotMedia(parsed.state.slotMedia),
+            });
             setCurrentStep(state.step ?? parsed.step ?? 1);
           } else if (state.step) {
             setCurrentStep(state.step);

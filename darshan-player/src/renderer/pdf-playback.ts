@@ -7,7 +7,11 @@ type PdfPage = {
   }) => PdfRenderTask
   cleanup?: () => void
 }
-type PdfDocument = { getPage: (pageNumber: number) => Promise<PdfPage>; destroy?: () => Promise<void> }
+type PdfDocument = {
+  numPages: number
+  getPage: (pageNumber: number) => Promise<PdfPage>
+  destroy?: () => Promise<void>
+}
 type PdfJsModule = {
   GlobalWorkerOptions: { workerSrc: string }
   getDocument: (options: { url?: string; data?: Uint8Array; disableWorker?: boolean }) => {
@@ -24,6 +28,15 @@ let reservedPdfRasterPixels = 0
 
 export function buildPdfPlaybackSource(source: string | undefined): string {
   return source || ''
+}
+
+export function validatePdfPageSelection(pageNumber: number, pageCount: number): void {
+  if (!Number.isSafeInteger(pageNumber) || pageNumber < 1) {
+    throw new Error('Invalid PDF page selection')
+  }
+  if (!Number.isSafeInteger(pageCount) || pageCount < 1 || pageNumber > pageCount) {
+    throw new Error(`PDF page ${pageNumber} exceeds document page count ${pageCount}`)
+  }
 }
 
 function createStatusElement(message: string): HTMLDivElement {
@@ -83,7 +96,8 @@ class PdfPlaybackController {
   constructor(
     private readonly container: ManagedPdfElement,
     private readonly source: string,
-    private readonly canvas: HTMLCanvasElement
+    private readonly canvas: HTMLCanvasElement,
+    private readonly pageNumber: number
   ) {}
 
   start(): void {
@@ -131,7 +145,8 @@ class PdfPlaybackController {
     try {
       const documentProxy = await this.loadDocument()
       if (this.disposed) return
-      const page = await documentProxy.getPage(1)
+      validatePdfPageSelection(this.pageNumber, documentProxy.numPages)
+      const page = await documentProxy.getPage(this.pageNumber)
       const viewport = page.getViewport({ scale: 1 })
       const rect = this.container.getBoundingClientRect()
       const width = Math.max(1, rect.width || this.container.clientWidth || viewport.width)
@@ -177,8 +192,10 @@ class PdfPlaybackController {
       page.cleanup?.()
     } catch (error) {
       if (this.disposed) return
+      if (error instanceof Error && error.name === 'RenderingCancelledException') return
       window.darshan?.log?.('warn', 'PDF preview render failed', {
         reason: error instanceof Error ? error.message : String(error),
+        page_number: this.pageNumber,
       })
       this.canvas.remove()
       this.container.appendChild(createStatusElement('PDF preview unavailable'))
@@ -211,7 +228,7 @@ class PdfPlaybackController {
   }
 }
 
-export function createPdfPlaybackElement(source: string | undefined): HTMLElement {
+export function createPdfPlaybackElement(source: string | undefined, pageNumber: number = 1): HTMLElement {
   const container = document.createElement('div') as ManagedPdfElement
   container.setAttribute('title', 'PDF playback')
   container.style.position = 'absolute'
@@ -234,7 +251,7 @@ export function createPdfPlaybackElement(source: string | undefined): HTMLElemen
   canvas.style.maxHeight = '100%'
   canvas.style.background = '#fff'
   container.appendChild(canvas)
-  const controller = new PdfPlaybackController(container, resolvedSource, canvas)
+  const controller = new PdfPlaybackController(container, resolvedSource, canvas, pageNumber)
   container.__darshanCleanup = () => controller.dispose()
   controller.start()
   return container
