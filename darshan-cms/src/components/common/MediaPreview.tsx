@@ -53,10 +53,19 @@ function PdfCanvasPreview({ source, pageNumber, title }: { source: string; pageN
     let observer: ResizeObserver | undefined;
     let frame: number | undefined;
     let generation = 0;
+    let renderInFlight = false;
+    let renderAgain = false;
+    let lastRenderKey: string | undefined;
     setStatus("loading");
 
     const render = async () => {
+      if (renderInFlight) {
+        renderAgain = true;
+        return;
+      }
+      renderInFlight = true;
       const currentGeneration = ++generation;
+      let page: PdfPage | undefined;
       try {
         if (!Number.isSafeInteger(pageNumber) || pageNumber < 1) throw new Error("Invalid PDF page selection");
         if (!documentProxy) {
@@ -69,7 +78,7 @@ function PdfCanvasPreview({ source, pageNumber, title }: { source: string; pageN
         }
         if (disposed || currentGeneration !== generation) return;
         if (pageNumber > documentProxy.numPages) throw new Error("Selected page is outside this document");
-        const page = await documentProxy.getPage(pageNumber);
+        page = await documentProxy.getPage(pageNumber);
         const baseViewport = page.getViewport({ scale: 1 });
         const rect = containerRef.current?.getBoundingClientRect();
         const width = Math.max(1, rect?.width || baseViewport.width);
@@ -77,6 +86,11 @@ function PdfCanvasPreview({ source, pageNumber, title }: { source: string; pageN
         const scale = Math.max(0.1, Math.min(width / baseViewport.width, height / baseViewport.height));
         const viewport = page.getViewport({ scale });
         const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const renderKey = [pageNumber, Math.floor(viewport.width), Math.floor(viewport.height), dpr].join(":");
+        if (renderKey === lastRenderKey) {
+          setStatus("ready");
+          return;
+        }
         const canvas = canvasRef.current;
         const context = canvas?.getContext("2d");
         if (!canvas || !context) throw new Error("Canvas rendering is unavailable");
@@ -88,11 +102,20 @@ function PdfCanvasPreview({ source, pageNumber, title }: { source: string; pageN
         renderTask?.cancel?.();
         renderTask = page.render({ canvasContext: context, viewport });
         await renderTask.promise;
-        if (!disposed && currentGeneration === generation) setStatus("ready");
-        page.cleanup?.();
+        if (!disposed && currentGeneration === generation) {
+          lastRenderKey = renderKey;
+          setStatus("ready");
+        }
       } catch (error) {
         if (disposed || (error instanceof Error && error.name === "RenderingCancelledException")) return;
         setStatus("error");
+      } finally {
+        page?.cleanup?.();
+        renderInFlight = false;
+        if (!disposed && renderAgain) {
+          renderAgain = false;
+          scheduleRender();
+        }
       }
     };
 
