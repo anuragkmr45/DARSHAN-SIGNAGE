@@ -34,4 +34,19 @@ describe('deleted-user content ownership migration', () => {
     expect(sql.match(/REFERENCES "departments"\("id"\) ON DELETE RESTRICT/g)).toHaveLength(4);
     expect(sql.match(/REFERENCES "users"\("id"\) ON DELETE RESTRICT NOT VALID/g)).toHaveLength(5);
   });
+
+  it('forward-migrates only identifiable organization-scoped SUPER_ADMIN content', async () => {
+    const sql = await readFile(
+      path.resolve(process.cwd(), 'drizzle/migrations/0046_super_admin_restricted_content.sql'),
+      'utf8'
+    );
+
+    for (const table of ['media', 'layouts', 'presentations', 'schedules']) {
+      expect(sql).toContain(`UPDATE "${table}" AS resource`);
+    }
+    expect(sql.match(/SET "owner_scope" = 'RESTRICTED', "owner_department_id" = NULL/g)).toHaveLength(4);
+    expect(sql.match(/role\."name" = 'SUPER_ADMIN'/g)).toHaveLength(4);
+    expect(sql.match(/resource\."owner_scope" = 'ORGANIZATION'/g)).toHaveLength(4);
+    expect(sql).not.toMatch(/role\."name" = 'ADMIN'/);
+  });
 });
