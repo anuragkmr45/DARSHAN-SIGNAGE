@@ -46,13 +46,13 @@ For a late start or restart inside an active window, the player aligns a looping
 | Legacy row/draft omits loop value | Defaults to `false`; only an explicit video `true` restores as enabled | Deterministic CMS/server test passed |
 | Same video occurs twice with different loop values | Each occurrence preserves its own setting and ordering | Not Tested |
 | Video loop beside selected PDF page | Video repeats independently; PDF stays on the chosen static page; both clear at the schedule boundary | Runtime observed in mixed and simultaneous scenarios |
-| Legacy/malformed snapshot has no usable layout slots | Parser falls back to the older direct timeline. Native video looping still applies, but that legacy scheduler can remount at the configured display interval; current Schedule Creator produces layout scenes. Characterize any required legacy support before release rather than assuming scene behavior. | Not Tested |
+| Legacy/malformed snapshot has no usable layout slots | Parser falls back to the direct timeline. A lone loop-enabled video now remains on one native-loop element instead of completing/remounting at `displayMs`; an explicit `scheduleWindowEndsAt` ends it once and emits renderer cleanup, while a missing end leaves control to snapshot/takeover/stop authority. | Automated developer simulation passed; Electron regression remains open |
 
 ## Static verification performed
 
 - Player production build/bundle: passed.
-- Player full unit suite: 352 passed; full integration suite: 5 passed; fault-injection suite: 14 passed. The focused loop/snapshot simulation covered three native wraps without replay, decoded-duration modulo seeking, invalid duration, bounded play exhaustion, two independent lifecycles, stall recovery, disposal during retry/seek, strict snapshot normalization, a 100 ms remaining scene boundary, transient Axios timeout handling and offline retry state preservation.
-- Player lint: passed with 280 repository warnings and no errors.
+- Player full unit suite: 357 passed; full integration suite: 5 passed; fault-injection suite: 14 passed. The focused loop/snapshot simulation covered three native wraps without replay, decoded-duration modulo seeking, invalid duration, bounded play exhaustion, two independent lifecycles, stall recovery, disposal during retry/seek, strict snapshot normalization, a 100 ms remaining scene boundary, direct-timeline single-loop retention through repeated display durations, authoritative direct-loop cleanup, pause/resume retention of the wall-clock authority boundary, transition/completion timer cancellation, transient Axios timeout handling and offline retry state preservation.
+- Player lint: passed with 281 repository warnings and no errors.
 - CMS full unit suite: 110 passed; production build and bundle budget: passed. Source-connected state tests cover occurrence-specific toggling, stale-occurrence safety, legacy/default restoration, payload generation, video/PDF preview options, Loop On/Off approval labels, duplicate video independence, and non-video normalization.
 - CMS lint: passed with four existing warnings and no errors.
 - Server production/CLI build: passed.
@@ -63,10 +63,10 @@ For a late start or restart inside an active window, the player aligns a looping
 Latest reproducible commands from the repository root, all exit code 0 unless the note says otherwise:
 
 - `cd darshan-player && npm run build`
-- `cd darshan-player && npm run test:unit -- --reporter dot` — 352 passed
+- `cd darshan-player && NODE_OPTIONS=--max-old-space-size=768 npm run test:unit` — 357 passed
 - `cd darshan-player && npm run test:integration` — 5 passed
 - `cd darshan-player && npm run test:fault` — 14 passed
-- `cd darshan-player && npm run lint` — 0 errors, 280 existing warnings
+- `cd darshan-player && NODE_OPTIONS=--max-old-space-size=768 npm run lint` — 0 errors, 281 warnings
 - `cd darshan-cms && npm run test:unit -- --reporter=dot` — 110 passed
 - `cd darshan-cms && npm run build` — build and bundle budget passed; entry JavaScript 216.8 KiB / 68.6 KiB gzip
 - `cd darshan-cms && npm run lint` — 0 errors, 4 existing warnings

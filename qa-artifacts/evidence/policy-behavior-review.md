@@ -2,6 +2,8 @@
 
 Static review of `release-01`, commit `a6e401d2479cd0dee34c33552671cd0f86d4d173`, 2026-09-24. Business source: the user's follow-up answers to BQ-002, BQ-003, BQ-004, BQ-008 and BQ-009. No application code was changed and no tests, services, deployment or database commands were run. Line anchors refer to this baseline.
 
+**Update notice, 2026-10-16:** account withdrawal now has a separate source implementation: token verification requires a live session and active non-deleted user; tombstoning and repository-backed user/password updates remove target sessions, and user-facing paths disconnect user rooms. See `deleted-user-ownership-review.md` and `CONC-07`. Permission-definition/recovery-CLI socket behavior and in-flight boundaries remain open runtime checks; all historical line anchors below are point-in-time evidence.
+
 This distinguishes intended acceptance from implemented behavior. Source-confirmed branches are not production execution evidence. The recommendations below are test-planning targets, not implemented fixes.
 
 ## BQ-002: SUPER_ADMIN Accounts
@@ -79,19 +81,18 @@ QA targets: built-ins are read-only through UI and direct API; rename/inheritanc
 
 Latest stated acceptance policy: immediate removal of old access. The latest BQ-009 follow-up labels this "Immediate access withdrawal" and describes the implementation gaps below. Earlier notes mentioned a possible delayed alternative without a maximum; no such grace period is approved. This is a requirement, not a claim that the current code meets it.
 
-Actual code:
+Actual code, refreshed 2026-10-16:
 
-- Ordinary user updates (`darshan-server/src/routes/users.ts:290`; `src/db/repositories/user.ts:201`) save the account and do not revoke existing sessions. Password reset (`darshan-server/src/routes/users-invite.ts:330`) likewise saves the password without revocation.
-- `darshan-server/src/server/index.ts:90` validates JWT/session ownership/expiry and extends the session. It does not reload active status or the user's current role/department at this point.
-- `darshan-server/src/auth/jwt.ts:59` refreshes using the previous token's role, role ID and department claims. Old access can persist through continuing refresh, not merely until the original token's expiry.
-- New login does reject inactive users (`darshan-server/src/routes/auth.ts:100`). Logout revokes its JTI (`:207`). These controls do not implement withdrawal of every existing session after an account edit.
-- Important distinction: `darshan-server/src/rbac/index.ts:64` reads current grants for the token's role ID on an ability check. Editing the grants of that same role can affect the next REST authorization check, whereas assigning the account a different role leaves an existing token pointing to the previous role. Role-name checks and department claims can remain stale.
-- Chat/notifications/screens socket middleware validates token/session on connection, then retains the user payload (`chat-namespace.ts:169`; `notifications-namespace.ts:97`; `screens-namespace.ts:241`). The traced handlers do not implement account-change-driven session disconnection. Some screen subscribe/sync operations re-evaluate role grants (`screens-namespace.ts:116`); this is not a general revocation/room-removal guarantee.
-- `darshan-server/src/db/repositories/session.ts:38` has a revoke-by-user helper, but ordinary update/reset routes do not call it. The separate administrator recovery/deactivation CLI directly deletes that user's sessions within its transaction (`darshan-server/src/deployment/admin-recovery.ts:202`, `:271`). This is a distinct path, not evidence that CMS account edits revoke access or that connected sockets disconnect immediately.
+- Every access-token verification joins the live session to an active, non-deleted user. Repository-backed user update and tombstone transactions lock the user and delete every target session before commit.
+- User update, reset, activation and tombstone routes disconnect the target user's shared chat, notification and screen rooms after the database transaction commits.
+- Login now verifies the password, then locks and rechecks the current user/password hash and takes a shared lock on the current role before inserting the session in that transaction. Consequently, either login commits first and a waiting account change deletes the new session, or the account change commits first and login cannot issue from the stale password/account row.
+- Role-definition update locks the complete effective-permission graph, rechecks the actor/session, changes the role and deletes sessions for users assigned directly or through transitive inheritance in one transaction; the route then disconnects each affected local user room. Guarded owned-resource writes take the complementary graph lock, so a parent-role edit cannot leave a descendant-role session authorizing after commit.
+- Custom-role deletion uses the same graph lock and is rejected while any direct or transitive inheritor still references the target. This prevents a delete from silently changing a descendant role's effective permissions; the PostgreSQL route regression is authored but remains unexecuted in the resource-safe phase.
+- The separate administrator recovery/deactivation CLI deletes sessions transactionally, but as an out-of-process database tool it cannot directly disconnect sockets held by a live API process. The production runbook therefore requires the backend to be stopped for the change or all backend instances restarted immediately afterward.
 
-Assessment: immediate global access withdrawal is not established and ordinary account-edit paths have source-confirmed gaps. There is no verified bounded fallback delay. Treat disablement, password change, role reassignment, same-role grant edit, department reassignment, logout and CLI recovery as separate cases.
+Assessment: the ordinary API and role-definition source paths now implement committed-state withdrawal and deterministic login/account ordering. Runtime propagation, multiple live clients, all three namespaces, recovery procedure, and already-in-flight boundaries remain unverified; no runtime pass or grace period is claimed.
 
-QA targets: next REST operation, refresh, multiple browsers, idle/active tabs, already-connected socket subscriptions and reconnect; user update commit as timing reference; stopped protected delivery after revocation; negative control for another unaffected account; dedicated recovery CLI session behavior. Old credentials/claims must not authorize subsequent forbidden operations after the change. Distinguish already-in-flight work and record observed propagation delay without treating it as an approved grace period. No runtime guarantee has been verified.
+QA targets: next REST operation, refresh, multiple browsers, idle/active tabs, already-connected socket subscriptions and reconnect; user/role update commit as timing reference; stopped protected delivery after revocation; concurrent login versus password/role/department change; negative control for another unaffected account; and the stopped/restarted-backend recovery procedure. Old credentials/claims must not authorize subsequent forbidden operations after the change. Distinguish already-in-flight work and record observed propagation delay without treating it as an approved grace period. No runtime guarantee has been verified.
 
 ## Existing Tests Read, Not Run
 

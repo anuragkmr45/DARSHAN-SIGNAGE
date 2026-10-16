@@ -1,21 +1,21 @@
 {
-  "analysisDate": "2026-10-15",
-  "commit": "8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2 + video-loop reliability working tree",
+  "analysisDate": "2026-10-16",
+  "commit": "e721c2ab0c8b94af95b6914810a0c6788899e318 + deleted-user ownership working tree",
   "branch": "release-01",
-  "trackedFiles": 1262,
-  "workspaceFilesReviewed": 1269,
+  "trackedFiles": 1279,
+  "workspaceFilesReviewed": 1321,
   "counts": {
     ".codex": 10,
     ".dockerignore": 1,
     ".gitignore": 1,
     "README.md": 1,
-    "darshan-cms": 291,
+    "darshan-cms": 292,
     "darshan-player": 166,
-    "darshan-server": 390,
+    "darshan-server": 403,
     "deploy": 72,
     "docs": 280,
     "manifests": 3,
-    "qa-artifacts": 20,
+    "qa-artifacts": 58,
     "scripts": 26,
     "standards": 8
   },
@@ -5072,6 +5072,7 @@
     "darshan-cms/src/lib/screens.test.ts",
     "darshan-cms/tests/admin-stabilization.e2e.spec.ts",
     "darshan-cms/tests/chat.e2e.spec.ts",
+    "darshan-cms/tests/content-ownership.e2e.spec.ts",
     "darshan-cms/tests/dashboard-active-scheduled.e2e.spec.ts",
     "darshan-cms/tests/dashboard-online-screens.e2e.spec.ts",
     "darshan-cms/tests/scheduling-emergency.e2e.spec.ts",
@@ -5157,11 +5158,16 @@
     "darshan-server/src/deployment/restore-evidence.test.ts",
     "darshan-server/src/http-status-codes.test.ts",
     "darshan-server/src/jobs/chat-media-cleanup.test.ts",
+    "darshan-server/src/jobs/deleted-user-upload-cleanup.test.ts",
     "darshan-server/src/jobs/device-telemetry-idempotency.unit.test.ts",
     "darshan-server/src/jobs/device-telemetry.test.ts",
+    "darshan-server/src/jobs/media-processing-state.unit.test.ts",
     "darshan-server/src/jobs/webpage-processing.test.ts",
     "darshan-server/src/observability/metrics.test.ts",
     "darshan-server/src/observability/prometheus-summary.test.ts",
+    "darshan-server/src/deployment/deleted-user-content-ownership-migration.unit.test.ts",
+    "darshan-server/src/deployment/deleted-user-content-ownership-migration.integration.test.ts",
+    "darshan-server/src/rbac/content-ownership.unit.test.ts",
     "darshan-server/src/rbac/policy.test.ts",
     "darshan-server/src/realtime/chat-namespace.test.ts",
     "darshan-server/src/realtime/device-gateway.test.ts",
@@ -5171,6 +5177,8 @@
     "darshan-server/src/realtime/realtime-bus.test.ts",
     "darshan-server/src/realtime/screens-namespace.test.ts",
     "darshan-server/src/realtime/socket-server.test.ts",
+    "darshan-server/src/routes/content-ownership.test.ts",
+    "darshan-server/src/server/logger-options.unit.test.ts",
     "darshan-server/src/realtime/valkey-realtime-bus.integration.test.ts",
     "darshan-server/src/realtime/valkey-resp-client.test.ts",
     "darshan-server/src/routes/admin-ops-contracts.test.ts",
@@ -5287,13 +5295,50 @@
     "darshan-server/drizzle/migrations/0041_off_host_backup_manifest.sql",
     "darshan-server/drizzle/migrations/0042_emergency_transition_reliability.sql",
     "darshan-server/drizzle/migrations/0043_deployment_run_state.sql",
-    "darshan-server/drizzle/migrations/0044_document_page_selection.sql"
+    "darshan-server/drizzle/migrations/0044_document_page_selection.sql",
+    "darshan-server/drizzle/migrations/0045_deleted_user_content_ownership.sql"
   ],
+  "ownershipDelta": {
+    "sourceReview": "qa-artifacts/evidence/deleted-user-ownership-review.md",
+    "centralPolicy": "darshan-server/src/rbac/content-ownership.ts",
+    "mutationAuthorization": "darshan-server/src/auth/mutation-authorization.ts",
+    "migration": "darshan-server/drizzle/migrations/0045_deleted_user_content_ownership.sql",
+    "affectedEntities": [
+      "users",
+      "sessions",
+      "media",
+      "media_upload_sessions",
+      "layouts",
+      "presentations",
+      "schedules",
+      "schedule_requests",
+      "notifications",
+      "departments"
+    ],
+    "newQACases": [
+      "AUTHZ-07",
+      "DATA-06",
+      "CONC-07",
+      "UI-07"
+    ],
+    "verification": {
+      "serverBuild": "Passed 2026-10-16",
+      "cmsBuildAndBundleBudget": "Passed 2026-10-16",
+      "serverOwnershipFocusedUnit": "5/5 passed after nested-response helper update",
+      "serverBoundedPureUnit": "50/50 passed across 15 files, including processing-state compare-and-set, mocked webpage processing and transitive role-impact coverage",
+      "serverOwnershipRouteAndMigrationIntegration": "Authored, including deterministic transfer-first/write-first row-lock barriers; requires intentionally restarted isolated PostgreSQL",
+      "cmsAccessUnit": "7/7 passed",
+      "cmsOwnershipPlaywright": "Four focused cases discovered; browser execution pending",
+      "documentation": "API catalogue, developer onboarding, ownership/operator contract and production database lifecycle runbook cover stable ownership/tombstones, per-occurrence document pages/video loops, 0044-before-0045 migration recovery and old-server rollback blocking",
+      "runtimeStatus": "Partially exercised in the disposable 2026-10-16 API/CMS run; migration, races, sockets and final-build browser/player coverage remain"
+    }
+  },
   "limits": [
-    "Inventory enumeration is static. A separate targeted disposable CMS/API/browser/Linux Electron/DB run is documented in evidence/runtime-2026-10-15/runtime-validation.md; no production deployment or load test was run.",
+    "Inventory enumeration is static. Targeted developer runs are documented in evidence/runtime-2026-10-15/runtime-validation.md and evidence/runtime-2026-10-16/runtime-validation.md; neither is final QA or release evidence.",
     "Explicit fastify registrations only; plugin-generated Swagger, Socket.IO transport, and dynamic framework routes are separate surfaces.",
     "Local auth call extraction is not an authorization audit; inherited middleware and helper guards must be traced.",
     "69 pgTable declarations do not include deployment-run SQL-only tables or pg-boss internal schema.",
-    "Test-file presence is not evidence of passing execution or complete coverage. Only explicitly reported cases have partial runtime status; all other runtime cases remain Not Tested."
+    "Test-file presence, discovery, TypeScript compilation and pure unit results are not evidence that DB-backed or browser behavior passed. Only explicitly dated observed paths are partial developer evidence; QA-owned results remain independent.",
+    "Existing route paths were retained for the ownership delta. Route line numbers are point-in-time static anchors and may have shifted after source edits; authorization semantics must be traced through verifyAccessToken and content-ownership helpers."
   ]
 }

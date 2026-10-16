@@ -2,6 +2,8 @@
 
 Static source review: 2026-09-25, commit `a6e401d2479cd0dee34c33552671cd0f86d4d173`.
 
+**Supersession notice, 2026-10-16:** the BQ-007 Media/Layout/Presentation/Schedule matrix below is historical. The user subsequently confirmed stable organization/original-department/restricted ownership, and the `e721c2a` working tree implements it centrally and closes the named Presentation gap. Use `deleted-user-ownership-review.md`, BR-084..090 and `AUTHZ-07` for current expectations. OPERATOR-directory privacy and BQ-011..013 findings here remain applicable. This notice is source reconciliation, not runtime proof.
+
 Scope: BQ-007, BQ-011, BQ-012 and BQ-013. Findings below come from application handlers, repositories, runtime code and configuration generation, not documentary claims. No tests, services, database requests, browser sessions or deployments were executed. No application files were changed. These observations do not resolve the corresponding business questions or approve the behavior as correct.
 
 User response on 2026-09-25 supplied these same code-derived findings as answers. The findings are accepted for current-behavior characterization and cross-linked into BR-008/018/026/034/072. They are not silently upgraded to intended business rules. The user's separate explicit approval of administrator self-approval/direct publishing resolves BQ-010 and is recorded in BR-057.
@@ -95,4 +97,4 @@ Source anchors:
 
 ## QA Interpretation
 
-Keep these as IMPLEMENTED_RULE evidence, not user-confirmed requirements. BQ-007/011/012/013 have code-derived answers; their remaining acceptance-policy choices are explicitly TBD, not requests to repeat source analysis. Presentation authorization gaps, group selection changes after editing, authenticated webpage limitations and bounded/droppable PoP evidence are represented in the risk register and detailed cases. Characterization results remain separate from release acceptance, and a behavior matching vulnerable code must not become a security pass. Nothing in this review is a runtime pass/fail result.
+Keep these as dated IMPLEMENTED_RULE evidence, not user-confirmed requirements. The old BQ-007 resource matrix and Presentation authorization gap are superseded in source by the 2026-10-16 stable-ownership implementation and remain runtime test targets in `AUTHZ-07`; OPERATOR-directory privacy is still undecided. BQ-011/012/013 limitations remain represented in the risk register and detailed cases. Characterization results remain separate from release acceptance, and a behavior matching source must not become a security pass. Nothing in this review is a runtime pass/fail result.

@@ -54,7 +54,7 @@ Migration `0044_document_page_selection.sql` adds nullable positive integers to 
 
 - Server production/CLI TypeScript build: passed.
 - CMS production build and bundle budget: passed; PDF.js is a lazy chunk and worker asset. The full CMS unit suite passed 110 tests, including the source-connected selected-page preview option.
-- Player main/renderer build and bundle: passed. The full player unit suite passed 352 tests, its integration suite passed 5 tests, and its fault-injection suite passed 14 tests.
+- Player main/renderer build and bundle: passed. The latest full player unit suite passed 357 tests, its integration suite passed 5 tests, and its fault-injection suite passed 14 tests.
 - Server database-free unit suite passed 25 tests, including page validation, PDF inspection, migration-contract, backfill-safety, PoP idempotency, video-loop normalization, presentation resolution and immutable snapshot serialization.
 - Player and CMS lint passed with existing warnings and no errors. Server-wide lint still has one pre-existing `prefer-const` error in `darshan-server/src/jobs/index.ts`; it is not in the document-page or video-loop delta.
 - A dedicated `darshan_feature_test` database was freshly migrated through all 46 migrations. The focused page/loop server suites passed 9 tests. Broader publish capability, telemetry list/export and migration/backfill matrices remain open.

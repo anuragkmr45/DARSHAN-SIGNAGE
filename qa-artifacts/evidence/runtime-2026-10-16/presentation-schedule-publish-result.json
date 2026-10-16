@@ -1,0 +1,43 @@
+{
+  "run_id": "mvaeor5y",
+  "phase": "published",
+  "assertions": {
+    "capablePlayerPublish": "passed",
+    "immutableSnapshotPageSelection": "passed",
+    "immutableSnapshotLoopFlag": "passed"
+  },
+  "resources": {
+    "screen_id": "33333333-3333-4333-8333-333333333333",
+    "document_media_id": "6b497b50-385d-4618-972d-ae2d72f3d27a",
+    "video_media_id": "ef74b8f8-88cb-4404-aae9-9c707f156e04",
+    "layout_id": "a4d2918e-7bd3-46c8-95b2-3da14a69f2c2",
+    "presentation_id": "2e49bc92-2f1c-4ec9-a33b-a4281e2466d1",
+    "schedule_id": "54a2fc26-9127-404d-b477-d78b079ed8d5",
+    "schedule_item_id": "f1d6d96b-2a85-4a0c-b03c-1fdbda74307f",
+    "publish_id": "8e7608bf-8523-466e-9530-17cfa9505785",
+    "snapshot_id": "96102f4f-c64c-4ccf-aeb2-b330283d8376"
+  },
+  "snapshot_slots": [
+    {
+      "slot_id": "documents",
+      "order": 0,
+      "media_id": "6b497b50-385d-4618-972d-ae2d72f3d27a",
+      "page_number": 2,
+      "loop_enabled": false
+    },
+    {
+      "slot_id": "documents",
+      "order": 1,
+      "media_id": "6b497b50-385d-4618-972d-ae2d72f3d27a",
+      "page_number": 5,
+      "loop_enabled": false
+    },
+    {
+      "slot_id": "video",
+      "order": 0,
+      "media_id": "ef74b8f8-88cb-4404-aae9-9c707f156e04",
+      "page_number": null,
+      "loop_enabled": true
+    }
+  ]
+}

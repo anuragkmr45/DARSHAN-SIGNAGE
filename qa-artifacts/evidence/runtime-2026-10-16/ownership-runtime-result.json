@@ -1,0 +1,34 @@
+{
+  "runSuffix": "mvae597g",
+  "users": {
+    "creator": "e6268906-c41f-47a4-bca4-da8c32f1daaa",
+    "peer": "66cc81e3-94d6-4baa-a868-1781b9db766b",
+    "departmentLead": "553e49ad-7391-4fb2-a010-6a5e772193ed",
+    "otherDepartment": "f09fb8a6-5d6c-4d4c-885b-7b5f065b902d",
+    "replacement": "27074853-c3ca-4cd7-8dd8-3c3464dd5c4f"
+  },
+  "resources": {
+    "media": "e20e95b0-bd3d-497c-88eb-46abf6bca0e8",
+    "layout": "cbeae8f3-4180-4936-a8ad-774f8fb115ed",
+    "presentation": "d423d9c6-8056-4962-9c58-deff82d75dc1",
+    "schedule": "916e782c-6e24-4e73-bab2-d996a648c464",
+    "scheduleRequest": "b6560e19-ce1a-40cd-8421-7f996a918cbb",
+    "organizationLayout": "93bfa452-a40d-4e7f-9977-7483957126ff",
+    "organizationSchedule": "c0e9cef8-bc65-4414-8a60-4ebfc81e30d4",
+    "screen": "33333333-3333-4333-8333-333333333333"
+  },
+  "assertions": {
+    "roleAndScopeMatrix": "passed",
+    "nestedOwnershipClosure": "passed",
+    "transferRevocationAndStableOwnership": "passed",
+    "tombstoneAndIdempotency": "passed",
+    "emailReuseAndHistoryPrivacy": "passed",
+    "departmentDeleteCounts": {
+      "users": 20,
+      "media": 7,
+      "layouts": 6,
+      "presentations": 9,
+      "schedules": 6
+    }
+  }
+}

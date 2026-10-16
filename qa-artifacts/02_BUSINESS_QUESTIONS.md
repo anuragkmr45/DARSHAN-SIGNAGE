@@ -4,7 +4,7 @@ Status: SOURCE-BEHAVIOR ANSWERED FOR ALL 20 TOPICS. User-approved rules are iden
 
 Source behavior for all BQ-001 through BQ-020 has been recorded. A question's remaining `TBD` means business approval or an actual site target is missing, not that code behavior is unknown. QA can characterize the implementation now; release acceptance for an undecided policy remains separate. Do not include passwords, keys, production tokens or customer data.
 
-Unless a section says otherwise, historical observed behavior refers to the earlier static baseline. BQ-001 and the cross-cutting playback baseline were refreshed against `release-01` commit `8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2` plus the 2026-10-15 video-loop reliability working tree. Source references are repository-relative; no live application execution occurred.
+Unless a section says otherwise, historical observed behavior refers to its dated static baseline. BQ-001/playback was refreshed on 2026-10-15; BQ-007, deletion-specific BQ-009 and the account portion of BQ-020 were refreshed against `release-01` commit `e721c2ab0c8b94af95b6914810a0c6788899e318` plus the 2026-10-16 deleted-user ownership working tree. Source references are repository-relative. Ownership has partial isolated API/CMS developer evidence, but the post-run source changes, migration `0045`, deterministic races and final frozen-build runtime remain unverified; the earlier PDF/video runtime is separately linked.
 
 ## Batch 1: Core Behavior And Scope
 
@@ -136,17 +136,19 @@ Question: Should operators be able to discover operators in other departments? F
 
 Why this changes testing: Department membership is not a uniform privacy boundary in the current implementation. A per-resource action matrix is needed, not an assumption that every record is either global or private.
 
-Observed implementation: OPERATOR directory reads are global to the OPERATOR role; department sharing and ADMIN-owned sharing exist in helpers; some mutations/deletes are creator-only. ADMIN and SUPER_ADMIN ownership are not always treated identically by shared-resource helpers.
+Observed implementation, refreshed 2026-10-16: OPERATOR directory behavior remains separate, but Media, Layout, Presentation and Schedule now persist an `ORGANIZATION`, `DEPARTMENT`, or `RESTRICTED` owner at creation/migration. Their list/read/manage paths use one centralized policy; Presentation's former basic-route gap and nested reference gap are closed in source. This working tree has build/unit evidence only, not runtime acceptance.
 
-Evidence: `darshan-server/src/rbac/policy.ts`; `darshan-server/src/routes/media.ts`; `darshan-server/src/routes/layouts.ts`; `darshan-server/src/routes/presentations.ts`; `darshan-server/src/routes/schedules.ts`; `darshan-cms/src/lib/access.ts`.
+Evidence: `darshan-server/src/rbac/content-ownership.ts`; content repositories/routes; migration `0045_deleted_user_content_ownership.sql`; `darshan-cms/src/lib/access.ts`; `evidence/deleted-user-ownership-review.md`.
 
-Affected areas: UC-003..UC-011, UC-024; BR-008, BR-047, BR-048, BR-052; horizontal authorization, search/list counts, attachments and exports.
+Affected areas: UC-003..UC-012, UC-024; BR-008, BR-047, BR-048, BR-052, BR-085..BR-090; horizontal authorization, nested references, search/list counts, attribution and exports.
 
-Answer received 2026-09-25: the user supplied the current per-resource implementation matrix and explicitly distinguished the presentation authorization gap from intended unrestricted sharing. Media/layout reads allow same-department plus ADMIN-owned content; their ordinary deletion is creator-only, and layout editing is creator-only. New upload-session ownership differs from legacy finalization. Schedule access/editing is department-scoped subject to permission/state; no whole-schedule DELETE exists. Basic presentation handlers omit resource/ownership guards; item/slot operations check permissions but not department ownership. OPERATOR directory access includes operators' names/emails across departments, whereas DEPARTMENT is restricted to its own operators.
+Historical answer received 2026-09-25 (superseded for the four content resources on 2026-10-16): the user supplied the then-current per-resource implementation matrix and explicitly distinguished the presentation authorization gap from intended unrestricted sharing. Media/layout reads allowed same-department plus ADMIN-owned content; ordinary deletion/editing was creator-oriented; Schedule access was department-derived; and basic Presentation handlers omitted guards. OPERATOR directory access included operators' names/emails across departments, whereas DEPARTMENT was restricted to its own operators.
 
-Resolution: ANSWERED AS IMPLEMENTATION BASELINE. Use the detailed matrix in `evidence/content-runtime-review.md::BQ-007` for characterization coverage (BR-008, BR-072). Do not treat the missing presentation authorization as an accepted feature. Intended presentation sharing and acceptance of the directory/privacy differences remain NEEDS_BUSINESS_CONFIRMATION under BR-052; the user has not approved a replacement uniform sharing matrix. No repeated request for the same code explanation is needed.
+Updated decision received 2026-10-16: operational ownership must not be assigned to another individual when a creator is deleted. It stays with the original department, or with the organization for administrator-created content; unresolved legacy rows are restricted to administrators. Administrators manage all scopes. A permitted DEPARTMENT lead manages department content; an OPERATOR/custom department user manages only their own content while still in the owner department; peers and other departments cannot mutate it. Organization content is readable with the corresponding permission but administrator-managed. Creator transfer does not move old content. Stable ownership applies uniformly to Media, Layout, Presentation, Schedule and Schedule Request authorization.
 
-Code-baseline expected result for QA: A permitted OPERATOR can list other OPERATOR accounts across departments, including name/email; a DEPARTMENT user sees operators in their own department. An ordinary department-scoped user can read same-department and ADMIN-owned media/layouts, but cannot edit/delete another creator's layout or delete another creator's media. A mutable same-department schedule can be edited with `update Schedule`; another department's schedule is denied. Basic presentation list/get/PATCH/DELETE currently require a valid session but lack Presentation ability and ownership checks, so cross-owner access may succeed; record that as an authorization finding, never a security pass. Item/slot mutation has an ability check but no department-owner check. These are characterization expectations, not approval of cross-department disclosure or unauthorized presentation access.
+Resolution: **RESOLVED for the four content resources and deleted/ transferred creator behavior** under BR-085..090. The old source characterization in `evidence/content-runtime-review.md` is historical and superseded for these resources by `evidence/deleted-user-ownership-review.md`. OPERATOR-directory cross-department name/email visibility remains a separate unapproved privacy decision under BR-052.
+
+Code-baseline expected result for QA: an actor must have the applicable ability and stable-owner access. Administrators read/manage all scopes. Permitted users read organization content but only administrators mutate it. Same-department users read department content; a DEPARTMENT lead with ability manages it; an OPERATOR/custom user with ability manages only their own resource and only while still in the owner department. Peers, moved creators and other departments are denied mutation; restricted rows are administrator-only. Presentation/Schedule parents cannot expose an unreadable or scope-incompatible nested resource. Deleting/transferring the creator does not change owner scope/department or published playback. Directory visibility must be scored separately.
 
 ### BQ-008: Saved Role Customizations
 
@@ -172,9 +174,9 @@ Question: When an account is disabled, its password is reset, or its role/depart
 
 Why this changes testing: Session revocation latency changes the expected result for direct API calls, open browser tabs and already-connected sockets.
 
-Observed implementation: Session JTI/expiry is checked and idle validity extended; token refresh retains identity claims. Traced user updates/reset operations do not visibly revoke every session or disconnect sockets.
+Observed implementation, refreshed 2026-10-16: every access-token verification requires a live unexpired session plus an active, non-deleted user. Tombstone deletion and repository-backed user/password changes remove all target sessions; the user-facing update/reset/activation routes disconnect chat/notification/screen rooms. Login session creation locks and rechecks the user/password and current role so a concurrent old-password login cannot escape revocation. Effective-role graph edits serialize with guarded content writes and revoke sessions for users assigned directly or through transitive inheritance in the same transaction, then disconnect their local rooms. Thus a department transfer or inherited permission change cannot keep using an old session for a later guarded mutation. The recovery CLI remains a separate operational case because it cannot directly disconnect sockets owned by another running process.
 
-Evidence: `darshan-server/src/server/index.ts::refreshSessionFromRequestToken`; `darshan-server/src/auth/jwt.ts::refreshAccessToken`; `darshan-server/src/routes/users.ts`; `darshan-server/src/routes/users-invite.ts`; `darshan-server/src/realtime/chat-namespace.ts`; `darshan-server/src/realtime/screens-namespace.ts`.
+Evidence: `darshan-server/src/auth/jwt.ts::verifyAccessToken`; `darshan-server/src/db/repositories/user.ts::tombstone`; `darshan-server/src/routes/users.ts`; shared user rooms in the chat/notification/screen namespaces; `evidence/deleted-user-ownership-review.md`.
 
 Affected areas: UC-002..UC-004, UC-021; BR-010, BR-011, BR-012, BR-056; authentication, horizontal/vertical authorization and concurrency.
 
@@ -184,7 +186,7 @@ Latest follow-up, 2026-09-24: "Immediate access withdrawal"; the user describes 
 
 Resolution: record immediate withdrawal as the intended acceptance requirement (BR-056), not as a current capability. No fallback grace period is approved. After the account/security change commits, old access must not authorize subsequent protected operations or ongoing protected socket delivery. This requirement does not prescribe a particular revocation implementation or require removing still-authorized privileges after a role change.
 
-Code comparison: ordinary account updates/password resets do not revoke sessions; refresh keeps old account role/department claims and can prolong access. Same-role permission edits can affect the next ability check because role grants are reread. Socket connection checks are not continuous revocation. Recovery CLI session deletion is a separate path. See `evidence/policy-behavior-review.md::BQ-009`.
+Code comparison: deletion, ordinary user-row updates, password reset and role-definition edits now have source-level session revocation; user-facing paths disconnect local sockets, and reconnect requires a surviving session plus current active account. Login issuance is serialized with user/role change. Permission-definition propagation and the stopped/restarted-backend recovery procedure still need their live-socket matrix. See `evidence/deleted-user-ownership-review.md` for current source and `evidence/policy-behavior-review.md::BQ-009` for the superseded historical gap.
 
 Planning note: distinguish operations already in flight before the change from operations authorized after it. Record measured propagation and any residual-access window during future execution; do not invent an accepted delay. This review did not execute a session or socket test.
 
@@ -364,15 +366,17 @@ Question: Should a user-facing media delete be recoverable through a recycle bin
 
 Why this changes testing: A retained DB row alone does not preserve a deleted file. Recovery expectations must match both storage and metadata behavior.
 
-Observed implementation: Media's soft-delete path retains metadata but attempts to delete object data and marks it FAILED. References can prevent deletion. Chat cleanup and account deletion have separate reference/cascade behavior; no universal recycle-bin workflow is established.
+Observed implementation, refreshed 2026-10-16: Media's soft-delete path still retains metadata but attempts to delete object data and marks it FAILED. References can prevent deletion, and chat cleanup remains separate. Account deletion is now a permanent tombstone: it retains identity/history and stable content ownership, scrubs email/credentials, revokes access and stops incomplete uploads. It does not provide restore or automatically transfer assets to a person.
 
-Evidence: `darshan-server/src/routes/media.ts` delete handler; `darshan-server/src/db/repositories/media.ts`; `darshan-server/src/jobs/index.ts::cleanupChatMediaAssets`; `darshan-server/src/db/repositories/user.ts::getDeleteUsageSummary`.
+Evidence: `darshan-server/src/routes/media.ts` delete handler; `darshan-server/src/db/repositories/media.ts`; `darshan-server/src/jobs/index.ts`; `darshan-server/src/db/repositories/user.ts::tombstone`; migration `0045`; `evidence/deleted-user-ownership-review.md`.
 
-Affected areas: UC-003, UC-005, UC-021, UC-028; BR-015, BR-062; destructive actions, retention, referential integrity and recovery.
+Affected areas: UC-003, UC-005, UC-008..UC-012, UC-021, UC-028; BR-015, BR-062, BR-084..090; destructive actions, retention, attribution, referential integrity and recovery.
 
 Code answer, 2026-09-25: Media soft delete still attempts object deletion and retains a FAILED row without storage pointers; hard delete removes both where possible. In-use checks can block deletion. Unreferenced chat media has a separate asynchronous cleanup path. No universal recycle-bin route is demonstrated. See `evidence/operational-behavior-review.md::BQ-020`.
 
-Human input still needed: Whether a user-facing recycle/undelete period is required for media, chat attachments and accounts, or whether removal after reference checks is intended. Keep recoverability expectations TBD until a product decision exists.
+Account-deletion decision received 2026-10-16: deleted accounts are not user-restorable and are not physically removed while referenced history exists; retained content stays with its original department/organization and no automatic person-to-person reassignment occurs. The original display name remains for history, but the old email is not shown. This resolves the account portion under BR-084..090.
+
+Human input still needed: whether a user-facing recycle/undelete period is required for independently deleted Media and chat attachments. Do not apply the account-tombstone decision to those object-deletion workflows.
 
 ## Answer And Resolution Log
 
@@ -386,6 +390,7 @@ Human input still needed: Whether a user-facing recycle/undelete period is requi
 | 2a | BQ-009 | Immediate withdrawal recorded as the intended acceptance rule; implementation gap retained | Latest user follow-up, 2026-09-24 |
 | 2b | BQ-010 | Self-approval and direct administrator publish confirmed | User answer, 2026-09-25 |
 | 2b | BQ-007, BQ-011..BQ-013 | Code-derived answers recorded for characterization; unapproved policy expectations remain TBD | User answers and source review, 2026-09-25 |
+| Ownership delta | BQ-007, BQ-020 | Stable organization/original-department ownership and permanent user tombstones confirmed; account portion resolved; directory and Media/chat recycle policy remain separate | User product decision and source implementation, 2026-10-16 |
 | 2c | BQ-014 | Code behavior recorded; reporting meaning/timezone pending human input | Source review, 2026-09-25 |
 | 3 | BQ-015..BQ-020 | Code behavior recorded; site policies and actual target state pending human input | Source review, 2026-09-25 |
 

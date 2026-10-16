@@ -2,6 +2,8 @@
 
 Static inspection on 2026-09-25 of `release-01` at `a6e401d2479cd0dee34c33552671cd0f86d4d173`. No application test, deployment, load, browser, VM or database action was run. This is the code answer to BQ-014 through BQ-020; product and site acceptance targets are identified separately.
 
+**Supersession notice, 2026-10-16:** the BQ-020 account-deletion portion is replaced by the confirmed permanent-tombstone/stable-ownership behavior in `deleted-user-ownership-review.md`, BR-084..090 and cases `DATA-06`/`CONC-07`/`UI-07`. The Media/chat object-deletion and recycle-policy findings in this review remain applicable. No ownership runtime test has been run.
+
 ## BQ-014: Reports
 
 `darshan-server/src/routes/reports.ts:307` computes `screen_uptime_percent` as `ACTIVE/(ACTIVE+OFFLINE)*100`, rounds to two decimal places, and returns null when the denominator is zero. This is a current screen-state fraction, not historical uptime. `darshan-server/src/routes/proof-of-play.ts:24` defines COMPLETED as `ended_at IS NOT NULL` and INCOMPLETE as null; its day grouping is PostgreSQL `date(created_at)` with no explicit timezone conversion. `darshan-server/src/routes/reports.ts:825` uses the same day grouping. The server's PDF date formatter emits UTC (`reports.ts:17`); the CMS audit timestamp formatter uses the browser's default locale/timezone (`darshan-cms/src/pages/Reports.tsx:46`). `org.general.timezone` defaults to UTC in `darshan-server/src/utils/settings.ts:26`, but the cited grouping query does not use it. Database session timezone was not measured. Business meaning of uptime, reporting day, and completion remains BQ-014.

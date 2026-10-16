@@ -1,0 +1,6 @@
+page,label,expected_color
+1,First sheet row,red
+2,Second sheet row,blue
+3,Third sheet row,green
+4,Fourth sheet row,purple
+5,Fifth sheet row,orange

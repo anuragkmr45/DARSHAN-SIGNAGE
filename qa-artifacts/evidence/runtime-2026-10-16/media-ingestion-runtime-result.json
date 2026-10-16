@@ -1,0 +1,138 @@
+{
+  "run_id": "mvaelcqz",
+  "assertions": "passed",
+  "media": [
+    {
+      "filename": "fixture-corrupt.pdf",
+      "content_type": "application/pdf",
+      "media_id": "b2dc3849-ebd6-4aee-a44e-411b1abb2874",
+      "upload_session_id": "b4c2ef99-deea-4cb6-a317-9b9a638aa643",
+      "type": "DOCUMENT",
+      "status": "FAILED",
+      "status_reason": "DOCUMENT_PDF_INVALID",
+      "page_count": null,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-encrypted.pdf",
+      "content_type": "application/pdf",
+      "media_id": "1236f92a-e8ab-4504-8acc-f79a0cb0b439",
+      "upload_session_id": "0732f026-3b7a-4a45-a755-3b3470b763b9",
+      "type": "DOCUMENT",
+      "status": "FAILED",
+      "status_reason": "DOCUMENT_PDF_ENCRYPTED",
+      "page_count": null,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-loop.mp4",
+      "content_type": "video/mp4",
+      "media_id": "ef74b8f8-88cb-4404-aae9-9c707f156e04",
+      "upload_session_id": "1344f0e6-c663-4f5f-b2a9-2005f9786170",
+      "type": "VIDEO",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": null,
+      "duration_seconds": 2,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-pages.doc",
+      "content_type": "application/msword",
+      "media_id": "2a373cda-16c1-4698-9696-9aa33c10582a",
+      "upload_session_id": "bc61ad0f-2c3f-4883-9160-9d648e1bdf70",
+      "type": "DOCUMENT",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": 2,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-pages.docx",
+      "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "media_id": "b56528cb-06ed-4681-a46a-b9c48bdb920f",
+      "upload_session_id": "a33a9057-4462-4ee0-aeb6-61b43e3cb073",
+      "type": "DOCUMENT",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": 2,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-pages.pdf",
+      "content_type": "application/pdf",
+      "media_id": "6b497b50-385d-4618-972d-ae2d72f3d27a",
+      "upload_session_id": "11509432-382a-477d-a4f7-279cafb9a751",
+      "type": "DOCUMENT",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": 5,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-sheet.csv",
+      "content_type": "text/csv",
+      "media_id": "6addbf45-b209-4a70-abb8-9b3986b88983",
+      "upload_session_id": "7306a7e6-bdfb-43c5-b8dc-a21ccf1a97bf",
+      "type": "DOCUMENT",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": 1,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-sheet.xls",
+      "content_type": "application/vnd.ms-excel",
+      "media_id": "f18a9618-17cf-4f44-a52e-9ac787683dba",
+      "upload_session_id": "73ed9003-a1e8-431b-9e6e-e0c18db0d36a",
+      "type": "DOCUMENT",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": 1,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-sheet.xlsx",
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "media_id": "7db00a14-dfad-45c6-b265-1a67e1275c90",
+      "upload_session_id": "c1538326-7c8c-4d9f-b664-a29f8c07b899",
+      "type": "DOCUMENT",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": 1,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-slides.ppt",
+      "content_type": "application/vnd.ms-powerpoint",
+      "media_id": "66fbca0e-cc2e-4a32-b570-e87d58b9cf43",
+      "upload_session_id": "cc5e4437-64f2-4611-8f27-44e0738c1ee0",
+      "type": "DOCUMENT",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": 5,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    },
+    {
+      "filename": "fixture-slides.pptx",
+      "content_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "media_id": "a3b3e7ee-5981-4cae-9b45-15f69c720806",
+      "upload_session_id": "3b7c17d0-a97e-4f32-baf2-223e0a7e7aa6",
+      "type": "DOCUMENT",
+      "status": "READY",
+      "status_reason": null,
+      "page_count": 5,
+      "duration_seconds": null,
+      "owner_scope": "ORGANIZATION"
+    }
+  ]
+}
