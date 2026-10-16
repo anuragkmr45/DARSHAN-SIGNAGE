@@ -101,8 +101,8 @@ export async function presentationRoutes(fastify: FastifyInstance) {
     if (!ability.can(action, 'Presentation')) throw AppError.forbidden('Forbidden');
     const actor = actorFor(payload);
     const allowed = action === 'read'
-      ? canReadContentResource(actor, presentation)
-      : canManageContentResource(actor, presentation);
+      ? canReadContentResource(actor, presentation, ability, 'Presentation')
+      : canManageContentResource(actor, presentation, ability, 'Presentation', action);
     if (!allowed) throw AppError.forbidden('Forbidden');
     return { ability, actor };
   };
@@ -124,7 +124,13 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         .where(eq(schema.presentations.id, presentationId))
         .for('update');
       if (!presentation) throw AppError.notFound('Presentation not found');
-      if (!canManageContentResource(context.actor, presentation)) throw AppError.forbidden('Forbidden');
+      if (!canManageContentResource(
+        context.actor,
+        presentation,
+        context.ability,
+        'Presentation',
+        action
+      )) throw AppError.forbidden('Forbidden');
       return execute({ ...context, presentation });
     });
   const serializePresentation = (presentation: any, ownership: any, ability: any, actor: ActorContext) => {
@@ -174,12 +180,12 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const data = createPresentationSchema.parse(request.body);
         const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
           if (!ability.can('create', 'Presentation')) throw AppError.forbidden('Forbidden');
-          const newOwnership = ownershipForNewContent(actor);
+          const newOwnership = ownershipForNewContent(actor, ability, 'Presentation');
 
           if (data.layout_id) {
             const layout = await layoutRepo.findById(data.layout_id, executor);
             if (!layout) throw AppError.notFound('Layout not found');
-            if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+            if (!canReadContentResource(actor, layout, ability, 'Layout')) throw AppError.forbidden('Forbidden');
             if (!canReferenceContentResource({ id: 'new-presentation', ...newOwnership }, layout)) {
               throw AppError.badRequest('The selected layout has narrower ownership than the presentation.');
             }
@@ -230,6 +236,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           page: query.page,
           limit: query.limit,
           actor,
+          ability,
         });
         const ownershipViews = await resolveContentOwnershipViews(result.items);
 
@@ -278,7 +285,9 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         let layout: any = null;
         if ((presentation as any).layout_id) {
           layout = await layoutRepo.findById((presentation as any).layout_id);
-          if (layout && !canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+          if (layout && !canReadContentResource(actor, layout, ability, 'Layout')) {
+            throw AppError.forbidden('Forbidden');
+          }
         }
 
         const slotItems = await slotItemRepo.listByPresentation(presentation.id);
@@ -287,7 +296,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
-        if (mediaRows.some((media) => !canReadContentResource(actor, media))) {
+        if (mediaRows.some((media) => !canReadContentResource(actor, media, ability, 'Media'))) {
           throw AppError.forbidden('Presentation contains media outside your ownership scope.');
         }
 
@@ -354,7 +363,9 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const presentation = await presRepo.findById((request.params as any).id);
         if (!presentation) throw AppError.notFound('Presentation not found');
         const actor = actorFor(payload);
-        if (!canReadContentResource(actor, presentation)) throw AppError.forbidden('Forbidden');
+        if (!canReadContentResource(actor, presentation, ability, 'Presentation')) {
+          throw AppError.forbidden('Forbidden');
+        }
 
         const items = await presItemRepo.listByPresentation(presentation.id);
         const mediaIds = items.map((i: any) => i.media_id);
@@ -363,7 +374,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
-        if (mediaRows.some((media) => !canReadContentResource(actor, media))) {
+        if (mediaRows.some((media) => !canReadContentResource(actor, media, ability, 'Media'))) {
           throw AppError.forbidden('Presentation contains media outside your ownership scope.');
         }
         const ownershipViews = await resolveContentOwnershipViews(mediaRows);
@@ -415,7 +426,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           async ({ presentation, actor, ability, executor }) => {
             const media = await mediaRepo.findById(data.media_id, executor);
             if (!media) throw AppError.notFound('Media not found');
-            if (!canReadContentResource(actor, media)) throw AppError.forbidden('Forbidden');
+            if (!canReadContentResource(actor, media, ability, 'Media')) throw AppError.forbidden('Forbidden');
             if (!canReferenceContentResource(presentation, media)) {
               throw AppError.badRequest('The selected media has narrower ownership than the presentation.');
             }
@@ -522,7 +533,9 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const presentation = await presRepo.findById((request.params as any).id);
         if (!presentation) throw AppError.notFound('Presentation not found');
         const actor = actorFor(payload);
-        if (!canReadContentResource(actor, presentation)) throw AppError.forbidden('Forbidden');
+        if (!canReadContentResource(actor, presentation, ability, 'Presentation')) {
+          throw AppError.forbidden('Forbidden');
+        }
 
         const slots = await slotItemRepo.listByPresentation(presentation.id);
         const mediaIds = slots.map((i: any) => i.media_id);
@@ -530,7 +543,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
-        if (mediaRows.some((media) => !canReadContentResource(actor, media))) {
+        if (mediaRows.some((media) => !canReadContentResource(actor, media, ability, 'Media'))) {
           throw AppError.forbidden('Presentation contains media outside your ownership scope.');
         }
         const ownershipViews = await resolveContentOwnershipViews(mediaRows);
@@ -593,13 +606,13 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             if (!layout || !layoutSlotIds(layout.spec).has(data.slot_id)) {
               throw AppError.validation({ reason: 'LAYOUT_SLOT_NOT_FOUND', slot_id: data.slot_id });
             }
-            if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+            if (!canReadContentResource(actor, layout, ability, 'Layout')) throw AppError.forbidden('Forbidden');
             if (!canReferenceContentResource(presentation, layout)) {
               throw AppError.badRequest('The presentation layout has narrower ownership than the presentation.');
             }
             const media = await mediaRepo.findById(data.media_id, executor);
             if (!media) throw AppError.notFound('Media not found');
-            if (!canReadContentResource(actor, media)) throw AppError.forbidden('Forbidden');
+            if (!canReadContentResource(actor, media, ability, 'Media')) throw AppError.forbidden('Forbidden');
             if (!canReferenceContentResource(presentation, media)) {
               throw AppError.badRequest('The selected media has narrower ownership than the presentation.');
             }
@@ -691,7 +704,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             }
             const layout = await layoutRepo.findById(presentation.layout_id, executor);
             if (!layout) throw AppError.notFound('Presentation layout not found');
-            if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+            if (!canReadContentResource(actor, layout, ability, 'Layout')) throw AppError.forbidden('Forbidden');
             if (!canReferenceContentResource(presentation, layout)) {
               throw AppError.badRequest('The presentation layout has narrower ownership than the presentation.');
             }
@@ -710,7 +723,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
               }
               const media = mediaMap.get(item.media_id);
               if (!media) throw AppError.notFound('Media not found', { media_id: item.media_id });
-              if (!canReadContentResource(actor, media)) throw AppError.forbidden('Forbidden');
+              if (!canReadContentResource(actor, media, ability, 'Media')) throw AppError.forbidden('Forbidden');
               if (!canReferenceContentResource(presentation, media)) {
                 throw AppError.badRequest('Selected media has narrower ownership than the presentation.');
               }
@@ -846,7 +859,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             if (data.layout_id) {
               const layout = await layoutRepo.findById(data.layout_id, executor);
               if (!layout) throw AppError.notFound('Layout not found');
-              if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+              if (!canReadContentResource(actor, layout, ability, 'Layout')) throw AppError.forbidden('Forbidden');
               if (!canReferenceContentResource(existing, layout)) {
                 throw AppError.badRequest('The selected layout has narrower ownership than the presentation.');
               }

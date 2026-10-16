@@ -1,7 +1,7 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import type { ActorContext } from '@/rbac/policy';
-import { contentReadCondition, type ContentOwnerScope } from '@/rbac/content-ownership';
+import { contentReadCondition, type ContentAbility, type ContentOwnerScope } from '@/rbac/content-ownership';
 
 export class PresentationRepository {
   async create(data: {
@@ -31,6 +31,7 @@ export class PresentationRepository {
     limit?: number;
     created_by?: string;
     actor?: ActorContext;
+    ability?: ContentAbility;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -42,7 +43,7 @@ export class PresentationRepository {
       conditions.push(eq(schema.presentations.created_by, options.created_by));
     }
     if (options.actor) {
-      const accessCondition = contentReadCondition(options.actor, schema.presentations);
+      const accessCondition = contentReadCondition(options.actor, schema.presentations, options.ability, 'Presentation');
       if (accessCondition) conditions.push(accessCondition);
     }
 

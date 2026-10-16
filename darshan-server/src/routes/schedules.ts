@@ -29,7 +29,7 @@ import {
 } from '@/routes/schedule-publish-helper';
 import z from 'zod';
 import { AppError } from '@/utils/app-error';
-import { isAdminLike, type ActorContext } from '@/rbac/policy';
+import { type ActorContext } from '@/rbac/policy';
 import {
   canManageContentResource,
   canReadContentResource,
@@ -169,16 +169,17 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   };
 
   const assertScheduleAccess = async (
-    payload: { sub: string; role: string; department_id?: string },
+    payload: JWTPayload,
     scheduleId: string,
     manage = false
   ) => {
     const schedule = await scheduleRepo.findById(scheduleId);
     if (!schedule) throw AppError.notFound('Schedule not found');
     const actor = actorFor(payload);
+    const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
     const canAccessSchedule = manage
-      ? canManageContentResource(actor, schedule)
-      : canReadContentResource(actor, schedule);
+      ? canManageContentResource(actor, schedule, ability, 'Schedule', 'update')
+      : canReadContentResource(actor, schedule, ability, 'Schedule');
     if (!canAccessSchedule) throw AppError.forbidden('Forbidden');
     return schedule;
   };
@@ -199,7 +200,9 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         .where(eq(schema.schedules.id, scheduleId))
         .for('update');
       if (!schedule) throw AppError.notFound('Schedule not found');
-      if (!canManageContentResource(context.actor, schedule)) throw AppError.forbidden('Forbidden');
+      if (!canManageContentResource(context.actor, schedule, context.ability, 'Schedule', 'update')) {
+        throw AppError.forbidden('Forbidden');
+      }
       return execute({ ...context, schedule });
     });
 
@@ -270,7 +273,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
             start_at: startAt,
             end_at: endAt,
             created_by: actor.userId,
-            ...ownershipForNewContent(actor),
+            ...ownershipForNewContent(actor, ability, 'Schedule'),
           }, executor);
           return { schedule, actor, ability };
         });
@@ -357,7 +360,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const body = request.body as any;
         const target = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
-          if (!ability.can('update', 'Schedule') || !isAdminLike(actor.roleName)) {
+          if (!ability.can('update', 'Schedule')) {
             throw AppError.forbidden('Forbidden');
           }
           const [publish] = await executor
@@ -371,7 +374,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
             .from(schema.schedules)
             .where(eq(schema.schedules.id, publish.schedule_id))
             .for('update');
-          if (!schedule || !canManageContentResource(actor, schedule)) {
+          if (!schedule || !canManageContentResource(actor, schedule, ability, 'Schedule', 'update')) {
             throw AppError.forbidden('Forbidden');
           }
           const [updatedTarget] = await executor
@@ -423,6 +426,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           limit: query.limit,
           is_active: query.is_active === 'true' ? true : query.is_active === 'false' ? false : undefined,
           actor,
+          ability,
         });
         const ownershipViews = await resolveContentOwnershipViews(result.items);
 
@@ -502,16 +506,16 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const presMap = await resolvePresentations(items.map((i: any) => i.presentation_id));
         const actor = actorFor(payload);
         for (const presentation of presMap.values()) {
-          if (!canReadContentResource(actor, presentation)) {
+          if (!canReadContentResource(actor, presentation, ability, 'Presentation')) {
             throw AppError.forbidden('Schedule contains a presentation outside your ownership scope.');
           }
-          if (presentation.layout && !canReadContentResource(actor, presentation.layout)) {
+          if (presentation.layout && !canReadContentResource(actor, presentation.layout, ability, 'Layout')) {
             throw AppError.forbidden('Schedule contains a layout outside your ownership scope.');
           }
           const referencedMedia = [...(presentation.items || []), ...(presentation.slots || [])]
             .map((item: any) => item.media)
             .filter(Boolean);
-          if (referencedMedia.some((media: any) => !canReadContentResource(actor, media))) {
+          if (referencedMedia.some((media: any) => !canReadContentResource(actor, media, ability, 'Media'))) {
             throw AppError.forbidden('Schedule contains media outside your ownership scope.');
           }
         }
@@ -629,10 +633,12 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const authorized = await withScheduleMutation(
           payload,
           (request.params as any).id,
-          async ({ schedule, actor, executor }) => {
+          async ({ schedule, actor, ability, executor }) => {
             const pres = await presentationRepo.findById(data.presentation_id, executor);
             if (!pres) throw AppError.notFound('Presentation not found');
-            if (!canReadContentResource(actor, pres)) throw AppError.forbidden('Forbidden');
+            if (!canReadContentResource(actor, pres, ability, 'Presentation')) {
+              throw AppError.forbidden('Forbidden');
+            }
             if (!canReferenceContentResource(schedule, pres)) {
               throw AppError.badRequest('The selected presentation has narrower ownership than the schedule.');
             }
@@ -852,7 +858,6 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           payload,
           (request.params as any).id,
           async ({ schedule, actor, executor }) => {
-            if (!isAdminLike(actor.roleName)) throw AppError.forbidden('Forbidden');
             if (uniqueScreens.length) {
               const screens = await executor
                 .select({ id: schema.screens.id })
@@ -1006,7 +1011,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const body = takeDownPublishSchema.parse(request.body ?? {});
         const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
-          if (!ability.can('update', 'Schedule') || !isAdminLike(actor.roleName)) {
+          if (!ability.can('update', 'Schedule')) {
             throw AppError.forbidden('Forbidden');
           }
           const [publish] = await executor
@@ -1020,7 +1025,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
             .from(schema.schedules)
             .where(eq(schema.schedules.id, publish.schedule_id))
             .for('update');
-          if (!schedule || !canManageContentResource(actor, schedule)) {
+          if (!schedule || !canManageContentResource(actor, schedule, ability, 'Schedule', 'update')) {
             throw AppError.forbidden('Forbidden');
           }
           const takedownResult = await reservationService.takeDownPublish(

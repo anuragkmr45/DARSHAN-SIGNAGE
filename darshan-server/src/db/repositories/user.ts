@@ -1,5 +1,12 @@
 import { eq, and, sql, desc, or, getTableColumns, inArray, isNull } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
+import { lockUserAndAssertSuperAdminSurvives } from '@/auth/super-admin-invariant';
+
+type UserDirectoryVisibility = {
+  actorUserId: string;
+  actorDepartmentId?: string | null;
+  global: boolean;
+};
 
 export class UserRepository {
   private async countRows(
@@ -53,6 +60,7 @@ export class UserRepository {
     email?: string;
     role_id?: string;
     department_id?: string;
+    visibility?: UserDirectoryVisibility;
   }) {
     const db = getDatabase();
     const page = options.page ?? 1;
@@ -75,6 +83,13 @@ export class UserRepository {
     }
     if (options.department_id) {
       conditions.push(eq(schema.users.department_id, options.department_id));
+    }
+    if (options.visibility && !options.visibility.global) {
+      conditions.push(
+        options.visibility.actorDepartmentId
+          ? eq(schema.users.department_id, options.visibility.actorDepartmentId)
+          : eq(schema.users.id, options.visibility.actorUserId)
+      );
     }
     const invitedAtExpr = sql`COALESCE((${schema.users.ext}->>'invited_at')::timestamptz, ${schema.users.created_at})`;
     if (options.invited_before) {
@@ -153,6 +168,7 @@ export class UserRepository {
     role_id?: string;
     department_id?: string;
     is_active?: boolean;
+    visibility?: UserDirectoryVisibility;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -171,6 +187,13 @@ export class UserRepository {
     }
     if (options.is_active !== undefined) {
       conditions.push(eq(schema.users.is_active, options.is_active));
+    }
+    if (options.visibility && !options.visibility.global) {
+      conditions.push(
+        options.visibility.actorDepartmentId
+          ? eq(schema.users.department_id, options.visibility.actorDepartmentId)
+          : eq(schema.users.id, options.visibility.actorUserId)
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -204,12 +227,20 @@ export class UserRepository {
   async update(id: string, data: Partial<typeof schema.users.$inferInsert>) {
     const db = getDatabase();
     return db.transaction(async (tx) => {
-      const [current] = await tx
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(and(eq(schema.users.id, id), isNull(schema.users.deleted_at)))
-        .for('update');
-      if (!current) return null;
+      const current =
+        data.is_active === false || data.role_id !== undefined
+          ? await lockUserAndAssertSuperAdminSurvives(tx, id, {
+              isActive: data.is_active,
+              roleId: data.role_id,
+            })
+          : (
+              await tx
+                .select()
+                .from(schema.users)
+                .where(and(eq(schema.users.id, id), isNull(schema.users.deleted_at)))
+                .for('update')
+            )[0];
+      if (!current || current.deleted_at) return null;
 
       const [user] = await tx
         .update(schema.users)
@@ -226,11 +257,7 @@ export class UserRepository {
   async tombstone(id: string, deletedBy: string, invalidPasswordHash: string) {
     const db = getDatabase();
     return db.transaction(async (tx) => {
-      const [current] = await tx
-        .select()
-        .from(schema.users)
-        .where(eq(schema.users.id, id))
-        .for('update');
+      const current = await lockUserAndAssertSuperAdminSurvives(tx, id, { deleting: true });
       if (!current) return null;
       if (current.deleted_at) {
         return { user: current, alreadyDeleted: true, abortedUploads: [], failedMedia: [] };

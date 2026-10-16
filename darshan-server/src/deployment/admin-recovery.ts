@@ -1,6 +1,11 @@
 import { and, eq, isNull, lt, sql } from 'drizzle-orm';
 import { hashPassword, validatePasswordStrength } from '@/auth/password';
+import {
+  LAST_ACTIVE_SUPER_ADMIN,
+  lockUserAndAssertSuperAdminSurvives,
+} from '@/auth/super-admin-invariant';
 import { schema, type Database } from '@/db';
+import { AppError } from '@/utils/app-error';
 import { acquireTransactionAdvisoryLock, type BoundedAdvisoryLockOptions } from './bounded-advisory-lock';
 
 export type AdminAccountInspection = {
@@ -252,15 +257,13 @@ export async function deactivateAdministrator(
     const account = accounts[0];
     if (!account.isActive) return { status: 'already_deactivated', account };
 
-    if (account.roleName === 'SUPER_ADMIN') {
-      const activeSuperAdmins = await tx
-        .select({ count: sql<number>`count(*)` })
-        .from(schema.users)
-        .innerJoin(schema.roles, eq(schema.users.role_id, schema.roles.id))
-        .where(sql`${schema.users.is_active} = true AND ${schema.roles.name} = 'SUPER_ADMIN'`);
-      if (Number(activeSuperAdmins[0]?.count ?? 0) <= 1) {
-        return { status: 'conflict', reason: 'Refusing to deactivate the last active SUPER_ADMIN account.' };
+    try {
+      await lockUserAndAssertSuperAdminSurvives(tx, account.id, { isActive: false });
+    } catch (error) {
+      if (error instanceof AppError && error.code === LAST_ACTIVE_SUPER_ADMIN) {
+        return { status: 'conflict', reason: error.message };
       }
+      throw error;
     }
 
     const [updated] = await tx

@@ -115,32 +115,22 @@ export async function userRoutes(fastify: FastifyInstance) {
         }
 
         const query = listUsersQuerySchema.parse(request.query);
-        const effectiveRole =
-          payload.role === 'OPERATOR'
-            ? 'OPERATOR'
-            : payload.role === 'DEPARTMENT'
-              ? 'OPERATOR'
-              : query.role;
-        const effectiveDepartmentId =
-          payload.role === 'DEPARTMENT' ? payload.department_id : query.department_id;
         const result = await userRepo.list({
           page: query.page,
           limit: query.limit,
-          role: effectiveRole,
+          role: query.role,
           role_id: query.role_id,
-          department_id: effectiveDepartmentId,
+          department_id: query.department_id,
           is_active: query.is_active === 'true' ? true : query.is_active === 'false' ? false : undefined,
+          visibility: {
+            actorUserId: payload.sub,
+            actorDepartmentId: payload.department_id,
+            global: ability.can('manage', 'User'),
+          },
         });
 
-        const items = result.items.filter((user) =>
-          canReadUserRecord(
-            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            { roleName: (user as any).role ?? '', departmentId: user.department_id }
-          )
-        );
-
         return reply.send({
-          items: items.map((user) => ({
+          items: result.items.map((user) => ({
             id: user.id,
             email: user.email,
             first_name: user.first_name,
@@ -155,7 +145,7 @@ export async function userRoutes(fastify: FastifyInstance) {
           pagination: {
             page: result.page,
             limit: result.limit,
-            total: items.length,
+            total: result.total,
           },
         });
       } catch (error) {
@@ -197,10 +187,11 @@ export async function userRoutes(fastify: FastifyInstance) {
         if (
           !canReadUserRecord(
             { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            { roleName: role?.name ?? '', departmentId: user.department_id }
+            { id: user.id, roleName: role?.name ?? '', departmentId: user.department_id },
+            { global: ability.can('manage', 'User') }
           )
         ) {
-          throw AppError.forbidden('Forbidden');
+          throw AppError.notFound('User not found');
         }
 
         return reply.send({
@@ -350,9 +341,6 @@ export async function userRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('User not found');
         }
         const targetRole = user.role_id ? await roleRepo.findById(user.role_id) : null;
-        if (targetRole?.name === 'SUPER_ADMIN') {
-          throw AppError.forbidden('SUPER_ADMIN accounts cannot be deleted.');
-        }
         if (
           !canManageUserRecord(
             { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },

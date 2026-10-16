@@ -44,19 +44,27 @@ describe('rbac policy helpers', () => {
     ).toBe(false);
   });
 
-  it('keeps operator users read-only to operator records across departments', () => {
+  it('limits non-global directory readers to their own department', () => {
     expect(
       canReadUserRecord(
         { userId: 'operator-user', roleName: 'OPERATOR', departmentId: 'dept-a' },
-        { roleName: 'OPERATOR', departmentId: 'dept-b' }
+        { id: 'operator-b', roleName: 'OPERATOR', departmentId: 'dept-b' }
+      )
+    ).toBe(false);
+
+    expect(
+      canReadUserRecord(
+        { userId: 'operator-user', roleName: 'OPERATOR', departmentId: 'dept-a' },
+        { id: 'lead-a', roleName: 'DEPARTMENT', departmentId: 'dept-a' }
       )
     ).toBe(true);
 
     expect(
       canReadUserRecord(
-        { userId: 'operator-user', roleName: 'OPERATOR', departmentId: 'dept-a' },
-        { roleName: 'DEPARTMENT', departmentId: 'dept-a' }
+        { userId: 'global-manager', roleName: 'CUSTOM', departmentId: null },
+        { id: 'operator-b', roleName: 'OPERATOR', departmentId: 'dept-b' },
+        { global: true }
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 });

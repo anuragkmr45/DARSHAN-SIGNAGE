@@ -108,7 +108,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         .where(eq(schema.media.id, mediaId))
         .for('update');
       if (!media) throw AppError.notFound('Media not found');
-      if (!canManageContentResource(context.actor, media)) throw AppError.forbidden('Forbidden');
+      if (!canManageContentResource(context.actor, media, context.ability, 'Media', action)) {
+        throw AppError.forbidden('Forbidden');
+      }
       return execute({ ...context, media });
     });
 
@@ -139,7 +141,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         .where(eq(schema.media.id, session.media_id))
         .for('update');
       if (!media) throw AppError.notFound('Upload session media record not found');
-      if (!canManageContentResource(context.actor, media)) {
+      if (!canManageContentResource(context.actor, media, context.ability, 'Media', 'create')) {
         throw AppError.forbidden('You no longer manage the content owned by this upload session');
       }
       return execute({ ...context, session, media });
@@ -640,7 +642,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           );
           if (existing) {
             const existingMedia = await mediaRepo.findById(existing.media_id, executor);
-            if (!existingMedia || !canManageContentResource(actor, existingMedia)) {
+            if (!existingMedia || !canManageContentResource(actor, existingMedia, ability, 'Media', 'create')) {
               throw AppError.forbidden('You no longer manage the content owned by this upload session');
             }
             const requestMatchesExisting =
@@ -655,7 +657,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             return { session: existing, actor, ability, existing: true as const };
           }
 
-          const ownership = ownershipForNewContent(actor);
+          const ownership = ownershipForNewContent(actor, ability, 'Media');
           await executor.insert(schema.media).values({
             id: mediaId,
             name: displayName,
@@ -985,7 +987,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             completed = await withUploadSessionMutation(
               payload,
               session.id,
-              ({ actor, executor }) => uploadSessionRepo.completeFinalizationForAuthorizedActor(
+              ({ actor, ability, executor }) => uploadSessionRepo.completeFinalizationForAuthorizedActor(
                 {
                   id: session.id,
                   userId: session.created_by,
@@ -993,6 +995,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
                   mediaUpdate,
                 },
                 actor,
+                ability,
                 executor
               )
             );
@@ -1134,7 +1137,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             source_size: data.size,
             status_reason: null,
             created_by: actor.userId,
-            ...ownershipForNewContent(actor),
+            ...ownershipForNewContent(actor, ability, 'Media'),
           }).returning();
           return { media, actor, ability };
         });
@@ -1206,7 +1209,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
                 status_reason: null,
                 source_url: normalizedWebpageUrl!,
                 created_by: actor.userId,
-                ...ownershipForNewContent(actor),
+                ...ownershipForNewContent(actor, ability, 'Media'),
               }
             : {
                 name: normalizeDisplayName(normalizeOriginalFilename(data.name)),
@@ -1214,7 +1217,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
                 status: 'PENDING',
                 status_reason: null,
                 created_by: actor.userId,
-                ...ownershipForNewContent(actor),
+                ...ownershipForNewContent(actor, ability, 'Media'),
               };
           const [media] = await executor.insert(schema.media).values(insertData).returning();
           return { media, actor, ability };
@@ -1274,6 +1277,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
               type: query.type,
               status: query.status,
               actor,
+              ability,
             });
 
             hasMore = batch.items.length === batchSize;
@@ -1332,6 +1336,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           type: query.type,
           status: query.status,
           actor,
+          ability,
         });
 
         const readyIds = result.items.map((m: any) => m.ready_object_id).filter(Boolean) as string[];
@@ -1388,7 +1393,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         if (!media) {
           throw AppError.notFound('Media not found');
         }
-        if (!canReadContentResource(actor, media)) throw AppError.forbidden('Forbidden');
+        if (!canReadContentResource(actor, media, ability, 'Media')) throw AppError.forbidden('Forbidden');
         const ownership = (await resolveContentOwnershipViews([media])).get(media.id);
         return reply.send(
           decorateMedia(await serializeMediaWithResolvedState(media), media, ownership, ability, actor)
@@ -1511,7 +1516,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             .for('update');
           if (!media) throw AppError.notFound('Media not found');
 
-          if (!canManageContentResource(actor, media)) {
+          if (!canManageContentResource(actor, media, ability, 'Media', 'delete')) {
             const [creator] = await executor
               .select({
                 first_name: schema.users.first_name,

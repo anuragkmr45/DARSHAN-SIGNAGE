@@ -1,7 +1,7 @@
-import { and, eq, inArray, or, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { AppError } from '@/utils/app-error';
-import { type ActorContext, isAdminLike } from '@/rbac/policy';
+import { type ActorContext } from '@/rbac/policy';
 
 export const CONTENT_OWNER_SCOPES = ['DEPARTMENT', 'ORGANIZATION', 'RESTRICTED'] as const;
 export type ContentOwnerScope = (typeof CONTENT_OWNER_SCOPES)[number];
@@ -41,11 +41,18 @@ export function normalizeContentOwnerScope(value?: string | null): ContentOwnerS
     : 'RESTRICTED';
 }
 
-export function ownershipForNewContent(actor: ActorContext): {
+export function ownershipForNewContent(
+  actor: ActorContext,
+  ability: ContentAbility,
+  subject: ContentSubject
+): {
   owner_scope: ContentOwnerScope;
   owner_department_id: string | null;
 } {
-  if (isAdminLike(actor.roleName)) {
+  if (actor.roleName === 'SUPER_ADMIN') {
+    return { owner_scope: 'RESTRICTED', owner_department_id: null };
+  }
+  if (actor.roleName === 'ADMIN' || ability.can('manage', subject)) {
     return { owner_scope: 'ORGANIZATION', owner_department_id: null };
   }
   if (!actor.departmentId) {
@@ -54,8 +61,14 @@ export function ownershipForNewContent(actor: ActorContext): {
   return { owner_scope: 'DEPARTMENT', owner_department_id: actor.departmentId };
 }
 
-export function canReadContentResource(actor: ActorContext, resource: ContentOwnedResource): boolean {
-  if (isAdminLike(actor.roleName)) return true;
+export function canReadContentResource(
+  actor: ActorContext,
+  resource: ContentOwnedResource,
+  ability: ContentAbility,
+  subject: ContentSubject
+): boolean {
+  if (!ability.can('read', subject)) return false;
+  if (ability.can('manage', subject)) return true;
   const scope = normalizeContentOwnerScope(resource.owner_scope);
   if (scope === 'ORGANIZATION') return true;
   return scope === 'DEPARTMENT' && Boolean(
@@ -63,8 +76,15 @@ export function canReadContentResource(actor: ActorContext, resource: ContentOwn
   );
 }
 
-export function canManageContentResource(actor: ActorContext, resource: ContentOwnedResource): boolean {
-  if (isAdminLike(actor.roleName)) return true;
+export function canManageContentResource(
+  actor: ActorContext,
+  resource: ContentOwnedResource,
+  ability: ContentAbility,
+  subject: ContentSubject,
+  action: 'update' | 'delete' | 'create' | 'approve' | 'publish' = 'update'
+): boolean {
+  if (!ability.can(action, subject)) return false;
+  if (ability.can('manage', subject)) return true;
   if (
     normalizeContentOwnerScope(resource.owner_scope) !== 'DEPARTMENT' ||
     !actor.departmentId ||
@@ -72,7 +92,7 @@ export function canManageContentResource(actor: ActorContext, resource: ContentO
   ) {
     return false;
   }
-  if (actor.roleName === 'DEPARTMENT') return true;
+  if (subject === 'Schedule') return true;
   return Boolean(resource.created_by && resource.created_by === actor.userId);
 }
 
@@ -84,13 +104,13 @@ export function contentResponseMetadata(
   subject: ContentSubject,
   supportsDelete = true
 ) {
-  const canManage = canManageContentResource(actor, resource);
   return {
     created_by: resource.created_by ?? null,
     ownership: ownership ?? null,
     permissions: {
-      can_update: canManage && ability.can('update', subject),
-      can_delete: supportsDelete && canManage && ability.can('delete', subject),
+      can_update: canManageContentResource(actor, resource, ability, subject, 'update'),
+      can_delete:
+        supportsDelete && canManageContentResource(actor, resource, ability, subject, 'delete'),
     },
   };
 }
@@ -111,9 +131,12 @@ export function canReferenceContentResource(
 
 export function contentReadCondition(
   actor: ActorContext,
-  columns: OwnershipColumns
+  columns: OwnershipColumns,
+  ability?: ContentAbility,
+  subject?: ContentSubject
 ): SQL | undefined {
-  if (isAdminLike(actor.roleName)) return undefined;
+  if (ability && subject && !ability.can('read', subject)) return sql`false`;
+  if (ability && subject && ability.can('manage', subject)) return undefined;
   if (!actor.departmentId) {
     return eq(columns.owner_scope, 'ORGANIZATION');
   }

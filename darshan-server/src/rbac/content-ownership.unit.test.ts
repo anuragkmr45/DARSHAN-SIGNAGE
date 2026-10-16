@@ -14,76 +14,131 @@ const departmentResource = {
   owner_department_id: 'department-a',
 };
 
+const ability = (...grants: string[]) => ({
+  can: (action: string, subject: string) =>
+    grants.includes(`${action}:${subject}`) ||
+    grants.includes(`manage:${subject}`) ||
+    grants.includes('manage:all'),
+});
+
 describe('content ownership policy', () => {
-  it('snapshots organization ownership for administrators and department ownership for scoped users', () => {
+  it('snapshots restricted, organization, and department ownership from role and permissions', () => {
     expect(
-      ownershipForNewContent({ userId: 'admin-1', roleName: 'ADMIN', departmentId: null })
+      ownershipForNewContent(
+        { userId: 'root-1', roleName: 'SUPER_ADMIN', departmentId: null },
+        ability('manage:all'),
+        'Media'
+      )
+    ).toEqual({ owner_scope: 'RESTRICTED', owner_department_id: null });
+    expect(
+      ownershipForNewContent(
+        { userId: 'admin-1', roleName: 'ADMIN', departmentId: null },
+        ability('manage:Media'),
+        'Media'
+      )
     ).toEqual({ owner_scope: 'ORGANIZATION', owner_department_id: null });
     expect(
-      ownershipForNewContent({ userId: 'operator-1', roleName: 'OPERATOR', departmentId: 'department-a' })
+      ownershipForNewContent(
+        { userId: 'custom-1', roleName: 'CUSTOM_GLOBAL', departmentId: null },
+        ability('manage:Media'),
+        'Media'
+      )
+    ).toEqual({ owner_scope: 'ORGANIZATION', owner_department_id: null });
+    expect(
+      ownershipForNewContent(
+        { userId: 'operator-1', roleName: 'OPERATOR', departmentId: 'department-a' },
+        ability('create:Media'),
+        'Media'
+      )
     ).toEqual({ owner_scope: 'DEPARTMENT', owner_department_id: 'department-a' });
     expect(() =>
-      ownershipForNewContent({ userId: 'operator-1', roleName: 'OPERATOR', departmentId: null })
+      ownershipForNewContent(
+        { userId: 'operator-1', roleName: 'OPERATOR', departmentId: null },
+        ability('create:Media'),
+        'Media'
+      )
     ).toThrow(/department is required/i);
   });
 
   it('allows organization reads, same-department reads, and administrator-only restricted reads', () => {
     const operator = { userId: 'operator-1', roleName: 'OPERATOR', departmentId: 'department-a' };
-    expect(canReadContentResource(operator, departmentResource)).toBe(true);
+    const reader = ability('read:Media');
+    expect(canReadContentResource(operator, departmentResource, reader, 'Media')).toBe(true);
     expect(
       canReadContentResource(operator, {
         ...departmentResource,
         owner_scope: 'ORGANIZATION',
         owner_department_id: null,
-      })
+      }, reader, 'Media')
     ).toBe(true);
     expect(
-      canReadContentResource({ ...operator, departmentId: 'department-b' }, departmentResource)
+      canReadContentResource({ ...operator, departmentId: 'department-b' }, departmentResource, reader, 'Media')
     ).toBe(false);
     expect(
       canReadContentResource(operator, {
         ...departmentResource,
         owner_scope: 'RESTRICTED',
         owner_department_id: null,
-      })
+      }, reader, 'Media')
     ).toBe(false);
     expect(
       canReadContentResource(
-        { userId: 'admin-1', roleName: 'ADMIN', departmentId: null },
-        { ...departmentResource, owner_scope: 'RESTRICTED', owner_department_id: null }
+        { userId: 'global-1', roleName: 'CUSTOM_GLOBAL', departmentId: null },
+        { ...departmentResource, owner_scope: 'RESTRICTED', owner_department_id: null },
+        ability('manage:Media'),
+        'Media'
       )
     ).toBe(true);
+    expect(canReadContentResource(operator, departmentResource, ability(), 'Media')).toBe(false);
   });
 
-  it('lets department leads manage department content while operators and custom roles manage only their own', () => {
-    expect(
-      canManageContentResource(
-        { userId: 'lead-1', roleName: 'DEPARTMENT', departmentId: 'department-a' },
-        departmentResource
-      )
-    ).toBe(true);
+  it('lets creators manage media, same-department permitted users manage schedules, and global managers bypass scope', () => {
     expect(
       canManageContentResource(
         { userId: 'creator-1', roleName: 'OPERATOR', departmentId: 'department-a' },
-        departmentResource
+        departmentResource,
+        ability('update:Media'),
+        'Media'
       )
     ).toBe(true);
     expect(
       canManageContentResource(
-        { userId: 'other-1', roleName: 'OPERATOR', departmentId: 'department-a' },
-        departmentResource
+        { userId: 'other-1', roleName: 'DEPARTMENT', departmentId: 'department-a' },
+        departmentResource,
+        ability('update:Media'),
+        'Media'
       )
     ).toBe(false);
     expect(
       canManageContentResource(
-        { userId: 'creator-1', roleName: 'CUSTOM_EDITOR', departmentId: 'department-a' },
-        departmentResource
+        { userId: 'other-1', roleName: 'OPERATOR', departmentId: 'department-a' },
+        departmentResource,
+        ability('update:Schedule'),
+        'Schedule'
+      )
+    ).toBe(true);
+    expect(
+      canManageContentResource(
+        { userId: 'global-1', roleName: 'CUSTOM_GLOBAL', departmentId: null },
+        { ...departmentResource, owner_scope: 'RESTRICTED', owner_department_id: null },
+        ability('manage:Media'),
+        'Media'
       )
     ).toBe(true);
     expect(
       canManageContentResource(
         { userId: 'creator-1', roleName: 'OPERATOR', departmentId: 'department-b' },
-        departmentResource
+        departmentResource,
+        ability('update:Media'),
+        'Media'
+      )
+    ).toBe(false);
+    expect(
+      canManageContentResource(
+        { userId: 'creator-1', roleName: 'OPERATOR', departmentId: 'department-a' },
+        departmentResource,
+        ability('read:Media'),
+        'Media'
       )
     ).toBe(false);
   });

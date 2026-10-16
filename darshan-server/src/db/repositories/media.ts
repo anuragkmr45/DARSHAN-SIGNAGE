@@ -1,7 +1,7 @@
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import type { ActorContext } from '@/rbac/policy';
-import { contentReadCondition, type ContentOwnerScope } from '@/rbac/content-ownership';
+import { contentReadCondition, type ContentAbility, type ContentOwnerScope } from '@/rbac/content-ownership';
 import {
   DEFAULT_MEDIA_SETTING_KEY,
   DEFAULT_MEDIA_TARGETS_SETTING_KEY,
@@ -58,6 +58,7 @@ export class MediaRepository {
     status?: string;
     created_by_ids?: string[];
     actor?: ActorContext;
+    ability?: ContentAbility;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -78,7 +79,7 @@ export class MediaRepository {
       conditions.push(inArray(schema.media.created_by, options.created_by_ids as any));
     }
     if (options.actor) {
-      const accessCondition = contentReadCondition(options.actor, schema.media);
+      const accessCondition = contentReadCondition(options.actor, schema.media, options.ability, 'Media');
       if (accessCondition) conditions.push(accessCondition);
     }
 

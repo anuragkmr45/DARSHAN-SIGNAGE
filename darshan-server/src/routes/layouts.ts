@@ -122,7 +122,7 @@ export async function layoutRoutes(fastify: FastifyInstance) {
           const layout = await repo.create({
             ...data,
             created_by: actor.userId,
-            ...ownershipForNewContent(actor),
+            ...ownershipForNewContent(actor, ability, 'Layout'),
           }, executor);
           return { layout, actor, ability };
         });
@@ -163,6 +163,7 @@ export async function layoutRoutes(fastify: FastifyInstance) {
           aspect_ratio: query.aspect_ratio,
           search: query.search,
           actor,
+          ability,
         });
         const ownershipViews = await resolveContentOwnershipViews(result.items);
 
@@ -204,7 +205,7 @@ export async function layoutRoutes(fastify: FastifyInstance) {
         const layout = await repo.findById((request.params as any).id);
         if (!layout) throw AppError.notFound('Layout not found');
         const actor = actorFor(payload);
-        if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+        if (!canReadContentResource(actor, layout, ability, 'Layout')) throw AppError.forbidden('Forbidden');
         const ownership = (await resolveContentOwnershipViews([layout])).get(layout.id);
         return reply.send(serializeLayout(layout, ownership, ability, actor));
       } catch (error) {
@@ -243,7 +244,7 @@ export async function layoutRoutes(fastify: FastifyInstance) {
           if (!ability.can('update', 'Layout')) throw AppError.forbidden('Forbidden');
           const existingLayout = await repo.findById((request.params as any).id, executor);
           if (!existingLayout) throw AppError.notFound('Layout not found');
-          if (!canManageContentResource(actor, existingLayout)) {
+          if (!canManageContentResource(actor, existingLayout, ability, 'Layout', 'update')) {
             throw AppError.forbidden('You cannot edit this layout.');
           }
           const layout = await repo.update((request.params as any).id, data, executor);
@@ -280,7 +281,7 @@ export async function layoutRoutes(fastify: FastifyInstance) {
           if (!ability.can('delete', 'Layout')) throw AppError.forbidden('Forbidden');
           const layout = await repo.findById((request.params as any).id, executor);
           if (!layout) throw AppError.notFound('Layout not found');
-          if (!canManageContentResource(actor, layout)) {
+          if (!canManageContentResource(actor, layout, ability, 'Layout', 'delete')) {
             throw AppError.forbidden('You cannot delete this layout.');
           }
           await repo.delete(layout.id, executor);

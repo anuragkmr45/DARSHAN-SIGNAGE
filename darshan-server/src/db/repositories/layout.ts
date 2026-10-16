@@ -1,7 +1,7 @@
 import { eq, and, desc, or, sql, inArray } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import type { ActorContext } from '@/rbac/policy';
-import { contentReadCondition, type ContentOwnerScope } from '@/rbac/content-ownership';
+import { contentReadCondition, type ContentAbility, type ContentOwnerScope } from '@/rbac/content-ownership';
 
 export class LayoutRepository {
   async create(data: {
@@ -31,6 +31,7 @@ export class LayoutRepository {
     search?: string;
     created_by_ids?: string[];
     actor?: ActorContext;
+    ability?: ContentAbility;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -58,7 +59,7 @@ export class LayoutRepository {
       conditions.push(inArray(schema.layouts.created_by, options.created_by_ids as any));
     }
     if (options.actor) {
-      const accessCondition = contentReadCondition(options.actor, schema.layouts);
+      const accessCondition = contentReadCondition(options.actor, schema.layouts, options.ability, 'Layout');
       if (accessCondition) conditions.push(accessCondition);
     }
 

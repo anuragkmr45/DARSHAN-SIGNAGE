@@ -1,7 +1,8 @@
 import { and, eq, lt } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
-import { canManageContentResource } from '@/rbac/content-ownership';
+import { canManageContentResource, type ContentAbility } from '@/rbac/content-ownership';
 import type { ActorContext } from '@/rbac/policy';
+import { defineAbilityFor } from '@/rbac';
 
 export type MediaUploadSessionState =
   | 'INITIALIZING'
@@ -142,6 +143,7 @@ export class MediaUploadSessionRepository {
         .from(schema.roles)
         .where(eq(schema.roles.id, user.role_id));
       if (!role) return null;
+      const ability = await defineAbilityFor(user.role_id, user.id, user.department_id ?? undefined);
 
       return this.completeFinalizationForAuthorizedActor(
         params,
@@ -150,6 +152,7 @@ export class MediaUploadSessionRepository {
           roleName: role.name,
           departmentId: user.department_id,
         },
+        ability,
         tx
       );
     });
@@ -163,6 +166,7 @@ export class MediaUploadSessionRepository {
       mediaUpdate: Partial<typeof schema.media.$inferInsert>;
     },
     actor: ActorContext,
+    ability: ContentAbility,
     executor: DbExecutor
   ) {
     const [current] = await executor
@@ -179,7 +183,7 @@ export class MediaUploadSessionRepository {
       .from(schema.media)
       .where(eq(schema.media.id, params.mediaId))
       .for('update');
-    if (!currentMedia || !canManageContentResource(actor, currentMedia)) {
+    if (!currentMedia || !canManageContentResource(actor, currentMedia, ability, 'Media', 'create')) {
       return null;
     }
 

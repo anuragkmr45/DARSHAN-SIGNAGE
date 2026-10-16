@@ -12,7 +12,7 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
-import { canManageUserRecord, canManageUserRoleTarget, canReadUserRecord } from '@/rbac/policy';
+import { canManageUserRecord, canManageUserRoleTarget } from '@/rbac/policy';
 import { disconnectAuthenticatedUserSockets } from '@/realtime/socket-server';
 
 const logger = createLogger('users-invite-routes');
@@ -213,22 +213,21 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           email: query.email,
           role_id: roleId,
           department_id: query.department_id,
+          visibility: {
+            actorUserId: payload.sub,
+            actorDepartmentId: payload.department_id,
+            global: ability.can('manage', 'User'),
+          },
         });
 
         const serializeInvite = createInviteSerializer(new Date());
-        const visibleItems = result.items.filter((invite) =>
-          canReadUserRecord(
-            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            { roleName: invite.role ?? '', departmentId: invite.department_id }
-          )
-        );
 
         return reply.status(OK).send({
-          items: visibleItems.map(serializeInvite),
+          items: result.items.map(serializeInvite),
           pagination: {
             page: result.page,
             limit: result.limit,
-            total: visibleItems.length,
+            total: result.total,
           },
         });
       } catch (error) {
@@ -260,21 +259,20 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           page: 1,
           limit: 100,
           statuses: ['pending'],
+          visibility: {
+            actorUserId: payload.sub,
+            actorDepartmentId: payload.department_id,
+            global: ability.can('manage', 'User'),
+          },
         });
         const serializeInvite = createInviteSerializer(new Date());
-        const visibleItems = result.items.filter((invite) =>
-          canReadUserRecord(
-            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            { roleName: invite.role ?? '', departmentId: invite.department_id }
-          )
-        );
 
         return reply.status(OK).send({
-          items: visibleItems.map(serializeInvite),
+          items: result.items.map(serializeInvite),
           pagination: {
             page: result.page,
             limit: result.limit,
-            total: visibleItems.length,
+            total: result.total,
           },
         });
       } catch (error) {

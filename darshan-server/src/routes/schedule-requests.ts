@@ -17,7 +17,7 @@ import { getDatabase, schema } from '@/db';
 import { eq, inArray } from 'drizzle-orm';
 import { publishScheduleSnapshot } from '@/routes/schedule-publish-helper';
 import { AppError } from '@/utils/app-error';
-import { isAdminLike, type ActorContext } from '@/rbac/policy';
+import { type ActorContext } from '@/rbac/policy';
 import {
   canManageContentResource,
   canReadContentResource,
@@ -367,11 +367,13 @@ async function expandScheduleRequests(
           .where(inArray(schema.presentations.id, presentationIds as any))
       : [];
   const presentationMap = new Map(presentations.map((p) => [p.id, p]));
-  if (presentations.some((item) => !canReadContentResource(actor, item))) {
+  if (presentations.some((item) => !canReadContentResource(actor, item, ability, 'Presentation'))) {
     throw AppError.forbidden('Schedule request contains a presentation outside your ownership scope.');
   }
   const readablePresentationIds = new Set(
-    presentations.filter((item) => canReadContentResource(actor, item)).map((item) => item.id)
+    presentations
+      .filter((item) => canReadContentResource(actor, item, ability, 'Presentation'))
+      .map((item) => item.id)
   );
   const presentationOwnership = await resolveContentOwnershipViews(presentations);
 
@@ -385,11 +387,11 @@ async function expandScheduleRequests(
       ? await db.select().from(schema.layouts).where(inArray(schema.layouts.id, layoutIds as any))
       : [];
   const layoutMap = new Map(layouts.map((l) => [l.id, l]));
-  if (layouts.some((item) => !canReadContentResource(actor, item))) {
+  if (layouts.some((item) => !canReadContentResource(actor, item, ability, 'Layout'))) {
     throw AppError.forbidden('Schedule request contains a layout outside your ownership scope.');
   }
   const readableLayoutIds = new Set(
-    layouts.filter((item) => canReadContentResource(actor, item)).map((item) => item.id)
+    layouts.filter((item) => canReadContentResource(actor, item, ability, 'Layout')).map((item) => item.id)
   );
   const readableLayoutMap = new Map(
     Array.from(layoutMap.entries()).filter(([id]) => readableLayoutIds.has(id))
@@ -424,11 +426,11 @@ async function expandScheduleRequests(
       ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
       : [];
   const mediaOwnership = await resolveContentOwnershipViews(media);
-  if (media.some((item) => !canReadContentResource(actor, item))) {
+  if (media.some((item) => !canReadContentResource(actor, item, ability, 'Media'))) {
     throw AppError.forbidden('Schedule request contains media outside your ownership scope.');
   }
   const readableMediaIds = new Set(
-    media.filter((item) => canReadContentResource(actor, item)).map((item) => item.id)
+    media.filter((item) => canReadContentResource(actor, item, ability, 'Media')).map((item) => item.id)
   );
 
   const screenIds = include.has('screens')
@@ -630,22 +632,23 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
   });
 
   const assertScheduleAccess = async (
-    payload: { sub: string; role: string; department_id?: string | null },
+    payload: JWTPayload,
     scheduleId: string,
     manage = false
   ) => {
     const schedule = await scheduleRepo.findById(scheduleId);
     if (!schedule) throw AppError.notFound('Schedule not found');
     const actor = actorFor(payload);
+    const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
     const canAccess = manage
-      ? canManageContentResource(actor, schedule)
-      : canReadContentResource(actor, schedule);
+      ? canManageContentResource(actor, schedule, ability, 'Schedule', 'update')
+      : canReadContentResource(actor, schedule, ability, 'Schedule');
     if (!canAccess) throw AppError.forbidden('Forbidden');
     return schedule;
   };
 
   const assertScheduleRequestAccess = async (
-    payload: { sub: string; role: string; department_id?: string | null },
+    payload: JWTPayload,
     req: any,
     manage = false
   ) => {
@@ -667,7 +670,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
       if (!context.ability.can('update', 'ScheduleRequest')) {
         throw AppError.forbidden('Forbidden');
       }
-      if (options.requireAdmin && !isAdminLike(context.actor.roleName)) {
+      if (options.requireAdmin && !context.ability.can('update', 'ScheduleRequest')) {
         throw AppError.forbidden('Forbidden');
       }
 
@@ -696,7 +699,13 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
       if (scheduleRequest.schedule_id !== schedule.id) {
         throw AppError.conflict('Schedule request changed while it was being authorized. Please retry.');
       }
-      if (options.requireManage && !canManageContentResource(context.actor, schedule)) {
+      if (options.requireManage && !canManageContentResource(
+        context.actor,
+        schedule,
+        context.ability,
+        'Schedule',
+        'update'
+      )) {
         throw AppError.forbidden('Forbidden');
       }
 
@@ -729,7 +738,9 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             .where(eq(schema.schedules.id, data.schedule_id))
             .for('update');
           if (!schedule) throw AppError.notFound('Schedule not found');
-          if (!canManageContentResource(actor, schedule)) throw AppError.forbidden('Forbidden');
+          if (!canManageContentResource(actor, schedule, ability, 'Schedule', 'update')) {
+            throw AppError.forbidden('Forbidden');
+          }
 
           const [createdRequest] = await executor
             .insert(schema.scheduleRequests)
@@ -746,7 +757,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               scheduleRequestId: createdRequest.id,
               scheduleId: data.schedule_id,
               ownerUserId: actor.userId,
-              allowPrivateRefs: isAdminLike(actor.roleName),
+              allowPrivateRefs: ability.can('manage', 'Schedule'),
             },
             executor
           );
@@ -816,6 +827,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const query = scheduleRequestFilterQuerySchema.parse(request.query);
         const filter = {
           actor: actorFor(payload),
+          ability,
           q: query.q,
           date_field: query.date_field,
           date_from: query.date_from ? new Date(query.date_from) : undefined,
@@ -860,6 +872,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
           date_to: query.date_to ? new Date(query.date_to) : undefined,
           sort_direction: query.sort_direction,
           actor: actorFor(payload),
+          ability,
         };
         const result = await repo.list(filter);
 
@@ -1058,7 +1071,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const updated = await withScheduleRequestMutation(
           payload,
           (request.params as any).id,
-          async ({ scheduleRequest, actor, executor }) => {
+          async ({ scheduleRequest, actor, ability, executor }) => {
           await reservationService.promoteRequestHold(
             {
               scheduleRequestId: scheduleRequest.id,
@@ -1286,7 +1299,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const updated = await withScheduleRequestMutation(
           payload,
           (request.params as any).id,
-          async ({ scheduleRequest, actor, executor }) => {
+          async ({ scheduleRequest, actor, ability, executor }) => {
           if (!['PENDING', 'APPROVED'].includes(scheduleRequest.status)) {
             throw AppError.badRequest('Only pending or approved requests can be cancelled');
           }
@@ -1296,10 +1309,10 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               scheduleRequestId: scheduleRequest.id,
               nextStatus: 'CANCELLED',
               releaseState: 'CANCELLED',
-              releaseReason: isAdminLike(actor.roleName)
+              releaseReason: ability.can('manage', 'ScheduleRequest')
                 ? 'request-cancelled-by-admin'
                 : 'request-cancelled-by-schedule-owner',
-              reviewedBy: isAdminLike(actor.roleName) ? actor.userId : null,
+              reviewedBy: ability.can('manage', 'ScheduleRequest') ? actor.userId : null,
             },
             executor
           );

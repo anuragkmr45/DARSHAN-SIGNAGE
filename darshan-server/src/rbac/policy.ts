@@ -52,16 +52,12 @@ export const canManageUserRecord = (
 
 export const canReadUserRecord = (
   actor: ActorContext,
-  target: { roleName: string; departmentId?: string | null }
+  target: { id?: string; roleName?: string; departmentId?: string | null },
+  options: { global?: boolean } = {}
 ) => {
-  if (isAdminLike(actor.roleName)) return true;
-  if (actor.roleName === 'DEPARTMENT') {
-    return target.roleName === 'OPERATOR' && isSameDepartment(actor.departmentId, target.departmentId);
-  }
-  if (actor.roleName === 'OPERATOR') {
-    return target.roleName === 'OPERATOR';
-  }
-  return false;
+  if (options.global) return true;
+  if (target.id && target.id === actor.userId) return true;
+  return isSameDepartment(actor.departmentId, target.departmentId);
 };
 
 export async function getDepartmentUserIds(departmentId?: string | null) {
