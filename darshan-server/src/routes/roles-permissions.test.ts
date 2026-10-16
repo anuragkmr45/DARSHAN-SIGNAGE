@@ -1,8 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { eq } from 'drizzle-orm';
 import { closeTestServer, createTestServer, generateTestToken, testUser } from '@/test/helpers';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { getDatabase, schema } from '@/db';
+import { generateAccessToken } from '@/auth/jwt';
+import { hashPassword } from '@/auth/password';
 
 describe('Role and permission routes', () => {
   let server: FastifyInstance;
@@ -99,5 +103,129 @@ describe('Role and permission routes', () => {
 
     expect(superAdminResponse.statusCode).toBe(HTTP_STATUS.CREATED);
     expect(JSON.parse(superAdminResponse.body).name).toBe(createPayload.name);
+  });
+
+  it('revokes sessions for every user assigned to an updated role', async () => {
+    const db = getDatabase();
+    const roleId = randomUUID();
+    const userId = randomUUID();
+    const email = `role-revoke-${userId}@example.test`;
+    await db.insert(schema.roles).values({
+      id: roleId,
+      name: `ROLE_REVOKE_${roleId}`,
+      permissions: { grants: [{ action: 'read', subject: 'Dashboard' }] },
+      is_system: false,
+    });
+    await db.insert(schema.users).values({
+      id: userId,
+      email,
+      password_hash: await hashPassword('Password123!'),
+      role_id: roleId,
+      is_active: true,
+    });
+    const access = await generateAccessToken(userId, email, roleId, `ROLE_REVOKE_${roleId}`);
+    await db.insert(schema.sessions).values({
+      user_id: userId,
+      access_jti: access.jti,
+      expires_at: access.expiresAt,
+    });
+
+    const response = await server.inject({
+      method: 'PUT',
+      url: `/api/v1/roles/${roleId}`,
+      headers: { authorization: `Bearer ${superAdminToken}` },
+      payload: { permissions: { grants: [] } },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    expect(await db.select().from(schema.sessions).where(eq(schema.sessions.user_id, userId))).toHaveLength(0);
+  });
+
+  it('revokes sessions for users whose role transitively inherits the updated role', async () => {
+    const db = getDatabase();
+    const parentRoleId = randomUUID();
+    const childRoleId = randomUUID();
+    const grandchildRoleId = randomUUID();
+    const userId = randomUUID();
+    const email = `inherited-role-revoke-${userId}@example.test`;
+    await db.insert(schema.roles).values([
+      {
+        id: parentRoleId,
+        name: `ROLE_PARENT_${parentRoleId}`,
+        permissions: { grants: [{ action: 'read', subject: 'Dashboard' }] },
+        is_system: false,
+      },
+      {
+        id: childRoleId,
+        name: `ROLE_CHILD_${childRoleId}`,
+        permissions: { inherits: [parentRoleId], grants: [] },
+        is_system: false,
+      },
+      {
+        id: grandchildRoleId,
+        name: `ROLE_GRANDCHILD_${grandchildRoleId}`,
+        permissions: { inherits: [childRoleId], grants: [] },
+        is_system: false,
+      },
+    ]);
+    await db.insert(schema.users).values({
+      id: userId,
+      email,
+      password_hash: await hashPassword('Password123!'),
+      role_id: grandchildRoleId,
+      is_active: true,
+    });
+    const access = await generateAccessToken(
+      userId,
+      email,
+      grandchildRoleId,
+      `ROLE_GRANDCHILD_${grandchildRoleId}`
+    );
+    await db.insert(schema.sessions).values({
+      user_id: userId,
+      access_jti: access.jti,
+      expires_at: access.expiresAt,
+    });
+
+    const response = await server.inject({
+      method: 'PUT',
+      url: `/api/v1/roles/${parentRoleId}`,
+      headers: { authorization: `Bearer ${superAdminToken}` },
+      payload: { permissions: { grants: [] } },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    expect(await db.select().from(schema.sessions).where(eq(schema.sessions.user_id, userId))).toHaveLength(0);
+  });
+
+  it('rejects deleting a custom role that another role inherits', async () => {
+    const db = getDatabase();
+    const parentRoleId = randomUUID();
+    const childRoleId = randomUUID();
+    await db.insert(schema.roles).values([
+      {
+        id: parentRoleId,
+        name: `ROLE_DELETE_PARENT_${parentRoleId}`,
+        permissions: { grants: [{ action: 'read', subject: 'Dashboard' }] },
+        is_system: false,
+      },
+      {
+        id: childRoleId,
+        name: `ROLE_DELETE_CHILD_${childRoleId}`,
+        permissions: { inherits: [parentRoleId], grants: [] },
+        is_system: false,
+      },
+    ]);
+
+    const response = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/roles/${parentRoleId}`,
+      headers: { authorization: `Bearer ${superAdminToken}` },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(response.body).details).toEqual({ inheritor_role_ids: [childRoleId] });
+    expect(await db.select().from(schema.roles).where(eq(schema.roles.id, parentRoleId))).toHaveLength(1);
+    expect(await db.select().from(schema.roles).where(eq(schema.roles.id, childRoleId))).toHaveLength(1);
   });
 });

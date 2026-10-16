@@ -76,7 +76,7 @@ export async function notifyMessageEvent(input: NotifyMessageEventInput): Promis
             ? `You were mentioned in ${label}`
             : `New reply in a thread in ${label}`;
 
-        await notificationRepo.create({
+        const created = await notificationRepo.create({
           user_id: userId,
           title,
           message,
@@ -88,6 +88,7 @@ export async function notifyMessageEvent(input: NotifyMessageEventInput): Promis
             snippet,
           },
         });
+        if (created === null) return;
 
         if (input.onNotificationCreated) {
           try {

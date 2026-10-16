@@ -22,6 +22,7 @@ import { useDebounce } from "@/hooks/use-debounce";
 import type { ScreenAspectRatio } from "@/api/types";
 import type { Layout } from "@/pages/Layouts";
 import { AspectFrame } from "@/components/common/AspectFrame";
+import { getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 
 interface StepLayoutSelectProps {
   selectedLayout: Layout | null;
@@ -238,6 +239,12 @@ export function StepLayoutSelect({ selectedLayout, onSelectLayout }: StepLayoutS
                     <div className="flex gap-2 mt-2">
                       <Badge variant="outline">{layout.aspect_ratio}</Badge>
                       <Badge variant="secondary">{layout.spec.slots.length} slots</Badge>
+                      {getContentOwnershipLabel(layout) ? (
+                        <Badge variant="secondary">{getContentOwnershipLabel(layout)}</Badge>
+                      ) : null}
+                      {getContentCreatorLabel(layout) ? (
+                        <Badge variant="outline">{getContentCreatorLabel(layout)}</Badge>
+                      ) : null}
                     </div>
                   </div>
                 </div>

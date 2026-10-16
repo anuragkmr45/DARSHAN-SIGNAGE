@@ -94,6 +94,12 @@ Phase 8 is locally implemented and tested, including Valkey fanout backfill, but
 
 Phase 9 mobile/TV adapters remain blocked until the Phase 8 gate is accepted or explicitly deferred by a human approver.
 
+## Content ownership and document playback
+
+- `darshan-server/docs/deleted-user-content-ownership.md` defines account tombstones, stable Media/Layout/Presentation/Schedule ownership, API metadata, migration `0045`, and the old-server rollback guard.
+- `darshan-server/docs/document-page-selection.md` defines supported document uploads, per-occurrence page selection, conversion/page counting, player capability gating, and page-aware proof-of-play.
+- Video looping is per presentation occurrence. A loop-enabled video uses native media cycles only while its occurrence is active; schedule/item boundaries and higher-authority playback always stop it.
+
 ## Commit Rules
 
 - Do not commit generated bundles, `build/`, `dist/`, `out/`, runtime temp files, or `.DS_Store`.

@@ -1,9 +1,9 @@
 import { eq, asc } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 
 export class PresentationSlotItemRepository {
-  async listByPresentation(presentationId: string) {
-    const db = getDatabase();
+  async listByPresentation(presentationId: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     return db
       .select()
       .from(schema.presentationSlotItems)
@@ -21,8 +21,8 @@ export class PresentationSlotItemRepository {
     audio_enabled?: boolean;
     loop_enabled?: boolean;
     page_number?: number | null;
-  }) {
-    const db = getDatabase();
+  }, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const [item] = await db.insert(schema.presentationSlotItems).values(data).returning();
     return item;
   }
@@ -38,10 +38,10 @@ export class PresentationSlotItemRepository {
       audio_enabled?: boolean;
       loop_enabled?: boolean;
       page_number?: number | null;
-    }>
+    }>,
+    executor?: DbExecutor
   ) {
-    const db = getDatabase();
-    return db.transaction(async (tx) => {
+    const replace = async (tx: DbExecutor) => {
       await tx
         .delete(schema.presentationSlotItems)
         .where(eq(schema.presentationSlotItems.presentation_id, presentationId));
@@ -52,17 +52,18 @@ export class PresentationSlotItemRepository {
         .insert(schema.presentationSlotItems)
         .values(items.map((item) => ({ ...item, presentation_id: presentationId })))
         .returning();
-    });
+    };
+    return executor ? replace(executor) : getDatabase().transaction(replace);
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
+  async findById(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const [item] = await db.select().from(schema.presentationSlotItems).where(eq(schema.presentationSlotItems.id, id));
     return item || null;
   }
 
-  async delete(id: string) {
-    const db = getDatabase();
+  async delete(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     await db.delete(schema.presentationSlotItems).where(eq(schema.presentationSlotItems.id, id));
   }
 }

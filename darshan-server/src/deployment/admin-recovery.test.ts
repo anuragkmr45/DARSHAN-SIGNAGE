@@ -10,6 +10,7 @@ import {
   cleanupExpiredSessions,
   createAdministrator,
   deactivateAdministrator,
+  inspectAdministrator,
   recoverAdministrator,
 } from './admin-recovery';
 
@@ -34,6 +35,7 @@ suite('administrator recovery and maintenance', () => {
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "email" varchar(255) NOT NULL UNIQUE,
         "password_hash" text NOT NULL, "first_name" varchar(100), "last_name" varchar(100),
         "role_id" uuid NOT NULL, "department_id" uuid, "is_active" boolean NOT NULL DEFAULT true,
+        "deleted_at" timestamp, "deleted_by" uuid,
         "ext" jsonb, "created_at" timestamp NOT NULL DEFAULT now(), "updated_at" timestamp NOT NULL DEFAULT now()
       );
       CREATE TABLE "${schemaName}"."sessions" (
@@ -155,6 +157,45 @@ suite('administrator recovery and maintenance', () => {
     expect(privilegedRecovered.is_active).toBe(true);
     expect(privilegedRecovered.role_id).toBe(superRole.id);
     expect(await verifyPassword('PrivilegedRecoveryPassword123!', privilegedRecovered.password_hash)).toBe(true);
+  });
+
+  it('does not inspect, recover, or mutate a deleted-user tombstone', async () => {
+    const db = database();
+    await seedRoles();
+    const [adminRole] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'ADMIN'));
+    const tombstoneEmail = `deleted+${randomUUID()}@deleted.invalid`;
+    const [tombstone] = await db
+      .insert(schema.users)
+      .values({
+        email: tombstoneEmail,
+        password_hash: 'deleted-password-hash',
+        first_name: 'Former',
+        last_name: 'Administrator',
+        role_id: adminRole.id,
+        is_active: false,
+        deleted_at: new Date(),
+      })
+      .returning();
+
+    const recovered = await recoverAdministrator(db, {
+      email: tombstoneEmail,
+      password: 'MustNotReplaceDeletedPassword123!',
+      ticket: 'INC-DELETE-001',
+      reactivate: true,
+      grantSuperAdmin: true,
+    });
+    expect(recovered).toEqual({ status: 'not_found' });
+    expect(await inspectAdministrator(db, tombstoneEmail)).toEqual([]);
+
+    const [preserved] = await db.select().from(schema.users).where(eq(schema.users.id, tombstone.id));
+    expect(preserved).toMatchObject({
+      password_hash: 'deleted-password-hash',
+      role_id: adminRole.id,
+      is_active: false,
+    });
+    expect(preserved.deleted_at).toBeInstanceOf(Date);
+    expect(await db.select().from(schema.auditLogs)).toHaveLength(0);
+    expect(await db.select().from(schema.systemLogs)).toHaveLength(0);
   });
 
   it('rejects multiline change tickets before writing recovery audit state', async () => {

@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { createRoleRepository } from '@/db/repositories/role';
-import { getDatabase, schema } from '@/db';
+import { schema } from '@/db';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
@@ -12,6 +12,8 @@ import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { PERMISSION_ACTIONS } from '@/rbac/permissions';
 import { canManageSystemRole, isSuperAdmin } from '@/rbac/policy';
+import { disconnectAuthenticatedUserSockets } from '@/realtime/socket-server';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
 
 const logger = createLogger('role-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -47,7 +49,6 @@ const listRolesQuerySchema = z.object({
 
 export async function roleRoutes(fastify: FastifyInstance) {
   const roleRepo = createRoleRepository();
-  const db = getDatabase();
 
   // Create role
   fastify.post<{ Body: typeof createRoleSchema._type }>(
@@ -197,17 +198,28 @@ export async function roleRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Role')) throw AppError.forbidden('Forbidden');
-
         const data = updateRoleSchema.parse(request.body);
-        const existingRole = await roleRepo.findById(request.params.id);
-        if (!existingRole) throw AppError.notFound('Role not found');
-        if (existingRole.is_system && !canManageSystemRole(payload.role, existingRole.name)) {
-          throw AppError.forbidden('Forbidden');
+        const result = await withCurrentMutationAuthorization(
+          payload,
+          async ({ actor, ability, executor }) => {
+            if (!ability.can('update', 'Role')) throw AppError.forbidden('Forbidden');
+            const [existingRole] = await executor
+              .select()
+              .from(schema.roles)
+              .where(eq(schema.roles.id, request.params.id));
+            if (!existingRole) throw AppError.notFound('Role not found');
+            if (existingRole.is_system && !canManageSystemRole(actor.roleName, existingRole.name)) {
+              throw AppError.forbidden('Forbidden');
+            }
+            return roleRepo.update(request.params.id, data, executor);
+          },
+          { roleLock: 'update' }
+        );
+        if (!result) throw AppError.notFound('Role not found');
+        const { role: updated, revokedUserIds } = result;
+        for (const userId of revokedUserIds) {
+          disconnectAuthenticatedUserSockets(userId);
         }
-        const updated = await roleRepo.update(request.params.id, data);
-        if (!updated) throw AppError.notFound('Role not found');
 
         return reply.status(OK).send({
           id: updated.id,
@@ -240,25 +252,32 @@ export async function roleRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('delete', 'Role')) throw AppError.forbidden('Forbidden');
-
-        const role = await roleRepo.findById(request.params.id);
-        if (!role) throw AppError.notFound('Role not found');
-        if (role.is_system && !canManageSystemRole(payload.role, role.name)) {
-          throw AppError.forbidden('Forbidden');
-        }
-        if (role.is_system) throw AppError.conflict('System roles cannot be deleted.');
-
-        const [usage] = await db
-          .select({ count: sql<number>`count(*)` })
-          .from(schema.users)
-          .where(eq(schema.users.role_id, request.params.id));
-        if (Number((usage as any)?.count || 0) > 0) {
+        const deletion = await withCurrentMutationAuthorization(
+          payload,
+          async ({ actor, ability, executor }) => {
+            if (!ability.can('delete', 'Role')) throw AppError.forbidden('Forbidden');
+            const [role] = await executor
+              .select()
+              .from(schema.roles)
+              .where(eq(schema.roles.id, request.params.id));
+            if (!role) throw AppError.notFound('Role not found');
+            if (role.is_system && !canManageSystemRole(actor.roleName, role.name)) {
+              throw AppError.forbidden('Forbidden');
+            }
+            if (role.is_system) throw AppError.conflict('System roles cannot be deleted.');
+            return roleRepo.delete(request.params.id, executor);
+          },
+          { roleLock: 'update' }
+        );
+        if (deletion.status === 'NOT_FOUND') throw AppError.notFound('Role not found');
+        if (deletion.status === 'ASSIGNED') {
           throw AppError.conflict('Role is assigned to users and cannot be deleted.');
         }
-
-        await roleRepo.delete(request.params.id);
+        if (deletion.status === 'INHERITED') {
+          throw AppError.conflict('Role is inherited by another role and cannot be deleted.', {
+            inheritor_role_ids: deletion.inheritorIds,
+          });
+        }
         return reply.status(OK).send({ success: true });
       } catch (error) {
         logger.error(error, 'Delete role error');

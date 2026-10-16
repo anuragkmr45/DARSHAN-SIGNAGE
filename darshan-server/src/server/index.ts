@@ -60,6 +60,7 @@ import { registerObservabilityHttp } from '@/observability/http';
 import { ensureObservabilityInitialized } from '@/observability/metrics';
 import { loadServerTlsOptions } from '@/server/tls';
 import { collectReadiness } from '@/runtime/readiness';
+import { buildFastifyLoggerOptions } from '@/server/logger-options';
 
 const REFRESHED_AUTH_KEY = Symbol.for('darshan.refreshedAuth');
 const DEVICE_SCREENSHOT_BODY_LIMIT_BYTES = 4 * 1024 * 1024;
@@ -224,15 +225,7 @@ export async function createServer(options: CreateServerOptions = {}) {
 
   const fastify = Fastify({
     ...(tlsOptions ? { https: tlsOptions } : {}),
-    logger: {
-      level: getRuntimeLogLevelSetting(),
-      transport: {
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-        },
-      },
-    },
+    logger: buildFastifyLoggerOptions(appConfig.NODE_ENV, getRuntimeLogLevelSetting()),
     genReqId: (req) => {
       const header = req.headers['x-request-id'];
       if (Array.isArray(header) && header[0]) return header[0];

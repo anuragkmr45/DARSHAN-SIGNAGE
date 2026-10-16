@@ -47,8 +47,9 @@ export function DeleteOperatorDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete Operator</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete <strong>{operator?.name}</strong>? This action
-            cannot be undone and will remove all associated permissions and access.
+            Delete <strong>{operator?.name}</strong>? Sign-in and active sessions will stop
+            immediately. Existing content and schedule history will be kept under its current
+            department ownership and will show a deleted creator. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

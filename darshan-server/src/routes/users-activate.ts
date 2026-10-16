@@ -6,6 +6,7 @@ import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
+import { disconnectAuthenticatedUserSockets } from '@/realtime/socket-server';
 
 const logger = createLogger('user-activate-route');
 
@@ -51,7 +52,9 @@ export async function userActivateRoutes(fastify: FastifyInstance) {
           },
           is_active: true,
         });
-        return reply.send({ success: true, user_id: updated!.id });
+        if (!updated) throw AppError.notFound('Invalid or expired token');
+        disconnectAuthenticatedUserSockets(user.id);
+        return reply.send({ success: true, user_id: updated.id });
       } catch (error) {
         logger.error(error, 'Activate user error');
         return respondWithError(reply, error);

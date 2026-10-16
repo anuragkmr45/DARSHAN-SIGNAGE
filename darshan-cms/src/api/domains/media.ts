@@ -15,6 +15,7 @@ export interface PresignResponse {
   bucket: string;
   object_key: string;
   expires_in: number;
+  media: MediaAsset;
 }
 
 export interface MediaCompletionPayload {

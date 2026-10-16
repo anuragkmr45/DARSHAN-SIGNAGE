@@ -11,6 +11,11 @@ import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { createRoleRepository } from '@/db/repositories/role';
 import { canManageUserRecord, canManageUserRoleTarget, canReadUserRecord } from '@/rbac/policy';
+import { randomBytes } from 'node:crypto';
+import { abortMultipartUpload, deleteObject } from '@/s3';
+import { createMediaUploadSessionRepository } from '@/db/repositories/media-upload-session';
+import { createMediaRepository } from '@/db/repositories/media';
+import { disconnectAuthenticatedUserSockets } from '@/realtime/socket-server';
 
 const logger = createLogger('user-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -18,17 +23,8 @@ const { CREATED, OK } = HTTP_STATUS;
 export async function userRoutes(fastify: FastifyInstance) {
   const userRepo = createUserRepository();
   const roleRepo = createRoleRepository();
-  const resolveUserLabel = (user: {
-    first_name?: string | null;
-    last_name?: string | null;
-    email?: string | null;
-  }) => {
-    const fullName = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
-    if (fullName.length > 0) return fullName;
-    if (user.email) return user.email;
-    return 'this user';
-  };
-
+  const uploadSessionRepo = createMediaUploadSessionRepository();
+  const mediaRepo = createMediaRepository();
   // Create user (admin only)
   fastify.post<{ Body: typeof createUserSchema._type }>(
     apiEndpoints.users.create,
@@ -193,7 +189,7 @@ export async function userRoutes(fastify: FastifyInstance) {
         }
 
         const user = await userRepo.findById((request.params as any).id);
-        if (!user) {
+        if (!user || user.deleted_at) {
           throw AppError.notFound('User not found');
         }
 
@@ -264,7 +260,7 @@ export async function userRoutes(fastify: FastifyInstance) {
           }
         }
         const existingUser = await userRepo.findById((request.params as any).id);
-        if (!existingUser) {
+        if (!existingUser || existingUser.deleted_at) {
           throw AppError.notFound('User not found');
         }
         if (
@@ -292,6 +288,7 @@ export async function userRoutes(fastify: FastifyInstance) {
         if (!user) {
           throw AppError.notFound('User not found');
         }
+        disconnectAuthenticatedUserSockets(user.id);
 
         const role = await roleRepo.findById(user.role_id);
 
@@ -331,6 +328,7 @@ export async function userRoutes(fastify: FastifyInstance) {
         email?: string | null;
         role_id?: string;
         department_id?: string | null;
+        deleted_at?: Date | null;
       } | null = null;
 
       try {
@@ -352,6 +350,9 @@ export async function userRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('User not found');
         }
         const targetRole = user.role_id ? await roleRepo.findById(user.role_id) : null;
+        if (targetRole?.name === 'SUPER_ADMIN') {
+          throw AppError.forbidden('SUPER_ADMIN accounts cannot be deleted.');
+        }
         if (
           !canManageUserRecord(
             { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
@@ -365,30 +366,57 @@ export async function userRoutes(fastify: FastifyInstance) {
           throw AppError.forbidden('Forbidden');
         }
 
-        await userRepo.delete(userId);
-        return reply.status(OK).send({ message: 'User deleted successfully', id: userId });
-      } catch (error) {
-        if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23503') {
-          const usageSummary = user
-            ? await userRepo.getDeleteUsageSummary((request.params as any).id)
-            : { inUse: false, primaryReason: null, references: [] as Array<{ key: string; label: string; count: number }> };
-          const primaryLabel = usageSummary.references[0]?.label ?? 'existing records';
-          const hasMore = usageSummary.references.length > 1;
-          const conflictError = new AppError({
-            statusCode: 409,
-            code: 'CONFLICT',
-            message: `${resolveUserLabel(user ?? {})} cannot be deleted because they are still linked to ${primaryLabel}${hasMore ? ' and other records' : ''}. Reassign or remove those records first, or deactivate the user instead.`,
-            details:
-              usageSummary.references.length > 0
-                ? {
-                    references: usageSummary.references,
-                  }
-                : null,
-          });
-          logger.error(conflictError, 'Delete user error');
-          return respondWithError(reply, conflictError);
+        const invalidPasswordHash = await hashPassword(`${randomBytes(32).toString('hex')}A!`);
+        const result = await userRepo.tombstone(userId, payload.sub, invalidPasswordHash);
+        if (!result) throw AppError.notFound('User not found');
+
+        let cleanedUploads = 0;
+        for (const upload of result.abortedUploads) {
+          try {
+            if (upload.strategy === 'multipart' && upload.multipart_upload_id) {
+              await abortMultipartUpload(
+                upload.staging_bucket,
+                upload.staging_object_key,
+                upload.multipart_upload_id
+              ).catch((cleanupError) => {
+                logger.warn({ cleanupError, uploadSessionId: upload.id }, 'Multipart upload was already closed or could not be aborted');
+              });
+            }
+            await deleteObject(upload.staging_bucket, upload.staging_object_key);
+            await deleteObject(upload.canonical_bucket, upload.canonical_object_key);
+            await uploadSessionRepo.update(upload.id, { failure_reason: 'USER_DELETED_UPLOAD_ABORTED' });
+            await mediaRepo.update(upload.media_id, {
+              status: 'FAILED',
+              status_reason: 'USER_DELETED_UPLOAD_ABORTED',
+            });
+            cleanedUploads += 1;
+          } catch (cleanupError) {
+            logger.warn({ cleanupError, uploadSessionId: upload.id }, 'Deleted-user upload cleanup will be retried');
+          }
         }
 
+        const uploadMediaIds = new Set(result.abortedUploads.map((upload) => upload.media_id));
+        for (const media of result.failedMedia) {
+          if (uploadMediaIds.has(media.id) || !media.source_bucket || !media.source_object_key) continue;
+          try {
+            await deleteObject(media.source_bucket, media.source_object_key);
+            await mediaRepo.update(media.id, { status_reason: 'USER_DELETED_UPLOAD_ABORTED' });
+          } catch (cleanupError) {
+            await mediaRepo.update(media.id, { status_reason: 'USER_DELETED_CLEANUP_PENDING' });
+            logger.warn({ cleanupError, mediaId: media.id }, 'Deleted-user legacy upload cleanup will be retried');
+          }
+        }
+
+        disconnectAuthenticatedUserSockets(userId);
+        return reply.status(OK).send({
+          message: result.alreadyDeleted ? 'User was already deleted' : 'User deleted successfully',
+          id: userId,
+          deleted_at: result.user.deleted_at?.toISOString() ?? null,
+          already_deleted: result.alreadyDeleted,
+          aborted_uploads: result.abortedUploads.length,
+          cleaned_uploads: cleanedUploads,
+        });
+      } catch (error) {
         logger.error(error, 'Delete user error');
         return respondWithError(reply, error);
       }

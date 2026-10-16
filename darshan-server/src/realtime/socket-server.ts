@@ -181,3 +181,16 @@ export function getOrCreateSocketServer(fastify: FastifyInstance): SocketIOServe
 export function getSocketServer(): SocketIOServer | null {
   return socketServer;
 }
+
+export function authenticatedUserRoom(userId: string): string {
+  return `auth:user:${userId}`;
+}
+
+export function disconnectAuthenticatedUserSockets(userId: string): void {
+  const io = getSocketServer();
+  if (!io) return;
+  const room = authenticatedUserRoom(userId);
+  for (const namespace of ['/chat', '/notifications', '/screens']) {
+    io.of(namespace).in(room).disconnectSockets(true);
+  }
+}

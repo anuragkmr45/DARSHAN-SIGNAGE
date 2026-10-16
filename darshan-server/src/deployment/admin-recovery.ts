@@ -1,4 +1,4 @@
-import { eq, lt, sql } from 'drizzle-orm';
+import { and, eq, isNull, lt, sql } from 'drizzle-orm';
 import { hashPassword, validatePasswordStrength } from '@/auth/password';
 import { schema, type Database } from '@/db';
 import { acquireTransactionAdvisoryLock, type BoundedAdvisoryLockOptions } from './bounded-advisory-lock';
@@ -82,7 +82,7 @@ async function findAccountsByEmail(db: Database, email: string): Promise<AdminAc
     })
     .from(schema.users)
     .leftJoin(schema.roles, eq(schema.users.role_id, schema.roles.id))
-    .where(sql`lower(${schema.users.email}) = ${email}`);
+    .where(and(sql`lower(${schema.users.email}) = ${email}`, isNull(schema.users.deleted_at)));
 }
 
 export async function inspectAdministrator(db: Database, email: string): Promise<AdminAccountInspection[]> {

@@ -53,6 +53,7 @@ import {
   resolveVideoLoopLabel,
   updateSlotMediaOccurrence,
 } from "@/lib/scheduleCreatorState";
+import { getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 
 interface StepMediaAssignProps {
   layout: Layout;
@@ -626,6 +627,16 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                                   <Badge variant="outline" className="text-xs">
                                     {mediaTypeLabel(mediaType, media.source_content_type ?? media.content_type)}
                                   </Badge>
+                                  {getContentOwnershipLabel(media) ? (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {getContentOwnershipLabel(media)}
+                                    </Badge>
+                                  ) : null}
+                                  {getContentCreatorLabel(media) ? (
+                                    <Badge variant="outline" className="text-xs">
+                                      {getContentCreatorLabel(media)}
+                                    </Badge>
+                                  ) : null}
                                   {typeof media.duration_seconds === "number" ? (
                                     <span className="text-xs text-muted-foreground">{media.duration_seconds}s</span>
                                   ) : null}

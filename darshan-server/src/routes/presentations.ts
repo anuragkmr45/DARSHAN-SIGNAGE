@@ -5,18 +5,31 @@ import { createPresentationItemRepository } from '@/db/repositories/presentation
 import { createMediaRepository } from '@/db/repositories/media';
 import { createPresentationSlotItemRepository } from '@/db/repositories/presentation-slot-item';
 import { createLayoutRepository } from '@/db/repositories/layout';
-import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
+import { extractTokenFromHeader, verifyAccessToken, type JWTPayload } from '@/auth/jwt';
+import {
+  withCurrentMutationAuthorization,
+  type MutationAuthorizationContext,
+} from '@/auth/mutation-authorization';
 import { defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { getDatabase, schema } from '@/db';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
 import { normalizeDocumentPage } from '@/utils/document-page-selection';
 import { normalizeVideoLoopEnabled } from '@/utils/video-loop';
+import type { ActorContext } from '@/rbac/policy';
+import {
+  canManageContentResource,
+  canReadContentResource,
+  canReferenceContentResource,
+  contentResponseMetadata,
+  ownershipForNewContent,
+  resolveContentOwnershipViews,
+} from '@/rbac/content-ownership';
 
 const logger = createLogger('presentation-routes');
 const { CREATED, NO_CONTENT } = HTTP_STATUS;
@@ -74,6 +87,71 @@ export async function presentationRoutes(fastify: FastifyInstance) {
   const slotItemRepo = createPresentationSlotItemRepository();
   const layoutRepo = createLayoutRepository();
   const db = getDatabase();
+  const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
+    userId: payload.sub,
+    roleName: payload.role,
+    departmentId: payload.department_id,
+  });
+  const authorizePresentation = async (
+    payload: { sub: string; role: string; role_id: string; department_id?: string | null },
+    presentation: any,
+    action: 'read' | 'update' | 'delete'
+  ) => {
+    const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id ?? undefined);
+    if (!ability.can(action, 'Presentation')) throw AppError.forbidden('Forbidden');
+    const actor = actorFor(payload);
+    const allowed = action === 'read'
+      ? canReadContentResource(actor, presentation)
+      : canManageContentResource(actor, presentation);
+    if (!allowed) throw AppError.forbidden('Forbidden');
+    return { ability, actor };
+  };
+  const withPresentationMutation = async <T>(
+    payload: JWTPayload,
+    presentationId: string,
+    action: 'update' | 'delete',
+    execute: (
+      context: MutationAuthorizationContext & {
+        presentation: typeof schema.presentations.$inferSelect;
+      }
+    ) => Promise<T>
+  ) =>
+    withCurrentMutationAuthorization(payload, async (context) => {
+      if (!context.ability.can(action, 'Presentation')) throw AppError.forbidden('Forbidden');
+      const [presentation] = await context.executor
+        .select()
+        .from(schema.presentations)
+        .where(eq(schema.presentations.id, presentationId))
+        .for('update');
+      if (!presentation) throw AppError.notFound('Presentation not found');
+      if (!canManageContentResource(context.actor, presentation)) throw AppError.forbidden('Forbidden');
+      return execute({ ...context, presentation });
+    });
+  const serializePresentation = (presentation: any, ownership: any, ability: any, actor: ActorContext) => {
+    return {
+      id: presentation.id,
+      name: presentation.name,
+      description: presentation.description,
+      layout_id: presentation.layout_id ?? null,
+      ...contentResponseMetadata(presentation, ownership, actor, ability, 'Presentation'),
+      created_at: presentation.created_at.toISOString?.() ?? presentation.created_at,
+      updated_at: presentation.updated_at.toISOString?.() ?? presentation.updated_at,
+    };
+  };
+  const serializeNestedLayout = (layout: any, ownership: any, ability: any, actor: ActorContext) => ({
+    id: layout.id,
+    name: layout.name,
+    description: layout.description,
+    aspect_ratio: layout.aspect_ratio,
+    spec: layout.spec,
+    ...contentResponseMetadata(layout, ownership, actor, ability, 'Layout'),
+    created_at: layout.created_at?.toISOString?.() ?? layout.created_at,
+    updated_at: layout.updated_at?.toISOString?.() ?? layout.updated_at,
+  });
+  const serializeNestedMedia = (media: any, ownership: any, ability: any, actor: ActorContext) => ({
+    ...serializeMediaRecord(media),
+    ...contentResponseMetadata(media, ownership, actor, ability, 'Media'),
+  });
 
   // Create presentation
   fastify.post<{ Body: typeof createPresentationSchema._type }>(
@@ -94,26 +172,30 @@ export async function presentationRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const data = createPresentationSchema.parse(request.body);
+        const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          if (!ability.can('create', 'Presentation')) throw AppError.forbidden('Forbidden');
+          const newOwnership = ownershipForNewContent(actor);
 
-        if (data.layout_id) {
-          const layout = await layoutRepo.findById(data.layout_id);
-          if (!layout) throw AppError.notFound('Layout not found');
-        }
+          if (data.layout_id) {
+            const layout = await layoutRepo.findById(data.layout_id, executor);
+            if (!layout) throw AppError.notFound('Layout not found');
+            if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+            if (!canReferenceContentResource({ id: 'new-presentation', ...newOwnership }, layout)) {
+              throw AppError.badRequest('The selected layout has narrower ownership than the presentation.');
+            }
+          }
 
-        const presentation = await presRepo.create({
-          ...data,
-          created_by: payload.sub,
+          const presentation = await presRepo.create({
+            ...data,
+            created_by: actor.userId,
+            ...newOwnership,
+          }, executor);
+          return { presentation, actor, ability };
         });
-
-        return reply.status(CREATED).send({
-          id: presentation.id,
-          name: presentation.name,
-          description: presentation.description,
-          layout_id: (presentation as any).layout_id ?? null,
-          created_by: presentation.created_by,
-          created_at: presentation.created_at.toISOString(),
-          updated_at: presentation.updated_at.toISOString(),
-        });
+        const ownership = (await resolveContentOwnershipViews([authorized.presentation])).get(authorized.presentation.id);
+        return reply.status(CREATED).send(
+          serializePresentation(authorized.presentation, ownership, authorized.ability, authorized.actor)
+        );
       } catch (error) {
         logger.error(error, 'Create presentation error');
         return respondWithError(reply, error);
@@ -138,23 +220,23 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Presentation')) throw AppError.forbidden('Forbidden');
+        const actor = actorFor(payload);
 
         const query = listPresentationsQuerySchema.parse(request.query);
         const result = await presRepo.list({
           page: query.page,
           limit: query.limit,
+          actor,
         });
+        const ownershipViews = await resolveContentOwnershipViews(result.items);
 
         return reply.send({
-          items: result.items.map((p) => ({
-            id: p.id,
-            name: p.name,
-            description: p.description,
-            created_by: p.created_by,
-            created_at: p.created_at.toISOString(),
-            updated_at: p.updated_at.toISOString(),
-          })),
+          items: result.items.map((presentation) =>
+            serializePresentation(presentation, ownershipViews.get(presentation.id), ability, actor)
+          ),
           pagination: {
             page: result.page,
             limit: result.limit,
@@ -185,16 +267,18 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
 
         const presentation = await presRepo.findById((request.params as any).id);
         if (!presentation) {
           throw AppError.notFound('Presentation not found');
         }
+        const { ability, actor } = await authorizePresentation(payload, presentation, 'read');
 
         let layout: any = null;
         if ((presentation as any).layout_id) {
           layout = await layoutRepo.findById((presentation as any).layout_id);
+          if (layout && !canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
         }
 
         const slotItems = await slotItemRepo.listByPresentation(presentation.id);
@@ -203,19 +287,22 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
+        if (mediaRows.some((media) => !canReadContentResource(actor, media))) {
+          throw AppError.forbidden('Presentation contains media outside your ownership scope.');
+        }
 
+        const ownershipViews = await resolveContentOwnershipViews([
+          presentation,
+          ...(layout ? [layout] : []),
+          ...mediaRows,
+        ]);
         return reply.send({
+          ...serializePresentation(presentation, ownershipViews.get(presentation.id), ability, actor),
           id: presentation.id,
           name: presentation.name,
           description: presentation.description,
           layout: layout
-            ? {
-                id: layout.id,
-                name: layout.name,
-                description: layout.description,
-                aspect_ratio: layout.aspect_ratio,
-                spec: layout.spec,
-              }
+            ? serializeNestedLayout(layout, ownershipViews.get(layout.id), ability, actor)
             : null,
           slots: slotItems.map((i: any) => ({
             id: i.id,
@@ -228,11 +315,15 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             audio_enabled: i.audio_enabled,
             loop_enabled: normalizeVideoLoopEnabled(mediaMap.get(i.media_id)?.type, i.loop_enabled),
             created_at: i.created_at.toISOString?.() ?? i.created_at,
-            media: mediaMap.get(i.media_id) ? serializeMediaRecord(mediaMap.get(i.media_id) as any) : null,
+            media: mediaMap.get(i.media_id)
+              ? serializeNestedMedia(
+                  mediaMap.get(i.media_id),
+                  ownershipViews.get(i.media_id),
+                  ability,
+                  actor
+                )
+              : null,
           })),
-          created_by: presentation.created_by,
-          created_at: presentation.created_at.toISOString(),
-          updated_at: presentation.updated_at.toISOString(),
         });
       } catch (error) {
         logger.error(error, 'Get presentation error');
@@ -262,6 +353,8 @@ export async function presentationRoutes(fastify: FastifyInstance) {
 
         const presentation = await presRepo.findById((request.params as any).id);
         if (!presentation) throw AppError.notFound('Presentation not found');
+        const actor = actorFor(payload);
+        if (!canReadContentResource(actor, presentation)) throw AppError.forbidden('Forbidden');
 
         const items = await presItemRepo.listByPresentation(presentation.id);
         const mediaIds = items.map((i: any) => i.media_id);
@@ -270,6 +363,10 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
+        if (mediaRows.some((media) => !canReadContentResource(actor, media))) {
+          throw AppError.forbidden('Presentation contains media outside your ownership scope.');
+        }
+        const ownershipViews = await resolveContentOwnershipViews(mediaRows);
 
         return reply.send({
           items: items.map((i: any) => {
@@ -282,17 +379,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
               page_number: i.page_number ?? (media?.type === 'DOCUMENT' ? 1 : null),
               created_at: i.created_at.toISOString?.() ?? i.created_at,
               media: media
-                ? {
-                    id: media.id,
-                    name: media.name,
-                    type: media.type,
-                    status: media.status,
-                    source_bucket: media.source_bucket,
-                    source_object_key: media.source_object_key,
-                    ready_object_id: media.ready_object_id,
-                    thumbnail_object_id: media.thumbnail_object_id,
-                    page_count: media.page_count ?? null,
-                  }
+                ? serializeNestedMedia(media, ownershipViews.get(media.id), ability, actor)
                 : null,
             };
           }),
@@ -320,55 +407,56 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Presentation')) throw AppError.forbidden('Forbidden');
-
-        const presentation = await presRepo.findById((request.params as any).id);
-        if (!presentation) throw AppError.notFound('Presentation not found');
-
         const data = presentationItemSchema.parse(request.body);
+        const authorized = await withPresentationMutation(
+          payload,
+          (request.params as any).id,
+          'update',
+          async ({ presentation, actor, ability, executor }) => {
+            const media = await mediaRepo.findById(data.media_id, executor);
+            if (!media) throw AppError.notFound('Media not found');
+            if (!canReadContentResource(actor, media)) throw AppError.forbidden('Forbidden');
+            if (!canReferenceContentResource(presentation, media)) {
+              throw AppError.badRequest('The selected media has narrower ownership than the presentation.');
+            }
+            if (media.status !== 'READY') {
+              throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
+            }
+            const pageNumber = normalizeDocumentPage(media, data.page_number);
 
-        const media = await mediaRepo.findById(data.media_id);
-        if (!media) throw AppError.notFound('Media not found');
-        if (media.status !== 'READY') {
-          throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
-        }
-        const pageNumber = normalizeDocumentPage(media, data.page_number);
+            const existing = await presItemRepo.listByPresentation(presentation.id, executor);
+            const desiredOrder =
+              data.order ?? (existing.length ? Math.max(...existing.map((i: any) => i.order)) + 1 : 0);
+            if (data.order !== undefined && existing.some((i: any) => i.order === desiredOrder)) {
+              throw AppError.badRequest('Order already used in this presentation');
+            }
 
-        const existing = await presItemRepo.listByPresentation(presentation.id);
-        const desiredOrder =
-          data.order ?? (existing.length ? Math.max(...existing.map((i: any) => i.order)) + 1 : 0);
-        if (data.order !== undefined && existing.some((i: any) => i.order === desiredOrder)) {
-          throw AppError.badRequest('Order already used in this presentation');
-        }
-
-        const item = await presItemRepo.create({
-          presentation_id: presentation.id,
-          media_id: data.media_id,
-          order: desiredOrder,
-          duration_seconds: data.duration_seconds,
-          page_number: pageNumber,
-        });
+            const item = await presItemRepo.create({
+              presentation_id: presentation.id,
+              media_id: data.media_id,
+              order: desiredOrder,
+              duration_seconds: data.duration_seconds,
+              page_number: pageNumber,
+            }, executor);
+            return { item, media, actor, ability };
+          }
+        );
+        const ownership = (await resolveContentOwnershipViews([authorized.media])).get(authorized.media.id);
 
         return reply.status(CREATED).send({
-          id: item.id,
-          presentation_id: presentation.id,
-          media_id: item.media_id,
-          order: item.order,
-          duration_seconds: item.duration_seconds,
-          page_number: item.page_number ?? (media.type === 'DOCUMENT' ? 1 : null),
-          created_at: item.created_at.toISOString?.() ?? item.created_at,
-          media: {
-            id: media.id,
-            name: media.name,
-            type: media.type,
-            status: media.status,
-            source_bucket: media.source_bucket,
-            source_object_key: media.source_object_key,
-            ready_object_id: media.ready_object_id,
-            thumbnail_object_id: media.thumbnail_object_id,
-            page_count: media.page_count ?? null,
-          },
+          id: authorized.item.id,
+          presentation_id: (request.params as any).id,
+          media_id: authorized.item.media_id,
+          order: authorized.item.order,
+          duration_seconds: authorized.item.duration_seconds,
+          page_number: authorized.item.page_number ?? (authorized.media.type === 'DOCUMENT' ? 1 : null),
+          created_at: authorized.item.created_at.toISOString?.() ?? authorized.item.created_at,
+          media: serializeNestedMedia(
+            authorized.media,
+            ownership,
+            authorized.ability,
+            authorized.actor
+          ),
         });
       } catch (error) {
         logger.error(error, 'Add presentation item error');
@@ -393,18 +481,18 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Presentation')) throw AppError.forbidden('Forbidden');
-
-        const presentation = await presRepo.findById((request.params as any).id);
-        if (!presentation) throw AppError.notFound('Presentation not found');
-
-        const item = await presItemRepo.findById((request.params as any).itemId);
-        if (!item || item.presentation_id !== presentation.id) {
-          throw AppError.notFound('Presentation item not found');
-        }
-
-        await presItemRepo.delete(item.id);
+        await withPresentationMutation(
+          payload,
+          (request.params as any).id,
+          'update',
+          async ({ presentation, executor }) => {
+            const item = await presItemRepo.findById((request.params as any).itemId, executor);
+            if (!item || item.presentation_id !== presentation.id) {
+              throw AppError.notFound('Presentation item not found');
+            }
+            await presItemRepo.delete(item.id, executor);
+          }
+        );
         return reply.status(NO_CONTENT).send();
       } catch (error) {
         logger.error(error, 'Delete presentation item error');
@@ -433,6 +521,8 @@ export async function presentationRoutes(fastify: FastifyInstance) {
 
         const presentation = await presRepo.findById((request.params as any).id);
         if (!presentation) throw AppError.notFound('Presentation not found');
+        const actor = actorFor(payload);
+        if (!canReadContentResource(actor, presentation)) throw AppError.forbidden('Forbidden');
 
         const slots = await slotItemRepo.listByPresentation(presentation.id);
         const mediaIds = slots.map((i: any) => i.media_id);
@@ -440,6 +530,10 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
+        if (mediaRows.some((media) => !canReadContentResource(actor, media))) {
+          throw AppError.forbidden('Presentation contains media outside your ownership scope.');
+        }
+        const ownershipViews = await resolveContentOwnershipViews(mediaRows);
 
         return reply.send({
           items: slots.map((i: any) => ({
@@ -453,7 +547,14 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             audio_enabled: i.audio_enabled,
             loop_enabled: normalizeVideoLoopEnabled(mediaMap.get(i.media_id)?.type, i.loop_enabled),
             created_at: i.created_at.toISOString?.() ?? i.created_at,
-            media: mediaMap.get(i.media_id) ? serializeMediaRecord(mediaMap.get(i.media_id) as any) : null,
+            media: mediaMap.get(i.media_id)
+              ? serializeNestedMedia(
+                  mediaMap.get(i.media_id),
+                  ownershipViews.get(i.media_id),
+                  ability,
+                  actor
+                )
+              : null,
           })),
         });
       } catch (error) {
@@ -478,78 +579,84 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Presentation')) throw AppError.forbidden('Forbidden');
-
-        const presentation = await presRepo.findById((request.params as any).id);
-        if (!presentation) throw AppError.notFound('Presentation not found');
-
-        if (!(presentation as any).layout_id) {
-          throw AppError.badRequest('Presentation has no layout assigned');
-        }
-
         const data = presentationSlotItemSchema.parse(request.body);
-        const layout = await layoutRepo.findById((presentation as any).layout_id);
-        if (!layout || !layoutSlotIds(layout.spec).has(data.slot_id)) {
-          throw AppError.validation({ reason: 'LAYOUT_SLOT_NOT_FOUND', slot_id: data.slot_id });
-        }
-        const media = await mediaRepo.findById(data.media_id);
-        if (!media) throw AppError.notFound('Media not found');
-        if (media.status !== 'READY') {
-          throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
-        }
-        const pageNumber = normalizeDocumentPage(media, data.page_number);
+        const authorized = await withPresentationMutation(
+          payload,
+          (request.params as any).id,
+          'update',
+          async ({ presentation, actor, ability, executor }) => {
+            if (!presentation.layout_id) {
+              throw AppError.badRequest('Presentation has no layout assigned');
+            }
 
-        const existing = await slotItemRepo.listByPresentation(presentation.id);
-        const order =
-          data.order ??
-          (() => {
-            const inSlot = existing.filter((i: any) => i.slot_id === data.slot_id);
-            return inSlot.length ? Math.max(...inSlot.map((i: any) => i.order || 0)) + 1 : 0;
-          })();
-        if (existing.some((item: any) => item.slot_id === data.slot_id && item.order === order)) {
-          throw AppError.validation({
-            reason: 'PRESENTATION_SLOT_ORDER_CONFLICT',
-            slot_id: data.slot_id,
-            order,
-          });
-        }
+            const layout = await layoutRepo.findById(presentation.layout_id, executor);
+            if (!layout || !layoutSlotIds(layout.spec).has(data.slot_id)) {
+              throw AppError.validation({ reason: 'LAYOUT_SLOT_NOT_FOUND', slot_id: data.slot_id });
+            }
+            if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+            if (!canReferenceContentResource(presentation, layout)) {
+              throw AppError.badRequest('The presentation layout has narrower ownership than the presentation.');
+            }
+            const media = await mediaRepo.findById(data.media_id, executor);
+            if (!media) throw AppError.notFound('Media not found');
+            if (!canReadContentResource(actor, media)) throw AppError.forbidden('Forbidden');
+            if (!canReferenceContentResource(presentation, media)) {
+              throw AppError.badRequest('The selected media has narrower ownership than the presentation.');
+            }
+            if (media.status !== 'READY') {
+              throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
+            }
+            const pageNumber = normalizeDocumentPage(media, data.page_number);
 
-        const item = await slotItemRepo.create({
-          presentation_id: presentation.id,
-          slot_id: data.slot_id,
-          media_id: data.media_id,
-          order,
-          duration_seconds: data.duration_seconds,
-          fit_mode: data.fit_mode,
-          audio_enabled: data.audio_enabled,
-          loop_enabled: normalizeVideoLoopEnabled(media.type, data.loop_enabled),
-          page_number: pageNumber,
-        });
+            const existing = await slotItemRepo.listByPresentation(presentation.id, executor);
+            const order =
+              data.order ??
+              (() => {
+                const inSlot = existing.filter((i: any) => i.slot_id === data.slot_id);
+                return inSlot.length ? Math.max(...inSlot.map((i: any) => i.order || 0)) + 1 : 0;
+              })();
+            if (existing.some((item: any) => item.slot_id === data.slot_id && item.order === order)) {
+              throw AppError.validation({
+                reason: 'PRESENTATION_SLOT_ORDER_CONFLICT',
+                slot_id: data.slot_id,
+                order,
+              });
+            }
+
+            const item = await slotItemRepo.create({
+              presentation_id: presentation.id,
+              slot_id: data.slot_id,
+              media_id: data.media_id,
+              order,
+              duration_seconds: data.duration_seconds,
+              fit_mode: data.fit_mode,
+              audio_enabled: data.audio_enabled,
+              loop_enabled: normalizeVideoLoopEnabled(media.type, data.loop_enabled),
+              page_number: pageNumber,
+            }, executor);
+            return { item, media, actor, ability };
+          }
+        );
+        const ownership = (await resolveContentOwnershipViews([authorized.media])).get(authorized.media.id);
 
         return reply.status(CREATED).send({
-          id: item.id,
-          presentation_id: presentation.id,
-          slot_id: item.slot_id,
-          media_id: item.media_id,
-          order: item.order,
-          duration_seconds: item.duration_seconds,
-          fit_mode: item.fit_mode,
-          audio_enabled: item.audio_enabled,
-          loop_enabled: normalizeVideoLoopEnabled(media.type, item.loop_enabled),
-          page_number: item.page_number ?? (media.type === 'DOCUMENT' ? 1 : null),
-          created_at: item.created_at.toISOString?.() ?? item.created_at,
-          media: {
-            id: media.id,
-            name: media.name,
-            type: media.type,
-            status: media.status,
-            source_bucket: media.source_bucket,
-            source_object_key: media.source_object_key,
-            ready_object_id: media.ready_object_id,
-            thumbnail_object_id: media.thumbnail_object_id,
-            page_count: media.page_count ?? null,
-          },
+          id: authorized.item.id,
+          presentation_id: (request.params as any).id,
+          slot_id: authorized.item.slot_id,
+          media_id: authorized.item.media_id,
+          order: authorized.item.order,
+          duration_seconds: authorized.item.duration_seconds,
+          fit_mode: authorized.item.fit_mode,
+          audio_enabled: authorized.item.audio_enabled,
+          loop_enabled: normalizeVideoLoopEnabled(authorized.media.type, authorized.item.loop_enabled),
+          page_number: authorized.item.page_number ?? (authorized.media.type === 'DOCUMENT' ? 1 : null),
+          created_at: authorized.item.created_at.toISOString?.() ?? authorized.item.created_at,
+          media: serializeNestedMedia(
+            authorized.media,
+            ownership,
+            authorized.ability,
+            authorized.actor
+          ),
         });
       } catch (error) {
         logger.error(error, 'Add presentation slot item error');
@@ -573,65 +680,80 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Presentation')) throw AppError.forbidden('Forbidden');
-
-        const presentation = await presRepo.findById((request.params as any).id);
-        if (!presentation) throw AppError.notFound('Presentation not found');
-        if (!(presentation as any).layout_id) {
-          throw AppError.badRequest('Presentation has no layout assigned');
-        }
-
-        const layout = await layoutRepo.findById((presentation as any).layout_id);
-        if (!layout) throw AppError.notFound('Presentation layout not found');
-        const allowedSlotIds = layoutSlotIds(layout.spec);
         const data = replacePresentationSlotsSchema.parse(request.body);
-        const mediaIds = Array.from(new Set(data.items.map((item) => item.media_id)));
-        const mediaRows = mediaIds.length
-          ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
-          : [];
-        const mediaMap = new Map(mediaRows.map((media) => [media.id, media]));
-        const usedOrders = new Map<string, Set<number>>();
-        const nextOrders = new Map<string, number>();
+        const authorized = await withPresentationMutation(
+          payload,
+          (request.params as any).id,
+          'update',
+          async ({ presentation, actor, ability, executor }) => {
+            if (!presentation.layout_id) {
+              throw AppError.badRequest('Presentation has no layout assigned');
+            }
+            const layout = await layoutRepo.findById(presentation.layout_id, executor);
+            if (!layout) throw AppError.notFound('Presentation layout not found');
+            if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+            if (!canReferenceContentResource(presentation, layout)) {
+              throw AppError.badRequest('The presentation layout has narrower ownership than the presentation.');
+            }
+            const allowedSlotIds = layoutSlotIds(layout.spec);
+            const mediaIds = Array.from(new Set(data.items.map((item) => item.media_id)));
+            const mediaRows = mediaIds.length
+              ? await executor.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
+              : [];
+            const mediaMap = new Map(mediaRows.map((media) => [media.id, media]));
+            const usedOrders = new Map<string, Set<number>>();
+            const nextOrders = new Map<string, number>();
 
-        const normalizedItems = data.items.map((item) => {
-          if (!allowedSlotIds.has(item.slot_id)) {
-            throw AppError.validation({ reason: 'LAYOUT_SLOT_NOT_FOUND', slot_id: item.slot_id });
-          }
-          const media = mediaMap.get(item.media_id);
-          if (!media) throw AppError.notFound('Media not found', { media_id: item.media_id });
-          if (media.status !== 'READY') {
-            throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
-          }
+            const normalizedItems = data.items.map((item) => {
+              if (!allowedSlotIds.has(item.slot_id)) {
+                throw AppError.validation({ reason: 'LAYOUT_SLOT_NOT_FOUND', slot_id: item.slot_id });
+              }
+              const media = mediaMap.get(item.media_id);
+              if (!media) throw AppError.notFound('Media not found', { media_id: item.media_id });
+              if (!canReadContentResource(actor, media)) throw AppError.forbidden('Forbidden');
+              if (!canReferenceContentResource(presentation, media)) {
+                throw AppError.badRequest('Selected media has narrower ownership than the presentation.');
+              }
+              if (media.status !== 'READY') {
+                throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
+              }
 
-          const order = item.order ?? nextOrders.get(item.slot_id) ?? 0;
-          const orders = usedOrders.get(item.slot_id) ?? new Set<number>();
-          if (orders.has(order)) {
-            throw AppError.validation({
-              reason: 'PRESENTATION_SLOT_ORDER_CONFLICT',
-              slot_id: item.slot_id,
-              order,
+              const order = item.order ?? nextOrders.get(item.slot_id) ?? 0;
+              const orders = usedOrders.get(item.slot_id) ?? new Set<number>();
+              if (orders.has(order)) {
+                throw AppError.validation({
+                  reason: 'PRESENTATION_SLOT_ORDER_CONFLICT',
+                  slot_id: item.slot_id,
+                  order,
+                });
+              }
+              orders.add(order);
+              usedOrders.set(item.slot_id, orders);
+              nextOrders.set(item.slot_id, Math.max(nextOrders.get(item.slot_id) ?? 0, order + 1));
+
+              return {
+                slot_id: item.slot_id,
+                media_id: item.media_id,
+                order,
+                duration_seconds: item.duration_seconds,
+                fit_mode: item.fit_mode,
+                audio_enabled: item.audio_enabled,
+                loop_enabled: normalizeVideoLoopEnabled(media.type, item.loop_enabled),
+                page_number: normalizeDocumentPage(media, item.page_number),
+              };
             });
+
+            const replaced = await slotItemRepo.replaceByPresentation(
+              presentation.id,
+              normalizedItems,
+              executor
+            );
+            return { replaced, mediaRows, mediaMap, actor, ability };
           }
-          orders.add(order);
-          usedOrders.set(item.slot_id, orders);
-          nextOrders.set(item.slot_id, Math.max(nextOrders.get(item.slot_id) ?? 0, order + 1));
-
-          return {
-            slot_id: item.slot_id,
-            media_id: item.media_id,
-            order,
-            duration_seconds: item.duration_seconds,
-            fit_mode: item.fit_mode,
-            audio_enabled: item.audio_enabled,
-            loop_enabled: normalizeVideoLoopEnabled(media.type, item.loop_enabled),
-            page_number: normalizeDocumentPage(media, item.page_number),
-          };
-        });
-
-        const replaced = await slotItemRepo.replaceByPresentation(presentation.id, normalizedItems);
+        );
+        const ownershipViews = await resolveContentOwnershipViews(authorized.mediaRows);
         return reply.send({
-          items: replaced
+          items: authorized.replaced
             .sort((left, right) => left.slot_id.localeCompare(right.slot_id) || left.order - right.order)
             .map((item) => ({
               id: item.id,
@@ -642,11 +764,16 @@ export async function presentationRoutes(fastify: FastifyInstance) {
               duration_seconds: item.duration_seconds,
               fit_mode: item.fit_mode,
               audio_enabled: item.audio_enabled,
-              loop_enabled: normalizeVideoLoopEnabled(mediaMap.get(item.media_id)?.type, item.loop_enabled),
-              page_number: item.page_number ?? (mediaMap.get(item.media_id)?.type === 'DOCUMENT' ? 1 : null),
+              loop_enabled: normalizeVideoLoopEnabled(authorized.mediaMap.get(item.media_id)?.type, item.loop_enabled),
+              page_number: item.page_number ?? (authorized.mediaMap.get(item.media_id)?.type === 'DOCUMENT' ? 1 : null),
               created_at: item.created_at.toISOString?.() ?? item.created_at,
-              media: mediaMap.get(item.media_id)
-                ? serializeMediaRecord(mediaMap.get(item.media_id) as any)
+              media: authorized.mediaMap.get(item.media_id)
+                ? serializeNestedMedia(
+                    authorized.mediaMap.get(item.media_id),
+                    ownershipViews.get(item.media_id),
+                    authorized.ability,
+                    authorized.actor
+                  )
                 : null,
             })),
         });
@@ -672,18 +799,18 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Presentation')) throw AppError.forbidden('Forbidden');
-
-        const presentation = await presRepo.findById((request.params as any).id);
-        if (!presentation) throw AppError.notFound('Presentation not found');
-
-        const item = await slotItemRepo.findById((request.params as any).slotItemId);
-        if (!item || item.presentation_id !== presentation.id) {
-          throw AppError.notFound('Presentation slot item not found');
-        }
-
-        await slotItemRepo.delete(item.id);
+        await withPresentationMutation(
+          payload,
+          (request.params as any).id,
+          'update',
+          async ({ presentation, executor }) => {
+            const item = await slotItemRepo.findById((request.params as any).slotItemId, executor);
+            if (!item || item.presentation_id !== presentation.id) {
+              throw AppError.notFound('Presentation slot item not found');
+            }
+            await slotItemRepo.delete(item.id, executor);
+          }
+        );
         return reply.status(NO_CONTENT).send();
       } catch (error) {
         logger.error(error, 'Delete presentation slot item error');
@@ -709,29 +836,32 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
-
+        const payload = await verifyAccessToken(token);
         const data = createPresentationSchema.partial().parse(request.body);
-        if (data.layout_id) {
-          const layout = await layoutRepo.findById(data.layout_id);
-          if (!layout) throw AppError.notFound('Layout not found');
-        }
+        const authorized = await withPresentationMutation(
+          payload,
+          (request.params as any).id,
+          'update',
+          async ({ presentation: existing, actor, ability, executor }) => {
+            if (data.layout_id) {
+              const layout = await layoutRepo.findById(data.layout_id, executor);
+              if (!layout) throw AppError.notFound('Layout not found');
+              if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+              if (!canReferenceContentResource(existing, layout)) {
+                throw AppError.badRequest('The selected layout has narrower ownership than the presentation.');
+              }
+            }
 
-        const presentation = await presRepo.update((request.params as any).id, data);
+            const presentation = await presRepo.update(existing.id, data, executor);
+            if (!presentation) throw AppError.notFound('Presentation not found');
+            return { presentation, actor, ability };
+          }
+        );
 
-        if (!presentation) {
-          throw AppError.notFound('Presentation not found');
-        }
-
-        return reply.send({
-          id: presentation.id,
-          name: presentation.name,
-          description: presentation.description,
-          layout_id: (presentation as any).layout_id ?? null,
-          created_by: presentation.created_by,
-          created_at: presentation.created_at.toISOString(),
-          updated_at: presentation.updated_at.toISOString(),
-        });
+        const ownership = (await resolveContentOwnershipViews([authorized.presentation])).get(authorized.presentation.id);
+        return reply.send(
+          serializePresentation(authorized.presentation, ownership, authorized.ability, authorized.actor)
+        );
       } catch (error) {
         logger.error(error, 'Update presentation error');
         return respondWithError(reply, error);
@@ -756,9 +886,15 @@ export async function presentationRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
-
-        await presRepo.delete((request.params as any).id);
+        const payload = await verifyAccessToken(token);
+        await withPresentationMutation(
+          payload,
+          (request.params as any).id,
+          'delete',
+          async ({ presentation, executor }) => {
+            await presRepo.delete(presentation.id, executor);
+          }
+        );
         return reply.status(NO_CONTENT).send();
       } catch (error) {
         logger.error(error, 'Delete presentation error');

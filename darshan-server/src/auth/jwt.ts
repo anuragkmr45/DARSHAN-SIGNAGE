@@ -2,6 +2,8 @@ import { SignJWT, jwtVerify, type JWTPayload as JoseJWTPayload } from 'jose';
 import { config as appConfig } from '@/config';
 import { randomUUID } from 'crypto';
 import { AuthError } from '@/auth/errors';
+import { getDatabase, schema } from '@/db';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 
 export interface JWTPayload extends JoseJWTPayload {
   sub: string; // user ID
@@ -50,8 +52,32 @@ export async function verifyAccessToken(token: string): Promise<JWTPayload> {
 
   try {
     const verified = await jwtVerify(token, secret);
-    return verified.payload as JWTPayload;
+    const payload = verified.payload as JWTPayload;
+    if (!payload.sub || !payload.jti) {
+      throw new AuthError('Invalid or expired token');
+    }
+
+    const db = getDatabase();
+    const [authenticated] = await db
+      .select({ user_id: schema.sessions.user_id })
+      .from(schema.sessions)
+      .innerJoin(schema.users, eq(schema.users.id, schema.sessions.user_id))
+      .where(
+        and(
+          eq(schema.sessions.access_jti, payload.jti),
+          eq(schema.sessions.user_id, payload.sub),
+          gt(schema.sessions.expires_at, new Date()),
+          eq(schema.users.is_active, true),
+          isNull(schema.users.deleted_at)
+        )
+      )
+      .limit(1);
+    if (!authenticated) {
+      throw new AuthError('Token has been revoked');
+    }
+    return payload;
   } catch (error) {
+    if (error instanceof AuthError) throw error;
     throw new AuthError('Invalid or expired token');
   }
 }

@@ -34,6 +34,7 @@ import { MediaPreview } from "@/components/common/MediaPreview";
 import { AspectFrame } from "@/components/common/AspectFrame";
 import { resolveMediaDisplayName } from "@/lib/media";
 import { resolveVideoLoopLabel } from "@/lib/scheduleCreatorState";
+import { getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 
 interface RequestDetailDrawerProps {
   request: ScheduleRequestListItem;
@@ -71,7 +72,8 @@ const formatRequestId = (id?: string | null) => (id ? `REQ-${id.slice(-12)}` : "
 const getUserLabel = (user?: ScheduleRequestListItem["requested_by_user"] | null) => {
   if (!user) return "";
   const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
-  return name || user.email || user.id || "";
+  const label = name || user.email || user.id || "";
+  return user.status === "DELETED" ? `${label} (deleted)` : label;
 };
 
 const resolveContentType = (media: MediaAsset): ContentType => {
@@ -559,7 +561,15 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   {currentRequest.schedule?.name && (
                     <div>
                       <p className="text-sm text-muted-foreground">Schedule Name</p>
-                      <p className="font-medium">{currentRequest.schedule.name}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">{currentRequest.schedule.name}</p>
+                        {getContentOwnershipLabel(currentRequest.schedule) ? (
+                          <Badge variant="secondary">{getContentOwnershipLabel(currentRequest.schedule)}</Badge>
+                        ) : null}
+                        {getContentCreatorLabel(currentRequest.schedule) ? (
+                          <Badge variant="outline">{getContentCreatorLabel(currentRequest.schedule)}</Badge>
+                        ) : null}
+                      </div>
                     </div>
                   )}
                   {currentRequest.schedule?.id && (
@@ -615,6 +625,12 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                           <p className="truncate text-sm font-medium">{resolveMediaDisplayName(media)}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <ContentTypeBadge type={resolveContentType(media)} />
+                            {getContentOwnershipLabel(media) ? (
+                              <Badge variant="secondary">{getContentOwnershipLabel(media)}</Badge>
+                            ) : null}
+                            {getContentCreatorLabel(media) ? (
+                              <Badge variant="outline">{getContentCreatorLabel(media)}</Badge>
+                            ) : null}
                             {media.duration_seconds && (
                               <span className="text-xs text-muted-foreground">
                                 Duration: {formatDuration(media.duration_seconds)}
@@ -689,12 +705,30 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {presentations.map((presentation) => (
-                    <div key={presentation.id} className="flex items-center justify-between text-sm">
+                    <div key={presentation.id} className="flex items-center justify-between gap-3 text-sm">
                       <div>
                         <p className="font-medium">{presentation.name}</p>
                         <p className="text-xs text-muted-foreground">{presentation.id}</p>
                       </div>
-                      {presentation.layout_id && <Badge variant="outline">Layout {presentation.layout_id}</Badge>}
+                      <div className="flex flex-wrap justify-end gap-2">
+                        {getContentOwnershipLabel(presentation) ? (
+                          <Badge variant="secondary">{getContentOwnershipLabel(presentation)}</Badge>
+                        ) : null}
+                        {getContentCreatorLabel(presentation) ? (
+                          <Badge variant="outline">{getContentCreatorLabel(presentation)}</Badge>
+                        ) : null}
+                        {presentation.layout && getContentOwnershipLabel(presentation.layout) ? (
+                          <Badge variant="secondary">
+                            Layout: {getContentOwnershipLabel(presentation.layout)}
+                          </Badge>
+                        ) : null}
+                        {presentation.layout && getContentCreatorLabel(presentation.layout) ? (
+                          <Badge variant="outline">{getContentCreatorLabel(presentation.layout)}</Badge>
+                        ) : null}
+                        {presentation.layout_id && !presentation.layout ? (
+                          <Badge variant="outline">Layout {presentation.layout_id}</Badge>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                 </CardContent>

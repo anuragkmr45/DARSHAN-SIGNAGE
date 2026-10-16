@@ -1,4 +1,4 @@
-import { eq, and, sql, desc, or, getTableColumns } from 'drizzle-orm';
+import { eq, and, sql, desc, or, getTableColumns, inArray, isNull } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 
 export class UserRepository {
@@ -40,7 +40,7 @@ export class UserRepository {
     const result = await db
       .select()
       .from(schema.users)
-      .where(sql`LOWER(ext->>'invite_token') = ${normalizedToken}`);
+      .where(and(sql`LOWER(ext->>'invite_token') = ${normalizedToken}`, isNull(schema.users.deleted_at)));
     return (result as any)[0] || null;
   }
 
@@ -60,7 +60,7 @@ export class UserRepository {
     const offset = (page - 1) * limit;
     const nowIso = new Date().toISOString();
 
-    const conditions: any[] = [];
+    const conditions: any[] = [isNull(schema.users.deleted_at)];
 
     // Only users that have invite metadata
     conditions.push(
@@ -139,7 +139,10 @@ export class UserRepository {
 
   async findByEmail(email: string) {
     const db = getDatabase();
-    const result = await db.select().from(schema.users).where(eq(schema.users.email, email));
+    const result = await db
+      .select()
+      .from(schema.users)
+      .where(and(eq(schema.users.email, email), isNull(schema.users.deleted_at)));
     return result[0] || null;
   }
 
@@ -156,7 +159,7 @@ export class UserRepository {
     const limit = options.limit || 20;
     const offset = (page - 1) * limit;
 
-    const conditions = [];
+    const conditions = [isNull(schema.users.deleted_at)];
     if (options.role?.trim()) {
       conditions.push(sql`LOWER(${schema.roles.name}) = ${options.role.trim().toLowerCase()}`);
     }
@@ -200,17 +203,100 @@ export class UserRepository {
 
   async update(id: string, data: Partial<typeof schema.users.$inferInsert>) {
     const db = getDatabase();
-    const result = await db
-      .update(schema.users)
-      .set({ ...data, updated_at: new Date() })
-      .where(eq(schema.users.id, id))
-      .returning();
-    return result[0] || null;
+    return db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(and(eq(schema.users.id, id), isNull(schema.users.deleted_at)))
+        .for('update');
+      if (!current) return null;
+
+      const [user] = await tx
+        .update(schema.users)
+        .set({ ...data, updated_at: new Date() })
+        .where(and(eq(schema.users.id, id), isNull(schema.users.deleted_at)))
+        .returning();
+      if (!user) return null;
+
+      await tx.delete(schema.sessions).where(eq(schema.sessions.user_id, id));
+      return user;
+    });
   }
 
-  async delete(id: string) {
+  async tombstone(id: string, deletedBy: string, invalidPasswordHash: string) {
     const db = getDatabase();
-    await db.delete(schema.users).where(eq(schema.users.id, id));
+    return db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, id))
+        .for('update');
+      if (!current) return null;
+      if (current.deleted_at) {
+        return { user: current, alreadyDeleted: true, abortedUploads: [], failedMedia: [] };
+      }
+
+      const now = new Date();
+      const abortedUploads = await tx
+        .update(schema.mediaUploadSessions)
+        .set({
+          state: 'ABORTED',
+          aborted_at: now,
+          expires_at: now,
+          failure_reason: 'USER_DELETED_CLEANUP_PENDING',
+          updated_at: now,
+        })
+        .where(
+          and(
+            eq(schema.mediaUploadSessions.created_by, id),
+            inArray(schema.mediaUploadSessions.state, ['INITIALIZING', 'ACTIVE', 'FINALIZING'])
+          )
+        )
+        .returning();
+
+      const failedMedia = await tx
+        .select()
+        .from(schema.media)
+        .where(
+          and(
+            eq(schema.media.created_by, id),
+            inArray(schema.media.status, ['PENDING', 'PROCESSING'])
+          )
+        )
+        .for('update');
+      if (failedMedia.length > 0) {
+        await tx
+          .update(schema.media)
+          .set({ status: 'FAILED', status_reason: 'USER_DELETED_CLEANUP_PENDING', updated_at: now })
+          .where(inArray(schema.media.id, failedMedia.map((media) => media.id)));
+      }
+
+      await tx.delete(schema.sessions).where(eq(schema.sessions.user_id, id));
+
+      const [user] = await tx
+        .update(schema.users)
+        .set({
+          email: `deleted+${id}@deleted.invalid`,
+          password_hash: invalidPasswordHash,
+          is_active: false,
+          deleted_at: now,
+          deleted_by: deletedBy,
+          ext: null,
+          updated_at: now,
+        })
+        .where(and(eq(schema.users.id, id), isNull(schema.users.deleted_at)))
+        .returning();
+
+      await tx.insert(schema.auditLogs).values({
+        user_id: deletedBy,
+        action: 'USER_DELETED',
+        entity_type: 'USER',
+        entity_id: id,
+        created_at: now,
+      });
+
+      return { user, alreadyDeleted: false, abortedUploads, failedMedia };
+    });
   }
 
   async getDeleteUsageSummary(id: string) {

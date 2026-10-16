@@ -1,5 +1,7 @@
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+import type { ActorContext } from '@/rbac/policy';
+import { contentReadCondition, type ContentOwnerScope } from '@/rbac/content-ownership';
 
 export class ScheduleRepository {
   async create(data: {
@@ -9,14 +11,16 @@ export class ScheduleRepository {
     start_at: Date;
     end_at: Date;
     created_by: string;
-  }) {
-    const db = getDatabase();
+    owner_scope?: ContentOwnerScope;
+    owner_department_id?: string | null;
+  }, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const result = await db.insert(schema.schedules).values(data).returning();
     return result[0];
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
+  async findById(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const result = await db.select().from(schema.schedules).where(eq(schema.schedules.id, id));
     return result[0] || null;
   }
@@ -26,6 +30,7 @@ export class ScheduleRepository {
     limit?: number;
     is_active?: boolean;
     created_by_ids?: string[];
+    actor?: ActorContext;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -41,6 +46,10 @@ export class ScheduleRepository {
         return { items: [], total: 0, page, limit };
       }
       conditions.push(inArray(schema.schedules.created_by, options.created_by_ids as any));
+    }
+    if (options.actor) {
+      const accessCondition = contentReadCondition(options.actor, schema.schedules);
+      if (accessCondition) conditions.push(accessCondition);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -68,8 +77,8 @@ export class ScheduleRepository {
     };
   }
 
-  async update(id: string, data: Partial<typeof schema.schedules.$inferInsert>) {
-    const db = getDatabase();
+  async update(id: string, data: Partial<typeof schema.schedules.$inferInsert>, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const result = await db
       .update(schema.schedules)
       .set({

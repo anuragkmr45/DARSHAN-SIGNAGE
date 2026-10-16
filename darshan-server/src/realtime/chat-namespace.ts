@@ -13,6 +13,7 @@ import {
 import { getActiveModeration } from '@/chat/guard';
 import {
   attachNamespaceSocketObservability,
+  authenticatedUserRoom,
   getOrCreateSocketServer,
   getSocketAllowedOrigins,
   isAllowedOrigin,
@@ -190,6 +191,7 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
       socket.disconnect(true);
       return;
     }
+    socket.join(authenticatedUserRoom(user.sub));
 
     socket.on('disconnect', () => {
       chatTypingRateLimiter.clear(socket.id);

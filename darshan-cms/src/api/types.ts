@@ -91,6 +91,22 @@ export interface LayoutSpec {
   slots: LayoutSlot[];
 }
 
+export interface ContentOwnership {
+  scope: "DEPARTMENT" | "ORGANIZATION" | "RESTRICTED";
+  department_id: string | null;
+  department_name: string | null;
+  creator: {
+    id: string | null;
+    display_name: string;
+    status: "ACTIVE" | "INACTIVE" | "DELETED" | "UNKNOWN";
+  };
+}
+
+export interface ContentPermissions {
+  can_update: boolean;
+  can_delete: boolean;
+}
+
 export interface LayoutItem {
   id: string;
   name: string;
@@ -99,6 +115,8 @@ export interface LayoutItem {
   spec: LayoutSpec;
   created_by?: string | null;
   is_shared?: boolean;
+  ownership?: ContentOwnership;
+  permissions?: ContentPermissions;
   created_at: string;
   updated_at: string;
 }
@@ -111,6 +129,8 @@ export interface LayoutSummary {
   spec: LayoutSlot[] | LayoutSpec;
   created_by?: string | null;
   is_shared?: boolean;
+  ownership?: ContentOwnership;
+  permissions?: ContentPermissions;
   created_at?: string;
   updated_at?: string;
 }
@@ -621,6 +641,8 @@ export interface Presentation {
   layout_id?: string;
   layout?: LayoutSummary;
   created_by?: string;
+  ownership?: ContentOwnership;
+  permissions?: ContentPermissions;
   created_at?: string;
   updated_at?: string;
 }
@@ -1555,6 +1577,8 @@ export interface MediaAsset {
   media_url?: string | null;
   fallback_media_url?: string | null;
   created_by?: string;
+  ownership?: ContentOwnership;
+  permissions?: ContentPermissions;
   created_at?: string;
   updated_at?: string;
 }
@@ -1568,6 +1592,10 @@ export interface Schedule {
   end_at: string;
   is_active?: boolean;
   created_by?: string;
+  owner_scope?: ContentOwnership["scope"];
+  owner_department_id?: string | null;
+  ownership?: ContentOwnership;
+  permissions?: ContentPermissions;
 }
 
 export interface ScheduleItemPayload {
@@ -1656,12 +1684,13 @@ export type ScheduleRequestStatus =
 
 export interface ScheduleRequestUser {
   id: string;
-  email?: string;
+  email?: string | null;
   first_name?: string;
   last_name?: string;
   role_id?: string;
   department_id?: string | null;
   department?: Department | null;
+  status?: "ACTIVE" | "INACTIVE" | "DELETED";
 }
 
 export interface ScheduleTimeStatus {

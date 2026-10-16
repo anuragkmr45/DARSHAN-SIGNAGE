@@ -1,5 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
+import type { ActorContext } from '@/rbac/policy';
+import { contentReadCondition } from '@/rbac/content-ownership';
 
 type ScheduleRequestStatus = (typeof schema.scheduleRequestStatusEnum.enumValues)[number];
 type ScheduleRequestStatusFilter = ScheduleRequestStatus;
@@ -47,6 +49,7 @@ export class ScheduleRequestRepository {
     date_from?: Date;
     date_to?: Date;
     sort_direction?: ScheduleRequestSortDirection;
+    actor?: ActorContext;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -93,6 +96,7 @@ export class ScheduleRequestRepository {
     date_field?: ScheduleRequestDateField;
     date_from?: Date;
     date_to?: Date;
+    actor?: ActorContext;
   }) {
     const db = getDatabase();
     if (options?.requested_by_ids && options.requested_by_ids.length === 0) {
@@ -137,6 +141,7 @@ export class ScheduleRequestRepository {
     date_field?: ScheduleRequestDateField;
     date_from?: Date;
     date_to?: Date;
+    actor?: ActorContext;
   }) {
     const conditions: any[] = [];
 
@@ -148,6 +153,17 @@ export class ScheduleRequestRepository {
     }
     if (options.requested_by_ids) {
       conditions.push(inArray(schema.scheduleRequests.requested_by, options.requested_by_ids as any));
+    }
+    if (options.actor) {
+      const scheduleAccess = contentReadCondition(options.actor, schema.schedules);
+      if (scheduleAccess) {
+        conditions.push(sql`EXISTS (
+          SELECT 1
+          FROM ${schema.schedules}
+          WHERE ${schema.schedules.id} = ${schema.scheduleRequests.schedule_id}
+            AND ${scheduleAccess}
+        )`);
+      }
     }
 
     const query = options.q?.trim();
@@ -172,7 +188,8 @@ export class ScheduleRequestRepository {
             ON ${schema.departments.id} = ${schema.users.department_id}
           WHERE ${schema.users.id} = ${schema.scheduleRequests.requested_by}
             AND (
-              COALESCE(${schema.users.email}, '') ILIKE ${likePattern} ESCAPE '\\'
+              (${schema.users.deleted_at} IS NULL
+                AND COALESCE(${schema.users.email}, '') ILIKE ${likePattern} ESCAPE '\\')
               OR COALESCE(${schema.users.first_name}, '') ILIKE ${likePattern} ESCAPE '\\'
               OR COALESCE(${schema.users.last_name}, '') ILIKE ${likePattern} ESCAPE '\\'
               OR COALESCE(CONCAT_WS(' ', ${schema.users.first_name}, ${schema.users.last_name}), '') ILIKE ${likePattern} ESCAPE '\\'

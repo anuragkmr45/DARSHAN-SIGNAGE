@@ -118,7 +118,7 @@
       { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" },
       { "status": 404, "code": "NOT_FOUND", "when": "User not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/users.ts fastify.delete(apiEndpoints.users.delete). Side effects: users table."
+    "notes": "Idempotently tombstones the user, revokes sessions, disconnects user sockets, stops unfinished uploads, and preserves completed content/history. Response fields: id, deleted_at, already_deleted, aborted_uploads, cleaned_uploads. Every SUPER_ADMIN is protected. See docs/deleted-user-content-ownership.md. Ref: darshan-server/src/routes/users.ts fastify.delete(apiEndpoints.users.delete)."
   },
 
   {
@@ -239,7 +239,7 @@
       { "status": 401, "code": "UNAUTHORIZED", "when": "Missing/invalid token" },
       { "status": 404, "code": "NOT_FOUND", "when": "Role not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/roles.ts fastify.put(apiEndpoints.roles.update)"
+    "notes": "Locks the effective permission graph, updates the role and revokes database sessions for users assigned directly or through transitive role inheritance in one transaction, then disconnects their local chat/notification/screen sockets. Affected users must authenticate again. Ref: darshan-server/src/routes/roles.ts fastify.put(apiEndpoints.roles.update)"
   },
   {
     "domain": "roles",
@@ -250,9 +250,9 @@
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/roles.ts (delete response)",
     "errors": [
       { "status": 404, "code": "NOT_FOUND", "when": "Role not found" },
-      { "status": 409, "code": "CONFLICT", "when": "System role or role in use" }
+      { "status": 409, "code": "CONFLICT", "when": "System role, role assigned to a user, or role inherited by another role" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/roles.ts fastify.delete(apiEndpoints.roles.delete)"
+    "notes": "Locks the effective permission graph and rejects deleting a system role, an assigned role, or a custom role referenced by direct or transitive inheritance. Ref: darshan-server/src/routes/roles.ts fastify.delete(apiEndpoints.roles.delete)"
   },
   {
     "domain": "permissions",
@@ -334,6 +334,83 @@
 
   {
     "domain": "media",
+    "method": "GET",
+    "path": "/api/v1/media/upload-policy",
+    "auth": "jwt",
+    "requestSchemaRef": null,
+    "responseSchemaRef": "darshan-server/src/routes/media.ts (effective upload policy)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Media create ability is missing" }
+    ],
+    "notes": "Returns the authoritative upload-size, multipart-threshold, part-size and concurrency policy before transfer starts."
+  },
+  {
+    "domain": "media",
+    "method": "POST",
+    "path": "/api/v1/media/uploads",
+    "auth": "jwt",
+    "requestSchemaRef": "darshan-server/src/schemas/media.ts#createUploadSessionSchema",
+    "responseSchemaRef": "darshan-server/src/routes/media.ts (upload session response)",
+    "errors": [
+      { "status": 401, "code": "UNAUTHORIZED", "when": "Account is inactive/deleted or token/session is invalid" },
+      { "status": 403, "code": "FORBIDDEN", "when": "Media create ability or department ownership context is missing" },
+      { "status": 409, "code": "CONFLICT", "when": "Idempotency key conflicts or deletion wins activation" }
+    ],
+    "notes": "Creates/resumes an idempotent INITIALIZING/ACTIVE upload plus PENDING Media. The embedded Media includes created_by, ownership and server-authoritative permissions even before completion."
+  },
+  {
+    "domain": "media",
+    "method": "GET",
+    "path": "/api/v1/media/uploads/:sessionId",
+    "auth": "jwt",
+    "requestSchemaRef": null,
+    "responseSchemaRef": "darshan-server/src/routes/media.ts (upload session response)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Session belongs to another user" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Upload session is missing" }
+    ],
+    "notes": "Returns upload state, parts/URL where applicable, and embedded Media ownership/permissions. Expired ACTIVE sessions fail the Media atomically."
+  },
+  {
+    "domain": "media",
+    "method": "POST",
+    "path": "/api/v1/media/uploads/:sessionId/parts",
+    "auth": "jwt",
+    "requestSchemaRef": "darshan-server/src/schemas/media.ts#uploadPartPresignSchema",
+    "responseSchemaRef": "darshan-server/src/routes/media.ts (multipart part URLs)",
+    "errors": [
+      { "status": 400, "code": "BAD_REQUEST", "when": "Part list or strategy is invalid" },
+      { "status": 409, "code": "CONFLICT", "when": "Session is no longer active" }
+    ],
+    "notes": "Issues bounded CMS-origin URLs only for authoritative multipart part numbers."
+  },
+  {
+    "domain": "media",
+    "method": "POST",
+    "path": "/api/v1/media/uploads/:sessionId/complete",
+    "auth": "jwt",
+    "requestSchemaRef": "darshan-server/src/schemas/media.ts#completeUploadSessionSchema",
+    "responseSchemaRef": "darshan-server/src/routes/media.ts (upload session response)",
+    "errors": [
+      { "status": 400, "code": "BAD_REQUEST", "when": "Parts, size or checksum fail verification" },
+      { "status": 409, "code": "CONFLICT", "when": "Session is inactive/already finalizing or user deletion wins" }
+    ],
+    "notes": "Promotes verified bytes and commits Media plus session only for an active creator. Delete-first compensates promoted objects; finalization-first retains completed Media. Embedded Media includes ownership/permissions."
+  },
+  {
+    "domain": "media",
+    "method": "DELETE",
+    "path": "/api/v1/media/uploads/:sessionId",
+    "auth": "jwt",
+    "requestSchemaRef": null,
+    "responseSchemaRef": "darshan-server/src/routes/media.ts (abort upload response)",
+    "errors": [
+      { "status": 409, "code": "CONFLICT", "when": "Completed upload cannot be aborted" }
+    ],
+    "notes": "Aborts an incomplete upload, removes staging bytes where possible and marks Media FAILED."
+  },
+  {
+    "domain": "media",
     "method": "POST",
     "path": "/api/v1/media/presign-upload",
     "auth": "jwt",
@@ -343,7 +420,7 @@
       { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" },
       { "status": 422, "code": "VALIDATION_ERROR", "when": "Invalid file metadata" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/media.ts fastify.post(apiEndpoints.media.presignUpload). Side effects: media row, MinIO bucket."
+    "notes": "Legacy direct presign path. Creates a stable-owned PENDING Media row and returns it with created_by, ownership and server-authoritative permissions alongside the upload fields. Ref: darshan-server/src/routes/media.ts fastify.post(apiEndpoints.media.presignUpload)."
   },
   {
     "domain": "media",
@@ -355,7 +432,7 @@
     "errors": [
       { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/media.ts fastify.post(apiEndpoints.media.create). Side effects: media row."
+    "notes": "Creates stable-owned Media and returns created_by, ownership and server-authoritative permissions. Ref: darshan-server/src/routes/media.ts fastify.post(apiEndpoints.media.create)."
   },
   {
     "domain": "media",
@@ -367,7 +444,7 @@
     "errors": [
       { "status": 422, "code": "VALIDATION_ERROR", "when": "Bad query params" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/media.ts fastify.get(apiEndpoints.media.list)"
+    "notes": "Rows are filtered by stable owner scope and include ownership plus server-authoritative permissions. See docs/deleted-user-content-ownership.md. Ref: darshan-server/src/routes/media.ts fastify.get(apiEndpoints.media.list)"
   },
   {
     "domain": "media",
@@ -379,7 +456,7 @@
     "errors": [
       { "status": 404, "code": "NOT_FOUND", "when": "Media not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/media.ts fastify.get(apiEndpoints.media.get)"
+    "notes": "Applies ability plus stable-owner visibility and returns created_by, ownership and server-authoritative permissions. Ref: darshan-server/src/routes/media.ts fastify.get(apiEndpoints.media.get)."
   },
   {
     "domain": "media",
@@ -392,7 +469,7 @@
       { "status": 400, "code": "BAD_REQUEST", "when": "Missing source object or invalid state" },
       { "status": 404, "code": "NOT_FOUND", "when": "Media not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/media.ts fastify.post(apiEndpoints.media.complete). Side effects: media row update."
+    "notes": "Finalizes only for an active creator and returns the updated Media with stable ownership and permissions. Ref: darshan-server/src/routes/media.ts fastify.post(apiEndpoints.media.complete)."
   },
   {
     "domain": "media",
@@ -429,7 +506,7 @@
     "errors": [
       { "status": 422, "code": "VALIDATION_ERROR", "when": "Bad query params" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.list)"
+    "notes": "Rows are filtered by stable owner scope and include ownership plus server-authoritative permissions. See docs/deleted-user-content-ownership.md. Ref: darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.list)"
   },
   {
     "domain": "presentations",
@@ -441,7 +518,7 @@
     "errors": [
       { "status": 404, "code": "NOT_FOUND", "when": "Presentation not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.get)"
+    "notes": "The Presentation and expanded Layout/Media resources include created_by, ownership and server-authoritative permissions. Inaccessible nested resources reject the response. Ref: darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.get)"
   },
   {
     "domain": "presentations",
@@ -477,7 +554,7 @@
     "errors": [
       { "status": 404, "code": "NOT_FOUND", "when": "Presentation not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.items)"
+    "notes": "Expanded Media resources include created_by, ownership and server-authoritative permissions. Ref: darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.items)"
   },
   {
     "domain": "presentations",
@@ -490,7 +567,7 @@
       { "status": 400, "code": "BAD_REQUEST", "when": "Order conflict" },
       { "status": 404, "code": "NOT_FOUND", "when": "Presentation or media not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/presentations.ts fastify.post(apiEndpoints.presentations.items)"
+    "notes": "The expanded Media resource includes created_by, ownership and server-authoritative permissions. Ref: darshan-server/src/routes/presentations.ts fastify.post(apiEndpoints.presentations.items)"
   },
   {
     "domain": "presentations",
@@ -514,7 +591,7 @@
     "errors": [
       { "status": 404, "code": "NOT_FOUND", "when": "Presentation not found" }
     ],
-    "notes": "Each item includes loop_enabled. Only VIDEO media can return true; missing legacy and non-video values normalize to false. Ref: darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.slotItems)"
+    "notes": "Each item includes loop_enabled. Only VIDEO media can return true; missing legacy and non-video values normalize to false. Expanded Media includes created_by, ownership and server-authoritative permissions. Ref: darshan-server/src/routes/presentations.ts fastify.get(apiEndpoints.presentations.slotItems)"
   },
   {
     "domain": "presentations",
@@ -528,7 +605,7 @@
       { "status": 404, "code": "NOT_FOUND", "when": "Presentation or media not found" },
       { "status": 422, "code": "VALIDATION_ERROR", "when": "Explicit order conflicts with another item in the same slot" }
     ],
-    "notes": "loop_enabled is occurrence-specific and normalizes to false for non-video media. Ref: darshan-server/src/routes/presentations.ts fastify.post(apiEndpoints.presentations.slotItems)"
+    "notes": "loop_enabled is occurrence-specific and normalizes to false for non-video media. Expanded Media includes created_by, ownership and server-authoritative permissions. Ref: darshan-server/src/routes/presentations.ts fastify.post(apiEndpoints.presentations.slotItems)"
   },
   {
     "domain": "presentations",
@@ -544,7 +621,7 @@
       { "status": 422, "code": "DOCUMENT_PAGE_COUNT_UNAVAILABLE", "when": "A page other than 1 is selected before page count is known" },
       { "status": 422, "code": "DOCUMENT_PAGE_NOT_APPLICABLE", "when": "page_number is supplied for non-document media" }
     ],
-    "notes": "Atomically replaces all slot occurrences. page_number defaults to 1 for documents and is occurrence-specific. loop_enabled is occurrence-specific for VIDEO media and normalizes to false for non-video media. The same media may be assigned more than once with independent values. Ref: darshan-server/src/routes/presentations.ts fastify.put(apiEndpoints.presentations.slotItems)"
+    "notes": "Atomically replaces all slot occurrences. page_number defaults to 1 for documents and is occurrence-specific. loop_enabled is occurrence-specific for VIDEO media and normalizes to false for non-video media. The same media may be assigned more than once with independent values. Expanded Media includes created_by, ownership and server-authoritative permissions. Ref: darshan-server/src/routes/presentations.ts fastify.put(apiEndpoints.presentations.slotItems)"
   },
   {
     "domain": "presentations",
@@ -581,7 +658,7 @@
     "errors": [
       { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/layouts.ts fastify.get(apiEndpoints.layouts.list)"
+    "notes": "Rows are filtered by stable owner scope and include ownership plus server-authoritative permissions. See docs/deleted-user-content-ownership.md. Ref: darshan-server/src/routes/layouts.ts fastify.get(apiEndpoints.layouts.list)"
   },
   {
     "domain": "layouts",
@@ -644,7 +721,7 @@
     "errors": [
       { "status": 422, "code": "VALIDATION_ERROR", "when": "Bad query params" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/schedules.ts fastify.get(apiEndpoints.schedules.list)"
+    "notes": "Rows are filtered by stable owner scope and include ownership plus server-authoritative permissions. See docs/deleted-user-content-ownership.md. Ref: darshan-server/src/routes/schedules.ts fastify.get(apiEndpoints.schedules.list)"
   },
   {
     "domain": "schedules",
@@ -692,9 +769,10 @@
     "requestSchemaRef": null,
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/schedules.ts (publishes response)",
     "errors": [
-      { "status": 401, "code": "UNAUTHORIZED", "when": "Missing/invalid token" }
+      { "status": 401, "code": "UNAUTHORIZED", "when": "Missing/invalid token" },
+      { "status": 403, "code": "FORBIDDEN", "when": "Schedule read ability or stable-owner visibility is missing" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/schedules.ts fastify.get(apiEndpoints.schedules.publishes)"
+    "notes": "Requires both Schedule read ability and stable-owner visibility. Ref: darshan-server/src/routes/schedules.ts fastify.get(apiEndpoints.schedules.publishes)"
   },
   {
     "domain": "schedules",
@@ -716,9 +794,23 @@
     "requestSchemaRef": null,
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/schedules.ts (publish response)",
     "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Schedule read ability or stable-owner visibility is missing" },
       { "status": 404, "code": "NOT_FOUND", "when": "Publish not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/schedules.ts fastify.get(apiEndpoints.schedules.publishStatus)"
+    "notes": "Requires both Schedule read ability and stable-owner visibility. Ref: darshan-server/src/routes/schedules.ts fastify.get(apiEndpoints.schedules.publishStatus)"
+  },
+  {
+    "domain": "schedules",
+    "method": "POST",
+    "path": "/api/v1/publishes/:id/take-down",
+    "auth": "jwt",
+    "requestSchemaRef": "{ reason?: string } (inline)",
+    "responseSchemaRef": "darshan-server/src/routes/schedules.ts (take-down response)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Schedule update ability or administrator role is missing" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Publish not found" }
+    ],
+    "notes": "Administrator-only take-down requiring Schedule update ability; Schedule stable ownership is also resolved before mutation. Ref: darshan-server/src/routes/schedules.ts fastify.post(apiEndpoints.schedules.takeDownPublish)"
   },
   {
     "domain": "schedules",
@@ -730,7 +822,7 @@
     "errors": [
       { "status": 404, "code": "NOT_FOUND", "when": "Schedule not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/schedules.ts fastify.get(apiEndpoints.schedules.items)"
+    "notes": "Expanded Presentation, Layout and Media resources are ownership-filtered and include created_by, ownership and server-authoritative permissions. Ref: darshan-server/src/routes/schedules.ts fastify.get(apiEndpoints.schedules.items)"
   },
   {
     "domain": "schedules",
@@ -792,7 +884,7 @@
     "errors": [
       { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/schedule-requests.ts fastify.get(apiEndpoints.scheduleRequests.list)"
+    "notes": "Visibility and management derive from the referenced Schedule's stable ownership, not the requester's current department. Expanded owned resources include ownership and server-authoritative permissions; deleted requester/reviewer email is null. See docs/deleted-user-content-ownership.md. Ref: darshan-server/src/routes/schedule-requests.ts fastify.get(apiEndpoints.scheduleRequests.list)"
   },
   {
     "domain": "schedule-requests",
@@ -856,6 +948,33 @@
       { "status": 404, "code": "NOT_FOUND", "when": "Request not found" }
     ],
     "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/schedule-requests.ts fastify.post(apiEndpoints.scheduleRequests.publish)"
+  },
+  {
+    "domain": "schedule-requests",
+    "method": "POST",
+    "path": "/api/v1/schedule-requests/:id/cancel",
+    "auth": "jwt",
+    "requestSchemaRef": null,
+    "responseSchemaRef": "darshan-server/src/routes/schedule-requests.ts (cancel response)",
+    "errors": [
+      { "status": 400, "code": "BAD_REQUEST", "when": "Request is not pending or approved" },
+      { "status": 403, "code": "FORBIDDEN", "when": "ScheduleRequest update ability or Schedule stable-owner management is missing" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Request not found" }
+    ],
+    "notes": "Cancellation follows the referenced Schedule's stable owner, not the requester's current department. Ref: darshan-server/src/routes/schedule-requests.ts fastify.post(apiEndpoints.scheduleRequests.cancel)"
+  },
+  {
+    "domain": "schedule-requests",
+    "method": "POST",
+    "path": "/api/v1/schedule-requests/:id/take-down",
+    "auth": "jwt",
+    "requestSchemaRef": "{ reason?: string } (inline)",
+    "responseSchemaRef": "darshan-server/src/routes/schedule-requests.ts (take-down response)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "ScheduleRequest update ability or administrator role is missing" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Request not found" }
+    ],
+    "notes": "Administrator-only published-request take-down with explicit ScheduleRequest update ability. Ref: darshan-server/src/routes/schedule-requests.ts fastify.post(apiEndpoints.scheduleRequests.takeDown)"
   },
 
   {
@@ -1497,7 +1616,7 @@
     "errors": [
       { "status": 422, "code": "VALIDATION_ERROR", "when": "Invalid payload" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/requests.ts fastify.post(apiEndpoints.requests.addMessage)"
+    "notes": "Author includes retained name and ACTIVE/INACTIVE/DELETED status; email is null for a deleted author. Ref: darshan-server/src/routes/requests.ts fastify.post(apiEndpoints.requests.addMessage)"
   },
   {
     "domain": "requests",
@@ -1509,7 +1628,7 @@
     "errors": [
       { "status": 500, "code": "INTERNAL_ERROR", "when": "Unhandled error" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/requests.ts fastify.get(apiEndpoints.requests.listMessages)"
+    "notes": "Historical authors retain stable ID/name and ACTIVE/INACTIVE/DELETED status; deleted-author email is never returned. Ref: darshan-server/src/routes/requests.ts fastify.get(apiEndpoints.requests.listMessages)"
   },
 
   {

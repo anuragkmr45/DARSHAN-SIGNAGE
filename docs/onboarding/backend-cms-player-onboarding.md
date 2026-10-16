@@ -64,6 +64,33 @@ Main service groups:
 | Evidence | `pop-service.ts`, `screenshot-service.ts`, heartbeat/metrics services |
 | Security/diagnostics | `common/redaction.ts`, `common/logger.ts`, secure playback guard, operator tools |
 
+## Current Content And Scheduling Contracts
+
+- Media, Layouts, Presentations, and Schedules have stable ownership separate
+  from `created_by`. Administrator-created content is organization-owned;
+  department-created content stays with the department recorded at creation.
+  Moving or deleting the creator does not transfer the content to another
+  person. Read `darshan-server/docs/deleted-user-content-ownership.md` before
+  changing content authorization, user deletion, upload finalization, nested
+  presentation/schedule expansion, or Schedule Request control.
+- Owned-resource API responses expose `ownership` and server-authoritative
+  `permissions.can_update`/`permissions.can_delete`. CMS code must use those
+  flags and must not infer access from `created_by`. A deleted creator keeps a
+  stable ID and display name but no public email or login authority.
+- Document page selection belongs to each presentation occurrence. Supported
+  uploads are `.pdf`, `.ppt`, `.pptx`, `.doc`, `.docx`, `.xls`, `.xlsx`, and
+  `.csv`; non-PDF documents are converted to PDF before page counting. Legacy
+  or missing selection means page 1. Read
+  `darshan-server/docs/document-page-selection.md` before changing authoring,
+  publication, player rendering, or proof-of-play.
+- Video `loop_enabled` is also occurrence-specific and valid only for video.
+  Native cycles may repeat only while that occurrence remains authoritative;
+  item/schedule end, take-down, emergency, default-content takeover, secure
+  lock, and shutdown must stop the media and its audio/timers.
+- Database upgrades for these contracts apply `0044` before `0045`. Production
+  migration and rollback restrictions are in
+  `docs/runbooks/production-database-lifecycle.md`.
+
 ## Change Safety Checklist
 
 - Check `docs/contracts` before altering behavior.

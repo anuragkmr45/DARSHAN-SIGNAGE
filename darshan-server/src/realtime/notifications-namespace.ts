@@ -12,6 +12,7 @@ import {
 import { classifySocketAuthRejectReason, resolveSocketAuthToken } from '@/realtime/chat-namespace';
 import {
   attachNamespaceSocketObservability,
+  authenticatedUserRoom,
   getOrCreateSocketServer,
   getSocketAllowedOrigins,
 } from '@/realtime/socket-server';
@@ -121,6 +122,7 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
 
     const room = notificationUserRoom(user.sub);
     socket.join(room);
+    socket.join(authenticatedUserRoom(user.sub));
 
     socket.on('disconnect', () => {
       notificationsSyncRateLimiter.clear(socket.id);

@@ -93,6 +93,8 @@ describe('Layout Routes - admin created shared layouts', () => {
           slots: [{ id: 'hero', x: 0, y: 0, w: 1, h: 1 }],
         },
         created_by: adminUserId,
+        owner_scope: 'ORGANIZATION',
+        owner_department_id: null,
       })
       .returning();
 

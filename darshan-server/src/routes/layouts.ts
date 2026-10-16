@@ -8,7 +8,15 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
-import { canAccessOwnedResource, canReadLayoutResource, getAdminUserIds, getDepartmentUserIds, getUserRoleMap, isDepartmentScopedRole } from '@/rbac/policy';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
+import type { ActorContext } from '@/rbac/policy';
+import {
+  canManageContentResource,
+  canReadContentResource,
+  contentResponseMetadata,
+  ownershipForNewContent,
+  resolveContentOwnershipViews,
+} from '@/rbac/content-ownership';
 
 const logger = createLogger('layout-routes');
 const { CREATED } = HTTP_STATUS;
@@ -29,6 +37,24 @@ const listLayoutsQuerySchema = z.object({
 
 export async function layoutRoutes(fastify: FastifyInstance) {
   const repo = createLayoutRepository();
+  const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
+    userId: payload.sub,
+    roleName: payload.role,
+    departmentId: payload.department_id,
+  });
+  const serializeLayout = (layout: any, ownership: any, ability: any, actor: ActorContext) => {
+    return {
+      id: layout.id,
+      name: layout.name,
+      description: layout.description,
+      aspect_ratio: layout.aspect_ratio,
+      spec: layout.spec,
+      is_shared: layout.owner_scope === 'ORGANIZATION',
+      ...contentResponseMetadata(layout, ownership, actor, ability, 'Layout'),
+      created_at: layout.created_at.toISOString?.() ?? layout.created_at,
+      updated_at: layout.updated_at.toISOString?.() ?? layout.updated_at,
+    };
+  };
   const validateLayoutSpec = (spec: any) => {
     const slots = Array.isArray(spec) ? spec : spec?.slots;
     if (!Array.isArray(slots) || slots.length === 0) {
@@ -83,9 +109,6 @@ export async function layoutRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('create', 'Layout')) throw AppError.forbidden('Forbidden');
-
         const data = layoutSchema.parse(request.body);
         try {
           validateLayoutSpec((data as any).spec);
@@ -94,22 +117,19 @@ export async function layoutRoutes(fastify: FastifyInstance) {
             { field: 'spec', message: err?.message || 'Invalid layout spec' },
           ]);
         }
-        const layout = await repo.create({
-          ...data,
-          created_by: payload.sub,
+        const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          if (!ability.can('create', 'Layout')) throw AppError.forbidden('Forbidden');
+          const layout = await repo.create({
+            ...data,
+            created_by: actor.userId,
+            ...ownershipForNewContent(actor),
+          }, executor);
+          return { layout, actor, ability };
         });
-
-        return reply.status(CREATED).send({
-          id: layout.id,
-          name: layout.name,
-          description: layout.description,
-          aspect_ratio: layout.aspect_ratio,
-          spec: layout.spec,
-          created_by: layout.created_by ?? payload.sub,
-          is_shared: payload.role === 'ADMIN',
-          created_at: layout.created_at.toISOString?.() ?? layout.created_at,
-          updated_at: layout.updated_at.toISOString?.() ?? layout.updated_at,
-        });
+        const ownership = (await resolveContentOwnershipViews([authorized.layout])).get(authorized.layout.id);
+        return reply.status(CREATED).send(
+          serializeLayout(authorized.layout, ownership, authorized.ability, authorized.actor)
+        );
       } catch (error) {
         logger.error(error, 'Create layout error');
         return respondWithError(reply, error);
@@ -136,35 +156,20 @@ export async function layoutRoutes(fastify: FastifyInstance) {
         if (!ability.can('read', 'Layout')) throw AppError.forbidden('Forbidden');
 
         const query = listLayoutsQuerySchema.parse(request.query);
-        const createdByIds = isDepartmentScopedRole(payload.role)
-          ? Array.from(new Set([...(await getDepartmentUserIds(payload.department_id)), ...(await getAdminUserIds())]))
-          : undefined;
+        const actor = actorFor(payload);
         const result = await repo.list({
           page: query.page,
           limit: query.limit,
           aspect_ratio: query.aspect_ratio,
           search: query.search,
-          created_by_ids: createdByIds,
+          actor,
         });
-
-        const creatorRoles = await getUserRoleMap(
-          result.items
-            .map((item: any) => item.created_by)
-            .filter((value: string | null | undefined): value is string => Boolean(value))
-        );
+        const ownershipViews = await resolveContentOwnershipViews(result.items);
 
         return reply.send({
-          items: result.items.map((l: any) => ({
-            id: l.id,
-            name: l.name,
-            description: l.description,
-            aspect_ratio: l.aspect_ratio,
-            spec: l.spec,
-            created_by: l.created_by ?? null,
-            is_shared: Boolean(l.created_by && creatorRoles.get(l.created_by) === 'ADMIN'),
-            created_at: l.created_at.toISOString?.() ?? l.created_at,
-            updated_at: l.updated_at.toISOString?.() ?? l.updated_at,
-          })),
+          items: result.items.map((layout: any) =>
+            serializeLayout(layout, ownershipViews.get(layout.id), ability, actor)
+          ),
           pagination: {
             page: result.page,
             limit: result.limit,
@@ -198,24 +203,10 @@ export async function layoutRoutes(fastify: FastifyInstance) {
 
         const layout = await repo.findById((request.params as any).id);
         if (!layout) throw AppError.notFound('Layout not found');
-        const canReadLayout = await canReadLayoutResource(
-          { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-          layout.created_by
-        );
-        if (!canReadLayout) throw AppError.forbidden('Forbidden');
-
-        const creatorRoles = await getUserRoleMap(layout.created_by ? [layout.created_by] : []);
-        return reply.send({
-          id: layout.id,
-          name: layout.name,
-          description: layout.description,
-          aspect_ratio: layout.aspect_ratio,
-          spec: layout.spec,
-          created_by: layout.created_by ?? null,
-          is_shared: Boolean(layout.created_by && creatorRoles.get(layout.created_by) === 'ADMIN'),
-          created_at: layout.created_at.toISOString?.() ?? layout.created_at,
-          updated_at: layout.updated_at.toISOString?.() ?? layout.updated_at,
-        });
+        const actor = actorFor(payload);
+        if (!canReadContentResource(actor, layout)) throw AppError.forbidden('Forbidden');
+        const ownership = (await resolveContentOwnershipViews([layout])).get(layout.id);
+        return reply.send(serializeLayout(layout, ownership, ability, actor));
       } catch (error) {
         logger.error(error, 'Get layout error');
         return respondWithError(reply, error);
@@ -238,9 +229,6 @@ export async function layoutRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Layout')) throw AppError.forbidden('Forbidden');
-
         const data = layoutSchema.partial().parse(request.body);
         if (data.spec) {
           try {
@@ -251,28 +239,21 @@ export async function layoutRoutes(fastify: FastifyInstance) {
             ]);
           }
         }
-        const existingLayout = await repo.findById((request.params as any).id);
-        if (!existingLayout) throw AppError.notFound('Layout not found');
-        const canUpdateLayout = await canAccessOwnedResource(
-          { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-          existingLayout.created_by,
-          { creatorOnlyForScopedRoles: true, allowUnownedForAdminOnly: true }
-        );
-        if (!canUpdateLayout) throw AppError.forbidden('You can only edit layouts you created.');
-        const layout = await repo.update((request.params as any).id, data);
-        if (!layout) throw AppError.notFound('Layout not found');
-
-        return reply.send({
-          id: layout.id,
-          name: layout.name,
-          description: layout.description,
-          aspect_ratio: layout.aspect_ratio,
-          spec: layout.spec,
-          created_by: layout.created_by ?? null,
-          is_shared: payload.role === 'ADMIN',
-          created_at: layout.created_at.toISOString?.() ?? layout.created_at,
-          updated_at: layout.updated_at.toISOString?.() ?? layout.updated_at,
+        const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          if (!ability.can('update', 'Layout')) throw AppError.forbidden('Forbidden');
+          const existingLayout = await repo.findById((request.params as any).id, executor);
+          if (!existingLayout) throw AppError.notFound('Layout not found');
+          if (!canManageContentResource(actor, existingLayout)) {
+            throw AppError.forbidden('You cannot edit this layout.');
+          }
+          const layout = await repo.update((request.params as any).id, data, executor);
+          if (!layout) throw AppError.notFound('Layout not found');
+          return { layout, actor, ability };
         });
+        const ownership = (await resolveContentOwnershipViews([authorized.layout])).get(authorized.layout.id);
+        return reply.send(
+          serializeLayout(authorized.layout, ownership, authorized.ability, authorized.actor)
+        );
       } catch (error) {
         logger.error(error, 'Update layout error');
         return respondWithError(reply, error);
@@ -295,19 +276,15 @@ export async function layoutRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('delete', 'Layout')) throw AppError.forbidden('Forbidden');
-
-        const layout = await repo.findById((request.params as any).id);
-        if (!layout) throw AppError.notFound('Layout not found');
-        const canDeleteLayout = await canAccessOwnedResource(
-          { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-          layout.created_by,
-          { creatorOnlyForScopedRoles: true, allowUnownedForAdminOnly: true }
-        );
-        if (!canDeleteLayout) throw AppError.forbidden('You can only delete layouts you created.');
-
-        await repo.delete(layout.id);
+        await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          if (!ability.can('delete', 'Layout')) throw AppError.forbidden('Forbidden');
+          const layout = await repo.findById((request.params as any).id, executor);
+          if (!layout) throw AppError.notFound('Layout not found');
+          if (!canManageContentResource(actor, layout)) {
+            throw AppError.forbidden('You cannot delete this layout.');
+          }
+          await repo.delete(layout.id, executor);
+        });
         return reply.status(204).send();
       } catch (error) {
         logger.error(error, 'Delete layout error');

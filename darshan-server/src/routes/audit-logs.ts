@@ -47,6 +47,7 @@ async function serializeAuditLogs(logs: AuditLogRow[]) {
             role_id: schema.users.role_id,
             department_id: schema.users.department_id,
             is_active: schema.users.is_active,
+            deleted_at: schema.users.deleted_at,
           })
           .from(schema.users)
           .where(inArray(schema.users.id, userIds))
@@ -54,10 +55,19 @@ async function serializeAuditLogs(logs: AuditLogRow[]) {
 
   const usersById = new Map(users.map((user) => [user.id, user]));
 
-  return logs.map((log) => ({
+  return logs.map((log) => {
+    const resolvedUser = log.user_id ? usersById.get(log.user_id) ?? null : null;
+    const user = resolvedUser
+      ? {
+          ...resolvedUser,
+          email: resolvedUser.deleted_at ? null : resolvedUser.email,
+          status: resolvedUser.deleted_at ? 'DELETED' : resolvedUser.is_active ? 'ACTIVE' : 'INACTIVE',
+        }
+      : null;
+    return {
     id: log.id,
     user_id: log.user_id,
-    user: log.user_id ? usersById.get(log.user_id) ?? null : null,
+    user,
     action: log.action,
     resource_type: log.entity_type,
     resource_id: log.entity_id,
@@ -66,7 +76,8 @@ async function serializeAuditLogs(logs: AuditLogRow[]) {
     user_agent: null,
     storage_object_id: log.storage_object_id,
     created_at: log.created_at.toISOString(),
-  }));
+    };
+  });
 }
 
 export async function auditLogRoutes(fastify: FastifyInstance) {

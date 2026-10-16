@@ -22,7 +22,7 @@ export const canManageSystemRole = (actorRoleName: string, targetRoleName: strin
 };
 
 export const canManageUserRoleTarget = (actorRoleName: string, targetRoleName: string) => {
-  if (actorRoleName === 'SUPER_ADMIN') return targetRoleName === 'ADMIN' || targetRoleName === 'OPERATOR';
+  if (actorRoleName === 'SUPER_ADMIN') return Boolean(targetRoleName);
   if (actorRoleName === 'ADMIN') return targetRoleName === 'DEPARTMENT' || targetRoleName === 'OPERATOR';
   if (actorRoleName === 'DEPARTMENT') return targetRoleName === 'OPERATOR';
   return false;
@@ -42,7 +42,7 @@ export const canManageUserRecord = (
   actor: ActorContext,
   target: { id: string; roleName: string; departmentId?: string | null }
 ) => {
-  if (isSuperAdmin(actor.roleName)) return target.roleName === 'ADMIN' || target.roleName === 'OPERATOR';
+  if (isSuperAdmin(actor.roleName)) return Boolean(target.roleName);
   if (isAdmin(actor.roleName)) return target.roleName === 'DEPARTMENT' || target.roleName === 'OPERATOR';
   if (actor.roleName === 'DEPARTMENT') {
     return target.roleName === 'OPERATOR' && isSameDepartment(actor.departmentId, target.departmentId);

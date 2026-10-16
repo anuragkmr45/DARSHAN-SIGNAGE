@@ -1,9 +1,9 @@
 import { eq, asc, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 
 export class ScheduleItemRepository {
-  async listBySchedule(scheduleId: string) {
-    const db = getDatabase();
+  async listBySchedule(scheduleId: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     return db
       .select()
       .from(schema.scheduleItems)
@@ -19,8 +19,8 @@ export class ScheduleItemRepository {
     priority?: number;
     screen_ids?: string[];
     screen_group_ids?: string[];
-  }) {
-    const db = getDatabase();
+  }, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const [item] = await db
       .insert(schema.scheduleItems)
       .values({
@@ -39,8 +39,8 @@ export class ScheduleItemRepository {
     return item;
   }
 
-  async delete(id: string) {
-    const db = getDatabase();
+  async delete(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const [item] = await db.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, id));
     await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, id));
     if (item) {

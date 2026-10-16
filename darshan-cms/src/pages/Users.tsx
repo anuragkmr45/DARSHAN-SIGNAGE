@@ -18,7 +18,7 @@ import { DeleteUserDialog } from "@/components/users/DeleteUserDialog";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { useAppSelector } from "@/store/hooks";
-import { canManageUserTarget } from "@/lib/access";
+import { canDeleteUserTarget, canManageUserTarget } from "@/lib/access";
 
 const PAGE_SIZE = 9;
 
@@ -86,6 +86,7 @@ export default function Users() {
             filteredUsers.map((user) => ({
                 user,
                 canManageTarget: canManageUserTarget(currentUser, user.role, user.department_id),
+                canDeleteTarget: canDeleteUserTarget(currentUser, user.role, user.department_id),
             })),
         [currentUser, filteredUsers],
     );
@@ -257,14 +258,14 @@ export default function Users() {
                     ) : (
                         <div className="space-y-6">
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                {visibleUsers.map(({ user, canManageTarget }) => (
+                                {visibleUsers.map(({ user, canManageTarget, canDeleteTarget }) => (
                                     <UserCard
                                         key={user.id}
                                         user={user}
                                         onEdit={() => setEditingUser(user)}
                                         onDelete={() => setDeletingUser(user)}
                                         canEdit={canManageTarget}
-                                        canDelete={canManageTarget}
+                                        canDelete={canDeleteTarget}
                                     />
                                 ))}
                             </div>

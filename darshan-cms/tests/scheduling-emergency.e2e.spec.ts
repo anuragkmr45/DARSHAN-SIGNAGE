@@ -65,6 +65,12 @@ const mediaPayload = {
       status: "READY",
       media_url: "https://cdn.example.com/hero-loop.mp4",
       duration_seconds: 15,
+      ownership: {
+        scope: "ORGANIZATION",
+        department_id: null,
+        department_name: null,
+        creator: { id: "admin-user-id", display_name: "Admin User", status: "ACTIVE" },
+      },
     },
     {
       id: "document-1",
@@ -76,6 +82,12 @@ const mediaPayload = {
       source_content_type: "application/pdf",
       media_url: "https://cdn.example.com/operations-handbook.pdf",
       page_count: 5,
+      ownership: {
+        scope: "DEPARTMENT",
+        department_id: "operations-department",
+        department_name: "Operations",
+        creator: { id: "former-user", display_name: "Former User", status: "DELETED" },
+      },
     },
   ],
   page: 1,
@@ -240,6 +252,15 @@ test.describe("Scheduling and emergency operator flow", () => {
     await page.getByRole("button", { name: /^next$/i }).click();
 
     await page.getByRole("button", { name: "Add Media", exact: true }).click();
+    await expect(page.getByText("Organization owned", { exact: true })).toBeVisible();
+    await expect(page.getByText("Operations owned", { exact: true })).toBeVisible();
+    await expect(page.getByText("Created by Former User (Deleted)", { exact: true })).toBeVisible();
+    await expect(page.getByText(/former-user@/i)).toHaveCount(0);
+    await page.getByRole("dialog").getByText("Hero Loop", { exact: true }).click();
+    await page.getByText("Loop video Off", { exact: true }).click();
+    await expect(page.getByText("Loop video On", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Add Media", exact: true }).click();
     await page.getByRole("dialog").getByText("Operations Handbook", { exact: true }).click();
     await page.getByLabel("Page for Operations Handbook").fill("2");
     await page.getByRole("button", { name: "Add Media", exact: true }).click();
@@ -248,7 +269,12 @@ test.describe("Scheduling and emergency operator flow", () => {
     await expect(page.getByText("Page 2 of 5", { exact: true })).toBeVisible();
     await expect(page.getByText("Page 5 of 5", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: /^next$/i }).click();
-    expect(capturedSlotPayload?.items?.map((item) => item.page_number)).toEqual([2, 5]);
+    expect(capturedSlotPayload?.items?.find((item) => item.media_id === "media-1")?.loop_enabled).toBe(true);
+    expect(
+      capturedSlotPayload?.items
+        ?.filter((item) => item.media_id === "document-1")
+        .map((item) => item.page_number),
+    ).toEqual([2, 5]);
 
     await page.getByText("Lobby Screen", { exact: true }).click();
     await page.getByRole("button", { name: /^next$/i }).click();
@@ -262,6 +288,9 @@ test.describe("Scheduling and emergency operator flow", () => {
 
     await expect(page.getByText("Audit Timezone")).toBeVisible();
     await expect(page.getByText("Asia/Kolkata", { exact: true })).toBeVisible();
+    await expect(page.getByText("Page 2 of 5", { exact: true })).toBeVisible();
+    await expect(page.getByText("Page 5 of 5", { exact: true })).toBeVisible();
+    await expect(page.getByText("Loop On", { exact: true })).toBeVisible();
     expect(capturedSchedulePayload).not.toBeNull();
     expect(capturedSchedulePayload?.timezone).toBe("Asia/Kolkata");
   });

@@ -8,7 +8,10 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Keep browser execution bounded on developer/QA workstations. Individual
+  // suites may render videos and PDF canvases, so auto-selecting one worker per
+  // CPU can exhaust the host before an assertion is reported.
+  workers: 1,
   reporter: [["list"]],
   use: {
     baseURL,

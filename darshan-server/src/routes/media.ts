@@ -10,18 +10,26 @@ import {
   uploadSessionParamsSchema,
 } from '@/schemas/media';
 import { createMediaRepository } from '@/db/repositories/media';
-import { createMediaUploadSessionRepository } from '@/db/repositories/media-upload-session';
-import type { MediaUsageReference } from '@/db/repositories/media';
-import { createUserRepository } from '@/db/repositories/user';
-import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
 import {
-  canAccessOwnedResource,
-  canReadAdminSharedResource,
-  getAdminUserIds,
-  getDepartmentUserIds,
-  isDepartmentScopedRole,
-} from '@/rbac/policy';
+  createMediaUploadSessionRepository,
+  type MediaUploadSessionState,
+} from '@/db/repositories/media-upload-session';
+import type { MediaUsageReference } from '@/db/repositories/media';
+import { extractTokenFromHeader, verifyAccessToken, type JWTPayload } from '@/auth/jwt';
+import {
+  withCurrentMutationAuthorization,
+  type MutationAuthorizationContext,
+} from '@/auth/mutation-authorization';
+import { defineAbilityFor } from '@/rbac';
+import type { ActorContext } from '@/rbac/policy';
+import {
+  canManageContentResource,
+  canReadContentResource,
+  contentResponseMetadata,
+  type ContentAbility,
+  ownershipForNewContent,
+  resolveContentOwnershipViews,
+} from '@/rbac/content-ownership';
 import {
   abortMultipartUpload,
   completeMultipartUpload,
@@ -64,7 +72,7 @@ import {
 import { assertWebpageUrlAllowed, WebpageUrlPolicyError } from '@/utils/webpage-url-policy';
 
 const logger = createLogger('media-routes');
-const { CREATED, FORBIDDEN, OK } = HTTP_STATUS;
+const { CREATED, OK } = HTTP_STATUS;
 const LEGACY_WEBPAGE_PREVIEW_REQUEUE_COOLDOWN_MS = 5 * 60 * 1000;
 const UPLOAD_MULTIPART_THRESHOLD_BYTES = 100 * 1024 * 1024;
 const UPLOAD_PART_SIZE_BYTES = 16 * 1024 * 1024;
@@ -78,8 +86,70 @@ const legacyWebpagePreviewRequeueAt = new Map<string, number>();
 export async function mediaRoutes(fastify: FastifyInstance) {
   const mediaRepo = createMediaRepository();
   const uploadSessionRepo = createMediaUploadSessionRepository();
-  const userRepo = createUserRepository();
   const db = getDatabase();
+  const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
+    userId: payload.sub,
+    roleName: payload.role,
+    departmentId: payload.department_id,
+  });
+  const withMediaMutation = async <T>(
+    payload: JWTPayload,
+    mediaId: string,
+    action: 'update' | 'delete',
+    execute: (
+      context: MutationAuthorizationContext & { media: typeof schema.media.$inferSelect }
+    ) => Promise<T>
+  ) =>
+    withCurrentMutationAuthorization(payload, async (context) => {
+      if (!context.ability.can(action, 'Media')) throw AppError.forbidden('Forbidden');
+      const [media] = await context.executor
+        .select()
+        .from(schema.media)
+        .where(eq(schema.media.id, mediaId))
+        .for('update');
+      if (!media) throw AppError.notFound('Media not found');
+      if (!canManageContentResource(context.actor, media)) throw AppError.forbidden('Forbidden');
+      return execute({ ...context, media });
+    });
+
+  const withUploadSessionMutation = async <T>(
+    payload: JWTPayload,
+    sessionId: string,
+    execute: (
+      context: MutationAuthorizationContext & {
+        session: typeof schema.mediaUploadSessions.$inferSelect;
+        media: typeof schema.media.$inferSelect;
+      }
+    ) => Promise<T>
+  ) =>
+    withCurrentMutationAuthorization(payload, async (context) => {
+      if (!context.ability.can('create', 'Media')) throw AppError.forbidden('Forbidden');
+      const [session] = await context.executor
+        .select()
+        .from(schema.mediaUploadSessions)
+        .where(eq(schema.mediaUploadSessions.id, sessionId))
+        .for('update');
+      if (!session) throw AppError.notFound('Upload session not found');
+      if (session.created_by !== context.actor.userId) {
+        throw AppError.forbidden('This upload session belongs to another user');
+      }
+      const [media] = await context.executor
+        .select()
+        .from(schema.media)
+        .where(eq(schema.media.id, session.media_id))
+        .for('update');
+      if (!media) throw AppError.notFound('Upload session media record not found');
+      if (!canManageContentResource(context.actor, media)) {
+        throw AppError.forbidden('You no longer manage the content owned by this upload session');
+      }
+      return execute({ ...context, session, media });
+    });
+  const decorateMedia = (serialized: any, media: any, ownership: any, ability: any, actor: ActorContext) => {
+    return {
+      ...serialized,
+      ...contentResponseMetadata(media, ownership, actor, ability, 'Media'),
+    };
+  };
 
   fastify.get(
     apiEndpoints.media.uploadPolicy,
@@ -107,21 +177,6 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       }
     }
   );
-
-  const isDeleteBypassRole = (roleName?: string) =>
-    roleName === 'ADMIN' || roleName === 'SUPER_ADMIN';
-
-  const resolveOwnerDisplayName = (user: {
-    first_name?: string | null;
-    last_name?: string | null;
-    email?: string | null;
-  } | null) => {
-    if (!user) return 'another user';
-    const fullName = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
-    if (fullName.length > 0) return fullName;
-    if (user.email) return user.email;
-    return 'another user';
-  };
 
   const mediaUsageMessageByReference: Record<MediaUsageReference, string> = {
     chat_attachments: 'Media cannot be deleted because it is still used by chat messages.',
@@ -324,7 +379,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     }
   };
 
-  const finalizeVerifiedUpload = async (media: any, data: typeof completeUploadSchema._type) => {
+  const finalizeVerifiedUpload = async (
+    media: any,
+    data: typeof completeUploadSchema._type,
+    commitMedia?: (update: Partial<typeof schema.media.$inferInsert>) => Promise<any | null>
+  ) => {
     if (!media.source_bucket || !media.source_object_key) {
       throw AppError.badRequest('Media missing source object info');
     }
@@ -369,7 +428,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     };
 
     if (media.type === 'VIDEO') {
-      const processingMedia = await mediaRepo.update(media.id, {
+      const processingMedia = await (commitMedia ?? ((update) => mediaRepo.update(media.id, update)))({
         ...updateBase,
         status: 'PROCESSING',
       });
@@ -383,7 +442,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     }
 
     if (media.type === 'DOCUMENT') {
-      const processingMedia = await mediaRepo.update(media.id, {
+      const processingMedia = await (commitMedia ?? ((update) => mediaRepo.update(media.id, update)))({
         ...updateBase,
         status: 'PROCESSING',
       });
@@ -396,7 +455,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       return processingMedia;
     }
 
-    const readyMedia = await mediaRepo.update(media.id, {
+    const readyMedia = await (commitMedia ?? ((update) => mediaRepo.update(media.id, update)))({
       ...updateBase,
       status: 'READY',
     });
@@ -419,7 +478,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (!ability.can('create', 'Media')) {
       throw AppError.forbidden('Forbidden');
     }
-    return payload;
+    return { payload, ability, actor: actorFor(payload) };
   };
 
   const getIdempotencyKey = (request: FastifyRequest) => {
@@ -432,18 +491,6 @@ export async function mediaRoutes(fastify: FastifyInstance) {
   };
 
   const isSessionExpired = (session: { expires_at: Date }) => session.expires_at.getTime() <= Date.now();
-
-  const assertSessionOwner = async (request: FastifyRequest, sessionId: string) => {
-    const payload = await requireMediaCreateAbility(request);
-    const session = await uploadSessionRepo.findById(sessionId);
-    if (!session) {
-      throw AppError.notFound('Upload session not found');
-    }
-    if (session.created_by !== payload.sub) {
-      throw AppError.forbidden('This upload session belongs to another user');
-    }
-    return { payload, session };
-  };
 
   const sessionPartCount = (session: { expected_size: number; part_size: number | null }) => {
     if (!session.part_size) return 0;
@@ -476,7 +523,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       .sort((left, right) => left.part_number - right.part_number);
   };
 
-  const serializeUploadSession = async (session: any, includeSingleUploadUrl = false) => {
+  const serializeUploadSession = async (
+    session: any,
+    context: { actor: ActorContext; ability: ContentAbility },
+    includeSingleUploadUrl = false
+  ) => {
     let uploadedParts: Array<{ part_number: number; etag: string; size: number | null }> = [];
     if (session.strategy === 'multipart' && session.state === 'ACTIVE' && session.multipart_upload_id) {
       uploadedParts = await listUploadedParts(session);
@@ -491,7 +542,10 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             'cms'
           )
         : undefined;
-    const media = session.state === 'COMPLETED' ? await mediaRepo.findById(session.media_id) : null;
+    const media = await mediaRepo.findById(session.media_id);
+    const ownership = media
+      ? (await resolveContentOwnershipViews([media])).get(media.id)
+      : undefined;
 
     return {
       session_id: session.id,
@@ -503,19 +557,42 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       part_count: sessionPartCount(session),
       uploaded_parts: uploadedParts,
       upload_url: singleUploadUrl,
-      media: media ? await serializeCurrentMediaState(media) : null,
+      media: media
+        ? decorateMedia(
+            await serializeCurrentMediaState(media),
+            media,
+            ownership,
+            context.ability,
+            context.actor
+          )
+        : null,
       failure_reason: session.failure_reason,
     };
   };
 
-  const markUploadSessionFailed = async (session: any, reason: string, deleteStaging = false) => {
-    if (deleteStaging) {
+  const markUploadSessionFailed = async (
+    payload: JWTPayload,
+    session: any,
+    expectedStates: MediaUploadSessionState[],
+    reason: string,
+    deleteStaging = false
+  ) => {
+    const failed = await withUploadSessionMutation(
+      payload,
+      session.id,
+      ({ executor }) => uploadSessionRepo.failIfCurrentState(
+        session.id,
+        expectedStates,
+        reason,
+        executor
+      )
+    );
+    if (failed && deleteStaging) {
       await deleteObject(session.staging_bucket, session.staging_object_key).catch((error) => {
         logger.warn({ error, sessionId: session.id }, 'Failed to remove rejected staging object');
       });
     }
-    await uploadSessionRepo.update(session.id, { state: 'FAILED', failure_reason: reason });
-    await mediaRepo.update(session.media_id, { status: 'FAILED', status_reason: reason });
+    return failed;
   };
 
   // Resumable upload session. The browser only receives CMS-origin signed URLs
@@ -531,23 +608,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const payload = await requireMediaCreateAbility(request);
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
         const idempotencyKey = getIdempotencyKey(request);
         const data = createUploadSessionSchema.parse(request.body);
-        const existing = await uploadSessionRepo.findByUserAndIdempotencyKey(payload.sub, idempotencyKey);
-        if (existing) {
-          const requestMatchesExisting =
-            existing.original_filename === normalizeOriginalFilename(data.filename) &&
-            existing.display_name === normalizeDisplayName(data.display_name || data.filename) &&
-            existing.content_type === data.content_type &&
-            existing.expected_size === data.size &&
-            safeChecksumEquals(existing.checksum_sha256, data.checksum_sha256);
-          if (!requestMatchesExisting) {
-            throw AppError.conflict('Idempotency-Key is already associated with a different upload');
-          }
-          return reply.send(await serializeUploadSession(existing, true));
-        }
-
         const mediaId = randomUUID();
         const sessionId = randomUUID();
         const originalFilename = normalizeOriginalFilename(data.filename);
@@ -566,38 +631,76 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           createBucketIfNotExists(UPLOAD_CANONICAL_BUCKET),
         ]);
 
-        await mediaRepo.create({
-          id: mediaId,
-          name: displayName,
-          type: inferUploadMediaType(data.content_type) as any,
-          status: PENDINGSTATUS,
-          source_bucket: UPLOAD_CANONICAL_BUCKET,
-          source_object_key: objectKey,
-          source_content_type: data.content_type,
-          source_size: data.size,
-          status_reason: null,
-          created_by: payload.sub,
-        });
+        const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          if (!ability.can('create', 'Media')) throw AppError.forbidden('Forbidden');
+          const existing = await uploadSessionRepo.findByUserAndIdempotencyKey(
+            actor.userId,
+            idempotencyKey,
+            executor
+          );
+          if (existing) {
+            const existingMedia = await mediaRepo.findById(existing.media_id, executor);
+            if (!existingMedia || !canManageContentResource(actor, existingMedia)) {
+              throw AppError.forbidden('You no longer manage the content owned by this upload session');
+            }
+            const requestMatchesExisting =
+              existing.original_filename === originalFilename &&
+              existing.display_name === displayName &&
+              existing.content_type === data.content_type &&
+              existing.expected_size === data.size &&
+              safeChecksumEquals(existing.checksum_sha256, data.checksum_sha256);
+            if (!requestMatchesExisting) {
+              throw AppError.conflict('Idempotency-Key is already associated with a different upload');
+            }
+            return { session: existing, actor, ability, existing: true as const };
+          }
 
-        let session = await uploadSessionRepo.create({
-          id: sessionId,
-          media_id: mediaId,
-          created_by: payload.sub,
-          idempotency_key: idempotencyKey,
-          state: 'INITIALIZING',
-          strategy,
-          original_filename: originalFilename,
-          display_name: displayName,
-          content_type: data.content_type,
-          expected_size: data.size,
-          checksum_sha256: data.checksum_sha256,
-          part_size: strategy === 'multipart' ? UPLOAD_PART_SIZE_BYTES : null,
-          staging_bucket: UPLOAD_STAGING_BUCKET,
-          staging_object_key: stagingObjectKey,
-          canonical_bucket: UPLOAD_CANONICAL_BUCKET,
-          canonical_object_key: objectKey,
-          expires_at: expiresAt,
+          const ownership = ownershipForNewContent(actor);
+          await executor.insert(schema.media).values({
+            id: mediaId,
+            name: displayName,
+            type: inferUploadMediaType(data.content_type) as any,
+            status: PENDINGSTATUS,
+            source_bucket: UPLOAD_CANONICAL_BUCKET,
+            source_object_key: objectKey,
+            source_content_type: data.content_type,
+            source_size: data.size,
+            status_reason: null,
+            created_by: actor.userId,
+            ...ownership,
+          });
+
+          const [createdSession] = await executor
+            .insert(schema.mediaUploadSessions)
+            .values({
+              id: sessionId,
+              media_id: mediaId,
+              created_by: actor.userId,
+              idempotency_key: idempotencyKey,
+              state: 'INITIALIZING',
+              strategy,
+              original_filename: originalFilename,
+              display_name: displayName,
+              content_type: data.content_type,
+              expected_size: data.size,
+              checksum_sha256: data.checksum_sha256,
+              part_size: strategy === 'multipart' ? UPLOAD_PART_SIZE_BYTES : null,
+              staging_bucket: UPLOAD_STAGING_BUCKET,
+              staging_object_key: stagingObjectKey,
+              canonical_bucket: UPLOAD_CANONICAL_BUCKET,
+              canonical_object_key: objectKey,
+              expires_at: expiresAt,
+            })
+            .returning();
+          return { session: createdSession, actor, ability, existing: false as const };
         });
+        let { session } = authorized;
+
+        if (authorized.existing) {
+          return reply.send(
+            await serializeUploadSession(session, authorized, true)
+          );
+        }
 
         try {
           if (strategy === 'multipart') {
@@ -610,22 +713,54 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             if (!multipart.UploadId) {
               throw new Error('Object storage did not return a multipart upload id');
             }
-            session = await uploadSessionRepo.update(session.id, {
-              state: 'ACTIVE',
-              multipart_upload_id: multipart.UploadId,
-            });
+            const activated = await withUploadSessionMutation(
+              payload,
+              session.id,
+              ({ executor }) => uploadSessionRepo.activate(
+                session.id,
+                { multipart_upload_id: multipart.UploadId },
+                executor
+              )
+            );
+            if (!activated) {
+              await abortMultipartUpload(
+                session.staging_bucket,
+                session.staging_object_key,
+                multipart.UploadId
+              ).catch(() => undefined);
+              throw AppError.conflict('Upload was cancelled because its owner account was deleted');
+            }
+            session = activated;
           } else {
-            session = await uploadSessionRepo.update(session.id, { state: 'ACTIVE' });
+            const activated = await withUploadSessionMutation(
+              payload,
+              session.id,
+              ({ executor }) => uploadSessionRepo.activate(session.id, {}, executor)
+            );
+            if (!activated) {
+              throw AppError.conflict('Upload was cancelled because its owner account was deleted');
+            }
+            session = activated;
           }
         } catch (error) {
-          await markUploadSessionFailed(session, 'UPLOAD_SESSION_INITIALIZATION_FAILED');
+          const latestSession = await uploadSessionRepo.findById(session.id).catch(() => null);
+          if (latestSession?.state === 'INITIALIZING' || latestSession?.state === 'ACTIVE') {
+            await markUploadSessionFailed(
+              payload,
+              latestSession,
+              ['INITIALIZING', 'ACTIVE'],
+              'UPLOAD_SESSION_INITIALIZATION_FAILED'
+            );
+          }
           throw error;
         }
 
         if (!session) {
           throw AppError.internal('Failed to activate upload session');
         }
-        return reply.status(CREATED).send(await serializeUploadSession(session, true));
+        return reply.status(CREATED).send(
+          await serializeUploadSession(session, authorized, true)
+        );
       } catch (error) {
         logger.error(error, 'Create upload session error');
         return respondWithError(reply, error);
@@ -640,14 +775,37 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
         const { sessionId } = uploadSessionParamsSchema.parse(request.params);
-        const { session } = await assertSessionOwner(request, sessionId);
-        if (isSessionExpired(session) && session.state === 'ACTIVE') {
-          await uploadSessionRepo.update(session.id, { state: 'EXPIRED', failure_reason: 'UPLOAD_SESSION_EXPIRED' });
-          await mediaRepo.update(session.media_id, { status: 'FAILED', status_reason: 'UPLOAD_SESSION_EXPIRED' });
-          return reply.send(await serializeUploadSession({ ...session, state: 'EXPIRED', failure_reason: 'UPLOAD_SESSION_EXPIRED' }));
-        }
-        return reply.send(await serializeUploadSession(session, true));
+        const authorized = await withUploadSessionMutation(
+          payload,
+          sessionId,
+          async ({ session, actor, ability, executor }) => {
+            if (isSessionExpired(session) && session.state === 'ACTIVE') {
+              const expired = await uploadSessionRepo.update(
+                session.id,
+                { state: 'EXPIRED', failure_reason: 'UPLOAD_SESSION_EXPIRED' },
+                executor
+              );
+              await mediaRepo.update(
+                session.media_id,
+                { status: 'FAILED', status_reason: 'UPLOAD_SESSION_EXPIRED' },
+                executor
+              );
+              return { session: expired ?? session, actor, ability, expired: true };
+            }
+            return { session, actor, ability, expired: false };
+          }
+        );
+        return reply.send(
+          await serializeUploadSession(
+            authorized.session,
+            authorized,
+            !authorized.expired
+          )
+        );
       } catch (error) {
         logger.error(error, 'Get upload session error');
         return respondWithError(reply, error);
@@ -662,16 +820,20 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
         const { sessionId } = uploadSessionParamsSchema.parse(request.params);
-        const { session } = await assertSessionOwner(request, sessionId);
-        if (session.strategy !== 'multipart' || !session.multipart_upload_id) {
-          throw AppError.badRequest('This upload session does not use multipart upload');
-        }
-        if (session.state !== 'ACTIVE' || isSessionExpired(session)) {
-          throw AppError.conflict('Upload session is no longer active');
-        }
-
         const data = uploadPartPresignSchema.parse(request.body);
+        const session = await withUploadSessionMutation(payload, sessionId, async ({ session }) => {
+          if (session.strategy !== 'multipart' || !session.multipart_upload_id) {
+            throw AppError.badRequest('This upload session does not use multipart upload');
+          }
+          if (session.state !== 'ACTIVE' || isSessionExpired(session)) {
+            throw AppError.conflict('Upload session is no longer active');
+          }
+          return session;
+        });
         const maxPartNumber = sessionPartCount(session);
         const partNumbers = Array.from(new Set(data.part_numbers)).sort((left, right) => left - right);
         if (partNumbers.some((partNumber) => partNumber > maxPartNumber)) {
@@ -708,18 +870,31 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       let finalizingSessionId: string | undefined;
       try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
         const { sessionId } = uploadSessionParamsSchema.parse(request.params);
-        const { session: originalSession } = await assertSessionOwner(request, sessionId);
         const data = completeUploadSessionSchema.parse(request.body);
-        if (originalSession.state === 'COMPLETED') {
-          return reply.send(await serializeUploadSession(originalSession));
-        }
-        if (originalSession.state !== 'ACTIVE' || isSessionExpired(originalSession)) {
-          throw AppError.conflict('Upload session is no longer active');
+        const authorizedClaim = await withUploadSessionMutation(
+          payload,
+          sessionId,
+          async ({ session, actor, ability, executor }) => {
+            if (session.state === 'COMPLETED') {
+              return { session, actor, ability, alreadyCompleted: true as const };
+            }
+            if (session.state !== 'ACTIVE' || isSessionExpired(session)) {
+              throw AppError.conflict('Upload session is no longer active');
+            }
+            const claimed = await uploadSessionRepo.claimForFinalization(session.id, executor);
+            if (!claimed) throw AppError.conflict('Upload session is already being finalized');
+            return { session: claimed, actor, ability, alreadyCompleted: false as const };
+          }
+        );
+        if (authorizedClaim.alreadyCompleted) {
+          return reply.send(await serializeUploadSession(authorizedClaim.session, authorizedClaim));
         }
 
-        let session = await uploadSessionRepo.claimForFinalization(originalSession.id);
-        if (!session) throw AppError.conflict('Upload session is already being finalized');
+        let session = authorizedClaim.session;
         finalizingSessionId = session.id;
 
         if (session.strategy === 'multipart') {
@@ -754,7 +929,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const stagingHead = await headObject(session.staging_bucket, session.staging_object_key);
         const stagingSize = normalizeHeadSize(stagingHead?.ContentLength);
         if (stagingSize !== session.expected_size) {
-          await markUploadSessionFailed(session, 'UPLOAD_SIZE_MISMATCH', true);
+          await markUploadSessionFailed(payload, session, ['FINALIZING'], 'UPLOAD_SIZE_MISMATCH', true);
           throw AppError.badRequest('Uploaded object size does not match expected size', {
             expected_size: session.expected_size,
             actual_size: stagingSize,
@@ -762,7 +937,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         }
         const actualChecksum = await computeObjectSha256(session.staging_bucket, session.staging_object_key);
         if (!safeChecksumEquals(actualChecksum, session.checksum_sha256)) {
-          await markUploadSessionFailed(session, 'UPLOAD_CHECKSUM_MISMATCH', true);
+          await markUploadSessionFailed(payload, session, ['FINALIZING'], 'UPLOAD_CHECKSUM_MISMATCH', true);
           throw AppError.badRequest('Uploaded object checksum does not match expected SHA-256');
         }
 
@@ -774,18 +949,63 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         });
         const canonicalHead = await headObject(session.canonical_bucket, session.canonical_object_key);
         if (normalizeHeadSize(canonicalHead?.ContentLength) !== session.expected_size) {
-          await markUploadSessionFailed(session, 'UPLOAD_PROMOTION_SIZE_MISMATCH');
+          await markUploadSessionFailed(payload, session, ['FINALIZING'], 'UPLOAD_PROMOTION_SIZE_MISMATCH');
           throw AppError.internal('Promoted object did not match the verified staging object size');
         }
 
         const media = await mediaRepo.findById(session.media_id);
         if (!media) throw AppError.internal('Upload session media record is missing');
+        let completedSession: typeof session | null = null;
         const finalizedMedia = await finalizeVerifiedUpload(media, {
           content_type: session.content_type,
           size: session.expected_size,
           width: data.width,
           height: data.height,
           duration_seconds: data.duration_seconds,
+        }, async (mediaUpdate) => {
+          const compensatePromotion = async () => {
+            const [, canonicalDeleted] = await Promise.all([
+              deleteObject(session.staging_bucket, session.staging_object_key).catch(() => undefined),
+              deleteObject(session.canonical_bucket, session.canonical_object_key)
+                .then(() => true)
+                .catch((error) => {
+                  logger.warn({ error, sessionId: session.id }, 'Promoted object cleanup will be retried');
+                  return false;
+                }),
+            ]);
+            if (mediaUpdate.source_object_id && canonicalDeleted) {
+              await db
+                .delete(schema.storageObjects)
+                .where(eq(schema.storageObjects.id, mediaUpdate.source_object_id as string))
+                .catch(() => undefined);
+            }
+          };
+          let completed: Awaited<ReturnType<typeof uploadSessionRepo.completeFinalizationForAuthorizedActor>>;
+          try {
+            completed = await withUploadSessionMutation(
+              payload,
+              session.id,
+              ({ actor, executor }) => uploadSessionRepo.completeFinalizationForAuthorizedActor(
+                {
+                  id: session.id,
+                  userId: session.created_by,
+                  mediaId: media.id,
+                  mediaUpdate,
+                },
+                actor,
+                executor
+              )
+            );
+          } catch (authorizationError) {
+            await compensatePromotion();
+            throw authorizationError;
+          }
+          if (!completed) {
+            await compensatePromotion();
+            throw AppError.conflict('Upload was cancelled because its owner account or ownership access changed');
+          }
+          completedSession = completed?.session ?? null;
+          return completed?.media ?? null;
         });
         if (finalizedMedia.source_object_id) {
           await db
@@ -793,16 +1013,14 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             .set({ sha256: actualChecksum })
             .where(eq(schema.storageObjects.id, finalizedMedia.source_object_id));
         }
+        if (!completedSession) {
+          throw AppError.internal('Upload finalization completed without a session result');
+        }
+        session = completedSession;
         await deleteObject(session.staging_bucket, session.staging_object_key).catch((error) => {
           logger.warn({ error, sessionId: session.id }, 'Promoted staging object will be cleaned up later');
         });
-        session = await uploadSessionRepo.update(session.id, {
-          state: 'COMPLETED',
-          completed_at: new Date(),
-          failure_reason: null,
-        });
-        if (!session) throw AppError.internal('Failed to mark upload session complete');
-        return reply.send(await serializeUploadSession(session));
+        return reply.send(await serializeUploadSession(session, authorizedClaim));
       } catch (error) {
         if (finalizingSessionId) {
           const latestSession = await uploadSessionRepo.findById(finalizingSessionId).catch(() => null);
@@ -825,19 +1043,36 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
         const { sessionId } = uploadSessionParamsSchema.parse(request.params);
-        const { session } = await assertSessionOwner(request, sessionId);
-        if (session.state === 'COMPLETED') {
-          throw AppError.conflict('Completed upload sessions cannot be aborted');
-        }
+        const session = await withUploadSessionMutation(
+          payload,
+          sessionId,
+          async ({ session, executor }) => {
+            if (session.state === 'COMPLETED') {
+              throw AppError.conflict('Completed upload sessions cannot be aborted');
+            }
+            const aborted = await uploadSessionRepo.update(
+              session.id,
+              { state: 'ABORTED', aborted_at: new Date(), failure_reason: 'UPLOAD_ABORTED' },
+              executor
+            );
+            await mediaRepo.update(
+              session.media_id,
+              { status: 'FAILED', status_reason: 'UPLOAD_ABORTED' },
+              executor
+            );
+            return aborted ?? session;
+          }
+        );
         if (session.strategy === 'multipart' && session.multipart_upload_id) {
           await abortMultipartUpload(session.staging_bucket, session.staging_object_key, session.multipart_upload_id).catch((error) => {
             logger.warn({ error, sessionId: session.id }, 'Failed to abort multipart upload');
           });
         }
         await deleteObject(session.staging_bucket, session.staging_object_key).catch(() => undefined);
-        await uploadSessionRepo.update(session.id, { state: 'ABORTED', aborted_at: new Date(), failure_reason: 'UPLOAD_ABORTED' });
-        await mediaRepo.update(session.media_id, { status: 'FAILED', status_reason: 'UPLOAD_ABORTED' });
         return reply.status(OK).send({ session_id: session.id, state: 'ABORTED' });
       } catch (error) {
         logger.error(error, 'Abort upload session error');
@@ -865,12 +1100,6 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('create', 'Media')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const data = presignUploadSchema.parse(request.body);
         const mediaId = randomUUID();
         const originalFilename = normalizeOriginalFilename(data.filename);
@@ -892,19 +1121,25 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         // endpoint that a browser cannot reliably reach.
         const uploadUrl = await getPresignedPutUrl(bucket, objectKey, 3600, 'cms');
 
-        // Create media record
-        const media = await mediaRepo.create({
-          id: mediaId,
-          name: displayName,
-          type: inferredType as any,
-          status: PENDINGSTATUS,
-          source_bucket: bucket,
-          source_object_key: objectKey,
-          source_content_type: data.content_type,
-          source_size: data.size,
-          status_reason: null,
-          created_by: payload.sub,
+        const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          if (!ability.can('create', 'Media')) throw AppError.forbidden('Forbidden');
+          const [media] = await executor.insert(schema.media).values({
+            id: mediaId,
+            name: displayName,
+            type: inferredType as any,
+            status: PENDINGSTATUS,
+            source_bucket: bucket,
+            source_object_key: objectKey,
+            source_content_type: data.content_type,
+            source_size: data.size,
+            status_reason: null,
+            created_by: actor.userId,
+            ...ownershipForNewContent(actor),
+          }).returning();
+          return { media, actor, ability };
         });
+        const { media, actor, ability } = authorized;
+        const ownership = (await resolveContentOwnershipViews([media])).get(media.id);
 
         return reply.send({
           upload_url: uploadUrl,
@@ -913,6 +1148,13 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           object_key: objectKey,
           original_filename: originalFilename,
           expires_in: 3600,
+          media: decorateMedia(
+            await serializeCurrentMediaState(media),
+            media,
+            ownership,
+            ability,
+            actor
+          ),
         });
       } catch (error) {
         logger.error(error, 'Presign upload error');
@@ -939,13 +1181,8 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('create', 'Media')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const data = createMediaSchema.parse(request.body);
+        let normalizedWebpageUrl: string | null = null;
         if (data.type === 'WEBPAGE') {
           const normalizedUrl = normalizeWebpageUrl(data.source_url, appConfig.NODE_ENV);
           try {
@@ -956,30 +1193,42 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             }
             throw error;
           }
-          const media = await mediaRepo.create({
-            name: normalizeDisplayName(data.display_name || data.name),
-            type: 'WEBPAGE',
-            status: 'PROCESSING',
-            status_reason: null,
-            source_url: normalizedUrl,
-            created_by: payload.sub,
-          });
-
-          await queueWebpageVerification(media.id, normalizedUrl);
-          return reply.status(CREATED).send(await serializeCurrentMediaState(media));
+          normalizedWebpageUrl = normalizedUrl;
         }
 
-        const originalFilename = normalizeOriginalFilename(data.name);
-        const displayName = normalizeDisplayName(originalFilename);
-        const media = await mediaRepo.create({
-          name: displayName,
-          type: data.type,
-          status: 'PENDING',
-          status_reason: null,
-          created_by: payload.sub,
+        const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          if (!ability.can('create', 'Media')) throw AppError.forbidden('Forbidden');
+          const insertData: typeof schema.media.$inferInsert = data.type === 'WEBPAGE'
+            ? {
+                name: normalizeDisplayName(data.display_name || data.name),
+                type: 'WEBPAGE',
+                status: 'PROCESSING',
+                status_reason: null,
+                source_url: normalizedWebpageUrl!,
+                created_by: actor.userId,
+                ...ownershipForNewContent(actor),
+              }
+            : {
+                name: normalizeDisplayName(normalizeOriginalFilename(data.name)),
+                type: data.type,
+                status: 'PENDING',
+                status_reason: null,
+                created_by: actor.userId,
+                ...ownershipForNewContent(actor),
+              };
+          const [media] = await executor.insert(schema.media).values(insertData).returning();
+          return { media, actor, ability };
         });
+        const { media, actor, ability } = authorized;
 
-        return reply.status(CREATED).send(await serializeCurrentMediaState(media));
+        if (normalizedWebpageUrl) {
+          await queueWebpageVerification(media.id, normalizedWebpageUrl);
+        }
+
+        const ownership = (await resolveContentOwnershipViews([media])).get(media.id);
+        return reply.status(CREATED).send(
+          decorateMedia(await serializeCurrentMediaState(media), media, ownership, ability, actor)
+        );
       } catch (error) {
         logger.error(error, 'Create media error');
         return respondWithError(reply, error);
@@ -1005,11 +1254,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Media')) throw AppError.forbidden('Forbidden');
+        const actor = actorFor(payload);
 
         const query = listMediaQuerySchema.parse(request.query);
-        const createdByIds = isDepartmentScopedRole(payload.role)
-          ? Array.from(new Set([...(await getDepartmentUserIds(payload.department_id)), ...(await getAdminUserIds())]))
-          : undefined;
         if (query.status === 'READY') {
           const requestedOffset = (query.page - 1) * query.limit;
           const batchSize = Math.max(query.limit, 100);
@@ -1024,7 +1273,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
               limit: batchSize,
               type: query.type,
               status: query.status,
-              created_by_ids: createdByIds,
+              actor,
             });
 
             hasMore = batch.items.length === batchSize;
@@ -1046,8 +1295,16 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             const resolvedBatch = await Promise.all(
               batch.items.map((m) => serializeMediaWithResolvedState(m, readyMap))
             );
+            const ownershipViews = await resolveContentOwnershipViews(batch.items);
 
-            for (const item of resolvedBatch) {
+            for (let index = 0; index < resolvedBatch.length; index += 1) {
+              const item = decorateMedia(
+                resolvedBatch[index],
+                batch.items[index],
+                ownershipViews.get(batch.items[index].id),
+                ability,
+                actor
+              );
               if (item.status !== 'READY') continue;
 
               if (validTotal >= requestedOffset && collected.length < query.limit) {
@@ -1074,7 +1331,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           limit: query.limit,
           type: query.type,
           status: query.status,
-          created_by_ids: createdByIds,
+          actor,
         });
 
         const readyIds = result.items.map((m: any) => m.ready_object_id).filter(Boolean) as string[];
@@ -1083,7 +1340,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           : [];
         const readyMap = new Map(readyObjects.map((o: any) => [o.id, o]));
 
-        const items = await Promise.all(result.items.map((m) => serializeMediaWithResolvedState(m, readyMap)));
+        const serializedItems = await Promise.all(result.items.map((m) => serializeMediaWithResolvedState(m, readyMap)));
+        const ownershipViews = await resolveContentOwnershipViews(result.items);
+        const items = serializedItems.map((item, index) =>
+          decorateMedia(item, result.items[index], ownershipViews.get(result.items[index].id), ability, actor)
+        );
 
         return reply.send({
           items,
@@ -1118,19 +1379,20 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Media')) throw AppError.forbidden('Forbidden');
+        const actor = actorFor(payload);
 
         const mediaId = (request.params as any).id;
         const media = await mediaRepo.findById(mediaId);
         if (!media) {
           throw AppError.notFound('Media not found');
         }
-        const canReadMedia = await canReadAdminSharedResource(
-          { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-          media.created_by
+        if (!canReadContentResource(actor, media)) throw AppError.forbidden('Forbidden');
+        const ownership = (await resolveContentOwnershipViews([media])).get(media.id);
+        return reply.send(
+          decorateMedia(await serializeMediaWithResolvedState(media), media, ownership, ability, actor)
         );
-        if (!canReadMedia) throw AppError.forbidden('Forbidden');
-
-        return reply.send(await serializeMediaWithResolvedState(media));
       } catch (error) {
         logger.error(error, 'Get media error');
         return respondWithError(reply, error);
@@ -1156,28 +1418,62 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Media')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const data = completeUploadSchema.parse(request.body);
-        const media = await mediaRepo.findById((request.params as any).id);
-        if (!media) {
-          throw AppError.notFound('Media not found');
-        }
-        const canUpdateMedia = await canAccessOwnedResource(
-          { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-          media.created_by
+        const authorized = await withMediaMutation(
+          payload,
+          (request.params as any).id,
+          'update',
+          async ({ media, actor, ability }) => ({ media, actor, ability })
         );
-        if (!canUpdateMedia) throw AppError.forbidden('Forbidden');
+        const { media, actor, ability } = authorized;
 
         if (media.status === 'READY' || media.status === 'PROCESSING') {
-          return reply.send(await serializeCurrentMediaState(media));
+          const ownership = (await resolveContentOwnershipViews([media])).get(media.id);
+          return reply.send(decorateMedia(await serializeCurrentMediaState(media), media, ownership, ability, actor));
         }
 
-        const updated = await finalizeVerifiedUpload(media, data);
-        return reply.send(await serializeCurrentMediaState(updated));
+        const updated = await finalizeVerifiedUpload(media, data, async (mediaUpdate) => {
+          const compensateLegacyUpload = async () => {
+            const sourceDeleted = await deleteObject(media.source_bucket!, media.source_object_key!)
+              .then(() => true)
+              .catch((error) => {
+                logger.warn({ error, mediaId: media.id }, 'Legacy upload cleanup will be retried');
+                return false;
+              });
+            if (mediaUpdate.source_object_id && sourceDeleted) {
+              await db
+                .delete(schema.storageObjects)
+                .where(eq(schema.storageObjects.id, mediaUpdate.source_object_id as string))
+                .catch(() => undefined);
+            }
+          };
+          let committed: typeof schema.media.$inferSelect | null;
+          try {
+            committed = await withMediaMutation(
+              payload,
+              media.id,
+              'update',
+              async ({ media: currentMedia, executor }) => {
+                const [activeCreator] = await executor
+                  .select({ id: schema.users.id, is_active: schema.users.is_active, deleted_at: schema.users.deleted_at })
+                  .from(schema.users)
+                  .where(eq(schema.users.id, currentMedia.created_by));
+                if (!activeCreator?.is_active || activeCreator.deleted_at) return null;
+                return mediaRepo.update(currentMedia.id, mediaUpdate, executor);
+              }
+            );
+          } catch (authorizationError) {
+            await compensateLegacyUpload();
+            throw authorizationError;
+          }
+          if (!committed) {
+            await compensateLegacyUpload();
+            throw AppError.conflict('Upload was cancelled because its creator account or ownership access changed');
+          }
+          return committed;
+        });
+        const ownership = (await resolveContentOwnershipViews([updated])).get(updated.id);
+        return reply.send(decorateMedia(await serializeCurrentMediaState(updated), updated, ownership, ability, actor));
       } catch (error) {
         logger.error(error, 'Complete upload error');
         return respondWithError(reply, error);
@@ -1203,89 +1499,111 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('delete', 'Media')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
-        const media = await mediaRepo.findById((request.params as any).id);
-        if (!media) {
-          throw AppError.notFound('Media not found');
-        }
-
-        const owner = media.created_by ? await userRepo.findById(media.created_by) : null;
-        const canDeleteThisMedia =
-          media.created_by === payload.sub || isDeleteBypassRole(payload.role);
-        if (!canDeleteThisMedia) {
-          throw new AppError({
-            statusCode: FORBIDDEN,
-            code: 'MEDIA_DELETE_FORBIDDEN_OWNER',
-            message: `You can only delete media you uploaded. This media was uploaded by ${resolveOwnerDisplayName(owner)}.`,
-            details: {
-              owner_user_id: media.created_by,
-              owner_display_name: resolveOwnerDisplayName(owner),
-            },
-          });
-        }
-
         const hardDelete =
           typeof (request.query as any).hard === 'string' &&
           ((request.query as any).hard as string).toLowerCase() === 'true';
+        const deletion = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          if (!ability.can('delete', 'Media')) throw AppError.forbidden('Forbidden');
+          const [media] = await executor
+            .select()
+            .from(schema.media)
+            .where(eq(schema.media.id, (request.params as any).id))
+            .for('update');
+          if (!media) throw AppError.notFound('Media not found');
 
-        const usageSummary = await mediaRepo.getUsageSummary(media.id);
-        if (usageSummary.inUse) {
-          throw new AppError({
-            statusCode: 409,
-            code: 'MEDIA_IN_USE',
-            message:
-              mediaUsageMessageByReference[usageSummary.primaryReason ?? 'chat_attachments'],
-            details: {
-              references: usageSummary.references,
-            },
-          });
-        }
+          if (!canManageContentResource(actor, media)) {
+            const [creator] = await executor
+              .select({
+                first_name: schema.users.first_name,
+                last_name: schema.users.last_name,
+              })
+              .from(schema.users)
+              .where(eq(schema.users.id, media.created_by));
+            const ownerDisplayName = [creator?.first_name, creator?.last_name]
+              .filter(Boolean)
+              .join(' ') || 'another user';
+            throw new AppError({
+              statusCode: 403,
+              code: 'MEDIA_DELETE_FORBIDDEN_OWNER',
+              message: `You cannot delete this media. It was created by ${ownerDisplayName}.`,
+              details: {
+                owner_user_id: media.created_by,
+                owner_display_name: ownerDisplayName,
+              },
+            });
+          }
 
-        const db = getDatabase();
-        const storageObjects = new Map<string, { bucket: string; key: string; id?: string }>();
+          const usageSummary = await mediaRepo.getUsageSummary(media.id, executor);
+          if (usageSummary.inUse) {
+            throw new AppError({
+              statusCode: 409,
+              code: 'MEDIA_IN_USE',
+              message: mediaUsageMessageByReference[usageSummary.primaryReason ?? 'chat_attachments'],
+              details: { references: usageSummary.references },
+            });
+          }
+
+          const storageObjects = new Map<string, { bucket: string; key: string; id: string }>();
+          const storageObjectIds = [
+            media.source_object_id,
+            media.ready_object_id,
+            media.thumbnail_object_id,
+          ].filter(Boolean) as string[];
+          if (storageObjectIds.length > 0) {
+            const rows = await executor
+              .select()
+              .from(schema.storageObjects)
+              .where(inArray(schema.storageObjects.id, storageObjectIds as any));
+            rows.forEach((obj) => storageObjects.set(obj.id, {
+              bucket: obj.bucket,
+              key: obj.object_key,
+              id: obj.id,
+            }));
+          }
+
+          if (media.source_bucket && media.source_object_key) {
+            const [trackedSource] = await executor
+              .insert(schema.storageObjects)
+              .values({
+                bucket: media.source_bucket,
+                object_key: media.source_object_key,
+                content_type: media.source_content_type,
+                size: media.source_size,
+              })
+              .onConflictDoUpdate({
+                target: [schema.storageObjects.bucket, schema.storageObjects.object_key],
+                set: { bucket: media.source_bucket },
+              })
+              .returning();
+            storageObjects.set(trackedSource.id, {
+              bucket: trackedSource.bucket,
+              key: trackedSource.object_key,
+              id: trackedSource.id,
+            });
+          }
+
+          if (hardDelete) {
+            await mediaRepo.delete(media.id, executor);
+          } else {
+            await mediaRepo.update(media.id, {
+              status: 'FAILED',
+              source_object_id: null as any,
+              source_bucket: null as any,
+              source_object_key: null as any,
+              ready_object_id: null as any,
+              thumbnail_object_id: null as any,
+            }, executor);
+          }
+
+          return { mediaId: media.id, storageObjects: Array.from(storageObjects.values()) };
+        });
+
         const deletedObjects: { bucket: string; key: string; success: boolean; error?: string }[] = [];
-
-        const addStorageObject = (obj: { bucket: string; key: string; id?: string }) => {
-          const mapKey = obj.id ?? `${obj.bucket}:${obj.key}`;
-          storageObjects.set(mapKey, obj);
-        };
-
-        if (media.source_bucket && media.source_object_key) {
-          addStorageObject({ bucket: media.source_bucket, key: media.source_object_key });
-        }
-
-        if (media.source_object_id) {
-          const [obj] = await db
-            .select()
-            .from(schema.storageObjects)
-            .where(eq(schema.storageObjects.id, media.source_object_id));
-          if (obj) addStorageObject({ bucket: obj.bucket, key: obj.object_key, id: obj.id });
-        }
-
-        if (media.ready_object_id) {
-          const [obj] = await db
-            .select()
-            .from(schema.storageObjects)
-            .where(eq(schema.storageObjects.id, media.ready_object_id));
-          if (obj) addStorageObject({ bucket: obj.bucket, key: obj.object_key, id: obj.id });
-        }
-
-        if (media.thumbnail_object_id) {
-          const [obj] = await db
-            .select()
-            .from(schema.storageObjects)
-            .where(eq(schema.storageObjects.id, media.thumbnail_object_id));
-          if (obj) addStorageObject({ bucket: obj.bucket, key: obj.object_key, id: obj.id });
-        }
-
-        for (const obj of storageObjects.values()) {
+        for (const obj of deletion.storageObjects) {
           try {
             await deleteObject(obj.bucket, obj.key);
             deletedObjects.push({ bucket: obj.bucket, key: obj.key, success: true });
+            await db.delete(schema.storageObjects).where(eq(schema.storageObjects.id, obj.id));
           } catch (err) {
             logger.warn(err, 'Failed to delete media object from storage');
             deletedObjects.push({
@@ -1297,38 +1615,17 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           }
         }
 
-        // Remove storage object rows for ready/thumbnail if present
-        for (const obj of storageObjects.values()) {
-          if (obj.id) {
-            try {
-              await db.delete(schema.storageObjects).where(eq(schema.storageObjects.id, obj.id));
-            } catch (err) {
-              logger.warn(err, 'Failed to delete storage object row');
-            }
-          }
-        }
-
         if (hardDelete) {
-          await mediaRepo.delete(media.id);
           return reply.status(OK).send({
             message: 'Media hard deleted (DB row removed, storage cleaned where possible)',
-            id: media.id,
+            id: deletion.mediaId,
             storage_deleted: deletedObjects,
           });
         }
 
-        await mediaRepo.update(media.id, {
-          status: 'FAILED',
-          source_object_id: null as any,
-          source_bucket: null as any,
-          source_object_key: null as any,
-          ready_object_id: null as any,
-          thumbnail_object_id: null as any,
-        });
-
         return reply.status(OK).send({
           message: 'Media soft deleted (DB retained, storage cleaned where possible)',
-          id: media.id,
+          id: deletion.mediaId,
           storage_deleted: deletedObjects,
         });
       } catch (error) {

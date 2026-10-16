@@ -27,8 +27,11 @@ export function DeleteUserDialog({ user, open, onOpenChange, onConfirm }: Delete
                 <AlertDialogHeader>
                     <AlertDialogTitle>Delete User</AlertDialogTitle>
                     <AlertDialogDescription>
-                        Are you sure you want to delete <strong>{displayName}</strong>? This action
-                        cannot be undone and will remove all associated permissions and access.
+                        Delete <strong>{displayName}</strong>? This cannot be undone. Sign-in,
+                        active sessions, and notifications will stop immediately. Existing media,
+                        layouts, presentations, schedules, published playback, and audit history
+                        will be kept under their current organization or department ownership and
+                        will show this person as a deleted creator.
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

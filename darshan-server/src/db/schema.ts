@@ -11,6 +11,8 @@ import {
   jsonb,
   uniqueIndex,
   index,
+  check,
+  foreignKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -123,6 +125,8 @@ export const users = pgTable(
     role_id: uuid('role_id').notNull(),
     department_id: uuid('department_id'),
     is_active: boolean('is_active').notNull().default(true),
+    deleted_at: timestamp('deleted_at'),
+    deleted_by: uuid('deleted_by'),
     ext: jsonb('ext'),
     created_at: timestamp('created_at').notNull().defaultNow(),
     updated_at: timestamp('updated_at').notNull().defaultNow(),
@@ -130,6 +134,12 @@ export const users = pgTable(
   (table) => ({
     emailIdx: uniqueIndex('users_email_idx').on(table.email),
     roleIdx: index('users_role_id_idx').on(table.role_id),
+    deletedAtIdx: index('users_deleted_at_idx').on(table.deleted_at),
+    deletedByFk: foreignKey({
+      columns: [table.deleted_by],
+      foreignColumns: [table.id],
+      name: 'users_deleted_by_fk',
+    }).onDelete('restrict'),
   })
 );
 
@@ -196,13 +206,22 @@ export const media = pgTable(
     width: integer('width'),
     height: integer('height'),
     page_count: integer('page_count'),
-    created_by: uuid('created_by').notNull(),
+    created_by: uuid('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    owner_scope: varchar('owner_scope', { length: 16 }).notNull().default('RESTRICTED'),
+    owner_department_id: uuid('owner_department_id').references(() => departments.id, {
+      onDelete: 'restrict',
+    }),
     created_at: timestamp('created_at').notNull().defaultNow(),
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
     createdByIdx: index('media_created_by_idx').on(table.created_by),
+    ownerIdx: index('media_owner_idx').on(table.owner_scope, table.owner_department_id),
     statusIdx: index('media_status_idx').on(table.status),
+    ownerScopeCheck: check(
+      'media_owner_scope_check',
+      sql`(${table.owner_scope} = 'DEPARTMENT' AND ${table.owner_department_id} IS NOT NULL) OR (${table.owner_scope} IN ('ORGANIZATION', 'RESTRICTED') AND ${table.owner_department_id} IS NULL)`
+    ),
   })
 );
 
@@ -258,13 +277,22 @@ export const presentations = pgTable(
     name: varchar('name', { length: 255 }).notNull(),
     description: text('description'),
     layout_id: uuid('layout_id'),
-    created_by: uuid('created_by').notNull(),
+    created_by: uuid('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    owner_scope: varchar('owner_scope', { length: 16 }).notNull().default('RESTRICTED'),
+    owner_department_id: uuid('owner_department_id').references(() => departments.id, {
+      onDelete: 'restrict',
+    }),
     created_at: timestamp('created_at').notNull().defaultNow(),
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
     createdByIdx: index('presentations_created_by_idx').on(table.created_by),
+    ownerIdx: index('presentations_owner_idx').on(table.owner_scope, table.owner_department_id),
     layoutIdx: index('presentations_layout_id_idx').on(table.layout_id),
+    ownerScopeCheck: check(
+      'presentations_owner_scope_check',
+      sql`(${table.owner_scope} = 'DEPARTMENT' AND ${table.owner_department_id} IS NOT NULL) OR (${table.owner_scope} IN ('ORGANIZATION', 'RESTRICTED') AND ${table.owner_department_id} IS NULL)`
+    ),
   })
 );
 
@@ -320,15 +348,24 @@ export const schedules = pgTable(
     end_at: timestamp('end_at').notNull(),
     revision: integer('revision').notNull().default(1),
     is_active: boolean('is_active').notNull().default(true),
-    created_by: uuid('created_by').notNull(),
+    created_by: uuid('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    owner_scope: varchar('owner_scope', { length: 16 }).notNull().default('RESTRICTED'),
+    owner_department_id: uuid('owner_department_id').references(() => departments.id, {
+      onDelete: 'restrict',
+    }),
     created_at: timestamp('created_at').notNull().defaultNow(),
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
     createdByIdx: index('schedules_created_by_idx').on(table.created_by),
+    ownerIdx: index('schedules_owner_idx').on(table.owner_scope, table.owner_department_id),
     isActiveIdx: index('schedules_is_active_idx').on(table.is_active),
     startAtIdx: index('schedules_start_at_idx').on(table.start_at),
     endAtIdx: index('schedules_end_at_idx').on(table.end_at),
+    ownerScopeCheck: check(
+      'schedules_owner_scope_check',
+      sql`(${table.owner_scope} = 'DEPARTMENT' AND ${table.owner_department_id} IS NOT NULL) OR (${table.owner_scope} IN ('ORGANIZATION', 'RESTRICTED') AND ${table.owner_department_id} IS NULL)`
+    ),
   })
 );
 
@@ -498,13 +535,22 @@ export const layouts = pgTable(
     description: text('description'),
     aspect_ratio: varchar('aspect_ratio', { length: 50 }).notNull(),
     spec: jsonb('spec').notNull(), // normalized slots: [{id,x,y,w,h,z,fit,audio_enabled}]
-    created_by: uuid('created_by'),
+    created_by: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),
+    owner_scope: varchar('owner_scope', { length: 16 }).notNull().default('RESTRICTED'),
+    owner_department_id: uuid('owner_department_id').references(() => departments.id, {
+      onDelete: 'restrict',
+    }),
     created_at: timestamp('created_at').notNull().defaultNow(),
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => ({
     aspectIdx: index('layouts_aspect_ratio_idx').on(table.aspect_ratio),
     creatorIdx: index('layouts_created_by_idx').on(table.created_by),
+    ownerIdx: index('layouts_owner_idx').on(table.owner_scope, table.owner_department_id),
+    ownerScopeCheck: check(
+      'layouts_owner_scope_check',
+      sql`(${table.owner_scope} = 'DEPARTMENT' AND ${table.owner_department_id} IS NOT NULL) OR (${table.owner_scope} IN ('ORGANIZATION', 'RESTRICTED') AND ${table.owner_department_id} IS NULL)`
+    ),
   })
 );
 

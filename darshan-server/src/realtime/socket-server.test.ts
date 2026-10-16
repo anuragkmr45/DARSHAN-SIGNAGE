@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import type { FastifyInstance } from 'fastify';
 
 const ORIGINAL_ENV = { ...process.env };
 const secretDirectory = mkdtempSync(join(tmpdir(), 'darshan-socket-server-test-'));
@@ -69,6 +70,7 @@ function applyProductionFileBackedSecrets(): void {
 
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
+  vi.doUnmock('socket.io');
   vi.resetModules();
 });
 
@@ -208,5 +210,40 @@ describe('socket-server origin handling', () => {
     await expect(loadSocketServer()).rejects.toThrow(
       'Production login throttling must use Valkey; memory throttling is forbidden.'
     );
+  });
+
+  it('disconnects a deleted user room from every authenticated namespace', async () => {
+    applyRequiredEnv();
+    process.env.NODE_ENV = 'test';
+    const disconnectSockets = vi.fn();
+    const inRoom = vi.fn(() => ({ disconnectSockets }));
+    const namespace = { in: inRoom };
+    const of = vi.fn(() => namespace);
+    const on = vi.fn();
+
+    vi.doMock('socket.io', () => ({
+      Server: class {
+        engine = { clientsCount: 0 };
+        on = on;
+        of = of;
+      },
+    }));
+
+    const { authenticatedUserRoom, disconnectAuthenticatedUserSockets, getOrCreateSocketServer } =
+      await loadSocketServer();
+    const fastify = { server: {} } as unknown as FastifyInstance;
+    getOrCreateSocketServer(fastify);
+
+    const userId = '00000000-0000-0000-0000-000000000123';
+    disconnectAuthenticatedUserSockets(userId);
+
+    expect(authenticatedUserRoom(userId)).toBe(`auth:user:${userId}`);
+    expect(of.mock.calls.map(([name]) => name)).toEqual(['/chat', '/notifications', '/screens']);
+    expect(inRoom).toHaveBeenCalledTimes(3);
+    expect(inRoom).toHaveBeenNthCalledWith(1, `auth:user:${userId}`);
+    expect(inRoom).toHaveBeenNthCalledWith(2, `auth:user:${userId}`);
+    expect(inRoom).toHaveBeenNthCalledWith(3, `auth:user:${userId}`);
+    expect(disconnectSockets).toHaveBeenCalledTimes(3);
+    expect(disconnectSockets).toHaveBeenCalledWith(true);
   });
 });

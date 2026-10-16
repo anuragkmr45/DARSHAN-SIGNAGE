@@ -43,7 +43,12 @@ import { queryKeys } from "@/api/queryKeys";
 import type { LayoutItem, LayoutListParams } from "@/api/types";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { useAppSelector } from "@/store/hooks";
-import { canManageLayoutRecord } from "@/lib/access";
+import {
+  canDeleteLayoutRecord,
+  canManageLayoutRecord,
+  getContentCreatorLabel,
+  getContentOwnershipLabel,
+} from "@/lib/access";
 
 const ITEMS_PER_PAGE = 9;
 const aspectRatios = ["16:9", "9:16", "1:1", "4:3", "21:9"];
@@ -72,24 +77,7 @@ function formatRelativeTime(dateString: string): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
-export interface LayoutSlot {
-  id: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-export interface Layout {
-  id: string;
-  name: string;
-  description: string;
-  aspect_ratio: string;
-  spec: {
-    slots: LayoutSlot[];
-  };
-  updated_at: string;
-}
+export type Layout = LayoutItem;
 
 function getPreviewDimensions(ratio: string, maxWidth: number): { width: number; height: number } {
   const [widthRatio, heightRatio] = ratio.split(":").map(Number);
@@ -313,13 +301,19 @@ const Layouts = () => {
             <TableBody>
               {layouts.map((layout) => {
                 const canManageLayout = canManageLayoutRecord(currentUser, layout);
+                const canDeleteLayout = canDeleteLayoutRecord(currentUser, layout);
                 return (
                 <TableRow key={layout.id}>
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
                       <LayoutGrid className="h-4 w-4 text-muted-foreground" />
                       {layout.name}
-                      {layout.is_shared ? <Badge variant="secondary">Shared</Badge> : null}
+                      {getContentOwnershipLabel(layout) ? (
+                        <Badge variant="secondary">{getContentOwnershipLabel(layout)}</Badge>
+                      ) : null}
+                      {getContentCreatorLabel(layout) ? (
+                        <Badge variant="outline">{getContentCreatorLabel(layout)}</Badge>
+                      ) : null}
                     </div>
                   </TableCell>
                   <TableCell className="max-w-[300px] text-muted-foreground">
@@ -357,7 +351,7 @@ const Layouts = () => {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="text-destructive"
-                          disabled={!canManageLayout}
+                          disabled={!canDeleteLayout}
                           onClick={() => setDeleteTarget(layout)}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
@@ -365,9 +359,9 @@ const Layouts = () => {
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    {!canManageLayout && layout.is_shared ? (
+                    {!canManageLayout && !canDeleteLayout ? (
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Shared admin template
+                        Read-only for your account
                       </p>
                     ) : null}
                   </TableCell>

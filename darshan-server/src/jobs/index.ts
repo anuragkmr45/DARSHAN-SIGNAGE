@@ -28,6 +28,10 @@ import {
   LIBREOFFICE_CONVERSION_TIMEOUT_MS,
 } from '@/utils/libreoffice-conversion';
 import {
+  commitReadyMediaIfProcessing,
+  failMediaIfProcessing,
+} from '@/jobs/media-processing-state';
+import {
   type HeartbeatTelemetryJob,
   type ProofOfPlayTelemetryJob,
   type ScreenshotTelemetryJob,
@@ -208,7 +212,7 @@ export function getWebpageProcessingStage(error: unknown): WebpageProcessingStag
 
 function sanitizeWebpageErrorText(value: string, sourceUrl?: string) {
   const sourceOrigin = sourceUrl ? redactWebpageUrlForLogs(sourceUrl) : undefined;
-  let sanitized = sourceUrl && sourceOrigin ? value.split(sourceUrl).join(sourceOrigin) : value;
+  const sanitized = sourceUrl && sourceOrigin ? value.split(sourceUrl).join(sourceOrigin) : value;
 
   return sanitized.replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (rawMatch) => {
     let match = rawMatch;
@@ -328,6 +332,7 @@ export async function processWebpageVerifyCaptureJob(
     logger?: WebpageJobLogger;
     verifySource?: typeof verifyWebpageSource;
     putObject?: typeof putObject;
+    deleteObject?: typeof deleteObject;
     upsertStorageObject?: typeof upsertStorageObject;
     now?: () => Date;
   } = {}
@@ -337,6 +342,7 @@ export async function processWebpageVerifyCaptureJob(
   const now = dependencies.now ?? (() => new Date());
   const verifySource = dependencies.verifySource ?? verifyWebpageSource;
   const putReadyObject = dependencies.putObject ?? putObject;
+  const deleteReadyObject = dependencies.deleteObject ?? deleteObject;
   const upsertReadyStorageObject = dependencies.upsertStorageObject ?? upsertStorageObject;
   const { mediaId, sourceUrl } = job;
 
@@ -346,6 +352,10 @@ export async function processWebpageVerifyCaptureJob(
     );
     if (!media) {
       jobLogger.warn({ mediaId }, 'Media not found for webpage verification');
+      return;
+    }
+    if (media.status !== 'PROCESSING') {
+      jobLogger.warn({ mediaId, status: media.status }, 'Skipping stale webpage verification job');
       return;
     }
 
@@ -371,16 +381,21 @@ export async function processWebpageVerifyCaptureJob(
     );
 
     await runWebpageStage('media-ready-update', async () => {
-      await db
-        .update(schema.media)
-        .set({
+      const result = await commitReadyMediaIfProcessing({
+        mediaId,
+        readyObjectId: readyObject.id,
+        values: {
           source_url: verification.finalUrl,
-          ready_object_id: readyObject.id,
-          status: 'READY',
-          status_reason: null,
           updated_at: now(),
-        })
-        .where(eq(schema.media.id, mediaId));
+        },
+        executor: db,
+        compensateStaleResult: async () => {
+          await deleteReadyObject(READY_BUCKET, fallbackKey);
+        },
+      });
+      if (result === 'STALE') {
+        jobLogger.warn({ mediaId }, 'Discarded webpage result after media authority changed');
+      }
     });
   } catch (error) {
     const stage = getWebpageProcessingStage(error);
@@ -394,14 +409,7 @@ export async function processWebpageVerifyCaptureJob(
       'Webpage verification/capture failed'
     );
     const failureReason = getWebpageFailureReason(error);
-    await db
-      .update(schema.media)
-      .set({
-        status: 'FAILED',
-        status_reason: failureReason,
-        updated_at: now(),
-      })
-      .where(eq(schema.media.id, mediaId));
+    await failMediaIfProcessing({ mediaId, statusReason: failureReason, executor: db });
   }
 }
 
@@ -853,6 +861,198 @@ export async function cleanupChatMediaAssets(input: {
   }
 }
 
+export async function cleanupDeletedUserUploads(options: {
+  now?: () => Date;
+  limit?: number;
+} = {}) {
+  const db = getDatabase();
+  const runAt = options.now?.() ?? new Date();
+  const terminalCutoff = runAt.getTime() - 2 * 60 * 60 * 1000;
+  const limit = options.limit ?? 100;
+  const result = {
+    upload_sessions_cleaned: 0,
+    upload_sessions_pending: 0,
+    legacy_media_cleaned: 0,
+    legacy_media_pending: 0,
+  };
+
+  const deletedUserUploads = await db
+    .select()
+    .from(schema.mediaUploadSessions)
+    .where(
+      and(
+        eq(schema.mediaUploadSessions.state, 'ABORTED'),
+        inArray(schema.mediaUploadSessions.failure_reason, [
+          'USER_DELETED_CLEANUP_PENDING',
+          'USER_DELETED_UPLOAD_ABORTED',
+        ])
+      )
+    )
+    .limit(limit);
+
+  for (const upload of deletedUserUploads) {
+    try {
+      if (upload.strategy === 'multipart' && upload.multipart_upload_id) {
+        await abortMultipartUpload(
+          upload.staging_bucket,
+          upload.staging_object_key,
+          upload.multipart_upload_id
+        ).catch(() => undefined);
+      }
+      await deleteObject(upload.staging_bucket, upload.staging_object_key);
+      await deleteObject(upload.canonical_bucket, upload.canonical_object_key);
+      await db.transaction(async (tx) => {
+        if (upload.aborted_at && upload.aborted_at.getTime() <= terminalCutoff) {
+          await tx
+            .update(schema.mediaUploadSessions)
+            .set({ failure_reason: 'USER_DELETED_UPLOAD_ABORTED_FINAL', updated_at: runAt })
+            .where(eq(schema.mediaUploadSessions.id, upload.id));
+        }
+        await tx
+          .update(schema.media)
+          .set({ status: 'FAILED', status_reason: 'USER_DELETED_UPLOAD_ABORTED', updated_at: runAt })
+          .where(eq(schema.media.id, upload.media_id));
+      });
+      result.upload_sessions_cleaned += 1;
+    } catch (error) {
+      result.upload_sessions_pending += 1;
+      logger.warn({ error, uploadSessionId: upload.id }, 'Failed to retry deleted-user upload cleanup');
+    }
+  }
+
+  const deletedUserLegacyMedia = await db
+    .select()
+    .from(schema.media)
+    .where(
+      inArray(schema.media.status_reason, [
+        'USER_DELETED_CLEANUP_PENDING',
+        'USER_DELETED_UPLOAD_ABORTED',
+      ])
+    )
+    .limit(limit);
+  for (const media of deletedUserLegacyMedia) {
+    try {
+      const storageObjectIds = [
+        media.source_object_id,
+        media.ready_object_id,
+        media.thumbnail_object_id,
+      ].filter((id): id is string => Boolean(id));
+      const trackedObjects = storageObjectIds.length > 0
+        ? await db
+            .select({
+              id: schema.storageObjects.id,
+              bucket: schema.storageObjects.bucket,
+              object_key: schema.storageObjects.object_key,
+            })
+            .from(schema.storageObjects)
+            .where(inArray(schema.storageObjects.id, storageObjectIds))
+        : [];
+      const cleanupTargets = new Map<string, { bucket: string; objectKey: string }>();
+      for (const object of trackedObjects) {
+        cleanupTargets.set(`${object.bucket}/${object.object_key}`, {
+          bucket: object.bucket,
+          objectKey: object.object_key,
+        });
+      }
+      if (media.source_bucket && media.source_object_key) {
+        cleanupTargets.set(`${media.source_bucket}/${media.source_object_key}`, {
+          bucket: media.source_bucket,
+          objectKey: media.source_object_key,
+        });
+      }
+
+      for (const target of cleanupTargets.values()) {
+        await deleteObject(target.bucket, target.objectKey);
+      }
+
+      await db.transaction(async (tx) => {
+        const isCleanupPending = media.status_reason === 'USER_DELETED_CLEANUP_PENDING';
+        const shouldFinalize = media.updated_at.getTime() <= terminalCutoff;
+        await tx
+          .update(schema.media)
+          .set({
+            status: 'FAILED',
+            status_reason: shouldFinalize
+              ? 'USER_DELETED_UPLOAD_ABORTED_FINAL'
+              : 'USER_DELETED_UPLOAD_ABORTED',
+            source_object_id: null,
+            source_bucket: null,
+            source_object_key: null,
+            ready_object_id: null,
+            thumbnail_object_id: null,
+            updated_at: isCleanupPending || shouldFinalize ? runAt : media.updated_at,
+          })
+          .where(eq(schema.media.id, media.id));
+      });
+      result.legacy_media_cleaned += 1;
+    } catch (error) {
+      result.legacy_media_pending += 1;
+      logger.warn({ error, mediaId: media.id }, 'Failed to retry deleted-user legacy upload cleanup');
+    }
+  }
+
+  return result;
+}
+
+export async function cleanupOrphanedStorageObjects(options: {
+  storageObjectIds?: string[];
+  now?: () => Date;
+  minimumAgeMs?: number;
+  limit?: number;
+} = {}) {
+  const db = getDatabase();
+  const minimumAgeMs = options.minimumAgeMs ?? 2 * 60 * 60 * 1000;
+  const cutoff = new Date((options.now?.() ?? new Date()).getTime() - minimumAgeMs);
+  const limit = options.limit ?? 500;
+  const orphansResult = await db.execute(
+    sql`
+      SELECT id, bucket, object_key
+      FROM storage_objects so
+      WHERE so.created_at <= ${cutoff}
+        AND NOT EXISTS (SELECT 1 FROM media m WHERE m.source_object_id = so.id OR m.ready_object_id = so.id OR m.thumbnail_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM schedule_snapshots ss WHERE ss.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM heartbeats h WHERE h.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM proof_of_play pop WHERE pop.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM screenshots s WHERE s.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM request_attachments ra WHERE ra.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM audit_logs al WHERE al.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM system_logs sl WHERE sl.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM login_attempts la WHERE la.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM log_archives lga WHERE lga.storage_object_id = so.id)
+      ORDER BY so.created_at ASC
+      LIMIT ${limit}
+    `
+  );
+  const requestedIds = options.storageObjectIds?.length
+    ? new Set(options.storageObjectIds)
+    : null;
+  const orphans = ((orphansResult as { rows?: any[] }).rows ?? []).filter(
+    (orphan) => !requestedIds || requestedIds.has(orphan.id)
+  );
+  const cleanedIds: string[] = [];
+  let pending = 0;
+
+  for (const orphan of orphans) {
+    const { id, bucket, object_key: objectKey } = orphan as any;
+    try {
+      await deleteObject(bucket, objectKey);
+      cleanedIds.push(id);
+    } catch (error) {
+      pending += 1;
+      logger.warn(error, `Failed to delete object ${bucket}/${objectKey}`);
+    }
+  }
+
+  if (cleanedIds.length) {
+    await db.delete(schema.storageObjects).where(inArray(schema.storageObjects.id, cleanedIds));
+    logger.info(`Removed ${cleanedIds.length} orphaned storage objects`);
+  } else if (!orphans.length) {
+    logger.info('No orphaned storage objects found');
+  }
+
+  return { cleaned: cleanedIds.length, pending };
+}
+
 // Job handlers registration
 export async function registerJobHandlers() {
   const jobs = getJobs();
@@ -919,6 +1119,10 @@ export async function registerJobHandlers() {
           logger.warn(`Media not found for transcode job: ${mediaId}`);
           continue;
         }
+        if (media.status !== 'PROCESSING') {
+          logger.warn({ mediaId, status: media.status }, 'Skipping stale transcode job');
+          continue;
+        }
 
         const [sourceObject] =
           sourceObjectId && !media.source_bucket
@@ -933,17 +1137,13 @@ export async function registerJobHandlers() {
 
         if (!sourceBucket || !sourceKey) {
           logger.warn(`Missing source object info for media ${mediaId}`);
-          await db
-            .update(schema.media)
-            .set({ status: 'FAILED', updated_at: new Date() })
-            .where(eq(schema.media.id, mediaId));
+          await failMediaIfProcessing({
+            mediaId,
+            statusReason: 'VIDEO_SOURCE_MISSING',
+            executor: db,
+          });
           continue;
         }
-
-        await db
-          .update(schema.media)
-          .set({ status: 'PROCESSING', status_reason: null, updated_at: new Date() })
-          .where(eq(schema.media.id, mediaId));
 
         const sourceBuffer = await getObject(sourceBucket, sourceKey);
         tempDir = await fs.mkdtemp(join(tmpdir(), 'ffmpeg-'));
@@ -967,37 +1167,68 @@ export async function registerJobHandlers() {
             FORMAT_CONTENT_TYPE.hls
           );
 
-          const [readyObject] = await db
-            .insert(schema.storageObjects)
-            .values({
-              bucket: READY_BUCKET,
-              object_key: playlistKey,
-              content_type: FORMAT_CONTENT_TYPE.hls,
-              size: playlistBuffer.length,
-              sha256: playlistUpload.sha256,
-            })
-            .returning();
+          const readyObject = await upsertStorageObject({
+            bucket: READY_BUCKET,
+            objectKey: playlistKey,
+            contentType: FORMAT_CONTENT_TYPE.hls,
+            size: playlistBuffer.length,
+            sha256: playlistUpload.sha256,
+          });
 
           const files = await fs.readdir(workDir);
           const segments = files.filter((file) => file.startsWith('segment_') && file.endsWith('.ts'));
 
-          await Promise.all(
+          const segmentObjects = await Promise.all(
             segments.map(async (file) => {
               const buffer = await fs.readFile(join(workDir, file));
               const key = `${mediaId}/hls/${file}`;
-              await putObject(READY_BUCKET, key, buffer, HLS_SEGMENT_CONTENT_TYPE);
+              const upload = await putObject(READY_BUCKET, key, buffer, HLS_SEGMENT_CONTENT_TYPE);
+              return {
+                bucket: READY_BUCKET,
+                objectKey: key,
+                contentType: HLS_SEGMENT_CONTENT_TYPE,
+                size: buffer.length,
+                sha256: upload.sha256,
+              };
             })
           );
 
-          await db
-            .update(schema.media)
-            .set({
-              ready_object_id: readyObject?.id,
-              status: 'READY',
-              status_reason: null,
-              updated_at: new Date(),
-            })
-            .where(eq(schema.media.id, mediaId));
+          const producedObjects = [
+            {
+              bucket: READY_BUCKET,
+              objectKey: playlistKey,
+              contentType: FORMAT_CONTENT_TYPE.hls,
+              size: playlistBuffer.length,
+              sha256: playlistUpload.sha256,
+            },
+            ...segmentObjects,
+          ];
+          const result = await commitReadyMediaIfProcessing({
+            mediaId,
+            readyObjectId: readyObject.id,
+            executor: db,
+            compensateStaleResult: async () => {
+              for (const produced of producedObjects) {
+                try {
+                  await deleteObject(produced.bucket, produced.objectKey);
+                } catch (cleanupError) {
+                  await upsertStorageObject(produced).catch((trackingError) => {
+                    logger.error(
+                      { cleanupError, trackingError, mediaId, objectKey: produced.objectKey },
+                      'Failed to track stale transcode object for retry'
+                    );
+                  });
+                  logger.warn(
+                    { cleanupError, mediaId, objectKey: produced.objectKey },
+                    'Stale transcode object cleanup will be retried'
+                  );
+                }
+              }
+            },
+          });
+          if (result === 'STALE') {
+            logger.warn({ mediaId }, 'Discarded HLS transcode after media authority changed');
+          }
         } else {
           const outputBuffer = await fs.readFile(outputPath);
           const readyKey = `${mediaId}/ready.${outputExt}`;
@@ -1008,34 +1239,34 @@ export async function registerJobHandlers() {
             FORMAT_CONTENT_TYPE[targetFormat] ?? 'application/octet-stream'
           );
 
-          const [readyObject] = await db
-            .insert(schema.storageObjects)
-            .values({
-              bucket: READY_BUCKET,
-              object_key: readyKey,
-              content_type: FORMAT_CONTENT_TYPE[targetFormat],
-              size: outputBuffer.length,
-              sha256: upload.sha256,
-            })
-            .returning();
+          const readyObject = await upsertStorageObject({
+            bucket: READY_BUCKET,
+            objectKey: readyKey,
+            contentType: FORMAT_CONTENT_TYPE[targetFormat],
+            size: outputBuffer.length,
+            sha256: upload.sha256,
+          });
 
-          await db
-            .update(schema.media)
-            .set({
-              ready_object_id: readyObject?.id,
-              status: 'READY',
-              status_reason: null,
-              updated_at: new Date(),
-            })
-            .where(eq(schema.media.id, mediaId));
+          const result = await commitReadyMediaIfProcessing({
+            mediaId,
+            readyObjectId: readyObject.id,
+            executor: db,
+            compensateStaleResult: async () => {
+              await deleteObject(READY_BUCKET, readyKey);
+            },
+          });
+          if (result === 'STALE') {
+            logger.warn({ mediaId }, 'Discarded video transcode after media authority changed');
+          }
         }
       } catch (error) {
         logger.error(error, `Transcode failed for media ${mediaId}`);
         try {
-          await db
-            .update(schema.media)
-            .set({ status: 'FAILED', status_reason: 'VIDEO_TRANSCODE_FAILED', updated_at: new Date() })
-            .where(eq(schema.media.id, mediaId));
+          await failMediaIfProcessing({
+            mediaId,
+            statusReason: 'VIDEO_TRANSCODE_FAILED',
+            executor: db,
+          });
         } catch (updateError) {
           logger.error(updateError, `Failed to mark media ${mediaId} as failed`);
         }
@@ -1059,6 +1290,10 @@ export async function registerJobHandlers() {
         const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId));
         if (!media) {
           logger.warn(`Media not found for thumbnail job: ${mediaId}`);
+          continue;
+        }
+        if (media.status !== 'PROCESSING' && media.status !== 'READY') {
+          logger.warn({ mediaId, status: media.status }, 'Skipping stale thumbnail job');
           continue;
         }
 
@@ -1101,21 +1336,32 @@ export async function registerJobHandlers() {
         const thumbnailKey = `${mediaId}/thumbnail.jpg`;
         const upload = await putObject(THUMBNAIL_BUCKET, thumbnailKey, thumbnailBuffer, THUMBNAIL_CONTENT_TYPE);
 
-        const [thumbnailObject] = await db
-          .insert(schema.storageObjects)
-          .values({
-            bucket: THUMBNAIL_BUCKET,
-            object_key: thumbnailKey,
-            content_type: THUMBNAIL_CONTENT_TYPE,
-            size: thumbnailBuffer.length,
-            sha256: upload.sha256,
-          })
-          .returning();
+        const thumbnailObject = await upsertStorageObject({
+          bucket: THUMBNAIL_BUCKET,
+          objectKey: thumbnailKey,
+          contentType: THUMBNAIL_CONTENT_TYPE,
+          size: thumbnailBuffer.length,
+          sha256: upload.sha256,
+        });
 
-        await db
+        const [updated] = await db
           .update(schema.media)
-          .set({ thumbnail_object_id: thumbnailObject?.id, updated_at: new Date() })
-          .where(eq(schema.media.id, mediaId));
+          .set({ thumbnail_object_id: thumbnailObject.id, updated_at: new Date() })
+          .where(
+            and(
+              eq(schema.media.id, mediaId),
+              inArray(schema.media.status, ['PROCESSING', 'READY'])
+            )
+          )
+          .returning({ id: schema.media.id });
+        if (!updated) {
+          await deleteObject(THUMBNAIL_BUCKET, thumbnailKey).catch((cleanupError) => {
+            logger.warn(
+              { cleanupError, mediaId, objectKey: thumbnailKey },
+              'Stale thumbnail cleanup will be retried'
+            );
+          });
+        }
       } catch (error) {
         logger.error(error, `Thumbnail generation failed for media ${mediaId}`);
       } finally {
@@ -1137,6 +1383,10 @@ export async function registerJobHandlers() {
           logger.warn({ mediaId }, 'Media not found for document conversion');
           continue;
         }
+        if (media.status !== 'PROCESSING') {
+          logger.warn({ mediaId, status: media.status }, 'Skipping stale document conversion job');
+          continue;
+        }
 
         const [sourceObject] =
           sourceObjectId && !media.source_bucket
@@ -1150,10 +1400,11 @@ export async function registerJobHandlers() {
         const sourceKey = media.source_object_key ?? sourceObject?.object_key;
 
         if (!sourceBucket || !sourceKey) {
-          await db
-            .update(schema.media)
-            .set({ status: 'FAILED', status_reason: 'DOCUMENT_SOURCE_MISSING', updated_at: new Date() })
-            .where(eq(schema.media.id, mediaId));
+          await failMediaIfProcessing({
+            mediaId,
+            statusReason: 'DOCUMENT_SOURCE_MISSING',
+            executor: db,
+          });
           continue;
         }
 
@@ -1188,6 +1439,7 @@ export async function registerJobHandlers() {
         const pageCount = await inspectPdfPageCount(outputBuffer);
 
         let readyObjectId: string | null = media.ready_object_id ?? null;
+        let producedReadyKey: string | null = null;
         if (!nativePdf) {
           const readyKey = `${mediaId}/ready.pdf`;
           const upload = await putObject(READY_BUCKET, readyKey, outputBuffer, DOCUMENT_READY_CONTENT_TYPE);
@@ -1199,29 +1451,29 @@ export async function registerJobHandlers() {
             sha256: upload.sha256,
           });
           readyObjectId = readyObject.id;
+          producedReadyKey = readyKey;
         }
 
-        await db
-          .update(schema.media)
-          .set({
-            ready_object_id: readyObjectId,
+        const commitResult = await commitReadyMediaIfProcessing({
+          mediaId,
+          readyObjectId,
+          values: {
             page_count: pageCount,
-            status: 'READY',
-            status_reason: null,
-            updated_at: new Date(),
-          })
-          .where(eq(schema.media.id, mediaId));
+          },
+          executor: db,
+          compensateStaleResult: producedReadyKey
+            ? async () => {
+                await deleteObject(READY_BUCKET, producedReadyKey!);
+              }
+            : undefined,
+        });
+        if (commitResult === 'STALE') {
+          logger.warn({ mediaId }, 'Discarded document conversion after media authority changed');
+        }
       } catch (error) {
         logger.error({ error, mediaId }, 'Document conversion failed');
         const statusReason = error instanceof PdfInspectionError ? error.code : 'DOCUMENT_CONVERSION_FAILED';
-        await db
-          .update(schema.media)
-          .set({
-            status: 'FAILED',
-            status_reason: statusReason,
-            updated_at: new Date(),
-          })
-          .where(eq(schema.media.id, mediaId));
+        await failMediaIfProcessing({ mediaId, statusReason, executor: db });
       } finally {
         await cleanupTempDir(tempDir);
       }
@@ -1350,6 +1602,9 @@ export async function registerJobHandlers() {
               }
             }
             logger.info(`Cleaned up ${expiredUploads.length} expired media upload sessions`);
+
+            await cleanupDeletedUserUploads();
+            await cleanupOrphanedStorageObjects();
             break;
           }
           case 'old_logs': {
@@ -1406,44 +1661,7 @@ export async function registerJobHandlers() {
             break;
           }
           case 'orphaned_objects': {
-            const orphansResult = await db.execute(
-              sql`
-                SELECT id, bucket, object_key
-                FROM storage_objects so
-                WHERE NOT EXISTS (SELECT 1 FROM media m WHERE m.source_object_id = so.id OR m.ready_object_id = so.id OR m.thumbnail_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM schedule_snapshots ss WHERE ss.storage_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM heartbeats h WHERE h.storage_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM proof_of_play pop WHERE pop.storage_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM screenshots s WHERE s.storage_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM request_attachments ra WHERE ra.storage_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM audit_logs al WHERE al.storage_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM system_logs sl WHERE sl.storage_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM login_attempts la WHERE la.storage_object_id = so.id)
-                  AND NOT EXISTS (SELECT 1 FROM log_archives lga WHERE lga.storage_object_id = so.id)
-              `
-            );
-
-            const orphans = (orphansResult as { rows?: any[] }).rows ?? [];
-            if (!orphans.length) {
-              logger.info('No orphaned storage objects found');
-              break;
-            }
-
-            const orphanIds: string[] = [];
-            for (const orphan of orphans) {
-              const { id, bucket, object_key: objectKey } = orphan as any;
-              try {
-                await deleteObject(bucket, objectKey);
-                orphanIds.push(id);
-              } catch (error) {
-                logger.warn(error, `Failed to delete object ${bucket}/${objectKey}`);
-              }
-            }
-
-            if (orphanIds.length) {
-              await db.delete(schema.storageObjects).where(inArray(schema.storageObjects.id, orphanIds));
-              logger.info(`Removed ${orphanIds.length} orphaned storage objects`);
-            }
+            await cleanupOrphanedStorageObjects();
             break;
           }
           case 'chat_orphaned_media': {

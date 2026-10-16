@@ -28,7 +28,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ApiError } from "@/api/apiClient";
 import type { ScheduleRequestListItem } from "@/api/types";
 import { useAppSelector } from "@/store/hooks";
-import { canManageEmergency } from "@/lib/access";
+import { canManageEmergency, getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useScreensRealtime } from "@/hooks/screens/useScreensRealtime";
 
@@ -71,8 +71,8 @@ const getRequesterLabel = (request?: ScheduleRequestListItem) => {
   const user = request?.requested_by_user;
   if (!user) return "Unknown requester";
   const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
-  if (name) return name;
-  return user.email || user.id;
+  const label = name || user.email || user.id;
+  return user.status === "DELETED" ? `${label} (deleted)` : label;
 };
 
 const formatReservationState = (request?: ScheduleRequestListItem) => {
@@ -482,6 +482,16 @@ export default function ScheduleQueue() {
                             <div className="mb-1 flex flex-wrap items-center gap-2">
                               <h3 className="truncate font-semibold text-foreground">{scheduleName}</h3>
                               <Badge variant="outline" className="shrink-0">{reservationState}</Badge>
+                              {request.schedule && getContentOwnershipLabel(request.schedule) ? (
+                                <Badge variant="secondary" className="shrink-0">
+                                  {getContentOwnershipLabel(request.schedule)}
+                                </Badge>
+                              ) : null}
+                              {request.schedule && getContentCreatorLabel(request.schedule) ? (
+                                <Badge variant="outline" className="shrink-0">
+                                  {getContentCreatorLabel(request.schedule)}
+                                </Badge>
+                              ) : null}
                             </div>
                             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                               <span className="break-words">

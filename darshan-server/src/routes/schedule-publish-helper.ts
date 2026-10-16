@@ -1,14 +1,15 @@
 import { createHash } from 'crypto';
 import { inArray } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 import { createScheduleRepository, ScheduleRepository } from '@/db/repositories/schedule';
 import { createScheduleItemRepository, ScheduleItemRepository } from '@/db/repositories/schedule-item';
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
 import { areAspectsCompatible, parseAspectRatio } from '@/utils/display-profile';
 import { normalizeVideoLoopEnabled } from '@/utils/video-loop';
+import { canReferenceContentResource, type ContentOwnedResource } from '@/rbac/content-ownership';
 
-type DB = ReturnType<typeof getDatabase>;
+type DB = DbExecutor;
 
 function normalizeCodecList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -120,6 +121,53 @@ export async function resolvePresentations(presentationIds: string[], db: DB = g
   return grouped;
 }
 
+export type ScheduleOwnershipCompatibilityIssue = {
+  presentation_id: string;
+  child_type: 'PRESENTATION' | 'LAYOUT' | 'MEDIA';
+  child_id: string;
+  occurrence_id?: string;
+};
+
+export function findScheduleOwnershipCompatibilityIssues(
+  schedule: ContentOwnedResource,
+  presentations: Iterable<any>
+): ScheduleOwnershipCompatibilityIssue[] {
+  const issues: ScheduleOwnershipCompatibilityIssue[] = [];
+  for (const presentation of presentations) {
+    if (!canReferenceContentResource(schedule, presentation)) {
+      issues.push({
+        presentation_id: presentation.id,
+        child_type: 'PRESENTATION',
+        child_id: presentation.id,
+      });
+      continue;
+    }
+
+    if (presentation.layout && !canReferenceContentResource(presentation, presentation.layout)) {
+      issues.push({
+        presentation_id: presentation.id,
+        child_type: 'LAYOUT',
+        child_id: presentation.layout.id,
+      });
+    }
+
+    for (const occurrence of [
+      ...(presentation.items ?? []),
+      ...(presentation.slots ?? []),
+    ]) {
+      if (occurrence.media && !canReferenceContentResource(presentation, occurrence.media)) {
+        issues.push({
+          presentation_id: presentation.id,
+          child_type: 'MEDIA',
+          child_id: occurrence.media.id,
+          occurrence_id: occurrence.id,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 type SnapshotPresentationSlotInput = {
   id: string;
   slot_id: string;
@@ -177,7 +225,7 @@ export async function getScheduleDisplayPreflight(params: {
 }) {
   const db = params.db ?? getDatabase();
   const scheduleItemRepo = params.scheduleItemRepo ?? createScheduleItemRepository();
-  const scheduleItems = await scheduleItemRepo.listBySchedule(params.scheduleId);
+  const scheduleItems = await scheduleItemRepo.listBySchedule(params.scheduleId, db);
   const presentations = await resolvePresentations(scheduleItems.map((item: any) => item.presentation_id), db);
   const groupIds = new Set<string>(params.screenGroupIds || []);
   scheduleItems.forEach((item: any) => (item.screen_group_ids || []).forEach((groupId: string) => groupIds.add(groupId)));
@@ -260,12 +308,12 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
   const scheduleRepo = params.scheduleRepo ?? createScheduleRepository();
   const scheduleItemRepo = params.scheduleItemRepo ?? createScheduleItemRepository();
 
-  const schedule = await scheduleRepo.findById(params.scheduleId);
+  const schedule = await scheduleRepo.findById(params.scheduleId, db);
   if (!schedule) {
     throw AppError.notFound('Schedule not found');
   }
 
-  const scheduleItems = await scheduleItemRepo.listBySchedule(schedule.id);
+  const scheduleItems = await scheduleItemRepo.listBySchedule(schedule.id, db);
   if (scheduleItems.length === 0) {
     throw AppError.badRequest('Cannot publish a schedule without schedule items');
   }
@@ -278,6 +326,14 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
     throw AppError.badRequest('One or more schedule items reference a missing presentation', {
       reason: 'MISSING_PRESENTATION',
       presentation_ids: missingPresentationIds,
+    });
+  }
+
+  const incompatibleOwnership = findScheduleOwnershipCompatibilityIssues(schedule, presMap.values());
+  if (incompatibleOwnership.length > 0) {
+    throw AppError.badRequest('Schedule references content with incompatible ownership', {
+      reason: 'INCOMPATIBLE_CONTENT_OWNERSHIP',
+      invalid_references: incompatibleOwnership,
     });
   }
 

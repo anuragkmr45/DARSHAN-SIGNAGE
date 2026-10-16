@@ -1,5 +1,7 @@
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+import type { ActorContext } from '@/rbac/policy';
+import { contentReadCondition, type ContentOwnerScope } from '@/rbac/content-ownership';
 import {
   DEFAULT_MEDIA_SETTING_KEY,
   DEFAULT_MEDIA_TARGETS_SETTING_KEY,
@@ -27,6 +29,8 @@ export class MediaRepository {
     name: string;
     type: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'WEBPAGE';
     created_by: string;
+    owner_scope?: ContentOwnerScope;
+    owner_department_id?: string | null;
     source_object_id?: string;
     source_bucket?: string;
     source_object_key?: string;
@@ -41,8 +45,8 @@ export class MediaRepository {
     return result[0];
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
+  async findById(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const result = await db.select().from(schema.media).where(eq(schema.media.id, id));
     return result[0] || null;
   }
@@ -53,6 +57,7 @@ export class MediaRepository {
     type?: string;
     status?: string;
     created_by_ids?: string[];
+    actor?: ActorContext;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -71,6 +76,10 @@ export class MediaRepository {
         return { items: [], total: 0, page, limit };
       }
       conditions.push(inArray(schema.media.created_by, options.created_by_ids as any));
+    }
+    if (options.actor) {
+      const accessCondition = contentReadCondition(options.actor, schema.media);
+      if (accessCondition) conditions.push(accessCondition);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -98,8 +107,8 @@ export class MediaRepository {
     };
   }
 
-  async update(id: string, data: Partial<typeof schema.media.$inferInsert>) {
-    const db = getDatabase();
+  async update(id: string, data: Partial<typeof schema.media.$inferInsert>, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const result = await db
       .update(schema.media)
       .set({ ...data, updated_at: new Date() })
@@ -108,13 +117,13 @@ export class MediaRepository {
     return result[0] || null;
   }
 
-  async delete(id: string) {
-    const db = getDatabase();
+  async delete(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     await db.delete(schema.media).where(eq(schema.media.id, id));
   }
 
-  async getUsageSummary(id: string): Promise<MediaUsageSummary> {
-    const db = getDatabase();
+  async getUsageSummary(id: string, executor?: DbExecutor): Promise<MediaUsageSummary> {
+    const db = executor ?? getDatabase();
 
     const [
       chatAttachment,

@@ -13,6 +13,7 @@ import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { canManageUserRecord, canManageUserRoleTarget, canReadUserRecord } from '@/rbac/policy';
+import { disconnectAuthenticatedUserSockets } from '@/realtime/socket-server';
 
 const logger = createLogger('users-invite-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -302,7 +303,7 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
 
         const data = resetPasswordSchema.parse(request.body);
         const current = await userRepo.findById((request.params as any).id);
-        if (!current) throw AppError.notFound('User not found');
+        if (!current || current.deleted_at) throw AppError.notFound('User not found');
 
         const [targetRole] = await db.select().from(schema.roles).where(eq(schema.roles.id, current.role_id));
         if (
@@ -332,6 +333,7 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           ext: current.ext,
         });
         if (!user) throw AppError.notFound('User not found');
+        disconnectAuthenticatedUserSockets(user.id);
 
         return reply.send({
           id: user.id,

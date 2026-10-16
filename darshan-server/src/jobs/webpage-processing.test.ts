@@ -8,7 +8,7 @@ import {
   type WebpageVerifyCaptureJob,
 } from '@/jobs';
 
-function createDb(media: { id: string } | null) {
+function createDb(media: { id: string; status: string; ready_object_id?: string | null } | null) {
   const updates: Array<Record<string, unknown>> = [];
   const db = {
     select: vi.fn(() => ({
@@ -20,7 +20,9 @@ function createDb(media: { id: string } | null) {
       set: vi.fn((values: Record<string, unknown>) => {
         updates.push(values);
         return {
-          where: vi.fn(async () => []),
+          where: vi.fn(() => ({
+            returning: vi.fn(async () => [{ id: media?.id }]),
+          })),
         };
       }),
     })),
@@ -33,7 +35,7 @@ describe('webpage media processing job', () => {
   it('captures, uploads, upserts, and marks webpage media READY', async () => {
     const mediaId = randomUUID();
     const screenshot = Buffer.from('png-preview');
-    const { db, updates } = createDb({ id: mediaId });
+    const { db, updates } = createDb({ id: mediaId, status: 'PROCESSING' });
     const verifySource = vi.fn().mockResolvedValue({
       finalUrl: 'https://example.com/',
       contentType: 'text/html; charset=utf-8',
@@ -76,7 +78,7 @@ describe('webpage media processing job', () => {
 
   it('uses the same fallback object key on retry so processing is idempotent', async () => {
     const mediaId = randomUUID();
-    const { db } = createDb({ id: mediaId });
+    const { db } = createDb({ id: mediaId, status: 'PROCESSING' });
     const verifySource = vi.fn().mockResolvedValue({
       finalUrl: 'https://example.com/',
       contentType: 'text/html',
@@ -101,7 +103,7 @@ describe('webpage media processing job', () => {
 
   it('logs structured stage errors and stores a mapped failure reason', async () => {
     const mediaId = randomUUID();
-    const { db, updates } = createDb({ id: mediaId });
+    const { db, updates } = createDb({ id: mediaId, status: 'PROCESSING' });
     const sourceUrl = 'https://example.com/dashboard?token=secret';
     const putFailure = Object.assign(new Error(`put failed for ${sourceUrl}`), { code: 'ECONNRESET' });
     const verifySource = vi.fn().mockResolvedValue({

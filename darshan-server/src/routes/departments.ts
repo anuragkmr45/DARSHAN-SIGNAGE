@@ -234,9 +234,34 @@ export async function departmentRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('Department not found');
         }
 
+        const usage = await deptRepo.getDeleteUsageSummary(departmentId);
+        if (Object.values(usage).some((value) => value > 0)) {
+          throw new AppError({
+            statusCode: 409,
+            code: 'DEPARTMENT_IN_USE',
+            message: 'Department cannot be deleted while it owns users or content.',
+            details: usage,
+          });
+        }
+
         await deptRepo.delete(departmentId);
         return reply.status(OK).send({ message: 'Department deleted successfully', id: departmentId });
       } catch (error) {
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error as { code?: string }).code === '23503'
+        ) {
+          return respondWithError(
+            reply,
+            new AppError({
+              statusCode: 409,
+              code: 'DEPARTMENT_IN_USE',
+              message: 'Department cannot be deleted because ownership changed during deletion. Refresh and try again.',
+            })
+          );
+        }
         logger.error(error, 'Delete department error');
         return respondWithError(reply, error);
       }

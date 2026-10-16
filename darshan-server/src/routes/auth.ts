@@ -14,6 +14,8 @@ import { getLoginThrottleStore } from '@/auth/login-throttle';
 import { AppError } from '@/utils/app-error';
 import { createRoleRepository } from '@/db/repositories/role';
 import { getIdleTimeoutSeconds } from '@/utils/settings';
+import { getDatabase, schema } from '@/db';
+import { eq } from 'drizzle-orm';
 
 const logger = createLogger('auth-routes');
 const { TOO_MANY_REQUESTS } = HTTP_STATUS;
@@ -95,32 +97,76 @@ export async function authRoutes(fastify: FastifyInstance) {
           throw new AppError({ statusCode: 503, code: 'AUTH_THROTTLE_UNAVAILABLE', message: 'Login protection is temporarily unavailable. Try again later.' });
         }
 
-        const { is_active, id, role_id, first_name, last_name, department_id } = user || {}
-
-        if (!is_active) {
+        if (!user.is_active) {
           throw AppError.forbidden('User account is inactive');
         }
 
-        const role = await roleRepo.findById(role_id);
-        if (!role) {
+        // Serialize session issuance with account update/tombstone. If login
+        // commits first, the waiting account change removes this session; if
+        // the account change commits first, the credential/state recheck below
+        // prevents a session from being created from the stale pre-change row.
+        const issued = await getDatabase().transaction(async (tx) => {
+          const [current] = await tx
+            .select({
+              id: schema.users.id,
+              email: schema.users.email,
+              password_hash: schema.users.password_hash,
+              first_name: schema.users.first_name,
+              last_name: schema.users.last_name,
+              role_id: schema.users.role_id,
+              department_id: schema.users.department_id,
+              is_active: schema.users.is_active,
+              deleted_at: schema.users.deleted_at,
+            })
+            .from(schema.users)
+            .where(eq(schema.users.id, user.id))
+            .for('update');
+
+          if (!current || current.deleted_at || current.password_hash !== user.password_hash) {
+            return { status: 'stale_credentials' as const };
+          }
+          if (!current.is_active) {
+            return { status: 'inactive' as const };
+          }
+
+          const [role] = await tx
+            .select({ id: schema.roles.id, name: schema.roles.name })
+            .from(schema.roles)
+            .where(eq(schema.roles.id, current.role_id))
+            .for('share');
+          if (!role) {
+            return { status: 'missing_role' as const };
+          }
+
+          const access = await generateAccessToken(
+            current.id,
+            current.email,
+            role.id,
+            role.name,
+            current.department_id,
+            { expiresInSeconds: getIdleTimeoutSeconds() }
+          );
+          await tx.insert(schema.sessions).values({
+            user_id: current.id,
+            access_jti: access.jti,
+            expires_at: access.expiresAt,
+          });
+
+          return { status: 'issued' as const, current, role, ...access };
+        });
+
+        if (issued.status === 'inactive') {
+          throw AppError.forbidden('User account is inactive');
+        }
+        if (issued.status === 'missing_role') {
           throw AppError.forbidden('Role not found');
         }
+        if (issued.status === 'stale_credentials') {
+          throw AppError.unauthorized('Credentials or account state changed during login. Please try again.');
+        }
 
-        const { token, jti, expiresAt } = await generateAccessToken(
-          id,
-          email,
-          role.id,
-          role.name,
-          department_id,
-          { expiresInSeconds: getIdleTimeoutSeconds() }
-        );
+        const { current, role, token, expiresAt } = issued;
         const csrfToken = randomUUID();
-
-        await sessionRepo.create({
-          user_id: id,
-          access_jti: jti,
-          expires_at: expiresAt,
-        });
 
         // Issue cookies (JWT as HttpOnly, CSRF as readable token)
         const secure = appConfig.AUTH_COOKIE_SECURE;
@@ -162,13 +208,13 @@ export async function authRoutes(fastify: FastifyInstance) {
           csrf_token?: string;
         } = {
           user: {
-            id: id,
-            email: email,
-            first_name: first_name,
-            last_name: last_name,
+            id: current.id,
+            email: current.email,
+            first_name: current.first_name,
+            last_name: current.last_name,
             role: role.name,
             role_id: role.id,
-            department_id: department_id ?? null,
+            department_id: current.department_id ?? null,
           },
           expiresAt: expiresAt.toISOString(),
         };

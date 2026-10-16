@@ -5,7 +5,13 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.unit.test.ts', 'src/utils/document-page-selection.test.ts', 'src/utils/pdf-metadata.test.ts'],
+    include: [
+      'src/**/*.unit.test.ts',
+      'src/routes/auth-throttle.test.ts',
+      'src/jobs/webpage-processing.test.ts',
+      'src/utils/document-page-selection.test.ts',
+      'src/utils/pdf-metadata.test.ts',
+    ],
   },
   resolve: {
     alias: {

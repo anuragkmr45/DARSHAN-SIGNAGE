@@ -26,7 +26,7 @@ import {
 } from "@/lib/mediaUploadFlow";
 import { mapMediaDeleteError } from "@/lib/mediaDeleteErrors";
 import { deriveDisplayNameFromFilename, resolveMediaDisplayName } from "@/lib/media";
-import { canDeleteMediaRecord } from "@/lib/access";
+import { canDeleteMediaRecord, getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 import { PageNavigation } from "@/components/common/PageNavigation";
 
 type MediaLibraryLocationState = {
@@ -530,10 +530,20 @@ export default function MediaLibrary() {
               onClick={() => handlePreview(item)}
             >
               <CardHeader>
-                <CardTitle className="text-base flex items-center justify-between">
-                  <span className="truncate">{resolveMediaLabel(item)}</span>
-                  <Badge variant="outline">{resolveLibraryMediaType(item)}</Badge>
-                </CardTitle>
+                <div className="space-y-2">
+                  <CardTitle className="text-base flex items-center justify-between gap-2">
+                    <span className="truncate">{resolveMediaLabel(item)}</span>
+                    <Badge variant="outline">{resolveLibraryMediaType(item)}</Badge>
+                  </CardTitle>
+                  <div className="flex flex-wrap gap-2">
+                    {getContentOwnershipLabel(item) ? (
+                      <Badge variant="secondary">{getContentOwnershipLabel(item)}</Badge>
+                    ) : null}
+                    {getContentCreatorLabel(item) ? (
+                      <Badge variant="outline">{getContentCreatorLabel(item)}</Badge>
+                    ) : null}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 {resolvePrimaryMediaUrl(item) ? (
@@ -607,8 +617,7 @@ export default function MediaLibrary() {
                     </p>
                   </div>
                 )}
-                {(resolveCopyTargetUrl(item) || canDeleteMediaRecord(currentUser, item)) && (
-                  <div className="flex justify-end gap-2">
+                <div className="flex justify-end gap-2">
                     {resolveCopyTargetUrl(item) ? (
                       <Button
                         variant="outline"
@@ -634,8 +643,7 @@ export default function MediaLibrary() {
                       <Trash2 className="h-4 w-4 mr-2" />
                       Delete
                     </Button>
-                  </div>
-                )}
+                </div>
                 {item.size && <div>Size: {(item.size / 1024 / 1024).toFixed(2)} MB</div>}
                 {item.status && (
                   <Badge variant="secondary" className="text-xs">

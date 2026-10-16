@@ -1,4 +1,5 @@
-import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { drizzle, type NodePgDatabase, type NodePgTransaction } from 'drizzle-orm/node-postgres';
+import type { ExtractTablesWithRelations } from 'drizzle-orm';
 import { readFileSync } from 'node:fs';
 import { Pool, type PoolConfig } from 'pg';
 import { config as appConfig } from '@/config';
@@ -6,6 +7,11 @@ import { assertTestRuntimeDatabase } from './test-database-safety.js';
 import * as schema from './schema.js';
 
 export type Database = NodePgDatabase<typeof schema>;
+export type DatabaseTransaction = NodePgTransaction<
+  typeof schema,
+  ExtractTablesWithRelations<typeof schema>
+>;
+export type DbExecutor = Database | DatabaseTransaction;
 
 let db: Database | null = null;
 let pool: Pool | null = null;

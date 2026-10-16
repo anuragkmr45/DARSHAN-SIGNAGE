@@ -490,7 +490,7 @@ export default function Operators() {
       <ConfirmDialog
         open={isDeleteConfirmOpen}
         title="Delete operator?"
-        description={`This will remove ${pendingActionUser?.email ?? "the operator"}.`}
+        description={`Delete ${pendingActionUser?.email ?? "the operator"}? Sign-in and active sessions will stop immediately. Existing content and schedule history will be kept under its current department ownership and will show a deleted creator. This cannot be undone.`}
         confirmLabel="Delete"
         onCancel={() => {
           setPendingActionUser(null);

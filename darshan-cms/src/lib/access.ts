@@ -1,4 +1,4 @@
-import type { LayoutItem, MediaAsset, Role, RoleName, User } from "@/api/types";
+import type { ContentOwnership, LayoutItem, MediaAsset, Role, RoleName, User } from "@/api/types";
 
 type CanFn = (action: string, subject: string) => boolean;
 
@@ -73,11 +73,42 @@ export const canManageBrandingSettings = (
   return can("manage", "BrandingSettings") || can("update", "BrandingSettings");
 };
 
-export const canManageLayoutRecord = (user: User | null | undefined, layout: Pick<LayoutItem, "created_by">) =>
-  isAdminLike(user?.role) || Boolean(user?.id && layout.created_by && layout.created_by === user.id);
+export const canManageLayoutRecord = (
+  _user: User | null | undefined,
+  layout: Pick<LayoutItem, "created_by" | "permissions">,
+) => layout.permissions?.can_update === true;
 
-export const canDeleteMediaRecord = (user: User | null | undefined, media: Pick<MediaAsset, "created_by">) =>
-  isAdminLike(user?.role) || Boolean(user?.id && media.created_by && media.created_by === user.id);
+export const canDeleteLayoutRecord = (
+  _user: User | null | undefined,
+  layout: Pick<LayoutItem, "created_by" | "permissions">,
+) => layout.permissions?.can_delete === true;
+
+export const canDeleteMediaRecord = (
+  _user: User | null | undefined,
+  media: Pick<MediaAsset, "created_by" | "permissions">,
+) => media.permissions?.can_delete === true;
+
+export const getContentOwnershipLabel = (
+  resource: { ownership?: ContentOwnership },
+) => {
+  if (resource.ownership?.scope === "ORGANIZATION") return "Organization owned";
+  if (resource.ownership?.scope === "DEPARTMENT") {
+    return resource.ownership.department_name
+      ? `${resource.ownership.department_name} owned`
+      : "Department owned";
+  }
+  return resource.ownership ? "Restricted" : null;
+};
+
+export const getContentCreatorLabel = (
+  resource: { ownership?: ContentOwnership },
+) => {
+  const creator = resource.ownership?.creator;
+  if (!creator || creator.status === "ACTIVE") return null;
+  if (creator.status === "UNKNOWN") return "Creator unknown";
+  const status = creator.status === "DELETED" ? "Deleted" : "Inactive";
+  return `Created by ${creator.display_name} (${status})`;
+};
 
 export const canEditSystemRole = (currentRoleName: RoleName | undefined, targetRoleName: string) => {
   if (currentRoleName === "SUPER_ADMIN") return true;
@@ -101,13 +132,21 @@ export const canManageUserTarget = (
   targetDepartmentId?: string | null,
 ) => {
   if (!actor?.role || !targetRoleName) return false;
-  if (actor.role === "SUPER_ADMIN") return targetRoleName === "ADMIN" || targetRoleName === "OPERATOR";
+  if (actor.role === "SUPER_ADMIN") return true;
   if (actor.role === "ADMIN") return targetRoleName === "DEPARTMENT" || targetRoleName === "OPERATOR";
   if (actor.role === "DEPARTMENT") {
     return targetRoleName === "OPERATOR" && actor.department_id === targetDepartmentId;
   }
   return false;
 };
+
+export const canDeleteUserTarget = (
+  actor: User | null | undefined,
+  targetRoleName: string | null | undefined,
+  targetDepartmentId?: string | null,
+) =>
+  targetRoleName !== "SUPER_ADMIN" &&
+  canManageUserTarget(actor, targetRoleName, targetDepartmentId);
 
 export const canReadUserTarget = (
   actor: User | null | undefined,

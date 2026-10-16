@@ -39,6 +39,8 @@ suite('production bootstrap', () => {
         "role_id" uuid NOT NULL,
         "department_id" uuid,
         "is_active" boolean NOT NULL DEFAULT true,
+        "deleted_at" timestamp,
+        "deleted_by" uuid,
         "ext" jsonb,
         "created_at" timestamp NOT NULL DEFAULT now(),
         "updated_at" timestamp NOT NULL DEFAULT now()

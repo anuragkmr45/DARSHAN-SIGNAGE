@@ -19,6 +19,7 @@ import {
 import { classifySocketAuthRejectReason, resolveSocketAuthToken } from '@/realtime/chat-namespace';
 import {
   attachNamespaceSocketObservability,
+  authenticatedUserRoom,
   getOrCreateSocketServer,
   getSocketAllowedOrigins,
   getSocketServer,
@@ -257,6 +258,12 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
   });
 
   nsp.on('connection', (socket: Socket) => {
+    const user = (socket.data as any).user;
+    if (!user?.sub) {
+      socket.disconnect(true);
+      return;
+    }
+    socket.join(authenticatedUserRoom(user.sub));
     socket.on('disconnect', () => {
       screensSubscribeRateLimiter.clear(socket.id);
       screensSyncRateLimiter.clear(socket.id);

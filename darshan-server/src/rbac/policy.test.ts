@@ -9,6 +9,18 @@ describe('rbac policy helpers', () => {
     expect(canManageUserRoleTarget('OPERATOR', 'OPERATOR')).toBe(false);
   });
 
+  it('allows super admin to manage users assigned to every named or custom role', () => {
+    for (const targetRole of ['SUPER_ADMIN', 'ADMIN', 'DEPARTMENT', 'OPERATOR', 'CUSTOM_EDITOR']) {
+      expect(canManageUserRoleTarget('SUPER_ADMIN', targetRole)).toBe(true);
+      expect(
+        canManageUserRecord(
+          { userId: 'root', roleName: 'SUPER_ADMIN', departmentId: null },
+          { id: 'target', roleName: targetRole, departmentId: 'dept-a' }
+        )
+      ).toBe(true);
+    }
+  });
+
   it('keeps system-role editing restricted for admin vs super admin', () => {
     expect(canManageSystemRole('SUPER_ADMIN', 'ADMIN')).toBe(true);
     expect(canManageSystemRole('ADMIN', 'DEPARTMENT')).toBe(true);

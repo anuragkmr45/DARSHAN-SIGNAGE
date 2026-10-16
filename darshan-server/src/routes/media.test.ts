@@ -25,6 +25,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
   let adminUserId: string;
   let superAdminUserId: string;
   let operatorUserId: string;
+  let departmentId: string;
 
   beforeAll(async () => {
     await initializeDatabase();
@@ -94,11 +95,18 @@ describe('Media Routes - delete ownership and usage protection', () => {
     });
     const superAdminRole = await ensureRole('SUPER_ADMIN', { grants: [] });
 
+    departmentId = randomUUID();
+    await db.insert(schema.departments).values({
+      id: departmentId,
+      name: `Media route test ${departmentId}`,
+    });
+
     const createUser = async (params: {
       email: string;
       firstName: string;
       lastName: string;
       roleId: string;
+      departmentId?: string;
     }) => {
       const id = randomUUID();
       await db.insert(schema.users).values({
@@ -108,6 +116,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
         first_name: params.firstName,
         last_name: params.lastName,
         role_id: params.roleId,
+        department_id: params.departmentId,
         is_active: true,
       });
       return id;
@@ -118,12 +127,14 @@ describe('Media Routes - delete ownership and usage protection', () => {
       firstName: 'Priya',
       lastName: 'Sharma',
       roleId: mediaUserRole.id,
+      departmentId,
     });
     otherUserId = await createUser({
       email: `media-other-${Date.now()}@example.com`,
       firstName: 'Amit',
       lastName: 'Khan',
       roleId: mediaUserRole.id,
+      departmentId,
     });
     adminUserId = await createUser({
       email: `media-admin-${Date.now()}@example.com`,
@@ -142,16 +153,17 @@ describe('Media Routes - delete ownership and usage protection', () => {
       firstName: 'Operator',
       lastName: 'User',
       roleId: operatorRole.id,
+      departmentId,
     });
 
-    const operatorDepartmentId = randomUUID();
-    await db
-      .update(schema.users)
-      .set({ department_id: operatorDepartmentId })
-      .where(eq(schema.users.id, operatorUserId));
-
-    const issueToken = async (userId: string, email: string, roleId: string, roleName: string) => {
-      const token = await generateAccessToken(userId, email, roleId, roleName);
+    const issueToken = async (
+      userId: string,
+      email: string,
+      roleId: string,
+      roleName: string,
+      userDepartmentId?: string
+    ) => {
+      const token = await generateAccessToken(userId, email, roleId, roleName, userDepartmentId);
       await createSessionRepository().create({
         user_id: userId,
         access_jti: token.jti,
@@ -164,13 +176,15 @@ describe('Media Routes - delete ownership and usage protection', () => {
       ownerUserId,
       `owner-${ownerUserId}@example.com`,
       mediaUserRole.id,
-      mediaUserRole.name
+      mediaUserRole.name,
+      departmentId
     );
     otherUserToken = await issueToken(
       otherUserId,
       `other-${otherUserId}@example.com`,
       mediaUserRole.id,
-      mediaUserRole.name
+      mediaUserRole.name,
+      departmentId
     );
     adminToken = await issueToken(
       adminUserId,
@@ -184,19 +198,13 @@ describe('Media Routes - delete ownership and usage protection', () => {
       superAdminRole.id,
       superAdminRole.name
     );
-    const operatorAccess = await generateAccessToken(
+    operatorToken = await issueToken(
       operatorUserId,
       `operator-${operatorUserId}@example.com`,
       operatorRole.id,
       operatorRole.name,
-      operatorDepartmentId
+      departmentId
     );
-    await createSessionRepository().create({
-      user_id: operatorUserId,
-      access_jti: operatorAccess.jti,
-      expires_at: operatorAccess.expiresAt,
-    });
-    operatorToken = operatorAccess.token;
   });
 
   afterAll(async () => {
@@ -214,6 +222,8 @@ describe('Media Routes - delete ownership and usage protection', () => {
         type: 'IMAGE',
         status: 'READY',
         created_by: createdBy,
+        owner_scope: createdBy === adminUserId ? 'ORGANIZATION' : 'DEPARTMENT',
+        owner_department_id: createdBy === adminUserId ? null : departmentId,
       })
       .returning();
     return media;
@@ -428,6 +438,8 @@ describe('Media Routes - delete ownership and usage protection', () => {
       id: presentationId,
       name: `presentation-${Date.now()}`,
       created_by: ownerUserId,
+      owner_scope: 'DEPARTMENT',
+      owner_department_id: departmentId,
     });
     await db.insert(schema.presentationItems).values({
       id: randomUUID(),
@@ -496,6 +508,8 @@ describe('Media Routes - delete ownership and usage protection', () => {
         type: 'IMAGE',
         status: 'READY',
         created_by: ownerUserId,
+        owner_scope: 'DEPARTMENT',
+        owner_department_id: departmentId,
         source_bucket: 'media-source',
         source_object_key: `images/${imageId}.png`,
       },
@@ -505,6 +519,8 @@ describe('Media Routes - delete ownership and usage protection', () => {
         type: 'VIDEO',
         status: 'READY',
         created_by: ownerUserId,
+        owner_scope: 'DEPARTMENT',
+        owner_department_id: departmentId,
         source_bucket: 'media-source',
         source_object_key: `videos/${videoId}.mp4`,
       },

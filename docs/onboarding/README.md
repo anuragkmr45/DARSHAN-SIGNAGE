@@ -1,6 +1,6 @@
 # DARSHAN Onboarding
 
-Last code-truth refresh: 2026-06-28.
+Last code-truth refresh: 2026-10-16.
 
 This folder helps new engineers, operators, and field installers understand DARSHAN from the current codebase. It does not define new behavior.
 

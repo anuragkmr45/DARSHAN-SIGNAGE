@@ -16,6 +16,19 @@ import { AppError } from '@/utils/app-error';
 const logger = createLogger('request-routes');
 const { CREATED } = HTTP_STATUS;
 
+type RequestAuthor = typeof schema.users.$inferSelect;
+
+function serializeRequestAuthor(author: RequestAuthor | null | undefined) {
+  if (!author) return null;
+  return {
+    id: author.id,
+    email: author.deleted_at ? null : author.email,
+    first_name: author.first_name,
+    last_name: author.last_name,
+    status: author.deleted_at ? 'DELETED' : author.is_active ? 'ACTIVE' : 'INACTIVE',
+  };
+}
+
 const createRequestSchema = z.object({
   title: z.string().min(1).max(255),
   description: z.string().optional(),
@@ -282,14 +295,7 @@ export async function requestRoutes(fastify: FastifyInstance) {
           id: message.id,
           request_id: message.request_id,
           user_id: message.author_id,
-          author: author
-            ? {
-                id: author.id,
-                email: author.email,
-                first_name: author.first_name,
-                last_name: author.last_name,
-              }
-            : null,
+          author: serializeRequestAuthor(author),
           message: message.content,
           attachments: attachmentUrls,
           created_at: message.created_at.toISOString(),
@@ -354,14 +360,7 @@ export async function requestRoutes(fastify: FastifyInstance) {
             id: m.id,
             request_id: m.request_id,
             user_id: m.author_id,
-            author: authorMap.get(m.author_id)
-              ? {
-                  id: authorMap.get(m.author_id)!.id,
-                  email: authorMap.get(m.author_id)!.email,
-                  first_name: authorMap.get(m.author_id)!.first_name,
-                  last_name: authorMap.get(m.author_id)!.last_name,
-                }
-              : null,
+            author: serializeRequestAuthor(authorMap.get(m.author_id)),
             message: m.content,
             attachments: (m as any).attachments
               ? (m as any).attachments.map((id: string) => attachmentUrlMap.get(id) || { id, url: null })

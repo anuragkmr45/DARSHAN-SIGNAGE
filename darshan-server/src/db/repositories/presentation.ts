@@ -1,19 +1,24 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+import type { ActorContext } from '@/rbac/policy';
+import { contentReadCondition, type ContentOwnerScope } from '@/rbac/content-ownership';
 
 export class PresentationRepository {
   async create(data: {
     name: string;
     description?: string;
+    layout_id?: string;
     created_by: string;
-  }) {
-    const db = getDatabase();
+    owner_scope?: ContentOwnerScope;
+    owner_department_id?: string | null;
+  }, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const result = await db.insert(schema.presentations).values(data).returning();
     return result[0];
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
+  async findById(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const result = await db
       .select()
       .from(schema.presentations)
@@ -25,6 +30,7 @@ export class PresentationRepository {
     page?: number;
     limit?: number;
     created_by?: string;
+    actor?: ActorContext;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -34,6 +40,10 @@ export class PresentationRepository {
     const conditions = [];
     if (options.created_by) {
       conditions.push(eq(schema.presentations.created_by, options.created_by));
+    }
+    if (options.actor) {
+      const accessCondition = contentReadCondition(options.actor, schema.presentations);
+      if (accessCondition) conditions.push(accessCondition);
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -61,8 +71,8 @@ export class PresentationRepository {
     };
   }
 
-  async update(id: string, data: Partial<typeof schema.presentations.$inferInsert>) {
-    const db = getDatabase();
+  async update(id: string, data: Partial<typeof schema.presentations.$inferInsert>, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const result = await db
       .update(schema.presentations)
       .set({ ...data, updated_at: new Date() })
@@ -71,8 +81,8 @@ export class PresentationRepository {
     return result[0] || null;
   }
 
-  async delete(id: string) {
-    const db = getDatabase();
+  async delete(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     await db.delete(schema.presentations).where(eq(schema.presentations.id, id));
   }
 }

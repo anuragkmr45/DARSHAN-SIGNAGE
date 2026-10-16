@@ -1,4 +1,4 @@
-import { eq, and, desc, lt, sql } from 'drizzle-orm';
+import { eq, and, desc, lt, sql, isNull } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 
 export class NotificationRepository {
@@ -11,6 +11,19 @@ export class NotificationRepository {
   }) {
     const db = getDatabase();
     return db.transaction(async (tx) => {
+      const [recipient] = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.id, data.user_id),
+            eq(schema.users.is_active, true),
+            isNull(schema.users.deleted_at)
+          )
+        )
+        .for('share');
+      if (!recipient) return null;
+
       const [created] = await tx.insert(schema.notifications).values(data).returning();
 
       await tx

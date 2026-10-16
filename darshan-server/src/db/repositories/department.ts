@@ -58,6 +58,25 @@ export class DepartmentRepository {
     return result[0] || null;
   }
 
+  async getDeleteUsageSummary(id: string) {
+    const db = getDatabase();
+    const count = async (table: any, column: any) => {
+      const [row] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(table)
+        .where(eq(column, id));
+      return Number(row?.count ?? 0);
+    };
+    const [users, media, layouts, presentations, schedules] = await Promise.all([
+      count(schema.users, schema.users.department_id),
+      count(schema.media, schema.media.owner_department_id),
+      count(schema.layouts, schema.layouts.owner_department_id),
+      count(schema.presentations, schema.presentations.owner_department_id),
+      count(schema.schedules, schema.schedules.owner_department_id),
+    ]);
+    return { users, media, layouts, presentations, schedules };
+  }
+
   async delete(id: string) {
     const db = getDatabase();
     await db.delete(schema.departments).where(eq(schema.departments.id, id));

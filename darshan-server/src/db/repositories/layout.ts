@@ -1,5 +1,7 @@
 import { eq, and, desc, or, sql, inArray } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+import type { ActorContext } from '@/rbac/policy';
+import { contentReadCondition, type ContentOwnerScope } from '@/rbac/content-ownership';
 
 export class LayoutRepository {
   async create(data: {
@@ -8,14 +10,16 @@ export class LayoutRepository {
     aspect_ratio: string;
     spec: Record<string, any>;
     created_by?: string | null;
-  }) {
-    const db = getDatabase();
+    owner_scope?: ContentOwnerScope;
+    owner_department_id?: string | null;
+  }, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const [layout] = await db.insert(schema.layouts).values(data).returning();
     return layout;
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
+  async findById(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const [layout] = await db.select().from(schema.layouts).where(eq(schema.layouts.id, id));
     return layout || null;
   }
@@ -26,6 +30,7 @@ export class LayoutRepository {
     aspect_ratio?: string;
     search?: string;
     created_by_ids?: string[];
+    actor?: ActorContext;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -52,6 +57,10 @@ export class LayoutRepository {
       }
       conditions.push(inArray(schema.layouts.created_by, options.created_by_ids as any));
     }
+    if (options.actor) {
+      const accessCondition = contentReadCondition(options.actor, schema.layouts);
+      if (accessCondition) conditions.push(accessCondition);
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -75,8 +84,8 @@ export class LayoutRepository {
     };
   }
 
-  async update(id: string, data: Partial<typeof schema.layouts.$inferInsert>) {
-    const db = getDatabase();
+  async update(id: string, data: Partial<typeof schema.layouts.$inferInsert>, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const [layout] = await db
       .update(schema.layouts)
       .set({ ...data, updated_at: new Date() })
@@ -85,8 +94,8 @@ export class LayoutRepository {
     return layout || null;
   }
 
-  async delete(id: string) {
-    const db = getDatabase();
+  async delete(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     await db.delete(schema.layouts).where(eq(schema.layouts.id, id));
   }
 }

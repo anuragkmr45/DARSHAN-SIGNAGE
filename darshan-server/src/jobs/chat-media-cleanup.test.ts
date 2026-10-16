@@ -42,6 +42,8 @@ async function tableExists(tableName: string) {
 }
 
 describe('cleanupChatMediaAssets', () => {
+  let creatorId: string;
+
   beforeAll(async () => {
     await initializeDatabase();
     if (!(await tableExists('chat_conversations'))) {
@@ -49,6 +51,23 @@ describe('cleanupChatMediaAssets', () => {
     }
     await applyMigrationFile('0013_chat_fk_integrity.sql');
     await applyMigrationFile('0014_chat_pins_bookmarks_and_also_to_channel.sql');
+
+    const db = getDatabase();
+    const roleId = randomUUID();
+    creatorId = randomUUID();
+    await db.insert(schema.roles).values({
+      id: roleId,
+      name: `CHAT_MEDIA_CLEANUP_${roleId}`,
+      permissions: {},
+      is_system: false,
+    });
+    await db.insert(schema.users).values({
+      id: creatorId,
+      email: `chat-media-cleanup-${creatorId}@example.test`,
+      password_hash: 'test-only-hash',
+      role_id: roleId,
+      is_active: true,
+    });
   });
 
   afterAll(async () => {
@@ -84,7 +103,7 @@ describe('cleanupChatMediaAssets', () => {
       name: 'Cleanup Target',
       type: 'VIDEO',
       status: 'READY',
-      created_by: randomUUID(),
+      created_by: creatorId,
       source_bucket: 'media-source',
       source_object_key: `source/${mediaId}.mp4`,
       ready_object_id: readyObjectId,
@@ -182,8 +201,6 @@ describe('cleanupChatMediaAssets', () => {
     const db = getDatabase();
     const mediaId = randomUUID();
     const presentationId = randomUUID();
-    const creatorId = randomUUID();
-
     await db.insert(schema.media).values({
       id: mediaId,
       name: 'Presentation Media',
@@ -236,7 +253,7 @@ describe('cleanupChatMediaAssets', () => {
       name: 'Failing Cleanup Target',
       type: 'VIDEO',
       status: 'READY',
-      created_by: randomUUID(),
+      created_by: creatorId,
       ready_object_id: readyObjectId,
     });
 
