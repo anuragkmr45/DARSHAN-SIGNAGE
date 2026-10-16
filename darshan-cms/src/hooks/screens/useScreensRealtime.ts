@@ -55,6 +55,8 @@ export const useScreensRealtime = ({
 }: UseScreensRealtimeOptions) => {
   const queryClient = useQueryClient();
   const authToken = useAppSelector((state) => state.auth.token);
+  const user = useAppSelector((state) => state.auth.user);
+  const isAuthenticated = Boolean(authToken || user);
   const [isConnected, setIsConnected] = useState(false);
   const [rejectedScreenIds, setRejectedScreenIds] = useState<string[]>([]);
   const [pendingEmergencyScreenIds, setPendingEmergencyScreenIds] = useState<string[]>([]);
@@ -72,7 +74,7 @@ export const useScreensRealtime = ({
   const listRealtimeFilters = useMemo(() => getScreensListRealtimeFilters(listQueryKey), [listQueryKey]);
 
   useEffect(() => {
-    if (!enabled || !authToken) {
+    if (!enabled || !isAuthenticated) {
       setIsConnected((current) => (current ? false : current));
       setRejectedScreenIds((current) => (current.length > 0 ? EMPTY_SCREEN_IDS : current));
       setPendingEmergencyScreenIds((current) => (current.length > 0 ? EMPTY_SCREEN_IDS : current));
@@ -332,6 +334,7 @@ export const useScreensRealtime = ({
   }, [
     activeScreenId,
     authToken,
+    isAuthenticated,
     detailQueryKey,
     enabled,
     handlePreviewUpdate,

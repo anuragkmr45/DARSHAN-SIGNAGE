@@ -86,6 +86,8 @@ export const useChatRealtime = ({
 }: UseChatRealtimeOptions) => {
   const queryClient = useQueryClient();
   const authToken = useAppSelector((state) => state.auth.token);
+  const user = useAppSelector((state) => state.auth.user);
+  const isAuthenticated = Boolean(authToken || user);
   const selfUserId = useAppSelector((state) => state.auth.user?.id);
   const [isConnected, setIsConnected] = useState(false);
   const [typingMap, setTypingMap] = useState<Record<string, string[]>>({});
@@ -100,7 +102,7 @@ export const useChatRealtime = ({
   }, [activeConversationId, subscribedConversationIds]);
 
   useEffect(() => {
-    if (!authToken) return;
+    if (!isAuthenticated) return;
     const socket = connectChatSocket(authToken);
     if (!socket) return;
     const typingTimeouts = typingTimeoutRef.current;
@@ -318,7 +320,7 @@ export const useChatRealtime = ({
       socket.off("chat:bookmark:update", onBookmarkUpdate);
       socket.off("chat:typing", onTyping);
     };
-  }, [activeConversationId, authToken, onActiveConversationRejected, queryClient, selfUserId, subscriptionIds]);
+  }, [activeConversationId, authToken, isAuthenticated, onActiveConversationRejected, queryClient, selfUserId, subscriptionIds]);
 
   return {
     isConnected,

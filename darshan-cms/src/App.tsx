@@ -7,6 +7,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { GlobalLoader } from "@/components/common/GlobalLoader";
 import { ProductionSecurityBoundary } from "@/components/security/ProductionSecurityBoundary";
+import { AuthSessionBootstrap } from "@/components/auth/AuthSessionBootstrap";
 import Home from "./pages/Home";
 import Auth from "./pages/Auth";
 
@@ -50,7 +51,9 @@ const App = () => (
         <Toaster />
         <Sonner />
         <ProductionSecurityBoundary queryClient={queryClient}>
-          <AppRoutes />
+          <AuthSessionBootstrap>
+            <AppRoutes />
+          </AuthSessionBootstrap>
         </ProductionSecurityBoundary>
       </TooltipProvider>
     </ThemeProvider>

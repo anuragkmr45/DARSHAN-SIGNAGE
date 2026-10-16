@@ -148,11 +148,16 @@ export class ApiClient {
 
         const contentType = response.headers.get("content-type");
         const isJson = contentType?.includes("application/json");
-        const refreshedToken = response.headers.get("x-access-token");
-        const refreshedExpiresAt = response.headers.get("x-access-token-expires-at") ?? undefined;
-
-        if (refreshedToken && this.refreshedAuthHandler) {
-          this.refreshedAuthHandler({ token: refreshedToken, expiresAt: refreshedExpiresAt });
+        // Cookie sessions keep the JWT in an HttpOnly cookie. Only legacy
+        // bearer sessions need to consume a refreshed token from headers.
+        if (authToken && this.refreshedAuthHandler) {
+          const refreshedToken = response.headers.get("x-access-token");
+          if (refreshedToken) {
+            this.refreshedAuthHandler({
+              token: refreshedToken,
+              expiresAt: response.headers.get("x-access-token-expires-at") ?? undefined,
+            });
+          }
         }
 
         if (!response.ok) {
@@ -178,7 +183,7 @@ export class ApiClient {
         return payload as TResponse;
       } catch (error) {
         if (error instanceof ApiError) {
-          if (typeof window !== "undefined" && error.status === 401 && !options.path.includes("/auth/login")) {
+          if (typeof window !== "undefined" && error.status === 401 && !["/auth/login", "/auth/me"].includes(options.path)) {
             try {
               this.unauthorizedHandler?.();
             } catch {

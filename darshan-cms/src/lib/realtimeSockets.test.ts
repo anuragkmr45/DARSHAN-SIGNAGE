@@ -77,6 +77,20 @@ describe("CMS realtime socket lifecycle", () => {
     });
   });
 
+  test("cookie sessions connect all namespaces without a JavaScript token", async () => {
+    const { screens, chat, notifications } = await loadRealtimeSocketModules();
+    screens.connectScreensSocket();
+    chat.connectChatSocket();
+    notifications.connectNotificationsSocket();
+
+    expect(socketState.io).toHaveBeenCalledTimes(3);
+    socketState.io.mock.calls.forEach(([, options]) => {
+      expect(options).toEqual(expect.objectContaining({ withCredentials: true }));
+      expect(options.auth).toBeUndefined();
+    });
+    socketState.sockets.forEach((socket) => expect(socket.connected).toBe(true));
+  });
+
   test("disconnectAllRealtimeSockets is safe when called twice", async () => {
     const { screens, chat, notifications, realtime } = await loadRealtimeSocketModules();
 

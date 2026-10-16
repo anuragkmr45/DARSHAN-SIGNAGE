@@ -67,12 +67,16 @@ export function AppHeader() {
 
   const handleLogout = async () => {
     disconnectAllRealtimeSockets();
-    dispatch(clearAuth());
-    await queryClient.cancelQueries();
-    queryClient.clear();
-    navigate("/login", { replace: true });
-
-    void authApi.logout().catch(() => undefined);
+    try {
+      await authApi.logout();
+    } catch {
+      // Clear the local session even when the logout request fails.
+    } finally {
+      dispatch(clearAuth());
+      await queryClient.cancelQueries();
+      queryClient.clear();
+      navigate("/login", { replace: true });
+    }
   };
 
   return (

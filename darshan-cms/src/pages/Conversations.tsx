@@ -208,9 +208,10 @@ export default function Conversations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const authToken = useAppSelector((state) => state.auth.token);
   const currentUserId = useAppSelector((state) => state.auth.user?.id);
+  const isAuthenticated = Boolean(authToken || currentUserId);
   const currentRole = useAppSelector((state) => state.auth.user?.role);
   const { isAdminOrSuperAdmin } = useAuthorization();
-  const usersDirectoryQuery = useChatUserDirectory(Boolean(authToken));
+  const usersDirectoryQuery = useChatUserDirectory(isAuthenticated);
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -542,7 +543,7 @@ export default function Conversations() {
   }, [canShowModeration]);
 
   const emitTyping = (isTyping: boolean) => {
-    if (!activeConversationId || !authToken) return;
+    if (!activeConversationId || !isAuthenticated) return;
     const socket = connectChatSocket(authToken);
     socket?.emit("chat:typing", { conversationId: activeConversationId, isTyping });
   };
@@ -637,7 +638,7 @@ export default function Conversations() {
     if (readTimerRef.current) window.clearTimeout(readTimerRef.current);
     readTimerRef.current = window.setTimeout(() => {
       void markRead.mutateAsync({ conversationId: activeConversationId, lastReadSeq: latestMessageSeq });
-      if (authToken) {
+      if (isAuthenticated) {
         const socket = connectChatSocket(authToken);
         socket?.emit("chat:read", {
           conversationId: activeConversationId,
@@ -650,7 +651,7 @@ export default function Conversations() {
     return () => {
       if (readTimerRef.current) window.clearTimeout(readTimerRef.current);
     };
-  }, [activeConversationId, authToken, effectiveStatus?.mode, isAtBottom, latestMessageSeq, markRead]);
+  }, [activeConversationId, authToken, isAuthenticated, effectiveStatus?.mode, isAtBottom, latestMessageSeq, markRead]);
 
   const jumpToLatest = () => {
     const viewport = messageViewportRef.current;

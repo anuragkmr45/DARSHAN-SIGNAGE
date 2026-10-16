@@ -49,8 +49,12 @@ const renderApp = () => {
 };
 
 loadCmsRuntimeConfig()
+  .then(renderApp)
   .catch((error) => {
     const message = error instanceof Error ? error.message : "Unknown runtime config error";
     console.error("CMS runtime config failed to load", { message });
-  })
-  .finally(renderApp);
+    const alert = document.createElement("div");
+    alert.setAttribute("role", "alert");
+    alert.textContent = "CMS configuration could not be loaded. Contact your administrator.";
+    document.getElementById("root")?.replaceChildren(alert);
+  });

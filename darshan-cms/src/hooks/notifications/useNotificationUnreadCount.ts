@@ -20,14 +20,16 @@ const toUnreadTotal = (payload: unknown) => {
 export const useNotificationUnreadCount = () => {
   const queryClient = useQueryClient();
   const token = useAppSelector((state) => state.auth.token);
+  const user = useAppSelector((state) => state.auth.user);
+  const isAuthenticated = Boolean(token || user);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
 
   const query = useQuery({
     queryKey: notificationUnreadCountQueryKey,
-    enabled: Boolean(token),
+    enabled: isAuthenticated,
     queryFn: () => notificationsApi.getUnreadCount(),
     staleTime: 15_000,
-    refetchInterval: token && !isSocketConnected ? 60_000 : false,
+    refetchInterval: isAuthenticated && !isSocketConnected ? 60_000 : false,
     retry: (failureCount, error) => {
       const status = (error as { status?: number })?.status;
       if (status === 401 || status === 403) return false;
@@ -37,7 +39,7 @@ export const useNotificationUnreadCount = () => {
   const { refetch } = query;
 
   useEffect(() => {
-    if (!token) {
+    if (!isAuthenticated) {
       setIsSocketConnected(false);
       return;
     }
@@ -113,7 +115,7 @@ export const useNotificationUnreadCount = () => {
       socket.off("connect_error", onConnectError);
       socket.off("notifications:count", onCount);
     };
-  }, [queryClient, refetch, token]);
+  }, [isAuthenticated, queryClient, refetch, token]);
 
   const unreadTotal = useMemo(() => query.data?.unread_total ?? 0, [query.data?.unread_total]);
   const isLoadingInitial = query.isLoading && !query.data;

@@ -212,11 +212,14 @@ const getBuildEnvConfig = (
   enforceSecureTransport = true,
 ): CmsRuntimeConfig => {
   const apiBaseUrl = validatePublicBaseUrl(
-    env.VITE_API_BASE_URL ?? origin,
+    env.VITE_API_BASE_URL?.trim() || origin,
     "api.baseUrl",
   );
   const socketBaseUrl = validatePublicBaseUrl(
-    env.VITE_WS_BASE_URL ?? env.VITE_WS_URL ?? env.VITE_API_BASE_URL ?? origin,
+    env.VITE_WS_BASE_URL?.trim() ||
+      env.VITE_WS_URL?.trim() ||
+      env.VITE_API_BASE_URL?.trim() ||
+      origin,
     "realtime.socketBaseUrl",
   );
 

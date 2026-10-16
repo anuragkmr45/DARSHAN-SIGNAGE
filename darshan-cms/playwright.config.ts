@@ -13,12 +13,15 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
-    video: "retain-on-failure",
+    video: process.env.E2E_BROWSER_CHANNEL === "chrome" ? "off" : "retain-on-failure",
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(process.env.E2E_BROWSER_CHANNEL === "chrome" ? { channel: "chrome" as const } : {}),
+      },
     },
   ],
   webServer: shouldStartLocalServer
