@@ -1,5 +1,16 @@
 import { eq, desc, isNull, and, or, gt, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+
+function delegatedVisibilityCondition(allowedScreenIds?: string[]) {
+  if (allowedScreenIds === undefined) return undefined;
+  if (allowedScreenIds.length === 0) return sql`false`;
+  return and(
+    eq(schema.emergencies.target_all, false),
+    sql`jsonb_array_length(${schema.emergencies.screen_group_ids}) = 0`,
+    sql`jsonb_array_length(${schema.emergencies.screen_ids}) > 0`,
+    sql`${schema.emergencies.screen_ids} <@ ${JSON.stringify(allowedScreenIds)}::jsonb`
+  );
+}
 
 export class EmergencyRepository {
   async create(data: {
@@ -15,9 +26,8 @@ export class EmergencyRepository {
     audit_note?: string | null;
     idempotency_key?: string | null;
     request_fingerprint?: string | null;
-  }) {
-    const db = getDatabase();
-    return await db.transaction(async (tx) => {
+  }, executor?: DbExecutor) {
+    const create = async (tx: DbExecutor) => {
       const [emergency] = await tx
         .insert(schema.emergencies)
         .values({
@@ -50,7 +60,8 @@ export class EmergencyRepository {
         actor_id: data.triggered_by,
       });
       return emergency;
-    });
+    };
+    return executor ? create(executor) : getDatabase().transaction(create);
   }
 
   async getActive() {
@@ -69,37 +80,41 @@ export class EmergencyRepository {
     return result[0] || null;
   }
 
-  async listActive() {
-    const db = getDatabase();
-    return db
+  async listActive(options: { allowedScreenIds?: string[] } = {}) {
+    const conditions = [
+      isNull(schema.emergencies.cleared_at),
+      eq(schema.emergencies.is_active, true),
+      or(isNull(schema.emergencies.expires_at), gt(schema.emergencies.expires_at, new Date())),
+    ];
+    const visibility = delegatedVisibilityCondition(options.allowedScreenIds);
+    if (visibility) conditions.push(visibility);
+    return getDatabase()
       .select()
       .from(schema.emergencies)
-      .where(
-        and(
-          isNull(schema.emergencies.cleared_at),
-          eq(schema.emergencies.is_active, true),
-          or(isNull(schema.emergencies.expires_at), gt(schema.emergencies.expires_at, new Date()))
-        )
-      )
+      .where(and(...conditions))
       .orderBy(desc(schema.emergencies.created_at));
   }
 
   async list(options: {
     page?: number;
     limit?: number;
+    allowedScreenIds?: string[];
   }) {
     const db = getDatabase();
     const page = options.page || 1;
     const limit = options.limit || 20;
     const offset = (page - 1) * limit;
 
+    const visibility = delegatedVisibilityCondition(options.allowedScreenIds);
     const [totalRow] = await db
       .select({ count: sql<number>`count(*)` })
-      .from(schema.emergencies);
+      .from(schema.emergencies)
+      .where(visibility);
 
     const items = await db
       .select()
       .from(schema.emergencies)
+      .where(visibility)
       .orderBy(desc(schema.emergencies.created_at))
       .limit(limit)
       .offset(offset);
@@ -112,9 +127,8 @@ export class EmergencyRepository {
     };
   }
 
-  async clear(id: string, cleared_by: string, clear_reason?: string | null) {
-    const db = getDatabase();
-    return await db.transaction(async (tx) => {
+  async clear(id: string, cleared_by: string, clear_reason?: string | null, executor?: DbExecutor) {
+    const clear = async (tx: DbExecutor) => {
       const [emergency] = await tx
         .update(schema.emergencies)
         .set({
@@ -153,12 +167,12 @@ export class EmergencyRepository {
         .where(eq(schema.emergencies.id, id))
         .limit(1);
       return existing ? { emergency: existing, transitioned: false } : null;
-    });
+    };
+    return executor ? clear(executor) : getDatabase().transaction(clear);
   }
 
-  async findByUserAndIdempotencyKey(triggeredBy: string, idempotencyKey: string) {
-    const db = getDatabase();
-    const [result] = await db
+  async findByUserAndIdempotencyKey(triggeredBy: string, idempotencyKey: string, executor?: DbExecutor) {
+    const [result] = await (executor ?? getDatabase())
       .select()
       .from(schema.emergencies)
       .where(and(
@@ -169,9 +183,8 @@ export class EmergencyRepository {
     return result || null;
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
-    const result = await db
+  async findById(id: string, executor?: DbExecutor) {
+    const result = await (executor ?? getDatabase())
       .select()
       .from(schema.emergencies)
       .where(eq(schema.emergencies.id, id));

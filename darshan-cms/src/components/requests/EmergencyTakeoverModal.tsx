@@ -80,12 +80,13 @@ export function EmergencyTakeoverModal({
 }: EmergencyTakeoverModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { can, isAdminOrSuperAdmin } = useAuthorization();
-  const canManageEmergency = isAdminOrSuperAdmin || can("update", "Screen");
+  const { can } = useAuthorization();
+  const canManageEmergencyGlobally = can("manage", "Emergency");
+  const canUseEmergency = canManageEmergencyGlobally || can("update", "Screen");
 
   const [message, setMessage] = useState("");
   const [severity, setSeverity] = useState<Severity>("HIGH");
-  const [scope, setScope] = useState<ScopeMode>("all");
+  const [scope, setScope] = useState<ScopeMode>("screens");
   const [selectedScreenIds, setSelectedScreenIds] = useState<string[]>([]);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [mediaId, setMediaId] = useState<string>("none");
@@ -100,7 +101,7 @@ export function EmergencyTakeoverModal({
   const emergencyStatusQuery = useQuery({
     queryKey: queryKeys.emergencyStatus,
     queryFn: emergencyApi.status,
-    enabled: open,
+    enabled: open && canUseEmergency,
     staleTime: 15_000,
     refetchInterval: open ? 30_000 : false,
   });
@@ -108,7 +109,7 @@ export function EmergencyTakeoverModal({
   const mediaQuery = useQuery({
     queryKey: [...queryKeys.media, "emergency-picker"],
     queryFn: () => mediaApi.list({ page: 1, limit: 100, status: "READY" }),
-    enabled: open,
+    enabled: open && canUseEmergency,
     staleTime: 60_000,
   });
 
@@ -122,7 +123,7 @@ export function EmergencyTakeoverModal({
   const groupsQuery = useQuery({
     queryKey: queryKeys.screenGroups,
     queryFn: () => screensApi.listGroups({ page: 1, limit: 100 }),
-    enabled: open,
+    enabled: open && canManageEmergencyGlobally,
     staleTime: 60_000,
   });
 
@@ -145,7 +146,7 @@ export function EmergencyTakeoverModal({
   const resetForm = () => {
     setMessage("");
     setSeverity("HIGH");
-    setScope("all");
+    setScope("screens");
     setSelectedScreenIds([]);
     setSelectedGroupIds([]);
     setMediaId("none");
@@ -222,10 +223,18 @@ export function EmergencyTakeoverModal({
   };
 
   const handleActivate = async () => {
-    if (!canManageEmergency) {
+    if (!canUseEmergency) {
       toast({
         title: "Permission denied",
         description: "You do not have permission to trigger an emergency takeover.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!canManageEmergencyGlobally && scope !== "screens") {
+      toast({
+        title: "Direct screens only",
+        description: "Your delegated emergency permission is limited to selected screens.",
         variant: "destructive",
       });
       return;
@@ -357,8 +366,8 @@ export function EmergencyTakeoverModal({
                       <SelectValue placeholder="Select scope" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All screens</SelectItem>
-                      <SelectItem value="groups">Screen groups</SelectItem>
+                      {canManageEmergencyGlobally && <SelectItem value="all">All screens</SelectItem>}
+                      {canManageEmergencyGlobally && <SelectItem value="groups">Screen groups</SelectItem>}
                       <SelectItem value="screens">Specific screens</SelectItem>
                     </SelectContent>
                   </Select>
@@ -660,7 +669,7 @@ export function EmergencyTakeoverModal({
           <Button
             variant={scope === "all" ? "destructive" : "default"}
             onClick={() => void handleActivate()}
-            disabled={!canManageEmergency || triggerMutation.isPending}
+            disabled={!canUseEmergency || triggerMutation.isPending}
           >
             <Zap className="mr-2 h-4 w-4" />
             {triggerMutation.isPending ? "Activating..." : "Activate emergency"}

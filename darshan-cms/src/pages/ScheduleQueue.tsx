@@ -28,9 +28,10 @@ import { useToast } from "@/hooks/use-toast";
 import { ApiError } from "@/api/apiClient";
 import type { ScheduleRequestListItem } from "@/api/types";
 import { useAppSelector } from "@/store/hooks";
-import { canManageEmergency, getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
+import { getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useScreensRealtime } from "@/hooks/screens/useScreensRealtime";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 const PAGE_SIZE = 10;
 
@@ -92,7 +93,8 @@ export default function ScheduleQueue() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const currentUser = useAppSelector((state) => state.auth.user);
-  const showEmergencyTakeover = canManageEmergency(currentUser);
+  const { can } = useAuthorization();
+  const showEmergencyTakeover = can("manage", "Emergency") || can("update", "Screen");
   const [searchQuery, setSearchQuery] = useState("");
   const [dateField, setDateField] = useState<DateField>("created_at");
   const [dateFrom, setDateFrom] = useState("");

@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, or, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, inArray, or, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 
 type DbExecutor = any;
@@ -34,6 +34,7 @@ export class ScreenRepository {
     limit?: number;
     status?: string;
     q?: string;
+    ids?: string[];
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -41,6 +42,9 @@ export class ScreenRepository {
     const offset = (page - 1) * limit;
 
     const conditions = [];
+    if (options.ids) {
+      conditions.push(options.ids.length > 0 ? inArray(schema.screens.id, options.ids as any) : sql`false`);
+    }
     if (options.status) {
       conditions.push(eq(schema.screens.status, options.status as any));
     }

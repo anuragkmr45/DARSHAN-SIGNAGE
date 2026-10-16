@@ -44,6 +44,7 @@ import {
   updateDisplaySelection,
 } from '@/services/screen-display-state-service';
 import { displaySelectionSchema } from '@/utils/display-profile';
+import { subject } from '@casl/ability';
 
 const logger = createLogger('screen-routes');
 const { OK } = HTTP_STATUS;
@@ -291,7 +292,16 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        const screenRows = await db.select().from(schema.screens);
+        const accessibleScreenIds = screenRows
+          .filter((screen) =>
+            (ability as any).can('read', subject('Screen', screen)) ||
+            (ability as any).can('update', subject('Screen', screen))
+          )
+          .map((screen) => screen.id);
+        if (accessibleScreenIds.length === 0) throw AppError.forbidden('Forbidden');
 
         const query = listScreensQuerySchema.parse(request.query);
         const result = await screenRepo.list({
@@ -299,6 +309,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
           limit: query.limit,
           status: query.status,
           q: query.q,
+          ids: accessibleScreenIds,
         });
 
         if (query.include_summary?.toLowerCase() === 'true') {
