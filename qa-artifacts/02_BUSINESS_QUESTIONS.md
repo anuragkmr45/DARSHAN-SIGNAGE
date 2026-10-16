@@ -4,7 +4,7 @@ Status: SOURCE-BEHAVIOR ANSWERED FOR ALL 20 TOPICS. User-approved rules are iden
 
 Source behavior for all BQ-001 through BQ-020 has been recorded. A question's remaining `TBD` means business approval or an actual site target is missing, not that code behavior is unknown. QA can characterize the implementation now; release acceptance for an undecided policy remains separate. Do not include passwords, keys, production tokens or customer data.
 
-Unless a section says otherwise, historical observed behavior refers to its dated static baseline. BQ-001/playback was refreshed on 2026-10-15; BQ-007, deletion-specific BQ-009 and the account portion of BQ-020 were refreshed against `release-01` commit `e721c2ab0c8b94af95b6914810a0c6788899e318` plus the 2026-10-16 deleted-user ownership working tree. Source references are repository-relative. Ownership has partial isolated API/CMS developer evidence, but the post-run source changes, migration `0045`, deterministic races and final frozen-build runtime remain unverified; the earlier PDF/video runtime is separately linked.
+Unless a section says otherwise, historical observed behavior refers to its dated static baseline. BQ-002/003/006/007/008/009 were refreshed through source commit `8f66d8f`; their combined review is `evidence/authorization-session-requests-review.md`. Source references are repository-relative. These refreshed areas have build/bounded-test evidence but no new application runtime; migration, deterministic races, multi-process sockets and final frozen-candidate execution remain unverified. Earlier PDF/video and ownership runtime is separately linked.
 
 ## Batch 1: Core Behavior And Scope
 
@@ -32,7 +32,7 @@ Question: Is it intentional that SUPER_ADMIN can manage ADMIN and OPERATOR accou
 
 Why this changes testing: Role names alone suggest a hierarchy that the current policy does not implement. The expected allow/deny matrix must come from an approved policy.
 
-Observed implementation: Target-role helpers give SUPER_ADMIN the ADMIN/OPERATOR set and give ADMIN the DEPARTMENT/OPERATOR set. The CMS repeats this distinction.
+Observed implementation, refreshed 2026-10-16: global `manage User` participates in account administration, while protected system-role hierarchy remains explicit. A repository-level transaction locks the SUPER_ADMIN role row and blocks delete/disable/demotion only when the target is the last active direct SUPER_ADMIN. The recovery CLI calls the same invariant.
 
 Evidence: `darshan-server/src/rbac/policy.ts::canManageUserRoleTarget`, `canManageUserRecord`; `darshan-server/src/routes/users.ts`; `darshan-cms/src/lib/access.ts::canManageUserTarget`.
 
@@ -42,11 +42,9 @@ Affected areas: UC-003, UC-004; BR-006, BR-007, BR-052; create/invite/edit/disab
 
 Answer: "yes deleting super admin shoudl be blocked". Business source: user answer BQ-002, 2026-09-24.
 
-Follow-up answer, 2026-09-24: "every SUPER_ADMIN"; SUPER_ADMIN should manage all user roles: "yes". The user also requested checking actual code behavior.
+Latest decision, 2026-10-16: block deleting, disabling and demoting the **last active SUPER_ADMIN**. Removing one is allowed when another active direct SUPER_ADMIN remains.
 
-Resolution: core requirements RESOLVED. Every SUPER_ADMIN account is protected from deletion (BR-067), and SUPER_ADMIN should manage users across all roles subject to that exception (BR-070). Demotion/disablement of the last active SUPER_ADMIN remains a separate unconfirmed edge policy; do not interpret deletion protection as approval or denial of those operations.
-
-Code comparison: normal account APIs deny SUPER_ADMIN deletion by their target-role guard, but also deny SUPER_ADMIN management of DEPARTMENT/SUPER_ADMIN/custom-role users. Role-definition management is broader and must not be confused with account management. The recovery CLI separately protects the last active SUPER_ADMIN from deactivation. See `evidence/policy-behavior-review.md::BQ-002` for source anchors and scope limits.
+Resolution: RESOLVED under BR-067/070. Expected QA result: the last removal returns `409 LAST_ACTIVE_SUPER_ADMIN`; one of two may be removed; two concurrent removals cannot both commit; global User managers administer other user types subject to permission and hierarchy checks. See `AUTHZ-01` and `evidence/authorization-session-requests-review.md`.
 
 ### BQ-003: Emergency Authority
 
@@ -54,7 +52,7 @@ Question: Should emergency trigger/clear be restricted to ADMIN and SUPER_ADMIN,
 
 Why this changes testing: Emergency takeover is safety-sensitive. A role that can manage an ordinary screen may not be intended to override site-wide content.
 
-Observed implementation: The backend accepts admin-like/manage-all users and also a role able to `update Screen`; the CMS helper exposes emergency management only to admin-like users.
+Observed implementation, refreshed 2026-10-16: `manage Emergency` is the global controller. Otherwise conditional `update Screen` is evaluated on every target record. Delegates can use only explicit direct screens; group/global/mixed targets are denied. Trigger/clear recheck permission transactionally, while status/history are scoped to authorized emergencies.
 
 Evidence: `darshan-server/src/routes/emergency.ts::requireEmergencyAdmin`; `darshan-cms/src/lib/access.ts::canManageEmergency`.
 
@@ -66,9 +64,9 @@ Answer: "delegated users too". Business source: user answer BQ-003, 2026-09-24.
 
 Follow-up answer, 2026-09-24: "screen-management permission sufficient, all selected screens". The user also requested checking actual code behavior.
 
-Resolution: screen-management delegation and explicitly selected screen targets are CONFIRMED (BR-068). The answer does not automatically approve every additional global/group/clear-scope behavior found in the API; retain these as scope-boundary cases rather than assuming an ownership policy.
+Latest decision: delegates control and clear only emergencies on screens they may manage; ADMIN/SUPER_ADMIN or any role with `manage Emergency` controls groups/global emergencies.
 
-Code comparison: backend accepts update Screen and validates selected target existence without per-target ownership checks. The emergency modal also accepts that permission, but its parent Schedule Queue page hides/unmounts the control for non-admin role names. This is a source-observed UI workflow conflict, not an executed test failure. See `evidence/policy-behavior-review.md::BQ-003`.
+Resolution: RESOLVED under BR-068/095. Expected QA result is recorded in `AUTHZ-03`; source/build/unit evidence exists, but CMS/API/player runtime remains Not Tested.
 
 ### BQ-004: Offline Playback Policy
 
@@ -116,7 +114,7 @@ Question: What should the separate `/requests` workboard do: an admin-only suppo
 
 Why this changes testing: Its visibility and terminal state are contradictory across layers, so either privacy tests or functional workflow tests can otherwise get the wrong expected result.
 
-Observed implementation: The CMS requires `read Request`. Traced backend handlers check authentication but not the matching Request permission/ownership. List filtering accepts OPEN/IN_PROGRESS/CLOSED; the database enum defines OPEN/IN_PROGRESS/PENDING_APPROVAL/APPROVED/REJECTED/COMPLETED. The current route surface does not establish a complete approval transition workflow.
+Observed implementation, refreshed 2026-10-16: general Request server registration, route/repository modules, CMS page/client/navigation and report/webhook surfaces are removed. Legacy tables remain for compatibility. Schedule Requests remain a separate registered feature.
 
 Evidence: `darshan-cms/src/AuthenticatedAppShell.tsx`; `darshan-cms/src/pages/Requests.tsx`; `darshan-server/src/routes/requests.ts`; `darshan-server/src/db/repositories/request.ts`; `darshan-server/src/db/schema.ts::requestStatusEnum`.
 
@@ -126,7 +124,9 @@ Affected areas: UC-023; BR-037, BR-055; role/owner matrix, status transitions, a
 
 Answer: "Requests feature is out of scope for this release." Business source: user answer BQ-006, 2026-09-24.
 
-Resolution: RESOLVED for release scope. Exclude UC-023 functional workflow/UAT acceptance and do not seek its intended status graph. Schedule requests/approvals remain in scope. Preserve authorization/exposure/data-integrity risk coverage if the excluded workboard APIs remain reachable. This scope decision does not instruct removal or disabling of application code.
+Latest decision: disable the out-of-scope general Requests APIs for this release.
+
+Resolution: RESOLVED under BR-055/094. Expected QA result: every former general Requests URL and UI/client/report/webhook entry is absent/not-found, legacy rows are not exposed, and Schedule Requests still work. See `AUTHZ-06`.
 
 ## Batch 2: Access, Content And Evidence Policy
 
@@ -136,7 +136,7 @@ Question: Should operators be able to discover operators in other departments? F
 
 Why this changes testing: Department membership is not a uniform privacy boundary in the current implementation. A per-resource action matrix is needed, not an assumption that every record is either global or private.
 
-Observed implementation, refreshed 2026-10-16: OPERATOR directory behavior remains separate, but Media, Layout, Presentation and Schedule now persist an `ORGANIZATION`, `DEPARTMENT`, or `RESTRICTED` owner at creation/migration. Their list/read/manage paths use one centralized policy; Presentation's former basic-route gap and nested reference gap are closed in source. This working tree has build/unit evidence only, not runtime acceptance.
+Observed implementation, refreshed 2026-10-16: Media, Layout, Presentation and Schedule persist `ORGANIZATION`, `DEPARTMENT` or `RESTRICTED` ownership and use centralized policy. User/operator/invite/chat participant directories now apply active same-department visibility before pagination unless the actor has global `manage User`.
 
 Evidence: `darshan-server/src/rbac/content-ownership.ts`; content repositories/routes; migration `0045_deleted_user_content_ownership.sql`; `darshan-cms/src/lib/access.ts`; `evidence/deleted-user-ownership-review.md`.
 
@@ -144,11 +144,9 @@ Affected areas: UC-003..UC-012, UC-024; BR-008, BR-047, BR-048, BR-052, BR-085..
 
 Historical answer received 2026-09-25 (superseded for the four content resources on 2026-10-16): the user supplied the then-current per-resource implementation matrix and explicitly distinguished the presentation authorization gap from intended unrestricted sharing. Media/layout reads allowed same-department plus ADMIN-owned content; ordinary deletion/editing was creator-oriented; Schedule access was department-derived; and basic Presentation handlers omitted guards. OPERATOR directory access included operators' names/emails across departments, whereas DEPARTMENT was restricted to its own operators.
 
-Updated decision received 2026-10-16: operational ownership must not be assigned to another individual when a creator is deleted. It stays with the original department, or with the organization for administrator-created content; unresolved legacy rows are restricted to administrators. Administrators manage all scopes. A permitted DEPARTMENT lead manages department content; an OPERATOR/custom department user manages only their own content while still in the owner department; peers and other departments cannot mutate it. Organization content is readable with the corresponding permission but administrator-managed. Creator transfer does not move old content. Stable ownership applies uniformly to Media, Layout, Presentation, Schedule and Schedule Request authorization.
+Latest decisions: non-global users see people only in their department; Media/Layout permit same-department read but creator/global-manager edit/delete; Presentation permits creator and same-department permitted access with creator/global-manager mutation; Schedule permits same-department permitted management with action-specific grants; other departments are denied. ADMIN-created content is organization-shared while SUPER_ADMIN-created content is restricted/private.
 
-Resolution: **RESOLVED for the four content resources and deleted/ transferred creator behavior** under BR-085..090. The old source characterization in `evidence/content-runtime-review.md` is historical and superseded for these resources by `evidence/deleted-user-ownership-review.md`. OPERATOR-directory cross-department name/email visibility remains a separate unapproved privacy decision under BR-052.
-
-Code-baseline expected result for QA: an actor must have the applicable ability and stable-owner access. Administrators read/manage all scopes. Permitted users read organization content but only administrators mutate it. Same-department users read department content; a DEPARTMENT lead with ability manages it; an OPERATOR/custom user with ability manages only their own resource and only while still in the owner department. Peers, moved creators and other departments are denied mutation; restricted rows are administrator-only. Presentation/Schedule parents cannot expose an unreadable or scope-incompatible nested resource. Deleting/transferring the creator does not change owner scope/department or published playback. Directory visibility must be scored separately.
+Resolution: RESOLVED under BR-085..093. Detailed Expected Results are in `AUTHZ-08..13`. Deleting/transferring the creator does not change stable owner scope/department or published playback.
 
 ### BQ-008: Saved Role Customizations
 
@@ -156,7 +154,7 @@ Question: Must edits to built-in role permissions survive API restarts and upgra
 
 Why this changes testing: A permission change that succeeds in the UI but disappears after restart can be correct policy or a serious defect.
 
-Observed implementation: Roles can be edited through permission-controlled APIs, while API startup calls `syncSystemRolePermissions()` and overwrites built-in grants. CASL custom grants coexist with name-based checks.
+Observed implementation, refreshed 2026-10-16: feature routes and CMS controls use effective CASL permissions; inherited and conditional grants are resolved. A recursive regression test rejects feature-level custom-role name gates. Role-name identity remains only for protected system-role hierarchy and content ownership classification.
 
 Evidence: `darshan-server/src/routes/roles.ts`; `darshan-server/src/rbac/system-roles.ts`; `darshan-server/src/server/index.ts`; `darshan-cms/src/components/settings/RolesPermissionsTab.tsx`.
 
@@ -164,9 +162,7 @@ Affected areas: UC-004, UC-027; BR-009, BR-049, BR-052; persistence, authorizati
 
 Answer, 2026-09-24: "built-in roles stay fixed and customization use only custom roles"; check actual code behavior.
 
-Resolution: RESOLVED for built-in permission immutability/customization policy (BR-071). Do not accept temporary edits to built-ins merely because startup later resets them.
-
-Code comparison: API startup overwrites canonical built-in permissions, but UI and PUT role APIs allow authorized edits, including name/permissions. Custom-role grants persist outside this reset loop; ordinary user-role assignment restrictions still obstruct the complete workflow. See `evidence/policy-behavior-review.md::BQ-008`. Custom-role access to each business workflow follows the approved permission/role matrix, not an assumption of universal name-gate removal.
+Resolution: RESOLVED under BR-071/092. Custom-role permissions decide access everywhere regardless of role display name; protected system-role hierarchy remains identity-based. Runtime inheritance/condition/session-withdrawal coverage is `AUTHZ-02`.
 
 ### BQ-009: Existing Sessions After Account Changes
 
@@ -174,7 +170,7 @@ Question: When an account is disabled, its password is reset, or its role/depart
 
 Why this changes testing: Session revocation latency changes the expected result for direct API calls, open browser tabs and already-connected sockets.
 
-Observed implementation, refreshed 2026-10-16: every access-token verification requires a live unexpired session plus an active, non-deleted user. Tombstone deletion and repository-backed user/password changes remove all target sessions; the user-facing update/reset/activation routes disconnect chat/notification/screen rooms. Login session creation locks and rechecks the user/password and current role so a concurrent old-password login cannot escape revocation. Effective-role graph edits serialize with guarded content writes and revoke sessions for users assigned directly or through transitive inheritance in the same transaction, then disconnect their local rooms. Thus a department transfer or inherited permission change cannot keep using an old session for a later guarded mutation. The recovery CLI remains a separate operational case because it cannot directly disconnect sockets owned by another running process.
+Observed implementation, refreshed 2026-10-16: account/password and direct/transitive role-permission changes revoke affected sessions transactionally. Invalidation broadcasts through the realtime bus to all API nodes, disconnects local user rooms, and protected socket actions reverify the stored handshake token before proceeding. Login issuance locks and rechecks current user/password/role. The recovery CLI remains an operational restart case.
 
 Evidence: `darshan-server/src/auth/jwt.ts::verifyAccessToken`; `darshan-server/src/db/repositories/user.ts::tombstone`; `darshan-server/src/routes/users.ts`; shared user rooms in the chat/notification/screen namespaces; `evidence/deleted-user-ownership-review.md`.
 
@@ -184,9 +180,7 @@ Answer, 2026-09-24: "prefered immediately, within a specified delay"; check actu
 
 Latest follow-up, 2026-09-24: "Immediate access withdrawal"; the user describes its absence from ordinary account updates, token refresh and existing socket connections.
 
-Resolution: record immediate withdrawal as the intended acceptance requirement (BR-056), not as a current capability. No fallback grace period is approved. After the account/security change commits, old access must not authorize subsequent protected operations or ongoing protected socket delivery. This requirement does not prescribe a particular revocation implementation or require removing still-authorized privileges after a role change.
-
-Code comparison: deletion, ordinary user-row updates, password reset and role-definition edits now have source-level session revocation; user-facing paths disconnect local sockets, and reconnect requires a surviving session plus current active account. Login issuance is serialized with user/role change. Permission-definition propagation and the stopped/restarted-backend recovery procedure still need their live-socket matrix. See `evidence/deleted-user-ownership-review.md` for current source and `evidence/policy-behavior-review.md::BQ-009` for the superseded historical gap.
+Resolution: RESOLVED under BR-056/096. Immediately after commit, old REST and socket access must fail on every node. Bounded in-memory broadcast testing passed; multi-node Valkey, failure and in-flight runtime cases remain `AUTHN-04`/`CONC-07`.
 
 Planning note: distinguish operations already in flight before the change from operations authorized after it. Record measured propagation and any residual-access window during future execution; do not invent an accepted delay. This review did not execute a session or socket test.
 

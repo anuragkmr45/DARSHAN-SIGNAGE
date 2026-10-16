@@ -6,12 +6,12 @@ The 2026-10-15 targeted run used a smaller disposable single-host Linux topology
 
 ## Provisioned Actors
 
-- SUPER_ADMIN accounts: at least two, to test any-account deletion block and last-active edge without risking sole access.
+- SUPER_ADMIN accounts: at least two active direct system-role users, plus inactive/deleted fixtures, to test safe removal, last-active delete/disable/demotion and concurrent removal without risking sole access.
 - ADMIN accounts: two, with one self-authored request for approved self-approval/direct publish.
 - DEPARTMENT accounts: one each in departments A and B.
-- OPERATOR accounts: creator and peer in A, one in B; include user names/emails visible in cross-department directory characterization.
+- OPERATOR/accounts: creator and peer in A, one in B, inactive/deleted users, a null-department user and a global User manager. Use them across user/operator/invite/chat participant lists, pagination and guessed-ID checks; cross-department visibility is expected only for the global manager.
 - Deleted-user fixtures: one tombstoned creator in A, one creator transferred A -> B before deletion, one inactive but not deleted account, and one missing legacy creator. Retain synthetic names and historical references; use a known original email solely to verify scrub/non-disclosure/reuse.
-- Custom roles: one with `update Screen`, one department-bound content creator, one read-only content role, one conditional department grant and one with no relevant grant.
+- Custom roles: one with conditional `update Screen` for selected records, one with `manage Emergency`, one department-bound content creator, one read-only role, one with independent Schedule action grants, one inherited/conditional User grant and one with no relevant grant. Rename custom roles during testing without changing permissions.
 - Paired devices: active landscape, portrait, overlapping-group, revoked/recovered and offline candidates. Use disposable device certificates and test CA.
 - Chat actors: owner, moderator, member, removed member and private DM outsider.
 

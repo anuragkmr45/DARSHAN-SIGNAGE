@@ -1,7 +1,7 @@
 # Deleted-User Ownership Source Review
 
 Review date: 2026-10-16  
-Source baseline: `release-01` at `e721c2ab0c8b94af95b6914810a0c6788899e318` plus the uncommitted deleted-user ownership implementation.  
+Source baseline: historical ownership implementation; latest authorization behavior is reconciled through `8f66d8f` in `authorization-session-requests-review.md`.
 Evidence type: source inspection, compilation/unit tests, and a partial disposable API/CMS developer run. The run covered the role/scope matrix, stable ownership across transfer/deletion, tombstones, email reuse/history privacy, department conflicts and two CMS screenshots. **Migration `0045`, deterministic races, sockets, final browser coverage and the final frozen build were not runtime-verified.** See `runtime-2026-10-16/runtime-validation.md`.
 
 ## Intended Product Behavior
@@ -10,13 +10,14 @@ Deleting a CMS user is an account-access operation, not a content-transfer opera
 
 Ownership is assigned at creation and is not recalculated when the creator later changes department or is deleted:
 
-- administrator-created content is `ORGANIZATION` owned;
+- `ADMIN`-created content is `ORGANIZATION` owned;
+- `SUPER_ADMIN`-created content is `RESTRICTED`;
 - a department-bound creator's content is `DEPARTMENT` owned by that department;
 - legacy content without a valid owner mapping is `RESTRICTED` and administrator-only;
 - ownership is never automatically reassigned to another individual;
 - published snapshots/player payloads do not contain this control-plane metadata and are not rewritten on account deletion.
 
-Authorization requires both the relevant CASL ability and the stable ownership rule. Administrators manage all scopes. Organization content is readable by permitted users but managed only by administrators. Department content is readable within its department; a permitted DEPARTMENT lead manages it, while an OPERATOR or custom department-bound user manages only content they created and only while they remain in the owner department. A peer operator cannot modify it. Restricted content is administrator-only.
+Authorization requires both the relevant CASL ability and the stable ownership rule. A global subject manager can manage all applicable scopes. Organization content is readable by permitted users but globally managed. Department Media/Layout/Presentation is readable within its department but mutable only by the creator or global manager. Schedule is the explicit exception: a permitted same-department actor may perform only its granted lifecycle action. Restricted content requires global subject management.
 
 ## Source Evidence
 

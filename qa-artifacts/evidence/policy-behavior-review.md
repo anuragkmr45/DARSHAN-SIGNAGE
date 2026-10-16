@@ -2,13 +2,13 @@
 
 Static review of `release-01`, commit `a6e401d2479cd0dee34c33552671cd0f86d4d173`, 2026-09-24. Business source: the user's follow-up answers to BQ-002, BQ-003, BQ-004, BQ-008 and BQ-009. No application code was changed and no tests, services, deployment or database commands were run. Line anchors refer to this baseline.
 
-**Update notice, 2026-10-16:** account withdrawal now has a separate source implementation: token verification requires a live session and active non-deleted user; tombstoning and repository-backed user/password updates remove target sessions, and user-facing paths disconnect user rooms. See `deleted-user-ownership-review.md` and `CONC-07`. Permission-definition/recovery-CLI socket behavior and in-flight boundaries remain open runtime checks; all historical line anchors below are point-in-time evidence.
+**Supersession notice, 2026-10-16:** sections BQ-002, BQ-003, BQ-006, BQ-007, BQ-008 and BQ-009 below are retained as point-in-time pre-fix findings. Their current acceptance behavior and source implementation are in `authorization-session-requests-review.md`, BR-055/056/067/068/085/086/091..096 and cases `AUTHN-04`, `AUTHZ-01..03`, `AUTHZ-06`, `AUTHZ-08..13`. Current code protects only the last active SUPER_ADMIN, scopes directories by department, enforces target-aware emergencies, disables general Requests, uses permission-driven custom roles and broadcasts/revalidates session invalidation. Runtime proof remains open.
 
 This distinguishes intended acceptance from implemented behavior. Source-confirmed branches are not production execution evidence. The recommendations below are test-planning targets, not implemented fixes.
 
 ## BQ-002: SUPER_ADMIN Accounts
 
-Confirmed requirement: block deletion of every SUPER_ADMIN account. SUPER_ADMIN must be able to manage users of all roles, subject to that deletion prohibition. The user has not separately approved a last-active-account demotion/disablement policy.
+Historical requirement at the time of this review: block deletion of every SUPER_ADMIN account. **Superseded:** current rule blocks delete/disable/demotion only for the last active direct SUPER_ADMIN; see `authorization-session-requests-review.md` and `AUTHZ-01`.
 
 Actual code:
 
