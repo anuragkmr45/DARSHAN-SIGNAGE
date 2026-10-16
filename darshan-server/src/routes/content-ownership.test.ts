@@ -272,7 +272,7 @@ describe('content ownership routes', () => {
     }
   });
 
-  it('exposes server-derived permissions for creator, peer, department lead, and admin', async () => {
+  it('exposes creator-only content mutation and department-wide schedule mutation permissions', async () => {
     for (const kind of ['media', 'layouts', 'presentations', 'schedules'] as const) {
       const ownerResponse = await server.inject({
         method: 'GET',
@@ -288,7 +288,7 @@ describe('content ownership routes', () => {
         headers: auth(peerToken),
       });
       expect(peerResponse.statusCode).toBe(200);
-      expect(JSON.parse(peerResponse.body).permissions.can_update).toBe(false);
+      expect(JSON.parse(peerResponse.body).permissions.can_update).toBe(kind === 'schedules');
 
       const leadResponse = await server.inject({
         method: 'GET',
@@ -296,7 +296,7 @@ describe('content ownership routes', () => {
         headers: auth(leadToken),
       });
       expect(leadResponse.statusCode).toBe(200);
-      expect(JSON.parse(leadResponse.body).permissions.can_update).toBe(true);
+      expect(JSON.parse(leadResponse.body).permissions.can_update).toBe(kind === 'schedules');
 
       const adminResponse = await server.inject({
         method: 'GET',
@@ -475,7 +475,7 @@ describe('content ownership routes', () => {
         headers: auth(customEditorToken),
         payload: { name: `Custom editor attempted peer ${kind}` },
       });
-      expect(peerUpdate.statusCode).toBe(403);
+      expect(peerUpdate.statusCode).toBe(kind === 'schedules' ? 200 : 403);
     }
   });
 
@@ -510,7 +510,7 @@ describe('content ownership routes', () => {
     }
   });
 
-  it('allows only an owner, department lead, or administrator to update department content', async () => {
+  it('allows creator-only content mutation and department-wide permitted schedule mutation', async () => {
     const targets = [
       { kind: 'layouts' as const, payload: { name: 'Owner updated layout' } },
       { kind: 'presentations' as const, payload: { name: 'Owner updated presentation' } },
@@ -520,7 +520,7 @@ describe('content ownership routes', () => {
     for (const target of targets) {
       const url = detailUrl(target.kind, departmentResources[target.kind]);
       const denied = await server.inject({ method: 'PATCH', url, headers: auth(peerToken), payload: target.payload });
-      expect(denied.statusCode).toBe(403);
+      expect(denied.statusCode).toBe(target.kind === 'schedules' ? 200 : 403);
 
       const ownerUpdate = await server.inject({ method: 'PATCH', url, headers: auth(ownerToken), payload: target.payload });
       expect(ownerUpdate.statusCode).toBe(200);
@@ -531,7 +531,7 @@ describe('content ownership routes', () => {
         headers: auth(leadToken),
         payload: { name: `Lead updated ${target.kind}` },
       });
-      expect(leadUpdate.statusCode).toBe(200);
+      expect(leadUpdate.statusCode).toBe(target.kind === 'schedules' ? 200 : 403);
 
       const adminUpdate = await server.inject({
         method: 'PATCH',

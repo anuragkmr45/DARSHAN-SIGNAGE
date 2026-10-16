@@ -290,7 +290,7 @@ test.describe("Scheduling and emergency operator flow", () => {
     await expect(page.getByText("Asia/Kolkata", { exact: true })).toBeVisible();
     await expect(page.getByText("Page 2 of 5", { exact: true })).toBeVisible();
     await expect(page.getByText("Page 5 of 5", { exact: true })).toBeVisible();
-    await expect(page.getByText("Loop On", { exact: true })).toBeVisible();
+    await expect(page.getByText("Loop On", { exact: true }).first()).toBeVisible();
     expect(capturedSchedulePayload).not.toBeNull();
     expect(capturedSchedulePayload?.timezone).toBe("Asia/Kolkata");
   });

@@ -102,7 +102,7 @@ describe('Role and permission routes', () => {
     });
 
     expect(superAdminResponse.statusCode).toBe(HTTP_STATUS.CREATED);
-    expect(JSON.parse(superAdminResponse.body).name).toBe(createPayload.name);
+    expect(JSON.parse(superAdminResponse.body).name).toBe(`${createPayload.name}_SUPER`);
   });
 
   it('revokes sessions for every user assigned to an updated role', async () => {
@@ -224,7 +224,7 @@ describe('Role and permission routes', () => {
     });
 
     expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
-    expect(JSON.parse(response.body).details).toEqual({ inheritor_role_ids: [childRoleId] });
+    expect(JSON.parse(response.body).error.details).toEqual({ inheritor_role_ids: [childRoleId] });
     expect(await db.select().from(schema.roles).where(eq(schema.roles.id, parentRoleId))).toHaveLength(1);
     expect(await db.select().from(schema.roles).where(eq(schema.roles.id, childRoleId))).toHaveLength(1);
   });

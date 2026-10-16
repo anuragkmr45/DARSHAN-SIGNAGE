@@ -6,6 +6,7 @@ import { getDatabase, schema } from '@/db';
 import { eq } from 'drizzle-orm';
 import { generateAccessToken } from '@/auth/jwt';
 import { createSessionRepository } from '@/db/repositories/session';
+import { randomUUID } from 'node:crypto';
 
 async function issueAdminToken() {
   const db = getDatabase();
@@ -310,9 +311,30 @@ describe('User Routes', () => {
 
   describe('DELETE /api/v1/users/:id', () => {
     it('allows deleting a SUPER_ADMIN when another active SUPER_ADMIN remains', async () => {
-      const token = await issueSuperAdminToken();
       const superAdminRoleId = await getRoleIdByName('SUPER_ADMIN');
       const db = getDatabase();
+      const actorId = randomUUID();
+      const actorEmail = `surviving-super-admin-${actorId}@example.test`;
+      await db.insert(schema.users).values({
+        id: actorId,
+        email: actorEmail,
+        password_hash: 'not-used',
+        first_name: 'Surviving',
+        last_name: 'Administrator',
+        role_id: superAdminRoleId,
+        is_active: true,
+      });
+      const actorToken = await generateAccessToken(
+        actorId,
+        actorEmail,
+        superAdminRoleId,
+        'SUPER_ADMIN'
+      );
+      await createSessionRepository().create({
+        user_id: actorId,
+        access_jti: actorToken.jti,
+        expires_at: actorToken.expiresAt,
+      });
       const [target] = await db
         .insert(schema.users)
         .values({
@@ -328,7 +350,7 @@ describe('User Routes', () => {
       const response = await server.inject({
         method: 'DELETE',
         url: `/api/v1/users/${target.id}`,
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: `Bearer ${actorToken.token}` },
       });
 
       expect(response.statusCode).toBe(HTTP_STATUS.OK);

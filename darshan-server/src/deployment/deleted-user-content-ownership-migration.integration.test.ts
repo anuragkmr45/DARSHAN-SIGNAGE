@@ -30,7 +30,12 @@ suite('0045 deleted-user content ownership migration rehearsal', () => {
       await adminPool.query(`CREATE DATABASE "${databaseName}"`);
       connection = await rehearsalPool.connect();
       const manifest = await loadMigrationManifest();
-      const pre0045 = manifest.filter((migration) => migration.id !== '0045_deleted_user_content_ownership.sql');
+      const through0045 = manifest.filter(
+        (migration) => migration.id.localeCompare('0046_super_admin_restricted_content.sql') < 0
+      );
+      const pre0045 = through0045.filter(
+        (migration) => migration.id.localeCompare('0045_deleted_user_content_ownership.sql') < 0
+      );
       const preUpgrade = await applyDatabaseMigrations(connection, pre0045, 'preqa-0044');
       expect(preUpgrade.pending).toEqual([]);
 
@@ -100,7 +105,7 @@ suite('0045 deleted-user content ownership migration rehearsal', () => {
         );
       }
 
-      const upgraded = await applyDatabaseMigrations(connection, manifest, 'preqa-0045');
+      const upgraded = await applyDatabaseMigrations(connection, through0045, 'preqa-0045');
       expect(upgraded.pending).toEqual([]);
       expect(upgraded.applied.at(-1)?.migration_id).toBe('0045_deleted_user_content_ownership.sql');
 
@@ -189,9 +194,9 @@ suite('0045 deleted-user content ownership migration rehearsal', () => {
       );
       expect(retainedReferences.rows[0]?.references).toBe('4');
 
-      const rerun = await applyDatabaseMigrations(connection, manifest, 'preqa-0045-rerun');
+      const rerun = await applyDatabaseMigrations(connection, through0045, 'preqa-0045-rerun');
       expect(rerun.pending).toEqual([]);
-      expect(rerun.applied).toHaveLength(manifest.length);
+      expect(rerun.applied).toHaveLength(through0045.length);
     } finally {
       connection?.release();
       await rehearsalPool.end();
@@ -213,10 +218,15 @@ suite('0045 deleted-user content ownership migration rehearsal', () => {
       await adminPool.query(`CREATE DATABASE "${databaseName}"`);
       connection = await rehearsalPool.connect();
       const manifest = await loadMigrationManifest();
-      const pre0045 = manifest.filter((migration) => migration.id !== '0045_deleted_user_content_ownership.sql');
+      const through0045 = manifest.filter(
+        (migration) => migration.id.localeCompare('0046_super_admin_restricted_content.sql') < 0
+      );
+      const pre0045 = through0045.filter(
+        (migration) => migration.id.localeCompare('0045_deleted_user_content_ownership.sql') < 0
+      );
       expect((await applyDatabaseMigrations(connection, pre0045, 'preqa-interrupt-0044')).pending).toEqual([]);
 
-      const failingManifest = manifest.map((migration) =>
+      const failingManifest = through0045.map((migration) =>
         migration.id === '0045_deleted_user_content_ownership.sql'
           ? { ...migration, sql: `${migration.sql}\nSELECT 1 / 0;` }
           : migration
@@ -225,7 +235,7 @@ suite('0045 deleted-user content ownership migration rehearsal', () => {
         applyDatabaseMigrations(connection, failingManifest, 'preqa-interrupt-failure')
       ).rejects.toMatchObject({ code: '22012' });
 
-      const afterFailure = await planDatabaseMigrations(connection, manifest);
+      const afterFailure = await planDatabaseMigrations(connection, through0045);
       expect(afterFailure.pending).toEqual(['0045_deleted_user_content_ownership.sql']);
       const rolledBackColumn = await connection.query<{ exists: boolean }>(`
         SELECT EXISTS (
@@ -237,7 +247,11 @@ suite('0045 deleted-user content ownership migration rehearsal', () => {
       `);
       expect(rolledBackColumn.rows[0]?.exists).toBe(false);
 
-      const recovered = await applyDatabaseMigrations(connection, manifest, 'preqa-interrupt-forward-recovery');
+      const recovered = await applyDatabaseMigrations(
+        connection,
+        through0045,
+        'preqa-interrupt-forward-recovery'
+      );
       expect(recovered.pending).toEqual([]);
       expect(recovered.applied.at(-1)?.migration_id).toBe('0045_deleted_user_content_ownership.sql');
     } finally {

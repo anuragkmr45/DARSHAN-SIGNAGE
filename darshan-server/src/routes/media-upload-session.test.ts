@@ -7,6 +7,7 @@ import { generateAccessToken } from '@/auth/jwt';
 import { createSessionRepository } from '@/db/repositories/session';
 import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
+import { SYSTEM_ROLE_DEFAULTS } from '@/rbac/system-roles';
 
 const {
   createBucketIfNotExistsMock,
@@ -112,12 +113,33 @@ describe('Media upload sessions', () => {
     });
     ownerToken = access.token;
 
-    const [adminRole] = await db
+    const [existingAdminRole] = await db
       .select()
       .from(schema.roles)
       .where(eq(schema.roles.name, 'ADMIN'))
       .limit(1);
-    if (!adminRole) throw new Error('ADMIN role is required for upload deletion race tests');
+    const adminRole =
+      existingAdminRole ??
+      (
+        await db
+          .insert(schema.roles)
+          .values({
+            id: randomUUID(),
+            name: 'ADMIN',
+            permissions: SYSTEM_ROLE_DEFAULTS.ADMIN,
+            is_system: true,
+          })
+          .returning()
+      )[0];
+    await db
+      .insert(schema.roles)
+      .values({
+        id: randomUUID(),
+        name: 'OPERATOR',
+        permissions: SYSTEM_ROLE_DEFAULTS.OPERATOR,
+        is_system: true,
+      })
+      .onConflictDoNothing();
     const deletionAdminId = randomUUID();
     const deletionAdminEmail = `upload-deletion-admin-${deletionAdminId}@example.test`;
     await db.insert(schema.users).values({
@@ -295,7 +317,7 @@ describe('Media upload sessions', () => {
       status: 'PENDING',
       created_by: ownerUserId,
       ownership: {
-        scope: 'ORGANIZATION',
+        scope: 'RESTRICTED',
         department_id: null,
         creator: { id: ownerUserId, status: 'ACTIVE' },
       },
@@ -391,7 +413,7 @@ describe('Media upload sessions', () => {
       status: 'PENDING',
       created_by: ownerUserId,
       ownership: {
-        scope: 'ORGANIZATION',
+        scope: 'RESTRICTED',
         department_id: null,
         creator: { id: ownerUserId, status: 'ACTIVE' },
       },
@@ -443,7 +465,7 @@ describe('Media upload sessions', () => {
       media: {
         status: 'READY',
         created_by: ownerUserId,
-        ownership: { scope: 'ORGANIZATION', creator: { id: ownerUserId, status: 'ACTIVE' } },
+        ownership: { scope: 'RESTRICTED', creator: { id: ownerUserId, status: 'ACTIVE' } },
         permissions: { can_update: true, can_delete: true },
       },
     });

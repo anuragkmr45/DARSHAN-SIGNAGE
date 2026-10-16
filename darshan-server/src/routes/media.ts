@@ -715,15 +715,25 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             if (!multipart.UploadId) {
               throw new Error('Object storage did not return a multipart upload id');
             }
-            const activated = await withUploadSessionMutation(
-              payload,
-              session.id,
-              ({ executor }) => uploadSessionRepo.activate(
+            let activated;
+            try {
+              activated = await withUploadSessionMutation(
+                payload,
                 session.id,
-                { multipart_upload_id: multipart.UploadId },
-                executor
-              )
-            );
+                ({ executor }) => uploadSessionRepo.activate(
+                  session.id,
+                  { multipart_upload_id: multipart.UploadId },
+                  executor
+                )
+              );
+            } catch (error) {
+              await abortMultipartUpload(
+                session.staging_bucket,
+                session.staging_object_key,
+                multipart.UploadId
+              ).catch(() => undefined);
+              throw error;
+            }
             if (!activated) {
               await abortMultipartUpload(
                 session.staging_bucket,

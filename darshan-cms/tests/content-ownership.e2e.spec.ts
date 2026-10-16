@@ -159,7 +159,7 @@ test.describe("Owned content response contract", () => {
 
     await login(page);
     await page.goto("/media");
-    await expect(page.getByRole("heading", { name: "Media Library" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("heading", { name: "Media Library", exact: true })).toBeVisible();
     await expect(page.getByText("Operations owned", { exact: true })).toBeVisible();
     await expect(page.getByText("Created by Former User (Deleted)", { exact: true })).toBeVisible();
     await expect(page.getByText("Organization owned", { exact: true })).toBeVisible();
@@ -230,7 +230,7 @@ test.describe("Owned content response contract", () => {
 
     await login(page);
     await page.goto("/layouts");
-    await expect(page.getByRole("heading", { name: "Layouts" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("heading", { name: "Layouts", exact: true })).toBeVisible();
     await expect(page.getByText("Operations owned", { exact: true })).toBeVisible();
     await expect(page.getByText("Created by Former User (Deleted)", { exact: true })).toBeVisible();
     await expect(page.getByText("Organization owned", { exact: true })).toBeVisible();
