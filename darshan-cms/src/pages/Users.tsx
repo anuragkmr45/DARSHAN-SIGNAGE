@@ -19,12 +19,14 @@ import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { useAppSelector } from "@/store/hooks";
 import { canDeleteUserTarget, canManageUserTarget } from "@/lib/access";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 const PAGE_SIZE = 9;
 
 export default function Users() {
     const currentUser = useAppSelector((state) => state.auth.user);
-    const canManageUsers = currentUser?.role === "SUPER_ADMIN" || currentUser?.role === "ADMIN" || currentUser?.role === "DEPARTMENT";
+    const { can } = useAuthorization();
+    const canManageUsers = can("create", "User") || can("update", "User") || can("delete", "User") || can("manage", "User");
     const [searchQuery, setSearchQuery] = useState("");
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [isInviteOpen, setIsInviteOpen] = useState(false);

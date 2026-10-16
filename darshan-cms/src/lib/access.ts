@@ -39,7 +39,7 @@ export const canAccessModule = (moduleKey: ModuleKey, user: User | null | undefi
     case "notifications":
       return can("read", "Notification");
     case "operators":
-      return (role === "SUPER_ADMIN" || role === "ADMIN" || role === "DEPARTMENT") && can("read", "User");
+      return can("read", "User");
     case "departments":
       return isAdminLike(role) && can("read", "Department");
     case "users":
@@ -144,9 +144,7 @@ export const canDeleteUserTarget = (
   actor: User | null | undefined,
   targetRoleName: string | null | undefined,
   targetDepartmentId?: string | null,
-) =>
-  targetRoleName !== "SUPER_ADMIN" &&
-  canManageUserTarget(actor, targetRoleName, targetDepartmentId);
+) => canManageUserTarget(actor, targetRoleName, targetDepartmentId);
 
 export const canReadUserTarget = (
   actor: User | null | undefined,
@@ -154,15 +152,8 @@ export const canReadUserTarget = (
   targetDepartmentId?: string | null,
 ) => {
   if (!actor?.role || !targetRoleName) return false;
-  if (isAdminLike(actor.role)) return true;
-  if (actor.role === "DEPARTMENT") {
-    return targetRoleName === "OPERATOR" && actor.department_id === targetDepartmentId;
-  }
-  if (actor.role === "OPERATOR") {
-    return targetRoleName === "OPERATOR";
-  }
-  return false;
+  return actor.department_id === targetDepartmentId || isAdminLike(actor.role);
 };
 
-export const canManageOperatorsModule = (actor: User | null | undefined) =>
-  actor?.role === "SUPER_ADMIN" || actor?.role === "ADMIN" || actor?.role === "DEPARTMENT";
+export const canManageOperatorsModule = (can: CanFn) =>
+  can("create", "User") || can("update", "User") || can("delete", "User") || can("manage", "User");

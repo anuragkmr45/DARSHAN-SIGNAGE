@@ -31,11 +31,13 @@ import { PageNavigation } from "@/components/common/PageNavigation";
 import { useAppSelector } from "@/store/hooks";
 import { departmentsApi } from "@/api/domains/departments";
 import { canManageOperatorsModule, isAdminLike } from "@/lib/access";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 const PAGE_SIZE = 9;
 
 export default function Operators() {
   const currentUser = useAppSelector((state) => state.auth.user);
+  const { can } = useAuthorization();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -66,7 +68,7 @@ export default function Operators() {
   const { data: rolesData, isLoading: isRolesLoading } = useRolesList();
   const roles = useMemo(() => rolesData?.items ?? [], [rolesData?.items]);
   const operatorRole = useMemo(() => roles.find((role) => role.name === "OPERATOR") ?? null, [roles]);
-  const canManageOperators = canManageOperatorsModule(currentUser);
+  const canManageOperators = canManageOperatorsModule(can);
   const canPickDepartment = isAdminLike(currentUser?.role);
   const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
     queryKey: ["departments"],

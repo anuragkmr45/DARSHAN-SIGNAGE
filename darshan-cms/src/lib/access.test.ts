@@ -28,7 +28,7 @@ describe("access helpers", () => {
     expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "OPERATOR")).toBe(true);
     expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "CUSTOM_EDITOR")).toBe(true);
     expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "SUPER_ADMIN")).toBe(true);
-    expect(canDeleteUserTarget(makeUser({ role: "SUPER_ADMIN" }), "SUPER_ADMIN")).toBe(false);
+    expect(canDeleteUserTarget(makeUser({ role: "SUPER_ADMIN" }), "SUPER_ADMIN")).toBe(true);
     expect(canDeleteUserTarget(makeUser({ role: "SUPER_ADMIN" }), "DEPARTMENT")).toBe(true);
     expect(canManageUserTarget(makeUser({ role: "ADMIN" }), "DEPARTMENT")).toBe(true);
     expect(canManageUserTarget(makeUser({ role: "ADMIN" }), "OPERATOR")).toBe(true);
@@ -41,18 +41,16 @@ describe("access helpers", () => {
     expect(canManageUserTarget(departmentUser, "OPERATOR", "dept-b")).toBe(false);
   });
 
-  it("keeps operators read-only while still exposing operator records", () => {
+  it("limits directory records to the current department", () => {
     const operatorUser = makeUser({ role: "OPERATOR", department_id: "dept-a" });
 
-    expect(canReadUserTarget(operatorUser, "OPERATOR", "dept-b")).toBe(true);
-    expect(canReadUserTarget(operatorUser, "DEPARTMENT", "dept-a")).toBe(false);
-    expect(canManageOperatorsModule(operatorUser)).toBe(false);
+    expect(canReadUserTarget(operatorUser, "OPERATOR", "dept-b")).toBe(false);
+    expect(canReadUserTarget(operatorUser, "DEPARTMENT", "dept-a")).toBe(true);
   });
 
-  it("shows the Operators module to super admin, admin, and department users", () => {
-    expect(canManageOperatorsModule(makeUser({ role: "SUPER_ADMIN" }))).toBe(true);
-    expect(canManageOperatorsModule(makeUser({ role: "ADMIN" }))).toBe(true);
-    expect(canManageOperatorsModule(makeUser({ role: "DEPARTMENT" }))).toBe(true);
+  it("uses permissions rather than role names for operator management", () => {
+    expect(canManageOperatorsModule((action, subject) => action === "update" && subject === "User")).toBe(true);
+    expect(canManageOperatorsModule(() => false)).toBe(false);
   });
 
   it("uses server resource permissions instead of guessing from the creator", () => {
