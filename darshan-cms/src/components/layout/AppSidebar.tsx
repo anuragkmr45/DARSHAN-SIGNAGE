@@ -38,7 +38,6 @@ type NavItem = {
   moduleKey?: ModuleKey;
   permissions?: Array<{ action: string; subject: string }>;
   requireAny?: boolean;
-  allowRoles?: string[];
 };
 
 type NavSection = {
@@ -148,12 +147,6 @@ export function AppSidebar() {
       if (isAuthzLoading) return false;
       return canAccessModule(item.moduleKey, user ?? undefined, can);
     }
-    if (
-      item.allowRoles?.length &&
-      user?.role &&
-      item.allowRoles.includes(user.role)
-    )
-      return true;
     if (!item.permissions?.length) return true;
     if (isAuthzLoading) return false;
     const requireAny = item.requireAny ?? true;

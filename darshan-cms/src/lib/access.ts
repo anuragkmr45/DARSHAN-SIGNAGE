@@ -20,9 +20,7 @@ const isAdmin = (role?: string | null) => role === "ADMIN";
 const isSuperAdmin = (role?: string | null) => role === "SUPER_ADMIN";
 export const isAdminLike = (role?: string | null) => isAdmin(role) || isSuperAdmin(role);
 
-export const canAccessModule = (moduleKey: ModuleKey, user: User | null | undefined, can: CanFn) => {
-  const role = user?.role;
-
+export const canAccessModule = (moduleKey: ModuleKey, _user: User | null | undefined, can: CanFn) => {
   switch (moduleKey) {
     case "dashboard":
       return can("read", "Dashboard");
@@ -41,19 +39,17 @@ export const canAccessModule = (moduleKey: ModuleKey, user: User | null | undefi
     case "operators":
       return can("read", "User");
     case "departments":
-      return isAdminLike(role) && can("read", "Department");
+      return can("read", "Department");
     case "users":
       return can("read", "User");
     case "reports":
       return can("read", "Report") || can("read", "AuditLog");
     case "settings":
-      return isAdminLike(role) && can("read", "OrgSettings");
+      return can("read", "OrgSettings");
     default:
       return false;
   }
 };
-
-export const canManageEmergency = (user: User | null | undefined) => isAdminLike(user?.role);
 
 export const canManageBrandingSettings = (
   user: User | null | undefined,

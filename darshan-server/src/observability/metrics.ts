@@ -527,6 +527,7 @@ const REALTIME_SOCKET_EVENTS = new Set<string>([
   'COMMAND_AVAILABLE',
   'RESYNC_REQUIRED',
   'SERVER_TIME',
+  'USER_SESSIONS_INVALIDATED',
   'screens:subscribe',
   'screens:sync',
   'screens:error',

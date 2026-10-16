@@ -114,7 +114,7 @@ describe('device realtime gateway and outbox dispatcher', () => {
 
   beforeAll(async () => {
     server = await createTestServer();
-    setupDeviceRealtimeGateway(server, { force: true });
+    await setupDeviceRealtimeGateway(server, { force: true });
     await server.listen({ host: '127.0.0.1', port: 0 });
     const address = server.server.address() as AddressInfo;
     baseUrl = `http://127.0.0.1:${address.port}`;

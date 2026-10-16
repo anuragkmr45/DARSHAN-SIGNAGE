@@ -39,6 +39,24 @@ describe('realtime bus and Valkey fanout safety', () => {
     ]);
   });
 
+  it('broadcasts session invalidation to every simulated server node', async () => {
+    const bus = new InMemoryRealtimeBus();
+    const nodeA: unknown[] = [];
+    const nodeB: unknown[] = [];
+    await bus.subscribeBroadcast((message) => nodeA.push(message));
+    await bus.subscribeBroadcast((message) => nodeB.push(message));
+
+    const message = {
+      type: 'USER_SESSIONS_INVALIDATED' as const,
+      user_ids: ['user-1', 'user-2'],
+    };
+    const result = await bus.publishBroadcast(message);
+
+    expect(result).toMatchObject({ status: 'published' });
+    expect(nodeA).toEqual([message]);
+    expect(nodeB).toEqual([message]);
+  });
+
   it('enforces the WebSocket notification hard payload limit before publishing', async () => {
     const bus = new ValkeyRealtimeBus({
       url: undefined,

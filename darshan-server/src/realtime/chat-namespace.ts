@@ -29,6 +29,7 @@ import {
   validateSocketPayload,
   type SocketAck,
 } from '@/realtime/socket-hardening';
+import { requireCurrentSocketSession, storeSocketSession } from '@/realtime/socket-session';
 
 const logger = createLogger('chat-namespace');
 
@@ -175,7 +176,7 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
         return next(new Error('Token has been revoked'));
       }
 
-      (socket.data as any).user = payload;
+      storeSocketSession(socket, resolved.token, payload);
       recordRealtimeSocketAuth(CHAT_NAMESPACE, 'success', 'authorized');
       return next();
     } catch (error) {
@@ -201,6 +202,7 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
       recordRealtimeSocketClientEvent(CHAT_NAMESPACE, 'chat:subscribe');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        const currentUser = await requireCurrentSocketSession(socket);
         const parsed = validateSocketPayload({
           socket,
           namespace: '/chat',
@@ -225,8 +227,8 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
         const rejected: string[] = [];
 
         for (const id of ids) {
-          const canAccess = await chatRepo.canAccessConversation(id, user.sub, user.role);
-          const moderation = await chatRepo.getModeration(id, user.sub);
+          const canAccess = await chatRepo.canAccessConversation(id, currentUser.sub, currentUser.role);
+          const moderation = await chatRepo.getModeration(id, currentUser.sub);
           if (!canSocketSubscribe(canAccess, moderation)) {
             rejected.push(id);
             continue;
@@ -259,6 +261,7 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
       recordRealtimeSocketClientEvent(CHAT_NAMESPACE, 'chat:typing');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        const currentUser = await requireCurrentSocketSession(socket);
         const parsed = validateSocketPayload({
           socket,
           namespace: '/chat',
@@ -294,12 +297,12 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
         }
 
         const payload = parsed.data;
-        const canAccess = await chatRepo.canAccessConversation(payload.conversationId, user.sub, user.role);
+        const canAccess = await chatRepo.canAccessConversation(payload.conversationId, currentUser.sub, currentUser.role);
         if (!canAccess) {
           recordRealtimeSocketReject(CHAT_NAMESPACE, 'chat:typing', 'unauthorized');
           return;
         }
-        const moderation = await chatRepo.getModeration(payload.conversationId, user.sub);
+        const moderation = await chatRepo.getModeration(payload.conversationId, currentUser.sub);
         if (getActiveModeration(moderation).bannedUntil) {
           recordRealtimeSocketReject(CHAT_NAMESPACE, 'chat:typing', 'unauthorized');
           return;
@@ -308,7 +311,7 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
         recordRealtimeSocketServerEvent(CHAT_NAMESPACE, 'chat:typing');
         nsp.to(chatConversationRoom(payload.conversationId)).emit('chat:typing', {
           conversationId: payload.conversationId,
-          userId: user.sub,
+          userId: currentUser.sub,
           isTyping: Boolean(payload.isTyping),
           ttlSeconds: 7,
         });
@@ -323,6 +326,7 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
       recordRealtimeSocketClientEvent(CHAT_NAMESPACE, 'chat:read');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        const currentUser = await requireCurrentSocketSession(socket);
         const parsed = validateSocketPayload({
           socket,
           namespace: '/chat',
@@ -341,17 +345,17 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
         }
 
         const payload = parsed.data;
-        const canAccess = await chatRepo.canAccessConversation(payload.conversationId, user.sub, user.role);
+        const canAccess = await chatRepo.canAccessConversation(payload.conversationId, currentUser.sub, currentUser.role);
         if (!canAccess) {
           recordRealtimeSocketReject(CHAT_NAMESPACE, 'chat:read', 'unauthorized');
           return;
         }
-        const moderation = await chatRepo.getModeration(payload.conversationId, user.sub);
+        const moderation = await chatRepo.getModeration(payload.conversationId, currentUser.sub);
         if (getActiveModeration(moderation).bannedUntil) {
           recordRealtimeSocketReject(CHAT_NAMESPACE, 'chat:read', 'unauthorized');
           return;
         }
-        await chatRepo.markRead(payload.conversationId, user.sub, payload.lastReadSeq);
+        await chatRepo.markRead(payload.conversationId, currentUser.sub, payload.lastReadSeq);
         if (ack) ack({ ok: true });
       } catch (error) {
         logger.warn({ err: error, socket_id: socket.id }, 'Failed to handle chat read event');

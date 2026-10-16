@@ -12,8 +12,6 @@ import {
 } from '@/observability/prometheus-summary';
 
 const logger = createLogger('observability-routes');
-const OBSERVABILITY_ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'OPERATOR']);
-
 async function requireAbility(request: FastifyRequest, subject: 'Dashboard' | 'Screen') {
   const token = extractTokenFromHeader(request.headers.authorization);
   if (!token) {
@@ -21,9 +19,6 @@ async function requireAbility(request: FastifyRequest, subject: 'Dashboard' | 'S
   }
 
   const payload = await verifyAccessToken(token);
-  if (OBSERVABILITY_ALLOWED_ROLES.has(payload.role)) {
-    return;
-  }
   const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
   if (!ability.can('read', subject)) {
     throw AppError.forbidden('Forbidden');

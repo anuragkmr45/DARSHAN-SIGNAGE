@@ -47,8 +47,7 @@ import {
   getServerNowFromOffset,
   isHeartbeatStale,
 } from "@/hooks/screens/screensRealtimeUtils";
-import { useAppSelector } from "@/store/hooks";
-import { isAdminLike } from "@/lib/access";
+import { useAuthorization } from "@/hooks/useAuthorization";
 import {
   formatMaskedScreenId,
   getScreenAuthIndicator,
@@ -77,8 +76,8 @@ const formatDateTime = (value?: string | null) => {
 
 export default function Screens() {
   const queryClient = useQueryClient();
-  const currentUser = useAppSelector((state) => state.auth.user);
-  const canManageScreens = isAdminLike(currentUser?.role);
+  const { can } = useAuthorization();
+  const canManageScreens = can("manage", "Screen") || can("update", "Screen");
   const [search, setSearch] = useState("");
   const [isPairModalOpen, setIsPairModalOpen] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);

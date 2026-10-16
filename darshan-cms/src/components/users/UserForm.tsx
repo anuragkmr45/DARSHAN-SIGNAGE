@@ -13,7 +13,8 @@ import type { UserFormData } from "@/types/user";
 import { useRolesList } from "@/hooks/useRolesApi";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { useAppSelector } from "@/store/hooks";
-import { canManageUserTarget, isAdminLike } from "@/lib/access";
+import { canManageUserTarget } from "@/lib/access";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 interface UserFormProps {
     user?: User | null;
@@ -24,6 +25,7 @@ interface UserFormProps {
 
 export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps) {
     const currentUser = useAppSelector((state) => state.auth.user);
+    const { can } = useAuthorization();
     const [showPassword, setShowPassword] = useState(false);
     const [formData, setFormData] = useState<UserFormData>({
         email: user?.email || "",
@@ -35,7 +37,8 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
         is_active: user?.is_active ?? true,
     });
 
-    const canPickDepartment = isAdminLike(currentUser?.role);
+    const canManageUsersGlobally = can("manage", "User");
+    const canPickDepartment = canManageUsersGlobally && can("read", "Department");
     const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
         queryKey: ["departments"],
         queryFn: () => departmentsApi.list({ page: 1, limit: 100 }),
@@ -46,9 +49,10 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
     const roles = useMemo(
         () =>
             (rolesData?.items ?? []).filter((role) =>
-                canManageUserTarget(currentUser, role.name, currentUser?.department_id),
+                canManageUserTarget(currentUser, role.name, currentUser?.department_id) ||
+                (canManageUsersGlobally && !role.is_system),
             ),
-        [currentUser, rolesData?.items],
+        [canManageUsersGlobally, currentUser, rolesData?.items],
     );
     const rolesErrorMessage = rolesError ? mapUsersErrorToUx(rolesError, "Failed to load roles") : null;
 
@@ -59,10 +63,10 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
             first_name: user?.first_name || "",
             last_name: user?.last_name || "",
             role_id: user?.role_id || "",
-            department_id: currentUser?.role === "DEPARTMENT" ? currentUser.department_id || "" : user?.department_id || "",
+            department_id: !canPickDepartment ? currentUser?.department_id || "" : user?.department_id || "",
             is_active: user?.is_active ?? true,
         });
-    }, [currentUser?.department_id, currentUser?.role, user]);
+    }, [canPickDepartment, currentUser?.department_id, user]);
 
     useEffect(() => {
         if (!formData.role_id && roles.length > 0) {

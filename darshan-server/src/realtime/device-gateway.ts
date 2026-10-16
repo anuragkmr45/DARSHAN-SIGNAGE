@@ -21,6 +21,7 @@ import {
   unregisterDeviceForFanout,
 } from '@/realtime/realtime-fanout';
 import { attachNamespaceSocketObservability, getOrCreateSocketServer } from '@/realtime/socket-server';
+import { disconnectInvalidatedUsers } from '@/realtime/session-invalidation';
 import {
   buildDeviceSocketError,
   consumeSocketRateLimit,
@@ -116,7 +117,7 @@ function buildHelloAck(input: {
   };
 }
 
-export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { force?: boolean } = {}) {
+export async function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { force?: boolean } = {}) {
   if ((fastify as any)._deviceRealtimeGatewayReady) return;
   if (!options.force && !config.REALTIME_SYNC_ENABLED) return;
 
@@ -124,14 +125,20 @@ export function setupDeviceRealtimeGateway(fastify: FastifyInstance, options: { 
   const nsp = io.of(config.REALTIME_DEVICE_NAMESPACE);
   attachNamespaceSocketObservability(nsp, config.REALTIME_DEVICE_NAMESPACE);
 
-  void initializeRealtimeFanout((message) => {
-    handleLocalFanoutDelivery(message, (incoming) => {
-      if (!incoming.device_id || typeof incoming.device_id !== 'string') return 0;
-      return deviceConnectionRegistry.emitToDevice(incoming.device_id, incoming.type, incoming);
-    });
-  }, options).catch((error) => {
+  try {
+    await initializeRealtimeFanout((message) => {
+      if (message.type === 'USER_SESSIONS_INVALIDATED') {
+        disconnectInvalidatedUsers(Array.isArray(message.user_ids) ? message.user_ids : []);
+        return;
+      }
+      handleLocalFanoutDelivery(message, (incoming) => {
+        if (!incoming.device_id || typeof incoming.device_id !== 'string') return 0;
+        return deviceConnectionRegistry.emitToDevice(incoming.device_id, incoming.type, incoming);
+      });
+    }, options);
+  } catch (error) {
     logger.warn({ err: error }, 'Device realtime fanout initialization failed; polling fallback remains authoritative');
-  });
+  }
 
   nsp.use(async (socket, next) => {
     const result = await authenticateDeviceSocketHandshake({

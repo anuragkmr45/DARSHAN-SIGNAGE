@@ -11,8 +11,8 @@ import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { PERMISSION_ACTIONS } from '@/rbac/permissions';
-import { canManageSystemRole, isSuperAdmin } from '@/rbac/policy';
-import { disconnectAuthenticatedUserSockets } from '@/realtime/socket-server';
+import { canManageSystemRole } from '@/rbac/policy';
+import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
 import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
 
 const logger = createLogger('role-routes');
@@ -69,9 +69,6 @@ export async function roleRoutes(fastify: FastifyInstance) {
         if (!ability.can('create', 'Role')) throw AppError.forbidden('Forbidden');
 
         const data = createRoleSchema.parse(request.body);
-        if (!isSuperAdmin(payload.role)) {
-          throw AppError.forbidden('Only Super Admin can create roles.');
-        }
         const role = await roleRepo.create({
           name: data.name,
           description: data.description,
@@ -217,9 +214,7 @@ export async function roleRoutes(fastify: FastifyInstance) {
         );
         if (!result) throw AppError.notFound('Role not found');
         const { role: updated, revokedUserIds } = result;
-        for (const userId of revokedUserIds) {
-          disconnectAuthenticatedUserSockets(userId);
-        }
+        await broadcastSessionInvalidation(revokedUserIds);
 
         return reply.status(OK).send({
           id: updated.id,

@@ -209,8 +209,7 @@ export default function Conversations() {
   const authToken = useAppSelector((state) => state.auth.token);
   const currentUserId = useAppSelector((state) => state.auth.user?.id);
   const isAuthenticated = Boolean(authToken || currentUserId);
-  const currentRole = useAppSelector((state) => state.auth.user?.role);
-  const { isAdminOrSuperAdmin } = useAuthorization();
+  const { can } = useAuthorization();
   const usersDirectoryQuery = useChatUserDirectory(isAuthenticated);
 
   const [search, setSearch] = useState("");
@@ -504,7 +503,8 @@ export default function Conversations() {
       : null;
   const effectiveStatus = chatStatus ?? archivedStatus;
 
-  const canModerate = Boolean(isAdminOrSuperAdmin || currentRole === "ADMIN" || currentRole === "SUPER_ADMIN");
+  const canModerate = can("manage", "Conversation");
+  const canHardDelete = can("delete", "Conversation");
   const canShowModeration = Boolean(canModerate && selectedConversation?.type !== "DM");
   const canManage =
     canModerate ||
@@ -999,7 +999,7 @@ export default function Conversations() {
         conversation={selectedConversation}
         canManage={Boolean(canManage)}
         canMutateItems={!composerDisabled}
-        isSuperAdmin={currentRole === "SUPER_ADMIN"}
+        isSuperAdmin={canHardDelete}
         pins={pinsQuery.data?.items ?? []}
         pinsLoading={pinsQuery.isLoading}
         bookmarks={bookmarksQuery.data?.items ?? []}

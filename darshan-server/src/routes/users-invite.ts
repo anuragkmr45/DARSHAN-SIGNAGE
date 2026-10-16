@@ -13,7 +13,8 @@ import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { canManageUserRecord, canManageUserRoleTarget } from '@/rbac/policy';
-import { disconnectAuthenticatedUserSockets } from '@/realtime/socket-server';
+import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
+import { subject } from '@casl/ability';
 
 const logger = createLogger('users-invite-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -100,10 +101,15 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
         if (!targetRole) {
           throw AppError.badRequest('Role not found');
         }
-        if (!canManageUserRoleTarget(payload.role, targetRole.name)) {
+        const hasGlobalUserManagement = ability.can('manage', 'User');
+        if (
+          !canManageUserRoleTarget(payload.role, targetRole.name) &&
+          !((!targetRole.is_system || targetRole.name === 'OPERATOR') &&
+            (hasGlobalUserManagement || data.department_id === payload.department_id))
+        ) {
           throw AppError.forbidden('Forbidden');
         }
-        if (payload.role === 'DEPARTMENT' && data.department_id !== payload.department_id) {
+        if (!hasGlobalUserManagement && data.department_id !== payload.department_id) {
           throw AppError.forbidden('Department users can only manage operators in their own department.');
         }
 
@@ -167,7 +173,14 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'User')) throw AppError.forbidden('Forbidden');
+        if (
+          !ability.can('read', 'User') &&
+          !(ability as any).can('read', subject('User', {
+            id: payload.sub,
+            department_id: payload.department_id,
+            is_active: true,
+          }))
+        ) throw AppError.forbidden('Forbidden');
 
         const query = listInvitesQuerySchema.parse(request.query);
         const statusLookup: Record<string, 'pending' | 'expired' | 'activated'> = {
@@ -253,7 +266,14 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'User')) throw AppError.forbidden('Forbidden');
+        if (
+          !ability.can('read', 'User') &&
+          !(ability as any).can('read', subject('User', {
+            id: payload.sub,
+            department_id: payload.department_id,
+            is_active: true,
+          }))
+        ) throw AppError.forbidden('Forbidden');
 
         const result = await userRepo.listInvites({
           page: 1,
@@ -297,18 +317,23 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'User')) throw AppError.forbidden('Forbidden');
-
         const data = resetPasswordSchema.parse(request.body);
         const current = await userRepo.findById((request.params as any).id);
         if (!current || current.deleted_at) throw AppError.notFound('User not found');
+        if (!(ability as any).can('update', subject('User', current))) {
+          throw AppError.forbidden('Forbidden');
+        }
 
         const [targetRole] = await db.select().from(schema.roles).where(eq(schema.roles.id, current.role_id));
+        const hasGlobalUserManagement = ability.can('manage', 'User');
         if (
           !canManageUserRecord(
             { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
             { id: current.id, roleName: targetRole?.name ?? '', departmentId: current.department_id }
-          )
+          ) &&
+          !((!targetRole?.is_system || targetRole?.name === 'OPERATOR') && (
+            hasGlobalUserManagement || current.department_id === payload.department_id
+          ))
         ) {
           throw AppError.forbidden('Forbidden');
         }
@@ -331,7 +356,7 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           ext: current.ext,
         });
         if (!user) throw AppError.notFound('User not found');
-        disconnectAuthenticatedUserSockets(user.id);
+        await broadcastSessionInvalidation([user.id]);
 
         return reply.send({
           id: user.id,

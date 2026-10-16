@@ -11,8 +11,9 @@ import { createLogger } from '@/utils/logger';
 const logger = createLogger('realtime-bus');
 
 export type RealtimeWakeMessage = {
-  type: 'COMMAND_AVAILABLE' | 'RESYNC_REQUIRED' | 'SERVER_TIME';
+  type: 'COMMAND_AVAILABLE' | 'RESYNC_REQUIRED' | 'SERVER_TIME' | 'USER_SESSIONS_INVALIDATED';
   device_id?: string;
+  user_ids?: string[];
   sent_at?: string;
   [key: string]: unknown;
 };

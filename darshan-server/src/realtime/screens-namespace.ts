@@ -36,6 +36,7 @@ import {
 } from '@/realtime/socket-hardening';
 import { defineAbilityFor, type AppAbility } from '@/rbac';
 import { inArray } from 'drizzle-orm';
+import { requireCurrentSocketSession, storeSocketSession } from '@/realtime/socket-session';
 
 const logger = createLogger('screens-namespace');
 const SCREENS_NAMESPACE = '/screens';
@@ -247,7 +248,7 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
         return next(new Error('Token has been revoked'));
       }
 
-      (socket.data as any).user = payload;
+      storeSocketSession(socket, resolved.token, payload);
       recordRealtimeSocketAuth(SCREENS_NAMESPACE, 'success', 'authorized');
       return next();
     } catch (error) {
@@ -273,6 +274,7 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
       recordRealtimeSocketClientEvent(SCREENS_NAMESPACE, 'screens:subscribe');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        await requireCurrentSocketSession(socket);
         const parsed = validateSocketPayload({
           socket,
           namespace: '/screens',
@@ -369,6 +371,7 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
       recordRealtimeSocketClientEvent(SCREENS_NAMESPACE, 'screens:sync');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        await requireCurrentSocketSession(socket);
         const parsed = validateSocketPayload({
           socket,
           namespace: '/screens',

@@ -15,7 +15,8 @@ import { randomBytes } from 'node:crypto';
 import { abortMultipartUpload, deleteObject } from '@/s3';
 import { createMediaUploadSessionRepository } from '@/db/repositories/media-upload-session';
 import { createMediaRepository } from '@/db/repositories/media';
-import { disconnectAuthenticatedUserSockets } from '@/realtime/socket-server';
+import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
+import { subject } from '@casl/ability';
 
 const logger = createLogger('user-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -56,10 +57,15 @@ export async function userRoutes(fastify: FastifyInstance) {
         if (!role) {
           throw AppError.notFound('Role not found');
         }
-        if (!canManageUserRoleTarget(payload.role, role.name)) {
+        const hasGlobalUserManagement = ability.can('manage', 'User');
+        if (
+          !canManageUserRoleTarget(payload.role, role.name) &&
+          !((!role.is_system || role.name === 'OPERATOR') &&
+            (hasGlobalUserManagement || data.department_id === payload.department_id))
+        ) {
           throw AppError.forbidden('Forbidden');
         }
-        if (payload.role === 'DEPARTMENT' && data.department_id !== payload.department_id) {
+        if (!hasGlobalUserManagement && data.department_id !== payload.department_id) {
           throw AppError.forbidden('Department users can only manage operators in their own department.');
         }
 
@@ -110,7 +116,14 @@ export async function userRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'User')) {
+        if (
+          !ability.can('read', 'User') &&
+          !(ability as any).can('read', subject('User', {
+            id: payload.sub,
+            department_id: payload.department_id,
+            is_active: true,
+          }))
+        ) {
           throw AppError.forbidden('Forbidden');
         }
 
@@ -174,16 +187,15 @@ export async function userRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'User')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const user = await userRepo.findById((request.params as any).id);
-        if (!user || user.deleted_at) {
+        if (!user || user.deleted_at || (!ability.can('manage', 'User') && !user.is_active)) {
           throw AppError.notFound('User not found');
         }
 
         const role = await roleRepo.findById(user.role_id);
+        if (!(ability as any).can('read', subject('User', user))) {
+          throw AppError.notFound('User not found');
+        }
         if (
           !canReadUserRecord(
             { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
@@ -233,29 +245,33 @@ export async function userRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
 
-        if (!ability.can('update', 'User')) {
+        const data = updateUserSchema.parse(request.body);
+        const existingUser = await userRepo.findById((request.params as any).id);
+        if (!existingUser || existingUser.deleted_at) {
+          throw AppError.notFound('User not found');
+        }
+        if (!(ability as any).can('update', subject('User', existingUser))) {
           throw AppError.forbidden('Forbidden');
         }
-
-        const data = updateUserSchema.parse(request.body);
+        const hasGlobalUserManagement = ability.can('manage', 'User');
         if (data.role_id) {
           const role = await roleRepo.findById(data.role_id);
           if (!role) {
             throw AppError.notFound('Role not found');
           }
-          if (!canManageUserRoleTarget(payload.role, role.name)) {
+          if (
+            !canManageUserRoleTarget(payload.role, role.name) &&
+            !((!role.is_system || role.name === 'OPERATOR') &&
+              (hasGlobalUserManagement || existingUser.department_id === payload.department_id))
+          ) {
             throw AppError.forbidden('Forbidden');
           }
-          if (payload.role === 'DEPARTMENT' && data.department_id !== payload.department_id) {
+          if (!hasGlobalUserManagement && data.department_id !== undefined && data.department_id !== payload.department_id) {
             throw AppError.forbidden('Department users can only manage operators in their own department.');
           }
         }
-        const existingUser = await userRepo.findById((request.params as any).id);
-        if (!existingUser || existingUser.deleted_at) {
-          throw AppError.notFound('User not found');
-        }
         if (
-          payload.role === 'DEPARTMENT' &&
+          !hasGlobalUserManagement &&
           Object.prototype.hasOwnProperty.call(data, 'department_id') &&
           data.department_id !== payload.department_id
         ) {
@@ -270,7 +286,10 @@ export async function userRoutes(fastify: FastifyInstance) {
               roleName: existingRole?.name ?? '',
               departmentId: existingUser.department_id,
             }
-          )
+          ) &&
+          !((!existingRole?.is_system || existingRole?.name === 'OPERATOR') && (
+            hasGlobalUserManagement || existingUser.department_id === payload.department_id
+          ))
         ) {
           throw AppError.forbidden('Forbidden');
         }
@@ -279,7 +298,7 @@ export async function userRoutes(fastify: FastifyInstance) {
         if (!user) {
           throw AppError.notFound('User not found');
         }
-        disconnectAuthenticatedUserSockets(user.id);
+        await broadcastSessionInvalidation([user.id]);
 
         const role = await roleRepo.findById(user.role_id);
 
@@ -331,16 +350,16 @@ export async function userRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
 
-        if (!ability.can('delete', 'User')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const userId = (request.params as any).id;
         user = await userRepo.findById(userId);
         if (!user) {
           throw AppError.notFound('User not found');
         }
         const targetRole = user.role_id ? await roleRepo.findById(user.role_id) : null;
+        if (!(ability as any).can('delete', subject('User', user))) {
+          throw AppError.forbidden('Forbidden');
+        }
+        const hasGlobalUserManagement = ability.can('manage', 'User');
         if (
           !canManageUserRecord(
             { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
@@ -349,7 +368,10 @@ export async function userRoutes(fastify: FastifyInstance) {
               roleName: targetRole?.name ?? '',
               departmentId: (user as any).department_id,
             }
-          )
+          ) &&
+          !((!targetRole?.is_system || targetRole?.name === 'OPERATOR') && (
+            hasGlobalUserManagement || (user as any).department_id === payload.department_id
+          ))
         ) {
           throw AppError.forbidden('Forbidden');
         }
@@ -395,7 +417,7 @@ export async function userRoutes(fastify: FastifyInstance) {
           }
         }
 
-        disconnectAuthenticatedUserSockets(userId);
+        await broadcastSessionInvalidation([userId]);
         return reply.status(OK).send({
           message: result.alreadyDeleted ? 'User was already deleted' : 'User deleted successfully',
           id: userId,

@@ -451,7 +451,7 @@ export async function createServer(options: CreateServerOptions = {}) {
   await fastify.register(roleRoutes);
   await fastify.register(permissionRoutes);
 
-  setupDeviceRealtimeGateway(fastify);
+  await setupDeviceRealtimeGateway(fastify);
   if (options.startOutboxDispatcher !== false) {
     startOutboxDispatcher();
   }

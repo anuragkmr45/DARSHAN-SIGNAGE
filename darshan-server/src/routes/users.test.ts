@@ -309,7 +309,7 @@ describe('User Routes', () => {
   });
 
   describe('DELETE /api/v1/users/:id', () => {
-    it('blocks deletion of every SUPER_ADMIN account', async () => {
+    it('allows deleting a SUPER_ADMIN when another active SUPER_ADMIN remains', async () => {
       const token = await issueSuperAdminToken();
       const superAdminRoleId = await getRoleIdByName('SUPER_ADMIN');
       const db = getDatabase();
@@ -331,11 +331,10 @@ describe('User Routes', () => {
         headers: { authorization: `Bearer ${token}` },
       });
 
-      expect(response.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
-      expect(JSON.parse(response.body).error.message).toContain('cannot be deleted');
-      const [preserved] = await db.select().from(schema.users).where(eq(schema.users.id, target.id));
-      expect(preserved?.deleted_at).toBeNull();
-      expect(preserved?.is_active).toBe(true);
+      expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      const [deleted] = await db.select().from(schema.users).where(eq(schema.users.id, target.id));
+      expect(deleted?.deleted_at).toBeInstanceOf(Date);
+      expect(deleted?.is_active).toBe(false);
     });
 
     it('tombstones the account while preserving linked history and revoking its session', async () => {

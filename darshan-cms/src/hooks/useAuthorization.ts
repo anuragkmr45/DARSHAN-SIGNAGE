@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { rolesApi } from "@/api/domains/roles";
 import { queryKeys } from "@/api/queryKeys";
 import { useAppSelector } from "@/store/hooks";
-import { canWithGrants, isSystemAdminRoleName, resolveEffectiveGrants } from "@/lib/authorization";
+import { canWithGrants, resolveEffectiveGrants } from "@/lib/authorization";
 
 const DEFAULT_ROLE_LIST = { page: 1, limit: 100 };
 
@@ -37,11 +37,6 @@ export const useAuthorization = () => {
     [effectiveGrants],
   );
 
-  const isAdminOrSuperAdmin = useMemo(
-    () => isSystemAdminRoleName(roleName) || canWithGrants(effectiveGrants, "manage", "all"),
-    [effectiveGrants, roleName],
-  );
-
   const currentRole = useMemo(
     () => roles.find((role) => role.id === resolvedRoleId),
     [roles, resolvedRoleId],
@@ -49,7 +44,6 @@ export const useAuthorization = () => {
 
   return {
     can,
-    isAdminOrSuperAdmin,
     grants: effectiveGrants,
     role: currentRole,
     isLoading: rolesQuery.isLoading,

@@ -10,6 +10,7 @@ import {
 } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { AppError } from '@/utils/app-error';
+import { defineAbilityFor } from '@/rbac';
 
 type ConversationType = 'DM' | 'GROUP_CLOSED' | 'FORUM_OPEN';
 type ConversationState = 'ACTIVE' | 'ARCHIVED' | 'DELETED';
@@ -19,15 +20,29 @@ type BookmarkType = 'LINK' | 'FILE' | 'MESSAGE';
 
 const INDEFINITE_UNTIL = new Date('9999-12-31T23:59:59.999Z');
 
-function isAdminRole(roleName: string | undefined | null): boolean {
-  return roleName === 'ADMIN' || roleName === 'SUPER_ADMIN';
-}
-
 function normalizeDmPair(a: string, b: string) {
   return a < b ? `${a}:${b}` : `${b}:${a}`;
 }
 
 export class ChatRepository {
+  private async hasGlobalConversationManagement(userId: string): Promise<boolean> {
+    const db = getDatabase();
+    const [user] = await db
+      .select({
+        role_id: schema.users.role_id,
+        department_id: schema.users.department_id,
+      })
+      .from(schema.users)
+      .where(and(
+        eq(schema.users.id, userId),
+        eq(schema.users.is_active, true),
+        isNull(schema.users.deleted_at)
+      ));
+    if (!user) return false;
+    const ability = await defineAbilityFor(user.role_id, userId, user.department_id ?? undefined);
+    return ability.can('manage', 'Conversation');
+  }
+
   async getConversationById(id: string) {
     const db = getDatabase();
     const [conversation] = await db
@@ -262,7 +277,7 @@ export class ChatRepository {
   async canAccessConversation(
     conversationId: string,
     userId: string,
-    roleName?: string
+    _roleName?: string
   ): Promise<boolean> {
     const conversation = await this.getConversationById(conversationId);
     if (!conversation || conversation.state === 'DELETED') return false;
@@ -272,18 +287,18 @@ export class ChatRepository {
     const member = await this.getMember(conversationId, userId);
     if (member) return true;
 
-    if (conversation.type !== 'DM' && isAdminRole(roleName)) return true;
+    if (conversation.type !== 'DM' && await this.hasGlobalConversationManagement(userId)) return true;
     return false;
   }
 
   async isConversationAdmin(
     conversationId: string,
     userId: string,
-    roleName?: string
+    _roleName?: string
   ): Promise<boolean> {
     const conversation = await this.getConversationById(conversationId);
     if (!conversation) return false;
-    if (conversation.type !== 'DM' && isAdminRole(roleName)) return true;
+    if (conversation.type !== 'DM' && await this.hasGlobalConversationManagement(userId)) return true;
 
     const member = await this.getMember(conversationId, userId);
     if (!member) return false;

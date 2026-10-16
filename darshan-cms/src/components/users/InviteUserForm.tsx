@@ -12,7 +12,8 @@ import type { InviteFormData } from "@/types/user";
 import { useRolesList } from "@/hooks/useRolesApi";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { useAppSelector } from "@/store/hooks";
-import { canManageUserTarget, isAdminLike } from "@/lib/access";
+import { canManageUserTarget } from "@/lib/access";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 interface InviteUserFormProps {
     onSubmit: (data: InviteFormData) => void;
@@ -22,12 +23,14 @@ interface InviteUserFormProps {
 
 export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserFormProps) {
     const currentUser = useAppSelector((state) => state.auth.user);
+    const { can } = useAuthorization();
+    const canManageUsersGlobally = can("manage", "User");
+    const canPickDepartment = canManageUsersGlobally && can("read", "Department");
     const [formData, setFormData] = useState<InviteFormData>({
         email: "",
         role_id: "",
-        department_id: currentUser?.role === "DEPARTMENT" ? currentUser.department_id || "" : "",
+        department_id: !canPickDepartment ? currentUser?.department_id || "" : "",
     });
-    const canPickDepartment = isAdminLike(currentUser?.role);
 
     const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
         queryKey: ["departments"],
@@ -39,9 +42,10 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
     const roles = useMemo(
         () =>
             (rolesData?.items ?? []).filter((role) =>
-                canManageUserTarget(currentUser, role.name, currentUser?.department_id),
+                canManageUserTarget(currentUser, role.name, currentUser?.department_id) ||
+                (canManageUsersGlobally && !role.is_system),
             ),
-        [currentUser, rolesData?.items],
+        [canManageUsersGlobally, currentUser, rolesData?.items],
     );
     const rolesErrorMessage = rolesError ? mapUsersErrorToUx(rolesError, "Failed to load roles") : null;
     const currentDepartmentLabel = currentUser?.department_id ? "Assigned to your department" : "No department assigned";

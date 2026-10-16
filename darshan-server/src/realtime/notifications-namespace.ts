@@ -25,6 +25,7 @@ import {
   validateSocketPayload,
   type SocketAck,
 } from '@/realtime/socket-hardening';
+import { requireCurrentSocketSession, storeSocketSession } from '@/realtime/socket-session';
 
 const logger = createLogger('notifications-namespace');
 const NOTIFICATIONS_NAMESPACE = '/notifications';
@@ -103,7 +104,7 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
         return next(new Error('Token has been revoked'));
       }
 
-      (socket.data as any).user = payload;
+      storeSocketSession(socket, resolved.token, payload);
       recordRealtimeSocketAuth(NOTIFICATIONS_NAMESPACE, 'success', 'authorized');
       return next();
     } catch (error) {
@@ -132,6 +133,7 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
       recordRealtimeSocketClientEvent(NOTIFICATIONS_NAMESPACE, 'notifications:sync');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
+        const currentUser = await requireCurrentSocketSession(socket);
         const parsed = validateSocketPayload({
           socket,
           namespace: '/notifications',
@@ -168,7 +170,7 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
           return;
         }
 
-        const unread_total = await counterRepo.getUnreadTotal(user.sub);
+        const unread_total = await counterRepo.getUnreadTotal(currentUser.sub);
         if (ack) {
           ack({ unread_total });
         } else {

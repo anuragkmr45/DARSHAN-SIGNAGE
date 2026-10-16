@@ -103,7 +103,7 @@ const normalizeLayoutSlots = (spec?: unknown): LayoutSlot[] => {
 };
 
 export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerProps) {
-  const { can, isAdminOrSuperAdmin, isLoading: isAuthzLoading } = useAuthorization();
+  const { can, isLoading: isAuthzLoading } = useAuthorization();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [currentRequest, setCurrentRequest] = useState(request);
@@ -117,10 +117,10 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   }, [request]);
 
   const canApprove = can("approve", "ScheduleRequest") || can("manage", "ScheduleRequest");
-  const canPublish = can("publish", "Schedule") || can("manage", "Schedule");
+  const canPublish = can("publish", "ScheduleRequest") || can("manage", "Schedule");
   const allowApprove = !isAuthzLoading && canApprove;
   const allowPublish = !isAuthzLoading && canPublish;
-  const allowTakeDown = !isAuthzLoading && isAdminOrSuperAdmin;
+  const allowTakeDown = !isAuthzLoading && canPublish;
 
   const mediaItems = useMemo(() => currentRequest.media ?? [], [currentRequest.media]);
   const presentations = useMemo(() => currentRequest.presentations ?? [], [currentRequest.presentations]);

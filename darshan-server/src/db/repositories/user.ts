@@ -85,6 +85,7 @@ export class UserRepository {
       conditions.push(eq(schema.users.department_id, options.department_id));
     }
     if (options.visibility && !options.visibility.global) {
+      conditions.push(eq(schema.users.is_active, true));
       conditions.push(
         options.visibility.actorDepartmentId
           ? eq(schema.users.department_id, options.visibility.actorDepartmentId)

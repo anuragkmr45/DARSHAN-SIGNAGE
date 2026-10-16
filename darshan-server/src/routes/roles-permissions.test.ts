@@ -72,7 +72,7 @@ describe('Role and permission routes', () => {
     ]);
   });
 
-  it('rejects role creation for plain admins but allows super admins', async () => {
+  it('allows role creation whenever the caller has create Role permission', async () => {
     const createPayload = {
       name: `CUSTOM_ROLE_${Date.now()}`,
       description: 'Phase 1 regression role',
@@ -90,7 +90,7 @@ describe('Role and permission routes', () => {
       payload: createPayload,
     });
 
-    expect(adminResponse.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(adminResponse.statusCode).toBe(HTTP_STATUS.CREATED);
 
     const superAdminResponse = await server.inject({
       method: 'POST',
@@ -98,7 +98,7 @@ describe('Role and permission routes', () => {
       headers: {
         authorization: `Bearer ${superAdminToken}`,
       },
-      payload: createPayload,
+      payload: { ...createPayload, name: `${createPayload.name}_SUPER` },
     });
 
     expect(superAdminResponse.statusCode).toBe(HTTP_STATUS.CREATED);

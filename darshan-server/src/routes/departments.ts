@@ -8,7 +8,6 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
-import { isAdminLike } from '@/rbac/policy';
 
 const logger = createLogger('department-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -86,7 +85,7 @@ export async function departmentRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Department') || !isAdminLike(payload.role)) {
+        if (!ability.can('read', 'Department')) {
           throw AppError.forbidden('Forbidden');
         }
 
@@ -136,7 +135,7 @@ export async function departmentRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Department') || !isAdminLike(payload.role)) {
+        if (!ability.can('read', 'Department')) {
           throw AppError.forbidden('Forbidden');
         }
 

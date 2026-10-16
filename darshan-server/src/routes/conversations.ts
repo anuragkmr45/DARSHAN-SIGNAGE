@@ -8,6 +8,9 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
+import { getDatabase, schema } from '@/db';
+import { eq } from 'drizzle-orm';
+import { canAccessDirectoryUser } from '@/rbac/user-directory';
 
 const logger = createLogger('conversation-routes');
 const { CREATED } = HTTP_STATUS;
@@ -23,6 +26,7 @@ const sendMessageSchema = z.object({
 
 export async function conversationRoutes(fastify: FastifyInstance) {
   const repo = createConversationRepository();
+  const db = getDatabase();
 
   fastify.post<{ Body: typeof startConversationSchema._type }>(
     apiEndpoints.conversations.start,
@@ -42,6 +46,12 @@ export async function conversationRoutes(fastify: FastifyInstance) {
         if (!ability.can('read', 'Conversation')) throw AppError.forbidden('Forbidden');
 
         const data = startConversationSchema.parse(request.body);
+        const [participant] = await db.select().from(schema.users).where(eq(schema.users.id, data.participant_id));
+        if (!participant || !canAccessDirectoryUser(
+          { userId: payload.sub, departmentId: payload.department_id },
+          participant,
+          ability
+        )) throw AppError.notFound('User not found');
         const conversation = await repo.getOrCreate(payload.sub, data.participant_id);
         return reply.status(CREATED).send(conversation);
       } catch (error) {

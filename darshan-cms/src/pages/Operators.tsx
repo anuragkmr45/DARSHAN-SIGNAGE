@@ -30,7 +30,7 @@ import { getRoleBadgeClass } from "@/lib/roleBadges";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { useAppSelector } from "@/store/hooks";
 import { departmentsApi } from "@/api/domains/departments";
-import { canManageOperatorsModule, isAdminLike } from "@/lib/access";
+import { canManageOperatorsModule } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
 
 const PAGE_SIZE = 9;
@@ -69,7 +69,7 @@ export default function Operators() {
   const roles = useMemo(() => rolesData?.items ?? [], [rolesData?.items]);
   const operatorRole = useMemo(() => roles.find((role) => role.name === "OPERATOR") ?? null, [roles]);
   const canManageOperators = canManageOperatorsModule(can);
-  const canPickDepartment = isAdminLike(currentUser?.role);
+  const canPickDepartment = can("manage", "User") && can("read", "Department");
   const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
     queryKey: ["departments"],
     queryFn: () => departmentsApi.list({ page: 1, limit: 100 }),
@@ -121,7 +121,7 @@ export default function Operators() {
         last_name: selectedUser.last_name ?? "",
         role_id: operatorRole?.id ?? selectedUser.role_id,
         department_id:
-          currentUser?.role === "DEPARTMENT" ? currentUser.department_id ?? "" : selectedUser.department_id ?? "",
+          !canPickDepartment ? currentUser?.department_id ?? "" : selectedUser.department_id ?? "",
         password: "",
         confirm_password: "",
       });
@@ -131,12 +131,12 @@ export default function Operators() {
         first_name: "",
         last_name: "",
         role_id: operatorRole?.id ?? "",
-        department_id: currentUser?.role === "DEPARTMENT" ? currentUser.department_id ?? "" : "",
+        department_id: !canPickDepartment ? currentUser?.department_id ?? "" : "",
         password: "",
         confirm_password: "",
       });
     }
-  }, [currentUser?.department_id, currentUser?.role, isFormOpen, operatorRole?.id, selectedUser]);
+  }, [canPickDepartment, currentUser?.department_id, isFormOpen, operatorRole?.id, selectedUser]);
 
   useEffect(() => {
     if (operatorRole && formData.role_id !== operatorRole.id) {
