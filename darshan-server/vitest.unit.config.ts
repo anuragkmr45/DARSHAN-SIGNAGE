@@ -9,6 +9,7 @@ export default defineConfig({
       'src/**/*.unit.test.ts',
       'src/routes/auth-throttle.test.ts',
       'src/jobs/webpage-processing.test.ts',
+      'src/realtime/realtime-bus.test.ts',
       'src/utils/document-page-selection.test.ts',
       'src/utils/pdf-metadata.test.ts',
     ],
