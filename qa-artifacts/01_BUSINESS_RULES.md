@@ -1,8 +1,17 @@
 # Business Rule Catalogue
 
-Status: READY FOR QA EXECUTION, NOT RELEASE-APPROVED. The 2026-10-16 authorization, ownership, emergency, Requests and session decisions are implemented through code commit `8f66d8f` and described in `evidence/authorization-session-requests-review.md`. Developer evidence is limited to builds and focused automated/static tests; browser, database migration, multi-process socket, race and end-to-end execution remain QA gates. Earlier PDF/video evidence remains separately dated.
+Status: READY FOR QA EXECUTION, NOT RELEASE-APPROVED. The 2026-10-16
+authorization, ownership, emergency, Requests and session decisions are
+implemented through code commit `a01804c` and described in
+`evidence/authorization-session-requests-review.md`. Developer evidence now
+includes builds, real-PostgreSQL affected routes/migration rehearsal, one-worker
+browser flows, full player automation and a built-API smoke. Multi-process live
+sockets, physical platforms, security, recovery and soak remain QA gates.
+Earlier PDF/video runtime evidence remains separately dated.
 
-Baseline: `release-01` source through `8f66d8f` (`feat(auth): enforce permission and session boundaries`). Older rules retain their historical evidence anchors.
+Baseline: `release-01` source through `a01804c` (`fix(media): compensate
+multipart authorization races`). Older rules retain their historical evidence
+anchors.
 
 ## Classification
 

@@ -1,6 +1,13 @@
 # Master Human QA Checklist
 
-Baseline: `release-01` through `8f66d8f`. The latest authorization/session implementation review is `evidence/authorization-session-requests-review.md`; earlier PDF/video and ownership evidence remains separately dated. Execute remaining work only on authorized isolated test environments. Each checkbox names detailed rows in `05_TEST_CASES.csv`, where every case has an Expected Result; QA records actual status, evidence and defect IDs there.
+Baseline: `release-01` through `a01804c`. The latest authorization/session
+implementation review is `evidence/authorization-session-requests-review.md`
+and developer execution is in
+`evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`; earlier
+PDF/video and ownership evidence remains separately dated. Execute remaining
+work only on authorized isolated test environments. Each checkbox names
+detailed rows in `05_TEST_CASES.csv`, where every case has an Expected Result;
+QA records actual status, evidence and defect IDs there.
 
 ## Identity, Access And Privacy
 

@@ -4,7 +4,14 @@ Status: SOURCE-BEHAVIOR ANSWERED FOR ALL 20 TOPICS. User-approved rules are iden
 
 Source behavior for all BQ-001 through BQ-020 has been recorded. A question's remaining `TBD` means business approval or an actual site target is missing, not that code behavior is unknown. QA can characterize the implementation now; release acceptance for an undecided policy remains separate. Do not include passwords, keys, production tokens or customer data.
 
-Unless a section says otherwise, historical observed behavior refers to its dated static baseline. BQ-002/003/006/007/008/009 were refreshed through source commit `8f66d8f`; their combined review is `evidence/authorization-session-requests-review.md`. Source references are repository-relative. These refreshed areas have build/bounded-test evidence but no new application runtime; migration, deterministic races, multi-process sockets and final frozen-candidate execution remain unverified. Earlier PDF/video and ownership runtime is separately linked.
+Unless a section says otherwise, historical observed behavior refers to its
+dated static baseline. BQ-002/003/006/007/008/009 were refreshed through source
+commit `a01804c`; their combined review is
+`evidence/authorization-session-requests-review.md`. Source references are
+repository-relative. These areas have developer build, database/migration,
+built-API, browser and player evidence in the dated closure report; independent
+QA, multi-process live sockets and the remaining release matrix are still
+unverified. Earlier PDF/video and ownership runtime is separately linked.
 
 ## Batch 1: Core Behavior And Scope
 

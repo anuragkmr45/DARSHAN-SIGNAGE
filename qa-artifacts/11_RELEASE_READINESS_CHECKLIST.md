@@ -1,15 +1,22 @@
 # Release Readiness Checklist
 
-This is a release gate, not a current sign-off. Record owner, date, build/release ID, evidence and decision for each item. The authorization/session implementation review is `evidence/authorization-session-requests-review.md`; builds and bounded checks passed but its application behavior remains Not Tested. Earlier targeted PDF/video and ownership evidence also does not replace platform, security, recovery, soak or deployment gates.
+This is a release gate, not a current sign-off. Record owner, date,
+build/release ID, evidence and decision for each item. The authorization/session
+review is `evidence/authorization-session-requests-review.md`; the final
+developer cycle added real-PostgreSQL, built-API, browser and full-player
+automated evidence in
+`evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`. These results
+do not replace independent QA, platform, security, recovery, soak or deployment
+gates.
 
 ## Current Targeted Feature Evidence
 
 - [x] Disposable Linux CMS/API/Electron flow demonstrated independent PDF pages, video Loop On/Off, multiple items, simultaneous slots, corrupt-media advance, schedule hard stop, cached offline restart/recovery, take-down and page-aware PoP persistence.
 - [x] CMS/server/player focused tests and builds passed; Linux AppImage and amd64 `.deb` were created with recorded hashes.
-- [x] Deleted-user ownership source/build checks and a partial disposable API/CMS developer run passed the specifically recorded ownership assertions. This is developer evidence only; migration, deterministic races/sockets, complete browser coverage and the frozen-build repeat remain open. See `evidence/runtime-2026-10-16/runtime-validation.md`.
-- [x] Authorization/session/Requests source implementation, server/CMS production builds, 18 focused contract tests and 9 realtime-bus tests passed. No application/browser/database/multi-process runtime was started for this change set.
+- [x] Deleted-user ownership source/build checks, affected DB-backed routes and migration `0045` upgrade/repeat/failure/recovery rehearsal passed on disposable PostgreSQL. This is developer evidence only; the complete QA matrix and release recovery gate remain open.
+- [x] Authorization/session/Requests developer verification passed server/CMS/player builds, focused unit/integration suites, six CMS browser cases and built-API HTTP checks. A multipart authorization-revocation cleanup defect was fixed and the final affected server rerun passed 65/65. Multi-process live sockets remain open.
 - [ ] `AUTHN-04`, `AUTHZ-01..03`, `AUTHZ-06`, `AUTHZ-08..13` require independent QA runtime evidence; bounded developer checks do not mark these cases Pass.
-- [ ] `AUTHZ-07`, `DATA-06`, `CONC-07` and `UI-07` require QA5 runtime evidence; no Pass/Actual Result may be inferred from the checked static item above.
+- [ ] `AUTHZ-07`, `DATA-06`, `CONC-07` and `UI-07` require independent QA runtime evidence; no Pass/Actual Result may be inferred from the checked developer items above.
 - [ ] Fresh-machine installation/reboot tests for the generated Linux packages remain pending.
 - [ ] Windows x64 package/install/kiosk/playback and supported physical display matrix remain pending.
 - [ ] Long soak, approved performance limits, two-minute secure lock/cache purge, mixed-version capability rollout, accessibility and full product/security regression remain pending.
@@ -29,7 +36,7 @@ This is a release gate, not a current sign-off. Record owner, date, build/releas
 - [ ] Recovery evidence is fresh, signed by the separate authority and tied to this site/release policy. The recorded measured RPO/RTO meet the approved BQ-018 thresholds.
 - [ ] Retention/deletion obligations for DB records, media, chat, screenshots, logs, metrics and backups have owners and evidence. Do not infer compliance from a config field or unused cleanup function. `BKP-01`, `PERF-04`; BQ-015/020.
 - [ ] If upgrading, forward migration baseline, backup/restore plan, downtime window and compatible client/player versions are approved. Failed migration leaves a controlled state; no old image is started against unreviewed schema. `DEP-03`, `BKP-03`; BQ-018.
-- [ ] Migration `0045` is rehearsed on a disposable legacy-data copy for organization/valid-department/restricted/missing/nullable and pre-migration-transferred creator classes, constraints/indexes, tombstone references, repeat invocation and recovery. Human review accepts the migration-time mapping where legacy creation-time department is unknowable. Rollback explicitly disables user deletion on any older server that still physically deletes rows. `DATA-06`, `BKP-03`; R-25/R-29.
+- [ ] Migration `0045` is rehearsed on a disposable legacy-data copy for organization/valid-department/restricted/missing/nullable and pre-migration-transferred creator classes, constraints/indexes, tombstone references, repeat invocation and recovery. The developer PostgreSQL rehearsal passed these technical paths; QA/release still needs frozen-candidate evidence, human acceptance of unknowable historical departments and a rollback decision that disables physical deletion on an older server. `DATA-06`, `BKP-03`; R-25/R-29.
 - [ ] An interrupted first install resumes correctly, old release stop script cannot stop the new active role, and stable volumes/site identity are preserved. `DEP-05`, `DEP-07`.
 
 ## Product And Security

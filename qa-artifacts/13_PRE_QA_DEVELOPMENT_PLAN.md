@@ -1,5 +1,14 @@
 # Pre-QA Development Completion Plan
 
+> **Final developer closure — 2026-10-17:** the later multi-loop developer-QA
+> cycle completed the affected PostgreSQL/migration suites, built-API smoke,
+> CMS browser flow and full player automation. It found and fixed the multipart
+> authorization-revocation cleanup race, then passed the post-fix build and
+> affected reruns. Exact results and remaining independent-QA gates are in
+> `evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`. Earlier
+> “pending/unexecuted” entries below are retained as the original plan/history
+> and are superseded where the closure report records execution.
+
 > **Superseding decision — 2026-10-16:** the user limited the remaining developer
 > gate to a 10–15 minute low-resource smoke check and assigned the deeper
 > database, migration, browser, Electron, concurrency, security/load and soak
@@ -18,17 +27,18 @@ The build is ready to enter QA only when all three feature contracts are impleme
 
 ## Current Development Checkpoint
 
-Checkpoint date: 2026-10-16  
-Overall state: **fast developer smoke complete — ready for independent QA execution, not release approval**
+Checkpoint date: 2026-10-17
+Overall state: **end-to-end affected developer QA complete — ready for
+independent QA execution, not release approval**
 
 | Workstream | Current evidence | Remaining before QA |
 | --- | --- | --- |
-| Deleted-user ownership and tombstones | Stable ownership/tombstone source changes exist; focused unit and DB/API tests pass; a live isolated API/CMS run verified role/scope access, stable ownership after transfer, tombstoning, repeated delete, email reuse, history privacy and department-delete counts. SUPER_ADMIN management of all user roles was corrected and retested. Nested Presentation/Schedule/Schedule Request resources now reuse one ownership/permission response helper. The legacy Request message-history projection now masks tombstone email and exposes deleted status; its DB assertion is authored. | Run the new nested/history DB tests, finish concurrency/socket/upload race checks, complete pre-`0045` migration recovery rehearsal, repeat affected suites on the frozen revision and finish the complete browser matrix. |
-| Document page selection | CMS/API/player implementation and earlier targeted Linux runtime evidence exist. The 2026-10-16 worker run ingested/converted `.pdf`, `.ppt`, `.pptx`, `.doc`, `.docx`, `.xls`, `.xlsx` and `.csv`, rejected malformed/encrypted PDFs, persisted duplicate pages 2/5, enforced atomic invalid-page and capability rules, and froze the pages in a published snapshot. | Validate selected-page CMS preview and current Linux Electron output on the frozen build; exercise offline cache/replayed PoP, mixed targets and raster/resource behavior. The attempted 2026-10-16 CMS page/loop script produced no valid result. |
-| Video looping | Occurrence-level `loop_enabled` implementation exists; API normalization and immutable snapshot persistence passed in the disposable developer run. Native scene playback and the direct/legacy single-item timeline now retain one mounted loop element until authority ends. Pause/resume preserves the authoritative wall-clock end, and stop/skip clear both transition and completion timers. The capped player unit suite passes 357/357 and prior integration/fault suites are green. | Re-run on the final Linux Electron build, observe at least three complete wraps, verify loop-off and multi-item advancement, test every takeover/end/error boundary, and complete the resource-growth soak. |
+| Deleted-user ownership and tombstones | Stable ownership/tombstone behavior, affected DB/API tests, migration `0045` upgrade/repeat/failure/recovery and CMS ownership browser checks passed. Multipart creation now compensates when revocation wins before upload-session activation. | QA repeats the matrix on the frozen candidate and completes real object-store outage, two-node socket and remaining deterministic concurrency cases. |
+| Document page selection | CMS/API/player implementation, supported-format ingestion/publication, selected pages 2/5, CMS author/review browser checks and full player automation passed; earlier Linux Electron runtime evidence is retained. | QA validates the frozen build on approved physical targets, mixed capabilities, offline replay and Windows. |
+| Video looping | Occurrence-level publication and CMS Loop On review passed; player build plus all 384 unit/integration/performance/fault tests passed for native wraps, loop-off, multi-item, resume/stall and authority-boundary cleanup. | QA observes the frozen build on physical Linux/Windows targets and completes the long resource-growth soak. |
 | Runtime stack | Current production server image starts successfully against isolated PostgreSQL, Valkey and S3-compatible storage; API/worker health and live CMS authentication have been exercised. A production logger packaging defect was fixed and regression-tested. | Validate with the exact approved object-store/dependency image or retain an explicit release risk; complete player pairing, restart/offline recovery and the 30-minute combined stability observation. |
-| Authorization/session/Requests | Last-active SUPER_ADMIN protection, same-department people directories, resource-specific ownership, action-specific scheduling, permission-driven custom roles, target-aware emergency control, general Requests disablement and cross-node/socket session invalidation are implemented through `8f66d8f`. Server/CMS builds, 18 focused checks and 9 realtime-bus tests passed without starting the application. | QA runs `AUTHN-04`, `AUTHZ-01..03`, `AUTHZ-06`, `AUTHZ-08..13` and `CONC-07` on the frozen candidate, including two API nodes and deterministic DB barriers. |
-| QA package | All 102 case rows have the required planning fields, including Expected Result; dated developer evidence is linked and the latest 12-area matrix is in `evidence/authorization-session-requests-review.md`. | Leave independent QA fields unclaimed, assign owners to remaining site-policy decisions, and bind the handoff to one immutable commit/build. |
+| Authorization/session/Requests | Implemented through `a01804c`; focused unit/DB/API/browser checks passed. The built API returned `409` for last-active SUPER_ADMIN disable, `404` for general Requests, `200` for Schedule Requests and rejected a disabled user's old token immediately. | QA runs `AUTHN-04`, `AUTHZ-01..03`, `AUTHZ-06`, `AUTHZ-08..13` and `CONC-07`, especially two API nodes/live sockets, recovery CLI and the complete directory-picker matrix. |
+| QA package | All 102 case rows have the required planning fields, including Expected Result; the 12-area matrix and final developer closure report are linked from `README.md`. | Leave independent QA fields unclaimed, assign owners to remaining site-policy decisions, and bind the handoff to one immutable release build. |
 
 Evidence already collected is developer evidence only. It may justify `Partially Tested`; it must not be converted to an independent QA `Pass`.
 

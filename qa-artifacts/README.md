@@ -1,12 +1,28 @@
 # DARSHAN Human QA Planning Package
 
-Status: **READY FOR INDEPENDENT QA EXECUTION; not release-approved.** The authorization/ownership/emergency/Requests/session implementation is complete in source through `8f66d8f`; server/CMS builds and bounded automated/static checks passed. The application was deliberately not started for this change set. Browser, database/migration, multi-process socket, deterministic race and end-to-end evidence remain QA/release gates.
+Status: **READY FOR INDEPENDENT QA EXECUTION; not release-approved.** The
+authorization/ownership/emergency/Requests/session implementation and its
+multipart-revocation compensation fix are complete through `a01804c`. Server,
+CMS and player builds; real-PostgreSQL affected routes and migration rehearsal;
+one-worker CMS browser flows; the complete player automated suite; and a built
+API HTTP smoke passed. Two-node live sockets, physical-platform/runtime,
+security, recovery, soak and release evidence remain QA/release gates.
 
-Repository baseline: `release-01` source through commit `8f66d8f`. Earlier document-page, video-loop and ownership evidence remains historical baseline material and is traced separately.
+Repository baseline: `release-01` source through commit `a01804c`. Earlier
+document-page, video-loop and ownership evidence remains historical baseline
+material and is traced separately.
 
 A disposable local API/CMS/dependency stack, browser flow, real Linux Electron player, freshly migrated test database, focused DB-backed suite and Linux packaging command were executed on 2026-10-15 for the document-page and video-loop scope. Results and screenshots are in `evidence/runtime-2026-10-15/runtime-validation.md`. This targeted run did not execute the full product checklist, Windows/physical-hardware matrix, long soak, security assessment, penetration test, backup/restore rehearsal or production deployment.
 
 On 2026-10-16, an isolated API/worker/PostgreSQL/Valkey/S3-compatible/CMS developer run exercised ownership, tombstones, every supported document extension, selected-page persistence/publication and loop-flag publication. It used RustFS rather than the exact approved MinIO image and stopped before migration `0045`, deterministic race/socket coverage, a valid final CMS page/loop browser result or current Linux Electron playback. Later low-memory builds and automated suites passed. Subsequent static passes masked deleted-user email in legacy Request history; made late upload validation conditional; prevented a late document/video/webpage worker from changing deletion-stopped PROCESSING Media back to READY; and made stale produced-object/thumbnail cleanup retryable. The new database/object-store regressions are authored but unexecuted. See `evidence/runtime-2026-10-16/runtime-validation.md` and `evidence/deleted-user-ownership-review.md`. This remains partial developer evidence; QA execution fields stay independent.
+
+A later resource-bounded closure cycle completed on 2026-10-17 and supersedes those
+specific execution gaps: migration `0045` rehearsal, affected DB-backed routes,
+CMS browser flows, all player automation and a built API smoke were executed.
+It found and fixed a multipart authorization-revocation cleanup defect. See
+`evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md` for exact
+results and the smaller remaining QA/release boundary. QA-owned result fields
+remain independent.
 
 ## Read First
 
@@ -26,6 +42,7 @@ On 2026-10-16, an isolated API/worker/PostgreSQL/Valkey/S3-compatible/CMS develo
 14. [Pre-QA development completion plan](13_PRE_QA_DEVELOPMENT_PLAN.md): ordered implementation, automated-test, migration, disposable-runtime and handoff gates for ownership/tombstones, document page selection and video looping.
 15. [Fast developer smoke handoff](evidence/runtime-2026-10-16/fast-developer-smoke.md): the final bounded 2026-10-16 checks, exact results, exclusions and QA execution order.
 16. [Authorization/session/Requests review](evidence/authorization-session-requests-review.md): the final 12-area expected-behavior matrix, source anchors, multi-pass corner cases, bounded developer verification and runtime exclusions.
+17. [Authorization and playback developer-QA closure](evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md): final multi-loop server/database/API/browser/player results, defect corrections, catalogue integrity and explicit independent-QA gaps.
 
 The inventory is supporting evidence, not a completed authorization audit. Source references are repository-relative. Only results explicitly linked to the dated runtime report are current execution evidence; test-file presence and historical QA reports do not mean tests currently pass.
 
@@ -50,7 +67,7 @@ The 2026-09-25 answer confirms administrator self-approval and direct publishing
 | `10_SMOKE_REGRESSION_UAT.md` | Distinct smoke, regression, and UAT selections | Provisional |
 | `11_RELEASE_READINESS_CHECKLIST.md` | Deployment, migrations, rollback, restore and release gates | Provisional |
 | `12_CODE_BASELINE_EXPECTATIONS.md` | Code-derived expectations for all 20 business topics | Static baseline; not test results |
-| `13_PRE_QA_DEVELOPMENT_PLAN.md` | Original deep plan plus the superseding fast developer-smoke handoff decision | Fast developer smoke complete; deep runtime gates transferred to QA/release validation |
+| `13_PRE_QA_DEVELOPMENT_PLAN.md` | Original deep plan, fast-smoke decision and later end-to-end developer closure | Developer closure complete; listed cross-node/platform/security/recovery/soak gates remain with QA/release validation |
 
 This file grouping covers all requested deliverables without duplicating the detailed cases. Suites reference the master case IDs rather than cloning cases. The detailed CSV has 102 data rows and all required planning fields are populated: Test ID, objective, preconditions, test data, steps, expected result, priority, risk level, design evidence, environment/dependencies and status. QA-owned Actual Result, Execution Evidence and Defect ID fields intentionally remain blank for unexecuted cases.
 

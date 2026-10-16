@@ -1,17 +1,33 @@
 # System Understanding
 
-Status: READY FOR INDEPENDENT QA EXECUTION, NOT RELEASE-APPROVED. Authorization/ownership/emergency/Requests/session changes are implemented through `8f66d8f`; builds and bounded tests passed, while browser, database/migration, multi-process socket, concurrency and frozen-candidate execution remain open QA gates.
+Status: READY FOR INDEPENDENT QA EXECUTION, NOT RELEASE-APPROVED.
+Authorization/ownership/emergency/Requests/session behavior and multipart
+revocation compensation are implemented through `a01804c`. Builds,
+real-PostgreSQL affected suites/migration rehearsal, one-worker browser flows,
+the full player automated suite and built-API smoke passed. Multi-process live
+sockets, physical platforms, security, recovery and soak remain QA gates.
 
 ## Baseline And Scope
 
 - Product: DARSHAN digital signage, CMS administration, and Electron playback.
-- Branch/commit: `release-01` through `8f66d8f`, plus the QA-only bounded-test inclusion and artifact reconciliation.
-- Source inspection/build/unit evidence refreshed: 2026-10-16. PDF/video targeted runtime evidence remains dated 2026-10-15. This describes the working tree and disposable historical run, not a production site.
-- 1,321 Git-visible files after the feature/evidence delta: CMS 292; player 166; server 403; QA artifacts 58; deployment 72; documentation 280; scripts 26; standards 8; manifests 3; `.codex` 10; three root files. This includes 1,279 tracked files plus 42 current untracked feature/evidence files.
+- Branch/commit: `release-01` through `a01804c`, plus the QA-artifact
+  reconciliation that links the final developer evidence.
+- Source/runtime evidence refreshed: 2026-10-17. PDF/video targeted Linux
+  runtime evidence remains dated 2026-10-15. These describe disposable
+  developer environments, not a production site or independent QA result.
+- 1,322 tracked files existed at the source/test commit. The QA-only report
+  added afterward is committed separately so the application baseline remains
+  identifiable.
 - 239 explicit Fastify route registrations, all resolved to paths by static parsing. Some registrations are configuration-dependent, including `/metrics`.
 - 29 CMS route declarations, including shell/catch-all and legacy route aliases. This is not a count of 29 distinct product screens.
-- 69 `pgTable` declarations and 15 enums in `darshan-server/src/db/schema.ts`; 46 tracked SQL migrations plus new working-tree migration `0045` (47 visible SQL migration files). The SQL-only `darshan_deployment_runs` table and pg-boss internals are additional data surfaces.
-- 206 Git-visible TypeScript/JavaScript `*.test`/`*.spec` files at the reconciled baseline. Targeted browser/Linux Electron/DB execution is recorded in dated evidence; authorization/session bounded checks are in `evidence/authorization-session-requests-review.md`. Test-file presence alone is not proof.
+- 69 `pgTable` declarations and 15 enums in `darshan-server/src/db/schema.ts`;
+  48 tracked SQL migrations through `0046`. The SQL-only
+  `darshan_deployment_runs` table and pg-boss internals are additional data
+  surfaces.
+- 206 tracked TypeScript/JavaScript `*.test`/`*.spec` files. Targeted
+  browser/Linux Electron/DB execution is recorded in dated evidence, including
+  `evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`. Test-file
+  presence alone is not proof.
 - No tracked GitHub Actions, GitLab CI, Jenkinsfile, or Azure Pipelines file was found in the inspected file index. This does not establish whether external CI exists.
 
 Primary machine-readable inventory: `evidence/repository-inventory.json`.

@@ -1,6 +1,11 @@
 # Code-Derived Expectations For QA
 
-Baseline: `release-01` through `8f66d8f`, source-reviewed 2026-10-16. These are code expectations, **not runtime proof**. The latest authorization review is `evidence/authorization-session-requests-review.md`; its cases remain `Not Tested` until QA executes the application. Earlier targeted PDF/video and ownership evidence remains separately dated.
+Baseline: `release-01` through `a01804c`, source-reviewed 2026-10-17. These are
+code expectations, **not independent QA proof**. The latest authorization review
+is `evidence/authorization-session-requests-review.md`; developer runtime is in
+`evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`, while catalogue
+cases remain `Not Tested` or `Partially Tested` until QA records its own result.
+Earlier targeted PDF/video and ownership evidence remains separately dated.
 
 When a user-confirmed rule disagrees with code, report the observed difference against that rule even if the software behaves exactly as this sheet predicts. For code-only topics, report the observed behavior and its risk; do not call an insecure behavior a security pass merely because it matches source. Site-specific commitments without a value in code remain unscored until the release owner supplies an acceptance target.
 
