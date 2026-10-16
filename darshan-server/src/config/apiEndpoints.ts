@@ -129,14 +129,6 @@ export const apiEndpoints = {
     update: withBase('/layouts/:id'),
     delete: withBase('/layouts/:id'),
   },
-  requests: {
-    create: withBase('/requests'),
-    list: withBase('/requests'),
-    get: withBase('/requests/:id'),
-    update: withBase('/requests/:id'),
-    addMessage: withBase('/requests/:id/messages'),
-    listMessages: withBase('/requests/:id/messages'),
-  },
   notifications: {
     list: withBase('/notifications'),
     unreadCount: withBase('/notifications/unread-count'),
@@ -272,7 +264,6 @@ export const apiEndpoints = {
     summary: withBase('/reports/summary'),
     schedules: withBase('/reports/schedules'),
     trends: withBase('/reports/trends'),
-    requestsByDepartment: withBase('/reports/requests-by-department'),
     offlineScreens: withBase('/reports/offline-screens'),
     storage: withBase('/reports/storage'),
     systemHealth: withBase('/reports/system-health'),

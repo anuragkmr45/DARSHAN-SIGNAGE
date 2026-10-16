@@ -1,7 +1,6 @@
 import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
 import type {
-  DepartmentRequestsReport,
   OfflineScreensReport,
   ReportSummary,
   ScheduleActivityReport,
@@ -26,12 +25,6 @@ export const reportsApi = {
   getTrends: () =>
     apiClient.request<Record<string, unknown>>({
       path: endpoints.reports.trends,
-      method: "GET",
-    }),
-
-  getRequestsByDepartment: () =>
-    apiClient.request<DepartmentRequestsReport[]>({
-      path: endpoints.reports.requestsByDepartment,
       method: "GET",
     }),
 

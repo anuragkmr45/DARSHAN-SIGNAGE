@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Download, TrendingUp, Activity, Monitor, AlertTriangle, Bell, Shield, CheckCircle2 } from "lucide-react";
+import { Download, Activity, Monitor, AlertTriangle, Bell, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -466,7 +466,7 @@ export default function Reports() {
 
       {canReadReports && (
         <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Media</CardTitle>
@@ -477,20 +477,6 @@ export default function Reports() {
                   <Skeleton className="h-7 w-16" />
                 ) : (
                   <div className="text-2xl font-bold">{summary?.media_total ?? 0}</div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Open Requests</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                {summaryQuery.isLoading ? (
-                  <Skeleton className="h-7 w-16" />
-                ) : (
-                  <div className="text-2xl font-bold">{summary?.requests_open ?? 0}</div>
                 )}
               </CardContent>
             </Card>
@@ -509,19 +495,6 @@ export default function Reports() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Completed Requests</CardTitle>
-                <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                {summaryQuery.isLoading ? (
-                  <Skeleton className="h-7 w-16" />
-                ) : (
-                  <div className="text-2xl font-bold">{summary?.requests_completed ?? 0}</div>
-                )}
-              </CardContent>
-            </Card>
           </div>
 
           <Card>

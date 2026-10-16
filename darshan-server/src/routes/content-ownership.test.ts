@@ -885,25 +885,12 @@ describe('content ownership routes', () => {
   it('keeps ownership stable when the creator moves departments and is later deleted', async () => {
     const db = getDatabase();
     const scheduleRequestId = randomUUID();
-    const genericRequestId = randomUUID();
-    const genericRequestMessageId = randomUUID();
     await db.insert(schema.scheduleRequests).values({
       id: scheduleRequestId,
       schedule_id: departmentResources.schedules,
       schedule_payload: {},
       notes: 'Retained department request',
       requested_by: ownerId,
-    });
-    await db.insert(schema.requests).values({
-      id: genericRequestId,
-      title: 'Retained request history',
-      created_by: ownerId,
-    });
-    await db.insert(schema.requestMessages).values({
-      id: genericRequestMessageId,
-      request_id: genericRequestId,
-      author_id: ownerId,
-      content: 'Historical message from the deleted owner',
     });
 
     const moved = await server.inject({
@@ -993,26 +980,6 @@ describe('content ownership routes', () => {
         permissions: { can_update: true },
       },
     });
-
-    const retainedMessageHistory = await server.inject({
-      method: 'GET',
-      url: `/api/v1/requests/${genericRequestId}/messages`,
-      headers: auth(leadToken),
-    });
-    expect(retainedMessageHistory.statusCode).toBe(200);
-    expect(JSON.parse(retainedMessageHistory.body).items).toContainEqual(
-      expect.objectContaining({
-        id: genericRequestMessageId,
-        author: expect.objectContaining({
-          id: ownerId,
-          email: null,
-          first_name: 'Owner',
-          last_name: 'Ownership',
-          status: 'DELETED',
-        }),
-      })
-    );
-    expect(retainedMessageHistory.body).not.toContain(`deleted+${ownerId}@deleted.invalid`);
 
     const tombstoneEmailSearch = await server.inject({
       method: 'GET',

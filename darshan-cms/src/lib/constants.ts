@@ -3,7 +3,6 @@ export const ROUTES = {
   login: "/login",
   dashboard: "/dashboard",
   schedule: "/schedule",
-  requests: "/requests",
   departments: "/departments",
   operators: "/operators",
   users: "/users",

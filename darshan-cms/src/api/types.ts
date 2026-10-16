@@ -357,8 +357,6 @@ export interface ReportExportParams {
 export interface ReportSummary {
   uptime?: number;
   total_media?: number;
-  open_requests?: number;
-  completed_requests?: number;
   active_screens?: number;
   offline_screens?: number;
 }
@@ -407,7 +405,6 @@ export interface MetricsOverview {
     users?: number;
     media?: number;
     screens?: number;
-    requests?: number;
     [key: string]: number | undefined;
   };
   screens?: {
@@ -537,17 +534,6 @@ export interface ScreenObservabilitySummary {
     links: ObservabilityGrafanaLink[];
     embed_url: string | null;
   };
-}
-
-export interface DepartmentRequestsReport {
-  department_id: string | null;
-  department_name: string | null;
-  requests: Array<{
-    id: string;
-    title: string;
-    status: string;
-    created_at: string;
-  }>;
 }
 
 export interface OfflineScreensReport {
@@ -1843,15 +1829,6 @@ export interface Publish {
     screen_id?: string | null;
     screen_group_id?: string | null;
   }>;
-}
-
-export interface RequestTicket {
-  id: string;
-  title: string;
-  description?: string;
-  priority?: "LOW" | "MEDIUM" | "HIGH";
-  status?: string;
-  assigned_to?: string | null;
 }
 
 export type ChatConversationType = "DM" | "GROUP_CLOSED" | "FORUM_OPEN";

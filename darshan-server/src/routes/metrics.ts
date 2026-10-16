@@ -33,7 +33,6 @@ export async function metricsRoutes(fastify: FastifyInstance) {
         const [usersCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
         const [mediaCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.media);
         const [screensCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.screens);
-        const [requestsCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.requests);
 
         const now = new Date();
         const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -156,7 +155,6 @@ export async function metricsRoutes(fastify: FastifyInstance) {
             users: Number(usersCount?.count || 0),
             media: Number(mediaCount?.count || 0),
             screens: totalScreens,
-            requests: Number(requestsCount?.count || 0),
           },
           screens: {
             total: totalScreens,

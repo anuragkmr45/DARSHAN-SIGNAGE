@@ -11,7 +11,6 @@ export const PERMISSION_SUBJECTS = [
   'ScheduleRequest',
   'Screen',
   'ScreenGroup',
-  'Request',
   'Notification',
   'AuditLog',
   'DevicePairing',

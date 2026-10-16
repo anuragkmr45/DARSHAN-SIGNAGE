@@ -15,7 +15,6 @@ const Departments = lazy(() => import("./pages/Departments"));
 const Conversations = lazy(() => import("./pages/Conversations"));
 const Screens = lazy(() => import("./pages/Screens"));
 const MediaLibrary = lazy(() => import("./pages/MediaLibrary"));
-const Requests = lazy(() => import("./pages/Requests"));
 const Operators = lazy(() => import("./pages/Operators"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Settings = lazy(() => import("./pages/Settings"));
@@ -55,7 +54,6 @@ export default function AuthenticatedAppShell() {
                   <Route path="/layouts" element={<ProtectedRoute moduleKey="layouts"><Layouts /></ProtectedRoute>} />
                   <Route path="/layouts/new" element={<ProtectedRoute moduleKey="layouts"><LayoutEditor /></ProtectedRoute>} />
                   <Route path="/layouts/:id" element={<ProtectedRoute moduleKey="layouts"><LayoutEditor /></ProtectedRoute>} />
-                  <Route path="/requests" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "Request" }]}><Requests /></ProtectedRoute>} />
                   <Route path="/departments" element={<ProtectedRoute moduleKey="departments"><Departments /></ProtectedRoute>} />
                   <Route path="/operators" element={<ProtectedRoute moduleKey="operators"><Operators /></ProtectedRoute>} />
                   <Route path="/users" element={<ProtectedRoute moduleKey="users"><Users /></ProtectedRoute>} />

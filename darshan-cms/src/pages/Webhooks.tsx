@@ -35,8 +35,6 @@ const availableEvents = [
   { id: "content.approved", label: "Content Approved" },
   { id: "content.rejected", label: "Content Rejected" },
   { id: "content.published", label: "Content Published" },
-  { id: "request.created", label: "Request Created" },
-  { id: "request.completed", label: "Request Completed" },
   { id: "department.created", label: "Department Created" },
 ];
 

@@ -8,7 +8,6 @@ import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
-import { isDepartmentScopedRole } from '@/rbac/policy';
 import { createEmergencyRepository } from '@/db/repositories/emergency';
 import { escapeHtml, renderPdfDocument } from '@/utils/pdf-render';
 
@@ -321,10 +320,6 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
 
         const [mediaCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.media);
-        const [requestsOpen] = await db
-          .select({ count: sql<number>`count(*)` })
-          .from(schema.requests)
-          .where(sql`${schema.requests.status} = 'OPEN'`);
         const [screensActive] = await db
           .select({ count: sql<number>`count(*)` })
           .from(schema.screens)
@@ -333,10 +328,6 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           .select({ count: sql<number>`count(*)` })
           .from(schema.screens)
           .where(sql`${schema.screens.status} = 'OFFLINE'`);
-        const [requestsCompleted] = await db
-          .select({ count: sql<number>`count(*)` })
-          .from(schema.requests)
-          .where(sql`${schema.requests.status} = 'COMPLETED'`);
 
         const totalScreens = Number(screensActive?.count || 0) + Number(screensOffline?.count || 0);
         const uptimePercent =
@@ -344,8 +335,6 @@ export async function reportsRoutes(fastify: FastifyInstance) {
 
         return reply.send({
           media_total: Number(mediaCount?.count || 0),
-          requests_open: Number(requestsOpen?.count || 0),
-          requests_completed: Number(requestsCompleted?.count || 0),
           screens_active: Number(screensActive?.count || 0),
           screens_offline: Number(screensOffline?.count || 0),
           screen_uptime_percent: uptimePercent,
@@ -375,10 +364,6 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
 
         const [mediaCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.media);
-        const [requestsOpen] = await db
-          .select({ count: sql<number>`count(*)` })
-          .from(schema.requests)
-          .where(sql`${schema.requests.status} = 'OPEN'`);
         const [screensActive] = await db
           .select({ count: sql<number>`count(*)` })
           .from(schema.screens)
@@ -387,10 +372,6 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           .select({ count: sql<number>`count(*)` })
           .from(schema.screens)
           .where(sql`${schema.screens.status} = 'OFFLINE'`);
-        const [requestsCompleted] = await db
-          .select({ count: sql<number>`count(*)` })
-          .from(schema.requests)
-          .where(sql`${schema.requests.status} = 'COMPLETED'`);
         const notifications = await db
           .select({
             id: schema.notifications.id,
@@ -436,14 +417,6 @@ export async function reportsRoutes(fastify: FastifyInstance) {
                 <div class="card">
                   <div class="label">Total Media</div>
                   <div class="value">${escapeHtml(formatCount(Number(mediaCount?.count || 0)))}</div>
-                </div>
-                <div class="card">
-                  <div class="label">Open Requests</div>
-                  <div class="value">${escapeHtml(formatCount(Number(requestsOpen?.count || 0)))}</div>
-                </div>
-                <div class="card">
-                  <div class="label">Completed Requests</div>
-                  <div class="value">${escapeHtml(formatCount(Number(requestsCompleted?.count || 0)))}</div>
                 </div>
                 <div class="card">
                   <div class="label">Active Screens</div>
@@ -551,82 +524,6 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         return reply.send(pdf);
       } catch (error) {
         logger.error(error, 'Report PDF export error');
-        return respondWithError(reply, error);
-      }
-    }
-  );
-
-  // Pending requests grouped by department
-  fastify.get(
-    apiEndpoints.reports.requestsByDepartment,
-    {
-      schema: {
-        description: 'Pending requests grouped by department',
-        tags: ['Reports'],
-        security: [{ bearerAuth: [] }],
-      },
-    },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) throw AppError.unauthorized('Missing authorization header');
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
-
-        const rowsWhere =
-          isDepartmentScopedRole(payload.role) && payload.department_id
-            ? sql`${schema.requests.status} != 'COMPLETED'
-                AND ${schema.requests.status} != 'REJECTED'
-                AND ${schema.users.department_id} = ${payload.department_id}`
-            : sql`${schema.requests.status} != 'COMPLETED'
-                AND ${schema.requests.status} != 'REJECTED'`;
-
-        const rows = await db
-          .select({
-            requestId: schema.requests.id,
-            title: schema.requests.title,
-            status: schema.requests.status,
-            createdAt: schema.requests.created_at,
-            departmentId: schema.departments.id,
-            departmentName: schema.departments.name,
-          })
-          .from(schema.requests)
-          .leftJoin(schema.users, eq(schema.requests.created_by, schema.users.id))
-          .leftJoin(schema.departments, eq(schema.users.department_id, schema.departments.id))
-          .where(rowsWhere);
-
-        const grouped = new Map<
-          string,
-          {
-            department_id: string | null;
-            department_name: string;
-            requests: { id: string; title: string; status: string; created_at: string }[];
-          }
-        >();
-
-        for (const row of rows) {
-          const key = row.departmentId ?? 'unassigned';
-          if (!grouped.has(key)) {
-            grouped.set(key, {
-              department_id: row.departmentId ?? null,
-              department_name: row.departmentName ?? 'Unassigned',
-              requests: [],
-            });
-          }
-          grouped.get(key)!.requests.push({
-            id: row.requestId,
-            title: row.title,
-            status: row.status,
-            created_at: row.createdAt.toISOString(),
-          });
-        }
-
-        return reply.send({
-          departments: Array.from(grouped.values()),
-        });
-      } catch (error) {
-        logger.error(error, 'Requests by department error');
         return respondWithError(reply, error);
       }
     }
@@ -838,18 +735,9 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           .from(schema.media)
           .groupBy(schema.media.type);
 
-        const requestsByStatus = await db
-          .select({
-            status: schema.requests.status,
-            count: sql<number>`count(*)`,
-          })
-          .from(schema.requests)
-          .groupBy(schema.requests.status);
-
         return reply.send({
           proof_of_play_daily: popDaily,
           media_by_type: mediaByType,
-          requests_by_status: requestsByStatus,
         });
       } catch (error) {
         logger.error(error, 'Reports trends error');

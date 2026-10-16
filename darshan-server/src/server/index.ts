@@ -15,7 +15,6 @@ import { scheduleRoutes } from '@/routes/schedules';
 import { screenRoutes } from '@/routes/screens';
 import { departmentRoutes } from '@/routes/departments';
 import { auditLogRoutes } from '@/routes/audit-logs';
-import { requestRoutes } from '@/routes/requests';
 import { emergencyRoutes } from '@/routes/emergency';
 import { notificationRoutes } from '@/routes/notifications';
 import { presentationRoutes } from '@/routes/presentations';
@@ -427,7 +426,6 @@ export async function createServer(options: CreateServerOptions = {}) {
   await fastify.register(scheduleRoutes);
   await fastify.register(screenRoutes);
   await fastify.register(auditLogRoutes);
-  await fastify.register(requestRoutes);
   await fastify.register(emergencyRoutes);
   await fastify.register(notificationRoutes);
   await fastify.register(presentationRoutes);

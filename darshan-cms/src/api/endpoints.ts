@@ -121,16 +121,10 @@ export const endpoints = {
     summary: "/reports/summary",
     schedules: "/reports/schedules",
     trends: "/reports/trends",
-    requestsByDepartment: "/reports/requests-by-department",
     offlineScreens: "/reports/offline-screens",
     storage: "/reports/storage",
     systemHealth: "/reports/system-health",
     export: "/reports/export",
-  },
-  requests: {
-    base: "/requests",
-    byId: (requestId: string) => `/requests/${requestId}`,
-    messages: (requestId: string) => `/requests/${requestId}/messages`,
   },
   roles: {
     base: "/roles",

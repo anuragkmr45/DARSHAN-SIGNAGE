@@ -4,7 +4,6 @@ import { KPICard } from "@/components/dashboard/KPICard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import {
   Table,
   TableBody,
@@ -123,18 +122,6 @@ export default function Dashboard() {
     queryFn: observabilityApi.getOverview,
     enabled: isAuthenticated,
     staleTime: 30_000,
-  });
-
-  const {
-    data: requestsByDept,
-    isLoading: isRequestsLoading,
-    isError: isRequestsError,
-    error: requestsError,
-  } = useQuery({
-    queryKey: ["reports-requests-by-department"],
-    queryFn: reportsApi.getRequestsByDepartment,
-    enabled: isAuthenticated,
-    staleTime: 60_000,
   });
 
   const {
@@ -282,16 +269,6 @@ export default function Dashboard() {
       });
     }
   }, [isMetricsError, metricsError, toast]);
-
-  useEffect(() => {
-    if (isRequestsError) {
-      toast({
-        title: "Requests unavailable",
-        description: getErrorMessage(requestsError, "We couldn't load requests right now."),
-        variant: "destructive",
-      });
-    }
-  }, [isRequestsError, requestsError, toast]);
 
   useEffect(() => {
     if (isOfflineError) {
@@ -446,35 +423,6 @@ export default function Dashboard() {
     storageBytes,
     totalsMetrics,
   ]);
-
-  const departmentRequests = useMemo(() => {
-    if (Array.isArray(requestsByDept)) return requestsByDept;
-    if (requestsByDept && Array.isArray((requestsByDept as { departments?: unknown })?.departments)) {
-      return (requestsByDept as { departments: typeof requestsByDept })?.departments ?? [];
-    }
-    return [];
-  }, [requestsByDept]);
-
-  const pendingRequests = useMemo(() => {
-    if (!departmentRequests) return [];
-
-    return departmentRequests
-      .filter((dept) => (dept?.requests?.length ?? 0) > 0)
-      .map((dept) => {
-        const sorted = [...dept.requests].sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-        );
-        const latest = sorted[0];
-        return {
-          id: dept.department_id || dept.department_name || "unknown",
-          department: dept.department_name || "Unassigned",
-          count: dept.requests.length,
-          latestTitle: latest?.title ?? "—",
-          status: latest?.status,
-          createdAt: latest?.created_at,
-        };
-      });
-  }, [departmentRequests]);
 
   const alerts = useMemo(() => {
     const items: Array<{
@@ -733,65 +681,6 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Pending Requests */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Pending Requests by Department</CardTitle>
-            <CardDescription>Requests requiring review or approval</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table className="min-w-[640px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Department</TableHead>
-                  <TableHead>Open Requests</TableHead>
-                  <TableHead>Latest Request</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isRequestsLoading && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
-                      Loading requests...
-                    </TableCell>
-                  </TableRow>
-                )}
-
-                {!isRequestsLoading && pendingRequests.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
-                      No pending requests right now.
-                    </TableCell>
-                  </TableRow>
-                )}
-
-                {!isRequestsLoading &&
-                  pendingRequests.map((request) => (
-                    <TableRow
-                      key={request.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => navigate("/requests")}
-                    >
-                      <TableCell className="font-medium">{request.department}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{request.count}</Badge>
-                      </TableCell>
-                      <TableCell className="max-w-[220px] truncate">{request.latestTitle}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={request.status} />
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatRelativeTime(request.createdAt)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
           </CardContent>
         </Card>
 
