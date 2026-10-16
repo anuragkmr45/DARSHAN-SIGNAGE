@@ -19,6 +19,7 @@ import { publishScheduleSnapshot } from '@/routes/schedule-publish-helper';
 import { AppError } from '@/utils/app-error';
 import { type ActorContext } from '@/rbac/policy';
 import {
+  canAccessContentMutationScope,
   canManageContentResource,
   canReadContentResource,
   contentResponseMetadata,
@@ -664,13 +665,11 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         schedule: typeof schema.schedules.$inferSelect;
       }
     ) => Promise<T>,
-    options: { requireManage?: boolean; requireAdmin?: boolean } = {}
+    options: { action?: 'update' | 'approve' | 'publish' } = {}
   ) =>
     withCurrentMutationAuthorization(payload, async (context) => {
-      if (!context.ability.can('update', 'ScheduleRequest')) {
-        throw AppError.forbidden('Forbidden');
-      }
-      if (options.requireAdmin && !context.ability.can('update', 'ScheduleRequest')) {
+      const action = options.action ?? 'update';
+      if (!context.ability.can(action, 'ScheduleRequest')) {
         throw AppError.forbidden('Forbidden');
       }
 
@@ -699,13 +698,10 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
       if (scheduleRequest.schedule_id !== schedule.id) {
         throw AppError.conflict('Schedule request changed while it was being authorized. Please retry.');
       }
-      if (options.requireManage && !canManageContentResource(
-        context.actor,
-        schedule,
-        context.ability,
-        'Schedule',
-        'update'
-      )) {
+      if (
+        !context.ability.can('manage', 'ScheduleRequest') &&
+        !canAccessContentMutationScope(context.actor, schedule, context.ability, 'Schedule')
+      ) {
         throw AppError.forbidden('Forbidden');
       }
 
@@ -738,7 +734,10 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             .where(eq(schema.schedules.id, data.schedule_id))
             .for('update');
           if (!schedule) throw AppError.notFound('Schedule not found');
-          if (!canManageContentResource(actor, schedule, ability, 'Schedule', 'update')) {
+          if (
+            !ability.can('manage', 'ScheduleRequest') &&
+            !canAccessContentMutationScope(actor, schedule, ability, 'Schedule')
+          ) {
             throw AppError.forbidden('Forbidden');
           }
 
@@ -923,12 +922,12 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Update request (admin only, editable before publish)
+  // Update request while editable
   fastify.patch<{ Params: { id: string }; Body: typeof updateRequestSchema._type }>(
     apiEndpoints.scheduleRequests.update,
     {
       schema: {
-        description: 'Update a schedule request (admin only)',
+        description: 'Update a schedule request while editable',
         tags: ['Schedules'],
         security: [{ bearerAuth: [] }],
       },
@@ -968,7 +967,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               .returning();
             return row;
           },
-          { requireManage: true }
+          { action: 'update' }
         );
 
         emitScheduleRequestsChanged(fastify);
@@ -1053,12 +1052,12 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Approve request (admin only)
+  // Approve request
   fastify.post<{ Params: { id: string }; Body: { comment?: string } }>(
     apiEndpoints.scheduleRequests.approve,
     {
       schema: {
-        description: 'Approve a schedule request (admin only)',
+        description: 'Approve a schedule request',
         tags: ['Schedules'],
         security: [{ bearerAuth: [] }],
       },
@@ -1087,7 +1086,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             .where(eq(schema.scheduleRequests.id, scheduleRequest.id));
           return row;
           },
-          { requireAdmin: true }
+          { action: 'approve' }
         );
         emitScheduleRequestsChanged(fastify);
         return reply.send({
@@ -1106,7 +1105,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Publish an approved request (admin only)
+  // Publish an approved request
   fastify.post<{ Params: { id: string }; Body: typeof publishRequestSchema._type }>(
     apiEndpoints.scheduleRequests.publish,
     {
@@ -1189,7 +1188,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               actor,
             };
           },
-          { requireAdmin: true }
+          { action: 'publish' }
         );
 
         if (authorized.kind === 'existing') {
@@ -1227,12 +1226,12 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Reject request (admin only)
+  // Reject request
   fastify.post<{ Params: { id: string }; Body: { comment?: string } }>(
     apiEndpoints.scheduleRequests.reject,
     {
       schema: {
-        description: 'Reject a schedule request (admin only)',
+        description: 'Reject a schedule request',
         tags: ['Schedules'],
         security: [{ bearerAuth: [] }],
       },
@@ -1263,7 +1262,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             .where(eq(schema.scheduleRequests.id, scheduleRequest.id));
           return row;
           },
-          { requireAdmin: true }
+          { action: 'approve' }
         );
         emitScheduleRequestsChanged(fastify);
         return reply.send({
@@ -1322,7 +1321,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             .where(eq(schema.scheduleRequests.id, scheduleRequest.id));
           return row;
           },
-          { requireManage: true }
+          { action: 'update' }
         );
         emitScheduleRequestsChanged(fastify);
         return reply.send({
@@ -1345,7 +1344,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
     apiEndpoints.scheduleRequests.takeDown,
     {
       schema: {
-        description: 'Take down a published schedule request (admin only)',
+        description: 'Take down a published schedule request',
         tags: ['Schedules'],
         security: [{ bearerAuth: [] }],
       },
@@ -1373,7 +1372,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               .where(eq(schema.scheduleRequests.id, scheduleRequest.id));
             return { takedownResult, updated, actor };
           },
-          { requireAdmin: true }
+          { action: 'publish' }
         );
 
         if (authorized.takedownResult.screenIds.length > 0) {

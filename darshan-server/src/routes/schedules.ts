@@ -31,6 +31,7 @@ import z from 'zod';
 import { AppError } from '@/utils/app-error';
 import { type ActorContext } from '@/rbac/policy';
 import {
+  canAccessContentMutationScope,
   canManageContentResource,
   canReadContentResource,
   canReferenceContentResource,
@@ -186,6 +187,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   const withScheduleMutation = async <T>(
     payload: JWTPayload,
     scheduleId: string,
+    permission: { action: 'create' | 'update' | 'delete' | 'publish'; subject: 'Schedule' | 'ScheduleItem' | 'ScheduleRequest' },
     execute: (
       context: MutationAuthorizationContext & {
         schedule: typeof schema.schedules.$inferSelect;
@@ -193,14 +195,17 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     ) => Promise<T>
   ) =>
     withCurrentMutationAuthorization(payload, async (context) => {
-      if (!context.ability.can('update', 'Schedule')) throw AppError.forbidden('Forbidden');
+      if (
+        !context.ability.can(permission.action, permission.subject) &&
+        !context.ability.can('manage', 'Schedule')
+      ) throw AppError.forbidden('Forbidden');
       const [schedule] = await context.executor
         .select()
         .from(schema.schedules)
         .where(eq(schema.schedules.id, scheduleId))
         .for('update');
       if (!schedule) throw AppError.notFound('Schedule not found');
-      if (!canManageContentResource(context.actor, schedule, context.ability, 'Schedule', 'update')) {
+      if (!canAccessContentMutationScope(context.actor, schedule, context.ability, 'Schedule')) {
         throw AppError.forbidden('Forbidden');
       }
       return execute({ ...context, schedule });
@@ -633,6 +638,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const authorized = await withScheduleMutation(
           payload,
           (request.params as any).id,
+          { action: 'create', subject: 'ScheduleItem' },
           async ({ schedule, actor, ability, executor }) => {
             const pres = await presentationRepo.findById(data.presentation_id, executor);
             if (!pres) throw AppError.notFound('Presentation not found');
@@ -733,6 +739,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         await withScheduleMutation(
           payload,
           (request.params as any).id,
+          { action: 'delete', subject: 'ScheduleItem' },
           async ({ schedule, executor }) => {
             const [item] = await executor
               .select()
@@ -796,6 +803,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const authorized = await withScheduleMutation(
           payload,
           (request.params as any).id,
+          { action: 'update', subject: 'Schedule' },
           async ({ schedule: existingSchedule, actor, ability, executor }) => {
             await reservationService.assertScheduleMutable(existingSchedule.id, executor);
 
@@ -857,6 +865,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const authorized = await withScheduleMutation(
           payload,
           (request.params as any).id,
+          { action: 'publish', subject: 'ScheduleRequest' },
           async ({ schedule, actor, executor }) => {
             if (uniqueScreens.length) {
               const screens = await executor
@@ -1011,7 +1020,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const body = takeDownPublishSchema.parse(request.body ?? {});
         const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
-          if (!ability.can('update', 'Schedule')) {
+          if (!ability.can('publish', 'ScheduleRequest') && !ability.can('manage', 'Schedule')) {
             throw AppError.forbidden('Forbidden');
           }
           const [publish] = await executor
@@ -1025,7 +1034,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
             .from(schema.schedules)
             .where(eq(schema.schedules.id, publish.schedule_id))
             .for('update');
-          if (!schedule || !canManageContentResource(actor, schedule, ability, 'Schedule', 'update')) {
+          if (!schedule || !canAccessContentMutationScope(actor, schedule, ability, 'Schedule')) {
             throw AppError.forbidden('Forbidden');
           }
           const takedownResult = await reservationService.takeDownPublish(

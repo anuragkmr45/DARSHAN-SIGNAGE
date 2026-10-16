@@ -84,16 +84,22 @@ export function canManageContentResource(
   action: 'update' | 'delete' | 'create' | 'approve' | 'publish' = 'update'
 ): boolean {
   if (!ability.can(action, subject)) return false;
+  if (!canAccessContentMutationScope(actor, resource, ability, subject)) return false;
   if (ability.can('manage', subject)) return true;
-  if (
-    normalizeContentOwnerScope(resource.owner_scope) !== 'DEPARTMENT' ||
-    !actor.departmentId ||
-    resource.owner_department_id !== actor.departmentId
-  ) {
-    return false;
-  }
   if (subject === 'Schedule') return true;
   return Boolean(resource.created_by && resource.created_by === actor.userId);
+}
+
+export function canAccessContentMutationScope(
+  actor: ActorContext,
+  resource: ContentOwnedResource,
+  ability: ContentAbility,
+  subject: ContentSubject
+): boolean {
+  if (ability.can('manage', subject)) return true;
+  return normalizeContentOwnerScope(resource.owner_scope) === 'DEPARTMENT' && Boolean(
+    actor.departmentId && resource.owner_department_id === actor.departmentId
+  );
 }
 
 export function contentResponseMetadata(

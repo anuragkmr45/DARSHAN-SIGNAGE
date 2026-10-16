@@ -7,7 +7,6 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { respondWithError } from '@/utils/errors';
 import { createScheduleReservationService } from '@/services/scheduling/reservation-service';
 import { AppError } from '@/utils/app-error';
-import { isAdminLike } from '@/rbac/policy';
 
 const logger = createLogger('schedule-reservation-routes');
 
@@ -62,7 +61,7 @@ export async function scheduleReservationRoutes(fastify: FastifyInstance) {
           screenIds: body.screen_ids,
           screenGroupIds: body.screen_group_ids,
           currentUserId: payload.sub,
-          allowPrivateRefs: isAdminLike(payload.role),
+          allowPrivateRefs: ability.can('manage', 'Schedule'),
         });
 
         return reply.send({
