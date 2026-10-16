@@ -81,6 +81,29 @@ describe('Playback Engine', () => {
     })).to.equal(true)
   })
 
+  it('clears a native looping video when its authoritative schedule boundary ends', () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const send = sandbox.spy()
+    const engine = getPlaybackEngine()
+    engine.initialize({ webContents: { send } })
+    engine.currentItem = {
+      id: 'looping-video',
+      type: 'video',
+      displayMs: 2000,
+      fit: 'contain',
+      muted: true,
+      loop: true,
+      transitionDurationMs: 0,
+    }
+
+    engine.scheduler.emit('timeline-complete', { willRepeat: false, authorityEnded: true })
+
+    expect(send.calledWith('playback-update', {
+      type: 'clear-active',
+      reason: 'timeline-authority-ended',
+    })).to.equal(true)
+  })
+
   it('ignores equivalent timeline playlist updates when only presigned asset urls changed', async () => {
     const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
     const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')

@@ -22,10 +22,46 @@ export interface ScheduledItem {
   resumeDecision?: PlaybackResumeDecision
 }
 
+export interface TimelineCompletion {
+  willRepeat: boolean
+  authorityEnded: boolean
+}
+
+function getScheduleWindowEndMs(item?: TimelineItem): number | null {
+  const rawEnd = item?.meta?.['scheduleWindowEndsAt']
+  if (typeof rawEnd !== 'string') {
+    return null
+  }
+
+  const endMs = Date.parse(rawEnd)
+  return Number.isFinite(endMs) ? endMs : null
+}
+
+function getServerNowMs(item?: TimelineItem): number {
+  const rawOffset = Number(item?.meta?.['serverTimeOffsetMs'])
+  return Date.now() + (Number.isFinite(rawOffset) ? rawOffset : 0)
+}
+
+function isScheduleWindowActive(item?: TimelineItem): boolean {
+  const endMs = getScheduleWindowEndMs(item)
+  return endMs === null || getServerNowMs(item) < endMs
+}
+
+function resolveSingleLoopHoldMs(item: TimelineItem): number {
+  const endMs = getScheduleWindowEndMs(item)
+  if (endMs === null) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  return Math.max(0, endMs - getServerNowMs(item))
+}
+
 export class TimelineScheduler extends EventEmitter {
   private currentItem?: ScheduledItem
   private nextItem?: ScheduledItem
   private timer?: NodeJS.Timeout
+  private transitionTimer?: NodeJS.Timeout
+  private activeItems: TimelineItem[] = []
   private startTime: number = 0
   private isPaused = false
   private jitterLog: number[] = []
@@ -40,6 +76,8 @@ export class TimelineScheduler extends EventEmitter {
       return
     }
 
+    this.clearScheduledTimers()
+    this.activeItems = items
     logger.info({ itemCount: items.length }, 'Starting timeline')
 
     this.startTime = Date.now()
@@ -56,8 +94,13 @@ export class TimelineScheduler extends EventEmitter {
     }
 
     if (index >= items.length) {
-      this.emit('timeline-complete')
-      if (shouldRepeatScheduledItem(items.length, items[0])) {
+      const repeatable = shouldRepeatScheduledItem(items.length, items[0])
+      const willRepeat = repeatable && isScheduleWindowActive(items[0])
+      this.emit('timeline-complete', {
+        willRepeat,
+        authorityEnded: repeatable && !willRepeat,
+      } satisfies TimelineCompletion)
+      if (willRepeat) {
         // Loop back to start
         logger.debug('Timeline completed, looping')
         this.start(items)
@@ -76,11 +119,14 @@ export class TimelineScheduler extends EventEmitter {
     const now = Date.now()
     const startTime = now
     const durationMs = Math.max(1, item.displayMs)
-    const scheduledDurationMs = resumeDecision
-      ? resumeDecision.completed
-        ? 0
-        : Math.max(0, resumeDecision.remainingMs)
-      : durationMs
+    const isSingleContinuousLoop = items.length === 1 && item.loop === true && resumeDecision?.completed !== true
+    const scheduledDurationMs = isSingleContinuousLoop
+      ? resolveSingleLoopHoldMs(item)
+      : resumeDecision
+        ? resumeDecision.completed
+          ? 0
+          : Math.max(0, resumeDecision.remainingMs)
+        : durationMs
     const endTime = startTime + scheduledDurationMs
 
     const scheduledItem: ScheduledItem = {
@@ -132,20 +178,29 @@ export class TimelineScheduler extends EventEmitter {
 
     this.emit('play-item', scheduledItem)
 
+    // A single loop-enabled occurrence is owned by the browser's native loop
+    // flag. With no explicit schedule end it remains mounted until a higher
+    // authority stops/replaces the timeline; do not remount it every displayMs.
+    if (!Number.isFinite(scheduledDurationMs)) {
+      return
+    }
+
     // Schedule transition to next item
     const transitionTime = scheduledDurationMs - (item.transitionDurationMs || 0)
 
     // Schedule transition start
     if (item.transitionDurationMs && item.transitionDurationMs > 0) {
-      setTimeout(() => {
+      this.transitionTimer = setTimeout(() => {
+        this.transitionTimer = undefined
         if (!this.isPaused && this.currentItem === scheduledItem) {
           this.emit('transition-start', scheduledItem, this.nextItem)
         }
-      }, transitionTime)
+      }, Math.max(0, transitionTime))
     }
 
     // Schedule next item
     this.timer = setTimeout(() => {
+      this.timer = undefined
       if (!this.isPaused) {
         this.emit('item-complete', scheduledItem)
         this.scheduleNext(items, index + 1)
@@ -221,10 +276,7 @@ export class TimelineScheduler extends EventEmitter {
     logger.info('Pausing timeline')
     this.isPaused = true
 
-    if (this.timer) {
-      clearTimeout(this.timer)
-      this.timer = undefined
-    }
+    this.clearScheduledTimers()
 
     this.emit('paused')
   }
@@ -241,22 +293,30 @@ export class TimelineScheduler extends EventEmitter {
     this.isPaused = false
     this.emit('resumed')
 
-    // Resume from current position
-    if (this.currentItem) {
-      const now = Date.now()
-      const elapsed = now - this.currentItem.startTime
-      const remaining = this.currentItem.item.displayMs - elapsed
-
-      if (remaining > 0) {
-        this.timer = setTimeout(() => {
-          if (!this.isPaused && this.currentItem) {
-            this.emit('item-complete', this.currentItem)
-            // Continue with next item
-            // Note: This is simplified - in production you'd need to track the full timeline
-          }
-        }, remaining)
-      }
+    const scheduledItem = this.currentItem
+    if (!scheduledItem || !Number.isFinite(scheduledItem.endTime)) {
+      return
     }
+
+    const remaining = Math.max(0, scheduledItem.endTime - Date.now())
+    const transitionDurationMs = scheduledItem.item.transitionDurationMs || 0
+    const transitionRemaining = remaining - transitionDurationMs
+    if (transitionDurationMs > 0 && this.nextItem) {
+      this.transitionTimer = setTimeout(() => {
+        this.transitionTimer = undefined
+        if (!this.isPaused && this.currentItem === scheduledItem) {
+          this.emit('transition-start', scheduledItem, this.nextItem)
+        }
+      }, Math.max(0, transitionRemaining))
+    }
+
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      if (!this.isPaused && this.currentItem === scheduledItem) {
+        this.emit('item-complete', scheduledItem)
+        this.scheduleNext(this.activeItems, scheduledItem.index + 1)
+      }
+    }, remaining)
   }
 
   /**
@@ -265,14 +325,12 @@ export class TimelineScheduler extends EventEmitter {
   stop(): void {
     logger.info('Stopping timeline')
 
-    if (this.timer) {
-      clearTimeout(this.timer)
-      this.timer = undefined
-    }
+    this.clearScheduledTimers()
 
     this.isPaused = false
     this.currentItem = undefined
     this.nextItem = undefined
+    this.activeItems = []
 
     this.emit('stopped')
   }
@@ -287,13 +345,10 @@ export class TimelineScheduler extends EventEmitter {
 
     logger.info({ currentIndex: this.currentItem.index }, 'Skipping to next item')
 
-    if (this.timer) {
-      clearTimeout(this.timer)
-      this.timer = undefined
-    }
+    this.clearScheduledTimers()
 
     this.emit('item-complete', this.currentItem)
-    // Note: This is simplified - in production you'd need to track the full timeline
+    this.scheduleNext(this.activeItems, this.currentItem.index + 1)
   }
 
   /**
@@ -315,6 +370,17 @@ export class TimelineScheduler extends EventEmitter {
    */
   isPausedState(): boolean {
     return this.isPaused
+  }
+
+  private clearScheduledTimers(): void {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = undefined
+    }
+    if (this.transitionTimer) {
+      clearTimeout(this.transitionTimer)
+      this.transitionTimer = undefined
+    }
   }
 
   /**

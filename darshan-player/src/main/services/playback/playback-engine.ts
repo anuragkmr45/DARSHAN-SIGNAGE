@@ -194,12 +194,12 @@ export class PlaybackEngine extends EventEmitter {
       this.handleTransitionStart(current, next)
     })
 
-    this.scheduler.on('timeline-complete', () => {
+    this.scheduler.on('timeline-complete', (completion?: { authorityEnded?: boolean }) => {
       logger.debug({ itemType: this.currentItem?.type }, 'Timeline completed')
-      if (this.currentItem?.type === 'scene' && this.mainWindow) {
+      if ((this.currentItem?.type === 'scene' || completion?.authorityEnded === true) && this.mainWindow) {
         this.mainWindow.webContents.send('playback-update', {
           type: 'clear-active',
-          reason: 'scene-window-complete',
+          reason: completion?.authorityEnded === true ? 'timeline-authority-ended' : 'scene-window-complete',
         })
       }
     })
