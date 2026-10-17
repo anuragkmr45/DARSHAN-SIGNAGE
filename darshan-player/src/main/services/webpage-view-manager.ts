@@ -2,9 +2,9 @@ import { WebContentsView, session } from 'electron'
 import type { BrowserWindow, Session } from 'electron'
 import type { WebpageViewBounds, WebpageViewRequest, WebpageViewStatus } from '../../common/types'
 import { redactUrlForDiagnostics } from '../../common/redaction'
-import { assertPlayerWebpageUrlAllowed, hostMatches } from './webpage-network-policy'
+import { assertPlayerWebpageUrlAllowed, assertPlayerWebpageUrlStaticallyAllowed } from './webpage-network-policy'
 
-const WEBPAGE_PARTITION = 'persist:darshan-webpage-playback'
+const WEBPAGE_PARTITION = 'darshan-webpage-playback'
 const MAX_LIVE_VIEWS = 4
 const READY_DEADLINE_MS = 12_000
 const READY_SAMPLE_DELAY_MS = 150
@@ -210,14 +210,29 @@ export class WebpageViewManager {
     const contents = entry.view.webContents
     contents.setAudioMuted(true)
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    contents.on('login', (event, _details, _authInfo, callback) => {
+      event.preventDefault()
+      callback()
+      this.fail(entry, 'authentication-required')
+    })
     contents.on('before-input-event', (event) => {
       if (this.isInputLocked()) event.preventDefault()
     })
     contents.on('will-navigate', (event, url) => {
-      if (!this.hostAllowed(url, 'navigation')) event.preventDefault()
+      if (!this.hostAllowed(url, 'navigation')) {
+        event.preventDefault()
+        this.fail(entry, 'navigation-blocked')
+        return
+      }
+      this.showFallbackWhileNavigating(entry)
     })
     contents.on('will-redirect', (event, url) => {
-      if (!this.hostAllowed(url, 'navigation')) event.preventDefault()
+      if (!this.hostAllowed(url, 'navigation')) {
+        event.preventDefault()
+        this.fail(entry, 'redirect-blocked')
+        return
+      }
+      this.showFallbackWhileNavigating(entry)
     })
     contents.on('dom-ready', () => {
       void contents.executeJavaScript(`${LOCKDOWN_SCRIPT}(${JSON.stringify(this.isInputLocked())})`, false).catch(() => undefined)
@@ -262,6 +277,14 @@ export class WebpageViewManager {
       this.schedule(entry, () => void sample(0), 350)
     }
     void sample(0)
+  }
+
+  private showFallbackWhileNavigating(entry: Entry): void {
+    if (entry.disposed) return
+    entry.healthy = false
+    entry.probeGeneration += 1
+    entry.view.setVisible(false)
+    this.sendStatus({ id: entry.request.id, generation: entry.request.generation, state: 'loading' })
   }
 
   private fail(entry: Entry, reason: string, error?: unknown): void {
@@ -350,17 +373,8 @@ export class WebpageViewManager {
 
   private hostAllowed(url: string, purpose: 'navigation' | 'resource'): boolean {
     try {
-      const parsed = new URL(url)
-      if (parsed.username || parsed.password) return false
-      const security = this.getSecurity()
-      const allowHttp = security.webpageAllowHttp === true && process.env['NODE_ENV'] !== 'production'
-      if (parsed.protocol !== 'https:' && !(allowHttp && parsed.protocol === 'http:')) return false
-      const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-      const allowedDomains = purpose === 'resource' && security.webpageResourceDomains?.length
-        ? security.webpageResourceDomains
-        : security.allowedDomains
-      if (process.env['NODE_ENV'] !== 'production' && allowedDomains.length === 0) return true
-      return allowedDomains.some((raw) => hostMatches(hostname, raw))
+      assertPlayerWebpageUrlStaticallyAllowed(url, purpose, this.getSecurity())
+      return true
     } catch {
       return false
     }

@@ -35,6 +35,7 @@ type MockState = {
     target_id: string;
     media_id: string;
     aspect_ratio: string;
+    priority: number;
   }>;
 };
 
@@ -82,6 +83,7 @@ const groups = [
 ];
 
 const serializeAssignments = (assignments: MockState["assignments"]) => ({
+  revision: `revision-${assignments.map((assignment) => `${assignment.target_type}:${assignment.target_id}:${assignment.priority}`).join("|")}`,
   assignments: assignments.map((assignment) => ({
     ...assignment,
     media: mediaCatalog.find((media) => media.id === assignment.media_id) ?? null,
@@ -96,7 +98,12 @@ const login = async (page: Page) => {
   await page.waitForURL(/\/dashboard/);
 };
 
-const installApiMocks = async (page: Page, state: MockState) => {
+const installApiMocks = async (
+  page: Page,
+  state: MockState,
+  options: { conflictNextTargetSave?: boolean; targetSaveEvents?: string[] } = {},
+) => {
+  let conflictNextTargetSave = options.conflictNextTargetSave === true;
   await page.route("**/api/v1/**", async (route: Route) => {
     const url = new URL(route.request().url());
     const { pathname } = url;
@@ -163,6 +170,24 @@ const installApiMocks = async (page: Page, state: MockState) => {
 
     if (pathname === "/api/v1/settings/default-media/targets" && method === "PUT") {
       const payload = route.request().postDataJSON() as { assignments: MockState["assignments"] };
+      if (conflictNextTargetSave) {
+        conflictNextTargetSave = false;
+        options.targetSaveEvents?.push("conflict");
+        state.assignments = state.assignments.map((assignment) => ({ ...assignment, priority: 60 }));
+        return route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            error: {
+              code: "CONFLICT",
+              message: "Default media assignments changed. Refresh and review the latest values.",
+              details: { reason: "DEFAULT_MEDIA_TARGETS_STALE" },
+            },
+          }),
+        });
+      }
+      options.targetSaveEvents?.push("success");
       state.assignments = payload.assignments;
       return route.fulfill({
         status: 200,
@@ -215,7 +240,7 @@ const currentAssignmentsSection = (page: Page) =>
 test.describe("Settings default media targets", () => {
   test("renders target-scoped assignments and scope rules", async ({ page }) => {
     const state: MockState = {
-      assignments: [{ target_type: "SCREEN", target_id: "screen-1", media_id: "media-16-9", aspect_ratio: "16:9" }],
+      assignments: [{ target_type: "SCREEN", target_id: "screen-1", media_id: "media-16-9", aspect_ratio: "16:9", priority: 0 }],
     };
 
     await installApiMocks(page, state);
@@ -228,6 +253,54 @@ test.describe("Settings default media targets", () => {
     await expect(page.locator("label").filter({ hasText: /^Lobby/ }).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: "Current assignments", exact: true })).toBeVisible();
     await expect(currentAssignmentsSection(page).getByText("Lobby Loop", { exact: true })).toBeVisible();
+  });
+
+  test("saves an explicit group priority", async ({ page }) => {
+    const state: MockState = {
+      assignments: [{ target_type: "GROUP", target_id: "group-1", media_id: "media-16-9", aspect_ratio: "16:9", priority: 40 }],
+    };
+
+    await installApiMocks(page, state);
+    await login(page);
+    await openDefaultMedia(page);
+
+    const section = currentAssignmentsSection(page);
+    const priority = section.getByLabel("Priority (0–100)");
+    await expect(priority).toHaveValue("40");
+    await priority.fill("75");
+    await section.getByRole("button", { name: "Save priority", exact: true }).click();
+    await expect.poll(() => state.assignments[0]?.priority).toBe(75);
+  });
+
+  test("keeps an operator's unsaved priority visible after a stale-save conflict", async ({ page }) => {
+    const state: MockState = {
+      assignments: [{ target_type: "GROUP", target_id: "group-1", media_id: "media-16-9", aspect_ratio: "16:9", priority: 40 }],
+    };
+
+    const targetSaveEvents: string[] = [];
+    const targetSaveStatuses: number[] = [];
+    page.on("response", (response) => {
+      if (new URL(response.url()).pathname === "/api/v1/settings/default-media/targets" && response.request().method() === "PUT") {
+        targetSaveStatuses.push(response.status());
+      }
+    });
+    await installApiMocks(page, state, { conflictNextTargetSave: true, targetSaveEvents });
+    await login(page);
+    await openDefaultMedia(page);
+
+    const section = currentAssignmentsSection(page);
+    const priority = section.getByLabel("Priority (0–100)");
+    await priority.fill("75");
+    await section.getByRole("button", { name: "Save priority", exact: true }).click();
+
+    await expect.poll(() => targetSaveEvents).toEqual(["conflict"]);
+    await expect.poll(() => targetSaveStatuses).toEqual([409]);
+    await expect.poll(() => state.assignments[0]?.priority).toBe(60);
+    await expect(priority).toHaveValue("75");
+
+    await section.getByRole("button", { name: "Save priority", exact: true }).click();
+    await expect.poll(() => targetSaveStatuses).toEqual([409, 200]);
+    await expect.poll(() => state.assignments[0]?.priority).toBe(75);
   });
 
   test("assigns and clears screen-targeted default media", async ({ page }) => {

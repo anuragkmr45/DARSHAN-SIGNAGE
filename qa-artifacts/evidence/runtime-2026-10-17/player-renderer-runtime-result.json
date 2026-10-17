@@ -1,0 +1,25 @@
+{
+  "run": {
+    "timestamp": "2026-10-17T03:25:56.737Z",
+    "branch": "release-01",
+    "source_commit": "c680c0a",
+    "mode": "current-built-player-renderer-in-headless-chromium"
+  },
+  "summary": { "pass": 1, "fail": 1 },
+  "results": [
+    {
+      "id": 16,
+      "status": "PASS",
+      "actual": "The player loaded and displayed the real retained fallback PNG for the READY webpage whose latest refresh had failed with WEBPAGE_HTTP_503.",
+      "fallback_revision": "c166b6d4-f587-4dd2-a8b2-ae9e996de29a",
+      "fallback_sha256": "d358921c7cb018ce77673a8e157b289bfe8280398c4cea9fba3e85fd16917ce1",
+      "fallback_image_loaded": true
+    },
+    {
+      "id": 18,
+      "status": "FAIL",
+      "expected": "A standard company fallback image",
+      "actual": "The player displayed text 'DARSHAN No content assigned yet.' with zero image elements."
+    }
+  ]
+}

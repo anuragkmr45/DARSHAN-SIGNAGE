@@ -1,13 +1,11 @@
 # Master Human QA Checklist
 
-Baseline: `release-01` through `a01804c`. The latest authorization/session
-implementation review is `evidence/authorization-session-requests-review.md`
-and developer execution is in
-`evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`; earlier
-PDF/video and ownership evidence remains separately dated. Execute remaining
-work only on authorized isolated test environments. Each checkbox names
-detailed rows in `05_TEST_CASES.csv`, where every case has an Expected Result;
-QA records actual status, evidence and defect IDs there.
+Baseline: uncommitted `release-01` working tree based on `c680c0a`. Webpage and
+default-priority developer evidence is in
+`evidence/webpage-default-priority-developer-verification-2026-10-17.md`;
+human QA fields remain unexecuted. Execute remaining work only on authorized
+isolated test environments. Each checkbox names detailed rows in
+`05_TEST_CASES.csv`; QA records actual status, evidence and defects there.
 
 ## Identity, Access And Privacy
 
@@ -34,13 +32,14 @@ QA records actual status, evidence and defect IDs there.
 - [ ] `PLAYER-12`: late join/restart uses decoded-duration modulo; rejected play, load/decode error, stall and unexpected end recover visibly and within bounds; multiple slots remain independent; multi-item slots advance; video plus selected-PDF playback and every takeover/end path clean up safely.
 - [ ] `FILE-05`: delete permission, reference conflict, soft/hard object removal, partial S3 failure, chat cleanup and no accidental recycle promise; BQ-020 recoverability is TBD.
 - [ ] `FUN-01..02`, `UI-01`: layout bounds/slots, presentation timing/order/fit/audio, CMS form validation and error recovery.
-- [ ] `FUN-08`, `PLAYER-09`: public/private HTTPS policy, redirects, resource hosts, invalid trust, login/error page readiness, preview fallback and crash recovery. The code has no preview-age gate or login handoff; required page classes/acceptable preview age remain BQ-011.
+- [ ] `FUN-08`, `PLAYER-09`, `WEB-01..06`: policy-controlled HTTP/HTTPS, every redirect/navigation hop, resource hosts, DNS/CIDR rebinding, invalid trust, unsupported login mechanisms, manual/24-hour refresh, latest-success preservation, revision propagation/cache fallback, corrupt preview and crash recovery. Expected: no unapproved destination or credentials are used, and refresh failure never replaces the last successful preview.
 - [ ] `FUN-12`, `API-04`: API key, SSO and webhook **management** only. Validate admin permissions, persistence and explicit outbound Test action. Actual SSO login, API-key business authentication and automatic webhook event delivery are outside this release.
 
 ## Scheduling, Screens And Player
 
 - [ ] `FUN-03..05`, `CONC-01`, `DATA-02`: half-open intervals, concrete-screen group overlap, holds, stale revisions, administrator self-approval, direct publishing, cancellation, takedown, replay and transaction/outbox consistency.
-- [ ] `FUN-06`: screen > first saved eligible group > aspect > global > none. Saved `[A,B]` selects A, then editing A in CMS can make `[B,A]` select B; whether that change is acceptable remains BQ-012.
+- [ ] `FUN-06`, `DEF-01..03`: eligible screen > group priority descending > target ID ascending tie-break > aspect > global > none. Priority is integer `0..100`, legacy/missing is `0`, non-priority edits preserve it, and concurrent same-revision writes yield one success plus one `409` without silent overwrite.
+- [ ] `DEF-04`, `PLAYER-05`: with no active Schedule or eligible Screen/Group/aspect/global default, show the approved standard company fallback image online and offline on every supported display. Expected: a visible fitted image, never a blank or text-only idle card. The 2026-10-17 developer runtime failed this expectation.
 - [ ] `FUN-07`, `CONC-03`: emergency READY media/message capability, selected targets, severity/recency ordering, duplicate key, clear/expiry, offline policy and safe fallback.
 - [ ] `PLAYER-01..02`, `API-02`: device pairing/recovery/revocation, signed REST/WSS, snapshot 304/404 and convergence through polling when wake-ups fail.
 - [ ] `API-03`, `PLAYER-06`, `CONC-05`: command lease/ACK, screenshot, display selection, expiration and nonrepeated destructive commands.

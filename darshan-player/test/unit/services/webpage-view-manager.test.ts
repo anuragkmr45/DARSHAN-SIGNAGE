@@ -180,6 +180,24 @@ describe('WebpageViewManager', () => {
     expect(blockedRedirect.preventDefault.calledOnce).to.equal(true)
   })
 
+  it('cancels HTTP authentication challenges and keeps the fallback active', async () => {
+    await manager.mount(request('auth-slot', 1, 1))
+    const contents = views[0].webContents
+    const event = { preventDefault: sinon.spy() }
+    const callback = sinon.spy()
+
+    contents.emit('login', event, {}, {}, callback)
+
+    expect(event.preventDefault.calledOnce).to.equal(true)
+    expect(callback.calledOnceWithExactly()).to.equal(true)
+    expect(statuses).to.deep.include({
+      id: 'auth-slot',
+      generation: 1,
+      state: 'fallback',
+      reason: 'authentication-required',
+    })
+  })
+
   it('keeps the fallback visible when a loaded page remains empty through the readiness deadline', async () => {
     const clock = sinon.useFakeTimers({ shouldClearNativeTimers: true })
     await manager.mount(request('blank-slot', 1, 1))

@@ -25,6 +25,8 @@ function normalizeMediaItem(input: any): DefaultMediaItem | null {
   const fallbackMediaUrl = typeof input.fallback_media_url === 'string' ? input.fallback_media_url : undefined
   const contentType = typeof input.content_type === 'string' ? input.content_type : undefined
   const sourceContentType = typeof input.source_content_type === 'string' ? input.source_content_type : undefined
+  const fallbackRevision = typeof input.fallback_media_revision === 'string' ? input.fallback_media_revision : undefined
+  const fallbackSha256 = typeof input.fallback_media_sha256 === 'string' ? input.fallback_media_sha256 : undefined
 
   const hasPlayableWebpagePayload = type === 'WEBPAGE' && Boolean(sourceUrl || fallbackMediaUrl || mediaUrl)
   if (!id || !type || (!mediaUrl && !hasPlayableWebpagePayload)) {
@@ -40,6 +42,19 @@ function normalizeMediaItem(input: any): DefaultMediaItem | null {
     source_url: sourceUrl,
     fallback_media_url: fallbackMediaUrl,
     source_content_type: sourceContentType,
+    fallback_media_revision: fallbackRevision,
+    fallback_media_sha256: fallbackSha256,
+    fallback_media_captured_at:
+      typeof input.fallback_media_captured_at === 'string' ? input.fallback_media_captured_at : undefined,
+    webpage_preview_refresh_status:
+      input.webpage_preview_refresh_status === 'MISSING' ||
+      input.webpage_preview_refresh_status === 'REFRESHING' ||
+      input.webpage_preview_refresh_status === 'READY' ||
+      input.webpage_preview_refresh_status === 'FAILED'
+        ? input.webpage_preview_refresh_status
+        : undefined,
+    webpage_preview_last_error:
+      typeof input.webpage_preview_last_error === 'string' ? input.webpage_preview_last_error : undefined,
   }
 }
 

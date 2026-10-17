@@ -1,7 +1,8 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   getWebpageProcessingStage,
+  processWebpageRefreshDueJob,
   processWebpageVerifyCaptureJob,
   serializeWebpageProcessingError,
   WebpageProcessingStageError,
@@ -32,6 +33,30 @@ function createDb(media: { id: string; status: string; ready_object_id?: string 
 }
 
 describe('webpage media processing job', () => {
+  it('queues every due webpage in the bounded automatic refresh batch', async () => {
+    const due = [{ id: randomUUID() }, { id: randomUUID() }];
+    const limit = vi.fn(async () => due);
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit })),
+        })),
+      })),
+    } as any;
+    const now = new Date('2026-10-17T00:00:00.000Z');
+    const requestRefresh = vi.fn()
+      .mockResolvedValueOnce({ mediaId: due[0].id, refreshStatus: 'QUEUED', requestedAt: now, refreshToken: randomUUID() })
+      .mockResolvedValueOnce({ mediaId: due[1].id, refreshStatus: 'ALREADY_QUEUED', requestedAt: now, refreshToken: randomUUID() });
+
+    const result = await processWebpageRefreshDueJob({}, { db, now: () => now, requestRefresh });
+
+    expect(limit).toHaveBeenCalledTimes(1);
+    expect(requestRefresh).toHaveBeenCalledTimes(2);
+    expect(requestRefresh).toHaveBeenNthCalledWith(1, { mediaId: due[0].id, executor: db, requestedAt: now });
+    expect(requestRefresh).toHaveBeenNthCalledWith(2, { mediaId: due[1].id, executor: db, requestedAt: now });
+    expect(result).toEqual({ due: 2, queued: 1 });
+  });
+
   it('captures, uploads, upserts, and marks webpage media READY', async () => {
     const mediaId = randomUUID();
     const screenshot = Buffer.from('png-preview');
@@ -46,6 +71,7 @@ describe('webpage media processing job', () => {
     const upsertStorageObject = vi.fn().mockResolvedValue({ id: 'ready-object-id' });
     const logger = { warn: vi.fn(), error: vi.fn() };
     const updatedAt = new Date('2026-10-03T00:00:00.000Z');
+    const previewKey = `${mediaId}/webpage-previews/${createHash('sha256').update(screenshot).digest('hex')}.png`;
 
     await processWebpageVerifyCaptureJob(
       { mediaId, sourceUrl: 'https://example.com/dashboard?token=secret' },
@@ -55,19 +81,23 @@ describe('webpage media processing job', () => {
     expect(verifySource).toHaveBeenCalledWith('https://example.com/dashboard?token=secret');
     expect(putObject).toHaveBeenCalledWith(
       'media-ready',
-      `${mediaId}/webpage-fallback.png`,
+      previewKey,
       screenshot,
       'image/png'
     );
     expect(upsertStorageObject).toHaveBeenCalledWith({
       bucket: 'media-ready',
-      objectKey: `${mediaId}/webpage-fallback.png`,
+      objectKey: previewKey,
       contentType: 'image/png',
       size: screenshot.length,
       sha256: 'a'.repeat(64),
     });
     expect(updates).toContainEqual({
       source_url: 'https://example.com/',
+      webpage_preview_captured_at: updatedAt,
+      webpage_preview_attempted_at: updatedAt,
+      webpage_preview_refresh_token: null,
+      webpage_preview_last_error: null,
       ready_object_id: 'ready-object-id',
       status: 'READY',
       status_reason: null,
@@ -76,7 +106,7 @@ describe('webpage media processing job', () => {
     expect(logger.error).not.toHaveBeenCalled();
   });
 
-  it('uses the same fallback object key on retry so processing is idempotent', async () => {
+  it('uses the same content-addressed object key on retry so processing is idempotent', async () => {
     const mediaId = randomUUID();
     const { db } = createDb({ id: mediaId, status: 'PROCESSING' });
     const verifySource = vi.fn().mockResolvedValue({
@@ -89,16 +119,52 @@ describe('webpage media processing job', () => {
     const upsertStorageObject = vi.fn().mockResolvedValue({ id: 'same-ready-object-id' });
     const logger = { warn: vi.fn(), error: vi.fn() };
     const job: WebpageVerifyCaptureJob = { mediaId, sourceUrl: 'https://example.com/' };
+    const expectedKey = `${mediaId}/webpage-previews/${createHash('sha256').update('retry-preview').digest('hex')}.png`;
 
     await processWebpageVerifyCaptureJob(job, { db, verifySource, putObject, upsertStorageObject, logger });
     await processWebpageVerifyCaptureJob(job, { db, verifySource, putObject, upsertStorageObject, logger });
 
     expect(putObject.mock.calls.map((call) => call[1])).toEqual([
-      `${mediaId}/webpage-fallback.png`,
-      `${mediaId}/webpage-fallback.png`,
+      expectedKey,
+      expectedKey,
     ]);
     expect(upsertStorageObject).toHaveBeenCalledTimes(2);
     expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('keeps a READY webpage and its existing preview when a refresh fails', async () => {
+    const mediaId = randomUUID();
+    const refreshToken = randomUUID();
+    const attemptedAt = new Date('2026-10-03T01:00:00.000Z');
+    const { db, updates } = createDb({
+      id: mediaId,
+      status: 'READY',
+      ready_object_id: 'last-good-object',
+      webpage_preview_refresh_token: refreshToken,
+    } as any);
+
+    await processWebpageVerifyCaptureJob(
+      {
+        mediaId,
+        sourceUrl: 'https://example.com/',
+        mode: 'REFRESH',
+        refreshToken,
+      },
+      {
+        db,
+        verifySource: vi.fn().mockRejectedValue(new Error('navigation timeout')),
+        logger: { warn: vi.fn(), error: vi.fn() },
+        now: () => attemptedAt,
+      }
+    );
+
+    expect(updates).toContainEqual({
+      webpage_preview_refresh_token: null,
+      webpage_preview_last_error: 'WEBPAGE_REQUEST_TIMEOUT',
+      webpage_preview_attempted_at: attemptedAt,
+    });
+    expect(updates).not.toContainEqual(expect.objectContaining({ status: 'FAILED' }));
+    expect(updates).not.toContainEqual(expect.objectContaining({ ready_object_id: expect.anything() }));
   });
 
   it('logs structured stage errors and stores a mapped failure reason', async () => {

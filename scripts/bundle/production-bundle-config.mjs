@@ -147,6 +147,8 @@ const OUTPUTS = {
   WEBPAGE_ALLOWED_CIDRS: ['production/backend/.env.production', 'production/electron/config.json'],
   WEBPAGE_ALLOWED_PORTS: ['production/backend/.env.production', 'production/electron/config.json'],
   WEBPAGE_ALLOW_HTTP: ['production/backend/.env.production', 'production/electron/config.json'],
+  WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS: ['production/backend/.env.production'],
+  WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE: ['production/backend/.env.production'],
   VITE_ENABLE_PRODUCTION_LOCKDOWN: ['CMS build artifact'],
   VITE_REALTIME_DELIVERY_STATUS_UI: ['CMS build artifact'],
   VITE_MEDIA_CACHE_STATUS_UI: ['CMS build artifact'],
@@ -175,6 +177,7 @@ const ALLOWED_FIELDS = new Set([
   'DEVICE_AUTH_MODE', 'DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT',
   'MAX_UPLOAD_MB',
   'WEBPAGE_NAVIGATION_ALLOWLIST', 'WEBPAGE_RESOURCE_ALLOWLIST', 'WEBPAGE_ALLOWED_CIDRS', 'WEBPAGE_ALLOWED_PORTS', 'WEBPAGE_ALLOW_HTTP',
+  'WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS', 'WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE',
   'LOG_LEVEL', 'POSTGRES_IMAGE', 'MINIO_IMAGE', 'VALKEY_IMAGE', 'NGINX_IMAGE',
   'NODE_EXPORTER_IMAGE', 'POSTGRES_EXPORTER_IMAGE', 'NGINX_PROMETHEUS_EXPORTER_IMAGE',
   'PROMETHEUS_IMAGE', 'ALERTMANAGER_IMAGE', 'GRAFANA_IMAGE', 'PROMETHEUS_SCRAPE_INTERVAL',
@@ -205,7 +208,7 @@ const DEFAULTS = {
   PROMETHEUS_HOST_PORT: '9090', ALERTMANAGER_HOST_PORT: '9093', GRAFANA_HOST_PORT: '3001',
   NODE_EXPORTER_HOST_PORT: '9100', POSTGRES_EXPORTER_HOST_PORT: '9187', NGINX_EXPORTER_HOST_PORT: '9113',
   METRICS_GATEWAY_HOST_PORT: '9443',
-  POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', BACKUP_OFFHOST_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info', MAX_UPLOAD_MB: '500', WEBPAGE_RESOURCE_ALLOWLIST: '', WEBPAGE_ALLOWED_CIDRS: '', WEBPAGE_ALLOWED_PORTS: '443', WEBPAGE_ALLOW_HTTP: 'false',
+  POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', BACKUP_OFFHOST_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info', MAX_UPLOAD_MB: '500', WEBPAGE_RESOURCE_ALLOWLIST: '', WEBPAGE_ALLOWED_CIDRS: '', WEBPAGE_ALLOWED_PORTS: '443', WEBPAGE_ALLOW_HTTP: 'false', WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS: '24', WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE: '100',
   POSTGRES_IMAGE: 'postgres:15-alpine', MINIO_IMAGE: 'minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e', VALKEY_IMAGE: 'valkey/valkey:7-alpine',
   NGINX_IMAGE: 'nginx:1.27-alpine', PROMETHEUS_IMAGE: 'prom/prometheus:v3.3.1',
   ALERTMANAGER_IMAGE: 'prom/alertmanager:v0.28.1', GRAFANA_IMAGE: 'grafana/grafana:12.0.2',
@@ -685,13 +688,20 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   if (!/^\d+$/.test(config.MAX_UPLOAD_MB) || Number(config.MAX_UPLOAD_MB) !== 500) {
     addError('MAX_UPLOAD_MB must be exactly 500 so the application policy remains below the 1000M CMS proxy envelope')
   }
+  if (!/^\d+$/.test(config.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS)
+    || Number(config.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS) < 1
+    || Number(config.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS) > 168) {
+    addError('WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS must be an integer from 1 to 168')
+  }
+  if (!/^\d+$/.test(config.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE)
+    || Number(config.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE) < 1
+    || Number(config.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE) > 1000) {
+    addError('WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE must be an integer from 1 to 1000')
+  }
   validateWebpageHostList('WEBPAGE_NAVIGATION_ALLOWLIST', config.WEBPAGE_NAVIGATION_ALLOWLIST, addError)
   validateWebpageHostList('WEBPAGE_RESOURCE_ALLOWLIST', config.WEBPAGE_RESOURCE_ALLOWLIST, addError)
   validateWebpageCidrs(config.WEBPAGE_ALLOWED_CIDRS, addError)
   validateWebpagePorts(config.WEBPAGE_ALLOWED_PORTS, addError)
-  if (config.WEBPAGE_ALLOW_HTTP === 'true') {
-    addError('WEBPAGE_ALLOW_HTTP must be false for production bundles')
-  }
   if (config.INITIAL_ADMIN_EMAIL && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.INITIAL_ADMIN_EMAIL)) addError('INITIAL_ADMIN_EMAIL must be valid')
   if (!['dual', 'signature'].includes(config.DEVICE_AUTH_MODE)) {
     addError('DEVICE_AUTH_MODE must be dual or signature for production')

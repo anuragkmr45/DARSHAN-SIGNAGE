@@ -99,6 +99,8 @@ function buildTimelineItem(input: {
   pageNumber?: unknown
   sourceUrl?: string | null
   fallbackUrl?: string | null
+  fallbackRevision?: string | null
+  fallbackSha256?: string | null
   meta?: Record<string, unknown>
 }): TimelineItem | null {
   const mediaId = input.mediaId || input.id
@@ -134,6 +136,7 @@ function buildTimelineItem(input: {
     muted: Boolean(input.muted),
     loop: Boolean(input.loopEnabled),
     pageNumber: normalizedPage,
+    sha256: type === 'url' ? (input.fallbackSha256 ?? undefined) : undefined,
     transitionDurationMs: 0,
     meta: {
       ...input.meta,
@@ -142,6 +145,8 @@ function buildTimelineItem(input: {
       source_content_type: input.sourceContentType,
       source_url: input.sourceUrl ?? undefined,
       fallback_url: input.fallbackUrl ?? undefined,
+      fallback_revision: input.fallbackRevision ?? undefined,
+      fallback_sha256: input.fallbackSha256 ?? undefined,
     },
   }
 }
@@ -177,6 +182,8 @@ export function buildWindowItems(
         remoteUrl: entry.media_id ? mediaUrlMap[entry.media_id] : undefined,
         sourceUrl: entry.media?.source_url ?? entry.media?.url ?? null,
         fallbackUrl: entry.media?.fallback_url ?? null,
+        fallbackRevision: entry.media?.fallback_revision ?? null,
+        fallbackSha256: entry.media?.fallback_sha256 ?? null,
         durationSeconds: entry.duration_seconds,
         pageNumber: entry.page_number,
         fit: 'contain',
@@ -204,6 +211,8 @@ export function buildWindowItems(
         remoteUrl: entry.media_id ? mediaUrlMap[entry.media_id] : undefined,
         sourceUrl: entry.media?.source_url ?? entry.media?.url ?? null,
         fallbackUrl: entry.media?.fallback_url ?? null,
+        fallbackRevision: entry.media?.fallback_revision ?? null,
+        fallbackSha256: entry.media?.fallback_sha256 ?? null,
         durationSeconds: entry.duration_seconds,
         pageNumber: entry.page_number,
         fit: entry.fit_mode,

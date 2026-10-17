@@ -151,10 +151,10 @@ export const settingsApi = {
       method: "GET",
     }),
 
-  updateDefaultMediaTargets: (assignments: DefaultMediaTargetsSetting["assignments"]) =>
+  updateDefaultMediaTargets: (assignments: DefaultMediaTargetsSetting["assignments"], expectedRevision?: string) =>
     apiClient.request<DefaultMediaTargetsSetting>({
       path: endpoints.settings.defaultMediaTargets,
       method: "PUT",
-      body: { assignments },
+      body: { assignments, expected_revision: expectedRevision },
     }),
 };

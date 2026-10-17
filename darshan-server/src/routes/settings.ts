@@ -1,9 +1,10 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { createHash } from 'crypto';
 import { z } from 'zod';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 import { createLogger, getRecentLogs, setRuntimeLogLevel } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
@@ -12,6 +13,8 @@ import {
   DEFAULT_MEDIA_SETTING_KEY,
   DEFAULT_MEDIA_TARGETS_SETTING_KEY,
   DEFAULT_MEDIA_VARIANTS_SETTING_KEY,
+  canonicalizeDefaultMediaTargets,
+  extractDefaultMediaTargets,
   getDefaultMedia,
   getDefaultMediaTargetAssignments,
   getDefaultMediaVariants,
@@ -77,11 +80,24 @@ const defaultMediaTargetAssignmentSchema = z.object({
   target_id: z.string().uuid(),
   media_id: z.string().uuid(),
   aspect_ratio: z.string().min(1),
+  priority: z.number().int().min(0).max(100).optional(),
 });
 
 const defaultMediaTargetsUpdateSchema = z.object({
   assignments: z.array(defaultMediaTargetAssignmentSchema),
+  expected_revision: z.string().length(64).nullable().optional(),
 });
+
+const defaultMediaTargetsRevision = (assignments: ReturnType<typeof extractDefaultMediaTargets>) => {
+  const canonical = canonicalizeDefaultMediaTargets(assignments.map((assignment) => ({
+    target_type: assignment.target_type,
+    target_id: assignment.target_id,
+    media_id: assignment.media_id,
+    aspect_ratio: assignment.aspect_ratio,
+    priority: assignment.priority,
+  })));
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+};
 
 const logsQuerySchema = z.object({
   level: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).optional(),
@@ -123,12 +139,14 @@ function assertDefaultMediaReady(media: { id: string; status?: string | null }) 
   }
 }
 
-async function ensureReadyDefaultMediaIds(ids: Array<string | null | undefined>) {
+async function ensureReadyDefaultMediaIds(
+  ids: Array<string | null | undefined>,
+  executor: DbExecutor = getDatabase()
+) {
   const requestedIds = Array.from(new Set(ids.filter((value): value is string => Boolean(value))));
   if (requestedIds.length === 0) return;
 
-  const db = getDatabase();
-  const rows = await db
+  const rows = await executor
     .select({ id: schema.media.id, status: schema.media.status })
     .from(schema.media)
     .where(inArray(schema.media.id, requestedIds as string[]));
@@ -161,19 +179,19 @@ async function serializeBranding(settings: BrandingSettings) {
 }
 
 async function validateDefaultMediaTargets(
-  assignments: Array<z.infer<typeof defaultMediaTargetAssignmentSchema>>
+  assignments: Array<z.infer<typeof defaultMediaTargetAssignmentSchema>>,
+  executor: DbExecutor = getDatabase()
 ) {
   if (assignments.length === 0) return;
 
-  const db = getDatabase();
-  await ensureReadyDefaultMediaIds(assignments.map((assignment) => assignment.media_id));
+  await ensureReadyDefaultMediaIds(assignments.map((assignment) => assignment.media_id), executor);
 
   const screenAssignments = assignments.filter((assignment) => assignment.target_type === 'SCREEN');
   const groupAssignments = assignments.filter((assignment) => assignment.target_type === 'GROUP');
 
   if (screenAssignments.length > 0) {
     const screenIds = screenAssignments.map((assignment) => assignment.target_id);
-    const screens = await db
+    const screens = await executor
       .select({
         id: schema.screens.id,
         aspect_ratio: schema.screens.aspect_ratio,
@@ -199,7 +217,7 @@ async function validateDefaultMediaTargets(
 
   if (groupAssignments.length > 0) {
     const groupIds = groupAssignments.map((assignment) => assignment.target_id);
-    const groups = await db
+    const groups = await executor
       .select({ id: schema.screenGroups.id })
       .from(schema.screenGroups)
       .where(inArray(schema.screenGroups.id, groupIds as string[]));
@@ -208,7 +226,7 @@ async function validateDefaultMediaTargets(
       throw AppError.notFound('Screen group not found');
     }
 
-    const members = await db
+    const members = await executor
       .select({
         group_id: schema.screenGroupMembers.group_id,
         screen_id: schema.screenGroupMembers.screen_id,
@@ -267,6 +285,9 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       content_type: mediaAccess.content_type,
       source_content_type: mediaAccess.source_content_type,
       size: mediaAccess.size,
+      ready_object_id: mediaAccess.ready_object_id,
+      ready_object_sha256: mediaAccess.ready_object_sha256,
+      ready_object_created_at: mediaAccess.ready_object_created_at,
     });
   };
 
@@ -288,12 +309,20 @@ export async function settingsRoutes(fastify: FastifyInstance) {
   const serializeDefaultMediaTargets = async () => {
     const data = await getDefaultMediaTargetAssignments(db);
     return {
+      revision: defaultMediaTargetsRevision(data.map((assignment) => ({
+        target_type: assignment.target_type,
+        target_id: assignment.target_id,
+        media_id: assignment.media_id,
+        aspect_ratio: assignment.aspect_ratio,
+        priority: assignment.priority,
+      }))),
       assignments: await Promise.all(
         data.map(async (assignment) => ({
           target_type: assignment.target_type,
           target_id: assignment.target_id,
           aspect_ratio: assignment.aspect_ratio,
           media_id: assignment.media_id,
+          priority: assignment.priority,
           media: assignment.media ? await serializeMedia(assignment.media) : null,
         }))
       ),
@@ -862,37 +891,56 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       try {
         const payload = await requireAccess(request, 'update', 'OrgSettings');
         const data = defaultMediaTargetsUpdateSchema.parse(request.body);
-        const dedupedAssignments = Array.from(
-          new Map(
-            data.assignments.map((assignment) => [
-              `${assignment.target_type}:${assignment.target_id}`,
-              {
-                ...assignment,
-                aspect_ratio: assignment.aspect_ratio.trim(),
-              },
-            ])
-          ).values()
-        );
-
-        await validateDefaultMediaTargets(dedupedAssignments);
-
-        if (dedupedAssignments.length === 0) {
-          await db.delete(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_TARGETS_SETTING_KEY));
-          await dispatchPlaybackRefresh(fastify, {
-            reason: 'DEFAULT_MEDIA',
-            targetAll: true,
-            createdBy: payload.sub,
-          });
-          return reply.status(OK).send({ assignments: [] });
+        const keys = data.assignments.map((assignment) => `${assignment.target_type}:${assignment.target_id}`);
+        if (new Set(keys).size !== keys.length) {
+          throw AppError.badRequest('Default media targets must not contain duplicate screen or group assignments.');
         }
 
-        await db
-          .insert(schema.settings)
-          .values({ key: DEFAULT_MEDIA_TARGETS_SETTING_KEY, value: dedupedAssignments })
-          .onConflictDoUpdate({
-            target: schema.settings.key,
-            set: { value: dedupedAssignments, updated_at: new Date() },
-          });
+        const savedAssignments = await db.transaction(async (tx) => {
+          // The settings row does not exist before the first save, so a row lock
+          // cannot serialize every writer. This transaction-scoped advisory lock
+          // gives first-save and later-save operations the same concurrency rule.
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${DEFAULT_MEDIA_TARGETS_SETTING_KEY}))`);
+
+          const [currentSetting] = await tx
+            .select()
+            .from(schema.settings)
+            .where(eq(schema.settings.key, DEFAULT_MEDIA_TARGETS_SETTING_KEY));
+          const currentAssignments = extractDefaultMediaTargets(currentSetting?.value);
+          const priorityByTarget = new Map(
+            currentAssignments.map((assignment) => [`${assignment.target_type}:${assignment.target_id}`, assignment.priority])
+          );
+          const normalizedAssignments = canonicalizeDefaultMediaTargets(data.assignments.map((assignment) => ({
+            ...assignment,
+            aspect_ratio: assignment.aspect_ratio.trim(),
+            priority: assignment.target_type === 'GROUP'
+              ? assignment.priority ?? priorityByTarget.get(`${assignment.target_type}:${assignment.target_id}`) ?? 0
+              : 0,
+          })));
+
+          if (data.expected_revision !== undefined
+            && data.expected_revision !== defaultMediaTargetsRevision(currentAssignments)) {
+            throw AppError.conflict('Default media assignments changed. Refresh and review the latest values.', {
+              reason: 'DEFAULT_MEDIA_TARGETS_STALE',
+            });
+          }
+
+          await validateDefaultMediaTargets(normalizedAssignments, tx);
+
+          if (normalizedAssignments.length === 0) {
+            await tx.delete(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_TARGETS_SETTING_KEY));
+            return normalizedAssignments;
+          }
+
+          await tx
+            .insert(schema.settings)
+            .values({ key: DEFAULT_MEDIA_TARGETS_SETTING_KEY, value: normalizedAssignments })
+            .onConflictDoUpdate({
+              target: schema.settings.key,
+              set: { value: normalizedAssignments, updated_at: new Date() },
+            });
+          return normalizedAssignments;
+        });
 
         await dispatchPlaybackRefresh(fastify, {
           reason: 'DEFAULT_MEDIA',
@@ -900,6 +948,9 @@ export async function settingsRoutes(fastify: FastifyInstance) {
           createdBy: payload.sub,
         });
 
+        if (savedAssignments.length === 0) {
+          return reply.status(OK).send({ assignments: [], revision: defaultMediaTargetsRevision([]) });
+        }
         return reply.status(OK).send(await serializeDefaultMediaTargets());
       } catch (error) {
         logger.error(error, 'Update default media targets error');

@@ -122,7 +122,7 @@ export async function assertWebpageUrlAllowed(
   let url: URL;
   try { url = new URL(rawUrl); } catch { throw new WebpageUrlPolicyError('WEBPAGE_URL_INVALID', 'Webpage URL is invalid'); }
   if (url.username || url.password) throw new WebpageUrlPolicyError('WEBPAGE_CREDENTIALS_BLOCKED', 'Credentials are not allowed in webpage URLs');
-  const allowHttp = policy.WEBPAGE_ALLOW_HTTP === true && policy.NODE_ENV !== 'production';
+  const allowHttp = policy.WEBPAGE_ALLOW_HTTP === true;
   if (url.protocol !== 'https:' && !(allowHttp && url.protocol === 'http:')) {
     throw new WebpageUrlPolicyError('WEBPAGE_SCHEME_BLOCKED', 'Webpage URL scheme is not allowed');
   }

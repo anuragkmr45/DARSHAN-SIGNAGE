@@ -86,6 +86,7 @@ export const endpoints = {
     uploadSessionComplete: (sessionId: string) => `/media/uploads/${sessionId}/complete`,
     complete: (mediaId: string) => `/media/${mediaId}/complete`,
     byId: (mediaId: string) => `/media/${mediaId}`,
+    webpagePreviewRefresh: (mediaId: string) => `/media/${mediaId}/webpage-preview/refresh`,
   },
   metrics: {
     overview: "/metrics/overview",

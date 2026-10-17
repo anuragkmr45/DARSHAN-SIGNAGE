@@ -90,17 +90,16 @@ export function hostMatches(hostname: string, rawPattern: string): boolean {
   return hostname === pattern
 }
 
-export async function assertPlayerWebpageUrlAllowed(
+export function assertPlayerWebpageUrlStaticallyAllowed(
   rawUrl: string,
   purpose: Purpose,
   security: SecurityConfig,
-  resolveAddresses?: (hostname: string) => Promise<string[]>,
-): Promise<URL> {
+): URL {
   let url: URL
   try { url = new URL(rawUrl) } catch { throw new WebpageNetworkPolicyError('WEBPAGE_URL_INVALID', 'Invalid webpage URL') }
   if (purpose === 'resource' && (url.protocol === 'data:' || url.protocol === 'blob:')) return url
   if (url.username || url.password) throw new WebpageNetworkPolicyError('WEBPAGE_CREDENTIALS_BLOCKED', 'URL credentials are prohibited')
-  const allowHttp = security.webpageAllowHttp === true && process.env['NODE_ENV'] !== 'production'
+  const allowHttp = security.webpageAllowHttp === true
   if (url.protocol !== 'https:' && !(allowHttp && url.protocol === 'http:')) {
     throw new WebpageNetworkPolicyError('WEBPAGE_SCHEME_BLOCKED', 'URL scheme is prohibited')
   }
@@ -121,6 +120,18 @@ export async function assertPlayerWebpageUrlAllowed(
       'Webpage host is not allowlisted',
     )
   }
+  return url
+}
+
+export async function assertPlayerWebpageUrlAllowed(
+  rawUrl: string,
+  purpose: Purpose,
+  security: SecurityConfig,
+  resolveAddresses?: (hostname: string) => Promise<string[]>,
+): Promise<URL> {
+  const url = assertPlayerWebpageUrlStaticallyAllowed(rawUrl, purpose, security)
+  if (purpose === 'resource' && (url.protocol === 'data:' || url.protocol === 'blob:')) return url
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
 
   let addresses: string[]
   try {

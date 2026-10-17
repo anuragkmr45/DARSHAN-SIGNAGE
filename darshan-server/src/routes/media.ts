@@ -67,13 +67,13 @@ import {
   queueDocumentConvert,
   queueFFmpegThumbnail,
   queueFFmpegTranscode,
+  requestWebpagePreviewRefresh,
   queueWebpageVerifyCapture,
 } from '@/jobs';
 import { assertWebpageUrlAllowed, WebpageUrlPolicyError } from '@/utils/webpage-url-policy';
 
 const logger = createLogger('media-routes');
-const { CREATED, OK } = HTTP_STATUS;
-const LEGACY_WEBPAGE_PREVIEW_REQUEUE_COOLDOWN_MS = 5 * 60 * 1000;
+const { ACCEPTED, CREATED, OK } = HTTP_STATUS;
 const UPLOAD_MULTIPART_THRESHOLD_BYTES = 100 * 1024 * 1024;
 const UPLOAD_PART_SIZE_BYTES = 16 * 1024 * 1024;
 const UPLOAD_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -81,7 +81,6 @@ const UPLOAD_SINGLE_URL_TTL_SECONDS = 60 * 60;
 const UPLOAD_PART_URL_TTL_SECONDS = 15 * 60;
 const UPLOAD_STAGING_BUCKET = 'media-staging';
 const UPLOAD_CANONICAL_BUCKET = 'media-source';
-const legacyWebpagePreviewRequeueAt = new Map<string, number>();
 
 export async function mediaRoutes(fastify: FastifyInstance) {
   const mediaRepo = createMediaRepository();
@@ -243,65 +242,8 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     return storageObject;
   };
 
-  const isLegacyWebpagePreview = (params: {
-    media: any;
-    readyObject?: any;
-    resolvedContentType?: string | null;
-  }) => {
-    if ((params.media.type ?? '').toUpperCase() !== 'WEBPAGE') return false;
-    if (params.media.status !== 'READY') return false;
-    if (!params.media.source_url) return false;
-
-    const contentType = (params.readyObject?.content_type ?? params.resolvedContentType ?? '')
-      .toString()
-      .toLowerCase();
-    const objectKey = (params.readyObject?.object_key ?? '').toString().toLowerCase();
-
-    return contentType === 'image/svg+xml' || objectKey.endsWith('/webpage-fallback.svg');
-  };
-
-  const maybeQueueLegacyWebpagePreviewRefresh = async (params: {
-    media: any;
-    readyObject?: any;
-    resolvedContentType?: string | null;
-  }) => {
-    if (!isLegacyWebpagePreview(params)) {
-      return;
-    }
-
-    const now = Date.now();
-    const lastQueuedAt = legacyWebpagePreviewRequeueAt.get(params.media.id) ?? 0;
-    if (now - lastQueuedAt < LEGACY_WEBPAGE_PREVIEW_REQUEUE_COOLDOWN_MS) {
-      return;
-    }
-
-    legacyWebpagePreviewRequeueAt.set(params.media.id, now);
-
-    try {
-      await queueWebpageVerifyCapture({
-        mediaId: params.media.id,
-        sourceUrl: params.media.source_url,
-      });
-      logger.info({ mediaId: params.media.id }, 'Queued legacy webpage preview recapture');
-    } catch (error) {
-      logger.warn(
-        {
-          error,
-          mediaId: params.media.id,
-        },
-        'Failed to queue legacy webpage preview recapture'
-      );
-    }
-  };
-
   const serializeMediaWithResolvedState = async (media: any, readyMap?: Map<string, any>) => {
     const mediaAccess = await resolveMediaAccess(media, db, { readyObjectMap: readyMap });
-    const readyObject = media.ready_object_id ? readyMap?.get(media.ready_object_id) : undefined;
-    await maybeQueueLegacyWebpagePreviewRefresh({
-      media,
-      readyObject,
-      resolvedContentType: mediaAccess.content_type,
-    });
     const statusState = resolveApiStatus(media, mediaAccess.is_object_missing);
     return serializeMediaRecord(media, mediaAccess.media_url, {
       status: statusState.status,
@@ -309,6 +251,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       content_type: mediaAccess.content_type,
       source_content_type: mediaAccess.source_content_type,
       size: mediaAccess.size,
+      ready_object_id: mediaAccess.ready_object_id,
+      ready_object_sha256: mediaAccess.ready_object_sha256,
+      ready_object_created_at: mediaAccess.ready_object_created_at,
     });
   };
 
@@ -365,13 +310,19 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     }
   };
 
-  const queueWebpageVerification = async (mediaId: string, sourceUrl: string) => {
+  const queueWebpageVerification = async (
+    mediaId: string,
+    sourceUrl: string,
+    refreshToken: string
+  ) => {
     try {
-      await queueWebpageVerifyCapture({ mediaId, sourceUrl });
+      await queueWebpageVerifyCapture({ mediaId, sourceUrl, mode: 'INITIAL', refreshToken });
     } catch (error) {
       await mediaRepo.update(mediaId, {
         status: 'FAILED',
         status_reason: 'WEBPAGE_CAPTURE_QUEUE_FAILED',
+        webpage_preview_refresh_token: null,
+        webpage_preview_last_error: 'WEBPAGE_CAPTURE_QUEUE_FAILED',
       });
       throw AppError.internal('Failed to queue webpage verification job', {
         media_id: mediaId,
@@ -1196,6 +1147,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const data = createMediaSchema.parse(request.body);
         let normalizedWebpageUrl: string | null = null;
+        let webpagePreviewRefreshToken: string | null = null;
         if (data.type === 'WEBPAGE') {
           const normalizedUrl = normalizeWebpageUrl(data.source_url, appConfig.NODE_ENV);
           try {
@@ -1207,6 +1159,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             throw error;
           }
           normalizedWebpageUrl = normalizedUrl;
+          webpagePreviewRefreshToken = randomUUID();
         }
 
         const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
@@ -1218,6 +1171,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
                 status: 'PROCESSING',
                 status_reason: null,
                 source_url: normalizedWebpageUrl!,
+                webpage_preview_attempted_at: new Date(),
+                webpage_preview_refresh_token: webpagePreviewRefreshToken!,
+                webpage_preview_last_error: null,
                 created_by: actor.userId,
                 ...ownershipForNewContent(actor, ability, 'Media'),
               }
@@ -1235,7 +1191,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const { media, actor, ability } = authorized;
 
         if (normalizedWebpageUrl) {
-          await queueWebpageVerification(media.id, normalizedWebpageUrl);
+          await queueWebpageVerification(media.id, normalizedWebpageUrl, webpagePreviewRefreshToken!);
         }
 
         const ownership = (await resolveContentOwnershipViews([media])).get(media.id);
@@ -1410,6 +1366,59 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         );
       } catch (error) {
         logger.error(error, 'Get media error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.post<{ Params: { id: string } }>(
+    apiEndpoints.media.webpagePreviewRefresh,
+    {
+      schema: {
+        description: 'Refresh the stored preview for a webpage media item',
+        tags: ['Media'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const mediaId = (request.params as { id: string }).id;
+
+        let result;
+        try {
+          result = await withMediaMutation(
+            payload,
+            mediaId,
+            'update',
+            async ({ media, executor }) => {
+              if (media.type !== 'WEBPAGE') {
+                throw AppError.badRequest('Preview refresh is available only for webpage media');
+              }
+              return requestWebpagePreviewRefresh({ mediaId, executor });
+            }
+          );
+        } catch (error) {
+          const code = error instanceof Error ? error.message : '';
+          if (code === 'WEBPAGE_MEDIA_NOT_FOUND') throw AppError.notFound('Webpage media not found');
+          if (code === 'WEBPAGE_PREVIEW_REFRESH_NOT_AVAILABLE') {
+            throw AppError.conflict('Webpage preview cannot be refreshed in its current state');
+          }
+          if (code === 'WEBPAGE_PREVIEW_REFRESH_CONFLICT') {
+            throw AppError.conflict('Webpage preview refresh changed; retry the request');
+          }
+          throw error;
+        }
+
+        return reply.status(ACCEPTED).send({
+          media_id: result.mediaId,
+          refresh_status: result.refreshStatus,
+          requested_at: result.requestedAt.toISOString(),
+        });
+      } catch (error) {
+        logger.error(error, 'Refresh webpage preview error');
         return respondWithError(reply, error);
       }
     }

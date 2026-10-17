@@ -1,0 +1,30 @@
+{
+  "run": {
+    "timestamp": "2026-10-17T03:17:21.387Z",
+    "branch": "release-01",
+    "source_commit": "c680c0a",
+    "mode": "live-built-api",
+    "database": "darshan_runtime_test"
+  },
+  "summary": {
+    "pass": 13,
+    "fail": 1,
+    "blocked": 0
+  },
+  "results": [
+    { "id": 1, "status": "PASS", "actual": "Non-last SUPER_ADMIN delete, disable and demote returned 200; all three operations against the last active SUPER_ADMIN returned 409 LAST_ACTIVE_SUPER_ADMIN." },
+    { "id": 2, "status": "PASS", "actual": "The operator list contained only the two active Operations users; direct lookup of the Sales user returned 404." },
+    { "id": 3, "status": "PASS", "actual": "Same-department Media read returned 200, peer delete returned 403, creator delete returned 200 and cross-department read was denied." },
+    { "id": 4, "status": "PASS", "actual": "Same-department Layout read returned 200, peer update returned 403, creator update returned 200 and cross-department read was denied." },
+    { "id": 5, "status": "PASS", "actual": "Same-department Presentation read and administrator read returned 200; peer mutation returned 403 and cross-department read was denied." },
+    { "id": 6, "status": "PASS", "actual": "Same-department Schedule read/update and administrator read returned 200; cross-department read was denied." },
+    { "id": 7, "status": "PASS", "actual": "ADMIN-created Media/Layout/Presentation/Schedule were ORGANIZATION and department-readable; SUPER_ADMIN-created equivalents were RESTRICTED and denied." },
+    { "id": 8, "status": "PASS", "actual": "A custom role with an arbitrary name created all four content types and used its granted mutations; a missing User.read grant returned 403." },
+    { "id": 9, "status": "PASS", "actual": "Delegate direct allowed Screen returned 201; other Screen, Group and Global returned 403; ADMIN Group and SUPER_ADMIN Global returned 201." },
+    { "id": 10, "status": "PASS", "actual": "Delegate cleared its allowed Screen emergency with 200; clearing an unassigned Screen emergency returned 403 and the emergency remained active." },
+    { "id": 11, "status": "PASS", "actual": "Three general Requests probes returned 404 while Schedule Requests list returned 200." },
+    { "id": 12, "status": "PASS", "actual": "Old sessions returned 401 immediately after disable, password reset and role-permission removal; the new password logged in successfully." },
+    { "id": 17, "status": "PASS", "actual": "For one Screen in two Groups, priority 90 won over 10; Group metadata edit and an assignment update omitting priority retained 90 and the correct winner." },
+    { "id": 18, "status": "FAIL", "actual": "After clearing Screen/Group, aspect and global defaults, the live API returned source NONE, media_id null and media null instead of a standard company image." }
+  ]
+}

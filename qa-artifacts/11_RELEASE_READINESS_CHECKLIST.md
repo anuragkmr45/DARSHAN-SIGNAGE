@@ -9,6 +9,13 @@ automated evidence in
 do not replace independent QA, platform, security, recovery, soak or deployment
 gates.
 
+The webpage/default-priority developer review and exact bounded commands are in
+`evidence/webpage-default-priority-review.md` and
+`evidence/webpage-default-priority-developer-verification-2026-10-17.md`.
+The later live requirements 1-18 run is in
+`evidence/runtime-2026-10-17/runtime-validation.md`; 1-17 passed the bounded
+developer scenarios and requirement 18 failed.
+
 ## Current Targeted Feature Evidence
 
 - [x] Disposable Linux CMS/API/Electron flow demonstrated independent PDF pages, video Loop On/Off, multiple items, simultaneous slots, corrupt-media advance, schedule hard stop, cached offline restart/recovery, take-down and page-aware PoP persistence.
@@ -21,6 +28,10 @@ gates.
 - [ ] Windows x64 package/install/kiosk/playback and supported physical display matrix remain pending.
 - [ ] Long soak, approved performance limits, two-minute secure lock/cache purge, mixed-version capability rollout, accessibility and full product/security regression remain pending.
 - [x] Server, CMS and player blocking-error lint exits successfully. The two no-behavior errors found during the review were corrected; the existing warning backlog remains technical debt and is not represented as remediated.
+- [x] Webpage/default-priority focused developer gates passed: real-PostgreSQL settings/media routes, migration unit, server policy/jobs/default resolver, one-worker CMS flows, player full unit and fault suites, builds and release-bundle configuration.
+- [x] Live built-API/worker/Chromium developer flow exercised requirements 1-17 successfully, including real webpage capture, denied redirect reachability, retained failed-refresh preview and rendered preview fallback. This is partial developer evidence only.
+- [ ] **BLOCKER — BR-102 / DEF-04 / R-38:** the no-Schedule/no-default path must show the approved standard company fallback image. Current runtime returns `NONE` and renders a text-only `No content assigned yet` card.
+- [ ] `WEB-01..06`, `DEF-01..03`, `FUN-06`, `FUN-08` and `PLAYER-09` require independent QA against controlled HTTP/HTTPS/DNS/auth/redirect fixtures, real capture/object storage and the packaged physical player.
 
 ## Build And Environment
 
@@ -37,6 +48,7 @@ gates.
 - [ ] Retention/deletion obligations for DB records, media, chat, screenshots, logs, metrics and backups have owners and evidence. Do not infer compliance from a config field or unused cleanup function. `BKP-01`, `PERF-04`; BQ-015/020.
 - [ ] If upgrading, forward migration baseline, backup/restore plan, downtime window and compatible client/player versions are approved. Failed migration leaves a controlled state; no old image is started against unreviewed schema. `DEP-03`, `BKP-03`; BQ-018.
 - [ ] Migration `0045` is rehearsed on a disposable legacy-data copy for organization/valid-department/restricted/missing/nullable and pre-migration-transferred creator classes, constraints/indexes, tombstone references, repeat invocation and recovery. The developer PostgreSQL rehearsal passed these technical paths; QA/release still needs frozen-candidate evidence, human acceptance of unknowable historical departments and a rollback decision that disables physical deletion on an older server. `DATA-06`, `BKP-03`; R-25/R-29.
+- [ ] Migration `0047` is applied before any new API/worker/player rollout. Verify new preview columns/index, legacy backfill semantics, repeat application through the migration ledger and restore/forward-recovery behavior on the frozen candidate. Do not deploy the new worker against an old schema. `WEB-04..06`, `DEP-03`, `BKP-03`; R-36.
 - [ ] An interrupted first install resumes correctly, old release stop script cannot stop the new active role, and stable volumes/site identity are preserved. `DEP-05`, `DEP-07`.
 
 ## Product And Security
@@ -52,8 +64,12 @@ gates.
 - [ ] Media upload, conversion, selected-page CMS preview, immutable snapshot, capable-player playback, page-aware PoP, webpage preview, chat and reports pass smoke/UAT on actual target hardware. `10_SMOKE_REGRESSION_UAT.md`.
 - [ ] Video-only loop selection survives CMS draft/review/request and API/snapshot round trips; a short video completes at least three native cycles on one mounted occurrence, coexists with the selected PDF page, stops at schedule/takeover/secure-lock boundaries, and has no hidden audio, retry storm, stale callback or material resource growth. `UI-06`, `API-07`, `PLAYER-11`, `PLAYER-12`, `OBS-04`, `PERF-06`; R-24.
 - [ ] Every target player has advertised `pdf_page_selection_v1`, or schedules using page >1 are demonstrably blocked. Page 1 remains compatible during rollout. `API-06`, `COMP-04`.
+- [ ] Release configuration explicitly records webpage HTTP decision, approved hosts, ports and private CIDRs. Source defaults remain fail-closed; enabling HTTP is accepted as cleartext risk. Every server/player node receives the same policy before new webpage content is published. `WEB-01..03`; R-35.
+- [ ] Manual and 24-hour automatic preview refresh, failed-refresh preservation, snapshot/default revision propagation and revision-aware packaged-player fallback pass with real object storage. `WEB-04..06`, `PLAYER-09`; R-08/R-36.
+- [ ] Default priority `0..100`, deterministic tie-break, direct-Screen precedence, legacy zero, edit preservation and two-writer stale conflict pass on the frozen database/CMS/player build. `FUN-06`, `DEF-01..03`; R-37.
+- [ ] The approved standard company fallback asset is versioned in the release, resolves when no Schedule/default is eligible, renders online/offline on packaged physical players and survives restart/cache damage as specified. `DEF-04`, `PLAYER-05`; R-38.
 - [ ] General Requests old URLs/OpenAPI/CMS/client/report/webhook surfaces are absent and legacy rows are not exposed; Schedule Requests still pass smoke. `AUTHZ-06`; R-18/R-34.
-- [ ] Human policies remaining for BQ-011/012/013/014/015/016/017/018/019 and BQ-020 Media/chat recycle behavior are answered or accepted as explicit limits. Directory and four-resource ownership rules are no longer TBD. A remaining TBD affecting recovery, capacity or critical playback cannot be silently converted to Pass.
+- [ ] Human policies remaining for BQ-013/014/015/016/017/018/019 and BQ-020 Media/chat recycle behavior are answered or accepted as explicit limits. BQ-011/012 are closed by BR-097..101. A remaining TBD affecting recovery, capacity or critical playback cannot be silently converted to Pass.
 
 ## Decision Record
 

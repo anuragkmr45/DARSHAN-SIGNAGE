@@ -1,10 +1,10 @@
 {
-  "analysisDate": "2026-10-16",
-  "commit": "8f66d8f (authorization/session baseline; QA artifact reconciliation follows)",
+  "analysisDate": "2026-10-17",
+  "commit": "uncommitted release-01 working tree based on c680c0a",
   "branch": "release-01",
-  "trackedFiles": 1321,
-  "inventoryReconciledThrough": "2026-10-16 authorization, Requests disablement and session invalidation delta; unchanged historical line numbers were not regenerated",
-  "workspaceFilesReviewed": 1321,
+  "trackedFiles": 1323,
+  "inventoryReconciledThrough": "2026-10-17 webpage playback, preview refresh and default-priority delta; historical full-route line numbers were not regenerated",
+  "workspaceFilesReviewed": 1329,
   "counts": {
     ".codex": 10,
     ".dockerignore": 1,
@@ -16,7 +16,7 @@
     "deploy": 72,
     "docs": 280,
     "manifests": 3,
-    "qa-artifacts": 56,
+    "qa-artifacts": 57,
     "scripts": 26,
     "standards": 8
   },

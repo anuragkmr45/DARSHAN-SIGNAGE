@@ -289,11 +289,13 @@ export interface DefaultMediaTargetAssignment {
   target_id: string;
   media_id: string;
   aspect_ratio: string;
+  priority: number;
   media?: MediaAsset | null;
 }
 
 export interface DefaultMediaTargetsSetting {
   assignments: DefaultMediaTargetAssignment[];
+  revision: string;
 }
 
 export interface Conversation {
@@ -1562,6 +1564,11 @@ export interface MediaAsset {
   source_key?: string;
   media_url?: string | null;
   fallback_media_url?: string | null;
+  fallback_media_revision?: string | null;
+  fallback_media_sha256?: string | null;
+  fallback_media_captured_at?: string | null;
+  webpage_preview_refresh_status?: "MISSING" | "REFRESHING" | "READY" | "FAILED" | null;
+  webpage_preview_last_error?: string | null;
   created_by?: string;
   ownership?: ContentOwnership;
   permissions?: ContentPermissions;

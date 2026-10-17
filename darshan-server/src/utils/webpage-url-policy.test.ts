@@ -72,6 +72,24 @@ describe('webpage URL policy primitives', () => {
     ), 'WEBPAGE_ADDRESS_BLOCKED');
   });
 
+  it('allows production HTTP only when the feature and port are explicitly enabled', async () => {
+    const httpPolicy = {
+      ...productionPolicy,
+      WEBPAGE_ALLOW_HTTP: true,
+      WEBPAGE_ALLOWED_PORTS: '80,443',
+    };
+
+    await expect(assertWebpageUrlAllowed('http://screen.example.test/', 'navigation', {
+      policy: httpPolicy,
+      resolveAddresses: async () => ['203.0.113.10'],
+    })).resolves.toMatchObject({ protocol: 'http:' });
+
+    await expectCode(assertWebpageUrlAllowed('http://screen.example.test/', 'navigation', {
+      policy: { ...httpPolicy, WEBPAGE_ALLOWED_PORTS: '443' },
+      resolveAddresses: async () => ['203.0.113.10'],
+    }), 'WEBPAGE_PORT_BLOCKED');
+  });
+
   it('matches IPv4 and IPv6 CIDRs without accepting adjacent networks', () => {
     expect(ipMatchesCidr('192.168.29.64', '192.168.29.0/24')).toBe(true);
     expect(ipMatchesCidr('192.168.30.1', '192.168.29.0/24')).toBe(false);

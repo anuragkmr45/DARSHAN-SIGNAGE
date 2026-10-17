@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload, Image as ImageIcon, Video, FileText, Copy, Trash2, Globe, ExternalLink } from "lucide-react";
+import { Upload, Image as ImageIcon, Video, FileText, Copy, Trash2, Globe, ExternalLink, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +65,19 @@ const resolveCopyTargetUrl = (media: MediaAsset) =>
 const resolveStatusLabel = (media: MediaAsset) => media.status ?? "PENDING";
 const resolvePlayableMimeType = (media: MediaAsset) => media.content_type || media.source_content_type || null;
 const resolveOriginalMimeType = (media: MediaAsset) => media.source_content_type || null;
+
+const getFriendlyWebpagePolicyError = (error: unknown) => {
+  if (!(error instanceof ApiError)) return "Unable to add webpage.";
+  const messages: Record<string, string> = {
+    WEBPAGE_SCHEME_BLOCKED: "This URL scheme is not enabled. Use HTTP or HTTPS allowed by the deployment.",
+    WEBPAGE_HOST_NOT_ALLOWED: "This website host is not on the approved list.",
+    WEBPAGE_PORT_BLOCKED: "This website uses a port that is not approved.",
+    WEBPAGE_CREDENTIALS_BLOCKED: "URLs containing a username or password are not supported.",
+    WEBPAGE_ADDRESS_BLOCKED: "This website resolves to a private or protected address that is not approved.",
+    WEBPAGE_REDIRECT_BLOCKED: "The website redirected to a destination that is not approved.",
+  };
+  return messages[error.code] ?? error.message;
+};
 
 const copyTextToClipboard = async (text: string) => {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText && window.isSecureContext) {
@@ -290,8 +303,60 @@ export default function MediaLibrary() {
       }
     },
     onError: (error) => {
-      const message = error instanceof ApiError ? error.message : "Unable to add webpage.";
+      const message = getFriendlyWebpagePolicyError(error);
       toast({ title: "Create failed", description: message, variant: "destructive" });
+    },
+  });
+
+  const previewRefreshMutation = useMutation({
+    mutationFn: async (media: MediaAsset) => {
+      const priorRevision = media.fallback_media_revision ?? null;
+      const request = await mediaApi.refreshWebpagePreview(media.id);
+      const requestedAt = Date.parse(request.requested_at);
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        const refreshed = await mediaApi.getById(media.id);
+        const capturedAt = refreshed.fallback_media_captured_at
+          ? Date.parse(refreshed.fallback_media_captured_at)
+          : Number.NaN;
+        if (
+          refreshed.fallback_media_revision !== priorRevision ||
+          (Number.isFinite(capturedAt) && capturedAt >= requestedAt) ||
+          refreshed.webpage_preview_refresh_status === "FAILED"
+        ) {
+          return refreshed;
+        }
+      }
+      return await mediaApi.getById(media.id);
+    },
+    onMutate: (media) => {
+      setPreviewMedia((current) =>
+        current?.id === media.id
+          ? { ...current, webpage_preview_refresh_status: "REFRESHING" }
+          : current,
+      );
+    },
+    onSuccess: (media) => {
+      setPreviewMedia(media);
+      void queryClient.invalidateQueries({ queryKey: ["media"] });
+      toast({
+        title: media.webpage_preview_refresh_status === "FAILED" ? "Preview refresh failed" : "Preview refreshed",
+        description:
+          media.webpage_preview_refresh_status === "FAILED"
+            ? "The last successful screenshot is still available."
+            : "The latest successful webpage screenshot is now available.",
+        variant: media.webpage_preview_refresh_status === "FAILED" ? "destructive" : "default",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Preview refresh failed",
+        description: error instanceof ApiError ? error.message : "Unable to request a new preview.",
+        variant: "destructive",
+      });
+      if (previewMedia) {
+        void mediaApi.getById(previewMedia.id).then(setPreviewMedia).catch(() => undefined);
+      }
     },
   });
 
@@ -796,12 +861,12 @@ export default function MediaLibrary() {
                 id="webpage-url"
                 value={webpageUrl}
                 onChange={(event) => setWebpageUrl(event.target.value)}
-                placeholder="https://example.com"
+                placeholder="https://example.com or http://example.com"
                 disabled={webpageMutation.isPending}
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              The server verifies the URL, captures a fallback screenshot, and only then marks it ready. Webpage playback is anonymous/public only; CMS login cookies are never reused on screens.
+              HTTP and HTTPS are supported when approved by your deployment. HTTP is unencrypted. The server captures a fallback screenshot; authenticated pages and CMS login cookies are not supported on screens.
             </p>
           </div>
           <DialogFooter>
@@ -868,6 +933,29 @@ export default function MediaLibrary() {
                     <p className="text-xs text-muted-foreground">
                       Playback uses the live URL only when it loads anonymously. Screens fall back to the captured preview when the live page is unavailable.
                     </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <div>
+                        {previewMedia.fallback_media_captured_at
+                          ? `Captured ${new Date(previewMedia.fallback_media_captured_at).toLocaleString()}`
+                          : "No successful capture time available"}
+                        {previewMedia.webpage_preview_last_error
+                          ? ` · Latest refresh failed (${previewMedia.webpage_preview_last_error}); showing the last successful preview.`
+                          : null}
+                      </div>
+                      {previewMedia.permissions?.can_update === true ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={previewRefreshMutation.isPending || previewMedia.webpage_preview_refresh_status === "REFRESHING"}
+                          onClick={() => previewRefreshMutation.mutate(previewMedia)}
+                        >
+                          <RefreshCw className={`mr-2 h-4 w-4 ${previewRefreshMutation.isPending ? "animate-spin" : ""}`} />
+                          {previewRefreshMutation.isPending || previewMedia.webpage_preview_refresh_status === "REFRESHING"
+                            ? "Refreshing..."
+                            : "Refresh preview"}
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center gap-3 rounded-md border bg-muted/40 p-6 text-center">

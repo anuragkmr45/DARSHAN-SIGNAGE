@@ -67,6 +67,10 @@ describe('Settings Client', () => {
         source_url: 'https://status.example.com',
         media_url: 'https://cdn.example.com/webpage-fallback.svg',
         fallback_media_url: 'https://cdn.example.com/webpage-fallback.svg',
+        fallback_media_revision: 'ready-object-v2',
+        fallback_media_sha256: 'a'.repeat(64),
+        fallback_media_captured_at: '2026-10-17T00:00:00.000Z',
+        webpage_preview_refresh_status: 'READY',
       },
     }
 
@@ -78,6 +82,9 @@ describe('Settings Client', () => {
     expect(parsed.media?.source_url).to.equal('https://status.example.com')
     expect(parsed.media?.fallback_media_url).to.equal('https://cdn.example.com/webpage-fallback.svg')
     expect(parsed.media?.media_url).to.equal('https://cdn.example.com/webpage-fallback.svg')
+    expect(parsed.media?.fallback_media_revision).to.equal('ready-object-v2')
+    expect(parsed.media?.fallback_media_sha256).to.equal('a'.repeat(64))
+    expect(parsed.media?.webpage_preview_refresh_status).to.equal('READY')
   })
 
   it('should parse webpage default media when only a live source_url is available', () => {

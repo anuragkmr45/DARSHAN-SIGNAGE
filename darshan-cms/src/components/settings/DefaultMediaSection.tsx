@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -182,6 +183,8 @@ export function DefaultMediaSection() {
   const [removeContext, setRemoveContext] = useState<RemoveContext>(null);
   const [mediaSearch, setMediaSearch] = useState("");
   const [mediaTypeFilter, setMediaTypeFilter] = useState("all");
+  const [priorityDrafts, setPriorityDrafts] = useState<Record<string, string>>({});
+  const [conflictedAssignments, setConflictedAssignments] = useState<DefaultMediaTargetAssignment[] | null>(null);
 
   const assignmentsQuery = useDefaultMediaTargets();
   const updateAssignments = useUpdateDefaultMediaTargets();
@@ -232,8 +235,8 @@ export function DefaultMediaSection() {
   const screens = useMemo(() => (Array.isArray(screensQuery.data) ? screensQuery.data : []), [screensQuery.data]);
   const groups = useMemo(() => (Array.isArray(groupsQuery.data) ? groupsQuery.data : []), [groupsQuery.data]);
   const assignments = useMemo(
-    () => (Array.isArray(assignmentsQuery.data?.assignments) ? assignmentsQuery.data.assignments : []),
-    [assignmentsQuery.data],
+    () => conflictedAssignments ?? (Array.isArray(assignmentsQuery.data?.assignments) ? assignmentsQuery.data.assignments : []),
+    [assignmentsQuery.data, conflictedAssignments],
   );
   const screensMap = useMemo(() => new Map(screens.map((screen) => [screen.id, screen])), [screens]);
   const groupsMap = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
@@ -303,6 +306,18 @@ export function DefaultMediaSection() {
     [assignments],
   );
 
+  useEffect(() => {
+    setPriorityDrafts((current) => {
+      const next = { ...current };
+      assignments.forEach((assignment) => {
+        if (assignment.target_type === "GROUP" && next[assignment.target_id] === undefined) {
+          next[assignment.target_id] = String(assignment.priority ?? 0);
+        }
+      });
+      return next;
+    });
+  }, [assignments]);
+
   const sanitizeAssignments = (items: DefaultMediaTargetAssignment[]) => {
     const dropped: DefaultMediaTargetAssignment[] = [];
     const kept = items.filter((assignment) => {
@@ -334,10 +349,24 @@ export function DefaultMediaSection() {
 
     updateAssignments.mutate(kept, {
       onSuccess: () => {
+        setConflictedAssignments(null);
         setPickerContext(null);
         setRemoveContext(null);
       },
       onError: (error) => {
+        const reason = error instanceof ApiError && error.details && typeof error.details === "object"
+          ? (error.details as { reason?: string }).reason
+          : undefined;
+        if (error instanceof ApiError && error.status === 409 && reason === "DEFAULT_MEDIA_TARGETS_STALE") {
+          setConflictedAssignments(kept);
+          void assignmentsQuery.refetch();
+          toast({
+            title: "Assignments changed elsewhere",
+            description: "Your unsaved values are still shown. Review the latest saved values, then save again.",
+            variant: "destructive",
+          });
+          return;
+        }
         const message =
           error instanceof ApiError && /screen not found|screen group not found/i.test(error.message)
             ? "One or more selected screens or groups no longer exist. Refresh the page and try again."
@@ -385,8 +414,28 @@ export function DefaultMediaSection() {
         target_id: targetId,
         media_id: media.id,
         aspect_ratio: pickerContext.aspectRatio,
+        priority: pickerContext.type === "GROUP"
+          ? assignmentsByKey[`GROUP:${targetId}`]?.priority ?? 0
+          : 0,
       })),
     ]);
+  };
+
+  const handlePrioritySave = (assignment: DefaultMediaTargetAssignment) => {
+    const value = Number(priorityDrafts[assignment.target_id]);
+    if (!Number.isInteger(value) || value < 0 || value > 100) {
+      toast({
+        title: "Invalid priority",
+        description: "Group priority must be a whole number from 0 to 100.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateAssignmentList(assignments.map((item) =>
+      item.target_type === "GROUP" && item.target_id === assignment.target_id
+        ? { ...item, priority: value }
+        : item
+    ));
   };
 
   const handleRemove = () => {
@@ -431,7 +480,8 @@ export function DefaultMediaSection() {
           <p className="font-medium text-foreground">Scope rules</p>
           <p>1. Default media is used only for the screens or groups you assign here.</p>
           <p>2. Screen groups must contain screens with a single shared aspect ratio.</p>
-          <p>3. Untargeted screens stay empty when nothing is scheduled.</p>
+          <p>3. When groups compete, the highest priority wins; equal priorities use stable group order.</p>
+          <p>4. Untargeted screens stay empty when nothing is scheduled.</p>
         </div>
 
         <Tabs value={targetMode} onValueChange={(value) => setTargetMode(value as "SCREEN" | "GROUP")}>
@@ -581,6 +631,36 @@ export function DefaultMediaSection() {
                         </div>
                       ) : (
                         <p className="text-sm text-muted-foreground">Media not found.</p>
+                      )}
+
+                      {assignment.target_type === "GROUP" && (
+                        <div className="flex items-end gap-2">
+                          <div className="space-y-1">
+                            <Label htmlFor={`group-priority-${assignment.target_id}`}>Priority (0–100)</Label>
+                            <Input
+                              id={`group-priority-${assignment.target_id}`}
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={priorityDrafts[assignment.target_id] ?? String(assignment.priority ?? 0)}
+                              onChange={(event) => setPriorityDrafts((current) => ({
+                                ...current,
+                                [assignment.target_id]: event.target.value,
+                              }))}
+                              disabled={!canEdit || updateAssignments.isPending}
+                              className="w-28"
+                            />
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handlePrioritySave(assignment)}
+                            disabled={!canEdit || updateAssignments.isPending}
+                          >
+                            Save priority
+                          </Button>
+                        </div>
                       )}
 
                       <div className="flex flex-wrap items-center gap-2">

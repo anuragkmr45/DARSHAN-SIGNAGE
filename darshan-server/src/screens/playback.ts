@@ -4,6 +4,7 @@ import {
   getDefaultMediaTargetAssignments,
   getDefaultMediaVariants,
   resolveDefaultMediaForScreen,
+  selectDefaultMediaTargetAssignment,
   type ResolvedDefaultMedia,
 } from '@/utils/default-media';
 import { resolveAspectRatio } from '@/utils/aspect-ratio';
@@ -882,35 +883,18 @@ async function resolveDefaultMediaByScreenId(
 
   for (const screen of screens) {
     const aspect_ratio = resolveAspectRatio(screen);
-    const groupIds = new Set(groupIdsByScreenId.get(screen.id) ?? []);
-    const matchingAssignments = assignments.filter(
-      (assignment) => assignment.aspect_ratio === aspect_ratio && assignment.media
-    );
-
-    const screenAssignment = matchingAssignments.find(
-      (assignment) => assignment.target_type === 'SCREEN' && assignment.target_id === screen.id
-    );
-    if (screenAssignment?.media) {
+    const targetAssignment = selectDefaultMediaTargetAssignment(assignments, {
+      screenId: screen.id,
+      aspectRatio: aspect_ratio,
+      groupIds: groupIdsByScreenId.get(screen.id) ?? [],
+    });
+    if (targetAssignment?.media) {
       result.set(screen.id, {
-        source: 'SCREEN',
+        source: targetAssignment.target_type,
         aspect_ratio,
-        media_id: screenAssignment.media_id,
-        media: screenAssignment.media,
-        media_url: screenAssignment.media_url,
-      });
-      continue;
-    }
-
-    const groupAssignment = matchingAssignments.find(
-      (assignment) => assignment.target_type === 'GROUP' && groupIds.has(assignment.target_id)
-    );
-    if (groupAssignment?.media) {
-      result.set(screen.id, {
-        source: 'GROUP',
-        aspect_ratio,
-        media_id: groupAssignment.media_id,
-        media: groupAssignment.media,
-        media_url: groupAssignment.media_url,
+        media_id: targetAssignment.media_id,
+        media: targetAssignment.media,
+        media_url: targetAssignment.media_url,
       });
       continue;
     }

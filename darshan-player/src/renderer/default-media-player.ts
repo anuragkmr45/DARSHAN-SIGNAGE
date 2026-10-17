@@ -88,7 +88,7 @@ export class DefaultMediaPlayer {
   setMedia(payload: DefaultMediaResponse | null | undefined): void {
     this.current = payload && typeof payload === 'object' ? payload : { media_id: null, media: null }
     const nextKey = this.current.media
-      ? `${this.current.media.id}:${this.current.media.media_url || ''}:${this.current.media.fallback_media_url || ''}:${this.current.media.source_url || ''}`
+      ? `${this.current.media.id}:${this.current.media.fallback_media_revision || ''}:${this.current.media.media_url || ''}:${this.current.media.fallback_media_url || ''}:${this.current.media.source_url || ''}`
       : 'none'
     if (nextKey !== this.lastMediaKey) {
       this.lastMediaKey = nextKey

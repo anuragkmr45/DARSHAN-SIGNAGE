@@ -1,5 +1,14 @@
 # Pre-QA Development Completion Plan
 
+> **Webpage/default-priority closure — 2026-10-17:** policy-controlled HTTP and
+> HTTPS, unsupported login mechanisms, per-hop redirect validation,
+> latest-success revisioned previews, manual/24-hour refresh and deterministic
+> group priority are implemented in the working tree based on `c680c0a`.
+> Focused server real-PostgreSQL tests, server unit/policy tests, CMS one-worker
+> browser tests, player full unit/fault suites and all three builds passed.
+> Exact evidence and independent-QA limits are in
+> `evidence/webpage-default-priority-developer-verification-2026-10-17.md`.
+
 > **Final developer closure — 2026-10-17:** the later multi-loop developer-QA
 > cycle completed the affected PostgreSQL/migration suites, built-API smoke,
 > CMS browser flow and full player automation. It found and fixed the multipart
@@ -18,7 +27,7 @@
 
 Plan date: 2026-10-16  
 Target branch: `release-01`  
-Scope: deleted-user ownership, document page selection, video looping, and the authorization/session/Requests completion delta
+Scope: deleted-user ownership, document page selection, video looping, authorization/session/Requests, webpage playback/preview refresh, and default priority
 Purpose: finish implementation and developer verification before handing the build to independent QA. This plan is not QA approval, and a developer result must not be recorded as a QA `Pass`.
 
 ## Release Outcome
@@ -38,7 +47,9 @@ independent QA execution, not release approval**
 | Video looping | Occurrence-level publication and CMS Loop On review passed; player build plus all 384 unit/integration/performance/fault tests passed for native wraps, loop-off, multi-item, resume/stall and authority-boundary cleanup. | QA observes the frozen build on physical Linux/Windows targets and completes the long resource-growth soak. |
 | Runtime stack | Current production server image starts successfully against isolated PostgreSQL, Valkey and S3-compatible storage; API/worker health and live CMS authentication have been exercised. A production logger packaging defect was fixed and regression-tested. | Validate with the exact approved object-store/dependency image or retain an explicit release risk; complete player pairing, restart/offline recovery and the 30-minute combined stability observation. |
 | Authorization/session/Requests | Implemented through `a01804c`; focused unit/DB/API/browser checks passed. The built API returned `409` for last-active SUPER_ADMIN disable, `404` for general Requests, `200` for Schedule Requests and rejected a disabled user's old token immediately. | QA runs `AUTHN-04`, `AUTHZ-01..03`, `AUTHZ-06`, `AUTHZ-08..13` and `CONC-07`, especially two API nodes/live sockets, recovery CLI and the complete directory-picker matrix. |
-| QA package | All 102 case rows have the required planning fields, including Expected Result; the 12-area matrix and final developer closure report are linked from `README.md`. | Leave independent QA fields unclaimed, assign owners to remaining site-policy decisions, and bind the handoff to one immutable release build. |
+| Webpage playback and preview refresh | Server/player policy, release HTTP configuration, per-hop redirect checks, login cancellation, migration `0047`, manual/due refresh, revision serialization/cache and controlled renderer fallback are implemented; bounded automated gates passed. | QA runs `WEB-01..06`, `FUN-08`, `PLAYER-09` with real controlled HTTP/HTTPS/DNS/auth/redirect fixtures, object-store faults and a packaged player. |
+| Default priority | CMS/API priority `0..100`, legacy zero, deterministic resolver, preservation on media-only edits, expected revision and PostgreSQL advisory-lock serialization are implemented; route and CMS conflict tests passed. | QA runs `FUN-06`, `DEF-01..03` with overlapping groups, two real clients and end-player observation. |
+| QA package | All 111 case rows have the required planning fields, including Expected Result; the traceability matrix and developer reports are linked from `README.md`. | Leave independent QA fields unclaimed, assign owners to remaining site-policy decisions, and bind the handoff to one immutable release build. |
 
 Evidence already collected is developer evidence only. It may justify `Partially Tested`; it must not be converted to an independent QA `Pass`.
 
@@ -62,6 +73,8 @@ These are the concrete remaining tasks. They are ordered so that a later task do
 | `DEV-VID-01` | Run Loop On and Loop Off in current Linux Electron. Cover one and many items/slots, short/equal/long duration, late join, restart/offline, rejection/decode/stall recovery, schedule end and emergency/default/secure-lock/shutdown replacement. | Loop On makes at least three complete native wraps on one mounted occurrence; Loop Off plays once; multi-item timing advances; every authority boundary stops old picture/audio and pending callbacks; PoP remains occurrence-based. | `PLAYER-11`, `PLAYER-12`, `OBS-04`; recording, logs and DOM/media/timer counters. |
 | `DEV-STAB-01` | Run the final API, worker, CMS and player together for at least 30 minutes on the approved isolated topology, including selected PDFs, looping videos, conversion work, reconnect and one controlled takeover. | No unexplained CPU/RAM/handle/DOM/timer/object/queue growth, replay storm, duplicate audio or duplicate PoP. Health and worker heartbeat remain valid. | `PERF-04..06`, `REL-01..02`, `OBS-01`. |
 | `DEV-RC-01` | Freeze one clean commit, build artifacts from it, record hashes/configuration/migration level and repeat all affected automated gates. Remove or exclude generated scratch outputs and reconcile every document to the same revision. | Clean synchronized `release-01` release candidate; reproducible evidence; no stale/empty result presented as a pass; QA-owned result fields remain blank. | Release manifest, commit/build hashes, `git status`, complete gate report and approved exceptions. |
+| `DEV-WEB-01` | Freeze and deploy migration `0047`, identical server/player webpage policy and preview-refresh configuration before publishing new webpage media. | HTTP decision and allowlists are explicit; every hop is enforced; latest-success revision identity survives success/failure and reaches snapshot/default/player cache. | `WEB-01..06`, `FUN-08`, `PLAYER-09`; migration/config manifest and real controlled-fixture evidence. |
+| `DEV-DEF-01` | Freeze priority/revision schema and run two-client settings plus overlapping-group playback on the candidate. | Priority remains within `0..100`, winner is deterministic, edits preserve omitted priority and stale writes return `409` without losing local input. | `FUN-06`, `DEF-01..03`; DB rows, responses, CMS and player evidence. |
 
 An implementation change in any row reopens all later rows that depend on it. The current disposable stack is intentionally stopped; warn the workstation owner before beginning `DEV-OWN-02` through `DEV-STAB-01`, because those tasks start database, object-store, browser or Electron processes.
 
@@ -330,6 +343,8 @@ Development may hand the build to QA only when all answers below are **Yes**:
 - [ ] Does the ownership matrix pass for all four resource types, scopes and actors?
 - [ ] Does a selected document page survive CMS -> API -> DB -> snapshot -> player -> PoP?
 - [ ] Does a loop-enabled video repeat full cycles and stop/advance at every boundary without leaked playback state?
+- [ ] Do allowed HTTP/HTTPS pages load while login mechanisms and every unapproved redirect/navigation are blocked, with the latest successful preview retained through refresh failure?
+- [ ] Does explicit group priority produce the deterministic winner and reject one of two same-revision saves without silent overwrite?
 - [ ] Did the isolated browser/Electron runtime and 30-minute stability rehearsal complete without unexplained errors?
 - [ ] Are exact production dependency images and supported OS/display targets either verified or explicitly open as release-blocking risks?
 - [ ] Does every QA test have a usable expected result, data recipe and evidence requirement?

@@ -174,6 +174,16 @@ export const mediaApi = {
       method: "GET",
     }),
 
+  refreshWebpagePreview: (mediaId: string) =>
+    apiClient.request<{
+      media_id: string;
+      refresh_status: "QUEUED" | "ALREADY_QUEUED";
+      requested_at: string;
+    }>({
+      path: endpoints.media.webpagePreviewRefresh(mediaId),
+      method: "POST",
+    }),
+
   remove: (mediaId: string, options?: { hard?: boolean }) =>
     apiClient.request<{ message?: string } | void>({
       path: endpoints.media.byId(mediaId),

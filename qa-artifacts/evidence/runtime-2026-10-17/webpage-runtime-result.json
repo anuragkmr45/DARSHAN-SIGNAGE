@@ -1,0 +1,34 @@
+{
+  "run": {
+    "timestamp": "2026-10-17T03:24:04.809Z",
+    "branch": "release-01",
+    "source_commit": "c680c0a",
+    "mode": "live-built-api-worker-chromium",
+    "database": "darshan_runtime_test",
+    "fixture": "controlled HTTP/auth/redirect server"
+  },
+  "summary": { "pass": 4, "fail": 0 },
+  "results": [
+    {
+      "id": 13,
+      "status": "PASS",
+      "actual": "An approved ordinary HTTP URL was accepted, captured by real Chromium and advanced from PROCESSING to READY with a stored revision and SHA-256."
+    },
+    {
+      "id": 14,
+      "status": "PASS",
+      "actual": "A credentialed URL returned 400 WEBPAGE_CREDENTIALS_BLOCKED. A Basic-auth challenge became FAILED, and the fixture recorded zero Authorization headers."
+    },
+    {
+      "id": 15,
+      "status": "PASS",
+      "actual": "A relative same-approved-host redirect became READY at its final URL. A redirect to a reachable but unapproved hostname became FAILED and the destination request counter stayed zero.",
+      "diagnostic_note": "The stored reason was WEBPAGE_UNREACHABLE rather than the more precise WEBPAGE_REDIRECT_BLOCKED. The security behavior passed, but failure classification is imprecise."
+    },
+    {
+      "id": 16,
+      "status": "PASS",
+      "actual": "A successful refresh changed revision and checksum. A later HTTP 503 refresh kept status READY and retained exactly that new revision/checksum with WEBPAGE_HTTP_503 recorded."
+    }
+  ]
+}

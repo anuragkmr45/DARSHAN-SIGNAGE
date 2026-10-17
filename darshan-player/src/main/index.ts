@@ -842,7 +842,9 @@ function setupIPCHandlers(): void {
         lastReportedActiveSlots = nextSlots
         getTelemetryService().setActivePlayback(sceneId, activeSlots)
         getCacheManager().replaceNowPlaying(
-          activeSlots.map((slot) => slot.media_id).filter((mediaId): mediaId is string => Boolean(mediaId))
+          activeSlots
+            .map((slot) => slot.cache_key || slot.media_id)
+            .filter((mediaId): mediaId is string => Boolean(mediaId))
         )
       } catch (error) {
         logger.warn({ error }, 'Failed to process active playback update from renderer')

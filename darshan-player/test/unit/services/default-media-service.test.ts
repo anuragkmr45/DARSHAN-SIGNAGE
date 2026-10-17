@@ -217,6 +217,8 @@ describe('Default Media Service', () => {
         media_url: undefined,
         source_url: 'https://status.example.com',
         fallback_media_url: 'https://cdn.example.com/webpage-fallback.svg',
+        fallback_media_revision: 'preview-revision-1',
+        fallback_media_sha256: 'a'.repeat(64),
         source_content_type: 'text/html',
       },
     })
@@ -225,9 +227,9 @@ describe('Default Media Service', () => {
     const result = await service.refreshNow('manual')
 
     expect(addStub.calledOnce).to.equal(true)
-    expect(addStub.firstCall.args[0]).to.equal('media-webpage')
+    expect(addStub.firstCall.args[0]).to.equal('media-webpage.__revision__.preview-revision-1')
     expect(addStub.firstCall.args[1]).to.equal('https://cdn.example.com/webpage-fallback.svg')
-    expect(getStub.calledWith('media-webpage')).to.equal(true)
+    expect(getStub.calledWith('media-webpage.__revision__.preview-revision-1')).to.equal(true)
     expect(result.media?.local_path).to.equal(cachedPath)
     expect(result.media?.source_url).to.equal('https://status.example.com')
   })

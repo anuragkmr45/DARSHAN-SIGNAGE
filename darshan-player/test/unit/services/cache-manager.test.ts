@@ -167,6 +167,72 @@ describe('Cache Manager', () => {
       }
     })
 
+    it('replaces a cached webpage preview when its checksum revision changes', async () => {
+      const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+      const cacheManager = getCacheManager()
+      const original = Buffer.from('original-preview')
+      const refreshed = Buffer.from('refreshed-preview')
+      sandbox.stub(cacheManager, 'download' as any)
+        .onFirstCall().resolves(original)
+        .onSecondCall().resolves(refreshed)
+
+      await cacheManager.add('webpage-preview', 'https://example.com/old.png', calculateHash(original))
+      const cachedPath = await cacheManager.get('webpage-preview', 'image/png')
+      await cacheManager.add('webpage-preview', 'https://example.com/new.png', calculateHash(refreshed), {
+        contentType: 'image/png',
+      })
+
+      expect(fs.readFileSync(cachedPath!)).to.deep.equal(refreshed)
+    })
+
+    it('retains the last successful webpage preview when replacement download fails', async () => {
+      const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+      const cacheManager = getCacheManager()
+      const original = Buffer.from('last-successful-preview')
+      const download = sandbox.stub(cacheManager, 'download' as any)
+      download.onFirstCall().resolves(original)
+      download.onSecondCall().rejects(new Error('preview unavailable'))
+
+      await cacheManager.add('webpage-preview', 'https://example.com/old.png', calculateHash(original), {
+        contentType: 'image/png',
+      })
+      const cachedPath = await cacheManager.get('webpage-preview', 'image/png')
+
+      try {
+        await cacheManager.add('webpage-preview', 'https://example.com/new.png', 'f'.repeat(64), {
+          contentType: 'image/png',
+        })
+        expect.fail('Expected replacement download to fail')
+      } catch (error: any) {
+        expect(error.message).to.include('preview unavailable')
+      }
+
+      expect(fs.readFileSync(cachedPath!)).to.deep.equal(original)
+      expect(await cacheManager.has('webpage-preview')).to.equal(true)
+    })
+
+    it('keeps the selected webpage revision intact while caching a newer revision', async () => {
+      const { buildRevisionedCacheKey, getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+      const cacheManager = getCacheManager()
+      const previous = Buffer.from('selected-preview-revision')
+      const refreshed = Buffer.from('new-preview-revision')
+      sandbox.stub(cacheManager, 'download' as any)
+        .onFirstCall().resolves(previous)
+        .onSecondCall().resolves(refreshed)
+
+      const previousKey = buildRevisionedCacheKey('webpage-preview', 'revision-1')
+      const refreshedKey = buildRevisionedCacheKey('webpage-preview', 'revision-2')
+      await cacheManager.add(previousKey, 'https://example.com/old.png', calculateHash(previous), { contentType: 'image/png' })
+      cacheManager.markNowPlaying(previousKey)
+      await cacheManager.add(refreshedKey, 'https://example.com/new.png', calculateHash(refreshed), { contentType: 'image/png' })
+
+      const previousPath = await cacheManager.get(previousKey, 'image/png')
+      const refreshedPath = await cacheManager.get(refreshedKey, 'image/png')
+      expect(previousPath).not.to.equal(refreshedPath)
+      expect(fs.readFileSync(previousPath!)).to.deep.equal(previous)
+      expect(fs.readFileSync(refreshedPath!)).to.deep.equal(refreshed)
+    })
+
     it('should evict LRU items when cache is full', async () => {
       const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
       const cacheManager = getCacheManager()

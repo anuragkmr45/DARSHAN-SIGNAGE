@@ -27,6 +27,7 @@ export type DefaultMediaTargetAssignment = {
   target_id: string;
   media_id: string;
   aspect_ratio: string;
+  priority: number;
 };
 
 export type DefaultMediaTargetAssignmentRecord = DefaultMediaTargetAssignment & {
@@ -69,7 +70,7 @@ const extractDefaultMediaVariants = (value: unknown): DefaultMediaVariantsMap =>
   }, {});
 };
 
-const extractDefaultMediaTargets = (value: unknown): DefaultMediaTargetAssignment[] => {
+export const extractDefaultMediaTargets = (value: unknown): DefaultMediaTargetAssignment[] => {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -84,6 +85,10 @@ const extractDefaultMediaTargets = (value: unknown): DefaultMediaTargetAssignmen
     const targetId = typeof record.target_id === 'string' ? record.target_id.trim() : '';
     const aspectRatio = typeof record.aspect_ratio === 'string' ? record.aspect_ratio.trim() : '';
     const mediaId = extractDefaultMediaId(record.media_id ?? record);
+    const priority = typeof record.priority === 'number' && Number.isInteger(record.priority)
+      && record.priority >= 0 && record.priority <= 100
+      ? record.priority
+      : 0;
 
     if (
       (targetType === 'SCREEN' || targetType === 'GROUP') &&
@@ -98,12 +103,37 @@ const extractDefaultMediaTargets = (value: unknown): DefaultMediaTargetAssignmen
         target_id: targetId,
         media_id: mediaId,
         aspect_ratio: aspectRatio,
+        priority: targetType === 'GROUP' ? priority : 0,
       });
     }
 
     return acc;
   }, []);
 };
+
+export const canonicalizeDefaultMediaTargets = (
+  assignments: DefaultMediaTargetAssignment[]
+): DefaultMediaTargetAssignment[] => [...assignments].sort((left, right) =>
+  left.target_type.localeCompare(right.target_type) || left.target_id.localeCompare(right.target_id)
+);
+
+export function selectDefaultMediaTargetAssignment(
+  assignments: DefaultMediaTargetAssignmentRecord[],
+  params: { screenId: string; aspectRatio: string | null; groupIds: Iterable<string> }
+): DefaultMediaTargetAssignmentRecord | null {
+  const eligible = assignments.filter(
+    (assignment) => assignment.aspect_ratio === params.aspectRatio && isReadyMedia(assignment.media)
+  );
+  const screenAssignment = eligible.find(
+    (assignment) => assignment.target_type === 'SCREEN' && assignment.target_id === params.screenId
+  );
+  if (screenAssignment) return screenAssignment;
+
+  const groupIds = new Set(params.groupIds);
+  return eligible
+    .filter((assignment) => assignment.target_type === 'GROUP' && groupIds.has(assignment.target_id))
+    .sort((left, right) => right.priority - left.priority || left.target_id.localeCompare(right.target_id))[0] ?? null;
+}
 
 export async function resolveMediaUrl(media: any, db = getDatabase()): Promise<string | null> {
   const access = await resolveMediaAccess(media, db);
@@ -276,39 +306,22 @@ export async function resolveDefaultMediaForScreen(
 
   if (screenId) {
     const assignments = await getDefaultMediaTargetAssignments(db);
-    const matchingAssignments = assignments.filter(
-      (assignment) => assignment.aspect_ratio === aspect_ratio && isReadyMedia(assignment.media)
-    );
-
-    const screenAssignment = matchingAssignments.find(
-      (assignment) => assignment.target_type === 'SCREEN' && assignment.target_id === screenId
-    );
-    if (screenAssignment?.media) {
-      return {
-        source: 'SCREEN',
-        aspect_ratio,
-        media_id: screenAssignment.media_id,
-        media: screenAssignment.media,
-        media_url: screenAssignment.media_url,
-      };
-    }
-
     const memberships = await db
       .select({ group_id: schema.screenGroupMembers.group_id })
       .from(schema.screenGroupMembers)
       .where(eq(schema.screenGroupMembers.screen_id, screenId));
-    const groupIds = new Set(memberships.map((membership) => membership.group_id));
-
-    const groupAssignment = matchingAssignments.find(
-      (assignment) => assignment.target_type === 'GROUP' && groupIds.has(assignment.target_id)
-    );
-    if (groupAssignment?.media) {
+    const targetAssignment = selectDefaultMediaTargetAssignment(assignments, {
+      screenId,
+      aspectRatio: aspect_ratio,
+      groupIds: memberships.map((membership) => membership.group_id),
+    });
+    if (targetAssignment?.media) {
       return {
-        source: 'GROUP',
+        source: targetAssignment.target_type,
         aspect_ratio,
-        media_id: groupAssignment.media_id,
-        media: groupAssignment.media,
-        media_url: groupAssignment.media_url,
+        media_id: targetAssignment.media_id,
+        media: targetAssignment.media,
+        media_url: targetAssignment.media_url,
       };
     }
   }

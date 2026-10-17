@@ -1,30 +1,28 @@
 # System Understanding
 
-Status: READY FOR INDEPENDENT QA EXECUTION, NOT RELEASE-APPROVED.
-Authorization/ownership/emergency/Requests/session behavior and multipart
-revocation compensation are implemented through `a01804c`. Builds,
-real-PostgreSQL affected suites/migration rehearsal, one-worker browser flows,
-the full player automated suite and built-API smoke passed. Multi-process live
-sockets, physical platforms, security, recovery and soak remain QA gates.
+Status: CONDITIONAL QA HANDOFF, NOT RELEASE-APPROVED. The webpage
+playback/default-priority revamp has bounded developer verification, but the
+required no-Schedule/no-default company fallback image currently fails. Real
+network/capture/object-store failure, physical platforms, mixed versions,
+security, capacity and soak remain QA/release gates.
 
 ## Baseline And Scope
 
 - Product: DARSHAN digital signage, CMS administration, and Electron playback.
-- Branch/commit: `release-01` through `a01804c`, plus the QA-artifact
-  reconciliation that links the final developer evidence.
+- Branch/commit: uncommitted `release-01` working tree based on `c680c0a`.
 - Source/runtime evidence refreshed: 2026-10-17. PDF/video targeted Linux
   runtime evidence remains dated 2026-10-15. These describe disposable
   developer environments, not a production site or independent QA result.
-- 1,322 tracked files existed at the source/test commit. The QA-only report
-  added afterward is committed separately so the application baseline remains
-  identifiable.
+- 1,323 files are tracked at the base working tree; the new migration and three
+  new test files are currently intended untracked feature files. Freeze all of
+  them in one reviewed release-candidate commit before QA.
 - 239 explicit Fastify route registrations, all resolved to paths by static parsing. Some registrations are configuration-dependent, including `/metrics`.
 - 29 CMS route declarations, including shell/catch-all and legacy route aliases. This is not a count of 29 distinct product screens.
 - 69 `pgTable` declarations and 15 enums in `darshan-server/src/db/schema.ts`;
-  48 tracked SQL migrations through `0046`. The SQL-only
+  49 workspace SQL migrations through `0047`. The SQL-only
   `darshan_deployment_runs` table and pg-boss internals are additional data
   surfaces.
-- 206 tracked TypeScript/JavaScript `*.test`/`*.spec` files. Targeted
+- 209 workspace TypeScript/JavaScript `*.test`/`*.spec` files. Targeted
   browser/Linux Electron/DB execution is recorded in dated evidence, including
   `evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`. Test-file
   presence alone is not proof.
@@ -50,7 +48,7 @@ Business source: user answers BQ-001 through BQ-006 and follow-ups to BQ-002/003
 - Schedule approval: user answer BQ-010 on 2026-09-25 permits administrator self-approval and direct administrator publishing. Other permissions, reservations and lifecycle controls remain applicable.
 - Deleted users and content ownership: deletion creates a permanent tombstone, immediately ends sessions/sockets, scrubs email/credentials, stops incomplete uploads and preserves stable historical identity. Media, Layout, Presentation and Schedule stay owned by their original department or organization; unresolved legacy ownership is restricted to administrators. There is no automatic person reassignment or restore UI. Ability plus stable ownership governs every resource/nested route, Schedule Requests follow Schedule ownership, and published playback is not rewritten.
 
-The 2026-09-25 answers to BQ-011/012/013 remain code characterizations in `evidence/content-runtime-review.md`. Its resource and OPERATOR-directory findings are superseded by the current authorization matrix in `evidence/authorization-session-requests-review.md`; the source closure is not a runtime pass.
+The 2026-09-25 BQ-011/012 characterizations are superseded by the 2026-10-17 confirmed BR-097..102 webpage/default-priority/company-fallback contract. The current text-only NONE state conflicts with BR-102 and is tracked by DEF-04/R-38. BQ-013 remains a code characterization in `evidence/content-runtime-review.md`. Historical resource and OPERATOR-directory findings are superseded by the current authorization matrix; source closure is not a runtime pass.
 
 Source review of BQ-014 through BQ-020 is recorded in `evidence/operational-behavior-review.md`. It establishes current report formulas, job schedules, player packaging, capacity-evidence validation, maintenance upgrade order, TLS paths and delete behavior. It also identifies values that source cannot establish: actual site workload, operational recovery time, external network exposure, retention policy and the supported hardware/browser matrix. These remain explicit acceptance inputs in the final test plan.
 
@@ -201,6 +199,24 @@ These are risk hypotheses and source-observed inconsistencies unless the dated r
 ## 2026-10-15 Document Page Selection Delta
 
 The architecture now adds `media.page_count`, occurrence-level `page_number`, immutable snapshot propagation, a `pdf_page_selection_v1` player capability gate, selected-page PDF.js rendering in CMS/player, and page-aware proof-of-play. Native PDFs and converted Office/CSV files both obtain their count from the final playable PDF. See `evidence/document-page-selection-review.md` for the simulated flow, corner cases, and explicit non-execution limits.
+
+## 2026-10-17 Webpage And Default-Priority Delta
+
+Webpage URLs now pass one explicit policy in both capture and player paths.
+HTTP remains off in source defaults and is explicitly enabled by the release
+bundle; HTTPS remains supported. Userinfo, HTTP authentication and persistent
+login profiles are unsupported. Each redirect/navigation hop is revalidated by
+scheme, host, port, DNS result and CIDR.
+
+Migration `0047` adds preview revision/checksum/capture/attempt metadata.
+Manual refresh and the 24-hour due scheduler use compare-and-set job ownership;
+only a successful capture advances the content-addressed object and revision.
+Snapshots and defaults carry that identity to a revision-aware player cache.
+
+Default-media GROUP assignments now carry priority `0..100`. Resolution is
+SCREEN, GROUP priority descending with target-ID ascending tie-break,
+ASPECT_RATIO, GLOBAL, NONE. Settings carry a revision and use a PostgreSQL
+transaction advisory lock so two same-revision writes cannot both commit.
 
 ## Existing QA Evidence And Gaps
 

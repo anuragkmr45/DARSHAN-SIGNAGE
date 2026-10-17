@@ -485,6 +485,101 @@ describe('Settings routes - dimension-wise default media', () => {
     expect(body.error.message).toContain('must contain screens with the same aspect ratio');
   });
 
+  it('preserves an omitted group priority and rejects one of two concurrent stale saves', async () => {
+    const db = getDatabase();
+    const firstMediaId = randomUUID();
+    const replacementMediaId = randomUUID();
+    const screenId = randomUUID();
+    const groupId = randomUUID();
+
+    await db.insert(schema.media).values([
+      {
+        id: firstMediaId,
+        name: 'Priority fallback one',
+        type: 'IMAGE',
+        status: 'READY',
+        created_by: testUser.id,
+      },
+      {
+        id: replacementMediaId,
+        name: 'Priority fallback two',
+        type: 'IMAGE',
+        status: 'READY',
+        created_by: testUser.id,
+      },
+    ]);
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Priority concurrency screen',
+      aspect_ratio: '16:9',
+      status: 'ACTIVE',
+    });
+    await db.insert(schema.screenGroups).values({ id: groupId, name: 'Priority concurrency group' });
+    await db.insert(schema.screenGroupMembers).values({ group_id: groupId, screen_id: screenId });
+
+    const createResponse = await server.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/default-media/targets',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        assignments: [{
+          target_type: 'GROUP',
+          target_id: groupId,
+          media_id: firstMediaId,
+          aspect_ratio: '16:9',
+          priority: 20,
+        }],
+      },
+    });
+    expect(createResponse.statusCode).toBe(HTTP_STATUS.OK);
+    const initialRevision = JSON.parse(createResponse.body).revision as string;
+
+    const replacementResponse = await server.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/default-media/targets',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        expected_revision: initialRevision,
+        assignments: [{
+          target_type: 'GROUP',
+          target_id: groupId,
+          media_id: replacementMediaId,
+          aspect_ratio: '16:9',
+        }],
+      },
+    });
+    expect(replacementResponse.statusCode).toBe(HTTP_STATUS.OK);
+    const replacementBody = JSON.parse(replacementResponse.body);
+    expect(replacementBody.assignments[0]).toMatchObject({ media_id: replacementMediaId, priority: 20 });
+
+    const concurrentPayload = (priority: number) => ({
+      method: 'PUT' as const,
+      url: '/api/v1/settings/default-media/targets',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        expected_revision: replacementBody.revision,
+        assignments: [{
+          target_type: 'GROUP',
+          target_id: groupId,
+          media_id: replacementMediaId,
+          aspect_ratio: '16:9',
+          priority,
+        }],
+      },
+    });
+    const concurrentResponses = await Promise.all([
+      server.inject(concurrentPayload(40)),
+      server.inject(concurrentPayload(80)),
+    ]);
+
+    expect(concurrentResponses.map((response) => response.statusCode).sort()).toEqual([
+      HTTP_STATUS.OK,
+      HTTP_STATUS.CONFLICT,
+    ]);
+    const conflict = concurrentResponses.find((response) => response.statusCode === HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(conflict!.body).error.details.reason).toBe('DEFAULT_MEDIA_TARGETS_STALE');
+  });
+
   it('queues immediate refresh commands for all screens when default media settings change', async () => {
     const db = getDatabase();
     const globalMediaId = randomUUID();

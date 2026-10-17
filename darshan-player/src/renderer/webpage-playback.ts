@@ -66,6 +66,21 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
       width: '100%', height: '100%', objectFit: options.fallbackFit ?? 'contain', background: '#000',
     })
     fallbackLayer.appendChild(fallbackImage)
+
+    const fallbackLabel = document.createElement('div')
+    fallbackLabel.textContent = 'Live webpage and saved preview unavailable'
+    Object.assign(fallbackLabel.style, {
+      color: '#fff', fontSize: '18px', fontWeight: '600', opacity: '0.8', display: 'none', textAlign: 'center',
+    })
+    fallbackImage.addEventListener('error', () => {
+      fallbackImage.style.display = 'none'
+      fallbackLabel.style.display = 'block'
+      log(options, 'warn', 'Saved webpage preview failed to load', {
+        url: redactUrlForDiagnostics(options.fallbackUrl),
+      })
+      options.onFallback?.('preview-load-failed')
+    }, { once: true })
+    fallbackLayer.appendChild(fallbackLabel)
   } else {
     const fallbackLabel = document.createElement('div')
     fallbackLabel.textContent = 'Live webpage unavailable'

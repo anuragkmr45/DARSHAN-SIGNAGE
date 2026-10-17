@@ -1394,6 +1394,7 @@ class Player {
             slot_id: slot.id,
             item_id: item.id,
             media_id: item.mediaId || item.objectKey || null,
+            cache_key: typeof item.meta?.['cache_key'] === 'string' ? String(item.meta['cache_key']) : null,
             schedule_id: scheduleId || null,
             playback_instance_id: globalThis.crypto.randomUUID(),
             started_at: new Date(Date.now() + serverTimeOffsetMs).toISOString(),

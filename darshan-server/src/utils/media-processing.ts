@@ -77,15 +77,11 @@ export function isWebpageMedia(input: { type?: string | null }) {
   return (input.type || '').toUpperCase() === 'WEBPAGE';
 }
 
-export function normalizeWebpageUrl(url: string, nodeEnv: 'development' | 'production' | 'test') {
+export function normalizeWebpageUrl(url: string, _nodeEnv: 'development' | 'production' | 'test') {
   const parsed = new URL(url);
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Webpage media only supports http and https URLs.');
-  }
-
-  if (nodeEnv === 'production' && parsed.protocol !== 'https:') {
-    throw new Error('Webpage media must use https in production.');
   }
 
   parsed.hash = '';

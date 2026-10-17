@@ -10,8 +10,11 @@ describe('Webpage playback helpers', () => {
     src = ''
     parentElement
     textContent = ''
+    listeners = new Map()
     constructor(tagName) { this.tagName = String(tagName).toUpperCase() }
     appendChild(child) { this.children.push(child); child.parentElement = this; return child }
+    addEventListener(type, callback) { this.listeners.set(type, callback) }
+    dispatch(type) { this.listeners.get(type)?.() }
     getBoundingClientRect() { return { left: 20, top: 30, width: 640, height: 360 } }
   }
 
@@ -96,5 +99,25 @@ describe('Webpage playback helpers', () => {
     expect(serialized).not.to.contain('password')
     expect(serialized).not.to.contain('token')
     expect(serialized).not.to.contain('secret')
+  })
+
+  it('shows a controlled message when the saved preview image is missing or corrupt', () => {
+    const { createWebpagePlaybackElement } = loadModule()
+    const reasons = []
+    const container = createWebpagePlaybackElement({
+      liveUrl: 'https://display.example.test/page',
+      fallbackUrl: 'file:///cache/preview.png',
+      onFallback: (reason) => reasons.push(reason),
+    })
+    const fallbackLayer = container.children[0]
+    const preview = fallbackLayer.children[0]
+    const message = fallbackLayer.children[1]
+
+    preview.dispatch('error')
+
+    expect(preview.style.display).to.equal('none')
+    expect(message.style.display).to.equal('block')
+    expect(message.textContent).to.equal('Live webpage and saved preview unavailable')
+    expect(reasons).to.deep.equal(['preview-load-failed'])
   })
 })

@@ -133,7 +133,14 @@ function normalizeItem(
     muted,
     loop,
     pageNumber,
-    sha256: input.sha256,
+    sha256:
+      type === 'url'
+        ? typeof input.fallback_sha256 === 'string'
+          ? input.fallback_sha256
+          : typeof input.fallback_media_sha256 === 'string'
+            ? input.fallback_media_sha256
+            : input.sha256
+        : input.sha256,
     meta: {
       ...(input.meta && typeof input.meta === 'object' ? input.meta : {}),
       source_url: typeof input.source_url === 'string' ? input.source_url : undefined,
@@ -142,6 +149,18 @@ function normalizeItem(
           ? input.fallback_url
           : type === 'url' && typeof input.media_url === 'string'
             ? input.media_url
+            : undefined,
+      fallback_revision:
+        typeof input.fallback_revision === 'string'
+          ? input.fallback_revision
+          : typeof input.fallback_media_revision === 'string'
+            ? input.fallback_media_revision
+            : undefined,
+      fallback_sha256:
+        typeof input.fallback_sha256 === 'string'
+          ? input.fallback_sha256
+          : typeof input.fallback_media_sha256 === 'string'
+            ? input.fallback_media_sha256
             : undefined,
       name: typeof input.name === 'string' ? input.name : undefined,
       message: options.emergency && typeof input.message === 'string' ? input.message : undefined,

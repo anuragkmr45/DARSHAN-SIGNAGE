@@ -14,10 +14,14 @@ Sequence after a fresh install or planned update:
 6. `AUTHZ-03`, `AUTHZ-06`: delegate triggers/clears only an authorized direct screen; global controller handles a group/global target; old general Requests URLs are not found while one Schedule Request flow works.
 7. `FILE-01`: small synthetic image upload becomes READY and previews.
 8. `FUN-03`, `FUN-04`: hold a short disposable schedule, administrator self-approves or direct-publishes, and published state appears.
-9. `UI-05`, `API-05`, `PLAYER-10`, `OBS-03`: assign page 2 of a multi-page PDF, confirm page 2 in author/review preview and immutable snapshot, play page 2 on a capable device, and confirm PoP records page 2. Native display evidence required.
-10. `UI-06`, `API-07`, `PLAYER-11`, `PLAYER-12`, `OBS-04`: in one short multi-slot schedule, keep the selected page-2 PDF visible in one frame and a short Loop On video in another for at least three video durations. Confirm the video repeats complete cycles on one active occurrence, the PDF never changes page, and both clear exactly at schedule end. Repeat once with Loop Off and confirm one video play only.
-11. `FUN-09`, `FUN-10`: send a private test message and verify notification/read state.
-12. `FUN-11`, `OBS-02`: verify report endpoint and authenticated metrics scrape/alert pipeline access.
+9. `WEB-01`, `FUN-08`: register one approved HTTP and one HTTPS page, capture each and confirm the release policy; verify a denied redirect never reaches its target and a Basic-auth page receives no credentials.
+10. `WEB-04..06`, `PLAYER-09`: manually refresh v1 to v2, confirm revision/checksum propagation and v2 display, then fail the next refresh/live page and confirm v2 remains visible; corrupt/miss v2 and confirm controlled older-revision/unavailable behavior.
+11. `FUN-06`, `DEF-01..03`: resolve overlapping groups with unequal/equal priorities, confirm direct Screen precedence, edit media without changing priority, and make two same-revision saves; expect one success and one recoverable `409`.
+12. `DEF-04`, `PLAYER-05`: clear every Screen/Group/aspect/global default and leave no active Schedule; expect the approved standard company image on the packaged player online, after restart and offline. Stop smoke if the display is blank or text-only.
+13. `UI-05`, `API-05`, `PLAYER-10`, `OBS-03`: assign page 2 of a multi-page PDF, confirm page 2 in author/review preview and immutable snapshot, play page 2 on a capable device, and confirm PoP records page 2. Native display evidence required.
+14. `UI-06`, `API-07`, `PLAYER-11`, `PLAYER-12`, `OBS-04`: in one short multi-slot schedule, keep the selected page-2 PDF visible in one frame and a short Loop On video in another for at least three video durations. Confirm the video repeats complete cycles on one active occurrence, the PDF never changes page, and both clear exactly at schedule end. Repeat once with Loop Off and confirm one video play only.
+15. `FUN-09`, `FUN-10`: send a private test message and verify notification/read state.
+16. `FUN-11`, `OBS-02`: verify report endpoint and authenticated metrics scrape/alert pipeline access.
 
 Smoke stops on failed signing/trust, data integrity, login, worker readiness, publish, player visibility, or emergency takeover. Report the specific failed ID; no pass by inference from a healthy container alone.
 
@@ -26,14 +30,14 @@ Smoke stops on failed signing/trust, data integrity, login, worker readiness, pu
 Always run all `P0` cases after a release touching shared API, schema, permissions, player identity, security policy, installer, or storage. For a release limited to one role, select relevant cases from these sets and include its cross-role dependency checks:
 
 - Identity/access: `AUTHN-01..04`, `AUTHZ-01..13`, `SEC-01..02`, `UI-02`, `UI-07`, `CONC-07`.
-- Media/content: `FILE-01..06`, `FUN-01..02`, `FUN-06`, `FUN-08`, `UI-05..06`, `API-05..07`, `DATA-05`, `CONC-06`, `PLAYER-08..12`, `OBS-03..04`, `COMP-04`, `PERF-05..06`.
+- Media/content: `FILE-01..06`, `FUN-01..02`, `FUN-06`, `FUN-08`, `WEB-01..06`, `DEF-01..04`, `UI-05..06`, `API-05..07`, `DATA-05`, `CONC-06`, `PLAYER-05`, `PLAYER-08..12`, `OBS-03..04`, `COMP-04`, `PERF-05..06`.
 - Schedules/emergencies: `FUN-03..05`, `FUN-07`, `CONC-01`, `CONC-03`, `DATA-02`.
 - Device/runtime: `API-02..03`, `CONC-05`, `PLAYER-01..07`, `REL-01`.
 - Collaboration/reporting: `FUN-09..12`, `CONC-04`, `DATA-04`, `UI-04`.
 - Operations: `DATA-01..03`, `DATA-06`, `DEP-01..07`, `BKP-01..03`, `OBS-01..02`, `REL-02`.
 - Clients: `COMP-01..03`, `UI-01..03` on approved physical/browser targets.
 
-`PERF-01..06` require a separate approved isolated capacity run and site thresholds; they are not part of every code-change regression. Full planned coverage is the 102-case CSV. Do not treat a unit-test file, TypeScript build or generated bundle validator as proof these live paths passed.
+`PERF-01..06` require a separate approved isolated capacity run and site thresholds; they are not part of every code-change regression. Full planned coverage is the 112-case CSV. Do not treat a unit-test file, TypeScript build or generated bundle validator as proof these live paths passed.
 
 ## UAT Journeys
 
@@ -43,7 +47,8 @@ Always run all `P0` cases after a release touching shared API, schema, permissio
 | Account administrator and department custodian | Delete a creator with active sessions/upload and retained Media/Layout/Presentation/Schedule; inspect history and continue eligible schedule work | `AUTHZ-07`, `DATA-06`, `CONC-07`, `UI-07` | Immediate access loss; no automatic person transfer; original department/organization custody; deleted-name attribution without email; unfinished upload cannot play; published output unchanged |
 | Department/operator | See only own-department people; upload/read department content; enforce creator mutation for Media/Layout/Presentation and permitted action-specific Schedule management; use page selection and video loop | `AUTHZ-08..12`, `FUN-01..03`, `UI-01..02`, `UI-05..06`, `API-05`, `PLAYER-11` | Directory privacy and resource matrix match expected results; selected page matches preview/player; loop repeats to its boundary |
 | Emergency delegate | Open CMS control, select screens, trigger and clear | `AUTHZ-03`, `FUN-07`, `PLAYER-03` | Selected-screen delegation and emergency stop on lock |
-| Viewer/field operator | Pair player, install package, validate fullscreen/portrait, schedule/default fallbacks, looping video and selected-page PDF coexistence | `PLAYER-01..05`, `PLAYER-10..12`, `COMP-01..02`, `FUN-06` | Correct physical output, complete video cycles with hard stop, selected PDF page, two-minute lock/cache erasure, BQ-012 default choice |
+| Viewer/field operator | Pair player, install package, validate fullscreen/portrait, schedule/default fallbacks, looping video and selected-page PDF coexistence | `PLAYER-01..05`, `PLAYER-10..12`, `COMP-01..02`, `FUN-06`, `DEF-04` | Correct physical output, approved company image when nothing is assigned, complete video cycles with hard stop, selected PDF page, two-minute lock/cache erasure, BQ-012 default choice |
+| Web content administrator | Register approved HTTP/HTTPS pages, reject login-required/escaping redirects, refresh preview and configure overlapping-group priority | `WEB-01..06`, `DEF-01..03`, `FUN-08`, `PLAYER-09` | Clear policy errors, latest successful fallback, deterministic priority and recoverable stale-save workflow |
 | Communications/reporting user | Chat, notifications, PoP and report export | `FUN-09..11`, `UI-04`, `PLAYER-07` | Private membership, counts, evidence loss and report meaning TBD |
 | Release/recovery operator | Fresh signed role install, backend-only update, backup and isolated restore | `DEP-01..07`, `BKP-01..03` | Compatible releases, complete data, no silent schema rollback, RPO/RTO TBD |
 

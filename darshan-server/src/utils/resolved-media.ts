@@ -14,6 +14,9 @@ export type ResolvedMediaAsset = {
   source_content_type: string | null;
   status: string | null;
   page_count: number | null;
+  fallback_revision?: string | null;
+  fallback_sha256?: string | null;
+  fallback_captured_at?: string | null;
   source_url?: string | null;
 };
 
@@ -32,6 +35,9 @@ export function buildResolvedMediaRepresentation(
     source_content_type: media.source_content_type ?? null,
     status: media.status ?? null,
     page_count: media.page_count ?? null,
+    fallback_revision: isWebpage ? media.fallback_media_revision ?? null : null,
+    fallback_sha256: isWebpage ? media.fallback_media_sha256 ?? null : null,
+    fallback_captured_at: isWebpage ? media.fallback_media_captured_at ?? null : null,
     ...(options.includeSourceUrl ? { source_url: media.source_url ?? null } : {}),
   };
 }
@@ -74,6 +80,9 @@ export async function buildResolvedMediaMap(
           content_type: access.content_type,
           source_content_type: access.source_content_type,
           size: access.size,
+          ready_object_id: access.ready_object_id,
+          ready_object_sha256: access.ready_object_sha256,
+          ready_object_created_at: access.ready_object_created_at,
         }),
       ] as const;
     })
@@ -180,6 +189,9 @@ export async function buildResolvedMediaRecord(
     content_type: access.content_type,
     source_content_type: access.source_content_type,
     size: access.size,
+    ready_object_id: access.ready_object_id,
+    ready_object_sha256: access.ready_object_sha256,
+    ready_object_created_at: access.ready_object_created_at,
   });
   const representation = buildResolvedMediaRepresentation(serialized, { includeSourceUrl: audience === 'cms' });
   return {

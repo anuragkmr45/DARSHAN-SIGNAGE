@@ -147,13 +147,27 @@ Source-free production player config additionally requires HTTPS/WSS and:
 Current packages automatically discover `/etc/darshan/player/config.json` on
 Linux and `C:\\ProgramData\\DARSHAN\\config.json` on Windows.
 
-For production webpage media, `WEBPAGE_NAVIGATION_ALLOWLIST=*` and
-`WEBPAGE_RESOURCE_ALLOWLIST=*` mean any public HTTPS hostname after the server
-and player still enforce credential blocking, HTTPS-only navigation, port
-allowlists, DNS revalidation, and loopback/link-local/private address blocking.
-The generated player config should contain `allowedDomains: ["*"]`,
+For the release webpage policy, `WEBPAGE_NAVIGATION_ALLOWLIST=*` and
+`WEBPAGE_RESOURCE_ALLOWLIST=*` mean any public hostname after the server and
+player still enforce credential blocking, scheme/port allowlists, DNS
+revalidation, and loopback/link-local/private address blocking. Set
+`WEBPAGE_ALLOWED_PORTS=80,443` and `WEBPAGE_ALLOW_HTTP=true` only when ordinary
+HTTP pages are part of the approved site policy; HTTP is unencrypted and the
+source default remains `false`. Redirects are revalidated at every hop and must
+remain on approved hosts. Login-required pages, URL credentials, HTTP Basic
+authentication, cookie/profile import, downloads, and permission prompts are
+not supported. A public login page may be displayed but the player does not log
+in. The generated release player config should contain `allowedDomains: ["*"]`,
 `webpageResourceDomains: ["*"]`, `webpageAllowedCidrs: []`,
-`webpageAllowedPorts: [443]`, and `webpageAllowHttp: false`. Do not add
+`webpageAllowedPorts: [80, 443]`, and `webpageAllowHttp: true`.
+
+Set `WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=24` and
+`WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=100` for the standard refresh policy. A
+manual or scheduled refresh publishes a new content-addressed preview only
+after capture succeeds. A failure records the error and preserves the previous
+successful preview for schedule, default-media, offline, and live-page fallback
+use. The API and worker must be upgraded together before players so the preview
+revision/checksum fields are available before cache switching. Do not add
 `player.realtime.degradedStatePollMs` to the file-config JSON; current players
 derive that value from runtime defaults.
 

@@ -16,6 +16,7 @@ export async function commitReadyMediaIfProcessing(input: {
   mediaId: string;
   readyObjectId: string | null;
   values?: Partial<typeof schema.media.$inferInsert>;
+  expectedWebpagePreviewRefreshToken?: string;
   executor?: DbExecutor;
   compensateStaleResult?: () => Promise<void>;
 }): Promise<MediaProcessingCommitResult> {
@@ -29,7 +30,18 @@ export async function commitReadyMediaIfProcessing(input: {
       status_reason: null,
       updated_at: input.values?.updated_at ?? new Date(),
     })
-    .where(and(eq(schema.media.id, input.mediaId), eq(schema.media.status, 'PROCESSING')))
+    .where(
+      and(
+        eq(schema.media.id, input.mediaId),
+        eq(schema.media.status, 'PROCESSING'),
+        input.expectedWebpagePreviewRefreshToken
+          ? eq(
+              schema.media.webpage_preview_refresh_token,
+              input.expectedWebpagePreviewRefreshToken
+            )
+          : undefined
+      )
+    )
     .returning({ id: schema.media.id });
 
   if (committed) return 'COMMITTED';

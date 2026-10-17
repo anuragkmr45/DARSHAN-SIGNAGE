@@ -311,10 +311,14 @@ export const useUpdateDefaultMediaTargets = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: settingsApi.updateDefaultMediaTargets,
+    mutationFn: (assignments: DefaultMediaTargetsSetting["assignments"]) => {
+      const current = queryClient.getQueryData<DefaultMediaTargetsSetting>(queryKeys.defaultMediaTargets);
+      return settingsApi.updateDefaultMediaTargets(assignments, current?.revision);
+    },
     onSuccess: (data) => {
       const nextData: DefaultMediaTargetsSetting = {
         assignments: data?.assignments ?? [],
+        revision: data?.revision ?? "",
       };
 
       queryClient.setQueryData(queryKeys.defaultMediaTargets, nextData);
@@ -325,6 +329,13 @@ export const useUpdateDefaultMediaTargets = () => {
       });
     },
     onError: (error) => {
+      const reason = error instanceof ApiError && error.details && typeof error.details === "object"
+        ? (error.details as { reason?: string }).reason
+        : undefined;
+      if (error instanceof ApiError && error.status === 409 && reason === "DEFAULT_MEDIA_TARGETS_STALE") {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.defaultMediaTargets });
+        return;
+      }
       const message = error instanceof ApiError ? error.message : "Unable to update default media assignments.";
       toast({
         title: "Update failed",

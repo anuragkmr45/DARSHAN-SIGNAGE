@@ -206,6 +206,10 @@ export const media = pgTable(
     width: integer('width'),
     height: integer('height'),
     page_count: integer('page_count'),
+    webpage_preview_captured_at: timestamp('webpage_preview_captured_at'),
+    webpage_preview_attempted_at: timestamp('webpage_preview_attempted_at'),
+    webpage_preview_refresh_token: uuid('webpage_preview_refresh_token'),
+    webpage_preview_last_error: varchar('webpage_preview_last_error', { length: 120 }),
     created_by: uuid('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
     owner_scope: varchar('owner_scope', { length: 16 }).notNull().default('RESTRICTED'),
     owner_department_id: uuid('owner_department_id').references(() => departments.id, {
@@ -218,6 +222,11 @@ export const media = pgTable(
     createdByIdx: index('media_created_by_idx').on(table.created_by),
     ownerIdx: index('media_owner_idx').on(table.owner_scope, table.owner_department_id),
     statusIdx: index('media_status_idx').on(table.status),
+    webpagePreviewDueIdx: index('media_webpage_preview_due_idx').on(
+      table.type,
+      table.status,
+      table.webpage_preview_attempted_at
+    ),
     ownerScopeCheck: check(
       'media_owner_scope_check',
       sql`(${table.owner_scope} = 'DEPARTMENT' AND ${table.owner_department_id} IS NOT NULL) OR (${table.owner_scope} IN ('ORGANIZATION', 'RESTRICTED') AND ${table.owner_department_id} IS NULL)`

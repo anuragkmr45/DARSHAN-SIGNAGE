@@ -15,6 +15,9 @@ export type ResolvedMediaAccess = {
   content_type: string | null;
   source_content_type: string | null;
   size: number | null;
+  ready_object_id: string | null;
+  ready_object_sha256: string | null;
+  ready_object_created_at: Date | null;
 };
 
 type ResolveMediaAccessOptions = {
@@ -84,6 +87,9 @@ export async function resolveMediaAccess(
   let objectKey: string | null = null;
   let resolvedContentType: string | null = null;
   let resolvedSize: number | null = null;
+  let readyObjectId: string | null = null;
+  let readyObjectSha256: string | null = null;
+  let readyObjectCreatedAt: Date | null = null;
 
   if (media.ready_object_id) {
     const readyObject = await getReadyStorageObject(media, options, db);
@@ -94,6 +100,9 @@ export async function resolveMediaAccess(
         content_type: null,
         source_content_type: media.source_content_type ?? null,
         size: null,
+        ready_object_id: media.ready_object_id,
+        ready_object_sha256: null,
+        ready_object_created_at: null,
       };
     }
 
@@ -101,6 +110,9 @@ export async function resolveMediaAccess(
     objectKey = readyObject.object_key;
     resolvedContentType = readyObject.content_type ?? null;
     resolvedSize = readyObject.size ?? null;
+    readyObjectId = readyObject.id;
+    readyObjectSha256 = readyObject.sha256 ?? null;
+    readyObjectCreatedAt = readyObject.created_at ?? null;
   } else if (media.source_bucket && media.source_object_key) {
     bucket = media.source_bucket;
     objectKey = media.source_object_key;
@@ -115,6 +127,9 @@ export async function resolveMediaAccess(
       content_type: media.ready_object_id ? resolvedContentType : media.source_content_type ?? null,
       source_content_type: media.source_content_type ?? null,
       size: resolvedSize,
+      ready_object_id: readyObjectId,
+      ready_object_sha256: readyObjectSha256,
+      ready_object_created_at: readyObjectCreatedAt,
     };
   }
 
@@ -134,6 +149,9 @@ export async function resolveMediaAccess(
         content_type: resolvedContentType,
         source_content_type: media.source_content_type ?? null,
         size: resolvedSize,
+        ready_object_id: readyObjectId,
+        ready_object_sha256: readyObjectSha256,
+        ready_object_created_at: readyObjectCreatedAt,
       };
     }
 
@@ -144,6 +162,9 @@ export async function resolveMediaAccess(
       content_type: resolvedContentType,
       source_content_type: media.source_content_type ?? null,
       size: resolvedSize,
+      ready_object_id: readyObjectId,
+      ready_object_sha256: readyObjectSha256,
+      ready_object_created_at: readyObjectCreatedAt,
     };
   }
 
@@ -161,6 +182,9 @@ export async function resolveMediaAccess(
       content_type: resolvedContentType,
       source_content_type: media.source_content_type ?? null,
       size: resolvedSize,
+      ready_object_id: readyObjectId,
+      ready_object_sha256: readyObjectSha256,
+      ready_object_created_at: readyObjectCreatedAt,
     };
   } catch (error) {
     logger.warn(error, 'Failed to generate media URL');
@@ -170,6 +194,9 @@ export async function resolveMediaAccess(
       content_type: resolvedContentType,
       source_content_type: media.source_content_type ?? null,
       size: resolvedSize,
+      ready_object_id: readyObjectId,
+      ready_object_sha256: readyObjectSha256,
+      ready_object_created_at: readyObjectCreatedAt,
     };
   }
 }

@@ -496,6 +496,9 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         content_type: mediaAccess.content_type,
         source_content_type: mediaAccess.source_content_type,
         size: mediaAccess.size,
+        ready_object_id: mediaAccess.ready_object_id,
+        ready_object_sha256: mediaAccess.ready_object_sha256,
+        ready_object_created_at: mediaAccess.ready_object_created_at,
       }
     );
     return {
@@ -652,6 +655,9 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
                 content_type: defaultMediaAccess?.content_type,
                 source_content_type: defaultMediaAccess?.source_content_type,
                 size: defaultMediaAccess?.size,
+                ready_object_id: defaultMediaAccess?.ready_object_id,
+                ready_object_sha256: defaultMediaAccess?.ready_object_sha256,
+                ready_object_created_at: defaultMediaAccess?.ready_object_created_at,
               }
             )
           : null;

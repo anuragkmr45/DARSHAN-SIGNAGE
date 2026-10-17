@@ -1,11 +1,12 @@
 # Code-Derived Expectations For QA
 
-Baseline: `release-01` through `a01804c`, source-reviewed 2026-10-17. These are
-code expectations, **not independent QA proof**. The latest authorization review
-is `evidence/authorization-session-requests-review.md`; developer runtime is in
-`evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`, while catalogue
-cases remain `Not Tested` or `Partially Tested` until QA records its own result.
-Earlier targeted PDF/video and ownership evidence remains separately dated.
+Baseline: uncommitted `release-01` working tree based on `c680c0a`,
+source-reviewed 2026-10-17. These are code expectations, **not independent QA
+proof**. The webpage/default delta is reviewed in
+`evidence/webpage-default-priority-review.md`; developer commands are in
+`evidence/webpage-default-priority-developer-verification-2026-10-17.md`.
+Catalogue cases remain `Not Tested` or `Partially Tested` until QA records its
+own result.
 
 When a user-confirmed rule disagrees with code, report the observed difference against that rule even if the software behaves exactly as this sheet predicts. For code-only topics, report the observed behavior and its risk; do not call an insecure behavior a security pass merely because it matches source. Site-specific commitments without a value in code remain unscored until the release owner supplies an acceptance target.
 
@@ -23,8 +24,8 @@ When a user-confirmed rule disagrees with code, report the observed difference a
 | BQ-008 Custom roles | Feature access uses effective CASL action/subject/record permissions, inheritance and conditions rather than custom role names. Role-name identity remains for protected system-role hierarchy and content classification. | Matches the custom-role rule; static regression passed and runtime conditional/inheritance coverage remains. | `AUTHZ-02` |
 | BQ-009 Access withdrawal | Account/password and direct/transitive permission changes revoke affected sessions transactionally. Invalidation is broadcast across API nodes, local user rooms disconnect, and each protected socket action re-verifies its stored token/session. | Core withdrawal is source-implemented; live multi-node propagation, Valkey failure and in-flight boundaries remain runtime work. | `AUTHN-04`, `AUTHZ-02`, `CONC-07` |
 | BQ-010 Schedule approval | Admin-like approval/publish path does not reject a request because its author is the approver; direct admin publish is implemented. Other hold/revision/conflict checks still apply. | Self-approval and direct admin publishing are user-confirmed. | `FUN-04`, `CONC-01` |
-| BQ-011 Webpages | Production permits HTTPS only for allowed host/port/DNS/address/trust combinations. Private HTTPS also needs allowed CIDR; hard-denied addresses stay blocked. Capture starts a fresh browser context without CMS login. Live view can show preview on failure or "Live webpage unavailable" without one; no preview-age gate is implemented. | Code characterization only. A visible login/error page can satisfy basic readiness; this is not proof protected content works. | `FUN-08`, `PLAYER-09` |
-| BQ-012 Default media | Eligible SCREEN wins, then first saved eligible GROUP, then ASPECT_RATIO, GLOBAL, NONE. Group overlap is allowed; CMS replacement moves an edited assignment to the end, so editing A can change [A,B] into [B,A] and make B win. | Code characterization only; there is no explicit group priority or conflict rejection. | `FUN-06` |
+| BQ-011 Webpages | Policy-controlled HTTP and HTTPS use the same scheme/host/port/DNS/CIDR checks on the initial URL and every redirect/navigation. Source defaults disable HTTP; release config explicitly enables it. URL credentials, HTTP authentication and persistent login profiles are unsupported. Manual and 24-hour due refresh publish a new revision/checksum only after success; failure preserves the last successful preview. Snapshots/defaults propagate revision identity and the player caches by revision with older-valid fallback. | Confirmed by BR-097..100. HTTP remains cleartext risk; login-required content is out of scope. Real controlled-network/object-store/physical-player execution remains. | `FUN-08`, `PLAYER-09`, `WEB-01..06` |
+| BQ-012 Default media | Eligible SCREEN wins, then eligible GROUP by priority descending and target ID ascending, then ASPECT_RATIO, GLOBAL, NONE. Priority is integer `0..100`; legacy/missing is `0`; media/order edits that omit priority preserve it. Settings expected revision plus a transaction advisory lock yields one commit and one `409` for competing same-revision saves. When the resolver reaches NONE, current player code renders a text-only `No content assigned yet` state. | Priority behavior matches BR-101. **Conflict with BR-102:** no Schedule/default must show the approved standard company image, not the current text-only state. | `FUN-06`, `DEF-01..04`, `PLAYER-05` |
 | BQ-013 Proof of play | Memory buffer is bounded to 100 events/512 KiB; pending spool to 32 files, 50 events/file and 2% of cache capacity clamped to 1-16 MiB. Old pending files can be discarded with counters. Abrupt crash/write errors can lose events; media-lock purge leaves already-spooled files intact. No offline-time guarantee exists. | Code characterization only; matching these bounds does not prove lossless evidence. | `PLAYER-07`, `DATA-04`, `PERF-04` |
 | BQ-014 Reporting | `screen_uptime_percent` is current ACTIVE/(ACTIVE+OFFLINE) times 100, two decimals, null for zero denominator. PoP COMPLETED means `ended_at` is non-null. Daily SQL grouping uses `date(created_at)` without a site timezone conversion; PDF dates are UTC while CMS timestamps use browser locale. | Code formula is known; no approved historical-uptime or reporting-day target was supplied. | `FUN-11`, `UI-04` |
 | BQ-015 Retention | Production backup check runs hourly against configured `BACKUP_INTERVAL_HOURS`; weekly log archive copies records. A 30-day old-log deletion handler and off-host prune function exist but no non-test caller was found. Prometheus retention defaults to configurable 30d. | Configured values are not legal retention policy or proof that deletion occurs. | `BKP-01`, `PERF-04` |
@@ -37,7 +38,7 @@ When a user-confirmed rule disagrees with code, report the observed difference a
 ## Source Detail
 
 - Access/content rules: `darshan-server/src/rbac/content-ownership.ts`; `darshan-server/src/routes/users.ts`, `media.ts`, `layouts.ts`, `presentations.ts`, `schedules.ts`, `schedule-requests.ts`; migration `0045`; `evidence/deleted-user-ownership-review.md`. `evidence/content-runtime-review.md` remains historical for behavior not superseded by the 2026-10-16 decision.
-- Webpages/defaults/PoP: `darshan-server/src/utils/webpage-url-policy.ts`, `default-media.ts`; `darshan-cms/src/components/settings/DefaultMediaSection.tsx`; `darshan-player/src/renderer/webpage-playback.ts`; `darshan-player/src/main/services/offline-replay-budgets.ts`, `pop-service.ts`, `media-cache-purge.ts`.
+- Webpages/defaults/PoP: `darshan-server/src/utils/webpage-url-policy.ts`, `jobs/index.ts`, `routes/settings.ts`, `default-media.ts`; migration `0047`; `darshan-cms/src/pages/MediaLibrary.tsx`, `components/settings/DefaultMediaSection.tsx`; player webpage policy/view/cache/renderer services; PoP replay budget services.
 - All other topic-specific anchors: `02_BUSINESS_QUESTIONS.md`, `evidence/policy-behavior-review.md`, and `evidence/operational-behavior-review.md`.
 
 ## Inputs That Code Cannot Supply

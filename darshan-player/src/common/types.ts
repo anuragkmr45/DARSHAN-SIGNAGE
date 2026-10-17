@@ -204,6 +204,7 @@ export interface ActiveSlotPlayback {
   slot_id: string
   item_id: string
   media_id: string | null
+  cache_key?: string | null
   schedule_id?: string | null
   playback_instance_id: string
   started_at: string
@@ -222,6 +223,11 @@ export interface DefaultMediaItem {
   media_url?: string
   source_url?: string
   fallback_media_url?: string
+  fallback_media_revision?: string
+  fallback_media_sha256?: string
+  fallback_media_captured_at?: string
+  webpage_preview_refresh_status?: 'MISSING' | 'REFRESHING' | 'READY' | 'FAILED'
+  webpage_preview_last_error?: string
   local_path?: string
   local_url?: string
 }
@@ -393,6 +399,9 @@ export interface SnapshotPresentationMedia {
   source_content_type?: string
   source_url?: string | null
   fallback_url?: string | null
+  fallback_revision?: string | null
+  fallback_sha256?: string | null
+  fallback_captured_at?: string | null
   url?: string | null
   source_bucket?: string
   source_object_key?: string
@@ -442,6 +451,9 @@ export interface SnapshotMediaEntry {
   media_url?: string
   source_url?: string | null
   fallback_url?: string | null
+  fallback_revision?: string | null
+  fallback_sha256?: string | null
+  fallback_captured_at?: string | null
   type?: MediaType
   media_type?: MediaType
   content_type?: string

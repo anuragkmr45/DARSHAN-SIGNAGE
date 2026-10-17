@@ -1,16 +1,18 @@
 # DARSHAN Human QA Planning Package
 
-Status: **READY FOR INDEPENDENT QA EXECUTION; not release-approved.** The
-authorization/ownership/emergency/Requests/session implementation and its
-multipart-revocation compensation fix are complete through `a01804c`. Server,
-CMS and player builds; real-PostgreSQL affected routes and migration rehearsal;
-one-worker CMS browser flows; the complete player automated suite; and a built
-API HTTP smoke passed. Two-node live sockets, physical-platform/runtime,
-security, recovery, soak and release evidence remain QA/release gates.
+Status: **CONDITIONAL QA HANDOFF; not release-approved.** The
+webpage-playback and default-priority revamp is implemented and has bounded
+developer verification. Server/CMS/player builds, focused real-PostgreSQL API
+tests, one-worker CMS browser tests, full player unit tests and player fault
+tests passed. The later live requirements 1-18 run passed 1-17 but found that
+the no-Schedule/no-default path does not show the required standard company
+image (BR-102/DEF-04/R-38). Physical-player, security,
+mixed-version, capacity, soak and final release evidence remain QA/release
+gates.
 
-Repository baseline: `release-01` source through commit `a01804c`. Earlier
-document-page, video-loop and ownership evidence remains historical baseline
-material and is traced separately.
+Repository baseline: uncommitted `release-01` working tree based on `c680c0a`.
+QA must receive a fixed commit and build hashes before execution evidence is
+used for release approval. Earlier feature evidence remains separately dated.
 
 A disposable local API/CMS/dependency stack, browser flow, real Linux Electron player, freshly migrated test database, focused DB-backed suite and Linux packaging command were executed on 2026-10-15 for the document-page and video-loop scope. Results and screenshots are in `evidence/runtime-2026-10-15/runtime-validation.md`. This targeted run did not execute the full product checklist, Windows/physical-hardware matrix, long soak, security assessment, penetration test, backup/restore rehearsal or production deployment.
 
@@ -23,6 +25,14 @@ It found and fixed a multipart authorization-revocation cleanup defect. See
 `evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md` for exact
 results and the smaller remaining QA/release boundary. QA-owned result fields
 remain independent.
+
+On 2026-10-17, a fresh disposable API/database/Valkey/S3-compatible
+storage/worker/Chromium run exercised the 18 requested access, ownership,
+emergency, Requests, session, webpage and default behaviours. Requirements
+1-17 passed the bounded scenarios. Requirement 18 failed in both the live API
+response and current player renderer: it produced a text-only empty state, not
+the required company fallback image. See
+`evidence/runtime-2026-10-17/runtime-validation.md`.
 
 ## Read First
 
@@ -43,6 +53,7 @@ remain independent.
 15. [Fast developer smoke handoff](evidence/runtime-2026-10-16/fast-developer-smoke.md): the final bounded 2026-10-16 checks, exact results, exclusions and QA execution order.
 16. [Authorization/session/Requests review](evidence/authorization-session-requests-review.md): the final 12-area expected-behavior matrix, source anchors, multi-pass corner cases, bounded developer verification and runtime exclusions.
 17. [Authorization and playback developer-QA closure](evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md): final multi-loop server/database/API/browser/player results, defect corrections, catalogue integrity and explicit independent-QA gaps.
+18. [Requirements 1-18 live runtime validation](evidence/runtime-2026-10-17/runtime-validation.md): exact built-API/worker/Chromium observations, machine-readable results, cleanup and the requirement 18 release blocker.
 
 The inventory is supporting evidence, not a completed authorization audit. Source references are repository-relative. Only results explicitly linked to the dated runtime report are current execution evidence; test-file presence and historical QA reports do not mean tests currently pass.
 
@@ -55,12 +66,12 @@ The 2026-09-25 answer confirms administrator self-approval and direct publishing
 | File | Contents | Current status |
 | --- | --- | --- |
 | `00_SYSTEM_UNDERSTANDING.md` | System understanding and 29 use cases | Provisional |
-| `01_BUSINESS_RULES.md` | Classified rules and business sources | Latest authorization decisions are BR-091..096; all 20 questions retain source review |
+| `01_BUSINESS_RULES.md` | Classified rules and business sources | Latest authorization and webpage/default/fallback decisions are BR-091..102; all 20 questions retain source review |
 | `02_BUSINESS_QUESTIONS.md` | Questions, answers, affected expectations | Source answers complete; site and business inputs still TBD |
-| `03_RISK_REGISTER.csv` | 34 scored risks and risk-to-test links | Structurally validated; runtime disposition pending |
+| `03_RISK_REGISTER.csv` | 38 scored risks and risk-to-test links | Structurally validated; R-38 is an observed release blocker |
 | `04_MASTER_TEST_CHECKLIST.md` | Product and cross-cutting testing checklist | Provisional |
-| `05_TEST_CASES.csv` | 102 detailed, human-executable cases | All 102 have Expected Result; 22 are Partially Tested from dated developer evidence and 80 are Not Tested |
-| `06_TRACEABILITY_MATRIX.csv` | 131 requirement/use-case-to-test/risk rows | Structurally validated; latest authorization rows are explicitly traced |
+| `05_TEST_CASES.csv` | 112 detailed, human-executable cases | All 112 have Expected Result; 23 are Partially Tested from dated developer evidence and 89 are Not Tested |
+| `06_TRACEABILITY_MATRIX.csv` | 135 requirement/use-case-to-test/risk rows | Structurally validated; latest authorization and fallback rows are explicitly traced |
 | `07_SECURITY_CHECKLIST.md` | Authorized security verification plan, no execution | Provisional |
 | `08_PERFORMANCE_RELIABILITY_CHECKLIST.md` | Load, stress, spike, soak, resilience and recovery plans | Provisional |
 | `09_TEST_DATA_AND_ENVIRONMENT.md` | Data recipes, isolation, topology, tools, cleanup rules | Provisional |
@@ -69,9 +80,9 @@ The 2026-09-25 answer confirms administrator self-approval and direct publishing
 | `12_CODE_BASELINE_EXPECTATIONS.md` | Code-derived expectations for all 20 business topics | Static baseline; not test results |
 | `13_PRE_QA_DEVELOPMENT_PLAN.md` | Original deep plan, fast-smoke decision and later end-to-end developer closure | Developer closure complete; listed cross-node/platform/security/recovery/soak gates remain with QA/release validation |
 
-This file grouping covers all requested deliverables without duplicating the detailed cases. Suites reference the master case IDs rather than cloning cases. The detailed CSV has 102 data rows and all required planning fields are populated: Test ID, objective, preconditions, test data, steps, expected result, priority, risk level, design evidence, environment/dependencies and status. QA-owned Actual Result, Execution Evidence and Defect ID fields intentionally remain blank for unexecuted cases.
+This file grouping covers all requested deliverables without duplicating the detailed cases. Suites reference the master case IDs rather than cloning cases. The detailed CSV has 112 data rows and all required planning fields are populated: Test ID, objective, preconditions, test data, steps, expected result, priority, risk level, design evidence, environment/dependencies and status. QA-owned Actual Result, Execution Evidence and Defect ID fields intentionally remain blank for unexecuted cases.
 
-Priority distribution: 67 P0, 34 P1 and 1 P2. Twenty-two cases are `Partially Tested` from dated developer runs and 80 remain `Not Tested`; the new authorization cases remain Not Tested despite successful bounded developer checks. None is promoted to Pass by inference.
+Priority distribution: 80 P0, 31 P1 and 1 P2. Twenty-three cases are `Partially Tested` and 89 remain `Not Tested`; the nine webpage/default-priority cases remain `Not Tested` for human QA despite successful bounded developer checks. New case DEF-04 is Partially Tested because the developer runtime produced an explicit failure; this is not a QA Pass.
 
 ## Acceptance Controls
 
@@ -79,15 +90,15 @@ Priority distribution: 67 P0, 34 P1 and 1 P2. Twenty-two cases are `Partially Te
 - Do not silently turn current implementation into the business requirement.
 - Keep unknown SLOs, retention periods, capacity, RPO and RTO as TBD until agreed.
 - A contradictory implementation becomes a suspected defect/test target, not an instruction to change the requirement.
-- Cases include every requested design field and every row has an Expected Result. The 22 cases touched by dated developer runs remain `Partially Tested`; all 80 others remain `Not Tested`. Defect ID remains QA-owned until a defect is filed.
+- Cases include every requested design field and every row has an Expected Result. Developer evidence does not change a human QA Status to Pass. Defect ID remains QA-owned until a defect is filed.
 - Record code-only outcomes before scoring acceptance. A source-predicted authorization gap is not a security pass; a conflict with a confirmed rule is a suspected defect even when runtime matches source.
 - Audit coverage by role/action/resource, state transition, API operation, integration failure, user journey, data lifecycle, risk, and release path.
 - Preserve explicit untested/uncovered limitations. Do not claim 100% behavioral coverage from a static inventory.
 
 ## How QA Uses This Package
 
-1. Open `05_TEST_CASES.csv` and filter `Status`. Start with the 80 `Not Tested` rows—especially `AUTHN-04`, `AUTHZ-01..03`, `AUTHZ-06`, `AUTHZ-08..13` and `CONC-07`; re-run the 22 `Partially Tested` rows on the approved target matrix.
-2. For each row, prepare the stated preconditions/test data, perform `Steps`, and compare the observation with `Expected Result`. The expected-result field is populated for all 102 cases.
+1. Open `05_TEST_CASES.csv` and filter `Status`. Start with `WEB-01..06`, `DEF-01..03`, `FUN-06`, `FUN-08` and `PLAYER-09`, then continue the remaining `Not Tested` rows. Re-run every `Partially Tested` row on the approved target matrix.
+2. For each row, prepare the stated preconditions/test data, perform `Steps`, and compare the observation with `Expected Result`. The expected-result field is populated for all 112 cases.
 3. Write what actually happened in `Actual Result`, set `Status`, link sanitized screenshots/logs/queries in `Execution Evidence`, and add a `Defect ID` when observed behavior differs.
 4. Use `10_SMOKE_REGRESSION_UAT.md` to choose the smoke/regression/UAT order; use `06_TRACEABILITY_MATRIX.csv` to see which business rule and risk each case covers.
 5. Do not approve release until the open items in `11_RELEASE_READINESS_CHECKLIST.md` have owners/evidence and the final Go/No-go decision is signed by the responsible humans.

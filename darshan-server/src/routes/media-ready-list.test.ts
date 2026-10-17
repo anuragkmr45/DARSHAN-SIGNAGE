@@ -14,8 +14,9 @@ const { headObjectMock, getPresignedUrlMock } = vi.hoisted(() => ({
   getPresignedUrlMock: vi.fn(),
 }));
 
-const { queueWebpageVerifyCaptureMock } = vi.hoisted(() => ({
+const { queueWebpageVerifyCaptureMock, requestWebpagePreviewRefreshMock } = vi.hoisted(() => ({
   queueWebpageVerifyCaptureMock: vi.fn(),
+  requestWebpagePreviewRefreshMock: vi.fn(),
 }));
 
 vi.mock('@/s3', async () => {
@@ -32,6 +33,7 @@ vi.mock('@/jobs', async () => {
   return {
     ...actual,
     queueWebpageVerifyCapture: queueWebpageVerifyCaptureMock,
+    requestWebpagePreviewRefresh: requestWebpagePreviewRefreshMock,
   };
 });
 
@@ -109,6 +111,7 @@ describe('Media Routes - READY list pagination', () => {
     headObjectMock.mockReset();
     getPresignedUrlMock.mockReset();
     queueWebpageVerifyCaptureMock.mockReset();
+    requestWebpagePreviewRefreshMock.mockReset();
     getPresignedUrlMock.mockResolvedValue('http://signed.test/valid');
   });
 
@@ -176,7 +179,7 @@ describe('Media Routes - READY list pagination', () => {
     expect(body.pagination.total).toBeGreaterThanOrEqual(1);
   });
 
-  it('requeues legacy webpage svg previews while still returning the current preview response', async () => {
+  it('returns legacy webpage previews without starting read-triggered background work', async () => {
     const db = getDatabase();
     const mediaId = randomUUID();
     const readyObjectId = randomUUID();
@@ -188,7 +191,6 @@ describe('Media Routes - READY list pagination', () => {
       ContentType: 'image/svg+xml',
     });
     getPresignedUrlMock.mockResolvedValue('http://signed.test/webpage-preview');
-    queueWebpageVerifyCaptureMock.mockResolvedValue(undefined);
 
     await db.insert(schema.storageObjects).values({
       id: readyObjectId,
@@ -230,9 +232,41 @@ describe('Media Routes - READY list pagination', () => {
         }),
       ])
     );
-    expect(queueWebpageVerifyCaptureMock).toHaveBeenCalledWith({
-      mediaId,
-      sourceUrl,
+    expect(queueWebpageVerifyCaptureMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts an authorized manual refresh for READY webpage media', async () => {
+    const db = getDatabase();
+    const mediaId = randomUUID();
+    const requestedAt = new Date('2026-10-17T00:00:00.000Z');
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: `refreshable-webpage-${Date.now()}`,
+      type: 'WEBPAGE',
+      status: 'READY',
+      created_by: ownerUserId,
+      source_url: 'https://example.com/dashboard',
+      created_at: new Date(),
+      updated_at: new Date(),
     });
+    requestWebpagePreviewRefreshMock.mockResolvedValue({
+      mediaId,
+      refreshStatus: 'QUEUED',
+      requestedAt,
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/media/${mediaId}/webpage-preview/refresh`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.ACCEPTED);
+    expect(JSON.parse(response.body)).toEqual({
+      media_id: mediaId,
+      refresh_status: 'QUEUED',
+      requested_at: requestedAt.toISOString(),
+    });
+    expect(requestWebpagePreviewRefreshMock).toHaveBeenCalledWith({ mediaId });
   });
 });

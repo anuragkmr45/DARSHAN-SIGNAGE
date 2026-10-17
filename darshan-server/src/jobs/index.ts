@@ -1,12 +1,12 @@
 import PgBoss from 'pg-boss';
 import ffmpeg from 'fluent-ffmpeg';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { execFile as execFileCallback } from 'child_process';
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { and, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 import { config as appConfig } from '@/config';
 import { abortMultipartUpload, deleteObject, getObject, putObject } from '@/s3';
 import { createLogger } from '@/utils/logger';
@@ -345,6 +345,7 @@ export async function processWebpageVerifyCaptureJob(
   const deleteReadyObject = dependencies.deleteObject ?? deleteObject;
   const upsertReadyStorageObject = dependencies.upsertStorageObject ?? upsertStorageObject;
   const { mediaId, sourceUrl } = job;
+  const mode = job.mode ?? 'INITIAL';
 
   try {
     const [media] = await runWebpageStage('media-load', async () =>
@@ -354,14 +355,20 @@ export async function processWebpageVerifyCaptureJob(
       jobLogger.warn({ mediaId }, 'Media not found for webpage verification');
       return;
     }
-    if (media.status !== 'PROCESSING') {
+    const expectedStatus = mode === 'REFRESH' ? 'READY' : 'PROCESSING';
+    if (media.status !== expectedStatus) {
       jobLogger.warn({ mediaId, status: media.status }, 'Skipping stale webpage verification job');
+      return;
+    }
+    if (job.refreshToken && media.webpage_preview_refresh_token !== job.refreshToken) {
+      jobLogger.warn({ mediaId }, 'Skipping superseded webpage preview job');
       return;
     }
 
     const verification = await verifySource(sourceUrl);
     const previewBuffer = verification.screenshot;
-    const fallbackKey = `${mediaId}/webpage-fallback.png`;
+    const contentHash = createHash('sha256').update(previewBuffer).digest('hex');
+    const fallbackKey = `${mediaId}/webpage-previews/${contentHash}.png`;
     const upload = await runWebpageStage('fallback-upload', () =>
       putReadyObject(
         READY_BUCKET,
@@ -380,23 +387,66 @@ export async function processWebpageVerifyCaptureJob(
       })
     );
 
+    let committed = false;
     await runWebpageStage('media-ready-update', async () => {
-      const result = await commitReadyMediaIfProcessing({
-        mediaId,
-        readyObjectId: readyObject.id,
-        values: {
-          source_url: verification.finalUrl,
-          updated_at: now(),
-        },
-        executor: db,
-        compensateStaleResult: async () => {
-          await deleteReadyObject(READY_BUCKET, fallbackKey);
-        },
-      });
-      if (result === 'STALE') {
+      const completedAt = now();
+      if (mode === 'REFRESH') {
+        const [updated] = await db
+          .update(schema.media)
+          .set({
+            ready_object_id: readyObject.id,
+            source_url: verification.finalUrl,
+            webpage_preview_captured_at: completedAt,
+            webpage_preview_attempted_at: completedAt,
+            webpage_preview_refresh_token: null,
+            webpage_preview_last_error: null,
+            status_reason: null,
+            updated_at: completedAt,
+          })
+          .where(
+            and(
+              eq(schema.media.id, mediaId),
+              eq(schema.media.status, 'READY'),
+              job.refreshToken
+                ? eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
+                : undefined
+            )
+          )
+          .returning({ id: schema.media.id });
+        committed = Boolean(updated);
+      } else {
+        const result = await commitReadyMediaIfProcessing({
+          mediaId,
+          readyObjectId: readyObject.id,
+          expectedWebpagePreviewRefreshToken: job.refreshToken,
+          values: {
+            source_url: verification.finalUrl,
+            webpage_preview_captured_at: completedAt,
+            webpage_preview_attempted_at: completedAt,
+            webpage_preview_refresh_token: null,
+            webpage_preview_last_error: null,
+            updated_at: completedAt,
+          },
+          executor: db,
+        });
+        committed = result !== 'STALE';
+      }
+
+      if (!committed) {
         jobLogger.warn({ mediaId }, 'Discarded webpage result after media authority changed');
       }
     });
+
+    if (committed && mode === 'REFRESH') {
+      await queueWebpagePreviewPlaybackRefresh({
+        mediaId,
+        readyObjectId: readyObject.id,
+        createdBy: media.created_by,
+        db,
+      }).catch((refreshError) => {
+        jobLogger.warn({ refreshError, mediaId }, 'Failed to queue player refresh after preview update');
+      });
+    }
   } catch (error) {
     const stage = getWebpageProcessingStage(error);
     jobLogger.error(
@@ -409,8 +459,218 @@ export async function processWebpageVerifyCaptureJob(
       'Webpage verification/capture failed'
     );
     const failureReason = getWebpageFailureReason(error);
-    await failMediaIfProcessing({ mediaId, statusReason: failureReason, executor: db });
+    if (mode === 'REFRESH') {
+      await db
+        .update(schema.media)
+        .set({
+          webpage_preview_refresh_token: null,
+          webpage_preview_last_error: failureReason,
+          webpage_preview_attempted_at: now(),
+        })
+        .where(
+          and(
+            eq(schema.media.id, mediaId),
+            eq(schema.media.status, 'READY'),
+            job.refreshToken
+              ? eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
+              : undefined
+          )
+        );
+    } else {
+      if (job.refreshToken) {
+        await db
+          .update(schema.media)
+          .set({
+            webpage_preview_refresh_token: null,
+            webpage_preview_last_error: failureReason,
+            webpage_preview_attempted_at: now(),
+          })
+          .where(
+            and(
+              eq(schema.media.id, mediaId),
+              eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
+            )
+          );
+      }
+      await failMediaIfProcessing({ mediaId, statusReason: failureReason, executor: db });
+    }
   }
+}
+
+async function queueWebpagePreviewPlaybackRefresh(input: {
+  mediaId: string;
+  readyObjectId: string;
+  createdBy: string;
+  db?: DbExecutor;
+}) {
+  const db = input.db ?? getDatabase();
+  const screens = await db.select({ id: schema.screens.id }).from(schema.screens);
+  if (screens.length === 0) return;
+
+  await queuePlaybackRefreshDispatch(
+    {
+      reason: 'DEFAULT_MEDIA',
+      screenIds: screens.map((screen) => screen.id),
+      createdBy: input.createdBy,
+      defaultMediaVersion: `${input.mediaId}:${input.readyObjectId}`,
+    },
+    {
+      singletonKey: 'webpage-preview-refresh',
+      singletonSeconds: 60,
+    }
+  );
+}
+
+export type WebpagePreviewRefreshRequestResult = {
+  mediaId: string;
+  refreshStatus: 'QUEUED' | 'ALREADY_QUEUED';
+  requestedAt: Date;
+  refreshToken: string;
+};
+
+export async function requestWebpagePreviewRefresh(input: {
+  mediaId: string;
+  executor?: DbExecutor;
+  requestedAt?: Date;
+}): Promise<WebpagePreviewRefreshRequestResult> {
+  const db = input.executor ?? getDatabase();
+  const requestedAt = input.requestedAt ?? new Date();
+  const [media] = await db.select().from(schema.media).where(eq(schema.media.id, input.mediaId));
+  if (!media || media.type !== 'WEBPAGE' || !media.source_url) {
+    throw new Error('WEBPAGE_MEDIA_NOT_FOUND');
+  }
+  if (media.status !== 'READY' && media.status !== 'FAILED') {
+    if (media.webpage_preview_refresh_token) {
+      return {
+        mediaId: media.id,
+        refreshStatus: 'ALREADY_QUEUED',
+        requestedAt: media.webpage_preview_attempted_at ?? requestedAt,
+        refreshToken: media.webpage_preview_refresh_token,
+      };
+    }
+    throw new Error('WEBPAGE_PREVIEW_REFRESH_NOT_AVAILABLE');
+  }
+  if (media.webpage_preview_refresh_token) {
+    return {
+      mediaId: media.id,
+      refreshStatus: 'ALREADY_QUEUED',
+      requestedAt: media.webpage_preview_attempted_at ?? requestedAt,
+      refreshToken: media.webpage_preview_refresh_token,
+    };
+  }
+
+  const refreshToken = randomUUID();
+  const mode: WebpageVerifyCaptureJob['mode'] = media.status === 'READY' ? 'REFRESH' : 'INITIAL';
+  const [claimed] = await db
+    .update(schema.media)
+    .set({
+      status: mode === 'INITIAL' ? 'PROCESSING' : 'READY',
+      status_reason: mode === 'INITIAL' ? null : media.status_reason,
+      webpage_preview_attempted_at: requestedAt,
+      webpage_preview_refresh_token: refreshToken,
+      webpage_preview_last_error: null,
+      updated_at: mode === 'INITIAL' ? requestedAt : media.updated_at,
+    })
+    .where(
+      and(
+        eq(schema.media.id, media.id),
+        eq(schema.media.status, media.status),
+        isNull(schema.media.webpage_preview_refresh_token)
+      )
+    )
+    .returning({ id: schema.media.id });
+
+  if (!claimed) {
+    const [current] = await db
+      .select({
+        token: schema.media.webpage_preview_refresh_token,
+        attemptedAt: schema.media.webpage_preview_attempted_at,
+      })
+      .from(schema.media)
+      .where(eq(schema.media.id, media.id));
+    if (current?.token) {
+      return {
+        mediaId: media.id,
+        refreshStatus: 'ALREADY_QUEUED',
+        requestedAt: current.attemptedAt ?? requestedAt,
+        refreshToken: current.token,
+      };
+    }
+    throw new Error('WEBPAGE_PREVIEW_REFRESH_CONFLICT');
+  }
+
+  try {
+    await queueWebpageVerifyCapture({
+      mediaId: media.id,
+      sourceUrl: media.source_url,
+      mode,
+      refreshToken,
+    });
+  } catch (error) {
+    await db
+      .update(schema.media)
+      .set({
+        status: media.status,
+        status_reason: media.status_reason,
+        webpage_preview_refresh_token: null,
+        webpage_preview_last_error: 'WEBPAGE_CAPTURE_QUEUE_FAILED',
+      })
+      .where(
+        and(
+          eq(schema.media.id, media.id),
+          eq(schema.media.webpage_preview_refresh_token, refreshToken)
+        )
+      );
+    throw error;
+  }
+
+  return { mediaId: media.id, refreshStatus: 'QUEUED', requestedAt, refreshToken };
+}
+
+export async function processWebpageRefreshDueJob(
+  _job: WebpageRefreshDueJob,
+  dependencies: {
+    db?: DbExecutor;
+    now?: () => Date;
+    requestRefresh?: typeof requestWebpagePreviewRefresh;
+  } = {}
+) {
+  const db = dependencies.db ?? getDatabase();
+  const now = dependencies.now?.() ?? new Date();
+  const cutoff = new Date(
+    now.getTime() - appConfig.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000
+  );
+  const due = await db
+    .select({ id: schema.media.id })
+    .from(schema.media)
+    .where(
+      and(
+        eq(schema.media.type, 'WEBPAGE'),
+        eq(schema.media.status, 'READY'),
+        isNull(schema.media.webpage_preview_refresh_token),
+        or(
+          isNull(schema.media.webpage_preview_attempted_at),
+          lte(schema.media.webpage_preview_attempted_at, cutoff)
+        )
+      )
+    )
+    .limit(appConfig.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE);
+
+  let queued = 0;
+  const requestRefresh = dependencies.requestRefresh ?? requestWebpagePreviewRefresh;
+  for (const row of due) {
+    try {
+      const result = await requestRefresh({
+        mediaId: row.id,
+        executor: db,
+        requestedAt: now,
+      });
+      if (result.refreshStatus === 'QUEUED') queued += 1;
+    } catch (error) {
+      logger.warn({ error, mediaId: row.id }, 'Failed to queue due webpage preview refresh');
+    }
+  }
+  return { due: due.length, queued };
 }
 
 async function convertDocumentWithLibreOffice(inputPath: string, outputDir: string) {
@@ -448,7 +708,7 @@ type PgBossError = Error & {
   code?: string;
 };
 
-const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'emergency:reconcile'] as const;
+const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'emergency:reconcile', 'webpage:refresh-due'] as const;
 const WORK_QUEUE_NAMES = [
   'playback:refresh-dispatch',
   'telemetry:heartbeat',
@@ -458,6 +718,7 @@ const WORK_QUEUE_NAMES = [
   'ffmpeg:thumbnail',
   'document:convert',
   'webpage:verify-capture',
+  'webpage:refresh-due',
   'archive',
   'cleanup',
   'chat:media-cleanup',
@@ -597,6 +858,12 @@ export interface DocumentConvertJob {
 export interface WebpageVerifyCaptureJob {
   mediaId: string;
   sourceUrl: string;
+  mode?: 'INITIAL' | 'REFRESH';
+  refreshToken?: string;
+}
+
+export interface WebpageRefreshDueJob {
+  trigger: 'scheduled-scan';
 }
 
 export interface ArchiveJob {
@@ -728,6 +995,14 @@ export async function queueWebpageVerifyCapture(job: WebpageVerifyCaptureJob, op
   return sendJob('webpage:verify-capture', job, {
     retryLimit: 2,
     retryDelay: 30,
+    ...options,
+  });
+}
+
+export async function queueWebpageRefreshDue(job: WebpageRefreshDueJob, options?: any) {
+  return sendJob('webpage:refresh-due', job, {
+    retryLimit: 1,
+    retryDelay: 60,
     ...options,
   });
 }
@@ -1486,6 +1761,12 @@ export async function registerJobHandlers() {
     }
   });
 
+  await registerObservedWorker<WebpageRefreshDueJob>('webpage:refresh-due', async (batch) => {
+    for (const job of batch) {
+      await processWebpageRefreshDueJob(job.data);
+    }
+  });
+
   // Archive handler
   await registerObservedWorker<ArchiveJob>('archive', async (batch) => {
     const db = getDatabase();
@@ -1783,12 +2064,14 @@ export async function scheduleRecurringJobs() {
     await jobs.unschedule('archive').catch(() => { });
     await jobs.unschedule('backup:check').catch(() => { });
     await jobs.unschedule('emergency:reconcile').catch(() => { });
+    await jobs.unschedule('webpage:refresh-due').catch(() => { });
 
     // Now schedule safely (queues exist)
     await jobs.schedule('cleanup', '15 * * * *', { type: 'expired_sessions' });      // hourly upload/session expiry cleanup
     await jobs.schedule('archive', '0 3 * * 0', { type: 'logs', startDate: '', endDate: '' }); // Sun 3 AM
     await jobs.schedule('backup:check', '0 * * * *', { trigger: 'scheduled-check' }); // hourly
     await jobs.schedule('emergency:reconcile', '* * * * *', {}); // every minute
+    await jobs.schedule('webpage:refresh-due', '20 * * * *', { trigger: 'scheduled-scan' }); // hourly
 
     logger.info('Recurring jobs scheduled successfully');
   } catch (error) {

@@ -263,7 +263,8 @@ export class PlaybackEngine extends EventEmitter {
     const mediaId = item.mediaId || item.objectKey || item.id
     if (item.type !== 'scene' && mediaId) {
       const cacheManager = getCacheManager()
-      cacheManager.markNowPlaying(mediaId)
+      const cacheKey = typeof item.meta?.['cache_key'] === 'string' ? String(item.meta['cache_key']) : mediaId
+      cacheManager.markNowPlaying(cacheKey)
     }
 
     // Record proof-of-play start
@@ -312,7 +313,8 @@ export class PlaybackEngine extends EventEmitter {
     const mediaId = item.mediaId || item.objectKey || item.id
     if (item.type !== 'scene' && mediaId) {
       const cacheManager = getCacheManager()
-      cacheManager.unmarkNowPlaying(mediaId)
+      const cacheKey = typeof item.meta?.['cache_key'] === 'string' ? String(item.meta['cache_key']) : mediaId
+      cacheManager.unmarkNowPlaying(cacheKey)
     }
 
     // Record proof-of-play end

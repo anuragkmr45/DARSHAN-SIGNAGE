@@ -209,39 +209,31 @@ Resolution: CONFIRMED_BUSINESS_RULE (BR-057). Administrator self-approval and di
 
 ### BQ-011: Supported Webpages And Failure Display
 
-Question: Which webpages must this release support: public HTTPS pages, private intranet HTTPS pages, or pages needing an interactive login/SSO/session? When a live page fails or changes, is its captured preview an acceptable fallback, and is there a maximum acceptable preview age?
+Question: Which webpages and fallback behavior does this release support?
 
-Why this changes testing: An isolated view and allowlist do not provide user-session login or guarantee that a captured page remains current. Egress and fallback fixtures depend on the promised use cases.
+Final answer received 2026-10-17: allow ordinary HTTP as well as HTTPS through an explicit policy; do not support login-required pages; allow redirects only while every hop remains on approved destinations; always use the latest successful preview when live display fails. Capture may be refreshed manually and automatically every 24 hours by default. A failed refresh must not replace the last successful preview.
 
-Observed implementation: Backend capture and player native views have network restrictions, isolated web content, bounded readiness/crash recovery and fallback handling. HTTP is blocked by the production policy.
+Implemented behavior: source defaults keep HTTP disabled, while the release bundle explicitly enables HTTP and ports 80/443. Server capture and player navigation validate scheme, host, port, DNS result and CIDR on the initial URL and subsequent hops. Embedded credentials and HTTP-auth login are denied; the player uses a nonpersistent isolated partition. Successful captures create a new revision/checksum; failed attempts retain the former successful preview. Player caches are revision-aware and can use the newest older cached revision if the selected revision is temporarily unavailable.
 
-Evidence: `darshan-server/src/utils/webpage-url-policy.ts`; `darshan-server/src/utils/webpage-capture.ts`; `darshan-player/src/main/services/webpage-view-manager.ts`; `darshan-player/src/main/services/webpage-network-policy.ts`; `darshan-player/src/renderer/webpage-playback.ts`.
+Evidence: `darshan-server/src/utils/webpage-url-policy.ts`; `darshan-server/src/jobs/index.ts`; `darshan-server/src/routes/media.ts`; migration `0047`; `darshan-player/src/main/services/webpage-network-policy.ts`; `darshan-player/src/main/services/webpage-view-manager.ts`; `darshan-player/src/main/services/cache/cache-manager.ts`; `darshan-player/src/renderer/webpage-playback.ts`; `evidence/webpage-default-priority-review.md`.
 
-Affected areas: UC-007, UC-017; BR-018, BR-058; redirects, dependent resource hosts, offline fallback and compatibility.
+Resolution: CONFIRMED_BUSINESS_RULES BR-097..100. BQ-011 is closed. HTTP is a deliberate deployment choice and must be presented as cleartext-risk acceptance, not equivalent transport security. A login/error page remains a content-quality fixture for QA, but login automation/session import is explicitly outside scope.
 
-Answer received 2026-09-25: public HTTPS is conditional on allowlists, ports, DNS and trust; private HTTPS additionally needs an allowed private CIDR; HTTP is not allowed by production policy. Capture does not automate login or inherit CMS sessions. Player cookies can persist but do not establish unattended authentication. Recognized failures show a captured preview when supplied, otherwise "Live webpage unavailable"; the renderer has no preview-age rejection and may treat a visible login/error page as ready.
-
-Resolution: ANSWERED AS IMPLEMENTATION BASELINE (BR-018). Record fixtures and limitations from `evidence/content-runtime-review.md::BQ-011`; do not promise login-required content works. The required webpage classes and business acceptance/maximum age of fallback content remain TBD under BR-058. Playback locking after backend loss remains governed separately by confirmed BR-053, even if a webpage preview is available.
-
-Code-baseline expected result for QA: Allowed public HTTPS pages may load/capture only when host, port, DNS/address, network and certificate checks pass. Private HTTPS additionally needs an allowed CIDR; denied destinations and production HTTP are blocked. Capture does not authenticate to a protected page or import a CMS session, and a visible login/error page can pass the basic readiness probe. When native playback fails, an available captured preview is shown even while the backend is reachable; without one, the player says `Live webpage unavailable`. The renderer has no maximum-preview-age check. A fallback image URL is not proof that its image actually loaded. This characterizes code, not an approved promise to display stale or login-protected content.
+QA expected result: an allowed HTTP or HTTPS fixture loads; a disallowed scheme/host/port/address or any redirect to one is blocked; credentialed/basic-auth pages never receive credentials; manual and due refresh publish a new revision only after a successful capture; failure leaves the prior revision usable; a missing/corrupt preview produces a controlled unavailable state rather than a broken image or crash.
 
 ### BQ-012: Competing Default Media
 
-Question: If a screen belongs to two groups with different default media for its aspect ratio, which group wins, or should the second conflicting assignment be rejected?
+Question: If a screen belongs to competing groups, which default wins and what happens during edits?
 
-Why this changes testing: Different assignment order can change what the viewer sees without an explicit priority presented to the operator.
+Final answer received 2026-10-17: add explicit numeric group priority. Editing an assignment without changing priority must not change priority.
 
-Observed implementation: Screen overrides group; group overrides aspect/global. The matching group assignment is selected using the first stored match.
+Implemented behavior: direct SCREEN wins. Otherwise, eligible matching GROUP assignments are sorted by integer priority descending and then target ID ascending for a stable tie. ASPECT_RATIO and GLOBAL follow. Priority accepts `0..100`; legacy/missing values normalize to `0`. CMS exposes the value. Settings use an expected revision, and a transaction-scoped advisory lock ensures concurrent saves from one revision produce one success and one `409`, including the first save.
 
-Evidence: `darshan-server/src/utils/default-media.ts::resolveDefaultMediaForScreen`; `darshan-cms/src/components/settings/DefaultMediaSection.tsx`.
+Evidence: `darshan-server/src/utils/default-media.ts`; `darshan-server/src/routes/settings.ts`; `darshan-cms/src/components/settings/DefaultMediaSection.tsx`; `darshan-cms/src/api/domains/settings.ts`; `evidence/webpage-default-priority-review.md`.
 
-Affected areas: UC-015, UC-018; BR-026, BR-059; group changes, fallback determinism and concurrency.
+Resolution: CONFIRMED_BUSINESS_RULE BR-101. BQ-012 is closed.
 
-Answer received 2026-09-25: precedence is SCREEN -> first eligible saved GROUP -> ASPECT_RATIO -> GLOBAL -> NONE. Multiple-group selection follows saved assignment-array order, not explicit priority. Updating group A through the CMS filters its old assignment and appends the replacement, so [A, B] can become [B, A] and change the winner.
-
-Resolution: ANSWERED AS IMPLEMENTATION BASELINE (BR-026), supported by resolver/CMS array operations in `evidence/content-runtime-review.md::BQ-012`. Include the order-changing edit as a regression characterization and risk. The user described, but did not explicitly approve, that business outcome; BR-059 remains TBD. Do not invent priority or conflict rejection as an existing requirement.
-
-Code-baseline expected result for QA: The resolver selects the first eligible READY, aspect-matching SCREEN assignment, then the first eligible saved GROUP assignment whose group contains the screen, then ASPECT_RATIO, GLOBAL and NONE. With overlapping eligible groups saved as `[A, B]`, A wins. Changing A through the CMS removes and appends A, making `[B, A]`; B then wins. Overlap is not rejected and there is no explicit group priority. This is the current algorithm, not business approval of order-sensitive display changes.
+QA expected result: higher eligible GROUP priority wins regardless of array order; equal priority always chooses ascending target ID; a direct SCREEN assignment still wins; media/order-only edits preserve priority; invalid priorities reject atomically; concurrent stale saves never silently overwrite the winning save.
 
 ### BQ-013: Proof-Of-Play Completeness
 

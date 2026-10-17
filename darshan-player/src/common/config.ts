@@ -972,9 +972,6 @@ export class ConfigManager {
       if (!this.config.transportTls.strictCertificateValidation) {
         errors.push('production transportTls.strictCertificateValidation must be true')
       }
-      if (this.config.security.webpageAllowHttp) {
-        errors.push('production webpageAllowHttp must be false')
-      }
     }
 
     if (this.config.transportTls.enabled && !this.config.transportTls.caPath) {

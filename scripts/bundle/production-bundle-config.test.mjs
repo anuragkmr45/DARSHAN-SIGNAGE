@@ -110,6 +110,9 @@ WEBPAGE_NAVIGATION_ALLOWLIST=display-content.example.test
 WEBPAGE_RESOURCE_ALLOWLIST=*.assets.example.test
 WEBPAGE_ALLOWED_CIDRS=10.20.0.0/24,fd00:20::/64
 WEBPAGE_ALLOWED_PORTS=443,8443
+WEBPAGE_ALLOW_HTTP=false
+WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=24
+WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=100
 BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_DAYS=30
 BACKUP_OFFHOST_DESTINATION=s3://offhost-backups.example.test/darshan/site-a
@@ -178,6 +181,8 @@ EXPORTER_PIDS_LIMIT=128
   assert.deepEqual(loaded.outputs.WEBPAGE_ALLOWED_CIDRS, ['production/backend/.env.production', 'production/electron/config.json'])
   assert.deepEqual(loaded.outputs.WEBPAGE_ALLOWED_PORTS, ['production/backend/.env.production', 'production/electron/config.json'])
   assert.deepEqual(loaded.outputs.WEBPAGE_ALLOW_HTTP, ['production/backend/.env.production', 'production/electron/config.json'])
+  assert.deepEqual(loaded.outputs.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS, ['production/backend/.env.production'])
+  assert.deepEqual(loaded.outputs.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE, ['production/backend/.env.production'])
   assert.equal(loaded.config.SITE_PKI_DIR, secure)
 	  const validText = fs.readFileSync(envFile, 'utf8')
 	  const validCapacityEvidence = fs.readFileSync(capacityEvidence, 'utf8')
@@ -208,8 +213,16 @@ EXPORTER_PIDS_LIMIT=128
   fs.writeFileSync(envFile, validText.replace('WEBPAGE_ALLOWED_CIDRS=10.20.0.0\/24,fd00:20::\/64', 'WEBPAGE_ALLOWED_CIDRS=10.20.0.0\/99'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOWED_CIDRS contains invalid CIDR/)
 
-  fs.writeFileSync(envFile, `${validText}\nWEBPAGE_ALLOW_HTTP=true\n`)
-  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOW_HTTP must be false for production/)
+  fs.writeFileSync(envFile, validText
+    .replace('WEBPAGE_ALLOWED_PORTS=443,8443', 'WEBPAGE_ALLOWED_PORTS=80,443')
+    .replace('WEBPAGE_ALLOW_HTTP=false', 'WEBPAGE_ALLOW_HTTP=true'))
+  assert.equal(loadProductionBundleConfig(envFile, root).config.WEBPAGE_ALLOW_HTTP, 'true')
+
+  fs.writeFileSync(envFile, validText.replace('WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=24', 'WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=0'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS must be an integer from 1 to 168/)
+
+  fs.writeFileSync(envFile, validText.replace('WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=100', 'WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=1001'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE must be an integer from 1 to 1000/)
   fs.writeFileSync(envFile, validText
     .replace('strong-postgres-pass', 'has:a:colon-password')
     .replace('strong-monitoring-password-123', 'has:a:strong-monitoring-password-123')

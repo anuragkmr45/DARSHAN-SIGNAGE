@@ -95,6 +95,8 @@ const envSchema = z.object({
   WEBPAGE_ALLOWED_CIDRS: z.string().default(''),
   WEBPAGE_ALLOWED_PORTS: z.string().default('443'),
   WEBPAGE_ALLOW_HTTP: optionalBooleanString,
+  WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(100),
   PG_BOSS_SCHEMA: z.string().default('pgboss'),
   RATE_LIMIT_ENABLED: z
     .enum(['true', 'false'])

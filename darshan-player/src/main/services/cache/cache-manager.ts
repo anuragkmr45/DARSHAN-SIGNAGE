@@ -31,6 +31,22 @@ export interface CacheAddContext {
   playbackMode?: 'normal' | 'emergency' | 'default' | 'offline' | 'empty'
 }
 
+const CACHE_REVISION_SEPARATOR = '.__revision__.'
+
+/**
+ * Keep content revisions as distinct cache entries. This lets a player finish
+ * using the selected revision while a newer webpage preview downloads.
+ */
+export function buildRevisionedCacheKey(mediaId: string, revision?: string | null): string {
+  const normalized = revision?.trim()
+  return normalized ? `${mediaId}${CACHE_REVISION_SEPARATOR}${normalized}` : mediaId
+}
+
+export type ResolvedCacheEntry = {
+  cacheKey: string
+  localPath: string
+}
+
 export class CacheManager {
   private cacheDir: string
   private maxBytes: number
@@ -185,13 +201,19 @@ export class CacheManager {
 
   async add(mediaId: string, url: string, sha256?: string, context: CacheAddContext = {}): Promise<void> {
     if (await this.has(mediaId)) {
-      return
+      const cached = this.entries.get(mediaId)
+      if (!sha256 || cached?.sha256 === sha256) {
+        return
+      }
     }
 
     const existingInFlight = this.inFlight.get(mediaId)
     if (existingInFlight) {
       await existingInFlight
-      return
+      const cached = this.entries.get(mediaId)
+      if (!sha256 || cached?.sha256 === sha256) {
+        return
+      }
     }
 
     const operation = this.addInternal(mediaId, url, sha256, context)
@@ -315,6 +337,33 @@ export class CacheManager {
     }
   }
 
+  async resolveRevisioned(
+    mediaId: string,
+    revision?: string | null,
+    contentType?: string
+  ): Promise<ResolvedCacheEntry | undefined> {
+    const requestedKey = buildRevisionedCacheKey(mediaId, revision)
+    const requestedPath = await this.get(requestedKey, contentType)
+    if (requestedPath) return { cacheKey: requestedKey, localPath: requestedPath }
+
+    if (revision) {
+      const prefix = `${mediaId}${CACHE_REVISION_SEPARATOR}`
+      const candidates = Array.from(this.entries.values())
+        .filter((entry) => entry.mediaId.startsWith(prefix))
+        .sort((left, right) => right.lastUsedAt - left.lastUsedAt)
+      for (const candidate of candidates) {
+        const candidatePath = await this.get(candidate.mediaId, contentType)
+        if (candidatePath) return { cacheKey: candidate.mediaId, localPath: candidatePath }
+      }
+
+      // Compatibility for caches populated before revision-aware keys existed.
+      const legacyPath = await this.get(mediaId, contentType)
+      if (legacyPath) return { cacheKey: mediaId, localPath: legacyPath }
+    }
+
+    return undefined
+  }
+
   async prefetch(items: PrefetchItem[]): Promise<void> {
     if (items.length === 0) {
       return
@@ -337,16 +386,14 @@ export class CacheManager {
         }
 
         try {
-          if (!(await this.has(current.mediaId))) {
-            await this.add(current.mediaId, current.url, current.sha256, {
-              contentType: current.contentType,
-              source: current.source || 'PREFETCH',
-              snapshotId: current.snapshotId,
-              scheduleId: current.scheduleId,
-              defaultMediaVersion: current.defaultMediaVersion,
-              playbackMode: current.playbackMode,
-            })
-          }
+          await this.add(current.mediaId, current.url, current.sha256, {
+            contentType: current.contentType,
+            source: current.source || 'PREFETCH',
+            snapshotId: current.snapshotId,
+            scheduleId: current.scheduleId,
+            defaultMediaVersion: current.defaultMediaVersion,
+            playbackMode: current.playbackMode,
+          })
         } catch (error) {
           logger.warn({ mediaId: current.mediaId, error }, 'Failed to prefetch item')
         }

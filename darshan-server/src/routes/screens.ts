@@ -226,6 +226,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
         content_type: mediaAccess.content_type,
         source_content_type: mediaAccess.source_content_type,
         size: mediaAccess.size,
+        ready_object_id: mediaAccess.ready_object_id,
+        ready_object_sha256: mediaAccess.ready_object_sha256,
+        ready_object_created_at: mediaAccess.ready_object_created_at,
       }
     );
     return {

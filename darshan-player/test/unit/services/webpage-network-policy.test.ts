@@ -124,7 +124,21 @@ describe('Webpage Network Policy', () => {
     }
   })
 
-  it('rejects credentials, production HTTP, unexpected ports, metadata, and link-local addresses', async () => {
+  it('allows explicitly configured production HTTP', async () => {
+    const parsed = await assertPlayerWebpageUrlAllowed(
+      'http://8.8.8.8/',
+      'navigation',
+      {
+        ...baseSecurity,
+        allowedDomains: ['8.8.8.8'],
+        webpageAllowedPorts: [80, 443],
+        webpageAllowHttp: true,
+      },
+    )
+    expect(parsed.protocol).to.equal('http:')
+  })
+
+  it('rejects credentials, disabled HTTP, unexpected ports, metadata, and link-local addresses', async () => {
     const cases = [
       ['https://user:secret@8.8.8.8/', 'URL credentials are prohibited'],
       ['http://8.8.8.8/', 'URL scheme is prohibited'],

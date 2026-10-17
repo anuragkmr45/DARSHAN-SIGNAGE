@@ -11,7 +11,7 @@ import { getLogger } from '../../../common/logger'
 import { getConfigManager } from '../../../common/config'
 import { DefaultMediaResponse } from '../../../common/types'
 import { atomicWrite, ensureDir } from '../../../common/utils'
-import { getCacheManager } from '../cache/cache-manager'
+import { buildRevisionedCacheKey, getCacheManager } from '../cache/cache-manager'
 import { getPairingService } from '../pairing-service'
 import { getSettingsClient, normalizeDefaultMediaResponse } from './settings-client'
 
@@ -234,6 +234,8 @@ export class DefaultMediaService extends EventEmitter {
       previous.media.source_url !== next.media.source_url ||
       normalizeComparableAssetUrl(previous.media.fallback_media_url) !==
         normalizeComparableAssetUrl(next.media.fallback_media_url) ||
+      previous.media.fallback_media_revision !== next.media.fallback_media_revision ||
+      previous.media.fallback_media_sha256 !== next.media.fallback_media_sha256 ||
       normalizeComparableAssetUrl(previous.media.local_url) !== normalizeComparableAssetUrl(next.media.local_url) ||
       previous.media.type !== next.media.type ||
       previous.media.name !== next.media.name ||
@@ -273,16 +275,20 @@ export class DefaultMediaService extends EventEmitter {
     }
 
     const cacheManager = getCacheManager()
+    const cacheRevision = media.type === 'WEBPAGE'
+      ? media.fallback_media_revision || media.fallback_media_sha256
+      : undefined
+    const cacheKey = buildRevisionedCacheKey(mediaId, cacheRevision)
     const cacheUrl = media.type === 'WEBPAGE'
       ? media.fallback_media_url || media.media_url
       : media.media_url
 
     try {
       if (cacheUrl) {
-        await cacheManager.add(mediaId, cacheUrl, undefined, {
+        await cacheManager.add(cacheKey, cacheUrl, media.fallback_media_sha256, {
           contentType: media.content_type,
           source: 'DEFAULT_MEDIA',
-          defaultMediaVersion: media.id,
+          defaultMediaVersion: media.fallback_media_revision || media.id,
           playbackMode: 'default',
         })
       }
@@ -290,8 +296,8 @@ export class DefaultMediaService extends EventEmitter {
       logger.warn({ error, mediaId }, 'Failed to cache resolved default media')
     }
 
-    const localPath = await cacheManager.get(mediaId, media.content_type)
-    if (!localPath) {
+    const cached = await cacheManager.resolveRevisioned(mediaId, cacheRevision, media.content_type)
+    if (!cached) {
       return payload
     }
 
@@ -299,8 +305,12 @@ export class DefaultMediaService extends EventEmitter {
       ...payload,
       media: {
         ...media,
-        local_path: localPath,
-        local_url: pathToFileURL(localPath).toString(),
+        local_path: cached.localPath,
+        local_url: `${pathToFileURL(cached.localPath).toString()}${
+          media.fallback_media_revision
+            ? `?revision=${encodeURIComponent(media.fallback_media_revision)}`
+            : ''
+        }`,
       },
     }
   }
@@ -315,8 +325,11 @@ export class DefaultMediaService extends EventEmitter {
 
     try {
       const cacheManager = getCacheManager()
-      const localPath = await cacheManager.get(mediaId, media.content_type)
-      if (!localPath) {
+      const cacheRevision = media.type === 'WEBPAGE'
+        ? media.fallback_media_revision || media.fallback_media_sha256
+        : undefined
+      const cached = await cacheManager.resolveRevisioned(mediaId, cacheRevision, media.content_type)
+      if (!cached) {
         return payload
       }
 
@@ -324,8 +337,12 @@ export class DefaultMediaService extends EventEmitter {
         ...payload,
         media: {
           ...media,
-          local_path: localPath,
-          local_url: pathToFileURL(localPath).toString(),
+          local_path: cached.localPath,
+          local_url: `${pathToFileURL(cached.localPath).toString()}${
+            media.fallback_media_revision
+              ? `?revision=${encodeURIComponent(media.fallback_media_revision)}`
+              : ''
+          }`,
         },
       }
     } catch (error) {

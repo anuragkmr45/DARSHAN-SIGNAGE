@@ -21,6 +21,10 @@ type MediaRecord = {
   created_by?: string | null;
   created_at?: Date | string | null;
   updated_at?: Date | string | null;
+  webpage_preview_captured_at?: Date | string | null;
+  webpage_preview_attempted_at?: Date | string | null;
+  webpage_preview_refresh_token?: string | null;
+  webpage_preview_last_error?: string | null;
 };
 
 type SerializeMediaOptions = {
@@ -29,6 +33,9 @@ type SerializeMediaOptions = {
   content_type?: string | null;
   source_content_type?: string | null;
   size?: number | null;
+  ready_object_id?: string | null;
+  ready_object_sha256?: string | null;
+  ready_object_created_at?: Date | string | null;
 };
 
 const trimToUndefined = (value?: string | null) => {
@@ -72,6 +79,15 @@ export const serializeMediaRecord = (
   const isWebpage = (media.type ?? '').toUpperCase() === 'WEBPAGE';
   const sourceUrl = trimToUndefined(media.source_url) ?? undefined;
   const fallbackMediaUrl = mediaUrl ?? null;
+  const fallbackRevision = options?.ready_object_id ?? media.ready_object_id ?? null;
+  const fallbackCapturedAt = media.webpage_preview_captured_at ?? options?.ready_object_created_at;
+  const previewRefreshStatus = media.webpage_preview_refresh_token
+    ? 'REFRESHING'
+    : media.webpage_preview_last_error
+      ? 'FAILED'
+      : fallbackRevision
+        ? 'READY'
+        : 'MISSING';
 
   return {
     id: media.id,
@@ -99,5 +115,10 @@ export const serializeMediaRecord = (
     updated_at: toIso(media.updated_at),
     media_url: fallbackMediaUrl,
     fallback_media_url: isWebpage ? fallbackMediaUrl : null,
+    fallback_media_revision: isWebpage ? fallbackRevision : null,
+    fallback_media_sha256: isWebpage ? (options?.ready_object_sha256 ?? null) : null,
+    fallback_media_captured_at: isWebpage ? (toIso(fallbackCapturedAt) ?? null) : null,
+    webpage_preview_refresh_status: isWebpage ? previewRefreshStatus : null,
+    webpage_preview_last_error: isWebpage ? (media.webpage_preview_last_error ?? null) : null,
   };
 };
