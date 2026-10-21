@@ -51,6 +51,7 @@ describe('Player layout helpers', () => {
   it('advances only multi-item scene slots and bounds single-item recovery delay', () => {
     const {
       resolveSceneSlotRecoveryDelayMs,
+      resolveSceneSlotOccurrenceBoundaryDelayMs,
       shouldAdvanceSceneSlot,
     } = require('../../../src/renderer/player-layout-helpers.ts')
 
@@ -59,6 +60,9 @@ describe('Player layout helpers', () => {
     expect(resolveSceneSlotRecoveryDelayMs(250)).to.equal(1000)
     expect(resolveSceneSlotRecoveryDelayMs(10_000)).to.equal(10_000)
     expect(resolveSceneSlotRecoveryDelayMs(120_000)).to.equal(30_000)
+    expect(resolveSceneSlotOccurrenceBoundaryDelayMs(10_000, undefined, 2500)).to.equal(2500)
+    expect(resolveSceneSlotOccurrenceBoundaryDelayMs(10_000, 750, 2500)).to.equal(750)
+    expect(resolveSceneSlotOccurrenceBoundaryDelayMs(10_000, -10, 2500)).to.equal(0)
   })
 
   it('applies configured opacity transition styles to entering and exiting scheduled elements', async () => {

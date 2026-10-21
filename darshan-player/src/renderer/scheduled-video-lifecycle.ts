@@ -4,6 +4,23 @@ export const SCHEDULED_VIDEO_PLAY_RETRY_DELAYS_MS = [250, 1000] as const
 export const SCHEDULED_VIDEO_STALL_TIMEOUT_MS = 10_000
 export const SCHEDULED_VIDEO_LOAD_TIMEOUT_MS = 15_000
 
+export type ScheduledVideoFailureCode =
+  | 'VIDEO_PLAYBACK_START_FAILED'
+  | 'VIDEO_PLAYBACK_STALLED'
+  | 'VIDEO_LOOP_ENDED_UNEXPECTEDLY'
+  | 'VIDEO_MEDIA_ERROR'
+  | 'VIDEO_MEDIA_LOAD_TIMEOUT'
+
+export class ScheduledVideoPlaybackError extends Error {
+  constructor(
+    public readonly code: ScheduledVideoFailureCode,
+    detail?: string,
+  ) {
+    super(detail ? `${code}: ${detail}` : code)
+    this.name = 'ScheduledVideoPlaybackError'
+  }
+}
+
 export interface ScheduledVideoLifecycleOptions {
   itemId: string
   displayMs: number
@@ -128,13 +145,13 @@ export function attachScheduledVideoLifecycle(
   }
 
   const scheduleStallWatchdog = (reason: string): void => {
-    if (!options.loop || !playbackStarted || disposed || runtimeFailureReported) {
+    if (!playbackStarted || disposed || runtimeFailureReported) {
       return
     }
     clearStallTimer()
     stallTimer = setTimeout((): void => {
       stallTimer = undefined
-      reportRuntimeFailure(new Error(`VIDEO_PLAYBACK_STALLED: ${reason}`))
+      reportRuntimeFailure(new ScheduledVideoPlaybackError('VIDEO_PLAYBACK_STALLED', reason))
     }, SCHEDULED_VIDEO_STALL_TIMEOUT_MS)
   }
 
@@ -143,7 +160,7 @@ export function attachScheduledVideoLifecycle(
   const onStalled = (): void => scheduleStallWatchdog('media stalled without progress')
   const onEnded = (): void => {
     if (options.loop) {
-      reportRuntimeFailure(new Error('VIDEO_LOOP_ENDED_UNEXPECTEDLY'))
+      reportRuntimeFailure(new ScheduledVideoPlaybackError('VIDEO_LOOP_ENDED_UNEXPECTEDLY'))
     }
   }
 
@@ -199,7 +216,7 @@ export function attachScheduledVideoLifecycle(
         }
 
         playbackStarting = false
-        failInitial(new Error(`VIDEO_PLAYBACK_START_FAILED: ${normalized.message}`))
+        failInitial(new ScheduledVideoPlaybackError('VIDEO_PLAYBACK_START_FAILED', normalized.message))
       })
     }
 
@@ -259,7 +276,7 @@ export function attachScheduledVideoLifecycle(
   }
   const onError = (): void => {
     const mediaMessage = video.error?.message || 'Failed to load or decode scheduled video'
-    const error = new Error(`VIDEO_MEDIA_ERROR: ${mediaMessage}`)
+    const error = new ScheduledVideoPlaybackError('VIDEO_MEDIA_ERROR', mediaMessage)
     if (!readySettled) {
       failInitial(error)
       return
@@ -279,7 +296,7 @@ export function attachScheduledVideoLifecycle(
 
   loadTimer = setTimeout((): void => {
     loadTimer = undefined
-    failInitial(new Error('VIDEO_MEDIA_LOAD_TIMEOUT'))
+    failInitial(new ScheduledVideoPlaybackError('VIDEO_MEDIA_LOAD_TIMEOUT'))
   }, SCHEDULED_VIDEO_LOAD_TIMEOUT_MS)
 
   const dispose = (): void => {

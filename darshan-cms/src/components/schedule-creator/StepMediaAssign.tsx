@@ -49,6 +49,7 @@ import type { SlotMedia } from "@/pages/ScheduleCreator";
 import { resolveMediaDisplayName } from "@/lib/media";
 import { createUuid } from "@/lib/uuid";
 import {
+  hydrateDocumentPageCounts,
   resolveSlotMediaPreviewOptions,
   resolveVideoLoopLabel,
   updateSlotMediaOccurrence,
@@ -181,18 +182,8 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
     });
     if (resolvedCounts.size === 0) return;
 
-    let changed = false;
-    const hydrated = slotMedia.map((item) => {
-      const pageCount = item.pageCount ?? resolvedCounts.get(item.mediaId);
-      if (pageCount == null || pageCount === item.pageCount) return item;
-      changed = true;
-      return {
-        ...item,
-        pageCount,
-        pageNumber: Math.min(Math.max(item.pageNumber ?? 1, 1), pageCount),
-      };
-    });
-    if (changed) onUpdateSlotMedia(hydrated);
+    const hydrated = hydrateDocumentPageCounts(slotMedia, resolvedCounts);
+    if (hydrated !== slotMedia) onUpdateSlotMedia(hydrated);
   }, [missingDocumentPageCountIds, onUpdateSlotMedia, restoredDocumentQueries, slotMedia]);
 
   const filteredMedia = useMemo(() => {

@@ -25,6 +25,14 @@ export function resolveSceneSlotRecoveryDelayMs(displayMs: number): number {
   return Math.min(30_000, Math.max(1000, Number(displayMs) || 0))
 }
 
+export function resolveSceneSlotOccurrenceBoundaryDelayMs(
+  displayMs: number,
+  delayOverrideMs?: number,
+  remainingMs?: number,
+): number {
+  return Math.max(0, delayOverrideMs ?? remainingMs ?? Math.max(1, Number(displayMs) || 0))
+}
+
 export function computeSceneStageFrame(
   aspectRatio: string | undefined,
   viewportWidth: number,

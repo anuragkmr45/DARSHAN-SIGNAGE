@@ -97,6 +97,30 @@ export function resolveScheduledResumePosition(input: PlaybackResumeInput): Play
   }
 }
 
+/**
+ * A failed only-item frame must make a real playback attempt again even when
+ * its normal display duration has already elapsed. Non-looping video restarts
+ * from zero; looping video keeps wall-clock alignment for decoded-duration
+ * modulo seeking.
+ */
+export function resolveFailedSingleItemRetryPosition(input: PlaybackResumeInput): PlaybackResumeDecision {
+  const item = input.items[0]
+  const resolved = resolveScheduledResumePosition(input)
+  if (!item) {
+    return resolved
+  }
+
+  return {
+    ...resolved,
+    index: 0,
+    remainingMs: getItemDurationMs(item),
+    elapsedMsInItem: item.loop === true ? resolved.elapsedMsInItem : 0,
+    seekMs: item.loop === true ? resolved.seekMs : 0,
+    autoplay: true,
+    completed: false,
+  }
+}
+
 export function shouldUsePersistedProgress(
   persisted: PlaybackProgressEntry,
   expected?: PlaybackProgressIdentity,

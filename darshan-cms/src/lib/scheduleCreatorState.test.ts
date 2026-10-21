@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPresentationSlotPayloads,
+  hydrateDocumentPageCounts,
   normalizeRestoredSlotMedia,
   resolveSlotMediaPreviewOptions,
   resolveVideoLoopLabel,
@@ -38,6 +39,25 @@ describe("normalizeRestoredSlotMedia", () => {
     expect(image.loopEnabled).toBe(false);
     expect(document.loopEnabled).toBe(false);
     expect(document.pageNumber).toBe(3);
+  });
+
+  it("preserves an invalid restored document page so the editor can show validation", () => {
+    const [document] = normalizeRestoredSlotMedia([
+      { ...baseItem, mediaType: "DOCUMENT", pageCount: 5, pageNumber: 8 },
+    ]);
+
+    expect(document.pageNumber).toBe(8);
+    expect(document.pageCount).toBe(5);
+  });
+
+  it("hydrates a page count without silently replacing the selected page", () => {
+    const original = [{ ...baseItem, mediaType: "DOCUMENT" as const, pageCount: null, pageNumber: 8 }];
+    const hydrated = hydrateDocumentPageCounts(original, new Map([["media-1", 5]]));
+
+    expect(hydrated).not.toBe(original);
+    expect(hydrated[0].pageCount).toBe(5);
+    expect(hydrated[0].pageNumber).toBe(8);
+    expect(hydrateDocumentPageCounts(hydrated, new Map([["media-1", 5]]))).toBe(hydrated);
   });
 
   it("keeps duplicate video occurrences independent in the API payload", () => {

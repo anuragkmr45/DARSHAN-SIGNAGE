@@ -35,6 +35,23 @@ export const updateSlotMediaOccurrence = (
   });
 };
 
+export const hydrateDocumentPageCounts = (
+  items: SlotMedia[],
+  resolvedCounts: ReadonlyMap<string, number>,
+): SlotMedia[] => {
+  let changed = false;
+  const hydrated = items.map((item) => {
+    const pageCount = item.pageCount ?? resolvedCounts.get(item.mediaId);
+    if (pageCount == null || pageCount === item.pageCount) return item;
+    changed = true;
+    return {
+      ...item,
+      pageCount,
+    };
+  });
+  return changed ? hydrated : items;
+};
+
 export const normalizeRestoredSlotMedia = (items: unknown): SlotMedia[] => {
   if (!Array.isArray(items)) return [];
   return items.map((raw) => {
@@ -42,15 +59,7 @@ export const normalizeRestoredSlotMedia = (items: unknown): SlotMedia[] => {
     const isDocument = item.mediaType === "DOCUMENT";
     const requestedPage = Number(item.pageNumber ?? 1);
     const pageCount = typeof item.pageCount === "number" && item.pageCount > 0 ? Math.trunc(item.pageCount) : null;
-    const pageNumber =
-      isDocument &&
-      Number.isSafeInteger(requestedPage) &&
-      requestedPage > 0 &&
-      (pageCount ? requestedPage <= pageCount : requestedPage === 1)
-        ? requestedPage
-        : isDocument
-          ? 1
-          : undefined;
+    const pageNumber = isDocument ? (Number.isFinite(requestedPage) ? requestedPage : 0) : undefined;
     return {
       ...(item as SlotMedia),
       clientItemId: typeof item.clientItemId === "string" && item.clientItemId ? item.clientItemId : createUuid(),

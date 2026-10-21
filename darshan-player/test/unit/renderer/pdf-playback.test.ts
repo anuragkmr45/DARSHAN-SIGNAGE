@@ -76,10 +76,26 @@ describe('PDF playback helpers', () => {
   })
 
   it('accepts a selected physical page and rejects invalid or out-of-range pages', () => {
-    const { validatePdfPageSelection } = require('../../../src/renderer/pdf-playback')
+    const { PdfPlaybackError, validatePdfPageSelection } = require('../../../src/renderer/pdf-playback')
 
     expect(() => validatePdfPageSelection(3, 5)).not.to.throw()
-    expect(() => validatePdfPageSelection(0, 5)).to.throw('Invalid PDF page selection')
-    expect(() => validatePdfPageSelection(6, 5)).to.throw('exceeds document page count')
+    expect(() => validatePdfPageSelection(0, 5)).to.throw(PdfPlaybackError, 'Selected document page 0 is invalid')
+    expect(() => validatePdfPageSelection(6, 5)).to.throw(
+      PdfPlaybackError,
+      'Selected document page 6 does not exist. This document contains 5 pages.'
+    )
+
+    try {
+      validatePdfPageSelection(6, 5)
+      expect.fail('Expected an out-of-range page to fail')
+    } catch (error) {
+      expect(error).to.be.instanceOf(PdfPlaybackError)
+      expect(error.detail).to.deep.equal({
+        code: 'DOCUMENT_PAGE_OUT_OF_RANGE',
+        message: 'Selected document page 6 does not exist. This document contains 5 pages.',
+        requestedPage: 6,
+        actualPageCount: 5,
+      })
+    }
   })
 })

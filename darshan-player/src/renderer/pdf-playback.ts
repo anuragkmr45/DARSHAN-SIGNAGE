@@ -20,6 +20,31 @@ type PdfJsModule = {
   }
 }
 
+export type PdfPlaybackErrorCode = 'INVALID_DOCUMENT_PAGE' | 'DOCUMENT_PAGE_OUT_OF_RANGE' | 'PDF_RENDER_FAILED'
+
+export interface PdfPlaybackErrorDetail {
+  code: PdfPlaybackErrorCode
+  message: string
+  requestedPage: number
+  actualPageCount: number | null
+  itemId?: string
+  mediaId?: string
+  snapshotId?: string
+}
+
+export interface PdfPlaybackContext {
+  itemId?: string
+  mediaId?: string
+  snapshotId?: string
+}
+
+export class PdfPlaybackError extends Error {
+  constructor(public readonly detail: PdfPlaybackErrorDetail) {
+    super(detail.message)
+    this.name = 'PdfPlaybackError'
+  }
+}
+
 export const PDF_WORKER_SOURCE = './pdf.worker.mjs'
 // Each rendered page has a front and a back canvas. The process-wide budget
 // bounds aggregate raster memory when a multi-slot layout contains PDFs.
@@ -32,10 +57,20 @@ export function buildPdfPlaybackSource(source: string | undefined): string {
 
 export function validatePdfPageSelection(pageNumber: number, pageCount: number): void {
   if (!Number.isSafeInteger(pageNumber) || pageNumber < 1) {
-    throw new Error('Invalid PDF page selection')
+    throw new PdfPlaybackError({
+      code: 'INVALID_DOCUMENT_PAGE',
+      message: `Selected document page ${pageNumber} is invalid.`,
+      requestedPage: pageNumber,
+      actualPageCount: Number.isSafeInteger(pageCount) && pageCount > 0 ? pageCount : null,
+    })
   }
   if (!Number.isSafeInteger(pageCount) || pageCount < 1 || pageNumber > pageCount) {
-    throw new Error(`PDF page ${pageNumber} exceeds document page count ${pageCount}`)
+    throw new PdfPlaybackError({
+      code: 'DOCUMENT_PAGE_OUT_OF_RANGE',
+      message: `Selected document page ${pageNumber} does not exist. This document contains ${pageCount} pages.`,
+      requestedPage: pageNumber,
+      actualPageCount: Number.isSafeInteger(pageCount) && pageCount > 0 ? pageCount : null,
+    })
   }
 }
 
@@ -53,6 +88,7 @@ function createStatusElement(message: string): HTMLDivElement {
   status.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   status.style.fontSize = '14px'
   status.style.textAlign = 'center'
+  status.style.whiteSpace = 'pre-line'
   return status
 }
 
@@ -97,7 +133,8 @@ class PdfPlaybackController {
     private readonly container: ManagedPdfElement,
     private readonly source: string,
     private readonly canvas: HTMLCanvasElement,
-    private readonly pageNumber: number
+    private readonly pageNumber: number,
+    private readonly context: PdfPlaybackContext
   ) {}
 
   start(): void {
@@ -193,14 +230,23 @@ class PdfPlaybackController {
     } catch (error) {
       if (this.disposed) return
       if (error instanceof Error && error.name === 'RenderingCancelledException') return
-      window.darshan?.log?.('warn', 'PDF preview render failed', {
-        reason: error instanceof Error ? error.message : String(error),
-        page_number: this.pageNumber,
-      })
+      const detail: PdfPlaybackErrorDetail = error instanceof PdfPlaybackError
+        ? { ...error.detail, ...this.context }
+        : {
+            code: 'PDF_RENDER_FAILED',
+            message: error instanceof Error ? error.message : String(error),
+            requestedPage: this.pageNumber,
+            actualPageCount: null,
+            ...this.context,
+          }
+      window.darshan?.log?.('warn', 'PDF preview render failed', detail)
       this.canvas.remove()
-      this.container.appendChild(createStatusElement('PDF preview unavailable'))
+      const visibleReason = detail.code === 'DOCUMENT_PAGE_OUT_OF_RANGE' || detail.code === 'INVALID_DOCUMENT_PAGE'
+        ? detail.message
+        : 'The document could not be displayed.'
+      this.container.appendChild(createStatusElement(`Unavailable\n${visibleReason}`))
       this.container.setAttribute('data-pdf-rendered', 'false')
-      this.container.dispatchEvent(new Event('darshan-pdf-error'))
+      this.container.dispatchEvent(new CustomEvent<PdfPlaybackErrorDetail>('darshan-pdf-error', { detail }))
       this.dispose()
     }
   }
@@ -228,7 +274,11 @@ class PdfPlaybackController {
   }
 }
 
-export function createPdfPlaybackElement(source: string | undefined, pageNumber: number = 1): HTMLElement {
+export function createPdfPlaybackElement(
+  source: string | undefined,
+  pageNumber: number = 1,
+  context: PdfPlaybackContext = {}
+): HTMLElement {
   const container = document.createElement('div') as ManagedPdfElement
   container.setAttribute('title', 'PDF playback')
   container.style.position = 'absolute'
@@ -242,7 +292,7 @@ export function createPdfPlaybackElement(source: string | undefined, pageNumber:
   container.style.background = '#000'
   const resolvedSource = buildPdfPlaybackSource(source)
   if (!resolvedSource) {
-    container.appendChild(createStatusElement('PDF source unavailable'))
+    container.appendChild(createStatusElement('Unavailable\nPDF source unavailable.'))
     return container
   }
   const canvas = document.createElement('canvas')
@@ -251,7 +301,7 @@ export function createPdfPlaybackElement(source: string | undefined, pageNumber:
   canvas.style.maxHeight = '100%'
   canvas.style.background = '#fff'
   container.appendChild(canvas)
-  const controller = new PdfPlaybackController(container, resolvedSource, canvas, pageNumber)
+  const controller = new PdfPlaybackController(container, resolvedSource, canvas, pageNumber, context)
   container.__darshanCleanup = () => controller.dispose()
   controller.start()
   return container

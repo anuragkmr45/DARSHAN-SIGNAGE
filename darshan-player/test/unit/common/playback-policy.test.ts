@@ -59,6 +59,35 @@ describe('Playback policy helpers', () => {
     expect(decision.completed).to.equal(true)
   })
 
+  it('turns a completed failed one-item video into a real retry from the beginning', () => {
+    const { resolveFailedSingleItemRetryPosition } = require('../../../src/common/playback-policy.ts')
+    const decision = resolveFailedSingleItemRetryPosition({
+      startsAt: '2026-06-19T10:00:00.000Z',
+      nowMs: Date.parse('2026-06-19T10:01:00.000Z'),
+      items: [{ id: 'failed-video', mediaId: 'media-video', displayMs: 5000, loop: false }],
+    })
+
+    expect(decision.index).to.equal(0)
+    expect(decision.remainingMs).to.equal(5000)
+    expect(decision.seekMs).to.equal(0)
+    expect(decision.autoplay).to.equal(true)
+    expect(decision.completed).to.equal(false)
+  })
+
+  it('keeps wall-clock seek alignment when retrying a failed looping one-item video', () => {
+    const { resolveFailedSingleItemRetryPosition } = require('../../../src/common/playback-policy.ts')
+    const decision = resolveFailedSingleItemRetryPosition({
+      startsAt: '2026-06-19T10:00:00.000Z',
+      nowMs: Date.parse('2026-06-19T10:01:00.000Z'),
+      items: [{ id: 'failed-loop', mediaId: 'media-video', displayMs: 7000, loop: true }],
+    })
+
+    expect(decision.remainingMs).to.equal(7000)
+    expect(decision.seekMs).to.equal(60_000)
+    expect(decision.autoplay).to.equal(true)
+    expect(decision.completed).to.equal(false)
+  })
+
   it('preserves full wall-clock elapsed time for decoded-duration loop seeking', () => {
     const { resolveScheduledResumePosition } = require('../../../src/common/playback-policy.ts')
     const startsAt = new Date('2026-06-19T10:00:00.000Z').toISOString()

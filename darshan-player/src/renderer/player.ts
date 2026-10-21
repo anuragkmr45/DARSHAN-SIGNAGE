@@ -20,6 +20,7 @@ import { createPdfPlaybackElement } from './pdf-playback'
 import { createWebpagePlaybackElement } from './webpage-playback'
 import { DeferredPlaybackGate } from './deferred-playback-gate'
 import {
+  resolveFailedSingleItemRetryPosition,
   resolveScheduledResumePosition,
 } from '../common/playback-policy'
 import { resolvePlayerContentSource, shouldDisplaySecurityLock } from '../common/player-content-source'
@@ -27,6 +28,7 @@ import {
   computeSceneStageFrame,
   prepareElementForFadeIn,
   prepareElementForFadeOut,
+  resolveSceneSlotOccurrenceBoundaryDelayMs,
   resolveSceneSlotRecoveryDelayMs,
   shouldAdvanceSceneSlot,
   teardownScheduledElementTree,
@@ -42,6 +44,7 @@ export {
   prepareElementForFadeIn,
   prepareElementForFadeOut,
   resolveOpacityTransitionStyle,
+  resolveSceneSlotOccurrenceBoundaryDelayMs,
   resolveSceneSlotRecoveryDelayMs,
   shouldAdvanceSceneSlot,
   teardownScheduledElementTree,
@@ -66,6 +69,12 @@ type PlaybackProgressContext = PlaybackProgressIdentity & {
   itemDisplayMs?: number
 }
 
+type ScheduledMediaOptions = {
+  scheduleId?: string
+  singleItemFrame?: boolean
+  retryingFailedItem?: boolean
+}
+
 class Player {
   private static readonly FALLBACK_STATUS_GUARD_MS = 2000
   private canvas: HTMLCanvasElement | null = null
@@ -86,7 +95,9 @@ class Player {
   private pendingTransition?: PendingTransition
   private activeSceneId?: string
   private activeSlotPlaybacks = new Map<string, ActiveSlotPlayback>()
-  private deferredPlayback = new DeferredPlaybackGate<{ item: TimelineItem; scheduleId?: string }>()
+  private deferredPlayback = new DeferredPlaybackGate<{ item: TimelineItem } & ScheduledMediaOptions>()
+  private topLevelRecoveryTimer?: number
+  private topLevelRenderAbortController?: AbortController
 
   constructor() {
     this.initializeElements()
@@ -180,6 +191,7 @@ class Player {
               {
                 item: data.item,
                 scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+                singleItemFrame: data.singleItemFrame === true,
               },
               this.latestPresentationRevision,
             )
@@ -195,6 +207,7 @@ class Player {
         this.setActiveSource('schedule')
         this.playMedia(data.item, {
           scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+          singleItemFrame: data.singleItemFrame === true,
         }).catch((error) => {
           this.log('error', 'Failed to play media', { error: error.message })
           this.showFallback(error.message)
@@ -257,7 +270,10 @@ class Player {
     if (deferred) {
       this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
       this.setActiveSource('schedule')
-      void this.playMedia(deferred.item, { scheduleId: deferred.scheduleId }).catch((error) => {
+      void this.playMedia(deferred.item, {
+        scheduleId: deferred.scheduleId,
+        singleItemFrame: deferred.singleItemFrame,
+      }).catch((error) => {
         this.log('error', 'Failed to play deferred media', { error: error.message })
         this.showFallback(error.message)
       })
@@ -337,8 +353,12 @@ class Player {
   /**
    * Play media item
    */
-  private async playMedia(item: TimelineItem, options: { scheduleId?: string } = {}): Promise<void> {
+  private async playMedia(item: TimelineItem, options: ScheduledMediaOptions = {}): Promise<void> {
+    this.clearTopLevelRecoveryTimer()
+    this.abortTopLevelRender()
     const sessionId = ++this.playbackSession
+    const renderAbortController = item.type === 'video' ? new AbortController() : undefined
+    this.topLevelRenderAbortController = renderAbortController
     this.log('info', 'Playing media', { itemId: item.id, type: item.type })
     const transitionDurationMs =
       this.pendingTransition?.nextId === item.id ? this.pendingTransition.durationMs : undefined
@@ -387,7 +407,15 @@ class Player {
 
       let element: HTMLElement
       let shouldWrapEmergencyMedia = item.type !== 'message' && typeof item.meta?.['emergency_message'] === 'string'
-      const resumeDecision = await this.resolveSingleItemResumeDecision(item, options.scheduleId)
+      const normalResumeDecision = await this.resolveSingleItemResumeDecision(item, options.scheduleId)
+      const resumeDecision = options.retryingFailedItem === true
+        ? resolveFailedSingleItemRetryPosition({
+            items: [item],
+            startsAt:
+              this.getStringMeta(item, 'scheduleWindowStartsAt') || this.getStringMeta(item, 'scheduleStartsAt'),
+            serverTimeOffsetMs: this.getNumberMeta(item, 'serverTimeOffsetMs') || 0,
+          })
+        : normalResumeDecision
       const progressContext = this.buildPlaybackProgressContext(item, {
         scheduleId: options.scheduleId,
       })
@@ -397,7 +425,14 @@ class Player {
           element = await this.renderImage(item)
           break
         case 'video':
-          element = await this.renderVideo(item, resumeDecision)
+          element = await this.renderVideo(
+            item,
+            resumeDecision,
+            (error) => {
+              this.handleTopLevelVideoFailure(item, error, sessionId, options)
+            },
+            renderAbortController?.signal,
+          )
           this.attachVideoProgressReporter(element as HTMLVideoElement, item, progressContext)
           break
         case 'pdf':
@@ -447,7 +482,15 @@ class Player {
         this.currentElement = fallback
         return
       }
+      if (item.type === 'video' && sessionId === this.playbackSession) {
+        this.handleTopLevelVideoFailure(item, error as Error, sessionId, options)
+        return
+      }
       throw error
+    } finally {
+      if (this.topLevelRenderAbortController === renderAbortController) {
+        this.topLevelRenderAbortController = undefined
+      }
     }
   }
 
@@ -771,7 +814,11 @@ class Player {
    * Render PDF
    */
   private async renderPDF(item: TimelineItem): Promise<HTMLElement> {
-    return createPdfPlaybackElement(this.getMediaSource(item), item.pageNumber ?? 1)
+    return createPdfPlaybackElement(this.getMediaSource(item), item.pageNumber ?? 1, {
+      itemId: item.id,
+      mediaId: item.mediaId,
+      snapshotId: this.getStringMeta(item, 'snapshotId'),
+    })
   }
 
   /**
@@ -1023,6 +1070,54 @@ class Player {
     fallback.appendChild(msg)
 
     this.showElement(fallback)
+  }
+
+  private handleTopLevelVideoFailure(
+    item: TimelineItem,
+    error: Error,
+    sessionId: number,
+    options: ScheduledMediaOptions,
+  ): void {
+    if (sessionId !== this.playbackSession || !this.canRenderScheduledContent() || !this.mediaContainer) {
+      return
+    }
+
+    this.log('error', 'Scheduled video unavailable', {
+      itemId: item.id,
+      error: error.message,
+      singleItemFrame: options.singleItemFrame === true,
+    })
+    const unavailable = this.createMediaPreviewCard(item, 'Unavailable', 'This video could not be played.')
+    this.showElement(unavailable, undefined, 0)
+    this.currentElement = unavailable
+
+    if (options.singleItemFrame !== true) {
+      return
+    }
+
+    const retryDelayMs = resolveSceneSlotRecoveryDelayMs(item.displayMs)
+    this.topLevelRecoveryTimer = window.setTimeout(() => {
+      this.topLevelRecoveryTimer = undefined
+      if (sessionId !== this.playbackSession || !this.canRenderScheduledContent()) {
+        return
+      }
+      void this.playMedia(item, { ...options, retryingFailedItem: true }).catch((retryError) => {
+        this.log('error', 'Failed to retry scheduled video', { error: (retryError as Error).message })
+      })
+    }, retryDelayMs)
+  }
+
+  private clearTopLevelRecoveryTimer(): void {
+    if (this.topLevelRecoveryTimer === undefined) {
+      return
+    }
+    window.clearTimeout(this.topLevelRecoveryTimer)
+    this.topLevelRecoveryTimer = undefined
+  }
+
+  private abortTopLevelRender(): void {
+    this.topLevelRenderAbortController?.abort()
+    this.topLevelRenderAbortController = undefined
   }
 
   private showCompatibilityPlaceholder(result: CompatResult, item: TimelineItem): void {
@@ -1285,6 +1380,48 @@ class Player {
       let nextElement: HTMLElement | undefined
       let pendingRuntimeError: Error | undefined
       let runtimeFailureHandled = false
+      const shouldAdvance = shouldAdvanceSceneSlot(slot.items.length)
+      const resumeDecision =
+        resumeOverride && resumeOverride.index === normalizedIndex
+          ? resumeOverride
+          : resolveScheduledResumePosition({
+              items: [item],
+              startsAt: sceneStartsAt,
+              serverTimeOffsetMs,
+            })
+
+      // Own the occurrence boundary independently from asynchronous media
+      // loading. A decode/load failure must not restart the item duration.
+      if (shouldAdvance && !resumeDecision.completed) {
+        const boundaryDelayMs = resolveSceneSlotOccurrenceBoundaryDelayMs(
+          item.displayMs,
+          delayOverrideMs,
+          resumeDecision.remainingMs,
+        )
+        const timer = window.setTimeout(() => {
+          timers.delete(timer)
+          if (disposed || generation !== renderGeneration) {
+            return
+          }
+          // End the old occurrence at its wall-clock boundary even when the
+          // following item is still resolving or the current decoder is hung.
+          renderAbortController.abort()
+          renderGeneration += 1
+          if (activeElement) {
+            this.disposeScheduledElement(activeElement)
+            activeElement = undefined
+          }
+          this.clearActiveSlotPlayback(slot.id)
+          if (sceneStartsAt) {
+            void resolveScenePosition().then((nextPosition) => {
+              void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
+            })
+          } else {
+            void showSlotItem(normalizedIndex + 1)
+          }
+        }, boundaryDelayMs)
+        timers.add(timer)
+      }
 
       const handleVideoRuntimeError = (error: Error) => {
         if (!nextElement) {
@@ -1302,7 +1439,7 @@ class Player {
         })
 
         this.disposeScheduledElement(nextElement)
-        const placeholder = this.createMediaPreviewCard(item, 'Preview unavailable', error.message)
+        const placeholder = this.createMediaPreviewCard(item, 'Unavailable', 'This video could not be played.')
         placeholder.style.opacity = '1'
         container.appendChild(placeholder)
         activeElement = placeholder
@@ -1312,7 +1449,12 @@ class Player {
           const retryDelayMs = resolveSceneSlotRecoveryDelayMs(item.displayMs)
           const timer = window.setTimeout(() => {
             timers.delete(timer)
-            void showSlotItem(normalizedIndex)
+            const retryResumeDecision = resolveFailedSingleItemRetryPosition({
+              items: [item],
+              startsAt: sceneStartsAt,
+              serverTimeOffsetMs,
+            })
+            void showSlotItem(normalizedIndex, undefined, retryResumeDecision)
           }, retryDelayMs)
           timers.add(timer)
         }
@@ -1328,14 +1470,6 @@ class Player {
           source: item.localUrl || item.localPath || item.remoteUrl || item.url || null,
         })
 
-        const resumeDecision =
-          resumeOverride && resumeOverride.index === normalizedIndex
-            ? resumeOverride
-            : resolveScheduledResumePosition({
-                items: [item],
-                startsAt: sceneStartsAt,
-                serverTimeOffsetMs,
-              })
         const renderedElement = await renderIntoSlot(
           item,
           resumeDecision,
@@ -1401,21 +1535,6 @@ class Player {
             page_number: item.type === 'pdf' ? item.pageNumber ?? 1 : undefined,
           })
         }
-        if (shouldAdvanceSceneSlot(slot.items.length) && !resumeDecision.completed) {
-          const delayMs = delayOverrideMs ?? resumeDecision.remainingMs ?? Math.max(250, item.displayMs)
-          const timer = window.setTimeout(() => {
-            timers.delete(timer)
-            if (sceneStartsAt) {
-              void resolveScenePosition().then((nextPosition) => {
-                void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
-              })
-            } else {
-              void showSlotItem(normalizedIndex + 1)
-            }
-          }, delayMs)
-          timers.add(timer)
-        }
-
         if (pendingRuntimeError) {
           handleVideoRuntimeError(pendingRuntimeError)
         }
@@ -1430,7 +1549,11 @@ class Player {
           error: (error as Error).message,
         })
 
-        const placeholder = this.createMediaPreviewCard(item, 'Preview unavailable', (error as Error).message)
+        const placeholder = this.createMediaPreviewCard(
+          item,
+          'Unavailable',
+          item.type === 'video' ? 'This video could not be played.' : 'This item could not be displayed.',
+        )
         placeholder.style.opacity = '1'
         while (container.firstChild) {
           this.disposeScheduledElement(container.firstChild as HTMLElement)
@@ -1438,21 +1561,19 @@ class Player {
         container.appendChild(placeholder)
         activeElement = placeholder
         this.clearActiveSlotPlayback(slot.id)
-        const shouldAdvance = shouldAdvanceSceneSlot(slot.items.length)
-        const delayMs = !shouldAdvance
-          ? resolveSceneSlotRecoveryDelayMs(item.displayMs)
-          : delayOverrideMs ?? Math.max(250, item.displayMs)
-        const timer = window.setTimeout(() => {
-          timers.delete(timer)
-          if (shouldAdvance && sceneStartsAt) {
-            void resolveScenePosition().then((nextPosition) => {
-              void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
+        if (!shouldAdvance) {
+          const delayMs = resolveSceneSlotRecoveryDelayMs(item.displayMs)
+          const timer = window.setTimeout(() => {
+            timers.delete(timer)
+            const retryResumeDecision = resolveFailedSingleItemRetryPosition({
+              items: [item],
+              startsAt: sceneStartsAt,
+              serverTimeOffsetMs,
             })
-          } else {
-            void showSlotItem(shouldAdvance ? normalizedIndex + 1 : normalizedIndex)
-          }
-        }, delayMs)
-        timers.add(timer)
+            void showSlotItem(normalizedIndex, undefined, retryResumeDecision)
+          }, delayMs)
+          timers.add(timer)
+        }
       }
     }
 
@@ -1485,6 +1606,8 @@ class Player {
   }
 
   private clearScheduledPlayback(reason: string): void {
+    this.clearTopLevelRecoveryTimer()
+    this.abortTopLevelRender()
     this.playbackSession += 1
     this.pendingTransition = undefined
     this.activeSceneId = undefined

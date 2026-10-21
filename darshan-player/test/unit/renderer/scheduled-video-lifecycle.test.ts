@@ -213,6 +213,35 @@ describe('Scheduled video lifecycle', () => {
     expect(cancelledError.called).to.equal(false)
   })
 
+  it('reports a non-looping video that stalls after playback starts', async () => {
+    const clock = sinon.useFakeTimers()
+    const {
+      attachScheduledVideoLifecycle,
+      ScheduledVideoPlaybackError,
+      SCHEDULED_VIDEO_STALL_TIMEOUT_MS,
+    } = require('../../../src/renderer/scheduled-video-lifecycle.ts')
+    const video = new FakeVideo()
+    const runtimeError = sinon.spy()
+    const lifecycle = attachScheduledVideoLifecycle(video as unknown as HTMLVideoElement, {
+      itemId: 'non-loop-video-stall',
+      displayMs: 30_000,
+      loop: false,
+      autoplay: true,
+      seekMs: 0,
+      onRuntimeError: runtimeError,
+    })
+
+    video.dispatchEvent(new Event('loadedmetadata'))
+    await lifecycle.ready
+    video.dispatchEvent(new Event('stalled'))
+    await clock.tickAsync(SCHEDULED_VIDEO_STALL_TIMEOUT_MS)
+
+    expect(runtimeError.calledOnce).to.equal(true)
+    expect(runtimeError.firstCall.args[0]).to.be.instanceOf(ScheduledVideoPlaybackError)
+    expect(runtimeError.firstCall.args[0].code).to.equal('VIDEO_PLAYBACK_STALLED')
+    lifecycle.dispose()
+  })
+
   it('cancels the stall watchdog when playback progress resumes', async () => {
     const clock = sinon.useFakeTimers()
     const {
