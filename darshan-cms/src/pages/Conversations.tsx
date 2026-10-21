@@ -73,6 +73,13 @@ import type { ChatPendingUiMessage } from "@/components/chat/types";
 const MESSAGES_LIMIT = 50;
 const READ_DEBOUNCE_MS = 900;
 
+type ChatStatus = {
+  code?: string;
+  message: string;
+  mode?: "READ_ONLY" | "MUTED" | "BANNED";
+  until?: string;
+};
+
 const getAttachmentId = (attachment: string | { media_id?: string; mediaId?: string }) =>
   typeof attachment === "string" ? attachment : attachment.media_id || attachment.mediaId;
 
@@ -216,12 +223,7 @@ export default function Conversations() {
   const [createOpen, setCreateOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [chatStatus, setChatStatus] = useState<{
-    code?: string;
-    message: string;
-    mode?: "READ_ONLY" | "MUTED" | "BANNED";
-    until?: string;
-  } | null>(null);
+  const [chatStatus, setChatStatus] = useState<ChatStatus | null>(null);
   const [pendingUiMessages, setPendingUiMessages] = useState<ChatPendingUiMessage[]>([]);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [newMessagesFromSeq, setNewMessagesFromSeq] = useState<number | null>(null);
@@ -497,7 +499,7 @@ export default function Conversations() {
     return map;
   }, [allMediaIds, mediaQueries]);
 
-  const archivedStatus =
+  const archivedStatus: ChatStatus | null =
     selectedConversation?.state === "ARCHIVED"
       ? { code: "CHAT_ARCHIVED", message: "Conversation is archived and read-only.", mode: "READ_ONLY" as const }
       : null;
