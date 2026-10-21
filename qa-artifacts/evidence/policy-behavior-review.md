@@ -4,6 +4,14 @@ Static review of `release-01`, commit `a6e401d2479cd0dee34c33552671cd0f86d4d173`
 
 **Supersession notice, 2026-10-16:** sections BQ-002, BQ-003, BQ-006, BQ-007, BQ-008 and BQ-009 below are retained as point-in-time pre-fix findings. Their current acceptance behavior and source implementation are in `authorization-session-requests-review.md`, BR-055/056/067/068/085/086/091..096 and cases `AUTHN-04`, `AUTHZ-01..03`, `AUTHZ-06`, `AUTHZ-08..13`. Current code protects only the last active SUPER_ADMIN, scopes directories by department, enforces target-aware emergencies, disables general Requests, uses permission-driven custom roles and broadcasts/revalidates session invalidation. Runtime proof remains open.
 
+**Supersession notice, 2026-10-17:** BQ-004 below is also a historical
+pre-fix finding. Current secure mode uses one exact 120-second authenticated
+backend lease, stops every playback authority, purges only media cache and
+requires ordered identity/fresh-snapshot/content/authority recovery before
+unlock. See BR-053/069/107, `PLAYER-03..04`, `PLAYER-16` and
+`playback-recovery-developer-verification-2026-10-21.md`. Two real Electron
+120-second journeys and changed-authority recoveries passed.
+
 This distinguishes intended acceptance from implemented behavior. Source-confirmed branches are not production execution evidence. The recommendations below are test-planning targets, not implemented fixes.
 
 ## BQ-002: SUPER_ADMIN Accounts

@@ -4,6 +4,15 @@ Review date: 2026-10-15
 Baseline: `release-01` at `8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2`, plus the uncommitted document-page and video-loop reliability implementation in this workspace.
 Method: repeated static data-flow review and deterministic checks, followed by a disposable local CMS/API/database/object-store/browser/Linux Electron run. Detailed execution results and screenshots are in `runtime-2026-10-15/runtime-validation.md`. No Windows or representative physical-display test was run.
 
+**2026-10-17 addendum:** all release players will be upgraded. Page >1 remains
+blocked until every target has connected and reported
+`pdf_page_selection_v1`; mixed-version playback is no longer an acceptance
+scenario. CMS now preserves a restored selection made invalid by a refreshed
+page count, and the player shows exact `Unavailable` with structured
+`DOCUMENT_PAGE_OUT_OF_RANGE` context without substituting another page. See
+`playback-recovery-developer-verification-2026-10-21.md`; two current Electron
+visual passes show distinct labeled pages 2 and 5 plus the invalid-page surface.
+
 ## Intended behavior
 
 Each presentation occurrence of a document selects one static physical PDF page. The same media may appear more than once and select a different page each time. A missing legacy selection is page 1. There is no automatic page progression.
@@ -23,7 +32,7 @@ Accepted document extensions are `.pdf`, `.ppt`, `.pptx`, `.doc`, `.docx`, `.xls
 
 ## Compatibility and persistence
 
-Migration `0044_document_page_selection.sql` adds nullable positive integers to media, legacy presentation items, layout-slot items and proof-of-play. Null selection remains compatible as page 1. A dry-run-by-default backfill inspects only READY documents with a missing count; `--apply` is required to write values. Mixed player fleets are protected by the publish capability gate.
+Migration `0044_document_page_selection.sql` adds nullable positive integers to media, legacy presentation items, layout-slot items and proof-of-play. Null selection remains compatible as page 1. A dry-run-by-default backfill inspects only READY documents with a missing count; `--apply` is required to write values. The publish capability gate is now the deployment prerequisite: every release player is upgraded and connects once before page >1 is allowed.
 
 ## Corner-case simulation
 
@@ -40,8 +49,8 @@ Migration `0044_document_page_selection.sql` adds nullable positive integers to 
 | Invalid layout slot / duplicate slot order / non-READY media | Entire replacement rejected; old assignment should remain | DB-backed invalid page/non-document and duplicate-order subset passed |
 | Concurrent atomic replacement | Transaction avoids partial row sets; last successful serialized replacement requires DB concurrency verification | Not Tested |
 | Publish after media replacement/count drift | Publish revalidation rejects stale out-of-range selection | Not Tested |
-| Old player + page 1 | Compatible | Not Tested |
-| Old player + page >1 | Publish conflict `UNSUPPORTED_DOCUMENT_PAGE_SELECTION` | Not Tested |
+| Updated player has not yet reported capability + page 1 | Compatible | Focused automation passed |
+| Any concrete target has not yet reported capability + page >1 | Publish conflict `UNSUPPORTED_DOCUMENT_PAGE_SELECTION`; update/connect every target before rollout | Focused automation passed; fleet deployment proof pending |
 | PDF URL expires or cache misses | Existing retry/cache behavior applies; renderer shows error if no readable PDF | Not Tested |
 | Resize/high-DPI/multi-slot PDFs | Contain-fit render; player raster budget bounds two-canvas allocations | Not Tested |
 | Playback changes only page | Playlist fingerprint changes and new page should render | Runtime observed across pages 1/10/19 |
@@ -65,4 +74,4 @@ The run provides targeted evidence for browser canvas output, DB-backed replacem
 
 ## Remaining execution gates
 
-Complete the still-open portions of `FILE-03`, `FILE-04`, `FILE-06`, `UI-05`, `API-05`, `API-06`, `DATA-05`, `CONC-06`, `PLAYER-10`, `OBS-03`, `COMP-04`, and `PERF-05` in the approved QA environment. Apply migration/backfill only to a disposable database first. Validate fresh-package Windows and Ubuntu physical output, long-run rendering and mixed-fleet capability gating before release. Review `R-21` through `R-23` before enabling the CMS control for a mixed fleet.
+Complete the still-open portions of `FILE-03`, `FILE-04`, `FILE-06`, `UI-05`, `API-05`, `API-06`, `DATA-05`, `CONC-06`, `PLAYER-10`, `OBS-03`, `COMP-04`, and `PERF-05` in the approved QA environment. Apply migration/backfill only to a disposable database first. Validate fresh-package Windows and Ubuntu physical output, long-run rendering and the all-target update/connect capability prerequisite before release. Review `R-21` through `R-23` before enabling page >1 for the release fleet.

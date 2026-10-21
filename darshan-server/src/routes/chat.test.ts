@@ -120,6 +120,16 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     const messageId = randomUUID();
     const secondUserId = randomUUID();
 
+    await db.insert(schema.users).values({
+      id: secondUserId,
+      email: `archived-chat-peer-${secondUserId}@example.com`,
+      password_hash: await hashPassword('Password123!'),
+      first_name: 'Archived',
+      last_name: 'Peer',
+      role_id: testUser.role_id,
+      is_active: true,
+    });
+
     await db.insert(schema.chatConversations).values({
       id: conversationId,
       type: 'GROUP_CLOSED',

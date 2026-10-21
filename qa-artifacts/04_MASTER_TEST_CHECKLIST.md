@@ -1,10 +1,10 @@
 # Master Human QA Checklist
 
-Baseline: uncommitted `release-01` working tree based on `c680c0a`. Webpage and
-default-priority developer evidence is in
-`evidence/webpage-default-priority-developer-verification-2026-10-17.md`;
-human QA fields remain unexecuted. Execute remaining work only on authorized
-isolated test environments. Each checkbox names detailed rows in
+Baseline: uncommitted `release-01` working tree based on `d8281db`. Playback
+recovery developer evidence is in
+`evidence/playback-recovery-developer-verification-2026-10-21.md`; two Linux
+Electron developer runs passed, while human QA fields remain unexecuted.
+Execute remaining work only on authorized isolated test environments. Each checkbox names detailed rows in
 `05_TEST_CASES.csv`; QA records actual status, evidence and defects there.
 
 ## Identity, Access And Privacy
@@ -25,11 +25,13 @@ isolated test environments. Each checkbox names detailed rows in
 
 - [ ] `FILE-01..03`: supported/unsupported MIME, 500 MiB production cap, hashing, multipart resume, exact object size/parts, retries, conversion tools and worker failure.
 - [ ] `FILE-03`, `FILE-04`, `FILE-06`: native PDF and converted `.ppt/.pptx/.doc/.docx/.xls/.xlsx/.csv` stay PROCESSING until final-PDF page inspection; encrypted/malformed output fails; valid page counts match the playable PDF.
-- [ ] `UI-05`, `API-05`, `API-06`, `DATA-05`, `CONC-06`: each occurrence defaults to page 1, accepts only an in-range integer, can reuse one document with different pages, previews the chosen page, saves atomically, freezes it in the snapshot, and handles legacy nulls.
-- [ ] `PLAYER-08`, `PLAYER-10`, `COMP-04`, `PERF-05`: the selected page—not always page 1—renders with correct contain fit on approved browsers/displays; page-only updates refresh playback; multi-slot/high-DPI PDFs remain within the raster budget; do not expect all-page progression.
+- [ ] `UI-05`, `API-05`, `API-06`, `DATA-05`, `CONC-06`: each occurrence defaults to page 1, accepts only an in-range integer, can reuse one document with different pages, previews the chosen page, saves atomically, freezes it in the snapshot, and handles legacy nulls. A restored value made invalid by a refreshed page count remains visible and blocks progression; it is never silently clamped.
+- [ ] `API-06`, `COMP-04`: every release player is updated and connects once to report `pdf_page_selection_v1`; page >1 remains blocked until every concrete target reports it. Mixed-version playback is not an accepted rollout mode; page 1 remains compatible when capability data is absent.
+- [ ] `PLAYER-08`, `PLAYER-10`, `COMP-04`, `PERF-05`: the selected page—not always page 1—renders with correct contain fit on approved browsers/displays; page-only updates refresh playback; multi-slot/high-DPI PDFs remain within the raster budget. A post-publish page mismatch shows exact heading `Unavailable`, emits safe structured context and never renders a substitute page.
 - [ ] `UI-06`, `API-07`: Loop video is occurrence-specific, visible in author/review/request views, survives draft/API/publish round trips, defaults legacy values to Off, normalizes non-video over-posting to false, and rejects duplicate explicit same-slot order without a partial replacement.
-- [ ] `PLAYER-11`: a loop-enabled single video repeats complete native media cycles on one mounted element and active identity until schedule end; Loop Off plays once; item display duration does not remount the successful single item.
-- [ ] `PLAYER-12`: late join/restart uses decoded-duration modulo; rejected play, load/decode error, stall and unexpected end recover visibly and within bounds; multiple slots remain independent; multi-item slots advance; video plus selected-PDF playback and every takeover/end path clean up safely.
+- [ ] `PLAYER-11`: a loop-enabled single video repeats complete native media cycles on one mounted element and active identity until schedule end; Loop Off plays once; item display duration does not remount the successful single item; display and audio stop within 250 ms of the hard boundary.
+- [ ] `PLAYER-12..14`: rejected play, load/decode error, stall and unexpected end produce one exact `Unavailable` state. A multi-item frame advances at its original wall-clock boundary. A one-item layout/fullscreen frame retries the same item at `clamp(duration, 1–30 seconds)` with one timer/attempt, cancelled by every authority change or disposal.
+- [ ] `PLAYER-15`: loop/non-loop, one/many item, one/many slot and failing/retrying media all stop at the server-adjusted schedule end within 250 ms; completion records authority end, no display/audio/timer/callback survives, and the next authority is selected without a zero-delay loop.
 - [ ] `FILE-05`: delete permission, reference conflict, soft/hard object removal, partial S3 failure, chat cleanup and no accidental recycle promise; BQ-020 recoverability is TBD.
 - [ ] `FUN-01..02`, `UI-01`: layout bounds/slots, presentation timing/order/fit/audio, CMS form validation and error recovery.
 - [ ] `FUN-08`, `PLAYER-09`, `WEB-01..06`: policy-controlled HTTP/HTTPS, every redirect/navigation hop, resource hosts, DNS/CIDR rebinding, invalid trust, unsupported login mechanisms, manual/24-hour refresh, latest-success preservation, revision propagation/cache fallback, corrupt preview and crash recovery. Expected: no unapproved destination or credentials are used, and refresh failure never replaces the last successful preview.
@@ -43,7 +45,7 @@ isolated test environments. Each checkbox names detailed rows in
 - [ ] `FUN-07`, `CONC-03`: emergency READY media/message capability, selected targets, severity/recency ordering, duplicate key, clear/expiry, offline policy and safe fallback.
 - [ ] `PLAYER-01..02`, `API-02`: device pairing/recovery/revocation, signed REST/WSS, snapshot 304/404 and convergence through polling when wake-ups fail.
 - [ ] `API-03`, `PLAYER-06`, `CONC-05`: command lease/ACK, screenshot, display selection, expiration and nonrepeated destructive commands.
-- [ ] `PLAYER-03..04`: two-minute production outage lock, emergency stop, cached media erase, identity/PoP preservation, purge failure and offline restart.
+- [ ] `PLAYER-03..04`, `PLAYER-16`: the secure deadline is exactly 120 seconds after the last authenticated success; reachability-only heartbeat cannot renew or unlock it. Lock stops schedule/default/emergency and purges only media cache. Recovery is single-flight and ordered identity validation -> forced fresh snapshot -> current-media sync/check -> authority apply -> unlock; stale authority never resumes.
 - [ ] `PLAYER-05`, `COMP-01..03`: fullscreen kiosk, display choice/orientation/DPI, real Windows x64 and Ubuntu desktop packages, X11/Wayland difference, CMS browsers. Site hardware/browser/accessibility matrix remains BQ-016.
 
 ## Collaboration, Evidence And Reports

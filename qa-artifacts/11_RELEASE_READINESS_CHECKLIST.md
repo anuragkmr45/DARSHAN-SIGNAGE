@@ -16,6 +16,11 @@ The later live requirements 1-18 run is in
 `evidence/runtime-2026-10-17/runtime-validation.md`; 1-17 passed the bounded
 developer scenarios and requirement 18 failed.
 
+Requirements 19-24 source/automated verification and two current Linux
+Electron runtime passes are recorded in
+`evidence/playback-recovery-developer-verification-2026-10-21.md`. This is
+developer evidence, not an independent QA or release pass.
+
 ## Current Targeted Feature Evidence
 
 - [x] Disposable Linux CMS/API/Electron flow demonstrated independent PDF pages, video Loop On/Off, multiple items, simultaneous slots, corrupt-media advance, schedule hard stop, cached offline restart/recovery, take-down and page-aware PoP persistence.
@@ -26,10 +31,12 @@ developer scenarios and requirement 18 failed.
 - [ ] `AUTHZ-07`, `DATA-06`, `CONC-07` and `UI-07` require independent QA runtime evidence; no Pass/Actual Result may be inferred from the checked developer items above.
 - [ ] Fresh-machine installation/reboot tests for the generated Linux packages remain pending.
 - [ ] Windows x64 package/install/kiosk/playback and supported physical display matrix remain pending.
-- [ ] Long soak, approved performance limits, two-minute secure lock/cache purge, mixed-version capability rollout, accessibility and full product/security regression remain pending.
+- [ ] Long soak, approved performance limits, physical-player secure lock/cache purge/recovery, all-player update-and-connect capability deployment, accessibility and full product/security regression remain pending.
 - [x] Server, CMS and player blocking-error lint exits successfully. The two no-behavior errors found during the review were corrected; the existing warning backlog remains technical debt and is not represented as remediated.
 - [x] Webpage/default-priority focused developer gates passed: real-PostgreSQL settings/media routes, migration unit, server policy/jobs/default resolver, one-worker CMS flows, player full unit and fault suites, builds and release-bundle configuration.
 - [x] Live built-API/worker/Chromium developer flow exercised requirements 1-17 successfully, including real webpage capture, denied redirect reachability, retained failed-refresh preview and rendered preview fallback. This is partial developer evidence only.
+- [x] Requirements 19-24 focused player/CMS/server automation, complete player unit/integration/fault/performance suites, component builds and static QA traceability passed at the recorded working-tree baseline. This does not replace independent QA.
+- [x] Requirements 19-24 developer runtime gate passed twice with the real Linux Electron player: selected/invalid PDF pages, corrupt-video progression/retry cancellation, 41/18 ms hard stops and 120,144/120,146 ms secure lock/fresh-authority recovery. Independent QA remains open.
 - [ ] **BLOCKER — BR-102 / DEF-04 / R-38:** the no-Schedule/no-default path must show the approved standard company fallback image. Current runtime returns `NONE` and renders a text-only `No content assigned yet` card.
 - [ ] `WEB-01..06`, `DEF-01..03`, `FUN-06`, `FUN-08` and `PLAYER-09` require independent QA against controlled HTTP/HTTPS/DNS/auth/redirect fixtures, real capture/object storage and the packaged physical player.
 
@@ -59,11 +66,13 @@ developer scenarios and requirement 18 failed.
 - [ ] People directories pass same-department active-only filtering across users/operators/invites/chat pickers, guessed IDs, totals and pagination, with global `manage User` as the only global-directory exception. `AUTHZ-08`; R-31.
 - [ ] Media/Layout/Presentation creator mutation, permitted same-department read, Schedule same-department action-specific management, cross-department denial, nested closure and ADMIN organization versus SUPER_ADMIN restricted classification pass for every actor/scope. `AUTHZ-09..13`; R-02/R-25/R-26/R-27/R-32.
 - [ ] User tombstone/email reuse/list exclusion/history display, owning-department deletion counts, UI confirmation/labels/action flags, no deleted-email disclosure, upload/finalization and PROCESSING-worker commit orders, duplicate-worker safety, non-reactivation and retryable source/ready/thumbnail object cleanup pass with evidence. `DATA-06`, `CONC-07`, `REL-02`, `UI-07`; R-25/R-28.
-- [ ] Delegated emergencies are accessible in CMS and constrained to authorized direct Screens for trigger/status/history/clear; global Emergency managers control group/global targets; READY/readable media and transaction-time recheck pass. A two-minute outage still stops playback and erases media cache. `AUTHZ-03`, `PLAYER-03..04`.
+- [ ] Delegated emergencies are accessible in CMS and constrained to authorized direct Screens for trigger/status/history/clear; global Emergency managers control group/global targets; READY/readable media and transaction-time recheck pass. An exact 120-second authenticated-backend outage still stops every authority and erases only media cache. `AUTHZ-03`, `PLAYER-03..04`, `PLAYER-16`.
 - [ ] Migration `0044` is rehearsed; the document page-count backfill dry-run is reviewed before apply; malformed/encrypted failures are resolved; rollback retains nullable compatibility columns until affected snapshots/PoP age out. `DATA-05`, `FILE-06`.
 - [ ] Media upload, conversion, selected-page CMS preview, immutable snapshot, capable-player playback, page-aware PoP, webpage preview, chat and reports pass smoke/UAT on actual target hardware. `10_SMOKE_REGRESSION_UAT.md`.
-- [ ] Video-only loop selection survives CMS draft/review/request and API/snapshot round trips; a short video completes at least three native cycles on one mounted occurrence, coexists with the selected PDF page, stops at schedule/takeover/secure-lock boundaries, and has no hidden audio, retry storm, stale callback or material resource growth. `UI-06`, `API-07`, `PLAYER-11`, `PLAYER-12`, `OBS-04`, `PERF-06`; R-24.
-- [ ] Every target player has advertised `pdf_page_selection_v1`, or schedules using page >1 are demonstrably blocked. Page 1 remains compatible during rollout. `API-06`, `COMP-04`.
+- [ ] Video-only loop selection survives CMS draft/review/request and API/snapshot round trips; a short video completes at least three native cycles on one mounted occurrence, coexists with the selected PDF page, and stops at every hard boundary. Corrupt multi-item video shows `Unavailable` until its original boundary; a failed only-item frame retries once per clamped 1–30 second interval; no hidden audio, timer storm, stale callback or resource growth occurs. `UI-06`, `API-07`, `PLAYER-11..15`, `OBS-04`, `PERF-06`; R-24/R-40/R-41.
+- [ ] Every target player is updated, has connected once and has advertised `pdf_page_selection_v1`; schedules using page >1 are blocked until that prerequisite is complete. Page 1 remains compatible while capability data is absent, but mixed-version playback is not an accepted release mode. `API-06`, `COMP-04`; R-22.
+- [ ] Post-publish PDF page mismatch and CMS stale-page restoration meet BR-103: CMS preserves/blocks the invalid value; player shows exact `Unavailable`, emits safe requested/actual context, and never renders a substitute page. `UI-05`, `PLAYER-10`; R-39.
+- [ ] Secure recovery meets BR-107: locked heartbeat only reports reachability/starts one recovery; identity validation, forced fresh snapshot, current-content sync/check and authority apply precede unlock; invalid identity re-pairs, snapshot failure remains locked with bounded retry, and stale authority never resumes. `PLAYER-03..04`, `PLAYER-16`; R-05/R-42.
 - [ ] Release configuration explicitly records webpage HTTP decision, approved hosts, ports and private CIDRs. Source defaults remain fail-closed; enabling HTTP is accepted as cleartext risk. Every server/player node receives the same policy before new webpage content is published. `WEB-01..03`; R-35.
 - [ ] Manual and 24-hour automatic preview refresh, failed-refresh preservation, snapshot/default revision propagation and revision-aware packaged-player fallback pass with real object storage. `WEB-04..06`, `PLAYER-09`; R-08/R-36.
 - [ ] Default priority `0..100`, deterministic tie-break, direct-Screen precedence, legacy zero, edit preservation and two-writer stale conflict pass on the frozen database/CMS/player build. `FUN-06`, `DEF-01..03`; R-37.

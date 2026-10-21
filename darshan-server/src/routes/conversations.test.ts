@@ -81,9 +81,17 @@ describe('Conversation Routes - chat DM shim', () => {
     };
 
     const adminRole = await ensureRole('ADMIN', testRoles.ADMIN.id, {
-      grants: [{ action: 'read', subject: 'Conversation' }],
+      grants: [
+        { action: 'read', subject: 'Conversation' },
+        { action: 'read', subject: 'User' },
+      ],
     });
     const operatorRole = await ensureRole('OPERATOR', testRoles.OPERATOR.id);
+    const departmentId = randomUUID();
+    await db.insert(schema.departments).values({
+      id: departmentId,
+      name: `Legacy chat ${departmentId}`,
+    });
 
     const adminPassword = await hashPassword('Password123!');
     await db
@@ -95,6 +103,7 @@ describe('Conversation Routes - chat DM shim', () => {
         first_name: testUser.first_name,
         last_name: testUser.last_name,
         role_id: adminRole.id,
+        department_id: departmentId,
         is_active: true,
       })
       .onConflictDoUpdate({
@@ -105,6 +114,7 @@ describe('Conversation Routes - chat DM shim', () => {
           first_name: testUser.first_name,
           last_name: testUser.last_name,
           role_id: adminRole.id,
+          department_id: departmentId,
           is_active: true,
         },
       });
@@ -113,7 +123,8 @@ describe('Conversation Routes - chat DM shim', () => {
       testUser.id,
       testUser.email,
       adminRole.id,
-      adminRole.name
+      adminRole.name,
+      departmentId
     );
     await createSessionRepository().create({
       user_id: testUser.id,
@@ -130,6 +141,7 @@ describe('Conversation Routes - chat DM shim', () => {
       first_name: 'Legacy',
       last_name: 'Peer',
       role_id: operatorRole.id,
+      department_id: departmentId,
       is_active: true,
     });
   });

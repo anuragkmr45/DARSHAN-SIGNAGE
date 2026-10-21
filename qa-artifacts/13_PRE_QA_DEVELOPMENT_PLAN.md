@@ -1,5 +1,14 @@
 # Pre-QA Development Completion Plan
 
+> **Requirements 19-24 checkpoint — 2026-10-21:** PDF invalid-page,
+> corrupt-video retry/boundary, universal schedule hard-stop and secure recovery
+> implementation plus automated component gates are complete in the working
+> tree based on `d8281db`. The current CMS flow and two Linux Electron runtime
+> passes are complete. Exact evidence is in
+> `evidence/playback-recovery-developer-verification-2026-10-21.md`. Therefore
+> the older “ready for independent QA” checkpoint below is historical and does
+> not describe the current working tree.
+
 > **Webpage/default-priority closure — 2026-10-17:** policy-controlled HTTP and
 > HTTPS, unsupported login mechanisms, per-hop redirect validation,
 > latest-success revisioned previews, manual/24-hour refresh and deterministic
@@ -36,20 +45,21 @@ The build is ready to enter QA only when all three feature contracts are impleme
 
 ## Current Development Checkpoint
 
-Checkpoint date: 2026-10-17
-Overall state: **end-to-end affected developer QA complete — ready for
-independent QA execution, not release approval**
+Checkpoint date: 2026-10-21
+Overall state: **requirements 19-24 developer verification complete;
+independent QA and release gates remain — not release-approved**
 
 | Workstream | Current evidence | Remaining before QA |
 | --- | --- | --- |
 | Deleted-user ownership and tombstones | Stable ownership/tombstone behavior, affected DB/API tests, migration `0045` upgrade/repeat/failure/recovery and CMS ownership browser checks passed. Multipart creation now compensates when revocation wins before upload-session activation. | QA repeats the matrix on the frozen candidate and completes real object-store outage, two-node socket and remaining deterministic concurrency cases. |
-| Document page selection | CMS/API/player implementation, supported-format ingestion/publication, selected pages 2/5, CMS author/review browser checks and full player automation passed; earlier Linux Electron runtime evidence is retained. | QA validates the frozen build on approved physical targets, mixed capabilities, offline replay and Windows. |
+| Document page selection | CMS/API/player implementation, supported-format ingestion/publication, selected pages 2/5, CMS author/review browser checks and full player automation passed; earlier Linux Electron runtime evidence is retained. | QA validates the frozen build on approved physical targets, all-target update/connect capability, offline replay and Windows. |
 | Video looping | Occurrence-level publication and CMS Loop On review passed; player build plus all 384 unit/integration/performance/fault tests passed for native wraps, loop-off, multi-item, resume/stall and authority-boundary cleanup. | QA observes the frozen build on physical Linux/Windows targets and completes the long resource-growth soak. |
 | Runtime stack | Current production server image starts successfully against isolated PostgreSQL, Valkey and S3-compatible storage; API/worker health and live CMS authentication have been exercised. A production logger packaging defect was fixed and regression-tested. | Validate with the exact approved object-store/dependency image or retain an explicit release risk; complete player pairing, restart/offline recovery and the 30-minute combined stability observation. |
 | Authorization/session/Requests | Implemented through `a01804c`; focused unit/DB/API/browser checks passed. The built API returned `409` for last-active SUPER_ADMIN disable, `404` for general Requests, `200` for Schedule Requests and rejected a disabled user's old token immediately. | QA runs `AUTHN-04`, `AUTHZ-01..03`, `AUTHZ-06`, `AUTHZ-08..13` and `CONC-07`, especially two API nodes/live sockets, recovery CLI and the complete directory-picker matrix. |
 | Webpage playback and preview refresh | Server/player policy, release HTTP configuration, per-hop redirect checks, login cancellation, migration `0047`, manual/due refresh, revision serialization/cache and controlled renderer fallback are implemented; bounded automated gates passed. | QA runs `WEB-01..06`, `FUN-08`, `PLAYER-09` with real controlled HTTP/HTTPS/DNS/auth/redirect fixtures, object-store faults and a packaged player. |
 | Default priority | CMS/API priority `0..100`, legacy zero, deterministic resolver, preservation on media-only edits, expected revision and PostgreSQL advisory-lock serialization are implemented; route and CMS conflict tests passed. | QA runs `FUN-06`, `DEF-01..03` with overlapping groups, two real clients and end-player observation. |
-| QA package | All 111 case rows have the required planning fields, including Expected Result; the traceability matrix and developer reports are linked from `README.md`. | Leave independent QA fields unclaimed, assign owners to remaining site-policy decisions, and bind the handoff to one immutable release build. |
+| Requirements 19-24 playback/recovery | Focused CMS/player/server tests, complete player unit/integration/fault/performance suites, component builds, disposable API/worker ingestion, current-player pairing, and two Linux Electron journeys passed. | Independent QA runs the approved platform/physical-display/audio matrix, Windows coverage, capacity and soak; fleet deployment proves every player upgraded and connected once. |
+| QA package | All 116 case rows have the required planning fields, including Expected Result; the 140-row traceability matrix and developer reports are linked from `README.md`. | Leave independent QA fields unclaimed, complete the current runtime evidence, assign owners to remaining site-policy decisions, and bind the handoff to one immutable release build. |
 
 Evidence already collected is developer evidence only. It may justify `Partially Tested`; it must not be converted to an independent QA `Pass`.
 
@@ -222,13 +232,13 @@ Automated coverage:
 - Boundary matrix: page 1, last page, zero, negative, fraction, above count, unknown count and non-document over-posting.
 - Duplicate occurrence and reorder/save/restore matrix.
 - Native, converted, malformed, encrypted and conversion-failure documents.
-- Publish to capable, incapable and mixed player sets.
+- Before page >1, verify every target has the updated player and has connected once to report capability; verify publish blocks while any report is missing.
 - Offline cached playback and spooled/replayed page-aware proof-of-play.
 - Resize, high-DPI and simultaneous multi-slot rendering within the canvas memory budget.
 
 Exit condition:
 
-- The page chosen in CMS is the page persisted, published, rendered and reported; invalid changes are atomic; and mixed-version players cannot silently show the wrong page.
+- The page chosen in CMS is the page persisted, published, rendered and reported; invalid changes are atomic; and page >1 cannot publish until every updated target has reported capability.
 
 ## Phase 4 — Finish Video Looping
 
@@ -319,7 +329,7 @@ Development documentation:
 1. Update API contracts for tombstone DELETE response, ownership/permission metadata, `page_number`, `loop_enabled` and related error codes.
 2. Update onboarding/operator guidance so user deletion is described as account tombstoning, not physical deletion or asset transfer.
 3. Add migration order, backup, forward-recovery and rollback guard instructions. An older server that physically deletes users must not be used after `0045` unless deletion is disabled.
-4. Record supported extensions, conversion behavior, page default/range behavior, loop boundaries and mixed-player compatibility.
+4. Record supported extensions, conversion behavior, page default/range behavior, loop boundaries and all-target update/connect capability evidence.
 
 QA package completion:
 

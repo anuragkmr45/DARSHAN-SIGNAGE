@@ -1,16 +1,17 @@
 # System Understanding
 
-Status: CONDITIONAL QA HANDOFF, NOT RELEASE-APPROVED. The webpage
-playback/default-priority revamp has bounded developer verification, but the
-required no-Schedule/no-default company fallback image currently fails. Real
-network/capture/object-store failure, physical platforms, mixed versions,
-security, capacity and soak remain QA/release gates.
+Status: PRE-QA DEVELOPMENT VERIFICATION IN PROGRESS, NOT RELEASE-APPROVED. The
+requirements 19-24 playback/recovery source, automation and two current Linux
+Electron journeys are developer-verified.
+The required no-Schedule/no-default company fallback image also remains a
+separate blocker. Real network/capture/object-store failure, physical
+platforms, security, capacity and soak remain QA/release gates.
 
 ## Baseline And Scope
 
 - Product: DARSHAN digital signage, CMS administration, and Electron playback.
-- Branch/commit: uncommitted `release-01` working tree based on `c680c0a`.
-- Source/runtime evidence refreshed: 2026-10-17. PDF/video targeted Linux
+- Branch/commit: uncommitted `release-01` working tree based on `d8281db`.
+- Source/runtime evidence refreshed: 2026-10-21. PDF/video targeted Linux
   runtime evidence remains dated 2026-10-15. These describe disposable
   developer environments, not a production site or independent QA result.
 - 1,323 files are tracked at the base working tree; the new migration and three
@@ -34,12 +35,12 @@ Primary machine-readable inventory: `evidence/repository-inventory.json`.
 
 Business source: user answers BQ-001 through BQ-006 and follow-ups to BQ-002/003/004/008/009, 2026-09-24. These are intended outcomes, not runtime test results. Detailed comparison: `evidence/policy-behavior-review.md`.
 
-- Documents: the current requirement supersedes first-page-only playback. An author selects one static physical page per presentation occurrence; legacy/missing values remain page 1 and there is no automatic page progression. Supported document extensions are `.pdf`, `.ppt`, `.pptx`, `.doc`, `.docx`, `.xls`, `.xlsx`, and `.csv`.
-- Video loop: an enabled video occurrence repeats complete decoded-media cycles while it remains active. A successful single-item frame is not remounted on its configured display-duration tick; multi-item slots still advance at the occurrence boundary, and schedule/takeover/secure-lock cleanup is a hard stop.
+- Documents: an author selects one static physical page per presentation occurrence; legacy/missing values remain page 1 and there is no automatic progression. Every release player is updated and connects once before page >1 is allowed. Invalid restored/runtime selections remain explicit and show `Unavailable` without page substitution. Supported extensions are `.pdf`, `.ppt`, `.pptx`, `.doc`, `.docx`, `.xls`, `.xlsx`, and `.csv`.
+- Video loop/failure: an enabled occurrence repeats complete decoded-media cycles while active. Corrupt multi-item video shows `Unavailable` until its original boundary; a failed only-item frame retries at a clamped 1–30 second interval with one timer/attempt. Schedule end and every higher-authority change cancel media/retries; display/audio clearance target is <=250 ms.
 - SUPER_ADMIN: deleting, disabling or demoting the last active direct SUPER_ADMIN is blocked; one of multiple active SUPER_ADMIN accounts may be removed. Global User managers can administer user types subject to this invariant.
 - People directory: non-global users see active non-deleted people only in their own department across user/operator/invite/chat-participant surfaces; global `manage User` is the explicit exception.
 - Emergency: conditional Screen delegates control only explicitly selected authorized direct screens, including clear; `manage Emergency` controls group/global scope.
-- Offline player: lock after two minutes of backend outage, remove cached media and stop emergency playback too. Current generated defaults do not enable that policy.
+- Offline player: secure production mode locks exactly 120 seconds after the last authenticated backend success, stops schedule/default/emergency and removes only media cache. Reachability cannot unlock; identity validation, forced fresh snapshot, current-content sync and authority apply precede recovery.
 - Built-in roles: fixed; customization belongs in custom roles. Current role-editing APIs/UI are not immutable despite startup resetting default grants.
 - Session withdrawal: immediate post-commit withdrawal is required. Account/password and direct/transitive permission changes revoke affected sessions transactionally, broadcast invalidation to every API node and disconnect local user rooms. Protected socket actions revalidate the stored handshake token, so a missed broadcast still fails closed on the next protected action. The out-of-process recovery CLI still requires stopped/restarted backend instances. Test post-commit operations separately from work already in flight.
 - Integrations: management screens and their backing operations are in scope; actual SSO login, API-key request authentication and automatic webhook delivery are not release requirements.

@@ -8,6 +8,7 @@ import { closeDatabase, getDatabase, initializeDatabase, schema } from '@/db';
 import { createSessionRepository } from '@/db/repositories/session';
 import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
+import { SYSTEM_ROLE_DEFAULTS } from '@/rbac/system-roles';
 
 type RolePermissions = {
   grants: Array<{ action: string; subject: string }>;
@@ -82,12 +83,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
         { action: 'delete', subject: 'Media' },
       ],
     });
-    const adminRole = await ensureRole('ADMIN', {
-      grants: [
-        { action: 'read', subject: 'Media' },
-        { action: 'delete', subject: 'Media' },
-      ],
-    });
+    const adminRole = await ensureRole('ADMIN', SYSTEM_ROLE_DEFAULTS.ADMIN);
     const operatorRole = await ensureRole('OPERATOR', {
       grants: [
         { action: 'read', subject: 'Media' },

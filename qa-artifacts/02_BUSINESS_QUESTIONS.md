@@ -11,7 +11,9 @@ commit `a01804c`; their combined review is
 repository-relative. These areas have developer build, database/migration,
 built-API, browser and player evidence in the dated closure report; independent
 QA, multi-process live sockets and the remaining release matrix are still
-unverified. Earlier PDF/video and ownership runtime is separately linked.
+unverified. The 2026-10-21 playback/recovery implementation and two current
+Linux Electron passes are recorded in
+`evidence/playback-recovery-developer-verification-2026-10-21.md`.
 
 ## Batch 1: Core Behavior And Scope
 
@@ -21,7 +23,7 @@ Question: Should a PDF or Office document converted to PDF display only its firs
 
 Why this changes testing: A player showing only page 1 can be either correct or a blocking feature defect. Duration and page progression affect scheduling and PoP expectations.
 
-Observed implementation updated 2026-10-15: scheduling stores one selected physical page per occurrence, previews and player playback render that page, and Office/CSV conversion produces the PDF whose physical page count sets the valid range. There is no automatic progression. Legacy missing values mean page 1.
+Observed implementation updated 2026-10-17: scheduling stores one selected physical page per occurrence, previews and player playback render that page, and Office/CSV conversion produces the PDF whose physical page count sets the valid range. There is no automatic progression. Legacy missing values mean page 1. A restored invalid selection remains visible and blocks progression. Page >1 is blocked until every concrete target has updated, connected and reported `pdf_page_selection_v1`. A post-publish decoded-count mismatch shows exact `Unavailable` and never substitutes another page.
 
 Evidence: `darshan-player/src/renderer/pdf-playback.ts::render`; `darshan-server/src/jobs/index.ts` document conversion handler; `darshan-server/src/utils/libreoffice-conversion.ts`.
 
@@ -31,7 +33,7 @@ Affected areas: UC-006, UC-009, UC-017, UC-020; BR-017, BR-051; document fixture
 
 Answer: superseded by the user feature request on 2026-10-15: let the author choose the page while scheduling and show that page in preview and playback. The selection is static per occurrence; page 1 remains the compatibility default.
 
-Resolution: RESOLVED. Author-selected static page playback per scheduling occurrence is the acceptance requirement; page 1 is only the legacy/default selection. Automatic progression through later pages is not required. Successful conversion/rendering, timing and error handling still require verification; this answer is not a test result.
+Resolution: RESOLVED. Author-selected static page playback per scheduling occurrence is the acceptance requirement; page 1 is only the legacy/default selection. All release players are upgraded and connect once before page >1 rollout; mixed-version playback is not accepted. Invalid selections fail explicitly without substitution. Successful conversion/rendering and physical-platform behavior still require QA verification; this answer is not a test result.
 
 ### BQ-002: Administrator Hierarchy
 
@@ -81,7 +83,7 @@ Question: For the production acceptance baseline, should a previously validated 
 
 Why this changes testing: Continuing playback and stopping playback are opposite expected outcomes. A backend outage is not equivalent to explicit device revocation.
 
-Observed implementation: `standard`, `secure`, `high_security` and backend-required settings exist. Playback lease/grace and optional purge are separate from pairing-validation freshness. Production configuration must select the intended policy; defaults are not business approval.
+Observed implementation, refreshed 2026-10-17: `standard`, `secure`, `high_security` and backend-required settings exist. Generated production player bundles and checked examples select secure/backend-required playback. In secure mode the deadline is exactly the last authenticated backend success plus 120 seconds; legacy grace settings remain parseable but cannot extend it. Lock stops every authority and purges only media cache. While locked, reachability begins one ordered recovery but does not directly unlock.
 
 Evidence: `darshan-player/src/common/offline-security-policy.ts::evaluateSecurePlaybackState`; `darshan-player/src/main/services/player-flow.ts`; `darshan-player/src/main/services/secure-playback-guard.ts`; `darshan-player/src/main/services/snapshot-manager.ts`.
 
@@ -93,9 +95,9 @@ Answer: "lock". Business source: user answer BQ-004, 2026-09-24.
 
 Follow-up answer, 2026-09-24: "2min and erase cash file, yes emergency should stop too". The user also requested checking actual code behavior.
 
-Resolution: RESOLVED for intended behavior. Lock after two minutes of backend outage, remove cached media as part of locking and stop emergency playback as well (BR-053, BR-069). Do not extend cache deletion to identity/certificates/queued evidence without a requirement. Execution timing tolerance and purge-completion budget are not invented.
+Resolution: RESOLVED under BR-053/069/107. Lock exactly 120 seconds after the last authenticated backend success, stop schedule/default/emergency playback, and remove only media-cache content while preserving identity, certificates, logs, PoP and request queues. Runtime observation tolerance is at most one second. Recovery validates identity, force-fetches a fresh snapshot, synchronizes/checks current media, applies current authority and only then unlocks. Snapshot failure remains locked with bounded 2–30 second retry; invalid identity enters pairing recovery; stale cached authority never resumes.
 
-Code comparison: default standard mode disables secure locking and purge interval 0 disables purging; generated production player config omits overrides for these options. Secure-mode timing combines lease and grace, so 120,000 ms in the lock field alone does not enforce two minutes from physical disconnection. Lock branches suppress emergency content too; targeted media purge exists but needs failure/repopulation verification. See `evidence/policy-behavior-review.md::BQ-004`.
+Code comparison: the implementation now matches this contract in focused automation, generated production configuration and checked examples. Two real Electron runs passed the 119/120-second timing, media-purge/identity-preservation check and changed-authority recovery; see `evidence/playback-recovery-developer-verification-2026-10-21.md`.
 
 ### BQ-005: Real Integration Scope
 
@@ -377,8 +379,9 @@ Human input still needed: whether a user-facing recycle/undelete period is requi
 | --- | --- | --- | --- |
 | 1 | BQ-001, BQ-005, BQ-006 | Resolved for stated release scope | User answers, 2026-09-24 |
 | Document-page delta | BQ-001 | Superseded: occurrence-level static page selection; legacy defaults to page 1 | User request, 2026-10-15 |
+| Document playback follow-up | BQ-001 | All players updated/connected before page >1; invalid runtime page is Unavailable without substitution | User requirements 19-20, 2026-10-17 |
 | 1 follow-up | BQ-002, BQ-003 | Core rules resolved; separate edge-policy limits documented | User follow-up answers, 2026-09-24 |
-| 1 follow-up | BQ-004 | Two-minute lock, media erasure, emergency stop confirmed | User follow-up answer, 2026-09-24 |
+| 1 follow-up | BQ-004 | Exact authenticated-success +120s deadline, targeted media purge, all-authority stop and ordered fresh recovery confirmed | User requirement 24, 2026-10-17 |
 | 2a | BQ-008 | Fixed built-ins/custom-role customization confirmed | User answer, 2026-09-24 |
 | 2a | BQ-009 | Immediate withdrawal recorded as the intended acceptance rule; implementation gap retained | Latest user follow-up, 2026-09-24 |
 | 2b | BQ-010 | Self-approval and direct administrator publish confirmed | User answer, 2026-09-25 |

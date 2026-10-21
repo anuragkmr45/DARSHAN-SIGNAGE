@@ -12,6 +12,7 @@ import {
 import { createNotificationRepository } from '@/db/repositories/notification';
 import { UserRepository } from '@/db/repositories/user';
 import { hashPassword } from '@/auth/password';
+import { SYSTEM_ROLE_DEFAULTS } from '@/rbac/system-roles';
 
 async function waitForBlockedTransactions(client: PoolClient, minimum: number, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
@@ -32,19 +33,23 @@ describe('notification creation versus user deletion', () => {
   beforeAll(async () => {
     await initializeDatabase();
     const db = getDatabase();
-    const [adminRole] = await db
-      .select()
-      .from(schema.roles)
-      .where(eq(schema.roles.name, 'ADMIN'))
-      .limit(1);
-    const [operatorRole] = await db
-      .select()
-      .from(schema.roles)
-      .where(eq(schema.roles.name, 'OPERATOR'))
-      .limit(1);
-    if (!adminRole || !operatorRole) {
-      throw new Error('ADMIN and OPERATOR roles are required for notification deletion race tests');
-    }
+    const ensureRole = async (name: 'ADMIN' | 'OPERATOR') => {
+      const [existing] = await db.select().from(schema.roles).where(eq(schema.roles.name, name)).limit(1);
+      if (existing) return existing;
+
+      const [created] = await db
+        .insert(schema.roles)
+        .values({
+          id: randomUUID(),
+          name,
+          permissions: SYSTEM_ROLE_DEFAULTS[name],
+          is_system: true,
+        })
+        .returning();
+      return created;
+    };
+    const adminRole = await ensureRole('ADMIN');
+    const operatorRole = await ensureRole('OPERATOR');
     operatorRoleId = operatorRole.id;
     administratorId = randomUUID();
     await db.insert(schema.users).values({

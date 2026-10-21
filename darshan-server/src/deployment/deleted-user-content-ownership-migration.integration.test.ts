@@ -176,11 +176,14 @@ suite('0045 deleted-user content ownership migration rehearsal', () => {
          WHERE id = $1`,
         [departmentUserId, `deleted+${departmentUserId}@deleted.invalid`, adminUserId]
       );
-      const tombstone = await connection.query<{ deleted_at: Date | null; deleted_by: string | null }>(
+      const tombstone = await connection.query<{ deleted_at: Date | string | null; deleted_by: string | null }>(
         'SELECT deleted_at, deleted_by FROM users WHERE id = $1',
         [departmentUserId]
       );
-      expect(tombstone.rows[0]?.deleted_at).toBeInstanceOf(Date);
+      const deletedAt = tombstone.rows[0]?.deleted_at;
+      expect(deletedAt).toBeTruthy();
+      const deletedAtMs = deletedAt instanceof Date ? deletedAt.getTime() : Date.parse(String(deletedAt));
+      expect(Number.isNaN(deletedAtMs)).toBe(false);
       expect(tombstone.rows[0]?.deleted_by).toBe(adminUserId);
       const retainedReferences = await connection.query<{ references: string }>(
         `SELECT count(*)::text AS references

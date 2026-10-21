@@ -6,6 +6,15 @@ Baseline: `release-01` at `8e0bb6f5b93b230c2f08fe377cb52f8eccf729e2`, plus the u
 
 Method: repeated source data-flow review, production builds, lint, deterministic tests and event/timer simulation, followed by a disposable local CMS/API/database/object-store/browser/Linux Electron run with real H.264 media. Detailed execution evidence is in `runtime-2026-10-15/runtime-validation.md`. No Windows, fresh-machine package install, physical-display or long soak run was performed.
 
+**2026-10-17 addendum:** current failure behavior is stricter than this
+historical run. Every failed video uses exact `Unavailable`; multi-item failure
+holds only to the original wall-clock boundary; one-item layout/fullscreen
+failure retries at `clamp(duration, 1–30 seconds)` with one timer/attempt; and
+all media types now share the hard schedule-end deadline with a <=250 ms
+runtime target. Focused automation is recorded in
+`playback-recovery-developer-verification-2026-10-21.md`; the current Electron
+failure/boundary run and repeat passed in the disposable Linux environment.
+
 ## Confirmed behavior
 
 For a video occurrence with **Loop video** enabled, normal playback must not stop after the first media end. The video repeats complete native media cycles while that occurrence remains active. A single video occurrence remains mounted until the schedule window ends. In a multi-item slot, looping applies only while that occurrence owns its configured item interval; the slot then advances normally. Schedule end, emergency/default takeover, secure lock, snapshot replacement, scene replacement, or cleanup is a hard stop boundary.

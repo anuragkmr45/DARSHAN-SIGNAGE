@@ -1,0 +1,93 @@
+{
+  "run": "run-2",
+  "assertions": [
+    {
+      "name": "updated player advertises pdf_page_selection_v1",
+      "pass": true
+    },
+    {
+      "name": "duplicate PDF occurrence remains rendered after page transition",
+      "pass": true
+    },
+    {
+      "name": "invalid PDF page is explicit and never substituted",
+      "pass": true
+    },
+    {
+      "name": "corrupt multi-item video advances near original boundary",
+      "pass": true,
+      "elapsed_ms": 6495
+    },
+    {
+      "name": "one-item corrupt retry has bounded DOM growth",
+      "pass": true,
+      "max": 0,
+      "additions": 0
+    },
+    {
+      "name": "snapshot replacement cancels corrupt retry",
+      "pass": true
+    },
+    {
+      "name": "emergency authority cancels stale retry",
+      "pass": true
+    },
+    {
+      "name": "schedule boundary disposes video within 250 ms",
+      "pass": true,
+      "delta_ms": 18
+    },
+    {
+      "name": "security timing anchored to a fresh authenticated heartbeat",
+      "pass": true,
+      "heartbeat_age_ms": 164
+    },
+    {
+      "name": "valid content remains at 119 seconds",
+      "pass": true,
+      "overlayHidden": true,
+      "pdfCount": 1
+    },
+    {
+      "name": "security lock occurs at 120 seconds within one second",
+      "pass": true,
+      "elapsed_ms": 120146,
+      "api_stop_offset_ms": 164
+    },
+    {
+      "name": "lock purges media cache and preserves identity",
+      "pass": true,
+      "media_files": [],
+      "preserved_cache_state": [
+        "default-media.json",
+        "last-snapshot.json",
+        "playback-progress.json",
+        "pop-spool-state.json",
+        "request-queue.json",
+        "request-queue.state.json"
+      ],
+      "identity_files": 5
+    },
+    {
+      "name": "lock preserves proof-of-play spool",
+      "pass": true,
+      "before": 0,
+      "after": 0
+    },
+    {
+      "name": "recovery validates and applies fresh authority",
+      "pass": true
+    }
+  ],
+  "timings": {
+    "multi_item_advance_ms": 6495,
+    "hard_stop_delta_ms": 18,
+    "secure_lock_delta_ms": 120146
+  },
+  "screenshots": [
+    "run-2-pdf-page-2.png",
+    "run-2-pdf-page-5.png",
+    "run-2-pdf-invalid.png",
+    "run-2-secure-recovered-page-5.png"
+  ]
+}

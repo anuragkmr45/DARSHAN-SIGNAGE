@@ -1382,6 +1382,7 @@ describe('Screens routes realtime playback bootstrap', () => {
         target_id: otherScreenId,
         media_id: mediaId,
         aspect_ratio: '16:9',
+        priority: 0,
       },
     ]);
   });

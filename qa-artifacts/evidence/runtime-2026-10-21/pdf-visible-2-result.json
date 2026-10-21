@@ -1,0 +1,23 @@
+{
+  "run": "pdf-visible-2",
+  "assertions": [
+    {
+      "name": "updated player advertises pdf_page_selection_v1",
+      "pass": true
+    },
+    {
+      "name": "duplicate PDF occurrence remains visibly rendered after page transition",
+      "pass": true
+    },
+    {
+      "name": "invalid PDF page is explicit and never substituted",
+      "pass": true
+    }
+  ],
+  "timings": {},
+  "screenshots": [
+    "pdf-visible-2-pdf-page-2.png",
+    "pdf-visible-2-pdf-page-5.png",
+    "pdf-visible-2-pdf-invalid.png"
+  ]
+}

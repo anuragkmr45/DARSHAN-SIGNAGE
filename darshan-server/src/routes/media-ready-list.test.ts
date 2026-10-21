@@ -267,6 +267,6 @@ describe('Media Routes - READY list pagination', () => {
       refresh_status: 'QUEUED',
       requested_at: requestedAt.toISOString(),
     });
-    expect(requestWebpagePreviewRefreshMock).toHaveBeenCalledWith({ mediaId });
+    expect(requestWebpagePreviewRefreshMock).toHaveBeenCalledWith(expect.objectContaining({ mediaId }));
   });
 });

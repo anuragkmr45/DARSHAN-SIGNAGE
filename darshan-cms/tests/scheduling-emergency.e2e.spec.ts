@@ -262,7 +262,14 @@ test.describe("Scheduling and emergency operator flow", () => {
 
     await page.getByRole("button", { name: "Add Media", exact: true }).click();
     await page.getByRole("dialog").getByText("Operations Handbook", { exact: true }).click();
-    await page.getByLabel("Page for Operations Handbook").fill("2");
+    const firstDocumentPage = page.getByLabel("Page for Operations Handbook");
+    await firstDocumentPage.fill("6");
+    await expect(firstDocumentPage).toHaveValue("6");
+    await expect(firstDocumentPage).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("Enter a whole page number from 1 to 5.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^next$/i })).toBeDisabled();
+    await firstDocumentPage.fill("2");
+    await expect(firstDocumentPage).toHaveAttribute("aria-invalid", "false");
     await page.getByRole("button", { name: "Add Media", exact: true }).click();
     await page.getByRole("dialog").getByText("Operations Handbook", { exact: true }).click();
     await page.getByLabel("Page for Operations Handbook").nth(1).fill("5");
