@@ -191,6 +191,40 @@ describe('Default Media Service', () => {
     expect(service.getCurrent().source).to.equal('NONE')
   })
 
+  it('does not fetch or cache default media while the playback security lock is active', async () => {
+    const configured = JSON.parse(fs.readFileSync(process.env.HEXMON_CONFIG_PATH, 'utf8'))
+    configured.security = {
+      offlinePlaybackPolicy: 'secure',
+      backendRequiredForPlayback: true,
+      playbackLeaseMs: 120000,
+    }
+    fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify(configured, null, 2))
+
+    const { DefaultMediaService } = require('../../../src/main/services/settings/default-media-service.ts')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getSettingsClient } = require('../../../src/main/services/settings/settings-client')
+    const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'isPairedDevice').returns(true)
+    sandbox.stub(pairingService, 'getDeviceId').returns('device-123')
+    const fetchDefault = sandbox.stub(getSettingsClient(), 'getDefaultMedia').resolves({
+      source: 'GLOBAL',
+      aspect_ratio: null,
+      media_id: null,
+      media: null,
+    })
+    const cacheAdd = sandbox.stub(getCacheManager(), 'add').resolves()
+    const service = new DefaultMediaService()
+
+    const result = await service.refreshNow('locked-poll')
+
+    expect(result.source).to.equal('NONE')
+    expect(fetchDefault.called).to.equal(false)
+    expect(cacheAdd.called).to.equal(false)
+    expect(service.didLastRefreshSucceed()).to.equal(false)
+  })
+
   it('caches webpage fallback previews without trying to cache the live source url', async () => {
     const { DefaultMediaService } = require('../../../src/main/services/settings/default-media-service.ts')
     const { getPairingService } = require('../../../src/main/services/pairing-service')

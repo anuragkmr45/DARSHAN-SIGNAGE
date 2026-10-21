@@ -33,6 +33,7 @@ import { getDisplayManager } from './display-manager'
 import { getRealtimeService } from './realtime-service'
 import { getSecurePlaybackGuard, type SecurePlaybackGuardStatus } from './secure-playback-guard'
 import { clearMediaCacheTargets } from './media-cache-purge'
+import { getCacheManager } from './cache/cache-manager'
 
 const logger = getLogger('player-flow')
 const PAIRING_POLL_INTERVAL_MS = 5000
@@ -72,10 +73,13 @@ export class PlayerFlow extends EventEmitter {
   private defaultMediaListenerBound = false
   private securePlaybackGuardBound = false
   private securePlaybackPurgeCompleted = false
+  private securePlaybackLockActive = false
   private rendererServicesInitialized = false
   private screenshotInterval?: NodeJS.Timeout
   private pairingPollTimer?: NodeJS.Timeout
   private bootstrapRetryTimer?: NodeJS.Timeout
+  private secureRecoveryRetryTimer?: NodeJS.Timeout
+  private secureRecoveryPromise?: Promise<void>
   private readonly bootstrapBackoff = new ExponentialBackoff(2000, 30000, 10, 0.2)
   private readonly pairingPollBackoff = new ExponentialBackoff(2000, 30000, 10, 0.2)
   private readonly store = getDeviceStateStore()
@@ -92,6 +96,9 @@ export class PlayerFlow extends EventEmitter {
   }
   private readonly onSecurePlaybackPurgeRequested = (status: SecurePlaybackGuardStatus): void => {
     void this.handleSecurePlaybackPurgeRequest(status)
+  }
+  private readonly onSecurePlaybackRecoveryRequested = (): void => {
+    void this.startSecurePlaybackRecovery()
   }
 
   constructor() {
@@ -246,6 +253,7 @@ export class PlayerFlow extends EventEmitter {
   stop(): void {
     this.stopPairingTimers()
     this.stopBootstrapRetryTimer()
+    this.stopSecureRecoveryRetryTimer()
     this.stopRuntimeLoops(false)
     this.unbindLifecycleEvents()
     this.unbindDefaultMediaListener()
@@ -311,6 +319,7 @@ export class PlayerFlow extends EventEmitter {
     const guard = getSecurePlaybackGuard()
     guard.on('changed', this.onSecurePlaybackChanged)
     guard.on('purge-requested', this.onSecurePlaybackPurgeRequested)
+    guard.on('recovery-requested', this.onSecurePlaybackRecoveryRequested)
     this.securePlaybackGuardBound = true
     this.updateStatus({
       securityLock: this.toPlayerSecurityLockStatus(guard.getStatus()),
@@ -325,6 +334,7 @@ export class PlayerFlow extends EventEmitter {
     const guard = getSecurePlaybackGuard()
     guard.off('changed', this.onSecurePlaybackChanged)
     guard.off('purge-requested', this.onSecurePlaybackPurgeRequested)
+    guard.off('recovery-requested', this.onSecurePlaybackRecoveryRequested)
     this.securePlaybackGuardBound = false
   }
 
@@ -354,16 +364,29 @@ export class PlayerFlow extends EventEmitter {
     }
 
     try {
+      const securePlaybackGuard = getSecurePlaybackGuard()
+      if (securePlaybackGuard.isPlaybackLocked()) {
+        securePlaybackGuard.setRecoveryPhase('REVALIDATING_IDENTITY', 'bootstrap')
+      }
       const pairingStatus = await this.validateBackendPairingStatus()
       if (!pairingStatus) {
         return
       }
-      getSecurePlaybackGuard().markBackendSuccess('pairing-status')
 
-      this.restoreCachedPlayback()
       await this.probeAuthenticatedSnapshot()
       await this.applyBootstrapScreenshotPolicy()
-      await getSnapshotManager().refreshSnapshot()
+      securePlaybackGuard.setRecoveryPhase('FETCHING_CURRENT_SNAPSHOT', 'bootstrap')
+      await getSnapshotManager().refreshSnapshot({
+        force: true,
+        allowWhileSecurityLocked: true,
+        onSnapshotFetched: () => securePlaybackGuard.setRecoveryPhase('SYNCING_CONTENT', 'bootstrap'),
+      })
+      if (!getSnapshotManager().didLastRefreshSucceed()) {
+        throw new Error('Fresh snapshot retrieval failed during secure bootstrap')
+      }
+      securePlaybackGuard.setRecoveryPhase('APPLYING_AUTHORITY', 'bootstrap')
+      securePlaybackGuard.markBackendSuccess('pairing-status-and-current-snapshot')
+      this.securePlaybackPurgeCompleted = false
       await getHeartbeatService().sendImmediate()
       await this.startRuntimeLoops()
       await this.store.update({
@@ -377,6 +400,7 @@ export class PlayerFlow extends EventEmitter {
         error: undefined,
         recoveryReason: undefined,
       })
+      this.refreshPlaybackStatusFromCurrentState()
       this.bootstrapBackoff.reset()
     } catch (error) {
       await this.handleBootstrapFailure(error)
@@ -530,6 +554,11 @@ export class PlayerFlow extends EventEmitter {
 
   private async handleSecurePlaybackStatus(status: SecurePlaybackGuardStatus): Promise<void> {
     if (status.locked) {
+      if (!this.securePlaybackLockActive) {
+        this.securePlaybackLockActive = true
+        getCacheManager().invalidatePendingWrites()
+        getDefaultMediaService().enterSecurityLock()
+      }
       getPlaybackEngine().stop()
       this.playbackReady = false
 
@@ -543,6 +572,8 @@ export class PlayerFlow extends EventEmitter {
       })
       return
     }
+
+    this.securePlaybackLockActive = false
 
     this.updateStatus({
       securityLock: this.toPlayerSecurityLockStatus(status),
@@ -561,6 +592,7 @@ export class PlayerFlow extends EventEmitter {
 
     this.securePlaybackPurgeCompleted = true
     try {
+      await getCacheManager().clear(true)
       const removed = clearMediaCacheTargets(getConfigManager().getConfig().cache.path)
       logger.warn({ removed }, 'Secure offline playback lock purged media cache targets')
     } catch (error) {
@@ -581,6 +613,91 @@ export class PlayerFlow extends EventEmitter {
       lockAt: status.lockAt,
       purgeCacheAfterOfflineMs: status.purgeCacheAfterOfflineMs,
       purgeDue: status.purgeDue,
+      recoveryPhase: status.recoveryPhase,
+    }
+  }
+
+  private async startSecurePlaybackRecovery(): Promise<void> {
+    if (this.secureRecoveryPromise) {
+      return await this.secureRecoveryPromise
+    }
+
+    this.stopSecureRecoveryRetryTimer()
+    const recovery = this.recoverSecurePlaybackAfterBackendReturn()
+    this.secureRecoveryPromise = recovery
+    try {
+      await recovery
+    } finally {
+      if (this.secureRecoveryPromise === recovery) {
+        this.secureRecoveryPromise = undefined
+      }
+    }
+  }
+
+  private async recoverSecurePlaybackAfterBackendReturn(): Promise<void> {
+    const guard = getSecurePlaybackGuard()
+    if (!guard.isPlaybackLocked()) {
+      return
+    }
+
+    try {
+      guard.setRecoveryPhase('REVALIDATING_IDENTITY', 'secure-recovery')
+      const pairingStatus = await this.validateBackendPairingStatus()
+      if (!pairingStatus) {
+        return
+      }
+
+      guard.setRecoveryPhase('FETCHING_CURRENT_SNAPSHOT', 'secure-recovery')
+      await getSnapshotManager().refreshSnapshot({
+        force: true,
+        allowWhileSecurityLocked: true,
+        onSnapshotFetched: () => guard.setRecoveryPhase('SYNCING_CONTENT', 'secure-recovery'),
+      })
+      if (!getSnapshotManager().didLastRefreshSucceed()) {
+        throw new Error('Fresh snapshot retrieval failed during secure recovery')
+      }
+
+      // Snapshot refresh awaits media prefetch/checksum work before publishing
+      // the playlist. Its event remains blocked while this guard is locked.
+      guard.setRecoveryPhase('APPLYING_AUTHORITY', 'secure-recovery')
+      guard.markBackendSuccess('secure-recovery-complete')
+      this.securePlaybackPurgeCompleted = false
+      this.bootstrapBackoff.reset()
+      await this.transitionState('PAIRED_RUNTIME', {
+        backendAvailable: true,
+        online: true,
+        awaitingManualRecovery: false,
+        error: undefined,
+        recoveryReason: undefined,
+      })
+    } catch (error) {
+      if (
+        this.pairingService.isDeviceNotRegisteredError(error) ||
+        this.pairingService.isInvalidCredentialError(error)
+      ) {
+        await this.enterHardRecovery((error as Error).message || 'Stored device identity is no longer valid')
+        return
+      }
+
+      guard.markRecoveryFailed('secure-recovery', error)
+      this.securePlaybackPurgeCompleted = false
+      await this.handleSecurePlaybackPurgeRequest(guard.getStatus())
+      logger.warn({ error }, 'Secure playback recovery failed; playback remains locked')
+      this.scheduleSecureRecoveryRetry(this.bootstrapBackoff.getDelay())
+    }
+  }
+
+  private scheduleSecureRecoveryRetry(delayMs: number): void {
+    this.stopSecureRecoveryRetryTimer()
+    this.secureRecoveryRetryTimer = setTimeout(() => {
+      void this.startSecurePlaybackRecovery()
+    }, delayMs)
+  }
+
+  private stopSecureRecoveryRetryTimer(): void {
+    if (this.secureRecoveryRetryTimer) {
+      clearTimeout(this.secureRecoveryRetryTimer)
+      this.secureRecoveryRetryTimer = undefined
     }
   }
 

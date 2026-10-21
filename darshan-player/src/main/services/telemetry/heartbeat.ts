@@ -276,7 +276,14 @@ export class HeartbeatService {
       await getDeviceStateStore().update({
         lastHeartbeatAt: response.timestamp || new Date().toISOString(),
       })
-      getSecurePlaybackGuard().markBackendSuccess('heartbeat')
+      const securePlaybackGuard = getSecurePlaybackGuard()
+      if (securePlaybackGuard.isPlaybackLocked()) {
+        // Reachability is not sufficient to resume after a security lock.
+        // PlayerFlow must revalidate identity and fetch fresh authority first.
+        securePlaybackGuard.markBackendReachable('heartbeat')
+      } else {
+        securePlaybackGuard.markBackendSuccess('heartbeat')
+      }
       if (response.duplicate_identity?.active) {
         await getDeviceStateStore().update({
           duplicateIdentity: {

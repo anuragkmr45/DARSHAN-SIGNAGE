@@ -38,7 +38,7 @@ describe('secure playback guard', () => {
     expect(guard.getStatus().locked).to.equal(false)
   })
 
-  it('locks when the secure grace timer expires and unlocks on backend success', () => {
+  it('locks when the authenticated lease expires and unlocks on backend success', () => {
     const start = Date.parse('2026-06-19T10:00:00.000Z')
     clock = sinon.useFakeTimers({ now: start, shouldAdvanceTime: false })
     const { SecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
@@ -58,7 +58,7 @@ describe('secure playback guard', () => {
     guard.markBackendSuccess('unit-success')
     expect(guard.getStatus().locked).to.equal(false)
 
-    clock.tick(3100)
+    clock.tick(1001)
     expect(guard.getStatus().locked).to.equal(true)
     expect(changes.some((status) => status.locked === true)).to.equal(true)
 
@@ -66,7 +66,7 @@ describe('secure playback guard', () => {
     expect(guard.getStatus().locked).to.equal(false)
   })
 
-  it('emits purge-requested after high-security purge timeout', () => {
+  it('emits purge-requested at the security lock deadline', () => {
     const start = Date.parse('2026-06-19T10:00:00.000Z')
     clock = sinon.useFakeTimers({ now: start, shouldAdvanceTime: false })
     const { SecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
@@ -86,11 +86,43 @@ describe('secure playback guard', () => {
 
     guard.markBackendSuccess('unit-success')
     guard.markBackendFailure('unit-failure')
-    clock.tick(3001)
+    clock.tick(1001)
 
     expect(guard.getStatus().locked).to.equal(true)
     expect(guard.getStatus().purgeDue).to.equal(true)
     expect(purgeEvents.length).to.equal(1)
+  })
+
+  it('reports locked backend reachability without unlocking and emits one recovery request', () => {
+    const start = Date.parse('2026-06-19T10:00:00.000Z')
+    clock = sinon.useFakeTimers({ now: start, shouldAdvanceTime: false })
+    const { SecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
+    const guard = new SecurePlaybackGuard({
+      now: () => Date.now(),
+      configProvider: () =>
+        makeConfig({
+          offlinePlaybackPolicy: 'secure',
+          backendRequiredForPlayback: true,
+          playbackLeaseMs: 1000,
+        }),
+    })
+    const recoveryRequests = []
+    guard.on('recovery-requested', (status) => recoveryRequests.push(status))
+
+    guard.markBackendSuccess('unit-success')
+    clock.tick(1001)
+    guard.markBackendReachable('heartbeat')
+    guard.markBackendReachable('heartbeat-duplicate')
+
+    expect(guard.getStatus().locked).to.equal(true)
+    expect(guard.getStatus().recoveryPhase).to.equal('REVALIDATING_IDENTITY')
+    expect(recoveryRequests).to.have.length(1)
+
+    guard.setRecoveryPhase('FETCHING_CURRENT_SNAPSHOT')
+    expect(guard.getStatus().locked).to.equal(true)
+    guard.markBackendSuccess('validated-fresh-authority')
+    expect(guard.getStatus().locked).to.equal(false)
+    expect(guard.getStatus().recoveryPhase).to.equal('READY')
   })
 
   it('can seed backend success from persisted validation time', () => {

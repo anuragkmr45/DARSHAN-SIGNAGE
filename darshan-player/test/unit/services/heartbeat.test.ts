@@ -90,6 +90,7 @@ describe('Heartbeat Service', () => {
     const { getCommandProcessor } = require('../../../src/main/services/command-processor')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
     const { getPlayerMetrics } = require('../../../src/main/services/telemetry/player-metrics')
+    const { getSecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
 
     const heartbeatService = getHeartbeatService()
     const httpClient = getHttpClient()
@@ -97,6 +98,7 @@ describe('Heartbeat Service', () => {
     const pairingService = getPairingService()
     const commandProcessor = getCommandProcessor()
     const deviceStateStore = getDeviceStateStore()
+    const securePlaybackGuard = getSecurePlaybackGuard()
 
     sandbox.stub(pairingService, 'isPairedDevice').returns(true)
     sandbox.stub(pairingService, 'getDeviceId').returns('device-123')
@@ -150,6 +152,9 @@ describe('Heartbeat Service', () => {
       .resolves({ success: true, timestamp: new Date().toISOString(), commands: [] })
     sandbox.stub(commandProcessor, 'ingestCommands').resolves()
     const updateStub = sandbox.stub(deviceStateStore, 'update').resolves()
+    sandbox.stub(securePlaybackGuard, 'isPlaybackLocked').returns(true)
+    const reachableStub = sandbox.stub(securePlaybackGuard, 'markBackendReachable')
+    const successStub = sandbox.stub(securePlaybackGuard, 'markBackendSuccess')
 
     heartbeatService.setCurrentSchedule('schedule-1')
     heartbeatService.setCurrentMedia('media-1')
@@ -223,6 +228,8 @@ describe('Heartbeat Service', () => {
     )
     expect(payload.player_version).to.be.a('string')
     expect(updateStub.callCount).to.equal(2)
+    expect(reachableStub.calledOnceWithExactly('heartbeat')).to.equal(true)
+    expect(successStub.called).to.equal(false)
     expect(metrics).to.contain('darshan_player_heartbeat_total{result="success"} 1')
     expect(metrics).to.contain('darshan_player_last_successful_heartbeat_unixtime')
   })

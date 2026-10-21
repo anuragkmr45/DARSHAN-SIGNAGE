@@ -109,6 +109,39 @@ describe('Cache Manager', () => {
       expect(fs.existsSync(filePath!)).to.be.true
     })
 
+    it('prevents an in-flight pre-lock download from repopulating the purged cache and permits a fresh retry', async () => {
+      const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+      const cacheManager = getCacheManager()
+      let releaseStaleDownload: (value: Buffer) => void = () => undefined
+      const staleDownload = new Promise<Buffer>((resolve) => {
+        releaseStaleDownload = resolve
+      })
+      const freshData = Buffer.from('fresh-authority-content')
+      const download = sandbox.stub(cacheManager, 'download' as any)
+      download.onFirstCall().returns(staleDownload)
+      download.onSecondCall().resolves(freshData)
+
+      const staleWrite = cacheManager.add('secured-video', 'https://example.com/stale.mp4')
+      await Promise.resolve()
+      cacheManager.invalidatePendingWrites()
+      await cacheManager.clear(true)
+      const freshWrite = cacheManager.add('secured-video', 'https://example.com/fresh.mp4')
+      releaseStaleDownload(Buffer.from('stale-content'))
+
+      let staleError: any
+      try {
+        await staleWrite
+      } catch (error) {
+        staleError = error
+      }
+      await freshWrite
+
+      expect(staleError?.details?.reason).to.equal('CACHE_WRITE_INVALIDATED')
+      const cachedPath = await cacheManager.get('secured-video', 'video/mp4')
+      expect(fs.readFileSync(cachedPath!)).to.deep.equal(freshData)
+      expect(download.callCount).to.equal(2)
+    })
+
     it('should name converted document cache entries from the resolved PDF content type', async () => {
       const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
       const cacheManager = getCacheManager()

@@ -317,6 +317,14 @@ stage_player_bundle() {
   write_player_config() {
     local destination="$1"
     local ca_path="$2"
+    local offline_playback_policy="standard"
+    local backend_required_for_playback="false"
+    local purge_cache_after_offline_ms="0"
+    if [[ "$runtime_mode" == "production" ]]; then
+      offline_playback_policy="secure"
+      backend_required_for_playback="true"
+      purge_cache_after_offline_ms="120000"
+    fi
     cat > "$destination" <<EOF
 {
   "player": {
@@ -352,7 +360,14 @@ stage_player_bundle() {
       "webpageResourceDomains": $webpage_resource_json,
       "webpageAllowedCidrs": $webpage_cidrs_json,
       "webpageAllowedPorts": $webpage_ports_json,
-      "webpageAllowHttp": $WEBPAGE_ALLOW_HTTP
+      "webpageAllowHttp": $WEBPAGE_ALLOW_HTTP,
+      "offlinePlaybackPolicy": "$offline_playback_policy",
+      "backendRequiredForPlayback": $backend_required_for_playback,
+      "networkSwitchGraceMs": 30000,
+      "playbackLeaseMs": 120000,
+      "lockAfterOfflineMs": 120000,
+      "purgeCacheAfterOfflineMs": $purge_cache_after_offline_ms,
+      "showSecurityLockScreen": true
     }
   }
 }

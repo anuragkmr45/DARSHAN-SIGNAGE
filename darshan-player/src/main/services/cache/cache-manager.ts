@@ -54,6 +54,7 @@ export class CacheManager {
   private entries = new Map<string, CacheEntry>()
   private nowPlaying = new Set<string>()
   private inFlight = new Map<string, Promise<void>>()
+  private writeGeneration = 0
   private httpsAgent: ReturnType<typeof createTransportHttpsAgent>
 
   constructor() {
@@ -209,14 +210,20 @@ export class CacheManager {
 
     const existingInFlight = this.inFlight.get(mediaId)
     if (existingInFlight) {
-      await existingInFlight
+      try {
+        await existingInFlight
+      } catch (error) {
+        if (!(error instanceof CacheError) || error.details?.['reason'] !== 'CACHE_WRITE_INVALIDATED') {
+          throw error
+        }
+      }
       const cached = this.entries.get(mediaId)
-      if (!sha256 || cached?.sha256 === sha256) {
+      if (cached && await this.has(mediaId) && (!sha256 || cached.sha256 === sha256)) {
         return
       }
     }
 
-    const operation = this.addInternal(mediaId, url, sha256, context)
+    const operation = this.addInternal(mediaId, url, sha256, context, this.writeGeneration)
     this.inFlight.set(mediaId, operation)
 
     try {
@@ -230,10 +237,12 @@ export class CacheManager {
     mediaId: string,
     url: string,
     sha256?: string,
-    context: CacheAddContext = {}
+    context: CacheAddContext = {},
+    writeGeneration: number = this.writeGeneration
   ): Promise<void> {
     try {
       const data = await this.download(url)
+      this.assertWriteGeneration(writeGeneration, mediaId)
       const hash = calculateBufferHash(data)
 
       if (sha256 && hash !== sha256) {
@@ -248,9 +257,16 @@ export class CacheManager {
           sizeNeeded: data.length,
         })
       }
+      this.assertWriteGeneration(writeGeneration, mediaId)
 
       const filePath = this.getFilePath(mediaId, url, context.contentType)
       await atomicWrite(filePath, data)
+      if (writeGeneration !== this.writeGeneration) {
+        if (fs.existsSync(filePath)) {
+          fs.rmSync(filePath, { force: true })
+        }
+        this.assertWriteGeneration(writeGeneration, mediaId)
+      }
 
       const entry: CacheEntry = {
         mediaId,
@@ -264,6 +280,10 @@ export class CacheManager {
       this.entries.set(mediaId, entry)
       logger.info({ mediaId, size: data.length }, 'Cached item added')
     } catch (error) {
+      if (error instanceof CacheError && error.details?.['reason'] === 'CACHE_WRITE_INVALIDATED') {
+        logger.info({ mediaId }, 'Discarded cache write invalidated by playback security lock')
+        throw error
+      }
       void reportMediaCacheFailure({
         mediaId,
         url,
@@ -276,6 +296,19 @@ export class CacheManager {
       })
       throw error
     }
+  }
+
+  private assertWriteGeneration(writeGeneration: number, mediaId: string): void {
+    if (writeGeneration !== this.writeGeneration) {
+      throw new CacheError('Cache write invalidated by playback security lock', {
+        reason: 'CACHE_WRITE_INVALIDATED',
+        mediaId,
+      })
+    }
+  }
+
+  invalidatePendingWrites(): void {
+    this.writeGeneration += 1
   }
 
   async has(mediaId: string): Promise<boolean> {

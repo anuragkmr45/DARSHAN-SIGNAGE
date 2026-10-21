@@ -303,7 +303,16 @@ export interface PlayerSecurityLockStatus {
   lockAt?: string
   purgeCacheAfterOfflineMs?: number
   purgeDue?: boolean
+  recoveryPhase?: SecurePlaybackRecoveryPhase
 }
+
+export type SecurePlaybackRecoveryPhase =
+  | 'LOCKED'
+  | 'REVALIDATING_IDENTITY'
+  | 'FETCHING_CURRENT_SNAPSHOT'
+  | 'SYNCING_CONTENT'
+  | 'APPLYING_AUTHORITY'
+  | 'READY'
 
 export interface TimelineItem {
   id: string

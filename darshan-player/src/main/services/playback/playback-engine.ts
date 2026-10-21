@@ -31,6 +31,7 @@ export class PlaybackEngine extends EventEmitter {
   private currentScheduleId?: string
   private currentTimelineFingerprint?: string
   private currentPlaybackInstanceId?: string
+  private currentPlaylistItemCount = 0
   private errorCount = 0
   private maxErrors = 5
 
@@ -108,6 +109,7 @@ export class PlaybackEngine extends EventEmitter {
     this.currentItem = undefined
     this.currentScheduleId = undefined
     this.currentTimelineFingerprint = undefined
+    this.currentPlaylistItemCount = 0
 
     const telemetryService = getTelemetryService()
     telemetryService.clearCurrentPlayback()
@@ -159,6 +161,7 @@ export class PlaybackEngine extends EventEmitter {
    */
   private async startPlaylist(playlist: PlaybackPlaylist): Promise<void> {
     this.currentScheduleId = playlist.scheduleId || playlist.snapshotId
+    this.currentPlaylistItemCount = playlist.items.length
     this.scheduler.stop()
 
     if (playlist.items.length === 0) {
@@ -295,6 +298,7 @@ export class PlaybackEngine extends EventEmitter {
         item,
         scheduledItem,
         scheduleId: this.currentScheduleId,
+        singleItemFrame: this.currentPlaylistItemCount === 1,
       })
     }
 
@@ -408,6 +412,7 @@ export class PlaybackEngine extends EventEmitter {
       item: this.currentItem,
       scheduleId: this.currentScheduleId,
       restored: true,
+      singleItemFrame: this.currentPlaylistItemCount === 1,
     })
     return true
   }

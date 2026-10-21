@@ -2,31 +2,27 @@
 
 ## Summary
 
-This implementation adds an optional theft-resistant playback lock for DARSHAN Player. It does not change backend APIs, CMS APIs, database schema, pairing protocol, or realtime architecture.
+This implementation adds a theft-resistant playback lock for DARSHAN Player. It does not change backend APIs, CMS APIs, database schema, pairing protocol, or realtime architecture. Code-level defaults remain compatible with development and legacy configurations, while generated production player bundles and the checked production examples enable secure mode with a 120-second playback lease.
 
-Default behavior remains unchanged:
-
-- `player.security.offlinePlaybackPolicy: "standard"`
-- `player.security.backendRequiredForPlayback: false`
-- cached/offline playback can continue under the existing pairing validation grace rules.
-
-When enabled, the player requires recent backend validation before visible scheduled/default playback can continue.
+In secure production mode, visible schedule, default and emergency playback requires an authenticated backend success within the preceding 120 seconds. Compatibility grace settings remain parseable but cannot extend that deadline.
 
 ## Scope Implemented
 
 - Pure secure-offline playback policy helper.
-- Main-process secure playback guard with backend success/failure lease tracking.
+- Main-process secure playback guard with one deadline anchored to the last authenticated backend success.
 - Heartbeat integration:
-  - successful heartbeat renews the playback lease;
-  - transient/auth heartbeat failure starts or continues the security grace timer.
+  - while unlocked, a successful heartbeat renews the playback lease;
+  - while locked, a successful heartbeat records reachability and starts recovery but cannot unlock playback.
 - Pairing-status bootstrap success renews the playback lease.
 - PlayerFlow gates playlist playback while locked.
 - PlaybackEngine also refuses timeline restart while locked.
 - Renderer hides schedule/default content and shows a full-screen backend-validation warning while locked.
 - Recovery/OTP states are not covered by the security lock overlay.
-- Optional media-cache purge after a long-offline timeout:
+- Media-cache purge at the secure lock deadline:
   - deletes `media`, `objects`, `quarantine`, and legacy `cache-index.db`;
-  - preserves logs, screenshots, proof-of-play spool, and request queues.
+  - preserves identity, certificates, logs, screenshots, proof-of-play spool, and request queues.
+- Single-flight recovery with explicit phases: `LOCKED`, `REVALIDATING_IDENTITY`, `FETCHING_CURRENT_SNAPSHOT`, `SYNCING_CONTENT`, `APPLYING_AUTHORITY`, and `READY`.
+- Recovery validates stored identity, force-fetches current authority, attempts current-media prefetch/checksum verification and only then unlocks playback.
 - Player config file and env override support for non-secret security settings.
 
 ## Config Keys
@@ -38,7 +34,7 @@ Supported under `player.security`:
 - `networkSwitchGraceMs`: number
 - `playbackLeaseMs`: number
 - `lockAfterOfflineMs`: number
-- `purgeCacheAfterOfflineMs`: number, `0` disables purge
+- `purgeCacheAfterOfflineMs`: retained for configuration compatibility; it cannot delay secure-mode purge beyond the playback lease deadline
 - `showSecurityLockScreen`: boolean
 
 Env overrides:
@@ -60,13 +56,14 @@ Env overrides:
 
 ## Runtime Behavior
 
-1. Player validates pairing with backend before normal paired runtime.
-2. Backend pairing-status success or heartbeat success renews the secure playback lease.
-3. If backend/network contact is lost, the player remains inside the configured grace window.
-4. After grace expires, scheduled/default playback is stopped and the renderer displays a backend-validation warning.
-5. Heartbeat/retry paths continue.
-6. Backend success unlocks playback and the player returns to the current valid schedule/default media.
-7. Optional cache purge only runs after the configured purge timeout and does not delete PoP/request queue data.
+1. Player validates pairing with the backend before normal paired runtime.
+2. While unlocked, pairing-status or heartbeat success sets the lease deadline to `authenticated success time + playbackLeaseMs` (120,000 ms in production examples).
+3. Failure-detection time, `networkSwitchGraceMs`, `lockAfterOfflineMs`, and `purgeCacheAfterOfflineMs` cannot extend that secure deadline.
+4. At the deadline, schedule/default/emergency playback stops, the security-lock surface appears and media-cache targets are removed. Identity, certificates and evidence queues are preserved.
+5. Heartbeats and bounded recovery retries continue. A locked heartbeat reports reachability only.
+6. One recovery flow revalidates identity, rejects revoked/deleted/mismatched identity, force-fetches the current snapshot, attempts current-content synchronization and applies fresh authority.
+7. Playback unlocks only after fresh authority is applied. Cached playback is never restored first.
+8. Snapshot failure keeps the player locked with bounded retry. Invalid identity enters the existing hard-recovery/pairing flow. Media failure under valid fresh authority leaves the security lock and displays the normal `Unavailable` state rather than replaying stale content.
 
 ## Tests Run
 
@@ -77,11 +74,7 @@ Env overrides:
 - `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/heartbeat.test.ts`
 - `cd darshan-player && npx mocha --config .mocharc.json --spec test/unit/services/playback-engine.test.ts`
 
-All listed local targeted checks passed.
-
-Known unrelated blocked path:
-
-- `test/unit/renderer/player-layout.test.ts` still hits the existing `webpage-playback.ts` CommonJS/ESM module-loader failure when importing `src/renderer/player.ts` through ts-node. The secure-lock content-source decision is covered by `test/unit/common/player-content-source.test.ts`.
+The current focused policy, guard, heartbeat and PlayerFlow checks pass. See the dated developer-verification report in `qa-artifacts/evidence/` for the exact current-worktree results and remaining runtime gates.
 
 ## Real-Device Verification Required
 
@@ -94,12 +87,13 @@ Real-device verification must still be run on the existing AVITA LAP/RPi/AXON ta
 3. Pair and validate normally.
 4. Start scheduled/default media.
 5. Disconnect the player from the approved backend network.
-6. Verify playback continues only inside configured grace.
-7. Verify playback stops and the security warning appears after grace expires.
+6. Verify playback is still present at 119 seconds after the last authenticated success.
+7. Verify all playback stops and the security warning appears at 120 seconds, within the approved one-second observation tolerance.
 8. Reconnect to the approved backend network.
-9. Verify heartbeat succeeds and playback resumes.
-10. If testing purge, use a separate test device and verify only media cache targets are removed.
+9. Verify heartbeat reachability alone does not resume cached content; identity revalidation and a fresh snapshot/content sync occur first.
+10. Verify the current server-side authority resumes, not the stale pre-lock authority.
+11. Verify media cache was removed while identity, certificates, PoP and request queues remain.
 
 ## Recommendation
 
-Proceed to packaged real-device QA before enabling secure or high-security mode on production players. Keep `purgeCacheAfterOfflineMs: 0` until recovery and operator procedures are verified.
+Proceed to packaged real-device QA before production rollout. Update and reconnect every target player, then validate the exact 120-second boundary, targeted purge and ordered recovery on representative Windows and Ubuntu hardware.

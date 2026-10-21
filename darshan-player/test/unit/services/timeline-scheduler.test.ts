@@ -172,6 +172,61 @@ describe('TimelineScheduler schedule resume alignment', () => {
     }
   })
 
+  it('clips a multi-item video at the authoritative schedule boundary instead of starting the next item', () => {
+    const clock = sinon.useFakeTimers({ now: Date.parse('2026-06-19T10:00:00.000Z') })
+    const { TimelineScheduler } = require('../../../src/main/services/playback/timeline-scheduler.ts')
+    const scheduler = new TimelineScheduler()
+    const played = []
+    const completed = []
+    const timelineCompletions = []
+    scheduler.on('play-item', (scheduledItem) => played.push(scheduledItem))
+    scheduler.on('item-complete', (scheduledItem) => completed.push(scheduledItem))
+    scheduler.on('timeline-complete', (completion) => timelineCompletions.push(completion))
+
+    const meta = {
+      scheduleWindowStartsAt: '2026-06-19T10:00:00.000Z',
+      scheduleWindowEndsAt: '2026-06-19T10:00:03.000Z',
+      serverTimeOffsetMs: 0,
+    }
+    try {
+      scheduler.start([
+        {
+          id: 'long-video',
+          type: 'video',
+          mediaId: 'video-a',
+          displayMs: 10_000,
+          fit: 'contain',
+          muted: true,
+          loop: false,
+          transitionDurationMs: 500,
+          meta,
+        },
+        {
+          id: 'must-not-start',
+          type: 'image',
+          mediaId: 'image-b',
+          displayMs: 1000,
+          fit: 'contain',
+          muted: true,
+          loop: false,
+          transitionDurationMs: 0,
+          meta,
+        },
+      ])
+
+      clock.tick(2999)
+      expect(played.map((entry) => entry.item.id)).to.deep.equal(['long-video'])
+      clock.tick(1)
+
+      expect(played.map((entry) => entry.item.id)).to.deep.equal(['long-video'])
+      expect(completed.map((entry) => entry.item.id)).to.deep.equal(['long-video'])
+      expect(timelineCompletions).to.deep.equal([{ willRepeat: false, authorityEnded: true }])
+    } finally {
+      scheduler.stop()
+      clock.restore()
+    }
+  })
+
   it('preserves the authoritative loop boundary when paused and resumed', () => {
     const clock = sinon.useFakeTimers({ now: Date.parse('2026-06-19T10:00:00.000Z') })
     const { TimelineScheduler } = require('../../../src/main/services/playback/timeline-scheduler.ts')

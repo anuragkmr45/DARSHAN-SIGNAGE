@@ -83,8 +83,6 @@ export function evaluateSecurePlaybackState(input: SecurePlaybackEvaluationInput
   const nowMs = Number.isFinite(input.nowMs) ? Number(input.nowMs) : Date.now()
   const lastBackendSuccessAtMs = validTimestamp(input.lastBackendSuccessAtMs)
   const firstBackendFailureAtMs = validTimestamp(input.firstBackendFailureAtMs)
-  const offlineGraceMs = Math.max(config.networkSwitchGraceMs, config.lockAfterOfflineMs)
-
   if (!enabled) {
     return {
       enabled: false,
@@ -113,15 +111,15 @@ export function evaluateSecurePlaybackState(input: SecurePlaybackEvaluationInput
     }
   }
 
-  const leaseExpiresAtMs = lastBackendSuccessAtMs + config.playbackLeaseMs
-  const offlineStartedAtMs =
-    firstBackendFailureAtMs !== undefined ? Math.max(firstBackendFailureAtMs, lastBackendSuccessAtMs) : leaseExpiresAtMs
-  const lockAtMs = offlineStartedAtMs + offlineGraceMs
-  const purgeDueAtMs =
-    config.purgeCacheAfterOfflineMs > 0 ? offlineStartedAtMs + config.purgeCacheAfterOfflineMs : undefined
-  const purgeDue = purgeDueAtMs !== undefined && nowMs >= purgeDueAtMs
+  // Secure playback owns one authoritative deadline. Legacy grace settings
+  // remain readable so old site profiles continue to parse, but they must not
+  // extend playback beyond the lease established by the last authenticated
+  // backend success.
+  const lockAtMs = lastBackendSuccessAtMs + config.playbackLeaseMs
+  const purgeDueAtMs = lockAtMs
+  const purgeDue = nowMs >= purgeDueAtMs
 
-  if (nowMs <= leaseExpiresAtMs) {
+  if (nowMs < lockAtMs) {
     return {
       enabled: true,
       allowed: true,
@@ -136,28 +134,12 @@ export function evaluateSecurePlaybackState(input: SecurePlaybackEvaluationInput
     }
   }
 
-  if (nowMs < lockAtMs) {
-    return {
-      enabled: true,
-      allowed: true,
-      locked: false,
-      inGrace: true,
-      reason: 'Backend connection lost. Playback is inside the configured security grace window.',
-      lastBackendSuccessAtMs,
-      firstBackendFailureAtMs,
-      lockAtMs,
-      purgeCacheAfterOfflineMs: config.purgeCacheAfterOfflineMs,
-      purgeDue: false,
-      purgeDueAtMs,
-    }
-  }
-
   return {
     enabled: true,
     allowed: false,
     locked: true,
     inGrace: false,
-    reason: 'Backend connection has been unavailable longer than the configured playback security window.',
+    reason: 'Backend validation has not succeeded within the 120-second playback security window.',
     lastBackendSuccessAtMs,
     firstBackendFailureAtMs,
     lockAtMs,

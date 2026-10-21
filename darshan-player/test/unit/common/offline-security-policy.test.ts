@@ -28,7 +28,7 @@ describe('secure offline playback policy', () => {
     expect(result.reason).to.match(/Backend validation is required/)
   })
 
-  it('allows playback inside lease and grace windows, then locks', () => {
+  it('locks exactly when the authenticated playback lease expires without additive grace', () => {
     const { evaluateSecurePlaybackState } = require('../../../src/common/offline-security-policy')
     const successAt = Date.parse('2026-06-19T10:00:00.000Z')
     const security = {
@@ -43,26 +43,27 @@ describe('secure offline playback policy', () => {
       nowMs: successAt + 30000,
       lastBackendSuccessAtMs: successAt,
     })
-    const insideGrace = evaluateSecurePlaybackState({
+    const justBeforeDeadline = evaluateSecurePlaybackState({
       security,
-      nowMs: successAt + 70000,
+      nowMs: successAt + 59999,
       lastBackendSuccessAtMs: successAt,
     })
     const locked = evaluateSecurePlaybackState({
       security,
-      nowMs: successAt + 91000,
+      nowMs: successAt + 60000,
       lastBackendSuccessAtMs: successAt,
     })
 
     expect(insideLease.allowed).to.equal(true)
     expect(insideLease.inGrace).to.equal(false)
-    expect(insideGrace.allowed).to.equal(true)
-    expect(insideGrace.inGrace).to.equal(true)
+    expect(justBeforeDeadline.allowed).to.equal(true)
+    expect(justBeforeDeadline.inGrace).to.equal(false)
     expect(locked.allowed).to.equal(false)
     expect(locked.locked).to.equal(true)
+    expect(locked.lockAtMs).to.equal(successAt + 60000)
   })
 
-  it('uses first backend failure as the grace anchor when known', () => {
+  it('does not let the first failure or legacy grace settings extend the lease', () => {
     const { evaluateSecurePlaybackState } = require('../../../src/common/offline-security-policy')
     const successAt = Date.parse('2026-06-19T10:00:00.000Z')
     const failureAt = successAt + 10000
@@ -74,17 +75,18 @@ describe('secure offline playback policy', () => {
 
     const result = evaluateSecurePlaybackState({
       security,
-      nowMs: failureAt + 59000,
+      nowMs: successAt + 5000,
       lastBackendSuccessAtMs: successAt,
       firstBackendFailureAtMs: failureAt,
     })
 
-    expect(result.allowed).to.equal(true)
-    expect(result.inGrace).to.equal(true)
-    expect(result.lockAtMs).to.equal(failureAt + 60000)
+    expect(result.allowed).to.equal(false)
+    expect(result.locked).to.equal(true)
+    expect(result.inGrace).to.equal(false)
+    expect(result.lockAtMs).to.equal(successAt + 5000)
   })
 
-  it('reports purge due only after configured purge timeout', () => {
+  it('reports media-cache purge due at the same instant as the lock', () => {
     const { evaluateSecurePlaybackState } = require('../../../src/common/offline-security-policy')
     const successAt = Date.parse('2026-06-19T10:00:00.000Z')
     const failureAt = successAt + 10000
@@ -96,22 +98,23 @@ describe('secure offline playback policy', () => {
       purgeCacheAfterOfflineMs: 60000,
     }
 
-    const lockedNoPurge = evaluateSecurePlaybackState({
+    const justBeforeLock = evaluateSecurePlaybackState({
       security,
-      nowMs: failureAt + 20000,
+      nowMs: successAt + 4999,
       lastBackendSuccessAtMs: successAt,
       firstBackendFailureAtMs: failureAt,
     })
     const lockedWithPurge = evaluateSecurePlaybackState({
       security,
-      nowMs: failureAt + 61000,
+      nowMs: successAt + 5000,
       lastBackendSuccessAtMs: successAt,
       firstBackendFailureAtMs: failureAt,
     })
 
-    expect(lockedNoPurge.locked).to.equal(true)
-    expect(lockedNoPurge.purgeDue).to.equal(false)
+    expect(justBeforeLock.locked).to.equal(false)
+    expect(justBeforeLock.purgeDue).to.equal(false)
     expect(lockedWithPurge.locked).to.equal(true)
     expect(lockedWithPurge.purgeDue).to.equal(true)
+    expect(lockedWithPurge.purgeDueAtMs).to.equal(successAt + 5000)
   })
 })

@@ -13,6 +13,7 @@ import { DefaultMediaResponse } from '../../../common/types'
 import { atomicWrite, ensureDir } from '../../../common/utils'
 import { buildRevisionedCacheKey, getCacheManager } from '../cache/cache-manager'
 import { getPairingService } from '../pairing-service'
+import { getSecurePlaybackGuard } from '../secure-playback-guard'
 import { getSettingsClient, normalizeDefaultMediaResponse } from './settings-client'
 
 const logger = getLogger('default-media-service')
@@ -117,6 +118,11 @@ export class DefaultMediaService extends EventEmitter {
     }
   }
 
+  enterSecurityLock(): void {
+    this.refreshGeneration += 1
+    this.lastRefreshSucceeded = false
+  }
+
   async getDefaultMedia(options: { refresh?: boolean } = {}): Promise<DefaultMediaResponse> {
     if (options.refresh !== false) {
       await this.refreshNow('manual')
@@ -125,6 +131,12 @@ export class DefaultMediaService extends EventEmitter {
   }
 
   async refreshNow(reason: string): Promise<DefaultMediaResponse> {
+    if (getSecurePlaybackGuard().isPlaybackLocked()) {
+      this.lastRefreshSucceeded = false
+      logger.debug({ reason }, 'Ignoring default media refresh while the playback security lock is active')
+      return this.current
+    }
+
     const generation = this.refreshGeneration
     if (this.refreshPromise && this.refreshPromiseGeneration === generation) {
       return this.refreshPromise

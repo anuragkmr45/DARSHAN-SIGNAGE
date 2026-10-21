@@ -15,6 +15,7 @@ import { getPairingService } from './pairing-service'
 import { buildRevisionedCacheKey, getCacheManager } from './cache/cache-manager'
 import { NormalizedSnapshot, parseSnapshotResponse } from './snapshot-parser'
 import { getLifecycleEvents } from './lifecycle-events'
+import { getSecurePlaybackGuard } from './secure-playback-guard'
 import { NormalizedScheduleWindow, evaluateScheduleWindows } from './snapshot-evaluator'
 
 const logger = getLogger('snapshot-manager')
@@ -51,6 +52,7 @@ export class SnapshotManager extends EventEmitter {
   private lastRefreshSucceeded = false
   private serverClockOffsetMs = 0
   private representationEtag?: string
+  private lastImmediateEvaluationKey?: string
   // Every refresh captures this generation. A pairing reset or newer refresh
   // invalidates older async work before it can replace visible playback.
   private refreshGeneration = 0
@@ -143,16 +145,27 @@ export class SnapshotManager extends EventEmitter {
   }
 
   async refreshSnapshot(
-    options: { retryOnExpired?: boolean; force?: boolean } = {}
+    options: {
+      retryOnExpired?: boolean
+      force?: boolean
+      onSnapshotFetched?: () => void
+      allowWhileSecurityLocked?: boolean
+    } = {}
   ): Promise<PlaybackPlaylist | null> {
-    const generation = ++this.refreshGeneration
-    const retryOnExpired = options.retryOnExpired !== false
     const pairingService = getPairingService()
     const deviceId = pairingService.getDeviceId()
 
     if (!deviceId) {
       return null
     }
+    if (getSecurePlaybackGuard().isPlaybackLocked() && options.allowWhileSecurityLocked !== true) {
+      this.lastRefreshSucceeded = false
+      logger.warn('Ignoring snapshot refresh while the playback security lock is active')
+      return this.currentPlaylist ?? null
+    }
+
+    const generation = ++this.refreshGeneration
+    const retryOnExpired = options.retryOnExpired !== false
 
     try {
       const httpClient = getHttpClient()
@@ -187,6 +200,7 @@ export class SnapshotManager extends EventEmitter {
         logger.debug({ generation }, 'Discarding stale snapshot response before cache hydration')
         return this.currentPlaylist ?? null
       }
+      options.onSnapshotFetched?.()
       await this.cacheSnapshotMedia(normalized)
       const playlist = await this.buildPlaylist(normalized, 'normal')
 
@@ -227,7 +241,12 @@ export class SnapshotManager extends EventEmitter {
 
       if (error instanceof CacheError && error.details?.['reason'] === 'URL_EXPIRED' && retryOnExpired) {
         logger.warn('Media URL expired, refetching snapshot')
-        return await this.refreshSnapshot({ retryOnExpired: false, force: true })
+        return await this.refreshSnapshot({
+          retryOnExpired: false,
+          force: true,
+          onSnapshotFetched: options.onSnapshotFetched,
+          allowWhileSecurityLocked: options.allowWhileSecurityLocked,
+        })
       }
 
       logger.error({ error }, 'Snapshot fetch failed, using offline fallback')
@@ -440,7 +459,22 @@ export class SnapshotManager extends EventEmitter {
       return
     }
 
-    const delayMs = Math.max(250, nextTransitionAt - this.getServerNowMs())
+    const remainingMs = nextTransitionAt - this.getServerNowMs()
+    // Schedule boundaries are authoritative and must be applied immediately
+    // when already due. Signed-URL refreshes keep a small floor so a backend
+    // returning the same expired URL cannot create a tight refresh loop.
+    if (!forceRefresh && remainingMs <= 0) {
+      const immediateKey = `${snapshot.snapshotId || 'snapshot'}:${nextTransitionAt}`
+      if (this.lastImmediateEvaluationKey === immediateKey) {
+        logger.warn({ immediateKey }, 'Skipping repeated expired snapshot boundary evaluation')
+        return
+      }
+      this.lastImmediateEvaluationKey = immediateKey
+    } else if (remainingMs > 0) {
+      this.lastImmediateEvaluationKey = undefined
+    }
+
+    const delayMs = forceRefresh ? Math.max(250, remainingMs) : Math.max(0, remainingMs)
     this.evaluationTimer = setTimeout(() => {
       if (forceRefresh) {
         void this.refreshSnapshot({ force: true })

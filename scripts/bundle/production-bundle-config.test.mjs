@@ -443,6 +443,10 @@ test('production observability deploys every static exporter target from signed 
   // The observability compose writer is declared before the production assembly
   // block, so assert against the complete assembler rather than the latter slice.
   assert.match(assembler, /GF_SECURITY_ADMIN_PASSWORD__FILE: \$\{GRAFANA_ADMIN_PASSWORD_FILE\}/)
+  assert.match(assembler, /offline_playback_policy="secure"/)
+  assert.match(assembler, /backend_required_for_playback="true"/)
+  assert.match(assembler, /"playbackLeaseMs": 120000/)
+  assert.match(assembler, /purge_cache_after_offline_ms="120000"/)
   assert.match(assembler, /grafana-admin-password/)
   assert.match(assembler, /su -s \/bin\/sh grafana -c 'exec \/run\.sh'/)
   assert.match(production, /\$DATA_PRIVATE_HOST:\$POSTGRES_HOST_PORT\/\$POSTGRES_DB\?sslmode=verify-full&sslrootcert=\/etc\/darshan\/tls\/postgres-ca\.crt/)

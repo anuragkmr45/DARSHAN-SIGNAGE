@@ -35,7 +35,7 @@
       "networkSwitchGraceMs": 30000,
       "playbackLeaseMs": 120000,
       "lockAfterOfflineMs": 120000,
-      "purgeCacheAfterOfflineMs": 0,
+      "purgeCacheAfterOfflineMs": 120000,
       "showSecurityLockScreen": true
     },
     "duplicateIdentity": {

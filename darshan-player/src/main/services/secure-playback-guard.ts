@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import { getConfigManager } from '../../common/config'
 import { evaluateSecurePlaybackState, type SecurePlaybackEvaluation } from '../../common/offline-security-policy'
-import type { AppConfig, PlayerSecurityLockStatus } from '../../common/types'
+import type { AppConfig, PlayerSecurityLockStatus, SecurePlaybackRecoveryPhase } from '../../common/types'
 import { getLogger } from '../../common/logger'
 
 const logger = getLogger('secure-playback-guard')
@@ -24,6 +24,8 @@ export class SecurePlaybackGuard extends EventEmitter {
   private currentStatus: SecurePlaybackGuardStatus
   private timer?: NodeJS.Timeout
   private purgeRequested = false
+  private recoveryRequested = false
+  private recoveryPhase: SecurePlaybackRecoveryPhase = 'READY'
 
   constructor(options: SecurePlaybackGuardOptions = {}) {
     super()
@@ -47,8 +49,37 @@ export class SecurePlaybackGuard extends EventEmitter {
     this.lastBackendSuccessAtMs = this.now()
     this.firstBackendFailureAtMs = undefined
     this.purgeRequested = false
+    this.recoveryRequested = false
+    this.recoveryPhase = 'READY'
     logger.debug({ source }, 'Secure playback backend success observed')
     this.refresh(source)
+  }
+
+  markBackendReachable(source: string): void {
+    if (!this.isPlaybackLocked()) {
+      this.markBackendSuccess(source)
+      return
+    }
+
+    if (this.recoveryRequested) {
+      return
+    }
+
+    this.recoveryRequested = true
+    this.recoveryPhase = 'REVALIDATING_IDENTITY'
+    this.refresh(source)
+    this.emit('recovery-requested', { ...this.currentStatus }, source)
+  }
+
+  setRecoveryPhase(phase: SecurePlaybackRecoveryPhase, source = 'recovery'): void {
+    this.recoveryPhase = phase
+    this.refresh(source)
+  }
+
+  markRecoveryFailed(source: string, error?: unknown): void {
+    this.recoveryRequested = false
+    this.recoveryPhase = 'LOCKED'
+    this.markBackendFailure(source, error)
   }
 
   markBackendFailure(source: string, error?: unknown): void {
@@ -67,6 +98,8 @@ export class SecurePlaybackGuard extends EventEmitter {
     this.lastBackendSuccessAtMs = undefined
     this.firstBackendFailureAtMs = undefined
     this.purgeRequested = false
+    this.recoveryRequested = false
+    this.recoveryPhase = 'READY'
     this.clearTimer()
     this.refresh('reset')
   }
@@ -107,7 +140,9 @@ export class SecurePlaybackGuard extends EventEmitter {
   }
 
   private evaluate(): SecurePlaybackGuardStatus {
-    return toGuardStatus(this.evaluateRaw())
+    const status = toGuardStatus(this.evaluateRaw())
+    status.recoveryPhase = status.locked ? this.recoveryPhase === 'READY' ? 'LOCKED' : this.recoveryPhase : 'READY'
+    return status
   }
 
   private scheduleTimer(status: SecurePlaybackGuardStatus): void {
@@ -144,6 +179,7 @@ export class SecurePlaybackGuard extends EventEmitter {
       previous.firstBackendFailureAt !== next.firstBackendFailureAt ||
       previous.lockAt !== next.lockAt ||
       previous.purgeDue !== next.purgeDue
+      || previous.recoveryPhase !== next.recoveryPhase
     )
   }
 }

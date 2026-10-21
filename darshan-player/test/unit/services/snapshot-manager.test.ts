@@ -136,6 +136,42 @@ describe('Snapshot Manager', () => {
     expect(snapshotManager.getLastError()).to.equal(undefined)
   })
 
+  it('blocks normal snapshot refreshes while locked and permits only an explicit secure-recovery refresh', async () => {
+    const configured = JSON.parse(fs.readFileSync(process.env.HEXMON_CONFIG_PATH, 'utf8'))
+    configured.security = {
+      offlinePlaybackPolicy: 'secure',
+      backendRequiredForPlayback: true,
+      playbackLeaseMs: 120000,
+    }
+    fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify(configured, null, 2))
+
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const httpClient = getHttpClient()
+    const getResponse = sandbox.stub(httpClient, 'getResponse').resolves({
+      status: 200,
+      data: {
+        device_id: 'device-123',
+        content_state: 'empty',
+        snapshot: null,
+        emergency: null,
+        default_media: null,
+      },
+    })
+
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const snapshotManager = getSnapshotManager()
+
+    expect(await snapshotManager.refreshSnapshot()).to.equal(null)
+    expect(getResponse.called).to.equal(false)
+
+    const recovered = await snapshotManager.refreshSnapshot({
+      force: true,
+      allowWhileSecurityLocked: true,
+    })
+    expect(recovered?.mode).to.equal('empty')
+    expect(getResponse.calledOnce).to.equal(true)
+  })
+
   it('should expire a message emergency locally while offline', async () => {
     const baseTime = new Date('2026-09-07T10:00:00.000Z')
     clock = sandbox.useFakeTimers({ now: baseTime, shouldAdvanceTime: false })

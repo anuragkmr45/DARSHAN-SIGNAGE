@@ -56,6 +56,14 @@ function resolveSingleLoopHoldMs(item: TimelineItem): number {
   return Math.max(0, endMs - getServerNowMs(item))
 }
 
+function resolveScheduleWindowRemainingMs(item?: TimelineItem): number {
+  const endMs = getScheduleWindowEndMs(item)
+  if (endMs === null) {
+    return Number.POSITIVE_INFINITY
+  }
+  return Math.max(0, endMs - getServerNowMs(item))
+}
+
 export class TimelineScheduler extends EventEmitter {
   private currentItem?: ScheduledItem
   private nextItem?: ScheduledItem
@@ -116,17 +124,28 @@ export class TimelineScheduler extends EventEmitter {
       return
     }
 
+    const scheduleWindowRemainingMs = resolveScheduleWindowRemainingMs(item)
+    if (scheduleWindowRemainingMs <= 0) {
+      this.emit('timeline-complete', {
+        willRepeat: false,
+        authorityEnded: true,
+      } satisfies TimelineCompletion)
+      return
+    }
+
     const now = Date.now()
     const startTime = now
     const durationMs = Math.max(1, item.displayMs)
     const isSingleContinuousLoop = items.length === 1 && item.loop === true && resumeDecision?.completed !== true
-    const scheduledDurationMs = isSingleContinuousLoop
+    const itemDurationMs = isSingleContinuousLoop
       ? resolveSingleLoopHoldMs(item)
       : resumeDecision
         ? resumeDecision.completed
           ? 0
           : Math.max(0, resumeDecision.remainingMs)
         : durationMs
+    const scheduledDurationMs = Math.min(itemDurationMs, scheduleWindowRemainingMs)
+    const authorityEndsAtCompletion = Number.isFinite(scheduleWindowRemainingMs) && scheduleWindowRemainingMs <= itemDurationMs
     const endTime = startTime + scheduledDurationMs
 
     const scheduledItem: ScheduledItem = {
@@ -141,7 +160,7 @@ export class TimelineScheduler extends EventEmitter {
     this.currentItem = scheduledItem
 
     // Prepare next item
-    if (index + 1 < items.length) {
+    if (!authorityEndsAtCompletion && index + 1 < items.length) {
       const nextItem = items[index + 1]
       if (nextItem) {
         this.nextItem = {
@@ -189,7 +208,7 @@ export class TimelineScheduler extends EventEmitter {
     const transitionTime = scheduledDurationMs - (item.transitionDurationMs || 0)
 
     // Schedule transition start
-    if (item.transitionDurationMs && item.transitionDurationMs > 0) {
+    if (!authorityEndsAtCompletion && item.transitionDurationMs && item.transitionDurationMs > 0) {
       this.transitionTimer = setTimeout(() => {
         this.transitionTimer = undefined
         if (!this.isPaused && this.currentItem === scheduledItem) {
@@ -203,7 +222,14 @@ export class TimelineScheduler extends EventEmitter {
       this.timer = undefined
       if (!this.isPaused) {
         this.emit('item-complete', scheduledItem)
-        this.scheduleNext(items, index + 1)
+        if (authorityEndsAtCompletion) {
+          this.emit('timeline-complete', {
+            willRepeat: false,
+            authorityEnded: true,
+          } satisfies TimelineCompletion)
+        } else {
+          this.scheduleNext(items, index + 1)
+        }
       }
     }, Math.max(0, scheduledDurationMs))
   }

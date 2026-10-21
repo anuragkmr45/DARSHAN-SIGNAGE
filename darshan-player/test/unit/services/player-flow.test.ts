@@ -95,7 +95,11 @@ describe('Player Flow', () => {
     }
     sandbox.stub(heartbeatService, 'sendImmediate').resolves()
     sandbox.stub(snapshotManager, 'start').returns(undefined)
-    sandbox.stub(snapshotManager, 'refreshSnapshot').resolves({ mode: 'normal', items: [], scheduleId: 'sched-1' })
+    sandbox.stub(snapshotManager, 'refreshSnapshot').callsFake(async (options = {}) => {
+      options.onSnapshotFetched?.()
+      return { mode: 'normal', items: [], scheduleId: 'sched-1' }
+    })
+    sandbox.stub(snapshotManager, 'didLastRefreshSucceed').returns(true)
     sandbox.stub(playbackEngine, 'start').resolves()
     sandbox.stub(telemetryService, 'start').resolves()
     sandbox.stub(telemetryService, 'stop').resolves()
@@ -145,6 +149,80 @@ describe('Player Flow', () => {
     expect(playerFlow.getStatus().pairingCode).to.equal(undefined)
     expect(stubs.httpClient.get.calledOnce).to.equal(true)
     expect(stubs.heartbeatService.sendImmediate.calledOnce).to.equal(true)
+
+    await playerFlow.stop()
+  })
+
+  it('keeps a locked player stopped until identity and fresh authority are validated', async () => {
+    const configured = JSON.parse(fs.readFileSync(process.env.HEXMON_CONFIG_PATH, 'utf8'))
+    configured.security = {
+      offlinePlaybackPolicy: 'secure',
+      backendRequiredForPlayback: true,
+      playbackLeaseMs: 120000,
+      purgeCacheAfterOfflineMs: 120000,
+    }
+    fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify(configured, null, 2))
+
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getSecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
+    const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      fingerprint: 'fingerprint-1',
+    })
+
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(pairingService, 'fetchScreenshotPolicy').resolves({ enabled: false, interval_seconds: null })
+
+    const stubs = createCompleteBootstrapStubs()
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+
+    const guard = getSecurePlaybackGuard()
+    expect(guard.getStatus().locked).to.equal(false)
+    stubs.pairingService.fetchBackendPairingStatus.resetHistory()
+    stubs.snapshotManager.refreshSnapshot.resetHistory()
+    const playbackStop = sandbox.spy(stubs.playbackEngine, 'stop')
+    const cacheWriteInvalidation = sandbox.spy(getCacheManager(), 'invalidatePendingWrites')
+
+    ;(guard as any).lastBackendSuccessAtMs = Date.now() - 120001
+    ;(guard as any).refresh('unit-expiry')
+    expect(guard.getStatus().locked).to.equal(true)
+    expect(playbackStop.called).to.equal(true)
+
+    const observedPhases: string[] = []
+    guard.on('changed', (status: any) => {
+      if (status.recoveryPhase) observedPhases.push(status.recoveryPhase)
+    })
+    guard.markBackendReachable('unit-heartbeat')
+    await (playerFlow as any).secureRecoveryPromise
+
+    expect(stubs.pairingService.fetchBackendPairingStatus.calledOnce).to.equal(true)
+    expect(stubs.snapshotManager.refreshSnapshot.calledOnceWithMatch({
+      force: true,
+      allowWhileSecurityLocked: true,
+      onSnapshotFetched: sinon.match.func,
+    })).to.equal(true)
+    expect(
+      stubs.pairingService.fetchBackendPairingStatus.calledBefore(stubs.snapshotManager.refreshSnapshot)
+    ).to.equal(true)
+    expect(observedPhases).to.include.members([
+      'REVALIDATING_IDENTITY',
+      'FETCHING_CURRENT_SNAPSHOT',
+      'SYNCING_CONTENT',
+      'APPLYING_AUTHORITY',
+      'READY',
+    ])
+    expect(guard.getStatus().locked).to.equal(false)
+    expect(guard.getStatus().recoveryPhase).to.equal('READY')
+    expect(cacheWriteInvalidation.calledOnce).to.equal(true)
 
     await playerFlow.stop()
   })

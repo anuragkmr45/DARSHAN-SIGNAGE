@@ -104,6 +104,31 @@ describe('Playback Engine', () => {
     })).to.equal(true)
   })
 
+  it('preserves one-item retry behavior when restoring the current renderer item', () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const send = sandbox.spy()
+    const engine = getPlaybackEngine()
+    engine.initialize({ webContents: { send } })
+    engine.currentPlaylistItemCount = 1
+    engine.currentScheduleId = 'schedule-1'
+    engine.currentItem = {
+      id: 'only-video',
+      type: 'video',
+      displayMs: 5000,
+      fit: 'contain',
+      muted: true,
+      loop: false,
+      transitionDurationMs: 0,
+    }
+
+    expect(engine.restoreCurrentItemInRenderer()).to.equal(true)
+    expect(send.calledWith('media-change', sinon.match({
+      scheduleId: 'schedule-1',
+      restored: true,
+      singleItemFrame: true,
+    }))).to.equal(true)
+  })
+
   it('ignores equivalent timeline playlist updates when only presigned asset urls changed', async () => {
     const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
     const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
