@@ -52,6 +52,10 @@ pino-*.log
 coverage/
 *.lcov
 .nyc_output/
+test-results/
+playwright-report/
+blob-report/
+.vite/
 /darshan-player/**/pids/
 /darshan-player/**/*.pid
 /darshan-player/**/*.seed
