@@ -49,8 +49,9 @@ import { apiEndpoints, PENDINGSTATUS } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { getDatabase, schema } from '@/db';
-import { eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
+import { createAuditLogRepository } from '@/db/repositories/audit-log';
 import { config as appConfig } from '@/config';
 import {
   buildObjectKey,
@@ -84,6 +85,7 @@ const UPLOAD_CANONICAL_BUCKET = 'media-source';
 
 export async function mediaRoutes(fastify: FastifyInstance) {
   const mediaRepo = createMediaRepository();
+  const auditRepo = createAuditLogRepository();
   const uploadSessionRepo = createMediaUploadSessionRepository();
   const db = getDatabase();
   const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
@@ -91,6 +93,17 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     roleName: payload.role,
     departmentId: payload.department_id,
   });
+  const assertRestoreAdmin = (actor: ActorContext, ability: ContentAbility) => {
+    if (!['SUPER_ADMIN', 'ADMIN'].includes(actor.roleName) || !ability.can('manage', 'Media')) {
+      throw AppError.forbidden('Administrator media restore permission required');
+    }
+  };
+  const deletedListOffset = (query: unknown): number => {
+    const value = (query as { page?: string } | undefined)?.page ?? '1';
+    const page = Number(value);
+    if (!Number.isInteger(page) || page < 1 || page > 10000) throw AppError.badRequest('Invalid deleted-content page');
+    return (page - 1) * 100;
+  };
   const withMediaMutation = async <T>(
     payload: JWTPayload,
     mediaId: string,
@@ -107,6 +120,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         .where(eq(schema.media.id, mediaId))
         .for('update');
       if (!media) throw AppError.notFound('Media not found');
+      if (media.deleted_at) throw AppError.notFound('Media not found');
       if (!canManageContentResource(context.actor, media, context.ability, 'Media', action)) {
         throw AppError.forbidden('Forbidden');
       }
@@ -1356,7 +1370,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
 
         const mediaId = (request.params as any).id;
         const media = await mediaRepo.findById(mediaId);
-        if (!media) {
+        if (!media || media.deleted_at) {
           throw AppError.notFound('Media not found');
         }
         if (!canReadContentResource(actor, media, ability, 'Media')) throw AppError.forbidden('Forbidden');
@@ -1505,12 +1519,62 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Delete media (soft by default, hard with ?hard=true)
+  fastify.get(apiEndpoints.media.deleted, { schema: { tags: ['Media'], security: [{ bearerAuth: [] }] } }, async (request, reply) => {
+    try {
+      const token = extractTokenFromHeader(request.headers.authorization);
+      if (!token) throw AppError.unauthorized();
+      const payload = await verifyAccessToken(token);
+      const result = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+        assertRestoreAdmin(actor, ability);
+        const items = await executor.select().from(schema.media)
+          .where(isNotNull(schema.media.deleted_at)).orderBy(desc(schema.media.deleted_at)).limit(100).offset(deletedListOffset(request.query));
+        return items.map(({ id, name, type, status, deleted_at, deleted_by, created_by, owner_scope, owner_department_id }) =>
+          ({ id, name, type, status, deleted_at, deleted_by, created_by, owner_scope, owner_department_id }));
+      });
+      await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_DELETED_LIST', resource_type: 'Media', ip_address: request.ip });
+      return reply.send({ items: result });
+    } catch (error) { return respondWithError(reply, error); }
+  });
+
+  fastify.post<{ Params: { id: string } }>(apiEndpoints.media.restore, { schema: { tags: ['Media'], security: [{ bearerAuth: [] }] } }, async (request, reply) => {
+    try {
+      const token = extractTokenFromHeader(request.headers.authorization);
+      if (!token) throw AppError.unauthorized();
+      const payload = await verifyAccessToken(token);
+      const restored = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+        assertRestoreAdmin(actor, ability);
+        const [media] = await executor.select().from(schema.media)
+          .where(eq(schema.media.id, (request.params as { id: string }).id)).for('update');
+        if (!media) throw AppError.notFound('Media not found');
+        if (!media.deleted_at) return { id: media.id, already_restored: true };
+        const ids = [media.source_object_id, media.ready_object_id, media.thumbnail_object_id].filter(Boolean) as string[];
+        const objects = ids.length ? await executor.select().from(schema.storageObjects)
+          .where(inArray(schema.storageObjects.id, ids)) : [];
+        if (objects.length !== new Set(ids).size) {
+          throw new AppError({ statusCode: 409, code: 'MEDIA_RESTORE_OBJECT_MISSING', message: 'A tracked media object is missing.' });
+        }
+        const locations = new Map(objects.map((object) => [`${object.bucket}/${object.object_key}`, { bucket: object.bucket, key: object.object_key }]));
+        if (media.source_bucket && media.source_object_key) {
+          locations.set(`${media.source_bucket}/${media.source_object_key}`, { bucket: media.source_bucket, key: media.source_object_key });
+        }
+        for (const location of locations.values()) {
+          try { await headObject(location.bucket, location.key); }
+          catch { throw new AppError({ statusCode: 409, code: 'MEDIA_RESTORE_OBJECT_MISSING', message: 'A retained media object is unavailable.' }); }
+        }
+        await mediaRepo.update(media.id, { deleted_at: null, deleted_by: null }, executor);
+        return { id: media.id, already_restored: false };
+      });
+      if (!restored.already_restored) await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_RESTORE', resource_type: 'Media', resource_id: restored.id, ip_address: request.ip });
+      return reply.send(restored);
+    } catch (error) { return respondWithError(reply, error); }
+  });
+
+  // Deletion only hides media. Storage and the original processing state remain recoverable.
   fastify.delete<{ Params: { id: string }; Querystring: { hard?: string } }>(
     apiEndpoints.media.delete,
     {
       schema: {
-        description: 'Delete media (soft delete by default, hard delete with ?hard=true)',
+        description: 'Mark media deleted while retaining its objects for administrator restore',
         tags: ['Media'],
         security: [{ bearerAuth: [] }],
       },
@@ -1526,6 +1590,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const hardDelete =
           typeof (request.query as any).hard === 'string' &&
           ((request.query as any).hard as string).toLowerCase() === 'true';
+        if (hardDelete) {
+          throw new AppError({ statusCode: 400, code: 'MEDIA_HARD_DELETE_DISABLED', message: 'Permanent media deletion is disabled.' });
+        }
         const deletion = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
           if (!ability.can('delete', 'Media')) throw AppError.forbidden('Forbidden');
           const [media] = await executor
@@ -1557,6 +1624,8 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             });
           }
 
+          if (media.deleted_at) return { mediaId: media.id, alreadyDeleted: true };
+
           const usageSummary = await mediaRepo.getUsageSummary(media.id, executor);
           if (usageSummary.inUse) {
             throw new AppError({
@@ -1567,90 +1636,16 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             });
           }
 
-          const storageObjects = new Map<string, { bucket: string; key: string; id: string }>();
-          const storageObjectIds = [
-            media.source_object_id,
-            media.ready_object_id,
-            media.thumbnail_object_id,
-          ].filter(Boolean) as string[];
-          if (storageObjectIds.length > 0) {
-            const rows = await executor
-              .select()
-              .from(schema.storageObjects)
-              .where(inArray(schema.storageObjects.id, storageObjectIds as any));
-            rows.forEach((obj) => storageObjects.set(obj.id, {
-              bucket: obj.bucket,
-              key: obj.object_key,
-              id: obj.id,
-            }));
-          }
-
-          if (media.source_bucket && media.source_object_key) {
-            const [trackedSource] = await executor
-              .insert(schema.storageObjects)
-              .values({
-                bucket: media.source_bucket,
-                object_key: media.source_object_key,
-                content_type: media.source_content_type,
-                size: media.source_size,
-              })
-              .onConflictDoUpdate({
-                target: [schema.storageObjects.bucket, schema.storageObjects.object_key],
-                set: { bucket: media.source_bucket },
-              })
-              .returning();
-            storageObjects.set(trackedSource.id, {
-              bucket: trackedSource.bucket,
-              key: trackedSource.object_key,
-              id: trackedSource.id,
-            });
-          }
-
-          if (hardDelete) {
-            await mediaRepo.delete(media.id, executor);
-          } else {
-            await mediaRepo.update(media.id, {
-              status: 'FAILED',
-              source_object_id: null as any,
-              source_bucket: null as any,
-              source_object_key: null as any,
-              ready_object_id: null as any,
-              thumbnail_object_id: null as any,
-            }, executor);
-          }
-
-          return { mediaId: media.id, storageObjects: Array.from(storageObjects.values()) };
+          await mediaRepo.update(media.id, { deleted_at: new Date(), deleted_by: payload.sub }, executor);
+          return { mediaId: media.id, alreadyDeleted: false };
         });
-
-        const deletedObjects: { bucket: string; key: string; success: boolean; error?: string }[] = [];
-        for (const obj of deletion.storageObjects) {
-          try {
-            await deleteObject(obj.bucket, obj.key);
-            deletedObjects.push({ bucket: obj.bucket, key: obj.key, success: true });
-            await db.delete(schema.storageObjects).where(eq(schema.storageObjects.id, obj.id));
-          } catch (err) {
-            logger.warn(err, 'Failed to delete media object from storage');
-            deletedObjects.push({
-              bucket: obj.bucket,
-              key: obj.key,
-              success: false,
-              error: (err as Error).message,
-            });
-          }
+        if (!deletion.alreadyDeleted) {
+          await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_DELETE', resource_type: 'Media', resource_id: deletion.mediaId, ip_address: request.ip });
         }
-
-        if (hardDelete) {
-          return reply.status(OK).send({
-            message: 'Media hard deleted (DB row removed, storage cleaned where possible)',
-            id: deletion.mediaId,
-            storage_deleted: deletedObjects,
-          });
-        }
-
         return reply.status(OK).send({
-          message: 'Media soft deleted (DB retained, storage cleaned where possible)',
+          message: 'Media deleted and retained for administrator restore',
           id: deletion.mediaId,
-          storage_deleted: deletedObjects,
+          already_deleted: deletion.alreadyDeleted,
         });
       } catch (error) {
         logger.error(error, 'Delete media error');

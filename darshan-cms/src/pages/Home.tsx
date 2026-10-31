@@ -90,7 +90,7 @@ const Home = () => {
               </div>
               <h3 className="text-xl font-semibold text-foreground">Enterprise Security</h3>
               <p className="text-muted-foreground">
-                SSO/OIDC integration, API keys, and comprehensive audit logs for enterprise-grade security.
+                Local account sign-in, API keys, and comprehensive audit logs for site operations.
               </p>
             </CardContent>
           </Card>

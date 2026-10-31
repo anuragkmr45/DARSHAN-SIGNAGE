@@ -147,6 +147,9 @@ export async function assertPlayerWebpageUrlAllowed(
   const cidrs = security.webpageAllowedCidrs ?? []
   for (const address of addresses) {
     if (hardDenied(address)) throw new WebpageNetworkPolicyError('WEBPAGE_ADDRESS_BLOCKED', 'Webpage resolved to a prohibited address')
+    if (process.env['NODE_ENV'] === 'production' && !privateAddress(address)) {
+      throw new WebpageNetworkPolicyError('WEBPAGE_ADDRESS_BLOCKED', 'Public webpage destinations are not allowed in this release')
+    }
     if (privateAddress(address) && !cidrs.some((cidr) => ipMatchesCidr(address, cidr))) {
       throw new WebpageNetworkPolicyError('WEBPAGE_ADDRESS_BLOCKED', 'Private webpage address is not allowlisted')
     }

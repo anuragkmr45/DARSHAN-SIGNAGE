@@ -24,6 +24,7 @@ import { ModerationControls } from "@/components/chat/ModerationControls";
 import { ThreadPanel } from "@/components/chat/ThreadPanel";
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { ChatStatusBanner } from "@/components/chat/ChatStatusBanner";
+import { DeletedChatContentDialog } from '@/components/chat/DeletedChatContentDialog';
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -215,12 +216,14 @@ export default function Conversations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const authToken = useAppSelector((state) => state.auth.token);
   const currentUserId = useAppSelector((state) => state.auth.user?.id);
+  const currentUserRole = useAppSelector((state) => state.auth.user?.role);
   const isAuthenticated = Boolean(authToken || currentUserId);
   const { can } = useAuthorization();
   const usersDirectoryQuery = useChatUserDirectory(isAuthenticated);
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [deletedContentOpen, setDeletedContentOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatStatus, setChatStatus] = useState<ChatStatus | null>(null);
@@ -785,6 +788,7 @@ export default function Conversations() {
                 <Plus className="mr-2 h-4 w-4" />
                 New chat
               </Button>
+              {(currentUserRole === 'ADMIN' || currentUserRole === 'SUPER_ADMIN') && can('manage', 'Conversation') && <Button variant="outline" onClick={() => setDeletedContentOpen(true)}>Deleted content</Button>}
               <Button
                 variant="outline"
                 size="icon"
@@ -1137,6 +1141,7 @@ export default function Conversations() {
       <div className="hidden">
         {realtime.isConnected ? "socket-connected" : "socket-disconnected"}
       </div>
+      <DeletedChatContentDialog open={deletedContentOpen} onOpenChange={setDeletedContentOpen} />
     </div>
   );
 }

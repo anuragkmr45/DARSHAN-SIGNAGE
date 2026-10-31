@@ -80,6 +80,18 @@ export async function resolveMediaAccess(
   db = getDatabase(),
   options: ResolveMediaAccessOptions = {}
 ): Promise<ResolvedMediaAccess> {
+  if (media.deleted_at) {
+    return {
+      media_url: null,
+      is_object_missing: false,
+      content_type: null,
+      source_content_type: media.source_content_type ?? null,
+      size: null,
+      ready_object_id: null,
+      ready_object_sha256: null,
+      ready_object_created_at: null,
+    };
+  }
   const filename = (media as { original_filename?: string | null }).original_filename ?? media.name ?? 'file';
   const contentDisposition = buildContentDisposition(filename, 'inline');
 

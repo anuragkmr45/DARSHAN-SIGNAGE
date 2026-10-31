@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto'
 import WebSocket from 'ws'
 import { getConfigManager } from '../../common/config'
 import { getLogger } from '../../common/logger'
-import { CommandType, PlayerRealtimeDiagnostics } from '../../common/types'
+import { CommandType, DeviceApiError, PlayerRealtimeDiagnostics } from '../../common/types'
 import { ExponentialBackoff } from '../../common/utils'
 import { DEVICE_SOCKET_AUTH_VERSION, getCertificateManager } from './cert-manager'
 import { getCommandProcessor } from './command-processor'
@@ -14,6 +14,7 @@ import { getDefaultMediaService } from './settings/default-media-service'
 import { createTransportHttpsAgent } from './network/transport-tls'
 import { getSnapshotManager } from './snapshot-manager'
 import { getDisplayManager } from './display-manager'
+import { getLifecycleEvents } from './lifecycle-events'
 
 const logger = getLogger('realtime-service')
 const SOCKET_AUTH_NONCE_BYTES = 16
@@ -536,6 +537,10 @@ export class RealtimeService extends EventEmitter {
     } catch (error) {
       this.reconciliationFailureCount += 1
       logger.warn({ error, reason }, 'Desired-state reconciliation failed')
+      if (error instanceof DeviceApiError &&
+          (error.code === 'NOT_FOUND' || error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN')) {
+        getLifecycleEvents().emitRuntimeAuthFailure({ source: 'desired-state', error })
+      }
       return null
     }
   }

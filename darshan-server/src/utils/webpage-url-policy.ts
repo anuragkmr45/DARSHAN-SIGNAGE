@@ -97,7 +97,7 @@ export function ipMatchesCidr(address: string, cidr: string): boolean {
   return (addressValue.value >> shift) === (networkValue.value >> shift);
 }
 
-function isHardDeniedAddress(address: string): boolean {
+export function isHardDeniedAddress(address: string): boolean {
   const mapped = mappedIpv4Address(address);
   if (mapped) return isHardDeniedAddress(mapped);
   return [
@@ -106,7 +106,7 @@ function isHardDeniedAddress(address: string): boolean {
   ].some((cidr) => ipMatchesCidr(address, cidr));
 }
 
-function isPrivateAddress(address: string): boolean {
+export function isPrivateAddress(address: string): boolean {
   const mapped = mappedIpv4Address(address);
   if (mapped) return isPrivateAddress(mapped);
   return ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', 'fc00::/7']
@@ -157,6 +157,9 @@ export async function assertWebpageUrlAllowed(
   const cidrs = csv(policy.WEBPAGE_ALLOWED_CIDRS);
   for (const address of addresses) {
     if (isHardDeniedAddress(address)) throw new WebpageUrlPolicyError('WEBPAGE_ADDRESS_BLOCKED', 'Webpage resolved to a prohibited address');
+    if (policy.NODE_ENV === 'production' && !isPrivateAddress(address)) {
+      throw new WebpageUrlPolicyError('WEBPAGE_ADDRESS_BLOCKED', 'Public webpage destinations are not allowed in this release');
+    }
     if (isPrivateAddress(address) && !cidrs.some((cidr) => ipMatchesCidr(address, cidr))) {
       throw new WebpageUrlPolicyError('WEBPAGE_ADDRESS_BLOCKED', 'Private webpage address is not on the configured CIDR allowlist');
     }

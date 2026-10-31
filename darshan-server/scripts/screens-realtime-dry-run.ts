@@ -111,6 +111,7 @@ async function apiRequest(baseUrl: string, token: string, method: string, path: 
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(method === 'POST' && path.startsWith('/api/v1/emergency/') ? { 'Idempotency-Key': randomUUID() } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -404,6 +405,7 @@ async function run() {
 
     const emergency = await apiRequest(baseUrl, adminToken, 'POST', '/api/v1/emergency/trigger', {
       message: 'Realtime dry run emergency',
+      media_id: mediaId,
       screen_ids: [screenId],
     });
     if (emergency.status !== 201) {
@@ -421,6 +423,19 @@ async function run() {
     if (clearEmergency.status !== 200) {
       throw new Error(`Emergency clear failed: ${clearEmergency.status} ${JSON.stringify(clearEmergency.data)}`);
     }
+
+    const blockedDelete = await apiRequest(baseUrl, adminToken, 'DELETE', `/api/v1/screens/${screenId}`);
+    const blockedDeleteBody = requireObject(blockedDelete.data, 'blocked screen delete');
+    const blockedDeleteError = requireObject(blockedDeleteBody.error, 'blocked screen delete error');
+    if (blockedDelete.status !== 409 || blockedDeleteError.code !== 'SCREEN_IN_USE') {
+      throw new Error(`Referenced screen delete was not blocked: ${blockedDelete.status} ${JSON.stringify(blockedDelete.data)}`);
+    }
+    recordStep('Current publish blocks screen deletion', true);
+
+    // Preserve the published snapshot as history while ending its live window.
+    await db.update(schema.schedules)
+      .set({ end_at: new Date(Date.now() - 1000) })
+      .where(eq(schema.schedules.id, scheduleId));
 
     const deleteRefreshPromise = waitForEvent(
       socket,

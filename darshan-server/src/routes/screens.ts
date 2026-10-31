@@ -45,6 +45,8 @@ import {
 } from '@/services/screen-display-state-service';
 import { displaySelectionSchema } from '@/utils/display-profile';
 import { subject } from '@casl/ability';
+import { assertTargetCanBeDeleted, lockScreenTargetReferences } from '@/services/screen-deletion-guard';
+import { sendDeviceNotification } from '@/realtime/device-gateway';
 
 const logger = createLogger('screen-routes');
 const { OK } = HTTP_STATUS;
@@ -1691,6 +1693,15 @@ export async function screenRoutes(fastify: FastifyInstance) {
           : [];
 
         const cleanup = await db.transaction(async (tx) => {
+          await lockScreenTargetReferences(tx);
+          const [lockedScreen] = await tx.select({ id: schema.screens.id }).from(schema.screens)
+            .where(eq(schema.screens.id, screenId)).for('update');
+          if (!lockedScreen) throw AppError.notFound('Screen not found');
+          const memberships = await tx.select({ group_id: schema.screenGroupMembers.group_id })
+            .from(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.screen_id, screenId));
+          await assertTargetCanBeDeleted(tx, {
+            kind: 'SCREEN', id: screenId, groupIds: memberships.map((member) => member.group_id),
+          });
           const displayStateDeleted = await tx
             .delete(schema.screenDisplayStates)
             .where(eq(schema.screenDisplayStates.screen_id, screenId));
@@ -1771,6 +1782,11 @@ export async function screenRoutes(fastify: FastifyInstance) {
           screen_ids: [screenId],
           group_ids: [],
         });
+        try {
+          await sendDeviceNotification(screenId, 'RESYNC_REQUIRED', { reason: 'screen-deleted' });
+        } catch (notificationError) {
+          request.log.warn({ err: notificationError, screenId }, 'Deleted screen notification deferred');
+        }
 
         return reply.status(OK).send({
           message: 'Screen deleted with related data cleaned up',

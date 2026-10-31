@@ -16,7 +16,7 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { getDatabase, schema } from '@/db';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
 import { normalizeDocumentPage } from '@/utils/document-page-selection';
@@ -293,7 +293,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const slotItems = await slotItemRepo.listByPresentation(presentation.id);
         const mediaIds = slotItems.map((i: any) => i.media_id);
         const mediaRows = mediaIds.length
-          ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
+          ? await db.select().from(schema.media).where(and(inArray(schema.media.id, mediaIds as any), isNull(schema.media.deleted_at)))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
         if (mediaRows.some((media) => !canReadContentResource(actor, media, ability, 'Media'))) {
@@ -371,7 +371,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const mediaIds = items.map((i: any) => i.media_id);
         const db = getDatabase();
         const mediaRows = mediaIds.length
-          ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
+          ? await db.select().from(schema.media).where(and(inArray(schema.media.id, mediaIds as any), isNull(schema.media.deleted_at)))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
         if (mediaRows.some((media) => !canReadContentResource(actor, media, ability, 'Media'))) {
@@ -540,7 +540,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const slots = await slotItemRepo.listByPresentation(presentation.id);
         const mediaIds = slots.map((i: any) => i.media_id);
         const mediaRows = mediaIds.length
-          ? await db.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
+          ? await db.select().from(schema.media).where(and(inArray(schema.media.id, mediaIds as any), isNull(schema.media.deleted_at)))
           : [];
         const mediaMap = new Map(mediaRows.map((m) => [m.id, m]));
         if (mediaRows.some((media) => !canReadContentResource(actor, media, ability, 'Media'))) {
@@ -711,7 +711,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             const allowedSlotIds = layoutSlotIds(layout.spec);
             const mediaIds = Array.from(new Set(data.items.map((item) => item.media_id)));
             const mediaRows = mediaIds.length
-              ? await executor.select().from(schema.media).where(inArray(schema.media.id, mediaIds as any))
+              ? await executor.select().from(schema.media).where(and(inArray(schema.media.id, mediaIds as any), isNull(schema.media.deleted_at)))
               : [];
             const mediaMap = new Map(mediaRows.map((media) => [media.id, media]));
             const usedOrders = new Map<string, Set<number>>();

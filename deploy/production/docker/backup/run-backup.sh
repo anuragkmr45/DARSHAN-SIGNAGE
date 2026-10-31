@@ -21,7 +21,7 @@ require_value() {
 
 validate_configuration() {
   BACKUP_ROOT="${BACKUP_ROOT:-/backups}"
-  BACKUP_KEEP_SETS="${BACKUP_KEEP_SETS:-3}"
+  BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
   BACKUP_SCHEDULE_TIME="${BACKUP_SCHEDULE_TIME:-00:00}"
   BACKUP_SCHEDULE_TIMEZONE="${BACKUP_SCHEDULE_TIMEZONE:-Asia/Kolkata}"
   BACKUP_RETRY_SECONDS="${BACKUP_RETRY_SECONDS:-3600}"
@@ -32,7 +32,7 @@ validate_configuration() {
   MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://minio:9000}"
 
   [[ "$BACKUP_ROOT" == /* && "$BACKUP_ROOT" != "/" ]] || fail "BACKUP_ROOT must be an absolute non-root path"
-  [[ "$BACKUP_KEEP_SETS" == "3" ]] || fail "BACKUP_KEEP_SETS must be 3 for the small-release policy"
+  [[ "$BACKUP_RETENTION_DAYS" == "30" ]] || fail "BACKUP_RETENTION_DAYS must be 30 for this release"
   [[ "$BACKUP_SCHEDULE_TIME" == "00:00" ]] || fail "BACKUP_SCHEDULE_TIME must be 00:00 for the small-release policy"
   [[ "$BACKUP_SCHEDULE_TIMEZONE" == "Asia/Kolkata" ]] || fail "BACKUP_SCHEDULE_TIMEZONE must be Asia/Kolkata for IST"
   [[ "$BACKUP_RETRY_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "BACKUP_RETRY_SECONDS must be a positive integer"
@@ -84,19 +84,21 @@ assert_capacity() {
 }
 
 prune_completed_sets() {
+  local reference_date="$1"
   local -a sets=()
-  local remove_count index name path
+  local name path newest cutoff
 
   mapfile -t sets < <(
     find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
       -name 'backup-????-??-??' -printf '%f\n' | LC_ALL=C sort
   )
-  remove_count=$(( ${#sets[@]} - BACKUP_KEEP_SETS ))
-  (( remove_count > 0 )) || return 0
-
-  for (( index=0; index<remove_count; index++ )); do
-    name="${sets[$index]}"
+  (( ${#sets[@]} > 0 )) || return 0
+  newest="${sets[${#sets[@]}-1]}"
+  cutoff="$(TZ="$BACKUP_SCHEDULE_TIMEZONE" date -d "$reference_date - $BACKUP_RETENTION_DAYS days" +%F)" \
+    || fail "could not calculate backup retention cutoff"
+  for name in "${sets[@]}"; do
     [[ "$name" =~ ^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail "refusing to prune an invalid backup name"
+    [[ "$name" < "backup-$cutoff" && "$name" != "$newest" ]] || continue
     path="$BACKUP_ROOT/$name"
     [[ -d "$path" && ! -L "$path" ]] || fail "refusing to prune a non-directory backup"
     log "Pruning expired completed backup set $name"
@@ -146,6 +148,7 @@ run_once() {
   local backup_date="${BACKUP_SET_DATE:-$(TZ="$BACKUP_SCHEDULE_TIMEZONE" date +%F)}"
   local created_at final stage status_tmp
   [[ "$backup_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail "BACKUP_SET_DATE must use YYYY-MM-DD"
+  [[ "$(date -u -d "$backup_date" +%F 2>/dev/null)" == "$backup_date" ]] || fail "BACKUP_SET_DATE is not a calendar date"
 
   mkdir -p "$BACKUP_ROOT" "$BACKUP_ROOT/.partial"
   chmod 0700 "$BACKUP_ROOT" "$BACKUP_ROOT/.partial"
@@ -173,7 +176,7 @@ run_once() {
     [[ -d "$final" && ! -L "$final" ]] || fail "today's backup path is not a safe directory"
     verify_set "$final" || fail "today's existing backup failed checksum verification"
     log "Verified backup set backup-$backup_date already exists; no duplicate was created"
-    prune_completed_sets
+    prune_completed_sets "$backup_date"
     cleanup
     trap - EXIT INT TERM
     return 0
@@ -205,7 +208,7 @@ CREATED_AT_UTC=$created_at
 POSTGRES_DATABASE=$POSTGRES_DB
 POSTGRES_HOST=$POSTGRES_HOST
 MINIO_ENDPOINT=$MINIO_ENDPOINT
-RETENTION_COMPLETED_SETS=$BACKUP_KEEP_SETS
+RETENTION_DAYS=$BACKUP_RETENTION_DAYS
 BACKUP_SCHEDULE_TIME=$BACKUP_SCHEDULE_TIME
 BACKUP_SCHEDULE_TIMEZONE=$BACKUP_SCHEDULE_TIMEZONE
 EOF
@@ -224,7 +227,7 @@ EOF
   BACKUP_ACTIVE_STAGE=""
   sync
 
-  prune_completed_sets
+  prune_completed_sets "$backup_date"
 
   status_tmp="$BACKUP_ROOT/.last-success.$$"
   cat > "$status_tmp" <<EOF

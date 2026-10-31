@@ -2,7 +2,7 @@ import { EventEmitter } from 'events'
 import { DeviceApiError } from '../../common/types'
 
 export interface RuntimeAuthFailureEvent {
-  source: 'heartbeat' | 'command-poll' | 'command-ack' | 'proof-of-play' | 'screenshot' | 'request-queue' | 'snapshot'
+  source: 'heartbeat' | 'command-poll' | 'command-ack' | 'proof-of-play' | 'screenshot' | 'request-queue' | 'snapshot' | 'desired-state'
   error: DeviceApiError
 }
 

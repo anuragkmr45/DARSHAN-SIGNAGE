@@ -118,6 +118,10 @@ export const normalizeChatError = (error: unknown): ChatNormalizedError => {
 };
 
 export const chatApi = {
+  deletedConversations: (page = 1) => apiClient.request<{ items: Array<{ id: string; title: string | null; type: string; deleted_at: string }> }>({ path: `${endpoints.chat.deletedConversations}?page=${page}`, method: 'GET' }),
+  deletedMessages: (page = 1) => apiClient.request<{ items: Array<{ id: string; conversation_id: string; deleted_at: string }> }>({ path: `${endpoints.chat.deletedMessages}?page=${page}`, method: 'GET' }),
+  restoreConversation: (id: string) => apiClient.request<{ conversationId: string; already_restored: boolean }>({ path: endpoints.chat.restoreConversation(id), method: 'POST' }),
+  restoreMessage: (id: string) => apiClient.request<{ messageId: string; already_restored: boolean }>({ path: endpoints.chat.restoreMessage(id), method: 'POST' }),
   createDm: (otherUserId: string) =>
     apiClient.request<ChatConversationResponse>({
       path: endpoints.chat.dm,

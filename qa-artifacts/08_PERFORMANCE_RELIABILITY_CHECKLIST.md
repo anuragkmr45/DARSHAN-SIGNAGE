@@ -1,5 +1,9 @@
 # Performance, Load And Resilience Plan
 
+## Groups 1–4 measured release target, 2026-11-01
+
+The BQ-017/018 site decision in `02_BUSINESS_QUESTIONS.md` supersedes older TBD threshold text below. Execute the five-VM load, proxy-sharing, backup overlap, 1,000-player spike, latency/error, emergency display, backlog/PoP and production-sized restore gates in `evidence/groups-1-4-release-gates-2026-11-01.md`. No model or developer-only run counts as a measured release pass.
+
 This document primarily designs future tests. A short targeted Linux Electron characterization was executed on 2026-10-15: two simultaneous loop videos ran for 12 seconds, a mixed video/PDF sequence cycled, a corrupt video recovered to PDF page 19, cached looping survived an offline restart, and a schedule stopped approximately 105 ms after its boundary. Requirements 19–24 now have focused fake-clock/fault automation plus two current Linux Electron runs recorded in `evidence/playback-recovery-developer-verification-2026-10-21.md`. Neither record is a soak/capacity pass. Run the remaining plan only on isolated hardware and data that represent the five VM roles and actual player models. Obtain BQ-017 workload/SLO inputs, BQ-018 RPO/RTO and BQ-019 network boundary before assigning release pass/fail limits. The sample 500-player capacity template is not an approved target.
 
 ## Workload Model

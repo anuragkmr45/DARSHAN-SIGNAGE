@@ -23,6 +23,7 @@ import { AppError } from '@/utils/app-error';
 import { serializeMediaRecord } from '@/utils/media';
 import { resolveMediaAccess } from '@/utils/media-access';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
+import { lockScreenTargetReferences } from '@/services/screen-deletion-guard';
 import {
   APPEARANCE_SETTINGS_KEY,
   BACKUPS_SETTINGS_KEY,
@@ -905,6 +906,7 @@ export async function settingsRoutes(fastify: FastifyInstance) {
         }
 
         const savedAssignments = await db.transaction(async (tx) => {
+          await lockScreenTargetReferences(tx);
           // The settings row does not exist before the first save, so a row lock
           // cannot serialize every writer. This transaction-scoped advisory lock
           // gives first-save and later-save operations the same concurrency rule.

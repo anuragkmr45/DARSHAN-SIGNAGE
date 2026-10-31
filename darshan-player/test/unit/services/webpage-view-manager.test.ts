@@ -5,7 +5,8 @@ const { WebpageViewManager } = require('../../../src/main/services/webpage-view-
 
 const security = {
   csp: "default-src 'self'",
-  allowedDomains: ['8.8.8.8'],
+  allowedDomains: ['10.20.1.9'],
+  webpageAllowedCidrs: ['10.20.0.0/16'],
   webpageAllowedPorts: [443],
   disableEval: true,
   contextIsolation: true,
@@ -34,7 +35,7 @@ const request = (id: string, generation: number, zIndex: number, bounds = { x: 0
   generation,
   zIndex,
   bounds,
-  url: 'https://8.8.8.8/dashboard',
+  url: 'https://10.20.1.9/dashboard',
 })
 
 describe('WebpageViewManager', () => {
@@ -171,9 +172,9 @@ describe('WebpageViewManager', () => {
     const blockedNavigation = { preventDefault: sinon.spy() }
     const blockedRedirect = { preventDefault: sinon.spy() }
 
-    contents.emit('will-navigate', allowedNavigation, 'https://8.8.8.8/next')
+    contents.emit('will-navigate', allowedNavigation, 'https://10.20.1.9/next')
     contents.emit('will-navigate', blockedNavigation, 'https://evil.example/escape')
-    contents.emit('will-redirect', blockedRedirect, 'https://user:secret@8.8.8.8/private')
+    contents.emit('will-redirect', blockedRedirect, 'https://user:secret@10.20.1.9/private')
 
     expect(allowedNavigation.preventDefault.called).to.equal(false)
     expect(blockedNavigation.preventDefault.calledOnce).to.equal(true)

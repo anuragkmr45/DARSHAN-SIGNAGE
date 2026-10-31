@@ -28,6 +28,8 @@ type MockState = {
   pairings: Array<Record<string, unknown>>;
   recoveryByDeviceId: Record<string, unknown>;
   confirmModeByCode: Record<string, "PAIRING" | "RECOVERY">;
+  screenDeleteBlocked?: boolean;
+  groupDeleteBlocked?: boolean;
 };
 
 const adminUser = {
@@ -190,6 +192,11 @@ const installApiMocks = async (page: Page, state: MockState) => {
           pagination: { page: pageNum, limit, total: state.groups.length },
         }),
       });
+    }
+
+    if (/^\/api\/v1\/screen-groups\/[^/]+$/.test(pathname) && method === "GET") {
+      const group = state.groups.find((entry) => entry.id === pathname.split("/").pop());
+      return route.fulfill({ status: group ? 200 : 404, contentType: "application/json", body: JSON.stringify(group ?? { error: { code: "NOT_FOUND", message: "Group not found" } }) });
     }
 
     if (/^\/api\/v1\/screens\/[^/]+$/.test(pathname) && method === "GET") {
@@ -428,6 +435,12 @@ const installApiMocks = async (page: Page, state: MockState) => {
 
     if (pathname.startsWith("/api/v1/screens/") && method === "DELETE") {
       const screenId = pathname.split("/").pop()!;
+      if (state.screenDeleteBlocked) {
+        return route.fulfill({
+          status: 409, contentType: "application/json",
+          body: JSON.stringify({ success: false, error: { code: "SCREEN_IN_USE", message: "Remove references before deleting.", details: { blockers: { schedule_items: 1, defaults: 1 } } } }),
+        });
+      }
       state.screens = state.screens.filter((screen) => screen.id !== screenId);
       return route.fulfill({
         status: 200,
@@ -439,6 +452,17 @@ const installApiMocks = async (page: Page, state: MockState) => {
           storage_cleanup: { deleted: [], failed: [] },
         }),
       });
+    }
+
+    if (/^\/api\/v1\/screen-groups\/[^/]+$/.test(pathname) && method === "DELETE") {
+      if (state.groupDeleteBlocked) {
+        return route.fulfill({
+          status: 409, contentType: "application/json",
+          body: JSON.stringify({ success: false, error: { code: "SCREEN_GROUP_IN_USE", message: "Remove references before deleting.", details: { blockers: { active_emergencies: 1 } } } }),
+        });
+      }
+      state.groups = state.groups.filter((group) => group.id !== pathname.split("/").pop());
+      return route.fulfill({ status: 204 });
     }
 
     return route.fulfill({
@@ -501,6 +525,52 @@ test.describe("Screens operator flow", () => {
     await page.getByRole("button", { name: "Delete Screen Lobby Screen" }).click();
     await page.getByRole("button", { name: "Delete Screen" }).click();
     await expect(page.getByRole("button", { name: "Delete Screen Lobby Screen" })).toHaveCount(0);
+  });
+
+  test("keeps stale delete dialogs open and shows server blockers for screens and groups", async ({ page }) => {
+    const state: MockState = {
+      screens: [{ id: "screen-1", name: "Lobby Screen", status: "ACTIVE", active_items: [], upcoming_items: [] }],
+      groups: [{ id: "group-1", name: "Lobby Group", screen_ids: ["screen-1"] }],
+      pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+      screenDeleteBlocked: true, groupDeleteBlocked: true,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+
+    await page.getByRole("button", { name: "Delete Screen Lobby Screen" }).click();
+    await page.getByRole("button", { name: "Delete Screen", exact: true }).click();
+    await expect(page.getByRole("alert").getByText("Schedule items: 1")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete Screen", exact: true })).toBeVisible();
+    state.screenDeleteBlocked = false;
+    await page.getByRole("button", { name: "Delete Screen", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Delete Screen Lobby Screen" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Delete Group Lobby Group" }).click();
+    await page.getByRole("button", { name: "Delete Group", exact: true }).click();
+    await expect(page.getByRole("alert").getByText("Active emergencies: 1")).toBeVisible();
+    state.groupDeleteBlocked = false;
+    await page.getByRole("button", { name: "Delete Group", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Delete Group Lobby Group" })).toHaveCount(0);
+  });
+
+  test("shows blockers and allows retry from the edit-group delete control", async ({ page }) => {
+    const state: MockState = {
+      screens: [{ id: "screen-1", name: "Lobby Screen", status: "ACTIVE", active_items: [], upcoming_items: [] }],
+      groups: [{ id: "group-1", name: "Lobby Group", screen_ids: ["screen-1"] }],
+      pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {}, groupDeleteBlocked: true,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+
+    await page.getByRole("button", { name: "Edit Group Lobby Group" }).click();
+    await page.getByRole("button", { name: "Delete Group", exact: true }).click();
+    await page.getByRole("button", { name: "Delete Group", exact: true }).last().click();
+    await expect(page.getByRole("alert").getByText("Active emergencies: 1")).toBeVisible();
+    state.groupDeleteBlocked = false;
+    await page.getByRole("button", { name: "Delete Group", exact: true }).last().click();
+    await expect(page.getByRole("button", { name: "Delete Group Lobby Group" })).toHaveCount(0);
   });
 
   test("supports first-time pairing confirmation from the Pair Device modal", async ({ page }) => {

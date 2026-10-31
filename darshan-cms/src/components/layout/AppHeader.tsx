@@ -46,7 +46,7 @@ const routeLabels: Array<{ match: RegExp; title: string; eyebrow: string }> = [
   { match: /^\/departments/, title: "Departments", eyebrow: "Organization routing" },
   { match: /^\/users/, title: "Users", eyebrow: "Account management" },
   { match: /^\/reports|^\/proof-of-play/, title: "Reports & logs", eyebrow: "Evidence and audit" },
-  { match: /^\/settings|^\/api-keys|^\/webhooks|^\/sso-config/, title: "Site settings", eyebrow: "Platform configuration" },
+  { match: /^\/settings|^\/api-keys|^\/webhooks/, title: "Site settings", eyebrow: "Platform configuration" },
 ];
 
 const getRouteLabel = (pathname: string) =>

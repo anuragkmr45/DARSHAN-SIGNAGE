@@ -117,6 +117,8 @@ Answer: "only management screens". Business source: user answer BQ-005, 2026-09-
 
 Resolution: RESOLVED for release scope. Test integration administration UI, its backing management APIs, persistence, validation and access control. Actual SSO login, API-key-authenticated business calls and automatic business-event webhook delivery are not release requirements. Do not mark their absence as a functional release defect. If the explicit webhook Test action remains exposed, account for its outbound-request behavior and security; do not infer approval of automatic delivery.
 
+Release update, 2026-11-01: SSO management is removed from routing for the air-gapped first release; former SSO endpoints must return 404. API-key and explicit webhook Test administration remain in scope. Local email/password sign-in and recovery remain required. This supersedes the earlier SSO-management portion of this resolution.
+
 ### BQ-006: General Requests Workboard
 
 Question: What should the separate `/requests` workboard do: an admin-only support tracker, department-scoped requests, or a wider approval workflow? Specify who can see/comment on another person's request and the valid status sequence. This is separate from schedule approval requests.
@@ -253,6 +255,8 @@ Answer received 2026-09-25: retention is bounded best effort: memory 100 events/
 
 Resolution: ANSWERED AS IMPLEMENTATION BASELINE (BR-034). Test budget enforcement, discard reporting, replay and preservation across the specific media purge without claiming a guaranteed retained-event count or duration. `evidence/content-runtime-review.md::BQ-013` distinguishes pending/inflight files and memory durability. Acceptable business loss/retention duration remains TBD under BR-060; absence of a code guarantee does not itself approve evidence loss.
 
+Release decision, 2026-11-01: Document and test the current bounded best-effort behavior without a new alert rule. A successful spool write is durable pending replay; an overflow discard increments the discard metric with a warning; a failed disk write is logged without fabricating a discard count. No lossless claim is approved.
+
 Code-baseline expected result for QA: Up to 100 events/512 KiB remain in memory before overflow is spooled; pending spool files hold at most 50 events each, with a 32-file and 1-16 MiB derived byte budget. Oldest pending files are discarded when limits are exceeded, with discard counters; successful replay removes local batches. Abrupt crashes, failed writes and overflow can lose evidence. No fixed offline-hours/days promise or age TTL exists. The media-cache purge used by secure lock leaves already-spooled PoP files intact. This is bounded best effort, not a lossless acceptance criterion.
 
 ### BQ-014: Reporting Definitions
@@ -289,6 +293,8 @@ Code answer, 2026-09-25: Production backups are enabled at a configured interval
 
 Human input still needed: Approved retention and legal-hold/erasure rules by data class. This cannot be chosen from current cleanup code; use TBD until the site owner specifies it.
 
+Release decision, 2026-11-01: Retain recoverable Media and chat data after user-facing deletion, with administrator restore in CMS/API, and stop automatic permanent cleanup of accepted objects. Daily Data VM backup sets have a minimum 30-full-day age policy. Other class-specific legal-hold and erasure periods remain open.
+
 ### BQ-016: Supported Client Matrix
 
 Question: Which exact browser/OS versions and player hardware/architectures must be release-supported? Include Ubuntu display system where relevant, Windows versions, display count/resolutions/rotation/DPI and any mandatory accessibility standard or assistive technology.
@@ -321,7 +327,7 @@ Affected areas: all core journeys; BR-064; performance/load/stress/spike/soak, c
 
 Code answer, 2026-09-25: The builder checks approved measured capacity evidence containing `max_players` and reviewed limits; the capacity template's sample 500 is not site evidence. Resource ceilings, queue bounds and five VM sizes do not establish throughput or p95/p99. See `evidence/operational-behavior-review.md::BQ-017`.
 
-Human input still needed: Actual approved capacity evidence/profile or site workload, plus numerical response/propagation targets. The plan can describe load, stress, spike and soak methods; pass thresholds remain TBD. No load will be executed in this task.
+Release decision, 2026-11-01: Use 500 connected players, 40 active CMS users, five concurrent 500 MiB uploads, and a five-minute 1,000-player spike as measured release gates. Include per-event PoP. API p95 ≤1 second, p99 ≤2 seconds, non-chaos errors <1%, cached emergency display ≤3 seconds via healthy WebSocket and ≤7 seconds in fallback, lossless command fanout, no PoP discard at normal load, backlog recovery, and sustained CPU/memory <80% are acceptance thresholds. A representative five-VM QA run and site-specific measured artifacts are still required; model calculations and local developer tests cannot pass this gate.
 
 ### BQ-018: Recovery And Update Commitments
 
@@ -337,7 +343,7 @@ Affected areas: UC-001, UC-014, UC-027, UC-028; BR-044, BR-045, BR-065; release,
 
 Code answer, 2026-09-25: The managed upgrade is a maintenance flow: verify compatibility and signed restore evidence, stop API/worker, migrate forward, start/check, mark active. There is no automatic database downgrade. Compatibility generation does not prove semantic compatibility. See `evidence/operational-behavior-review.md::BQ-018`.
 
-Human input still needed: Approved RPO, RTO, planned downtime, deployed release/schema/player baseline and mixed-version support window. No actual production VM or recovery rehearsal was accessed. Identify release IDs only, not credentials.
+Release decision, 2026-11-01: RPO ≤24 hours, RTO ≤4 hours, and planned maintenance ≤2 hours. Isolated production-sized PostgreSQL/MinIO restore is required before every production release and monthly afterward. Keep backups on the Data VM for this release. Data VM/disk loss can destroy live data and backups, so the RPO target is unmet for that failure and needs explicit release-risk acceptance. Measured restore and deployed-version compatibility evidence remain pending.
 
 ### BQ-019: Network And Trust Acceptance Boundary
 
@@ -353,7 +359,7 @@ Affected areas: UC-005, UC-007, UC-013, UC-025..UC-028; BR-066; security, integr
 
 Code answer, 2026-09-25: Production generates TLS for cross-VM application and monitoring paths; several local proxy/exporter hops inside role networks use HTTP. Webpage and explicit webhook-test egress depend on allowlists. The runbook gives intended firewall source/port paths, but checked-in code cannot prove the VMs' actual rules. See `evidence/operational-behavior-review.md::BQ-019`.
 
-Human input still needed: The site's approved external egress, LAN/public exposure and acceptance of private-role-network HTTP. No private key or secret is needed.
+Release decision, 2026-11-01: DARSHAN cross-VM and user/player paths require verified HTTPS. HTTP on a private same-VM Docker network is allowed. Approved internal webpage and explicit webhook Test destinations may use HTTP or HTTPS; public Internet destinations are denied. Site firewall, DNS and certificate measurements remain QA evidence.
 
 ### BQ-020: Meaning Of Delete
 
@@ -371,7 +377,11 @@ Code answer, 2026-09-25: Media soft delete still attempts object deletion and re
 
 Account-deletion decision received 2026-10-16: deleted accounts are not user-restorable and are not physically removed while referenced history exists; retained content stays with its original department/organization and no automatic person-to-person reassignment occurs. The original display name remains for history, but the old email is not shown. This resolves the account portion under BR-084..090.
 
-Human input still needed: whether a user-facing recycle/undelete period is required for independently deleted Media and chat attachments. Do not apply the account-tombstone decision to those object-deletion workflows.
+Release decision, 2026-11-01: Keep delete actions, retain recoverable Media objects and chat messages/attachments, and provide administrator list/restore in CMS/API. Stop automatic permanent cleanup of accepted data. Old deletions that already removed objects cannot be promised recoverable. Account tombstones remain a separate policy.
+
+### BQ-025 and BQ-026: Safe Screen and Group Deletion
+
+Release decision, 2026-11-01: Block a Screen or Screen Group with editable draft or current/future references, defaults or active emergencies. Ended schedules and cleared emergencies retained only as history do not block. Return safe blocker counts on 409 without mutating the target. A successfully deleted connected Screen must stop all playback and show fresh pairing within five seconds of API success, after the player verifies identity through REST. Disconnected players follow their existing offline policy. These are implementation and measured QA acceptance criteria; old deployed player versions do not gain the five-second behavior until updated.
 
 ## Answer And Resolution Log
 

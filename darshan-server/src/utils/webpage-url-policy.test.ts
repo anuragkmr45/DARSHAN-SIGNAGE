@@ -26,7 +26,7 @@ describe('webpage URL policy primitives', () => {
     expect(webpageHostMatches('evil-example.com', '*.example.com')).toBe(false);
   });
 
-  it('allows any public HTTPS hostname when the global wildcard is configured', async () => {
+  it('denies public HTTPS even with a wildcard host and permits approved private addresses', async () => {
     expect(webpageHostMatches('www.youtube.com', '*')).toBe(true);
     expect(webpageHostMatches('www.pexels.com', '*')).toBe(true);
 
@@ -36,14 +36,19 @@ describe('webpage URL policy primitives', () => {
       WEBPAGE_RESOURCE_ALLOWLIST: '*',
     };
 
-    await expect(assertWebpageUrlAllowed(
+    await expectCode(assertWebpageUrlAllowed(
       'https://www.youtube.com/watch?v=test',
       'navigation',
       {
         policy: wildcardPolicy,
         resolveAddresses: async () => ['203.0.113.10'],
       },
-    )).resolves.toBeInstanceOf(URL);
+    ), 'WEBPAGE_ADDRESS_BLOCKED');
+
+    await expect(assertWebpageUrlAllowed('https://private.example.test/', 'navigation', {
+      policy: { ...wildcardPolicy, WEBPAGE_ALLOWED_CIDRS: '10.20.0.0/16' },
+      resolveAddresses: async () => ['10.20.1.9'],
+    })).resolves.toBeInstanceOf(URL);
 
     await expectCode(assertWebpageUrlAllowed(
       'https://private.example.test/',
@@ -81,7 +86,12 @@ describe('webpage URL policy primitives', () => {
 
     await expect(assertWebpageUrlAllowed('http://screen.example.test/', 'navigation', {
       policy: httpPolicy,
-      resolveAddresses: async () => ['203.0.113.10'],
+      resolveAddresses: async () => ['10.20.1.9'],
+    })).rejects.toMatchObject({ code: 'WEBPAGE_ADDRESS_BLOCKED' });
+
+    await expect(assertWebpageUrlAllowed('http://screen.example.test/', 'navigation', {
+      policy: { ...httpPolicy, WEBPAGE_ALLOWED_CIDRS: '10.20.0.0/16' },
+      resolveAddresses: async () => ['10.20.1.9'],
     })).resolves.toMatchObject({ protocol: 'http:' });
 
     await expectCode(assertWebpageUrlAllowed('http://screen.example.test/', 'navigation', {
@@ -119,14 +129,14 @@ describe('webpage URL policy primitives', () => {
   });
 
   it('applies a separate subresource allowlist', async () => {
-    const resolvePublic = async () => ['203.0.113.10'];
+    const resolvePrivate = async () => ['10.20.1.9'];
     await expect(assertWebpageUrlAllowed('https://cdn.example.test/image.png', 'resource', {
-      policy: productionPolicy,
-      resolveAddresses: resolvePublic,
+      policy: { ...productionPolicy, WEBPAGE_ALLOWED_CIDRS: '10.20.0.0/16' },
+      resolveAddresses: resolvePrivate,
     })).resolves.toBeInstanceOf(URL);
     await expectCode(assertWebpageUrlAllowed('https://screen.example.test/script.js', 'resource', {
       policy: productionPolicy,
-      resolveAddresses: resolvePublic,
+      resolveAddresses: resolvePrivate,
     }), 'WEBPAGE_RESOURCE_BLOCKED');
   });
 
@@ -139,10 +149,10 @@ describe('webpage URL policy primitives', () => {
       ['fe80::1'],
     ];
     const resolveNext = async () => addresses.shift() ?? [];
-    await expect(assertWebpageUrlAllowed('https://screen.example.test/', 'navigation', {
+    await expectCode(assertWebpageUrlAllowed('https://screen.example.test/', 'navigation', {
       policy: productionPolicy,
       resolveAddresses: resolveNext,
-    })).resolves.toBeInstanceOf(URL);
+    }), 'WEBPAGE_ADDRESS_BLOCKED');
     for (const code of ['WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED']) {
       await expectCode(assertWebpageUrlAllowed('https://screen.example.test/', 'navigation', {
         policy: productionPolicy,

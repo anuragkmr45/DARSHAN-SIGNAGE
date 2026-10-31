@@ -1,16 +1,19 @@
 import { eq, and, desc, or, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
+import { lockScreenTargetReferences } from '@/services/screen-deletion-guard';
 
 export class ScreenGroupRepository {
   async create(data: { name: string; description?: string; screen_ids?: string[] }) {
     const db = getDatabase();
-    const [group] = await db.insert(schema.screenGroups).values({ name: data.name, description: data.description }).returning();
-    if (data.screen_ids && data.screen_ids.length) {
-      await db
-        .insert(schema.screenGroupMembers)
-        .values(data.screen_ids.map((sid) => ({ group_id: group.id, screen_id: sid })));
-    }
-    return group;
+    return db.transaction(async (tx) => {
+      await lockScreenTargetReferences(tx);
+      const [group] = await tx.insert(schema.screenGroups).values({ name: data.name, description: data.description }).returning();
+      if (data.screen_ids?.length) {
+        await tx.insert(schema.screenGroupMembers)
+          .values(data.screen_ids.map((sid) => ({ group_id: group.id, screen_id: sid })));
+      }
+      return group;
+    });
   }
 
   async findById(id: string) {
@@ -65,28 +68,30 @@ export class ScreenGroupRepository {
     data: { name?: string; description?: string; screen_ids?: string[] }
   ) {
     const db = getDatabase();
-    const [group] = await db
-      .update(schema.screenGroups)
-      .set({ name: data.name, description: data.description, updated_at: new Date() })
-      .where(eq(schema.screenGroups.id, id))
-      .returning();
-    if (!group) return null;
-
-    if (data.screen_ids) {
-      await db.delete(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.group_id, id));
-      if (data.screen_ids.length) {
-        await db
-          .insert(schema.screenGroupMembers)
-          .values(data.screen_ids.map((sid) => ({ group_id: id, screen_id: sid })));
+    return db.transaction(async (tx) => {
+      await lockScreenTargetReferences(tx);
+      const [group] = await tx.update(schema.screenGroups)
+        .set({ name: data.name, description: data.description, updated_at: new Date() })
+        .where(eq(schema.screenGroups.id, id)).returning();
+      if (!group) return null;
+      if (data.screen_ids) {
+        await tx.delete(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.group_id, id));
+        if (data.screen_ids.length) {
+          await tx.insert(schema.screenGroupMembers)
+            .values(data.screen_ids.map((sid) => ({ group_id: id, screen_id: sid })));
+        }
       }
-    }
-    return group;
+      return group;
+    });
   }
 
   async delete(id: string) {
     const db = getDatabase();
-    await db.delete(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.group_id, id));
-    await db.delete(schema.screenGroups).where(eq(schema.screenGroups.id, id));
+    await db.transaction(async (tx) => {
+      await lockScreenTargetReferences(tx);
+      await tx.delete(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.group_id, id));
+      await tx.delete(schema.screenGroups).where(eq(schema.screenGroups.id, id));
+    });
   }
 }
 

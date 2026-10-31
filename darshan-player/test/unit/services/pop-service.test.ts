@@ -263,6 +263,28 @@ describe('Proof-of-Play Service', () => {
       expect(budgets.maxBufferEvents).to.equal(100)
       expect(budgets.maxReplayBatchSize).to.equal(25)
       expect(budgets.maxSpoolFiles).to.equal(32)
+      expect(stats.droppedEvents).to.be.greaterThan(0)
+    })
+
+    it('records overflow discard but does not fabricate a drop after a disk-write failure', async () => {
+      const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+      const popService = getProofOfPlayService()
+      const event = {
+        schedule_id: 'schedule-1', media_id: 'media-1',
+        start_time: new Date().toISOString(), end_time: new Date().toISOString(),
+        duration: 1, completed: true,
+      }
+      const writeStub = sandbox.stub(fs, 'writeFileSync').callsFake(() => { throw new Error('simulated disk failure') })
+      await (popService as any).spoolEvents([event], 'fault-test')
+      expect(popService.getReplayStats().droppedEvents).to.equal(0)
+      expect(fs.readdirSync(spoolDir).filter((name: string) => name.startsWith('pop-'))).to.have.length(0)
+      ;(popService as any).eventBuffer = Array.from({ length: 101 }, () => ({ ...event, source: 'live', device_id: 'test-device' }))
+      await (popService as any).trimLiveBuffer()
+      expect(popService.getReplayStats().compactedEvents).to.equal(0)
+      writeStub.restore()
+      ;(popService as any).maxSpoolBytes = 1
+      await (popService as any).spoolEvents([event], 'budget-test')
+      expect(popService.getReplayStats().droppedEvents).to.equal(1)
     })
 
     it('should pace replay by draining only one bounded batch at a time', async () => {

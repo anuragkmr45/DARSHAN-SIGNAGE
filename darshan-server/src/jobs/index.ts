@@ -351,7 +351,7 @@ export async function processWebpageVerifyCaptureJob(
     const [media] = await runWebpageStage('media-load', async () =>
       db.select().from(schema.media).where(eq(schema.media.id, mediaId))
     );
-    if (!media) {
+    if (!media || media.deleted_at) {
       jobLogger.warn({ mediaId }, 'Media not found for webpage verification');
       return;
     }
@@ -536,7 +536,7 @@ export async function requestWebpagePreviewRefresh(input: {
   const db = input.executor ?? getDatabase();
   const requestedAt = input.requestedAt ?? new Date();
   const [media] = await db.select().from(schema.media).where(eq(schema.media.id, input.mediaId));
-  if (!media || media.type !== 'WEBPAGE' || !media.source_url) {
+  if (!media || media.deleted_at || media.type !== 'WEBPAGE' || !media.source_url) {
     throw new Error('WEBPAGE_MEDIA_NOT_FOUND');
   }
   if (media.status !== 'READY' && media.status !== 'FAILED') {
@@ -1044,96 +1044,8 @@ export async function cleanupChatMediaAssets(input: {
   source?: 'message-delete' | 'conversation-delete' | 'fallback-reconcile';
   messageId?: string;
 }) {
-  const db = getDatabase();
-  const mediaRepo = createMediaRepository();
-  const mediaIds = Array.from(new Set(input.mediaAssetIds || []));
-  if (!mediaIds.length) return;
-
-  logger.info(
-    {
-      conversationId: input.conversationId,
-      messageId: input.messageId,
-      source: input.source,
-      mediaCount: mediaIds.length,
-    },
-    'Processing chat media cleanup'
-  );
-
-  for (const mediaId of mediaIds) {
-    try {
-      const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId));
-      if (!media) continue;
-
-      const usageSummary = await mediaRepo.getUsageSummary(mediaId);
-      if (usageSummary.inUse) {
-        logger.info(
-          { mediaId, references: usageSummary.references },
-          'Skipping chat media cleanup because references still exist'
-        );
-        continue;
-      }
-
-      const storageTargets = new Map<string, { id?: string; bucket: string; object_key: string }>();
-      if (media.source_object_id) {
-        const [row] = await db
-          .select()
-          .from(schema.storageObjects)
-          .where(eq(schema.storageObjects.id, media.source_object_id));
-        if (row) storageTargets.set(`${row.bucket}/${row.object_key}`, row);
-      }
-      if (media.ready_object_id) {
-        const [row] = await db
-          .select()
-          .from(schema.storageObjects)
-          .where(eq(schema.storageObjects.id, media.ready_object_id));
-        if (row) storageTargets.set(`${row.bucket}/${row.object_key}`, row);
-      }
-      if (media.thumbnail_object_id) {
-        const [row] = await db
-          .select()
-          .from(schema.storageObjects)
-          .where(eq(schema.storageObjects.id, media.thumbnail_object_id));
-        if (row) storageTargets.set(`${row.bucket}/${row.object_key}`, row);
-      }
-      if (media.source_bucket && media.source_object_key) {
-        storageTargets.set(`${media.source_bucket}/${media.source_object_key}`, {
-          bucket: media.source_bucket,
-          object_key: media.source_object_key,
-        });
-      }
-
-      let deletionFailed = false;
-      for (const storage of storageTargets.values()) {
-        try {
-          await deleteObject(storage.bucket, storage.object_key);
-        } catch (error) {
-          deletionFailed = true;
-          logger.warn(
-            error,
-            `Failed to delete chat media object ${storage.bucket}/${storage.object_key}`
-          );
-        }
-      }
-
-      if (deletionFailed) {
-        logger.warn({ mediaId }, 'Skipping media row deletion because object cleanup was incomplete');
-        continue;
-      }
-
-      const storageObjectIds = Array.from(storageTargets.values())
-        .map((row) => row.id)
-        .filter((id): id is string => Boolean(id));
-      if (storageObjectIds.length > 0) {
-        await db
-          .delete(schema.storageObjects)
-          .where(inArray(schema.storageObjects.id, storageObjectIds));
-      }
-
-      await db.delete(schema.media).where(eq(schema.media.id, mediaId));
-    } catch (error) {
-      logger.error(error, `Failed chat media cleanup for media ${mediaId}`);
-    }
-  }
+  // Old queued cleanup jobs are safe to replay after the retention upgrade.
+  logger.info({ conversationId: input.conversationId, mediaCount: input.mediaAssetIds.length }, 'Retaining chat media from legacy cleanup job');
 }
 
 export async function cleanupDeletedUserUploads(options: {
@@ -1195,77 +1107,8 @@ export async function cleanupDeletedUserUploads(options: {
     }
   }
 
-  const deletedUserLegacyMedia = await db
-    .select()
-    .from(schema.media)
-    .where(
-      inArray(schema.media.status_reason, [
-        'USER_DELETED_CLEANUP_PENDING',
-        'USER_DELETED_UPLOAD_ABORTED',
-      ])
-    )
-    .limit(limit);
-  for (const media of deletedUserLegacyMedia) {
-    try {
-      const storageObjectIds = [
-        media.source_object_id,
-        media.ready_object_id,
-        media.thumbnail_object_id,
-      ].filter((id): id is string => Boolean(id));
-      const trackedObjects = storageObjectIds.length > 0
-        ? await db
-            .select({
-              id: schema.storageObjects.id,
-              bucket: schema.storageObjects.bucket,
-              object_key: schema.storageObjects.object_key,
-            })
-            .from(schema.storageObjects)
-            .where(inArray(schema.storageObjects.id, storageObjectIds))
-        : [];
-      const cleanupTargets = new Map<string, { bucket: string; objectKey: string }>();
-      for (const object of trackedObjects) {
-        cleanupTargets.set(`${object.bucket}/${object.object_key}`, {
-          bucket: object.bucket,
-          objectKey: object.object_key,
-        });
-      }
-      if (media.source_bucket && media.source_object_key) {
-        cleanupTargets.set(`${media.source_bucket}/${media.source_object_key}`, {
-          bucket: media.source_bucket,
-          objectKey: media.source_object_key,
-        });
-      }
-
-      for (const target of cleanupTargets.values()) {
-        await deleteObject(target.bucket, target.objectKey);
-      }
-
-      await db.transaction(async (tx) => {
-        const isCleanupPending = media.status_reason === 'USER_DELETED_CLEANUP_PENDING';
-        const shouldFinalize = media.updated_at.getTime() <= terminalCutoff;
-        await tx
-          .update(schema.media)
-          .set({
-            status: 'FAILED',
-            status_reason: shouldFinalize
-              ? 'USER_DELETED_UPLOAD_ABORTED_FINAL'
-              : 'USER_DELETED_UPLOAD_ABORTED',
-            source_object_id: null,
-            source_bucket: null,
-            source_object_key: null,
-            ready_object_id: null,
-            thumbnail_object_id: null,
-            updated_at: isCleanupPending || shouldFinalize ? runAt : media.updated_at,
-          })
-          .where(eq(schema.media.id, media.id));
-      });
-      result.legacy_media_cleaned += 1;
-    } catch (error) {
-      result.legacy_media_pending += 1;
-      logger.warn({ error, mediaId: media.id }, 'Failed to retry deleted-user legacy upload cleanup');
-    }
-  }
-
+  // Completed media is retained even if an older release tagged it for cleanup.
+  // Aborted staging uploads above are never-accepted temporary objects.
   return result;
 }
 
@@ -1390,7 +1233,7 @@ export async function registerJobHandlers() {
 
       try {
         const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId));
-        if (!media) {
+        if (!media || media.deleted_at) {
           logger.warn(`Media not found for transcode job: ${mediaId}`);
           continue;
         }
@@ -1563,7 +1406,7 @@ export async function registerJobHandlers() {
 
       try {
         const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId));
-        if (!media) {
+        if (!media || media.deleted_at) {
           logger.warn(`Media not found for thumbnail job: ${mediaId}`);
           continue;
         }
@@ -1654,7 +1497,7 @@ export async function registerJobHandlers() {
 
       try {
         const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId));
-        if (!media) {
+        if (!media || media.deleted_at) {
           logger.warn({ mediaId }, 'Media not found for document conversion');
           continue;
         }

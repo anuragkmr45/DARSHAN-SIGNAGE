@@ -8,6 +8,7 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
+import { deliverWebhookTest } from '@/services/webhook-test-delivery';
 
 const logger = createLogger('webhook-routes');
 const { CREATED, NO_CONTENT } = HTTP_STATUS;
@@ -19,47 +20,6 @@ const webhookSchema = z.object({
   headers: z.record(z.string()).optional(),
   is_active: z.boolean().optional(),
 });
-
-const WEBHOOK_TEST_EVENT = 'webhook.test';
-const WEBHOOK_TEST_TIMEOUT_MS = 5_000;
-
-async function deliverWebhookTest(
-  record:
-    | {
-        id: string;
-        target_url: string;
-        headers?: Record<string, string> | null;
-      }
-    | null
-) {
-  if (!record) {
-    throw AppError.notFound('Webhook not found');
-  }
-
-  const sentAt = new Date().toISOString();
-  const response = await fetch(record.target_url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'user-agent': 'darshan-webhook-test',
-      'x-darshan-event': WEBHOOK_TEST_EVENT,
-      'x-darshan-sent-at': sentAt,
-      'x-darshan-webhook-id': record.id,
-      ...Object.fromEntries(
-        Object.entries(record.headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
-      ),
-    },
-    body: JSON.stringify({
-      type: WEBHOOK_TEST_EVENT,
-      sent_at: sentAt,
-      webhook_id: record.id,
-      target_url: record.target_url,
-    }),
-    signal: AbortSignal.timeout(WEBHOOK_TEST_TIMEOUT_MS),
-  });
-
-  return { response, sentAt };
-}
 
 export async function webhookRoutes(fastify: FastifyInstance) {
   const repo = createWebhookRepository();

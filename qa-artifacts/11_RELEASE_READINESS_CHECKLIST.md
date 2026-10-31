@@ -23,6 +23,9 @@ developer evidence, not an independent QA or release pass.
 
 ## Current Targeted Feature Evidence
 
+- [ ] **Groups 1–4 candidate gate:** Screen/Group deletion blocker and connected-player five-second runtime evidence, SSO absence/local login and private egress checks, recoverable Media/chat delete/restore including object hashes, 30-day Data VM backup capacity, and the five-VM load/recovery measurements in `evidence/groups-1-4-release-gates-2026-11-01.md` must all pass against frozen artifacts before merging or releasing the packet. Developer focused tests alone are not sign-off.
+- [ ] **Data VM loss risk:** Same-VM backups do not meet the ≤24-hour RPO for VM/disk loss. Record explicit owner acceptance or add independent storage before release. Never mark universal disaster recovery passed.
+
 - [x] Disposable Linux CMS/API/Electron flow demonstrated independent PDF pages, video Loop On/Off, multiple items, simultaneous slots, corrupt-media advance, schedule hard stop, cached offline restart/recovery, take-down and page-aware PoP persistence.
 - [x] CMS/server/player focused tests and builds passed; Linux AppImage and amd64 `.deb` were created with recorded hashes.
 - [x] Deleted-user ownership source/build checks, affected DB-backed routes and migration `0045` upgrade/repeat/failure/recovery rehearsal passed on disposable PostgreSQL. This is developer evidence only; the complete QA matrix and release recovery gate remain open.

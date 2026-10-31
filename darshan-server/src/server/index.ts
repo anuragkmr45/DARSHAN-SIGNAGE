@@ -1,5 +1,6 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { randomUUID } from 'crypto';
+import { parseTrustedProxyCidrs } from '@/utils/trusted-proxy';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
@@ -22,7 +23,6 @@ import { devicePairingRoutes } from '@/routes/device-pairing';
 import { deviceTelemetryRoutes } from '@/routes/device-telemetry';
 import { apiKeyRoutes } from '@/routes/api-keys';
 import { webhookRoutes } from '@/routes/webhooks';
-import { ssoConfigRoutes } from '@/routes/sso-config';
 import { settingsRoutes } from '@/routes/settings';
 import { conversationRoutes } from '@/routes/conversations';
 import { proofOfPlayRoutes } from '@/routes/proof-of-play';
@@ -224,6 +224,7 @@ export async function createServer(options: CreateServerOptions = {}) {
 
   const fastify = Fastify({
     ...(tlsOptions ? { https: tlsOptions } : {}),
+    trustProxy: parseTrustedProxyCidrs(appConfig.TRUSTED_PROXY_CIDRS),
     logger: buildFastifyLoggerOptions(appConfig.NODE_ENV, getRuntimeLogLevelSetting()),
     genReqId: (req) => {
       const header = req.headers['x-request-id'];
@@ -433,7 +434,6 @@ export async function createServer(options: CreateServerOptions = {}) {
   await fastify.register(deviceTelemetryRoutes);
   await fastify.register(apiKeyRoutes);
   await fastify.register(webhookRoutes);
-  await fastify.register(ssoConfigRoutes);
   await fastify.register(settingsRoutes);
   await fastify.register(conversationRoutes);
   await fastify.register(chatRoutes);

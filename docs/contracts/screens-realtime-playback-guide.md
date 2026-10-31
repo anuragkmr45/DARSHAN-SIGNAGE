@@ -12,6 +12,12 @@ Implemented behavior:
 
 This is zero-downtime relative to existing consumers because old fields remain in place.
 
+## Screen and Group deletion, 2026-11-01 release contract
+
+The delete API checks editable schedule references, current/future publishes and reservations, active emergencies, and defaults in the same transaction as deletion. A Screen check includes its current Group membership and a global emergency. `409 SCREEN_IN_USE` or `409 SCREEN_GROUP_IN_USE` returns category counts and leaves the target unchanged. Ended schedules and cleared emergencies kept solely as history are not blockers. Permission checks run first.
+
+After a successful Screen delete commits, the server wakes the connected player with `RESYNC_REQUIRED`. The notification has no deletion authority: the player confirms identity by REST, stops schedule/default/emergency/audio playback on confirmed invalid identity, clears identity-bound state, and shows fresh pairing. The target for a healthy connected player is within five seconds of API success. If REST is unavailable, the existing 120-second offline lock applies. Older deployed players retain their former behavior until updated. The five-second target requires a controlled runtime measurement and physical display QA before release sign-off.
+
 ## Verified End-to-End
 This flow has been verified against real backend mutations, not only unit tests.
 

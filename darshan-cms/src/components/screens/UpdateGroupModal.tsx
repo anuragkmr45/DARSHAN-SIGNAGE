@@ -21,6 +21,8 @@ import { queryKeys } from "@/api/queryKeys";
 import { useSafeMutation } from "@/hooks/useSafeMutation";
 import { toast } from "sonner";
 import type { ScreenGroup } from "@/api/types";
+import { screenDeletionBlockers } from "./screenDeletionBlockers";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
 interface UpdateGroupModalProps {
     open: boolean;
@@ -35,6 +37,8 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
         description: "",
     });
     const [selectedScreenIds, setSelectedScreenIds] = useState<string[]>([]);
+    const [confirmGroupDelete, setConfirmGroupDelete] = useState(false);
+    const [deleteBlockers, setDeleteBlockers] = useState<string[]>([]);
 
     const { data: groupData, isLoading: isLoadingGroup } = useQuery({
         queryKey: ["screen-group", groupId],
@@ -93,6 +97,8 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
             screen_ids?: string[]
         }) => screensApi.updateGroup(groupId, payload),
         onSuccess: () => {
+            setConfirmGroupDelete(false);
+            setDeleteBlockers([]);
             queryClient.invalidateQueries({ queryKey: queryKeys.screenGroups });
             queryClient.invalidateQueries({ queryKey: queryKeys.screens });
             queryClient.invalidateQueries({ queryKey: queryKeys.screensOverview({ includeMedia: true }) });
@@ -100,6 +106,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
             toast.success("Group updated successfully");
             handleClose();
         },
+        onError: (error) => setDeleteBlockers(screenDeletionBlockers(error)),
     }, "Unable to update group.");
 
     const deleteGroup = useSafeMutation({
@@ -111,9 +118,12 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
             toast.success("Group deleted successfully");
             handleClose();
         },
+        onError: (error) => setDeleteBlockers(screenDeletionBlockers(error)),
     }, "Unable to delete group.");
 
     const handleClose = () => {
+        setConfirmGroupDelete(false);
+        setDeleteBlockers([]);
         setFormState({ name: "", description: "" });
         setSelectedScreenIds([]);
         onOpenChange(false);
@@ -137,14 +147,14 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
     };
 
     const handleDelete = () => {
-        if (confirm("Are you sure you want to delete this group? This action cannot be undone.")) {
-            deleteGroup.mutate();
-        }
+        setDeleteBlockers([]);
+        setConfirmGroupDelete(true);
     };
 
     const isLoading = isLoadingGroup || isLoadingScreens || isLoadingGroups;
 
     return (
+      <>
         <Dialog open={open} onOpenChange={handleClose}>
             <DialogContent className="max-w-2xl overflow-y-auto">
                 <DialogHeader>
@@ -273,5 +283,22 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+        <ConfirmDialog
+          open={confirmGroupDelete}
+          title={`Delete ${groupData?.name ?? "group"}?`}
+          description="Delete is allowed only after current and future references are removed. The server checks again when you confirm."
+          confirmLabel="Delete Group"
+          onConfirm={() => deleteGroup.mutate()}
+          onCancel={() => { if (!deleteGroup.isPending) { setConfirmGroupDelete(false); setDeleteBlockers([]); } }}
+          isLoading={deleteGroup.isPending}
+        >
+          {deleteBlockers.length > 0 && (
+            <div role="alert" className="rounded-md border border-destructive/40 p-3 text-sm">
+              <p className="font-medium">Remove these references, then retry:</p>
+              <ul className="list-disc pl-5">{deleteBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+            </div>
+          )}
+        </ConfirmDialog>
+      </>
     );
 }

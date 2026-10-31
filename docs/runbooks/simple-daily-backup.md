@@ -1,4 +1,4 @@
-# Simple Daily Backup — Small Release
+# Daily Data VM Backup — 30-Day Policy
 
 ## Supported behavior
 
@@ -8,10 +8,10 @@ The production data Compose stack starts one dedicated `backup` sidecar. It:
 2. creates a PostgreSQL custom-format dump;
 3. discovers and mirrors every current MinIO bucket;
 4. writes and verifies SHA-256 checksums before publishing the set;
-5. keeps the latest three successfully completed daily sets; and
-6. deletes the oldest completed set only after a new set succeeds.
+5. retains every successful daily set for at least 30 full IST calendar days; and
+6. prunes expired sets only after verifying or completing a successful set, always keeping the newest set.
 
-The fourth successful daily backup therefore removes the first one. A failed PostgreSQL or MinIO capture does not publish a set and does not delete any previous completed backup. Failed runs retry after one hour by default.
+A failed PostgreSQL or MinIO capture does not publish a set and does not delete any previous completed backup. Failed runs retry after one hour by default. Missing days do not reduce the retention age of older successful sets.
 
 This release deliberately does not encrypt the backup files. Restrict the host backup directory to administrators and do not expose it through HTTP, SMB, or a public mount.
 
@@ -21,9 +21,9 @@ Use these values in the data-stack `.env.production` file:
 
 ```dotenv
 BACKUP_MODE=EXTERNAL_SIDECAR
-BACKUP_RETENTION_DAYS=3
+BACKUP_RETENTION_DAYS=30
 BACKUP_HOST_PATH=/var/lib/darshan/backups
-SIMPLE_BACKUP_KEEP_SETS=3
+SIMPLE_BACKUP_RETENTION_DAYS=30
 SIMPLE_BACKUP_SCHEDULE_TIME=00:00
 SIMPLE_BACKUP_TIMEZONE=Asia/Kolkata
 SIMPLE_BACKUP_RETRY_SECONDS=3600
@@ -31,7 +31,16 @@ SIMPLE_BACKUP_MAX_AGE_SECONDS=129600
 SIMPLE_BACKUP_MIN_FREE_BYTES=1073741824
 ```
 
-`BACKUP_HOST_PATH` is on the data VM. Keep enough free space for at least four temporary full backup sets because the old set is removed only after the new set is complete.
+`BACKUP_HOST_PATH` is on the data VM. Before enabling the scheduled sidecar, make one full backup with representative data, verify its checksums, and run the capacity gate against the Data VM's actual volume paths:
+
+```bash
+POSTGRES_VOLUME_PATH="$(docker volume inspect --format '{{ .Mountpoint }}' data_postgres_data)"
+MINIO_VOLUME_PATH="$(docker volume inspect --format '{{ .Mountpoint }}' data_minio_data)"
+./deploy/production/docker/backup/check-capacity.sh \
+  /var/lib/darshan/backups "$POSTGRES_VOLUME_PATH" "$MINIO_VOLUME_PATH"
+```
+
+Compose volume names can differ by project name; obtain the actual names with `docker volume ls`. Run this script from the repository checkout on the Data VM. It verifies the latest set, measures the live PostgreSQL and MinIO volumes and a full set, and requires room for 30 measured sets, one new staging set, and at least 20% projected margin (minimum 10 GiB). Its JSON result must be `"status":"pass"` for the release gate. A 600 GB allocation is not proof of sufficient capacity. Recheck after major data growth and before each release.
 
 Start the data stack normally:
 
@@ -105,12 +114,14 @@ Restore into newly created empty PostgreSQL and MinIO services. Do not overwrite
 ## Accepted limitations for this small release
 
 - Backup data is unencrypted at rest.
-- The backup directory is on the same data VM by default; loss of the VM or disk can also lose the backups. Copy the directory to another machine if VM-loss protection is required.
+- The backup directory is on the same data VM; loss of that VM or disk can also lose the backups. The RPO ≤24-hour target is **unmet for Data VM or disk loss**. This is a release risk requiring explicit owner acceptance. No off-host protection is claimed.
 - PostgreSQL and MinIO are captured sequentially, not as one cross-service transaction. Schedule backups during low activity.
 - MinIO mirroring captures current object contents, not prior versions from a versioned bucket.
 - PostgreSQL roles and host/container configuration are not included; recreate the database/user and deployment configuration before restore.
 - Sidecar backups are intentionally not shown in the CMS backup-history screen. Manual backup actions in the CMS return a conflict while sidecar mode is active.
 - Restore remains an administrator-run procedure for this small release.
+- Rehearse an isolated, production-sized PostgreSQL and MinIO restore before every production release and monthly afterward. Measure actual RPO ≤24 hours, RTO ≤4 hours, and maintenance downtime ≤2 hours; verify row counts, object hashes, playback, and final readiness. An overdue backup, failed restore, or missing measurement blocks release approval.
+- This sidecar is supported through direct Compose deployment. The source-free/offline bundle does not yet include its image.
 - A crash may leave an unpublished staging directory; the next exclusively locked run removes it before checking capacity.
 
 The advanced encrypted, signed, restartable backup/restore implementation and its unfinished status are preserved only on branch `codex/advanced-backup-recovery-archive-20261031`; its advanced recovery source is not part of the lightweight release commit.

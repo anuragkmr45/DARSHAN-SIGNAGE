@@ -412,18 +412,20 @@ export class ProofOfPlayService {
     }
 
     if (overflowEvents.length > 0) {
-      await this.spoolEvents(overflowEvents.map((event) => stripReplayMetadata(event)), 'buffer-overflow')
-      this.recordReplayDiscard(overflowEvents, 'compacted', 'buffer-overflow')
+      const spooled = await this.spoolEvents(overflowEvents.map((event) => stripReplayMetadata(event)), 'buffer-overflow')
+      if (spooled.length > 0) this.recordReplayDiscard(spooled, 'compacted', 'buffer-overflow')
     }
 
     this.refreshStats()
     await this.persistState()
   }
 
-  private async spoolEvents(events: ProofOfPlayEvent[], reason: string): Promise<void> {
+  private async spoolEvents(events: ProofOfPlayEvent[], reason: string): Promise<ProofOfPlayEvent[]> {
     if (events.length === 0) {
-      return
+      return []
     }
+
+    const spooled: ProofOfPlayEvent[] = []
 
     const chunks: ProofOfPlayEvent[][] = []
     for (let index = 0; index < events.length; index += POP_REPLAY_MAX_EVENTS_PER_FILE) {
@@ -434,6 +436,7 @@ export class ProofOfPlayService {
       const spoolFile = path.join(this.spoolPath, `pop-${Date.now()}-${generateId(8)}.json`)
       try {
         await atomicWrite(spoolFile, JSON.stringify(chunk, null, 2))
+        spooled.push(...chunk)
         logger.info({ spoolFile, count: chunk.length, reason }, 'PoP events spooled to disk')
       } catch (error) {
         logger.error({ error, spoolFile, count: chunk.length, reason }, 'Failed to spool PoP events')
@@ -443,6 +446,7 @@ export class ProofOfPlayService {
     await this.enforceSpoolBudget()
     this.refreshStats()
     await this.persistState()
+    return spooled
   }
 
   private async enforceSpoolBudget(): Promise<void> {

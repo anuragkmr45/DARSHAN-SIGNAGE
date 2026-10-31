@@ -4,13 +4,15 @@ import { inArray } from 'drizzle-orm';
 import { closeTestServer, createTestServer, generateTestToken, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { HTTP_STATUS } from '@/http-status-codes';
+import { createServer as createHttpServer } from 'node:http';
+import { networkInterfaces } from 'node:os';
+import { isPrivateAddress } from '@/utils/webpage-url-policy';
 
 describe('Admin ops route contracts', () => {
   let server: FastifyInstance;
   let superAdminToken: string;
   const createdApiKeyIds: string[] = [];
   const createdWebhookIds: string[] = [];
-  const createdSsoIds: string[] = [];
 
   beforeAll(async () => {
     server = await createTestServer();
@@ -28,10 +30,6 @@ describe('Admin ops route contracts', () => {
       await db
         .delete(schema.webhookSubscriptions)
         .where(inArray(schema.webhookSubscriptions.id, createdWebhookIds));
-    }
-
-    if (createdSsoIds.length > 0) {
-      await db.delete(schema.ssoConfigs).where(inArray(schema.ssoConfigs.id, createdSsoIds));
     }
 
     await closeTestServer(server);
@@ -121,65 +119,44 @@ describe('Admin ops route contracts', () => {
     expect(revoked.is_revoked).toBe(true);
   });
 
-  it('persists active SSO config lifecycle through upsert, list, and deactivate routes', async () => {
-    const createResponse = await server.inject({
-      method: 'POST',
-      url: '/api/v1/sso-config',
-      headers: {
-        authorization: `Bearer ${superAdminToken}`,
-      },
-      payload: {
-        provider: 'oidc',
-        issuer: `https://issuer-${Date.now()}.example.com`,
-        client_id: `client-${Date.now()}`,
-        client_secret: 'super-secret',
-        authorization_url: 'https://issuer.example.com/auth',
-        token_url: 'https://issuer.example.com/token',
-        jwks_url: 'https://issuer.example.com/jwks',
-        redirect_uri: 'https://cms.example.com/auth/callback',
-        scopes: ['openid', 'profile', 'email'],
-      },
-    });
-
-    expect(createResponse.statusCode).toBe(HTTP_STATUS.CREATED);
-    const created = JSON.parse(createResponse.body) as {
-      id: string;
-      issuer: string;
-      is_active: boolean;
-    };
-    createdSsoIds.push(created.id);
-    expect(created.is_active).toBe(true);
-
-    const listResponse = await server.inject({
-      method: 'GET',
-      url: '/api/v1/sso-config',
-      headers: {
-        authorization: `Bearer ${superAdminToken}`,
-      },
-    });
-
-    expect(listResponse.statusCode).toBe(HTTP_STATUS.OK);
-    const listed = JSON.parse(listResponse.body) as {
-      items: Array<{ id: string; issuer: string; is_active: boolean }>;
-    };
-    expect(Array.isArray(listed.items)).toBe(true);
-    expect(listed.items.some((item) => item.id === created.id && item.is_active)).toBe(true);
-
-    const deactivateResponse = await server.inject({
-      method: 'POST',
-      url: `/api/v1/sso-config/${created.id}/deactivate`,
-      headers: {
-        authorization: `Bearer ${superAdminToken}`,
-      },
-    });
-
-    expect(deactivateResponse.statusCode).toBe(HTTP_STATUS.OK);
-    const deactivated = JSON.parse(deactivateResponse.body) as { id: string; is_active: boolean };
-    expect(deactivated.id).toBe(created.id);
-    expect(deactivated.is_active).toBe(false);
+  it('does not expose SSO management routes in the air-gapped release', async () => {
+    for (const request of [
+      { method: 'GET' as const, url: '/api/v1/sso-config' },
+      { method: 'POST' as const, url: '/api/v1/sso-config', payload: { provider: 'oidc' } },
+      { method: 'POST' as const, url: '/api/v1/sso-config/00000000-0000-4000-8000-000000000000/deactivate' },
+    ]) {
+      const response = await server.inject({ ...request, headers: { authorization: `Bearer ${superAdminToken}` } });
+      expect(response.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
+    }
   });
 
   it('attempts outbound webhook delivery and records the latest delivery status', async () => {
+    const siteAddress = Object.values(networkInterfaces()).flat().find((entry) =>
+      entry?.family === 'IPv4' && !entry.internal && isPrivateAddress(entry.address))?.address;
+    if (!siteAddress) throw new Error('A private network interface is required for the webhook fixture');
+    const received: Array<{ event: string | undefined; body: string }> = [];
+    const fixture = createHttpServer((request, response) => {
+      let body = '';
+      request.on('data', (chunk) => { body += chunk.toString(); });
+      request.on('end', () => {
+        received.push({ event: request.headers['x-darshan-event'] as string | undefined, body });
+        response.writeHead(202, { 'content-type': 'application/json' });
+        response.end('{"ok":true}');
+      });
+    });
+    await new Promise<void>((resolve) => fixture.listen(0, '0.0.0.0', resolve));
+    const address = fixture.address();
+    if (!address || typeof address === 'string') throw new Error('Webhook fixture has no TCP port');
+    const targetUrl = `http://${siteAddress}:${address.port}/darshan`;
+    const previousPolicy = {
+      hosts: process.env.WEBHOOK_TEST_ALLOWED_HOSTS,
+      ports: process.env.WEBHOOK_TEST_ALLOWED_PORTS,
+      cidrs: process.env.WEBHOOK_TEST_ALLOWED_CIDRS,
+    };
+    process.env.WEBHOOK_TEST_ALLOWED_HOSTS = siteAddress;
+    process.env.WEBHOOK_TEST_ALLOWED_PORTS = String(address.port);
+    process.env.WEBHOOK_TEST_ALLOWED_CIDRS = `${siteAddress}/32`;
+    try {
     const createResponse = await server.inject({
       method: 'POST',
       url: '/api/v1/webhooks',
@@ -189,7 +166,7 @@ describe('Admin ops route contracts', () => {
       payload: {
         name: `RG7 Webhook ${Date.now()}`,
         event_types: ['content.published'],
-        target_url: 'https://hooks.example.test/darshan',
+        target_url: targetUrl,
         headers: {
           'x-phase': 'rg-7',
         },
@@ -219,16 +196,6 @@ describe('Admin ops route contracts', () => {
     };
     expect(listed.items.some((item) => item.id === created.id)).toBe(true);
 
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 202,
-        headers: {
-          'content-type': 'application/json',
-        },
-      }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
     const testResponse = await server.inject({
       method: 'POST',
       url: `/api/v1/webhooks/${created.id}/test`,
@@ -248,8 +215,9 @@ describe('Admin ops route contracts', () => {
     expect(testBody.attempted).toBe(created.target_url);
     expect(testBody.status_code).toBe(202);
     expect(testBody.sent_at).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(created.target_url);
+    expect(received).toHaveLength(1);
+    expect(received[0]?.event).toBe('webhook.test');
+    expect(JSON.parse(received[0]!.body).type).toBe('webhook.test');
 
     const db = getDatabase();
     const [stored] = await db
@@ -264,5 +232,14 @@ describe('Admin ops route contracts', () => {
     expect(stored?.id).toBe(created.id);
     expect(stored?.last_status).toBe('SUCCESS');
     expect(stored?.last_status_at).toBeTruthy();
+    } finally {
+      if (previousPolicy.hosts === undefined) delete process.env.WEBHOOK_TEST_ALLOWED_HOSTS;
+      else process.env.WEBHOOK_TEST_ALLOWED_HOSTS = previousPolicy.hosts;
+      if (previousPolicy.ports === undefined) delete process.env.WEBHOOK_TEST_ALLOWED_PORTS;
+      else process.env.WEBHOOK_TEST_ALLOWED_PORTS = previousPolicy.ports;
+      if (previousPolicy.cidrs === undefined) delete process.env.WEBHOOK_TEST_ALLOWED_CIDRS;
+      else process.env.WEBHOOK_TEST_ALLOWED_CIDRS = previousPolicy.cidrs;
+      await new Promise<void>((resolve, reject) => fixture.close((error) => error ? reject(error) : resolve()));
+    }
   });
 });

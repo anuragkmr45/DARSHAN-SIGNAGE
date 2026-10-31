@@ -17,6 +17,7 @@ import {
 } from '@/utils/resolved-media';
 import { getActiveEmergencyForScreen } from '@/screens/playback';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
+import { assertTargetCanBeDeleted, lockScreenTargetReferences } from '@/services/screen-deletion-guard';
 import { createDeviceCommand } from '@/services/command-lifecycle-service';
 import {
   buildScreenPlaybackState,
@@ -852,15 +853,25 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         if (!ability.can('delete', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
 
-        const group = await repo.findById((request.params as any).id);
-        if (!group) throw AppError.notFound('Screen group not found');
-        const members = await repo.members(group.id);
-
-        await repo.delete(group.id);
+        const groupId = (request.params as any).id as string;
+        const members = await db.transaction(async (tx) => {
+          await lockScreenTargetReferences(tx);
+          const [group] = await tx.select({ id: schema.screenGroups.id }).from(schema.screenGroups)
+            .where(eq(schema.screenGroups.id, groupId)).for('update');
+          if (!group) throw AppError.notFound('Screen group not found');
+          const currentMembers = await tx.select({ screen_id: schema.screenGroupMembers.screen_id })
+            .from(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.group_id, group.id));
+          await assertTargetCanBeDeleted(tx, {
+            kind: 'GROUP', id: group.id, memberScreenIds: currentMembers.map((member) => member.screen_id),
+          });
+          await tx.delete(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.group_id, group.id));
+          await tx.delete(schema.screenGroups).where(eq(schema.screenGroups.id, group.id));
+          return currentMembers;
+        });
         await dispatchPlaybackRefresh(fastify, {
           reason: 'GROUP_MEMBERSHIP',
           screenIds: Array.from(new Set(members.map((m: any) => m.screen_id))),
-          groupIds: [group.id],
+          groupIds: [groupId],
           createdBy: payload.sub,
         });
         return reply.status(204).send();

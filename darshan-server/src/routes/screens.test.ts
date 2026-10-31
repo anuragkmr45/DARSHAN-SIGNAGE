@@ -1229,6 +1229,7 @@ describe('Screens routes realtime playback bootstrap', () => {
       name: 'Delete Screen',
       status: 'ACTIVE',
     });
+    await db.insert(schema.screens).values({ id: otherScreenId, name: 'Other default target' });
 
     await db.insert(schema.storageObjects).values([
       {
@@ -1331,12 +1332,32 @@ describe('Screens routes realtime playback bootstrap', () => {
       storage_object_id: screenshotStorageId,
     });
 
-    const response = await server.inject({
+    const blocked = await server.inject({
       method: 'DELETE',
       url: `/api/v1/screens/${screenId}`,
       headers: {
         authorization: `Bearer ${adminToken}`,
       },
+    });
+
+    expect(blocked.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(blocked.body).error).toMatchObject({
+      code: 'SCREEN_IN_USE',
+      details: { blockers: { reservations: 1, defaults: 1 } },
+    });
+    expect(deleteObjectSpy).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.screens).where(eq(schema.screens.id, screenId))).toHaveLength(1);
+    expect(await db.select().from(schema.proofOfPlay).where(eq(schema.proofOfPlay.screen_id, screenId))).toHaveLength(1);
+
+    await db.delete(schema.scheduleReservations).where(eq(schema.scheduleReservations.screen_id, screenId));
+    await db.update(schema.settings).set({
+      value: [{ target_type: 'SCREEN', target_id: otherScreenId, media_id: mediaId, aspect_ratio: '16:9', priority: 0 }],
+    }).where(eq(schema.settings.key, 'default_media_targets'));
+
+    const response = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/screens/${screenId}`,
+      headers: { authorization: `Bearer ${adminToken}` },
     });
 
     expect(response.statusCode).toBe(HTTP_STATUS.OK);

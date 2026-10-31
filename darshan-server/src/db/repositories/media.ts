@@ -1,4 +1,4 @@
-import { eq, and, desc, inArray, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNull, sql } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import type { ActorContext } from '@/rbac/policy';
 import { contentReadCondition, type ContentAbility, type ContentOwnerScope } from '@/rbac/content-ownership';
@@ -47,7 +47,7 @@ export class MediaRepository {
 
   async findById(id: string, executor?: DbExecutor) {
     const db = executor ?? getDatabase();
-    const result = await db.select().from(schema.media).where(eq(schema.media.id, id));
+    const result = await db.select().from(schema.media).where(and(eq(schema.media.id, id), isNull(schema.media.deleted_at)));
     return result[0] || null;
   }
 
@@ -65,7 +65,7 @@ export class MediaRepository {
     const limit = options.limit || 20;
     const offset = (page - 1) * limit;
 
-    const conditions = [];
+    const conditions = [isNull(schema.media.deleted_at)];
     if (options.type) {
       conditions.push(eq(schema.media.type, options.type as any));
     }

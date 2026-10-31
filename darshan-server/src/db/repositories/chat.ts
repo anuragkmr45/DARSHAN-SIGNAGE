@@ -555,8 +555,10 @@ export class ChatRepository {
       const [message] = await tx
         .select()
         .from(schema.chatMessages)
-        .where(eq(schema.chatMessages.id, input.messageId));
+        .where(eq(schema.chatMessages.id, input.messageId))
+        .for('update');
       if (!message) throw AppError.notFound('Message not found');
+      if (message.deleted_at) return { message, detachedMediaAssetIds: [] };
 
       await tx.insert(schema.chatMessageRevisions).values({
         message_id: message.id,
@@ -612,21 +614,13 @@ export class ChatRepository {
         .set({
           deleted_at: new Date(),
           edited_at: new Date(),
-          body_text: null,
-          body_rich: null,
         })
         .where(eq(schema.chatMessages.id, input.messageId))
         .returning();
 
-      if (attachments.length > 0) {
-        await tx
-          .delete(schema.chatAttachments)
-          .where(eq(schema.chatAttachments.message_id, input.messageId));
-      }
-
       return {
         message: updated,
-        detachedMediaAssetIds,
+        detachedMediaAssetIds: [],
       };
     });
   }
@@ -1049,53 +1043,10 @@ export class ChatRepository {
       const [conversation] = await tx
         .select()
         .from(schema.chatConversations)
-        .where(eq(schema.chatConversations.id, conversationId));
+        .where(eq(schema.chatConversations.id, conversationId))
+        .for('update');
       if (!conversation) throw AppError.notFound('Conversation not found');
-
-      const messageIdsRows = await tx
-        .select({ id: schema.chatMessages.id })
-        .from(schema.chatMessages)
-        .where(eq(schema.chatMessages.conversation_id, conversationId));
-      const messageIds = messageIdsRows.map((row) => row.id);
-
-      const mediaRows = messageIds.length
-        ? await tx
-            .select({ media_asset_id: schema.chatAttachments.media_asset_id })
-            .from(schema.chatAttachments)
-            .where(inArray(schema.chatAttachments.message_id, messageIds))
-        : [];
-      const mediaAssetIds = Array.from(new Set(mediaRows.map((row) => row.media_asset_id)));
-
-      if (messageIds.length) {
-        await tx
-          .delete(schema.chatReactions)
-          .where(inArray(schema.chatReactions.message_id, messageIds));
-        await tx
-          .delete(schema.chatAttachments)
-          .where(inArray(schema.chatAttachments.message_id, messageIds));
-        await tx
-          .delete(schema.chatMessageRevisions)
-          .where(inArray(schema.chatMessageRevisions.message_id, messageIds));
-      }
-
-      await tx
-        .delete(schema.chatMessages)
-        .where(eq(schema.chatMessages.conversation_id, conversationId));
-      await tx
-        .delete(schema.chatReceipts)
-        .where(eq(schema.chatReceipts.conversation_id, conversationId));
-      await tx
-        .delete(schema.chatModeration)
-        .where(eq(schema.chatModeration.conversation_id, conversationId));
-      await tx
-        .delete(schema.chatMembers)
-        .where(eq(schema.chatMembers.conversation_id, conversationId));
-      await tx
-        .delete(schema.chatPins)
-        .where(eq(schema.chatPins.conversation_id, conversationId));
-      await tx
-        .delete(schema.chatBookmarks)
-        .where(eq(schema.chatBookmarks.conversation_id, conversationId));
+      if (conversation.state === 'DELETED') return { conversation, mediaAssetIds: [] };
 
       const [updated] = await tx
         .update(schema.chatConversations)
@@ -1107,7 +1058,7 @@ export class ChatRepository {
         .where(eq(schema.chatConversations.id, conversationId))
         .returning();
 
-      return { conversation: updated, mediaAssetIds };
+      return { conversation: updated, mediaAssetIds: [] };
     });
   }
 }

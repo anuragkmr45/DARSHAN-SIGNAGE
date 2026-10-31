@@ -44,7 +44,7 @@ chmod +x "$FAKE_BIN/pg_dump" "$FAKE_BIN/pg_restore" "$FAKE_BIN/aws"
 
 export PATH="$FAKE_BIN:$PATH"
 export BACKUP_ROOT="$BACKUPS"
-export BACKUP_KEEP_SETS=3
+export BACKUP_RETENTION_DAYS=30
 export BACKUP_MIN_FREE_BYTES=1
 export BACKUP_SET_DATE=2026-10-31
 export POSTGRES_USER=darshan
@@ -60,23 +60,41 @@ for day in 28 29 30; do
   (cd "$directory" && sha256sum data > SHA256SUMS)
 done
 
+for date in 2026-09-30 2026-10-01; do
+  directory="$BACKUPS/backup-$date"
+  mkdir -p "$directory"
+  printf 'old-%s\n' "$date" > "$directory/data"
+  (cd "$directory" && sha256sum data > SHA256SUMS)
+done
+
 # Simulate a process/host crash that left unpublished staging data behind.
 mkdir -p "$BACKUPS/.partial/backup-2026-10-27.99999"
 printf 'incomplete\n' > "$BACKUPS/.partial/backup-2026-10-27.99999/object"
 
 "$SCRIPT_DIR/run-backup.sh" run
 
-[[ ! -e "$BACKUPS/backup-2026-10-28" ]]
+[[ ! -e "$BACKUPS/backup-2026-09-30" ]]
+[[ -d "$BACKUPS/backup-2026-10-01" ]]
+[[ -d "$BACKUPS/backup-2026-10-28" ]]
 [[ -d "$BACKUPS/backup-2026-10-29" ]]
 [[ -d "$BACKUPS/backup-2026-10-30" ]]
 [[ -d "$BACKUPS/backup-2026-10-31" ]]
 [[ ! -e "$BACKUPS/.partial/backup-2026-10-27.99999" ]]
-[[ "$(find "$BACKUPS" -maxdepth 1 -type d -name 'backup-*' | wc -l)" -eq 3 ]]
+[[ "$(find "$BACKUPS" -maxdepth 1 -type d -name 'backup-*' | wc -l)" -eq 5 ]]
 (cd "$BACKUPS/backup-2026-10-31" && sha256sum --check --quiet SHA256SUMS)
 "$SCRIPT_DIR/run-backup.sh" healthcheck
 
 "$SCRIPT_DIR/run-backup.sh" run
 [[ "$(find "$BACKUPS" -maxdepth 1 -type d -name 'backup-2026-10-31' | wc -l)" -eq 1 ]]
+
+# A clock rollback may recheck an older day, but must not remove a newer set.
+BACKUP_SET_DATE=2026-10-29 "$SCRIPT_DIR/run-backup.sh" run
+[[ -d "$BACKUPS/backup-2026-10-31" ]]
+if BACKUP_SET_DATE=2026-10-32 "$SCRIPT_DIR/run-backup.sh" run; then
+  echo "expected invalid calendar date rejection" >&2
+  exit 1
+fi
+[[ -d "$BACKUPS/backup-2026-10-31" ]]
 
 exec 8>"$BACKUPS/.backup.lock"
 flock -n 8
@@ -107,6 +125,7 @@ fi
 [[ ! -e "$BACKUPS/backup-2026-10-31" ]]
 [[ -d "$BACKUPS/backup-2026-10-29" ]]
 [[ -d "$BACKUPS/backup-2026-10-30" ]]
+[[ -d "$BACKUPS/backup-2026-10-01" ]]
 [[ -f "$BACKUPS/.backup.lock" && ! -L "$BACKUPS/.backup.lock" ]]
 [[ -z "$(find "$BACKUPS/.partial" -mindepth 1 -maxdepth 1 -print -quit)" ]]
 

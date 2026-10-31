@@ -157,7 +157,18 @@ export default function MediaLibrary() {
   const [uploadResult, setUploadResult] = useState<UploadMediaResult | null>(null);
   const [previewMedia, setPreviewMedia] = useState<MediaAsset | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
-  const [deleteMode, setDeleteMode] = useState<"soft" | "hard">("soft");
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [deletedPage, setDeletedPage] = useState(1);
+  const canRestore = currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPER_ADMIN';
+  const deletedMediaQuery = useQuery({ queryKey: ['media', 'deleted', deletedPage], queryFn: () => mediaApi.deleted(deletedPage), enabled: canRestore && showDeleted });
+  const restoreMutation = useMutation({
+    mutationFn: mediaApi.restore,
+    onSuccess: () => {
+      toast({ title: 'Media restored' });
+      void queryClient.invalidateQueries({ queryKey: ['media'] });
+    },
+    onError: (error: Error) => toast({ title: 'Restore failed', description: error.message, variant: 'destructive' }),
+  });
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -231,8 +242,8 @@ export default function MediaLibrary() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async ({ mediaId, hard }: { mediaId: string; hard: boolean }) => {
-      const response = await mediaApi.remove(mediaId, hard ? { hard: true } : undefined);
+    mutationFn: async (mediaId: string) => {
+      const response = await mediaApi.remove(mediaId);
       return response as { message?: string } | void;
     },
     onSuccess: (res) => {
@@ -461,12 +472,11 @@ export default function MediaLibrary() {
 
   const confirmDelete = (item: MediaAsset) => {
     setDeleteTarget(item);
-    setDeleteMode("soft");
   };
 
   const handleDelete = () => {
     if (!deleteTarget || deleteMutation.isPending) return;
-    deleteMutation.mutate({ mediaId: deleteTarget.id, hard: deleteMode === "hard" });
+    deleteMutation.mutate(deleteTarget.id);
   };
 
   useEffect(() => {
@@ -544,6 +554,7 @@ export default function MediaLibrary() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {canRestore && <Button variant="outline" onClick={() => setShowDeleted(true)}>Deleted Media</Button>}
           <Button variant="outline" onClick={() => setIsWebpageOpen(true)}>
             <Globe className="h-4 w-4 mr-2" />
             Add Webpage
@@ -992,23 +1003,8 @@ export default function MediaLibrary() {
               <DialogTitle>Delete Media</DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              Choose soft delete to restrict usage, or hard delete to permanently remove the media and its storage
-              references.
+              This media will be hidden from normal use. Its objects remain available for an administrator to restore.
             </p>
-            <div className="flex gap-2">
-              <Button
-                variant={deleteMode === "soft" ? "default" : "outline"}
-                onClick={() => setDeleteMode("soft")}
-              >
-                Soft Delete
-              </Button>
-              <Button
-                variant={deleteMode === "hard" ? "destructive" : "outline"}
-                onClick={() => setDeleteMode("hard")}
-              >
-                Hard Delete
-              </Button>
-            </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteMutation.isPending}>
                 Cancel
@@ -1018,12 +1014,32 @@ export default function MediaLibrary() {
                 onClick={handleDelete}
                 disabled={deleteMutation.isPending}
               >
-                {deleteMutation.isPending ? "Deleting..." : deleteMode === "hard" ? "Hard Delete" : "Soft Delete"}
+                {deleteMutation.isPending ? "Deleting..." : "Delete Media"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
+      <Dialog open={showDeleted} onOpenChange={setShowDeleted}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Deleted Media</DialogTitle></DialogHeader>
+          <div className="max-h-80 space-y-2 overflow-y-auto">
+            {deletedMediaQuery.isError && <p>Unable to load deleted media.</p>}
+            {deletedMediaQuery.data?.items.length === 0 && <p>No deleted media.</p>}
+            {deletedMediaQuery.data?.items.map((item) => (
+              <div key={item.id} className="flex items-center justify-between gap-2 border-b py-2">
+                <span>{item.name}</span>
+                <Button variant="outline" disabled={restoreMutation.isPending} onClick={() => restoreMutation.mutate(item.id)}>Restore</Button>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <Button variant="outline" disabled={deletedPage === 1 || deletedMediaQuery.isFetching} onClick={() => setDeletedPage((page) => page - 1)}>Previous</Button>
+            <span>Page {deletedPage}</span>
+            <Button variant="outline" disabled={deletedMediaQuery.isFetching || (deletedMediaQuery.data?.items.length ?? 0) < 100} onClick={() => setDeletedPage((page) => page + 1)}>Next</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

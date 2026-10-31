@@ -107,6 +107,7 @@ const envSchema = z.object({
     .default('true'),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(1000),
   RATE_LIMIT_TIME_WINDOW: z.string().default('1 minute'),
+  TRUSTED_PROXY_CIDRS: z.string().default(''),
   CORS_ORIGINS: z.string().default(''),
   SOCKET_ALLOWED_ORIGINS: z.string().default(''),
   APP_PUBLIC_BASE_URL: z.preprocess((value) => {

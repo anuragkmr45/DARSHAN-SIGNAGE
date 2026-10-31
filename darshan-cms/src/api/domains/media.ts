@@ -184,10 +184,11 @@ export const mediaApi = {
       method: "POST",
     }),
 
-  remove: (mediaId: string, options?: { hard?: boolean }) =>
+  deleted: (page = 1) => apiClient.request<{ items: Array<{ id: string; name: string; type: string; deleted_at: string }> }>({ path: `${endpoints.media.deleted}?page=${page}`, method: 'GET' }),
+  restore: (mediaId: string) => apiClient.request<{ id: string; already_restored: boolean }>({ path: endpoints.media.restore(mediaId), method: 'POST' }),
+  remove: (mediaId: string) =>
     apiClient.request<{ message?: string } | void>({
       path: endpoints.media.byId(mediaId),
       method: "DELETE",
-      query: options?.hard ? { hard: true } : undefined,
     }),
 };

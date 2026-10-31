@@ -1197,6 +1197,18 @@ export class PlayerFlow extends EventEmitter {
     }
 
     if (this.pairingService.isInvalidCredentialError(event.error)) {
+      // A deleted screen loses its certificate before its next authenticated
+      // request. Confirm the missing screen through REST before clearing local
+      // identity; a revoked credential can still belong to an existing screen.
+      try {
+        const status = await this.pairingService.fetchPairingStatus()
+        if (status.device_id === this.pairingService.getDeviceId() && !status.screen && !status.active_pairing) {
+          await this.enterHardRecovery('Screen was removed from the backend')
+          return
+        }
+      } catch (error) {
+        logger.warn({ error }, 'Could not confirm screen identity after authentication failure')
+      }
       await this.enterRecoveryRequired(event.error.message || 'Device credentials are no longer valid')
       return
     }

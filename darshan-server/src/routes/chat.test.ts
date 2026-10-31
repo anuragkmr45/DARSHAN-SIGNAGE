@@ -362,10 +362,10 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
       .select()
       .from(schema.chatAttachments)
       .where(eq(schema.chatAttachments.message_id, replyMessageId));
-    expect(remainingAttachments).toEqual([]);
+    expect(remainingAttachments).toHaveLength(1);
   });
 
-  it('detaches deleted message attachments and allows async cleanup of exclusive media', async () => {
+  it('retains deleted message attachments and ignores legacy cleanup jobs', async () => {
     const db = getDatabase();
     const conversationId = randomUUID();
     const messageId = randomUUID();
@@ -425,7 +425,7 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
       .select()
       .from(schema.chatAttachments)
       .where(eq(schema.chatAttachments.message_id, messageId));
-    expect(attachmentsAfterDelete).toEqual([]);
+    expect(attachmentsAfterDelete).toHaveLength(1);
 
     await cleanupChatMediaAssets({
       mediaAssetIds: [mediaId],
@@ -438,7 +438,40 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
       .select()
       .from(schema.media)
       .where(eq(schema.media.id, mediaId));
-    expect(deletedMedia).toBeUndefined();
+    expect(deletedMedia).toBeTruthy();
+  });
+
+  it('restores retained conversation and message through administrator APIs', async () => {
+    const db = getDatabase();
+    const conversationId = randomUUID();
+    const messageId = randomUUID();
+    const auth = { authorization: `Bearer ${adminToken}` };
+    await db.insert(schema.chatConversations).values({ id: conversationId, type: 'GROUP_CLOSED', created_by: testUser.id, title: 'Restore group', state: 'ACTIVE', last_seq: 1, metadata: {} });
+    await db.insert(schema.chatMembers).values({ conversation_id: conversationId, user_id: testUser.id, role: 'OWNER' });
+    await db.insert(schema.chatMessages).values({ id: messageId, conversation_id: conversationId, seq: 1, sender_id: testUser.id, body_text: 'retained secret' });
+
+    const deletedMessage = await server.inject({ method: 'DELETE', url: `/api/v1/chat/messages/${messageId}`, headers: auth });
+    expect(deletedMessage.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(deletedMessage.body).message.body_text).toBeNull();
+    const [retained] = await db.select().from(schema.chatMessages).where(eq(schema.chatMessages.id, messageId));
+    expect(retained?.body_text).toBe('retained secret');
+
+    const deletedConversation = await server.inject({ method: 'DELETE', url: `/api/v1/chat/conversations/${conversationId}`, headers: auth });
+    expect(deletedConversation.statusCode).toBe(HTTP_STATUS.OK);
+    const earlyRestore = await server.inject({ method: 'POST', url: `/api/v1/chat/messages/${messageId}/restore`, headers: auth });
+    expect(JSON.parse(earlyRestore.body).error.code).toBe('CHAT_RESTORE_CONVERSATION_FIRST');
+    const list = await server.inject({ method: 'GET', url: '/api/v1/chat/deleted/conversations', headers: auth });
+    expect(JSON.parse(list.body).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: conversationId })]));
+
+    const restoredConversation = await server.inject({ method: 'POST', url: `/api/v1/chat/conversations/${conversationId}/restore`, headers: auth });
+    expect(restoredConversation.statusCode).toBe(HTTP_STATUS.OK);
+    const restoredMessage = await server.inject({ method: 'POST', url: `/api/v1/chat/messages/${messageId}/restore`, headers: auth });
+    expect(restoredMessage.statusCode).toBe(HTTP_STATUS.OK);
+    const repeated = await server.inject({ method: 'POST', url: `/api/v1/chat/messages/${messageId}/restore`, headers: auth });
+    expect(JSON.parse(repeated.body).already_restored).toBe(true);
+    const [visible] = await db.select().from(schema.chatMessages).where(eq(schema.chatMessages.id, messageId));
+    expect(visible?.deleted_at).toBeNull();
+    expect(visible?.body_text).toBe('retained secret');
   });
 
   it('allows admin to mute/unmute and enforces muted write restrictions', async () => {
@@ -815,7 +848,7 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     expect(listedIds).not.toContain(firstDm.id);
   });
 
-  it('purges pins and bookmarks on hard delete', async () => {
+  it('retains pins and bookmarks on recoverable conversation delete', async () => {
     const db = getDatabase();
     const superAdminRole = await ensureRole('SUPER_ADMIN');
     const superAdminUserId = randomUUID();
@@ -904,8 +937,8 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
       .select()
       .from(schema.chatBookmarks)
       .where(eq(schema.chatBookmarks.conversation_id, conversationId));
-    expect(pinsAfter.length).toBe(0);
-    expect(bookmarksAfter.length).toBe(0);
+    expect(pinsAfter.length).toBe(1);
+    expect(bookmarksAfter.length).toBe(1);
   });
 
   it('enforces special mention policy for @everyone/@channel and allows admin', async () => {

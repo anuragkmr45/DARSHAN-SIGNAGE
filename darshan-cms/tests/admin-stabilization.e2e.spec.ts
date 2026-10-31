@@ -28,20 +28,6 @@ type WebhookRecord = {
   last_status_at?: string | null;
 };
 
-type SsoRecord = {
-  id: string;
-  provider: string;
-  issuer: string;
-  client_id: string;
-  client_secret?: string;
-  authorization_url?: string;
-  token_url?: string;
-  jwks_url?: string;
-  redirect_uri?: string;
-  scopes?: string[];
-  is_active?: boolean;
-};
-
 type RequestRecord = {
   id: string;
   title: string;
@@ -53,7 +39,6 @@ type RequestRecord = {
 type MockState = {
   apiKeys: ApiKeyRecord[];
   webhooks: WebhookRecord[];
-  sso: SsoRecord | null;
   requests: RequestRecord[];
 };
 
@@ -300,31 +285,6 @@ const installCommonMocks = async (
       });
     }
 
-    if (pathname === "/api/v1/sso-config" && method === "GET") {
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ items: state.sso ? [state.sso] : [] }),
-      });
-    }
-
-    if (pathname === "/api/v1/sso-config" && method === "POST") {
-      const payload = route.request().postDataJSON() as SsoRecord;
-      state.sso = {
-        ...payload,
-        id: state.sso?.id ?? "sso-config-1",
-        is_active: true,
-      };
-      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(state.sso) });
-    }
-
-    if (/^\/api\/v1\/sso-config\/[^/]+\/deactivate$/.test(pathname) && method === "POST") {
-      const id = pathname.split("/")[4]!;
-      const responseBody = state.sso ? { ...state.sso, id, is_active: false } : { id, is_active: false };
-      state.sso = null;
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(responseBody) });
-    }
-
     if (pathname === "/api/v1/requests" && method === "GET") {
       return route.fulfill({
         status: 200,
@@ -392,7 +352,6 @@ test.describe("admin stabilization surfaces", () => {
       state: {
         apiKeys: [],
         webhooks: [],
-        sso: null,
         requests: [],
       },
     });
@@ -400,10 +359,12 @@ test.describe("admin stabilization surfaces", () => {
     await page.goto("/dashboard");
     await expect(page.getByLabel("Global search unavailable")).toBeDisabled();
 
-    for (const path of ["/api-keys", "/webhooks", "/sso-config", "/proof-of-play", "/requests"]) {
+    for (const path of ["/api-keys", "/webhooks", "/proof-of-play"]) {
       await page.goto(path);
       await page.waitForURL(/\/dashboard/);
     }
+    await page.goto("/sso-config");
+    await expect(page.getByText("Oops! Page not found")).toBeVisible();
   });
 
   test("renders live admin surfaces from API-backed state instead of local placeholders", async ({ page }) => {
@@ -429,19 +390,6 @@ test.describe("admin stabilization surfaces", () => {
           last_status_at: null,
         },
       ],
-      sso: {
-        id: "sso-1",
-        provider: "oidc",
-        issuer: "https://issuer.example.test",
-        client_id: "cms-client",
-        client_secret: "super-secret",
-        authorization_url: "https://issuer.example.test/authorize",
-        token_url: "https://issuer.example.test/token",
-        jwks_url: "https://issuer.example.test/jwks",
-        redirect_uri: "http://127.0.0.1:5173/auth/callback",
-        scopes: ["openid", "profile", "email"],
-        is_active: true,
-      },
       requests: [
         {
           id: "request-1",
@@ -480,26 +428,9 @@ test.describe("admin stabilization surfaces", () => {
     await expect(page.getByText("Healthy")).toBeVisible();
 
     await page.goto("/sso-config");
-    await expect(page.locator("#issuer")).toHaveValue("https://issuer.example.test");
-    await expect(page.getByRole("button", { name: /test connection/i })).toHaveCount(0);
-    await page.locator("#issuer").fill("https://issuer.updated.test");
-    await page.getByRole("button", { name: /save configuration/i }).click();
-    await expect(page.getByText("Configuration saved", { exact: true })).toBeVisible();
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "SSO / OIDC Configuration", exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator("#issuer")).toHaveValue("https://issuer.updated.test");
-    await page.getByRole("button", { name: /disconnect/i }).click();
-    await expect(page.getByText("Configuration deactivated", { exact: true })).toBeVisible();
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "SSO / OIDC Configuration", exact: true })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText("Active", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Oops! Page not found")).toBeVisible();
 
     await page.goto("/requests");
-    await expect(page.getByText("Front desk announcement")).toBeVisible();
-    await page.getByRole("button", { name: /new request/i }).click();
-    await page.locator("#request-title").fill("Poster correction");
-    await page.locator("#request-description").fill("Fix the room number on the portrait poster.");
-    await page.getByRole("button", { name: /^submit$/i }).click();
-    await expect(page.getByText("Poster correction")).toBeVisible();
+    await expect(page.getByText("Oops! Page not found")).toBeVisible();
   });
 });

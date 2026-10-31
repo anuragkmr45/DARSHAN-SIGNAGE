@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
@@ -9,6 +9,7 @@ import { createSessionRepository } from '@/db/repositories/session';
 import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { SYSTEM_ROLE_DEFAULTS } from '@/rbac/system-roles';
+import { createBucketIfNotExists, deleteObject, getObject, initializeS3, putObject } from '@/s3';
 
 type RolePermissions = {
   grants: Array<{ action: string; subject: string }>;
@@ -250,8 +251,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
     expect(response.statusCode).toBe(HTTP_STATUS.OK);
     const body = JSON.parse(response.body);
     expect(body.id).toBe(media.id);
-    expect(body.message).toContain('Media soft deleted');
-    expect(Array.isArray(body.storage_deleted)).toBe(true);
+    expect(body.message).toContain('Media deleted and retained');
 
     const db = getDatabase();
     const [updated] = await db
@@ -259,12 +259,59 @@ describe('Media Routes - delete ownership and usage protection', () => {
       .from(schema.media)
       .where(eq(schema.media.id, media.id));
     expect(updated).toBeTruthy();
-    expect(updated?.status).toBe('FAILED');
-    expect(updated?.source_bucket).toBeNull();
-    expect(updated?.source_object_key).toBeNull();
+    expect(updated?.status).toBe('READY');
+    expect(updated?.deleted_at).toBeTruthy();
+    const hidden = await server.inject({ method: 'GET', url: `/api/v1/media/${media.id}`, headers: { authorization: `Bearer ${ownerToken}` } });
+    expect(hidden.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
+    const restored = await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: { authorization: `Bearer ${adminToken}` } });
+    expect(restored.statusCode).toBe(HTTP_STATUS.OK);
+    const [visible] = await db.select().from(schema.media).where(eq(schema.media.id, media.id));
+    expect(visible?.deleted_at).toBeNull();
   });
 
-  it('hard deletes uploader owned media when not referenced', async () => {
+  it('retains object bytes, hides deleted media, and restores only while its object exists', async () => {
+    initializeS3();
+    await createBucketIfNotExists('media-source');
+    const media = await insertMedia(ownerUserId);
+    const key = `${media.id}/retained.png`;
+    const bytes = Buffer.from('retained-media-object-contents');
+    const checksum = createHash('sha256').update(bytes).digest('hex');
+    await putObject('media-source', key, bytes, 'image/png');
+    const db = getDatabase();
+    const [object] = await db.insert(schema.storageObjects).values({
+      bucket: 'media-source', object_key: key, content_type: 'image/png', size: bytes.length, sha256: checksum,
+    }).returning();
+    await db.update(schema.media).set({
+      source_object_id: object.id, source_bucket: 'media-source', source_object_key: key,
+      source_content_type: 'image/png', source_size: bytes.length,
+    }).where(eq(schema.media.id, media.id));
+
+    const ownerHeaders = { authorization: `Bearer ${ownerToken}` };
+    const adminHeaders = { authorization: `Bearer ${adminToken}` };
+    expect((await server.inject({ method: 'DELETE', url: `/api/v1/media/${media.id}`, headers: ownerHeaders })).statusCode).toBe(200);
+    expect((await server.inject({ method: 'DELETE', url: `/api/v1/media/${media.id}`, headers: ownerHeaders })).json().already_deleted).toBe(true);
+    const list = await server.inject({ method: 'GET', url: '/api/v1/media?limit=100', headers: ownerHeaders });
+    expect(list.json().items.some((item: { id: string }) => item.id === media.id)).toBe(false);
+    const denied = await server.inject({ method: 'GET', url: '/api/v1/media/deleted', headers: ownerHeaders });
+    expect(denied.statusCode).toBe(403);
+    const deletedList = await server.inject({ method: 'GET', url: '/api/v1/media/deleted', headers: adminHeaders });
+    expect(deletedList.json().items).toEqual(expect.arrayContaining([expect.objectContaining({ id: media.id })]));
+    expect(createHash('sha256').update(await getObject('media-source', key)).digest('hex')).toBe(checksum);
+
+    expect((await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: adminHeaders })).statusCode).toBe(200);
+    expect((await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: adminHeaders })).json().already_restored).toBe(true);
+    expect(createHash('sha256').update(await getObject('media-source', key)).digest('hex')).toBe(checksum);
+
+    expect((await server.inject({ method: 'DELETE', url: `/api/v1/media/${media.id}`, headers: ownerHeaders })).statusCode).toBe(200);
+    await deleteObject('media-source', key);
+    const failedRestore = await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: adminHeaders });
+    expect(failedRestore.statusCode).toBe(409);
+    expect(failedRestore.json().error.code).toBe('MEDIA_RESTORE_OBJECT_MISSING');
+    const [stillDeleted] = await db.select().from(schema.media).where(eq(schema.media.id, media.id));
+    expect(stillDeleted.deleted_at).toBeTruthy();
+  });
+
+  it('rejects permanent deletion', async () => {
     const media = await insertMedia(ownerUserId);
     const response = await server.inject({
       method: 'DELETE',
@@ -274,24 +321,23 @@ describe('Media Routes - delete ownership and usage protection', () => {
       },
     });
 
-    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    expect(response.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
     const body = JSON.parse(response.body);
-    expect(body.id).toBe(media.id);
-    expect(body.message).toContain('Media hard deleted');
+    expect(body.error.code).toBe('MEDIA_HARD_DELETE_DISABLED');
 
     const db = getDatabase();
     const [deleted] = await db
       .select()
       .from(schema.media)
       .where(eq(schema.media.id, media.id));
-    expect(deleted).toBeUndefined();
+    expect(deleted).toBeTruthy();
   });
 
   it('blocks non-owner delete and exposes uploader identity', async () => {
     const media = await insertMedia(ownerUserId);
     const response = await server.inject({
       method: 'DELETE',
-      url: `/api/v1/media/${media.id}?hard=true`,
+      url: `/api/v1/media/${media.id}`,
       headers: {
         authorization: `Bearer ${otherUserToken}`,
       },
@@ -343,7 +389,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
     const media = await insertMedia(ownerUserId);
     const response = await server.inject({
       method: 'DELETE',
-      url: `/api/v1/media/${media.id}?hard=true`,
+      url: `/api/v1/media/${media.id}`,
       headers: {
         authorization: `Bearer ${adminToken}`,
       },
@@ -355,14 +401,14 @@ describe('Media Routes - delete ownership and usage protection', () => {
       .select()
       .from(schema.media)
       .where(eq(schema.media.id, media.id));
-    expect(deleted).toBeUndefined();
+    expect(deleted?.deleted_at).toBeTruthy();
   });
 
   it('allows SUPER_ADMIN to delete another user media', async () => {
     const media = await insertMedia(ownerUserId);
     const response = await server.inject({
       method: 'DELETE',
-      url: `/api/v1/media/${media.id}?hard=true`,
+      url: `/api/v1/media/${media.id}`,
       headers: {
         authorization: `Bearer ${superAdminToken}`,
       },
@@ -374,7 +420,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
       .select()
       .from(schema.media)
       .where(eq(schema.media.id, media.id));
-    expect(deleted).toBeUndefined();
+    expect(deleted?.deleted_at).toBeTruthy();
   });
 
   it('returns 409 when media is referenced by chat attachments', async () => {
@@ -410,7 +456,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
 
     const response = await server.inject({
       method: 'DELETE',
-      url: `/api/v1/media/${media.id}?hard=true`,
+      url: `/api/v1/media/${media.id}`,
       headers: {
         authorization: `Bearer ${ownerToken}`,
       },
@@ -446,7 +492,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
 
     const response = await server.inject({
       method: 'DELETE',
-      url: `/api/v1/media/${media.id}?hard=true`,
+      url: `/api/v1/media/${media.id}`,
       headers: {
         authorization: `Bearer ${ownerToken}`,
       },
@@ -464,7 +510,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
   it('returns 404 for missing media', async () => {
     const response = await server.inject({
       method: 'DELETE',
-      url: `/api/v1/media/${randomUUID()}?hard=true`,
+      url: `/api/v1/media/${randomUUID()}`,
       headers: {
         authorization: `Bearer ${ownerToken}`,
       },
@@ -521,10 +567,14 @@ describe('Media Routes - delete ownership and usage protection', () => {
         source_object_key: `videos/${videoId}.mp4`,
       },
     ]);
+    initializeS3();
+    await createBucketIfNotExists('media-source');
+    await putObject('media-source', `images/${imageId}.png`, Buffer.from('image-fixture'), 'image/png');
+    await putObject('media-source', `videos/${videoId}.mp4`, Buffer.from('video-fixture'), 'video/mp4');
 
     const response = await server.inject({
       method: 'GET',
-      url: `/api/v1/media?page=1&limit=20&status=READY&type=`,
+      url: `/api/v1/media?page=1&limit=100&status=READY&type=`,
       headers: {
         authorization: `Bearer ${ownerToken}`,
       },
@@ -574,5 +624,23 @@ describe('Media Routes - delete ownership and usage protection', () => {
     expect(body.status).toBe('FAILED');
     expect(body.status_reason).toBe('MEDIA_OBJECT_MISSING');
     expect(body.media_url).toBeNull();
+  });
+
+  it('pages deleted media beyond the first 100 records', async () => {
+    const db = getDatabase();
+    const ids = Array.from({ length: 101 }, () => randomUUID());
+    await db.insert(schema.media).values(ids.map((id) => ({
+      id, name: `deleted-${id}`, type: 'IMAGE' as const, status: 'READY' as const,
+      created_by: ownerUserId, deleted_at: new Date(), deleted_by: ownerUserId,
+    })));
+    const headers = { authorization: `Bearer ${adminToken}` };
+    const first = await server.inject({ method: 'GET', url: '/api/v1/media/deleted?page=1', headers });
+    const second = await server.inject({ method: 'GET', url: '/api/v1/media/deleted?page=2', headers });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().items).toHaveLength(100);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().items.length).toBeGreaterThan(0);
+    const invalid = await server.inject({ method: 'GET', url: '/api/v1/media/deleted?page=0', headers });
+    expect(invalid.statusCode).toBe(400);
   });
 });

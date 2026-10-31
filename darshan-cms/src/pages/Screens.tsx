@@ -40,6 +40,7 @@ import { ScreenDetailsModal } from "@/components/screens/ScreenDetailsModal";
 import { toast } from "sonner";
 import { CreateGroupModal } from "@/components/screens/CreateGroupModal";
 import { UpdateGroupModal } from "@/components/screens/UpdateGroupModal";
+import { screenDeletionBlockers } from "@/components/screens/screenDeletionBlockers";
 import { useScreensRealtime } from "@/hooks/screens/useScreensRealtime";
 import {
   getPlaybackTimingLabel,
@@ -85,6 +86,9 @@ export default function Screens() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [recoveryScreenId, setRecoveryScreenId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScreenOverviewItem | null>(null);
+  const [groupDeleteTarget, setGroupDeleteTarget] = useState<ScreenGroup | null>(null);
+  const [deleteBlockers, setDeleteBlockers] = useState<string[]>([]);
+  const [groupDeleteBlockers, setGroupDeleteBlockers] = useState<string[]>([]);
   const [revokeTarget, setRevokeTarget] = useState<ScreenOverviewItem | null>(null);
   const [revokeNote, setRevokeNote] = useState("");
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
@@ -182,20 +186,25 @@ export default function Screens() {
   const deleteScreen = useSafeMutation({
     mutationFn: (id: string) => screensApi.remove(id),
     onSuccess: () => {
+      setDeleteBlockers([]);
       queryClient.invalidateQueries({ queryKey: queryKeys.screens });
       queryClient.invalidateQueries({ queryKey: queryKeys.screensSummary() });
       toast.success("Screen deleted successfully");
     },
+    onError: (error) => setDeleteBlockers(screenDeletionBlockers(error)),
   }, "Unable to delete screen.");
 
   const deleteGroup = useSafeMutation({
     mutationFn: (id: string) => screensApi.removeGroup(id),
     onSuccess: () => {
+      setGroupDeleteBlockers([]);
+      setGroupDeleteTarget(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.screenGroups });
       queryClient.invalidateQueries({ queryKey: ["available-screens"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.screens });
       toast.success("Group deleted successfully");
     },
+    onError: (error) => setGroupDeleteBlockers(screenDeletionBlockers(error)),
   }, "Unable to delete group.");
 
   const revokePairing = useSafeMutation({
@@ -231,6 +240,7 @@ export default function Screens() {
   }, [screensSummaryQuery.data]);
 
   const handleDeleteScreen = (screen: ScreenOverviewItem) => {
+    setDeleteBlockers([]);
     setDeleteTarget(screen);
   };
 
@@ -249,7 +259,8 @@ export default function Screens() {
 
   const handleDeleteGroup = (groupId: string, event: React.MouseEvent) => {
     event.stopPropagation();
-    deleteGroup.mutate(groupId);
+    setGroupDeleteBlockers([]);
+    setGroupDeleteTarget(screenGroups.find((group) => group.id === groupId) ?? null);
   };
 
   const handleEditGroup = (groupId: string, event: React.MouseEvent) => {
@@ -620,6 +631,7 @@ export default function Screens() {
                             size="sm"
                             variant="ghost"
                             onClick={(event) => handleEditGroup(id, event)}
+                            aria-label={`Edit Group ${name}`}
                             className="h-8 w-8 p-0"
                           >
                             <Pencil className="h-3.5 w-3.5" />
@@ -628,6 +640,7 @@ export default function Screens() {
                             size="sm"
                             variant="ghost"
                             onClick={(event) => handleDeleteGroup(id, event)}
+                            aria-label={`Delete Group ${name}`}
                             className="h-8 w-8 p-0 text-destructive hover:text-destructive"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -733,24 +746,24 @@ export default function Screens() {
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title={deleteTarget ? `Delete ${deleteTarget.name}?` : "Delete screen?"}
-        description="This action removes the screen from CMS."
-        confirmLabel={
-          deleteTarget &&
-          ((deleteTarget.active_items?.length ?? 0) > 0 ||
-            (deleteTarget.upcoming_items?.length ?? 0) > 0 ||
-            Boolean(deleteTarget.booked_until))
-            ? "Delete Anyway"
-            : "Delete Screen"
-        }
+        description="Delete is allowed only after current and future references are removed. The server checks again when you confirm."
+        confirmLabel="Delete Screen"
         onConfirm={confirmDeleteScreen}
         onCancel={() => {
           if (deleteScreen.isPending) return;
           setDeleteTarget(null);
+          setDeleteBlockers([]);
         }}
         isLoading={deleteScreen.isPending}
       >
         {deleteTarget ? (
           <div className="space-y-3">
+            {deleteBlockers.length > 0 && (
+              <div role="alert" className="rounded-md border border-destructive/40 p-3 text-sm">
+                <p className="font-medium">Remove these references, then retry:</p>
+                <ul className="list-disc pl-5">{deleteBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+              </div>
+            )}
             {((deleteTarget.active_items?.length ?? 0) > 0 ||
               (deleteTarget.upcoming_items?.length ?? 0) > 0 ||
               Boolean(deleteTarget.booked_until)) && (
@@ -759,9 +772,7 @@ export default function Screens() {
                   <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" />
                   <div className="space-y-1">
                     <p className="font-medium text-foreground">This screen currently has schedule targeting.</p>
-                    <p className="text-muted-foreground">
-                      Admin can still delete it, but the screen will be removed from current and upcoming schedule targeting.
-                    </p>
+                    <p className="text-muted-foreground">Remove current and upcoming schedule targeting before deleting this screen.</p>
                     <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                       <span>Active items: {deleteTarget.active_items?.length ?? 0}</span>
                       <span>Upcoming items: {deleteTarget.upcoming_items?.length ?? 0}</span>
@@ -787,6 +798,27 @@ export default function Screens() {
             </div>
           </div>
         ) : null}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(groupDeleteTarget)}
+        title={groupDeleteTarget ? `Delete ${groupDeleteTarget.name}?` : "Delete group?"}
+        description="Delete is allowed only after current and future references are removed. The server checks again when you confirm."
+        confirmLabel="Delete Group"
+        onConfirm={() => groupDeleteTarget && deleteGroup.mutate(groupDeleteTarget.id)}
+        onCancel={() => {
+          if (deleteGroup.isPending) return;
+          setGroupDeleteTarget(null);
+          setGroupDeleteBlockers([]);
+        }}
+        isLoading={deleteGroup.isPending}
+      >
+        {groupDeleteBlockers.length > 0 && (
+          <div role="alert" className="rounded-md border border-destructive/40 p-3 text-sm">
+            <p className="font-medium">Remove these references, then retry:</p>
+            <ul className="list-disc pl-5">{groupDeleteBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+          </div>
+        )}
       </ConfirmDialog>
 
       <ConfirmDialog

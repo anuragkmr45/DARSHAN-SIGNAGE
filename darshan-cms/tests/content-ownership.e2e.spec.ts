@@ -176,9 +176,75 @@ test.describe("Owned content response contract", () => {
 
     await deleteButtons.nth(1).click();
     await expect(page.getByRole("dialog", { name: "Delete Media" })).toBeVisible();
-    await page.getByRole("dialog", { name: "Delete Media" }).getByRole("button", { name: "Soft Delete" }).last().click();
+    await page.getByRole("dialog", { name: "Delete Media" }).getByRole("button", { name: "Delete Media" }).last().click();
     await expect(page.getByText("Delete not allowed", { exact: true })).toBeVisible();
     await expect(page.getByRole("dialog", { name: "Delete Media" })).toHaveCount(0);
+  });
+
+  test('administrator restores a deleted Media item from the library', async ({ page }) => {
+    let deleted = true;
+    await installCommonRoutes(page, async (route, pathname, method) => {
+      if (pathname === '/api/v1/media' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], pagination: { page: 1, limit: 20, total: 0 } }) });
+        return true;
+      }
+      if (pathname === '/api/v1/media/deleted' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: deleted ? [{ id: 'media-restore', name: 'Retained image', type: 'IMAGE', deleted_at: '2026-11-01T00:00:00Z' }] : [] }) });
+        return true;
+      }
+      if (pathname === '/api/v1/media/media-restore/restore' && method === 'POST') {
+        deleted = false;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'media-restore', already_restored: false }) });
+        return true;
+      }
+      return false;
+    });
+    await login(page);
+    await page.goto('/media');
+    await page.getByRole('button', { name: 'Deleted Media' }).click();
+    await expect(page.getByRole('dialog', { name: 'Deleted Media' }).getByText('Retained image')).toBeVisible();
+    await page.getByRole('dialog', { name: 'Deleted Media' }).getByRole('button', { name: 'Restore' }).click();
+    await expect(page.getByText('Media restored')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Deleted Media' }).getByText('No deleted media.')).toBeVisible();
+  });
+
+  test('administrator restores deleted chat content in conversation order', async ({ page }) => {
+    let conversationDeleted = true;
+    let messageDeleted = true;
+    await installCommonRoutes(page, async (route, pathname, method) => {
+      if (pathname === '/api/v1/chat/conversations' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], page: 1, limit: 30, total: 0 }) });
+        return true;
+      }
+      if (pathname === '/api/v1/chat/deleted/conversations' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: conversationDeleted ? [{ id: 'conversation-restore', title: 'Retained chat', type: 'GROUP_CLOSED', deleted_at: '2026-11-01T00:00:00Z' }] : [] }) });
+        return true;
+      }
+      if (pathname === '/api/v1/chat/deleted/messages' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: messageDeleted ? [{ id: 'message-restore', conversation_id: 'conversation-restore', deleted_at: '2026-11-01T00:00:00Z' }] : [] }) });
+        return true;
+      }
+      if (pathname === '/api/v1/chat/conversations/conversation-restore/restore' && method === 'POST') {
+        conversationDeleted = false;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ conversationId: 'conversation-restore', already_restored: false }) });
+        return true;
+      }
+      if (pathname === '/api/v1/chat/messages/message-restore/restore' && method === 'POST') {
+        messageDeleted = false;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ messageId: 'message-restore', already_restored: false }) });
+        return true;
+      }
+      return false;
+    });
+    await login(page);
+    await page.goto('/chat');
+    await page.getByRole('button', { name: 'Deleted content' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Deleted chat content' });
+    await expect(dialog.getByText('Retained chat')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Restore conversation' }).click();
+    await expect(dialog.getByText('No deleted conversations.')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Restore message' }).click();
+    await expect(dialog.getByText('No deleted messages.')).toBeVisible();
   });
 
   test("Layouts use server flags for action availability and display deleted ownership", async ({ page }) => {

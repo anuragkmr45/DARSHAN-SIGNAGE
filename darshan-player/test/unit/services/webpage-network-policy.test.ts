@@ -41,11 +41,11 @@ describe('Webpage Network Policy', () => {
     expect(hostMatches('evil-example.com', '*.example.com')).to.equal(false)
   })
 
-  it('allows any public HTTPS hostname when the global wildcard is configured', async () => {
+  it('denies public HTTPS even with a wildcard host and permits an approved private address', async () => {
     expect(hostMatches('www.youtube.com', '*')).to.equal(true)
     expect(hostMatches('www.pexels.com', '*')).to.equal(true)
 
-    const navigation = await assertPlayerWebpageUrlAllowed(
+    await expectPolicyFailure(assertPlayerWebpageUrlAllowed(
       'https://www.youtube.com/watch?v=test',
       'navigation',
       {
@@ -55,9 +55,12 @@ describe('Webpage Network Policy', () => {
         webpageAllowedPorts: [443],
       },
       async () => ['203.0.113.10'],
-    )
+    ), 'Public webpage destinations are not allowed in this release')
 
-    expect(navigation.hostname).to.equal('www.youtube.com')
+    const navigation = await assertPlayerWebpageUrlAllowed('https://intranet.site.test/', 'navigation', {
+      ...baseSecurity, allowedDomains: ['*'], webpageAllowedCidrs: ['10.20.0.0/16'], webpageAllowedPorts: [443],
+    }, async () => ['10.20.1.9'])
+    expect(navigation.hostname).to.equal('intranet.site.test')
 
     await expectPolicyFailure(assertPlayerWebpageUrlAllowed(
       'https://10.0.0.5/',
@@ -89,13 +92,12 @@ describe('Webpage Network Policy', () => {
     expect(ipMatchesCidr('::ffff:192.168.29.64', '::ffff:0:0/96')).to.equal(true)
   })
 
-  it('allows an explicitly configured public HTTPS endpoint', async () => {
-    const parsed = await assertPlayerWebpageUrlAllowed('https://8.8.8.8/', 'navigation', {
+  it('denies an explicitly configured public HTTPS endpoint', async () => {
+    await expectPolicyFailure(assertPlayerWebpageUrlAllowed('https://8.8.8.8/', 'navigation', {
       ...baseSecurity,
       allowedDomains: ['8.8.8.8'],
       webpageAllowedPorts: [443],
-    })
-    expect(parsed.protocol).to.equal('https:')
+    }), 'Public webpage destinations are not allowed in this release')
   })
 
   it('requires explicit CIDR permission for private addresses', async () => {
@@ -126,11 +128,12 @@ describe('Webpage Network Policy', () => {
 
   it('allows explicitly configured production HTTP', async () => {
     const parsed = await assertPlayerWebpageUrlAllowed(
-      'http://8.8.8.8/',
+      'http://10.20.1.9/',
       'navigation',
       {
         ...baseSecurity,
-        allowedDomains: ['8.8.8.8'],
+        allowedDomains: ['10.20.1.9'],
+        webpageAllowedCidrs: ['10.20.0.0/16'],
         webpageAllowedPorts: [80, 443],
         webpageAllowHttp: true,
       },
@@ -160,18 +163,19 @@ describe('Webpage Network Policy', () => {
       ...baseSecurity,
       allowedDomains: ['screen.example.test'],
       webpageResourceDomains: ['cdn.example.test'],
+      webpageAllowedCidrs: ['10.20.0.0/16'],
     }
     await assertPlayerWebpageUrlAllowed(
       'https://cdn.example.test/app.js',
       'resource',
       secured,
-      async () => ['203.0.113.9'],
+      async () => ['10.20.1.9'],
     )
     await expectPolicyFailure(assertPlayerWebpageUrlAllowed(
       'https://screen.example.test/app.js',
       'resource',
       secured,
-      async () => ['203.0.113.9'],
+      async () => ['10.20.1.9'],
     ), 'Webpage host is not allowlisted')
     await expectPolicyFailure(assertPlayerWebpageUrlAllowed(
       'https://screen.example.test/',

@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import { config as appConfig } from '@/config';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { chatAuthPreHandler, getRequestAuthContext } from '@/auth/request-auth';
@@ -17,8 +17,9 @@ import { createRateLimiter } from '@/chat/rate-limit';
 import { assertAttachmentAccess, assertAttachmentMediaReady } from '@/chat/attachment-auth';
 import { assertCanWriteToConversation, assertConversationWritable, assertNotBanned } from '@/chat/guard';
 import { getDatabase, schema } from '@/db';
-import { queueChatMediaCleanup, queueCleanup } from '@/jobs';
+import { headObject } from '@/s3';
 import { canAccessDirectoryUser } from '@/rbac/user-directory';
+import type { AppAbility } from '@/rbac';
 
 const logger = createLogger('chat-routes');
 const chatRepo = createChatRepository();
@@ -317,6 +318,34 @@ export async function chatRoutes(fastify: FastifyInstance) {
   const forumLimiter = createRateLimiter({ capacity: 30, refillPerSecond: 1 });
   const forumAttachmentLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 0.5 });
   const db = getDatabase();
+  const assertRestoreAdmin = (payload: { role: string }, ability: AppAbility) => {
+    if (!['SUPER_ADMIN', 'ADMIN'].includes(payload.role) || !ability.can('manage', 'Conversation')) {
+      throw AppError.forbidden('Administrator conversation restore permission required');
+    }
+  };
+  const deletedListOffset = (query: unknown): number => {
+    const value = (query as { page?: string } | undefined)?.page ?? '1';
+    const page = Number(value);
+    if (!Number.isInteger(page) || page < 1 || page > 10000) throw AppError.badRequest('Invalid deleted-content page');
+    return (page - 1) * 100;
+  };
+  const verifyMessageObjects = async (messageId: string, tx: any) => {
+    const attachments = await tx.select({ media_asset_id: schema.chatAttachments.media_asset_id })
+      .from(schema.chatAttachments).where(eq(schema.chatAttachments.message_id, messageId));
+    for (const attachment of attachments) {
+      const [media] = await tx.select().from(schema.media).where(eq(schema.media.id, attachment.media_asset_id));
+      if (!media || media.deleted_at) throw new AppError({ statusCode: 409, code: 'CHAT_RESTORE_MEDIA_MISSING', message: 'An attachment is unavailable.' });
+      const ids = [media.source_object_id, media.ready_object_id].filter(Boolean) as string[];
+      const objects = ids.length ? await tx.select().from(schema.storageObjects).where(inArray(schema.storageObjects.id, ids)) : [];
+      if (objects.length !== new Set(ids).size) throw new AppError({ statusCode: 409, code: 'CHAT_RESTORE_MEDIA_MISSING', message: 'An attachment object is missing.' });
+      const locations = new Map<string, { bucket: string; key: string }>(objects.map((item: typeof schema.storageObjects.$inferSelect) => [`${item.bucket}/${item.object_key}`, { bucket: item.bucket, key: item.object_key }]));
+      if (media.source_bucket && media.source_object_key) locations.set(`${media.source_bucket}/${media.source_object_key}`, { bucket: media.source_bucket, key: media.source_object_key });
+      for (const location of locations.values()) {
+        try { await headObject(location.bucket, location.key); }
+        catch { throw new AppError({ statusCode: 409, code: 'CHAT_RESTORE_MEDIA_MISSING', message: 'An attachment object is unavailable.' }); }
+      }
+    }
+  };
   const assertDirectoryTargets = async (payload: any, ability: any, userIds: string[]) => {
     const uniqueIds = Array.from(new Set(userIds));
     if (uniqueIds.length === 0) return;
@@ -403,7 +432,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
     { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       try {
-        const { payload, ability } = await authenticate(request);
+        const { payload } = await authenticate(request);
         const conversationId = (request.params as any).id;
         const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
         const moderation = await chatRepo.getModeration(conversationId, payload.sub);
@@ -720,6 +749,74 @@ export async function chatRoutes(fastify: FastifyInstance) {
     }
   );
 
+  fastify.get(apiEndpoints.chat.deletedConversations, { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } }, async (request, reply) => {
+    try {
+      const { payload, ability } = authenticate(request);
+      assertRestoreAdmin(payload, ability);
+      const items = await db.select({ id: schema.chatConversations.id, title: schema.chatConversations.title, type: schema.chatConversations.type, created_by: schema.chatConversations.created_by, deleted_at: schema.chatConversations.deleted_at })
+        .from(schema.chatConversations).where(eq(schema.chatConversations.state, 'DELETED'))
+        .orderBy(desc(schema.chatConversations.deleted_at)).limit(100).offset(deletedListOffset(request.query));
+      await appendAudit(request, payload.sub, 'CHAT_DELETED_CONVERSATIONS_LIST', 'ChatConversation');
+      return reply.send({ items });
+    } catch (error) { return respondWithError(reply, error); }
+  });
+
+  fastify.get(apiEndpoints.chat.deletedMessages, { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } }, async (request, reply) => {
+    try {
+      const { payload, ability } = authenticate(request);
+      assertRestoreAdmin(payload, ability);
+      const items = await db.select({ id: schema.chatMessages.id, conversation_id: schema.chatMessages.conversation_id, sender_id: schema.chatMessages.sender_id, deleted_at: schema.chatMessages.deleted_at })
+        .from(schema.chatMessages).where(isNotNull(schema.chatMessages.deleted_at))
+        .orderBy(desc(schema.chatMessages.deleted_at)).limit(100).offset(deletedListOffset(request.query));
+      await appendAudit(request, payload.sub, 'CHAT_DELETED_MESSAGES_LIST', 'ChatMessage');
+      return reply.send({ items });
+    } catch (error) { return respondWithError(reply, error); }
+  });
+
+  fastify.post<{ Params: { id: string } }>(apiEndpoints.chat.restoreConversation, { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } }, async (request, reply) => {
+    try {
+      const { payload, ability } = authenticate(request);
+      assertRestoreAdmin(payload, ability);
+      const id = request.params.id;
+      const result = await db.transaction(async (tx) => {
+        const [conversation] = await tx.select().from(schema.chatConversations).where(eq(schema.chatConversations.id, id)).for('update');
+        if (!conversation) throw AppError.notFound('Conversation not found');
+        if (conversation.state !== 'DELETED') return { conversationId: id, already_restored: true };
+        if (conversation.type === 'DM' && conversation.dm_pair_key) {
+          const [conflict] = await tx.select({ id: schema.chatConversations.id }).from(schema.chatConversations)
+            .where(and(eq(schema.chatConversations.dm_pair_key, conversation.dm_pair_key), eq(schema.chatConversations.type, 'DM'), eq(schema.chatConversations.state, 'ACTIVE'))).limit(1);
+          if (conflict) throw new AppError({ statusCode: 409, code: 'CHAT_RESTORE_ASSOCIATION_CONFLICT', message: 'An active direct conversation already exists.' });
+        }
+        const messages = await tx.select({ id: schema.chatMessages.id }).from(schema.chatMessages).where(eq(schema.chatMessages.conversation_id, id));
+        for (const message of messages) await verifyMessageObjects(message.id, tx);
+        await tx.update(schema.chatConversations).set({ state: conversation.archived_at ? 'ARCHIVED' : 'ACTIVE', deleted_at: null, updated_at: new Date() }).where(eq(schema.chatConversations.id, id));
+        return { conversationId: id, already_restored: false };
+      });
+      if (!result.already_restored) await appendAudit(request, payload.sub, 'CHAT_CONVERSATION_RESTORE', 'ChatConversation', id);
+      return reply.send(result);
+    } catch (error) { return respondWithError(reply, error); }
+  });
+
+  fastify.post<{ Params: { id: string } }>(apiEndpoints.chat.restoreMessage, { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } }, async (request, reply) => {
+    try {
+      const { payload, ability } = authenticate(request);
+      assertRestoreAdmin(payload, ability);
+      const id = request.params.id;
+      const result = await db.transaction(async (tx) => {
+        const [message] = await tx.select().from(schema.chatMessages).where(eq(schema.chatMessages.id, id)).for('update');
+        if (!message) throw AppError.notFound('Message not found');
+        const [conversation] = await tx.select().from(schema.chatConversations).where(eq(schema.chatConversations.id, message.conversation_id));
+        if (!conversation || conversation.state === 'DELETED') throw new AppError({ statusCode: 409, code: 'CHAT_RESTORE_CONVERSATION_FIRST', message: 'Restore the conversation first.' });
+        if (!message.deleted_at) return { messageId: id, already_restored: true };
+        await verifyMessageObjects(id, tx);
+        await tx.update(schema.chatMessages).set({ deleted_at: null }).where(eq(schema.chatMessages.id, id));
+        return { messageId: id, already_restored: false };
+      });
+      if (!result.already_restored) await appendAudit(request, payload.sub, 'CHAT_MESSAGE_RESTORE', 'ChatMessage', id);
+      return reply.send(result);
+    } catch (error) { return respondWithError(reply, error); }
+  });
+
   fastify.delete<{ Params: { id: string } }>(
     apiEndpoints.chat.deleteMessage,
     { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
@@ -764,28 +861,6 @@ export async function chatRoutes(fastify: FastifyInstance) {
         });
         const message = result.message;
 
-        if (result.detachedMediaAssetIds.length) {
-          try {
-            await queueChatMediaCleanup({
-              conversationId: row.conversation.id,
-              mediaAssetIds: result.detachedMediaAssetIds,
-              source: 'message-delete',
-              messageId: row.message.id,
-            });
-          } catch (queueError) {
-            logger.warn(queueError, 'Failed to enqueue chat media cleanup for deleted message');
-            try {
-              await queueCleanup({
-                type: 'chat_orphaned_media',
-                mediaAssetIds: result.detachedMediaAssetIds,
-                conversationId: row.conversation.id,
-                messageId: row.message.id,
-              });
-            } catch (fallbackError) {
-              logger.warn(fallbackError, 'Failed to enqueue fallback chat media cleanup');
-            }
-          }
-        }
 
         await appendAudit(request, payload.sub, 'CHAT_MESSAGE_DELETE', 'ChatMessage', row.message.id);
         emitChatEvent(fastify, row.conversation.id, 'chat:message:deleted', {
@@ -793,7 +868,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
           messageId: row.message.id,
           seq: message.seq,
         });
-        return reply.send({ message });
+        return reply.send({ message: { ...message, body_text: null, body_rich: null } });
       } catch (error) {
         logger.error(error, 'Delete message error');
         return respondWithError(reply, error);
@@ -1085,7 +1160,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
     { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       try {
-        const { payload, ability } = await authenticate(request);
+        const { payload } = await authenticate(request);
         const data = removeMemberSchema.parse(request.body);
         const conversationId = (request.params as any).id;
         const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
@@ -1211,27 +1286,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('Conversation not found');
         }
 
-        const result = await chatRepo.hardDeleteConversation(conversationId);
-        if (result.mediaAssetIds.length) {
-          try {
-            await queueChatMediaCleanup({
-              conversationId,
-              mediaAssetIds: result.mediaAssetIds,
-              source: 'conversation-delete',
-            });
-          } catch (queueError) {
-            logger.warn(queueError, 'Failed to enqueue chat media cleanup for hard-deleted conversation');
-            try {
-              await queueCleanup({
-                type: 'chat_orphaned_media',
-                mediaAssetIds: result.mediaAssetIds,
-                conversationId,
-              });
-            } catch (fallbackError) {
-              logger.warn(fallbackError, 'Failed to enqueue fallback chat media cleanup');
-            }
-          }
-        }
+        await chatRepo.hardDeleteConversation(conversationId);
 
         await appendAudit(request, payload.sub, 'CHAT_CONVERSATION_DELETE', 'ChatConversation', conversationId);
         emitChatEvent(fastify, conversationId, 'chat:conversation:updated', {

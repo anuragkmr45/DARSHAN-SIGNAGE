@@ -202,6 +202,8 @@ export const media = pgTable(
     ready_object_id: uuid('ready_object_id'),
     thumbnail_object_id: uuid('thumbnail_object_id'),
     status_reason: varchar('status_reason', { length: 120 }),
+    deleted_at: timestamp('deleted_at'),
+    deleted_by: uuid('deleted_by'),
     duration_seconds: integer('duration_seconds'),
     width: integer('width'),
     height: integer('height'),

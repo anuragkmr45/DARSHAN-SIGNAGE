@@ -650,6 +650,41 @@ describe('Player Flow', () => {
     await playerFlow.stop()
   })
 
+  it('stops playback and requests fresh pairing when REST confirms a deleted runtime screen', async () => {
+    const { DeviceApiError } = require('../../../src/common/types')
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+    const deviceId = '11111111-1111-4111-8111-111111111111'
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({ deviceId, fingerprint: 'fingerprint-1' })
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(pairingService, 'fetchPairingStatus').resolves({
+      device_id: deviceId, paired: false, confirmed: false, screen: null, active_pairing: null,
+    })
+    sandbox.stub(pairingService, 'requestPairingCode').rejects(new Error('request failed'))
+    createCompleteBootstrapStubs()
+    const playbackStop = sandbox.spy(getPlaybackEngine(), 'stop')
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+
+    getLifecycleEvents().emitRuntimeAuthFailure({
+      source: 'desired-state',
+      error: new DeviceApiError({ code: 'FORBIDDEN', status: 403, message: 'Invalid device credentials' }),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    expect(playbackStop.called).to.equal(true)
+    expect(playerFlow.getState()).to.equal('HARD_RECOVERY')
+    expect(stateStore.getState().deviceId).to.equal(undefined)
+    await playerFlow.stop()
+  })
+
   it('should force re-pair when backend reports environment mismatch', async () => {
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')

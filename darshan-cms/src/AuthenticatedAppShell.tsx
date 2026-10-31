@@ -20,7 +20,6 @@ const Reports = lazy(() => import("./pages/Reports"));
 const Settings = lazy(() => import("./pages/Settings"));
 const ApiKeys = lazy(() => import("./pages/ApiKeys"));
 const Webhooks = lazy(() => import("./pages/Webhooks"));
-const SsoConfig = lazy(() => import("./pages/SsoConfig"));
 const ProofOfPlay = lazy(() => import("./pages/ProofOfPlay"));
 const Users = lazy(() => import("./pages/Users"));
 const Layouts = lazy(() => import("./pages/Layouts"));
@@ -70,7 +69,6 @@ export default function AuthenticatedAppShell() {
                   <Route path="/settings" element={<ProtectedRoute moduleKey="settings"><Settings /></ProtectedRoute>} />
                   <Route path="/api-keys" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "ApiKey" }]}><ApiKeys /></ProtectedRoute>} />
                   <Route path="/webhooks" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "Webhook" }]}><Webhooks /></ProtectedRoute>} />
-                  <Route path="/sso-config" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "SsoConfig" }]}><SsoConfig /></ProtectedRoute>} />
                   <Route path="/proof-of-play" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "ProofOfPlay" }, { action: "read", subject: "Report" }]}><ProofOfPlay /></ProtectedRoute>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
