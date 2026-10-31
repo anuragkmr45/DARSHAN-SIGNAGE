@@ -1,8 +1,8 @@
 import { createHash } from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { createLogger } from '@/utils/logger';
-import { getPresignedUrl, putObject } from '@/s3';
+import { deleteObject, getPresignedUrl, putObject } from '@/s3';
 import { buildScreenPlaybackStateById } from '@/screens/playback';
 import { emitScreenPreviewUpdateGlobal, emitScreenStateUpdateGlobal } from '@/realtime/screens-namespace';
 import { getSocketServer } from '@/realtime/socket-server';
@@ -12,6 +12,62 @@ const logger = createLogger('device-telemetry-jobs');
 export const HEARTBEAT_BUCKET = 'logs-heartbeats';
 export const PROOF_OF_PLAY_BUCKET = 'logs-proof-of-play';
 export const SCREENSHOT_BUCKET = 'device-screenshots';
+
+async function discardUnreferencedTelemetryObject(
+  storageObjectId: string | null,
+  bucket: string,
+  objectKey: string,
+  cause: unknown
+) {
+  const db = getDatabase();
+  // A concurrent proof-of-play retry can lose the bucket/key uniqueness race
+  // before it learns the winning row id. Resolve by key as well so compensating
+  // cleanup never removes an object already referenced by the winning job.
+  const resolvedStorageObjectId = storageObjectId ?? (await db
+    .select({ id: schema.storageObjects.id })
+    .from(schema.storageObjects)
+    .where(and(eq(schema.storageObjects.bucket, bucket), eq(schema.storageObjects.object_key, objectKey)))
+    .limit(1))[0]?.id ?? null;
+  const referenced = resolvedStorageObjectId
+    ? await db.execute<{ referenced: boolean }>(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM heartbeats WHERE storage_object_id = ${resolvedStorageObjectId}::uuid
+          UNION ALL
+          SELECT 1 FROM proof_of_play WHERE storage_object_id = ${resolvedStorageObjectId}::uuid
+          UNION ALL
+          SELECT 1 FROM screenshots WHERE storage_object_id = ${resolvedStorageObjectId}::uuid
+        ) AS referenced
+      `)
+    : null;
+  if (referenced?.rows[0]?.referenced) return;
+
+  try {
+    await deleteObject(bucket, objectKey);
+  } catch (cleanupError) {
+    // Retain the storage row when object deletion fails so the ordinary orphan
+    // cleanup path still has an addressable retry record.
+    await db
+      .insert(schema.storageObjects)
+      .values({
+        ...(resolvedStorageObjectId ? { id: resolvedStorageObjectId } : {}),
+        bucket,
+        object_key: objectKey,
+      })
+      .onConflictDoNothing();
+    logger.error({ cause, cleanupError, storageObjectId: resolvedStorageObjectId, bucket, objectKey }, 'Failed to discard rejected telemetry object');
+    return;
+  }
+
+  if (resolvedStorageObjectId) {
+    await db.execute(sql`
+      DELETE FROM storage_objects
+      WHERE id = ${resolvedStorageObjectId}::uuid
+        AND NOT EXISTS (SELECT 1 FROM heartbeats WHERE storage_object_id = ${resolvedStorageObjectId}::uuid)
+        AND NOT EXISTS (SELECT 1 FROM proof_of_play WHERE storage_object_id = ${resolvedStorageObjectId}::uuid)
+        AND NOT EXISTS (SELECT 1 FROM screenshots WHERE storage_object_id = ${resolvedStorageObjectId}::uuid)
+    `);
+  }
+}
 
 export interface HeartbeatTelemetryJob {
   deviceId: string;
@@ -122,40 +178,47 @@ export async function processHeartbeatTelemetry(job: HeartbeatTelemetryJob) {
     received_at: job.receivedAt,
   });
   const upload = await putObject(HEARTBEAT_BUCKET, job.objectKey, payload, 'application/json');
-  const [existingStorageObject] = await db
-    .select({ id: schema.storageObjects.id })
-    .from(schema.storageObjects)
-    .where(eq(schema.storageObjects.id, job.storageObjectId))
-    .limit(1);
+  try {
+    await db.transaction(async (tx) => {
+      const [existingStorageObject] = await tx
+        .select({ id: schema.storageObjects.id })
+        .from(schema.storageObjects)
+        .where(eq(schema.storageObjects.id, job.storageObjectId))
+        .limit(1);
 
-  if (existingStorageObject) {
-    await db
-      .update(schema.storageObjects)
-      .set({
-        bucket: HEARTBEAT_BUCKET,
-        object_key: job.objectKey,
-        content_type: 'application/json',
-        size: Buffer.byteLength(payload),
-        sha256: upload.sha256,
-      })
-      .where(eq(schema.storageObjects.id, job.storageObjectId));
-  } else {
-    await db.insert(schema.storageObjects).values({
-      id: job.storageObjectId,
-      bucket: HEARTBEAT_BUCKET,
-      object_key: job.objectKey,
-      content_type: 'application/json',
-      size: Buffer.byteLength(payload),
-      sha256: upload.sha256,
+      if (existingStorageObject) {
+        await tx
+          .update(schema.storageObjects)
+          .set({
+            bucket: HEARTBEAT_BUCKET,
+            object_key: job.objectKey,
+            content_type: 'application/json',
+            size: Buffer.byteLength(payload),
+            sha256: upload.sha256,
+          })
+          .where(eq(schema.storageObjects.id, job.storageObjectId));
+      } else {
+        await tx.insert(schema.storageObjects).values({
+          id: job.storageObjectId,
+          bucket: HEARTBEAT_BUCKET,
+          object_key: job.objectKey,
+          content_type: 'application/json',
+          size: Buffer.byteLength(payload),
+          sha256: upload.sha256,
+        });
+      }
+
+      await tx.insert(schema.heartbeats).values({
+        screen_id: job.deviceId,
+        status: job.status,
+        storage_object_id: job.storageObjectId,
+        created_at: new Date(job.receivedAt),
+      });
     });
+  } catch (error) {
+    await discardUnreferencedTelemetryObject(job.storageObjectId, HEARTBEAT_BUCKET, job.objectKey, error);
+    throw error;
   }
-
-  await db.insert(schema.heartbeats).values({
-    screen_id: job.deviceId,
-    status: job.status,
-    storage_object_id: job.storageObjectId,
-    created_at: new Date(job.receivedAt),
-  });
 }
 
 export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) {
@@ -186,56 +249,64 @@ export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) 
     received_at: job.receivedAt,
   });
   const upload = await putObject(PROOF_OF_PLAY_BUCKET, job.objectKey, payload, 'application/json');
-  const [existingStorageObject] = await db
-    .select({ id: schema.storageObjects.id })
-    .from(schema.storageObjects)
-    .where(and(eq(schema.storageObjects.bucket, PROOF_OF_PLAY_BUCKET), eq(schema.storageObjects.object_key, job.objectKey)))
-    .limit(1);
+  let storageObjectId: string | null = null;
+  let inserted: Array<{ id: string }> = [];
+  try {
+    await db.transaction(async (tx) => {
+      const [existingStorageObject] = await tx
+        .select({ id: schema.storageObjects.id })
+        .from(schema.storageObjects)
+        .where(and(eq(schema.storageObjects.bucket, PROOF_OF_PLAY_BUCKET), eq(schema.storageObjects.object_key, job.objectKey)))
+        .limit(1);
 
-  let storageObjectId = existingStorageObject?.id ?? null;
+      storageObjectId = existingStorageObject?.id ?? null;
+      if (existingStorageObject) {
+        await tx
+          .update(schema.storageObjects)
+          .set({
+            content_type: 'application/json',
+            size: Buffer.byteLength(payload),
+            sha256: upload.sha256,
+          })
+          .where(eq(schema.storageObjects.id, existingStorageObject.id));
+      } else {
+        const [storageObject] = await tx
+          .insert(schema.storageObjects)
+          .values({
+            bucket: PROOF_OF_PLAY_BUCKET,
+            object_key: job.objectKey,
+            content_type: 'application/json',
+            size: Buffer.byteLength(payload),
+            sha256: upload.sha256,
+          })
+          .returning({ id: schema.storageObjects.id });
+        storageObjectId = storageObject?.id ?? null;
+      }
 
-  if (existingStorageObject) {
-    await db
-      .update(schema.storageObjects)
-      .set({
-        content_type: 'application/json',
-        size: Buffer.byteLength(payload),
-        sha256: upload.sha256,
-      })
-      .where(eq(schema.storageObjects.id, existingStorageObject.id));
-  } else {
-    const [storageObject] = await db
-      .insert(schema.storageObjects)
-      .values({
-        bucket: PROOF_OF_PLAY_BUCKET,
-        object_key: job.objectKey,
-        content_type: 'application/json',
-        size: Buffer.byteLength(payload),
-        sha256: upload.sha256,
-      })
-      .returning({ id: schema.storageObjects.id });
-    storageObjectId = storageObject?.id ?? null;
+      inserted = await tx
+        .insert(schema.proofOfPlay)
+        .values({
+          screen_id: job.deviceId,
+          media_id: job.mediaId,
+          presentation_id: job.scheduleId,
+          schedule_id: job.scheduleId,
+          scene_id: job.sceneId ?? null,
+          slot_id: job.slotId ?? null,
+          item_id: job.itemId ?? null,
+          page_number: job.pageNumber ?? null,
+          playback_instance_id: job.playbackInstanceId,
+          started_at: new Date(job.startTime),
+          ended_at: new Date(job.endTime),
+          storage_object_id: storageObjectId,
+          created_at: new Date(job.receivedAt),
+          idempotency_key: job.idempotencyKey,
+        })
+        .returning({ id: schema.proofOfPlay.id });
+    });
+  } catch (error) {
+    await discardUnreferencedTelemetryObject(storageObjectId, PROOF_OF_PLAY_BUCKET, job.objectKey, error);
+    throw error;
   }
-
-  const inserted = await db
-    .insert(schema.proofOfPlay)
-    .values({
-      screen_id: job.deviceId,
-      media_id: job.mediaId,
-      presentation_id: job.scheduleId,
-      schedule_id: job.scheduleId,
-      scene_id: job.sceneId ?? null,
-      slot_id: job.slotId ?? null,
-      item_id: job.itemId ?? null,
-      page_number: job.pageNumber ?? null,
-      playback_instance_id: job.playbackInstanceId,
-      started_at: new Date(job.startTime),
-      ended_at: new Date(job.endTime),
-      storage_object_id: storageObjectId,
-      created_at: new Date(job.receivedAt),
-      idempotency_key: job.idempotencyKey,
-    })
-    .returning({ id: schema.proofOfPlay.id });
 
   if (!inserted.length || !getSocketServer()) {
     return;
@@ -262,39 +333,46 @@ export async function processScreenshotTelemetry(job: ScreenshotTelemetryJob) {
   const imageBuffer = Buffer.from(job.imageData, 'base64');
   const contentType = job.mimeType === 'image/jpeg' || job.mimeType === 'image/webp' ? job.mimeType : 'image/png';
   const upload = await putObject(SCREENSHOT_BUCKET, job.objectKey, imageBuffer, contentType);
-  const [existingStorageObject] = await db
-    .select({ id: schema.storageObjects.id })
-    .from(schema.storageObjects)
-    .where(eq(schema.storageObjects.id, job.storageObjectId))
-    .limit(1);
+  try {
+    await db.transaction(async (tx) => {
+      const [existingStorageObject] = await tx
+        .select({ id: schema.storageObjects.id })
+        .from(schema.storageObjects)
+        .where(eq(schema.storageObjects.id, job.storageObjectId))
+        .limit(1);
 
-  if (existingStorageObject) {
-    await db
-      .update(schema.storageObjects)
-      .set({
-        bucket: SCREENSHOT_BUCKET,
-        object_key: job.objectKey,
-        content_type: contentType,
-        size: imageBuffer.length,
-        sha256: upload.sha256,
-      })
-      .where(eq(schema.storageObjects.id, job.storageObjectId));
-  } else {
-    await db.insert(schema.storageObjects).values({
-      id: job.storageObjectId,
-      bucket: SCREENSHOT_BUCKET,
-      object_key: job.objectKey,
-      content_type: contentType,
-      size: imageBuffer.length,
-      sha256: upload.sha256,
+      if (existingStorageObject) {
+        await tx
+          .update(schema.storageObjects)
+          .set({
+            bucket: SCREENSHOT_BUCKET,
+            object_key: job.objectKey,
+            content_type: contentType,
+            size: imageBuffer.length,
+            sha256: upload.sha256,
+          })
+          .where(eq(schema.storageObjects.id, job.storageObjectId));
+      } else {
+        await tx.insert(schema.storageObjects).values({
+          id: job.storageObjectId,
+          bucket: SCREENSHOT_BUCKET,
+          object_key: job.objectKey,
+          content_type: contentType,
+          size: imageBuffer.length,
+          sha256: upload.sha256,
+        });
+      }
+
+      await tx.insert(schema.screenshots).values({
+        screen_id: job.deviceId,
+        storage_object_id: job.storageObjectId,
+        created_at: new Date(job.timestamp),
+      });
     });
+  } catch (error) {
+    await discardUnreferencedTelemetryObject(job.storageObjectId, SCREENSHOT_BUCKET, job.objectKey, error);
+    throw error;
   }
-
-  await db.insert(schema.screenshots).values({
-    screen_id: job.deviceId,
-    storage_object_id: job.storageObjectId,
-    created_at: new Date(job.timestamp),
-  });
 
   if (!getSocketServer()) {
     return;

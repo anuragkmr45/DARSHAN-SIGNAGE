@@ -1,12 +1,24 @@
 import { randomUUID } from 'crypto';
 import type { FastifyInstance } from 'fastify';
+import type { PoolClient } from 'pg';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generateAccessToken } from '@/auth/jwt';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, getDatabasePool, schema } from '@/db';
 import { createSessionRepository } from '@/db/repositories/session';
 import { lockScreenTargetReferences } from '@/services/screen-deletion-guard';
 import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
+import * as s3 from '@/s3';
+
+async function waitForBlockedTransaction(client: PoolClient, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await client.query<{ count: string }>('SELECT count(*)::text AS count FROM pg_locks WHERE NOT granted');
+    if (Number(result.rows[0]?.count ?? 0) >= 1) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Timed out waiting for the Screen deletion transaction to block');
+}
 
 describe('screen and group deletion references', () => {
   let server: FastifyInstance;
@@ -232,6 +244,99 @@ describe('screen and group deletion references', () => {
     const result = await deletion;
     expect(result.statusCode).toBe(409);
     expect(await db.select().from(schema.screens).where(eq(schema.screens.id, screenId))).toHaveLength(1);
+  });
+
+  it('includes telemetry that commits before deletion and removes only its three object rows and bytes', async () => {
+    const db = getDatabase();
+    const pool = getDatabasePool();
+    if (!pool) throw new Error('Database pool is not initialized');
+    const control = await pool.connect();
+    const screenId = randomUUID();
+    const otherScreenId = randomUUID();
+    const heartbeatStorageId = randomUUID();
+    const popStorageId = randomUUID();
+    const screenshotStorageId = randomUUID();
+    const otherStorageId = randomUUID();
+    const targetRows = [
+      { id: heartbeatStorageId, bucket: 'logs-heartbeats', object_key: `heartbeats/${screenId}/race.json`, content_type: 'application/json', size: 10 },
+      { id: popStorageId, bucket: 'logs-proof-of-play', object_key: `proof-of-play/${screenId}/race.json`, content_type: 'application/json', size: 10 },
+      { id: screenshotStorageId, bucket: 'device-screenshots', object_key: `screenshots/${screenId}/race.png`, content_type: 'image/png', size: 10 },
+    ];
+    const otherRow = {
+      id: otherStorageId,
+      bucket: 'logs-heartbeats',
+      object_key: `heartbeats/${otherScreenId}/history.json`,
+      content_type: 'application/json',
+      size: 10,
+    };
+    const deleteObjectSpy = vi.spyOn(s3, 'deleteObject').mockResolvedValue(undefined);
+    deleteObjectSpy.mockClear();
+    let releaseWriter!: () => void;
+    let telemetryInserted!: () => void;
+    const releaseWriterPromise = new Promise<void>((resolve) => { releaseWriter = resolve; });
+    const telemetryInsertedPromise = new Promise<void>((resolve) => { telemetryInserted = resolve; });
+    let writer: Promise<void> | undefined;
+    let deletion: ReturnType<typeof deleteScreen> | undefined;
+
+    try {
+      await db.insert(schema.screens).values([
+        { id: screenId, name: 'Telemetry wins delete race' },
+        { id: otherScreenId, name: 'Unrelated telemetry history' },
+      ]);
+      await db.insert(schema.storageObjects).values([...targetRows, otherRow]);
+      await db.insert(schema.heartbeats).values({
+        screen_id: otherScreenId,
+        status: 'ONLINE',
+        storage_object_id: otherStorageId,
+      });
+
+      writer = db.transaction(async (tx) => {
+        await tx.insert(schema.heartbeats).values({
+          screen_id: screenId,
+          status: 'ONLINE',
+          storage_object_id: heartbeatStorageId,
+        });
+        await tx.insert(schema.proofOfPlay).values({
+          screen_id: screenId,
+          started_at: new Date(),
+          storage_object_id: popStorageId,
+          idempotency_key: `screen-delete-race-${randomUUID().replaceAll('-', '')}`,
+        });
+        await tx.insert(schema.screenshots).values({
+          screen_id: screenId,
+          storage_object_id: screenshotStorageId,
+        });
+        telemetryInserted();
+        await releaseWriterPromise;
+      });
+      await telemetryInsertedPromise;
+
+      deletion = deleteScreen(screenId);
+      await waitForBlockedTransaction(control);
+      releaseWriter();
+      await writer;
+      const response = await deletion;
+
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body).storage_cleanup).toMatchObject({
+        deleted: expect.arrayContaining(targetRows.map((row) => expect.objectContaining({ id: row.id }))),
+        failed: [],
+      });
+      expect(deleteObjectSpy.mock.calls).toEqual(expect.arrayContaining(
+        targetRows.map((row) => [row.bucket, row.object_key])
+      ));
+      expect(deleteObjectSpy).toHaveBeenCalledTimes(3);
+      for (const row of targetRows) {
+        expect(await db.select().from(schema.storageObjects).where(eq(schema.storageObjects.id, row.id))).toHaveLength(0);
+      }
+      expect(await db.select().from(schema.storageObjects).where(eq(schema.storageObjects.id, otherStorageId))).toHaveLength(1);
+      expect(await db.select().from(schema.heartbeats).where(eq(schema.heartbeats.screen_id, otherScreenId))).toHaveLength(1);
+      expect(await db.select().from(schema.screens).where(eq(schema.screens.id, otherScreenId))).toHaveLength(1);
+    } finally {
+      releaseWriter?.();
+      await Promise.allSettled([writer, deletion].filter(Boolean) as Promise<unknown>[]);
+      control.release();
+    }
   });
 
   it('rejects a stale writer when deletion wins the shared target lock', async () => {

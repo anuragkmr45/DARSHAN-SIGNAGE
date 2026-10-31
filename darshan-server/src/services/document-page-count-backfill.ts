@@ -62,7 +62,11 @@ export async function backfillDocumentPageCounts(options: {
           const updated = await db
             .update(schema.media)
             .set({ page_count: pageCount, updated_at: new Date() })
-            .where(and(eq(schema.media.id, media.id), isNull(schema.media.page_count)))
+            .where(and(
+              eq(schema.media.id, media.id),
+              isNull(schema.media.deleted_at),
+              isNull(schema.media.page_count)
+            ))
             .returning({ id: schema.media.id });
           result.updated += updated.length;
         }

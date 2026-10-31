@@ -44,6 +44,7 @@ vi.mock('@/db', () => ({
       id: 'media.id',
       type: 'media.type',
       status: 'media.status',
+      deleted_at: 'media.deleted_at',
       page_count: 'media.page_count',
     },
     storageObjects: { id: 'storage_objects.id' },

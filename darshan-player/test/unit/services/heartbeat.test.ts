@@ -234,6 +234,80 @@ describe('Heartbeat Service', () => {
     expect(metrics).to.contain('darshan_player_last_successful_heartbeat_unixtime')
   })
 
+  it('detects a deleted screen on the next ordinary 30-second heartbeat when the realtime wake-up is missed', async () => {
+    const clock = sandbox.useFakeTimers({
+      now: new Date('2026-04-07T10:00:00.000Z'),
+      shouldAdvanceTime: false,
+    })
+    const { DeviceApiError } = require('../../../src/common/types')
+    const { getHeartbeatService } = require('../../../src/main/services/telemetry/heartbeat')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getSystemStatsCollector } = require('../../../src/main/services/telemetry/system-stats')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getSecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
+    const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+
+    const heartbeatService = getHeartbeatService()
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'isPairedDevice').returns(true)
+    sandbox.stub(pairingService, 'getDeviceId').returns('device-123')
+    sandbox.stub(pairingService, 'getInstallInstanceId').resolves('11111111-1111-4111-8111-111111111111')
+    sandbox.stub(getSystemStatsCollector(), 'collect').resolves({
+      cpuUsage: 1,
+      cpuCores: 2,
+      cpuLoad1m: 0,
+      cpuLoad5m: 0,
+      cpuLoad15m: 0,
+      memoryUsage: 1,
+      memoryTotal: 2,
+      memoryFree: 1,
+      diskUsage: 1,
+      diskTotal: 2,
+      diskFree: 1,
+      uptime: 60,
+      networkInterfaces: [],
+      displayCount: 1,
+      displays: [],
+      hostname: 'player-host',
+      osVersion: 'linux',
+    })
+    sandbox.stub(getDeviceStateStore(), 'update').resolves()
+    const guard = getSecurePlaybackGuard()
+    sandbox.stub(guard, 'isPlaybackLocked').returns(false)
+    sandbox.stub(guard, 'markBackendSuccess')
+    const authFailureStub = sandbox.stub(guard, 'markBackendFailure')
+
+    const postStub = sandbox.stub(getHttpClient(), 'post')
+    postStub.onFirstCall().resolves({ success: true, timestamp: new Date().toISOString(), commands: [] })
+    postStub.onSecondCall().rejects(new DeviceApiError({
+      message: 'Screen was deleted',
+      status: 404,
+      code: 'NOT_FOUND',
+    }))
+    const runtimeFailures: any[] = []
+    const listener = (event: any) => runtimeFailures.push(event)
+    getLifecycleEvents().on('runtime-auth-failure', listener)
+
+    try {
+      heartbeatService.start()
+      await clock.tickAsync(0)
+      expect(postStub.callCount).to.equal(1)
+      expect(runtimeFailures).to.have.length(0)
+
+      await clock.tickAsync(29_999)
+      expect(postStub.callCount).to.equal(1)
+      await clock.tickAsync(1)
+      expect(postStub.callCount).to.equal(2)
+      expect(runtimeFailures).to.have.length(1)
+      expect(runtimeFailures[0]).to.deep.include({ source: 'heartbeat' })
+      expect(authFailureStub.calledWith('heartbeat-auth-failure')).to.equal(true)
+    } finally {
+      getLifecycleEvents().off('runtime-auth-failure', listener)
+      heartbeatService.stop()
+    }
+  })
+
   it('coalesces immediate and scheduled heartbeats so only one POST stays in flight', async () => {
     const clock = sandbox.useFakeTimers({
       now: new Date('2026-04-07T10:00:00.000Z'),

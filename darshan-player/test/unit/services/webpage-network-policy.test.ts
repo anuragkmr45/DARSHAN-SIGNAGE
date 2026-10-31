@@ -147,6 +147,7 @@ describe('Webpage Network Policy', () => {
       ['http://8.8.8.8/', 'URL scheme is prohibited'],
       ['https://8.8.8.8:8443/', 'URL port is prohibited'],
       ['https://169.254.169.254/', 'Webpage resolved to a prohibited address'],
+      ['https://100.100.100.200/', 'Webpage resolved to a prohibited address'],
       ['https://[fe80::1]/', 'Webpage resolved to a prohibited address'],
     ] as const
     for (const [url, message] of cases) {

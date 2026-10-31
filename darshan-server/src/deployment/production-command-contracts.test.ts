@@ -122,6 +122,33 @@ describe('production command contracts', () => {
     expect(lifecycle).toContain('! -L "\\$DARSHAN_BACKUP_MANIFEST"');
   });
 
+  it('blocks source-free backend activation when the SSO release preflight fails', () => {
+    const packageJson = JSON.parse(readText('package.json')) as PackageJson;
+    const assembler = readFileSync(path.resolve(process.cwd(), '../scripts/bundle/assemble-runtime-bundle.sh'), 'utf8');
+    const startScript = assembler.slice(
+      assembler.indexOf('write_backend_start_script()'),
+      assembler.indexOf('write_backend_lifecycle_scripts()')
+    );
+
+    expect(packageJson.scripts).toMatchObject({
+      'production:preflight:sso': 'node dist-cli/scripts/check-sso-release-preflight.js',
+    });
+    expect(startScript).toContain('npm run --silent production:preflight:sso');
+    expect(startScript).toContain('Backend activation blocked: legacy SSO configuration or stored client secrets');
+    expect(startScript.indexOf('production:preflight:sso')).toBeLessThan(startScript.indexOf('up -d'));
+
+    const lifecycle = assembler.slice(
+      assembler.indexOf('write_backend_lifecycle_scripts()'),
+      assembler.indexOf('write_stop_script()')
+    );
+    const upgradeScript = lifecycle.slice(
+      lifecycle.indexOf('cat > "$target_dir/upgrade.sh"'),
+      lifecycle.indexOf('cat > "$target_dir/deploy.sh"')
+    );
+    expect(upgradeScript).toContain('npm run --silent production:preflight:sso');
+    expect(upgradeScript.indexOf('production:preflight:sso')).toBeLessThan(upgradeScript.indexOf('up -d --force-recreate'));
+  });
+
   it('generates acceptance checks that reject empty or multiline password files', () => {
     const assembler = readFileSync(path.resolve(process.cwd(), '../scripts/bundle/assemble-runtime-bundle.sh'), 'utf8');
     const serverPackage = readFileSync(path.resolve(process.cwd(), '../scripts/export/package-server.sh'), 'utf8');
@@ -194,6 +221,7 @@ describe('production command contracts', () => {
     expect(legacyBackendCompose).toContain('SERVER_TLS_ENABLED: ${SERVER_TLS_ENABLED:-true}');
     expect(legacyBackendCompose).toContain('DATABASE_TLS_ENABLED: ${DATABASE_TLS_ENABLED:-true}');
     expect(legacyBackendCompose).toContain('VALKEY_TLS_ENABLED: ${VALKEY_TLS_ENABLED:-true}');
+    expect(legacyBackendCompose).toContain('DARSHAN_CONTAINER_ROLE: api');
     expect(legacyBackendCompose).toContain('https.request({host:\'127.0.0.1\',port:3000,path:\'/api/v1/health/ready\'');
     expect(legacyCmsStart).toContain('require_file "$DARSHAN_BACKEND_TRANSPORT_CA_FILE"');
     expect(legacyCmsCompose).toContain('BACKEND_PRIVATE_HOST: ${BACKEND_PRIVATE_HOST:-${BACKEND_HOST}}');

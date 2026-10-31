@@ -126,31 +126,21 @@ export class MediaRepository {
   async getUsageSummary(id: string, executor?: DbExecutor): Promise<MediaUsageSummary> {
     const db = executor ?? getDatabase();
 
-    const [
-      chatAttachment,
-      chatBookmark,
-      presentationItem,
-      presentationSlotItem,
-      screen,
-      emergency,
-      emergencyType,
-      proofOfPlay,
-      defaultMediaSetting,
-      defaultMediaVariantsSetting,
-      defaultMediaTargetsSetting,
-    ] = await Promise.all([
-      db.select({ id: schema.chatAttachments.id }).from(schema.chatAttachments).where(eq(schema.chatAttachments.media_asset_id, id)).limit(1),
-      db.select({ id: schema.chatBookmarks.id }).from(schema.chatBookmarks).where(eq(schema.chatBookmarks.media_asset_id, id)).limit(1),
-      db.select({ id: schema.presentationItems.id }).from(schema.presentationItems).where(eq(schema.presentationItems.media_id, id)).limit(1),
-      db.select({ id: schema.presentationSlotItems.id }).from(schema.presentationSlotItems).where(eq(schema.presentationSlotItems.media_id, id)).limit(1),
-      db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.current_media_id, id)).limit(1),
-      db.select({ id: schema.emergencies.id }).from(schema.emergencies).where(eq(schema.emergencies.media_id, id)).limit(1),
-      db.select({ id: schema.emergencyTypes.id }).from(schema.emergencyTypes).where(eq(schema.emergencyTypes.media_id, id)).limit(1),
-      db.select({ id: schema.proofOfPlay.id }).from(schema.proofOfPlay).where(eq(schema.proofOfPlay.media_id, id)).limit(1),
-      db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_SETTING_KEY)).limit(1),
-      db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_VARIANTS_SETTING_KEY)).limit(1),
-      db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_TARGETS_SETTING_KEY)).limit(1),
-    ]);
+    // A transaction executor owns one PostgreSQL client. Keep these reads
+    // sequential so the delete check remains compatible with pg clients that
+    // reject overlapping queries on a transaction connection.
+    const chatAttachment = await db.select({ id: schema.chatAttachments.id }).from(schema.chatAttachments).where(eq(schema.chatAttachments.media_asset_id, id)).limit(1);
+    const chatBookmark = await db.select({ id: schema.chatBookmarks.id }).from(schema.chatBookmarks).where(eq(schema.chatBookmarks.media_asset_id, id)).limit(1);
+    const presentationItem = await db.select({ id: schema.presentationItems.id }).from(schema.presentationItems).where(eq(schema.presentationItems.media_id, id)).limit(1);
+    const presentationSlotItem = await db.select({ id: schema.presentationSlotItems.id }).from(schema.presentationSlotItems).where(eq(schema.presentationSlotItems.media_id, id)).limit(1);
+    const screen = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.current_media_id, id)).limit(1);
+    const emergency = await db.select({ id: schema.emergencies.id }).from(schema.emergencies).where(eq(schema.emergencies.media_id, id)).limit(1);
+    const emergencyType = await db.select({ id: schema.emergencyTypes.id }).from(schema.emergencyTypes).where(eq(schema.emergencyTypes.media_id, id)).limit(1);
+    const proofOfPlay = await db.select({ id: schema.proofOfPlay.id }).from(schema.proofOfPlay).where(eq(schema.proofOfPlay.media_id, id)).limit(1);
+    const defaultMediaSetting = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_SETTING_KEY)).limit(1);
+    const defaultMediaVariantsSetting = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_VARIANTS_SETTING_KEY)).limit(1);
+    const defaultMediaTargetsSetting = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_TARGETS_SETTING_KEY)).limit(1);
+    const brandingSetting = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, 'org.branding')).limit(1);
 
     const references: MediaUsageReference[] = [];
 
@@ -184,7 +174,12 @@ export class MediaRepository {
       variantMediaMap &&
       typeof variantMediaMap === 'object' &&
       !Array.isArray(variantMediaMap) &&
-      Object.values(variantMediaMap as Record<string, unknown>).some((value) => value === id)
+      Object.values(variantMediaMap as Record<string, unknown>).some((value) =>
+        value === id || Boolean(
+          value && typeof value === 'object' &&
+          (value as { media_id?: unknown }).media_id === id
+        )
+      )
     ) {
       if (!references.includes('settings')) {
         references.push('settings');
@@ -202,6 +197,15 @@ export class MediaRepository {
       if (!references.includes('settings')) {
         references.push('settings');
       }
+    }
+    const branding = brandingSetting[0]?.value;
+    if (
+      branding && typeof branding === 'object' && !Array.isArray(branding) &&
+      ['logo_media_id', 'icon_media_id', 'favicon_media_id'].some(
+        (key) => (branding as Record<string, unknown>)[key] === id
+      ) && !references.includes('settings')
+    ) {
+      references.push('settings');
     }
     if (proofOfPlay.length > 0) {
       references.push('proof_of_play');

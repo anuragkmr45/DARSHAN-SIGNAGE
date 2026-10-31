@@ -13,6 +13,7 @@ mkdir -p "$FAKE_BIN" "$BACKUPS"
 cat > "$FAKE_BIN/pg_dump" <<'EOF'
 #!/usr/bin/env bash
 set -e
+[[ "${FAKE_PG_DUMP_FAIL:-0}" != "1" ]] || exit 70
 for argument in "$@"; do
   case "$argument" in --file=*) output="${argument#--file=}" ;; esac
 done
@@ -125,10 +126,62 @@ grep -Eq '^MANIFEST_SHA256=[0-9a-f]{64}$' "$BACKUPS/last-success.env"
 "$SCRIPT_DIR/run-backup.sh" run
 [[ "$(find "$BACKUPS" -maxdepth 1 -type d -name 'backup-2026-10-31' | wc -l)" -eq 1 ]]
 
-# A clock rollback may recheck an older day, but must not remove a newer set.
-BACKUP_SET_DATE=2026-10-29 "$SCRIPT_DIR/run-backup.sh" run
+# A clock rollback may fail its capture, but must latch before the failure and
+# must not remove or demote a newer set.
+if FAKE_PG_DUMP_FAIL=1 BACKUP_SET_DATE=2026-10-27 "$SCRIPT_DIR/run-backup.sh" run; then
+  echo "expected rollback capture failure" >&2
+  exit 1
+fi
 [[ -d "$BACKUPS/backup-2026-10-31" ]]
+[[ ! -e "$BACKUPS/backup-2026-10-27" ]]
 grep -qx 'BACKUP_SET=backup-2026-10-31' "$BACKUPS/last-success.env"
+[[ -f "$BACKUPS/.clock-anomaly.env" && ! -L "$BACKUPS/.clock-anomaly.env" ]]
+if BACKUP_SET_DATE=2026-10-27 "$SCRIPT_DIR/run-backup.sh" healthcheck; then
+  echo "expected unacknowledged clock rollback to fail healthcheck" >&2
+  exit 1
+fi
+
+# An acknowledgement is not complete until a verified set is published. A
+# failed acknowledged capture keeps the latch, unhealthy state and history.
+if FAKE_PG_DUMP_FAIL=1 BACKUP_CLOCK_ACKNOWLEDGE_DATE=2026-10-27 BACKUP_SET_DATE=2026-10-27 "$SCRIPT_DIR/run-backup.sh" run; then
+  echo "expected acknowledged capture failure" >&2
+  exit 1
+fi
+[[ -f "$BACKUPS/.clock-anomaly.env" ]]
+[[ -d "$BACKUPS/backup-2026-10-01" ]]
+if BACKUP_SET_DATE=2026-10-27 "$SCRIPT_DIR/run-backup.sh" healthcheck; then
+  echo "expected failed acknowledgement to remain unhealthy" >&2
+  exit 1
+fi
+
+# A successful acknowledgement clears the latch only after publication and
+# intentionally does not prune until a later IST backup date.
+BACKUP_CLOCK_ACKNOWLEDGE_DATE=2026-10-27 BACKUP_SET_DATE=2026-10-27 "$SCRIPT_DIR/run-backup.sh" run
+[[ ! -e "$BACKUPS/.clock-anomaly.env" ]]
+BACKUP_SET_DATE=2026-10-27 "$SCRIPT_DIR/run-backup.sh" healthcheck
+[[ -d "$BACKUPS/backup-2026-10-01" ]]
+
+# The next daily run resumes ordinary retention.
+mkdir -p "$BACKUPS/backup-2026-09-27"
+printf 'expired-after-ack\n' > "$BACKUPS/backup-2026-09-27/data"
+(cd "$BACKUPS/backup-2026-09-27" && sha256sum data > SHA256SUMS)
+BACKUP_SET_DATE=2026-10-28 "$SCRIPT_DIR/run-backup.sh" run
+[[ ! -e "$BACKUPS/backup-2026-09-27" ]]
+
+# Even a two-day forward jump publishes a recoverable set but latches pruning
+# before any real 30-day history can be removed. Multi-day outages therefore
+# require the same explicit operator clock acknowledgement as larger jumps.
+BACKUP_SET_DATE=2026-10-30 "$SCRIPT_DIR/run-backup.sh" run
+[[ -d "$BACKUPS/backup-2026-10-01" ]]
+[[ -d "$BACKUPS/backup-2026-10-31" ]]
+[[ -f "$BACKUPS/.clock-anomaly.env" ]]
+if BACKUP_SET_DATE=2026-10-30 "$SCRIPT_DIR/run-backup.sh" healthcheck; then
+  echo "expected forward clock anomaly to fail healthcheck" >&2
+  exit 1
+fi
+# Return the focused fixture to its corrected date for the remaining tests.
+BACKUP_CLOCK_ACKNOWLEDGE_DATE=2026-10-28 BACKUP_SET_DATE=2026-10-28 "$SCRIPT_DIR/run-backup.sh" run
+[[ ! -e "$BACKUPS/.clock-anomaly.env" ]]
 if BACKUP_SET_DATE=2026-10-32 "$SCRIPT_DIR/run-backup.sh" run; then
   echo "expected invalid calendar date rejection" >&2
   exit 1

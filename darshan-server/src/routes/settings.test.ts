@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { FastifyInstance } from 'fastify';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
@@ -202,22 +202,27 @@ describe('Settings routes - dimension-wise default media', () => {
     });
     expect(brandingResponse.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
 
-    await db.insert(schema.settings).values({
-      key: BRANDING_SETTINGS_KEY,
-      value: {
-        app_name: 'DARSHAN CMS',
-        logo_media_id: mediaId,
-        icon_media_id: null,
-        favicon_media_id: null,
-      },
-    }).onConflictDoUpdate({
-      target: schema.settings.key,
-      set: { value: {
-        app_name: 'DARSHAN CMS',
-        logo_media_id: mediaId,
-        icon_media_id: null,
-        favicon_media_id: null,
-      } },
+    // Simulate a retained legacy row created before the database guard existed;
+    // current writes are rejected above, while reads must still fail closed.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL session_replication_role = 'replica'`);
+      await tx.insert(schema.settings).values({
+        key: BRANDING_SETTINGS_KEY,
+        value: {
+          app_name: 'DARSHAN CMS',
+          logo_media_id: mediaId,
+          icon_media_id: null,
+          favicon_media_id: null,
+        },
+      }).onConflictDoUpdate({
+        target: schema.settings.key,
+        set: { value: {
+          app_name: 'DARSHAN CMS',
+          logo_media_id: mediaId,
+          icon_media_id: null,
+          favicon_media_id: null,
+        } },
+      });
     });
     const readResponse = await server.inject({
       method: 'GET',

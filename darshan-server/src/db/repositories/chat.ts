@@ -5,6 +5,7 @@ import {
   gt,
   inArray,
   isNull,
+  ne,
   or,
   sql,
 } from 'drizzle-orm';
@@ -122,52 +123,68 @@ export class ChatRepository {
   async getOrCreateDm(userId: string, otherUserId: string) {
     const db = getDatabase();
     const pairKey = normalizeDmPair(userId, otherUserId);
-    const findActiveDm = async () => {
-      const [row] = await db
-        .select()
-        .from(schema.chatConversations)
-        .where(
-          and(
-            eq(schema.chatConversations.type, 'DM'),
-            eq(schema.chatConversations.dm_pair_key, pairKey),
-            eq(schema.chatConversations.state, 'ACTIVE')
+    return db.transaction(async (tx) => {
+      // Restore and creation use the same transaction-scoped lock. The unique
+      // index remains the final guard for older nodes or direct SQL writers.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`darshan_chat_dm_pair_v1:${pairKey}`}))`);
+
+      const findLiveDm = async () => {
+        const [row] = await tx
+          .select()
+          .from(schema.chatConversations)
+          .where(
+            and(
+              eq(schema.chatConversations.type, 'DM'),
+              eq(schema.chatConversations.dm_pair_key, pairKey),
+              ne(schema.chatConversations.state, 'DELETED')
+            )
           )
-        )
-        .limit(1);
-      return row || null;
-    };
+          .limit(1);
+        return row || null;
+      };
 
-    const upsertMembers = async (conversationId: string) => {
-      await db
-        .insert(schema.chatMembers)
-        .values([
-          {
-            conversation_id: conversationId,
-            user_id: userId,
-            role: 'MEMBER',
-            is_system: false,
-          },
-          {
-            conversation_id: conversationId,
-            user_id: otherUserId,
-            role: 'MEMBER',
-            is_system: false,
-          },
-        ])
-        .onConflictDoNothing({
-          target: [schema.chatMembers.conversation_id, schema.chatMembers.user_id],
-        });
-    };
+      const activateDm = async (conversation: typeof schema.chatConversations.$inferSelect) => {
+        if (conversation.state === 'ACTIVE') return conversation;
+        const [active] = await tx
+          .update(schema.chatConversations)
+          .set({ state: 'ACTIVE', archived_at: null, updated_at: new Date() })
+          .where(and(
+            eq(schema.chatConversations.id, conversation.id),
+            ne(schema.chatConversations.state, 'DELETED')
+          ))
+          .returning();
+        return active || conversation;
+      };
 
-    const existing = await findActiveDm();
-    if (existing) {
-      await upsertMembers(existing.id);
-      return existing;
-    }
+      const upsertMembers = async (conversationId: string) => {
+        await tx
+          .insert(schema.chatMembers)
+          .values([
+            {
+              conversation_id: conversationId,
+              user_id: userId,
+              role: 'MEMBER',
+              is_system: false,
+            },
+            {
+              conversation_id: conversationId,
+              user_id: otherUserId,
+              role: 'MEMBER',
+              is_system: false,
+            },
+          ])
+          .onConflictDoNothing({
+            target: [schema.chatMembers.conversation_id, schema.chatMembers.user_id],
+          });
+      };
 
-    let created: typeof schema.chatConversations.$inferSelect | null = null;
-    try {
-      const [inserted] = await db
+      const existing = await findLiveDm();
+      if (existing) {
+        await upsertMembers(existing.id);
+        return activateDm(existing);
+      }
+
+      const [inserted] = await tx
         .insert(schema.chatConversations)
         .values({
           type: 'DM',
@@ -176,23 +193,17 @@ export class ChatRepository {
           invite_policy: 'INVITES_DISABLED',
           metadata: {},
         })
+        .onConflictDoNothing()
         .returning();
-      created = inserted || null;
-    } catch (error: unknown) {
-      const pgCode =
-        typeof error === 'object' && error && 'code' in error
-          ? (error as { code?: string }).code
-          : undefined;
-      if (pgCode !== '23505') throw error;
-      created = await findActiveDm();
-    }
+      const created = inserted || await findLiveDm();
 
-    if (!created) {
-      throw AppError.internal('Failed to create DM conversation');
-    }
+      if (!created) {
+        throw AppError.internal('Failed to create DM conversation');
+      }
 
-    await upsertMembers(created.id);
-    return created;
+      await upsertMembers(created.id);
+      return activateDm(created);
+    });
   }
 
   async ensureSystemAdmins(conversationId: string) {

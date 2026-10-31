@@ -10,6 +10,7 @@ import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { SYSTEM_ROLE_DEFAULTS } from '@/rbac/system-roles';
 import { createBucketIfNotExists, deleteObject, getObject, initializeS3, putObject } from '@/s3';
+import { createMediaRepository } from '@/db/repositories/media';
 
 type RolePermissions = {
   grants: Array<{ action: string; subject: string }>;
@@ -510,6 +511,246 @@ describe('Media Routes - delete ownership and usage protection', () => {
       'Media cannot be deleted because it is still used in presentations.'
     );
     expect(body.error.details.references).toContain('presentations');
+  });
+
+  it('treats branding media as an in-use setting reference', async () => {
+    const db = getDatabase();
+    const media = await insertMedia(ownerUserId);
+    await db.insert(schema.settings).values({
+      key: 'org.branding',
+      value: {
+        app_name: 'DARSHAN',
+        logo_media_id: media.id,
+        icon_media_id: null,
+        favicon_media_id: null,
+      },
+    }).onConflictDoUpdate({
+      target: schema.settings.key,
+      set: {
+        value: {
+          app_name: 'DARSHAN',
+          logo_media_id: media.id,
+          icon_media_id: null,
+          favicon_media_id: null,
+        },
+        updated_at: new Date(),
+      },
+    });
+
+    const response = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/media/${media.id}`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(response.json().error).toMatchObject({
+      code: 'MEDIA_IN_USE',
+      details: { references: expect.arrayContaining(['settings']) },
+    });
+    await expect(db.update(schema.media).set({ deleted_at: new Date() })
+      .where(eq(schema.media.id, media.id))).rejects.toMatchObject({ code: '23503' });
+  });
+
+  it('treats legacy object-shaped default variants as in-use references', async () => {
+    const db = getDatabase();
+    const media = await insertMedia(ownerUserId);
+    await db.insert(schema.settings).values({
+      key: 'default_media_variants',
+      value: { landscape: { media_id: media.id } },
+    }).onConflictDoUpdate({
+      target: schema.settings.key,
+      set: { value: { landscape: { media_id: media.id } }, updated_at: new Date() },
+    });
+
+    const response = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/media/${media.id}`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(response.json().error).toMatchObject({
+      code: 'MEDIA_IN_USE',
+      details: { references: expect.arrayContaining(['settings']) },
+    });
+  });
+
+  it('rejects every new authoring association to deleted media but retains late PoP', async () => {
+    const db = getDatabase();
+    const media = await insertMedia(ownerUserId);
+    const presentationId = randomUUID();
+    const conversationId = randomUUID();
+    const messageId = randomUUID();
+    await db.insert(schema.presentations).values({
+      id: presentationId,
+      name: `deleted-association-${presentationId}`,
+      created_by: ownerUserId,
+      owner_scope: 'DEPARTMENT',
+      owner_department_id: departmentId,
+    });
+    await db.insert(schema.chatConversations).values({
+      id: conversationId,
+      type: 'GROUP_CLOSED',
+      title: 'Deleted association coverage',
+      created_by: ownerUserId,
+      state: 'ACTIVE',
+      invite_policy: 'ANY_MEMBER_CAN_INVITE',
+      last_seq: 1,
+      metadata: {},
+    });
+    await db.insert(schema.chatMessages).values({
+      id: messageId,
+      conversation_id: conversationId,
+      seq: 1,
+      sender_id: ownerUserId,
+      body_text: 'Deleted association coverage',
+    });
+    const deleted = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/media/${media.id}`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(deleted.statusCode).toBe(HTTP_STATUS.OK);
+
+    const expectReferenceRejected = async (operation: Promise<unknown>) => {
+      await expect(operation).rejects.toMatchObject({ code: '23503' });
+    };
+    await expectReferenceRejected(db.insert(schema.presentationItems).values({
+      presentation_id: presentationId, media_id: media.id, order: 0,
+    }));
+    await expectReferenceRejected(db.insert(schema.presentationSlotItems).values({
+      presentation_id: presentationId, slot_id: 'main', media_id: media.id, order: 0,
+    }));
+    await expectReferenceRejected(db.insert(schema.chatAttachments).values({
+      message_id: messageId, media_asset_id: media.id,
+    }));
+    await expectReferenceRejected(db.insert(schema.chatBookmarks).values({
+      conversation_id: conversationId,
+      type: 'FILE',
+      label: 'Deleted media',
+      media_asset_id: media.id,
+      created_by: ownerUserId,
+    }));
+    await expectReferenceRejected(db.insert(schema.screens).values({
+      name: `Deleted media screen ${randomUUID()}`,
+      current_media_id: media.id,
+    }));
+    await expectReferenceRejected(db.insert(schema.emergencies).values({
+      message: 'Deleted media emergency',
+      media_id: media.id,
+      is_active: false,
+    }));
+    await expectReferenceRejected(db.insert(schema.emergencyTypes).values({
+      name: `Deleted media type ${randomUUID()}`,
+      message: 'Deleted media emergency type',
+      media_id: media.id,
+    }));
+    for (const [key, value] of [
+      ['default_media_id', media.id],
+      ['default_media_variants', { landscape: media.id }],
+      ['default_media_variants', { portrait: { media_id: media.id } }],
+      ['default_media_targets', [{ target_type: 'SCREEN', target_id: randomUUID(), media_id: media.id, aspect_ratio: '16:9' }]],
+      ['org.branding', { app_name: 'DARSHAN', logo_media_id: media.id, icon_media_id: null, favicon_media_id: null }],
+    ] as const) {
+      await expectReferenceRejected(db.insert(schema.settings).values({ key, value }).onConflictDoUpdate({
+        target: schema.settings.key,
+        set: { value, updated_at: new Date() },
+      }));
+    }
+
+    const screenId = randomUUID();
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: `Late PoP deleted media ${screenId}`,
+    });
+    await db.insert(schema.proofOfPlay).values({
+      screen_id: screenId,
+      media_id: media.id,
+      started_at: new Date(),
+      idempotency_key: createHash('sha256').update(randomUUID()).digest('hex'),
+    });
+    expect(await db.select().from(schema.proofOfPlay).where(eq(schema.proofOfPlay.media_id, media.id))).toHaveLength(1);
+  });
+
+  it('serializes association-first and deletion-first races', async () => {
+    const db = getDatabase();
+    const mediaRepo = createMediaRepository();
+
+    const associationFirstMedia = await insertMedia(ownerUserId);
+    const associationPresentationId = randomUUID();
+    await db.insert(schema.presentations).values({
+      id: associationPresentationId,
+      name: `association-first-${associationPresentationId}`,
+      created_by: ownerUserId,
+      owner_scope: 'DEPARTMENT',
+      owner_department_id: departmentId,
+    });
+    let releaseAssociation!: () => void;
+    let announceAssociation!: () => void;
+    const associationReady = new Promise<void>((resolve) => { announceAssociation = resolve; });
+    const associationRelease = new Promise<void>((resolve) => { releaseAssociation = resolve; });
+    const associationWriter = db.transaction(async (tx) => {
+      await tx.insert(schema.presentationItems).values({
+        presentation_id: associationPresentationId,
+        media_id: associationFirstMedia.id,
+        order: 0,
+      });
+      announceAssociation();
+      await associationRelease;
+    });
+    await associationReady;
+    const blockedDelete = server.inject({
+      method: 'DELETE',
+      url: `/api/v1/media/${associationFirstMedia.id}`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    releaseAssociation();
+    await associationWriter;
+    expect((await blockedDelete).statusCode).toBe(HTTP_STATUS.CONFLICT);
+
+    const deletionFirstMedia = await insertMedia(ownerUserId);
+    const deletionPresentationId = randomUUID();
+    await db.insert(schema.presentations).values({
+      id: deletionPresentationId,
+      name: `deletion-first-${deletionPresentationId}`,
+      created_by: ownerUserId,
+      owner_scope: 'DEPARTMENT',
+      owner_department_id: departmentId,
+    });
+    let releaseDeletion!: () => void;
+    let announceDeletion!: () => void;
+    const deletionReady = new Promise<void>((resolve) => { announceDeletion = resolve; });
+    const deletionRelease = new Promise<void>((resolve) => { releaseDeletion = resolve; });
+    const deletion = db.transaction(async (tx) => {
+      const [row] = await tx.select().from(schema.media)
+        .where(eq(schema.media.id, deletionFirstMedia.id)).for('update');
+      expect(row).toBeTruthy();
+      expect((await mediaRepo.getUsageSummary(deletionFirstMedia.id, tx)).inUse).toBe(false);
+      await mediaRepo.update(deletionFirstMedia.id, {
+        deleted_at: new Date(),
+        deleted_by: ownerUserId,
+      }, tx);
+      announceDeletion();
+      await deletionRelease;
+    });
+    await deletionReady;
+    const racingWriter = (async () => db.insert(schema.presentationItems).values({
+      presentation_id: deletionPresentationId,
+      media_id: deletionFirstMedia.id,
+      order: 0,
+    }))();
+    const racingWriterOutcome = racingWriter.then(
+      () => null,
+      (error: unknown) => error
+    );
+    // Let PostgreSQL reach the row trigger and wait on the deletion's Media
+    // row lock before permitting the deletion transaction to commit.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    releaseDeletion();
+    await deletion;
+    expect(await racingWriterOutcome).toMatchObject({ code: '23503' });
+    expect(await db.select().from(schema.presentationItems)
+      .where(eq(schema.presentationItems.presentation_id, deletionPresentationId))).toHaveLength(0);
   });
 
   it('returns 404 for missing media', async () => {

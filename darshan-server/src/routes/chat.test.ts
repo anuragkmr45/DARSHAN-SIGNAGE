@@ -5,9 +5,8 @@ import { FastifyInstance } from 'fastify';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
-import { eq } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { HTTP_STATUS } from '@/http-status-codes';
-import { sql } from 'drizzle-orm';
 import { generateAccessToken } from '@/auth/jwt';
 import { createSessionRepository } from '@/db/repositories/session';
 import { hashPassword } from '@/auth/password';
@@ -476,6 +475,146 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     const conversationAudit = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.entity_id, conversationId));
     expect(messageAudit.map((row) => row.action)).toContain('CHAT_MESSAGE_RESTORE');
     expect(conversationAudit.map((row) => row.action)).toContain('CHAT_CONVERSATION_RESTORE');
+  });
+
+  it('returns an explicit restore conflict when an archived DM owns the same pair', async () => {
+    const db = getDatabase();
+    const otherUserId = randomUUID();
+    const deletedConversationId = randomUUID();
+    const archivedConversationId = randomUUID();
+    const pairKey = [testUser.id, otherUserId].sort().join(':');
+    const operatorRole = await ensureRole('OPERATOR');
+    await db.insert(schema.users).values({
+      id: otherUserId,
+      email: `restore-dm-${Date.now()}@example.com`,
+      password_hash: await hashPassword('Password123!'),
+      first_name: 'Restore',
+      last_name: 'Peer',
+      role_id: operatorRole.id,
+      is_active: true,
+    });
+    await db.insert(schema.chatConversations).values([
+      {
+        id: deletedConversationId,
+        type: 'DM',
+        dm_pair_key: pairKey,
+        created_by: testUser.id,
+        state: 'DELETED',
+        deleted_at: new Date(),
+        metadata: {},
+      },
+      {
+        id: archivedConversationId,
+        type: 'DM',
+        dm_pair_key: pairKey,
+        created_by: testUser.id,
+        state: 'ARCHIVED',
+        archived_at: new Date(),
+        metadata: {},
+      },
+    ]);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/chat/conversations/${deletedConversationId}/restore`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(response.body).error.code).toBe('CHAT_RESTORE_ASSOCIATION_CONFLICT');
+    const [stillDeleted] = await db.select().from(schema.chatConversations)
+      .where(eq(schema.chatConversations.id, deletedConversationId));
+    expect(stillDeleted?.state).toBe('DELETED');
+    expect(stillDeleted?.deleted_at).not.toBeNull();
+  });
+
+  it('reopens the existing archived DM instead of failing its unique pair constraint', async () => {
+    const db = getDatabase();
+    const otherUserId = randomUUID();
+    const conversationId = randomUUID();
+    const pairKey = [testUser.id, otherUserId].sort().join(':');
+    const operatorRole = await ensureRole('OPERATOR');
+    await db.insert(schema.users).values({
+      id: otherUserId,
+      email: `archived-dm-${Date.now()}@example.com`,
+      password_hash: await hashPassword('Password123!'),
+      first_name: 'Archived',
+      last_name: 'Peer',
+      role_id: operatorRole.id,
+      is_active: true,
+    });
+    await db.insert(schema.chatConversations).values({
+      id: conversationId,
+      type: 'DM',
+      dm_pair_key: pairKey,
+      created_by: testUser.id,
+      state: 'ARCHIVED',
+      archived_at: new Date(),
+      metadata: {},
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/v1/chat/dm',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { otherUserId },
+    });
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(response.body).conversation).toMatchObject({ id: conversationId, state: 'ACTIVE' });
+    const [reopened] = await db.select().from(schema.chatConversations)
+      .where(eq(schema.chatConversations.id, conversationId));
+    expect(reopened?.state).toBe('ACTIVE');
+    expect(reopened?.archived_at).toBeNull();
+  });
+
+  it('serializes DM creation against tombstone restore and leaves one live pair', async () => {
+    const db = getDatabase();
+    const otherUserId = randomUUID();
+    const deletedConversationId = randomUUID();
+    const pairKey = [testUser.id, otherUserId].sort().join(':');
+    const operatorRole = await ensureRole('OPERATOR');
+    await db.insert(schema.users).values({
+      id: otherUserId,
+      email: `race-dm-${Date.now()}@example.com`,
+      password_hash: await hashPassword('Password123!'),
+      first_name: 'Race',
+      last_name: 'Peer',
+      role_id: operatorRole.id,
+      is_active: true,
+    });
+    await db.insert(schema.chatConversations).values({
+      id: deletedConversationId,
+      type: 'DM',
+      dm_pair_key: pairKey,
+      created_by: testUser.id,
+      state: 'DELETED',
+      deleted_at: new Date(),
+      metadata: {},
+    });
+
+    const [restore, create] = await Promise.all([
+      server.inject({
+        method: 'POST',
+        url: `/api/v1/chat/conversations/${deletedConversationId}/restore`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      }),
+      server.inject({
+        method: 'POST',
+        url: '/api/v1/chat/dm',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { otherUserId },
+      }),
+    ]);
+    expect(create.statusCode).toBe(HTTP_STATUS.OK);
+    expect([HTTP_STATUS.OK, HTTP_STATUS.CONFLICT]).toContain(restore.statusCode);
+    if (restore.statusCode === HTTP_STATUS.CONFLICT) {
+      expect(JSON.parse(restore.body).error.code).toBe('CHAT_RESTORE_ASSOCIATION_CONFLICT');
+    }
+    const live = await db.select().from(schema.chatConversations).where(and(
+      eq(schema.chatConversations.dm_pair_key, pairKey),
+      ne(schema.chatConversations.state, 'DELETED')
+    ));
+    expect(live).toHaveLength(1);
+    expect(JSON.parse(create.body).conversation.id).toBe(live[0]?.id);
   });
 
   it('allows admin to mute/unmute and enforces muted write restrictions', async () => {

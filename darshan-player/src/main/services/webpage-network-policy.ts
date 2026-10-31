@@ -67,7 +67,7 @@ const hardDenied = (address: string): boolean => {
   const mapped = mappedIpv4Address(address)
   if (mapped) return hardDenied(mapped)
   return [
-    '0.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '224.0.0.0/4', '240.0.0.0/4',
+    '0.0.0.0/8', '127.0.0.0/8', '169.254.0.0/16', '100.100.100.200/32', '224.0.0.0/4', '240.0.0.0/4',
     '::/128', '::1/128', 'fe80::/10', 'ff00::/8',
   ].some((cidr) => ipMatchesCidr(address, cidr))
 }

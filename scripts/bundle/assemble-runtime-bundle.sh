@@ -816,6 +816,11 @@ if ! ./load-images.sh --verify-loaded; then
   echo "Required image is absent or differs from signed release metadata; reloading role archives."
   ./load-images.sh
 fi
+docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps api \
+  npm run --silent production:preflight:sso || {
+    echo "Backend activation blocked: legacy SSO configuration or stored client secrets require deliberate administrator cleanup." >&2
+    exit 1
+  }
 docker compose --env-file $env_file -f docker-compose.yml up -d
 ./wait-ready.sh
 if [[ -f ./deployment-control.sh ]]; then
@@ -1165,6 +1170,11 @@ docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps \
   --destination "\$BACKUP_OFFHOST_DESTINATION" --endpoint "\$BACKUP_OFFHOST_ENDPOINT" --interval-hours "\$BACKUP_INTERVAL_HOURS" \
   --retention-days "\$BACKUP_RETENTION_DAYS" --site "\$SIGNHEX_DEPLOYMENT_ID" || { echo "Backup evidence must carry a valid recovery-authority signature and prove a successful isolated restore for this site policy." >&2; exit 1; }
 ./wait-dependencies.sh
+docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps api \
+  npm run --silent production:preflight:sso || {
+    echo "Backend activation blocked: legacy SSO configuration or stored client secrets require deliberate administrator cleanup." >&2
+    exit 1
+  }
 ./deployment-state.sh begin UPGRADE
 state="\$(./deployment-state.sh status)"
 step="\$(jq -r '.run.last_step // empty' <<<"\$state")"

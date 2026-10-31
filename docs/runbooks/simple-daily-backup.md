@@ -57,6 +57,18 @@ docker compose --env-file .env.production logs --tail=100 backup
 
 The five-minute container healthcheck is intentionally bounded: it checks the age and safety of the atomic `last-success.env` pointer, the required set files/directories, and the SHA-256 of `SHA256SUMS`. It does not re-read and hash every PostgreSQL/MinIO payload byte on every probe. Full payload checksums are verified before atomic publication, when an existing same-day set is recovered after interruption, and as the first step of every restore.
 
+The sidecar also persists its last observed IST backup date. A backward date change or any forward jump greater than one calendar day latches `.clock-anomaly.env`, fails the healthcheck and suspends pruning while continuing to capture verified sets. This deliberately treats a multi-day outage conservatively: it cannot turn an unverified clock jump into deletion of retained history. Do not remove that marker by hand. First correct and verify NTP/system time and inspect every retained set, then stop the scheduled sidecar and run one explicitly acknowledged check for the current IST date:
+
+```bash
+docker compose --env-file .env.production stop backup
+docker compose --env-file .env.production run --rm \
+  -e BACKUP_CLOCK_ACKNOWLEDGE_DATE="$(TZ=Asia/Kolkata date +%F)" \
+  backup run
+docker compose --env-file .env.production up -d backup
+```
+
+The acknowledgement is accepted only for the date the sidecar observes on that run. The anomaly latch is cleared only after that run publishes or re-verifies a complete set; a capacity, dump, object-copy or checksum failure leaves the latch and unhealthy state intact. The acknowledged run never prunes. Normal age-based pruning resumes on a successful run for a later IST calendar date.
+
 A successful set is stored as:
 
 ```text
@@ -68,11 +80,26 @@ A successful set is stored as:
 └── SHA256SUMS
 ```
 
-## Manual restore
+## Manual isolated restore rehearsal
 
-Restore into newly created empty PostgreSQL and MinIO services. Do not overwrite a running production deployment. The commands below reuse the backup image, so PostgreSQL or AWS clients do not need to be installed on the VM.
+Restore on the designated recovery VM, never inside the production Data VM Compose project. The commands below reuse the backup image, so PostgreSQL or AWS clients do not need to be installed on the VM. Copy the selected backup set to the recovery VM and set `BACKUP_HOST_PATH` in a dedicated `.env.restore` file. Give the rehearsal unique unused host ports.
 
-1. Stop the API, worker, and backup sidecar so they cannot write to or capture the restore targets.
+1. Choose a unique run/project ID and prove that its target volumes do not already exist. This is a hard nonempty-target preflight; abort rather than reusing either volume:
+
+   ```bash
+   export RESTORE_RUN_ID="$(date -u +%Y%m%dt%H%M%Sz)"
+   export RESTORE_PROJECT="darshan-restore-${RESTORE_RUN_ID}"
+   export POSTGRES_HOST_PORT=55432 MINIO_HOST_PORT=59000 MINIO_CONSOLE_PORT=59001
+   for volume in "${RESTORE_PROJECT}_postgres_data" "${RESTORE_PROJECT}_minio_data"; do
+     if docker volume inspect "$volume" >/dev/null 2>&1; then
+       echo "Refusing existing restore volume: $volume" >&2
+       exit 1
+     fi
+   done
+   ```
+
+   Do not use the production Compose project name or production host ports. For a production recovery rather than a rehearsal, keep the API, worker and backup sidecar stopped until verification is complete.
+
 2. Verify the chosen set:
 
    ```bash
@@ -80,11 +107,39 @@ Restore into newly created empty PostgreSQL and MinIO services. Do not overwrite
    sha256sum --check SHA256SUMS
    ```
 
-3. Start only empty PostgreSQL and MinIO services. Recreate the application database/user with the deployment credentials, then restore the dump from the data Compose directory:
+3. Start only the new project’s PostgreSQL and MinIO services, then prove the application schema and bucket inventory are empty before restoring:
 
    ```bash
-   docker compose --env-file .env.production up -d postgres minio
-   docker compose --env-file .env.production run --rm --no-deps --entrypoint bash backup -lc '
+   docker compose -p "$RESTORE_PROJECT" --env-file .env.restore up -d postgres minio
+   if ! table_count="$(docker compose -p "$RESTORE_PROJECT" --env-file .env.restore exec -T postgres \
+     sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+       "select count(*) from pg_tables where schemaname = current_schema()"')"; then
+     echo "Could not verify the restore database" >&2
+     exit 1
+   fi
+   if [[ "$table_count" != 0 ]]; then
+     echo "Restore database is not empty: $table_count public tables" >&2
+     exit 1
+   fi
+   if ! bucket_names="$(docker compose -p "$RESTORE_PROJECT" --env-file .env.restore run --rm --no-deps \
+     --entrypoint bash backup -lc '
+       export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
+       export AWS_DEFAULT_REGION=us-east-1 AWS_EC2_METADATA_DISABLED=true
+       aws --endpoint-url http://minio:9000 s3api list-buckets --query "Buckets[].Name" --output text
+     ')"; then
+     echo "Could not verify the restore object store" >&2
+     exit 1
+   fi
+   if [[ -n "$bucket_names" ]]; then
+     echo "Restore object store is not empty: $bucket_names" >&2
+     exit 1
+   fi
+   ```
+
+   Any nonzero table count, existing bucket, command failure or pre-existing volume blocks the rehearsal. Restore the dump only after these checks pass:
+
+   ```bash
+   docker compose -p "$RESTORE_PROJECT" --env-file .env.restore run --rm --no-deps --entrypoint bash backup -lc '
      PGPASSWORD="$POSTGRES_PASSWORD" pg_restore \
        --exit-on-error --no-owner --no-acl \
        --host=postgres --port=5432 \
@@ -93,10 +148,10 @@ Restore into newly created empty PostgreSQL and MinIO services. Do not overwrite
    '
    ```
 
-4. Copy each backed-up bucket into the empty MinIO target:
+4. Copy each backed-up bucket into the proven-empty MinIO target:
 
    ```bash
-   docker compose --env-file .env.production run --rm --no-deps --entrypoint bash backup -lc '
+   docker compose -p "$RESTORE_PROJECT" --env-file .env.restore run --rm --no-deps --entrypoint bash backup -lc '
      export AWS_ACCESS_KEY_ID="$MINIO_ACCESS_KEY"
      export AWS_SECRET_ACCESS_KEY="$MINIO_SECRET_KEY"
      export AWS_DEFAULT_REGION=us-east-1 AWS_EC2_METADATA_DISABLED=true
@@ -111,7 +166,7 @@ Restore into newly created empty PostgreSQL and MinIO services. Do not overwrite
    '
    ```
 
-5. Start the API and worker, then check readiness, media access, schedules, and one representative image/video/PDF before reopening user access.
+5. Start API/player validation components against the isolated targets, then check readiness, row counts, object hashes, media access, schedules, and one representative image/video/PDF. Record start/end timestamps, last durable transaction, measured RPO/RTO and evidence paths. Keep the isolated volumes for review; remove them only through the approved rehearsal cleanup after evidence is accepted.
 
 ## Accepted limitations for this small release
 

@@ -27,6 +27,7 @@ validate_configuration() {
   BACKUP_RETRY_SECONDS="${BACKUP_RETRY_SECONDS:-3600}"
   BACKUP_MAX_AGE_SECONDS="${BACKUP_MAX_AGE_SECONDS:-129600}"
   BACKUP_MIN_FREE_BYTES="${BACKUP_MIN_FREE_BYTES:-1073741824}"
+  BACKUP_CLOCK_ACKNOWLEDGE_DATE="${BACKUP_CLOCK_ACKNOWLEDGE_DATE:-}"
   POSTGRES_HOST="${POSTGRES_HOST:-postgres}"
   POSTGRES_PORT="${POSTGRES_PORT:-5432}"
   MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://minio:9000}"
@@ -38,6 +39,11 @@ validate_configuration() {
   [[ "$BACKUP_RETRY_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "BACKUP_RETRY_SECONDS must be a positive integer"
   [[ "$BACKUP_MAX_AGE_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "BACKUP_MAX_AGE_SECONDS must be a positive integer"
   [[ "$BACKUP_MIN_FREE_BYTES" =~ ^[1-9][0-9]*$ ]] || fail "BACKUP_MIN_FREE_BYTES must be a positive integer"
+  if [[ -n "$BACKUP_CLOCK_ACKNOWLEDGE_DATE" ]]; then
+    [[ "$BACKUP_CLOCK_ACKNOWLEDGE_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ \
+      && "$(date -u -d "$BACKUP_CLOCK_ACKNOWLEDGE_DATE" +%F 2>/dev/null)" == "$BACKUP_CLOCK_ACKNOWLEDGE_DATE" ]] \
+      || fail "BACKUP_CLOCK_ACKNOWLEDGE_DATE must be a valid YYYY-MM-DD date"
+  fi
   [[ "$POSTGRES_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || fail "POSTGRES_PORT must be a valid port"
   (( POSTGRES_PORT <= 65535 )) || fail "POSTGRES_PORT must be 65535 or less"
   [[ "$MINIO_ENDPOINT" =~ ^https?://[^[:space:]]+$ ]] || fail "MINIO_ENDPOINT must be an HTTP(S) URL"
@@ -88,13 +94,97 @@ verify_status_pointer() {
   [[ "$actual_manifest_sha" == "$expected_manifest_sha" ]]
 }
 
+write_clock_state() {
+  local observed_date="$1"
+  local pruning_resume_after="${2:-}"
+  local state_tmp="$BACKUP_ROOT/.clock-state.$$"
+  cat > "$state_tmp" <<EOF
+LAST_OBSERVED_BACKUP_DATE=$observed_date
+PRUNING_RESUME_AFTER_DATE=$pruning_resume_after
+EOF
+  chmod 0600 "$state_tmp"
+  mv "$state_tmp" "$BACKUP_ROOT/.clock-state.env"
+}
+
+record_clock_anomaly() {
+  local previous_date="$1"
+  local observed_date="$2"
+  local anomaly_tmp="$BACKUP_ROOT/.clock-anomaly.$$"
+  cat > "$anomaly_tmp" <<EOF
+CLOCK_ANOMALY=1
+PREVIOUS_BACKUP_DATE=$previous_date
+OBSERVED_BACKUP_DATE=$observed_date
+DETECTED_AT_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+EOF
+  chmod 0600 "$anomaly_tmp"
+  mv "$anomaly_tmp" "$BACKUP_ROOT/.clock-anomaly.env"
+  log "Clock anomaly detected between $previous_date and $observed_date; retention pruning and health approval are blocked"
+}
+
+clock_reference_date() {
+  local state="$BACKUP_ROOT/.clock-state.env"
+  local status="$BACKUP_ROOT/last-success.env"
+  local value=""
+  if [[ -e "$state" ]]; then
+    [[ -f "$state" && ! -L "$state" ]] || fail "clock state is not a safe file"
+    value="$(sed -n 's/^LAST_OBSERVED_BACKUP_DATE=//p' "$state")"
+  elif [[ -f "$status" && ! -L "$status" ]]; then
+    value="$(sed -n 's/^BACKUP_SET=backup-//p' "$status")"
+  fi
+  if [[ -n "$value" ]]; then
+    [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ \
+      && "$(date -u -d "$value" +%F 2>/dev/null)" == "$value" ]] \
+      || fail "stored backup clock reference is invalid"
+  fi
+  printf '%s\n' "$value"
+}
+
+evaluate_clock_guard() {
+  local observed_date="$1"
+  local anomaly="$BACKUP_ROOT/.clock-anomaly.env"
+  local previous_date previous_epoch observed_epoch delta_days pruning_resume_after=""
+
+  if [[ -e "$anomaly" ]]; then
+    [[ -f "$anomaly" && ! -L "$anomaly" ]] || fail "clock anomaly marker is not a safe file"
+    if [[ "$BACKUP_CLOCK_ACKNOWLEDGE_DATE" == "$observed_date" ]]; then
+      log "Administrator acknowledgement accepted for verification on $observed_date; pruning remains blocked for this run"
+      return 2
+    fi
+    log "Clock anomaly remains unacknowledged; retaining every completed set"
+    return 1
+  fi
+
+  previous_date="$(clock_reference_date)"
+  [[ -n "$previous_date" ]] || return 0
+  if [[ -f "$BACKUP_ROOT/.clock-state.env" && ! -L "$BACKUP_ROOT/.clock-state.env" ]]; then
+    pruning_resume_after="$(sed -n 's/^PRUNING_RESUME_AFTER_DATE=//p' "$BACKUP_ROOT/.clock-state.env")"
+  fi
+  if [[ -n "$pruning_resume_after" && "$observed_date" == "$pruning_resume_after" ]]; then
+    log "Retention pruning remains blocked until the next IST backup date after $pruning_resume_after"
+    return 1
+  fi
+  previous_epoch="$(TZ="$BACKUP_SCHEDULE_TIMEZONE" date -d "$previous_date 00:00" +%s)"
+  observed_epoch="$(TZ="$BACKUP_SCHEDULE_TIMEZONE" date -d "$observed_date 00:00" +%s)"
+  delta_days=$(( (observed_epoch - previous_epoch) / 86400 ))
+  # One day is the only unattended advance compatible with the fixed daily
+  # retention contract. A multi-day outage is safe to capture after, but must
+  # not turn an unverified clock jump into automatic deletion of older sets.
+  if (( delta_days < 0 || delta_days > 1 )); then
+    record_clock_anomaly "$previous_date" "$observed_date"
+    return 1
+  fi
+  return 0
+}
+
 publish_success_status() {
   local backup_date="$1"
   local directory="$2"
   local completed_at_utc="${3:-}"
   local backup_set="backup-$backup_date"
   local current_set current_date current_completed current_utc current_manifest
-  local completed_at_epoch manifest_sha status_tmp
+  local completed_at_epoch manifest_sha now_epoch status_tmp
+
+  now_epoch="$(date -u +%s)"
 
   if [[ -f "$BACKUP_ROOT/last-success.env" && ! -L "$BACKUP_ROOT/last-success.env" ]]; then
     current_set="$(sed -n 's/^BACKUP_SET=//p' "$BACKUP_ROOT/last-success.env")"
@@ -106,6 +196,7 @@ publish_success_status() {
       && "$current_completed" =~ ^[0-9]+$ \
       && "$current_utc" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ \
       && "$(date -u -d "$current_date" +%F 2>/dev/null)" == "$current_date" \
+      && "$current_completed" -le "$now_epoch" \
       && ( "$current_set" == "$backup_set" || "$current_set" > "$backup_set" ) \
       ]] && verify_status_pointer "$current_set" "$current_manifest"; then
       log "Preserving success status for verified set $current_set"
@@ -236,7 +327,7 @@ run_once() {
   validate_configuration
 
   local backup_date="${BACKUP_SET_DATE:-$(TZ="$BACKUP_SCHEDULE_TIMEZONE" date +%F)}"
-  local completed_at created_at final stage
+  local allow_prune=false clock_acknowledgement=false completed_at created_at final stage
   [[ "$backup_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail "BACKUP_SET_DATE must use YYYY-MM-DD"
   [[ "$(date -u -d "$backup_date" +%F 2>/dev/null)" == "$backup_date" ]] || fail "BACKUP_SET_DATE is not a calendar date"
 
@@ -250,6 +341,12 @@ run_once() {
   # leave an unpublished staging directory. Under the exclusive lock it is
   # safe to remove those directories before checking capacity.
   cleanup_stale_partials
+
+  if evaluate_clock_guard "$backup_date"; then
+    allow_prune=true
+  elif [[ "$?" -eq 2 ]]; then
+    clock_acknowledgement=true
+  fi
 
   stage="$BACKUP_ROOT/.partial/backup-$backup_date.$$"
   final="$BACKUP_ROOT/backup-$backup_date"
@@ -267,7 +364,16 @@ run_once() {
     verify_set "$final" || fail "today's existing backup failed checksum verification"
     log "Verified backup set backup-$backup_date already exists; no duplicate was created"
     publish_success_status "$backup_date" "$final"
-    prune_completed_sets "$backup_date" "backup-$backup_date"
+    if [[ "$clock_acknowledgement" == true ]]; then
+      write_clock_state "$backup_date" "$backup_date"
+      rm -f -- "$BACKUP_ROOT/.clock-anomaly.env"
+      log "Administrator clock acknowledgement completed after verified publication; pruning remains blocked until a later IST date"
+    elif [[ "$allow_prune" == true ]]; then
+      prune_completed_sets "$backup_date" "backup-$backup_date"
+      write_clock_state "$backup_date"
+    else
+      log "Skipped retention pruning because the backup clock requires administrator acknowledgement"
+    fi
     cleanup
     trap - EXIT INT TERM
     return 0
@@ -320,7 +426,16 @@ EOF
 
   completed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   publish_success_status "$backup_date" "$final" "$completed_at"
-  prune_completed_sets "$backup_date" "backup-$backup_date"
+  if [[ "$clock_acknowledgement" == true ]]; then
+    write_clock_state "$backup_date" "$backup_date"
+    rm -f -- "$BACKUP_ROOT/.clock-anomaly.env"
+    log "Administrator clock acknowledgement completed after verified publication; pruning remains blocked until a later IST date"
+  elif [[ "$allow_prune" == true ]]; then
+    prune_completed_sets "$backup_date" "backup-$backup_date"
+    write_clock_state "$backup_date"
+  else
+    log "Skipped retention pruning because the backup clock requires administrator acknowledgement"
+  fi
   log "Backup set backup-$backup_date completed and verified"
   cleanup
   trap - EXIT INT TERM
@@ -356,6 +471,7 @@ healthcheck() {
   local status="$BACKUP_ROOT/last-success.env"
   local completed now age backup_set backup_date manifest_sha
   [[ -f "$status" && ! -L "$status" ]] || exit 1
+  [[ ! -e "$BACKUP_ROOT/.clock-anomaly.env" ]] || exit 1
   completed="$(sed -n 's/^COMPLETED_AT_EPOCH=//p' "$status")"
   backup_set="$(sed -n 's/^BACKUP_SET=//p' "$status")"
   manifest_sha="$(sed -n 's/^MANIFEST_SHA256=//p' "$status")"

@@ -536,6 +536,9 @@ test('authoritative backend role keeps restart separate from install, upgrade, a
     assembler.indexOf('write_backend_lifecycle_scripts()'),
   )
   assert.match(startWriter, /docker compose --env-file \$env_file -f docker-compose\.yml up -d/)
+  assert.match(startWriter, /production:preflight:sso/)
+  assert.match(startWriter, /Backend activation blocked: legacy SSO configuration or stored client secrets/)
+  assert.match(startWriter, /run --rm --no-deps api/)
   assert.match(startWriter, /^\.\/wait-ready\.sh$/m)
   assert.match(startWriter, /mark_active_release/)
   assert.doesNotMatch(startWriter, /db:migrate|migration:apply|bootstrap:production|db:push/)
@@ -569,10 +572,15 @@ test('authoritative backend role keeps restart separate from install, upgrade, a
   )
   const adoption = lifecycle.slice(lifecycle.indexOf('cat > "$target_dir/adopt-existing.sh"'))
   const recovery = lifecycle.slice(lifecycle.indexOf('cat > "$target_dir/recover-admin.sh"'))
+  const upgrade = lifecycle.slice(
+    lifecycle.indexOf('cat > "$target_dir/upgrade.sh"'),
+    lifecycle.indexOf('cat > "$target_dir/deploy.sh"'),
+  )
   for (const script of [deploy, adoption]) {
     assert.match(script, /\.\/verify-role\.sh[\s\S]*\.\/compatibility-check\.sh[\s\S]*\.\/load-images\.sh --verify-loaded[\s\S]*\.\/wait-dependencies\.sh/)
   }
   assert.match(adoption, /DARSHAN_BACKUP_MANIFEST/)
+  assert.match(upgrade, /production:preflight:sso[\s\S]*up -d --force-recreate/)
   assert.match(adoption, /A regular restore-verified backup manifest is required/)
   assert.match(adoption, /! -L "\\\$DARSHAN_BACKUP_MANIFEST"/)
   assert.match(adoption, /db:adopt/)

@@ -364,6 +364,100 @@ describe('Realtime Service', () => {
     expect(state.lastDesiredDefaultMediaVersion).to.equal('default-1')
   })
 
+  it('treats RESYNC_REQUIRED only as a wake-up and verifies deletion through REST', async () => {
+    const { RealtimeService } = require('../../../src/main/services/realtime-service')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+    const { DeviceApiError } = require('../../../src/common/types')
+
+    const httpClient = getHttpClient()
+    const runtimeFailures: any[] = []
+    const listener = (event: any) => runtimeFailures.push(event)
+    getLifecycleEvents().on('runtime-auth-failure', listener)
+    const getStub = sandbox.stub(httpClient, 'get').rejects(new DeviceApiError({
+      message: 'Screen was deleted',
+      status: 404,
+      code: 'NOT_FOUND',
+    }))
+
+    try {
+      const realtimeService = new RealtimeService()
+      await realtimeService.handleNotification({
+        type: 'RESYNC_REQUIRED',
+        device_id: 'device-1',
+        reason: 'screen-deleted',
+        // A realtime payload must never be accepted as deletion authority.
+        deleted: true,
+      } as any)
+
+      expect(getStub.calledOnceWith('/api/v1/device/device-1/desired-state')).to.equal(true)
+      expect(runtimeFailures).to.have.length(1)
+      expect(runtimeFailures[0]).to.deep.include({ source: 'desired-state' })
+      expect(runtimeFailures[0].error).to.be.instanceOf(DeviceApiError)
+    } finally {
+      getLifecycleEvents().off('runtime-auth-failure', listener)
+    }
+  })
+
+  it('reconciles by normal REST contact when a healthy socket notification is missed', async () => {
+    const clock = sandbox.useFakeTimers({ shouldAdvanceTime: false })
+    const { RealtimeService } = require('../../../src/main/services/realtime-service')
+    const { getCommandProcessor } = require('../../../src/main/services/command-processor')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+    const { DeviceApiError } = require('../../../src/common/types')
+
+    const transport = new FakeRealtimeTransport()
+    sandbox.stub(getCommandProcessor(), 'pollNow').resolves()
+    const initialState = {
+      device_id: 'device-1',
+      state: {
+        state_version: 0,
+        command_version: 0,
+        snapshot_id: null,
+        default_media_version: null,
+        emergency_version: null,
+        last_command_id: null,
+        last_command_type: null,
+        last_command_reason: null,
+        last_changed_reason: null,
+        updated_at: null,
+      },
+    }
+    const getStub = sandbox.stub(getHttpClient(), 'get')
+    getStub.onFirstCall().resolves(initialState)
+    getStub.onSecondCall().rejects(new DeviceApiError({
+      message: 'Screen was deleted',
+      status: 404,
+      code: 'NOT_FOUND',
+    }))
+    const runtimeFailures: any[] = []
+    const listener = (event: any) => runtimeFailures.push(event)
+    getLifecycleEvents().on('runtime-auth-failure', listener)
+
+    const realtimeService = new RealtimeService(transport)
+    try {
+      realtimeService.start()
+      await clock.tickAsync(0)
+      expect(realtimeService.isHealthy()).to.equal(true)
+      expect(getStub.callCount).to.equal(1)
+
+      // No RESYNC_REQUIRED event arrives. The next ordinary desired-state
+      // safety contact must still treat REST as authoritative.
+      await clock.tickAsync(299_999)
+      expect(getStub.callCount).to.equal(1)
+      expect(runtimeFailures).to.have.length(0)
+      await clock.tickAsync(1)
+      expect(getStub.callCount).to.equal(2)
+      expect(runtimeFailures).to.have.length(1)
+      expect(runtimeFailures[0]).to.deep.include({ source: 'desired-state' })
+      expect(runtimeFailures[0].error).to.be.instanceOf(DeviceApiError)
+    } finally {
+      getLifecycleEvents().off('runtime-auth-failure', listener)
+      realtimeService.stop()
+    }
+  })
+
   it('sends HELLO and waits for HELLO_ACK before marking realtime healthy', async () => {
     const { RealtimeService } = require('../../../src/main/services/realtime-service')
     const { getCommandProcessor } = require('../../../src/main/services/command-processor')

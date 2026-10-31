@@ -1,0 +1,64 @@
+{
+  "profile": "packet4-release-gate-v1",
+  "environment": "qa",
+  "baseUrl": "https://darshan-api.qa.internal",
+  "allowProductionLookingTarget": false,
+  "baseline": {
+    "players": 500,
+    "durationSeconds": 900
+  },
+  "spike": {
+    "players": 1000,
+    "durationSeconds": 300
+  },
+  "intervals": {
+    "heartbeatSeconds": 30,
+    "commandPollSeconds": 5,
+    "desiredStateSeconds": 60,
+    "playbackTransitionSeconds": 15
+  },
+  "requestTimeoutMs": 15000,
+  "maxInflight": 500,
+  "realtime": {
+    "enabled": true,
+    "url": "https://darshan-api.qa.internal",
+    "namespace": "/device",
+    "connectTimeoutMs": 15000
+  },
+  "cms": {
+    "users": 40,
+    "intervalSeconds": 5,
+    "flows": [
+      { "name": "screens", "method": "GET", "path": "/api/v1/screens?page=1&limit=50" },
+      { "name": "media", "method": "GET", "path": "/api/v1/media?page=1&limit=50" },
+      { "name": "reports", "method": "GET", "path": "/api/v1/reports/summary" }
+    ]
+  },
+  "uploads": {
+    "concurrency": 5,
+    "sizeBytes": 524288000,
+    "contentType": "video/mp4",
+    "partConcurrency": 3
+  },
+  "backlog": {
+    "players": 50,
+    "offlineStartSeconds": 300,
+    "offlineDurationSeconds": 120
+  },
+  "proxyScenario": {
+    "enabled": true,
+    "mode": "trusted",
+    "headerName": "x-forwarded-for"
+  },
+  "fanout": {
+    "enabled": false,
+    "phase": "baseline",
+    "method": "POST",
+    "path": "/api/v1/qa/preprovisioned-fanout-trigger",
+    "body": {},
+    "cmsUserIndex": 0,
+    "expectedRecipients": 500
+  },
+  "resourceProbes": [],
+  "outputDirectory": "/var/lib/darshan-qa-evidence/packet4"
+}

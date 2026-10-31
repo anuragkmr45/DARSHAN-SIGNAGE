@@ -1660,41 +1660,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('Screen not found');
         }
 
-        const [heartbeatStorageRefs, proofOfPlayStorageRefs, screenshotStorageRefs] = await Promise.all([
-          db
-            .select({ storage_object_id: schema.heartbeats.storage_object_id })
-            .from(schema.heartbeats)
-            .where(eq(schema.heartbeats.screen_id, screenId)),
-          db
-            .select({ storage_object_id: schema.proofOfPlay.storage_object_id })
-            .from(schema.proofOfPlay)
-            .where(eq(schema.proofOfPlay.screen_id, screenId)),
-          db
-            .select({ storage_object_id: schema.screenshots.storage_object_id })
-            .from(schema.screenshots)
-            .where(eq(schema.screenshots.screen_id, screenId)),
-        ]);
-
-        const storageObjectIds = Array.from(
-          new Set(
-            [...heartbeatStorageRefs, ...proofOfPlayStorageRefs, ...screenshotStorageRefs]
-              .map((row) => row.storage_object_id)
-              .filter((value): value is string => Boolean(value))
-          )
-        );
-
-        const storageRows = storageObjectIds.length
-          ? await db
-              .select({
-                id: schema.storageObjects.id,
-                bucket: schema.storageObjects.bucket,
-                object_key: schema.storageObjects.object_key,
-              })
-              .from(schema.storageObjects)
-              .where(inArray(schema.storageObjects.id, storageObjectIds))
-          : [];
-
-        const cleanup = await db.transaction(async (tx) => {
+        const deletion = await db.transaction(async (tx) => {
           await lockScreenTargetReferences(tx);
           const [lockedScreen] = await tx.select({ id: schema.screens.id }).from(schema.screens)
             .where(eq(schema.screens.id, screenId)).for('update');
@@ -1704,6 +1670,41 @@ export async function screenRoutes(fastify: FastifyInstance) {
           await assertTargetCanBeDeleted(tx, {
             kind: 'SCREEN', id: screenId, groupIds: memberships.map((member) => member.group_id),
           });
+
+          // The telemetry tables historically have no declarative Screen FK.
+          // Migration 0051 makes each telemetry writer hold a per-Screen share
+          // lock. Reading references after our conflicting target row lock
+          // therefore includes every writer that won the race; writers that
+          // start later wait and fail once this transaction deletes the target.
+          const heartbeatStorageRefs = await tx
+            .select({ storage_object_id: schema.heartbeats.storage_object_id })
+            .from(schema.heartbeats)
+            .where(eq(schema.heartbeats.screen_id, screenId));
+          const proofOfPlayStorageRefs = await tx
+            .select({ storage_object_id: schema.proofOfPlay.storage_object_id })
+            .from(schema.proofOfPlay)
+            .where(eq(schema.proofOfPlay.screen_id, screenId));
+          const screenshotStorageRefs = await tx
+            .select({ storage_object_id: schema.screenshots.storage_object_id })
+            .from(schema.screenshots)
+            .where(eq(schema.screenshots.screen_id, screenId));
+          const storageObjectIds = Array.from(
+            new Set(
+              [...heartbeatStorageRefs, ...proofOfPlayStorageRefs, ...screenshotStorageRefs]
+                .map((row) => row.storage_object_id)
+                .filter((value): value is string => Boolean(value))
+            )
+          );
+          const storageRows = storageObjectIds.length
+            ? await tx
+                .select({
+                  id: schema.storageObjects.id,
+                  bucket: schema.storageObjects.bucket,
+                  object_key: schema.storageObjects.object_key,
+                })
+                .from(schema.storageObjects)
+                .where(inArray(schema.storageObjects.id, storageObjectIds))
+            : [];
           const displayStateDeleted = await tx
             .delete(schema.screenDisplayStates)
             .where(eq(schema.screenDisplayStates.screen_id, screenId));
@@ -1727,22 +1728,25 @@ export async function screenRoutes(fastify: FastifyInstance) {
           await tx.delete(schema.screens).where(eq(schema.screens.id, screenId));
 
           return {
-            display_state: (displayStateDeleted as any)?.length ?? 0,
-            device_commands: (commandsDeleted as any)?.length ?? 0,
-            heartbeats: (heartbeatsDeleted as any)?.length ?? 0,
-            proof_of_play: (popDeleted as any)?.length ?? 0,
-            screenshots: (screenshotsDeleted as any)?.length ?? 0,
-            schedule_reservations: (reservationsDeleted as any)?.length ?? 0,
-            publish_targets: (publishTargetsDeleted as any)?.length ?? 0,
-            device_pairings: (pairingsDeleted as any)?.length ?? 0,
-            device_certificates: (certsDeleted as any)?.length ?? 0,
-            screen_group_members: (groupMembersDeleted as any)?.length ?? 0,
-            default_media_targets: defaultMediaTargetsRemoved,
+            storageRows,
+            cleanup: {
+              display_state: (displayStateDeleted as any)?.length ?? 0,
+              device_commands: (commandsDeleted as any)?.length ?? 0,
+              heartbeats: (heartbeatsDeleted as any)?.length ?? 0,
+              proof_of_play: (popDeleted as any)?.length ?? 0,
+              screenshots: (screenshotsDeleted as any)?.length ?? 0,
+              schedule_reservations: (reservationsDeleted as any)?.length ?? 0,
+              publish_targets: (publishTargetsDeleted as any)?.length ?? 0,
+              device_pairings: (pairingsDeleted as any)?.length ?? 0,
+              device_certificates: (certsDeleted as any)?.length ?? 0,
+              screen_group_members: (groupMembersDeleted as any)?.length ?? 0,
+              default_media_targets: defaultMediaTargetsRemoved,
+            },
           };
         });
 
         const uniqueStorageRows = Array.from(
-          new Map(storageRows.map((row) => [row.id, row])).values()
+          new Map(deletion.storageRows.map((row) => [row.id, row])).values()
         );
         const storageDeleted: Array<{ id: string; bucket: string; object_key: string }> = [];
         const storageFailed: Array<{ id: string; bucket: string; object_key: string; message: string }> = [];
@@ -1793,7 +1797,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
         return reply.status(OK).send({
           message: 'Screen deleted with related data cleaned up',
           id: screenId,
-          cleanup,
+          cleanup: deletion.cleanup,
           storage_cleanup: {
             deleted: storageDeleted,
             failed: storageFailed,

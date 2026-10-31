@@ -146,6 +146,7 @@ describe('webpage URL policy primitives', () => {
       ['10.0.0.5'],
       ['127.0.0.1'],
       ['169.254.169.254'],
+      ['100.100.100.200'],
       ['fe80::1'],
     ];
     const resolveNext = async () => addresses.shift() ?? [];
@@ -153,7 +154,7 @@ describe('webpage URL policy primitives', () => {
       policy: productionPolicy,
       resolveAddresses: resolveNext,
     }), 'WEBPAGE_ADDRESS_BLOCKED');
-    for (const code of ['WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED']) {
+    for (const code of ['WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED', 'WEBPAGE_ADDRESS_BLOCKED']) {
       await expectCode(assertWebpageUrlAllowed('https://screen.example.test/', 'navigation', {
         policy: productionPolicy,
         resolveAddresses: resolveNext,

@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 import { config as appConfig } from '@/config';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { chatAuthPreHandler, getRequestAuthContext } from '@/auth/request-auth';
@@ -304,6 +304,17 @@ async function appendRequiredAudit(
 
 function authenticate(request: FastifyRequest) {
   return getRequestAuthContext(request);
+}
+
+function postgresErrorCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+    if ('code' in current && typeof (current as { code?: unknown }).code === 'string') {
+      return (current as { code: string }).code;
+    }
+    current = 'cause' in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return undefined;
 }
 
 async function getConversationForAccess(
@@ -810,9 +821,14 @@ export async function chatRoutes(fastify: FastifyInstance) {
           return { conversationId: id, already_restored: true };
         }
         if (conversation.type === 'DM' && conversation.dm_pair_key) {
+          await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`darshan_chat_dm_pair_v1:${conversation.dm_pair_key}`}))`);
           const [conflict] = await tx.select({ id: schema.chatConversations.id }).from(schema.chatConversations)
-            .where(and(eq(schema.chatConversations.dm_pair_key, conversation.dm_pair_key), eq(schema.chatConversations.type, 'DM'), eq(schema.chatConversations.state, 'ACTIVE'))).limit(1);
-          if (conflict) throw new AppError({ statusCode: 409, code: 'CHAT_RESTORE_ASSOCIATION_CONFLICT', message: 'An active direct conversation already exists.' });
+            .where(and(
+              eq(schema.chatConversations.dm_pair_key, conversation.dm_pair_key),
+              eq(schema.chatConversations.type, 'DM'),
+              ne(schema.chatConversations.state, 'DELETED')
+            )).limit(1);
+          if (conflict) throw new AppError({ statusCode: 409, code: 'CHAT_RESTORE_ASSOCIATION_CONFLICT', message: 'Another direct conversation already exists.' });
         }
         const messages = await tx.select({ id: schema.chatMessages.id }).from(schema.chatMessages).where(eq(schema.chatMessages.conversation_id, id));
         for (const message of messages) await verifyMessageObjects(message.id, tx);
@@ -821,7 +837,12 @@ export async function chatRoutes(fastify: FastifyInstance) {
         return { conversationId: id, already_restored: false };
       });
       return reply.send(result);
-    } catch (error) { return respondWithError(reply, error); }
+    } catch (error) {
+      if (postgresErrorCode(error) === '23505') {
+        return respondWithError(reply, new AppError({ statusCode: 409, code: 'CHAT_RESTORE_ASSOCIATION_CONFLICT', message: 'Another direct conversation already exists.' }));
+      }
+      return respondWithError(reply, error);
+    }
   });
 
   fastify.post<{ Params: { id: string } }>(apiEndpoints.chat.restoreMessage, { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } }, async (request, reply) => {

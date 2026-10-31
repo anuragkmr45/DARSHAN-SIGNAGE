@@ -8,10 +8,38 @@ import { ipMatchesCidr, isHardDeniedAddress, isPrivateAddress, webpageHostMatche
 const MAX_REDIRECTS = 2;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const TIMEOUT_MS = 5_000;
+const UNSAFE_CUSTOM_HEADERS = new Set([
+  'connection',
+  'content-length',
+  'expect',
+  'host',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'proxy-connection',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
 const csv = (value: string) => value.split(',').map((part) => part.trim().toLowerCase()).filter(Boolean);
 
 type Policy = { hosts: string[]; ports: number[]; cidrs: string[] };
 type Resolve = (host: string) => Promise<string[]>;
+type PinnedPost = (
+  url: URL,
+  address: string,
+  headers: Record<string, string>,
+  body: string,
+  signal: AbortSignal
+) => Promise<{ status: number; location?: string }>;
+
+export type WebhookTestDeliveryOptions = {
+  policy?: Policy;
+  resolveAddresses?: Resolve;
+  sendPinnedPost?: PinnedPost;
+  signal?: AbortSignal;
+};
 
 function configuredPolicy(): Policy {
   return {
@@ -69,7 +97,7 @@ export async function validateWebhookTestDestination(
   return { url, address: addresses[0]! };
 }
 
-function sendPinnedPost(url: URL, address: string, headers: Record<string, string>, body: string, signal: AbortSignal): Promise<{ status: number; location?: string }> {
+export function sendPinnedPost(url: URL, address: string, headers: Record<string, string>, body: string, signal: AbortSignal): Promise<{ status: number; location?: string }> {
   return new Promise((resolve, reject) => {
     const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
       method: 'POST', headers, signal,
@@ -94,12 +122,12 @@ function sendPinnedPost(url: URL, address: string, headers: Record<string, strin
 
 export async function deliverWebhookTest(record: {
   id: string; target_url: string; headers?: Record<string, string> | null;
-}): Promise<{ response: { ok: boolean; status: number }; sentAt: string }> {
+}, options: WebhookTestDeliveryOptions = {}): Promise<{ response: { ok: boolean; status: number }; sentAt: string }> {
   const sentAt = new Date().toISOString();
   const body = JSON.stringify({ type: 'webhook.test', sent_at: sentAt, webhook_id: record.id });
   const custom = Object.fromEntries(Object.entries(record.headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]));
   for (const key of Object.keys(custom)) {
-    if (!/^[a-z0-9-]+$/.test(key) || ['host', 'content-length', 'connection', 'transfer-encoding'].includes(key) || key.startsWith('x-darshan-')) {
+    if (!/^[a-z0-9-]+$/.test(key) || UNSAFE_CUSTOM_HEADERS.has(key) || key.startsWith('x-darshan-')) {
       return blocked('Webhook Test contains an unsafe custom header.');
     }
   }
@@ -111,14 +139,19 @@ export async function deliverWebhookTest(record: {
     'x-darshan-sent-at': sentAt,
     'x-darshan-webhook-id': record.id,
   };
-  const signal = AbortSignal.timeout(TIMEOUT_MS);
+  const signal = options.signal ?? AbortSignal.timeout(TIMEOUT_MS);
+  const post = options.sendPinnedPost ?? sendPinnedPost;
+  const validationOptions = {
+    ...(options.policy ? { policy: options.policy } : {}),
+    ...(options.resolveAddresses ? { resolveAddresses: options.resolveAddresses } : {}),
+  };
   let next = record.target_url;
-  const first = await validateWebhookTestDestination(next);
+  const first = await validateWebhookTestDestination(next, validationOptions);
   const firstOrigin = first.url.origin;
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
-    const { url, address } = redirect === 0 ? first : await validateWebhookTestDestination(next);
+    const { url, address } = redirect === 0 ? first : await validateWebhookTestDestination(next, validationOptions);
     if (url.origin !== firstOrigin) return blocked('Webhook Test redirect changed origin.');
-    const response = await sendPinnedPost(url, address, headers, body, signal);
+    const response = await post(url, address, headers, body, signal);
     if (response.status === 307 || response.status === 308) {
       if (!response.location || redirect === MAX_REDIRECTS) return blocked('Webhook Test redirect limit exceeded.');
       next = new URL(response.location, url).toString();
