@@ -233,6 +233,10 @@ export interface BackupSettings {
   schedule_managed_by_deployment?: boolean;
   off_host_copy_required?: boolean;
   retention_days?: number | null;
+  external_sidecar?: boolean;
+  manual_run_supported?: boolean;
+  schedule_time?: string | null;
+  schedule_timezone?: string | null;
 }
 
 export interface BackupRunDownload {

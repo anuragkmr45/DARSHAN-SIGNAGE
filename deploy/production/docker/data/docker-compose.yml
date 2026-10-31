@@ -34,6 +34,49 @@ services:
       timeout: 5s
       retries: 10
 
+  backup:
+    build:
+      context: ../backup
+      dockerfile: Dockerfile
+    image: ${SIMPLE_BACKUP_IMAGE:-darshan-simple-backup:production}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      BACKUP_ROOT: /backups
+      BACKUP_KEEP_SETS: ${SIMPLE_BACKUP_KEEP_SETS:-3}
+      BACKUP_SCHEDULE_TIME: ${SIMPLE_BACKUP_SCHEDULE_TIME:-00:00}
+      BACKUP_SCHEDULE_TIMEZONE: ${SIMPLE_BACKUP_TIMEZONE:-Asia/Kolkata}
+      BACKUP_RETRY_SECONDS: ${SIMPLE_BACKUP_RETRY_SECONDS:-3600}
+      BACKUP_MAX_AGE_SECONDS: ${SIMPLE_BACKUP_MAX_AGE_SECONDS:-129600}
+      BACKUP_MIN_FREE_BYTES: ${SIMPLE_BACKUP_MIN_FREE_BYTES:-1073741824}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    volumes:
+      - ${BACKUP_HOST_PATH:-/var/lib/darshan/backups}:/backups
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/darshan-backup", "healthcheck"]
+      interval: 5m
+      timeout: 30s
+      retries: 2
+      start_period: 15m
+
 volumes:
   postgres_data:
   minio_data:

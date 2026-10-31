@@ -248,7 +248,8 @@ const Settings = () => {
   const securityQuery = useSecuritySettings();
   const appearanceQuery = useAppearanceSettings();
   const backupSettingsQuery = useBackupSettings();
-  const backupRunsQuery = useBackupRuns();
+  const externalBackupSidecar = backupSettingsQuery.data?.external_sidecar === true;
+  const backupRunsQuery = useBackupRuns(backupSettingsQuery.isSuccess && !externalBackupSidecar);
   const [logLevelFilter, setLogLevelFilter] = useState<string>("all");
   const recentLogsQuery = useRecentLogs({
     limit: 100,
@@ -664,10 +665,12 @@ const Settings = () => {
                   {automaticBackupsEnabled ? "Automatic backups on" : "Automatic backups off"}
                 </Badge>
                 <span className="text-muted-foreground">
-                  {automaticBackupsEnabled
+                  {externalBackupSidecar
+                    ? `The data-stack sidecar runs daily at ${backups.schedule_time ?? "00:00"} ${backups.schedule_timezone ?? "Asia/Kolkata"} and keeps the latest three successful sets.`
+                    : automaticBackupsEnabled
                     ? `Recurring backups are enabled for this installation and will be checked every ${backups.interval_hours} hour${backups.interval_hours === 1 ? "" : "s"}.`
                     : "Automatic backups stay off until you enable them and save this section."}
-                  {backupScheduleManaged && ` Production policy requires an independently operated off-host copy${backups.retention_days ? ` retained for ${backups.retention_days} days` : ""}.`}
+                  {backups.off_host_copy_required && ` Production policy requires an independently operated off-host copy${backups.retention_days ? ` retained for ${backups.retention_days} days` : ""}.`}
                 </span>
               </div>
               <div className="flex items-center justify-between rounded-lg border p-4">
@@ -724,15 +727,17 @@ const Settings = () => {
                   <Save className="mr-2 h-4 w-4" />
                   Save Advanced
                 </Button>
-                <Button variant="outline" onClick={() => runBackupNow.mutate()} disabled={runBackupNow.isPending}>
-                  <Database className="mr-2 h-4 w-4" />
-                  {runBackupNow.isPending ? "Queueing..." : "Run Backup Now"}
-                </Button>
+                {backups.manual_run_supported !== false ? (
+                  <Button variant="outline" onClick={() => runBackupNow.mutate()} disabled={runBackupNow.isPending}>
+                    <Database className="mr-2 h-4 w-4" />
+                    {runBackupNow.isPending ? "Queueing..." : "Run Backup Now"}
+                  </Button>
+                ) : null}
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          {!externalBackupSidecar ? <Card>
             <CardHeader>
               <CardTitle>Backup history</CardTitle>
               <CardDescription>Recent manual and automatic backup runs.</CardDescription>
@@ -770,7 +775,7 @@ const Settings = () => {
               ))}
               {backupRuns.length === 0 ? <p className="text-sm text-muted-foreground">No backup history yet.</p> : null}
             </CardContent>
-          </Card>
+          </Card> : null}
 
           <ConfirmDialog
             open={Boolean(backupPendingDelete)}

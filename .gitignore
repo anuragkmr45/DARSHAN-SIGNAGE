@@ -38,6 +38,8 @@ deploy/production/observability/prometheus.yml
 deploy/production/docker/.env
 deploy/production/docker/observability/prometheus.yml
 deploy/production/.generated/
+/deploy/production/backups/
+/.controlled-recovery-d3/
 
 # Logs, test output, and runtime state
 *.log

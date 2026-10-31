@@ -1980,37 +1980,39 @@ export async function registerJobHandlers() {
     }
   });
 
-  await registerObservedWorker<BackupJob>('backup', async (batch) => {
-    for (const job of batch) {
-      logger.info({ runId: job.data.runId }, 'Processing backup job');
-      await runFullBackup(job.data.runId);
-    }
-  });
+  if (appConfig.BACKUP_MODE !== 'EXTERNAL_SIDECAR') {
+    await registerObservedWorker<BackupJob>('backup', async (batch) => {
+      for (const job of batch) {
+        logger.info({ runId: job.data.runId }, 'Processing backup job');
+        await runFullBackup(job.data.runId);
+      }
+    });
 
-  await registerObservedWorker<BackupCheckJob>('backup:check', async () => {
-    const backupsSettings = getCachedSettings('org.backups');
-    if (!backupsSettings.automatic_enabled) {
-      return;
-    }
+    await registerObservedWorker<BackupCheckJob>('backup:check', async () => {
+      const backupsSettings = getCachedSettings('org.backups');
+      if (!backupsSettings.automatic_enabled) {
+        return;
+      }
 
-    const latestRun = await getLatestBackupRun();
-    const now = Date.now();
-    const latestFinishedAt =
-      latestRun?.completed_at ?? latestRun?.started_at ?? latestRun?.created_at ?? null;
-    const latestTimestamp = latestFinishedAt ? new Date(latestFinishedAt).getTime() : 0;
-    const intervalMs = backupsSettings.interval_hours * 60 * 60 * 1000;
+      const latestRun = await getLatestBackupRun();
+      const now = Date.now();
+      const latestFinishedAt =
+        latestRun?.completed_at ?? latestRun?.started_at ?? latestRun?.created_at ?? null;
+      const latestTimestamp = latestFinishedAt ? new Date(latestFinishedAt).getTime() : 0;
+      const intervalMs = backupsSettings.interval_hours * 60 * 60 * 1000;
 
-    if (latestRun && ['PENDING', 'RUNNING'].includes(latestRun.status)) {
-      return;
-    }
+      if (latestRun && ['PENDING', 'RUNNING'].includes(latestRun.status)) {
+        return;
+      }
 
-    if (latestTimestamp && now - latestTimestamp < intervalMs) {
-      return;
-    }
+      if (latestTimestamp && now - latestTimestamp < intervalMs) {
+        return;
+      }
 
-    const run = await createBackupRun('AUTOMATIC');
-    await queueBackup({ runId: run.id });
-  });
+      const run = await createBackupRun('AUTOMATIC');
+      await queueBackup({ runId: run.id });
+    });
+  }
 
   logger.info('Job handlers registered');
 }
@@ -2069,7 +2071,9 @@ export async function scheduleRecurringJobs() {
     // Now schedule safely (queues exist)
     await jobs.schedule('cleanup', '15 * * * *', { type: 'expired_sessions' });      // hourly upload/session expiry cleanup
     await jobs.schedule('archive', '0 3 * * 0', { type: 'logs', startDate: '', endDate: '' }); // Sun 3 AM
-    await jobs.schedule('backup:check', '0 * * * *', { trigger: 'scheduled-check' }); // hourly
+    if (appConfig.BACKUP_MODE !== 'EXTERNAL_SIDECAR') {
+      await jobs.schedule('backup:check', '0 * * * *', { trigger: 'scheduled-check' }); // hourly
+    }
     await jobs.schedule('emergency:reconcile', '* * * * *', {}); // every minute
     await jobs.schedule('webpage:refresh-due', '20 * * * *', { trigger: 'scheduled-scan' }); // hourly
 

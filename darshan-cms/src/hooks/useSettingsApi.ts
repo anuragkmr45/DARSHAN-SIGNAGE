@@ -142,14 +142,14 @@ export const useUpdateBackupSettings = () =>
     "Backup and log settings have been saved."
   );
 
-export const useBackupRuns = () =>
+export const useBackupRuns = (authorized = true) =>
   {
     const enabled = useSettingsQueriesEnabled();
     return useQuery({
       queryKey: queryKeys.settingsBackupRuns,
       queryFn: settingsApi.listBackupRuns,
       refetchInterval: 30_000,
-      enabled,
+      enabled: enabled && authorized,
     });
   };
 

@@ -54,11 +54,16 @@ const { CREATED, OK } = HTTP_STATUS;
 
 function serializeBackupSettings(settings: BackupsSettings) {
   const productionManaged = appConfig.NODE_ENV === 'production';
+  const externalSidecar = appConfig.BACKUP_MODE === 'EXTERNAL_SIDECAR';
   return {
     ...settings,
     schedule_managed_by_deployment: productionManaged,
-    off_host_copy_required: productionManaged,
+    off_host_copy_required: productionManaged && !externalSidecar,
     retention_days: productionManaged ? appConfig.BACKUP_RETENTION_DAYS : null,
+    external_sidecar: externalSidecar,
+    manual_run_supported: !externalSidecar,
+    schedule_time: externalSidecar ? appConfig.BACKUP_SCHEDULE_TIME : null,
+    schedule_timezone: externalSidecar ? appConfig.BACKUP_SCHEDULE_TIMEZONE : null,
   };
 }
 
@@ -625,6 +630,9 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const payload = await requireAccess(request, 'update', 'OrgSettings');
+        if (appConfig.BACKUP_MODE === 'EXTERNAL_SIDECAR') {
+          throw AppError.conflict('Manual application backups are disabled while the data-stack backup sidecar is active.');
+        }
         const run = await createBackupRun('MANUAL', payload.sub);
         await queueBackup({ runId: run.id });
         return reply.status(CREATED).send({

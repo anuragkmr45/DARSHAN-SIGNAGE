@@ -9,7 +9,7 @@ script is restart-only by design.
 
 | Role folder | Compose project | Containers | Run on |
 |---|---|---|---|
-| `data` | `darshan-data` | `postgres`, `minio` | Data VM |
+| `data` | `darshan-data` | `postgres`, `minio`, `backup` | Data VM |
 | `valkey` | `darshan-valkey` | `valkey` | Valkey VM |
 | `backend` | `darshan-backend` | `api` | Backend VM |
 | `cms` | `darshan-cms-prod` | `cms` | CMS VM |
@@ -59,6 +59,13 @@ MINIO_SECRET_KEY=<strong-minio-secret-key>
 ```
 
 `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` are also passed to the backend container so the API can read/write object storage. Use the same values on the Data VM and Backend VM.
+
+The small-release backup sidecar writes PostgreSQL and MinIO backup sets to
+`BACKUP_HOST_PATH` on the Data VM at midnight `Asia/Kolkata` and keeps the
+latest three successful sets. Keep `BACKUP_MODE=EXTERNAL_SIDECAR` on the
+Backend VM too; this prevents the older application backup worker and manual
+CMS action from running alongside the sidecar. See
+`docs/runbooks/simple-daily-backup.md` for verification and restore steps.
 
 Keep non-secret runtime behavior in JSON:
 

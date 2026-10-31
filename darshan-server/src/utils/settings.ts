@@ -95,6 +95,13 @@ const settingsCache: Record<SettingsSectionKey, unknown> = {
  */
 export function applyProductionBackupSchedule(value: BackupsSettings): BackupsSettings {
   if (appConfig.NODE_ENV !== 'production') return value;
+  if (appConfig.BACKUP_MODE === 'EXTERNAL_SIDECAR') {
+    return {
+      ...value,
+      automatic_enabled: true,
+      interval_hours: 24,
+    };
+  }
   if (!appConfig.BACKUP_INTERVAL_HOURS) {
     throw new Error('Production backup interval is not configured.');
   }

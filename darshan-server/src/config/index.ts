@@ -77,8 +77,11 @@ const envSchema = z.object({
   LIBREOFFICE_PATH: z.string().default('soffice'),
   PG_DUMP_PATH: z.string().default('pg_dump'),
   TAR_PATH: z.string().default('tar'),
+  BACKUP_MODE: z.enum(['APPLICATION_OFFHOST', 'EXTERNAL_SIDECAR']).default('APPLICATION_OFFHOST'),
   BACKUP_INTERVAL_HOURS: z.coerce.number().int().min(1).max(168).optional(),
   BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).optional(),
+  BACKUP_SCHEDULE_TIME: optionalTrimmedString,
+  BACKUP_SCHEDULE_TIMEZONE: optionalTrimmedString,
   BACKUP_OFFHOST_DESTINATION: optionalTrimmedString,
   BACKUP_OFFHOST_ENDPOINT: z.preprocess((value) => {
     if (typeof value !== 'string') return value;
@@ -208,9 +211,12 @@ if (parsed.data.NODE_ENV === 'production' && parsed.data.ADMIN_PASSWORD) {
   throw new Error('ADMIN_PASSWORD is forbidden in production. Use the one-shot protected bootstrap password file instead.');
 }
 if (parsed.data.NODE_ENV === 'production') {
+  const requiredSecrets = isBackgroundWorkerProcess() && parsed.data.BACKUP_MODE !== 'EXTERNAL_SIDECAR'
+    ? requiredProductionWorkerFileBackedSecretKeys
+    : requiredProductionFileBackedSecretKeys;
   assertProductionFileBackedSecrets(
     process.env,
-    isBackgroundWorkerProcess() ? requiredProductionWorkerFileBackedSecretKeys : requiredProductionFileBackedSecretKeys
+    requiredSecrets
   );
   if (parsed.data.OBSERVABILITY_METRICS_BEARER_TOKEN) {
     assertProductionFileBackedSecrets(process.env, ['OBSERVABILITY_METRICS_BEARER_TOKEN']);
@@ -289,6 +295,18 @@ function requestedProductionDeviceAuthMode(input: z.infer<typeof envSchema>) {
 
 function assertProductionBackupPolicy(input: z.infer<typeof envSchema>) {
   if (input.NODE_ENV !== 'production') return;
+  if (input.BACKUP_MODE === 'EXTERNAL_SIDECAR') {
+    if (input.BACKUP_RETENTION_DAYS !== 3) {
+      throw new Error('EXTERNAL_SIDECAR requires BACKUP_RETENTION_DAYS=3.');
+    }
+    if (input.BACKUP_SCHEDULE_TIME !== '00:00') {
+      throw new Error('EXTERNAL_SIDECAR requires BACKUP_SCHEDULE_TIME=00:00.');
+    }
+    if (input.BACKUP_SCHEDULE_TIMEZONE !== 'Asia/Kolkata') {
+      throw new Error('EXTERNAL_SIDECAR requires BACKUP_SCHEDULE_TIMEZONE=Asia/Kolkata.');
+    }
+    return;
+  }
   if (
     !input.BACKUP_INTERVAL_HOURS ||
     !input.BACKUP_RETENTION_DAYS ||

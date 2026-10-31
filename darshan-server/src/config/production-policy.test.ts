@@ -107,4 +107,41 @@ describe('production config policy', () => {
       'ADMIN_PASSWORD is forbidden in production. Use the one-shot protected bootstrap password file instead.'
     );
   });
+
+  it('allows the external sidecar without application off-host backup credentials', async () => {
+    configureProductionEnv({
+      DARSHAN_PROCESS_ROLE: 'worker',
+      BACKUP_MODE: 'EXTERNAL_SIDECAR',
+      BACKUP_RETENTION_DAYS: '3',
+      BACKUP_SCHEDULE_TIME: '00:00',
+      BACKUP_SCHEDULE_TIMEZONE: 'Asia/Kolkata',
+    });
+    for (const key of [
+      'BACKUP_INTERVAL_HOURS',
+      'BACKUP_OFFHOST_DESTINATION',
+      'BACKUP_OFFHOST_ENDPOINT',
+      'BACKUP_OFFHOST_REGION',
+      'BACKUP_OFFHOST_ACCESS_KEY_FILE',
+      'BACKUP_OFFHOST_SECRET_KEY_FILE',
+    ]) delete process.env[key];
+
+    const { config } = await loadConfig();
+
+    expect(config.BACKUP_MODE).toBe('EXTERNAL_SIDECAR');
+    expect(config.BACKUP_RETENTION_DAYS).toBe(3);
+    expect(config.BACKUP_SCHEDULE_TIMEZONE).toBe('Asia/Kolkata');
+  });
+
+  it('rejects an external sidecar schedule outside midnight IST', async () => {
+    configureProductionEnv({
+      BACKUP_MODE: 'EXTERNAL_SIDECAR',
+      BACKUP_RETENTION_DAYS: '3',
+      BACKUP_SCHEDULE_TIME: '00:00',
+      BACKUP_SCHEDULE_TIMEZONE: 'UTC',
+    });
+
+    await expect(loadConfig()).rejects.toThrow(
+      'EXTERNAL_SIDECAR requires BACKUP_SCHEDULE_TIMEZONE=Asia/Kolkata.'
+    );
+  });
 });
