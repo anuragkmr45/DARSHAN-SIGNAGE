@@ -79,7 +79,7 @@ describe('cleanupChatMediaAssets', () => {
     deleteObjectMock.mockResolvedValue(undefined);
   });
 
-  it('deletes media and storage rows when no references remain', async () => {
+  it('retains media and storage rows when a legacy cleanup job is replayed', async () => {
     const db = getDatabase();
     const mediaId = randomUUID();
     const readyObjectId = randomUUID();
@@ -116,21 +116,19 @@ describe('cleanupChatMediaAssets', () => {
       messageId: randomUUID(),
     });
 
-    expect(deleteObjectMock).toHaveBeenCalledWith('media-source', `source/${mediaId}.mp4`);
-    expect(deleteObjectMock).toHaveBeenCalledWith('media-ready', `ready/${mediaId}.mp4`);
-    expect(deleteObjectMock).toHaveBeenCalledWith('media-thumbnails', `thumb/${mediaId}.jpg`);
+    expect(deleteObjectMock).not.toHaveBeenCalled();
 
     const [deletedMedia] = await db
       .select()
       .from(schema.media)
       .where(eq(schema.media.id, mediaId));
-    expect(deletedMedia).toBeUndefined();
+    expect(deletedMedia).toBeTruthy();
 
     const storageRows = await db
       .select()
       .from(schema.storageObjects)
       .where(inArray(schema.storageObjects.id, [readyObjectId, thumbnailObjectId]));
-    expect(storageRows).toHaveLength(0);
+    expect(storageRows).toHaveLength(2);
   });
 
   it('skips cleanup when media is still referenced by chat bookmarks', async () => {
@@ -237,7 +235,7 @@ describe('cleanupChatMediaAssets', () => {
     expect(deleteObjectMock).not.toHaveBeenCalled();
   });
 
-  it('does not delete db rows when object deletion fails', async () => {
+  it('does not attempt object deletion for retained legacy cleanup work', async () => {
     const db = getDatabase();
     const mediaId = randomUUID();
     const readyObjectId = randomUUID();
@@ -275,5 +273,6 @@ describe('cleanupChatMediaAssets', () => {
       .from(schema.storageObjects)
       .where(eq(schema.storageObjects.id, readyObjectId));
     expect(storageRow).toBeTruthy();
+    expect(deleteObjectMock).not.toHaveBeenCalled();
   });
 });

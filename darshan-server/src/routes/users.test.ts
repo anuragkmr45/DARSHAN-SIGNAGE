@@ -401,6 +401,8 @@ describe('User Routes', () => {
             name: 'Processing document at deletion',
             type: 'DOCUMENT',
             status: 'PROCESSING',
+            source_bucket: 'media-source',
+            source_object_key: `retained-processing/${createdUser.id}.pdf`,
             created_by: createdUser.id,
             owner_scope: 'RESTRICTED',
           },
@@ -453,7 +455,9 @@ describe('User Routes', () => {
       ]);
       expect(stoppedProcessingMedia).toMatchObject({
         status: 'FAILED',
-        status_reason: 'USER_DELETED_CLEANUP_PENDING',
+        status_reason: 'USER_DELETED_UPLOAD_ABORTED_RETAINED',
+        source_bucket: 'media-source',
+        source_object_key: `retained-processing/${createdUser.id}.pdf`,
         created_by: createdUser.id,
         owner_scope: 'RESTRICTED',
       });

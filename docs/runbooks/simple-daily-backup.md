@@ -40,7 +40,7 @@ MINIO_VOLUME_PATH="$(docker volume inspect --format '{{ .Mountpoint }}' data_min
   /var/lib/darshan/backups "$POSTGRES_VOLUME_PATH" "$MINIO_VOLUME_PATH"
 ```
 
-Compose volume names can differ by project name; obtain the actual names with `docker volume ls`. Run this script from the repository checkout on the Data VM. It verifies the latest set, measures the live PostgreSQL and MinIO volumes and a full set, and requires room for 30 measured sets, one new staging set, and at least 20% projected margin (minimum 10 GiB). Its JSON result must be `"status":"pass"` for the release gate. A 600 GB allocation is not proof of sufficient capacity. Recheck after major data growth and before each release.
+Compose volume names can differ by project name; obtain the actual names with `docker volume ls`. Run this script from the repository checkout on the Data VM. It verifies the latest set and measures the live PostgreSQL and MinIO volumes and a full set. Because the age cutoff is inclusive, steady state can contain 31 published daily sets (today through 30 days ago); while the next capture runs, one additional staging set coexists until pruning is allowed. The gate therefore requires room for 31 measured published sets, one staging set, and at least 20% projected margin (minimum 10 GiB). Its JSON result must be `"status":"pass"` for the release gate. A 600 GB allocation is not proof of sufficient capacity. Recheck after major data growth and before each release.
 
 Start the data stack normally:
 
@@ -54,6 +54,8 @@ Check the backup service:
 docker compose --env-file .env.production ps backup
 docker compose --env-file .env.production logs --tail=100 backup
 ```
+
+The five-minute container healthcheck is intentionally bounded: it checks the age and safety of the atomic `last-success.env` pointer, the required set files/directories, and the SHA-256 of `SHA256SUMS`. It does not re-read and hash every PostgreSQL/MinIO payload byte on every probe. Full payload checksums are verified before atomic publication, when an existing same-day set is recovered after interruption, and as the first step of every restore.
 
 A successful set is stored as:
 

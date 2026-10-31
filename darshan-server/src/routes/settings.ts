@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createHash } from 'crypto';
 import { z } from 'zod';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
 import { getDatabase, schema, type DbExecutor } from '@/db';
@@ -130,7 +130,10 @@ async function ensureMediaIdsExist(ids: Array<string | null | undefined>) {
   if (requestedIds.length === 0) return;
 
   const db = getDatabase();
-  const rows = await db.select({ id: schema.media.id }).from(schema.media).where(inArray(schema.media.id, requestedIds as string[]));
+  const rows = await db
+    .select({ id: schema.media.id })
+    .from(schema.media)
+    .where(and(inArray(schema.media.id, requestedIds as string[]), isNull(schema.media.deleted_at)));
   if (rows.length !== requestedIds.length) {
     throw AppError.notFound('Media not found');
   }
@@ -155,7 +158,7 @@ async function ensureReadyDefaultMediaIds(
   const rows = await executor
     .select({ id: schema.media.id, status: schema.media.status })
     .from(schema.media)
-    .where(inArray(schema.media.id, requestedIds as string[]));
+    .where(and(inArray(schema.media.id, requestedIds as string[]), isNull(schema.media.deleted_at)));
   if (rows.length !== requestedIds.length) {
     throw AppError.notFound('Media not found');
   }
@@ -764,7 +767,10 @@ export async function settingsRoutes(fastify: FastifyInstance) {
           return reply.status(OK).send({ media_id: null, media: null });
         }
 
-        const [media] = await db.select().from(schema.media).where(eq(schema.media.id, data.media_id));
+        const [media] = await db
+          .select()
+          .from(schema.media)
+          .where(and(eq(schema.media.id, data.media_id), isNull(schema.media.deleted_at)));
         if (!media) {
           throw AppError.notFound('Media not found');
         }

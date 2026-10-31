@@ -28,6 +28,7 @@ import { mapMediaDeleteError } from "@/lib/mediaDeleteErrors";
 import { deriveDisplayNameFromFilename, resolveMediaDisplayName } from "@/lib/media";
 import { canDeleteMediaRecord, getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 import { PageNavigation } from "@/components/common/PageNavigation";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 type MediaLibraryLocationState = {
   returnTo?: string;
@@ -139,6 +140,7 @@ export default function MediaLibrary() {
   const navigate = useNavigate();
   const locationState = location.state as MediaLibraryLocationState | null;
   const currentUser = useAppSelector((state) => state.auth.user);
+  const { can } = useAuthorization();
   const [activeTab, setActiveTab] = useState<MediaTab>("all");
   const [pageByTab, setPageByTab] = useState<Record<MediaTab, number>>({
     all: 1,
@@ -159,7 +161,9 @@ export default function MediaLibrary() {
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
   const [showDeleted, setShowDeleted] = useState(false);
   const [deletedPage, setDeletedPage] = useState(1);
-  const canRestore = currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPER_ADMIN';
+  const canRestore =
+    (currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPER_ADMIN') &&
+    can('manage', 'Media');
   const deletedMediaQuery = useQuery({ queryKey: ['media', 'deleted', deletedPage], queryFn: () => mediaApi.deleted(deletedPage), enabled: canRestore && showDeleted });
   const restoreMutation = useMutation({
     mutationFn: mediaApi.restore,

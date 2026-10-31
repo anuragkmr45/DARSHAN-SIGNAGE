@@ -50,8 +50,8 @@ describe('screen and group deletion references', () => {
     expect(JSON.parse(blockedGroup.body).error).toMatchObject({ code: 'SCREEN_GROUP_IN_USE', details: { blockers: { schedule_items: 1 } } });
     expect(await db.select().from(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.screen_id, screenId))).toHaveLength(1);
 
-    await db.update(schema.scheduleItems).set({ start_at: new Date(Date.now() - 7200_000), end_at: new Date(Date.now() - 3600_000) })
-      .where(eq(schema.scheduleItems.id, item.id));
+    // The item keeps its original target and future timestamps as immutable
+    // history. Once the parent schedule has ended it must not block deletion.
     await db.update(schema.schedules).set({ end_at: new Date(Date.now() - 3600_000) }).where(eq(schema.schedules.id, scheduleId));
     expect((await deleteScreen(screenId)).statusCode).toBe(200);
     expect((await deleteGroup(groupId)).statusCode).toBe(204);

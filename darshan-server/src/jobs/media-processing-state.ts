@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 
 export type MediaProcessingCommitResult = 'COMMITTED' | 'ALREADY_COMMITTED' | 'STALE';
@@ -34,6 +34,7 @@ export async function commitReadyMediaIfProcessing(input: {
       and(
         eq(schema.media.id, input.mediaId),
         eq(schema.media.status, 'PROCESSING'),
+        isNull(schema.media.deleted_at),
         input.expectedWebpagePreviewRefreshToken
           ? eq(
               schema.media.webpage_preview_refresh_token,
@@ -50,11 +51,13 @@ export async function commitReadyMediaIfProcessing(input: {
     .select({
       status: schema.media.status,
       ready_object_id: schema.media.ready_object_id,
+      deleted_at: schema.media.deleted_at,
     })
     .from(schema.media)
     .where(eq(schema.media.id, input.mediaId));
 
   if (
+    !current?.deleted_at &&
     current?.status === 'READY' &&
     (current.ready_object_id ?? null) === input.readyObjectId
   ) {
@@ -79,7 +82,11 @@ export async function failMediaIfProcessing(input: {
       status_reason: input.statusReason,
       updated_at: new Date(),
     })
-    .where(and(eq(schema.media.id, input.mediaId), eq(schema.media.status, 'PROCESSING')))
+    .where(and(
+      eq(schema.media.id, input.mediaId),
+      eq(schema.media.status, 'PROCESSING'),
+      isNull(schema.media.deleted_at)
+    ))
     .returning({ id: schema.media.id });
   return Boolean(failed);
 }

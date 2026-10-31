@@ -10,7 +10,6 @@ import { getDatabase, schema, type DbExecutor } from '@/db';
 import { config as appConfig } from '@/config';
 import { abortMultipartUpload, deleteObject, getObject, putObject } from '@/s3';
 import { createLogger } from '@/utils/logger';
-import { createMediaRepository } from '@/db/repositories/media';
 import { createBackupRun, getLatestBackupRun, runFullBackup } from '@/utils/backup-runs';
 import { getCachedSettings } from '@/utils/settings';
 import { buildSourceFilename, isPdfDocument, requiresDocumentConversion } from '@/utils/media-processing';
@@ -407,6 +406,7 @@ export async function processWebpageVerifyCaptureJob(
             and(
               eq(schema.media.id, mediaId),
               eq(schema.media.status, 'READY'),
+              isNull(schema.media.deleted_at),
               job.refreshToken
                 ? eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
                 : undefined
@@ -434,6 +434,15 @@ export async function processWebpageVerifyCaptureJob(
 
       if (!committed) {
         jobLogger.warn({ mediaId }, 'Discarded webpage result after media authority changed');
+        const [current] = await db
+          .select({ readyObjectId: schema.media.ready_object_id })
+          .from(schema.media)
+          .where(eq(schema.media.id, mediaId));
+        if (current?.readyObjectId !== readyObject.id) {
+          await deleteReadyObject(READY_BUCKET, fallbackKey).catch((cleanupError) => {
+            jobLogger.warn({ cleanupError, mediaId, objectKey: fallbackKey }, 'Stale webpage preview cleanup will be retried');
+          });
+        }
       }
     });
 
@@ -471,6 +480,7 @@ export async function processWebpageVerifyCaptureJob(
           and(
             eq(schema.media.id, mediaId),
             eq(schema.media.status, 'READY'),
+            isNull(schema.media.deleted_at),
             job.refreshToken
               ? eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
               : undefined
@@ -488,6 +498,7 @@ export async function processWebpageVerifyCaptureJob(
           .where(
             and(
               eq(schema.media.id, mediaId),
+              isNull(schema.media.deleted_at),
               eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
             )
           );
@@ -575,6 +586,7 @@ export async function requestWebpagePreviewRefresh(input: {
       and(
         eq(schema.media.id, media.id),
         eq(schema.media.status, media.status),
+        isNull(schema.media.deleted_at),
         isNull(schema.media.webpage_preview_refresh_token)
       )
     )
@@ -585,10 +597,11 @@ export async function requestWebpagePreviewRefresh(input: {
       .select({
         token: schema.media.webpage_preview_refresh_token,
         attemptedAt: schema.media.webpage_preview_attempted_at,
+        deletedAt: schema.media.deleted_at,
       })
       .from(schema.media)
       .where(eq(schema.media.id, media.id));
-    if (current?.token) {
+    if (!current?.deletedAt && current?.token) {
       return {
         mediaId: media.id,
         refreshStatus: 'ALREADY_QUEUED',
@@ -618,6 +631,7 @@ export async function requestWebpagePreviewRefresh(input: {
       .where(
         and(
           eq(schema.media.id, media.id),
+          isNull(schema.media.deleted_at),
           eq(schema.media.webpage_preview_refresh_token, refreshToken)
         )
       );
@@ -647,6 +661,7 @@ export async function processWebpageRefreshDueJob(
       and(
         eq(schema.media.type, 'WEBPAGE'),
         eq(schema.media.status, 'READY'),
+        isNull(schema.media.deleted_at),
         isNull(schema.media.webpage_preview_refresh_token),
         or(
           isNull(schema.media.webpage_preview_attempted_at),
@@ -1468,7 +1483,8 @@ export async function registerJobHandlers() {
           .where(
             and(
               eq(schema.media.id, mediaId),
-              inArray(schema.media.status, ['PROCESSING', 'READY'])
+              inArray(schema.media.status, ['PROCESSING', 'READY']),
+              isNull(schema.media.deleted_at)
             )
           )
           .returning({ id: schema.media.id });
@@ -1719,7 +1735,7 @@ export async function registerJobHandlers() {
                   await tx
                     .update(schema.media)
                     .set({ status: 'FAILED', status_reason: 'UPLOAD_SESSION_EXPIRED', updated_at: new Date() })
-                    .where(eq(schema.media.id, upload.media_id));
+                    .where(and(eq(schema.media.id, upload.media_id), isNull(schema.media.deleted_at)));
                 });
               } catch (error) {
                 logger.warn({ error, uploadSessionId: upload.id }, 'Failed to clean up expired media upload session');

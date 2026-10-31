@@ -22,7 +22,11 @@ export async function assertTargetCanBeDeleted(db: DbExecutor, target: Target): 
   // driver never receives concurrent queries on that same client.
   const scheduleItems = await db.select({ id: schema.scheduleItems.id }).from(schema.scheduleItems)
       .innerJoin(schema.schedules, eq(schema.scheduleItems.schedule_id, schema.schedules.id))
-      .where(and(gt(schema.scheduleItems.end_at, now), sql`(${screenMatch} OR ${groupMatch})`));
+      .where(and(
+        gt(schema.schedules.end_at, now),
+        gt(schema.scheduleItems.end_at, now),
+        sql`(${screenMatch} OR ${groupMatch})`
+      ));
   const publishes = await db.select({ id: schema.publishTargets.id }).from(schema.publishTargets)
       .innerJoin(schema.publishes, eq(schema.publishTargets.publish_id, schema.publishes.id))
       .innerJoin(schema.schedules, eq(schema.publishes.schedule_id, schema.schedules.id))

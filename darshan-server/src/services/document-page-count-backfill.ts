@@ -30,6 +30,7 @@ export async function backfillDocumentPageCounts(options: {
     const conditions = [
       eq(schema.media.type, 'DOCUMENT'),
       eq(schema.media.status, 'READY'),
+      isNull(schema.media.deleted_at),
       isNull(schema.media.page_count),
     ];
     if (cursor) conditions.push(gt(schema.media.id, cursor));

@@ -49,7 +49,7 @@ import { apiEndpoints, PENDINGSTATUS } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { getDatabase, schema } from '@/db';
-import { desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
 import { createAuditLogRepository } from '@/db/repositories/audit-log';
 import { config as appConfig } from '@/config';
@@ -343,6 +343,98 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         source_url: sourceUrl,
         cause: error instanceof Error ? error.message : String(error),
       });
+    }
+  };
+
+  const RESTORE_REQUEUE_PENDING = 'MEDIA_RESTORE_REQUEUE_PENDING';
+  const RESTORE_REQUEUE_CLAIMED = 'MEDIA_RESTORE_REQUEUE_CLAIMED';
+  const RESTORE_REQUEUE_CLAIM_TIMEOUT_MS = 60_000;
+
+  const requeueRestoredProcessingMedia = async (mediaId: string): Promise<boolean> => {
+    const claimed = await db.transaction(async (tx) => {
+      const [media] = await tx.select().from(schema.media)
+        .where(eq(schema.media.id, mediaId)).for('update');
+      if (!media || media.deleted_at || media.status !== 'PROCESSING') return null;
+      const staleClaim =
+        media.status_reason === RESTORE_REQUEUE_CLAIMED &&
+        media.updated_at.getTime() <= Date.now() - RESTORE_REQUEUE_CLAIM_TIMEOUT_MS;
+      if (media.status_reason !== RESTORE_REQUEUE_PENDING && !staleClaim) return null;
+      await tx.update(schema.media).set({
+        status_reason: RESTORE_REQUEUE_CLAIMED,
+        updated_at: new Date(),
+      }).where(and(
+        eq(schema.media.id, media.id),
+        eq(schema.media.status, 'PROCESSING'),
+        isNull(schema.media.deleted_at)
+      ));
+      return media;
+    });
+    if (!claimed) return false;
+
+    try {
+      const sourceObjectId = claimed.source_object_id;
+      if ((claimed.type === 'VIDEO' || claimed.type === 'DOCUMENT') && !sourceObjectId) {
+        throw new AppError({
+          statusCode: 409,
+          code: 'MEDIA_RESTORE_PROCESSING_SOURCE_MISSING',
+          message: 'The retained processing source cannot be requeued.',
+        });
+      }
+      if (claimed.type === 'VIDEO') {
+        await Promise.all([
+          queueFFmpegTranscode({
+            mediaId: claimed.id,
+            sourceObjectId: sourceObjectId!,
+            targetFormat: 'mp4',
+            quality: 'high',
+          }),
+          queueFFmpegThumbnail({
+            mediaId: claimed.id,
+            sourceObjectId: sourceObjectId!,
+          }),
+        ]);
+      } else if (claimed.type === 'DOCUMENT') {
+        await queueDocumentConvert({
+          mediaId: claimed.id,
+          sourceObjectId: sourceObjectId!,
+        });
+      } else if (
+        claimed.type === 'WEBPAGE' &&
+        claimed.source_url &&
+        claimed.webpage_preview_refresh_token
+      ) {
+        await queueWebpageVerifyCapture({
+          mediaId: claimed.id,
+          sourceUrl: claimed.source_url,
+          mode: 'INITIAL',
+          refreshToken: claimed.webpage_preview_refresh_token,
+        });
+      } else {
+        throw new AppError({
+          statusCode: 409,
+          code: 'MEDIA_RESTORE_PROCESSING_SOURCE_MISSING',
+          message: 'The retained processing source cannot be requeued.',
+        });
+      }
+      await db.update(schema.media).set({ status_reason: null, updated_at: new Date() })
+        .where(and(
+          eq(schema.media.id, claimed.id),
+          eq(schema.media.status, 'PROCESSING'),
+          eq(schema.media.status_reason, RESTORE_REQUEUE_CLAIMED),
+          isNull(schema.media.deleted_at)
+        ));
+      return true;
+    } catch (error) {
+      await db.update(schema.media).set({
+        status_reason: RESTORE_REQUEUE_PENDING,
+        updated_at: new Date(),
+      }).where(and(
+        eq(schema.media.id, claimed.id),
+        eq(schema.media.status, 'PROCESSING'),
+        eq(schema.media.status_reason, RESTORE_REQUEUE_CLAIMED),
+        isNull(schema.media.deleted_at)
+      ));
+      throw error;
     }
   };
 
@@ -1551,9 +1643,25 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const [media] = await executor.select().from(schema.media)
           .where(eq(schema.media.id, (request.params as { id: string }).id)).for('update');
         if (!media) throw AppError.notFound('Media not found');
+        const mayNeedWebpageRequeue = Boolean(media.deleted_at) ||
+          media.status_reason === RESTORE_REQUEUE_PENDING;
+        const webpageRefreshToken =
+          media.status === 'PROCESSING' && media.type === 'WEBPAGE' && mayNeedWebpageRequeue
+            ? media.webpage_preview_refresh_token ?? randomUUID()
+            : media.webpage_preview_refresh_token;
         if (!media.deleted_at) {
+          if (webpageRefreshToken !== media.webpage_preview_refresh_token) {
+            await mediaRepo.update(media.id, {
+              webpage_preview_refresh_token: webpageRefreshToken,
+              webpage_preview_attempted_at: new Date(),
+            }, executor);
+          }
           await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_RESTORE', resource_type: 'Media', resource_id: media.id, ip_address: request.ip }, executor);
-          return { id: media.id, already_restored: true };
+          return {
+            id: media.id,
+            already_restored: true,
+            should_requeue: media.status === 'PROCESSING',
+          };
         }
         const ids = [media.source_object_id, media.ready_object_id, media.thumbnail_object_id].filter(Boolean) as string[];
         const objects = ids.length ? await executor.select().from(schema.storageObjects)
@@ -1569,11 +1677,32 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           try { await headObject(location.bucket, location.key); }
           catch { throw new AppError({ statusCode: 409, code: 'MEDIA_RESTORE_OBJECT_MISSING', message: 'A retained media object is unavailable.' }); }
         }
-        await mediaRepo.update(media.id, { deleted_at: null, deleted_by: null }, executor);
+        await mediaRepo.update(media.id, {
+          deleted_at: null,
+          deleted_by: null,
+          ...(media.status === 'PROCESSING' ? { status_reason: RESTORE_REQUEUE_PENDING } : {}),
+          ...(webpageRefreshToken !== media.webpage_preview_refresh_token
+            ? {
+                webpage_preview_refresh_token: webpageRefreshToken,
+                webpage_preview_attempted_at: new Date(),
+              }
+            : {}),
+        }, executor);
         await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_RESTORE', resource_type: 'Media', resource_id: media.id, ip_address: request.ip }, executor);
-        return { id: media.id, already_restored: false };
+        return {
+          id: media.id,
+          already_restored: false,
+          should_requeue: media.status === 'PROCESSING',
+        };
       });
-      return reply.send(restored);
+      const processingRequeued = restored.should_requeue
+        ? await requeueRestoredProcessingMedia(restored.id)
+        : false;
+      return reply.send({
+        id: restored.id,
+        already_restored: restored.already_restored,
+        processing_requeued: processingRequeued,
+      });
     } catch (error) { return respondWithError(reply, error); }
   });
 

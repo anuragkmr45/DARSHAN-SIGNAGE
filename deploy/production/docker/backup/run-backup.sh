@@ -71,6 +71,69 @@ verify_set() {
   (cd "$directory" && sha256sum --check --quiet SHA256SUMS)
 }
 
+verify_status_pointer() {
+  local backup_set="$1"
+  local expected_manifest_sha="$2"
+  local directory="$BACKUP_ROOT/$backup_set"
+  local actual_manifest_sha
+
+  [[ "$expected_manifest_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ -d "$directory" && ! -L "$directory" ]] || return 1
+  [[ -f "$directory/postgres.dump" && ! -L "$directory/postgres.dump" ]] || return 1
+  [[ -d "$directory/minio" && ! -L "$directory/minio" ]] || return 1
+  [[ -f "$directory/minio-buckets.txt" && ! -L "$directory/minio-buckets.txt" ]] || return 1
+  [[ -f "$directory/metadata.env" && ! -L "$directory/metadata.env" ]] || return 1
+  [[ -f "$directory/SHA256SUMS" && ! -L "$directory/SHA256SUMS" ]] || return 1
+  actual_manifest_sha="$(sha256sum "$directory/SHA256SUMS" | awk '{print $1}')"
+  [[ "$actual_manifest_sha" == "$expected_manifest_sha" ]]
+}
+
+publish_success_status() {
+  local backup_date="$1"
+  local directory="$2"
+  local completed_at_utc="${3:-}"
+  local backup_set="backup-$backup_date"
+  local current_set current_date current_completed current_utc current_manifest
+  local completed_at_epoch manifest_sha status_tmp
+
+  if [[ -f "$BACKUP_ROOT/last-success.env" && ! -L "$BACKUP_ROOT/last-success.env" ]]; then
+    current_set="$(sed -n 's/^BACKUP_SET=//p' "$BACKUP_ROOT/last-success.env")"
+    current_date="${current_set#backup-}"
+    current_completed="$(sed -n 's/^COMPLETED_AT_EPOCH=//p' "$BACKUP_ROOT/last-success.env")"
+    current_utc="$(sed -n 's/^COMPLETED_AT_UTC=//p' "$BACKUP_ROOT/last-success.env")"
+    current_manifest="$(sed -n 's/^MANIFEST_SHA256=//p' "$BACKUP_ROOT/last-success.env")"
+    if [[ "$current_set" =~ ^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$ \
+      && "$current_completed" =~ ^[0-9]+$ \
+      && "$current_utc" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ \
+      && "$(date -u -d "$current_date" +%F 2>/dev/null)" == "$current_date" \
+      && ( "$current_set" == "$backup_set" || "$current_set" > "$backup_set" ) \
+      ]] && verify_status_pointer "$current_set" "$current_manifest"; then
+      log "Preserving success status for verified set $current_set"
+      return 0
+    fi
+  fi
+
+  if [[ -z "$completed_at_utc" ]]; then
+    completed_at_utc="$(sed -n 's/^CREATED_AT_UTC=//p' "$directory/metadata.env")"
+  fi
+  [[ "$completed_at_utc" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
+    || fail "verified backup set $backup_set has no valid completion timestamp"
+  completed_at_epoch="$(date -u -d "$completed_at_utc" +%s 2>/dev/null)" \
+    || fail "verified backup set $backup_set has an invalid completion timestamp"
+  manifest_sha="$(sha256sum "$directory/SHA256SUMS" | awk '{print $1}')"
+  [[ "$manifest_sha" =~ ^[0-9a-f]{64}$ ]] || fail "could not hash backup manifest for $backup_set"
+
+  status_tmp="$BACKUP_ROOT/.last-success.$$"
+  cat > "$status_tmp" <<EOF
+BACKUP_SET=$backup_set
+COMPLETED_AT_EPOCH=$completed_at_epoch
+COMPLETED_AT_UTC=$completed_at_utc
+MANIFEST_SHA256=$manifest_sha
+EOF
+  chmod 0600 "$status_tmp"
+  mv "$status_tmp" "$BACKUP_ROOT/last-success.env"
+}
+
 assert_capacity() {
   local available required last_size=0 latest
   available="$(df -PB1 "$BACKUP_ROOT" | awk 'NR == 2 { print $4 }')"
@@ -85,20 +148,47 @@ assert_capacity() {
 
 prune_completed_sets() {
   local reference_date="$1"
+  local verified_name="$2"
   local -a sets=()
-  local name path newest cutoff
+  local name path newest_verified cutoff candidate_date index
+
+  [[ "$verified_name" =~ ^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+    || fail "verified backup set name is invalid"
+  candidate_date="${verified_name#backup-}"
+  [[ "$(date -u -d "$candidate_date" +%F 2>/dev/null)" == "$candidate_date" ]] \
+    || fail "verified backup set date is invalid"
 
   mapfile -t sets < <(
     find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
       -name 'backup-????-??-??' -printf '%f\n' | LC_ALL=C sort
   )
   (( ${#sets[@]} > 0 )) || return 0
-  newest="${sets[${#sets[@]}-1]}"
+  newest_verified="$verified_name"
+  for (( index=${#sets[@]}-1; index>=0; index-- )); do
+    name="${sets[$index]}"
+    [[ "$name" > "$newest_verified" ]] || break
+    candidate_date="${name#backup-}"
+    if [[ ! "$name" =~ ^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$ \
+      || "$(date -u -d "$candidate_date" +%F 2>/dev/null)" != "$candidate_date" ]]; then
+      log "Ignoring invalid backup directory while selecting newest verified set: $name"
+      continue
+    fi
+    if verify_set "$BACKUP_ROOT/$name"; then
+      newest_verified="$name"
+      break
+    fi
+    log "Ignoring unverified backup directory while selecting newest verified set: $name"
+  done
   cutoff="$(TZ="$BACKUP_SCHEDULE_TIMEZONE" date -d "$reference_date - $BACKUP_RETENTION_DAYS days" +%F)" \
     || fail "could not calculate backup retention cutoff"
   for name in "${sets[@]}"; do
-    [[ "$name" =~ ^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail "refusing to prune an invalid backup name"
-    [[ "$name" < "backup-$cutoff" && "$name" != "$newest" ]] || continue
+    candidate_date="${name#backup-}"
+    if [[ ! "$name" =~ ^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$ \
+      || "$(date -u -d "$candidate_date" +%F 2>/dev/null)" != "$candidate_date" ]]; then
+      log "Refusing to prune invalid backup directory $name"
+      continue
+    fi
+    [[ "$name" < "backup-$cutoff" && "$name" != "$newest_verified" ]] || continue
     path="$BACKUP_ROOT/$name"
     [[ -d "$path" && ! -L "$path" ]] || fail "refusing to prune a non-directory backup"
     log "Pruning expired completed backup set $name"
@@ -146,7 +236,7 @@ run_once() {
   validate_configuration
 
   local backup_date="${BACKUP_SET_DATE:-$(TZ="$BACKUP_SCHEDULE_TIMEZONE" date +%F)}"
-  local created_at final stage status_tmp
+  local completed_at created_at final stage
   [[ "$backup_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail "BACKUP_SET_DATE must use YYYY-MM-DD"
   [[ "$(date -u -d "$backup_date" +%F 2>/dev/null)" == "$backup_date" ]] || fail "BACKUP_SET_DATE is not a calendar date"
 
@@ -176,7 +266,8 @@ run_once() {
     [[ -d "$final" && ! -L "$final" ]] || fail "today's backup path is not a safe directory"
     verify_set "$final" || fail "today's existing backup failed checksum verification"
     log "Verified backup set backup-$backup_date already exists; no duplicate was created"
-    prune_completed_sets "$backup_date"
+    publish_success_status "$backup_date" "$final"
+    prune_completed_sets "$backup_date" "backup-$backup_date"
     cleanup
     trap - EXIT INT TERM
     return 0
@@ -227,16 +318,9 @@ EOF
   BACKUP_ACTIVE_STAGE=""
   sync
 
-  prune_completed_sets "$backup_date"
-
-  status_tmp="$BACKUP_ROOT/.last-success.$$"
-  cat > "$status_tmp" <<EOF
-BACKUP_SET=backup-$backup_date
-COMPLETED_AT_EPOCH=$(date -u +%s)
-COMPLETED_AT_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-EOF
-  chmod 0600 "$status_tmp"
-  mv "$status_tmp" "$BACKUP_ROOT/last-success.env"
+  completed_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  publish_success_status "$backup_date" "$final" "$completed_at"
+  prune_completed_sets "$backup_date" "backup-$backup_date"
   log "Backup set backup-$backup_date completed and verified"
   cleanup
   trap - EXIT INT TERM
@@ -270,13 +354,16 @@ run_loop() {
 healthcheck() {
   validate_configuration
   local status="$BACKUP_ROOT/last-success.env"
-  local completed now age backup_set
+  local completed now age backup_set backup_date manifest_sha
   [[ -f "$status" && ! -L "$status" ]] || exit 1
   completed="$(sed -n 's/^COMPLETED_AT_EPOCH=//p' "$status")"
   backup_set="$(sed -n 's/^BACKUP_SET=//p' "$status")"
+  manifest_sha="$(sed -n 's/^MANIFEST_SHA256=//p' "$status")"
   [[ "$completed" =~ ^[0-9]+$ ]] || exit 1
   [[ "$backup_set" =~ ^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || exit 1
-  verify_set "$BACKUP_ROOT/$backup_set" || exit 1
+  backup_date="${backup_set#backup-}"
+  [[ "$(date -u -d "$backup_date" +%F 2>/dev/null)" == "$backup_date" ]] || exit 1
+  verify_status_pointer "$backup_set" "$manifest_sha" || exit 1
   now="$(date -u +%s)"
   age=$(( now - completed ))
   (( age >= 0 && age <= BACKUP_MAX_AGE_SECONDS ))

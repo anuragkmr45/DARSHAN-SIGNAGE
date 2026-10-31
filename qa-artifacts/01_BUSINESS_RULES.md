@@ -144,6 +144,13 @@ Evidence references use repository-relative paths and symbols where helpful. `S`
 | BR-049 | Editable role controls imply persistent customization to an operator, but built-in role startup synchronization can contradict that expectation. | CMS `darshan-cms/src/components/settings/RolesPermissionsTab.tsx`; server `darshan-server/src/routes/roles.ts`, `darshan-server/src/rbac/system-roles.ts` | Security admin; S/C | Reconfiguration after restart may be unexpected; BQ-008 |
 | BR-050 | The user-stated single instance of each VM role creates dependency outage risks; presence of retries/backups alone does not establish HA or automatic failover. | Five-role generated Compose model; readiness dependency checks; independent recovery scripts | Ops/site users; all roles | Availability expectations must be explicit; BQ-017, BQ-018 |
 
+## Confirmed Groups 1–4 Operational Targets
+
+| ID | Confirmed requirement | Evidence / status | Actors/components | Risk |
+| --- | --- | --- | --- | --- |
+| BR-064 | Release workload is 500 connected players, 40 active CMS users, five concurrent 500 MiB uploads and a five-minute 1,000-player spike. API p95 ≤1 second, p99 ≤2 seconds, non-chaos errors <1%, cached emergency display ≤3 seconds on healthy WebSocket and ≤7 seconds on fallback, lossless command fanout, backlog recovery, no normal-load PoP discard and sustained CPU/memory <80% are gates. | BQ-017 release decision and `evidence/groups-1-4-release-gates-2026-11-01.md`; representative five-VM measurement is Not Tested | Ops/site users; all roles | Unmeasured capacity blocks release |
+| BR-065 | Measured RPO ≤24 hours, RTO ≤4 hours and planned maintenance ≤2 hours are gates. Rehearse an isolated production-sized PostgreSQL/MinIO restore before every release and monthly. Same-Data-VM backup cannot meet RPO for VM/disk loss and needs explicit accepted-risk disposition. | BQ-018 release decision and `evidence/groups-1-4-release-gates-2026-11-01.md`; production-sized restore is Not Tested | Ops/DBA/recovery; all roles | Missing/failed/late recovery evidence blocks release |
+
 ## Rules Requiring Business Confirmation
 
 | ID | Acceptance decision not settled by code | Observed evidence / related implemented rules | Actors/components | Risk / question |
@@ -153,8 +160,6 @@ Evidence references use repository-relative paths and symbols where helpful. `S`
 | BR-061 | Meaning of uptime/report counts and reporting-day timezone | BR-038 | Reporting users; S/C | Wrong calculations; BQ-014 |
 | BR-062 | Retention periods and deletion/restorability expectations by data class | BR-015,035,045 | Data owner/support; DB/S3/P | Irrecoverable loss/privacy violation; BQ-015,020 |
 | BR-063 | Supported browser, OS/package, display/GPU and accessibility acceptance matrix | BR-017,018,032,033; package and test manifests | Operators/viewers; C/P | Untested platform advertised as supported; BQ-016 |
-| BR-064 | Fleet/workload/media-volume limits and latency/error/playback SLOs | BR-013,029,040,050; user-stated VM resources are not measurements | Ops/site users; all roles | Mis-sized production and invented pass thresholds; BQ-017 |
-| BR-065 | Backup loss window, recovery deadline, maintenance allowance and supported update baselines | BR-043..045,050 | Ops/DBA/recovery; all roles | Unrecoverable or overlong outage; BQ-018 |
 | BR-066 | Approved network exposure, outbound integrations and certificate/trust boundary | BR-018,028,041,046,047 | Security/ops; all roles | Wrong isolation/security acceptance; BQ-019 |
 
 ## Evidence Use During Test Design

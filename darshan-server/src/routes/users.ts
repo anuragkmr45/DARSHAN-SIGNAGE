@@ -408,13 +408,11 @@ export async function userRoutes(fastify: FastifyInstance) {
         const uploadMediaIds = new Set(result.abortedUploads.map((upload) => upload.media_id));
         for (const media of result.failedMedia) {
           if (uploadMediaIds.has(media.id) || !media.source_bucket || !media.source_object_key) continue;
-          try {
-            await deleteObject(media.source_bucket, media.source_object_key);
-            await mediaRepo.update(media.id, { status_reason: 'USER_DELETED_UPLOAD_ABORTED' });
-          } catch (cleanupError) {
-            await mediaRepo.update(media.id, { status_reason: 'USER_DELETED_CLEANUP_PENDING' });
-            logger.warn({ cleanupError, mediaId: media.id }, 'Deleted-user legacy upload cleanup will be retried');
-          }
+          // This source belongs to an accepted media record, not an incomplete
+          // upload session. Keep it recoverable after the creator is tombstoned.
+          await mediaRepo.update(media.id, {
+            status_reason: 'USER_DELETED_UPLOAD_ABORTED_RETAINED',
+          });
         }
 
         await broadcastSessionInvalidation([userId]);

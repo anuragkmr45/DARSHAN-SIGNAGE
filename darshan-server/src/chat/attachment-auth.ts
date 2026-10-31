@@ -9,6 +9,7 @@ type MediaScopeRow = {
   scope_department_id?: string | null;
   scopeDepartmentId?: string | null;
   status?: string | null;
+  deleted_at?: Date | string | null;
 };
 
 type AttachmentAuthInput = {
@@ -46,11 +47,13 @@ export function assertAttachmentAccess(input: AttachmentAuthInput): void {
 }
 
 export function assertAttachmentMediaReady(
-  mediaRows: Array<Pick<MediaScopeRow, 'id' | 'status'>>,
+  mediaRows: Array<Pick<MediaScopeRow, 'id' | 'status' | 'deleted_at'>>,
   allowedStatuses: string[] = ['READY']
 ): void {
   const allowed = new Set(allowedStatuses);
-  const notReady = mediaRows.filter((row) => !row.status || !allowed.has(row.status));
+  const notReady = mediaRows.filter(
+    (row) => Boolean(row.deleted_at) || !row.status || !allowed.has(row.status)
+  );
   if (notReady.length === 0) return;
 
   throw new AppError({

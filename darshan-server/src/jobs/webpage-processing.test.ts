@@ -167,6 +167,111 @@ describe('webpage media processing job', () => {
     expect(updates).not.toContainEqual(expect.objectContaining({ ready_object_id: expect.anything() }));
   });
 
+  it('discards a newly produced preview when deletion wins the refresh commit race', async () => {
+    const mediaId = randomUUID();
+    const refreshToken = randomUUID();
+    const screenshot = Buffer.from('stale-preview');
+    const media = {
+      id: mediaId,
+      status: 'READY',
+      ready_object_id: 'retained-ready-object',
+      webpage_preview_refresh_token: refreshToken,
+      created_by: randomUUID(),
+    };
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(async () => [media]),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({ returning: vi.fn(async () => []) })),
+        })),
+      })),
+    } as any;
+    const deleteObject = vi.fn().mockResolvedValue(undefined);
+    const previewKey = `${mediaId}/webpage-previews/${createHash('sha256').update(screenshot).digest('hex')}.png`;
+
+    await processWebpageVerifyCaptureJob(
+      {
+        mediaId,
+        sourceUrl: 'https://example.com/',
+        mode: 'REFRESH',
+        refreshToken,
+      },
+      {
+        db,
+        verifySource: vi.fn().mockResolvedValue({
+          finalUrl: 'https://example.com/',
+          contentType: 'text/html',
+          title: 'Example Domain',
+          screenshot,
+        }),
+        putObject: vi.fn().mockResolvedValue({ sha256: 'c'.repeat(64), etag: 'etag' }),
+        upsertStorageObject: vi.fn().mockResolvedValue({ id: 'new-stale-ready-object' }),
+        deleteObject,
+        logger: { warn: vi.fn(), error: vi.fn() },
+      }
+    );
+
+    expect(deleteObject).toHaveBeenCalledWith('media-ready', previewKey);
+  });
+
+  it('does not delete the object committed by a duplicate refresh winner', async () => {
+    const mediaId = randomUUID();
+    const refreshToken = randomUUID();
+    const screenshot = Buffer.from('duplicate-preview');
+    const oldMedia = {
+      id: mediaId,
+      status: 'READY',
+      ready_object_id: 'old-ready-object',
+      webpage_preview_refresh_token: refreshToken,
+      created_by: randomUUID(),
+    };
+    const selectResults = [
+      [oldMedia],
+      [{ readyObjectId: 'winner-ready-object' }],
+    ];
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(async () => selectResults.shift() ?? []),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({ returning: vi.fn(async () => []) })),
+        })),
+      })),
+    } as any;
+    const deleteObject = vi.fn().mockResolvedValue(undefined);
+
+    await processWebpageVerifyCaptureJob(
+      {
+        mediaId,
+        sourceUrl: 'https://example.com/',
+        mode: 'REFRESH',
+        refreshToken,
+      },
+      {
+        db,
+        verifySource: vi.fn().mockResolvedValue({
+          finalUrl: 'https://example.com/',
+          contentType: 'text/html',
+          title: 'Example Domain',
+          screenshot,
+        }),
+        putObject: vi.fn().mockResolvedValue({ sha256: 'd'.repeat(64), etag: 'etag' }),
+        upsertStorageObject: vi.fn().mockResolvedValue({ id: 'winner-ready-object' }),
+        deleteObject,
+        logger: { warn: vi.fn(), error: vi.fn() },
+      }
+    );
+
+    expect(deleteObject).not.toHaveBeenCalled();
+  });
+
   it('logs structured stage errors and stores a mapped failure reason', async () => {
     const mediaId = randomUUID();
     const { db, updates } = createDb({ id: mediaId, status: 'PROCESSING' });

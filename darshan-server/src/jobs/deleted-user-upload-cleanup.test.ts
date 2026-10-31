@@ -54,7 +54,7 @@ describe('deleted-user upload cleanup retries', () => {
     deleteObjectMock.mockResolvedValue(undefined);
   });
 
-  it('keeps failed cleanup pending, retries it, and converges idempotently', async () => {
+  it('retries incomplete upload cleanup while retaining accepted legacy media', async () => {
     const db = getDatabase();
     const baseTime = new Date(Date.now() - 6 * 60 * 60 * 1000);
     const retryTime = new Date(baseTime.getTime() + 3 * 60 * 60 * 1000);
@@ -138,7 +138,7 @@ describe('deleted-user upload cleanup retries', () => {
     deleteObjectMock.mockRejectedValue(new Error('synthetic object-store outage'));
     const failed = await cleanupDeletedUserUploads({ now: () => retryTime });
     expect(failed.upload_sessions_pending).toBeGreaterThanOrEqual(1);
-    expect(failed.legacy_media_pending).toBeGreaterThanOrEqual(2);
+    expect(failed.legacy_media_pending).toBe(0);
 
     const [pendingSession] = await db
       .select()
@@ -164,9 +164,9 @@ describe('deleted-user upload cleanup retries', () => {
       `staging/${uploadSessionId}.mp4`,
       `multipart-${uploadSessionId}`
     );
-    expect(deleteObjectMock).toHaveBeenCalledWith('media-source', `legacy/${legacyMediaId}.png`);
-    expect(deleteObjectMock).toHaveBeenCalledWith('media-ready', `${legacyMediaId}/partial-ready.png`);
-    expect(deleteObjectMock).toHaveBeenCalledWith('media-thumbnails', `${legacyMediaId}/thumbnail.jpg`);
+    expect(deleteObjectMock).not.toHaveBeenCalledWith('media-source', `legacy/${legacyMediaId}.png`);
+    expect(deleteObjectMock).not.toHaveBeenCalledWith('media-ready', `${legacyMediaId}/partial-ready.png`);
+    expect(deleteObjectMock).not.toHaveBeenCalledWith('media-thumbnails', `${legacyMediaId}/thumbnail.jpg`);
 
     const [recoveredSession] = await db
       .select()
@@ -183,12 +183,12 @@ describe('deleted-user upload cleanup retries', () => {
     });
     expect(recoveredLegacyMedia).toMatchObject({
       status: 'FAILED',
-      status_reason: 'USER_DELETED_UPLOAD_ABORTED_FINAL',
-      source_object_id: null,
-      source_bucket: null,
-      source_object_key: null,
-      ready_object_id: null,
-      thumbnail_object_id: null,
+      status_reason: 'USER_DELETED_CLEANUP_PENDING',
+      source_object_id: sourceStorageId,
+      source_bucket: 'media-source',
+      source_object_key: `legacy/${legacyMediaId}.png`,
+      ready_object_id: readyStorageId,
+      thumbnail_object_id: thumbnailStorageId,
     });
 
     await cleanupDeletedUserUploads({ now: () => terminalTime, limit: 1_000 });
@@ -198,7 +198,7 @@ describe('deleted-user upload cleanup retries', () => {
       .where(eq(schema.media.id, uploadMediaId));
     expect(terminalUploadMedia).toMatchObject({
       status: 'FAILED',
-      status_reason: 'USER_DELETED_UPLOAD_ABORTED_FINAL',
+      status_reason: 'USER_DELETED_UPLOAD_ABORTED',
     });
 
     // Other integration cases can leave newly aborted uploads in the shared

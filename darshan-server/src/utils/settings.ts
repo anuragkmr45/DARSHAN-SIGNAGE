@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { config as appConfig } from '@/config';
 import { getPresignedUrl } from '@/s3';
@@ -197,7 +197,7 @@ export async function resolveBrandingMediaMap(ids: Array<string | null | undefin
       source_object_key: schema.media.source_object_key,
     })
     .from(schema.media)
-    .where(inArray(schema.media.id, requestedIds as string[]));
+    .where(and(inArray(schema.media.id, requestedIds as string[]), isNull(schema.media.deleted_at)));
 
   const map = new Map<string, { id: string; url: string | null }>();
 

@@ -263,6 +263,83 @@ describe('Media Routes - authoritative upload finalization', () => {
     });
   });
 
+  it('keeps a failed restore requeue retryable without duplicating a successful repeat', async () => {
+    const db = getDatabase();
+    const sourceObjectId = randomUUID();
+    const media = await insertMedia({
+      type: 'DOCUMENT',
+      status: 'PROCESSING',
+    });
+    await db.insert(schema.storageObjects).values({
+      id: sourceObjectId,
+      bucket: media.source_bucket!,
+      object_key: media.source_object_key!,
+      content_type: 'application/pdf',
+      size: media.source_size,
+    });
+    await db.update(schema.media).set({
+      source_object_id: sourceObjectId,
+      deleted_at: new Date(),
+      deleted_by: ownerUserId,
+    }).where(eq(schema.media.id, media.id));
+    headObjectMock.mockResolvedValue({
+      ContentLength: media.source_size,
+      ContentType: 'application/pdf',
+    });
+
+    const restore = () => server.inject({
+      method: 'POST',
+      url: `/api/v1/media/${media.id}/restore`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    queueDocumentConvertMock.mockRejectedValueOnce(new Error('synthetic queue outage'));
+    const first = await restore();
+    expect(first.statusCode).toBe(HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    const [pendingRetry] = await db.select().from(schema.media).where(eq(schema.media.id, media.id));
+    expect(pendingRetry).toMatchObject({
+      status: 'PROCESSING',
+      deleted_at: null,
+      status_reason: 'MEDIA_RESTORE_REQUEUE_PENDING',
+    });
+
+    queueDocumentConvertMock.mockResolvedValue(undefined);
+    const repeated = await restore();
+    expect(repeated.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(repeated.body)).toMatchObject({
+      id: media.id,
+      already_restored: true,
+      processing_requeued: true,
+    });
+    const afterSuccess = await restore();
+    expect(afterSuccess.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(afterSuccess.body)).toMatchObject({
+      id: media.id,
+      already_restored: true,
+      processing_requeued: false,
+    });
+    await db.update(schema.media).set({
+      status_reason: 'MEDIA_RESTORE_REQUEUE_CLAIMED',
+      updated_at: new Date('2000-01-01T00:00:00.000Z'),
+    }).where(eq(schema.media.id, media.id));
+    const staleClaimRetry = await restore();
+    expect(staleClaimRetry.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(staleClaimRetry.body).processing_requeued).toBe(true);
+    const finalRepeat = await restore();
+    expect(JSON.parse(finalRepeat.body).processing_requeued).toBe(false);
+    expect(queueDocumentConvertMock).toHaveBeenCalledTimes(3);
+    expect(queueDocumentConvertMock).toHaveBeenCalledWith({
+      mediaId: media.id,
+      sourceObjectId,
+    });
+
+    const [restored] = await db.select().from(schema.media).where(eq(schema.media.id, media.id));
+    expect(restored).toMatchObject({
+      status: 'PROCESSING',
+      deleted_at: null,
+      source_object_id: sourceObjectId,
+    });
+  });
+
   it('rejects completion when the storage object is missing', async () => {
     const media = await insertMedia({ type: 'DOCUMENT', sourceSize: 1024 });
     headObjectMock.mockRejectedValue({

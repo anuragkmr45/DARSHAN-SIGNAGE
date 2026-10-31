@@ -159,7 +159,7 @@ export class ConversationRepository {
           await db
             .select({ id: schema.media.id })
             .from(schema.media)
-            .where(inArray(schema.media.id, mediaIds))
+            .where(and(inArray(schema.media.id, mediaIds), isNull(schema.media.deleted_at)))
         ).map((row) => row.id)
       : [];
     const richBody = attachments?.length ? { legacy_attachments: attachments } : undefined;

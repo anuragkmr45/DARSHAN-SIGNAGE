@@ -3,7 +3,7 @@ import { commitReadyMediaIfProcessing, failMediaIfProcessing } from './media-pro
 
 function updateExecutor(options: {
   updateResult?: Array<{ id: string }>;
-  current?: { status: string; ready_object_id: string | null } | null;
+  current?: { status: string; ready_object_id: string | null; deleted_at?: Date | null } | null;
 }) {
   const updates: Array<Record<string, unknown>> = [];
   const where = vi.fn(() => ({
@@ -81,5 +81,20 @@ describe('media processing state commit', () => {
       statusReason: 'DOCUMENT_CONVERSION_FAILED',
       executor,
     })).resolves.toBe(false);
+  });
+
+  it('does not classify a deleted READY row as an idempotent worker success', async () => {
+    const { executor } = updateExecutor({
+      current: { status: 'READY', ready_object_id: 'ready-1', deleted_at: new Date() },
+    });
+    const compensate = vi.fn().mockResolvedValue(undefined);
+
+    await expect(commitReadyMediaIfProcessing({
+      mediaId: 'media-1',
+      readyObjectId: 'ready-1',
+      executor,
+      compensateStaleResult: compensate,
+    })).resolves.toBe('STALE');
+    expect(compensate).toHaveBeenCalledOnce();
   });
 });

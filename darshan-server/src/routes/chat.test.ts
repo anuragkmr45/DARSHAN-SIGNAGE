@@ -472,6 +472,10 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     const [visible] = await db.select().from(schema.chatMessages).where(eq(schema.chatMessages.id, messageId));
     expect(visible?.deleted_at).toBeNull();
     expect(visible?.body_text).toBe('retained secret');
+    const messageAudit = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.entity_id, messageId));
+    const conversationAudit = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.entity_id, conversationId));
+    expect(messageAudit.map((row) => row.action)).toContain('CHAT_MESSAGE_RESTORE');
+    expect(conversationAudit.map((row) => row.action)).toContain('CHAT_CONVERSATION_RESTORE');
   });
 
   it('allows admin to mute/unmute and enforces muted write restrictions', async () => {
@@ -745,6 +749,45 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
     const body = JSON.parse(response.body);
     expect(body.error.code).toBe('MEDIA_NOT_READY');
+  });
+
+  it('rejects deleted READY media attachments', async () => {
+    const db = getDatabase();
+    const conversationId = randomUUID();
+    const mediaId = randomUUID();
+
+    await db.insert(schema.chatConversations).values({
+      id: conversationId,
+      type: 'FORUM_OPEN',
+      created_by: testUser.id,
+      state: 'ACTIVE',
+      invite_policy: 'ANY_MEMBER_CAN_INVITE',
+      title: 'Deleted Media Forum',
+      metadata: {},
+      last_seq: 0,
+    });
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: 'Deleted Ready Media',
+      type: 'IMAGE',
+      status: 'READY',
+      created_by: testUser.id,
+      deleted_at: new Date(),
+      deleted_by: testUser.id,
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/chat/conversations/${conversationId}/messages`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        text: 'deleted media must stay hidden',
+        attachmentMediaIds: [mediaId],
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(response.body).error.code).toBe('MEDIA_NOT_READY');
   });
 
   it('recreates ACTIVE DM after hard delete and hides old deleted DM in list', async () => {

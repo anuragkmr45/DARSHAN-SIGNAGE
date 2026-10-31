@@ -13,6 +13,7 @@ import {
   DEFAULT_MEDIA_VARIANTS_SETTING_KEY,
   resolveDefaultMediaForScreen,
 } from '@/utils/default-media';
+import { BRANDING_SETTINGS_KEY } from '@/utils/settings';
 
 async function issueSuperAdminToken() {
   const db = getDatabase();
@@ -163,6 +164,68 @@ describe('Settings routes - dimension-wise default media', () => {
     const body = JSON.parse(response.body);
     expect(body.success).toBe(false);
     expect(body.error.message).toBe('Media not found');
+  });
+
+  it('rejects deleted media in authoring and never resolves a branding signed URL for it', async () => {
+    const db = getDatabase();
+    const mediaId = randomUUID();
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: 'Deleted branding image',
+      type: 'IMAGE',
+      status: 'READY',
+      source_bucket: 'media-source',
+      source_object_key: `deleted-branding/${mediaId}.png`,
+      created_by: testUser.id,
+      deleted_at: new Date(),
+      deleted_by: testUser.id,
+    });
+
+    const defaultResponse = await server.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/default-media',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { media_id: mediaId },
+    });
+    expect(defaultResponse.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
+
+    const brandingResponse = await server.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/branding',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        app_name: 'DARSHAN CMS',
+        logo_media_id: mediaId,
+        icon_media_id: null,
+        favicon_media_id: null,
+      },
+    });
+    expect(brandingResponse.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
+
+    await db.insert(schema.settings).values({
+      key: BRANDING_SETTINGS_KEY,
+      value: {
+        app_name: 'DARSHAN CMS',
+        logo_media_id: mediaId,
+        icon_media_id: null,
+        favicon_media_id: null,
+      },
+    }).onConflictDoUpdate({
+      target: schema.settings.key,
+      set: { value: {
+        app_name: 'DARSHAN CMS',
+        logo_media_id: mediaId,
+        icon_media_id: null,
+        favicon_media_id: null,
+      } },
+    });
+    const readResponse = await server.inject({
+      method: 'GET',
+      url: '/api/v1/settings/branding',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(readResponse.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(readResponse.body).logo_url).toBeNull();
   });
 
   it('rejects non-ready defaults and ignores legacy non-ready assignments at playback time', async () => {

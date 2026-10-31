@@ -21,7 +21,11 @@ for number in "$set_bytes" "$postgres_bytes" "$minio_bytes" "$current_backup_byt
   [[ "$number" =~ ^[0-9]+$ ]] || { echo 'capacity measurement failed' >&2; exit 2; }
 done
 
-projected_sets=$((30 * set_bytes))
+# An inclusive 30-full-day cutoff retains today plus D-1 through D-30: 31
+# published daily sets. During the next capture, one staging set coexists with
+# all 31 until successful publication allows the oldest set to be pruned.
+retained_set_count=31
+projected_sets=$((retained_set_count * set_bytes))
 staging_bytes=$set_bytes
 margin_bytes=$((projected_sets * margin_percent / 100))
 (( margin_bytes >= 10737418240 )) || margin_bytes=10737418240
@@ -31,6 +35,6 @@ additional_bytes=$((required_backup_bytes - current_backup_bytes))
 status=pass
 (( available_bytes >= additional_bytes )) || status=blocked
 
-printf '{"status":"%s","postgres_live_bytes":%s,"minio_live_bytes":%s,"measured_full_set_bytes":%s,"projected_30_sets_bytes":%s,"staging_bytes":%s,"margin_bytes":%s,"current_backup_bytes":%s,"filesystem_bytes":%s,"available_bytes":%s,"additional_required_bytes":%s}\n' \
-  "$status" "$postgres_bytes" "$minio_bytes" "$set_bytes" "$projected_sets" "$staging_bytes" "$margin_bytes" "$current_backup_bytes" "$filesystem_bytes" "$available_bytes" "$additional_bytes"
+printf '{"status":"%s","postgres_live_bytes":%s,"minio_live_bytes":%s,"measured_full_set_bytes":%s,"retained_set_count":%s,"projected_retained_sets_bytes":%s,"staging_bytes":%s,"margin_bytes":%s,"current_backup_bytes":%s,"filesystem_bytes":%s,"available_bytes":%s,"additional_required_bytes":%s}\n' \
+  "$status" "$postgres_bytes" "$minio_bytes" "$set_bytes" "$retained_set_count" "$projected_sets" "$staging_bytes" "$margin_bytes" "$current_backup_bytes" "$filesystem_bytes" "$available_bytes" "$additional_bytes"
 [[ "$status" == pass ]]

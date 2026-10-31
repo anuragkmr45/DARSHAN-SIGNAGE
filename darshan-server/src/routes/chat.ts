@@ -16,7 +16,7 @@ import { createNotificationCounterRepository } from '@/db/repositories/notificat
 import { createRateLimiter } from '@/chat/rate-limit';
 import { assertAttachmentAccess, assertAttachmentMediaReady } from '@/chat/attachment-auth';
 import { assertCanWriteToConversation, assertConversationWritable, assertNotBanned } from '@/chat/guard';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 import { headObject } from '@/s3';
 import { canAccessDirectoryUser } from '@/rbac/user-directory';
 import type { AppAbility } from '@/rbac';
@@ -282,6 +282,24 @@ async function appendAudit(
   } catch (error) {
     logger.warn(error, 'Failed to persist chat audit event');
   }
+}
+
+async function appendRequiredAudit(
+  request: FastifyRequest,
+  executor: DbExecutor,
+  userId: string,
+  action: string,
+  entityType: string,
+  entityId?: string
+) {
+  await auditRepo.create({
+    user_id: userId,
+    action,
+    resource_type: entityType,
+    resource_id: entityId,
+    ip_address: request.ip,
+    user_agent: request.headers['user-agent'] as string | undefined,
+  }, executor);
 }
 
 function authenticate(request: FastifyRequest) {
@@ -753,10 +771,13 @@ export async function chatRoutes(fastify: FastifyInstance) {
     try {
       const { payload, ability } = authenticate(request);
       assertRestoreAdmin(payload, ability);
-      const items = await db.select({ id: schema.chatConversations.id, title: schema.chatConversations.title, type: schema.chatConversations.type, created_by: schema.chatConversations.created_by, deleted_at: schema.chatConversations.deleted_at })
-        .from(schema.chatConversations).where(eq(schema.chatConversations.state, 'DELETED'))
-        .orderBy(desc(schema.chatConversations.deleted_at)).limit(100).offset(deletedListOffset(request.query));
-      await appendAudit(request, payload.sub, 'CHAT_DELETED_CONVERSATIONS_LIST', 'ChatConversation');
+      const items = await db.transaction(async (tx) => {
+        const rows = await tx.select({ id: schema.chatConversations.id, title: schema.chatConversations.title, type: schema.chatConversations.type, created_by: schema.chatConversations.created_by, deleted_at: schema.chatConversations.deleted_at })
+          .from(schema.chatConversations).where(eq(schema.chatConversations.state, 'DELETED'))
+          .orderBy(desc(schema.chatConversations.deleted_at)).limit(100).offset(deletedListOffset(request.query));
+        await appendRequiredAudit(request, tx, payload.sub, 'CHAT_DELETED_CONVERSATIONS_LIST', 'ChatConversation');
+        return rows;
+      });
       return reply.send({ items });
     } catch (error) { return respondWithError(reply, error); }
   });
@@ -765,10 +786,13 @@ export async function chatRoutes(fastify: FastifyInstance) {
     try {
       const { payload, ability } = authenticate(request);
       assertRestoreAdmin(payload, ability);
-      const items = await db.select({ id: schema.chatMessages.id, conversation_id: schema.chatMessages.conversation_id, sender_id: schema.chatMessages.sender_id, deleted_at: schema.chatMessages.deleted_at })
-        .from(schema.chatMessages).where(isNotNull(schema.chatMessages.deleted_at))
-        .orderBy(desc(schema.chatMessages.deleted_at)).limit(100).offset(deletedListOffset(request.query));
-      await appendAudit(request, payload.sub, 'CHAT_DELETED_MESSAGES_LIST', 'ChatMessage');
+      const items = await db.transaction(async (tx) => {
+        const rows = await tx.select({ id: schema.chatMessages.id, conversation_id: schema.chatMessages.conversation_id, sender_id: schema.chatMessages.sender_id, deleted_at: schema.chatMessages.deleted_at })
+          .from(schema.chatMessages).where(isNotNull(schema.chatMessages.deleted_at))
+          .orderBy(desc(schema.chatMessages.deleted_at)).limit(100).offset(deletedListOffset(request.query));
+        await appendRequiredAudit(request, tx, payload.sub, 'CHAT_DELETED_MESSAGES_LIST', 'ChatMessage');
+        return rows;
+      });
       return reply.send({ items });
     } catch (error) { return respondWithError(reply, error); }
   });
@@ -781,7 +805,10 @@ export async function chatRoutes(fastify: FastifyInstance) {
       const result = await db.transaction(async (tx) => {
         const [conversation] = await tx.select().from(schema.chatConversations).where(eq(schema.chatConversations.id, id)).for('update');
         if (!conversation) throw AppError.notFound('Conversation not found');
-        if (conversation.state !== 'DELETED') return { conversationId: id, already_restored: true };
+        if (conversation.state !== 'DELETED') {
+          await appendRequiredAudit(request, tx, payload.sub, 'CHAT_CONVERSATION_RESTORE', 'ChatConversation', id);
+          return { conversationId: id, already_restored: true };
+        }
         if (conversation.type === 'DM' && conversation.dm_pair_key) {
           const [conflict] = await tx.select({ id: schema.chatConversations.id }).from(schema.chatConversations)
             .where(and(eq(schema.chatConversations.dm_pair_key, conversation.dm_pair_key), eq(schema.chatConversations.type, 'DM'), eq(schema.chatConversations.state, 'ACTIVE'))).limit(1);
@@ -790,9 +817,9 @@ export async function chatRoutes(fastify: FastifyInstance) {
         const messages = await tx.select({ id: schema.chatMessages.id }).from(schema.chatMessages).where(eq(schema.chatMessages.conversation_id, id));
         for (const message of messages) await verifyMessageObjects(message.id, tx);
         await tx.update(schema.chatConversations).set({ state: conversation.archived_at ? 'ARCHIVED' : 'ACTIVE', deleted_at: null, updated_at: new Date() }).where(eq(schema.chatConversations.id, id));
+        await appendRequiredAudit(request, tx, payload.sub, 'CHAT_CONVERSATION_RESTORE', 'ChatConversation', id);
         return { conversationId: id, already_restored: false };
       });
-      if (!result.already_restored) await appendAudit(request, payload.sub, 'CHAT_CONVERSATION_RESTORE', 'ChatConversation', id);
       return reply.send(result);
     } catch (error) { return respondWithError(reply, error); }
   });
@@ -807,12 +834,15 @@ export async function chatRoutes(fastify: FastifyInstance) {
         if (!message) throw AppError.notFound('Message not found');
         const [conversation] = await tx.select().from(schema.chatConversations).where(eq(schema.chatConversations.id, message.conversation_id));
         if (!conversation || conversation.state === 'DELETED') throw new AppError({ statusCode: 409, code: 'CHAT_RESTORE_CONVERSATION_FIRST', message: 'Restore the conversation first.' });
-        if (!message.deleted_at) return { messageId: id, already_restored: true };
+        if (!message.deleted_at) {
+          await appendRequiredAudit(request, tx, payload.sub, 'CHAT_MESSAGE_RESTORE', 'ChatMessage', id);
+          return { messageId: id, already_restored: true };
+        }
         await verifyMessageObjects(id, tx);
         await tx.update(schema.chatMessages).set({ deleted_at: null }).where(eq(schema.chatMessages.id, id));
+        await appendRequiredAudit(request, tx, payload.sub, 'CHAT_MESSAGE_RESTORE', 'ChatMessage', id);
         return { messageId: id, already_restored: false };
       });
-      if (!result.already_restored) await appendAudit(request, payload.sub, 'CHAT_MESSAGE_RESTORE', 'ChatMessage', id);
       return reply.send(result);
     } catch (error) { return respondWithError(reply, error); }
   });
