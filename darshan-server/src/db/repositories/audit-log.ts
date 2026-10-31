@@ -1,5 +1,5 @@
 import { eq, and, desc, gte, lte, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 
 export class AuditLogRepository {
   async create(data: {
@@ -10,11 +10,13 @@ export class AuditLogRepository {
     changes?: Record<string, any>;
     ip_address?: string;
     user_agent?: string;
-  }) {
-    const db = getDatabase();
-    const result = await db.insert(schema.auditLogs).values({
-      ...data,
+  }, executor: DbExecutor = getDatabase()) {
+    const result = await executor.insert(schema.auditLogs).values({
+      user_id: data.user_id,
+      action: data.action,
       entity_type: data.resource_type,
+      entity_id: data.resource_id,
+      ip_address: data.ip_address,
     }).returning();
     return result[0];
   }

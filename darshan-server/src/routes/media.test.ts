@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { createServer } from '@/server';
 import { generateAccessToken } from '@/auth/jwt';
 import { closeDatabase, getDatabase, initializeDatabase, schema } from '@/db';
@@ -301,6 +301,11 @@ describe('Media Routes - delete ownership and usage protection', () => {
     expect((await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: adminHeaders })).statusCode).toBe(200);
     expect((await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: adminHeaders })).json().already_restored).toBe(true);
     expect(createHash('sha256').update(await getObject('media-source', key)).digest('hex')).toBe(checksum);
+    const auditRows = await db.select().from(schema.auditLogs).where(and(
+      eq(schema.auditLogs.entity_id, media.id),
+      eq(schema.auditLogs.entity_type, 'Media'),
+    ));
+    expect(auditRows.map((row) => row.action)).toEqual(expect.arrayContaining(['MEDIA_DELETE', 'MEDIA_RESTORE']));
 
     expect((await server.inject({ method: 'DELETE', url: `/api/v1/media/${media.id}`, headers: ownerHeaders })).statusCode).toBe(200);
     await deleteObject('media-source', key);

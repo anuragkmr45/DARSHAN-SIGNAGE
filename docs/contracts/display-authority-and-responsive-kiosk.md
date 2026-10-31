@@ -1,6 +1,6 @@
 # Display Authority and Responsive Kiosk Contract
 
-Last code-truth audit: 2026-09-04.
+Last code-truth audit: 2026-11-01.
 
 This contract defines how DARSHAN selects an Electron display, records what the player actually observed, and keeps pairing/recovery/playback surfaces usable on arbitrary output sizes. Code is authoritative; real display-driver and window-manager behavior still needs target-device evidence.
 
@@ -31,6 +31,7 @@ screen_display_states (authoritative observed + desired state)
 
 - Output keys are opaque. Platform IDs are preferred; a hardware-signature key is used only when unique; duplicate signatures are explicitly session-scoped and cannot be safely pinned.
 - `estimated_backing_px` is derived from DIP bounds and scale factor. `native_mode_px` remains null unless a platform adapter can provide a genuine native mode.
+- Refresh rate is observational metadata. A non-finite or non-positive platform value is reported as unknown (`null`) so virtual displays and incomplete drivers cannot make pairing or heartbeat payloads invalid.
 - Orientation is derived from current width/height, never guessed from rotation metadata alone. Rotation is reported separately.
 - Aspect ratios are reduced exactly when integer dimensions permit (`2400×1000` is `12:5`). Compatibility is symmetric and requires at least `0.995`; usable area is `min(layout/display, display/layout)`.
 - The server rejects same-session observations whose sequence is not newer. A changed runtime session starts a new ordering domain, but does not increment `profile_revision` when the content hash is unchanged. Selection writes include the observed revision, preventing a stale inventory from pinning the wrong output.

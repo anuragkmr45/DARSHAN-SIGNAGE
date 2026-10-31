@@ -50,4 +50,22 @@ describe('DisplayManager output normalization', () => {
     expect(output.identity_confidence).to.equal('SESSION')
     expect(output.aspect.exact_key).to.equal('12:5')
   })
+
+  it('reports an unknown refresh rate when the platform returns zero', () => {
+    const { toDisplayOutput } = loadManager()
+    const output = toDisplayOutput(
+      {
+        id: 8,
+        label: 'Virtual display',
+        bounds: { x: 0, y: 0, width: 1280, height: 720 },
+        workArea: { x: 0, y: 0, width: 1280, height: 720 },
+        scaleFactor: 1,
+        rotation: 0,
+        displayFrequency: 0,
+      },
+      8
+    )
+
+    expect(output.refresh_rate_hz).to.equal(null)
+  })
 })

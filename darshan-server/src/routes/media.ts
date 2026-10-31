@@ -1528,10 +1528,15 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         assertRestoreAdmin(actor, ability);
         const items = await executor.select().from(schema.media)
           .where(isNotNull(schema.media.deleted_at)).orderBy(desc(schema.media.deleted_at)).limit(100).offset(deletedListOffset(request.query));
+        await auditRepo.create({
+          user_id: payload.sub,
+          action: 'MEDIA_DELETED_LIST',
+          resource_type: 'Media',
+          ip_address: request.ip,
+        }, executor);
         return items.map(({ id, name, type, status, deleted_at, deleted_by, created_by, owner_scope, owner_department_id }) =>
           ({ id, name, type, status, deleted_at, deleted_by, created_by, owner_scope, owner_department_id }));
       });
-      await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_DELETED_LIST', resource_type: 'Media', ip_address: request.ip });
       return reply.send({ items: result });
     } catch (error) { return respondWithError(reply, error); }
   });
@@ -1546,7 +1551,10 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const [media] = await executor.select().from(schema.media)
           .where(eq(schema.media.id, (request.params as { id: string }).id)).for('update');
         if (!media) throw AppError.notFound('Media not found');
-        if (!media.deleted_at) return { id: media.id, already_restored: true };
+        if (!media.deleted_at) {
+          await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_RESTORE', resource_type: 'Media', resource_id: media.id, ip_address: request.ip }, executor);
+          return { id: media.id, already_restored: true };
+        }
         const ids = [media.source_object_id, media.ready_object_id, media.thumbnail_object_id].filter(Boolean) as string[];
         const objects = ids.length ? await executor.select().from(schema.storageObjects)
           .where(inArray(schema.storageObjects.id, ids)) : [];
@@ -1562,9 +1570,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           catch { throw new AppError({ statusCode: 409, code: 'MEDIA_RESTORE_OBJECT_MISSING', message: 'A retained media object is unavailable.' }); }
         }
         await mediaRepo.update(media.id, { deleted_at: null, deleted_by: null }, executor);
+        await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_RESTORE', resource_type: 'Media', resource_id: media.id, ip_address: request.ip }, executor);
         return { id: media.id, already_restored: false };
       });
-      if (!restored.already_restored) await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_RESTORE', resource_type: 'Media', resource_id: restored.id, ip_address: request.ip });
       return reply.send(restored);
     } catch (error) { return respondWithError(reply, error); }
   });
@@ -1624,7 +1632,10 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             });
           }
 
-          if (media.deleted_at) return { mediaId: media.id, alreadyDeleted: true };
+          if (media.deleted_at) {
+            await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_DELETE', resource_type: 'Media', resource_id: media.id, ip_address: request.ip }, executor);
+            return { mediaId: media.id, alreadyDeleted: true };
+          }
 
           const usageSummary = await mediaRepo.getUsageSummary(media.id, executor);
           if (usageSummary.inUse) {
@@ -1637,11 +1648,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           }
 
           await mediaRepo.update(media.id, { deleted_at: new Date(), deleted_by: payload.sub }, executor);
+          await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_DELETE', resource_type: 'Media', resource_id: media.id, ip_address: request.ip }, executor);
           return { mediaId: media.id, alreadyDeleted: false };
         });
-        if (!deletion.alreadyDeleted) {
-          await auditRepo.create({ user_id: payload.sub, action: 'MEDIA_DELETE', resource_type: 'Media', resource_id: deletion.mediaId, ip_address: request.ip });
-        }
         return reply.status(OK).send({
           message: 'Media deleted and retained for administrator restore',
           id: deletion.mediaId,

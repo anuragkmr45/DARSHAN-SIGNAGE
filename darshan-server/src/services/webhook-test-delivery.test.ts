@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateWebhookTestDestination } from './webhook-test-delivery';
+import { createPinnedLookup, validateWebhookTestDestination } from './webhook-test-delivery';
 
 const policy = { hosts: ['hook.site.test'], ports: [80, 443], cidrs: ['10.20.0.0/16'] };
 const check = (url: string, addresses: string[]) => validateWebhookTestDestination(url, {
@@ -7,6 +7,17 @@ const check = (url: string, addresses: string[]) => validateWebhookTestDestinati
 });
 
 describe('Webhook Test destination policy', () => {
+  it('returns the pinned address shape requested by Node lookup callers', async () => {
+    const lookup = createPinnedLookup('10.20.1.8');
+    await expect(new Promise((resolve, reject) => {
+      lookup('hook.site.test', { all: true }, (error, result) => error ? reject(error) : resolve(result));
+    })).resolves.toEqual([{ address: '10.20.1.8', family: 4 }]);
+    await expect(new Promise((resolve, reject) => {
+      lookup('hook.site.test', {}, (error, result, family) =>
+        error ? reject(error) : resolve({ address: result, family }));
+    })).resolves.toEqual({ address: '10.20.1.8', family: 4 });
+  });
+
   it('accepts approved internal HTTP and HTTPS destinations', async () => {
     expect((await check('http://hook.site.test/', ['10.20.1.8'])).address).toBe('10.20.1.8');
     expect((await check('https://hook.site.test/', ['10.20.1.8'])).url.protocol).toBe('https:');

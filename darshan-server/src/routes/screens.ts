@@ -299,6 +299,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Screen') && !ability.can('update', 'Screen')) {
+          throw AppError.forbidden('Forbidden');
+        }
         const screenRows = await db.select().from(schema.screens);
         const accessibleScreenIds = screenRows
           .filter((screen) =>
@@ -306,7 +309,6 @@ export async function screenRoutes(fastify: FastifyInstance) {
             (ability as any).can('update', subject('Screen', screen))
           )
           .map((screen) => screen.id);
-        if (accessibleScreenIds.length === 0) throw AppError.forbidden('Forbidden');
 
         const query = listScreensQuerySchema.parse(request.query);
         const result = await screenRepo.list({

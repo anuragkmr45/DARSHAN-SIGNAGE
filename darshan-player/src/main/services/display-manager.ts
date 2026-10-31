@@ -82,7 +82,8 @@ export function toDisplayOutput(display: Display, primaryId: number, duplicateSi
     estimated_backing_px: estimated,
     native_mode_px: null,
     rotation_degrees: Number.isFinite(display.rotation) ? display.rotation : 0,
-    refresh_rate_hz: Number.isFinite(display.displayFrequency) ? display.displayFrequency : null,
+    refresh_rate_hz:
+      Number.isFinite(display.displayFrequency) && display.displayFrequency > 0 ? display.displayFrequency : null,
     orientation: outputOrientation(estimated.width, estimated.height),
     aspect: normalizedAspect(estimated.width, estimated.height),
   }

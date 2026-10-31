@@ -25,6 +25,21 @@ function blocked(message: string): never {
   throw new AppError({ statusCode: 400, code: 'WEBHOOK_DESTINATION_BLOCKED', message });
 }
 
+export function createPinnedLookup(address: string) {
+  const family = isIP(address);
+  return (
+    _host: string,
+    options: { all?: boolean } | number,
+    callback: (error: Error | null, result: string | Array<{ address: string; family: number }>, family?: number) => void
+  ) => {
+    if (typeof options === 'object' && options.all === true) {
+      callback(null, [{ address, family }]);
+      return;
+    }
+    callback(null, address, family);
+  };
+}
+
 export async function validateWebhookTestDestination(
   rawUrl: string,
   options: { policy?: Policy; resolveAddresses?: Resolve } = {}
@@ -60,9 +75,7 @@ function sendPinnedPost(url: URL, address: string, headers: Record<string, strin
       method: 'POST', headers, signal,
       // The socket uses the address already checked above. TLS still verifies
       // the original URL hostname, so DNS changes cannot redirect this hop.
-      lookup: ((_host: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) => {
-        callback(null, address, isIP(address));
-      }) as any,
+      lookup: createPinnedLookup(address) as any,
     }, (response) => {
       let bytes = 0;
       response.on('data', (chunk: Buffer) => {
