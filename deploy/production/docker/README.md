@@ -61,8 +61,8 @@ MINIO_SECRET_KEY=<strong-minio-secret-key>
 `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` are also passed to the backend container so the API can read/write object storage. Use the same values on the Data VM and Backend VM.
 
 The small-release backup sidecar writes PostgreSQL and MinIO backup sets to
-`BACKUP_HOST_PATH` on the Data VM at midnight `Asia/Kolkata` and keeps the
-latest three successful sets. Keep `BACKUP_MODE=EXTERNAL_SIDECAR` on the
+`BACKUP_HOST_PATH` on the Data VM at midnight `Asia/Kolkata` and retains
+successful daily sets for at least 30 full IST days. Keep `BACKUP_MODE=EXTERNAL_SIDECAR` on the
 Backend VM too; this prevents the older application backup worker and manual
 CMS action from running alongside the sidecar. See
 `docs/runbooks/simple-daily-backup.md` for verification and restore steps.
