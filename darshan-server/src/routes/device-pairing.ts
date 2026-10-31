@@ -2,24 +2,36 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { readFile } from 'fs/promises';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, gt } from 'drizzle-orm';
 import { config } from '@/config';
-import { createDevicePairingRepository } from '@/db/repositories/device-pairing';
+import {
+  createDevicePairingRepository,
+  lockDevicePairingIdentity,
+} from '@/db/repositories/device-pairing';
 import { createDeviceCertificateRepository } from '@/db/repositories/device-certificate';
 import { createScreenRepository } from '@/db/repositories/screen';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 import { extractDeviceAuthPublicKeyFromCsr, issueDeviceCertificateFromCsr } from '@/utils/device-request-auth';
 import { recordPairingCodeAllocation, recordPairingCsrValidation } from '@/observability/metrics';
 import { detectDevicePairingOrphans } from '@/services/device-pairing-orphan-service';
 import { recordDisplayProfile } from '@/services/screen-display-state-service';
 import { displayProfileV1Schema } from '@/utils/display-profile';
+import { subject } from '@casl/ability';
+import {
+  canAccessScreen,
+  canObserveScreen,
+  canStartScreenRecovery,
+  devicePairingReadCondition,
+  hasDevicePairingReadGrant,
+} from '@/rbac/screen-access';
 
 const logger = createLogger('device-pairing-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -39,12 +51,6 @@ type PairingCreateInput = {
 
 function looksBase64(value: string) {
   return /^[A-Za-z0-9+/=\\r\\n]+$/.test(value);
-}
-
-function isActivePairingCodeConflict(error: unknown) {
-  if (!error || typeof error !== 'object') return false;
-  const pgError = error as { code?: string; constraint?: string };
-  return pgError.code === '23505' && pgError.constraint === 'device_pairings_active_code_idx';
 }
 
 function classifyPairingCsrValidationFailure(error: unknown) {
@@ -113,6 +119,11 @@ const pairingStatusQuerySchema = z.object({
   device_id: z.string().uuid(),
 });
 
+const pairingListQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
 const confirmPairingSchema = z.object({
   pairing_code: z.string().min(1),
   name: z.string().min(1).max(255),
@@ -133,38 +144,35 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
   const createPairingWithRetries = async (
     data: PairingCreateInput,
     codeFactory: () => string,
-    context: { mode: 'device_request' | 'recovery'; deviceId?: string | null }
+    context: { mode: 'device_request' | 'recovery'; deviceId?: string | null },
+    executor?: DbExecutor,
   ) => {
-    await pairingRepo.retireExpired();
+    await pairingRepo.retireExpired(executor);
 
-    let lastError: unknown = null;
+    let lastCollidingCode: string | null = null;
     for (let attempt = 1; attempt <= ACTIVE_PAIRING_CODE_MAX_ATTEMPTS; attempt += 1) {
       const pairingCode = codeFactory();
-      try {
-        const pairing = await pairingRepo.create({
-          ...data,
-          pairing_code: pairingCode,
-        });
+      const pairing = await pairingRepo.createIfCodeAvailable({
+        ...data,
+        pairing_code: pairingCode,
+      }, executor);
+      if (pairing) {
         recordPairingCodeAllocation(context.mode, 'success');
         return { pairing, pairingCode };
-      } catch (error) {
-        if (!isActivePairingCodeConflict(error)) {
-          throw error;
-        }
-
-        lastError = error;
-        recordPairingCodeAllocation(context.mode, 'collision_retry');
-        logger.warn(
-          {
-            pairingCode,
-            attempt,
-            mode: context.mode,
-            deviceId: context.deviceId ?? null,
-          },
-          'Pairing code collision detected; retrying'
-        );
-        await pairingRepo.retireExpired();
       }
+
+      lastCollidingCode = pairingCode;
+      recordPairingCodeAllocation(context.mode, 'collision_retry');
+      logger.warn(
+        {
+          pairingCodeRef: redactOperationalIdentifier(pairingCode),
+          attempt,
+          mode: context.mode,
+          deviceId: context.deviceId ?? null,
+        },
+        'Pairing code collision detected; retrying'
+      );
+      await pairingRepo.retireExpired(executor);
     }
 
     logger.error(
@@ -172,7 +180,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         mode: context.mode,
         deviceId: context.deviceId ?? null,
         attempts: ACTIVE_PAIRING_CODE_MAX_ATTEMPTS,
-        error: lastError,
+        lastCollisionRef: lastCollidingCode ? redactOperationalIdentifier(lastCollidingCode) : null,
       },
       'Failed to allocate a unique active pairing code'
     );
@@ -220,13 +228,31 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     };
   };
 
-  const findConfirmablePairing = async (pairingCode: string) => {
-    const activePairing = await pairingRepo.findByCode(pairingCode);
+  const findConfirmablePairingForUpdate = async (pairingCode: string, executor: DbExecutor) => {
+    const now = new Date();
+    const [activePairing] = await executor
+      .select()
+      .from(schema.devicePairings)
+      .where(
+        and(
+          eq(schema.devicePairings.pairing_code, pairingCode),
+          eq(schema.devicePairings.used, false),
+          gt(schema.devicePairings.expires_at, now),
+        ),
+      )
+      .limit(1)
+      .for('update');
     if (activePairing) {
       return activePairing;
     }
 
-    const historicalPairing = await pairingRepo.findAnyByCode(pairingCode);
+    const [historicalPairing] = await executor
+      .select()
+      .from(schema.devicePairings)
+      .where(eq(schema.devicePairings.pairing_code, pairingCode))
+      .orderBy(desc(schema.devicePairings.created_at), asc(schema.devicePairings.id))
+      .limit(1)
+      .for('update');
     if (!historicalPairing) {
       throw AppError.notFound('Invalid or expired pairing code');
     }
@@ -234,7 +260,19 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
       throw AppError.badRequest('Pairing missing device reference');
     }
 
-    const latestActivePairing = await pairingRepo.findActiveByDeviceId(historicalPairing.device_id);
+    const [latestActivePairing] = await executor
+      .select()
+      .from(schema.devicePairings)
+      .where(
+        and(
+          eq(schema.devicePairings.device_id, historicalPairing.device_id),
+          eq(schema.devicePairings.used, false),
+          gt(schema.devicePairings.expires_at, now),
+        ),
+      )
+      .orderBy(desc(schema.devicePairings.created_at), asc(schema.devicePairings.id))
+      .limit(1)
+      .for('update');
     if (latestActivePairing && latestActivePairing.id !== historicalPairing.id) {
       throw AppError.conflict('This recovery code has been superseded. Generate or use the latest recovery code.');
     }
@@ -345,10 +383,9 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     };
   };
 
-  const issuePairingCode = async (deviceId: string, expiresIn: number) => {
-    const existingScreen = await screenRepo.findById(deviceId);
-    await pairingRepo.retireExpired();
-    const retiredPairings = await pairingRepo.retireActiveByDeviceId(deviceId);
+  const issuePairingCode = async (deviceId: string, expiresIn: number, executor?: DbExecutor) => {
+    const existingScreen = await screenRepo.findById(deviceId, executor);
+    const retiredPairings = await pairingRepo.retireActiveByDeviceId(deviceId, null, executor);
     const expiresAt = new Date();
     expiresAt.setSeconds(expiresAt.getSeconds() + expiresIn);
 
@@ -361,7 +398,8 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
       {
         mode: 'recovery',
         deviceId,
-      }
+      },
+      executor,
     );
 
     return {
@@ -382,7 +420,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     apiEndpoints.devicePairing.generate,
     {
       schema: {
-        description: 'Generate pairing code for device (admin only)',
+        description: 'Generate pairing code for device (permission required)',
         tags: ['Device Pairing'],
         security: [{ bearerAuth: [] }],
       },
@@ -395,19 +433,31 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('create', 'DevicePairing')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const data = generatePairingCodeSchema.parse(request.body);
-        const responseBody = await issuePairingCode(data.device_id, data.expires_in);
+        const responseBody = await withCurrentMutationAuthorization(
+          payload,
+          async ({ ability, executor }) => {
+            await lockDevicePairingIdentity(executor, data.device_id);
+            const [existingScreen] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, data.device_id))
+              .for('update');
+            if (!(ability as any).can('create', subject('DevicePairing', {
+              device_id: data.device_id,
+              screen_id: data.device_id,
+            }))) throw AppError.forbidden('Forbidden');
+            if (existingScreen && !canStartScreenRecovery(ability, existingScreen)) {
+              throw AppError.forbidden('Forbidden');
+            }
+            return issuePairingCode(data.device_id, data.expires_in, executor);
+          },
+        );
 
         logger.info(
           {
             deviceId: data.device_id,
-            pairingCode: responseBody.pairing_code,
+            pairingCodeRef: redactOperationalIdentifier(responseBody.pairing_code),
             expiresAt: responseBody.expires_at,
             retiredPairingCount: responseBody.retired_pairing_count,
           },
@@ -498,7 +548,13 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         );
 
         logger.info(
-          { deviceId, pairingCode, expiresAt, ip: request.ip, label: data.device_label },
+          {
+            deviceId,
+            pairingCodeRef: redactOperationalIdentifier(pairingCode),
+            expiresAt,
+            ip: request.ip,
+            label: data.device_label,
+          },
           'Device pairing requested'
         );
 
@@ -603,16 +659,30 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         const certificatePem = issuedCertificate.certificatePem;
         const deviceSerial = issuedCertificate.serialNumber;
 
-        await db.transaction(async (tx) => {
+        const completed = await db.transaction(async (tx) => {
           const currentPairing = await pairingRepo.findActiveById(pairing.id, tx);
           if (!currentPairing) {
             throw AppError.conflict('This pairing code is no longer active. Generate a fresh pairing code and try again.');
           }
 
-          const { deviceId: currentDeviceId, pairingInfo, screenName, screenLocation } =
-            validateConfirmedPairing(currentPairing);
+          const { deviceId: currentDeviceId } = validateConfirmedPairing(currentPairing);
+          if (currentDeviceId !== deviceId) {
+            throw AppError.conflict('Pairing identity changed. Generate a fresh pairing code and try again.');
+          }
 
-          const consumedPairing = await pairingRepo.markAsUsedIfActive(currentPairing.id, tx);
+          await lockDevicePairingIdentity(tx, currentDeviceId);
+
+          const lockedPairing = await pairingRepo.findActiveById(pairing.id, tx);
+          if (!lockedPairing) {
+            throw AppError.conflict('This pairing code is no longer active. Generate a fresh pairing code and try again.');
+          }
+          const lockedPairingDetails = validateConfirmedPairing(lockedPairing);
+          if (lockedPairingDetails.deviceId !== currentDeviceId ||
+              csrDetails.subjectCommonName.toLowerCase() !== lockedPairingDetails.deviceId.toLowerCase()) {
+            throw AppError.conflict('Pairing identity changed. Generate a fresh pairing code and try again.');
+          }
+
+          const consumedPairing = await pairingRepo.markAsUsedIfActive(lockedPairing.id, tx);
           if (!consumedPairing) {
             throw AppError.conflict('This pairing code is no longer active. Generate a fresh pairing code and try again.');
           }
@@ -632,17 +702,17 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
           );
 
           const existingScreen = await screenRepo.findById(currentDeviceId, tx);
-          const screenDeviceInfo = buildScreenDeviceInfo(currentPairing, pairingInfo);
+          const screenDeviceInfo = buildScreenDeviceInfo(lockedPairing, lockedPairingDetails.pairingInfo);
           if (!existingScreen) {
             await screenRepo.create(
               {
                 id: currentDeviceId,
-                name: screenName,
-                location: screenLocation ?? undefined,
-                aspect_ratio: currentPairing.aspect_ratio ?? null,
-                width: currentPairing.width ?? null,
-                height: currentPairing.height ?? null,
-                orientation: currentPairing.orientation ?? null,
+                name: lockedPairingDetails.screenName,
+                location: lockedPairingDetails.screenLocation ?? undefined,
+                aspect_ratio: lockedPairing.aspect_ratio ?? null,
+                width: lockedPairing.width ?? null,
+                height: lockedPairing.height ?? null,
+                orientation: lockedPairing.orientation ?? null,
                 device_info: screenDeviceInfo,
               },
               tx
@@ -651,12 +721,12 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
             await screenRepo.update(
               currentDeviceId,
               {
-                name: screenName,
-                location: screenLocation ?? existingScreen.location ?? undefined,
-                aspect_ratio: currentPairing.aspect_ratio ?? existingScreen.aspect_ratio ?? null,
-                width: currentPairing.width ?? existingScreen.width ?? null,
-                height: currentPairing.height ?? existingScreen.height ?? null,
-                orientation: currentPairing.orientation ?? existingScreen.orientation ?? null,
+                name: lockedPairingDetails.screenName,
+                location: lockedPairingDetails.screenLocation ?? existingScreen.location ?? undefined,
+                aspect_ratio: lockedPairing.aspect_ratio ?? existingScreen.aspect_ratio ?? null,
+                width: lockedPairing.width ?? existingScreen.width ?? null,
+                height: lockedPairing.height ?? existingScreen.height ?? null,
+                orientation: lockedPairing.orientation ?? existingScreen.orientation ?? null,
                 device_info:
                   screenDeviceInfo != null
                     ? {
@@ -668,18 +738,19 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
               tx
             );
           }
-        });
 
-        const pairingProfile = (pairing.device_info as Record<string, unknown> | null)?.display_profile_v1;
-        const parsedPairingProfile = displayProfileV1Schema.safeParse(pairingProfile);
-        if (parsedPairingProfile.success) {
-          await recordDisplayProfile(deviceId, parsedPairingProfile.data);
-        }
+          const pairingProfile = (lockedPairing.device_info as Record<string, unknown> | null)?.display_profile_v1;
+          const parsedPairingProfile = displayProfileV1Schema.safeParse(pairingProfile);
+          if (parsedPairingProfile.success) {
+            await recordDisplayProfile(currentDeviceId, parsedPairingProfile.data, tx);
+          }
+          return { deviceId: currentDeviceId, pairing: lockedPairing };
+        });
 
         logger.info(
           {
-            deviceId,
-            pairingId: pairing.id,
+            deviceId: completed.deviceId,
+            pairingId: completed.pairing.id,
             certificateSerial: redactOperationalIdentifier(deviceSerial),
           },
           'Device pairing completed'
@@ -688,7 +759,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         return reply.status(CREATED).send({
           success: true,
           message: 'Device pairing completed. Certificate issued.',
-          device_id: deviceId,
+          device_id: completed.deviceId,
           certificate: certificatePem,
           ca_certificate: caCert,
           fingerprint: deviceSerial,
@@ -701,12 +772,12 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Confirm pairing (admin)
+  // Confirm pairing (permission required)
   fastify.post<{ Body: typeof confirmPairingSchema._type }>(
     apiEndpoints.devicePairing.confirm,
     {
       schema: {
-        description: 'Confirm pairing code (admin only)',
+        description: 'Confirm pairing code (permission required)',
         tags: ['Device Pairing'],
         security: [{ bearerAuth: [] }],
       },
@@ -719,41 +790,53 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('create', 'Screen')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const data = confirmPairingSchema.parse(request.body);
+        const preliminaryPairing = await pairingRepo.findByCode(data.pairing_code)
+          ?? await pairingRepo.findAnyByCode(data.pairing_code);
+        if (!preliminaryPairing) throw AppError.notFound('Invalid or expired pairing code');
+        if (!preliminaryPairing.device_id) throw AppError.badRequest('Pairing missing device reference');
+        const preliminaryDeviceId = preliminaryPairing.device_id;
 
-        const pairing = await findConfirmablePairing(data.pairing_code);
-        if (!pairing.device_id) {
-          throw AppError.badRequest('Pairing missing device reference');
-        }
-        const latestActivePairing = await pairingRepo.findActiveByDeviceId(pairing.device_id);
-        if (latestActivePairing && latestActivePairing.id !== pairing.id) {
-          throw AppError.conflict('This recovery code has been superseded. Generate or use the latest recovery code.');
-        }
-        if (pairing.used) {
-          throw AppError.conflict('This pairing code is no longer active. Generate a fresh recovery code and try again.');
-        }
-        const existing = await screenRepo.findById(pairing.device_id);
+        const { pairing, updatedInfo } = await withCurrentMutationAuthorization(
+          payload,
+          async ({ ability, executor }) => {
+            await lockDevicePairingIdentity(executor, preliminaryDeviceId);
+            const [existing] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, preliminaryDeviceId))
+              .for('update');
+            const currentPairing = await findConfirmablePairingForUpdate(data.pairing_code, executor);
+            if (currentPairing.device_id !== preliminaryDeviceId) {
+              throw AppError.conflict('This pairing code now belongs to a different pairing attempt. Try again.');
+            }
+            const proposedScreen = {
+              ...(existing ?? {}),
+              id: currentPairing.device_id,
+              name: data.name,
+              location: data.location ?? null,
+            };
+            const permitted = existing
+              ? canAccessScreen(ability, 'update', existing) && canAccessScreen(ability, 'update', proposedScreen)
+              : canAccessScreen(ability, 'create', proposedScreen);
+            if (!permitted) throw AppError.forbidden('Forbidden');
 
-        const pairingInfo = (pairing.device_info || {}) as Record<string, any>;
-        const updatedInfo = {
-          ...pairingInfo,
-          pairing: {
-            ...(pairingInfo as any)?.pairing,
-            confirmed: true,
-            confirmed_at: new Date().toISOString(),
-            mode: existing ? 'RECOVERY' : 'PAIRING',
-            screen_name: data.name,
-            screen_location: data.location ?? null,
+            const pairingInfo = (currentPairing.device_info || {}) as Record<string, any>;
+            const nextInfo = {
+              ...pairingInfo,
+              pairing: {
+                ...(pairingInfo as any)?.pairing,
+                confirmed: true,
+                confirmed_at: new Date().toISOString(),
+                mode: existing ? 'RECOVERY' : 'PAIRING',
+                screen_name: data.name,
+                screen_location: data.location ?? null,
+              },
+            };
+            await pairingRepo.updateDeviceInfo(currentPairing.id, nextInfo, executor);
+            return { pairing: currentPairing, updatedInfo: nextInfo };
           },
-        };
-
-        await pairingRepo.updateDeviceInfo(pairing.id, updatedInfo);
+        );
 
         logger.info({ pairingId: pairing.id, deviceId: pairing.device_id }, 'Pairing confirmed; awaiting device completion');
 
@@ -783,7 +866,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     apiEndpoints.devicePairing.recovery,
     {
       schema: {
-        description: 'Get recovery diagnostics for an existing device/screen (admin only)',
+        description: 'Get recovery diagnostics for an existing device/screen (record permission required)',
         tags: ['Device Pairing'],
         security: [{ bearerAuth: [] }],
       },
@@ -797,12 +880,10 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('read', 'Screen')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const deviceId = z.string().uuid().parse((request.params as any).deviceId);
+        const screen = await screenRepo.findById(deviceId);
+        if (!screen) throw AppError.notFound('Screen not found');
+        if (!canObserveScreen(ability, screen)) throw AppError.forbidden('Forbidden');
         const diagnostics = await buildRecoveryDiagnostics(deviceId);
         return reply.send(diagnostics);
       } catch (error) {
@@ -816,7 +897,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     apiEndpoints.devicePairing.startRecovery,
     {
       schema: {
-        description: 'Start credential recovery for an existing screen/device (admin only)',
+        description: 'Start credential recovery for an existing screen/device (record permissions required)',
         tags: ['Device Pairing'],
         security: [{ bearerAuth: [] }],
       },
@@ -829,26 +910,34 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('create', 'DevicePairing')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const deviceId = z.string().uuid().parse((request.params as any).deviceId);
-        const screen = await screenRepo.findById(deviceId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
 
         const expiresIn = z
           .object({ expires_in: z.number().int().positive().default(900) })
           .parse(request.body ?? {}).expires_in;
 
-        const responseBody = await issuePairingCode(deviceId, expiresIn);
+        const responseBody = await withCurrentMutationAuthorization(
+          payload,
+          async ({ ability, executor }) => {
+            await lockDevicePairingIdentity(executor, deviceId);
+            const [screen] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, deviceId))
+              .for('update');
+            if (!screen) throw AppError.notFound('Screen not found');
+            if (!canStartScreenRecovery(ability, screen)) {
+              throw AppError.forbidden('Forbidden');
+            }
+            return issuePairingCode(deviceId, expiresIn, executor);
+          },
+        );
         const diagnostics = await buildRecoveryDiagnostics(deviceId);
 
-        logger.info({ deviceId, pairingCode: responseBody.pairing_code }, 'Recovery pairing code generated');
+        logger.info(
+          { deviceId, pairingCodeRef: redactOperationalIdentifier(responseBody.pairing_code) },
+          'Recovery pairing code generated',
+        );
 
         return reply.status(CREATED).send({
           id: responseBody.pairing.id,
@@ -874,7 +963,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     apiEndpoints.devicePairing.orphans,
     {
       schema: {
-        description: 'Detect device pairing records that reference missing screen rows (admin only)',
+        description: 'Detect device pairing records that reference missing screen rows (unconditional permission required)',
         tags: ['Device Pairing'],
         security: [{ bearerAuth: [] }],
       },
@@ -888,7 +977,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'DevicePairing')) {
+        if (!canUnconditionally(ability, 'read', 'DevicePairing')) {
           throw AppError.forbidden('Forbidden');
         }
 
@@ -909,7 +998,7 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
     apiEndpoints.devicePairing.revoke,
     {
       schema: {
-        description: 'Revoke active pairing credentials for an existing screen/device (admin only)',
+        description: 'Revoke active pairing credentials for an existing screen/device (record permission required)',
         tags: ['Device Pairing'],
         security: [{ bearerAuth: [] }],
       },
@@ -922,79 +1011,75 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (
-          !ability.can('manage', 'DevicePairing') &&
-          !ability.can('delete', 'Screen') &&
-          !ability.can('manage', 'all')
-        ) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const deviceId = z.string().uuid().parse((request.params as any).deviceId);
         const body = revokePairingSchema.parse(request.body ?? {});
         const now = new Date();
+        const result = await withCurrentMutationAuthorization(
+          payload,
+          async ({ actor, ability, executor }) => {
+            await lockDevicePairingIdentity(executor, deviceId);
+            const [screen] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, deviceId))
+              .for('update');
+            const canManagePairing = (ability as any).can(
+              'manage',
+              subject('DevicePairing', { device_id: deviceId, screen_id: deviceId }),
+            );
+            const canDeleteTarget = Boolean(screen && canAccessScreen(ability, 'delete', screen));
+            if (!canManagePairing && !canDeleteTarget) throw AppError.forbidden('Forbidden');
 
-        const [screen] = await db
-          .select({ id: schema.screens.id, name: schema.screens.name })
-          .from(schema.screens)
-          .where(eq(schema.screens.id, deviceId))
-          .limit(1);
+            const revokedCertificates = await executor
+              .update(schema.deviceCertificates)
+              .set({ is_revoked: true, revoked_at: now })
+              .where(
+                and(
+                  eq(schema.deviceCertificates.screen_id, deviceId),
+                  eq(schema.deviceCertificates.is_revoked, false),
+                ),
+              )
+              .returning({ id: schema.deviceCertificates.id });
 
-        const revokedCertificates = await db
-          .update(schema.deviceCertificates)
-          .set({
-            is_revoked: true,
-            revoked_at: now,
-          })
-          .where(
-            and(
-              eq(schema.deviceCertificates.screen_id, deviceId),
-              eq(schema.deviceCertificates.is_revoked, false)
-            )
-          )
-          .returning({ id: schema.deviceCertificates.id });
+            const invalidatedPairings = await executor
+              .update(schema.devicePairings)
+              .set({ used: true, used_at: now, expires_at: now })
+              .where(
+                and(
+                  eq(schema.devicePairings.device_id, deviceId),
+                  eq(schema.devicePairings.used, false),
+                ),
+              )
+              .returning({ id: schema.devicePairings.id });
 
-        const invalidatedPairings = await db
-          .update(schema.devicePairings)
-          .set({
-            used: true,
-            used_at: now,
-            expires_at: now,
-          })
-          .where(
-            and(
-              eq(schema.devicePairings.device_id, deviceId),
-              eq(schema.devicePairings.used, false)
-            )
-          )
-          .returning({ id: schema.devicePairings.id });
-
-        await db.insert(schema.auditLogs).values({
-          user_id: payload.sub,
-          action: 'DEVICE_PAIRING_REVOKE',
-          entity_type: 'DEVICE_PAIRING',
-          entity_id: deviceId,
-          ip_address: request.ip,
-        });
+            await executor.insert(schema.auditLogs).values({
+              user_id: actor.userId,
+              action: 'DEVICE_PAIRING_REVOKE',
+              entity_type: 'DEVICE_PAIRING',
+              entity_id: deviceId,
+              ip_address: request.ip,
+            });
+            return { screen, revokedCertificates, invalidatedPairings };
+          },
+        );
 
         logger.warn(
           {
             deviceId,
             reason: body.reason,
             noteProvided: Boolean(body.note),
-            revokedCertificates: revokedCertificates.length,
-            invalidatedPairings: invalidatedPairings.length,
+            revokedCertificates: result.revokedCertificates.length,
+            invalidatedPairings: result.invalidatedPairings.length,
           },
-          'Device pairing revoked by admin'
+          'Device pairing revoked by an authorized CMS actor'
         );
 
         return reply.status(OK).send({
           device_id: deviceId,
-          screen: screen ? { id: screen.id, name: screen.name } : null,
-          status: revokedCertificates.length > 0 ? 'PAIRING_REVOKED' : 'NO_ACTIVE_CREDENTIAL',
-          revoked_certificates: revokedCertificates.length,
-          invalidated_pairings: invalidatedPairings.length,
+          screen: result.screen ? { id: result.screen.id, name: result.screen.name } : null,
+          status: result.revokedCertificates.length > 0 ? 'PAIRING_REVOKED' : 'NO_ACTIVE_CREDENTIAL',
+          revoked_certificates: result.revokedCertificates.length,
+          invalidated_pairings: result.invalidatedPairings.length,
           recommended_action: 'PAIR_AGAIN',
           server_identity: getServerIdentity(),
         });
@@ -1006,11 +1091,11 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
   );
 
   // List pairings
-  fastify.get<{ Querystring: { page?: number; limit?: number } }>(
+  fastify.get<{ Querystring: z.input<typeof pairingListQuerySchema> }>(
     apiEndpoints.devicePairing.list,
     {
       schema: {
-        description: 'List device pairings (admin only)',
+        description: 'List device pairings (permission required)',
         tags: ['Device Pairing'],
         security: [{ bearerAuth: [] }],
       },
@@ -1024,15 +1109,13 @@ export async function devicePairingRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('read', 'DevicePairing')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
-        const page = (request.query as any).page ? parseInt((request.query as any).page as string) : 1;
-        const limit = (request.query as any).limit ? parseInt((request.query as any).limit as string) : 20;
-
-        const result = await pairingRepo.list({ page, limit });
+        if (!hasDevicePairingReadGrant(ability)) throw AppError.forbidden('Forbidden');
+        const { page, limit } = pairingListQuerySchema.parse(request.query);
+        const result = await pairingRepo.list({
+          page,
+          limit,
+          readCondition: devicePairingReadCondition(ability),
+        });
         const now = new Date();
 
         return reply.send({

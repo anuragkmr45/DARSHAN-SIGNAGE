@@ -1,6 +1,6 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
 import crypto from 'crypto';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 
 export class ApiKeyRepository {
   private hashSecret(secret: string) {
@@ -19,8 +19,8 @@ export class ApiKeyRepository {
     roles?: string[];
     created_by: string;
     expires_at?: Date | null;
-  }) {
-    const db = getDatabase();
+  }, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const { raw, prefix } = this.generateSecret();
     const hash = this.hashSecret(raw);
 
@@ -40,14 +40,17 @@ export class ApiKeyRepository {
     return { record, secret: raw };
   }
 
-  async list(options: { page?: number; limit?: number; includeRevoked?: boolean }) {
-    const db = getDatabase();
+  async list(options: { page?: number; limit?: number; includeRevoked?: boolean; readCondition?: SQL }, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const page = options.page || 1;
     const limit = options.limit || 20;
     const offset = (page - 1) * limit;
 
     const includeRevoked = options.includeRevoked ?? false;
-    const where = includeRevoked ? undefined : eq(schema.apiKeys.is_revoked, false);
+    const activeCondition = includeRevoked ? undefined : eq(schema.apiKeys.is_revoked, false);
+    const where = activeCondition && options.readCondition
+      ? and(activeCondition, options.readCondition)
+      : activeCondition ?? options.readCondition;
 
     const items = await db
       .select()
@@ -65,14 +68,23 @@ export class ApiKeyRepository {
     return { items, total: Number(totalRow?.count || 0), page, limit };
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
+  async findById(id: string, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const [record] = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id));
     return record || null;
   }
 
-  async revoke(id: string) {
-    const db = getDatabase();
+  async findByIdForUpdate(id: string, executor: DbExecutor) {
+    const [record] = await executor
+      .select()
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, id))
+      .for('update');
+    return record || null;
+  }
+
+  async revoke(id: string, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const [record] = await db
       .update(schema.apiKeys)
       .set({ is_revoked: true, updated_at: new Date() })
@@ -81,8 +93,8 @@ export class ApiKeyRepository {
     return record || null;
   }
 
-  async rotate(id: string) {
-    const db = getDatabase();
+  async rotate(id: string, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const { raw, prefix } = this.generateSecret();
     const hash = this.hashSecret(raw);
     const [record] = await db

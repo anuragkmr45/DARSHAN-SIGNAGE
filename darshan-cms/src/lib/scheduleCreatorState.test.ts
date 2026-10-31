@@ -51,7 +51,13 @@ describe("normalizeRestoredSlotMedia", () => {
   });
 
   it("hydrates a page count without silently replacing the selected page", () => {
-    const original = [{ ...baseItem, mediaType: "DOCUMENT" as const, pageCount: null, pageNumber: 8 }];
+    const original = [{
+      ...baseItem,
+      mediaType: "DOCUMENT" as const,
+      loopEnabled: false,
+      pageCount: null,
+      pageNumber: 8,
+    }];
     const hydrated = hydrateDocumentPageCounts(original, new Map([["media-1", 5]]));
 
     expect(hydrated).not.toBe(original);

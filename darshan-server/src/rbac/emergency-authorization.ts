@@ -1,5 +1,5 @@
 import { subject } from '@casl/ability';
-import type { AppAbility } from '@/rbac';
+import { canUnconditionally, type AppAbility } from '@/rbac';
 
 export type EmergencyScreenRecord = { id: string; [key: string]: unknown };
 export type EmergencyTargetRecord = {
@@ -9,7 +9,7 @@ export type EmergencyTargetRecord = {
 };
 
 export function isGlobalEmergencyController(ability: AppAbility): boolean {
-  return ability.can('manage', 'Emergency');
+  return canUnconditionally(ability, 'manage', 'Emergency');
 }
 
 export function canUpdateEmergencyScreen(

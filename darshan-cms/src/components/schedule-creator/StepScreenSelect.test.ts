@@ -10,15 +10,21 @@ const snapshotAt = (serverTime: string, emergency: unknown = null): ScreenSnapsh
       items: [
         {
           id: "first",
+          schedule_id: "schedule-1",
+          presentation_id: "presentation-1",
+          priority: 1,
           start_at: "2026-09-07T10:00:00.000Z",
           end_at: "2026-09-07T10:05:00.000Z",
-          presentation: { name: "First presentation" },
+          presentation: { id: "presentation-1", name: "First presentation" },
         },
         {
           id: "second",
+          schedule_id: "schedule-1",
+          presentation_id: "presentation-2",
+          priority: 1,
           start_at: "2026-09-07T10:05:00.000Z",
           end_at: "2026-09-07T10:10:00.000Z",
-          presentation: { name: "Second presentation" },
+          presentation: { id: "presentation-2", name: "Second presentation" },
         },
       ],
     },

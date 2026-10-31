@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { defineAbilityFor, hasGlobalUserManagement, type AppAbility } from '@/rbac';
 import { createUserRepository } from '@/db/repositories/user';
 import { hashPassword, validatePasswordStrength, verifyPassword } from '@/auth/password';
 import { randomBytes } from 'crypto';
@@ -12,9 +12,12 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
-import { canManageUserRecord, canManageUserRoleTarget } from '@/rbac/policy';
+import { canManageUserTarget } from '@/rbac/policy';
+import { directoryReadPredicate, hasDirectoryReadGrant } from '@/rbac/user-directory';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
 import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
 import { subject } from '@casl/ability';
+import { parseInviteExpiry, parseInviteToken } from '@/auth/invite-state';
 
 const logger = createLogger('users-invite-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -37,6 +40,21 @@ const listInvitesQuerySchema = z.object({
   invited_after: z.coerce.date().optional(),
 });
 
+const inviteStatusLookup = {
+  pending: 'pending',
+  expired: 'expired',
+  activated: 'activated',
+  approved: 'activated',
+  active: 'activated',
+} as const;
+
+export function parseInviteStatuses(raw: string | undefined): ('pending' | 'expired' | 'activated')[] | undefined {
+  if (raw === undefined) return undefined;
+  const statuses = raw.split(',').map((value) => inviteStatusLookup[value.trim().toLowerCase() as keyof typeof inviteStatusLookup]);
+  if (statuses.some((status) => !status)) throw AppError.badRequest('Invalid invite status filter.');
+  return Array.from(new Set(statuses));
+}
+
 const resetPasswordSchema = z
   .object({
     current_password: z.string().min(1).optional(),
@@ -44,15 +62,57 @@ const resetPasswordSchema = z
   })
   .optional();
 
+const replaceInviteSchema = z.object({
+  expected_updated_at: z.string().datetime({ offset: true }),
+});
+
+export function builtInInviteRolePredicate(roleName: 'ADMIN' | 'OPERATOR' | 'DEPARTMENT') {
+  return and(eq(schema.roles.name, roleName), eq(schema.roles.is_system, true));
+}
+
+type ReplaceableInvite = {
+  id: string;
+  email: string;
+  role_id: string;
+  department_id: string | null;
+  is_active: boolean;
+  deleted_at: Date | null;
+  ext: unknown;
+  role: string | null;
+  role_is_system: boolean | null;
+};
+
+export const isPendingInvite = (user: ReplaceableInvite): boolean => {
+  const ext = user.ext;
+  return user.is_active && !user.deleted_at && Boolean(ext && typeof ext === 'object' && !Array.isArray(ext) &&
+    ['PENDING', 'EXPIRED'].includes(String((ext as Record<string, unknown>).invite_status)));
+};
+
+export const canIssueInviteFor = (ability: AppAbility, actorDepartmentId: string | null | undefined,
+  user: ReplaceableInvite): boolean =>
+  canManageUserTarget(
+    { departmentId: actorDepartmentId, globalUserManagement: hasGlobalUserManagement(ability) },
+    { roleName: user.role ?? '', isSystem: user.role_is_system === true, departmentId: user.department_id },
+  ) && (ability as unknown as { can: (action: string, target: unknown) => boolean }).can('create', subject('User', {
+    id: user.id,
+    email: user.email,
+    role_id: user.role_id,
+    department_id: user.department_id,
+    is_active: true,
+  }));
+
 const createInviteSerializer =
-  (referenceDate: Date) =>
+  (referenceDate: Date, ability: AppAbility, actorDepartmentId: string | null | undefined) =>
     (user: any) => {
       const ext = user.ext || {};
-      const expiresAt = ext.invite_expires_at ? new Date(ext.invite_expires_at) : null;
+      const inviteToken = parseInviteToken(ext.invite_token);
+      const expiresAt = parseInviteExpiry(ext.invite_expires_at);
       let derivedStatus: string | null = null;
-      if (ext.invite_status) {
+      if (isPendingInvite(user) && (!inviteToken || !expiresAt || expiresAt <= referenceDate)) {
+        derivedStatus = 'EXPIRED';
+      } else if (ext.invite_status) {
         derivedStatus = ext.invite_status;
-      } else if (ext.invite_token) {
+      } else if (inviteToken) {
         derivedStatus = expiresAt && expiresAt < referenceDate ? 'EXPIRED' : 'PENDING';
       }
 
@@ -61,9 +121,9 @@ const createInviteSerializer =
         email: user.email,
         role: user.role,
         department_id: user.department_id,
-        invite_token: ext.invite_token ?? null,
         invite_expires_at: ext.invite_expires_at ?? null,
         invite_status: derivedStatus,
+        can_replace: isPendingInvite(user) && canIssueInviteFor(ability, actorDepartmentId, user),
         invited_at: ext.invited_at ?? null,
         is_active: user.is_active,
         created_at: user.created_at.toISOString(),
@@ -89,57 +149,51 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('create', 'User')) throw AppError.forbidden('Forbidden');
-
         const data = inviteSchema.parse(request.body);
 
-        const [targetRole] = data.role_id
-          ? await db.select().from(schema.roles).where(eq(schema.roles.id, data.role_id))
-          : await db.select().from(schema.roles).where(eq(schema.roles.name, data.role ?? 'OPERATOR'));
-
-        if (!targetRole) {
-          throw AppError.badRequest('Role not found');
-        }
-        const hasGlobalUserManagement = ability.can('manage', 'User');
-        if (
-          !canManageUserRoleTarget(payload.role, targetRole.name) &&
-          !((!targetRole.is_system || targetRole.name === 'OPERATOR') &&
-            (hasGlobalUserManagement || data.department_id === payload.department_id))
-        ) {
-          throw AppError.forbidden('Forbidden');
-        }
-        if (!hasGlobalUserManagement && data.department_id !== payload.department_id) {
-          throw AppError.forbidden('Department users can only manage operators in their own department.');
-        }
-
-        const tempPassword = randomBytes(6).toString('hex');
+        // The account needs a non-null credential hash before activation, but
+        // this secret is deliberately unrecoverable and never returned. The
+        // invitation token is the only onboarding credential exposed to the
+        // manager; activation replaces this hash with the invitee's password.
+        const placeholderPassword = randomBytes(32).toString('base64url');
         const inviteToken = randomBytes(16).toString('hex');
         const now = new Date();
         const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const passwordHash = await hashPassword(tempPassword);
-        const user = await userRepo.create({
-          email: data.email,
-          password_hash: passwordHash,
-          role_id: targetRole.id,
-          department_id: data.department_id,
-        });
-
-        // Update with invite metadata using SQL
-        await db
-          .update(schema.users)
-          .set({
+        const passwordHash = await hashPassword(placeholderPassword);
+        const { user, targetRole } = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          const [targetRole] = data.role_id
+            ? await executor.select().from(schema.roles).where(eq(schema.roles.id, data.role_id))
+            : await executor.select().from(schema.roles)
+                .where(builtInInviteRolePredicate(data.role ?? 'OPERATOR'));
+          if (!targetRole) throw AppError.badRequest('Role not found');
+          if (!(ability as any).can('create', subject('User', { email: data.email, role_id: targetRole.id, department_id: data.department_id, is_active: true })) ||
+              !canManageUserTarget({ departmentId: actor.departmentId, globalUserManagement: hasGlobalUserManagement(ability) },
+                { roleName: targetRole.name, isSystem: targetRole.is_system, departmentId: data.department_id })) {
+            throw AppError.forbidden('Forbidden');
+          }
+          if (data.department_id) {
+            const [department] = await executor.select({ id: schema.departments.id }).from(schema.departments)
+              .where(eq(schema.departments.id, data.department_id)).for('share');
+            if (!department) throw AppError.notFound('Department not found');
+          }
+          const user = await userRepo.create({
+            email: data.email,
+            password_hash: passwordHash,
+            role_id: targetRole.id,
+            department_id: data.department_id,
+          }, executor);
+          await executor.update(schema.users).set({
             ext: {
-              ...((user as any).ext || {}),
               invite_token: inviteToken,
               invite_expires_at: expires.toISOString(),
               invite_status: 'PENDING',
               invited_at: now.toISOString(),
             },
-          })
-          .where(eq(schema.users.id, user.id));
+          }).where(eq(schema.users.id, user.id));
+          return { user, targetRole };
+        }, { roleLock: 'update' });
 
-        return reply.status(CREATED).send({
+        return reply.header('Cache-Control', 'no-store').status(CREATED).send({
           id: user.id,
           email: user.email,
           role: targetRole.name,
@@ -148,13 +202,96 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           invite_expires_at: expires.toISOString(),
           invite_status: 'PENDING',
           invited_at: now.toISOString(),
-          temp_password: tempPassword,
         });
       } catch (error) {
         logger.error(error, 'Invite user error');
         return respondWithError(reply, error);
       }
     }
+  );
+
+  fastify.post<{ Params: { id: string }; Body: typeof replaceInviteSchema._type }>(
+    apiEndpoints.userInvite.replace,
+    {
+      schema: {
+        description: 'Replace a pending invitation link (old link becomes invalid)',
+        tags: ['Users'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest<{ Params: { id: string }; Body: typeof replaceInviteSchema._type }>, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+        const data = replaceInviteSchema.parse(request.body);
+        const now = new Date();
+        const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const replaced = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          const [current] = await executor.select().from(schema.users)
+            .where(eq(schema.users.id, id)).for('update');
+          if (!current || current.deleted_at) throw AppError.notFound('Invitation not found');
+          const [role] = await executor.select().from(schema.roles)
+            .where(eq(schema.roles.id, current.role_id));
+          if (!role) throw AppError.conflict('Invitation role no longer exists');
+          const target = { ...current, role: role.name, role_is_system: role.is_system };
+          const globalUserManagement = hasGlobalUserManagement(ability);
+          if (!globalUserManagement && !current.is_active) throw AppError.notFound('Invitation not found');
+          if (!canManageUserTarget(
+            { departmentId: actor.departmentId, globalUserManagement },
+            { roleName: role.name, isSystem: role.is_system, departmentId: current.department_id },
+          )) throw AppError.notFound('Invitation not found');
+          if (!canIssueInviteFor(ability, actor.departmentId, target)) throw AppError.forbidden('Forbidden');
+          if (!isPendingInvite(target)) throw AppError.conflict('Invitation is no longer pending');
+          if (current.updated_at.getTime() !== new Date(data.expected_updated_at).getTime()) {
+            throw new AppError({
+              statusCode: 409,
+              code: 'INVITATION_CHANGED',
+              message: 'Invitation changed. Refresh and try again.',
+            });
+          }
+          const ext = current.ext as Record<string, unknown>;
+          let inviteToken: string;
+          do { inviteToken = randomBytes(16).toString('hex'); }
+          while (inviteToken === ext.invite_token);
+          const updated = await userRepo.update(id, {
+            ext: {
+              ...ext,
+              invite_token: inviteToken,
+              invite_expires_at: expires.toISOString(),
+              invite_status: 'PENDING',
+              invite_replaced_at: now.toISOString(),
+              invite_replaced_by: actor.userId,
+            },
+          }, executor);
+          if (!updated) throw AppError.notFound('Invitation not found');
+          await executor.insert(schema.auditLogs).values({
+            user_id: actor.userId,
+            action: 'USER_INVITE_LINK_REPLACED',
+            entity_type: 'USER',
+            entity_id: id,
+            ip_address: request.ip,
+            created_at: now,
+          });
+          return { user: updated, role: role.name, inviteToken };
+        }, { roleLock: 'update' });
+        await broadcastSessionInvalidation([replaced.user.id]);
+        return reply.header('Cache-Control', 'no-store').status(OK).send({
+          id: replaced.user.id,
+          email: replaced.user.email,
+          role: replaced.role,
+          department_id: replaced.user.department_id,
+          invite_token: replaced.inviteToken,
+          invite_expires_at: expires.toISOString(),
+          invite_status: 'PENDING',
+          invite_replaced_at: now.toISOString(),
+        });
+      } catch (error) {
+        logger.error(error, 'Replace invitation error');
+        return respondWithError(reply, error);
+      }
+    },
   );
 
   // List user invites with filters (admin only)
@@ -173,28 +310,10 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (
-          !ability.can('read', 'User') &&
-          !(ability as any).can('read', subject('User', {
-            id: payload.sub,
-            department_id: payload.department_id,
-            is_active: true,
-          }))
-        ) throw AppError.forbidden('Forbidden');
+        if (!hasDirectoryReadGrant(ability)) throw AppError.forbidden('Forbidden');
 
         const query = listInvitesQuerySchema.parse(request.query);
-        const statusLookup: Record<string, 'pending' | 'expired' | 'activated'> = {
-          pending: 'pending',
-          expired: 'expired',
-          activated: 'activated',
-          approved: 'activated',
-          active: 'activated',
-        };
-        const statuses =
-          query.status
-            ?.split(',')
-            .map((s) => statusLookup[s.trim().toLowerCase()])
-            .filter(Boolean) as ('pending' | 'expired' | 'activated')[] | undefined;
+        const statuses = parseInviteStatuses(query.status);
 
         let roleId: string | undefined;
         if (query.role) {
@@ -229,11 +348,12 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           visibility: {
             actorUserId: payload.sub,
             actorDepartmentId: payload.department_id,
-            global: ability.can('manage', 'User'),
+            global: hasGlobalUserManagement(ability),
+            readPredicate: directoryReadPredicate(ability),
           },
         });
 
-        const serializeInvite = createInviteSerializer(new Date());
+        const serializeInvite = createInviteSerializer(new Date(), ability, payload.department_id);
 
         return reply.status(OK).send({
           items: result.items.map(serializeInvite),
@@ -266,14 +386,7 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (
-          !ability.can('read', 'User') &&
-          !(ability as any).can('read', subject('User', {
-            id: payload.sub,
-            department_id: payload.department_id,
-            is_active: true,
-          }))
-        ) throw AppError.forbidden('Forbidden');
+        if (!hasDirectoryReadGrant(ability)) throw AppError.forbidden('Forbidden');
 
         const result = await userRepo.listInvites({
           page: 1,
@@ -282,10 +395,11 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           visibility: {
             actorUserId: payload.sub,
             actorDepartmentId: payload.department_id,
-            global: ability.can('manage', 'User'),
+            global: hasGlobalUserManagement(ability),
+            readPredicate: directoryReadPredicate(ability),
           },
         });
-        const serializeInvite = createInviteSerializer(new Date());
+        const serializeInvite = createInviteSerializer(new Date(), ability, payload.department_id);
 
         return reply.status(OK).send({
           items: result.items.map(serializeInvite),
@@ -316,49 +430,34 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         const data = resetPasswordSchema.parse(request.body);
-        const current = await userRepo.findById((request.params as any).id);
-        if (!current || current.deleted_at) throw AppError.notFound('User not found');
-        if (!(ability as any).can('update', subject('User', current))) {
-          throw AppError.forbidden('Forbidden');
-        }
-
-        const [targetRole] = await db.select().from(schema.roles).where(eq(schema.roles.id, current.role_id));
-        const hasGlobalUserManagement = ability.can('manage', 'User');
-        if (
-          !canManageUserRecord(
-            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            { id: current.id, roleName: targetRole?.name ?? '', departmentId: current.department_id }
-          ) &&
-          !((!targetRole?.is_system || targetRole?.name === 'OPERATOR') && (
-            hasGlobalUserManagement || current.department_id === payload.department_id
-          ))
-        ) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const nextPassword = data?.new_password
           ? data.new_password
           : `${randomBytes(6).toString('hex')}A!`;
-        if (data?.current_password) {
-          const currentMatches = await verifyPassword(data.current_password, current.password_hash);
-          if (!currentMatches) {
-            throw AppError.badRequest('Current password is incorrect');
-          }
-        }
-
         validatePasswordStrength(nextPassword);
         const passwordHash = await hashPassword(nextPassword);
-
-        const user = await userRepo.update((request.params as any).id, {
-          password_hash: passwordHash,
-          ext: current.ext,
-        });
-        if (!user) throw AppError.notFound('User not found');
+        const user = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          const [current] = await executor.select().from(schema.users)
+            .where(eq(schema.users.id, (request.params as any).id)).for('update');
+          if (!current || current.deleted_at || (!hasGlobalUserManagement(ability) && !current.is_active)) {
+            throw AppError.notFound('User not found');
+          }
+          const [targetRole] = await executor.select().from(schema.roles).where(eq(schema.roles.id, current.role_id));
+          if (!targetRole || !(ability as any).can('update', subject('User', current)) ||
+              !canManageUserTarget({ departmentId: actor.departmentId, globalUserManagement: hasGlobalUserManagement(ability) },
+                { roleName: targetRole.name, isSystem: targetRole.is_system, departmentId: current.department_id })) {
+            throw AppError.forbidden('Forbidden');
+          }
+          if (data?.current_password && !await verifyPassword(data.current_password, current.password_hash)) {
+            throw AppError.badRequest('Current password is incorrect');
+          }
+          const user = await userRepo.update(current.id, { password_hash: passwordHash, ext: current.ext }, executor);
+          if (!user) throw AppError.notFound('User not found');
+          return user;
+        }, { roleLock: 'update' });
         await broadcastSessionInvalidation([user.id]);
 
-        return reply.send({
+        return reply.header('Cache-Control', 'no-store').send({
           id: user.id,
           email: user.email,
           message: 'Password updated successfully',

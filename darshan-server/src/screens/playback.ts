@@ -368,7 +368,7 @@ export async function getLatestPublishForScreen(
   const reservationRepo = createScheduleReservationRepository();
   const now = options.now ?? new Date();
   if (!options.skipReservationExpiry) {
-    await reservationRepo.expireStaleHolds(now, db);
+    await reservationRepo.tryExpireStaleHolds(now, db);
   }
 
   const active = await reservationRepo.findCurrentPublishedForScreen(screenId, now, db);
@@ -705,6 +705,7 @@ export async function getActiveEmergencyForScreen(
         : effectiveMedia?.type ?? null,
     content_type: effectiveMedia?.content_type ?? null,
     source_content_type: effectiveMedia?.source_content_type ?? null,
+    loop_enabled: effectiveMedia?.type === 'VIDEO',
     screen_ids: emergencyScreenIds,
     screen_group_ids: emergencyGroupIds,
     target_all: (emergency as any).target_all ?? false,
@@ -1392,19 +1393,34 @@ export async function buildScreensOverviewPayload(options: {
   includeMedia?: boolean;
   includePreview?: boolean;
   onlineOnly?: boolean;
+  screenIds?: string[];
+  groupIds?: string[];
 }) {
   const db = options.db ?? getDatabase();
   const serverTime = new Date();
   const onlineThreshold = new Date(serverTime.getTime() - HEARTBEAT_STALE_MS);
   const reservationRepo = createScheduleReservationRepository();
-  await reservationRepo.expireStaleHolds(serverTime, db);
-  const screens = options.onlineOnly
-    ? await db
-        .select()
-        .from(schema.screens)
-        .where(and(eq(schema.screens.status, 'ACTIVE'), gte(schema.screens.last_heartbeat_at, onlineThreshold)))
-    : await db.select().from(schema.screens);
-  const groups = options.onlineOnly ? [] : await db.select().from(schema.screenGroups);
+  await reservationRepo.tryExpireStaleHolds(serverTime, db);
+  const screenScope = options.screenIds === undefined
+    ? undefined
+    : options.screenIds.length > 0
+      ? inArray(schema.screens.id, options.screenIds as any)
+      : sql`false`;
+  const onlineScope = options.onlineOnly
+    ? and(eq(schema.screens.status, 'ACTIVE'), gte(schema.screens.last_heartbeat_at, onlineThreshold))
+    : undefined;
+  const screens = await db
+    .select()
+    .from(schema.screens)
+    .where(screenScope && onlineScope ? and(screenScope, onlineScope) : screenScope ?? onlineScope);
+  const groupScope = options.groupIds === undefined
+    ? undefined
+    : options.groupIds.length > 0
+      ? inArray(schema.screenGroups.id, options.groupIds as any)
+      : sql`false`;
+  const groups = options.onlineOnly
+    ? []
+    : await db.select().from(schema.screenGroups).where(groupScope);
   const screenIds = screens.map((screen) => screen.id);
   const [proofOfPlayMap, recoveryStateMap, groupIdsByScreenId, latestPublishByScreenId, activeEmergencies] = await Promise.all([
     getLastProofOfPlayMap(screenIds, db),
@@ -1477,10 +1493,16 @@ export async function buildScreensOverviewPayload(options: {
 export async function buildScreensFleetSummary(options: {
   db?: ReturnType<typeof getDatabase>;
   now?: Date;
+  screenIds?: string[];
 } = {}): Promise<ScreenFleetSummary> {
   const db = options.db ?? getDatabase();
   const now = options.now ?? new Date();
-  const screens = await db.select().from(schema.screens);
+  const screenScope = options.screenIds === undefined
+    ? undefined
+    : options.screenIds.length > 0
+      ? inArray(schema.screens.id, options.screenIds as any)
+      : sql`false`;
+  const screens = await db.select().from(schema.screens).where(screenScope);
   const recoveryStateMap = await buildScreenRecoveryStateMap(
     screens.map((screen) => screen.id),
     db,
@@ -1596,17 +1618,24 @@ export async function buildScreenScheduleTimelinePayload(options: {
   windowStart: Date;
   windowHours: number;
   onlyActiveNow?: boolean;
+  screenIds?: string[];
 }) {
   const db = options.db ?? getDatabase();
   const now = options.now ?? new Date();
   const windowStart = options.windowStart;
   const windowEnd = new Date(windowStart.getTime() + options.windowHours * 60 * 60 * 1000);
-  const screens = options.onlyActiveNow
-    ? await db
-        .select()
-        .from(schema.screens)
-        .where(and(eq(schema.screens.status, 'ACTIVE'), isNotNull(schema.screens.current_schedule_id)))
-    : await db.select().from(schema.screens);
+  const screenScope = options.screenIds === undefined
+    ? undefined
+    : options.screenIds.length > 0
+      ? inArray(schema.screens.id, options.screenIds as any)
+      : sql`false`;
+  const activeScope = options.onlyActiveNow
+    ? and(eq(schema.screens.status, 'ACTIVE'), isNotNull(schema.screens.current_schedule_id))
+    : undefined;
+  const screens = await db
+    .select()
+    .from(schema.screens)
+    .where(screenScope && activeScope ? and(screenScope, activeScope) : screenScope ?? activeScope);
   const proofOfPlayMap = await getLastProofOfPlayMap(screens.map((screen) => screen.id), db);
   const windowStartMs = windowStart.getTime();
   const windowEndMs = windowEnd.getTime();

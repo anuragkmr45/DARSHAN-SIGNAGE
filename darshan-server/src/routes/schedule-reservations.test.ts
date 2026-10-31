@@ -2,44 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
-import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
+import { closeTestServer, createTestActor, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
-import { generateAccessToken } from '@/auth/jwt';
-import { createSessionRepository } from '@/db/repositories/session';
-import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
-
-async function issueSuperAdminToken(userId: string, email: string) {
-  const db = getDatabase();
-  const [superAdminRole] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'SUPER_ADMIN')).limit(1);
-  if (!superAdminRole) {
-    throw new Error('SUPER_ADMIN role is required for reservation tests');
-  }
-
-  const token = await generateAccessToken(userId, email, superAdminRole.id, superAdminRole.name);
-  await createSessionRepository().create({
-    user_id: userId,
-    access_jti: token.jti,
-    expires_at: token.expiresAt,
-  });
-  return { token: token.token, roleId: superAdminRole.id };
-}
-
-async function ensureUser(id: string, email: string, roleId: string) {
-  const db = getDatabase();
-  await db
-    .insert(schema.users)
-    .values({
-      id,
-      email,
-      password_hash: await hashPassword('TestPassword123!'),
-      first_name: email.split('@')[0],
-      last_name: 'Admin',
-      role_id: roleId,
-      is_active: true,
-    })
-    .onConflictDoNothing();
-}
 
 async function seedReadySchedule(params: {
   screenId: string;
@@ -103,16 +68,17 @@ describe('Hybrid schedule reservations', () => {
   let server: FastifyInstance;
   let tokenOne: string;
   let tokenTwo: string;
+  let firstUserId: string;
   let secondUserId: string;
 
   beforeAll(async () => {
     server = await createTestServer();
-    const firstAuth = await issueSuperAdminToken(testUser.id, testUser.email);
-    tokenOne = firstAuth.token;
-
-    secondUserId = randomUUID();
-    await ensureUser(secondUserId, 'second-admin@example.com', firstAuth.roleId);
-    tokenTwo = (await issueSuperAdminToken(secondUserId, 'second-admin@example.com')).token;
+    const firstActor = await createTestActor('SUPER_ADMIN');
+    const secondActor = await createTestActor('SUPER_ADMIN');
+    firstUserId = firstActor.id;
+    secondUserId = secondActor.id;
+    tokenOne = firstActor.token;
+    tokenTwo = secondActor.token;
   });
 
   afterAll(async () => {
@@ -552,7 +518,7 @@ describe('Hybrid schedule reservations', () => {
       .from(schema.publishes)
       .where(eq(schema.publishes.id, publishId));
     expect(publish?.status).toBe('TAKEN_DOWN');
-    expect(publish?.taken_down_by).toBe(testUser.id);
+    expect(publish?.taken_down_by).toBe(firstUserId);
     expect(publish?.takedown_reason).toBe('Direct publish removed by admin');
 
     const refreshCommands = await db

@@ -1,5 +1,11 @@
 import { eq, desc, and, sql, inArray, asc } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
+import { isReservedSystemRoleName } from '@/rbac/system-roles';
+import { AppError } from '@/utils/app-error';
+
+const reservedName = isReservedSystemRoleName;
+const immutableRoleError = () => new AppError({ statusCode: 409, code: 'SYSTEM_ROLE_IMMUTABLE', message: 'Built-in role definitions cannot be changed.' });
+const reservedNameError = () => new AppError({ statusCode: 409, code: 'RESERVED_ROLE_NAME', message: 'This role name is reserved.' });
 
 type RoleDependency = {
   id: string;
@@ -41,8 +47,9 @@ export class RoleRepository {
     description?: string;
     permissions: any;
     is_system?: boolean;
-  }) {
-    const db = getDatabase();
+  }, executor: DbExecutor = getDatabase()) {
+    if (!data.is_system && reservedName(data.name)) throw reservedNameError();
+    const db = executor;
     const [role] = await db
       .insert(schema.roles)
       .values({
@@ -119,12 +126,14 @@ export class RoleRepository {
   ) {
     const performUpdate = async (tx: DbExecutor) => {
       const roles = await tx
-        .select({ id: schema.roles.id, permissions: schema.roles.permissions })
+        .select({ id: schema.roles.id, name: schema.roles.name, is_system: schema.roles.is_system, permissions: schema.roles.permissions })
         .from(schema.roles)
         .orderBy(asc(schema.roles.id))
         .for('update');
       const current = roles.find((role) => role.id === id);
       if (!current) return null;
+      if (current.is_system || reservedName(current.name)) throw immutableRoleError();
+      if (data.name && reservedName(data.name)) throw reservedNameError();
 
       const affectedRoleIds = resolveAffectedRoleIds(roles, id);
 
@@ -142,7 +151,11 @@ export class RoleRepository {
 
       const userIds = assignedUsers.map((user) => user.id);
       if (userIds.length > 0) {
-        await tx.delete(schema.sessions).where(inArray(schema.sessions.user_id, userIds));
+        await tx.delete(schema.sessions).where(inArray(
+          schema.sessions.user_id,
+          tx.select({ id: schema.users.id }).from(schema.users)
+            .where(inArray(schema.users.role_id, affectedRoleIds))
+        ));
       }
 
       return { role, revokedUserIds: userIds };
@@ -155,11 +168,13 @@ export class RoleRepository {
   async delete(id: string, executor?: DbExecutor) {
     const performDelete = async (tx: DbExecutor) => {
       const roles = await tx
-        .select({ id: schema.roles.id, permissions: schema.roles.permissions })
+        .select({ id: schema.roles.id, name: schema.roles.name, is_system: schema.roles.is_system, permissions: schema.roles.permissions })
         .from(schema.roles)
         .orderBy(asc(schema.roles.id))
         .for('update');
-      if (!roles.some((role) => role.id === id)) return { status: 'NOT_FOUND' as const };
+      const current = roles.find((role) => role.id === id);
+      if (!current) return { status: 'NOT_FOUND' as const };
+      if (current.is_system || reservedName(current.name)) throw immutableRoleError();
 
       const inheritorIds = resolveAffectedRoleIds(roles, id).filter((roleId) => roleId !== id);
       if (inheritorIds.length > 0) {

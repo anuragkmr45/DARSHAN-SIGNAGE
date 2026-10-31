@@ -3,14 +3,18 @@ import { createUserSchema, updateUserSchema, listUsersQuerySchema } from '@/sche
 import { createUserRepository } from '@/db/repositories/user';
 import { hashPassword } from '@/auth/password';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { defineAbilityFor, hasGlobalUserManagement } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { createRoleRepository } from '@/db/repositories/role';
-import { canManageUserRecord, canManageUserRoleTarget, canReadUserRecord } from '@/rbac/policy';
+import { canManageUserTarget } from '@/rbac/policy';
+import { canAccessDirectoryUser, directoryReadPredicate, hasDirectoryReadGrant, userActionPermissions } from '@/rbac/user-directory';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
+import { schema } from '@/db';
+import { and, eq } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { abortMultipartUpload, deleteObject } from '@/s3';
 import { createMediaUploadSessionRepository } from '@/db/repositories/media-upload-session';
@@ -44,39 +48,32 @@ export async function userRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('create', 'User')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const data = createUserSchema.parse(request.body);
         const passwordHash = await hashPassword(data.password);
-
-        const role = await roleRepo.findById(data.role_id);
-        if (!role) {
-          throw AppError.notFound('Role not found');
-        }
-        const hasGlobalUserManagement = ability.can('manage', 'User');
-        if (
-          !canManageUserRoleTarget(payload.role, role.name) &&
-          !((!role.is_system || role.name === 'OPERATOR') &&
-            (hasGlobalUserManagement || data.department_id === payload.department_id))
-        ) {
-          throw AppError.forbidden('Forbidden');
-        }
-        if (!hasGlobalUserManagement && data.department_id !== payload.department_id) {
-          throw AppError.forbidden('Department users can only manage operators in their own department.');
-        }
-
-        const user = await userRepo.create({
-          email: data.email,
-          password_hash: passwordHash,
-          first_name: data.first_name,
-          last_name: data.last_name,
-          role_id: data.role_id,
-          department_id: data.department_id,
-        });
+        const { user, role } = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          const [role] = await executor.select().from(schema.roles).where(eq(schema.roles.id, data.role_id));
+          if (!role) throw AppError.notFound('Role not found');
+          const prospective = { ...data, id: '', is_active: true, deleted_at: null };
+          if (!(ability as any).can('create', subject('User', prospective)) ||
+              !canManageUserTarget({ departmentId: actor.departmentId, globalUserManagement: hasGlobalUserManagement(ability) },
+                { roleName: role.name, isSystem: role.is_system, departmentId: data.department_id })) {
+            throw AppError.forbidden('Forbidden');
+          }
+          if (data.department_id) {
+            const [department] = await executor.select({ id: schema.departments.id }).from(schema.departments)
+              .where(eq(schema.departments.id, data.department_id)).for('share');
+            if (!department) throw AppError.notFound('Department not found');
+          }
+          const user = await userRepo.create({
+            email: data.email,
+            password_hash: passwordHash,
+            first_name: data.first_name,
+            last_name: data.last_name,
+            role_id: data.role_id,
+            department_id: data.department_id,
+          }, executor);
+          return { user, role };
+        }, { roleLock: 'update' });
 
         return reply.status(CREATED).send({
           id: user.id,
@@ -116,14 +113,7 @@ export async function userRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (
-          !ability.can('read', 'User') &&
-          !(ability as any).can('read', subject('User', {
-            id: payload.sub,
-            department_id: payload.department_id,
-            is_active: true,
-          }))
-        ) {
+        if (!hasDirectoryReadGrant(ability)) {
           throw AppError.forbidden('Forbidden');
         }
 
@@ -138,7 +128,8 @@ export async function userRoutes(fastify: FastifyInstance) {
           visibility: {
             actorUserId: payload.sub,
             actorDepartmentId: payload.department_id,
-            global: ability.can('manage', 'User'),
+            global: hasGlobalUserManagement(ability),
+            readPredicate: directoryReadPredicate(ability),
           },
         });
 
@@ -152,6 +143,7 @@ export async function userRoutes(fastify: FastifyInstance) {
             role_id: user.role_id,
             department_id: user.department_id,
             is_active: user.is_active,
+            permissions: userActionPermissions({ userId: payload.sub, departmentId: payload.department_id }, user, ability),
             created_at: user.created_at.toISOString(),
             updated_at: user.updated_at.toISOString(),
           })),
@@ -167,6 +159,47 @@ export async function userRoutes(fastify: FastifyInstance) {
       }
     }
   );
+
+  fastify.get(apiEndpoints.users.managementOptions, {
+    schema: {
+      description: 'Assignable roles and departments for account management',
+      tags: ['Users'],
+      security: [{ bearerAuth: [] }],
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const token = extractTokenFromHeader(request.headers.authorization);
+      if (!token) throw AppError.unauthorized('Missing authorization header');
+      const payload = await verifyAccessToken(token);
+      const result = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+        if (!ability.can('create', 'User') && !ability.can('update', 'User')) {
+          throw AppError.forbidden('Forbidden');
+        }
+        const global = hasGlobalUserManagement(ability);
+        if (global) {
+          const [roles, departments] = await Promise.all([
+            executor.select({ id: schema.roles.id, name: schema.roles.name }).from(schema.roles),
+            executor.select({ id: schema.departments.id, name: schema.departments.name }).from(schema.departments),
+          ]);
+          return { roles, departments, is_global_user_manager: true };
+        }
+        if (!actor.departmentId) return { roles: [], departments: [], is_global_user_manager: false };
+        const [role] = await executor.select({ id: schema.roles.id, name: schema.roles.name })
+          .from(schema.roles).where(and(eq(schema.roles.name, 'OPERATOR'), eq(schema.roles.is_system, true)));
+        const [department] = await executor.select({ id: schema.departments.id, name: schema.departments.name })
+          .from(schema.departments).where(eq(schema.departments.id, actor.departmentId));
+        return {
+          roles: role ? [role] : [],
+          departments: department ? [department] : [],
+          is_global_user_manager: false,
+        };
+      });
+      return reply.send(result);
+    } catch (error) {
+      logger.error(error, 'Management options error');
+      return respondWithError(reply, error);
+    }
+  });
 
   // Get user by ID
   fastify.get<{ Params: { id: string } }>(
@@ -188,21 +221,12 @@ export async function userRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         const user = await userRepo.findById((request.params as any).id);
-        if (!user || user.deleted_at || (!ability.can('manage', 'User') && !user.is_active)) {
+        if (!user) {
           throw AppError.notFound('User not found');
         }
 
         const role = await roleRepo.findById(user.role_id);
-        if (!(ability as any).can('read', subject('User', user))) {
-          throw AppError.notFound('User not found');
-        }
-        if (
-          !canReadUserRecord(
-            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            { id: user.id, roleName: role?.name ?? '', departmentId: user.department_id },
-            { global: ability.can('manage', 'User') }
-          )
-        ) {
+        if (!canAccessDirectoryUser({ userId: payload.sub, departmentId: payload.department_id }, user, ability)) {
           throw AppError.notFound('User not found');
         }
 
@@ -215,6 +239,8 @@ export async function userRoutes(fastify: FastifyInstance) {
           role_id: user.role_id,
           department_id: user.department_id,
           is_active: user.is_active,
+          permissions: userActionPermissions({ userId: payload.sub, departmentId: payload.department_id },
+            { ...user, role: role?.name ?? null, role_is_system: role?.is_system ?? false }, ability),
           created_at: user.created_at.toISOString(),
           updated_at: user.updated_at.toISOString(),
         });
@@ -243,64 +269,37 @@ export async function userRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
         const data = updateUserSchema.parse(request.body);
-        const existingUser = await userRepo.findById((request.params as any).id);
-        if (!existingUser || existingUser.deleted_at) {
-          throw AppError.notFound('User not found');
-        }
-        if (!(ability as any).can('update', subject('User', existingUser))) {
-          throw AppError.forbidden('Forbidden');
-        }
-        const hasGlobalUserManagement = ability.can('manage', 'User');
-        if (data.role_id) {
-          const role = await roleRepo.findById(data.role_id);
-          if (!role) {
-            throw AppError.notFound('Role not found');
+        const { user, role } = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          const [existingUser] = await executor.select().from(schema.users)
+            .where(eq(schema.users.id, (request.params as any).id)).for('update');
+          if (!existingUser || existingUser.deleted_at ||
+              (!hasGlobalUserManagement(ability) && !existingUser.is_active)) {
+            throw AppError.notFound('User not found');
           }
-          if (
-            !canManageUserRoleTarget(payload.role, role.name) &&
-            !((!role.is_system || role.name === 'OPERATOR') &&
-              (hasGlobalUserManagement || existingUser.department_id === payload.department_id))
-          ) {
+          const [existingRole] = await executor.select().from(schema.roles)
+            .where(eq(schema.roles.id, existingUser.role_id));
+          const [role] = await executor.select().from(schema.roles)
+            .where(eq(schema.roles.id, data.role_id ?? existingUser.role_id));
+          if (!existingRole || !role) throw AppError.notFound('Role not found');
+          const actorScope = { departmentId: actor.departmentId, globalUserManagement: hasGlobalUserManagement(ability) };
+          if (!(ability as any).can('update', subject('User', existingUser)) ||
+              !(ability as any).can('update', subject('User', { ...existingUser, ...data })) ||
+              !canManageUserTarget(actorScope, { roleName: existingRole.name, isSystem: existingRole.is_system, departmentId: existingUser.department_id }) ||
+              !canManageUserTarget(actorScope, { roleName: role.name, isSystem: role.is_system,
+                departmentId: data.department_id !== undefined ? data.department_id : existingUser.department_id })) {
             throw AppError.forbidden('Forbidden');
           }
-          if (!hasGlobalUserManagement && data.department_id !== undefined && data.department_id !== payload.department_id) {
-            throw AppError.forbidden('Department users can only manage operators in their own department.');
+          if (data.department_id) {
+            const [department] = await executor.select({ id: schema.departments.id }).from(schema.departments)
+              .where(eq(schema.departments.id, data.department_id)).for('share');
+            if (!department) throw AppError.notFound('Department not found');
           }
-        }
-        if (
-          !hasGlobalUserManagement &&
-          Object.prototype.hasOwnProperty.call(data, 'department_id') &&
-          data.department_id !== payload.department_id
-        ) {
-          throw AppError.forbidden('Department users can only manage operators in their own department.');
-        }
-        const existingRole = await roleRepo.findById(existingUser.role_id);
-        if (
-          !canManageUserRecord(
-            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            {
-              id: existingUser.id,
-              roleName: existingRole?.name ?? '',
-              departmentId: existingUser.department_id,
-            }
-          ) &&
-          !((!existingRole?.is_system || existingRole?.name === 'OPERATOR') && (
-            hasGlobalUserManagement || existingUser.department_id === payload.department_id
-          ))
-        ) {
-          throw AppError.forbidden('Forbidden');
-        }
-        const user = await userRepo.update((request.params as any).id, data);
-
-        if (!user) {
-          throw AppError.notFound('User not found');
-        }
+          const user = await userRepo.update(existingUser.id, data, executor);
+          if (!user) throw AppError.notFound('User not found');
+          return { user, role };
+        }, { roleLock: 'update' });
         await broadcastSessionInvalidation([user.id]);
-
-        const role = await roleRepo.findById(user.role_id);
 
         return reply.send({
           id: user.id,
@@ -332,15 +331,6 @@ export async function userRoutes(fastify: FastifyInstance) {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      let user: {
-        first_name?: string | null;
-        last_name?: string | null;
-        email?: string | null;
-        role_id?: string;
-        department_id?: string | null;
-        deleted_at?: Date | null;
-      } | null = null;
-
       try {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) {
@@ -348,37 +338,25 @@ export async function userRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
         const userId = (request.params as any).id;
-        user = await userRepo.findById(userId);
-        if (!user) {
-          throw AppError.notFound('User not found');
-        }
-        const targetRole = user.role_id ? await roleRepo.findById(user.role_id) : null;
-        if (!(ability as any).can('delete', subject('User', user))) {
-          throw AppError.forbidden('Forbidden');
-        }
-        const hasGlobalUserManagement = ability.can('manage', 'User');
-        if (
-          !canManageUserRecord(
-            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            {
-              id: userId,
-              roleName: targetRole?.name ?? '',
-              departmentId: (user as any).department_id,
-            }
-          ) &&
-          !((!targetRole?.is_system || targetRole?.name === 'OPERATOR') && (
-            hasGlobalUserManagement || (user as any).department_id === payload.department_id
-          ))
-        ) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const invalidPasswordHash = await hashPassword(`${randomBytes(32).toString('hex')}A!`);
-        const result = await userRepo.tombstone(userId, payload.sub, invalidPasswordHash);
-        if (!result) throw AppError.notFound('User not found');
+        const result = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          const [user] = await executor.select().from(schema.users)
+            .where(eq(schema.users.id, userId)).for('update');
+          if (!user || (!hasGlobalUserManagement(ability) && (user.deleted_at || !user.is_active))) {
+            throw AppError.notFound('User not found');
+          }
+          const [targetRole] = await executor.select().from(schema.roles).where(eq(schema.roles.id, user.role_id));
+          if (!targetRole || !(ability as any).can('delete', subject('User', user)) ||
+              !canManageUserTarget({ departmentId: actor.departmentId, globalUserManagement: hasGlobalUserManagement(ability) },
+                { roleName: targetRole.name, isSystem: targetRole.is_system, departmentId: user.department_id })) {
+            throw AppError.forbidden('Forbidden');
+          }
+          const result = await userRepo.tombstone(userId, actor.userId, invalidPasswordHash, executor);
+          if (!result) throw AppError.notFound('User not found');
+          return result;
+        }, { roleLock: 'update' });
+        if (!result.alreadyDeleted) await broadcastSessionInvalidation([userId]);
 
         let cleanedUploads = 0;
         for (const upload of result.abortedUploads) {
@@ -417,7 +395,6 @@ export async function userRoutes(fastify: FastifyInstance) {
           }
         }
 
-        await broadcastSessionInvalidation([userId]);
         return reply.status(OK).send({
           message: result.alreadyDeleted ? 'User was already deleted' : 'User deleted successfully',
           id: userId,

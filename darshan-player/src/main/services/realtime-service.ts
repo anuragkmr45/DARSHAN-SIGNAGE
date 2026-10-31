@@ -14,6 +14,8 @@ import { getDefaultMediaService } from './settings/default-media-service'
 import { createTransportHttpsAgent } from './network/transport-tls'
 import { getSnapshotManager } from './snapshot-manager'
 import { getDisplayManager } from './display-manager'
+import { buildPlayerRecoveryGenerationProofPayload, isRecoveryGenerationCurrent, persistAcceptedRecoveryGeneration,
+  type PlayerRecoveryChallenge } from './recovery-generation'
 
 const logger = getLogger('realtime-service')
 const SOCKET_AUTH_NONCE_BYTES = 16
@@ -30,7 +32,7 @@ type SocketAuthCertificateManager = {
 
 export type RealtimeConnectionState = 'disabled' | 'disconnected' | 'connecting' | 'connected'
 
-type RealtimeNotificationType = 'HELLO_ACK' | 'COMMAND_AVAILABLE' | 'RESYNC_REQUIRED' | 'SERVER_TIME' | 'ERROR'
+type RealtimeNotificationType = 'HELLO_ACK' | 'RECOVERY_GENERATION_ACCEPTED' | 'COMMAND_AVAILABLE' | 'RESYNC_REQUIRED' | 'SERVER_TIME' | 'ERROR'
 
 export type RealtimeNotification = {
   type: RealtimeNotificationType
@@ -46,11 +48,15 @@ export type RealtimeNotification = {
   reason?: string
   resources?: string[]
   sent_at?: string
+  recovery_generation?: string
+  recovery_challenge?: PlayerRecoveryChallenge | null
+  receipt_sha256?: string
   [key: string]: unknown
 }
 
 export type DesiredStateResponse = {
   device_id: string
+  recovery_generation?: string | null
   server_time?: string
   state: {
     state_version: number
@@ -467,6 +473,12 @@ export class RealtimeService extends EventEmitter {
       case 'HELLO_ACK':
         await this.handleHelloAck(notification)
         break
+      case 'RECOVERY_GENERATION_ACCEPTED':
+        if (typeof notification.recovery_generation === 'string' && typeof notification.receipt_sha256 === 'string') {
+          await persistAcceptedRecoveryGeneration({ generation: notification.recovery_generation, receiptSha256: notification.receipt_sha256 })
+          await this.reconcileDesiredState('recovery-generation-accepted')
+        }
+        break
       case 'RESYNC_REQUIRED':
         await this.reconcileDesiredState(notification.reason || 'resync-required')
         break
@@ -612,6 +624,7 @@ export class RealtimeService extends EventEmitter {
   private bindTransport(transport: RealtimeTransport): void {
     transport.removeAllListeners('COMMAND_AVAILABLE')
     transport.removeAllListeners('HELLO_ACK')
+    transport.removeAllListeners('RECOVERY_GENERATION_ACCEPTED')
     transport.removeAllListeners('RESYNC_REQUIRED')
     transport.removeAllListeners('SERVER_TIME')
     transport.removeAllListeners('ERROR')
@@ -619,6 +632,9 @@ export class RealtimeService extends EventEmitter {
     transport.removeAllListeners('error')
 
     transport.on('HELLO_ACK', (payload) => {
+      void this.handleNotification(payload as RealtimeNotification)
+    })
+    transport.on('RECOVERY_GENERATION_ACCEPTED', (payload) => {
       void this.handleNotification(payload as RealtimeNotification)
     })
     transport.on('COMMAND_AVAILABLE', (payload) => {
@@ -654,6 +670,7 @@ export class RealtimeService extends EventEmitter {
     this.transport?.sendEvent('HELLO', {
       type: 'HELLO',
       protocol_version: '1.0',
+      recovery_nonce: randomBytes(32).toString('base64url'),
       device_id: pairingService.getDeviceId(),
       session_id: `electron-${process.pid}`,
       app: {
@@ -716,6 +733,18 @@ export class RealtimeService extends EventEmitter {
 
     this.state = 'connected'
     this.lastHelloAckAt = new Date().toISOString()
+    if (notification.recovery_challenge) {
+      try {
+        const payload = buildPlayerRecoveryGenerationProofPayload(notification.recovery_challenge)
+        const signature = await getCertificateManager().signRecoveryGenerationProof(payload)
+        this.transport?.sendEvent('RECOVERY_GENERATION_PROOF', {
+          challenge_id: notification.recovery_challenge.challenge_id,
+          signature_base64: signature,
+        })
+      } catch (error) {
+        logger.warn({ error }, 'Unable to prove advertised recovery generation; retaining current counters')
+      }
+    }
     this.serverReleaseId =
       typeof notification['server_release_id'] === 'string' ? notification['server_release_id'] : undefined
     this.serverCompatibilityGeneration =
@@ -807,12 +836,20 @@ export class RealtimeService extends EventEmitter {
       return false
     }
 
-    return ['HELLO_ACK', 'COMMAND_AVAILABLE', 'RESYNC_REQUIRED', 'SERVER_TIME', 'ERROR'].includes(notification.type)
+    return ['HELLO_ACK', 'RECOVERY_GENERATION_ACCEPTED', 'COMMAND_AVAILABLE', 'RESYNC_REQUIRED', 'SERVER_TIME', 'ERROR'].includes(notification.type)
   }
 
   private async applyDesiredState(desired: DesiredStateResponse, reason: string): Promise<void> {
     const current = getDeviceStateStore().getState()
     const state = desired.state
+
+    if (!isRecoveryGenerationCurrent(desired.recovery_generation, current.recoveryGeneration)) {
+      logger.warn(
+        { incomingGeneration: desired.recovery_generation, currentGeneration: current.recoveryGeneration },
+        'Ignoring desired state from an unproven recovery generation'
+      )
+      return
+    }
 
     if (state.state_version < (current.lastObservedStateVersion ?? current.lastDesiredStateVersion ?? 0)) {
       logger.warn(

@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useState } from "react";
 import type { Department } from "@/api/types";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 interface DepartmentFormDialogProps {
   open: boolean;
@@ -24,6 +25,11 @@ export const DepartmentFormDialog = ({
   onDelete,
 }: DepartmentFormDialogProps) => {
   const [formData, setFormData] = useState({ name: "", description: "" });
+  const { canRecord } = useAuthorization();
+  const proposed = department ? { ...department, ...formData } : formData;
+  const canSubmit = department
+    ? canRecord("update", "Department", department) && canRecord("update", "Department", proposed)
+    : canRecord("create", "Department", proposed);
 
   useEffect(() => {
     if (department) {
@@ -38,6 +44,7 @@ export const DepartmentFormDialog = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canSubmit) return;
     await onSubmit(
       { name: formData.name.trim(), description: formData.description.trim() || "" },
       department?.id
@@ -79,7 +86,7 @@ export const DepartmentFormDialog = ({
             <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting || !formData.name.trim()}>
+            <Button type="submit" disabled={isSubmitting || !formData.name.trim() || !canSubmit}>
               {isSubmitting ? "Saving..." : department ? "Update" : "Create"} Department
             </Button>
           </DialogFooter>

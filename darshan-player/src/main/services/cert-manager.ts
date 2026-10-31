@@ -136,6 +136,13 @@ export class CertificateManager {
     return this.signPayload(buildDeviceSocketAuthPayload(params))
   }
 
+  async signRecoveryGenerationProof(payload: string): Promise<string> {
+    if (!payload.startsWith('DARSHAN_RECOVERY_GENERATION_PROOF_V1\n')) {
+      throw new Error('Invalid recovery generation proof payload')
+    }
+    return this.signPayload(payload)
+  }
+
   /**
    * Generate RSA 2048 key pair
    */

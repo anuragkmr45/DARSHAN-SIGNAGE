@@ -1,7 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAppSelector } from "@/store/hooks";
 import { useAuthorization } from "@/hooks/useAuthorization";
-import { canAccessModule, type ModuleKey } from "@/lib/access";
+import { canAccessModule, getFirstAccessibleModulePath, type ModuleKey } from "@/lib/access";
 import { buildLoginRedirectPath } from "@/lib/authRedirect";
 
 interface ProtectedRouteProps {
@@ -31,7 +31,7 @@ export function ProtectedRoute({
   if (moduleKey) {
     if (isAuthzLoading) return null;
     if (!canAccessModule(moduleKey, user ?? undefined, can)) {
-      return <Navigate to="/dashboard" replace />;
+      return <Navigate to={getFirstAccessibleModulePath(user ?? undefined, can)} replace />;
     }
   }
 
@@ -41,7 +41,7 @@ export function ProtectedRoute({
       ? requirePermissions.some((perm) => can(perm.action, perm.subject))
       : requirePermissions.every((perm) => can(perm.action, perm.subject));
     if (!allowed) {
-      return <Navigate to="/dashboard" replace />;
+      return <Navigate to={getFirstAccessibleModulePath(user ?? undefined, can)} replace />;
     }
   }
 

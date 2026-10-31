@@ -11,6 +11,7 @@ export type DesiredStateCommandInput = {
   defaultMediaVersion?: string | null;
   emergencyVersion?: string | null;
   metadata?: unknown;
+  recoveryGeneration?: string | null;
 };
 
 export async function recordDesiredStateForCommand(tx: any, input: DesiredStateCommandInput) {
@@ -19,10 +20,12 @@ export async function recordDesiredStateForCommand(tx: any, input: DesiredStateC
   }
 
   const now = new Date();
+  const recoveryGeneration = input.recoveryGeneration ?? null;
   const [state] = await tx
     .insert(schema.deviceDesiredState)
     .values({
       screen_id: input.screenId,
+      recovery_generation: recoveryGeneration,
       snapshot_id: input.snapshotId ?? null,
       default_media_version: input.defaultMediaVersion ?? null,
       emergency_version: input.emergencyVersion ?? null,
@@ -43,6 +46,7 @@ export async function recordDesiredStateForCommand(tx: any, input: DesiredStateC
           input.snapshotId === undefined
             ? sql`COALESCE(${schema.deviceDesiredState.snapshot_id}, excluded.snapshot_id)`
             : input.snapshotId,
+        recovery_generation: recoveryGeneration,
         default_media_version:
           input.defaultMediaVersion === undefined
             ? sql`COALESCE(${schema.deviceDesiredState.default_media_version}, excluded.default_media_version)`
@@ -66,6 +70,7 @@ export async function recordDesiredStateForCommand(tx: any, input: DesiredStateC
   if (state) {
     await tx.insert(schema.deviceDesiredStateHistory).values({
       screen_id: state.screen_id,
+      recovery_generation: recoveryGeneration,
       state_version: state.state_version,
       command_version: state.command_version,
       snapshot_id: state.snapshot_id,

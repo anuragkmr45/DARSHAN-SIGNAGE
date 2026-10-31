@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'crypto';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 
 const {
@@ -27,9 +27,17 @@ import {
   PLAYBACK_REFRESH_JOB_CHUNK_SIZE,
   dispatchPlaybackRefresh,
 } from '@/services/playback-refresh-dispatch';
+import { createDeviceCommands } from '@/services/command-lifecycle-service';
 
 describe('playback refresh dispatch', () => {
   const fastify = {} as FastifyInstance;
+
+  async function seedScreens(screenIds: string[]) {
+    if (screenIds.length === 0) return;
+    await getDatabase().insert(schema.screens).values(
+      screenIds.map((id, index) => ({ id, name: `Refresh target ${index + 1}` }))
+    );
+  }
 
   beforeAll(async () => {
     await initializeDatabase();
@@ -102,6 +110,7 @@ describe('playback refresh dispatch', () => {
     queuePlaybackRefreshDispatchMock.mockResolvedValue('job-id');
 
     const screenIds = [randomUUID(), randomUUID()];
+    await seedScreens(screenIds);
     const result = await dispatchPlaybackRefresh(fastify, {
       reason: 'DEFAULT_MEDIA',
       screenIds,
@@ -145,6 +154,7 @@ describe('playback refresh dispatch', () => {
     queuePlaybackRefreshDispatchMock.mockResolvedValue('job-id');
 
     const screenIds = Array.from({ length: 40 }, () => randomUUID());
+    await seedScreens(screenIds);
     const result = await dispatchPlaybackRefresh(fastify, {
       reason: 'DEFAULT_MEDIA',
       screenIds,
@@ -200,6 +210,7 @@ describe('playback refresh dispatch', () => {
     const screenId = randomUUID();
     const snapshotId = randomUUID();
     const createdBy = randomUUID();
+    await seedScreens([screenId]);
 
     await dispatchPlaybackRefresh(fastify, {
       reason: 'PUBLISH',
@@ -233,6 +244,7 @@ describe('playback refresh dispatch', () => {
     queuePlaybackRefreshDispatchMock.mockRejectedValue(new Error('pg-boss unavailable'));
 
     const screenIds = [randomUUID(), randomUUID()];
+    await seedScreens(screenIds);
     const result = await dispatchPlaybackRefresh(fastify, {
       reason: 'EMERGENCY',
       screenIds,
@@ -274,5 +286,97 @@ describe('playback refresh dispatch', () => {
       .where(inArray(schema.commandOutbox.command_id, commands.map((command) => command.id)));
     expect(outboxRows).toHaveLength(2);
     expect(outboxRows.every((row) => row.event_type === 'COMMAND_AVAILABLE' && row.status === 'PENDING')).toBe(true);
+  });
+
+  it('keeps inserted command metadata aligned when a same-screen idempotency conflict is skipped', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    const createdBy = randomUUID();
+    const insertedSnapshotId = randomUUID();
+    const skippedSnapshotId = randomUUID();
+    const existingKey = `existing-${randomUUID()}`;
+    await seedScreens([screenId]);
+    await db.insert(schema.deviceCommands).values({
+      screen_id: screenId,
+      type: 'REFRESH',
+      payload: { reason: 'EXISTING' },
+      idempotency_key: existingKey,
+      created_by: createdBy,
+    });
+
+    const commands = await createDeviceCommands(
+      [
+        {
+          screenId,
+          type: 'REFRESH',
+          payload: { reason: 'INSERTED' },
+          idempotencyKey: `new-${randomUUID()}`,
+          desiredSnapshotId: insertedSnapshotId,
+          createdBy,
+        },
+        {
+          screenId,
+          type: 'REFRESH',
+          payload: { reason: 'SKIPPED' },
+          idempotencyKey: existingKey,
+          desiredSnapshotId: skippedSnapshotId,
+          createdBy,
+        },
+      ],
+      { ignoreIdempotencyConflicts: true },
+    );
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({
+      screen_id: screenId,
+      desired_snapshot_id: insertedSnapshotId,
+      payload: { reason: 'INSERTED' },
+    });
+    const [state] = await db
+      .select()
+      .from(schema.deviceDesiredState)
+      .where(eq(schema.deviceDesiredState.screen_id, screenId));
+    expect(state).toMatchObject({
+      last_command_id: commands[0].id,
+      snapshot_id: insertedSnapshotId,
+      last_command_reason: 'INSERTED',
+    });
+    const [outbox] = await db
+      .select()
+      .from(schema.commandOutbox)
+      .where(eq(schema.commandOutbox.command_id, commands[0].id));
+    expect(outbox).toMatchObject({
+      reason: 'INSERTED',
+      payload: expect.objectContaining({ desired_snapshot_id: insertedSnapshotId }),
+    });
+  });
+
+  it('fails direct batches for a missing Screen but lets background refresh batches skip it', async () => {
+    const existingScreenId = randomUUID();
+    const missingScreenId = randomUUID();
+    const createdBy = randomUUID();
+    await seedScreens([existingScreenId]);
+    const inputs = [existingScreenId, missingScreenId].map((screenId) => ({
+      screenId,
+      type: 'REFRESH',
+      payload: { reason: 'PUBLISH' },
+      createdBy,
+    }));
+
+    await expect(createDeviceCommands(inputs)).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'NOT_FOUND',
+      details: { screen_ids: [missingScreenId] },
+    });
+    expect(
+      await getDatabase()
+        .select()
+        .from(schema.deviceCommands)
+        .where(inArray(schema.deviceCommands.screen_id, [existingScreenId, missingScreenId])),
+    ).toHaveLength(0);
+
+    const commands = await createDeviceCommands(inputs, { missingScreenBehavior: 'skip' });
+    expect(commands).toHaveLength(1);
+    expect(commands[0].screen_id).toBe(existingScreenId);
   });
 });

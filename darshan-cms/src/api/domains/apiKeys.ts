@@ -15,7 +15,6 @@ export const apiKeysApi = {
       path: endpoints.apiKeys.base,
       method: "POST",
       body: payload,
-      useApiKey: true,
     }),
 
   list: () =>
@@ -23,7 +22,6 @@ export const apiKeysApi = {
       .request<PaginatedResponse<ApiKey>>({
         path: endpoints.apiKeys.base,
         method: "GET",
-        useApiKey: true,
       })
       .then((response) => response.items),
 
@@ -31,13 +29,11 @@ export const apiKeysApi = {
     apiClient.request<ApiKey>({
       path: endpoints.apiKeys.rotate(apiKeyId),
       method: "POST",
-      useApiKey: true,
     }),
 
   revoke: (apiKeyId: string) =>
     apiClient.request<void>({
       path: endpoints.apiKeys.revoke(apiKeyId),
       method: "POST",
-      useApiKey: true,
     }),
 };

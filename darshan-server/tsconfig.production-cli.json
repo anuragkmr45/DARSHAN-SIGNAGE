@@ -22,7 +22,13 @@
     "scripts/verify-chromium-runtime.ts",
     "scripts/verify-offhost-backup.ts",
     "scripts/deployment-run-state.ts",
-    "scripts/verify-restore-evidence.ts"
+    "scripts/verify-restore-evidence.ts",
+    "scripts/recovery-cli.ts",
+    "scripts/controlled-docker-recovery.ts",
+    "scripts/import-controlled-recovery-report.ts",
+    "scripts/recovery-runtime.ts",
+    "scripts/recovery-target-helper-worker.ts",
+    "scripts/recovery-target-relay-worker.ts"
   ],
   "exclude": ["node_modules", "dist", "dist-production", "dist-cli", "src/**/*.test.ts"]
 }

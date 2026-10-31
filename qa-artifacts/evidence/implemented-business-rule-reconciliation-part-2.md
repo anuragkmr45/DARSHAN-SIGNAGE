@@ -1,0 +1,82 @@
+# Implemented Business Rule Reconciliation — Part 2
+
+Date: 2026-10-21  
+Application-source baseline: `release-01` at
+`db137152cdb8eda7ecf1f836df33e0373b9fc278`  
+Scope: all 22 implemented Collaboration/Operations rules in
+`01_BUSINESS_RULES.md`.  
+Method: static, read-only comparison against current tracked source. No
+application, service or test process was run.
+
+## Meaning Of Catalogue Action
+
+- `KEPT_CURRENT`: the existing rule description accurately characterized the
+  current source at this baseline.
+- `CORRECTED_STALE`: the catalogue contained an outdated, overbroad or
+  ambiguous statement; the rule row was rewritten to match current source.
+
+These actions assess the accuracy of the **implemented-behavior catalogue**.
+They do not prove runtime behavior, approve an unresolved policy, or make any
+QA case Pass.
+
+## Result
+
+| Catalogue action | Count | Rule IDs |
+| --- | ---: | --- |
+| `KEPT_CURRENT` | 17 | BR-036, BR-038..046, BR-074..077, BR-080..082 |
+| `CORRECTED_STALE` | 5 | BR-035, BR-037, BR-073, BR-078, BR-079 |
+| **Total reviewed** | **22** | Every row in the Collaboration/Operations implemented-rule section |
+
+The corrections are material. Conversation management is permission-based but
+the list and direct-access surfaces are not identical. General Requests is
+absent from the runtime while stale test/catalogue tooling still refers to it.
+Prometheus defaults differ between deployment assets. Media deletion uses
+stable ownership and commits database deletion before best-effort object
+cleanup. New document ingestion requires a decoded page count, while migrated
+legacy READY documents can retain a null count until an explicit backfill.
+
+## Rule-By-Rule Comparison
+
+| Rule | Current source finding | Catalogue action | Evidence and QA carry-forward |
+| --- | --- | --- | --- |
+| BR-035 | Chat supports DM, closed-group and open-forum conversations, membership/moderation, archive read-only behavior, transactional sequence allocation, revisions, pins, bookmarks and attachments. Effective `manage Conversation` permits direct access and administration of non-DM conversations, but the conversation list still returns only active open forums or conversations where the actor is a member. New non-DM conversations automatically add active named ADMIN/SUPER_ADMIN users, not every custom-role global manager. DMs remain membership-only. | `CORRECTED_STALE` | `darshan-server/src/db/repositories/chat.ts::hasGlobalConversationManagement`, `canAccessConversation`, `isConversationAdmin`, `listConversations`, `ensureSystemAdmins`; `darshan-server/src/chat/guard.ts`; `darshan-server/src/routes/chat.ts`. Test list visibility separately from direct-ID access and mutation. |
+| BR-036 | Chat read/delivered cursors advance with SQL `GREATEST`; notification rows, non-negative cached counters, reconciliation and realtime count events are separate surfaces. | `KEPT_CURRENT` | `darshan-server/src/db/repositories/chat.ts::markRead`; `darshan-server/src/db/repositories/notification-counter.ts`; `darshan-server/src/routes/notifications.ts`; `darshan-server/src/realtime/notifications-namespace.ts`. Runtime duplicate/out-of-order delivery still needs testing. |
+| BR-037 | The general Requests runtime surface is removed: its server route/repository and CMS page/client are absent, endpoint registration/reporting is absent, and Schedule Requests remains registered. Legacy Request schema/migrations remain. `darshan-server/scripts/api-test-report.ts`, the generated API catalogue and the package's default `test` command still refer to removed general Request endpoints, so those artifacts are stale even though the release route is disabled. | `CORRECTED_STALE` | `darshan-server/src/server/index.ts`; `darshan-server/src/config/apiEndpoints.ts`; `darshan-server/src/deployment/requests-disabled.unit.test.ts`; `darshan-server/src/db/schema.ts::requestStatusEnum`; `darshan-server/scripts/api-test-report.ts`; `darshan-server/docs/api_catalog.json`; `darshan-server/package.json`. Do not mistake stale tooling for a live endpoint; preserve it as a tooling/release risk. |
+| BR-038 | The summary KPI is the current ACTIVE count divided by ACTIVE plus OFFLINE, rounded to two decimals or null. PoP completion is non-null `ended_at`; day grouping uses database `date(created_at)` without an explicit site timezone. Report PDF timestamps are UTC while the CMS uses browser locale. | `KEPT_CURRENT` | `darshan-server/src/routes/reports.ts::formatDateTime` and summary handler; `darshan-server/src/routes/proof-of-play.ts::buildConditions`; `darshan-cms/src/pages/Reports.tsx`. Business meaning/timezone remains BQ-014. |
+| BR-039 | API-key create/list/rotate/revoke, SSO configuration/deactivation, webhook CRUD and explicit webhook test delivery exist. No SSO login callback, API-key request-auth consumer or automatic business-event webhook dispatcher is registered in the traced server paths. | `KEPT_CURRENT` | `darshan-server/src/server/index.ts`; `darshan-server/src/routes/api-keys.ts`; `darshan-server/src/routes/sso-config.ts`; `darshan-server/src/routes/webhooks.ts`; `darshan-server/src/db/repositories/api-key.ts`. Keep explicit outbound webhook Test security in scope. |
+| BR-040 | API and worker roles initialize shared dependencies separately. Readiness verifies database access, the exact migration manifest, active bootstrap SUPER_ADMIN, every production bucket, configured Valkey and a fresh same-release worker heartbeat. | `KEPT_CURRENT` | `darshan-server/src/runtime/bootstrap.ts::startRuntime`; `darshan-server/src/runtime/readiness.ts::collectReadiness`. Listening and readiness are distinct outcomes. |
+| BR-041 | Production bundle configuration is distinct from development/QA and validates transport TLS inputs, the fixed 500 MiB upload cap, webpage policy, resource policy, signing/provenance and bounded legacy device-auth configuration. | `KEPT_CURRENT` | `scripts/bundle/production-bundle-config.mjs`; `scripts/bundle/build-production-bundle.mjs`; server/player configuration loaders. Generated configuration still needs deployment evidence. |
+| BR-042 | Production packaging builds runtime/CLI artifacts and validates signed role archives with pinned trust, provenance and compatibility metadata. Installation stages extraction, rejects unsafe archive entries, checks capacity and rejects source maps. | `KEPT_CURRENT` | `darshan-server/Dockerfile`; `scripts/bundle/build-production-bundle.mjs`; `scripts/bundle/verify-package-provenance.mjs`; `scripts/bundle/install-signed-role.sh`. Artifact existence is not installation success. |
+| BR-043 | Fresh install uses persisted deployment-run state, supports resumption, performs migration/bootstrap, accepts the backend before CMS, and removes the bootstrap password file only after full login acceptance completes. | `KEPT_CURRENT` | `scripts/bundle/assemble-runtime-bundle.sh` lifecycle generators; `darshan-server/src/deployment/deployment-run-state.ts`. Interrupted steps and secret cleanup need isolated execution. |
+| BR-044 | Managed upgrade requires validated restore evidence, stops API/worker before migration and uses a checksummed ordered migration ledger. Untracked adoption requires an approved ticket and matching reviewed database/manifest fingerprints. There is no automatic reverse-schema migration. | `KEPT_CURRENT` | `scripts/bundle/assemble-runtime-bundle.sh`; `darshan-server/src/deployment/migration-ledger.ts`; `darshan-server/src/deployment/restore-evidence.ts`; `docs/runbooks/source-free-production-bundle-deployment.md`. Recovery target and downtime remain BQ-018. |
+| BR-045 | Backup selects the versioned durable object set and log archives, excludes staging and recursive backup archives, and checks scratch capacity. Restore requires explicitly named clean isolated database/object targets, safe archives, object hash/size verification and signed evidence. | `KEPT_CURRENT` | `darshan-server/src/deployment/backup-contract.ts`; `darshan-server/src/utils/backup-runs.ts`; `darshan-server/scripts/restore-offhost-backup.ts`; `darshan-server/src/deployment/restore-evidence.ts`. Completeness and RPO/RTO require rehearsal and human targets. |
+| BR-046 | Generated production cross-VM application/monitoring links use verified TLS. Raw exporters can use HTTP only inside their private role network and are exposed to Prometheus through a TLS gateway. Health, readiness, scrape and alert delivery remain separate signals; `/metrics` has loopback/bearer gating. | `KEPT_CURRENT` | `scripts/bundle/assemble-runtime-bundle.sh`; `darshan-server/src/observability/http.ts`; `deploy/shared/observability/prometheus/rules/alerts.yml`. Actual firewall state is outside repository proof. |
+| BR-073 | Production backup cadence is configured through `BACKUP_INTERVAL_HOURS` and checked hourly. Weekly archiving is scheduled. A 30-day old-log deletion handler and off-host-pruning function exist without non-test callers, so they do not establish effective expiry. Prometheus retention is configuration-dependent: the generated source-free/shared profile defaults to 30 days, while the checked legacy production Compose file defaults to 15 days. | `CORRECTED_STALE` | `darshan-server/src/utils/settings.ts::applyProductionBackupSchedule`; `darshan-server/src/jobs/index.ts::scheduleRecurringJobs`; `darshan-server/src/utils/off-host-backup.ts::pruneOffHostBackups`; `scripts/bundle/production-bundle-config.mjs`; `deploy/shared/observability/prometheus/docker-compose.template.yml`; `deploy/production/docker/observability/docker-compose.yml`. Retention remains BQ-015. |
+| BR-074 | Current documented production players are Windows desktop x64 NSIS and Ubuntu desktop deb/AppImage. Linux packaging scripts select x64 or arm64; Ubuntu 22.04+ uses X11 as the primary display-power path and accepts degraded Wayland. macOS is development-only and CMS automation config covers Chromium only. | `KEPT_CURRENT` | `darshan-player/package.json`; `scripts/export/package-electron.sh`; `docs/environments/player-platform-support.md`; `docs/environments/player-ubuntu-compatibility-audit.md`; `darshan-cms/playwright.config.ts`. Native/site-specific acceptance remains BQ-016. |
+| BR-075 | Bundle validation requires site/release-matched capacity evidence containing approved measured artifacts, a positive `max_players`, validity/approval data and reviewed resource policy; generated resource ceilings are separate. Template values are examples, not an approved capacity or SLO. | `KEPT_CURRENT` | `scripts/bundle/production-bundle-config.mjs`; `docs/runbooks/production-capacity-evidence.template.json`; `scripts/bundle/assemble-runtime-bundle.sh`. Actual workload/thresholds remain BQ-017. |
+| BR-076 | Managed update validates signed recovery/compatibility evidence, stops API/worker, applies forward migrations, restarts and checks readiness before activating the release. No automatic schema downgrade is present, and version metadata alone does not prove interoperability or recovery time. | `KEPT_CURRENT` | `scripts/bundle/assemble-runtime-bundle.sh`; `docs/runbooks/source-free-production-bundle-deployment.md`; `darshan-server/src/deployment/migration-ledger.ts`. Exercise supported source versions and failure recovery later. |
+| BR-077 | Generated cross-VM traffic is TLS; private exporter/CMS status hops include local HTTP. Webpage and webhook-test egress are configuration-dependent. The runbook states intended source/port firewall rules, but repository state cannot prove the deployed exposure. | `KEPT_CURRENT` | `scripts/bundle/assemble-runtime-bundle.sh`; `docs/runbooks/source-free-production-bundle-deployment.md`; `darshan-server/src/utils/webpage-url-policy.ts`; `darshan-server/src/routes/webhooks.ts`. Site trust/egress remains BQ-019. |
+| BR-078 | Media deletion requires the action ability, stable ownership/mutation scope and no usage references. A non-global actor can delete non-Schedule content only as its creator; a global subject manager can override. Soft deletion commits a FAILED row with object pointers cleared; hard deletion removes the row. Both then attempt source/ready/thumbnail deletion after the database transaction; failures are returned and retained storage-object rows are not rolled back automatically. Chat attachment cleanup is a separate asynchronous job with retry/fallback paths. | `CORRECTED_STALE` | `darshan-server/src/routes/media.ts` delete handler; `darshan-server/src/rbac/content-ownership.ts::canManageContentResource`; `darshan-server/src/db/repositories/media.ts::getUsageSummary`; `darshan-server/src/jobs/index.ts::queueChatMediaCleanup`, `cleanupChatMediaAssets`; chat delete routes. Recoverability remains BQ-020. |
+| BR-079 | Newly completed document uploads remain PROCESSING until the native or converted final PDF is decoded by PDF.js with a positive page count; encrypted/malformed output becomes FAILED. Migration `0044` permits legacy READY documents with null `page_count`; a separate dry-run/apply backfill inspects those PDFs. Until a legacy count is populated, only page 1 is accepted. | `CORRECTED_STALE` | `darshan-server/src/routes/media.ts::finalizeMediaUpload`; `darshan-server/src/jobs/index.ts` document worker; `darshan-server/src/utils/pdf-metadata.ts::inspectPdfPageCount`; `darshan-server/src/services/document-page-count-backfill.ts`; `darshan-server/drizzle/migrations/0044_document_page_selection.sql`. Backfill completion is a deployment/data gate. |
+| BR-080 | Page selection is occurrence-specific, integer, 1-based and bounded by the media page count. Missing document selection resolves to 1; null legacy count permits only page 1; non-documents reject page metadata. The replace-all slot endpoint validates all rows before transactional replacement, and CMS preview/review carry the selected occurrence page. | `KEPT_CURRENT` | `darshan-server/src/utils/document-page-selection.ts`; `darshan-server/src/routes/presentations.ts` replace handler; `darshan-cms/src/components/common/MediaPreview.tsx`; schedule-creator state/components. |
+| BR-081 | Publish revalidates occurrence pages and freezes them in the immutable snapshot. A selected page above 1 is rejected for every targeted screen lacking `pdf_page_selection_v1`, including absent capability data; page 1 remains compatible. Player playlist fingerprints include the page, so a page-only change is not treated as equivalent. | `KEPT_CURRENT` | `darshan-server/src/routes/schedule-publish-helper.ts::publishScheduleSnapshot`; `darshan-player/src/main/services/snapshot-evaluator.ts`; `darshan-player/src/main/services/playback/playback-engine.ts::fingerprintTimelineItem`. Fleet connection/capability reporting remains a release gate. |
+| BR-082 | The selected page is retained through player start/end buffering and disk spooling, page-aware telemetry idempotency, database storage, REST/CSV output and the CMS PoP table. Legacy/non-document events may keep it null. | `KEPT_CURRENT` | `darshan-player/src/main/services/pop-service.ts`; `darshan-server/src/routes/device-telemetry.ts`; `darshan-server/src/jobs/device-telemetry.ts`; `darshan-server/src/db/schema.ts::proofOfPlay`; `darshan-server/src/routes/proof-of-play.ts`; `darshan-cms/src/pages/ProofOfPlay.tsx`. Runtime retry/replay and physical playback still require QA. |
+
+## Findings Carried To Later Steps
+
+1. BR-035 requires separate list-visibility and direct-ID authorization cases;
+   a custom global conversation manager is not automatically listed/membered
+   like a named ADMIN/SUPER_ADMIN.
+2. BR-037 confirms the release API is disabled, but the default server test
+   command and generated API catalogue still contain removed Requests calls.
+   Reconcile that tooling before treating it as release evidence.
+3. BR-073 cannot supply a single retention expectation. Human retention policy
+   and the actually deployed configuration are required.
+4. BR-078 object deletion is post-commit and best effort. QA must distinguish a
+   successful database deletion with failed object cleanup from atomic rollback.
+5. BR-079 makes document-page backfill completion a data/deployment gate for
+   legacy READY documents; a nullable count is supported compatibility state,
+   not proof that every legacy PDF has been inspected.
+6. Runtime-sensitive claims—chat ordering/realtime, outbound delivery,
+   installation/upgrade, restore, TLS/firewall, capacity, native platforms,
+   object storage, PDF rendering and PoP replay—remain unproven here.

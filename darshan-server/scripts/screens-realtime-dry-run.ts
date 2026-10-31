@@ -206,6 +206,7 @@ async function run() {
 
     const adminRole = await ensureRole('ADMIN', [
       { action: 'read', subject: 'Screen' },
+      { action: 'update', subject: 'Screen' },
       { action: 'delete', subject: 'Screen' },
     ]);
     const adminUser = await createUser(`screens-dry-run-${Date.now()}@example.com`, adminRole.id);
@@ -339,6 +340,38 @@ async function run() {
     }
     recordStep('Detail bootstrap', true);
 
+    const displaySelection = await apiRequest(
+      baseUrl,
+      adminToken,
+      'PUT',
+      `/api/v1/screens/${screenId}/display-selection`,
+      { mode: 'PRIMARY' },
+    );
+    if (displaySelection.status !== 200) {
+      throw new Error(`Display selection failed: ${displaySelection.status} ${JSON.stringify(displaySelection.data)}`);
+    }
+    const screenshotPolicy = await apiRequest(
+      baseUrl,
+      adminToken,
+      'POST',
+      `/api/v1/screens/${screenId}/screenshot-settings`,
+      { enabled: true, interval_seconds: 60 },
+    );
+    if (screenshotPolicy.status !== 200) {
+      throw new Error(`Screenshot policy failed: ${screenshotPolicy.status} ${JSON.stringify(screenshotPolicy.data)}`);
+    }
+    const screenshotTrigger = await apiRequest(
+      baseUrl,
+      adminToken,
+      'POST',
+      `/api/v1/screens/${screenId}/screenshot`,
+      { reason: 'SCREENS_DRY_RUN' },
+    );
+    if (screenshotTrigger.status !== 200) {
+      throw new Error(`Screenshot trigger failed: ${screenshotTrigger.status} ${JSON.stringify(screenshotTrigger.data)}`);
+    }
+    recordStep('Display and screenshot controls committed', true);
+
     socket = await connectScreensSocket(baseUrl, adminToken);
     recordStep('Socket connect', true);
 
@@ -435,8 +468,36 @@ async function run() {
     if (deleteResult.status !== 200) {
       throw new Error(`Screen delete failed: ${deleteResult.status} ${JSON.stringify(deleteResult.data)}`);
     }
+    const deleteBody = requireObject(deleteResult.data, 'screen delete');
+    const cleanup = requireObject(deleteBody.cleanup, 'screen delete cleanup');
+    for (const key of [
+      'command_outbox',
+      'command_history',
+      'desired_state_history',
+      'desired_state',
+      'display_state',
+      'device_commands',
+    ]) {
+      if (typeof cleanup[key] !== 'number' || cleanup[key] < 1) {
+        throw new Error(`Screen delete did not report ${key} cleanup: ${JSON.stringify(cleanup)}`);
+      }
+    }
     await deleteRefreshPromise;
     recordStep('screens:refresh:required from screen delete', true);
+
+    const orphanChecks = await Promise.all([
+      db.select().from(schema.screenDisplayStates).where(eq(schema.screenDisplayStates.screen_id, screenId)),
+      db.select().from(schema.deviceCommands).where(eq(schema.deviceCommands.screen_id, screenId)),
+      db.select().from(schema.deviceCommandStatusHistory).where(eq(schema.deviceCommandStatusHistory.screen_id, screenId)),
+      db.select().from(schema.commandOutbox).where(eq(schema.commandOutbox.screen_id, screenId)),
+      db.select().from(schema.deviceDesiredState).where(eq(schema.deviceDesiredState.screen_id, screenId)),
+      db.select().from(schema.deviceDesiredStateHistory).where(eq(schema.deviceDesiredStateHistory.screen_id, screenId)),
+      db.select().from(schema.mediaCacheReports).where(eq(schema.mediaCacheReports.screen_id, screenId)),
+    ]);
+    if (orphanChecks.some((rows) => rows.length > 0)) {
+      throw new Error(`Screen delete left device-control rows: ${orphanChecks.map((rows) => rows.length).join(',')}`);
+    }
+    recordStep('Screen device-control cleanup verified', true);
 
     const overviewAfterDelete = await apiRequest(baseUrl, adminToken, 'GET', '/api/v1/screens/overview?include_media=true');
     if (overviewAfterDelete.status !== 200) {

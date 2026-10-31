@@ -1,4 +1,6 @@
-import { accessSync, constants, existsSync, readdirSync } from 'fs';
+import { accessSync, constants, existsSync, readFileSync, readdirSync } from 'fs';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { delimiter, isAbsolute, join, resolve, sep } from 'path';
 import { createLogger } from '@/utils/logger';
 import { config as appConfig } from '@/config';
@@ -9,9 +11,11 @@ export type RuntimeDependencyStatus = 'available' | 'missing' | 'optional';
 export type RuntimeDependencyRole = 'all' | 'api' | 'worker';
 
 export interface RuntimeDependency {
-  name: 'ffmpeg' | 'libreoffice' | 'chromium' | 'pg_dump' | 'tar';
+  name: 'ffmpeg' | 'libreoffice' | 'chromium' | 'pg_dump' | 'tar' | 'age';
   status: RuntimeDependencyStatus;
   path?: string;
+  version?: string;
+  sha256?: string;
   detail?: string;
 }
 
@@ -165,6 +169,27 @@ function resolveTarPath() {
   return dedupeCandidates([appConfig.TAR_PATH, 'tar']).map(findExecutableCandidate).find(Boolean) || null;
 }
 
+function inspectAgeExecutable() {
+  const executable = dedupeCandidates([appConfig.AGE_PATH, 'age']).map(findExecutableCandidate).find(Boolean) || null;
+  if (!executable) {
+    return { path: null, detail: 'Install the pinned age binary or set AGE_PATH to the executable.' };
+  }
+
+  const sha256 = createHash('sha256').update(readFileSync(executable)).digest('hex');
+  if (appConfig.AGE_SHA256 && sha256.toLowerCase() !== appConfig.AGE_SHA256.toLowerCase()) {
+    return { path: executable, sha256, detail: 'age executable digest does not match pinned AGE_SHA256.' };
+  }
+  const versionResult = spawnSync(executable, ['--version'], { encoding: 'utf8', timeout: 5_000 });
+  const version = `${versionResult.stdout || ''}${versionResult.stderr || ''}`.trim().replace(/^v/, '');
+  if (versionResult.error || versionResult.status !== 0 || !version) {
+    return { path: executable, sha256, detail: `Unable to read age version: ${normalizeErrorMessage(versionResult.error || versionResult.stderr)}` };
+  }
+  if (appConfig.AGE_VERSION && version !== appConfig.AGE_VERSION.replace(/^v/, '')) {
+    return { path: executable, version, sha256, detail: `age version ${version} does not match pinned AGE_VERSION ${appConfig.AGE_VERSION}.` };
+  }
+  return { path: executable, version, sha256, detail: undefined };
+}
+
 export function getResolvedPgDumpPath() {
   return resolvePgDumpPath();
 }
@@ -189,7 +214,11 @@ function getRequiredDependencyNames(role: RuntimeDependencyRole) {
     return new Set<RuntimeDependency['name']>();
   }
 
-  return new Set<RuntimeDependency['name']>(['ffmpeg', 'libreoffice', 'pg_dump', 'tar']);
+  const required = new Set<RuntimeDependency['name']>(['ffmpeg', 'libreoffice', 'pg_dump', 'tar']);
+  if (appConfig.NODE_ENV === 'production' && appConfig.BACKUP_REPOSITORY_KIND === 'LOCAL_FILESYSTEM') {
+    required.add('age');
+  }
+  return required;
 }
 
 export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = 'all'): Promise<RuntimeDependencyReport> {
@@ -197,6 +226,7 @@ export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = '
   const libreOfficePath = resolveLibreOfficePath();
   const pgDumpPath = resolvePgDumpPath();
   const tarPath = resolveTarPath();
+  const age = inspectAgeExecutable();
   const requiredNames = getRequiredDependencyNames(role);
   const chromiumRequired = appConfig.NODE_ENV === 'production' || hasConfiguredChromiumPath();
   let chromiumPath: string | null = null;
@@ -246,6 +276,14 @@ export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = '
         path: tarPath || undefined,
         detail: tarPath ? undefined : 'Install tar or set TAR_PATH to the executable.',
       },
+      {
+        name: 'age',
+        status: age.path && !age.detail ? 'available' : requiredNames.has('age') ? 'missing' : 'optional',
+        path: age.path || undefined,
+        version: age.version,
+        sha256: age.sha256,
+        detail: age.detail,
+      },
     ],
   };
 }
@@ -268,7 +306,7 @@ export async function validateRuntimeDependencies(role: RuntimeDependencyRole = 
     throw new Error(
       `Missing required runtime dependencies: ${missingCritical
         .map((dependency) => dependency.name)
-        .join(', ')}. Install the missing tools on the host or configure FFMPEG_PATH, LIBREOFFICE_PATH, PG_DUMP_PATH, TAR_PATH, and DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH as needed.`
+        .join(', ')}. Install the missing tools on the host or configure FFMPEG_PATH, LIBREOFFICE_PATH, PG_DUMP_PATH, TAR_PATH, AGE_PATH/AGE_VERSION/AGE_SHA256, and DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH as needed.`
     );
   } else {
     logger.info(

@@ -1,15 +1,16 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { config as appConfig } from '@/config';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { createEmergencyRepository } from '@/db/repositories/emergency';
 import { escapeHtml, renderPdfDocument } from '@/utils/pdf-render';
+import { directorySignInEligiblePredicate } from '@/rbac/user-directory';
 
 const logger = createLogger('reports-routes');
 
@@ -139,7 +140,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Report')) throw AppError.forbidden('Forbidden');
 
         const parsedDays = Number(request.query.days ?? '7');
         const days = Number.isFinite(parsedDays) ? Math.min(365, Math.max(1, Math.floor(parsedDays))) : 7;
@@ -317,7 +318,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Report')) throw AppError.forbidden('Forbidden');
 
         const [mediaCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.media);
         const [screensActive] = await db
@@ -361,7 +362,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Report')) throw AppError.forbidden('Forbidden');
 
         const [mediaCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.media);
         const [screensActive] = await db
@@ -545,7 +546,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Report')) throw AppError.forbidden('Forbidden');
 
         const now = new Date();
         const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -599,7 +600,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Report')) throw AppError.forbidden('Forbidden');
 
         const [mediaStorage] = await db
           .select({ total: sql<number>`COALESCE(SUM(${schema.media.source_size}), 0)` })
@@ -643,7 +644,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Report')) throw AppError.forbidden('Forbidden');
 
         const bossSchema = (appConfig.PG_BOSS_SCHEMA || 'pgboss').replace(/"/g, '');
 
@@ -674,7 +675,13 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           .select({ count: sql<number>`count(*)` })
           .from(schema.users)
           .innerJoin(schema.roles, eq(schema.users.role_id, schema.roles.id))
-          .where(sql`${schema.roles.name} = 'OPERATOR' AND ${schema.users.is_active} = true`);
+          .where(and(
+            eq(schema.roles.name, 'OPERATOR'),
+            eq(schema.roles.is_system, true),
+            eq(schema.users.is_active, true),
+            isNull(schema.users.deleted_at),
+            directorySignInEligiblePredicate(),
+          ));
 
         return reply.send({
           transcode_queue: {
@@ -712,7 +719,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Report')) throw AppError.forbidden('Forbidden');
 
         const now = new Date();
         const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);

@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { config as appConfig } from '@/config';
 import * as schema from '@/db/schema';
 import { verifyPassword } from '@/auth/password';
 import { BoundedAdvisoryLockError } from './bounded-advisory-lock';
-import { adoptProductionBootstrapState, bootstrapProductionDatabase } from './production-bootstrap';
+import { adoptProductionBootstrapState, bootstrapProductionDatabase, inspectProductionBootstrap } from './production-bootstrap';
 
 const shouldSkip = appConfig.NODE_ENV === 'production';
 const suite = shouldSkip ? describe.skip : describe;
@@ -254,6 +255,115 @@ suite('production bootstrap', () => {
       email: 'existing.admin@example.test',
       releaseId: 'release-adoption-test',
     })).resolves.toMatchObject({ status: 'already_initialized' });
+  });
+
+  it('refuses a pending invite as the bootstrap administrator until activation is complete', async () => {
+    const db = database();
+    const [role] = await db.insert(schema.roles).values({
+      name: 'SUPER_ADMIN', permissions: {}, is_system: true,
+    }).returning({ id: schema.roles.id });
+    const [pending] = await db.insert(schema.users).values({
+      email: 'pending.admin@example.test',
+      password_hash: 'unchanged-hash',
+      role_id: role.id,
+      is_active: true,
+      ext: { invite_status: 'PENDING', invite_token: 'fixture-token' },
+    }).returning({ id: schema.users.id });
+
+    expect(await adoptProductionBootstrapState(db, {
+      email: 'pending.admin@example.test', releaseId: 'release-adoption-test',
+    })).toMatchObject({ status: 'conflict', code: 'PRODUCTION_BOOTSTRAP_CONFLICT' });
+    expect(await db.select().from(schema.productionBootstrapStates)).toHaveLength(0);
+    expect(await db.select().from(schema.auditLogs)).toHaveLength(0);
+
+    await db.update(schema.users).set({
+      ext: { invite_status: 'ACTIVATED', invite_token: null },
+    }).where(eq(schema.users.id, pending.id));
+    expect(await adoptProductionBootstrapState(db, {
+      email: 'pending.admin@example.test', releaseId: 'release-adoption-test',
+    })).toMatchObject({ status: 'created', code: 'PRODUCTION_BOOTSTRAP_ADOPTED' });
+
+    await db.update(schema.users).set({
+      ext: { invite_status: 'PENDING', invite_token: 'fixture-token' },
+    }).where(eq(schema.users.id, pending.id));
+    expect(await inspectProductionBootstrap(db)).toMatchObject({
+      status: 'conflict', code: 'PRODUCTION_BOOTSTRAP_CONFLICT',
+    });
+    expect(await bootstrapProductionDatabase(db, { email: 'pending.admin@example.test' })).toMatchObject({
+      status: 'conflict', code: 'PRODUCTION_BOOTSTRAP_CONFLICT',
+    });
+  });
+
+  it('refuses adoption when SUPER_ADMIN is a custom role, leaving the legacy data unchanged', async () => {
+    const db = database();
+    const [role] = await db.insert(schema.roles).values({
+      name: 'SUPER_ADMIN', permissions: {}, is_system: false,
+    }).returning({ id: schema.roles.id });
+    await db.insert(schema.users).values({
+      email: 'legacy.admin@example.test',
+      password_hash: 'unchanged-hash',
+      role_id: role.id,
+      is_active: true,
+    });
+
+    const result = await adoptProductionBootstrapState(db, {
+      email: 'legacy.admin@example.test', releaseId: 'release-adoption-test',
+    });
+    expect(result).toMatchObject({
+      status: 'conflict',
+      reason: expect.stringContaining('Reserved role SUPER_ADMIN'),
+    });
+    expect((await db.select().from(schema.roles))[0].is_system).toBe(false);
+    expect((await db.select().from(schema.users))[0].password_hash).toBe('unchanged-hash');
+    expect(await db.select().from(schema.productionBootstrapStates)).toHaveLength(0);
+    expect(await db.select().from(schema.auditLogs)).toHaveLength(0);
+    expect(await db.select().from(schema.systemLogs)).toHaveLength(0);
+  });
+
+  it('refuses adoption if any other canonical name belongs to a custom role', async () => {
+    const db = database();
+    const [superAdmin] = await db.insert(schema.roles).values({
+      name: 'SUPER_ADMIN', permissions: {}, is_system: true,
+    }).returning({ id: schema.roles.id });
+    await db.insert(schema.roles).values({ name: 'OPERATOR', permissions: {}, is_system: false });
+    await db.insert(schema.users).values({
+      email: 'legacy.admin@example.test', password_hash: 'unchanged-hash',
+      role_id: superAdmin.id, is_active: true,
+    });
+
+    const result = await adoptProductionBootstrapState(db, {
+      email: 'legacy.admin@example.test', releaseId: 'release-adoption-test',
+    });
+    expect(result).toMatchObject({
+      status: 'conflict',
+      reason: expect.stringContaining('Reserved role OPERATOR'),
+    });
+    expect(await db.select().from(schema.productionBootstrapStates)).toHaveLength(0);
+    expect(await db.select().from(schema.auditLogs)).toHaveLength(0);
+  });
+
+  it('reports conflict after a bootstrap role loses its system marker', async () => {
+    const db = database();
+    await bootstrapProductionDatabase(db, {
+      email: 'admin@example.test', password: 'StrongPassword123!', releaseId: 'release-test',
+    });
+    await db.update(schema.roles).set({ is_system: false })
+      .where(eq(schema.roles.name, 'ADMIN'));
+
+    expect(await inspectProductionBootstrap(db)).toMatchObject({
+      status: 'conflict', reason: expect.stringContaining('Reserved role ADMIN'),
+    });
+    expect(await bootstrapProductionDatabase(db, { email: 'admin@example.test' })).toMatchObject({
+      status: 'conflict', reason: expect.stringContaining('Reserved role ADMIN'),
+    });
+    expect(await adoptProductionBootstrapState(db, {
+      email: 'admin@example.test', releaseId: 'release-test',
+    })).toMatchObject({
+      status: 'conflict', reason: expect.stringContaining('Reserved role ADMIN'),
+    });
+    expect(await db.select().from(schema.productionBootstrapStates)).toHaveLength(1);
+    expect(await db.select().from(schema.auditLogs)).toHaveLength(1);
+    expect(await db.select().from(schema.systemLogs)).toHaveLength(1);
   });
 
   it('refuses to record an inactive or non-super-admin legacy user as the bootstrap authority', async () => {

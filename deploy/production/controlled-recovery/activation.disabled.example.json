@@ -1,0 +1,38 @@
+{
+  "format": "darshan-controlled-recovery-activation-v1",
+  "enabled": false,
+  "activation_mode": "DISABLED",
+  "non_production_acknowledgement": "PACKET_A_HAS_NO_EFFECT_ADAPTER",
+  "site_id": "site-a",
+  "release": {
+    "release_id": "release-03", "target_id": "darshan-server-release-03-controlled", "terminal_migration_id": "0057_controlled_recovery_report_projection.sql", "migration_manifest_sha256": "05561d3b1c8cac7fa57f6d47503835d23c2b88f7886203ab9c8207238762c438",
+    "profile": { "path": "/etc/darshan/controlled-recovery/profile.release-03.json", "sha256": "1111111111111111111111111111111111111111111111111111111111111111" },
+    "assets_manifest": { "path": "/opt/darshan/controlled-recovery/assets.json", "sha256": "2222222222222222222222222222222222222222222222222222222222222222" },
+    "recovery_runtime_manifest": { "path": "/opt/darshan/controlled-recovery/recovery-runtime-manifest.json", "sha256": "3333333333333333333333333333333333333333333333333333333333333333" },
+    "production_build_manifest": { "path": "/opt/darshan/controlled-recovery/production-build-manifest.json", "sha256": "4444444444444444444444444444444444444444444444444444444444444444" }
+  },
+  "docker": {
+    "executable": { "path": "/usr/bin/docker", "sha256": "5555555555555555555555555555555555555555555555555555555555555555" },
+    "config_identity": { "path": "/etc/darshan/controlled-recovery/docker-context.json", "sha256": "6666666666666666666666666666666666666666666666666666666666666666" },
+    "context": "darshan-controlled-recovery", "endpoint": "unix:///var/run/docker.sock", "daemon_identity_sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "source": {
+    "repository_root": "/var/lib/darshan/site-a/backup-repository",
+    "manifest_keyring": { "path": "/etc/darshan/controlled-recovery/manifest-keyring.json", "sha256": "8888888888888888888888888888888888888888888888888888888888888888" },
+    "policy_keyring": { "path": "/etc/darshan/controlled-recovery/policy-keyring.json", "sha256": "9999999999999999999999999999999999999999999999999999999999999999" },
+    "broker_socket": "/run/darshan-backup-broker/control.sock", "recovery_key_root": "/run/darshan-controlled-recovery/keys",
+    "recipients": [{ "key_id": "site-a-recovery-2026", "recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" }]
+  },
+  "resources": {
+    "postgres": { "image": "registry.example.invalid/postgres@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "user": "999:999", "entrypoint": ["docker-entrypoint.sh"], "command": ["postgres"], "memory_bytes": "1073741824", "nano_cpus": "1000000000", "pids_limit": 256, "read_only_root": true, "no_new_privileges": true, "cap_drop_all": true },
+    "minio": { "image": "registry.example.invalid/minio@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "user": "1000:1000", "entrypoint": ["/usr/bin/docker-entrypoint.sh"], "command": ["server", "/data"], "memory_bytes": "536870912", "nano_cpus": "500000000", "pids_limit": 128, "read_only_root": true, "no_new_privileges": true, "cap_drop_all": true },
+    "importer": { "image": "registry.example.invalid/importer@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "user": "65532:65532", "entrypoint": ["/opt/darshan/import"], "command": ["--fixed-contract"], "memory_bytes": "536870912", "nano_cpus": "500000000", "pids_limit": 64, "read_only_root": true, "no_new_privileges": true, "cap_drop_all": true },
+    "validator": { "image": "registry.example.invalid/validator@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "user": "65532:65532", "entrypoint": ["/opt/darshan/validate"], "command": ["--fixed-contract"], "memory_bytes": "536870912", "nano_cpus": "500000000", "pids_limit": 64, "read_only_root": true, "no_new_privileges": true, "cap_drop_all": true }
+  },
+  "packet2": {
+    "profile": { "path": "/etc/darshan/controlled-recovery/profile.packet2.json", "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
+    "fixed_overlay": { "path": "/opt/darshan/controlled-recovery/promotion-overlay.json", "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+  },
+  "report_authority": { "public_keyring": { "path": "/etc/darshan/controlled-recovery/report-keyring.json", "sha256": "abababababababababababababababababababababababababababababababab" }, "active_key_id": "deployment-report-2026" },
+  "limits": { "command_timeout_ms": 60000, "stdout_max_bytes": 1048576, "stderr_max_bytes": 1048576 }
+}

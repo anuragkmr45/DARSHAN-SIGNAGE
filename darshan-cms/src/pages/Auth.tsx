@@ -8,12 +8,14 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Monitor } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { authApi } from "@/api/domains/auth";
-import { ApiError } from "@/api/apiClient";
+import { queryClient } from "@/api/queryClient";
+import { ApiError, apiClient } from "@/api/apiClient";
 import { useAppDispatch } from "@/store/hooks";
 import { setCredentials } from "@/store/authSlice";
 import { getCookie } from "@/lib/cookies";
 import { isValidEmail } from "@/lib/validation";
 import { clearPostLoginRedirect, resolvePostLoginRedirect } from "@/lib/authRedirect";
+import { announceAuthContextChange } from "@/lib/authTabSync";
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -57,7 +59,10 @@ const Auth = () => {
       const auth = await authApi.login({ email, password });
       const csrfToken = auth.csrf_token ?? getCookie("csrf_token");
 
+      apiClient.markAuthContextChanged();
+      queryClient.clear();
       dispatch(setCredentials({ token: auth.token, user: auth.user, csrfToken }));
+      announceAuthContextChange();
 
       toast({
         title: "Login successful",

@@ -19,6 +19,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 type SsoFormState = {
   provider: string;
@@ -67,6 +68,8 @@ const mapConfigToState = (config: SsoConfigRecord | null): SsoFormState => {
 
 export default function SsoConfig() {
   const { toast } = useToast();
+  const { can } = useAuthorization();
+  const canUpdate = can("update", "SsoConfig");
   const queryClient = useQueryClient();
   const [formState, setFormState] = useState<SsoFormState>(createDefaultState);
 
@@ -142,6 +145,7 @@ export default function SsoConfig() {
   });
 
   const handleSave = () => {
+    if (!canUpdate) return;
     if (!formState.issuer.trim() || !formState.client_id.trim() || !formState.client_secret.trim()) {
       toast({
         title: "Validation error",
@@ -194,7 +198,7 @@ export default function SsoConfig() {
             <Select
               value={formState.provider}
               onValueChange={(value) => setFormState((current) => ({ ...current, provider: value }))}
-              disabled={isLoading}
+              disabled={isLoading || !canUpdate}
             >
               <SelectTrigger id="provider">
                 <SelectValue />
@@ -217,6 +221,7 @@ export default function SsoConfig() {
               value={formState.issuer}
               onChange={(value) => setFormState((current) => ({ ...current, issuer: value }))}
               placeholder="https://issuer.example.com"
+              disabled={!canUpdate}
             />
             <Field
               id="client-id"
@@ -224,6 +229,7 @@ export default function SsoConfig() {
               value={formState.client_id}
               onChange={(value) => setFormState((current) => ({ ...current, client_id: value }))}
               placeholder="cms-client-id"
+              disabled={!canUpdate}
             />
             <Field
               id="client-secret"
@@ -232,6 +238,7 @@ export default function SsoConfig() {
               onChange={(value) => setFormState((current) => ({ ...current, client_secret: value }))}
               placeholder="super-secret"
               type="password"
+              disabled={!canUpdate}
             />
             <Field
               id="authorization-url"
@@ -241,6 +248,7 @@ export default function SsoConfig() {
                 setFormState((current) => ({ ...current, authorization_url: value }))
               }
               placeholder="https://issuer.example.com/authorize"
+              disabled={!canUpdate}
             />
             <Field
               id="token-url"
@@ -248,6 +256,7 @@ export default function SsoConfig() {
               value={formState.token_url}
               onChange={(value) => setFormState((current) => ({ ...current, token_url: value }))}
               placeholder="https://issuer.example.com/token"
+              disabled={!canUpdate}
             />
             <Field
               id="jwks-url"
@@ -255,6 +264,7 @@ export default function SsoConfig() {
               value={formState.jwks_url}
               onChange={(value) => setFormState((current) => ({ ...current, jwks_url: value }))}
               placeholder="https://issuer.example.com/jwks"
+              disabled={!canUpdate}
             />
           </div>
 
@@ -264,6 +274,7 @@ export default function SsoConfig() {
             value={formState.redirect_uri}
             onChange={(value) => setFormState((current) => ({ ...current, redirect_uri: value }))}
             placeholder="https://cms.example.com/auth/callback"
+            disabled={!canUpdate}
           />
 
           <div className="space-y-2">
@@ -276,6 +287,7 @@ export default function SsoConfig() {
               }
               rows={3}
               placeholder="openid, profile, email"
+              disabled={!canUpdate}
             />
           </div>
 
@@ -288,14 +300,14 @@ export default function SsoConfig() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Button onClick={handleSave} disabled={saveMutation.isPending || isLoading}>
+            <Button onClick={handleSave} disabled={!canUpdate || saveMutation.isPending || isLoading}>
               {saveMutation.isPending ? "Saving..." : "Save Configuration"}
             </Button>
             {activeConfig ? (
               <Button
                 variant="destructive"
-                onClick={() => deactivateMutation.mutate(activeConfig.id)}
-                disabled={deactivateMutation.isPending}
+                onClick={() => { if (canUpdate) deactivateMutation.mutate(activeConfig.id); }}
+                disabled={!canUpdate || deactivateMutation.isPending}
               >
                 {deactivateMutation.isPending ? "Disconnecting..." : "Disconnect"}
               </Button>
@@ -329,6 +341,7 @@ function Field({
   onChange,
   placeholder,
   type = "text",
+  disabled = false,
 }: {
   id: string;
   label: string;
@@ -336,6 +349,7 @@ function Field({
   onChange: (value: string) => void;
   placeholder: string;
   type?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -346,6 +360,7 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
+        disabled={disabled}
       />
     </div>
   );

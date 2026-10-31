@@ -74,6 +74,7 @@ describe('Snapshot Parser', () => {
         media_url: 'https://cdn.example.com/emergency.mp4',
         type: 'video',
         display_ms: 15000,
+        loop_enabled: true,
       },
     }
 
@@ -82,7 +83,25 @@ describe('Snapshot Parser', () => {
     expect(parsed.emergencyItem).to.exist
     expect(parsed.emergencyItem?.mediaId).to.equal('media-emergency')
     expect(parsed.emergencyItem?.remoteUrl).to.equal('https://cdn.example.com/emergency.mp4')
+    expect(parsed.emergencyItem?.loop).to.equal(true)
     expect(parsed.emergencyItem?.meta?.emergency_message).to.equal('Shelter in place.')
+  })
+
+  it('never enables native looping for non-video emergency media', () => {
+    const parsed = parseSnapshotResponse({
+      emergency: {
+        id: 'emergency-image-1',
+        active: true,
+        kind: 'MEDIA',
+        media_id: 'emergency-image',
+        media_url: 'https://cdn.example.com/emergency.png',
+        type: 'image',
+        loop_enabled: true,
+      },
+    })
+
+    expect(parsed.emergencyItem?.type).to.equal('image')
+    expect(parsed.emergencyItem?.loop).to.equal(false)
   })
 
   it('should parse a message-only emergency as native message content', () => {

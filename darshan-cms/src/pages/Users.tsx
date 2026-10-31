@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, Mail, Clock, UserPlus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Search, Mail, Clock, UserPlus, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,36 +13,50 @@ import { InvitationCard } from "@/components/users/InvitationCard";
 import type { User } from "@/api/types";
 import type { UserFormData, InviteFormData } from "@/types/user";
 import { useUsersApi } from "@/hooks/useUsersApi";
+import { ApiError } from "@/api/apiClient";
+import { departmentUpdateValue } from "@/api/domains/users";
 import { UserCard } from "@/components/users/UserCard";
 import { DeleteUserDialog } from "@/components/users/DeleteUserDialog";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { PageNavigation } from "@/components/common/PageNavigation";
-import { useAppSelector } from "@/store/hooks";
-import { canDeleteUserTarget, canManageUserTarget } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
+import { useAppSelector } from "@/store/hooks";
+import { invitationActivationLink } from "@/lib/invitationLink";
 
 const PAGE_SIZE = 9;
 
 export default function Users() {
-    const currentUser = useAppSelector((state) => state.auth.user);
-    const { can } = useAuthorization();
-    const canManageUsers = can("create", "User") || can("update", "User") || can("delete", "User") || can("manage", "User");
+    const currentUserId = useAppSelector((state) => state.auth.user?.id);
+    const currentUserIdRef = useRef(currentUserId);
+    currentUserIdRef.current = currentUserId;
+    const { can, isLoading: isAuthorizationLoading } = useAuthorization();
+    const canCreateUsers = !isAuthorizationLoading && can("create", "User");
+    const canCreateUsersRef = useRef(canCreateUsers);
+    canCreateUsersRef.current = canCreateUsers;
+    const canUpdateUsers = !isAuthorizationLoading && can("update", "User");
+    const canDeleteUsers = !isAuthorizationLoading && can("delete", "User");
+    const canManageUsers = !isAuthorizationLoading && (canCreateUsers || can("update", "User") || can("delete", "User"));
     const [searchQuery, setSearchQuery] = useState("");
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [isInviteOpen, setIsInviteOpen] = useState(false);
+    const [activationLink, setActivationLink] = useState<{ url: string; email: string; expiresAt: string; kind: "created" | "replaced"; managerId: string } | null>(null);
+    const [replacementTarget, setReplacementTarget] = useState<{ id: string; email: string; updatedAt: string } | null>(null);
+    const [copyError, setCopyError] = useState("");
     const [editingUser, setEditingUser] = useState<User | null>(null);
     const [deletingUser, setDeletingUser] = useState<User | null>(null);
     const [activeTab, setActiveTab] = useState("users");
     const [usersPage, setUsersPage] = useState(1);
     const [invitationsPage, setInvitationsPage] = useState(1);
 
-    const { listUsers, createUser, updateUser, deleteUser, listInvitations, inviteUser } = useUsersApi({
+    const { listUsers, createUser, updateUser, deleteUser, listInvitations, inviteUser, replaceInvite } = useUsersApi({
         usersPage,
         usersLimit: PAGE_SIZE,
         invitationsPage,
         invitationsLimit: PAGE_SIZE,
         enableInvitations: canManageUsers,
     });
+    const resetInviteMutation = inviteUser.reset;
+    const resetReplaceMutation = replaceInvite.reset;
     const { data, isLoading, error: usersError } = listUsers;
     const { data: invitationsData, isLoading: isLoadingInvitations, error: invitationsError } = listInvitations;
     const users = useMemo(() => data?.items ?? [], [data?.items]);
@@ -87,11 +101,53 @@ export default function Users() {
         () =>
             filteredUsers.map((user) => ({
                 user,
-                canManageTarget: canManageUserTarget(currentUser, user.role, user.department_id),
-                canDeleteTarget: canDeleteUserTarget(currentUser, user.role, user.department_id),
+                canManageTarget: user.permissions?.can_update === true,
+                canDeleteTarget: user.permissions?.can_delete === true,
             })),
-        [currentUser, filteredUsers],
+        [filteredUsers],
     );
+    const currentEditingUser = editingUser && data?.items.find((user) => user.id === editingUser.id);
+    const currentDeletingUser = deletingUser && data?.items.find((user) => user.id === deletingUser.id);
+    const editingUserIsCurrent = Boolean(editingUser && currentEditingUser && currentEditingUser.updated_at === editingUser.updated_at);
+
+    useEffect(() => {
+        setIsCreateOpen(false);
+        setIsInviteOpen(false);
+        setActivationLink(null);
+        setReplacementTarget(null);
+        setCopyError("");
+        resetInviteMutation();
+        resetReplaceMutation();
+        setEditingUser(null);
+        setDeletingUser(null);
+    }, [currentUserId, resetInviteMutation, resetReplaceMutation]);
+
+    useEffect(() => {
+        if (!canCreateUsers) {
+            setIsCreateOpen(false);
+            setIsInviteOpen(false);
+            setActivationLink(null);
+            setReplacementTarget(null);
+            resetInviteMutation();
+            resetReplaceMutation();
+        }
+        if (editingUser && (!canUpdateUsers || (data && currentEditingUser?.permissions?.can_update !== true))) {
+            setEditingUser(null);
+        } else if (editingUser && currentEditingUser && currentEditingUser.updated_at !== editingUser.updated_at) {
+            // Another writer changed the account while this form was open. Do not
+            // silently reset unsaved fields or submit a stale role/department.
+            setEditingUser(null);
+        }
+        if (deletingUser && (!canDeleteUsers || (data && currentDeletingUser?.permissions?.can_delete !== true))) {
+            setDeletingUser(null);
+        }
+    }, [canCreateUsers, canDeleteUsers, canUpdateUsers, currentDeletingUser, currentEditingUser, data, deletingUser, editingUser, resetInviteMutation, resetReplaceMutation]);
+
+    useEffect(() => {
+        if (!canManageUsers && activeTab === "invitations") {
+            setActiveTab("users");
+        }
+    }, [activeTab, canManageUsers]);
 
     const usersTotalPages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
     const invitationsTotalPages = Math.max(1, Math.ceil((invitationsData?.total ?? 0) / PAGE_SIZE));
@@ -114,6 +170,7 @@ export default function Users() {
     }, [invitationsPage, invitationsTotalPages]);
 
     const handleCreateUser = (formData: UserFormData) => {
+        if (!canCreateUsers) return;
         createUser.mutate(
             {
                 email: formData.email,
@@ -127,11 +184,16 @@ export default function Users() {
                 onSuccess: () => {
                     setIsCreateOpen(false);
                 },
+                onError: (error) => {
+                    if (error instanceof ApiError && [403, 404].includes(error.status)) setIsCreateOpen(false);
+                },
             }
         );
     };
 
     const handleInviteUser = (formData: InviteFormData) => {
+        if (!canCreateUsers) return;
+        const invitingUserId = currentUserId;
         inviteUser.mutate(
             {
                 email: formData.email,
@@ -139,24 +201,86 @@ export default function Users() {
                 department_id: formData.department_id || undefined,
             },
             {
-                onSuccess: () => {
+                onSuccess: (result) => {
+                    if (currentUserIdRef.current !== invitingUserId || !canCreateUsersRef.current) {
+                        inviteUser.reset();
+                        return;
+                    }
                     setIsInviteOpen(false);
+                    setCopyError("");
+                    setActivationLink({
+                        url: invitationActivationLink(window.location.origin, result.invite_token),
+                        email: result.email,
+                        expiresAt: result.invite_expires_at,
+                        kind: "created",
+                        managerId: invitingUserId ?? "",
+                    });
+                },
+                onError: (error) => {
+                    if (error instanceof ApiError && [403, 404].includes(error.status)) setIsInviteOpen(false);
                 },
             }
         );
     };
 
+    const handleReplaceInvite = () => {
+        if (!canCreateUsers || !replacementTarget || replaceInvite.isPending) return;
+        const current = invitations.find((invitation) => invitation.id === replacementTarget.id);
+        if (!current || current.can_replace !== true || !current.updated_at || current.updated_at !== replacementTarget.updatedAt) {
+            setReplacementTarget(null);
+            return;
+        }
+        const invitingUserId = currentUserId;
+        replaceInvite.mutate({ inviteId: current.id, expectedUpdatedAt: replacementTarget.updatedAt }, {
+            onSuccess: (result) => {
+                setReplacementTarget(null);
+                if (currentUserIdRef.current !== invitingUserId || !canCreateUsersRef.current) {
+                    replaceInvite.reset();
+                    return;
+                }
+                setCopyError("");
+                setActivationLink({
+                    url: invitationActivationLink(window.location.origin, result.invite_token),
+                    email: result.email,
+                    expiresAt: result.invite_expires_at,
+                    kind: "replaced",
+                    managerId: invitingUserId ?? "",
+                });
+            },
+            onError: (error) => {
+                if (error instanceof ApiError && [403, 404, 409].includes(error.status)) setReplacementTarget(null);
+            },
+        });
+    };
+
+    const closeActivationLink = () => {
+        setActivationLink(null);
+        setCopyError("");
+        inviteUser.reset();
+        replaceInvite.reset();
+    };
+
+    const copyActivationLink = async () => {
+        if (!activationLink) return;
+        try {
+            await navigator.clipboard.writeText(activationLink.url);
+            setCopyError("");
+        } catch {
+            setCopyError("Copy failed. Select the link above and copy it manually.");
+        }
+    };
+
     const handleUpdateUser = (formData: UserFormData) => {
-        if (!editingUser) return;
+        if (!canUpdateUsers || !editingUserIsCurrent || !currentEditingUser || currentEditingUser.permissions?.can_update !== true) return;
 
         updateUser.mutate(
             {
-                userId: editingUser.id,
+                userId: currentEditingUser.id,
                 payload: {
                     first_name: formData.first_name,
                     last_name: formData.last_name,
                     role_id: formData.role_id,
-                    department_id: formData.department_id || undefined,
+                    department_id: departmentUpdateValue(formData.department_id),
                     is_active: formData.is_active,
                 },
             },
@@ -164,16 +288,22 @@ export default function Users() {
                 onSuccess: () => {
                     setEditingUser(null);
                 },
+                onError: (error) => {
+                    if (error instanceof ApiError && [403, 404].includes(error.status)) setEditingUser(null);
+                },
             }
         );
     };
 
     const handleDeleteUser = () => {
-        if (!deletingUser) return;
+        if (!canDeleteUsers || !currentDeletingUser || currentDeletingUser.permissions?.can_delete !== true) return;
 
-        deleteUser.mutate(deletingUser.id, {
+        deleteUser.mutate(currentDeletingUser.id, {
             onSuccess: () => {
                 setDeletingUser(null);
+            },
+            onError: (error) => {
+                if (error instanceof ApiError && [403, 404].includes(error.status)) setDeletingUser(null);
             },
         });
     };
@@ -187,7 +317,7 @@ export default function Users() {
                         Manage user accounts, roles, and permissions
                     </p>
                 </div>
-                {canManageUsers ? (
+                {canCreateUsers ? (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button>
@@ -202,7 +332,7 @@ export default function Users() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setIsInviteOpen(true)}>
                                 <Mail className="mr-2 h-4 w-4" />
-                                Send Invitation
+                                Create Invitation Link
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -217,7 +347,7 @@ export default function Users() {
                     {canManageUsers ? (
                         <TabsTrigger value="invitations">
                             <Mail className="mr-2 h-4 w-4" />
-                            Pending Invitations ({invitations.length})
+                            Awaiting Activation ({invitations.length})
                         </TabsTrigger>
                     ) : null}
                 </TabsList>
@@ -297,10 +427,10 @@ export default function Users() {
                     ) : filteredInvitations.length === 0 ? (
                         <div className="text-center py-12">
                             <Clock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                            <p className="text-muted-foreground">No pending invitations</p>
-                            <Button variant="outline" className="mt-4" onClick={() => setIsInviteOpen(true)}>
+                            <p className="text-muted-foreground">No invitations awaiting activation</p>
+                            <Button variant="outline" className="mt-4" onClick={() => setIsInviteOpen(true)} disabled={!canCreateUsers}>
                                 <Mail className="mr-2 h-4 w-4" />
-                                Send First Invitation
+                                Create First Invitation Link
                             </Button>
                         </div>
                     ) : (
@@ -310,6 +440,14 @@ export default function Users() {
                                     <InvitationCard
                                         key={invitation.id}
                                         invitation={invitation}
+                                        onReplace={canCreateUsers && invitation.can_replace === true
+                                            ? () => invitation.updated_at && setReplacementTarget({
+                                                id: invitation.id,
+                                                email: invitation.email ?? "this user",
+                                                updatedAt: invitation.updated_at,
+                                            })
+                                            : undefined}
+                                        isReplacing={replaceInvite.isPending && replacementTarget?.id === invitation.id}
                                     />
                                 ))}
                             </div>
@@ -325,7 +463,7 @@ export default function Users() {
             </Tabs>
 
             {/* Create User Dialog */}
-            <Dialog open={canManageUsers && isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <Dialog open={canCreateUsers && isCreateOpen} onOpenChange={setIsCreateOpen}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Create New User</DialogTitle>
@@ -342,12 +480,12 @@ export default function Users() {
             </Dialog>
 
             {/* Invite User Dialog */}
-            <Dialog open={canManageUsers && isInviteOpen} onOpenChange={setIsInviteOpen}>
+            <Dialog open={canCreateUsers && isInviteOpen} onOpenChange={setIsInviteOpen}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Invite User</DialogTitle>
                         <DialogDescription>
-                            Send an invitation email to a new user. They will receive a link to set up their account.
+                            Create a one-time activation link to share securely with the new user. No email is sent automatically.
                         </DialogDescription>
                     </DialogHeader>
                     <InviteUserForm
@@ -358,8 +496,49 @@ export default function Users() {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={canCreateUsers && replacementTarget !== null} onOpenChange={(open) => {
+                if (!open && !replaceInvite.isPending) setReplacementTarget(null);
+            }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Replace invitation link?</DialogTitle>
+                        <DialogDescription>
+                            The existing link for {replacementTarget?.email} will stop working immediately. The new link will be shown only once; copy and share it securely.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" onClick={() => setReplacementTarget(null)} disabled={replaceInvite.isPending}>Cancel</Button>
+                        <Button type="button" onClick={handleReplaceInvite} disabled={replaceInvite.isPending}>
+                            {replaceInvite.isPending ? "Replacing..." : "Replace link"}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={canCreateUsers && activationLink !== null && activationLink.managerId === currentUserId} onOpenChange={(open) => !open && closeActivationLink()}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{activationLink?.kind === "replaced" ? "Replacement link created" : "Invitation link created"}</DialogTitle>
+                        <DialogDescription>
+                            Copy and share this link securely with {activationLink?.email}. It is shown only now and cannot be retrieved from the invitation list.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <Input aria-label="Activation link" value={activationLink?.url ?? ""} readOnly onFocus={(event) => event.currentTarget.select()} />
+                        <Button type="button" onClick={copyActivationLink} disabled={!activationLink}>
+                            <Copy className="mr-2 h-4 w-4" /> Copy link
+                        </Button>
+                        {copyError ? <p role="alert" className="text-sm text-destructive">{copyError}</p> : null}
+                        <p className="text-sm text-muted-foreground">
+                            Expires {activationLink?.expiresAt ? new Date(activationLink.expiresAt).toLocaleString() : "at the time specified by the server"}. The user must activate before signing in.
+                        </p>
+                        <Button type="button" variant="outline" onClick={closeActivationLink}>Done</Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {/* Edit User Dialog */}
-            <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
+            <Dialog open={canUpdateUsers && editingUserIsCurrent && currentEditingUser?.permissions?.can_update === true} onOpenChange={(open) => !open && setEditingUser(null)}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Edit User</DialogTitle>
@@ -378,8 +557,8 @@ export default function Users() {
 
             {/* Delete User Dialog */}
             <DeleteUserDialog
-                user={deletingUser}
-                open={!!deletingUser}
+                user={currentDeletingUser || null}
+                open={canDeleteUsers && currentDeletingUser?.permissions?.can_delete === true}
                 onOpenChange={(open) => !open && setDeletingUser(null)}
                 onConfirm={handleDeleteUser}
             />

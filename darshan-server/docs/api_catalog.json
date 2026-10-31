@@ -24,7 +24,7 @@
       { "status": 403, "code": "FORBIDDEN", "when": "User inactive or role missing" },
       { "status": 429, "code": "RATE_LIMITED", "when": "Too many failed attempts" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/auth.ts fastify.post(apiEndpoints.auth.login). Side effects: sessions, cookies, login throttle state."
+    "notes": "Successful login includes the authenticated actor's resolved authorization.rules and is_global_user_manager flag. Ref: darshan-server/src/routes/auth.ts fastify.post(apiEndpoints.auth.login). Side effects: sessions, cookies, login throttle state."
   },
   {
     "domain": "auth",
@@ -49,7 +49,7 @@
       { "status": 401, "code": "UNAUTHORIZED", "when": "Missing/invalid token or revoked session" },
       { "status": 404, "code": "NOT_FOUND", "when": "User not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/auth.ts fastify.get(apiEndpoints.auth.me)"
+    "notes": "Returns only the authenticated actor's resolved authorization.rules and is_global_user_manager flag. Ref: darshan-server/src/routes/auth.ts fastify.get(apiEndpoints.auth.me)"
   },
 
   {
@@ -77,7 +77,20 @@
       { "status": 401, "code": "UNAUTHORIZED", "when": "Missing/invalid token" },
       { "status": 422, "code": "VALIDATION_ERROR", "when": "Bad query params" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/users.ts fastify.get(apiEndpoints.users.list)"
+    "notes": "Rows are filtered before pagination/counting and include server-calculated permissions.can_update, permissions.can_delete, and permissions.can_reset_password. Ref: darshan-server/src/routes/users.ts fastify.get(apiEndpoints.users.list)"
+  },
+  {
+    "domain": "users",
+    "method": "GET",
+    "path": "/api/v1/users/management-options",
+    "auth": "jwt",
+    "requestSchemaRef": null,
+    "responseSchemaRef": "darshan-server/src/routes/users.ts (management options response)",
+    "errors": [
+      { "status": 401, "code": "UNAUTHORIZED", "when": "Missing, invalid, revoked, or stale token" },
+      { "status": 403, "code": "FORBIDDEN", "when": "Actor lacks create/update User permission" }
+    ],
+    "notes": "Returns only candidate role and department {id,name} values plus is_global_user_manager. Global User managers receive all candidates without gaining Role/Department catalogue access; scoped managers receive the genuine system OPERATOR and their own Department; departmentless non-global managers receive empty arrays. Mutation routes remain authoritative. Registered before /users/:id."
   },
   {
     "domain": "users",
@@ -90,7 +103,7 @@
       { "status": 401, "code": "UNAUTHORIZED", "when": "Missing/invalid token" },
       { "status": 404, "code": "NOT_FOUND", "when": "User not found" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/users.ts fastify.get(apiEndpoints.users.get)"
+    "notes": "Returns permissions.can_update, permissions.can_delete, and permissions.can_reset_password for the requested stored account. Hidden records return 404. Ref: darshan-server/src/routes/users.ts fastify.get(apiEndpoints.users.get)"
   },
   {
     "domain": "users",
@@ -133,7 +146,22 @@
       { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" },
       { "status": 409, "code": "CONFLICT", "when": "Email exists" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/users-invite.ts fastify.post(apiEndpoints.userInvite.invite). Side effects: users + invite metadata."
+    "notes": "Creates the pending account with a high-entropy unreturned placeholder password hash and invite metadata. Returns the one-time activation token with Cache-Control: no-store and never returns temp_password. The separate reset-password route may still return a generated password. Ref: darshan-server/src/routes/users-invite.ts fastify.post(apiEndpoints.userInvite.invite)."
+  },
+  {
+    "domain": "users-invite",
+    "method": "POST",
+    "path": "/api/v1/users/invite/:id/replace",
+    "auth": "jwt",
+    "requestSchemaRef": "darshan-server/src/routes/users-invite.ts#replaceInviteSchema",
+    "responseSchemaRef": "darshan-server/src/routes/users-invite.ts (replace invitation response)",
+    "errors": [
+      { "status": 401, "code": "UNAUTHORIZED", "when": "Missing/invalid token" },
+      { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies replacement" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Invitation is absent or outside the actor scope" },
+      { "status": 409, "code": "CONFLICT", "when": "Invitation is no longer pending or expected_updated_at is stale" }
+    ],
+    "notes": "Rotates a pending or expired invitation token and seven-day expiry under a row lock. The old link becomes invalid, the new token is returned once with Cache-Control: no-store, stale contenders fail with INVITATION_CHANGED, sessions are revoked, and a token-free USER_INVITE_LINK_REPLACED audit event is recorded."
   },
   {
     "domain": "users-invite",
@@ -1064,6 +1092,33 @@
   },
   {
     "domain": "screens",
+    "method": "GET",
+    "path": "/api/v1/screens/:id/display-state",
+    "auth": "jwt",
+    "requestSchemaRef": null,
+    "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts (serialized display state)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete Screen record is not observable" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" }
+    ],
+    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.get(apiEndpoints.screens.displayState)."
+  },
+  {
+    "domain": "screens",
+    "method": "PUT",
+    "path": "/api/v1/screens/:id/display-selection",
+    "auth": "jwt",
+    "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/utils/display-profile.ts#displaySelectionSchema",
+    "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts (display-selection response)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete Screen update denied" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" },
+      { "status": 409, "code": "CONFLICT", "when": "Display inventory/selection changed or device lifecycle lock is held" }
+    ],
+    "notes": "Revalidates the current session and Screen grant, then atomically commits display state and SET_ACTIVE_DISPLAY command lifecycle rows under the per-device lock; refresh emits after commit."
+  },
+  {
+    "domain": "screens",
     "method": "POST",
     "path": "/api/v1/screens/:id/screenshot-settings",
     "auth": "jwt",
@@ -1071,9 +1126,11 @@
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts (screenshot settings response)",
     "errors": [
       { "status": 400, "code": "BAD_REQUEST", "when": "interval_seconds required" },
-      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Stored or proposed Screen update denied" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" },
+      { "status": 409, "code": "CONFLICT", "when": "Device lifecycle lock is held" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.post(apiEndpoints.screens.screenshotSettings). Side effects: screens + device_commands."
+    "notes": "Revalidates current authorization and atomically commits screens plus command lifecycle rows under the per-device lock. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.post(apiEndpoints.screens.screenshotSettings)."
   },
   {
     "domain": "screens",
@@ -1083,9 +1140,11 @@
     "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts#screenshotTriggerSchema",
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts (screenshot command response)",
     "errors": [
-      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete Screen update denied" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" },
+      { "status": 409, "code": "CONFLICT", "when": "Device lifecycle lock is held" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.post(apiEndpoints.screens.screenshot). Side effects: device_commands."
+    "notes": "Revalidates current authorization and atomically creates command lifecycle rows under the per-device lock. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.post(apiEndpoints.screens.screenshot)."
   },
   {
     "domain": "screens",
@@ -1131,9 +1190,13 @@
     "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts#createScreenSchema (partial)",
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts (screen response)",
     "errors": [
-      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" }
+      { "status": 401, "code": "UNAUTHORIZED", "when": "Token or current session is invalid" },
+      { "status": 403, "code": "FORBIDDEN", "when": "Stored or proposed Screen update grant denies" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" },
+      { "status": 409, "code": "CONFLICT", "when": "Another device lifecycle operation owns the lock" },
+      { "status": 422, "code": "VALIDATION_ERROR", "when": "Screen ID or body is invalid" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.patch(apiEndpoints.screens.update)"
+    "notes": "Revalidates current session and stored/proposed record permission inside one transaction and shares the per-device lifecycle lock. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.patch(apiEndpoints.screens.update)"
   },
   {
     "domain": "screens",
@@ -1143,9 +1206,13 @@
     "requestSchemaRef": null,
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts (delete response)",
     "errors": [
-      { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }
+      { "status": 401, "code": "UNAUTHORIZED", "when": "Token or current session is invalid" },
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete Screen delete grant denies" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen does not exist" },
+      { "status": 409, "code": "CONFLICT", "when": "Another device lifecycle operation owns the lock" },
+      { "status": 422, "code": "VALIDATION_ERROR", "when": "Screen ID is not a UUID" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.delete(apiEndpoints.screens.delete). Side effects: cleanup of device data."
+    "notes": "Revalidates current session and record permission inside one transaction, shares the per-device lifecycle lock, deletes pairing/certificate/display/command-history/outbox/desired-state/telemetry/cache-report and other dependent rows with accurate cleanup counts, then performs best-effort object cleanup. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screens.ts fastify.delete(apiEndpoints.screens.delete)."
   },
 
   {
@@ -1156,9 +1223,10 @@
     "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts#screenGroupSchema",
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts (group response)",
     "errors": [
-      { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Proposed group or a member Screen is outside the caller's scope" },
+      { "status": 409, "code": "CONFLICT", "when": "A member device lifecycle lock is held" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts fastify.post(apiEndpoints.screenGroups.create)"
+    "notes": "Current authorization is revalidated; member IDs are normalized and every member Screen is locked and checked before group plus memberships commit atomically."
   },
   {
     "domain": "screen-groups",
@@ -1204,9 +1272,11 @@
     "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts#screenGroupSchema (partial)",
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts (group response)",
     "errors": [
-      { "status": 404, "code": "NOT_FOUND", "when": "Group not found" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Stored/proposed group or an affected member Screen is outside the caller's scope" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Group not found" },
+      { "status": 409, "code": "CONFLICT", "when": "An affected member device lifecycle lock is held" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts fastify.patch(apiEndpoints.screenGroups.update)"
+    "notes": "Revalidates current authorization, locks the group and affected Screens, and commits group plus complete membership replacement in one transaction."
   },
   {
     "domain": "screen-groups",
@@ -1216,9 +1286,11 @@
     "requestSchemaRef": null,
     "responseSchemaRef": "204 no content",
     "errors": [
-      { "status": 404, "code": "NOT_FOUND", "when": "Group not found" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete group or an existing member Screen is outside the caller's scope" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Group not found" },
+      { "status": 409, "code": "CONFLICT", "when": "A member device lifecycle lock is held" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts fastify.delete(apiEndpoints.screenGroups.delete)"
+    "notes": "Revalidates current authorization, locks the group and existing member Screens, and deletes memberships plus group atomically. Current limitation: Schedule/publish/Emergency/default-media target references are not rewritten; BQ-026 must define the release policy."
   },
   {
     "domain": "screen-groups",
@@ -1253,9 +1325,11 @@
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts (screenshot settings response)",
     "errors": [
       { "status": 400, "code": "BAD_REQUEST", "when": "interval_seconds required" },
-      { "status": 404, "code": "NOT_FOUND", "when": "Group not found" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Group or any stored/proposed member Screen update is denied" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Group not found" },
+      { "status": 409, "code": "CONFLICT", "when": "Membership changed or a member lifecycle lock is held" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts fastify.post(apiEndpoints.screenGroups.screenshotSettings)"
+    "notes": "All member Screen policy writes and SET_SCREENSHOT_INTERVAL command lifecycle rows share one transaction; no partial member update is committed."
   },
   {
     "domain": "screen-groups",
@@ -1265,9 +1339,11 @@
     "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts#screenshotTriggerSchema",
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts (screenshot command response)",
     "errors": [
-      { "status": 404, "code": "NOT_FOUND", "when": "Group not found" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Group or any member Screen update is denied" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Group not found" },
+      { "status": 409, "code": "CONFLICT", "when": "Membership changed or a member lifecycle lock is held" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/screen-groups.ts fastify.post(apiEndpoints.screenGroups.screenshot)"
+    "notes": "All member TAKE_SCREENSHOT command lifecycle rows share one transaction; no partial command batch is committed."
   },
   {
     "domain": "screen-groups",
@@ -1315,7 +1391,8 @@
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts (confirm response)",
     "errors": [
       { "status": 404, "code": "NOT_FOUND", "when": "Pairing code invalid" },
-      { "status": 409, "code": "CONFLICT", "when": "Screen already exists" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Stored or proposed Screen is outside the current grant" },
+      { "status": 409, "code": "CONFLICT", "when": "Pairing code was used/superseded or another device lifecycle operation is in progress" }
     ],
     "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts fastify.post(apiEndpoints.devicePairing.confirm)"
   },
@@ -1329,6 +1406,7 @@
     "errors": [
       { "status": 400, "code": "BAD_REQUEST", "when": "Invalid CSR" },
       { "status": 404, "code": "NOT_FOUND", "when": "Pairing code invalid" },
+      { "status": 409, "code": "CONFLICT", "when": "Pairing is unconfirmed/used/superseded or another device lifecycle operation is in progress" },
       { "status": 500, "code": "CA_CERT_MISSING", "when": "CA cert missing" }
     ],
     "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts fastify.post(apiEndpoints.devicePairing.complete)"
@@ -1341,21 +1419,64 @@
     "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts#generatePairingCodeSchema",
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts (generate response)",
     "errors": [
-      { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete Screen or DevicePairing grant denies" },
+      { "status": 409, "code": "CONFLICT", "when": "Another device lifecycle operation is in progress" }
     ],
     "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts fastify.post(apiEndpoints.devicePairing.generate)"
   },
   {
     "domain": "device-pairing",
     "method": "GET",
+    "path": "/api/v1/device-pairing/recovery/:deviceId",
+    "auth": "jwt",
+    "requestSchemaRef": "deviceId path parameter",
+    "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts (recovery diagnostics response)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete Screen is not observable" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen does not exist" }
+    ],
+    "notes": "Returns current Screen, pairing, certificate and recovery diagnostics."
+  },
+  {
+    "domain": "device-pairing",
+    "method": "POST",
+    "path": "/api/v1/device-pairing/recovery/:deviceId",
+    "auth": "jwt",
+    "requestSchemaRef": "deviceId path parameter; body { expires_in? }",
+    "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts (start recovery response)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Matching Screen update and DevicePairing create grants are not both present" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen does not exist" },
+      { "status": 409, "code": "CONFLICT", "when": "Another device lifecycle operation is in progress" }
+    ],
+    "notes": "Atomically retires older active codes and issues a recovery code for the same device identity."
+  },
+  {
+    "domain": "device-pairing",
+    "method": "POST",
+    "path": "/api/v1/device-pairing/:deviceId/revoke",
+    "auth": "jwt",
+    "requestSchemaRef": "deviceId path parameter; body { reason?, note? }",
+    "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts (revoke response)",
+    "errors": [
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete DevicePairing manage and Screen delete grants both deny" },
+      { "status": 409, "code": "CONFLICT", "when": "Another device lifecycle operation is in progress" }
+    ],
+    "notes": "Atomically invalidates active certificates/pairings and writes a credential-free audit row."
+  },
+  {
+    "domain": "device-pairing",
+    "method": "GET",
     "path": "/api/v1/device-pairing",
     "auth": "jwt",
-    "requestSchemaRef": null,
+    "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts#pairingListQuerySchema",
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts (list response)",
     "errors": [
-      { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }
+      { "status": 401, "code": "UNAUTHORIZED", "when": "Token or current session is invalid" },
+      { "status": 403, "code": "FORBIDDEN", "when": "No valid DevicePairing read/manage grant exists" },
+      { "status": 422, "code": "VALIDATION_ERROR", "when": "page is not positive or limit is outside 1..100" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts fastify.get(apiEndpoints.devicePairing.list)"
+    "notes": "Requires a valid read/manage DevicePairing grant. Supported equality conditions are applied in SQL before count and deterministic pagination; policy screen_id maps to stored device_id. A valid scope with no matching rows returns an empty page, while no valid grant returns 403. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-pairing.ts fastify.get(apiEndpoints.devicePairing.list)"
   },
 
   {
@@ -1380,10 +1501,12 @@
     "requestSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-telemetry.ts#createCommandSchema",
     "responseSchemaRef": "/Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-telemetry.ts (command response)",
     "errors": [
-      { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" },
-      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" }
+      { "status": 401, "code": "UNAUTHORIZED", "when": "Current account or session is no longer valid" },
+      { "status": 403, "code": "FORBIDDEN", "when": "Concrete Screen update is denied" },
+      { "status": 404, "code": "NOT_FOUND", "when": "Screen not found" },
+      { "status": 409, "code": "CONFLICT", "when": "The device lifecycle lock is held" }
     ],
-    "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/device-telemetry.ts fastify.post(apiEndpoints.deviceTelemetry.commands)"
+    "notes": "Revalidates current authorization, locks the concrete Screen, and atomically creates command, status history, desired-state history/state and outbox rows."
   },
   {
     "domain": "device-telemetry",
@@ -2086,5 +2209,55 @@
       { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }
     ],
     "notes": "Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/reports.ts fastify.get(apiEndpoints.reports.systemHealth)"
+  },
+  {
+    "domain": "backups",
+    "method": "GET",
+    "path": "/api/v1/settings/backups/history",
+    "auth": "jwt + unconditional read Backup",
+    "requestSchemaRef": "query: limit 1..100, opaque cursor",
+    "responseSchemaRef": "src/backups/api-service.ts#listBackupHistory",
+    "errors": [{ "status": 400, "code": "BAD_REQUEST", "when": "Invalid cursor/limit" }, { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }],
+    "notes": "Safe keyset page plus independently queried health; never returns repository paths, mount locations, presigned URLs, or raw database rows."
+  },
+  {
+    "domain": "backups",
+    "method": "GET",
+    "path": "/api/v1/settings/backups/:id",
+    "auth": "jwt + unconditional read Backup",
+    "requestSchemaRef": "path: UUID id",
+    "responseSchemaRef": "src/backups/api-service.ts#getBackupDetail",
+    "errors": [{ "status": 404, "code": "NOT_FOUND", "when": "Unknown backup run" }, { "status": 403, "code": "FORBIDDEN", "when": "RBAC denies" }],
+    "notes": "Includes provenance, outcome, lifecycle, retention policy, safe artifacts, operation and tombstone."
+  },
+  {
+    "domain": "backups",
+    "method": "DELETE",
+    "path": "/api/v1/settings/backups/:id",
+    "auth": "fresh jwt/session/role lock + unconditional delete Backup",
+    "requestSchemaRef": "path: UUID id; optional Idempotency-Key",
+    "responseSchemaRef": "202 durable operation or 200 tombstone",
+    "errors": [{ "status": 409, "code": "BACKUP_DELETE_PROTECTED", "when": "Retention/hold/uncertainty protects artifacts" }, { "status": 409, "code": "BACKUP_DELETE_NOT_SUPPORTED", "when": "Runtime/repository cannot delete" }],
+    "notes": "Never hard-deletes history. 202 includes Location and Retry-After; delivery failure leaves accepted durable work for reconciliation."
+  },
+  {
+    "domain": "backups",
+    "method": "GET",
+    "path": "/api/v1/settings/backups/operations/:operationId",
+    "auth": "jwt + unconditional read Backup",
+    "requestSchemaRef": "path: UUID operationId",
+    "responseSchemaRef": "src/backups/api-service.ts#getBackupOperation",
+    "errors": [{ "status": 404, "code": "NOT_FOUND", "when": "Unknown operation" }],
+    "notes": "Bounded safe progress projection with no artifact keys or repository paths."
+  },
+  {
+    "domain": "backups",
+    "method": "GET",
+    "path": "/api/v1/settings/backups/:id/download",
+    "auth": "fresh jwt/session/role lock + unconditional download Backup",
+    "requestSchemaRef": "path: UUID id",
+    "responseSchemaRef": null,
+    "errors": [{ "status": 409, "code": "BACKUP_DOWNLOAD_NOT_SUPPORTED", "when": "Packet 7 streaming relay is unavailable" }],
+    "notes": "Capability endpoint only; does not expose paths, presign legacy objects, mount repositories, or buffer archives."
   }
 ]

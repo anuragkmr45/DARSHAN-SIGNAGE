@@ -108,6 +108,7 @@ describe('chat namespace auth resolution', () => {
     });
     expect(allowed).toBe(true);
   });
+
 });
 
 describe('chat namespace socket payload hardening', () => {

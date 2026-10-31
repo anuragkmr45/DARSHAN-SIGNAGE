@@ -1,11 +1,14 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { subject as caslSubject } from '@casl/ability';
 import { z } from 'zod';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { respondWithError } from '@/utils/errors';
 import { createScheduleReservationService } from '@/services/scheduling/reservation-service';
+import { createScheduleRepository } from '@/db/repositories/schedule';
+import { canAccessContentMutationScope, canReadContentResource } from '@/rbac/content-ownership';
 import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('schedule-reservation-routes');
@@ -33,6 +36,7 @@ const previewSchema = z
 
 export async function scheduleReservationRoutes(fastify: FastifyInstance) {
   const reservationService = createScheduleReservationService();
+  const scheduleRepo = createScheduleRepository();
 
   fastify.post<{ Body: typeof previewSchema._type }>(
     apiEndpoints.scheduleReservations.preview,
@@ -49,11 +53,23 @@ export async function scheduleReservationRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'ScheduleRequest') && !ability.can('create', 'ScheduleRequest')) {
+        const body = previewSchema.parse(request.body);
+        if (body.schedule_id) {
+          const schedule = await scheduleRepo.findById(body.schedule_id);
+          if (!schedule) throw AppError.notFound('Schedule not found');
+          const actor = { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id };
+          const canRead = canUnconditionally(ability, 'read', 'ScheduleRequest') &&
+            canReadContentResource(actor, schedule, ability, 'Schedule');
+          const canCreate = (ability as any).can('create', caslSubject('ScheduleRequest', {
+            schedule_id: body.schedule_id,
+            requested_by: payload.sub,
+            status: 'PENDING',
+          })) && canAccessContentMutationScope(actor, schedule, ability, 'Schedule');
+          if (!canRead && !canCreate) throw AppError.forbidden('Forbidden');
+        } else if (!canUnconditionally(ability, 'read', 'ScheduleRequest') &&
+                   !canUnconditionally(ability, 'create', 'ScheduleRequest')) {
           throw AppError.forbidden('Forbidden');
         }
-
-        const body = previewSchema.parse(request.body);
         const result = await reservationService.previewConflicts({
           scheduleId: body.schedule_id,
           startAt: body.start_at ? new Date(body.start_at) : undefined,
@@ -61,7 +77,7 @@ export async function scheduleReservationRoutes(fastify: FastifyInstance) {
           screenIds: body.screen_ids,
           screenGroupIds: body.screen_group_ids,
           currentUserId: payload.sub,
-          allowPrivateRefs: ability.can('manage', 'Schedule'),
+          allowPrivateRefs: canUnconditionally(ability, 'manage', 'Schedule'),
         });
 
         return reply.send({

@@ -2,7 +2,11 @@ import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
 import type {
   AppearanceSettings,
-  BackupRun,
+  BackupDeleteResponse,
+  BackupHistoryResponse,
+  BackupOperationDetail,
+  BackupRecord,
+  BackupRunResponse,
   BackupSettings,
   BrandingSettings,
   DefaultMediaSetting,
@@ -94,22 +98,45 @@ export const settingsApi = {
     }),
 
   runBackup: () =>
-    apiClient.request<{ id: string; status: string; trigger_type: string }>({
+    apiClient.request<BackupRunResponse>({
       path: endpoints.settings.backupRun,
       method: "POST",
       body: {},
     }),
 
-  deleteBackupRun: (backupId: string) =>
-    apiClient.request<{ id: string; deleted: true }>({
+  deleteBackupRun: (backupId: string, idempotencyKey: string) =>
+    apiClient.request<BackupDeleteResponse>({
       path: endpoints.settings.backupById(backupId),
       method: "DELETE",
+      headers: { "Idempotency-Key": idempotencyKey },
     }),
 
-  listBackupRuns: () =>
-    apiClient.request<{ items: BackupRun[] }>({
+  listBackupRuns: (params?: { limit?: number; cursor?: string }) =>
+    apiClient.request<BackupHistoryResponse>({
       path: endpoints.settings.backupHistory,
       method: "GET",
+      query: params,
+    }),
+
+  getBackup: (backupId: string) =>
+    apiClient.request<BackupRecord>({
+      path: endpoints.settings.backupById(backupId),
+      method: "GET",
+    }),
+
+  getBackupOperation: (operationId: string) =>
+    apiClient.request<BackupOperationDetail>({
+      path: endpoints.settings.backupOperation(operationId),
+      method: "GET",
+    }),
+
+  downloadBackupArtifact: (backupId: string, artifact: "DATABASE" | "OBJECTS" | "CONFIGURATION") =>
+    apiClient.request<Blob>({
+      path: endpoints.settings.backupDownload(backupId),
+      method: "GET",
+      query: { artifact },
+      responseType: "blob",
+      timeoutMs: 30 * 60_000,
     }),
 
   listLogs: (params?: { level?: string; limit?: number }) =>

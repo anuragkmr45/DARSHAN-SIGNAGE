@@ -90,6 +90,7 @@ export const deviceHelloPayloadSchema = z.object({
     })
     .optional(),
   local_state: z.record(z.unknown()).optional(),
+  recovery_nonce: z.string().regex(/^[A-Za-z0-9_-]{22,172}$/).optional(),
   sent_at: z.string().datetime().optional(),
 });
 

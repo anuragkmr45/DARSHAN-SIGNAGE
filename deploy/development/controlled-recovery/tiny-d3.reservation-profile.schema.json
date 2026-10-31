@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:darshan:development:d3-reservation-profile:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "non_production",
+    "providers_enabled",
+    "reservation_enabled",
+    "capture_enabled",
+    "broker_enabled",
+    "whole_run_enabled",
+    "source_profile_sha256",
+    "data_profile_sha256",
+    "capsule_profile_sha256",
+    "control_schema",
+    "control_ddl_path",
+    "control_ddl_sha256",
+    "outside_application_migrations",
+    "excluded_from_capture",
+    "queue",
+    "queue_schema",
+    "application_name",
+    "statement_timeout_ms",
+    "lock_timeout_ms",
+    "transaction_timeout_ms",
+    "maximum_bindings",
+    "commands"
+  ],
+  "properties": {
+    "format": {
+      "const": "darshan-d3-reservation-profile-v1"
+    },
+    "non_production": {
+      "const": true
+    },
+    "providers_enabled": {
+      "const": true
+    },
+    "reservation_enabled": {
+      "const": false
+    },
+    "capture_enabled": {
+      "const": false
+    },
+    "broker_enabled": {
+      "const": false
+    },
+    "whole_run_enabled": {
+      "const": false
+    },
+    "source_profile_sha256": {
+      "const": "1deb808f54ec122f85280b0e5b446913a8db78075b6505b7d77b6beba0278632"
+    },
+    "data_profile_sha256": {
+      "const": "33a2b270c55739e839dca7403034f49f24c39db5d8a8a93a413114bbf4d4176b"
+    },
+    "capsule_profile_sha256": {
+      "const": "5ff0dcaf1c6c6f0c6588143bb1f24ec39f2a772efd360d72bc596e2232e5c1e7"
+    },
+    "control_schema": {
+      "const": "darshan_d3_control"
+    },
+    "control_ddl_path": {
+      "const": "/home/hexmon/Desktop/DARSHAN-SIGNAGE/deploy/development/controlled-recovery/reservation-control.sql"
+    },
+    "control_ddl_sha256": {
+      "const": "b456e4c6fefe493d63de72cf51e8ebdc35667b12ec26109e8213071388ad4c63"
+    },
+    "outside_application_migrations": {
+      "const": true
+    },
+    "excluded_from_capture": {
+      "const": true
+    },
+    "queue": {
+      "const": "backup"
+    },
+    "queue_schema": {
+      "const": "pgboss"
+    },
+    "application_name": {
+      "const": "darshan-d3-reservation"
+    },
+    "statement_timeout_ms": {
+      "const": 10000
+    },
+    "lock_timeout_ms": {
+      "const": 1000
+    },
+    "transaction_timeout_ms": {
+      "const": 30000
+    },
+    "maximum_bindings": {
+      "const": 1
+    },
+    "commands": {
+      "const": [
+        "reserve-backup",
+        "reservation-status"
+      ]
+    }
+  }
+}

@@ -17,6 +17,7 @@ import {
   getOrCreateSocketServer,
   getSocketAllowedOrigins,
   isAllowedOrigin,
+  emitToCurrentSockets,
 } from '@/realtime/socket-server';
 import {
   buildSafeSocketError,
@@ -30,11 +31,32 @@ import {
   type SocketAck,
 } from '@/realtime/socket-hardening';
 import { requireCurrentSocketSession, storeSocketSession } from '@/realtime/socket-session';
+import { runWithContentMutationAdmission } from '@/maintenance/content-mutation-admission';
+import { MaintenanceCoordinatorError } from '@/maintenance/errors';
+import { MAINTENANCE_ADMISSION_ERROR_MESSAGE } from '@/maintenance/http-admission';
 
 const logger = createLogger('chat-namespace');
 
 const CHAT_NAMESPACE = '/chat';
 const chatTypingRateLimiter = new SocketEventRateLimiter(5, 1);
+
+export type ChatSocketAdmissionClass = 'DELIVERY' | 'GATED_MUTATION';
+
+export function classifyChatSocketAdmission(
+  event: 'chat:subscribe' | 'chat:typing' | 'chat:read',
+): ChatSocketAdmissionClass {
+  return event === 'chat:read' ? 'GATED_MUTATION' : 'DELIVERY';
+}
+
+function runChatSocketOperation<T>(
+  event: 'chat:subscribe' | 'chat:typing' | 'chat:read',
+  work: () => Promise<T>,
+): Promise<T> {
+  if (classifyChatSocketAdmission(event) === 'GATED_MUTATION') {
+    return runWithContentMutationAdmission(`socket:${event}`, work);
+  }
+  return work();
+}
 
 function parseCookieValue(cookieHeader: string | undefined, key: string): string | undefined {
   if (!cookieHeader) return undefined;
@@ -128,6 +150,36 @@ function respondChatSocketError(
   retryAfterSeconds?: number
 ) {
   const response = buildSafeSocketError(code, message, retryAfterSeconds);
+  if (ack) {
+    ack(response);
+  } else {
+    recordRealtimeSocketServerEvent(CHAT_NAMESPACE, 'chat:error');
+    socket.emit('chat:error', response);
+  }
+}
+
+export function buildChatMaintenanceError(error: MaintenanceCoordinatorError, nowMs = Date.now()) {
+  const retryAt = error.details?.retryAt;
+  const retryAtMs = retryAt instanceof Date
+    ? retryAt.getTime()
+    : typeof retryAt === 'string'
+      ? Date.parse(retryAt)
+      : Number.NaN;
+  return {
+    server_time: new Date().toISOString(),
+    error: {
+      code: 'MAINTENANCE_ADMISSION_CLOSED',
+      message: MAINTENANCE_ADMISSION_ERROR_MESSAGE,
+      retryable: true,
+      ...(Number.isFinite(retryAtMs)
+        ? { retry_after_seconds: Math.max(1, Math.ceil((retryAtMs - nowMs) / 1000)) }
+        : {}),
+    },
+  };
+}
+
+function respondChatMaintenanceError(socket: Socket, ack: SocketAck | undefined, error: MaintenanceCoordinatorError) {
+  const response = buildChatMaintenanceError(error);
   if (ack) {
     ack(response);
   } else {
@@ -309,7 +361,7 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
         }
 
         recordRealtimeSocketServerEvent(CHAT_NAMESPACE, 'chat:typing');
-        nsp.to(chatConversationRoom(payload.conversationId)).emit('chat:typing', {
+        await emitToCurrentSockets(nsp, [chatConversationRoom(payload.conversationId)], 'chat:typing', {
           conversationId: payload.conversationId,
           userId: currentUser.sub,
           isTyping: Boolean(payload.isTyping),
@@ -355,9 +407,19 @@ export async function setupChatNamespace(fastify: FastifyInstance) {
           recordRealtimeSocketReject(CHAT_NAMESPACE, 'chat:read', 'unauthorized');
           return;
         }
-        await chatRepo.markRead(payload.conversationId, currentUser.sub, payload.lastReadSeq);
+        await runChatSocketOperation(
+          'chat:read',
+          () => chatRepo.markRead(payload.conversationId, currentUser.sub, payload.lastReadSeq),
+        );
         if (ack) ack({ ok: true });
       } catch (error) {
+        if (
+          error instanceof MaintenanceCoordinatorError &&
+          error.code === 'MAINTENANCE_ADMISSION_CLOSED'
+        ) {
+          respondChatMaintenanceError(socket, ack, error);
+          return;
+        }
         logger.warn({ err: error, socket_id: socket.id }, 'Failed to handle chat read event');
         respondChatSocketError(socket, ack, 'INVALID_PAYLOAD', 'Invalid chat:read payload');
       }
@@ -382,5 +444,5 @@ export function emitChatEvent(
 ) {
   const io = getOrCreateSocketServer(fastify);
   recordRealtimeSocketServerEvent(CHAT_NAMESPACE, event);
-  io.of(CHAT_NAMESPACE).to(chatConversationRoom(conversationId)).emit(event, payload);
+  void emitToCurrentSockets(io.of(CHAT_NAMESPACE), [chatConversationRoom(conversationId)], event, payload);
 }

@@ -16,8 +16,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { clearAuth } from "@/store/authSlice";
 import { authApi } from "@/api/domains/auth";
+import { apiClient } from "@/api/apiClient";
 import { useNotificationUnreadCount } from "@/hooks/notifications/useNotificationUnreadCount";
 import { disconnectAllRealtimeSockets } from "@/lib/realtimeSockets";
+import { announceAuthContextChange } from "@/lib/authTabSync";
 
 const getInitials = (name?: string, email?: string) => {
   if (name) {
@@ -71,7 +73,9 @@ export function AppHeader() {
     } catch {
       // Clear the local session even when the logout request fails.
     } finally {
+      apiClient.markAuthContextChanged();
       dispatch(clearAuth());
+      announceAuthContextChange();
       await queryClient.cancelQueries();
       queryClient.clear();
       navigate("/login", { replace: true });

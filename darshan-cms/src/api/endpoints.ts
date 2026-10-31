@@ -190,6 +190,8 @@ export const endpoints = {
     backupById: (backupId: string) => `/settings/backups/${backupId}`,
     backupRun: "/settings/backups/run",
     backupHistory: "/settings/backups/history",
+    backupOperation: (operationId: string) => `/settings/backups/operations/${operationId}`,
+    backupDownload: (backupId: string) => `/settings/backups/${backupId}/download`,
     logs: "/settings/logs",
     defaultMedia: "/settings/default-media",
     defaultMediaVariants: "/settings/default-media/variants",
@@ -201,7 +203,9 @@ export const endpoints = {
   },
   users: {
     base: "/users",
+    managementOptions: "/users/management-options",
     invite: "/users/invite",
+    replaceInvite: (inviteId: string) => `/users/invite/${inviteId}/replace`,
     activate: "/users/activate",
     resetPassword: (userId: string) => `/users/${userId}/reset-password`,
     byId: (userId: string) => `/users/${userId}`,

@@ -1,6 +1,5 @@
 import { FastifyInstance } from 'fastify';
 import { Socket } from 'socket.io';
-import { subject } from '@casl/ability';
 import { verifyAccessToken, type JWTPayload } from '@/auth/jwt';
 import { createSessionRepository } from '@/db/repositories/session';
 import { getDatabase, schema } from '@/db';
@@ -14,7 +13,6 @@ import {
 import {
   buildScreenPlaybackStateById,
   buildScreensOverviewPayload,
-  summarizeGroupPlayback,
 } from '@/screens/playback';
 import { classifySocketAuthRejectReason, resolveSocketAuthToken } from '@/realtime/chat-namespace';
 import {
@@ -23,6 +21,8 @@ import {
   getOrCreateSocketServer,
   getSocketAllowedOrigins,
   getSocketServer,
+  emitToCurrentSockets,
+  withCurrentSocketSessionLock,
 } from '@/realtime/socket-server';
 import {
   buildSafeSocketError,
@@ -37,6 +37,10 @@ import {
 import { defineAbilityFor, type AppAbility } from '@/rbac';
 import { inArray } from 'drizzle-orm';
 import { requireCurrentSocketSession, storeSocketSession } from '@/realtime/socket-session';
+import {
+  canObserveScreen,
+  observableScreenGroupIds,
+} from '@/rbac/screen-access';
 
 const logger = createLogger('screens-namespace');
 const SCREENS_NAMESPACE = '/screens';
@@ -46,6 +50,7 @@ type ScreenRecord = typeof schema.screens.$inferSelect;
 type ScreenSocketAuthz = {
   allowedRows: ScreenRecord[];
   allowedIds: Set<string>;
+  allowedGroupIds: string[];
   hasUnconditionalScreenRead: boolean;
   hasScreenReadDeny: boolean;
   rowCount: number;
@@ -86,7 +91,10 @@ function hasUnconditionalScreenRead(ability: AppAbility): boolean {
 
   return rules.some((rule) => {
     if (rule.inverted || rule.conditions) return false;
-    const actionMatches = ruleValueIncludes(rule.action, 'read') || ruleValueIncludes(rule.action, 'manage');
+    const actionMatches =
+      ruleValueIncludes(rule.action, 'read') ||
+      ruleValueIncludes(rule.action, 'update') ||
+      ruleValueIncludes(rule.action, 'manage');
     const subjectMatches = ruleValueIncludes(rule.subject, 'Screen') || ruleValueIncludes(rule.subject, 'all');
     return actionMatches && subjectMatches;
   });
@@ -101,14 +109,13 @@ function hasRelevantScreenReadDeny(ability: AppAbility): boolean {
 
   return rules.some((rule) => {
     if (!rule.inverted) return false;
-    const actionMatches = ruleValueIncludes(rule.action, 'read') || ruleValueIncludes(rule.action, 'manage');
+    const actionMatches =
+      ruleValueIncludes(rule.action, 'read') ||
+      ruleValueIncludes(rule.action, 'update') ||
+      ruleValueIncludes(rule.action, 'manage');
     const subjectMatches = ruleValueIncludes(rule.subject, 'Screen') || ruleValueIncludes(rule.subject, 'all');
     return actionMatches && subjectMatches;
   });
-}
-
-function canReadScreen(ability: AppAbility, screen: ScreenRecord): boolean {
-  return (ability as any).can('read', subject('Screen', screen));
 }
 
 function canUseGlobalScreenRoom(authz: ScreenSocketAuthz): boolean {
@@ -126,11 +133,15 @@ async function resolveScreenSocketAuthz(
     options.screenIds && options.screenIds.length > 0
       ? await db.select().from(schema.screens).where(inArray(schema.screens.id, options.screenIds as any))
       : await db.select().from(schema.screens);
-  const allowedRows = rows.filter((screen) => canReadScreen(ability, screen));
+  const [allowedRows, groupRows] = await Promise.all([
+    Promise.resolve(rows.filter((screen) => canObserveScreen(ability, screen))),
+    db.select().from(schema.screenGroups),
+  ]);
 
   return {
     allowedRows,
     allowedIds: new Set(allowedRows.map((screen) => screen.id)),
+    allowedGroupIds: observableScreenGroupIds(ability, groupRows),
     hasUnconditionalScreenRead: hasUnconditionalScreenRead(ability),
     hasScreenReadDeny: hasRelevantScreenReadDeny(ability),
     rowCount: rows.length,
@@ -170,42 +181,6 @@ function respondScreenSocketError(
     recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:error');
     socket.emit('screens:error', response);
   }
-}
-
-async function buildAuthorizedScreensOverviewPayload(
-  authorizedRows: ScreenRecord[],
-  db: ReturnType<typeof getDatabase>
-) {
-  const screenIds = authorizedRows.map((screen) => screen.id);
-  const screenSummaries = (
-    await Promise.all(screenIds.map((screenId) => buildScreenPlaybackStateById(screenId, { db })))
-  ).filter(Boolean);
-  const screenSummaryMap = new Map(screenSummaries.map((summary: any) => [summary.id, summary]));
-
-  const memberRows =
-    screenIds.length > 0
-      ? await db
-          .select()
-          .from(schema.screenGroupMembers)
-          .where(inArray(schema.screenGroupMembers.screen_id, screenIds as any))
-      : [];
-  const membersByGroup = memberRows.reduce((acc, row) => {
-    const list = acc.get(row.group_id) || [];
-    list.push(row.screen_id);
-    acc.set(row.group_id, list);
-    return acc;
-  }, new Map<string, string[]>());
-  const groupIds = Array.from(membersByGroup.keys());
-  const groups =
-    groupIds.length > 0
-      ? await db.select().from(schema.screenGroups).where(inArray(schema.screenGroups.id, groupIds as any))
-      : [];
-
-  return {
-    server_time: new Date().toISOString(),
-    screens: screenSummaries,
-    groups: groups.map((group) => summarizeGroupPlayback(group, membersByGroup.get(group.id) || [], screenSummaryMap)),
-  };
 }
 
 export async function setupScreensNamespace(fastify: FastifyInstance) {
@@ -421,15 +396,18 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
         }
 
         if (ids.length === 0) {
-          const overview = canUseGlobalScreenRoom(authz)
-            ? await buildScreensOverviewPayload({ db })
-            : await buildAuthorizedScreensOverviewPayload(authz.allowedRows, db);
-          if (ack) {
-            ack(overview);
-          } else {
-            recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:sync');
-            socket.emit('screens:sync', overview);
-          }
+          const overview = await buildScreensOverviewPayload({
+            db,
+            screenIds: authz.allowedRows.map((screen) => screen.id),
+            groupIds: authz.allowedGroupIds,
+          });
+          await withCurrentSocketSessionLock(socket, () => {
+            if (ack) ack(overview);
+            else {
+              recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:sync');
+              socket.emit('screens:sync', overview);
+            }
+          });
           return;
         }
 
@@ -446,12 +424,13 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
           screens,
         };
 
-        if (ack) {
-          ack(result);
-        } else {
-          recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:sync');
-          socket.emit('screens:sync', result);
-        }
+        await withCurrentSocketSessionLock(socket, () => {
+          if (ack) ack(result);
+          else {
+            recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:sync');
+            socket.emit('screens:sync', result);
+          }
+        });
       } catch (error) {
         logger.warn(error, 'Failed to sync screens state');
         if (ack) {
@@ -468,10 +447,8 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
 }
 
 function emitScreenState(io: ReturnType<typeof getOrCreateSocketServer>, screen: Record<string, unknown> & { id: string }) {
-  io.of(SCREENS_NAMESPACE)
-    .to(screensAllRoom())
-    .to(screenRoom(screen.id))
-    .emit('screens:state:update', {
+  void emitToCurrentSockets(io.of(SCREENS_NAMESPACE), [screensAllRoom(), screenRoom(screen.id)],
+    'screens:state:update', {
       server_time: new Date().toISOString(),
       screen,
     });
@@ -503,10 +480,8 @@ function emitScreenPreview(io: ReturnType<typeof getOrCreateSocketServer>, paylo
   stale: boolean;
   storage_object_id?: string | null;
 }) {
-  io.of(SCREENS_NAMESPACE)
-    .to(screensAllRoom())
-    .to(screenRoom(payload.screenId))
-    .emit('screens:preview:update', payload);
+  void emitToCurrentSockets(io.of(SCREENS_NAMESPACE), [screensAllRoom(), screenRoom(payload.screenId)],
+    'screens:preview:update', payload);
   recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:preview:update');
 }
 
@@ -551,13 +526,8 @@ export function emitScreensRefreshRequired(
   }
 ) {
   const io = getOrCreateSocketServer(fastify);
-  let emitter = io.of(SCREENS_NAMESPACE).to(screensAllRoom());
-
-  for (const screenId of payload.screen_ids || []) {
-    emitter = emitter.to(screenRoom(screenId));
-  }
-
-  emitter.emit('screens:refresh:required', {
+  void emitToCurrentSockets(io.of(SCREENS_NAMESPACE),
+    [screensAllRoom(), ...(payload.screen_ids || []).map(screenRoom)], 'screens:refresh:required', {
     reason: payload.reason,
     screen_ids: payload.screen_ids || [],
     group_ids: payload.group_ids || [],
@@ -574,6 +544,6 @@ export function emitScreensRefreshRequired(
  */
 export function emitScheduleRequestsChanged(fastify: FastifyInstance) {
   const io = getOrCreateSocketServer(fastify);
-  io.of(SCREENS_NAMESPACE).to(screensAllRoom()).emit('schedule-requests:changed');
+  void emitToCurrentSockets(io.of(SCREENS_NAMESPACE), [screensAllRoom()], 'schedule-requests:changed');
   recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'schedule-requests:changed');
 }

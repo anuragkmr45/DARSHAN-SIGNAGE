@@ -1,0 +1,45 @@
+{
+  "artifacts": {
+    "cms": "/home/hexmon/Desktop/DARSHAN-SIGNAGE/darshan-cms/dist/index.html",
+    "player": "/home/hexmon/Desktop/DARSHAN-SIGNAGE/darshan-player/dist/main/main/index.js",
+    "server": "/home/hexmon/Desktop/DARSHAN-SIGNAGE/darshan-server/dist/index.js"
+  },
+  "docker": {
+    "config_directory": "/home/hexmon/Desktop/DARSHAN-SIGNAGE/deploy/development/controlled-recovery/docker-config",
+    "context": "default",
+    "endpoint": "unix:///var/run/docker.sock",
+    "executable": "/usr/bin/docker",
+    "expected_daemon_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "expected_root_dir": "/var/lib/docker",
+    "expected_server_version": "0.0.0-unenrolled",
+    "expected_socket_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "images": [
+      { "role": "postgres", "reference": "postgres:16-alpine", "image_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "repo_digest": "postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111" },
+      { "role": "minio", "reference": "minio/minio:latest", "image_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "repo_digest": "minio/minio@sha256:2222222222222222222222222222222222222222222222222222222222222222" },
+      { "role": "valkey", "reference": "valkey/valkey:8-alpine", "image_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333", "repo_digest": "valkey/valkey@sha256:3333333333333333333333333333333333333333333333333333333333333333" }
+    ],
+    "socket_path": "/var/run/docker.sock"
+  },
+  "firefox_executable": "/usr/bin/firefox",
+  "format": "darshan-controlled-recovery-development-readiness-v1",
+  "mode": "READ_ONLY_TINY_D1",
+  "non_production": true,
+  "paths": { "target": "/home/hexmon/Desktop", "workspace": "/home/hexmon/Desktop/DARSHAN-SIGNAGE" },
+  "resources": {
+    "host_reserve_bytes": "536870912",
+    "maximum_memory_pressure_avg10": "0.50",
+    "maximum_swap_used_bytes": "268435456",
+    "production_minimum_ram_bytes": "4294967296",
+    "required_target_bytes": "4294967296",
+    "required_target_inodes": "20000",
+    "required_workspace_bytes": "2147483648",
+    "required_workspace_inodes": "10000",
+    "serial_stage_peaks": [
+      { "stage": "READINESS", "bytes": "268435456" },
+      { "stage": "BACKUP", "bytes": "536870912" },
+      { "stage": "RECOVERED_SERVICES", "bytes": "1610612736" },
+      { "stage": "VALIDATION", "bytes": "1073741824" }
+    ]
+  },
+  "site_id": "tiny-d1-development"
+}

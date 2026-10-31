@@ -207,7 +207,7 @@ const getContentType = (response: Response) =>
   response.headers?.get("content-type")?.toLowerCase() ?? "";
 
 const getBuildEnvConfig = (
-  env: BuildEnv = import.meta.env,
+  env: BuildEnv = import.meta.env as BuildEnv,
   origin = getWindowOrigin(),
   enforceSecureTransport = true,
 ): CmsRuntimeConfig => {
@@ -248,7 +248,7 @@ const getBuildEnvConfig = (
 
 export const resolveCmsRuntimeConfig = (
   runtimeConfig?: CmsRuntimeConfigInput,
-  env: BuildEnv = import.meta.env,
+  env: BuildEnv = import.meta.env as BuildEnv,
   origin = getWindowOrigin(),
   source: CmsRuntimeConfig["source"] = "runtime-config",
 ): CmsRuntimeConfig => {

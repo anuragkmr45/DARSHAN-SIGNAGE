@@ -4,7 +4,7 @@ import { Mail, Shield, User, MoreVertical, Edit, Trash2, RefreshCw, CheckCircle,
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { usersApi } from "@/api/domains/users";
+import { departmentUpdateValue, usersApi } from "@/api/domains/users";
 import type { User as ApiUser } from "@/api/types";
 import { useToast } from "@/hooks/use-toast";
 import { ApiError } from "@/api/apiClient";
@@ -25,19 +25,21 @@ import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { queryKeys } from "@/api/queryKeys";
 import { useSafeMutation } from "@/hooks/useSafeMutation";
 import { LoadingIndicator } from "@/components/common/LoadingIndicator";
-import { useRolesList } from "@/hooks/useRolesApi";
 import { getRoleBadgeClass } from "@/lib/roleBadges";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { useAppSelector } from "@/store/hooks";
-import { departmentsApi } from "@/api/domains/departments";
-import { canManageOperatorsModule } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
+import { refreshUserManagementQueries, shouldRefreshAfterUserManagementError } from "@/lib/userManagementRefresh";
+import {
+  canSubmitUserMutation,
+  isManagementDepartmentSelectionValid,
+} from "@/lib/userProposalAuthorization";
 
 const PAGE_SIZE = 9;
 
 export default function Operators() {
   const currentUser = useAppSelector((state) => state.auth.user);
-  const { can } = useAuthorization();
+  const { can, canRecord, isLoading: isAuthorizationLoading } = useAuthorization();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -57,27 +59,65 @@ export default function Operators() {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isActivateConfirmOpen, setIsActivateConfirmOpen] = useState(false);
-  const operatorsQueryKey = ["users", "operators", page, PAGE_SIZE] as const;
+  const operatorsQueryKey = queryKeys.operatorDirectory(currentUser?.id, page, PAGE_SIZE);
 
   const { data, isLoading, isFetching, isError, error } = useQuery({
     queryKey: operatorsQueryKey,
     queryFn: () => usersApi.list({ page, limit: PAGE_SIZE, role: "OPERATOR" }),
-    placeholderData: (previousData) => previousData,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
-  const { data: rolesData, isLoading: isRolesLoading } = useRolesList();
-  const roles = useMemo(() => rolesData?.items ?? [], [rolesData?.items]);
-  const operatorRole = useMemo(() => roles.find((role) => role.name === "OPERATOR") ?? null, [roles]);
-  const canManageOperators = canManageOperatorsModule(can);
-  const canPickDepartment = can("manage", "User") && can("read", "Department");
-  const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
-    queryKey: ["departments"],
-    queryFn: () => departmentsApi.list({ page: 1, limit: 100 }),
-    enabled: canPickDepartment,
+  const canCreateOperators = !isAuthorizationLoading && can("create", "User");
+  const canUpdateOperators = !isAuthorizationLoading && can("update", "User");
+  const canDeleteOperators = !isAuthorizationLoading && can("delete", "User");
+  const optionsQuery = useQuery({
+    queryKey: queryKeys.userManagementOptions(currentUser?.id),
+    queryFn: usersApi.managementOptions,
+    enabled: Boolean(currentUser) && (canCreateOperators || canUpdateOperators),
   });
-  const departments = useMemo(() => departmentsData?.items ?? [], [departmentsData?.items]);
+  const operatorRole = useMemo(() => optionsQuery.data?.roles.find((role) => role.name === "OPERATOR") ?? null, [optionsQuery.data?.roles]);
+  const canPickDepartment = optionsQuery.data?.is_global_user_manager === true;
+  const isRolesLoading = optionsQuery.isLoading;
+  const isDepartmentsLoading = optionsQuery.isLoading;
+  const departments = useMemo(() => optionsQuery.data?.departments ?? [], [optionsQuery.data?.departments]);
   const departmentMap = useMemo(() => new Map(departments.map((department) => [department.id, department.name])), [departments]);
+  const departmentSelectionValid = isManagementDepartmentSelectionValid(
+    canPickDepartment,
+    formData.department_id,
+    departments,
+  );
   const passwordMismatch = !selectedUser && Boolean(formData.confirm_password) && formData.password !== formData.confirm_password;
+  const proposedOperator = selectedUser
+    ? {
+        ...selectedUser,
+        first_name: formData.first_name.trim() || undefined,
+        last_name: formData.last_name.trim() || undefined,
+        role_id: formData.role_id,
+        department_id: departmentUpdateValue(formData.department_id),
+      }
+    : {
+        email: formData.email.trim(),
+        first_name: formData.first_name.trim() || undefined,
+        last_name: formData.last_name.trim() || undefined,
+        role_id: formData.role_id,
+        department_id: formData.department_id.trim() || undefined,
+        is_active: true,
+      };
+  const proposalAllowed = !isAuthorizationLoading &&
+    (!selectedUser || selectedUser.permissions?.can_update === true) &&
+    canSubmitUserMutation(canRecord, selectedUser ? "update" : "create", selectedUser, proposedOperator);
+  const handleRejectedMutation = (error: unknown) => {
+    if (shouldRefreshAfterUserManagementError(error)) void refreshUserManagementQueries(queryClient);
+    if (error instanceof ApiError && [403, 404].includes(error.status)) {
+      setIsFormOpen(false);
+      setSelectedUser(null);
+      setPendingActionUser(null);
+      setIsDeleteConfirmOpen(false);
+      setIsResetConfirmOpen(false);
+      setIsActivateConfirmOpen(false);
+    }
+  };
 
   useEffect(() => {
     if (isError) {
@@ -87,6 +127,42 @@ export default function Operators() {
   }, [isError, error, toast]);
 
   const users = useMemo(() => data?.items ?? [], [data]);
+  const currentSelectedUser = selectedUser && users.find((user) => user.id === selectedUser.id);
+  const currentPendingUser = pendingActionUser && users.find((user) => user.id === pendingActionUser.id);
+  const selectedUserIsCurrent = Boolean(selectedUser && currentSelectedUser && currentSelectedUser.updated_at === selectedUser.updated_at);
+
+  useEffect(() => {
+    setIsFormOpen(false);
+    setSelectedUser(null);
+    setPendingActionUser(null);
+    setIsDeleteConfirmOpen(false);
+    setIsResetConfirmOpen(false);
+    setIsActivateConfirmOpen(false);
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (isFormOpen && (selectedUser
+      ? !canUpdateOperators || (data && currentSelectedUser?.permissions?.can_update !== true)
+      : !canCreateOperators)) {
+      setIsFormOpen(false);
+      setSelectedUser(null);
+    } else if (isFormOpen && selectedUser && currentSelectedUser && currentSelectedUser.updated_at !== selectedUser.updated_at) {
+      setIsFormOpen(false);
+      setSelectedUser(null);
+    }
+    if (!pendingActionUser) return;
+    if (isDeleteConfirmOpen && (!canDeleteOperators || (data && currentPendingUser?.permissions?.can_delete !== true))) {
+      setIsDeleteConfirmOpen(false);
+      setPendingActionUser(null);
+    } else if (isResetConfirmOpen && (!canUpdateOperators || (data && currentPendingUser?.permissions?.can_reset_password !== true))) {
+      setIsResetConfirmOpen(false);
+      setPendingActionUser(null);
+    } else if (isActivateConfirmOpen && (!canUpdateOperators || (data && currentPendingUser?.permissions?.can_update !== true))) {
+      setIsActivateConfirmOpen(false);
+      setPendingActionUser(null);
+    }
+  }, [canCreateOperators, canDeleteOperators, canUpdateOperators, currentPendingUser, currentSelectedUser,
+    data, isActivateConfirmOpen, isDeleteConfirmOpen, isFormOpen, isResetConfirmOpen, pendingActionUser, selectedUser]);
 
   const filtered = useMemo(
     () =>
@@ -146,6 +222,12 @@ export default function Operators() {
 
   const createOrUpdate = useSafeMutation({
     mutationFn: async () => {
+      if (selectedUser
+        ? !canUpdateOperators || !selectedUserIsCurrent || currentSelectedUser?.permissions?.can_update !== true ||
+          !proposalAllowed || !departmentSelectionValid
+        : !canCreateOperators || !proposalAllowed || !departmentSelectionValid) {
+        throw new ApiError({ status: 403, message: "Account permissions changed. Refresh and try again." });
+      }
       if (!selectedUser && formData.password !== formData.confirm_password) {
         throw new Error("Password and confirm password must match.");
       }
@@ -153,13 +235,12 @@ export default function Operators() {
       if (selectedUser) {
         // Update existing user
         const payload = {
-          email: formData.email.trim(),
           first_name: formData.first_name.trim() || undefined,
           last_name: formData.last_name.trim() || undefined,
           role_id: formData.role_id,
-          department_id: formData.department_id.trim() || undefined,
+          department_id: departmentUpdateValue(formData.department_id),
         };
-        return usersApi.update(selectedUser.id, payload);
+        return usersApi.update(currentSelectedUser!.id, payload);
       }
 
       // Create new user with password
@@ -174,26 +255,27 @@ export default function Operators() {
       return usersApi.create(payload);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.users });
-      queryClient.invalidateQueries({ queryKey: ["users", "operators"] });
+      void refreshUserManagementQueries(queryClient);
       setIsFormOpen(false);
       setSelectedUser(null);
     },
+    onError: handleRejectedMutation,
   }, "Unable to save operator.");
 
   const deleteUser = useSafeMutation({
     mutationFn: (id: string) => usersApi.remove(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.users });
-      queryClient.invalidateQueries({ queryKey: ["users", "operators"] });
+      void refreshUserManagementQueries(queryClient);
       setPendingActionUser(null);
       setIsDeleteConfirmOpen(false);
     },
+    onError: handleRejectedMutation,
   }, "Unable to delete operator.");
 
   const resetPassword = useSafeMutation({
     mutationFn: (id: string) => usersApi.resetPassword(id),
     onSuccess: (data) => {
+      void refreshUserManagementQueries(queryClient);
       setPendingActionUser(null);
       setIsResetConfirmOpen(false);
       toast({
@@ -202,16 +284,17 @@ export default function Operators() {
         duration: 10000,
       });
     },
+    onError: handleRejectedMutation,
   }, "Unable to reset password.");
 
   const activateUser = useSafeMutation({
     mutationFn: (id: string) => usersApi.update(id, { is_active: true } as Partial<ApiUser>),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.users });
-      queryClient.invalidateQueries({ queryKey: ["users", "operators"] });
+      void refreshUserManagementQueries(queryClient);
       setPendingActionUser(null);
       setIsActivateConfirmOpen(false);
     },
+    onError: handleRejectedMutation,
   }, "Unable to activate operator.");
 
   return (
@@ -219,10 +302,10 @@ export default function Operators() {
       <PageHeader
         title="Operators"
         description="Manage system operators and their permissions."
-        actionLabel={canManageOperators ? "Add Operator" : undefined}
-        actionIcon={canManageOperators ? <Plus className="h-4 w-4" /> : undefined}
+        actionLabel={canCreateOperators ? "Add Operator" : undefined}
+        actionIcon={canCreateOperators ? <Plus className="h-4 w-4" /> : undefined}
         onAction={
-          canManageOperators
+          canCreateOperators && operatorRole
             ? () => {
                 setSelectedUser(null);
                 setIsFormOpen(true);
@@ -265,15 +348,15 @@ export default function Operators() {
                     <div className="break-all text-xs text-muted-foreground">{operator.id}</div>
                   </div>
                 </div>
-                {canManageOperators ? (
+                {(operator.permissions?.can_update || operator.permissions?.can_delete || operator.permissions?.can_reset_password) ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Actions for ${operator.email}`}>
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem
+                    {operator.permissions?.can_update && <DropdownMenuItem
                       onClick={() => {
                         setSelectedUser(operator);
                         setIsFormOpen(true);
@@ -282,8 +365,8 @@ export default function Operators() {
                     >
                       <Edit className="h-4 w-4" />
                       Edit
-                    </DropdownMenuItem>
-                    {!operator.is_active && (
+                    </DropdownMenuItem>}
+                    {!operator.is_active && operator.permissions?.can_update && (
                       <DropdownMenuItem
                         onClick={() => {
                           setPendingActionUser(operator);
@@ -295,7 +378,7 @@ export default function Operators() {
                         Activate
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem
+                    {operator.permissions?.can_reset_password && <DropdownMenuItem
                       onClick={() => {
                         setPendingActionUser(operator);
                         setIsResetConfirmOpen(true);
@@ -304,8 +387,8 @@ export default function Operators() {
                     >
                       <RefreshCw className="h-4 w-4" />
                       Reset Password
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
+                    </DropdownMenuItem>}
+                    {operator.permissions?.can_delete && <DropdownMenuItem
                       onClick={() => {
                         setPendingActionUser(operator);
                         setIsDeleteConfirmOpen(true);
@@ -314,7 +397,7 @@ export default function Operators() {
                     >
                       <Trash2 className="h-4 w-4" />
                       Delete
-                    </DropdownMenuItem>
+                    </DropdownMenuItem>}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 ) : null}
@@ -347,7 +430,7 @@ export default function Operators() {
           <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} />
         </div>
       )}
-      <Dialog open={canManageOperators && isFormOpen} onOpenChange={setIsFormOpen}>
+      <Dialog open={isFormOpen && (selectedUser ? canUpdateOperators && selectedUserIsCurrent && currentSelectedUser?.permissions?.can_update === true : canCreateOperators)} onOpenChange={setIsFormOpen}>
         <DialogContent className="sm:max-w-[520px] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{selectedUser ? "Edit Operator" : "Add Operator"}</DialogTitle>
@@ -361,7 +444,7 @@ export default function Operators() {
                 value={formData.email}
                 onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
                 placeholder="operator@company.com"
-                disabled={createOrUpdate.isPending}
+                disabled={createOrUpdate.isPending || Boolean(selectedUser)}
               />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -468,6 +551,18 @@ export default function Operators() {
                 )}
               </div>
             </div>
+            {optionsQuery.data && !departmentSelectionValid ? (
+              <p role="alert" className="text-sm text-destructive">
+                {formData.department_id
+                  ? "The selected department is no longer available for this operator action."
+                  : "No permitted department is available for this operator action."}
+              </p>
+            ) : null}
+            {formData.email.trim() && formData.role_id && !isAuthorizationLoading && !proposalAllowed ? (
+              <p role="alert" className="text-sm text-destructive">
+                These operator details are outside your current permission scope.
+              </p>
+            ) : null}
           </div>
           <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="outline" onClick={() => setIsFormOpen(false)} disabled={createOrUpdate.isPending}>
@@ -480,7 +575,10 @@ export default function Operators() {
                 !formData.email.trim() ||
                 (!selectedUser && (!formData.password.trim() || !formData.confirm_password.trim() || passwordMismatch)) ||
                 !formData.role_id ||
-                !canManageOperators
+                !proposalAllowed ||
+                !departmentSelectionValid ||
+                !(selectedUser ? canUpdateOperators && selectedUserIsCurrent && currentSelectedUser?.permissions?.can_update : canCreateOperators) ||
+                !operatorRole
               }
             >
               {createOrUpdate.isPending ? "Saving..." : selectedUser ? "Update" : "Create"}
@@ -490,46 +588,46 @@ export default function Operators() {
       </Dialog>
 
       <ConfirmDialog
-        open={isDeleteConfirmOpen}
+        open={isDeleteConfirmOpen && canDeleteOperators && currentPendingUser?.permissions?.can_delete === true}
         title="Delete operator?"
-        description={`Delete ${pendingActionUser?.email ?? "the operator"}? Sign-in and active sessions will stop immediately. Existing content and schedule history will be kept under its current department ownership and will show a deleted creator. This cannot be undone.`}
+        description={`Delete ${currentPendingUser?.email ?? "the operator"}? Sign-in and active sessions will stop immediately. Existing content and schedule history will be kept under its current department ownership and will show a deleted creator. This cannot be undone.`}
         confirmLabel="Delete"
         onCancel={() => {
           setPendingActionUser(null);
           setIsDeleteConfirmOpen(false);
         }}
         onConfirm={() => {
-          if (pendingActionUser) deleteUser.mutate(pendingActionUser.id);
+          if (canDeleteOperators && currentPendingUser?.permissions?.can_delete) deleteUser.mutate(currentPendingUser.id);
         }}
         isLoading={deleteUser.isPending}
       />
 
       <ConfirmDialog
-        open={isResetConfirmOpen}
+        open={isResetConfirmOpen && canUpdateOperators && currentPendingUser?.permissions?.can_reset_password === true}
         title="Reset password?"
-        description={`A temporary password will be generated for ${pendingActionUser?.email ?? "this operator"}.`}
+        description={`A temporary password will be generated for ${currentPendingUser?.email ?? "this operator"}.`}
         confirmLabel="Reset"
         onCancel={() => {
           setPendingActionUser(null);
           setIsResetConfirmOpen(false);
         }}
         onConfirm={() => {
-          if (pendingActionUser) resetPassword.mutate(pendingActionUser.id);
+          if (canUpdateOperators && currentPendingUser?.permissions?.can_reset_password) resetPassword.mutate(currentPendingUser.id);
         }}
         isLoading={resetPassword.isPending}
       />
 
       <ConfirmDialog
-        open={isActivateConfirmOpen}
+        open={isActivateConfirmOpen && canUpdateOperators && currentPendingUser?.permissions?.can_update === true}
         title="Activate operator?"
-        description={`Reactivate access for ${pendingActionUser?.email ?? "this operator"}.`}
+        description={`Reactivate access for ${currentPendingUser?.email ?? "this operator"}.`}
         confirmLabel="Activate"
         onCancel={() => {
           setPendingActionUser(null);
           setIsActivateConfirmOpen(false);
         }}
         onConfirm={() => {
-          if (pendingActionUser) activateUser.mutate(pendingActionUser.id);
+          if (canUpdateOperators && currentPendingUser?.permissions?.can_update) activateUser.mutate(currentPendingUser.id);
         }}
         isLoading={activateUser.isPending}
       />

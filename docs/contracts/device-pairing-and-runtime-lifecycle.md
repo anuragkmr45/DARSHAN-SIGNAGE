@@ -172,18 +172,21 @@ If local disk is wiped:
 7. Device fetches `GET /api/v1/device/:deviceId/snapshot?include_urls=true`
 
 ### 2. Recovery pairing for an existing screen row
-This is supported through the existing admin-driven flow:
+This is supported through the existing permission-controlled CMS flow:
 - `POST /api/v1/device-pairing/generate`
 - `POST /api/v1/device-pairing/confirm`
 - `POST /api/v1/device-pairing/complete`
 
 Actual behavior:
-- admin can generate a pairing code for a known `device_id`
-- admin can confirm that pairing even when a `screens` row already exists for that `device_id`
+- a permitted CMS user can generate a recovery code only when both `update Screen` and `create DevicePairing` match the concrete `device_id`
+- confirmation rechecks both the stored Screen and the proposed name/location; first-time pairing instead checks the proposed `create Screen` record
+- confirmation is supported when a `screens` row already exists for that `device_id`
 - device completes pairing against that same `device_id`
 - `complete` does not create a new screen row when one already exists
 - `complete` revokes older device certificates for that same `device_id`
 - `complete` issues a fresh device certificate for the existing screen identity
+- a valid pairing-reported display profile is stored in the same transaction as pairing consumption, certificate issuance and Screen create/update
+- generate/recover/confirm/complete/revoke serialize per device; a contending request receives retryable `409` without a partial mutation
 
 ### 2a. Manual screen creation through CMS
 Current behavior:
@@ -254,8 +257,13 @@ Operational meaning:
 - no automatic auth failure occurs on certificate expiry
 
 ### 9. Screen deleted
-When admin calls `DELETE /api/v1/screens/:id`, backend deletes:
+When an authorized actor calls `DELETE /api/v1/screens/:id`, the backend revalidates the current session and concrete `delete Screen` grant in the deletion transaction. It acquires the same per-device lifecycle try-lock used by recovery/confirm/complete/revoke, then locks the Screen before deleting:
 - `device_commands`
+- `device_command_status_history`
+- `command_outbox`
+- `device_desired_state` and `device_desired_state_history`
+- `screen_display_states`
+- `media_cache_reports`
 - `heartbeats`
 - `proof_of_play`
 - `screenshots`
@@ -265,6 +273,16 @@ When admin calls `DELETE /api/v1/screens/:id`, backend deletes:
 - `screen_group_members`
 - `screens`
 - related storage objects best-effort
+
+If another pairing lifecycle mutation owns the device lock, deletion returns retryable `409` and changes nothing. This prevents deletion from interleaving with certificate issuance or pairing replacement. Database cleanup commits before best-effort object deletion.
+
+Current limitation: deletion does not rewrite Schedule item or Emergency selector JSON that contains the Screen ID. Automatically pruning the last target is unsafe because an empty target set currently means global playback eligibility. BQ-025 must choose a block-or-safe-retarget policy before this path is release-ready; immutable publish/history snapshots should not be silently rewritten.
+
+Display selection, screenshot policy and screenshot trigger also use this lifecycle lock. They revalidate the current CMS session and concrete Screen in the committing transaction. Display selection commits its display-state version and `SET_ACTIVE_DISPLAY` command lifecycle together; screenshot policy commits Screen fields and `SET_SCREENSHOT_INTERVAL` together; screenshot trigger commits `TAKE_SCREENSHOT` lifecycle rows together. A held lifecycle lock returns retryable `409` without partial state. A device heartbeat carrying a display profile waits for the short lifecycle transaction instead of taking the opposite database row-lock order; its display profile and legacy Screen dimensions then commit together.
+
+Direct CMS device-command creation follows the same boundary: it revalidates the current session and concrete `update Screen` grant, takes the device lifecycle lock, and commits the command, status history, desired state/history and outbox as one unit. Background playback-refresh batches wait for the same lock and skip a Screen that was deleted before they acquired it; interactive commands instead return `404` for a missing target. Command IDs are assigned before batch insertion so a partial idempotency-conflict result remains matched to the correct requested desired-state metadata, including when multiple requests target the same Screen.
+
+Screen Group create/update/delete and group screenshot controls serialize through the group row and every affected member's lifecycle lock. Group and membership writes are atomic, duplicate proposed members are normalized, current authorization is rechecked inside the transaction, and a membership replacement cannot remove a hidden member or add a missing/hidden Screen. Group screenshot policy and trigger operations are all-or-nothing across members; a locked, missing or unauthorized member prevents every Screen/command side effect.
 
 After delete:
 - device is no longer registered
@@ -408,12 +426,12 @@ Safe to retry:
 
 ### `POST /api/v1/device-pairing/confirm`
 Purpose:
-- admin marks pairing as approved and names the screen
+- an authorized CMS actor marks pairing as approved and names the screen
 
 Safe to retry:
 - conditionally
-- repeat confirm on same unexpired code is mostly safe
-- if screen already exists, server returns conflict
+- repeat confirmation on the current unexpired code revalidates current permission and proposed Screen fields
+- a superseded/used code or concurrent lifecycle operation returns `409`; refresh and retry only with the current code
 
 ### `POST /api/v1/device-pairing/complete`
 Purpose:
@@ -438,6 +456,7 @@ Safe to retry:
 - not strictly idempotent
 - repeated retries create extra heartbeat rows
 - operationally acceptable, but client should avoid burst retries
+- if a short pairing/Screen/display lifecycle mutation is active, display-profile persistence waits for it so the heartbeat cannot deadlock with Screen/display row locks
 
 ### `POST /api/v1/device/proof-of-play`
 Purpose:
@@ -466,16 +485,17 @@ Safe to retry:
 ## Error Catalog And Client Remediation
 | Endpoint | Status | Error code/message | Meaning | Client action |
 | --- | --- | --- | --- | --- |
-| pairing confirm/create/list CMS routes | 401 | `UNAUTHORIZED` / `Missing authorization header` | no JWT | re-auth admin |
+| pairing confirm/create/list CMS routes | 401 | `UNAUTHORIZED` / `Missing authorization header` | no JWT | re-authenticate the CMS actor |
 | any JWT route | 401 | `UNAUTHORIZED` / `Invalid token` | expired or malformed JWT | re-auth |
 | device-auth route | 401 | `UNAUTHORIZED` / `Missing device identity header` | no device serial header and no allowed user JWT fallback | send device identity or stop |
 | device-auth route | 403 | `FORBIDDEN` / `Device credentials expired` | cert exists but `expires_at` has passed | enter recovery; re-pair device |
 | device-auth route | 403 | `FORBIDDEN` / `Invalid device credentials` | no matching cert, revoked cert, deleted screen/cert | require re-pair or admin intervention |
 | `POST /device-pairing/complete` | 404 | `NOT_FOUND` / `Invalid or expired pairing code` | wrong code, used code, expired code | start new pairing |
-| `POST /device-pairing/confirm` | 404 | `NOT_FOUND` / `Invalid or expired pairing code` | admin used stale code | refresh pairings and retry with new code |
+| `POST /device-pairing/confirm` | 404 | `NOT_FOUND` / `Invalid or expired pairing code` | CMS actor used stale code | refresh pairings and retry with new code |
 | `POST /device-pairing/complete` | 409 | `CONFLICT` / `Pairing not confirmed` | device tried complete before admin confirm | poll status and wait |
 | `POST /device-pairing/complete` | 409 | `CONFLICT` / `CSR deviceId does not match pairing deviceId` | CSR bound to wrong device id | regenerate CSR with correct subject |
-| `POST /device-pairing/confirm` | 409 | `CONFLICT` / `Screen already exists for this device` | device_id already has screen row | investigate duplicate/reuse |
+| Pairing lifecycle, Screen/group mutation or CMS device-control mutation | 409 | `CONFLICT` / `Another device lifecycle operation is in progress. Try again.` | generate, confirm, complete, revoke, Screen update/delete, group membership/control, display selection, screenshot policy/trigger or direct command creation already owns a relevant device lifecycle lock | wait briefly, refresh state, and retry once |
+| `POST /device-pairing/complete` | 409 | `CONFLICT` / `Pairing identity changed...` | pairing device identity changed between preliminary validation and the transaction lock | discard the response state and start a fresh pairing |
 | `POST /device-pairing/complete` | 400 | `BAD_REQUEST` / `Invalid CSR format` | malformed CSR | regenerate CSR |
 | `POST /device-pairing/complete` | 500 | `CA_CERT_MISSING` | CA cert file missing on server | operator fix required; do not retry aggressively |
 | `GET /device/:deviceId/snapshot` | 404 | `NOT_FOUND` / `No publish found for this device` | no publish and no default media and no emergency | show idle/unconfigured screen; retry later |

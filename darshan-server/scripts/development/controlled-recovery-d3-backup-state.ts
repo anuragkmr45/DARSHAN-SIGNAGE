@@ -1,0 +1,31 @@
+import { randomUUID } from 'node:crypto';
+import { lstat, mkdir, readdir, rmdir, unlink } from 'node:fs/promises';
+import { z } from 'zod';
+import { canonicalJson, parseStrictJson } from '../../src/backups/backup-broker-protocol';
+import { digest, sha256 } from '../../src/recovery/controlled-docker/contracts';
+import type { D3OperationAuthority } from './controlled-recovery-d3-authority';
+import { d3StagingProcessIdentity, type D3AgeStagingProcessIdentity } from './controlled-recovery-d3-age-staging';
+import { publishExactD3CapsulePrivateBytes } from './controlled-recovery-d3-capsule-material';
+import { openD3ProtectedFile, protectD3Directory, recoverD3PublishedLinks, syncD3Directory } from './controlled-recovery-d3-protected-files';
+import { backupFailure } from './controlled-recovery-d3-backup-profile';
+
+export const D3_BACKUP_PHASES = ['ATTEMPT', 'CAPTURE', 'SEALED', 'PREPARED', 'SQL_INTENT', 'REPOSITORY_PUBLISHED', 'SQL_VERIFIED', 'INDEX', 'CLEANED'] as const;
+const sha = z.string().regex(/^[a-f0-9]{64}$/);
+export const d3BackupRecordSchema = z.object({ format: z.literal('darshan-d3-backup-record-v1'), operationId: z.string().uuid(), siteId: z.string(), repositoryId: z.string().uuid(), profileSha256: sha, kind: z.string().regex(/^[a-z][a-z0-9-]{0,80}$/), payload: z.record(z.unknown()), receiptSha256: sha }).strict();
+export type D3BackupRecord = z.infer<typeof d3BackupRecordSchema>;
+/** An index only: callers must reobserve SQL/repository/process authority on every request. */
+export class ProtectedD3BackupState {
+  constructor(readonly authority: D3OperationAuthority, readonly profileSha256: string, private readonly processes: D3AgeStagingProcessIdentity = d3StagingProcessIdentity) { sha.parse(profileSha256); }
+  get root() { return `${this.authority.root}/backup`; }
+  path(kind: string) { if (!/^[a-z][a-z0-9-]{0,80}$/.test(kind)) throw backupFailure(); return `${this.root}/state/${kind}.json`; }
+  private validate(kind: string, bytes: Buffer) { const r = d3BackupRecordSchema.parse(parseStrictJson(bytes, 1048576)), { receiptSha256, ...u } = r; if (!canonicalJson(r).equals(bytes) || digest(u) !== receiptSha256 || r.kind !== kind || r.operationId !== this.authority.operationId || r.siteId !== this.authority.siteId || r.repositoryId !== this.authority.repositoryId || r.profileSha256 !== this.profileSha256) throw backupFailure('CONTROLLED_RECOVERY_D3_BACKUP_RECORD_CHANGED'); return r; }
+  async read(kind: string, recover = false) { const path = this.path(kind); if (!recover) { const names = await readdir(`${this.root}/state`).catch((e: NodeJS.ErrnoException) => { if (e.code === 'ENOENT') return []; throw e; }); if (names.some((n) => n.startsWith(`${kind}.json.`))) throw backupFailure('CONTROLLED_RECOVERY_D3_BACKUP_PENDING'); } let h; try { if (recover) { await protectD3Directory(this.authority, `${this.root}/state`); await recoverD3PublishedLinks(this.authority, path); } h = await openD3ProtectedFile(this.authority, path, 1048576); } catch (cause) { if ((cause as NodeJS.ErrnoException).code === 'ENOENT') { if (!recover) { const names = await readdir(`${this.root}/state`).catch((e: NodeJS.ErrnoException) => { if (e.code === 'ENOENT') return []; throw e; }); if (names.some((n) => n.startsWith(`${kind}.json.`))) throw backupFailure('CONTROLLED_RECOVERY_D3_BACKUP_PENDING'); } return null; } throw cause; } try { return this.validate(kind, await h.readFile()); } finally { await h.close(); } }
+  async publish(kind: string, payload: Record<string, unknown>) { const u = { format: 'darshan-d3-backup-record-v1' as const, operationId: this.authority.operationId, siteId: this.authority.siteId, repositoryId: this.authority.repositoryId, profileSha256: this.profileSha256, kind, payload }, bytes = canonicalJson({ ...u, receiptSha256: digest(u) }); const checked = this.validate(kind, bytes); await publishExactD3CapsulePrivateBytes(this.authority, this.path(kind), bytes); const retained = await this.read(kind); if (!retained || retained.receiptSha256 !== checked.receiptSha256) throw backupFailure('CONTROLLED_RECOVERY_D3_BACKUP_RECORD_CHANGED'); return retained; }
+  async withLock<T>(kind: 'capabilities' | 'publication', action: () => Promise<T>) { const dir = `${this.root}/${kind}.lock`; await protectD3Directory(this.authority, this.root, true); try { await mkdir(dir, { mode: 0o700 }); } catch { throw backupFailure('CONTROLLED_RECOVERY_D3_BACKUP_BUSY'); } const owner = canonicalJson({ format: 'darshan-d3-backup-owner-v1', operationId: this.authority.operationId, profileSha256: this.profileSha256, token: randomUUID(), ...await this.processes.current() }); let uncertain = false, published = false;
+    try { await publishExactD3CapsulePrivateBytes(this.authority, `${dir}/owner.json`, owner); published = true; return await action(); } catch (cause) { uncertain = !published || !!cause && typeof cause === 'object' && 'code' in cause && String(cause.code).includes('UNCERTAIN'); if (uncertain) await publishExactD3CapsulePrivateBytes(this.authority, `${dir}/quarantine.json`, canonicalJson({ format: 'darshan-d3-backup-quarantine-v1', ownerSha256: sha256(owner), reason: 'SETTLEMENT_UNCERTAIN' })).catch(() => undefined); throw uncertain ? backupFailure('CONTROLLED_RECOVERY_D3_BACKUP_OWNER_SETTLEMENT_UNCERTAIN', cause) : cause; }
+    finally { if (!uncertain) await this.release(dir, owner); }
+  }
+  private async release(dir: string, owner: Buffer) { try { const h = await openD3ProtectedFile(this.authority, `${dir}/owner.json`, 16384); try { const s = await h.stat(); if (!owner.equals(await h.readFile())) throw backupFailure(); const t = await lstat(`${dir}/owner.json`); if (s.dev !== t.dev || s.ino !== t.ino) throw backupFailure(); await unlink(`${dir}/owner.json`); } finally { await h.close(); } await rmdir(dir); await syncD3Directory(this.root); } catch (cause) { throw backupFailure('CONTROLLED_RECOVERY_D3_BACKUP_OWNER_SETTLEMENT_UNCERTAIN', cause); } }
+
+  async assertInactive() { for (const path of [`${this.root}/capabilities.lock`, `${this.root}/publication.lock`, `${this.authority.root}/run/controller-source.lock`, `${this.authority.root}/source/state/command.lock`]) { const s = await lstat(path).catch((e: NodeJS.ErrnoException) => { if (e.code === 'ENOENT') return null; throw e; }); if (s) throw backupFailure('CONTROLLED_RECOVERY_D3_BACKUP_BUSY'); } }
+}

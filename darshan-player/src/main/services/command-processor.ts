@@ -59,6 +59,12 @@ export class CommandProcessor {
   async ingestCommands(rawCommands: Command[], source: CommandSource): Promise<void> {
     for (const rawCommand of rawCommands) {
       const command = this.normalizeCommand(rawCommand)
+      const currentGeneration = getDeviceStateStore().getState().recoveryGeneration
+      if ((currentGeneration && command.recoveryGeneration !== currentGeneration) ||
+          (!currentGeneration && command.recoveryGeneration)) {
+        logger.warn({ commandId: command.id }, 'Ignoring command from an unproven recovery generation')
+        continue
+      }
       if (getDeviceStateStore().hasRecentCommand(command.id, command.deliveryToken)) {
         logger.debug({ commandId: command.id, source }, 'Skipping previously seen command')
         getPlayerMetrics().recordCommandOutcome(command.type, source, 'deduplicated')
@@ -238,6 +244,10 @@ export class CommandProcessor {
         typeof (command as unknown as { delivery_token?: string }).delivery_token === 'string'
           ? (command as unknown as { delivery_token?: string }).delivery_token
           : command.deliveryToken,
+      recoveryGeneration:
+        typeof (command as unknown as { recovery_generation?: string }).recovery_generation === 'string'
+          ? (command as unknown as { recovery_generation?: string }).recovery_generation
+          : command.recoveryGeneration,
     }
   }
 
@@ -252,7 +262,7 @@ export class CommandProcessor {
         success: false,
         error: 'Rate limited',
         timestamp: new Date().toISOString(),
-      })
+      }, command.recoveryGeneration)
       return
     }
 
@@ -305,7 +315,7 @@ export class CommandProcessor {
         }
       }
 
-      await this.acknowledgeCommand(command.id, command.deliveryToken, result)
+      await this.acknowledgeCommand(command.id, command.deliveryToken, result, command.recoveryGeneration)
       this.updateRateLimit(command.type)
     } catch (error) {
       logger.error({ error, commandId: command.id }, 'Command processing failed')
@@ -314,7 +324,7 @@ export class CommandProcessor {
         success: false,
         error: (error as Error).message,
         timestamp: new Date().toISOString(),
-      })
+      }, command.recoveryGeneration)
     } finally {
       this.processingCommands.delete(command.id)
     }
@@ -474,7 +484,8 @@ export class CommandProcessor {
   private async acknowledgeCommand(
     commandId: string,
     deliveryToken: string | undefined,
-    result: CommandResult
+    result: CommandResult,
+    recoveryGeneration?: string | null
   ): Promise<void> {
     const deviceId = getPairingService().getDeviceId()
     if (!deviceId) {
@@ -484,6 +495,7 @@ export class CommandProcessor {
 
     const payload = {
       ...(deliveryToken ? { delivery_token: deliveryToken } : {}),
+      ...(recoveryGeneration ? { recovery_generation: recoveryGeneration } : {}),
       success: result.success,
       ...(typeof result.error === 'string' && result.error.length > 0 ? { error: result.error } : {}),
       ...(typeof result.message === 'string' && result.message.length > 0 ? { message: result.message } : {}),

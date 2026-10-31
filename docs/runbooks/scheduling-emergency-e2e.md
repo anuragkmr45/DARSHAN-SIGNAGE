@@ -41,8 +41,11 @@ Manual player checks:
 4. Verify `publish.selection_reason = active_reservation` while active.
 5. Verify the running player updates within one command poll cycle without restart.
 6. Verify emergency still overrides the same screen immediately.
-7. Clear emergency and verify scheduled playback resumes.
-8. Clear/expire the schedule and verify default media fallback remains intact.
+7. Select a long READY video emergency and verify its device snapshot contains `loop_enabled: true` while a non-video emergency contains `false`.
+8. Verify the video starts at zero, completes at least three natural wraps on one mounted identity, and an equivalent refresh does not restart it.
+9. Replace, clear and expire the emergency; verify picture/audio/callback cleanup and that the replacement starts at zero or the correct scheduled/default authority resumes.
+10. Activate the 120-second security lock and verify emergency media is torn down before fresh identity/snapshot recovery.
+11. Clear/expire the schedule and verify default media fallback remains intact.
 
 ## High-value scenarios
 ### Overlapping request contention

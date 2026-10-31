@@ -62,6 +62,8 @@ blob-report/
 /darshan-player/**/*.pid.lock
 /darshan-player/**/.runtime/
 /darshan-server/**/reports/
+/.controlled-recovery-d3/
+/deploy/production/backups/
 
 # Temporary files and local data
 /darshan-server/**/tmp/

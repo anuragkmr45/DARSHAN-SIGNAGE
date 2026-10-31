@@ -4,6 +4,9 @@ import { usersApi, type UpdateUserPayload } from "@/api/domains/users";
 import { ApiError } from "@/api/apiClient";
 import type { RoleId } from "@/api/types";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
+import { refreshUserManagementQueries, shouldRefreshAfterUserManagementError } from "@/lib/userManagementRefresh";
+import { queryKeys } from "@/api/queryKeys";
+import { useAppSelector } from "@/store/hooks";
 
 type UseUsersApiOptions = {
     usersPage?: number;
@@ -21,34 +24,38 @@ export const useUsersApi = ({
     enableInvitations = true,
 }: UseUsersApiOptions = {}) => {
     const queryClient = useQueryClient();
+    const currentUserId = useAppSelector((state) => state.auth.user?.id);
     const { toast } = useToast();
+    const refreshOnDenial = (error: unknown) => {
+        if (shouldRefreshAfterUserManagementError(error)) {
+            void refreshUserManagementQueries(queryClient);
+        }
+    };
 
     /* ============================
        Queries
     ============================ */
 
     const listUsers = useQuery({
-        queryKey: ["users", usersPage, usersLimit],
+        queryKey: queryKeys.usersList(currentUserId, usersPage, usersLimit),
         queryFn: () => usersApi.list({ page: usersPage, limit: usersLimit }),
         retry: false,
-        refetchOnWindowFocus: false,
+        refetchOnWindowFocus: true,
         staleTime: 0, // always refetch when invalidated
-        placeholderData: (previousData) => previousData,
     });
 
     const listInvitations = useQuery({
-        queryKey: ["invitations", invitationsPage, invitationsLimit],
+        queryKey: queryKeys.invitationsList(currentUserId, invitationsPage, invitationsLimit),
         queryFn: () =>
             usersApi.listInvitations({
-                status: "pending",
+                status: "pending,expired",
                 page: invitationsPage,
                 limit: invitationsLimit,
             }),
         enabled: enableInvitations,
         retry: false,
-        refetchOnWindowFocus: false,
+        refetchOnWindowFocus: true,
         staleTime: 0,
-        placeholderData: (previousData) => previousData,
     });
 
     /* ============================
@@ -66,7 +73,7 @@ export const useUsersApi = ({
         }) => usersApi.create(payload),
         retry: false,
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: ["users"] });
+            await refreshUserManagementQueries(queryClient);
 
             toast({
                 title: "User created",
@@ -74,6 +81,7 @@ export const useUsersApi = ({
             });
         },
         onError: (error: Error | ApiError) => {
+            refreshOnDenial(error);
             const ux = mapUsersErrorToUx(error, "Failed to create user");
             toast({
                 title: ux.title,
@@ -90,21 +98,42 @@ export const useUsersApi = ({
             department_id?: string;
         }) => usersApi.invite(payload),
         retry: false,
-        onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: ["invitations"] });
+        onSuccess: () => {
+            // Do not delay delivery of the one-time activation token on list refetches.
+            void refreshUserManagementQueries(queryClient);
 
             toast({
-                title: "Invitation sent",
-                description: "The user has been invited successfully.",
+                title: "Invitation link created",
+                description: "Copy the link and share it securely with the invitee. No email was sent.",
             });
         },
         onError: (error: Error | ApiError) => {
-            const ux = mapUsersErrorToUx(error, "Failed to send invitation");
+            refreshOnDenial(error);
+            const ux = mapUsersErrorToUx(error, "Failed to create invitation link");
             toast({
                 title: ux.title,
                 description: ux.message,
                 variant: "destructive",
             });
+        },
+    });
+
+    const replaceInvite = useMutation({
+        mutationFn: ({ inviteId, expectedUpdatedAt }: { inviteId: string; expectedUpdatedAt: string }) =>
+            usersApi.replaceInvite(inviteId, expectedUpdatedAt),
+        retry: false,
+        onSuccess: () => {
+            // The replacement token must appear before any list refresh completes.
+            void refreshUserManagementQueries(queryClient);
+            toast({
+                title: "Replacement link created",
+                description: "The old link is invalid. Copy and share the new link securely; no email was sent.",
+            });
+        },
+        onError: (error: Error | ApiError) => {
+            refreshOnDenial(error);
+            const ux = mapUsersErrorToUx(error, "Failed to replace invitation link");
+            toast({ title: ux.title, description: ux.message, variant: "destructive" });
         },
     });
 
@@ -118,7 +147,7 @@ export const useUsersApi = ({
         }) => usersApi.update(userId, payload),
         retry: false,
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: ["users"] });
+            await refreshUserManagementQueries(queryClient);
 
             toast({
                 title: "User updated",
@@ -126,6 +155,7 @@ export const useUsersApi = ({
             });
         },
         onError: (error: Error | ApiError) => {
+            refreshOnDenial(error);
             const ux = mapUsersErrorToUx(error, "Failed to update user");
             toast({
                 title: ux.title,
@@ -139,7 +169,7 @@ export const useUsersApi = ({
         mutationFn: (userId: string) => usersApi.remove(userId),
         retry: false,
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: ["users"] });
+            await refreshUserManagementQueries(queryClient);
 
             toast({
                 title: "User deleted",
@@ -148,6 +178,7 @@ export const useUsersApi = ({
             });
         },
         onError: (error: Error | ApiError) => {
+            refreshOnDenial(error);
             const ux = mapUsersErrorToUx(error, "Failed to delete user");
             toast({
                 title: ux.title,
@@ -162,6 +193,7 @@ export const useUsersApi = ({
         listInvitations,
         createUser,
         inviteUser,
+        replaceInvite,
         updateUser,
         deleteUser,
     };

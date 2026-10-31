@@ -423,6 +423,11 @@ export class PlayerFlow extends EventEmitter {
       return status
     }
 
+    if (status.status === 'RECOVERY_PAIRING_REVIEW_REQUIRED') {
+      await this.enterRecoveryPairingReviewWait(status.message || 'Recovered pairing is quarantined pending operator review.')
+      return null
+    }
+
     if (STALE_BACKEND_PAIRING_STATUSES.has(status.status)) {
       const message =
         status.message ||
@@ -775,6 +780,10 @@ export class PlayerFlow extends EventEmitter {
     )
 
     const backendPairingStatus = this.pairingService.getBackendPairingStatusFromError(error)
+    if (backendPairingStatus === 'RECOVERY_PAIRING_REVIEW_REQUIRED') {
+      await this.enterRecoveryPairingReviewWait((error as Error).message || 'Recovered pairing is quarantined pending operator review.')
+      return
+    }
     if (backendPairingStatus && STALE_BACKEND_PAIRING_STATUSES.has(backendPairingStatus)) {
       await this.enterHardRecovery((error as Error).message || `Pairing is invalid (${backendPairingStatus})`)
       return
@@ -865,6 +874,31 @@ export class PlayerFlow extends EventEmitter {
       mode: 'empty',
       online: false,
       backendAvailable: false,
+      awaitingManualRecovery: true,
+      error: reason,
+      recoveryReason: reason,
+    })
+
+    this.scheduleBootstrapRetry(this.bootstrapBackoff.getDelay())
+  }
+
+  private async enterRecoveryPairingReviewWait(reason: string): Promise<void> {
+    this.stopPairingTimers()
+    this.stopRuntimeLoops(false)
+    this.restoreCachedPlayback()
+
+    await this.store.update({
+      lifecycleState: 'LOCAL_IDENTITY_PRESENT',
+      recoveryReason: reason,
+      lastPairingValidationStatus: 'RECOVERY_PAIRING_REVIEW_REQUIRED',
+      pairingCode: undefined,
+      pairingExpiresAt: undefined,
+      activePairingMode: undefined,
+    })
+
+    await this.transitionState('LOCAL_IDENTITY_PRESENT', {
+      online: false,
+      backendAvailable: true,
       awaitingManualRecovery: true,
       error: reason,
       recoveryReason: reason,
@@ -1188,6 +1222,14 @@ export class PlayerFlow extends EventEmitter {
       this.state === 'PAIRING_COMPLETING' ||
       this.state === 'HARD_RECOVERY'
     ) {
+      return
+    }
+
+    const backendPairingStatus = this.pairingService.getBackendPairingStatusFromError(event.error)
+    if (backendPairingStatus === 'RECOVERY_PAIRING_REVIEW_REQUIRED') {
+      await this.enterRecoveryPairingReviewWait(
+        event.error.message || 'Recovered pairing is quarantined pending operator review.'
+      )
       return
     }
 

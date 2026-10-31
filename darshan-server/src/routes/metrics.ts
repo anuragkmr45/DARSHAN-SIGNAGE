@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { respondWithError } from '@/utils/errors';
@@ -28,7 +28,7 @@ export async function metricsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Dashboard')) throw AppError.forbidden('Forbidden');
 
         const [usersCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.users);
         const [mediaCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.media);

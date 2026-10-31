@@ -248,6 +248,9 @@ function assertBundleContract() {
     'production/observability/certs/server.key',
     'production/valkey/tls/server.key',
   ])
+  if (config.BACKUP_REPOSITORY_KIND === 'LOCAL_FILESYSTEM' && config.BACKUP_LOCAL_PROTOCOL === 'V2_BROKER') {
+    allowedPrivateKeys.add('production/backend/backup-broker-inputs/manifest-signing.key')
+  }
   for (const { relative, absolute } of files.filter(({ relative }) => relative.endsWith('.key'))) {
     if (!allowedPrivateKeys.has(relative)) fail(`Unexpected private key in runtime bundle: ${relative}`)
     if (process.platform !== 'win32' && (fs.statSync(absolute).mode & 0o077) !== 0) {

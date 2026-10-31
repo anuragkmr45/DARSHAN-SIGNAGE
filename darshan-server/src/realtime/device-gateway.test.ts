@@ -2,7 +2,7 @@ import { createSign, generateKeyPairSync, randomBytes, randomUUID } from 'crypto
 import { AddressInfo } from 'net';
 import { FastifyInstance } from 'fastify';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { closeTestServer, createTestServer } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
@@ -11,6 +11,8 @@ import { deviceConnectionRegistry } from '@/realtime/device-connection-registry'
 import { buildDeviceSocketSignaturePayload } from '@/realtime/device-socket-auth';
 import { dispatchPendingCommandOutboxBatch } from '@/services/outbox-dispatcher';
 import { getRecentLogs } from '@/utils/logger';
+import * as jobs from '@/jobs';
+import { processDeviceOperationalObservation } from '@/jobs/device-operational-observation';
 
 function waitForSocketConnect(socket: ClientSocket) {
   return new Promise<void>((resolve, reject) => {
@@ -174,6 +176,67 @@ describe('device realtime gateway and outbox dispatcher', () => {
       server_release_id: expect.any(String),
     });
     expect(deviceConnectionRegistry.getConnections(deviceId)).toHaveLength(1);
+  });
+
+  it('acknowledges HELLO while capability persistence waits for admitted replay', async () => {
+    const { db, deviceId, serial } = await seedDevice();
+    const queueObservationSpy = vi
+      .spyOn(jobs, 'queueDeviceOperationalObservation')
+      .mockResolvedValue('socket-observation-job');
+
+    socket = createClient(`${baseUrl}/device`, {
+      transports: ['websocket'],
+      auth: { device_id: deviceId, device_serial: serial },
+      reconnection: false,
+      forceNew: true,
+    });
+    await waitForSocketConnect(socket);
+
+    const ack = await emitWithAck<any>(socket, 'HELLO', {
+      type: 'HELLO',
+      protocol_version: '1.0',
+      device_id: deviceId,
+      capabilities: { features: ['pdf_page_selection_v1'], screenshot: true },
+    });
+    expect(ack).toMatchObject({ type: 'HELLO_ACK', device_id: deviceId });
+
+    const authJob = queueObservationSpy.mock.calls
+      .map(([job]) => job)
+      .find((job) => job.type === 'auth_rollout');
+    const capabilityJob = queueObservationSpy.mock.calls
+      .map(([job]) => job)
+      .find((job) => job.type === 'hello_capabilities');
+    expect(authJob).toMatchObject({ type: 'auth_rollout', channel: 'socket', screenId: deviceId });
+    expect(capabilityJob).toMatchObject({
+      type: 'hello_capabilities',
+      screenId: deviceId,
+      observedAt: expect.any(String),
+    });
+
+    const [beforeReplay] = await db
+      .select({ device_info: schema.screens.device_info })
+      .from(schema.screens)
+      .where(eq(schema.screens.id, deviceId));
+    expect((beforeReplay?.device_info as any)?.player_capabilities).toBeUndefined();
+
+    await processDeviceOperationalObservation(authJob!);
+    await processDeviceOperationalObservation(capabilityJob!);
+    await processDeviceOperationalObservation(capabilityJob!);
+
+    const [afterReplay] = await db
+      .select({ device_info: schema.screens.device_info })
+      .from(schema.screens)
+      .where(eq(schema.screens.id, deviceId));
+    expect((afterReplay?.device_info as any)?.player_capabilities).toEqual({
+      features: ['pdf_page_selection_v1'],
+      screenshot: true,
+    });
+    const [rollout] = await db
+      .select()
+      .from(schema.deviceAuthRolloutObservations)
+      .where(eq(schema.deviceAuthRolloutObservations.screen_id, deviceId));
+    expect(rollout?.last_legacy_socket_at).toBeInstanceOf(Date);
+    queueObservationSpy.mockRestore();
   });
 
   it('authenticates a device socket with optional signed socket auth', async () => {

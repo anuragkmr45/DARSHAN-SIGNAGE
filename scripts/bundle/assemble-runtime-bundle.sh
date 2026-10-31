@@ -1461,6 +1461,74 @@ if [[ "$role" == "backend" ]]; then
   [[ "\$BACKEND_WORKER_SCRATCH_DIR" == "/var/lib/darshan/\$SITE_NAME/worker-scratch" ]] || { echo "Unexpected worker scratch path." >&2; exit 1; }
   install -d -m 0700 -o 1000 -g 1000 "\$BACKEND_WORKER_SCRATCH_DIR"
   install -d -m 0770 -o root -g docker ./bootstrap-secrets
+  if [[ "\$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" ]]; then
+    [[ "\$BACKUP_REPOSITORY_ROOT" == "/var/lib/darshan/\$SITE_NAME/backup-repository" ]] || { echo "Unexpected local backup repository path." >&2; exit 1; }
+    [[ -d "\$BACKUP_REPOSITORY_ROOT" && ! -L "\$BACKUP_REPOSITORY_ROOT" ]] || { echo "Local backup repository must be a pre-provisioned non-symlink directory." >&2; exit 1; }
+    [[ "\$(readlink -f "\$BACKUP_REPOSITORY_ROOT")" == "\$BACKUP_REPOSITORY_ROOT" ]] || { echo "Local backup repository path traverses a symlink." >&2; exit 1; }
+    [[ "\$(stat -c '%d' "\$BACKUP_REPOSITORY_ROOT")" == "\$BACKUP_REPOSITORY_DEVICE_ID" ]] || { echo "Local backup repository device identity does not match signed policy." >&2; exit 1; }
+    [[ "\$(stat -c '%u:%g' "\$BACKUP_REPOSITORY_ROOT")" == "\$BACKUP_REPOSITORY_OWNER_UID:\$BACKUP_REPOSITORY_OWNER_GID" ]] || { echo "Local backup repository owner does not match signed policy." >&2; exit 1; }
+    repository_mode="\$(stat -c '%a' "\$BACKUP_REPOSITORY_ROOT")"
+    (( (8#\$repository_mode & 8#027) == 0 )) || { echo "Local backup repository must not be group-writable or accessible by other users." >&2; exit 1; }
+    repository_available="\$(df -B1 --output=avail "\$BACKUP_REPOSITORY_ROOT" | awk 'NR == 2 { print \$1 }')"
+    [[ "\$repository_available" =~ ^[0-9]+\$ && "\$repository_available" -ge "\$BACKUP_REPOSITORY_MIN_FREE_BYTES" ]] || { echo "Local backup repository is below the signed minimum free-space policy." >&2; exit 1; }
+    if [[ "\$BACKUP_LOCAL_PROTOCOL" == "V2_BROKER" ]]; then
+      [[ "\$BACKUP_BROKER_SOCKET_DIR" == "/var/lib/darshan/\$SITE_NAME/backup-broker-socket" ]] || { echo "Unexpected backup broker socket path." >&2; exit 1; }
+      [[ "\$BACKUP_WORKER_SPOOL_ROOT" == "/var/lib/darshan/\$SITE_NAME/backup-spool" ]] || { echo "Unexpected backup worker spool path." >&2; exit 1; }
+      [[ "\$BACKUP_RECOVERY_SOCKET_DIR" == "/var/lib/darshan/\$SITE_NAME/recovery-broker-socket" ]] || { echo "Unexpected recovery broker socket path." >&2; exit 1; }
+      [[ "\$RECOVERY_DOCKER_CONFIG_ROOT" == "/var/lib/darshan/\$SITE_NAME/recovery-docker-config" ]] || { echo "Unexpected recovery Docker config path." >&2; exit 1; }
+      install -d -m 0710 -o root -g 1000 "\$BACKUP_BROKER_SOCKET_DIR" "\$BACKUP_RECOVERY_SOCKET_DIR"
+      install -d -m 0700 -o 1000 -g 1000 "\$BACKUP_WORKER_SPOOL_ROOT" \
+        "\$RECOVERY_OPERATOR_CONFIG_ROOT" "\$RECOVERY_PLAN_ROOT" "\$RECOVERY_JOURNAL_ROOT" "\$RECOVERY_REVIEW_ROOT" "\$RECOVERY_EVIDENCE_ROOT"
+      operator_uid="\${SUDO_UID:-}"; operator_gid="\${SUDO_GID:-}"
+      [[ "\$operator_uid" == "1000" && "\$operator_gid" =~ ^[0-9]+\$ ]] || { echo "Backend recovery preparation requires the packaged uid-1000 sudo deployment operator." >&2; exit 1; }
+      docker_gid="\$(getent group docker | awk -F: '{print \$3}')"
+      id -G "\$operator_uid" | tr ' ' '\n' | grep -Fx "\$docker_gid" >/dev/null || { echo "Recovery deployment operator must belong to the docker group." >&2; exit 1; }
+      install -d -m 0700 -o "\$operator_uid" -g "\$operator_gid" "\$RECOVERY_DOCKER_CONFIG_ROOT"
+      [[ -f ./recovery-boundary/generated/boundary-manifest.json && ! -L ./recovery-boundary/generated/boundary-manifest.json ]] || { echo "Recovery boundary manifest is missing or unsafe." >&2; exit 1; }
+      [[ "\$(stat -c '%u:%g:%a' ./recovery-boundary/generated/boundary-manifest.json)" == "0:\$docker_gid:640" ]] || { echo "Recovery boundary manifest must be signed-role root:docker mode 0640." >&2; exit 1; }
+      for runner_file in ./recovery-boundary/recovery-container-runner.mjs ./recovery-boundary/runtime/node; do
+        [[ -f "\$runner_file" && ! -L "\$runner_file" && "\$(stat -c '%u:%g:%a' "\$runner_file")" == "0:\$docker_gid:750" ]] || { echo "Executable recovery runner asset has unsafe ownership/mode: \$runner_file" >&2; exit 1; }
+      done
+      for runner_file in ./recovery-boundary/recovery-boundary-lib.mjs ./recovery-boundary/recovery-runtime-manifest.json; do
+        [[ -f "\$runner_file" && ! -L "\$runner_file" && "\$(stat -c '%u:%g:%a' "\$runner_file")" == "0:\$docker_gid:640" ]] || { echo "Read-only recovery runner asset has unsafe ownership/mode: \$runner_file" >&2; exit 1; }
+      done
+      runtime_identity="\$(./recovery-boundary/runtime/node -p 'process.platform + ":" + process.arch + ":" + process.versions.node.split(".")[0]')"
+      [[ "\$runtime_identity" == "linux:x64:20" ]] || { echo "Pinned recovery Node runtime is incompatible with this host; Linux x64 Node.js 20 is required." >&2; exit 1; }
+      install -d -m 0700 -o 1000 -g 1000 "/var/lib/darshan/\$SITE_NAME/recovery-policy-trust" "/var/lib/darshan/\$SITE_NAME/recovery-manifest-trust"
+      if [[ -d ./recovery-boundary/generated ]]; then
+        install -m 0600 -o 1000 -g 1000 ./recovery-boundary/generated/operator-config.json "\$RECOVERY_OPERATOR_CONFIG_ROOT/operator-config.json"
+        install -m 0600 -o 1000 -g 1000 ./recovery-boundary/policy-trust/policy-keyring.json "/var/lib/darshan/\$SITE_NAME/recovery-policy-trust/policy-keyring.json"
+        install -m 0600 -o 1000 -g 1000 ./recovery-boundary/manifest-trust/manifest-keyring.json "/var/lib/darshan/\$SITE_NAME/recovery-manifest-trust/manifest-keyring.json"
+      fi
+      [[ -d ./backup-broker-inputs && ! -L ./backup-broker-inputs && -d ./backup-worker-public && ! -L ./backup-worker-public ]] || { echo "V2 broker input directories are missing or unsafe." >&2; exit 1; }
+      [[ -z "\$(find ./backup-broker-inputs ./backup-worker-public -type l -print -quit)" ]] || { echo "V2 broker inputs must not contain symbolic links." >&2; exit 1; }
+      chown 1000:1000 ./backup-broker-inputs ./backup-worker-public ./backup-broker-inputs/* ./backup-worker-public/*
+      chmod 0700 ./backup-broker-inputs ./backup-worker-public
+      chmod 0640 ./backup-broker-inputs/configuration.tar.age ./backup-broker-inputs/capsule-policy.signed.json ./backup-broker-inputs/policy-trust.json ./backup-broker-inputs/manifest-keyring.json
+      chmod 0600 ./backup-worker-public/manifest-keyring.json ./backup-worker-public/policy-keyring.json
+      chmod 0600 ./backup-broker-inputs/manifest-signing.key
+      for protected_dir in "\$BACKUP_WORKER_SPOOL_ROOT" \
+        "\$RECOVERY_OPERATOR_CONFIG_ROOT" "\$RECOVERY_PLAN_ROOT" "\$RECOVERY_JOURNAL_ROOT" "\$RECOVERY_REVIEW_ROOT" "\$RECOVERY_EVIDENCE_ROOT"; do
+        [[ ! -L "\$protected_dir" && "\$(readlink -f "\$protected_dir")" == "\$protected_dir" ]] || { echo "Backup broker runtime path traverses a symlink: \$protected_dir" >&2; exit 1; }
+        [[ "\$(stat -c '%u:%g:%a' "\$protected_dir")" == "1000:1000:700" ]] || { echo "Backup broker runtime path ownership or mode is invalid: \$protected_dir" >&2; exit 1; }
+      done
+      for socket_dir in "\$BACKUP_BROKER_SOCKET_DIR" "\$BACKUP_RECOVERY_SOCKET_DIR"; do
+        [[ ! -L "\$socket_dir" && "\$(readlink -f "\$socket_dir")" == "\$socket_dir" && \
+          "\$(stat -c '%u:%g:%a' "\$socket_dir")" == "0:1000:710" ]] || { echo "Broker listener directory exclusion boundary is invalid: \$socket_dir" >&2; exit 1; }
+      done
+      [[ ! -L "\$RECOVERY_DOCKER_CONFIG_ROOT" && "\$(readlink -f "\$RECOVERY_DOCKER_CONFIG_ROOT")" == "\$RECOVERY_DOCKER_CONFIG_ROOT" && \
+        "\$(stat -c '%u:%g:%a' "\$RECOVERY_DOCKER_CONFIG_ROOT")" == "\$operator_uid:\$operator_gid:700" ]] || { echo "Recovery Docker config ownership or mode is invalid." >&2; exit 1; }
+      [[ "\$(stat -c '%d' "\$BACKUP_WORKER_SPOOL_ROOT")" == "\$BACKUP_WORKER_SPOOL_DEVICE_ID" ]] || { echo "Backup worker spool device identity does not match signed policy." >&2; exit 1; }
+      for pair in "\$BACKUP_REPOSITORY_ROOT|\$BACKUP_WORKER_SPOOL_ROOT" "\$BACKUP_REPOSITORY_ROOT|\$BACKUP_BROKER_SOCKET_DIR" "\$BACKUP_WORKER_SPOOL_ROOT|\$BACKUP_BROKER_SOCKET_DIR"; do
+        left="\${pair%%|*}"; right="\${pair#*|}"
+        if [[ "\$left" == "\$right" || "\$left" == "\$right/"* || "\$right" == "\$left/"* ]]; then
+          echo "Backup repository, spool, and socket paths must be disjoint." >&2; exit 1
+        fi
+      done
+      spool_available="\$(df -B1 --output=avail "\$BACKUP_WORKER_SPOOL_ROOT" | awk 'NR == 2 { print \$1 }')"
+      [[ "\$spool_available" =~ ^[0-9]+\$ && "\$spool_available" -ge "\$BACKUP_WORKER_SPOOL_MIN_FREE_BYTES" ]] || { echo "Backup worker spool is below the signed minimum free-space policy." >&2; exit 1; }
+    fi
+  fi
 fi
 role_root="\$(pwd -P)"
 marker="\$state_root/prepared/\$DARSHAN_ROLE_NAME-\$DARSHAN_RELEASE_ID"
@@ -1500,6 +1568,18 @@ if [[ "$role" == "backend" ]]; then
   [[ "\$scratch_available" =~ ^[0-9]+\$ && "\$scratch_available" -ge "\$BACKEND_MIN_FREE_DISK_BYTES" ]] || {
     echo "Worker scratch filesystem is below the signed minimum free-space policy." >&2; exit 1;
   }
+  if [[ "\$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" ]]; then
+    repository_available="\$(df -B1 --output=avail "\$BACKUP_REPOSITORY_ROOT" | awk 'NR == 2 { print \$1 }')"
+    [[ "\$repository_available" =~ ^[0-9]+\$ && "\$repository_available" -ge "\$BACKUP_REPOSITORY_MIN_FREE_BYTES" ]] || {
+      echo "Local backup repository is below the signed minimum free-space policy." >&2; exit 1;
+    }
+    if [[ "\$BACKUP_LOCAL_PROTOCOL" == "V2_BROKER" ]]; then
+      spool_available="\$(df -B1 --output=avail "\$BACKUP_WORKER_SPOOL_ROOT" | awk 'NR == 2 { print \$1 }')"
+      [[ "\$spool_available" =~ ^[0-9]+\$ && "\$spool_available" -ge "\$BACKUP_WORKER_SPOOL_MIN_FREE_BYTES" ]] || {
+        echo "Backup worker spool is below the signed minimum free-space policy." >&2; exit 1;
+      }
+    fi
+  fi
 fi
 echo "Image-load capacity preflight passed."
 EOF
@@ -2208,6 +2288,9 @@ FFMPEG_PATH="${FFMPEG_PATH:-ffmpeg}"
 LIBREOFFICE_PATH="${LIBREOFFICE_PATH:-soffice}"
 PG_DUMP_PATH="${PG_DUMP_PATH:-pg_dump}"
 TAR_PATH="${TAR_PATH:-tar}"
+AGE_PATH="${AGE_PATH:-}"
+AGE_VERSION="${AGE_VERSION:-}"
+AGE_SHA256="${AGE_SHA256:-}"
 DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH="${DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-${HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-}}"
 HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH="${HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH}"
 PG_BOSS_SCHEMA="${PG_BOSS_SCHEMA:-pgboss}"
@@ -2229,6 +2312,71 @@ WEBPAGE_ALLOW_HTTP="${WEBPAGE_ALLOW_HTTP:-false}"
 WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS="${WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS:-24}"
 WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE="${WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE:-100}"
 STORAGE_QUOTA_BYTES="${STORAGE_QUOTA_BYTES:-0}"
+BACKUP_REPOSITORY_KIND="${BACKUP_REPOSITORY_KIND:-}"
+BACKUP_REPOSITORY_ROOT="${BACKUP_REPOSITORY_ROOT:-}"
+BACKUP_REPOSITORY_DEVICE_ID="${BACKUP_REPOSITORY_DEVICE_ID:-}"
+BACKUP_REPOSITORY_OWNER_UID="${BACKUP_REPOSITORY_OWNER_UID:-}"
+BACKUP_REPOSITORY_OWNER_GID="${BACKUP_REPOSITORY_OWNER_GID:-}"
+BACKUP_REPOSITORY_MIN_FREE_BYTES="${BACKUP_REPOSITORY_MIN_FREE_BYTES:-}"
+BACKUP_REPOSITORY_ID="${BACKUP_REPOSITORY_ID:-}"
+BACKUP_ENCRYPTION_RECIPIENT="${BACKUP_ENCRYPTION_RECIPIENT:-}"
+BACKUP_ENCRYPTION_KEY_ID="${BACKUP_ENCRYPTION_KEY_ID:-}"
+BACKUP_CAPSULE_HELPER_PATH="${BACKUP_CAPSULE_HELPER_PATH:-}"
+BACKUP_CAPSULE_HELPER_VERSION="${BACKUP_CAPSULE_HELPER_VERSION:-}"
+BACKUP_CAPSULE_HELPER_SHA256="${BACKUP_CAPSULE_HELPER_SHA256:-}"
+BACKUP_LOCAL_PROTOCOL="${BACKUP_LOCAL_PROTOCOL:-}"
+BACKUP_BROKER_SOCKET_DIR="${BACKUP_BROKER_SOCKET_DIR:-}"
+BACKUP_RECOVERY_SOCKET_DIR="${BACKUP_RECOVERY_SOCKET_DIR:-}"
+BACKUP_WORKER_SPOOL_ROOT="${BACKUP_WORKER_SPOOL_ROOT:-}"
+BACKUP_WORKER_SPOOL_DEVICE_ID="${BACKUP_WORKER_SPOOL_DEVICE_ID:-}"
+BACKUP_WORKER_SPOOL_MIN_FREE_BYTES="${BACKUP_WORKER_SPOOL_MIN_FREE_BYTES:-}"
+BACKUP_BROKER_HELPER_VERSION="${BACKUP_BROKER_HELPER_VERSION:-}"
+BACKUP_BROKER_CAPSULE_FILE="${BACKUP_BROKER_CAPSULE_FILE:-}"
+BACKUP_BROKER_POLICY_FILE="${BACKUP_BROKER_POLICY_FILE:-}"
+BACKUP_BROKER_POLICY_TRUST_FILE="${BACKUP_BROKER_POLICY_TRUST_FILE:-}"
+BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE="${BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE:-}"
+BACKUP_MANIFEST_PUBLIC_KEYRING_FILE="${BACKUP_MANIFEST_PUBLIC_KEYRING_FILE:-}"
+BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID="${BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID:-}"
+BACKUP_BROKER_ARTIFACT_MODE="${BACKUP_BROKER_ARTIFACT_MODE:-}"
+BACKUP_AGE_BUILD_BINARY_FILE="${BACKUP_AGE_BUILD_BINARY_FILE:-}"
+BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE="${BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE:-}"
+BACKUP_CAPSULE_POLICY_KEY_ID="${BACKUP_CAPSULE_POLICY_KEY_ID:-}"
+BACKUP_BROKER_POLICY_SHA256="${BACKUP_BROKER_POLICY_SHA256:-}"
+BACKUP_CAPSULE_GENERATION="${BACKUP_CAPSULE_GENERATION:-}"
+BACKUP_CAPSULE_SHA256="${BACKUP_CAPSULE_SHA256:-}"
+BACKUP_CAPSULE_SIZE_BYTES="${BACKUP_CAPSULE_SIZE_BYTES:-}"
+BACKUP_BROKER_CPU_LIMIT="${BACKUP_BROKER_CPU_LIMIT:-}"
+BACKUP_BROKER_MEMORY_LIMIT="${BACKUP_BROKER_MEMORY_LIMIT:-}"
+BACKUP_BROKER_PIDS_LIMIT="${BACKUP_BROKER_PIDS_LIMIT:-}"
+RECOVERY_OPERATOR_CONFIG_ROOT="${RECOVERY_OPERATOR_CONFIG_ROOT:-}"
+RECOVERY_PLAN_ROOT="${RECOVERY_PLAN_ROOT:-}"
+RECOVERY_JOURNAL_ROOT="${RECOVERY_JOURNAL_ROOT:-}"
+RECOVERY_REVIEW_ROOT="${RECOVERY_REVIEW_ROOT:-}"
+RECOVERY_EVIDENCE_ROOT="${RECOVERY_EVIDENCE_ROOT:-}"
+RECOVERY_DOCKER_CONFIG_ROOT="${RECOVERY_DOCKER_CONFIG_ROOT:-}"
+RECOVERY_CPU_LIMIT="${RECOVERY_CPU_LIMIT:-}"
+RECOVERY_MEMORY_LIMIT="${RECOVERY_MEMORY_LIMIT:-}"
+RECOVERY_PIDS_LIMIT="${RECOVERY_PIDS_LIMIT:-}"
+RECOVERY_SCRATCH_TMPFS_BYTES="${RECOVERY_SCRATCH_TMPFS_BYTES:-}"
+RECOVERY_HOME_TMPFS_BYTES="${RECOVERY_HOME_TMPFS_BYTES:-}"
+RECOVERY_TMP_TMPFS_BYTES="${RECOVERY_TMP_TMPFS_BYTES:-}"
+RECOVERY_JOURNAL_MIN_FREE_BYTES="${RECOVERY_JOURNAL_MIN_FREE_BYTES:-}"
+RECOVERY_EVIDENCE_MIN_FREE_BYTES="${RECOVERY_EVIDENCE_MIN_FREE_BYTES:-}"
+RECOVERY_OUTPUT_MIN_FREE_BYTES="${RECOVERY_OUTPUT_MIN_FREE_BYTES:-}"
+RECOVERY_BROKER_CONTROL_TIMEOUT_MS="${RECOVERY_BROKER_CONTROL_TIMEOUT_MS:-}"
+RECOVERY_RUN_TIMEOUT_MS="${RECOVERY_RUN_TIMEOUT_MS:-}"
+RECOVERY_STDOUT_MAX_BYTES="${RECOVERY_STDOUT_MAX_BYTES:-}"
+RECOVERY_STDERR_MAX_BYTES="${RECOVERY_STDERR_MAX_BYTES:-}"
+BACKUP_SITE_ID="${BACKUP_SITE_ID:-}"
+BACKUP_SCHEDULE_TIME="${BACKUP_SCHEDULE_TIME:-}"
+BACKUP_SCHEDULE_TIMEZONE="${BACKUP_SCHEDULE_TIMEZONE:-}"
+BACKUP_INTERVAL_HOURS="${BACKUP_INTERVAL_HOURS:-}"
+BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-}"
+BACKUP_OFFHOST_DESTINATION="${BACKUP_OFFHOST_DESTINATION:-}"
+BACKUP_OFFHOST_ENDPOINT="${BACKUP_OFFHOST_ENDPOINT:-}"
+BACKUP_OFFHOST_REGION="${BACKUP_OFFHOST_REGION:-}"
+BACKUP_OFFHOST_ACCESS_KEY="${BACKUP_OFFHOST_ACCESS_KEY:-}"
+BACKUP_OFFHOST_SECRET_KEY="${BACKUP_OFFHOST_SECRET_KEY:-}"
 QA_VALKEY_HOST="${QA_VALKEY_HOST:-${QA_BACKEND_HOST:-}}"
 QA_VALKEY_HOST_PORT="${QA_VALKEY_HOST_PORT:-6379}"
 VALKEY_PRIVATE_HOST="${VALKEY_PRIVATE_HOST:-${BACKEND_PRIVATE_HOST:-}}"
@@ -2314,6 +2462,91 @@ if profile_enabled production; then
     echo "DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT is required when DEVICE_AUTH_MODE=dual." >&2
     exit 1
   fi
+  [[ "$BACKUP_SITE_ID" == "$SITE_NAME" ]] || {
+    echo "BACKUP_SITE_ID must match SITE_NAME for production." >&2
+    exit 1
+  }
+  [[ "$BACKUP_SCHEDULE_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || {
+    echo "BACKUP_SCHEDULE_TIME must use 24-hour HH:mm format." >&2
+    exit 1
+  }
+  [[ -n "$BACKUP_SCHEDULE_TIMEZONE" && -n "$BACKUP_RETENTION_DAYS" ]] || {
+    echo "BACKUP_SCHEDULE_TIMEZONE and BACKUP_RETENTION_DAYS are required for production." >&2
+    exit 1
+  }
+  case "$BACKUP_REPOSITORY_KIND" in
+    LOCAL_FILESYSTEM)
+      expected_backup_root="/var/lib/darshan/$BACKUP_SITE_ID/backup-repository"
+      [[ "$BACKUP_REPOSITORY_ROOT" == "$expected_backup_root" ]] || {
+        echo "BACKUP_REPOSITORY_ROOT must be $expected_backup_root." >&2
+        exit 1
+      }
+      for value in "$BACKUP_REPOSITORY_DEVICE_ID" "$BACKUP_REPOSITORY_OWNER_UID" "$BACKUP_REPOSITORY_OWNER_GID" "$BACKUP_REPOSITORY_MIN_FREE_BYTES"; do
+        [[ "$value" =~ ^[0-9]+$ ]] || { echo "LOCAL_FILESYSTEM backup identity and capacity values must be integers." >&2; exit 1; }
+      done
+      [[ "$BACKUP_REPOSITORY_OWNER_UID:$BACKUP_REPOSITORY_OWNER_GID" == "1000:1000" ]] || {
+        echo "LOCAL_FILESYSTEM repository owner must be 1000:1000 for the packaged backend worker." >&2
+        exit 1
+      }
+      [[ "$BACKUP_REPOSITORY_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]] || {
+        echo "BACKUP_REPOSITORY_ID must be a canonical UUID." >&2
+        exit 1
+      }
+      [[ "$BACKUP_ENCRYPTION_RECIPIENT" =~ ^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$ ]] || {
+        echo "BACKUP_ENCRYPTION_RECIPIENT must be a canonical native age X25519 recipient." >&2
+        exit 1
+      }
+      [[ -n "$BACKUP_ENCRYPTION_KEY_ID" && "$AGE_PATH" == /* && -n "$AGE_VERSION" && "$AGE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
+        echo "LOCAL_FILESYSTEM requires a key id and absolute pinned age path/version/SHA-256 metadata." >&2
+        exit 1
+      }
+      case "$BACKUP_LOCAL_PROTOCOL" in
+        V1_HELPER)
+          [[ "$BACKUP_CAPSULE_HELPER_PATH" == /* && -n "$BACKUP_CAPSULE_HELPER_VERSION" && "$BACKUP_CAPSULE_HELPER_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
+            echo "V1_HELPER requires the absolute pinned combined backup host-helper path/version/SHA-256 metadata." >&2; exit 1;
+          }
+          [[ -z "$BACKUP_BROKER_SOCKET_DIR$BACKUP_WORKER_SPOOL_ROOT$BACKUP_BROKER_CAPSULE_FILE$BACKUP_BROKER_POLICY_FILE" ]] || { echo "V1_HELPER forbids V2 broker inputs." >&2; exit 1; }
+          ;;
+        V2_BROKER)
+          [[ "$BACKUP_BROKER_SOCKET_DIR" == "/var/lib/darshan/$BACKUP_SITE_ID/backup-broker-socket" && "$BACKUP_WORKER_SPOOL_ROOT" == "/var/lib/darshan/$BACKUP_SITE_ID/backup-spool" ]] || { echo "V2_BROKER socket and spool paths are not canonical site paths." >&2; exit 1; }
+          [[ "$BACKUP_WORKER_SPOOL_DEVICE_ID" =~ ^[0-9]+$ && "$BACKUP_WORKER_SPOOL_MIN_FREE_BYTES" =~ ^[0-9]+$ ]] || { echo "V2_BROKER spool device/capacity inputs must be integers." >&2; exit 1; }
+          [[ -n "$BACKUP_BROKER_HELPER_VERSION" ]] || { echo "V2_BROKER helper version is unavailable." >&2; exit 1; }
+          if [[ "$BACKUP_BROKER_ARTIFACT_MODE" == "PREBUILT" ]]; then
+            [[ "$BACKUP_BROKER_POLICY_SHA256" =~ ^[0-9a-f]{64}$ && "$BACKUP_CAPSULE_SHA256" =~ ^[0-9a-f]{64}$ && -n "$BACKUP_CAPSULE_GENERATION" ]] || { echo "V2_BROKER derived policy/capsule identity is unavailable." >&2; exit 1; }
+            [[ -f "$BACKUP_BROKER_CAPSULE_FILE" && -f "$BACKUP_BROKER_POLICY_FILE" && -f "$BACKUP_BROKER_POLICY_TRUST_FILE" && -f "$BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE" && -f "$BACKUP_MANIFEST_PUBLIC_KEYRING_FILE" ]] || { echo "V2_BROKER protected artifact inputs are unavailable." >&2; exit 1; }
+          elif [[ "$BACKUP_BROKER_ARTIFACT_MODE" == "PRODUCE" ]]; then
+            [[ -x "$BACKUP_AGE_BUILD_BINARY_FILE" && -f "$BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE" && -n "$BACKUP_CAPSULE_POLICY_KEY_ID" && \
+               -f "$BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE" && -f "$BACKUP_MANIFEST_PUBLIC_KEYRING_FILE" ]] || { echo "V2_BROKER producer inputs are unavailable." >&2; exit 1; }
+          else
+            echo "V2_BROKER requires explicit PREBUILT or PRODUCE artifact mode." >&2; exit 1
+          fi
+          [[ -z "$BACKUP_CAPSULE_HELPER_PATH$BACKUP_CAPSULE_HELPER_VERSION$BACKUP_CAPSULE_HELPER_SHA256" ]] || { echo "V2_BROKER forbids V1 helper inputs." >&2; exit 1; }
+          ;;
+        *) echo "LOCAL_FILESYSTEM requires explicit BACKUP_LOCAL_PROTOCOL=V1_HELPER or V2_BROKER." >&2; exit 1 ;;
+      esac
+      for private_identity_name in AGE_IDENTITY AGE_IDENTITY_FILE BACKUP_ENCRYPTION_IDENTITY BACKUP_ENCRYPTION_IDENTITY_FILE; do
+        [[ -z "${!private_identity_name:-}" ]] || { echo "Private age identity field $private_identity_name is forbidden." >&2; exit 1; }
+      done
+      [[ -z "$BACKUP_INTERVAL_HOURS$BACKUP_OFFHOST_DESTINATION$BACKUP_OFFHOST_ENDPOINT$BACKUP_OFFHOST_REGION$BACKUP_OFFHOST_ACCESS_KEY$BACKUP_OFFHOST_SECRET_KEY" ]] || {
+        echo "LOCAL_FILESYSTEM must not include legacy off-host backup settings." >&2
+        exit 1
+      }
+      ;;
+    LEGACY_OFF_HOST)
+      [[ -n "$BACKUP_INTERVAL_HOURS" && -n "$BACKUP_OFFHOST_DESTINATION" && -n "$BACKUP_OFFHOST_ENDPOINT" && -n "$BACKUP_OFFHOST_REGION" && -n "$BACKUP_OFFHOST_ACCESS_KEY" && -n "$BACKUP_OFFHOST_SECRET_KEY" ]] || {
+        echo "LEGACY_OFF_HOST requires interval, destination, endpoint, region, and worker credentials." >&2
+        exit 1
+      }
+      [[ -z "$BACKUP_REPOSITORY_ROOT$BACKUP_REPOSITORY_DEVICE_ID$BACKUP_REPOSITORY_OWNER_UID$BACKUP_REPOSITORY_OWNER_GID$BACKUP_REPOSITORY_MIN_FREE_BYTES$BACKUP_LOCAL_PROTOCOL$BACKUP_BROKER_SOCKET_DIR$BACKUP_WORKER_SPOOL_ROOT" ]] || {
+        echo "LEGACY_OFF_HOST must not include local repository settings." >&2
+        exit 1
+      }
+      ;;
+    *)
+      echo "BACKUP_REPOSITORY_KIND must explicitly select LOCAL_FILESYSTEM or LEGACY_OFF_HOST." >&2
+      exit 1
+      ;;
+  esac
   require_file "RELEASE_SIGNING_PRIVATE_KEY" "$RELEASE_SIGNING_PRIVATE_KEY"
 fi
 
@@ -3394,8 +3627,22 @@ if profile_enabled production; then
   write_runtime_secret "$PROD_BACKEND_DIR/secrets/minio-access-key" "$MINIO_ACCESS_KEY"
   write_runtime_secret "$PROD_BACKEND_DIR/secrets/minio-secret-key" "$MINIO_SECRET_KEY"
   install -d -m 750 "$PROD_BACKEND_DIR/worker-secrets"
-  write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-access-key" "$BACKUP_OFFHOST_ACCESS_KEY"
-  write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-secret-key" "$BACKUP_OFFHOST_SECRET_KEY"
+  if [[ "$BACKUP_REPOSITORY_KIND" == "LEGACY_OFF_HOST" ]]; then
+    write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-access-key" "$BACKUP_OFFHOST_ACCESS_KEY"
+    write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-secret-key" "$BACKUP_OFFHOST_SECRET_KEY"
+  fi
+  if [[ "$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" && "$BACKUP_LOCAL_PROTOCOL" == "V2_BROKER" ]]; then
+    install -d -m 0750 "$PROD_BACKEND_DIR/backup-broker-inputs" "$PROD_BACKEND_DIR/backup-worker-public"
+    if [[ "$BACKUP_BROKER_ARTIFACT_MODE" == "PREBUILT" ]]; then
+      install -m 0640 "$BACKUP_BROKER_CAPSULE_FILE" "$PROD_BACKEND_DIR/backup-broker-inputs/configuration.tar.age"
+      install -m 0640 "$BACKUP_BROKER_POLICY_FILE" "$PROD_BACKEND_DIR/backup-broker-inputs/capsule-policy.signed.json"
+      install -m 0640 "$BACKUP_BROKER_POLICY_TRUST_FILE" "$PROD_BACKEND_DIR/backup-broker-inputs/policy-trust.json"
+      install -m 0600 "$BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE" "$PROD_BACKEND_DIR/backup-broker-inputs/manifest-signing.key"
+      install -m 0640 "$BACKUP_MANIFEST_PUBLIC_KEYRING_FILE" "$PROD_BACKEND_DIR/backup-broker-inputs/manifest-keyring.json"
+      install -m 0600 "$BACKUP_MANIFEST_PUBLIC_KEYRING_FILE" "$PROD_BACKEND_DIR/backup-worker-public/manifest-keyring.json"
+      install -m 0600 "$BACKUP_BROKER_POLICY_TRUST_FILE" "$PROD_BACKEND_DIR/backup-worker-public/policy-keyring.json"
+    fi
+  fi
 
   cat > "$PROD_DATA_DIR/.env.production" <<EOF
 COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-data
@@ -3584,11 +3831,11 @@ OUTBOX_DISPATCH_ENABLED=$OUTBOX_DISPATCH_ENABLED
 OUTBOX_DISPATCH_BATCH_SIZE=$OUTBOX_DISPATCH_BATCH_SIZE
 OUTBOX_DISPATCH_INTERVAL_MS=$OUTBOX_DISPATCH_INTERVAL_MS
 OUTBOX_DISPATCH_LEASE_MS=$OUTBOX_DISPATCH_LEASE_MS
-BACKUP_INTERVAL_HOURS=$BACKUP_INTERVAL_HOURS
 BACKUP_RETENTION_DAYS=$BACKUP_RETENTION_DAYS
-BACKUP_OFFHOST_DESTINATION=$BACKUP_OFFHOST_DESTINATION
-BACKUP_OFFHOST_ENDPOINT=$BACKUP_OFFHOST_ENDPOINT
-BACKUP_OFFHOST_REGION=$BACKUP_OFFHOST_REGION
+BACKUP_REPOSITORY_KIND=$BACKUP_REPOSITORY_KIND
+BACKUP_SITE_ID=$BACKUP_SITE_ID
+BACKUP_SCHEDULE_TIME=$BACKUP_SCHEDULE_TIME
+BACKUP_SCHEDULE_TIMEZONE=$BACKUP_SCHEDULE_TIMEZONE
 CONTAINER_LOG_MAX_SIZE=$CONTAINER_LOG_MAX_SIZE
 CONTAINER_LOG_MAX_FILES=$CONTAINER_LOG_MAX_FILES
 BACKEND_API_CPU_LIMIT=$BACKEND_API_CPU_LIMIT
@@ -3604,6 +3851,64 @@ BACKEND_MIN_FREE_DISK_BYTES=$BACKEND_MIN_FREE_DISK_BYTES
 BACKEND_WORKER_SCRATCH_DIR=/var/lib/darshan/$SITE_NAME/worker-scratch
 EOF
 
+  if [[ "$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" ]]; then
+    cat >> "$PROD_BACKEND_DIR/.env.production" <<EOF
+BACKUP_REPOSITORY_ROOT=$BACKUP_REPOSITORY_ROOT
+BACKUP_REPOSITORY_DEVICE_ID=$BACKUP_REPOSITORY_DEVICE_ID
+BACKUP_REPOSITORY_OWNER_UID=$BACKUP_REPOSITORY_OWNER_UID
+BACKUP_REPOSITORY_OWNER_GID=$BACKUP_REPOSITORY_OWNER_GID
+BACKUP_REPOSITORY_MIN_FREE_BYTES=$BACKUP_REPOSITORY_MIN_FREE_BYTES
+BACKUP_REPOSITORY_ID=$BACKUP_REPOSITORY_ID
+BACKUP_ENCRYPTION_RECIPIENT=$BACKUP_ENCRYPTION_RECIPIENT
+BACKUP_ENCRYPTION_KEY_ID=$BACKUP_ENCRYPTION_KEY_ID
+AGE_PATH=$AGE_PATH
+AGE_VERSION=$AGE_VERSION
+AGE_SHA256=$AGE_SHA256
+BACKUP_LOCAL_PROTOCOL=$BACKUP_LOCAL_PROTOCOL
+EOF
+    if [[ "$BACKUP_LOCAL_PROTOCOL" == "V1_HELPER" ]]; then
+      cat >> "$PROD_BACKEND_DIR/.env.production" <<EOF
+BACKUP_CAPSULE_HELPER_PATH=$BACKUP_CAPSULE_HELPER_PATH
+BACKUP_CAPSULE_HELPER_VERSION=$BACKUP_CAPSULE_HELPER_VERSION
+BACKUP_CAPSULE_HELPER_SHA256=$BACKUP_CAPSULE_HELPER_SHA256
+EOF
+    else
+      cat >> "$PROD_BACKEND_DIR/.env.production" <<EOF
+BACKUP_BROKER_SOCKET_PATH=/run/darshan-backup-broker/broker.sock
+BACKUP_BROKER_HELPER_VERSION=$BACKUP_BROKER_HELPER_VERSION
+BACKUP_BROKER_POLICY_SHA256=$BACKUP_BROKER_POLICY_SHA256
+BACKUP_MANIFEST_PUBLIC_KEYRING_PATH=/run/darshan-backup-worker-public/manifest-keyring.json
+BACKUP_POLICY_PUBLIC_KEYRING_PATH=/run/darshan-backup-worker-public/policy-keyring.json
+BACKUP_WORKER_SPOOL_ROOT=$BACKUP_WORKER_SPOOL_ROOT
+BACKUP_WORKER_SPOOL_DEVICE_ID=$BACKUP_WORKER_SPOOL_DEVICE_ID
+BACKUP_WORKER_SPOOL_OWNER_UID=1000
+BACKUP_WORKER_SPOOL_OWNER_GID=1000
+BACKUP_CAPSULE_GENERATION=$BACKUP_CAPSULE_GENERATION
+BACKUP_CAPSULE_SHA256=$BACKUP_CAPSULE_SHA256
+BACKUP_BROKER_CPU_LIMIT=$BACKUP_BROKER_CPU_LIMIT
+BACKUP_BROKER_MEMORY_LIMIT=$BACKUP_BROKER_MEMORY_LIMIT
+BACKUP_BROKER_PIDS_LIMIT=$BACKUP_BROKER_PIDS_LIMIT
+BACKUP_BROKER_SOCKET_DIR=$BACKUP_BROKER_SOCKET_DIR
+BACKUP_RECOVERY_SOCKET_DIR=$BACKUP_RECOVERY_SOCKET_DIR
+BACKUP_WORKER_SPOOL_MIN_FREE_BYTES=$BACKUP_WORKER_SPOOL_MIN_FREE_BYTES
+BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID=$BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID
+RECOVERY_OPERATOR_CONFIG_ROOT=$RECOVERY_OPERATOR_CONFIG_ROOT
+RECOVERY_PLAN_ROOT=$RECOVERY_PLAN_ROOT
+RECOVERY_JOURNAL_ROOT=$RECOVERY_JOURNAL_ROOT
+RECOVERY_REVIEW_ROOT=$RECOVERY_REVIEW_ROOT
+RECOVERY_EVIDENCE_ROOT=$RECOVERY_EVIDENCE_ROOT
+RECOVERY_DOCKER_CONFIG_ROOT=$RECOVERY_DOCKER_CONFIG_ROOT
+EOF
+    fi
+  else
+    cat >> "$PROD_BACKEND_DIR/.env.production" <<EOF
+BACKUP_INTERVAL_HOURS=$BACKUP_INTERVAL_HOURS
+BACKUP_OFFHOST_DESTINATION=$BACKUP_OFFHOST_DESTINATION
+BACKUP_OFFHOST_ENDPOINT=$BACKUP_OFFHOST_ENDPOINT
+BACKUP_OFFHOST_REGION=$BACKUP_OFFHOST_REGION
+EOF
+  fi
+
   cat > "$PROD_RECOVERY_DIR/.env.recovery" <<EOF
 COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-recovery
 SITE_NAME=$SITE_NAME
@@ -3611,10 +3916,10 @@ DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
 DARSHAN_ROLE_NAME=recovery
 DARSHAN_COMPATIBILITY_GENERATION=$DARSHAN_COMPATIBILITY_GENERATION
 BACKEND_IMAGE=$BACKEND_IMAGE_REF
-BACKUP_OFFHOST_DESTINATION=$BACKUP_OFFHOST_DESTINATION
-BACKUP_OFFHOST_ENDPOINT=$BACKUP_OFFHOST_ENDPOINT
-BACKUP_OFFHOST_REGION=$BACKUP_OFFHOST_REGION
-BACKUP_INTERVAL_HOURS=$BACKUP_INTERVAL_HOURS
+BACKUP_REPOSITORY_KIND=$BACKUP_REPOSITORY_KIND
+BACKUP_SITE_ID=$BACKUP_SITE_ID
+BACKUP_SCHEDULE_TIME=$BACKUP_SCHEDULE_TIME
+BACKUP_SCHEDULE_TIMEZONE=$BACKUP_SCHEDULE_TIMEZONE
 BACKUP_RETENTION_DAYS=$BACKUP_RETENTION_DAYS
 PRODUCTION_DATABASE_HOST=$DATA_PRIVATE_HOST
 PRODUCTION_DATABASE_PORT=$POSTGRES_HOST_PORT
@@ -3622,6 +3927,23 @@ PRODUCTION_DATABASE_NAME=$POSTGRES_DB
 PRODUCTION_S3_ENDPOINT=https://$DATA_PRIVATE_HOST:$MINIO_HOST_PORT
 RECOVERY_MIN_FREE_DISK_BYTES=$BACKEND_MIN_FREE_DISK_BYTES
 EOF
+
+  if [[ "$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" ]]; then
+    cat >> "$PROD_RECOVERY_DIR/.env.recovery" <<EOF
+BACKUP_REPOSITORY_ROOT=$BACKUP_REPOSITORY_ROOT
+BACKUP_REPOSITORY_DEVICE_ID=$BACKUP_REPOSITORY_DEVICE_ID
+BACKUP_REPOSITORY_OWNER_UID=$BACKUP_REPOSITORY_OWNER_UID
+BACKUP_REPOSITORY_OWNER_GID=$BACKUP_REPOSITORY_OWNER_GID
+BACKUP_REPOSITORY_MIN_FREE_BYTES=$BACKUP_REPOSITORY_MIN_FREE_BYTES
+EOF
+  else
+    cat >> "$PROD_RECOVERY_DIR/.env.recovery" <<EOF
+BACKUP_OFFHOST_DESTINATION=$BACKUP_OFFHOST_DESTINATION
+BACKUP_OFFHOST_ENDPOINT=$BACKUP_OFFHOST_ENDPOINT
+BACKUP_OFFHOST_REGION=$BACKUP_OFFHOST_REGION
+BACKUP_INTERVAL_HOURS=$BACKUP_INTERVAL_HOURS
+EOF
+  fi
 
   cat > "$PROD_RECOVERY_DIR/docker-compose.yml" <<'EOF'
 services:
@@ -3638,10 +3960,16 @@ services:
     command: ["/bin/true"]
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,mode=1700
+      - /tmp:rw,noexec,nosuid,nodev,mode=1700,uid=1000,gid=1000
       - /run/darshan-recovery:rw,noexec,nosuid,nodev,mode=0700,uid=0,gid=0
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
 EOF
@@ -3649,7 +3977,7 @@ EOF
   cat > "$PROD_RECOVERY_DIR/preflight.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "\${1:-}" == "image-load" ]] || { echo "Usage: \$0 image-load" >&2; exit 2; }
+[[ "${1:-}" == "image-load" ]] || { echo "Usage: $0 image-load" >&2; exit 2; }
 source ./.env.recovery
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
 available="$(df -B1 --output=avail "$docker_root" | awk 'NR == 2 { print $1 }')"
@@ -4353,6 +4681,7 @@ x-backend-worker-resources: &backend-worker-resources
   cpus: ${BACKEND_WORKER_CPU_LIMIT}
   mem_limit: ${BACKEND_WORKER_MEMORY_LIMIT}
   pids_limit: ${BACKEND_WORKER_PIDS_LIMIT}
+# DARSHAN_BACKUP_BROKER_RESOURCE_ANCHOR
 x-exporter-resources: &exporter-resources
   cpus: ${EXPORTER_CPU_LIMIT}
   mem_limit: ${EXPORTER_MEMORY_LIMIT}
@@ -4374,6 +4703,7 @@ services:
     volumes:
       - ./certs:/run/darshan-input-certs:ro
       - ./secrets:/run/darshan-input-secrets:ro
+      # DARSHAN_BACKUP_API_VOLUME
     tmpfs:
       - /app/certs:mode=0700,uid=0,gid=0
       - /run/secrets:mode=0700,uid=0,gid=0
@@ -4411,16 +4741,15 @@ services:
       HOME: /tmp/darshan-worker-home
       XDG_CONFIG_HOME: /tmp/darshan-worker-home/.config
       XDG_CACHE_HOME: /tmp/darshan-worker-home/.cache
-      TMPDIR: /tmp
+      TMPDIR: /var/lib/darshan-worker/tmp
       DARSHAN_EXPECTED_WORKER_UID: "1000"
       DARSHAN_EXPECTED_WORKER_GID: "1000"
-      BACKUP_OFFHOST_ACCESS_KEY_FILE: /run/worker-secrets/backup-offhost-access-key
-      BACKUP_OFFHOST_SECRET_KEY_FILE: /run/worker-secrets/backup-offhost-secret-key
+      # DARSHAN_BACKUP_POLICY_ENVIRONMENT
     volumes:
       - ./certs:/run/darshan-input-certs:ro
       - ./secrets:/run/darshan-input-secrets:ro
-      - ./worker-secrets:/run/darshan-input-worker-secrets:ro
       - ${BACKEND_WORKER_SCRATCH_DIR}:/var/lib/darshan-worker
+      # DARSHAN_BACKUP_POLICY_VOLUME
     tmpfs:
       - /app/certs:mode=0700,uid=0,gid=0
       - /run/secrets:mode=0700,uid=0,gid=0
@@ -4428,7 +4757,10 @@ services:
     extra_hosts:
       - "${DATA_PRIVATE_HOST}:${DATA_BIND_ADDRESS}"
       - "${VALKEY_PRIVATE_HOST}:${VALKEY_BIND_ADDRESS}"
+    # DARSHAN_BACKUP_POLICY_DEPENDS
     command: npm run start:worker
+
+  # DARSHAN_BACKUP_BROKER_SERVICE
 
   node-exporter:
     image: ${NODE_EXPORTER_IMAGE}
@@ -4475,6 +4807,186 @@ services:
     security_opt:
       - no-new-privileges:true
 EOF
+
+  node - "$PROD_BACKEND_DIR/docker-compose.yml" "$BACKUP_REPOSITORY_KIND" "$BACKUP_LOCAL_PROTOCOL" "$BACKUP_REPOSITORY_ROOT" "$BACKUP_WORKER_SPOOL_ROOT" "$BACKUP_BROKER_SOCKET_DIR" "$BACKUP_RECOVERY_SOCKET_DIR" <<'NODE'
+const fs = require('node:fs');
+const [file, kind, protocol, root, spoolRoot, socketDir, recoverySocketDir] = process.argv.slice(2);
+let compose = fs.readFileSync(file, 'utf8');
+if (kind === 'LOCAL_FILESYSTEM' && protocol === 'V1_HELPER') {
+  compose = compose
+    .replace('      # DARSHAN_BACKUP_API_VOLUME\n', '')
+    .replace('      # DARSHAN_BACKUP_POLICY_ENVIRONMENT\n', '')
+    .replace('      # DARSHAN_BACKUP_POLICY_VOLUME\n', [
+      '      - type: bind',
+      `        source: ${root}`,
+      `        target: ${root}`,
+      '        read_only: false',
+      '        bind:',
+      '          create_host_path: false',
+    ].join('\n') + '\n');
+} else if (kind === 'LOCAL_FILESYSTEM' && protocol === 'V2_BROKER') {
+  const apiVolumes = [
+    '      - type: bind',
+    `        source: ${root}`,
+    `        target: ${root}`,
+    '        read_only: true',
+    '        bind:',
+    '          create_host_path: false',
+    '      - type: bind',
+    '        source: ./backup-worker-public',
+    '        target: /run/darshan-backup-worker-public',
+    '        read_only: true',
+    '        bind:',
+    '          create_host_path: false',
+  ].join('\n') + '\n';
+  const workerVolumes = [
+    '      - type: bind',
+    `        source: ${spoolRoot}`,
+    `        target: ${spoolRoot}`,
+    '        read_only: false',
+    '        bind:',
+    '          create_host_path: false',
+    '      - type: bind',
+    `        source: ${socketDir}`,
+    '        target: /run/darshan-backup-broker',
+    '        read_only: true',
+    '        bind:',
+    '          create_host_path: false',
+    '      - type: bind',
+    '        source: ./backup-worker-public',
+    '        target: /run/darshan-backup-worker-public',
+    '        read_only: true',
+    '        bind:',
+    '          create_host_path: false',
+  ].join('\n') + '\n';
+  const resourceAnchor = [
+    'x-backup-broker-resources: &backup-broker-resources',
+    '  cpus: ${BACKUP_BROKER_CPU_LIMIT}',
+    '  mem_limit: ${BACKUP_BROKER_MEMORY_LIMIT}',
+    '  pids_limit: ${BACKUP_BROKER_PIDS_LIMIT}',
+  ].join('\n');
+  const broker = [
+    '  backup-broker:',
+    '    image: ${BACKEND_IMAGE}',
+    '    pull_policy: never',
+    '    restart: unless-stopped',
+    '    user: "0:0"',
+    '    <<: [*darshan-log, *backup-broker-resources]',
+    '    network_mode: none',
+    '    environment:',
+    '      DARSHAN_CONTAINER_ROLE: backup-broker',
+    '      BACKUP_BROKER_SOCKET_PATH: /run/darshan-backup-broker/broker.sock',
+    '      BACKUP_BROKER_RECOVERY_SOCKET_PATH: /run/darshan-recovery-broker/recovery.sock',
+    '      BACKUP_BROKER_HELPER_VERSION: ${BACKUP_BROKER_HELPER_VERSION}',
+    '      BACKUP_BROKER_POLICY_SHA256: ${BACKUP_BROKER_POLICY_SHA256}',
+    '      BACKUP_SITE_ID: ${BACKUP_SITE_ID}',
+    '      BACKUP_REPOSITORY_ID: ${BACKUP_REPOSITORY_ID}',
+    '      BACKUP_BROKER_POLICY_PATH: /run/darshan-backup-broker-inputs/capsule-policy.signed.json',
+    '      BACKUP_BROKER_POLICY_TRUST_PATH: /run/darshan-backup-broker-inputs/policy-trust.json',
+    '      BACKUP_BROKER_MANIFEST_KEYRING_PATH: /run/darshan-backup-broker-inputs/manifest-keyring.json',
+    '      BACKUP_BROKER_MANIFEST_PRIVATE_KEY_PATH: /run/darshan-backup-broker-inputs/manifest-signing.key',
+    '      BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID: ${BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID}',
+    '      BACKUP_BROKER_CAPSULE_PATH: /run/darshan-backup-broker-inputs/configuration.tar.age',
+    `      BACKUP_BROKER_SPOOL_ROOT: ${spoolRoot}`,
+    '      BACKUP_BROKER_SPOOL_OWNER_UID: "1000"',
+    '      BACKUP_BROKER_SPOOL_OWNER_GID: "1000"',
+    `      BACKUP_REPOSITORY_ROOT: ${root}`,
+    '      BACKUP_REPOSITORY_DEVICE_ID: ${BACKUP_REPOSITORY_DEVICE_ID}',
+    '      BACKUP_REPOSITORY_OWNER_UID: ${BACKUP_REPOSITORY_OWNER_UID}',
+    '      BACKUP_REPOSITORY_OWNER_GID: ${BACKUP_REPOSITORY_OWNER_GID}',
+    '      BACKUP_REPOSITORY_MIN_FREE_BYTES: ${BACKUP_REPOSITORY_MIN_FREE_BYTES}',
+    '    volumes:',
+    '      - type: bind',
+    `        source: ${root}`,
+    `        target: ${root}`,
+    '        read_only: false',
+    '        bind:',
+    '          create_host_path: false',
+    '      - type: bind',
+    `        source: ${spoolRoot}`,
+    `        target: ${spoolRoot}`,
+    '        read_only: true',
+    '        bind:',
+    '          create_host_path: false',
+    '      - type: bind',
+    `        source: ${socketDir}`,
+    '        target: /run/darshan-backup-broker',
+    '        read_only: false',
+    '        bind:',
+    '          create_host_path: false',
+    '      - type: bind',
+    `        source: ${recoverySocketDir}`,
+    '        target: /run/darshan-recovery-broker',
+    '        read_only: false',
+    '        bind:',
+    '          create_host_path: false',
+    ...[
+      ['configuration.tar.age', 'configuration.tar.age'],
+      ['capsule-policy.signed.json', 'capsule-policy.signed.json'],
+      ['policy-trust.json', 'policy-trust.json'],
+      ['manifest-keyring.json', 'manifest-keyring.json'],
+      ['manifest-signing.key', 'manifest-signing.key'],
+    ].flatMap(([source, target]) => [
+      '      - type: bind',
+      `        source: ./backup-broker-inputs/${source}`,
+      `        target: /run/darshan-backup-broker-inputs/${target}`,
+      '        read_only: true',
+      '        bind:',
+      '          create_host_path: false',
+    ]),
+    '    entrypoint: /usr/local/bin/darshan-runtime-entrypoint',
+    '    command: ["/usr/local/bin/backup-broker-listener", "/usr/local/bin/node", "/app/dist/backups/backup-broker-main.js"]',
+    '    read_only: true',
+    '    tmpfs:',
+    '      - /tmp:mode=0700,uid=1000,gid=1000',
+    '    cap_drop:',
+    '      - ALL',
+    '    cap_add:',
+    '      - CHOWN',
+    '      - KILL',
+    '      - SETGID',
+    '      - SETUID',
+    '    security_opt:',
+    '      - no-new-privileges:true',
+    '    stop_grace_period: 35s',
+    '    healthcheck:',
+    '      test: ["CMD", "/usr/bin/setpriv", "--reuid=1000", "--regid=1000", "--clear-groups", "--no-new-privs", "--inh-caps=-all", "--ambient-caps=-all", "--", "/usr/local/bin/node", "--input-type=module", "-e", "import { BackupBrokerClient } from \'./dist/backups/backup-broker-client.js\'; const client = new BackupBrokerClient({ socketPath: process.env.BACKUP_BROKER_SOCKET_PATH, helperVersion: process.env.BACKUP_BROKER_HELPER_VERSION, policySha256: process.env.BACKUP_BROKER_POLICY_SHA256, siteId: process.env.BACKUP_SITE_ID, repositoryId: process.env.BACKUP_REPOSITORY_ID, controlTimeoutMs: 4000 }); await client.describe();"]',
+    '      interval: 10s',
+    '      timeout: 5s',
+    '      retries: 5',
+  ].join('\n');
+  compose = compose
+    .replace('# DARSHAN_BACKUP_BROKER_RESOURCE_ANCHOR', resourceAnchor)
+    .replace('      # DARSHAN_BACKUP_API_VOLUME\n', apiVolumes)
+    .replace('      # DARSHAN_BACKUP_POLICY_ENVIRONMENT\n', '')
+    .replace('      # DARSHAN_BACKUP_POLICY_VOLUME\n', workerVolumes)
+    .replace('    # DARSHAN_BACKUP_POLICY_DEPENDS\n', [
+      '    depends_on:',
+      '      backup-broker:',
+      '        condition: service_healthy',
+    ].join('\n') + '\n')
+    .replace('  # DARSHAN_BACKUP_BROKER_SERVICE', broker);
+} else if (kind === 'LEGACY_OFF_HOST') {
+  compose = compose
+    .replace('# DARSHAN_BACKUP_BROKER_RESOURCE_ANCHOR\n', '')
+    .replace('  # DARSHAN_BACKUP_BROKER_SERVICE\n', '')
+    .replace('    # DARSHAN_BACKUP_POLICY_DEPENDS\n', '')
+    .replace('      # DARSHAN_BACKUP_API_VOLUME\n', '')
+    .replace('      # DARSHAN_BACKUP_POLICY_ENVIRONMENT\n', [
+      '      BACKUP_OFFHOST_ACCESS_KEY_FILE: /run/worker-secrets/backup-offhost-access-key',
+      '      BACKUP_OFFHOST_SECRET_KEY_FILE: /run/worker-secrets/backup-offhost-secret-key',
+    ].join('\n') + '\n')
+    .replace('      # DARSHAN_BACKUP_POLICY_VOLUME\n', '      - ./worker-secrets:/run/darshan-input-worker-secrets:ro\n');
+} else {
+  throw new Error(`Unsupported backup repository protocol: ${kind}/${protocol}`);
+}
+compose = compose
+  .replace('# DARSHAN_BACKUP_BROKER_RESOURCE_ANCHOR\n', '')
+  .replace('  # DARSHAN_BACKUP_BROKER_SERVICE\n', '')
+  .replace('      # DARSHAN_BACKUP_API_VOLUME\n', '')
+  .replace('    # DARSHAN_BACKUP_POLICY_DEPENDS\n', '');
+fs.writeFileSync(file, compose);
+NODE
 
   cat > "$PROD_CMS_DIR/docker-compose.yml" <<'EOF'
 name: ${COMPOSE_PROJECT_NAME}
@@ -4671,10 +5183,55 @@ server {
     proxy_read_timeout 600s;
   }
 
-  # Keep SigV4's path, query, and CMS Host intact. This is the only browser
-  # route to object storage; signed query strings are never access-logged.
-  location ~ ^/(?:media-staging|media-source|media-ready|media-thumbnails|device-screenshots|logs-audit|logs-system|logs-auth|logs-heartbeats|logs-proof-of-play|archives)/ {
+  # Browser upload bytes traverse the Backend maintenance gate while retaining
+  # the exact SigV4 path, query and CMS Host.
+  location ^~ /media-staging/ {
+    if (\$request_method != PUT) { return 405; }
+    access_log off;
+    proxy_pass https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT;
+    proxy_http_version 1.1;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $BACKEND_PRIVATE_HOST;
+    proxy_ssl_trusted_certificate /etc/nginx/tls/transport-ca.crt;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 3;
+    proxy_set_header Host \$http_host;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+  }
+
+  location ^~ /media-source/ {
     if (\$request_method !~ ^(GET|HEAD|PUT)\$) { return 405; }
+    access_log off;
+    proxy_pass https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT;
+    proxy_http_version 1.1;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $BACKEND_PRIVATE_HOST;
+    proxy_ssl_trusted_certificate /etc/nginx/tls/transport-ca.crt;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 3;
+    proxy_set_header Host \$http_host;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+  }
+
+  # Signed reads stay direct to the Data VM and available during capture.
+  location ~ ^/(?:media-ready|media-thumbnails|device-screenshots|logs-audit|logs-system|logs-auth|logs-heartbeats|logs-proof-of-play|archives)/ {
+    if (\$request_method !~ ^(GET|HEAD)\$) { return 405; }
     access_log off;
     proxy_pass https://$DATA_PRIVATE_HOST:$MINIO_HOST_PORT;
     proxy_http_version 1.1;
@@ -4877,6 +5434,13 @@ curl --fail --silent --show-error \
   --resolve "${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}:${BACKEND_BIND_ADDRESS}" \
   "https://${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}/api/v1/health/ready" >/dev/null
 docker compose --env-file .env.production -f docker-compose.yml ps --services --status running | grep -qx worker
+if [[ "$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" && "$BACKUP_LOCAL_PROTOCOL" == "V2_BROKER" ]]; then
+  broker_id="$(docker compose --env-file .env.production -f docker-compose.yml ps -q backup-broker)"
+  [[ -n "$broker_id" && "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$broker_id")" == healthy ]] || {
+    echo "Backup capability unavailable: backup-broker DESCRIBE healthcheck is not healthy." >&2
+    exit 1
+  }
+fi
 require_metric "$BACKEND_PRIVATE_HOST" "$BACKEND_BIND_ADDRESS" /node/metrics '^node_exporter_build_info'
 echo "Production backend healthy."
 EOF
@@ -5424,7 +5988,158 @@ cat > "$BUNDLE_ROOT/CONFIGURATION_MANIFEST.json" <<EOF
 }
 EOF
 
+if profile_enabled production && [[ "$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" && "$BACKUP_LOCAL_PROTOCOL" == "V2_BROKER" && "$BACKUP_BROKER_ARTIFACT_MODE" == "PRODUCE" ]]; then
+  chmod 0640 \
+    "$PROD_BACKEND_DIR/.env.production" "$PROD_DATA_DIR/.env.production" "$PROD_CMS_DIR/.env.production" \
+    "$PROD_VALKEY_DIR/.env.production" "$PROD_OBSERVABILITY_DIR/.env.production"
+  chmod 0644 \
+    "$PROD_BACKEND_DIR/certs/device-ca.crt" "$PROD_BACKEND_DIR/certs/server.crt" "$PROD_BACKEND_DIR/certs/transport-ca.crt" "$PROD_BACKEND_DIR/metrics-gateway.conf" \
+    "$PROD_DATA_DIR/postgres/pg_hba.conf" "$PROD_DATA_DIR/tls/CAs/transport-ca.crt" "$PROD_DATA_DIR/tls/postgres-ca.crt" \
+    "$PROD_DATA_DIR/tls/postgres.crt" "$PROD_DATA_DIR/tls/public.crt" \
+    "$PROD_CMS_DIR/nginx/default.conf" "$PROD_CMS_DIR/tls/tls.crt" "$PROD_CMS_DIR/tls/transport-ca.crt" "$PROD_CMS_DIR/www/config/app-config.json" \
+    "$PROD_VALKEY_DIR/tls/ca.crt" "$PROD_VALKEY_DIR/tls/server.crt" \
+    "$PROD_OBSERVABILITY_DIR/alertmanager/alertmanager.yml" "$PROD_OBSERVABILITY_DIR/alertmanager/templates/default.tmpl" \
+    "$PROD_OBSERVABILITY_DIR/alertmanager/web-config.yml" "$PROD_OBSERVABILITY_DIR/certs/server.crt" "$PROD_OBSERVABILITY_DIR/certs/transport-ca.crt" \
+    "$PROD_OBSERVABILITY_DIR/grafana/grafana.ini" "$PROD_OBSERVABILITY_DIR/grafana/provisioning/dashboards/dashboards.yml" \
+    "$PROD_OBSERVABILITY_DIR/grafana/provisioning/datasources/prometheus.yml" "$PROD_OBSERVABILITY_DIR/grafana/dashboards/players-fleet.json" \
+    "$PROD_OBSERVABILITY_DIR/grafana/dashboards/vm-valkey.json" "$PROD_OBSERVABILITY_DIR/grafana/dashboards/vm1-data.json" \
+    "$PROD_OBSERVABILITY_DIR/grafana/dashboards/vm2-backend.json" "$PROD_OBSERVABILITY_DIR/grafana/dashboards/vm3-cms.json" \
+    "$PROD_OBSERVABILITY_DIR/grafana/dashboards/vm4-observability.json" "$PROD_OBSERVABILITY_DIR/prometheus/file-sd/players.targets.json" \
+    "$PROD_OBSERVABILITY_DIR/prometheus/prometheus.yml" "$PROD_OBSERVABILITY_DIR/prometheus/rules/alerts.yml" \
+    "$PROD_OBSERVABILITY_DIR/prometheus/rules/recording-rules.yml" "$PROD_OBSERVABILITY_DIR/prometheus/web-config.yml"
+  producer_output="$BUNDLE_ROOT/.backup-capsule-produced"
+  tar_build_binary="$(command -v "$TAR_PATH")"
+  created_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+  node - "$producer_output" "$PROD_BACKEND_DIR" "$PROD_DATA_DIR" "$PROD_CMS_DIR" "$PROD_VALKEY_DIR" "$PROD_OBSERVABILITY_DIR" "$BACKUP_SITE_ID" "$BACKUP_REPOSITORY_ID" "$DARSHAN_RELEASE_ID" "$SITE_NAME" "$DARSHAN_COMPATIBILITY_GENERATION" "$BACKUP_ENCRYPTION_RECIPIENT" "$BACKUP_ENCRYPTION_KEY_ID" "$BACKUP_AGE_BUILD_BINARY_FILE" "$AGE_VERSION" "$AGE_SHA256" "$tar_build_binary" "$BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE" "$RELEASE_SIGNING_PRIVATE_KEY" "$BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE" "$BACKUP_MANIFEST_PUBLIC_KEYRING_FILE" "$BACKUP_CAPSULE_POLICY_KEY_ID" "$BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID" "$created_at" <<'NODE' \
+    | "$PLATFORM_ROOT/darshan-server/node_modules/.bin/tsx" "$PLATFORM_ROOT/darshan-server/scripts/build-production-backup-capsule.ts" \
+    > "$BUNDLE_ROOT/.backup-capsule-derived.json"
+const [outputDirectory, backend, data, cms, valkey, observability, siteId, repositoryId, releaseGeneration, deploymentGeneration,
+  compatibilityGeneration, ageRecipient, ageRecipientKeyId, ageBinary, ageVersion, ageSha256, tarBinary, policyPrivateKeyFile,
+  releaseSigningPrivateKeyFile, manifestPrivateKeyFile, manifestPublicKeyringFile, policyKeyId, manifestKeyId, createdAt] = process.argv.slice(2);
+process.stdout.write(`${JSON.stringify({ outputDirectory, roleRoots: { backend, data, cms, valkey, observability }, siteId, repositoryId,
+  releaseGeneration, deploymentGeneration, compatibilityGeneration: Number(compatibilityGeneration), ageRecipient, ageRecipientKeyId,
+  ageBinary, ageVersion, ageSha256, tarBinary, policyPrivateKeyFile, releaseSigningPrivateKeyFile, manifestPrivateKeyFile,
+  manifestPublicKeyringFile, policyKeyId, manifestKeyId, createdAt })}\n`);
+NODE
+  install -m 0640 "$producer_output/configuration.tar.age" "$PROD_BACKEND_DIR/backup-broker-inputs/configuration.tar.age"
+  install -m 0640 "$producer_output/capsule-policy.signed.json" "$PROD_BACKEND_DIR/backup-broker-inputs/capsule-policy.signed.json"
+  install -m 0640 "$producer_output/policy-trust.json" "$PROD_BACKEND_DIR/backup-broker-inputs/policy-trust.json"
+  install -m 0600 "$producer_output/manifest-signing.key" "$PROD_BACKEND_DIR/backup-broker-inputs/manifest-signing.key"
+  install -m 0640 "$producer_output/manifest-keyring.json" "$PROD_BACKEND_DIR/backup-broker-inputs/manifest-keyring.json"
+  install -m 0600 "$producer_output/manifest-keyring.json" "$PROD_BACKEND_DIR/backup-worker-public/manifest-keyring.json"
+  install -m 0600 "$producer_output/policy-trust.json" "$PROD_BACKEND_DIR/backup-worker-public/policy-keyring.json"
+  install -m 0640 "$producer_output/deployment-overlay.json" "$PROD_BACKEND_DIR/backup-broker-inputs/deployment-overlay.json"
+  BACKUP_BROKER_POLICY_SHA256="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).policy_sha256' "$BUNDLE_ROOT/.backup-capsule-derived.json")"
+  BACKUP_CAPSULE_GENERATION="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).capsule_generation' "$BUNDLE_ROOT/.backup-capsule-derived.json")"
+  BACKUP_CAPSULE_SHA256="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).capsule_sha256' "$BUNDLE_ROOT/.backup-capsule-derived.json")"
+  BACKUP_CAPSULE_SIZE_BYTES="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).capsule_size_bytes' "$BUNDLE_ROOT/.backup-capsule-derived.json")"
+  node - "$PROD_BACKEND_DIR/.env.production" "$BACKUP_BROKER_POLICY_SHA256" "$BACKUP_CAPSULE_GENERATION" "$BACKUP_CAPSULE_SHA256" <<'NODE'
+const fs = require('node:fs'); const [file, policy, generation, capsule] = process.argv.slice(2); let text = fs.readFileSync(file, 'utf8');
+for (const [name, value] of [['BACKUP_BROKER_POLICY_SHA256', policy], ['BACKUP_CAPSULE_GENERATION', generation], ['BACKUP_CAPSULE_SHA256', capsule]]) {
+  const pattern = new RegExp(`^${name}=.*$`, 'm'); if (!pattern.test(text)) throw new Error(`Missing generated overlay field ${name}`); text = text.replace(pattern, `${name}=${value}`);
+}
+fs.writeFileSync(file, text);
+NODE
+  node -e 'const fs=require("node:fs"); Promise.all(process.argv.slice(1).map((path)=>fs.promises.rm(path,{recursive:true,force:true}))).catch((error)=>{throw error})' "$producer_output" "$BUNDLE_ROOT/.backup-capsule-derived.json"
+fi
+
+if profile_enabled production && [[ "$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" && "$BACKUP_LOCAL_PROTOCOL" == "V2_BROKER" ]]; then
+  install -d -m 0750 "$PROD_BACKEND_DIR/controlled-recovery-packet-a"
+  install -m 0640 \
+    "$PLATFORM_ROOT/deploy/production/controlled-recovery/activation.schema.json" \
+    "$PLATFORM_ROOT/deploy/production/controlled-recovery/activation.disabled.example.json" \
+    "$PLATFORM_ROOT/deploy/production/controlled-recovery/activation.tiny-disposable.example.json" \
+    "$PLATFORM_ROOT/deploy/production/controlled-recovery/profile.schema.json" \
+    "$PROD_BACKEND_DIR/controlled-recovery-packet-a/"
+  install -d -m 0750 "$PROD_BACKEND_DIR/controlled-recovery-packet-c-foundation"
+  install -m 0640 \
+    "$PLATFORM_ROOT/deploy/production/controlled-recovery/profile.packet-c.schema.json" \
+    "$PLATFORM_ROOT/deploy/production/controlled-recovery/profile.packet-c.example.json" \
+    "$PROD_BACKEND_DIR/controlled-recovery-packet-c-foundation/"
+  install -d -m 0700 "$PROD_BACKEND_DIR/recovery-boundary" "$PROD_BACKEND_DIR/recovery-boundary/policy-trust" "$PROD_BACKEND_DIR/recovery-boundary/manifest-trust"
+  install -d -m 0750 "$PROD_BACKEND_DIR/recovery-boundary/runtime"
+  install -m 0600 "$PROD_BACKEND_DIR/backup-broker-inputs/policy-trust.json" "$PROD_BACKEND_DIR/recovery-boundary/policy-trust/policy-keyring.json"
+  install -m 0600 "$PROD_BACKEND_DIR/backup-broker-inputs/manifest-keyring.json" "$PROD_BACKEND_DIR/recovery-boundary/manifest-trust/manifest-keyring.json"
+  install -m 0750 "$PLATFORM_ROOT/darshan-server/scripts/recovery-container-runner.mjs" "$PROD_BACKEND_DIR/recovery-boundary/recovery-container-runner.mjs"
+  install -m 0640 "$PLATFORM_ROOT/scripts/bundle/recovery-boundary-lib.mjs" "$PROD_BACKEND_DIR/recovery-boundary/recovery-boundary-lib.mjs"
+  install -m 0640 "$PLATFORM_ROOT/darshan-server/dist-cli/recovery-runtime-manifest.json" "$PROD_BACKEND_DIR/recovery-boundary/recovery-runtime-manifest.json"
+  install -m 0750 "$(command -v node)" "$PROD_BACKEND_DIR/recovery-boundary/runtime/node"
+  if [[ -f "$PROD_BACKEND_DIR/images/IMAGE_MANIFEST.tsv" ]]; then
+    env \
+      BACKUP_SITE_ID="$BACKUP_SITE_ID" BACKUP_REPOSITORY_ROOT="$BACKUP_REPOSITORY_ROOT" BACKUP_REPOSITORY_DEVICE_ID="$BACKUP_REPOSITORY_DEVICE_ID" \
+      BACKUP_REPOSITORY_ID="$BACKUP_REPOSITORY_ID" BACKUP_RECOVERY_SOCKET_DIR="$BACKUP_RECOVERY_SOCKET_DIR" \
+      BACKUP_BROKER_HELPER_VERSION="$BACKUP_BROKER_HELPER_VERSION" BACKUP_BROKER_POLICY_SHA256="$BACKUP_BROKER_POLICY_SHA256" \
+      RECOVERY_OPERATOR_CONFIG_ROOT="$RECOVERY_OPERATOR_CONFIG_ROOT" RECOVERY_PLAN_ROOT="$RECOVERY_PLAN_ROOT" \
+      RECOVERY_JOURNAL_ROOT="$RECOVERY_JOURNAL_ROOT" RECOVERY_REVIEW_ROOT="$RECOVERY_REVIEW_ROOT" RECOVERY_EVIDENCE_ROOT="$RECOVERY_EVIDENCE_ROOT" \
+      RECOVERY_DOCKER_CONFIG_ROOT="$RECOVERY_DOCKER_CONFIG_ROOT" \
+      RECOVERY_CPU_LIMIT="$RECOVERY_CPU_LIMIT" RECOVERY_MEMORY_LIMIT="$RECOVERY_MEMORY_LIMIT" RECOVERY_PIDS_LIMIT="$RECOVERY_PIDS_LIMIT" \
+      RECOVERY_SCRATCH_TMPFS_BYTES="$RECOVERY_SCRATCH_TMPFS_BYTES" RECOVERY_HOME_TMPFS_BYTES="$RECOVERY_HOME_TMPFS_BYTES" \
+      RECOVERY_TMP_TMPFS_BYTES="$RECOVERY_TMP_TMPFS_BYTES" RECOVERY_JOURNAL_MIN_FREE_BYTES="$RECOVERY_JOURNAL_MIN_FREE_BYTES" \
+      RECOVERY_EVIDENCE_MIN_FREE_BYTES="$RECOVERY_EVIDENCE_MIN_FREE_BYTES" RECOVERY_OUTPUT_MIN_FREE_BYTES="$RECOVERY_OUTPUT_MIN_FREE_BYTES" \
+      RECOVERY_BROKER_CONTROL_TIMEOUT_MS="$RECOVERY_BROKER_CONTROL_TIMEOUT_MS" RECOVERY_RUN_TIMEOUT_MS="$RECOVERY_RUN_TIMEOUT_MS" RECOVERY_STDOUT_MAX_BYTES="$RECOVERY_STDOUT_MAX_BYTES" \
+      RECOVERY_STDERR_MAX_BYTES="$RECOVERY_STDERR_MAX_BYTES" \
+      node "$PLATFORM_ROOT/scripts/bundle/generate-recovery-boundary.mjs" "$PROD_BACKEND_DIR/recovery-boundary/generated" \
+        "$PROD_BACKEND_DIR/images/IMAGE_MANIFEST.tsv" "$BACKEND_IMAGE_REF" \
+        "$PROD_BACKEND_DIR/recovery-boundary/recovery-container-runner.mjs" "$PROD_BACKEND_DIR/recovery-boundary/recovery-boundary-lib.mjs" \
+        "$PROD_BACKEND_DIR/recovery-boundary/recovery-runtime-manifest.json" "$PROD_BACKEND_DIR/recovery-boundary/runtime/node"
+  fi
+fi
+
 if profile_enabled production; then
+  if [[ "$BACKUP_REPOSITORY_KIND" == "LOCAL_FILESYSTEM" ]]; then
+    BACKUP_OPERATIONS_POLICY_JSON="$(node -e '
+      const [kind, localProtocol, siteId, root, deviceId, ownerUid, ownerGid, minimumFreeBytes, repositoryId, recipient, keyId, agePath, ageVersion, ageSha256, capsuleHelperPath, capsuleHelperVersion, capsuleHelperSha256, brokerSocketDir, spoolRoot, spoolDeviceId, spoolMinimumFreeBytes, brokerHelperVersion, brokerPolicySha256, capsuleGeneration, capsuleSha256, capsuleSizeBytes, manifestActiveKeyId, brokerCpu, brokerMemory, brokerPids, scheduleTime, scheduleTimezone, retentionDays] = process.argv.slice(1);
+      const policy = {
+        repositoryKind: kind,
+        localProtocol,
+        siteId,
+        repositoryRoot: root,
+        repositoryDeviceId: deviceId,
+        repositoryOwnerUid: Number(ownerUid),
+        repositoryOwnerGid: Number(ownerGid),
+        repositoryMinimumFreeBytes: Number(minimumFreeBytes),
+        repositoryId,
+        encryptionRecipient: recipient,
+        encryptionKeyId: keyId,
+        age: { path: agePath, version: ageVersion, sha256: ageSha256 },
+        scheduleTime,
+        scheduleTimezone,
+        retentionDays: Number(retentionDays),
+        restoreRehearsalRequiredBeforeMigration: true,
+      };
+      if (localProtocol === "V1_HELPER") policy.capsuleHelper = { path: capsuleHelperPath, version: capsuleHelperVersion, sha256: capsuleHelperSha256 };
+      else policy.broker = {
+        socketDirectory: brokerSocketDir,
+        spoolRoot,
+        spoolDeviceId,
+        spoolMinimumFreeBytes: Number(spoolMinimumFreeBytes),
+        helperVersion: brokerHelperVersion,
+        policySha256: brokerPolicySha256,
+        capsuleGeneration,
+        capsuleSha256,
+        capsuleSizeBytes: Number(capsuleSizeBytes),
+        manifestActiveKeyId,
+        resources: { cpus: brokerCpu, memory: brokerMemory, pids: Number(brokerPids) },
+      };
+      process.stdout.write(JSON.stringify(policy, null, 4));
+    ' "$BACKUP_REPOSITORY_KIND" "$BACKUP_LOCAL_PROTOCOL" "$BACKUP_SITE_ID" "$BACKUP_REPOSITORY_ROOT" "$BACKUP_REPOSITORY_DEVICE_ID" "$BACKUP_REPOSITORY_OWNER_UID" "$BACKUP_REPOSITORY_OWNER_GID" "$BACKUP_REPOSITORY_MIN_FREE_BYTES" "$BACKUP_REPOSITORY_ID" "$BACKUP_ENCRYPTION_RECIPIENT" "$BACKUP_ENCRYPTION_KEY_ID" "$AGE_PATH" "$AGE_VERSION" "$AGE_SHA256" "$BACKUP_CAPSULE_HELPER_PATH" "$BACKUP_CAPSULE_HELPER_VERSION" "$BACKUP_CAPSULE_HELPER_SHA256" "$BACKUP_BROKER_SOCKET_DIR" "$BACKUP_WORKER_SPOOL_ROOT" "$BACKUP_WORKER_SPOOL_DEVICE_ID" "$BACKUP_WORKER_SPOOL_MIN_FREE_BYTES" "$BACKUP_BROKER_HELPER_VERSION" "$BACKUP_BROKER_POLICY_SHA256" "$BACKUP_CAPSULE_GENERATION" "$BACKUP_CAPSULE_SHA256" "$BACKUP_CAPSULE_SIZE_BYTES" "$BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID" "$BACKUP_BROKER_CPU_LIMIT" "$BACKUP_BROKER_MEMORY_LIMIT" "$BACKUP_BROKER_PIDS_LIMIT" "$BACKUP_SCHEDULE_TIME" "$BACKUP_SCHEDULE_TIMEZONE" "$BACKUP_RETENTION_DAYS")"
+  else
+    BACKUP_OPERATIONS_POLICY_JSON="$(node -e '
+      const [kind, siteId, scheduleTime, scheduleTimezone, intervalHours, retentionDays, destination, endpoint, region] = process.argv.slice(1);
+      process.stdout.write(JSON.stringify({
+        repositoryKind: kind,
+        siteId,
+        scheduleTime,
+        scheduleTimezone,
+        intervalHours: Number(intervalHours),
+        retentionDays: Number(retentionDays),
+        offHostDestination: destination,
+        offHostEndpoint: endpoint,
+        offHostRegion: region,
+        restoreRehearsalRequiredBeforeMigration: true,
+      }, null, 4));
+    ' "$BACKUP_REPOSITORY_KIND" "$BACKUP_SITE_ID" "$BACKUP_SCHEDULE_TIME" "$BACKUP_SCHEDULE_TIMEZONE" "$BACKUP_INTERVAL_HOURS" "$BACKUP_RETENTION_DAYS" "$BACKUP_OFFHOST_DESTINATION" "$BACKUP_OFFHOST_ENDPOINT" "$BACKUP_OFFHOST_REGION")"
+  fi
   cat > "$BUNDLE_ROOT/OPERATIONS_POLICY.json" <<EOF
 {
   "capacity": {
@@ -5434,14 +6149,7 @@ if profile_enabled production; then
     "validUntil": "$CAPACITY_EVIDENCE_VALID_UNTIL",
     "modelOnlyAccepted": false
   },
-  "backup": {
-    "intervalHours": $BACKUP_INTERVAL_HOURS,
-    "retentionDays": $BACKUP_RETENTION_DAYS,
-    "offHostDestination": "$BACKUP_OFFHOST_DESTINATION",
-    "offHostEndpoint": "$BACKUP_OFFHOST_ENDPOINT",
-    "offHostRegion": "$BACKUP_OFFHOST_REGION",
-    "restoreRehearsalRequiredBeforeMigration": true
-  },
+  "backup": $BACKUP_OPERATIONS_POLICY_JSON,
   "containerLogging": {
     "driver": "local",
     "maxSize": "$CONTAINER_LOG_MAX_SIZE",

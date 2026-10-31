@@ -477,6 +477,7 @@ export interface DeviceSnapshot {
   representation_revision?: string
   content_state?: 'scheduled' | 'default' | 'empty'
   server_time?: string
+  recovery_generation?: string | null
   schedule?: SnapshotSchedule
   items?: SnapshotScheduleItem[]
   media_urls?: SnapshotMediaUrlMap
@@ -504,6 +505,7 @@ export interface DeviceSnapshot {
     displayMs?: number
     fit?: FitMode
     muted?: boolean
+    loop_enabled?: boolean
     transition_ms?: number
   }
   default_media?: {
@@ -825,6 +827,7 @@ export interface Command {
   createdAt?: string
   expiresAt?: string
   deliveryToken?: string
+  recoveryGeneration?: string | null
 }
 
 export interface CommandResult {
@@ -902,6 +905,7 @@ export type BackendPairingValidationStatus =
   | 'ENVIRONMENT_MISMATCH'
   | 'RECLAIM_REQUIRED'
   | 'BACKEND_REPAIR_REQUIRED'
+  | 'RECOVERY_PAIRING_REVIEW_REQUIRED'
 
 export interface DuplicateIdentitySessionSample {
   installInstanceSuffix: string | null
@@ -1015,6 +1019,9 @@ export interface DeviceStateRecord {
   lastSuccessfulPairingAt?: string
   lastHeartbeatAt?: string
   recoveryReason?: string
+  recoveryGeneration?: string
+  recoveryGenerationReceiptSha256?: string
+  recoveryGenerationAcceptedAt?: string
   installInstanceId?: string
   duplicateIdentity?: DuplicateIdentitySummary
   hardRecoveryDeadlineAt?: string
@@ -1048,6 +1055,7 @@ export type BackendErrorCode =
   | 'CA_CERT_MISSING'
   | 'INTERNAL_ERROR'
   | 'NETWORK_ERROR'
+  | 'RECOVERY_PAIRING_REVIEW_REQUIRED'
   | BackendPairingValidationStatus
 
 export interface BackendErrorPayload {

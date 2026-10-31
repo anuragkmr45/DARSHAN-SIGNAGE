@@ -272,6 +272,48 @@ describe('content ownership routes', () => {
     }
   });
 
+  it('applies conditional read grants before list totals and to each content detail', async () => {
+    const db = getDatabase();
+    const roleId = randomUUID();
+    const roleName = `CONDITIONAL_CONTENT_${roleId}`;
+    const subjects = {
+      media: 'Media',
+      layouts: 'Layout',
+      presentations: 'Presentation',
+      schedules: 'Schedule',
+    } as const;
+    await db.insert(schema.roles).values({
+      id: roleId,
+      name: roleName,
+      permissions: {
+        grants: (Object.keys(subjects) as ResourceKind[]).map((kind) => ({
+          action: 'read',
+          subject: subjects[kind],
+          conditions: { id: departmentResources[kind] },
+        })),
+      },
+      is_system: false,
+    });
+    const actor = await createUser(roleId, departmentA, 'ConditionalContent');
+    const token = await issueToken(actor.id, actor.email, roleId, roleName, departmentA);
+
+    for (const kind of Object.keys(subjects) as ResourceKind[]) {
+      const list = await server.inject({ method: 'GET', url: listUrl(kind), headers: auth(token) });
+      expect(list.statusCode).toBe(200);
+      const body = JSON.parse(list.body);
+      expect(body.items.map((item: { id: string }) => item.id)).toContain(departmentResources[kind]);
+      expect(body.items.map((item: { id: string }) => item.id)).not.toContain(organizationResources[kind]);
+      const total = body.pagination?.total ?? body.total;
+      expect(total).toBe(1);
+      expect((await server.inject({
+        method: 'GET', url: detailUrl(kind, departmentResources[kind]), headers: auth(token),
+      })).statusCode).toBe(200);
+      expect((await server.inject({
+        method: 'GET', url: detailUrl(kind, organizationResources[kind]), headers: auth(token),
+      })).statusCode).toBe(403);
+    }
+  });
+
   it('exposes creator-only content mutation and department-wide schedule mutation permissions', async () => {
     for (const kind of ['media', 'layouts', 'presentations', 'schedules'] as const) {
       const ownerResponse = await server.inject({

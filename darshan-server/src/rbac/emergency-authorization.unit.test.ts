@@ -1,6 +1,6 @@
 import { AbilityBuilder, createMongoAbility, subject } from '@casl/ability';
 import { describe, expect, it } from 'vitest';
-import type { AppAbility } from '@/rbac';
+import { canUnconditionally, type AppAbility } from '@/rbac';
 import {
   authorizedEmergencyScreenIds,
   canAccessEmergencyTarget,
@@ -19,6 +19,17 @@ describe('emergency authorization', () => {
     const ability = buildAbility((can) => can('manage', 'Emergency'));
     expect(isGlobalEmergencyController(ability)).toBe(true);
     expect(canAccessEmergencyTarget(ability, { target_all: true }, new Set())).toBe(true);
+  });
+
+  it('does not turn conditional Emergency or EmergencyType grants into global authority', () => {
+    const ability = buildAbility((can) => {
+      can('manage', 'Emergency', { id: 'one-emergency' });
+      can('read', 'EmergencyType', { id: 'one-type' });
+    });
+    expect(ability.can('manage', 'Emergency')).toBe(true); // Subject-type CASL check is not scope-aware.
+    expect(isGlobalEmergencyController(ability)).toBe(false);
+    expect(canAccessEmergencyTarget(ability, { target_all: true }, new Set())).toBe(false);
+    expect(canUnconditionally(ability, 'read', 'EmergencyType')).toBe(false);
   });
 
   it('evaluates conditional Screen grants against each concrete screen', () => {

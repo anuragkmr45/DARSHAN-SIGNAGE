@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'crypto';
 import { eq, sql } from 'drizzle-orm';
 import { FastifyRequest } from 'fastify';
 import { config as appConfig } from '@/config';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 
 export type DeviceIdentitySessionSource = 'heartbeat' | 'pairing_status' | 'websocket' | 'command_poll';
 export type DeviceIdentityEnforcement = 'warn' | 'block';
@@ -18,6 +18,22 @@ export interface DeviceIdentitySessionInput {
   ipAddress?: string | null;
   machineObservation?: string | null;
   now?: Date;
+}
+
+/** Sanitized, durable form used by the operational telemetry queue. */
+export interface DeviceIdentitySessionObservation {
+  deviceId: string;
+  screenId: string | null;
+  source: DeviceIdentitySessionSource;
+  installInstanceHash: string | null;
+  installInstanceSuffix: string | null;
+  runtimeSessionHash: string | null;
+  runtimeSessionSuffix: string | null;
+  playerVersion: string | null;
+  userAgentHash: string | null;
+  ipHash: string | null;
+  machineHash: string | null;
+  observedAt: string;
 }
 
 export interface DeviceIdentitySessionSample {
@@ -285,63 +301,84 @@ export function extractDeviceIdentitySessionInput(
   };
 }
 
-export async function recordDeviceIdentitySession(
+export function prepareDeviceIdentitySessionObservation(
   input: DeviceIdentitySessionInput
-): Promise<DuplicateIdentitySummary> {
-  const db = getDatabase();
-  const now = input.now ?? new Date();
-  const runtimeSessionHash = hashValue(input.runtimeSessionId);
-  const [screen] = await db
-    .select({
-      id: schema.screens.id,
-      device_info: schema.screens.device_info,
-    })
-    .from(schema.screens)
-    .where(eq(schema.screens.id, input.deviceId))
-    .limit(1);
+): DeviceIdentitySessionObservation {
+  const observedAt = input.now ?? new Date();
+  return {
+    deviceId: input.deviceId,
+    screenId: input.screenId ?? null,
+    source: input.source,
+    installInstanceHash: hashValue(input.installInstanceId),
+    installInstanceSuffix: suffix(input.installInstanceId),
+    runtimeSessionHash: hashValue(input.runtimeSessionId),
+    runtimeSessionSuffix: suffix(input.runtimeSessionId),
+    playerVersion: normalizeText(input.playerVersion, 80),
+    userAgentHash: shortHash(input.userAgent),
+    ipHash: shortHash(input.ipAddress),
+    machineHash: shortHash(input.machineObservation),
+    observedAt: observedAt.toISOString(),
+  };
+}
 
-  if (!screen) {
-    return summarize({ schemaVersion: 1, sessions: [], conflict: null });
-  }
-
-  const deviceInfo = asRecord(screen.device_info);
+function reduceIdentitySessionObservation(
+  deviceInfoValue: unknown,
+  observation: DeviceIdentitySessionObservation
+) {
+  const deviceInfo = asRecord(deviceInfoValue);
   const current = normalizeStored(deviceInfo.identity_sessions);
-  const activeCutoff = now.getTime();
+  const observedAt = safeDate(observation.observedAt) ?? new Date();
+  const latestStoredAt = current.sessions.reduce(
+    (latest, session) => Math.max(latest, Date.parse(session.lastSeenAt)),
+    observedAt.getTime()
+  );
+  const effectiveNow = new Date(latestStoredAt);
+  const activeCutoff = effectiveNow.getTime();
   const activeSessions = current.sessions.filter((session) => {
     const leaseExpiresAt = safeDate(session.leaseExpiresAt);
     return leaseExpiresAt ? leaseExpiresAt.getTime() > activeCutoff : false;
   });
 
-  if (appConfig.DUPLICATE_IDENTITY_DETECTION_ENABLED && runtimeSessionHash) {
-    const existingIndex = activeSessions.findIndex((session) => session.runtimeSessionHash === runtimeSessionHash);
+  if (appConfig.DUPLICATE_IDENTITY_DETECTION_ENABLED && observation.runtimeSessionHash) {
+    const existingIndex = activeSessions.findIndex(
+      (session) => session.runtimeSessionHash === observation.runtimeSessionHash
+    );
     const existing = existingIndex >= 0 ? activeSessions[existingIndex] : null;
-    const nextSession: StoredSession = {
-      installInstanceHash: hashValue(input.installInstanceId),
-      installInstanceSuffix: suffix(input.installInstanceId),
-      runtimeSessionHash,
-      runtimeSessionSuffix: suffix(input.runtimeSessionId),
-      machineHash: shortHash(input.machineObservation),
-      ipHash: shortHash(input.ipAddress),
-      userAgentHash: shortHash(input.userAgent),
-      playerVersion: normalizeText(input.playerVersion, 80),
-      source: input.source,
-      firstSeenAt: existing?.firstSeenAt ?? now.toISOString(),
-      lastSeenAt: now.toISOString(),
-      leaseExpiresAt: new Date(now.getTime() + appConfig.DEVICE_SESSION_LEASE_MS).toISOString(),
-      status: 'ACTIVE',
-    };
+    const existingLastSeenAt = existing ? Date.parse(existing.lastSeenAt) : Number.NEGATIVE_INFINITY;
+    if (!existing || observedAt.getTime() > existingLastSeenAt) {
+      const nextSession: StoredSession = {
+        installInstanceHash: observation.installInstanceHash,
+        installInstanceSuffix: observation.installInstanceSuffix,
+        runtimeSessionHash: observation.runtimeSessionHash,
+        runtimeSessionSuffix: observation.runtimeSessionSuffix,
+        machineHash: observation.machineHash,
+        ipHash: observation.ipHash,
+        userAgentHash: observation.userAgentHash,
+        playerVersion: observation.playerVersion,
+        source: observation.source,
+        firstSeenAt: existing?.firstSeenAt ?? observedAt.toISOString(),
+        lastSeenAt: observedAt.toISOString(),
+        leaseExpiresAt: new Date(
+          observedAt.getTime() + appConfig.DEVICE_SESSION_LEASE_MS
+        ).toISOString(),
+        status: 'ACTIVE',
+      };
 
-    if (existingIndex >= 0) {
-      activeSessions[existingIndex] = nextSession;
-    } else {
-      activeSessions.push(nextSession);
+      if (existingIndex >= 0) {
+        activeSessions[existingIndex] = nextSession;
+      } else {
+        activeSessions.push(nextSession);
+      }
     }
   }
 
-  activeSessions.sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
-  const limitedSessions = activeSessions.slice(0, DEFAULT_MAX_SESSIONS);
+  const sessionsAtEffectiveTime = activeSessions.filter(
+    (session) => Date.parse(session.leaseExpiresAt) > effectiveNow.getTime()
+  );
+  sessionsAtEffectiveTime.sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
+  const limitedSessions = sessionsAtEffectiveTime.slice(0, DEFAULT_MAX_SESSIONS);
   const matureSessions = limitedSessions.filter(
-    (session) => now.getTime() - Date.parse(session.firstSeenAt) >= appConfig.DEVICE_SESSION_RESTART_GRACE_MS
+    (session) => effectiveNow.getTime() - Date.parse(session.firstSeenAt) >= appConfig.DEVICE_SESSION_RESTART_GRACE_MS
   );
   const hasDuplicateConflict = matureSessions.length >= 2;
   const severity = appConfig.DUPLICATE_IDENTITY_ENFORCEMENT === 'block' ? 'BLOCK' : 'WARN';
@@ -351,8 +388,8 @@ export async function recordDeviceIdentitySession(
         type: 'DUPLICATE_IDENTITY_CONFLICT',
         status: 'OPEN',
         severity,
-        firstSeenAt: current.conflict?.status === 'OPEN' ? current.conflict.firstSeenAt : now.toISOString(),
-        lastSeenAt: now.toISOString(),
+        firstSeenAt: current.conflict?.status === 'OPEN' ? current.conflict.firstSeenAt : effectiveNow.toISOString(),
+        lastSeenAt: effectiveNow.toISOString(),
         activeSessionCount: limitedSessions.length,
         sessions: limitedSessions.map(toSample),
       }
@@ -360,7 +397,7 @@ export async function recordDeviceIdentitySession(
       ? {
           ...current.conflict,
           status: 'RESOLVED',
-          lastSeenAt: now.toISOString(),
+          lastSeenAt: effectiveNow.toISOString(),
           activeSessionCount: limitedSessions.length,
           sessions: limitedSessions.map(toSample),
         }
@@ -374,18 +411,87 @@ export async function recordDeviceIdentitySession(
     conflict,
   };
 
-  await db
-    .update(schema.screens)
-    .set({
-      device_info: {
-        ...deviceInfo,
-        identity_sessions: nextState,
-      },
-      updated_at: now,
-    })
-    .where(eq(schema.screens.id, input.deviceId));
+  return { deviceInfo, nextState, updatedAt: effectiveNow };
+}
 
-  return summarize(nextState);
+async function loadIdentitySessionScreen(deviceId: string) {
+  const db = getDatabase();
+  const [screen] = await db
+    .select({
+      id: schema.screens.id,
+      device_info: schema.screens.device_info,
+    })
+    .from(schema.screens)
+    .where(eq(schema.screens.id, deviceId))
+    .limit(1);
+
+  return screen ?? null;
+}
+
+export async function previewDeviceIdentitySessionObservation(
+  observation: DeviceIdentitySessionObservation
+): Promise<DuplicateIdentitySummary> {
+  const screen = await loadIdentitySessionScreen(observation.deviceId);
+
+  if (!screen) {
+    return summarize({ schemaVersion: 1, sessions: [], conflict: null });
+  }
+
+  return summarize(reduceIdentitySessionObservation(screen.device_info, observation).nextState);
+}
+
+async function persistDeviceIdentitySessionObservationWithExecutor(
+  observation: DeviceIdentitySessionObservation,
+  db: DbExecutor
+): Promise<DuplicateIdentitySummary> {
+    // The caller owns a transaction. Serialize the read/merge/write across
+    // worker processes so concurrent physical players cannot erase one
+    // another's duplicate-identity session.
+    await db.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${observation.deviceId}, 0))`);
+    const [screen] = await db
+      .select({ device_info: schema.screens.device_info })
+      .from(schema.screens)
+      .where(eq(schema.screens.id, observation.deviceId))
+      .limit(1);
+    if (!screen) {
+      return summarize({ schemaVersion: 1, sessions: [], conflict: null });
+    }
+
+    const { deviceInfo, nextState, updatedAt } = reduceIdentitySessionObservation(
+      screen.device_info,
+      observation
+    );
+
+    await db
+      .update(schema.screens)
+      .set({
+        device_info: {
+          ...deviceInfo,
+          identity_sessions: nextState,
+        },
+        updated_at: updatedAt,
+      })
+      .where(eq(schema.screens.id, observation.deviceId));
+
+    return summarize(nextState);
+}
+
+export async function persistDeviceIdentitySessionObservation(
+  observation: DeviceIdentitySessionObservation,
+  executor?: DbExecutor
+): Promise<DuplicateIdentitySummary> {
+  if (executor) {
+    return persistDeviceIdentitySessionObservationWithExecutor(observation, executor);
+  }
+  return getDatabase().transaction((tx) =>
+    persistDeviceIdentitySessionObservationWithExecutor(observation, tx)
+  );
+}
+
+export async function recordDeviceIdentitySession(
+  input: DeviceIdentitySessionInput
+): Promise<DuplicateIdentitySummary> {
+  return persistDeviceIdentitySessionObservation(prepareDeviceIdentitySessionObservation(input));
 }
 
 export async function listDuplicateIdentityConflicts(options: { limit?: number } = {}) {

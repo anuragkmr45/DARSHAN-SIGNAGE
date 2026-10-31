@@ -178,7 +178,12 @@ Edit only that private file. Important values include:
 - all runtime credentials
 - measured capacity evidence and per-service resource limits
 - minimum free disk policy for every VM role
-- independent off-host backup destination, policy, and worker-only credentials
+- explicit backup repository kind, site identity, daily time/timezone, and
+  retention; for `LOCAL_FILESYSTEM`, the dedicated Backend VM path/device,
+  owner and free-space floor, a stable repository UUID, public age recipient,
+  non-secret encryption key ID, and exact age/capsule-helper path, version and
+  SHA-256 pins; for retained `LEGACY_OFF_HOST`, its complete S3 policy and
+  worker-only credentials
 - `INSTALL_PLAYWRIGHT_CHROMIUM=true`
 - player target platforms and native installer inputs
 
@@ -221,8 +226,8 @@ Each server VM requires:
 - a `docker` group and an approved deployment user in that group
 - OpenSSL, curl, tar, jq, sha256sum, df, stat, flock, readlink, and getent
 - the independently pinned release public key
-- enough free space on the transfer, `/var/tmp`, release, Docker data-root, and
-  Backend worker-scratch filesystems
+- enough free space on the transfer, `/var/tmp`, release, Docker data-root,
+  Backend worker-scratch, and configured local backup-repository filesystems
 
 Do not install Node.js on production VMs for this workflow. Production CLI
 commands run from compiled JavaScript inside the backend image.
@@ -232,7 +237,7 @@ Apply a source/port firewall allowlist before starting services:
 - operator and player networks to CMS HTTPS
 - player and CMS VM networks to Backend HTTPS/WSS
 - Backend VM to Data PostgreSQL TLS and MinIO HTTPS
-- Backend VM to Valkey TLS and approved off-host S3 HTTPS
+- Backend VM to Valkey TLS and, only for `LEGACY_OFF_HOST`, approved S3 HTTPS
 - CMS VM to Data MinIO HTTPS and Observability Grafana HTTPS
 - Observability VM to each role's TLS metrics gateway, Backend metrics HTTPS,
   and MinIO metrics HTTPS
@@ -352,6 +357,43 @@ node exporter through the TLS gateway. Plaintext Valkey is disabled.
 
 ### 7.3 Backend VM, initial phase
 
+For `BACKUP_REPOSITORY_KIND=LOCAL_FILESYSTEM`, provision the signed repository
+path before installing the role. It must be a real, non-symlink directory on
+the configured device, owned by the packaged worker (`1000:1000`), with no
+group-write or other-user access. Record its decimal device identity before
+building the bundle:
+
+```bash
+sudo install -d -m 0700 -o 1000 -g 1000 \
+  "/var/lib/darshan/${SITE_NAME}/backup-repository"
+stat -c 'device=%d owner=%u:%g mode=%a' \
+  "/var/lib/darshan/${SITE_NAME}/backup-repository"
+```
+
+`prepare-host.sh` verifies that identity, ownership, permissions and free-space
+floor and fails if the mount is absent or changed. Docker bind-mounts it
+read-write into the worker at the same absolute path with
+`create_host_path: false`, so Docker cannot silently replace a missing mount
+with an empty host directory. It is deliberately not mounted into the API
+container. Worker backup staging uses the protected disk-backed
+`/var/lib/darshan/<site>/worker-scratch/tmp`, not container `/tmp`. The builder
+rejects incomplete local policy, mixed local/legacy fields, missing
+repository-kind selection, non-native age recipients, and every private age
+identity field. The recovery private key remains outside all application VMs;
+only its public recipient and a non-secret key identifier enter the bundle.
+
+The backend image pins the reviewed upstream age archive and installed binary
+digest and carries the tool inside the image archive for offline deployment.
+The current reviewed pin is Linux amd64 only; image builds for any architecture
+without an explicit upstream archive/digest pin fail closed. The operations
+policy records the runtime path/version/digest and capsule-helper metadata.
+These pins do not define or imply backup-manifest signing-key custody; that
+separate security decision must be approved before signing is implemented.
+
+Do not add backup policy to
+`darshan-server/config/backend.production.example.json`; that JSON is not the
+backup-policy authority. Set the signed inputs only in the private bundle env.
+
 ```bash
 cd "/opt/darshan/${RELEASE_ID}/backend"
 sudo ./prepare-host.sh
@@ -411,6 +453,59 @@ sudo ./prepare-host.sh
 
 The health check requires Prometheus, Alertmanager, and Grafana HTTPS plus every
 generated scrape target reporting `up == 1`.
+
+### 7.7 Local-repository pre-import recovery boundary
+
+For `LOCAL_FILESYSTEM/V2_BROKER`, run the eight pre-import commands only with
+the generated Backend role runner:
+
+```bash
+cd "/opt/darshan/${RELEASE_ID}/backend"
+./verify-role.sh
+sudo ./prepare-host.sh
+./recovery-boundary/runtime/node ./recovery-boundary/recovery-container-runner.mjs \
+  ./recovery-boundary/generated/boundary-manifest.json discover --json
+```
+
+Use only generated container paths for plan, journal and review arguments. Do
+not add Docker options, environment, mounts, images, entrypoints, or shell
+wrappers. The runner creates by the exact signed image ID under one fixed site
+container name. If that name already exists, investigate it; never delete an
+existing container merely to admit a new command. Online commands use only the
+recovery broker socket. Offline status deliberately omits broker, repository,
+and public keyring mounts.
+
+The signed role carries the pinned host Node executable used above; host Node
+is not a prerequisite. The installer leaves the runner, library, manifest and
+runtime root-owned, docker-group-readable/executable, and never group-writable.
+`prepare-host.sh` requires the packaged uid-1000 sudo operator to belong to the
+docker group, validates those root:docker modes, executes the pinned runtime to
+prove Linux x64 Node.js 20 and target-host loader compatibility, and creates
+only its Docker CLI configuration directory as operator-owned mode 0700. The
+runner pins the local daemon socket explicitly and ignores ambient Docker
+contexts and `DOCKER_*` variables.
+
+The Recovery VM role in section 8 is the retained legacy off-host rehearsal
+path. It is not the Packet 5A2c2 local-repository runner and must not bypass the
+Backend-host boundary. Packet 5B remains responsible for target preparation,
+decrypt/import, reconciliation, validation and promotion.
+
+The production backup broker itself is launched only through the packaged
+`backup-broker-listener` supervisor. `prepare-host.sh` establishes both socket
+parents as `root:1000` mode `0710`; do not relax or reassign those parents. The
+container drops every capability and restores only CHOWN/SETGID/SETUID for
+socket setup and permanent child privilege drop, plus KILL solely so the root
+supervisor can forward TERM/INT to its uid-1000 child. The child retains no
+capabilities. TERM/INT are blocked before setup and fork; the parent uses
+synchronous signal waiting with nonblocking child reaping, and the child
+unblocks the signals only immediately before exec. The
+supervisor retains orderly-close sockets under collision-resistant `.closed.*` evidence names and
+never removes a pathname. A public socket left after a host/container crash, an
+unexpected entry at either fixed socket name, or accumulated `.closed.*`
+evidence must be investigated while the broker is stopped. Preserve the entry
+and its device/inode in incident evidence, prove no broker process holds it,
+and remove or archive it only under the site's approved privileged incident
+procedure before restarting. Startup deliberately does not auto-reclaim it.
 
 ## 8. Independent Restore Rehearsal
 

@@ -97,6 +97,15 @@ staging="$(mktemp -d "$release_root/.${role}.partial.XXXXXX")"
 tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$staging"
 chown -R root:docker "$staging/$role"
 (cd "$staging/$role" && DARSHAN_RELEASE_TRUST_KEY="$trust_key" ./verify-role.sh >/dev/null)
+if [[ "$role" == "backend" && -d "$staging/$role/recovery-boundary" ]]; then
+  recovery="$staging/$role/recovery-boundary"
+  for file in "$recovery/recovery-container-runner.mjs" "$recovery/recovery-boundary-lib.mjs" \
+    "$recovery/recovery-runtime-manifest.json" "$recovery/runtime/node" "$recovery/generated/boundary-manifest.json"; do
+    [[ -f "$file" && ! -L "$file" ]] || { echo "Signed recovery runner asset is missing or unsafe: $file" >&2; exit 1; }
+  done
+  chmod 0750 "$recovery" "$recovery/generated" "$recovery/runtime" "$recovery/recovery-container-runner.mjs" "$recovery/runtime/node"
+  chmod 0640 "$recovery/recovery-boundary-lib.mjs" "$recovery/recovery-runtime-manifest.json" "$recovery/generated/boundary-manifest.json"
+fi
 mv "$staging/$role" "$release_root/$role"
 rmdir "$staging"
 staging=""

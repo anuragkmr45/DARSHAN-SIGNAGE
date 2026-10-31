@@ -142,4 +142,79 @@ describe("ApiClient runtime config", () => {
     expect(unauthorized).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledWith("/login?redirect=%2Fdashboard");
   });
+
+  it("does not reuse an old account's pending GET response after an auth switch", async () => {
+    setCmsRuntimeConfigForTests(runtimeConfig);
+    const responders: Array<(value: unknown) => void> = [];
+    const fetchMock = vi.fn(() => new Promise((resolve) => responders.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient();
+
+    const oldRequest = client.request<{ owner: string }>({ path: "/users", method: "GET" });
+    const oldResult = oldRequest.catch((error: ApiError) => error);
+    client.markAuthContextChanged();
+    const newRequest = client.request<{ owner: string }>({ path: "/users", method: "GET" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    responders[1]!({
+      ok: true,
+      headers: { get: () => "application/json" },
+      json: async () => ({ owner: "new-account" }),
+    });
+    expect(await newRequest).toEqual({ owner: "new-account" });
+
+    responders[0]!({
+      ok: true,
+      headers: { get: () => "application/json" },
+      json: async () => ({ owner: "old-account" }),
+    });
+    expect(await oldResult).toMatchObject({ code: "STALE_AUTH_CONTEXT" });
+  });
+
+  it("deduplicates only GETs with the same request credentials and representation", async () => {
+    setCmsRuntimeConfigForTests(runtimeConfig);
+    const responders: Array<(value: unknown) => void> = [];
+    const fetchMock = vi.fn(() => new Promise((resolve) => responders.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient();
+    let token = "first-token";
+    client.setAuthTokenProvider(() => token);
+
+    const first = client.request<{ owner: string }>({ path: "/users", method: "GET" });
+    const duplicate = client.request<{ owner: string }>({ path: "/users", method: "GET" });
+    token = "second-token";
+    const differentCredential = client.request<{ owner: string }>({ path: "/users", method: "GET" });
+    const differentRepresentation = client.request<string>({ path: "/users", method: "GET", responseType: "text" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    responders[0]!({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ owner: "first" }) });
+    responders[1]!({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ owner: "second" }) });
+    responders[2]!({ ok: true, headers: { get: () => "text/plain" }, text: async () => "text-view" });
+    expect(await first).toEqual({ owner: "first" });
+    expect(await duplicate).toEqual({ owner: "first" });
+    expect(await differentCredential).toEqual({ owner: "second" });
+    expect(await differentRepresentation).toBe("text-view");
+  });
+
+  it("does not let an old account's late 401 clear the new session", async () => {
+    setCmsRuntimeConfigForTests(runtimeConfig);
+    let respond!: (value: unknown) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise((resolve) => { respond = resolve; })));
+    const client = new ApiClient();
+    const unauthorized = vi.fn();
+    client.setUnauthorizedHandler(unauthorized);
+
+    const oldRequest = client.request({ path: "/users", method: "GET" });
+    const oldResult = oldRequest.catch((error: ApiError) => error);
+    client.markAuthContextChanged();
+    respond({
+      ok: false,
+      status: 401,
+      headers: { get: () => "application/json" },
+      json: async () => ({ error: { message: "Old session expired" } }),
+    });
+
+    expect(await oldResult).toMatchObject({ code: "STALE_AUTH_CONTEXT" });
+    expect(unauthorized).not.toHaveBeenCalled();
+  });
 });

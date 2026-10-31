@@ -1,0 +1,17 @@
+# Controlled Recovery Activation Packet B — Developer Evidence
+
+Date: 2026-10-30
+
+Scope is static/injected Packet 1 adapter evidence only. No Docker, service, network, SSH, broker, real key, decryption, import, restore, object-store, validation-query, promotion or rollback action was performed. Native recovery remains unavailable / `ENOTSUP` and unselected.
+
+Implemented boundaries include exact protected source selection, reviewed compatibility composition, durable private owner/fence and phase receipts, fresh phase-truth matching, fixed target ownership, transactional database import semantics, disk-streamed object GET/hash/PUT/resume/final enumeration, and validated aggregate-only reporting inputs. The installed Packet A activation does not contain Packet B asset authority; the default CLI fails closed with `CONTROLLED_RECOVERY_PACKET_B_ASSETS_NOT_ENROLLED` before any effect boundary.
+
+Developer verification passed: focused Packet B plus Packet A/Packet 1 predecessors **5 files / 64 tests**; final full recovery regression **32 files / 501 tests**; server build; recovery-test, scripts and production-CLI no-emit typechecks; and focused lint with zero warnings/errors. Bundle predecessor, static secret/JSON/CSV checks and `git diff --check` also passed. The final regression followed a behavior fix that lets a new process confirm a prior phase only after exact source reselection and matching external truth. These fixtures use temporary files, scripted SQL/object/broker/Docker contracts and no live subprocess or network dependency.
+
+Remaining gates: activation schema and signed inventory enrollment for all Packet B assets; installed root ownership/hash checks; real broker hold; pinned age/key recipient proof; producer ciphertext decrypt/extract; disposable Docker/PostgreSQL/MinIO import and crash ambiguity; forward migration; full SQL/reference validation; slow/cancelled/ENOSPC streaming; production capacity and Packet C E2E. Packet B is not production activation evidence.
+
+## Independent-review correction addendum
+
+The corrected Packet B boundary now accepts only one producer-shaped `darshan_postgres_<YYYYMMDD>_<HHMMSS>.sql` database archive, reconciles an already-complete exact owned target set after a create/receipt crash without issuing create again, fails closed on partial/foreign/ambiguous targets, reloads the durable `DATABASE_RESTORED` baseline after restart and rejects row loss, GET-streams and hashes every object after exact final enumeration, and atomically publishes the operation source binding with exact replay/conflict semantics. Concurrent different-source publication deterministically proves one winner and one non-clobbering conflict, including the bounded hard-link settlement interval. The focused correction run passed **82/82**. The initial full recovery regression passed **519/519**; after the behavior-changing settlement fix, the approved repeat also passed **519/519**. These remain filesystem/transcript/SQL/object fixtures; producer ciphertext, live broker/keyrings, PostgreSQL, MinIO, Docker and crash-host proof are pending.
+
+The final bounded review also closed decrypt cancellation ownership: Packet B begins and bounds upstream process termination/join before iterator cleanup and separately bounds the cleanup wait. The final focused/full counts are **83/83** and **520/520**. Real pinned-age cancellation, kill escalation and filesystem fault evidence remain pending.

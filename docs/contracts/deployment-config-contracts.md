@@ -58,6 +58,20 @@ edit only the private site bundle env before generation; editing role
 `.env.production`, CMS JSON, player JSON, or TLS files after generation creates
 an unsupported split.
 
+Backup policy is an explicit deployment/runtime environment contract, not part
+of `darshan-server/config/backend.production.example.json`. The bundle must set
+`BACKUP_REPOSITORY_KIND`, site identity, daily time/timezone, and retention.
+`LOCAL_FILESYSTEM` additionally requires the canonical
+`/var/lib/darshan/<site>/backup-repository` host path, device identity, worker
+owner `1000:1000`, and a free-space floor. Only the worker receives repository
+write authority. For the reviewed V2 broker profile, the API receives the same
+canonical repository as a read-only bind plus owner-only manifest/policy public
+keyrings solely for capacity projection and freshly authorized ciphertext
+downloads; it receives no broker signing key, configuration capsule, decrypt
+authority, spool or arbitrary host path. `LEGACY_OFF_HOST` instead requires its complete S3 policy and
+worker-only credential files. Mixed or missing repository policies are invalid;
+there is no repository fallback.
+
 ## Runtime Tool Contract
 
 | Tool | Used by | Source evidence | Runtime verification |

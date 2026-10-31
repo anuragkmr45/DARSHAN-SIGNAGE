@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import type { ActorContext } from '@/rbac/policy';
 import { contentReadCondition, type ContentAbility } from '@/rbac/content-ownership';
+import { canUnconditionally } from '@/rbac';
 
 type ScheduleRequestStatus = (typeof schema.scheduleRequestStatusEnum.enumValues)[number];
 type ScheduleRequestStatusFilter = ScheduleRequestStatus;
@@ -10,6 +11,39 @@ type ScheduleRequestSortDirection = 'asc' | 'desc';
 
 function escapeLikeQuery(value: string) {
   return value.replace(/[\\%_]/g, '\\$&');
+}
+
+const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Keep request rows and totals scoped to the same supported record conditions. */
+export function requestReadCondition(ability: ContentAbility) {
+  if (canUnconditionally(ability, 'read', 'ScheduleRequest')) return sql`true`;
+  const permitted: ReturnType<typeof sql>[] = [];
+  for (const rule of ability.rules) {
+    if (rule.inverted) continue;
+    const actions = Array.isArray(rule.action) ? rule.action : [rule.action];
+    const subjects = Array.isArray(rule.subject) ? rule.subject : [rule.subject];
+    if (!actions.some((action) => action === 'read' || action === 'manage') ||
+        !subjects.some((subject) => subject === 'ScheduleRequest' || subject === 'all')) continue;
+    const conditions = rule.conditions as Record<string, unknown> | undefined;
+    if (!conditions || typeof conditions !== 'object' || Array.isArray(conditions)) continue;
+    const parts: ReturnType<typeof sql>[] = [];
+    let supported = true;
+    for (const [key, value] of Object.entries(conditions)) {
+      if (typeof value !== 'string') { supported = false; break; }
+      if (key === 'id' || key === 'schedule_id' || key === 'requested_by') {
+        if (!canonicalUuid.test(value)) { supported = false; break; }
+        parts.push(eq(schema.scheduleRequests[key], value));
+      } else if (key === 'status' && schema.scheduleRequestStatusEnum.enumValues.includes(value as ScheduleRequestStatus)) {
+        parts.push(eq(schema.scheduleRequests.status, value as ScheduleRequestStatus));
+      } else {
+        supported = false;
+        break;
+      }
+    }
+    if (supported && parts.length > 0) permitted.push(and(...parts)!);
+  }
+  return permitted.length > 0 ? or(...permitted)! : sql`false`;
 }
 
 export class ScheduleRequestRepository {
@@ -167,6 +201,7 @@ export class ScheduleRequestRepository {
             AND ${scheduleAccess}
         )`);
       }
+      conditions.push(options.ability ? requestReadCondition(options.ability) : sql`false`);
     }
 
     const query = options.q?.trim();

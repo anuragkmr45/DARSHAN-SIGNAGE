@@ -13,6 +13,7 @@ export const apiEndpoints = {
   users: {
     create: withBase('/users'),
     list: withBase('/users'),
+    managementOptions: withBase('/users/management-options'),
     get: withBase('/users/:id'),
     update: withBase('/users/:id'),
     delete: withBase('/users/:id'),
@@ -20,6 +21,7 @@ export const apiEndpoints = {
   userInvite: {
     invite: withBase('/users/invite'),
     list: withBase('/users/invite'),
+    replace: withBase('/users/invite/:id/replace'),
     resetPassword: withBase('/users/:id/reset-password'),
     pending: withBase('/users/invite/pending'),
   },
@@ -210,6 +212,8 @@ export const apiEndpoints = {
     backupById: withBase('/settings/backups/:id'),
     backupRun: withBase('/settings/backups/run'),
     backupHistory: withBase('/settings/backups/history'),
+    backupOperation: withBase('/settings/backups/operations/:operationId'),
+    backupDownload: withBase('/settings/backups/:id/download'),
     logs: withBase('/settings/logs'),
     defaultMedia: withBase('/settings/default-media'),
     defaultMediaVariants: withBase('/settings/default-media/variants'),

@@ -4,7 +4,7 @@ import { config as appConfig } from '../src/config/index.js';
 import { initializeDatabase, getDatabase, schema } from '../src/db/index.js';
 import { hashPassword } from '../src/auth/password.js';
 import { createLogger } from '../src/utils/logger.js';
-import { SYSTEM_ROLE_DEFAULTS, SYSTEM_ROLE_NAMES } from '../src/rbac/system-roles.js';
+import { SYSTEM_ROLE_DEFAULTS, SYSTEM_ROLE_NAMES, syncSystemRolePermissions } from '../src/rbac/system-roles.js';
 
 const logger = createLogger('seed');
 
@@ -21,24 +21,19 @@ async function seed() {
 
     // Create system roles
     logger.info('Creating system roles...');
+    // Check every canonical name before making seed changes. A custom role with
+    // one of these names needs human review; seed must never promote it.
+    await syncSystemRolePermissions();
     const systemRoles = SYSTEM_ROLE_NAMES;
     const roleIdByName = new Map<string, string>();
 
     for (const name of systemRoles) {
       const [existingRole] = await db.select().from(schema.roles).where(eq(schema.roles.name, name));
+      if (existingRole && !existingRole.is_system) {
+        throw new Error(`SYSTEM_ROLE_IDENTITY_CONFLICT: role ${name} (${existingRole.id}) does not have a canonical built-in identity; review the database before seeding`);
+      }
       const role = existingRole
-        ? (
-            await db
-              .update(schema.roles)
-              .set({
-                description: `${name} role`,
-                is_system: true,
-                permissions: SYSTEM_ROLE_DEFAULTS[name],
-                updated_at: new Date(),
-              })
-              .where(eq(schema.roles.id, existingRole.id))
-              .returning()
-          )[0]
+        ? existingRole
         : (
             await db
               .insert(schema.roles)

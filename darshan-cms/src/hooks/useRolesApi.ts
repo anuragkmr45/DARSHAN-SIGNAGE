@@ -4,6 +4,7 @@ import { permissionsApi } from "@/api/domains/permissions";
 import { queryKeys } from "@/api/queryKeys";
 import { useToast } from "@/hooks/use-toast";
 import type { RolePayload, RoleListParams } from "@/api/domains/roles";
+import { refreshUserManagementQueries, shouldRefreshAfterUserManagementError } from "@/lib/userManagementRefresh";
 
 const DEFAULT_ROLE_LIST: RoleListParams = { page: 1, limit: 100 };
 
@@ -32,14 +33,22 @@ export const usePermissionsMetadata = () =>
 export const useRolesApi = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const refreshOnDenial = (error: unknown) => {
+    if (shouldRefreshAfterUserManagementError(error)) {
+      void queryClient.invalidateQueries({ queryKey: ["roles"] });
+      void refreshUserManagementQueries(queryClient);
+    }
+  };
 
   const createRole = useMutation({
     mutationFn: (payload: RolePayload) => rolesApi.create(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["roles"] });
+      await refreshUserManagementQueries(queryClient);
       toast({ title: "Role created", description: "The role has been created successfully." });
     },
     onError: (error: Error) => {
+      refreshOnDenial(error);
       toast({
         title: "Failed to create role",
         description: error.message,
@@ -54,9 +63,11 @@ export const useRolesApi = () => {
     onSuccess: async (_data, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["roles"] });
       await queryClient.invalidateQueries({ queryKey: queryKeys.role(variables.roleId) });
+      await refreshUserManagementQueries(queryClient);
       toast({ title: "Role updated", description: "The role has been updated successfully." });
     },
     onError: (error: Error) => {
+      refreshOnDenial(error);
       toast({
         title: "Failed to update role",
         description: error.message,
@@ -69,9 +80,11 @@ export const useRolesApi = () => {
     mutationFn: (roleId: string) => rolesApi.remove(roleId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["roles"] });
+      await refreshUserManagementQueries(queryClient);
       toast({ title: "Role deleted", description: "The role has been deleted." });
     },
     onError: (error: Error) => {
+      refreshOnDenial(error);
       toast({
         title: "Failed to delete role",
         description: error.message,

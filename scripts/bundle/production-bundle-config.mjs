@@ -1,7 +1,11 @@
 import fs from 'node:fs'
 import crypto from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const PLATFORM_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 // Bump this source-controlled value only when a release intentionally breaks
 // cross-role or player wire compatibility. It is not an operator input.
@@ -43,6 +47,11 @@ const PATH_FIELDS = new Set([
   'DEVICE_CA_CERT_FILE', 'DEVICE_CA_KEY_FILE',
   'RELEASE_SIGNING_PRIVATE_KEY',
   'CAPACITY_EVIDENCE_FILE',
+  'BACKUP_BROKER_CAPSULE_FILE', 'BACKUP_BROKER_POLICY_FILE', 'BACKUP_BROKER_POLICY_TRUST_FILE',
+  'BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE', 'BACKUP_MANIFEST_PUBLIC_KEYRING_FILE',
+  'BACKUP_AGE_BUILD_BINARY_FILE', 'BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE',
+  'RECOVERY_OPERATOR_CONFIG_ROOT', 'RECOVERY_PLAN_ROOT', 'RECOVERY_JOURNAL_ROOT',
+  'RECOVERY_REVIEW_ROOT', 'RECOVERY_EVIDENCE_ROOT', 'RECOVERY_DOCKER_CONFIG_ROOT',
 ])
 
 const SECRET_FIELDS = new Set([
@@ -53,7 +62,39 @@ const SECRET_FIELDS = new Set([
   'POSTGRES_TLS_KEY_FILE', 'VALKEY_TLS_KEY_FILE', 'DEVICE_CA_KEY_FILE',
   'OBSERVABILITY_TLS_KEY_FILE',
   'RELEASE_SIGNING_PRIVATE_KEY',
+  'BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE',
+  'BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE',
 ])
+
+const BACKUP_REPOSITORY_FIELDS = [
+  'BACKUP_REPOSITORY_KIND', 'BACKUP_REPOSITORY_ROOT', 'BACKUP_REPOSITORY_DEVICE_ID',
+  'BACKUP_REPOSITORY_OWNER_UID', 'BACKUP_REPOSITORY_OWNER_GID', 'BACKUP_REPOSITORY_MIN_FREE_BYTES',
+  'BACKUP_REPOSITORY_ID', 'BACKUP_ENCRYPTION_RECIPIENT', 'BACKUP_ENCRYPTION_KEY_ID',
+  'AGE_PATH', 'AGE_VERSION', 'AGE_SHA256',
+  'BACKUP_CAPSULE_HELPER_PATH', 'BACKUP_CAPSULE_HELPER_VERSION', 'BACKUP_CAPSULE_HELPER_SHA256',
+  'BACKUP_LOCAL_PROTOCOL', 'BACKUP_BROKER_SOCKET_DIR', 'BACKUP_WORKER_SPOOL_ROOT',
+  'BACKUP_WORKER_SPOOL_DEVICE_ID', 'BACKUP_WORKER_SPOOL_MIN_FREE_BYTES',
+  'BACKUP_BROKER_HELPER_VERSION', 'BACKUP_BROKER_CAPSULE_FILE', 'BACKUP_BROKER_POLICY_FILE',
+  'BACKUP_BROKER_POLICY_TRUST_FILE', 'BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE',
+  'BACKUP_MANIFEST_PUBLIC_KEYRING_FILE', 'BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID',
+  'BACKUP_BROKER_ARTIFACT_MODE', 'BACKUP_AGE_BUILD_BINARY_FILE', 'BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE',
+  'BACKUP_CAPSULE_POLICY_KEY_ID',
+  'BACKUP_BROKER_CPU_LIMIT', 'BACKUP_BROKER_MEMORY_LIMIT', 'BACKUP_BROKER_PIDS_LIMIT',
+  'BACKUP_RECOVERY_SOCKET_DIR',
+  'RECOVERY_OPERATOR_CONFIG_ROOT', 'RECOVERY_PLAN_ROOT', 'RECOVERY_JOURNAL_ROOT', 'RECOVERY_REVIEW_ROOT', 'RECOVERY_EVIDENCE_ROOT', 'RECOVERY_DOCKER_CONFIG_ROOT',
+  'RECOVERY_CPU_LIMIT', 'RECOVERY_MEMORY_LIMIT', 'RECOVERY_PIDS_LIMIT',
+  'RECOVERY_SCRATCH_TMPFS_BYTES', 'RECOVERY_HOME_TMPFS_BYTES', 'RECOVERY_TMP_TMPFS_BYTES',
+  'RECOVERY_JOURNAL_MIN_FREE_BYTES', 'RECOVERY_EVIDENCE_MIN_FREE_BYTES', 'RECOVERY_OUTPUT_MIN_FREE_BYTES',
+  'RECOVERY_BROKER_CONTROL_TIMEOUT_MS', 'RECOVERY_RUN_TIMEOUT_MS', 'RECOVERY_STDOUT_MAX_BYTES', 'RECOVERY_STDERR_MAX_BYTES',
+  'BACKUP_SITE_ID', 'BACKUP_SCHEDULE_TIME', 'BACKUP_SCHEDULE_TIMEZONE',
+]
+const PRIVATE_AGE_IDENTITY_FIELDS = new Set([
+  'AGE_IDENTITY', 'AGE_IDENTITY_FILE', 'BACKUP_ENCRYPTION_IDENTITY', 'BACKUP_ENCRYPTION_IDENTITY_FILE',
+])
+const LEGACY_OFF_HOST_BACKUP_FIELDS = [
+  'BACKUP_INTERVAL_HOURS', 'BACKUP_OFFHOST_DESTINATION', 'BACKUP_OFFHOST_ENDPOINT',
+  'BACKUP_OFFHOST_REGION', 'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+]
 
 // Production capacity is deliberately a site decision. These values have no
 // defaults and are consumed by the generated Compose roles.
@@ -74,8 +115,8 @@ const VOLUME_FIELDS = [
 ]
 const OPERATIONS_POLICY_FIELDS = [
   'CAPACITY_EVIDENCE_FILE',
-  'BACKUP_INTERVAL_HOURS', 'BACKUP_RETENTION_DAYS', 'BACKUP_OFFHOST_DESTINATION',
-  'BACKUP_OFFHOST_ENDPOINT', 'BACKUP_OFFHOST_REGION',
+  ...BACKUP_REPOSITORY_FIELDS,
+  'BACKUP_RETENTION_DAYS', ...LEGACY_OFF_HOST_BACKUP_FIELDS,
   'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES',
   ...DISK_FREE_FIELDS,
   ...RESOURCE_LIMIT_FIELDS,
@@ -120,6 +161,24 @@ const OUTPUTS = {
   JWT_SECRET: ['production/backend/.env.production'],
   BACKUP_INTERVAL_HOURS: ['OPERATIONS_POLICY.json'],
   BACKUP_RETENTION_DAYS: ['OPERATIONS_POLICY.json'],
+  BACKUP_REPOSITORY_KIND: ['OPERATIONS_POLICY.json', 'production/backend/.env.production', 'production/backend/docker-compose.yml'],
+  BACKUP_REPOSITORY_ROOT: ['OPERATIONS_POLICY.json', 'production/backend/.env.production', 'production/backend/docker-compose.yml'],
+  BACKUP_REPOSITORY_DEVICE_ID: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_REPOSITORY_OWNER_UID: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_REPOSITORY_OWNER_GID: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_REPOSITORY_MIN_FREE_BYTES: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_REPOSITORY_ID: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_ENCRYPTION_RECIPIENT: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_ENCRYPTION_KEY_ID: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  AGE_PATH: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  AGE_VERSION: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  AGE_SHA256: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_CAPSULE_HELPER_PATH: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_CAPSULE_HELPER_VERSION: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_CAPSULE_HELPER_SHA256: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_SITE_ID: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_SCHEDULE_TIME: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
+  BACKUP_SCHEDULE_TIMEZONE: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
   BACKUP_OFFHOST_DESTINATION: ['OPERATIONS_POLICY.json'],
   BACKUP_OFFHOST_ENDPOINT: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
   BACKUP_OFFHOST_REGION: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
@@ -173,6 +232,7 @@ const ALLOWED_FIELDS = new Set([
   'CAPACITY_EVIDENCE_FILE',
   'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'MINIO_REGION', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'JWT_EXPIRY', 'INITIAL_ADMIN_EMAIL',
   'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+  'BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE', 'BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE',
   'VOLUME_PROVISIONING_MODE', ...VOLUME_FIELDS,
   'DEVICE_AUTH_MODE', 'DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT',
   'MAX_UPLOAD_MB',
@@ -193,10 +253,14 @@ const REQUIRED_FIELDS = [
   'TRANSPORT_TLS_MODE', 'TRANSPORT_CA_CERT_FILE', 'DEVICE_CA_CERT_FILE', 'DEVICE_CA_KEY_FILE',
   'RELEASE_SIGNING_PRIVATE_KEY',
   'POSTGRES_PASSWORD', 'POSTGRES_MONITORING_PASSWORD', 'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'INITIAL_ADMIN_EMAIL',
-  'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+  'BACKUP_REPOSITORY_KIND', 'BACKUP_SITE_ID', 'BACKUP_SCHEDULE_TIME', 'BACKUP_SCHEDULE_TIMEZONE',
+  'BACKUP_RETENTION_DAYS',
   'VOLUME_PROVISIONING_MODE',
   'WEBPAGE_NAVIGATION_ALLOWLIST',
-  ...OPERATIONS_POLICY_FIELDS,
+  'CAPACITY_EVIDENCE_FILE',
+  'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES',
+  ...DISK_FREE_FIELDS,
+  ...RESOURCE_LIMIT_FIELDS,
 ]
 
 const DEFAULTS = {
@@ -208,7 +272,7 @@ const DEFAULTS = {
   PROMETHEUS_HOST_PORT: '9090', ALERTMANAGER_HOST_PORT: '9093', GRAFANA_HOST_PORT: '3001',
   NODE_EXPORTER_HOST_PORT: '9100', POSTGRES_EXPORTER_HOST_PORT: '9187', NGINX_EXPORTER_HOST_PORT: '9113',
   METRICS_GATEWAY_HOST_PORT: '9443',
-  POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', BACKUP_OFFHOST_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info', MAX_UPLOAD_MB: '500', WEBPAGE_RESOURCE_ALLOWLIST: '', WEBPAGE_ALLOWED_CIDRS: '', WEBPAGE_ALLOWED_PORTS: '443', WEBPAGE_ALLOW_HTTP: 'false', WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS: '24', WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE: '100',
+  POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info', MAX_UPLOAD_MB: '500', WEBPAGE_RESOURCE_ALLOWLIST: '', WEBPAGE_ALLOWED_CIDRS: '', WEBPAGE_ALLOWED_PORTS: '443', WEBPAGE_ALLOW_HTTP: 'false', WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS: '24', WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE: '100',
   POSTGRES_IMAGE: 'postgres:15-alpine', MINIO_IMAGE: 'minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e', VALKEY_IMAGE: 'valkey/valkey:7-alpine',
   NGINX_IMAGE: 'nginx:1.27-alpine', PROMETHEUS_IMAGE: 'prom/prometheus:v3.3.1',
   ALERTMANAGER_IMAGE: 'prom/alertmanager:v0.28.1', GRAFANA_IMAGE: 'grafana/grafana:12.0.2',
@@ -269,6 +333,10 @@ function parseBundleEnvTextInternal(text) {
       return
     }
     const [, key, rawValue] = match
+    if (PRIVATE_AGE_IDENTITY_FIELDS.has(key)) {
+      addError(`line ${lineNumber} uses forbidden private age identity field ${key}; source-free workers receive only a public recipient`)
+      return
+    }
     if (!ALLOWED_FIELDS.has(key)) {
       addError(`line ${lineNumber} uses unknown key ${key}`)
       return
@@ -498,6 +566,179 @@ function validateBackupCredential(name, value, minimumLength, addError) {
   }
 }
 
+function validateBackupPolicy(config, explicit, addError) {
+  if (!['LOCAL_FILESYSTEM', 'LEGACY_OFF_HOST'].includes(config.BACKUP_REPOSITORY_KIND)) {
+    addError('BACKUP_REPOSITORY_KIND must be LOCAL_FILESYSTEM or LEGACY_OFF_HOST')
+    return
+  }
+  if (!explicit.has('BACKUP_REPOSITORY_KIND')) {
+    addError('BACKUP_REPOSITORY_KIND must be explicitly selected; production has no repository fallback')
+  }
+  if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(config.BACKUP_SITE_ID || '')) {
+    addError('BACKUP_SITE_ID must contain only lowercase letters, digits, underscores, or hyphens')
+  } else if (config.BACKUP_SITE_ID !== config.SITE_NAME) {
+    addError('BACKUP_SITE_ID must match SITE_NAME')
+  }
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(config.BACKUP_SCHEDULE_TIME || '')) {
+    addError('BACKUP_SCHEDULE_TIME must use 24-hour HH:mm format')
+  }
+  if (config.BACKUP_SCHEDULE_TIMEZONE) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: config.BACKUP_SCHEDULE_TIMEZONE }).format(new Date(0))
+    } catch {
+      addError('BACKUP_SCHEDULE_TIMEZONE must be a valid IANA timezone')
+    }
+  }
+
+  if (config.BACKUP_REPOSITORY_KIND === 'LOCAL_FILESYSTEM') {
+    const required = [
+      'BACKUP_REPOSITORY_ROOT', 'BACKUP_REPOSITORY_DEVICE_ID', 'BACKUP_REPOSITORY_OWNER_UID',
+      'BACKUP_REPOSITORY_OWNER_GID', 'BACKUP_REPOSITORY_MIN_FREE_BYTES', 'BACKUP_REPOSITORY_ID',
+      'BACKUP_ENCRYPTION_RECIPIENT', 'BACKUP_ENCRYPTION_KEY_ID',
+      'AGE_PATH', 'AGE_VERSION', 'AGE_SHA256',
+      'BACKUP_LOCAL_PROTOCOL',
+    ]
+    for (const name of required) {
+      if (!config[name]) addError(`${name} is required when BACKUP_REPOSITORY_KIND=LOCAL_FILESYSTEM`)
+      else if (!explicit.has(name)) addError(`${name} must be explicitly configured for LOCAL_FILESYSTEM`)
+    }
+    const expectedRoot = config.BACKUP_SITE_ID
+      ? `/var/lib/darshan/${config.BACKUP_SITE_ID}/backup-repository`
+      : undefined
+    if (config.BACKUP_REPOSITORY_ROOT && (
+      !path.isAbsolute(config.BACKUP_REPOSITORY_ROOT)
+      || path.normalize(config.BACKUP_REPOSITORY_ROOT) !== config.BACKUP_REPOSITORY_ROOT
+      || config.BACKUP_REPOSITORY_ROOT !== expectedRoot
+    )) {
+      addError(`BACKUP_REPOSITORY_ROOT must be the canonical site-owned path ${expectedRoot}`)
+    }
+    if (config.BACKUP_REPOSITORY_DEVICE_ID) {
+      validatePositiveInteger('BACKUP_REPOSITORY_DEVICE_ID', config.BACKUP_REPOSITORY_DEVICE_ID, 1, 9_007_199_254_740_991, addError)
+    }
+    for (const name of ['BACKUP_REPOSITORY_OWNER_UID', 'BACKUP_REPOSITORY_OWNER_GID']) {
+      if (config[name]) validatePositiveInteger(name, config[name], 0, 2_147_483_647, addError)
+    }
+    if (config.BACKUP_REPOSITORY_OWNER_UID && config.BACKUP_REPOSITORY_OWNER_UID !== '1000') {
+      addError('BACKUP_REPOSITORY_OWNER_UID must be 1000 for the packaged backend worker user')
+    }
+    if (config.BACKUP_REPOSITORY_OWNER_GID && config.BACKUP_REPOSITORY_OWNER_GID !== '1000') {
+      addError('BACKUP_REPOSITORY_OWNER_GID must be 1000 for the packaged backend worker group')
+    }
+    if (config.BACKUP_REPOSITORY_MIN_FREE_BYTES) {
+      validatePositiveInteger('BACKUP_REPOSITORY_MIN_FREE_BYTES', config.BACKUP_REPOSITORY_MIN_FREE_BYTES, 1_073_741_824, 9_007_199_254_740_991, addError)
+    }
+    if (config.BACKUP_REPOSITORY_ID && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(config.BACKUP_REPOSITORY_ID)) {
+      addError('BACKUP_REPOSITORY_ID must be a canonical lowercase UUID')
+    }
+    if (config.BACKUP_ENCRYPTION_RECIPIENT && !/^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$/.test(config.BACKUP_ENCRYPTION_RECIPIENT)) {
+      addError('BACKUP_ENCRYPTION_RECIPIENT must be a canonical native age X25519 recipient')
+    }
+    if (config.BACKUP_ENCRYPTION_KEY_ID && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(config.BACKUP_ENCRYPTION_KEY_ID)) {
+      addError('BACKUP_ENCRYPTION_KEY_ID must be a stable non-secret identifier')
+    }
+    for (const name of ['AGE_PATH']) {
+      if (config[name] && !path.posix.isAbsolute(config[name])) addError(`${name} must be an absolute runtime path`)
+    }
+    if (config.AGE_VERSION && !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(config.AGE_VERSION)) {
+      addError('AGE_VERSION must be an exact semantic version')
+    }
+    for (const name of ['AGE_SHA256']) {
+      if (config[name]) validateSha256Field(name, config[name], addError)
+    }
+    if (!['V1_HELPER', 'V2_BROKER'].includes(config.BACKUP_LOCAL_PROTOCOL)) {
+      addError('BACKUP_LOCAL_PROTOCOL must explicitly select V1_HELPER or V2_BROKER for LOCAL_FILESYSTEM')
+    } else if (config.BACKUP_LOCAL_PROTOCOL === 'V1_HELPER') {
+      for (const name of ['BACKUP_CAPSULE_HELPER_PATH', 'BACKUP_CAPSULE_HELPER_VERSION', 'BACKUP_CAPSULE_HELPER_SHA256']) {
+        if (!config[name]) addError(`${name} is required for BACKUP_LOCAL_PROTOCOL=V1_HELPER`)
+      }
+      if (config.BACKUP_CAPSULE_HELPER_PATH && !path.posix.isAbsolute(config.BACKUP_CAPSULE_HELPER_PATH)) addError('BACKUP_CAPSULE_HELPER_PATH must be an absolute runtime path')
+      if (config.BACKUP_CAPSULE_HELPER_SHA256) validateSha256Field('BACKUP_CAPSULE_HELPER_SHA256', config.BACKUP_CAPSULE_HELPER_SHA256, addError)
+      for (const name of BACKUP_REPOSITORY_FIELDS.filter((name) => name.startsWith('BACKUP_BROKER_') || name.startsWith('BACKUP_WORKER_SPOOL_') ||
+        name.startsWith('BACKUP_RECOVERY_') || name.startsWith('RECOVERY_') || name === 'BACKUP_MANIFEST_PUBLIC_KEYRING_FILE')) {
+        if (config[name]) addError(`${name} must be omitted for BACKUP_LOCAL_PROTOCOL=V1_HELPER`)
+      }
+    } else {
+      const v2Required = ['BACKUP_BROKER_SOCKET_DIR', 'BACKUP_WORKER_SPOOL_ROOT', 'BACKUP_WORKER_SPOOL_DEVICE_ID', 'BACKUP_WORKER_SPOOL_MIN_FREE_BYTES',
+        'BACKUP_BROKER_HELPER_VERSION', 'BACKUP_BROKER_ARTIFACT_MODE', 'BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID',
+        'BACKUP_BROKER_CPU_LIMIT', 'BACKUP_BROKER_MEMORY_LIMIT', 'BACKUP_BROKER_PIDS_LIMIT', 'BACKUP_RECOVERY_SOCKET_DIR',
+        'RECOVERY_OPERATOR_CONFIG_ROOT', 'RECOVERY_PLAN_ROOT', 'RECOVERY_JOURNAL_ROOT', 'RECOVERY_REVIEW_ROOT', 'RECOVERY_EVIDENCE_ROOT', 'RECOVERY_DOCKER_CONFIG_ROOT',
+        'RECOVERY_CPU_LIMIT', 'RECOVERY_MEMORY_LIMIT', 'RECOVERY_PIDS_LIMIT', 'RECOVERY_SCRATCH_TMPFS_BYTES',
+        'RECOVERY_HOME_TMPFS_BYTES', 'RECOVERY_TMP_TMPFS_BYTES', 'RECOVERY_JOURNAL_MIN_FREE_BYTES',
+        'RECOVERY_EVIDENCE_MIN_FREE_BYTES', 'RECOVERY_OUTPUT_MIN_FREE_BYTES', 'RECOVERY_BROKER_CONTROL_TIMEOUT_MS', 'RECOVERY_RUN_TIMEOUT_MS',
+        'RECOVERY_STDOUT_MAX_BYTES', 'RECOVERY_STDERR_MAX_BYTES']
+      for (const name of v2Required) {
+        if (!config[name]) addError(`${name} is required for BACKUP_LOCAL_PROTOCOL=V2_BROKER`)
+        else if (!explicit.has(name)) addError(`${name} must be explicitly configured for V2_BROKER`)
+      }
+      for (const [name, expected] of [['BACKUP_BROKER_SOCKET_DIR', `/var/lib/darshan/${config.BACKUP_SITE_ID}/backup-broker-socket`],
+        ['BACKUP_RECOVERY_SOCKET_DIR', `/var/lib/darshan/${config.BACKUP_SITE_ID}/recovery-broker-socket`],
+        ['BACKUP_WORKER_SPOOL_ROOT', `/var/lib/darshan/${config.BACKUP_SITE_ID}/backup-spool`],
+        ['RECOVERY_OPERATOR_CONFIG_ROOT', `/var/lib/darshan/${config.BACKUP_SITE_ID}/recovery-operator-config`],
+        ['RECOVERY_PLAN_ROOT', `/var/lib/darshan/${config.BACKUP_SITE_ID}/recovery-plans`],
+        ['RECOVERY_JOURNAL_ROOT', `/var/lib/darshan/${config.BACKUP_SITE_ID}/recovery-journal`],
+        ['RECOVERY_REVIEW_ROOT', `/var/lib/darshan/${config.BACKUP_SITE_ID}/recovery-reviews`],
+        ['RECOVERY_EVIDENCE_ROOT', `/var/lib/darshan/${config.BACKUP_SITE_ID}/recovery-evidence`],
+        ['RECOVERY_DOCKER_CONFIG_ROOT', `/var/lib/darshan/${config.BACKUP_SITE_ID}/recovery-docker-config`]]) {
+        if (config[name] && config[name] !== expected) addError(`${name} must be the canonical site-owned path ${expected}`)
+      }
+      if (config.BACKUP_WORKER_SPOOL_DEVICE_ID) validatePositiveInteger('BACKUP_WORKER_SPOOL_DEVICE_ID', config.BACKUP_WORKER_SPOOL_DEVICE_ID, 1, 9_007_199_254_740_991, addError)
+      if (config.BACKUP_WORKER_SPOOL_MIN_FREE_BYTES) validatePositiveInteger('BACKUP_WORKER_SPOOL_MIN_FREE_BYTES', config.BACKUP_WORKER_SPOOL_MIN_FREE_BYTES, 1_073_741_824, 9_007_199_254_740_991, addError)
+      if (config.BACKUP_BROKER_CPU_LIMIT) validateCpuLimit('BACKUP_BROKER_CPU_LIMIT', config.BACKUP_BROKER_CPU_LIMIT, addError)
+      if (config.BACKUP_BROKER_MEMORY_LIMIT) validateMemoryLimit('BACKUP_BROKER_MEMORY_LIMIT', config.BACKUP_BROKER_MEMORY_LIMIT, addError)
+      if (config.BACKUP_BROKER_PIDS_LIMIT) validatePositiveInteger('BACKUP_BROKER_PIDS_LIMIT', config.BACKUP_BROKER_PIDS_LIMIT, 16, 32768, addError)
+      if (config.RECOVERY_CPU_LIMIT) validateCpuLimit('RECOVERY_CPU_LIMIT', config.RECOVERY_CPU_LIMIT, addError)
+      if (config.RECOVERY_MEMORY_LIMIT) validateMemoryLimit('RECOVERY_MEMORY_LIMIT', config.RECOVERY_MEMORY_LIMIT, addError)
+      if (config.RECOVERY_MEMORY_LIMIT && !/^[1-9][0-9]*[kmg]$/i.test(config.RECOVERY_MEMORY_LIMIT)) addError('RECOVERY_MEMORY_LIMIT must use integer k/m/g units')
+      if (config.RECOVERY_PIDS_LIMIT) validatePositiveInteger('RECOVERY_PIDS_LIMIT', config.RECOVERY_PIDS_LIMIT, 16, 32768, addError)
+      for (const name of ['RECOVERY_SCRATCH_TMPFS_BYTES', 'RECOVERY_HOME_TMPFS_BYTES', 'RECOVERY_TMP_TMPFS_BYTES',
+        'RECOVERY_JOURNAL_MIN_FREE_BYTES', 'RECOVERY_EVIDENCE_MIN_FREE_BYTES', 'RECOVERY_OUTPUT_MIN_FREE_BYTES']) {
+        if (config[name]) validatePositiveInteger(name, config[name], 1_048_576, 9_007_199_254_740_991, addError)
+      }
+      if (config.RECOVERY_BROKER_CONTROL_TIMEOUT_MS) validatePositiveInteger('RECOVERY_BROKER_CONTROL_TIMEOUT_MS', config.RECOVERY_BROKER_CONTROL_TIMEOUT_MS, 1_000, 240_000, addError)
+      if (config.RECOVERY_RUN_TIMEOUT_MS) validatePositiveInteger('RECOVERY_RUN_TIMEOUT_MS', config.RECOVERY_RUN_TIMEOUT_MS, 60_000, 86_400_000, addError)
+      for (const name of ['RECOVERY_STDOUT_MAX_BYTES', 'RECOVERY_STDERR_MAX_BYTES']) {
+        if (config[name]) validatePositiveInteger(name, config[name], 1_024, 67_108_864, addError)
+      }
+      if (!['PREBUILT', 'PRODUCE'].includes(config.BACKUP_BROKER_ARTIFACT_MODE)) addError('BACKUP_BROKER_ARTIFACT_MODE must be PREBUILT or PRODUCE')
+      const stableManifestFields = ['BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE', 'BACKUP_MANIFEST_PUBLIC_KEYRING_FILE']
+      const artifactFields = ['BACKUP_BROKER_CAPSULE_FILE', 'BACKUP_BROKER_POLICY_FILE', 'BACKUP_BROKER_POLICY_TRUST_FILE']
+      const producerFields = ['BACKUP_AGE_BUILD_BINARY_FILE', 'BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE', 'BACKUP_CAPSULE_POLICY_KEY_ID']
+      for (const name of [...stableManifestFields, ...(config.BACKUP_BROKER_ARTIFACT_MODE === 'PRODUCE' ? producerFields : artifactFields)]) {
+        if (!config[name]) addError(`${name} is required for BACKUP_BROKER_ARTIFACT_MODE=${config.BACKUP_BROKER_ARTIFACT_MODE}`)
+        else if (!explicit.has(name)) addError(`${name} must be explicitly configured for ${config.BACKUP_BROKER_ARTIFACT_MODE}`)
+      }
+      for (const name of config.BACKUP_BROKER_ARTIFACT_MODE === 'PRODUCE' ? artifactFields : producerFields) {
+        if (config[name]) addError(`${name} must be omitted for BACKUP_BROKER_ARTIFACT_MODE=${config.BACKUP_BROKER_ARTIFACT_MODE}`)
+      }
+      for (const name of ['BACKUP_CAPSULE_HELPER_PATH', 'BACKUP_CAPSULE_HELPER_VERSION', 'BACKUP_CAPSULE_HELPER_SHA256']) {
+        if (config[name]) addError(`${name} must be omitted for BACKUP_LOCAL_PROTOCOL=V2_BROKER`)
+      }
+    }
+    for (const name of LEGACY_OFF_HOST_BACKUP_FIELDS) {
+      if (config[name]) addError(`${name} must be omitted when BACKUP_REPOSITORY_KIND=LOCAL_FILESYSTEM`)
+    }
+    return
+  }
+
+  for (const name of LEGACY_OFF_HOST_BACKUP_FIELDS) {
+    if (!config[name]) addError(`${name} is required when BACKUP_REPOSITORY_KIND=LEGACY_OFF_HOST`)
+    else if (!explicit.has(name)) addError(`${name} must be explicitly configured for LEGACY_OFF_HOST`)
+  }
+  for (const name of [
+    'BACKUP_REPOSITORY_ROOT', 'BACKUP_REPOSITORY_DEVICE_ID', 'BACKUP_REPOSITORY_OWNER_UID',
+    'BACKUP_REPOSITORY_OWNER_GID', 'BACKUP_REPOSITORY_MIN_FREE_BYTES', 'BACKUP_REPOSITORY_ID',
+    'BACKUP_ENCRYPTION_RECIPIENT', 'BACKUP_ENCRYPTION_KEY_ID', 'AGE_PATH', 'AGE_VERSION', 'AGE_SHA256',
+    'BACKUP_CAPSULE_HELPER_PATH', 'BACKUP_CAPSULE_HELPER_VERSION', 'BACKUP_CAPSULE_HELPER_SHA256',
+    'BACKUP_LOCAL_PROTOCOL', 'BACKUP_BROKER_SOCKET_DIR', 'BACKUP_WORKER_SPOOL_ROOT', 'BACKUP_WORKER_SPOOL_DEVICE_ID',
+    'BACKUP_WORKER_SPOOL_MIN_FREE_BYTES', 'BACKUP_BROKER_HELPER_VERSION', 'BACKUP_BROKER_CAPSULE_FILE',
+    'BACKUP_BROKER_POLICY_FILE', 'BACKUP_BROKER_POLICY_TRUST_FILE', 'BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE',
+    'BACKUP_MANIFEST_PUBLIC_KEYRING_FILE', 'BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID', 'BACKUP_BROKER_CPU_LIMIT',
+    'BACKUP_BROKER_MEMORY_LIMIT', 'BACKUP_BROKER_PIDS_LIMIT',
+  ]) {
+    if (config[name]) addError(`${name} must be omitted when BACKUP_REPOSITORY_KIND=LEGACY_OFF_HOST`)
+  }
+}
+
 function readJsonFile(name, value, addError) {
   try {
     return JSON.parse(fs.readFileSync(value, 'utf8'))
@@ -510,6 +751,45 @@ function readJsonFile(name, value, addError) {
 function validateSha256Field(name, value, addError) {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/i.test(value)) {
     addError(`${name} must be a SHA-256 hex digest`)
+  }
+}
+
+function canonicalJson(value) {
+  const visit = (item) => Array.isArray(item) ? item.map(visit) : item && typeof item === 'object'
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map(([key, child]) => [key, visit(child)]))
+    : item
+  return Buffer.from(`${JSON.stringify(visit(value))}\n`)
+}
+
+function validateAndDeriveBrokerArtifacts(config, addError) {
+  if (config.BACKUP_LOCAL_PROTOCOL !== 'V2_BROKER') return
+  try {
+    const protectedPaths = [config.RELEASE_SIGNING_PRIVATE_KEY, config.BACKUP_BROKER_POLICY_TRUST_FILE, config.BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE, config.BACKUP_MANIFEST_PUBLIC_KEYRING_FILE]
+    if (new Set(protectedPaths).size !== protectedPaths.length) throw new Error('release, policy trust, and manifest key inputs must use distinct files')
+    const verifier = path.join(PLATFORM_ROOT, 'darshan-server', 'node_modules', '.bin', 'tsx')
+    const script = path.join(PLATFORM_ROOT, 'darshan-server', 'scripts', 'validate-backup-broker-artifacts.ts')
+    const output = execFileSync(verifier, [script], { input: canonicalJson({
+      capsuleFile: config.BACKUP_BROKER_CAPSULE_FILE,
+      policyFile: config.BACKUP_BROKER_POLICY_FILE,
+      policyTrustFile: config.BACKUP_BROKER_POLICY_TRUST_FILE,
+      manifestPrivateKeyFile: config.BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE,
+      manifestPublicKeyringFile: config.BACKUP_MANIFEST_PUBLIC_KEYRING_FILE,
+      releaseSigningPrivateKeyFile: config.RELEASE_SIGNING_PRIVATE_KEY,
+      manifestActiveKeyId: config.BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID,
+      siteId: config.BACKUP_SITE_ID,
+      repositoryId: config.BACKUP_REPOSITORY_ID,
+      releaseGeneration: config.RELEASE_ID,
+      deploymentGeneration: config.SITE_NAME,
+      compatibilityGeneration: PRODUCTION_COMPATIBILITY_GENERATION,
+      ageRecipientKeyId: config.BACKUP_ENCRYPTION_KEY_ID,
+    }), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+    const derived = JSON.parse(output)
+    config.BACKUP_BROKER_POLICY_SHA256 = derived.policySha256
+    config.BACKUP_CAPSULE_GENERATION = derived.capsuleGeneration
+    config.BACKUP_CAPSULE_SHA256 = derived.capsuleSha256
+    config.BACKUP_CAPSULE_SIZE_BYTES = derived.capsuleSizeBytes
+  } catch (error) {
+    addError(`V2 broker artifacts are invalid: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -725,10 +1005,11 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
     addError('GRAFANA_ADMIN_USER must be 3-64 letters, numbers, dot, underscore, or hyphen')
   }
   if (config.GRAFANA_ADMIN_PASSWORD) validateSecret('GRAFANA_ADMIN_PASSWORD', config.GRAFANA_ADMIN_PASSWORD, 24, addError)
+  validateBackupPolicy(config, parsed.explicit, addError)
   if (config.BACKUP_OFFHOST_ACCESS_KEY) validateBackupCredential('BACKUP_OFFHOST_ACCESS_KEY', config.BACKUP_OFFHOST_ACCESS_KEY, 8, addError)
   if (config.BACKUP_OFFHOST_SECRET_KEY) validateBackupCredential('BACKUP_OFFHOST_SECRET_KEY', config.BACKUP_OFFHOST_SECRET_KEY, 16, addError)
   if (config.BACKUP_INTERVAL_HOURS) validatePositiveInteger('BACKUP_INTERVAL_HOURS', config.BACKUP_INTERVAL_HOURS, 1, 168, addError)
-  if (config.BACKUP_RETENTION_DAYS) validatePositiveInteger('BACKUP_RETENTION_DAYS', config.BACKUP_RETENTION_DAYS, 1, 3650, addError)
+  if (config.BACKUP_RETENTION_DAYS) validatePositiveInteger('BACKUP_RETENTION_DAYS', config.BACKUP_RETENTION_DAYS, 30, 3650, addError)
   if (config.BACKUP_OFFHOST_DESTINATION) validateOffHostBackupDestination(config.BACKUP_OFFHOST_DESTINATION, addError)
   if (config.BACKUP_OFFHOST_ENDPOINT) validateOffHostBackupEndpoint(config.BACKUP_OFFHOST_ENDPOINT, addError)
   if (config.CONTAINER_LOG_MAX_SIZE) validateMemoryLimit('CONTAINER_LOG_MAX_SIZE', config.CONTAINER_LOG_MAX_SIZE, addError)
@@ -755,6 +1036,17 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
     )
     privateKeys.push('CMS_TLS_KEY_FILE', 'BACKEND_TLS_KEY_FILE', 'MINIO_TLS_KEY_FILE', 'POSTGRES_TLS_KEY_FILE', 'VALKEY_TLS_KEY_FILE', 'OBSERVABILITY_TLS_KEY_FILE')
   }
+  if (config.BACKUP_LOCAL_PROTOCOL === 'V2_BROKER') {
+    if (config.BACKUP_BROKER_ARTIFACT_MODE === 'PREBUILT') {
+      requiredFiles.push('BACKUP_BROKER_CAPSULE_FILE', 'BACKUP_BROKER_POLICY_FILE', 'BACKUP_BROKER_POLICY_TRUST_FILE',
+        'BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE', 'BACKUP_MANIFEST_PUBLIC_KEYRING_FILE')
+      privateKeys.push('BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE')
+    } else if (config.BACKUP_BROKER_ARTIFACT_MODE === 'PRODUCE') {
+      requiredFiles.push('BACKUP_AGE_BUILD_BINARY_FILE', 'BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE',
+        'BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE', 'BACKUP_MANIFEST_PUBLIC_KEYRING_FILE')
+      privateKeys.push('BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE', 'BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE')
+    }
+  }
   for (const name of requiredFiles) {
     if (!config[name]) {
       if (!parsed.invalidKeys.has(name)) addError(`${name} is required for TRANSPORT_TLS_MODE=${config.TRANSPORT_TLS_MODE}`)
@@ -769,6 +1061,7 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
     requireReadableFile('CAPACITY_EVIDENCE_FILE', config.CAPACITY_EVIDENCE_FILE, addError)
   }
   validateCapacityEvidence(config, addError)
+  if (config.BACKUP_BROKER_ARTIFACT_MODE === 'PREBUILT') validateAndDeriveBrokerArtifacts(config, addError)
   if (errors.length) throw createValidationError(errors)
   return { config, explicit: parsed.explicit, envFile: absoluteEnvFile, sourceText: text, secretFields: SECRET_FIELDS, outputs: OUTPUTS }
 }

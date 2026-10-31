@@ -132,12 +132,12 @@ export class EmergencyRepository {
       const [emergency] = await tx
         .update(schema.emergencies)
         .set({
-          cleared_at: new Date(),
+          cleared_at: sql`clock_timestamp()`,
           cleared_by,
           clear_reason: clear_reason ?? null,
           is_active: false,
           transition_version: sql`${schema.emergencies.transition_version} + 1`,
-          updated_at: new Date(),
+          updated_at: sql`clock_timestamp()`,
         })
         .where(and(
           eq(schema.emergencies.id, id),

@@ -10,7 +10,38 @@
     "scripts/backfill-document-page-counts.ts",
     "scripts/production-bootstrap.ts",
     "scripts/migrate-production.ts",
-    "scripts/seed.ts"
+    "scripts/seed.ts",
+    "scripts/recovery-cli.ts",
+    "scripts/controlled-docker-recovery.ts",
+    "scripts/controlled-recovery-e2e-readiness.ts",
+    "scripts/controlled-recovery-e2e-run.ts",
+    "scripts/import-controlled-recovery-report.ts",
+    "scripts/recovery-runtime.ts",
+    "scripts/development/controlled-recovery-d3-foundation.ts",
+    "scripts/development/controlled-recovery-d3-capture.ts",
+    "scripts/development/controlled-recovery-d3-reservation.ts",
+    "scripts/development/controlled-recovery-d3-reservation-prerequisites.ts",
+    "scripts/development/controlled-recovery-d3-broker.ts",
+    "scripts/development/controlled-recovery-d3-broker-enrollment.ts",
+    "scripts/development/controlled-recovery-d3-broker-prerequisites.ts",
+    "scripts/development/controlled-recovery-d3-broker-host.ts",
+    "scripts/development/controlled-recovery-d3-broker-storage.ts",
+    "scripts/development/controlled-recovery-d3-capsule.ts",
+    "scripts/development/controlled-recovery-d4-tools-image.ts",
+    "scripts/development/controlled-recovery-d3-source-backup.ts",
+    "scripts/development/controlled-recovery-d3-source-layout.ts",
+    "scripts/development/controlled-recovery-d3-source-executor.ts",
+    "scripts/development/controlled-recovery-d3-source-health.ts",
+    "scripts/controlled-recovery-d3-source.ts",
+    "scripts/recovery-target-helper-worker.ts",
+    "scripts/recovery-target-relay-worker.ts",
+    "scripts/controlled-recovery-d3-backup.ts",
+    "scripts/development/controlled-recovery-d3-backup-scoped.ts"
   ],
-  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test.ts",
+    "scripts/**/*.test.ts"
+  ]
 }

@@ -10,11 +10,11 @@ export function useSafeMutation<TData = unknown, TVariables = void>(
 
   return useMutation<TData, unknown, TVariables>({
     ...options,
-    onError: (err, vars, ctx) => {
+    onError: (err, vars, onMutateResult, context) => {
       const message =
         err instanceof ApiError ? err.message : fallbackMessage;
       toast({ title: "Error", description: message, variant: "destructive" });
-      options.onError?.(err, vars, ctx);
+      options.onError?.(err, vars, onMutateResult, context);
     },
   });
 }

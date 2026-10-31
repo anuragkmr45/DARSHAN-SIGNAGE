@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { closeTestServer, createTestServer } from '@/test/helpers';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, getDatabasePool, schema } from '@/db';
 import { recordDisplayProfile, updateDisplaySelection } from './screen-display-state-service';
 import type { DisplayProfileV1 } from '@/utils/display-profile';
 
@@ -85,5 +86,51 @@ describe('screen display state service', () => {
     });
     expect(selected.desired_selection).toEqual({ mode: 'PINNED', preferred_key: 'platform:1' });
     expect(selected.selection_version).toBe(2);
+  });
+
+  it('waits for the device lifecycle lock and commits profile plus legacy Screen dimensions together', async () => {
+    const db = getDatabase();
+    const pool = getDatabasePool();
+    if (!pool) throw new Error('PostgreSQL pool is required for display lifecycle tests');
+    const screenId = randomUUID();
+    await db.insert(schema.screens).values({ id: screenId, name: `Contended display state ${screenId}` });
+
+    const client = await pool.connect();
+    let write: ReturnType<typeof recordDisplayProfile> | undefined;
+    let settled = false;
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`darshan:device-pairing:${screenId}`],
+      );
+
+      write = recordDisplayProfile(screenId, profile()).finally(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(settled).toBe(false);
+
+      await client.query('ROLLBACK');
+      const result = await write;
+      expect(result.applied).toBe(true);
+
+      const [state] = await db
+        .select()
+        .from(schema.screenDisplayStates)
+        .where(eq(schema.screenDisplayStates.screen_id, screenId));
+      const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, screenId));
+      expect(state.profile_revision).toBe(1);
+      expect(screen).toEqual(expect.objectContaining({
+        width: 1920,
+        height: 1080,
+        aspect_ratio: '16:9',
+        orientation: 'LANDSCAPE',
+      }));
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+      await write?.catch(() => undefined);
+    }
   });
 });

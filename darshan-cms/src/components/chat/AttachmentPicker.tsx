@@ -309,7 +309,7 @@ export function AttachmentPicker({
           <DialogTitle>Add Attachments</DialogTitle>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "existing" | "upload")}>
           <TabsList>
             <TabsTrigger value="existing">Existing Media</TabsTrigger>
             <TabsTrigger value="upload">Upload New</TabsTrigger>

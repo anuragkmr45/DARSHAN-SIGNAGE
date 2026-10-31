@@ -95,13 +95,15 @@ const settingsCache: Record<SettingsSectionKey, unknown> = {
  */
 export function applyProductionBackupSchedule(value: BackupsSettings): BackupsSettings {
   if (appConfig.NODE_ENV !== 'production') return value;
-  if (!appConfig.BACKUP_INTERVAL_HOURS) {
+  if (appConfig.BACKUP_REPOSITORY_KIND === 'LEGACY_OFF_HOST' && !appConfig.BACKUP_INTERVAL_HOURS) {
     throw new Error('Production backup interval is not configured.');
   }
   return {
     ...value,
     automatic_enabled: true,
-    interval_hours: appConfig.BACKUP_INTERVAL_HOURS,
+    // Kept for the existing API shape; LOCAL_FILESYSTEM cadence is the
+    // deployment-owned daily time/timezone, not this legacy interval.
+    interval_hours: appConfig.BACKUP_INTERVAL_HOURS ?? 24,
   };
 }
 

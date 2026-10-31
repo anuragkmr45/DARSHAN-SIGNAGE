@@ -152,6 +152,8 @@ export default function Reports() {
 
   const canReadReports = can("read", "Report");
   const canReadAuditLogs = can("read", "AuditLog");
+  const canReadProofOfPlay = can("read", "ProofOfPlay");
+  const canReadEmergencyStatus = can("manage", "Emergency") || can("update", "Screen");
 
   const summaryQuery = useQuery({
     queryKey: ["reports-summary"],
@@ -162,7 +164,7 @@ export default function Reports() {
   const popQuery = useQuery({
     queryKey: ["pop-list"],
     queryFn: () => proofOfPlayApi.list({ limit: 10, page: 1 }),
-    enabled: canReadReports,
+    enabled: canReadReports && canReadProofOfPlay,
   });
 
   const auditLogsQuery = useQuery({
@@ -188,12 +190,14 @@ export default function Reports() {
     queryKey: ["emergency-status"],
     queryFn: emergencyApi.status,
     refetchInterval: 30_000,
-    enabled: canReadReports,
+    enabled: canReadReports && canReadEmergencyStatus,
   });
 
   useEffect(() => {
     const err =
-      (canReadReports && (summaryQuery.error || popQuery.error || notificationsQuery.error || emergencyQuery.error)) ||
+      (canReadReports && (summaryQuery.error || notificationsQuery.error)) ||
+      (canReadReports && canReadEmergencyStatus && emergencyQuery.error) ||
+      (canReadReports && canReadProofOfPlay && popQuery.error) ||
       (canReadAuditLogs && auditLogsQuery.error);
     if (err) {
       const message = err instanceof ApiError ? err.message : "Unable to load reports.";
@@ -202,6 +206,8 @@ export default function Reports() {
   }, [
     canReadReports,
     canReadAuditLogs,
+    canReadProofOfPlay,
+    canReadEmergencyStatus,
     summaryQuery.error,
     popQuery.error,
     auditLogsQuery.error,
@@ -260,6 +266,7 @@ export default function Reports() {
   }, [auditLogsPage, auditLogsTotalPages, auditLogsQuery.data]);
 
   const handleExportCsv = async () => {
+    if (!canReadProofOfPlay) return;
     try {
       setIsExportingCsv(true);
       const csv = await proofOfPlayApi.export();
@@ -423,7 +430,7 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          <Card>
+          {canReadEmergencyStatus && <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-500" />
@@ -460,7 +467,7 @@ export default function Reports() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </Card>}
         </div>
       )}
 
@@ -476,7 +483,7 @@ export default function Reports() {
                 {summaryQuery.isLoading ? (
                   <Skeleton className="h-7 w-16" />
                 ) : (
-                  <div className="text-2xl font-bold">{summary?.media_total ?? 0}</div>
+                  <div className="text-2xl font-bold">{summary?.total_media ?? 0}</div>
                 )}
               </CardContent>
             </Card>
@@ -490,14 +497,14 @@ export default function Reports() {
                 {summaryQuery.isLoading ? (
                   <Skeleton className="h-7 w-16" />
                 ) : (
-                  <div className="text-2xl font-bold">{summary?.screens_active ?? 0}</div>
+                  <div className="text-2xl font-bold">{summary?.active_screens ?? 0}</div>
                 )}
               </CardContent>
             </Card>
 
           </div>
 
-          <Card>
+          {canReadProofOfPlay && <Card>
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -532,7 +539,7 @@ export default function Reports() {
                 ))
               )}
             </CardContent>
-          </Card>
+          </Card>}
         </>
       )}
     </div>

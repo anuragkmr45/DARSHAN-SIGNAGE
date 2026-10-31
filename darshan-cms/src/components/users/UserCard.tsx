@@ -13,7 +13,7 @@ interface UserCardProps {
     canDelete?: boolean;
 }
 
-export function UserCard({ user, onEdit, onDelete, canEdit = true, canDelete = true }: UserCardProps) {
+export function UserCard({ user, onEdit, onDelete, canEdit = false, canDelete = false }: UserCardProps) {
     const { id, email, first_name, last_name, role, is_active } = user;
     const fullName = `${first_name || ""} ${last_name || ""}`.trim();
     const displayName = fullName || email;

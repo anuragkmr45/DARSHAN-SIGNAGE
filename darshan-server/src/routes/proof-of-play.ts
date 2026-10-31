@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, desc, gte, lte, eq, isNull, isNotNull, sql, inArray } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { stringify } from 'csv-stringify/sync';
 import { getPresignedUrl } from '@/s3';
@@ -65,7 +65,7 @@ export async function proofOfPlayRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'ProofOfPlay')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'ProofOfPlay')) throw AppError.forbidden('Forbidden');
 
         const query = listSchema.parse(request.query);
         const page = query.page;
@@ -172,7 +172,7 @@ export async function proofOfPlayRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'ProofOfPlay')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'ProofOfPlay')) throw AppError.forbidden('Forbidden');
 
         const query = listSchema.parse(request.query);
         const where = (buildConditions(query).length ? and(...buildConditions(query)) : undefined) as any;

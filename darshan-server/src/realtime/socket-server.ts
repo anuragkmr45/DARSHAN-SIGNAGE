@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { Namespace, Server as SocketIOServer } from 'socket.io';
+import { Namespace, Server as SocketIOServer, type Socket } from 'socket.io';
 import type { ServerOptions } from 'socket.io';
 import { config as appConfig } from '@/config';
 import {
@@ -7,6 +7,9 @@ import {
   recordRealtimeSocketDisconnect,
   setWebsocketConnections,
 } from '@/observability/metrics';
+import { requireCurrentSocketSession } from '@/realtime/socket-session';
+import { getDatabase, schema } from '@/db';
+import { and, eq } from 'drizzle-orm';
 
 const DEFAULT_ORIGIN = 'http://localhost:8080';
 const DEVELOPMENT_LOCAL_ORIGIN_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
@@ -14,6 +17,7 @@ const SOCKET_SERVER_KEY = Symbol.for('darshan.socket.io.server');
 const SOCKET_OBSERVABILITY_KEY = Symbol.for('darshan.socket.io.observability');
 const NAMESPACE_OBSERVABILITY_KEY = Symbol.for('darshan.socket.io.namespace.observability');
 let socketServer: SocketIOServer | null = null;
+const outboundSessionChecks = new WeakMap<Socket, Promise<void>>();
 
 type HttpServerWithSocket = {
   [SOCKET_SERVER_KEY]?: SocketIOServer;
@@ -193,4 +197,51 @@ export function disconnectAuthenticatedUserSockets(userId: string): void {
   for (const namespace of ['/chat', '/notifications', '/screens']) {
     io.of(namespace).in(room).disconnectSockets(true);
   }
+}
+
+/** Check the shared session table before every pushed event, including when the bus is unavailable. */
+export function emitToCurrentSockets(
+  namespace: Namespace,
+  rooms: readonly string[],
+  event: string,
+  payload?: unknown
+): Promise<void> {
+  const deliveries: Promise<void>[] = [];
+  for (const socket of namespace.sockets.values()) {
+    if (!rooms.some((room) => socket.rooms.has(room))) continue;
+    const prior = outboundSessionChecks.get(socket) ?? Promise.resolve();
+    const delivery = prior.catch(() => undefined).then(async () => {
+      if (!socket.connected || !rooms.some((room) => socket.rooms.has(room))) return;
+      try {
+        await withCurrentSocketSessionLock(socket, () => {
+          if (socket.connected && rooms.some((room) => socket.rooms.has(room))) {
+            if (payload === undefined) socket.emit(event);
+            else socket.emit(event, payload);
+          }
+        });
+      } catch {
+        socket.disconnect(true);
+      }
+    });
+    outboundSessionChecks.set(socket, delivery);
+    deliveries.push(delivery);
+  }
+  return Promise.all(deliveries).then(() => undefined);
+}
+
+/** Hold the session row while queuing a response so revocation cannot commit first. */
+export async function withCurrentSocketSessionLock<T>(socket: Socket, deliver: () => T | Promise<T>): Promise<T> {
+  const authenticated = await requireCurrentSocketSession(socket);
+  return getDatabase().transaction(async (tx) => {
+    const [session] = await tx.select({ expires_at: schema.sessions.expires_at })
+      .from(schema.sessions)
+      .where(and(eq(schema.sessions.access_jti, authenticated.jti),
+        eq(schema.sessions.user_id, authenticated.sub)))
+      .for('share');
+    if (!session || session.expires_at.getTime() <= Date.now()) {
+      socket.disconnect(true);
+      throw new Error('Socket session has been revoked');
+    }
+    return deliver();
+  });
 }

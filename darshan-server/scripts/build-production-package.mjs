@@ -2,7 +2,7 @@ import fs from 'node:fs';
 
 const source = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const scripts = Object.fromEntries(Object.entries(source.scripts).filter(([name]) => (
-  name === 'start' || name === 'start:api' || name === 'start:worker' || name.startsWith('production:')
+  name === 'start' || name === 'start:api' || name === 'start:worker' || name === 'start:backup-broker' || name.startsWith('production:')
 )));
 const runtimePackage = {
   name: source.name,

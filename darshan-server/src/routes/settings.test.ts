@@ -1,12 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { FastifyInstance } from 'fastify';
-import { eq, inArray } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
+import { closeTestServer, createTestActor, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { HTTP_STATUS } from '@/http-status-codes';
-import { generateAccessToken } from '@/auth/jwt';
-import { createSessionRepository } from '@/db/repositories/session';
 import {
   DEFAULT_MEDIA_SETTING_KEY,
   DEFAULT_MEDIA_TARGETS_SETTING_KEY,
@@ -15,19 +13,7 @@ import {
 } from '@/utils/default-media';
 
 async function issueSuperAdminToken() {
-  const db = getDatabase();
-  const [role] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'SUPER_ADMIN')).limit(1);
-  if (!role) {
-    throw new Error('SUPER_ADMIN role is required for settings route tests');
-  }
-
-  const token = await generateAccessToken(testUser.id, testUser.email, role.id, role.name);
-  await createSessionRepository().create({
-    user_id: testUser.id,
-    access_jti: token.jti,
-    expires_at: token.expiresAt,
-  });
-  return token.token;
+  return (await createTestActor('SUPER_ADMIN')).token;
 }
 
 describe('Settings routes - dimension-wise default media', () => {

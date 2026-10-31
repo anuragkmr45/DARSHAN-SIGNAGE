@@ -78,6 +78,14 @@ export const queryKeys = {
   mediaById: (mediaId?: string) => ["media", "by-id", mediaId] as const,
   presentations: ["presentations"] as const,
   users: ["users"] as const,
+  usersList: (userId: string | undefined, page: number, limit: number) =>
+    ["users", "list", userId ?? null, page, limit] as const,
+  operatorDirectory: (userId: string | undefined, page: number, limit: number) =>
+    ["users", "operators", userId ?? null, page, limit] as const,
+  invitationsList: (userId: string | undefined, page: number, limit: number) =>
+    ["invitations", "list", userId ?? null, page, limit] as const,
+  userManagementOptions: (userId?: string) => ["users", "management-options", userId] as const,
+  authorization: (userId?: string) => ["authorization", userId] as const,
   settings: ["settings"] as const,
   observabilityOverview: ["observability", "overview"] as const,
   observabilityScreen: (screenId?: string) => ["observability", "screen", screenId] as const,
@@ -86,7 +94,11 @@ export const queryKeys = {
   settingsSecurity: ["settings", "security"] as const,
   settingsAppearance: ["settings", "appearance"] as const,
   settingsBackups: ["settings", "backups"] as const,
-  settingsBackupRuns: ["settings", "backups", "history"] as const,
+  settingsBackupRoot: ["settings", "backups"] as const,
+  settingsBackupHistory: (params?: { limit?: number; cursor?: string }) =>
+    ["settings", "backups", "history", params?.limit ?? 20, params?.cursor ?? null] as const,
+  settingsBackupDetail: (backupId?: string) => ["settings", "backups", "detail", backupId ?? null] as const,
+  settingsBackupOperation: (operationId?: string) => ["settings", "backups", "operation", operationId ?? null] as const,
   settingsLogs: (filters?: { level?: string; limit?: number }) =>
     ["settings", "logs", filters?.level ?? null, filters?.limit ?? null] as const,
   defaultMedia: ["settings", "default-media"] as const,

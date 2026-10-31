@@ -1,5 +1,10 @@
 import { createHash, randomUUID } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/maintenance/worker-admission', () => ({
+  runWithWorkerAdmission: async <T>(_queueName: string, work: () => Promise<T>) => work(),
+}));
+
 import {
   getWebpageProcessingStage,
   processWebpageRefreshDueJob,

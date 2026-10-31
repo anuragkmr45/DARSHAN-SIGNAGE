@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { inArray } from 'drizzle-orm';
 import { createAuditLogRepository } from '@/db/repositories/audit-log';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
+import { subject } from '@casl/ability';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { respondWithError } from '@/utils/errors';
@@ -103,7 +104,7 @@ export async function auditLogRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
 
-        if (!ability.can('read', 'AuditLog')) {
+        if (!canUnconditionally(ability, 'read', 'AuditLog')) {
           throw AppError.forbidden('Forbidden');
         }
 
@@ -152,7 +153,7 @@ export async function auditLogRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
 
-        if (!ability.can('read', 'AuditLog')) {
+        if (!canUnconditionally(ability, 'read', 'AuditLog')) {
           throw AppError.forbidden('Forbidden');
         }
 
@@ -274,6 +275,9 @@ export async function auditLogRoutes(fastify: FastifyInstance) {
         const log = await auditRepo.findById(request.params.id);
         if (!log) {
           throw AppError.notFound('Audit log not found');
+        }
+        if (!(ability as any).can('read', subject('AuditLog', { ...log }))) {
+          throw AppError.forbidden('Forbidden');
         }
 
         const [serialized] = await serializeAuditLogs([log]);

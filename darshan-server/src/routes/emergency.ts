@@ -8,12 +8,13 @@ import { createMediaRepository } from '@/db/repositories/media';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
+import { config as appConfig } from '@/config';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, getDatabasePool, schema } from '@/db';
 import { getPresignedUrl } from '@/s3';
 import { AppError } from '@/utils/app-error';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import {
   authorizedEmergencyScreenIds,
   canAccessEmergencyTarget,
@@ -26,6 +27,7 @@ import { queueEmergencyTransitionReconcile } from '@/jobs';
 import { emitScreensRefreshRequired } from '@/realtime/screens-namespace';
 import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
 import { canReadContentResource } from '@/rbac/content-ownership';
+import { MaintenanceCoordinator } from '@/maintenance';
 
 const logger = createLogger('emergency-routes');
 const { CREATED } = HTTP_STATUS;
@@ -72,6 +74,10 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
   const emergencyTypeRepo = createEmergencyTypeRepository();
   const mediaRepo = createMediaRepository();
   const db = getDatabase();
+  const pool = getDatabasePool();
+  if (!pool) throw new Error('Database pool is not initialized.');
+  const maintenanceCoordinator = new MaintenanceCoordinator(pool);
+  const maintenanceSiteKey = appConfig.BACKUP_SITE_ID ?? 'local';
   const io: SocketIOServer = getOrCreateSocketServer(fastify);
 
   fastify.addHook('onClose', (_, done) => {
@@ -97,7 +103,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
     action: 'create' | 'read' | 'update' | 'delete'
   ) => {
     const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-    if (!ability.can(action, 'EmergencyType') && !isGlobalEmergencyController(ability)) {
+    if (!canUnconditionally(ability, action, 'EmergencyType') && !isGlobalEmergencyController(ability)) {
       throw AppError.forbidden('Forbidden');
     }
     return ability;
@@ -622,6 +628,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
               idempotency_key: idempotencyKey,
               request_fingerprint: requestFingerprint,
             }, executor);
+            await maintenanceCoordinator.preemptForEmergency(executor, maintenanceSiteKey);
             return { emergency, replay: false };
           });
         } catch (error) {
@@ -773,12 +780,16 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
             throw AppError.forbidden('Forbidden');
           }
 
-          return emergencyRepo.clear(
+          const result = await emergencyRepo.clear(
             currentEmergency.id,
             actor.userId,
             clearPayload.clear_reason ?? null,
             executor
           );
+          if (result?.transitioned) {
+            await maintenanceCoordinator.preemptForEmergency(executor, maintenanceSiteKey);
+          }
+          return result;
         });
 
         if (!clearResult) {

@@ -109,6 +109,9 @@ export class DeviceStateStore {
       lastSuccessfulPairingAt: undefined,
       lastHeartbeatAt: undefined,
       recoveryReason: reason,
+      recoveryGeneration: undefined,
+      recoveryGenerationReceiptSha256: undefined,
+      recoveryGenerationAcceptedAt: undefined,
       installInstanceId: undefined,
       duplicateIdentity: undefined,
       hardRecoveryDeadlineAt: undefined,
@@ -128,6 +131,28 @@ export class DeviceStateStore {
       lastPairingValidatedAt: undefined,
       lastValidatedDeviceId: undefined,
       lastValidatedServerIdentity: undefined,
+    })
+  }
+
+  async acceptRecoveryGeneration(input: { generation: string; receiptSha256: string; acceptedAt?: string }): Promise<DeviceStateRecord> {
+    if (!/^[0-9a-f-]{36}$/i.test(input.generation) || !/^[a-f0-9]{64}$/.test(input.receiptSha256)) {
+      throw new Error('Invalid recovery generation receipt')
+    }
+    if (this.state.recoveryGeneration === input.generation) return this.getState()
+    return await this.update({
+      recoveryGeneration: input.generation,
+      recoveryGenerationReceiptSha256: input.receiptSha256,
+      recoveryGenerationAcceptedAt: input.acceptedAt || new Date().toISOString(),
+      recentCommands: [],
+      lastObservedStateVersion: undefined,
+      lastAppliedStateVersion: undefined,
+      lastDesiredStateVersion: undefined,
+      lastDesiredCommandVersion: undefined,
+      lastDesiredSnapshotId: undefined,
+      lastDesiredDefaultMediaVersion: undefined,
+      lastDesiredEmergencyVersion: undefined,
+      lastDesiredDisplaySelectionVersion: undefined,
+      lastDesiredStateAt: undefined,
     })
   }
 

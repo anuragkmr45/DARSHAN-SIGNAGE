@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { AppSettingsBootstrap } from "@/components/settings/AppSettingsBootstrap";
 import { useAppearanceSettings } from "@/hooks/useSettingsApi";
+import { useAuthorization } from "@/hooks/useAuthorization";
 import NotFound from "./pages/NotFound";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -34,14 +35,16 @@ const RouteLoadingFallback = () => (
 );
 
 export default function AuthenticatedAppShell() {
-  const { data: appearance } = useAppearanceSettings();
+  const { can } = useAuthorization();
+  const { data: appearance } = useAppearanceSettings(can("read", "OrgSettings"));
   const sidebarDefaultOpen = appearance?.sidebar_mode !== "collapsed";
 
   return (
     <ProtectedRoute>
-      <AppSettingsBootstrap />
-      <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-        <div className="operational-shell flex min-h-screen w-full bg-background">
+      <>
+        <AppSettingsBootstrap />
+        <SidebarProvider defaultOpen={sidebarDefaultOpen}>
+          <div className="operational-shell flex min-h-screen w-full bg-background">
           <AppSidebar />
           <div className="flex min-w-0 flex-1 flex-col">
             <AppHeader />
@@ -71,14 +74,15 @@ export default function AuthenticatedAppShell() {
                   <Route path="/api-keys" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "ApiKey" }]}><ApiKeys /></ProtectedRoute>} />
                   <Route path="/webhooks" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "Webhook" }]}><Webhooks /></ProtectedRoute>} />
                   <Route path="/sso-config" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "SsoConfig" }]}><SsoConfig /></ProtectedRoute>} />
-                  <Route path="/proof-of-play" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "ProofOfPlay" }, { action: "read", subject: "Report" }]}><ProofOfPlay /></ProtectedRoute>} />
+                  <Route path="/proof-of-play" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "ProofOfPlay" }]}><ProofOfPlay /></ProtectedRoute>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
             </main>
           </div>
-        </div>
-      </SidebarProvider>
+          </div>
+        </SidebarProvider>
+      </>
     </ProtectedRoute>
   );
 }

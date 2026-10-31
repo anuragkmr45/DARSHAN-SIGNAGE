@@ -15,7 +15,9 @@ import { AppError } from '@/utils/app-error';
 import { createRoleRepository } from '@/db/repositories/role';
 import { getIdleTimeoutSeconds } from '@/utils/settings';
 import { getDatabase, schema } from '@/db';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
+import { defineAbilityFor, hasGlobalUserManagement } from '@/rbac';
+import { canAuthenticateInviteState } from '@/auth/invite-state';
 
 const logger = createLogger('auth-routes');
 const { TOO_MANY_REQUESTS } = HTTP_STATUS;
@@ -100,12 +102,22 @@ export async function authRoutes(fastify: FastifyInstance) {
         if (!user.is_active) {
           throw AppError.forbidden('User account is inactive');
         }
+        if (!canAuthenticateInviteState(user.ext)) {
+          throw AppError.forbidden('Activate invitation before signing in');
+        }
 
         // Serialize session issuance with account update/tombstone. If login
         // commits first, the waiting account change removes this session; if
         // the account change commits first, the credential/state recheck below
         // prevents a session from being created from the stale pre-change row.
         const issued = await getDatabase().transaction(async (tx) => {
+          // Role edits lock the role graph before users and sessions. Login
+          // follows that order so concurrent revocation cannot deadlock it.
+          const roles = await tx
+            .select({ id: schema.roles.id, name: schema.roles.name })
+            .from(schema.roles)
+            .orderBy(asc(schema.roles.id))
+            .for('share');
           const [current] = await tx
             .select({
               id: schema.users.id,
@@ -117,6 +129,7 @@ export async function authRoutes(fastify: FastifyInstance) {
               department_id: schema.users.department_id,
               is_active: schema.users.is_active,
               deleted_at: schema.users.deleted_at,
+              ext: schema.users.ext,
             })
             .from(schema.users)
             .where(eq(schema.users.id, user.id))
@@ -128,15 +141,20 @@ export async function authRoutes(fastify: FastifyInstance) {
           if (!current.is_active) {
             return { status: 'inactive' as const };
           }
+          if (!canAuthenticateInviteState(current.ext)) {
+            return { status: 'pending_invitation' as const };
+          }
 
-          const [role] = await tx
-            .select({ id: schema.roles.id, name: schema.roles.name })
-            .from(schema.roles)
-            .where(eq(schema.roles.id, current.role_id))
-            .for('share');
+          const role = roles.find((candidate) => candidate.id === current.role_id);
           if (!role) {
             return { status: 'missing_role' as const };
           }
+
+          const ability = await defineAbilityFor(role.id, current.id, current.department_id ?? undefined, tx);
+          const authorization = {
+            rules: ability.rules,
+            is_global_user_manager: hasGlobalUserManagement(ability),
+          };
 
           const access = await generateAccessToken(
             current.id,
@@ -152,11 +170,14 @@ export async function authRoutes(fastify: FastifyInstance) {
             expires_at: access.expiresAt,
           });
 
-          return { status: 'issued' as const, current, role, ...access };
+          return { status: 'issued' as const, current, role, authorization, ...access };
         });
 
         if (issued.status === 'inactive') {
           throw AppError.forbidden('User account is inactive');
+        }
+        if (issued.status === 'pending_invitation') {
+          throw AppError.forbidden('Activate invitation before signing in');
         }
         if (issued.status === 'missing_role') {
           throw AppError.forbidden('Role not found');
@@ -165,7 +186,7 @@ export async function authRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Credentials or account state changed during login. Please try again.');
         }
 
-        const { current, role, token, expiresAt } = issued;
+        const { current, role, authorization, token, expiresAt } = issued;
         const csrfToken = randomUUID();
 
         // Issue cookies (JWT as HttpOnly, CSRF as readable token)
@@ -202,6 +223,7 @@ export async function authRoutes(fastify: FastifyInstance) {
             role: string;
             role_id: string;
             department_id: string | null;
+            authorization: typeof authorization;
           };
           expiresAt: string;
           token?: string;
@@ -215,6 +237,7 @@ export async function authRoutes(fastify: FastifyInstance) {
             role: role.name,
             role_id: role.id,
             department_id: current.department_id ?? null,
+            authorization,
           },
           expiresAt: expiresAt.toISOString(),
         };
@@ -296,6 +319,8 @@ export async function authRoutes(fastify: FastifyInstance) {
         }
 
         const role = await roleRepo.findById(user.role_id);
+        if (!role) throw AppError.unauthorized('Authorization context is stale. Please sign in again.');
+        const ability = await defineAbilityFor(role.id, user.id, user.department_id ?? undefined);
 
         return reply.send({
           id: user.id,
@@ -308,6 +333,10 @@ export async function authRoutes(fastify: FastifyInstance) {
           is_active: user.is_active,
           created_at: user.created_at.toISOString(),
           updated_at: user.updated_at.toISOString(),
+          authorization: {
+            rules: ability.rules,
+            is_global_user_manager: hasGlobalUserManagement(ability),
+          },
         });
       } catch (error) {
         logger.error(error, 'Get me error');

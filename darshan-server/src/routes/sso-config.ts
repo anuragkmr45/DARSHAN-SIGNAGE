@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createSsoConfigRepository } from '@/db/repositories/sso-config';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
@@ -43,7 +43,7 @@ export async function ssoConfigRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('manage', 'SsoConfig') && !ability.can('update', 'SsoConfig')) {
+        if (!canUnconditionally(ability, 'update', 'SsoConfig')) {
           throw AppError.forbidden('Forbidden');
         }
 
@@ -72,7 +72,7 @@ export async function ssoConfigRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'SsoConfig')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'SsoConfig')) throw AppError.forbidden('Forbidden');
 
         const result = await repo.listActive();
         return reply.send({ items: result });
@@ -98,7 +98,7 @@ export async function ssoConfigRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'SsoConfig')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'update', 'SsoConfig')) throw AppError.forbidden('Forbidden');
 
         const record = await repo.deactivate((request.params as any).id);
         if (!record) throw AppError.notFound('SSO config not found');

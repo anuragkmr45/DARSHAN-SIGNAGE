@@ -4,7 +4,7 @@ import { FastifyInstance } from 'fastify';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { closeTestServer, createTestServer, testRoles, testUser } from '@/test/helpers';
+import { closeTestServer, createTestActor, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { createSessionRepository } from '@/db/repositories/session';
 import { generateAccessToken } from '@/auth/jwt';
@@ -31,13 +31,7 @@ async function issueAdminTokenWithSession() {
 }
 
 async function issueOperatorTokenWithSession() {
-  const token = await generateAccessToken(testUser.id, testUser.email, testRoles.OPERATOR.id, testRoles.OPERATOR.name);
-  await createSessionRepository().create({
-    user_id: testUser.id,
-    access_jti: token.jti,
-    expires_at: token.expiresAt,
-  });
-  return token.token;
+  return (await createTestActor('OPERATOR')).token;
 }
 
 async function issueLimitedScreenTokenWithSession(allowedScreenId: string) {

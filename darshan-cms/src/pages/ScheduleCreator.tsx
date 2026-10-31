@@ -16,6 +16,7 @@ import { screensApi } from "@/api/domains/screens";
 import { queryKeys } from "@/api/queryKeys";
 import type {
   ReservationConflictItem,
+  PresentationSlotPayload,
   ScheduleItemPayload,
   ScreenSnapshot,
 } from "@/api/types";

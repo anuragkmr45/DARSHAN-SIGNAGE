@@ -82,9 +82,12 @@ export class ScreenRepository {
     };
   }
 
-  async listAspectRatios(options?: { search?: string }) {
+  async listAspectRatios(options?: { search?: string; ids?: string[] }) {
     const db = getDatabase();
     const conditions = [];
+    if (options?.ids) {
+      conditions.push(options.ids.length > 0 ? inArray(schema.screens.id, options.ids as any) : sql`false`);
+    }
     if (options?.search?.trim()) {
       const term = `%${options.search.trim()}%`;
       conditions.push(

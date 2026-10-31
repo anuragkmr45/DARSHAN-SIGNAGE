@@ -208,6 +208,53 @@ describe('Snapshot Manager', () => {
     expect(snapshotManager.getCurrentPlaylist()?.items).to.deep.equal([])
   })
 
+  it('keeps an emergency video loop active until expiry, then restores default content', async () => {
+    const baseTime = new Date('2026-09-07T10:00:00.000Z')
+    clock = sandbox.useFakeTimers({ now: baseTime, shouldAdvanceTime: false })
+
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+    sandbox.stub(getCacheManager(), 'prefetch').resolves()
+    sandbox.stub(getHttpClient(), 'getResponse').resolves({
+      status: 200,
+      headers: { etag: 'W/"video-emergency-v1"' },
+      data: {
+        server_time: baseTime.toISOString(),
+        content_state: 'default',
+        snapshot: null,
+        emergency: {
+          id: 'emergency-video-1',
+          active: true,
+          kind: 'MEDIA',
+          media_id: 'emergency-video',
+          media_url: 'https://cdn.example.com/emergency.mp4',
+          type: 'video',
+          loop_enabled: true,
+          version: 'emergency-video-1:1',
+          expires_at: '2026-09-07T10:00:01.000Z',
+        },
+        default_media: {
+          id: 'default-image',
+          media_id: 'default-image',
+          media_url: 'https://cdn.example.com/default.png',
+          type: 'image',
+        },
+      },
+    })
+
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const snapshotManager = getSnapshotManager()
+    const initial = await snapshotManager.refreshSnapshot()
+
+    expect(initial?.mode).to.equal('emergency')
+    expect(initial?.items[0]?.type).to.equal('video')
+    expect(initial?.items[0]?.loop).to.equal(true)
+
+    await clock.tickAsync(1000)
+    expect(snapshotManager.getCurrentPlaylist()?.mode).to.equal('default')
+    expect(snapshotManager.getCurrentPlaylist()?.items[0]?.mediaId).to.equal('default-image')
+  })
+
   it('should store the response ETag separately and force transition refreshes unconditionally', async () => {
     const { getHttpClient } = require('../../../src/main/services/network/http-client')
     const httpClient = getHttpClient()

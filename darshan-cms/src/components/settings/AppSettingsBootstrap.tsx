@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useTheme } from "next-themes";
 import { useAppearanceSettings, useBrandingSettings } from "@/hooks/useSettingsApi";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 const ACCENT_PRESETS: Record<
   "crimson" | "blue" | "emerald" | "amber" | "slate",
@@ -54,8 +55,9 @@ const ACCENT_PRESETS: Record<
 };
 
 export function AppSettingsBootstrap() {
-  const { data: branding } = useBrandingSettings();
-  const { data: appearance } = useAppearanceSettings();
+  const { can } = useAuthorization();
+  const { data: branding } = useBrandingSettings(can("read", "BrandingSettings"));
+  const { data: appearance } = useAppearanceSettings(can("read", "OrgSettings"));
   const { setTheme } = useTheme();
 
   useEffect(() => {

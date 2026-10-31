@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
+import { eq } from 'drizzle-orm';
 
 const { queueHeartbeatTelemetryMock, queueScreenStateRefreshMock } = vi.hoisted(() => ({
   queueHeartbeatTelemetryMock: vi.fn(),
@@ -40,7 +41,7 @@ describe('device telemetry screen refresh scheduling', () => {
     await closeTestServer(server);
   });
 
-  it('queues a debounced screen refresh after a heartbeat', async () => {
+  it('defers screen observation and refresh work to the admitted heartbeat worker', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();
     const serial = `serial-${randomUUID()}`;
@@ -74,7 +75,21 @@ describe('device telemetry screen refresh scheduling', () => {
     });
 
     expect(response.statusCode).toBe(HTTP_STATUS.OK);
-    expect(queueScreenStateRefreshMock).toHaveBeenCalledTimes(1);
-    expect(queueScreenStateRefreshMock).toHaveBeenCalledWith(deviceId);
+    expect(queueScreenStateRefreshMock).not.toHaveBeenCalled();
+    expect(queueHeartbeatTelemetryMock).toHaveBeenCalledWith(expect.objectContaining({
+      deviceId,
+      screenObservation: expect.objectContaining({ status: 'ACTIVE' }),
+      identityObservation: expect.objectContaining({
+        deviceId,
+        source: 'heartbeat',
+        observedAt: expect.any(String),
+      }),
+    }));
+    const [screenAfterReceipt] = await db
+      .select()
+      .from(schema.screens)
+      .where(eq(schema.screens.id, deviceId));
+    expect(screenAfterReceipt?.status).toBe('OFFLINE');
+    expect((screenAfterReceipt?.device_info as any)?.identity_sessions).toBeUndefined();
   });
 });

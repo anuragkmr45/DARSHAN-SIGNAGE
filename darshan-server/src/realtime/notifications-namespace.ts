@@ -15,6 +15,8 @@ import {
   authenticatedUserRoom,
   getOrCreateSocketServer,
   getSocketAllowedOrigins,
+  emitToCurrentSockets,
+  withCurrentSocketSessionLock,
 } from '@/realtime/socket-server';
 import {
   buildSafeSocketError,
@@ -171,12 +173,13 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
         }
 
         const unread_total = await counterRepo.getUnreadTotal(currentUser.sub);
-        if (ack) {
-          ack({ unread_total });
-        } else {
-          recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:count');
-          socket.emit('notifications:count', { unread_total });
-        }
+        await withCurrentSocketSessionLock(socket, () => {
+          if (ack) ack({ unread_total });
+          else {
+            recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:count');
+            socket.emit('notifications:count', { unread_total });
+          }
+        });
       } catch (error) {
         logger.warn(error, 'Failed to sync notification count');
       }
@@ -184,8 +187,10 @@ export async function setupNotificationsNamespace(fastify: FastifyInstance) {
 
     try {
       const unread_total = await counterRepo.getUnreadTotal(user.sub);
-      recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:count');
-      socket.emit('notifications:count', { unread_total });
+      await withCurrentSocketSessionLock(socket, () => {
+        recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:count');
+        socket.emit('notifications:count', { unread_total });
+      });
     } catch (error) {
       logger.warn(error, 'Failed to emit initial notification count');
     }
@@ -201,7 +206,6 @@ export function emitNotificationCountEvent(
 ) {
   const io = getOrCreateSocketServer(fastify);
   recordRealtimeSocketServerEvent(NOTIFICATIONS_NAMESPACE, 'notifications:count');
-  io.of(NOTIFICATIONS_NAMESPACE)
-    .to(notificationUserRoom(userId))
-    .emit('notifications:count', { unread_total });
+  void emitToCurrentSockets(io.of(NOTIFICATIONS_NAMESPACE), [notificationUserRoom(userId)],
+    'notifications:count', { unread_total });
 }

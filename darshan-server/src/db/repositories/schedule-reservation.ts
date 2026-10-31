@@ -1,5 +1,9 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
+import {
+  runWithContentMutationAdmission,
+  tryRunWithContentMutationAdmission,
+} from '@/maintenance/content-mutation-admission';
 
 type DBLike = ReturnType<typeof getDatabase> | any;
 
@@ -7,8 +11,42 @@ const ACTIVE_STATES = ['HELD', 'RESERVED', 'PUBLISHED'] as const;
 
 export type ScheduleReservationState = (typeof schema.scheduleReservationStateEnum.enumValues)[number];
 
+export function isScheduleReservationActiveAt(
+  reservation: {
+    state: ScheduleReservationState;
+    end_at: Date;
+    hold_expires_at?: Date | null;
+  },
+  now: Date,
+): boolean {
+  if (!ACTIVE_STATES.includes(reservation.state as (typeof ACTIVE_STATES)[number])) return false;
+  if (reservation.end_at.getTime() <= now.getTime()) return false;
+  if (
+    reservation.state === 'HELD' &&
+    reservation.hold_expires_at &&
+    reservation.hold_expires_at.getTime() < now.getTime()
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export class ScheduleReservationRepository {
   async expireStaleHolds(now = new Date(), db: DBLike = getDatabase()) {
+    return runWithContentMutationAdmission(
+      'schedule-reservations:expire-stale',
+      () => this.expireStaleHoldsPersisted(now, db),
+    );
+  }
+
+  async tryExpireStaleHolds(now = new Date(), db: DBLike = getDatabase()) {
+    return tryRunWithContentMutationAdmission(
+      'hidden-read:schedule-reservations-expire-stale',
+      () => this.expireStaleHoldsPersisted(now, db),
+    );
+  }
+
+  private async expireStaleHoldsPersisted(now: Date, db: DBLike) {
     const expiredRows = await db
       .update(schema.scheduleReservations)
       .set({
@@ -109,16 +147,25 @@ export class ScheduleReservationRepository {
       startAt: Date;
       endAt: Date;
       excludeRequestId?: string | null;
+      now?: Date;
     },
     db: DBLike = getDatabase()
   ) {
     if (params.screenIds.length === 0) return [];
+
+    const now = params.now ?? new Date();
 
     const conditions = [
       inArray(schema.scheduleReservations.screen_id, params.screenIds as any),
       inArray(schema.scheduleReservations.state, ACTIVE_STATES as any),
       lt(schema.scheduleReservations.start_at, params.endAt),
       gt(schema.scheduleReservations.end_at, params.startAt),
+      gt(schema.scheduleReservations.end_at, now),
+      or(
+        ne(schema.scheduleReservations.state, 'HELD'),
+        sql`${schema.scheduleReservations.hold_expires_at} IS NULL`,
+        sql`${schema.scheduleReservations.hold_expires_at} >= ${now}`,
+      ) as any,
     ];
 
     if (params.excludeRequestId) {

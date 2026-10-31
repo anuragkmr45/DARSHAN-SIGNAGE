@@ -9,6 +9,12 @@ import {
   requiredProductionWorkerFileBackedSecretKeys,
 } from './file-config';
 import { parseOffHostBackupLocation } from '@/utils/off-host-backup-location';
+import {
+  BACKUP_REPOSITORY_KINDS,
+  assertDailyBackupTime,
+  assertIanaTimeZone,
+  createBackupRepositoryPolicy,
+} from '@/backups/policy';
 
 const optionalTrimmedString = z.preprocess((value) => {
   if (typeof value !== 'string') return value;
@@ -77,8 +83,40 @@ const envSchema = z.object({
   LIBREOFFICE_PATH: z.string().default('soffice'),
   PG_DUMP_PATH: z.string().default('pg_dump'),
   TAR_PATH: z.string().default('tar'),
+  AGE_PATH: z.string().trim().min(1).default('age'),
+  AGE_VERSION: optionalTrimmedString,
+  AGE_SHA256: z.string().trim().regex(/^[a-f0-9]{64}$/i).optional(),
   BACKUP_INTERVAL_HOURS: z.coerce.number().int().min(1).max(168).optional(),
   BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).optional(),
+  BACKUP_REPOSITORY_KIND: z.enum(BACKUP_REPOSITORY_KINDS).optional(),
+  BACKUP_REPOSITORY_ROOT: optionalTrimmedString,
+  BACKUP_REPOSITORY_DEVICE_ID: z.string().trim().regex(/^\d+$/).optional(),
+  BACKUP_REPOSITORY_OWNER_UID: z.coerce.number().int().nonnegative().optional(),
+  BACKUP_REPOSITORY_OWNER_GID: z.coerce.number().int().nonnegative().optional(),
+  BACKUP_REPOSITORY_MIN_FREE_BYTES: z.coerce.number().int().positive().optional(),
+  BACKUP_REPOSITORY_ID: z.string().uuid().optional(),
+  BACKUP_ENCRYPTION_RECIPIENT: z.string().trim()
+    .regex(/^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$/, 'must be a canonical native age X25519 recipient')
+    .optional(),
+  BACKUP_ENCRYPTION_KEY_ID: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/).optional(),
+  BACKUP_CAPSULE_HELPER_PATH: optionalTrimmedString,
+  BACKUP_CAPSULE_HELPER_VERSION: optionalTrimmedString,
+  BACKUP_CAPSULE_HELPER_SHA256: z.string().trim().regex(/^[a-f0-9]{64}$/i).optional(),
+  BACKUP_LOCAL_PROTOCOL: z.enum(['V1_HELPER', 'V2_BROKER']).optional(),
+  BACKUP_BROKER_SOCKET_PATH: optionalTrimmedString,
+  BACKUP_BROKER_HELPER_VERSION: optionalTrimmedString,
+  BACKUP_BROKER_POLICY_SHA256: z.string().trim().regex(/^[a-f0-9]{64}$/i).optional(),
+  BACKUP_MANIFEST_PUBLIC_KEYRING_PATH: optionalTrimmedString,
+  BACKUP_POLICY_PUBLIC_KEYRING_PATH: optionalTrimmedString,
+  BACKUP_WORKER_SPOOL_ROOT: optionalTrimmedString,
+  BACKUP_WORKER_SPOOL_DEVICE_ID: z.string().trim().regex(/^\d+$/).optional(),
+  BACKUP_WORKER_SPOOL_OWNER_UID: z.coerce.number().int().nonnegative().optional(),
+  BACKUP_WORKER_SPOOL_OWNER_GID: z.coerce.number().int().nonnegative().optional(),
+  BACKUP_CAPSULE_GENERATION: optionalTrimmedString,
+  BACKUP_CAPSULE_SHA256: z.string().trim().regex(/^[a-f0-9]{64}$/i).optional(),
+  BACKUP_SITE_ID: optionalTrimmedString,
+  BACKUP_SCHEDULE_TIME: optionalTrimmedString,
+  BACKUP_SCHEDULE_TIMEZONE: optionalTrimmedString,
   BACKUP_OFFHOST_DESTINATION: optionalTrimmedString,
   BACKUP_OFFHOST_ENDPOINT: z.preprocess((value) => {
     if (typeof value !== 'string') return value;
@@ -210,7 +248,9 @@ if (parsed.data.NODE_ENV === 'production' && parsed.data.ADMIN_PASSWORD) {
 if (parsed.data.NODE_ENV === 'production') {
   assertProductionFileBackedSecrets(
     process.env,
-    isBackgroundWorkerProcess() ? requiredProductionWorkerFileBackedSecretKeys : requiredProductionFileBackedSecretKeys
+    isBackgroundWorkerProcess() && parsed.data.BACKUP_REPOSITORY_KIND === 'LEGACY_OFF_HOST'
+      ? requiredProductionWorkerFileBackedSecretKeys
+      : requiredProductionFileBackedSecretKeys
   );
   if (parsed.data.OBSERVABILITY_METRICS_BEARER_TOKEN) {
     assertProductionFileBackedSecrets(process.env, ['OBSERVABILITY_METRICS_BEARER_TOKEN']);
@@ -258,10 +298,10 @@ function assertProductionStateServiceTransport(input: z.infer<typeof envSchema>)
   }
 }
 
-function assertProductionDeviceAuthPolicy(input: z.infer<typeof envSchema>) {
+function assertProductionDeviceAuthPolicy(input: z.infer<typeof envSchema>, sourceEnv: NodeJS.ProcessEnv = process.env) {
   if (input.NODE_ENV !== 'production') return;
 
-  const requested = requestedProductionDeviceAuthMode(input);
+  const requested = requestedProductionDeviceAuthMode(input, sourceEnv);
   if (requested === 'signature' && input.DEVICE_SOCKET_LEGACY_AUTH_ALLOWED === true) {
     throw new Error('Production signature-only device authentication forbids DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true.');
   }
@@ -279,29 +319,80 @@ function assertProductionDeviceAuthPolicy(input: z.infer<typeof envSchema>) {
   }
 }
 
-function requestedProductionDeviceAuthMode(input: z.infer<typeof envSchema>) {
+function requestedProductionDeviceAuthMode(input: z.infer<typeof envSchema>, sourceEnv: NodeJS.ProcessEnv = process.env) {
   return (
-    process.env.DARSHAN_DEVICE_AUTH_MODE?.trim().toLowerCase() ||
-    process.env.HEXMON_DEVICE_AUTH_MODE?.trim().toLowerCase() ||
+    sourceEnv.DARSHAN_DEVICE_AUTH_MODE?.trim().toLowerCase() ||
+    sourceEnv.HEXMON_DEVICE_AUTH_MODE?.trim().toLowerCase() ||
     input.DEVICE_AUTH_MODE
   );
 }
 
-function assertProductionBackupPolicy(input: z.infer<typeof envSchema>) {
+function assertProductionBackupPolicy(input: z.infer<typeof envSchema>, sourceEnv: NodeJS.ProcessEnv = process.env, backgroundWorker = isBackgroundWorkerProcess()) {
   if (input.NODE_ENV !== 'production') return;
-  if (
-    !input.BACKUP_INTERVAL_HOURS ||
-    !input.BACKUP_RETENTION_DAYS ||
-    !input.BACKUP_OFFHOST_DESTINATION ||
-    !input.BACKUP_OFFHOST_ENDPOINT ||
-    !input.BACKUP_OFFHOST_REGION
-  ) {
+  if (!input.BACKUP_RETENTION_DAYS || !input.BACKUP_REPOSITORY_KIND || !input.BACKUP_SITE_ID ||
+      !input.BACKUP_SCHEDULE_TIME || !input.BACKUP_SCHEDULE_TIMEZONE) {
     throw new Error(
-      'Production requires BACKUP_INTERVAL_HOURS, BACKUP_RETENTION_DAYS, BACKUP_OFFHOST_DESTINATION, BACKUP_OFFHOST_ENDPOINT, and BACKUP_OFFHOST_REGION.'
+      'Production requires BACKUP_RETENTION_DAYS, BACKUP_REPOSITORY_KIND, BACKUP_SITE_ID, BACKUP_SCHEDULE_TIME, and BACKUP_SCHEDULE_TIMEZONE.'
     );
   }
-  if (isBackgroundWorkerProcess() && (!input.BACKUP_OFFHOST_ACCESS_KEY || !input.BACKUP_OFFHOST_SECRET_KEY)) {
-    throw new Error('Production worker requires file-backed off-host S3 credentials.');
+  if (input.BACKUP_RETENTION_DAYS < 30) {
+    throw new Error('Production BACKUP_RETENTION_DAYS must be at least 30.');
+  }
+  assertDailyBackupTime(input.BACKUP_SCHEDULE_TIME);
+  assertIanaTimeZone(input.BACKUP_SCHEDULE_TIMEZONE);
+  createBackupRepositoryPolicy({
+    kind: input.BACKUP_REPOSITORY_KIND,
+    siteId: input.BACKUP_SITE_ID,
+    root: input.BACKUP_REPOSITORY_ROOT,
+  });
+
+  if (input.BACKUP_REPOSITORY_KIND === 'LOCAL_FILESYSTEM') {
+    for (const name of [
+      'AGE_IDENTITY',
+      'AGE_IDENTITY_FILE',
+      'BACKUP_ENCRYPTION_IDENTITY',
+      'BACKUP_ENCRYPTION_IDENTITY_FILE',
+    ]) {
+      if (sourceEnv[name]?.trim()) {
+        throw new Error(`Production LOCAL_FILESYSTEM forbids private age identity field ${name}; workers receive only a public recipient.`);
+      }
+    }
+    if (!input.BACKUP_REPOSITORY_DEVICE_ID || input.BACKUP_REPOSITORY_OWNER_UID === undefined ||
+        input.BACKUP_REPOSITORY_OWNER_GID === undefined || !input.BACKUP_REPOSITORY_MIN_FREE_BYTES) {
+      throw new Error('LOCAL_FILESYSTEM production backups require device identity, owner uid/gid, and minimum free bytes.');
+    }
+    if (backgroundWorker) {
+      if (!input.BACKUP_REPOSITORY_ID || !input.BACKUP_ENCRYPTION_RECIPIENT || !input.BACKUP_ENCRYPTION_KEY_ID) {
+        throw new Error('LOCAL_FILESYSTEM production worker requires repository id, public encryption recipient, and encryption key id.');
+      }
+      if (!input.AGE_PATH.startsWith('/') || !input.AGE_VERSION || !input.AGE_SHA256) {
+        throw new Error('LOCAL_FILESYSTEM production worker requires an absolute AGE_PATH plus pinned AGE_VERSION and AGE_SHA256 metadata.');
+      }
+      if (!input.BACKUP_LOCAL_PROTOCOL) {
+        throw new Error('LOCAL_FILESYSTEM production worker requires an explicit BACKUP_LOCAL_PROTOCOL; protocol fallback is forbidden.');
+      }
+      if (input.BACKUP_LOCAL_PROTOCOL === 'V1_HELPER' &&
+          (!input.BACKUP_CAPSULE_HELPER_PATH?.startsWith('/') || !input.BACKUP_CAPSULE_HELPER_VERSION || !input.BACKUP_CAPSULE_HELPER_SHA256)) {
+        throw new Error('V1_HELPER production worker requires the absolute combined backup host-helper path plus pinned version and SHA-256 metadata.');
+      }
+      if (input.BACKUP_LOCAL_PROTOCOL === 'V2_BROKER') {
+        if (!input.BACKUP_BROKER_SOCKET_PATH?.startsWith('/') || !input.BACKUP_BROKER_HELPER_VERSION || !input.BACKUP_BROKER_POLICY_SHA256 ||
+            !input.BACKUP_MANIFEST_PUBLIC_KEYRING_PATH?.startsWith('/') || !input.BACKUP_WORKER_SPOOL_ROOT?.startsWith('/') ||
+            !input.BACKUP_WORKER_SPOOL_DEVICE_ID || input.BACKUP_WORKER_SPOOL_OWNER_UID === undefined || input.BACKUP_WORKER_SPOOL_OWNER_GID === undefined ||
+            !input.BACKUP_CAPSULE_GENERATION || !input.BACKUP_CAPSULE_SHA256) {
+          throw new Error('V2_BROKER production worker requires pinned broker, public keyring, capsule, and owned worker-spool policy.');
+        }
+      }
+    }
+    return;
+  }
+
+  if (!input.BACKUP_INTERVAL_HOURS || !input.BACKUP_OFFHOST_DESTINATION ||
+      !input.BACKUP_OFFHOST_ENDPOINT || !input.BACKUP_OFFHOST_REGION) {
+    throw new Error('LEGACY_OFF_HOST requires the legacy interval, destination, endpoint, and region settings.');
+  }
+  if (backgroundWorker && (!input.BACKUP_OFFHOST_ACCESS_KEY || !input.BACKUP_OFFHOST_SECRET_KEY)) {
+    throw new Error('LEGACY_OFF_HOST production worker requires file-backed off-host S3 credentials.');
   }
 
   const endpoint = new URL(input.BACKUP_OFFHOST_ENDPOINT);
@@ -312,6 +403,19 @@ function assertProductionBackupPolicy(input: z.infer<typeof envSchema>) {
     throw new Error('Production BACKUP_OFFHOST_ENDPOINT must not point to localhost or an IP address.');
   }
   parseOffHostBackupLocation(input.BACKUP_OFFHOST_DESTINATION);
+}
+
+/** Pure entry point used by fixed deployment tooling to exercise the same production schema and policies as module startup. */
+export function validateBackendProductionEnvironment(sourceEnv: NodeJS.ProcessEnv, options: { backgroundWorker: boolean }) {
+  const runtime = buildBackendRuntimeEnv(sourceEnv); const result = envSchema.safeParse(runtime.env);
+  if (!result.success) throw new Error(`Invalid environment variables: ${JSON.stringify(result.error.flatten().fieldErrors)}`);
+  if (result.data.NODE_ENV !== 'production') throw new Error('D3 backend validation requires NODE_ENV=production.');
+  if (result.data.ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD is forbidden in production.');
+  assertProductionFileBackedSecrets(sourceEnv, requiredProductionFileBackedSecretKeys);
+  if ((result.data.LOGIN_THROTTLE_PROVIDER ?? 'valkey') !== 'valkey' || !resolveValkeyUrl(result.data)) throw new Error('Production login throttling requires Valkey.');
+  assertProductionStateServiceTransport(result.data); assertProductionDeviceAuthPolicy(result.data, sourceEnv);
+  assertProductionBackupPolicy(result.data, sourceEnv, options.backgroundWorker);
+  return { env: result.data, diagnostics: runtime.diagnostics };
 }
 
 function isBackgroundWorkerProcess() {

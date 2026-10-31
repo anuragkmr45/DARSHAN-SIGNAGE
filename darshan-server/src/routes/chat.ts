@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
+import { subject as caslSubject } from '@casl/ability';
 import { z } from 'zod';
 import { inArray } from 'drizzle-orm';
 import { config as appConfig } from '@/config';
@@ -19,12 +20,17 @@ import { assertCanWriteToConversation, assertConversationWritable, assertNotBann
 import { getDatabase, schema } from '@/db';
 import { queueChatMediaCleanup, queueCleanup } from '@/jobs';
 import { canAccessDirectoryUser } from '@/rbac/user-directory';
+import { canReadContentResource } from '@/rbac/content-ownership';
+import type { AppAbility } from '@/rbac';
 
 const logger = createLogger('chat-routes');
 const chatRepo = createChatRepository();
 const auditRepo = createAuditLogRepository();
 const notificationCounterRepo = createNotificationCounterRepository();
 const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+
+const canActOnConversation = (ability: AppAbility, action: 'manage' | 'delete', conversation: object) =>
+  (ability as any).can(action, caslSubject('Conversation', { ...conversation }));
 
 const createDmSchema = z.object({
   otherUserId: z.string().uuid(),
@@ -403,7 +409,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
     { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       try {
-        const { payload, ability } = await authenticate(request);
+        const { payload } = await authenticate(request);
         const conversationId = (request.params as any).id;
         const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
         const moderation = await chatRepo.getModeration(conversationId, payload.sub);
@@ -571,16 +577,18 @@ export async function chatRoutes(fastify: FastifyInstance) {
             .from(schema.media)
             .where(inArray(schema.media.id, attachmentMediaIds));
 
-          assertAttachmentMediaReady(mediaRows);
-
           assertAttachmentAccess({
             requestedMediaIds: attachmentMediaIds,
-            mediaRows: mediaRows as Array<{ id: string; created_by?: string | null }>,
+            mediaRows,
             senderId: payload.sub,
-            senderRole: payload.role,
-            senderDepartmentId: payload.department_id,
-            canOverrideMedia: ability.can('update', 'Media'),
+            canReadMedia: (media) => canReadContentResource(
+              { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id ?? null },
+              media, ability, 'Media'
+            ),
+            canOverrideMedia: (media) =>
+              (ability as any).can('update', caslSubject('Media', { ...media })),
           });
+          assertAttachmentMediaReady(mediaRows);
 
           data.attachmentMediaIds = attachmentMediaIds;
         }
@@ -1055,7 +1063,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
 
         const member = await chatRepo.getMember(conversationId, payload.sub);
         const isConvAdmin = await chatRepo.isConversationAdmin(conversationId, payload.sub, payload.role);
-        if (conversation.invite_policy === 'INVITES_DISABLED' && !ability.can('manage', 'Conversation')) {
+        if (conversation.invite_policy === 'INVITES_DISABLED' && !canActOnConversation(ability, 'manage', conversation)) {
           throw AppError.forbidden('Invites are disabled');
         }
         if (conversation.invite_policy === 'ADMINS_ONLY_CAN_INVITE' && !isConvAdmin) {
@@ -1085,7 +1093,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
     { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       try {
-        const { payload, ability } = await authenticate(request);
+        const { payload } = await authenticate(request);
         const data = removeMemberSchema.parse(request.body);
         const conversationId = (request.params as any).id;
         const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
@@ -1159,7 +1167,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
         const conversationId = (request.params as any).id;
         const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
         if (conversation.type === 'DM') throw AppError.forbidden('DM cannot be archived');
-        if (!ability.can('manage', 'Conversation')) throw AppError.forbidden('Forbidden');
+        if (!canActOnConversation(ability, 'manage', conversation)) throw AppError.forbidden('Forbidden');
         const updated = await chatRepo.archiveConversation(conversationId);
         await appendAudit(request, payload.sub, 'CHAT_CONVERSATION_ARCHIVE', 'ChatConversation', conversationId);
         emitChatEvent(fastify, conversationId, 'chat:conversation:updated', {
@@ -1183,7 +1191,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
         const conversationId = (request.params as any).id;
         const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
         if (conversation.type === 'DM') throw AppError.forbidden('DM cannot be unarchived');
-        if (!ability.can('manage', 'Conversation')) throw AppError.forbidden('Forbidden');
+        if (!canActOnConversation(ability, 'manage', conversation)) throw AppError.forbidden('Forbidden');
         const updated = await chatRepo.unarchiveConversation(conversationId);
         await appendAudit(request, payload.sub, 'CHAT_CONVERSATION_UNARCHIVE', 'ChatConversation', conversationId);
         emitChatEvent(fastify, conversationId, 'chat:conversation:updated', {
@@ -1204,12 +1212,12 @@ export async function chatRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       try {
         const { payload, ability } = await authenticate(request);
-        if (!ability.can('delete', 'Conversation')) throw AppError.forbidden('Forbidden');
         const conversationId = (request.params as any).id;
         const conversation = await chatRepo.getConversationById(conversationId);
         if (!conversation || conversation.state === 'DELETED') {
           throw AppError.notFound('Conversation not found');
         }
+        if (!canActOnConversation(ability, 'delete', conversation)) throw AppError.forbidden('Forbidden');
 
         const result = await chatRepo.hardDeleteConversation(conversationId);
         if (result.mediaAssetIds.length) {
@@ -1258,7 +1266,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
         assertConversationWritable(conversation);
 
         if (conversation.type === 'DM') throw AppError.forbidden('Moderation is not supported for DM');
-        if (!ability.can('manage', 'Conversation')) throw AppError.forbidden('Forbidden');
+        if (!canActOnConversation(ability, 'manage', conversation)) throw AppError.forbidden('Forbidden');
 
         const moderation = await chatRepo.applyModerationAction({
           conversationId,

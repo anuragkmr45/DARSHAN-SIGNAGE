@@ -3,8 +3,8 @@ set -eu
 
 role="${DARSHAN_CONTAINER_ROLE:-}"
 case "$role" in
-  api|worker|recovery) ;;
-  *) echo "DARSHAN_CONTAINER_ROLE must be api, worker, or recovery." >&2; exit 1 ;;
+  api|worker|backup-broker|recovery) ;;
+  *) echo "DARSHAN_CONTAINER_ROLE must be api, worker, backup-broker, or recovery." >&2; exit 1 ;;
 esac
 
 copy_inputs() {
@@ -55,6 +55,16 @@ prepare_worker_runtime_dirs() {
 
 if [ "$role" = recovery ]; then
   copy_inputs /run/darshan-input-recovery /run/darshan-recovery true
+elif [ "$role" = backup-broker ]; then
+  # Broker inputs are mounted individually read-only. Do not copy or expose
+  # application/runtime secret directories to this service. The narrowly
+  # privileged listener supervisor is the only accepted root entry; it binds
+  # protected sockets, drops to uid:gid 1000:1000, then execs Node by FD.
+  if [ "$(id -u)" != 0 ] || [ "$(id -g)" != 0 ] || [ "${1:-}" != /usr/local/bin/backup-broker-listener ]; then
+    echo "Backup broker must start through the fixed listener supervisor." >&2
+    exit 1
+  fi
+  exec "$@"
 else
   copy_inputs /run/darshan-input-certs /app/certs true
   copy_inputs /run/darshan-input-secrets /run/secrets true
@@ -66,7 +76,20 @@ else
   fi
   if [ "$role" = worker ]; then
     prepare_worker_runtime_dirs
-    copy_inputs /run/darshan-input-worker-secrets /run/worker-secrets true
+    case "${BACKUP_REPOSITORY_KIND:-}" in
+      LEGACY_OFF_HOST)
+        copy_inputs /run/darshan-input-worker-secrets /run/worker-secrets true
+        ;;
+      LOCAL_FILESYSTEM|"")
+        # Local repositories have no off-host credential input. Production
+        # policy validation rejects an empty kind; the empty case keeps QA and
+        # non-production workers independent of production-only secrets.
+        ;;
+      *)
+        echo "Unsupported BACKUP_REPOSITORY_KIND: $BACKUP_REPOSITORY_KIND" >&2
+        exit 1
+        ;;
+    esac
     install -d -m 0700 -o node -g node /var/lib/darshan-worker/tmp
   fi
 fi

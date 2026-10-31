@@ -24,6 +24,8 @@ Media, Layout, Presentation, and Schedule rows store ownership separately from `
 
 Changing or deleting a creator never rewrites `created_by`, `owner_scope`, or `owner_department_id`. Schedule Requests inherit access and operational control from the Schedule's stored ownership instead of the requester's current department.
 
+Conditional custom-role grants are evaluated against the proposed fields and derived ownership when creating content, and against the stored resource for detail/mutation decisions. Only an unconditional effective `manage` grant bypasses owner scope or creates organization-owned content for a custom role. List queries intersect owner scope with supported equality conditions on `id`, `name`, `created_by`, `owner_scope`, and `owner_department_id` before pagination and count. Unsupported list-condition fields or malformed UUID values fail closed; they do not turn a conditional grant into a global listing. These paths have source/unit evidence but still require the dedicated PostgreSQL/API and CMS regression run.
+
 Nested references obey visibility closure:
 
 - An organization parent may reference only organization content.
@@ -31,6 +33,7 @@ Nested references obey visibility closure:
 - A restricted parent is administrator-only and may reference any scope.
 - Cross-department and narrower-child assignments are rejected before the write. Atomic slot replacement leaves the previous complete assignment unchanged when any proposed occurrence is invalid.
 - Schedule-item creation resolves the selected Presentation's Layout and every Media occurrence and rejects any incompatible descendant before inserting the item. Publication repeats the same centralized closure check so legacy/directly corrupted rows cannot enter an immutable player snapshot.
+- Chat message attachments are checked against each Media row's current read permission and stored owner scope before message insertion; a record-limited update override is evaluated per Media row. This path has source/unit evidence but still needs the database-backed chat route regression.
 
 ## Response contract
 
@@ -75,7 +78,7 @@ The operation is idempotent. A successful response has this shape:
 }
 ```
 
-A repeated authorized call returns HTTP `200`, `already_deleted: true`, and does not create a second deletion audit event.
+A repeated call by an authorized global User manager returns HTTP `200`, `already_deleted: true`, and does not create a second deletion audit event. A scoped manager receives `404` for the tombstone, consistent with non-global directory visibility.
 
 The database transaction:
 
@@ -150,11 +153,12 @@ Automatic database downgrade is unsupported. The additive columns may remain dur
 - Do not promise person-to-person reassignment; content remains with its organization/department scope.
 - After deletion, verify the user disappears from normal directories, existing sessions fail, and history shows `Created by <name> (Deleted)` without email.
 - If cleanup counts differ, inspect worker logs and the upload-session/media failure reason; do not delete retained READY content manually.
-- A department cannot be deleted while it has users or owns Media, Layouts, Presentations, or Schedules. The conflict response contains per-resource counts.
+- A department cannot be deleted while it has users or owns Media, Layouts, Presentations, or Schedules. The conflict response contains per-resource counts. User assignment holds a shared Department lock; deletion revalidates the current caller, applies its grant to the locked Department record, and checks/deletes in the same transaction so concurrent API operations cannot create an orphaned user. Migration `0048_user_department_foreign_key.sql` adds an indexed `users.department_id` foreign key with `ON DELETE RESTRICT`, closing the same integrity gap for direct database/import writers while preserving `NULL` as the unassigned state. It fails closed and reports legacy orphan rows instead of silently deleting or rewriting them.
 
 ## Source anchors
 
 - `drizzle/migrations/0045_deleted_user_content_ownership.sql`
+- `drizzle/migrations/0048_user_department_foreign_key.sql`
 - `src/rbac/content-ownership.ts`
 - `src/db/repositories/user.ts :: tombstone()`
 - `src/routes/users.ts :: DELETE /api/v1/users/:id`

@@ -7,14 +7,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DialogFooter } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, Eye, EyeOff, Loader2 } from "lucide-react";
-import { departmentsApi } from "@/api/domains/departments";
+import { usersApi } from "@/api/domains/users";
+import { queryKeys } from "@/api/queryKeys";
 import type { User } from "@/api/types";
 import type { UserFormData } from "@/types/user";
-import { useRolesList } from "@/hooks/useRolesApi";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { useAppSelector } from "@/store/hooks";
-import { canManageUserTarget } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
+import {
+    canSubmitUserMutation,
+    isManagementDepartmentSelectionValid,
+} from "@/lib/userProposalAuthorization";
 
 interface UserFormProps {
     user?: User | null;
@@ -25,7 +28,7 @@ interface UserFormProps {
 
 export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps) {
     const currentUser = useAppSelector((state) => state.auth.user);
-    const { can } = useAuthorization();
+    const { can, canRecord, isLoading: isAuthorizationLoading } = useAuthorization();
     const [showPassword, setShowPassword] = useState(false);
     const [formData, setFormData] = useState<UserFormData>({
         email: user?.email || "",
@@ -37,24 +40,16 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
         is_active: user?.is_active ?? true,
     });
 
-    const canManageUsersGlobally = can("manage", "User");
-    const canPickDepartment = canManageUsersGlobally && can("read", "Department");
-    const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
-        queryKey: ["departments"],
-        queryFn: () => departmentsApi.list({ page: 1, limit: 100 }),
-        enabled: canPickDepartment,
+    const optionsQuery = useQuery({
+        queryKey: queryKeys.userManagementOptions(currentUser?.id),
+        queryFn: usersApi.managementOptions,
+        enabled: Boolean(currentUser) && (can("create", "User") || can("update", "User")),
     });
-
-    const { data: rolesData, isLoading: isRolesLoading, error: rolesError } = useRolesList();
-    const roles = useMemo(
-        () =>
-            (rolesData?.items ?? []).filter((role) =>
-                canManageUserTarget(currentUser, role.name, currentUser?.department_id) ||
-                (canManageUsersGlobally && !role.is_system),
-            ),
-        [canManageUsersGlobally, currentUser, rolesData?.items],
-    );
-    const rolesErrorMessage = rolesError ? mapUsersErrorToUx(rolesError, "Failed to load roles") : null;
+    const canPickDepartment = optionsQuery.data?.is_global_user_manager === true;
+    const roles = useMemo(() => optionsQuery.data?.roles ?? [], [optionsQuery.data?.roles]);
+    const rolesErrorMessage = optionsQuery.error ? mapUsersErrorToUx(optionsQuery.error, "Failed to load account options") : null;
+    const isRolesLoading = optionsQuery.isLoading || isAuthorizationLoading;
+    const isDepartmentsLoading = optionsQuery.isLoading;
 
     useEffect(() => {
         setFormData({
@@ -74,23 +69,40 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
         }
     }, [formData.role_id, roles]);
 
-    const departments = departmentsData?.items || [];
+    const departments = optionsQuery.data?.departments ?? [];
     const currentDepartmentLabel = currentUser?.department_id ? "Assigned to your department" : "No department assigned";
-
-    const handleSubmit = () => {
-        onSubmit(formData);
-    };
 
     const updateField = (field: keyof UserFormData, value: string | boolean) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
+    const proposedUser = {
+        ...(user ?? {}),
+        ...formData,
+        department_id: formData.department_id?.trim() || (user ? null : undefined),
+        is_active: formData.is_active ?? user?.is_active ?? true,
+    };
+    const proposalAllowed = !isAuthorizationLoading &&
+        (!user || user.permissions?.can_update === true) &&
+        canSubmitUserMutation(canRecord, user ? "update" : "create", user ?? null, proposedUser);
+
+    const departmentSelectionValid = isManagementDepartmentSelectionValid(
+        canPickDepartment,
+        formData.department_id,
+        departments,
+    );
     const isValid =
         formData.email.trim() &&
         formData.first_name.trim() &&
         formData.last_name.trim() &&
-        Boolean(formData.role_id);
+        roles.some((role) => role.id === formData.role_id) &&
+        departmentSelectionValid;
     const requiresPassword = !user && !formData.password;
+
+    const handleSubmit = () => {
+        if (!isValid || !proposalAllowed || requiresPassword || (!user && !passwordValidation.valid)) return;
+        onSubmit(formData);
+    };
 
     // Password validation
     const validatePassword = (password: string) => {
@@ -127,6 +139,7 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
                     value={formData.email}
                     onChange={(e) => updateField("email", e.target.value)}
                     placeholder="user@example.com"
+                    disabled={Boolean(user) || isLoading}
                 />
             </div>
 
@@ -145,6 +158,7 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
                         <button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
+                            aria-label={showPassword ? "Hide password" : "Show password"}
                             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                         >
                             {showPassword ? (
@@ -252,11 +266,6 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
                             {departments.map((dept) => (
                                 <SelectItem key={dept.id} value={dept.id}>
                                     {dept.name}
-                                    {dept.description && (
-                                        <span className="text-xs text-muted-foreground ml-2">
-                                            - {dept.description}
-                                        </span>
-                                    )}
                                 </SelectItem>
                             ))}
                         </SelectContent>
@@ -264,13 +273,33 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
                 )}
             </div>
 
+            {optionsQuery.data && !departmentSelectionValid ? (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                        {formData.department_id
+                            ? "The selected department is no longer available for this account action."
+                            : "No permitted department is available for this account action."}
+                    </AlertDescription>
+                </Alert>
+            ) : null}
+
+            {Boolean(isValid) && !isAuthorizationLoading && !proposalAllowed ? (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                        These account details are outside your current permission scope.
+                    </AlertDescription>
+                </Alert>
+            ) : null}
+
             <DialogFooter>
                 <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
                     Cancel
                 </Button>
                 <Button
                     onClick={handleSubmit}
-                    disabled={isLoading || !isValid || requiresPassword || (!user && !passwordValidation.valid)}
+                    disabled={isLoading || isRolesLoading || !isValid || !proposalAllowed || requiresPassword || (!user && !passwordValidation.valid)}
                 >
                     {isLoading ? "Saving..." : user ? "Update User" : "Create User"}
                 </Button>

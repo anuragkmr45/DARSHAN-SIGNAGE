@@ -12,6 +12,7 @@ import { closeDatabase, getDatabase, initializeDatabase, schema } from '@/db';
 import { hashPassword } from '@/auth/password';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { testRoles, testUser } from '@/test/helpers';
+import { createChatRepository } from '@/db/repositories/chat';
 
 async function applyMigrationFile(filename: string) {
   const db = getDatabase();
@@ -245,5 +246,82 @@ describe('Conversation Routes - chat DM shim', () => {
       )
       .limit(1);
     expect(receipt).toBeTruthy();
+  });
+
+  it('applies a conditional Conversation read grant to the legacy DM shim', async () => {
+    const db = getDatabase();
+    const [operatorRole] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'OPERATOR')).limit(1);
+    const [owner] = await db.select().from(schema.users).where(eq(schema.users.id, testUser.id)).limit(1);
+    if (!operatorRole || !owner?.department_id) throw new Error('Missing legacy chat fixtures');
+
+    const actorId = randomUUID();
+    const roleId = randomUUID();
+    await db.insert(schema.roles).values({ id: roleId, name: `CONDITIONAL_DM_${roleId}`, is_system: false, permissions: { grants: [] } });
+    await db.insert(schema.users).values({
+      id: actorId,
+      email: `conditional-dm-${actorId}@example.com`,
+      password_hash: await hashPassword('Password123!'),
+      first_name: 'Conditional',
+      last_name: 'Reader',
+      role_id: roleId,
+      department_id: owner.department_id,
+      is_active: true,
+    });
+
+    const chatRepo = createChatRepository();
+    const permitted = await chatRepo.getOrCreateDm(actorId, testUser.id);
+    const denied = await chatRepo.getOrCreateDm(actorId, otherUserId);
+    await db.update(schema.roles).set({ permissions: { grants: [
+      { action: 'read', subject: 'Conversation', conditions: { id: permitted.id } },
+      { action: 'read', subject: 'User' },
+    ] } }).where(eq(schema.roles.id, roleId));
+
+    const token = await generateAccessToken(actorId, `conditional-dm-${actorId}@example.com`, roleId, `CONDITIONAL_DM_${roleId}`, owner.department_id);
+    await createSessionRepository().create({ user_id: actorId, access_jti: token.jti, expires_at: token.expiresAt });
+    const headers = { authorization: `Bearer ${token.token}` };
+
+    const list = await server.inject({ method: 'GET', url: '/api/v1/conversations', headers });
+    expect(list.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(list.body).items.map((item: { id: string }) => item.id)).toEqual([permitted.id]);
+
+    const allowedMessages = await server.inject({ method: 'GET', url: `/api/v1/conversations/${permitted.id}/messages`, headers });
+    expect(allowedMessages.statusCode).toBe(HTTP_STATUS.OK);
+    const deniedMessages = await server.inject({ method: 'GET', url: `/api/v1/conversations/${denied.id}/messages`, headers });
+    expect(deniedMessages.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+
+    const allowedStart = await server.inject({ method: 'POST', url: '/api/v1/conversations', headers, payload: { participant_id: testUser.id } });
+    expect(allowedStart.statusCode).toBe(HTTP_STATUS.CREATED);
+    const deniedStart = await server.inject({ method: 'POST', url: '/api/v1/conversations', headers, payload: { participant_id: otherUserId } });
+    expect(deniedStart.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+
+    const deniedSend = await server.inject({ method: 'POST', url: `/api/v1/conversations/${denied.id}/messages`, headers, payload: { content: 'must not send' } });
+    expect(deniedSend.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const deniedRead = await server.inject({ method: 'POST', url: `/api/v1/conversations/${denied.id}/read`, headers });
+    expect(deniedRead.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const [message] = await db.select().from(schema.chatMessages).where(and(eq(schema.chatMessages.conversation_id, denied.id), eq(schema.chatMessages.body_text, 'must not send'))).limit(1);
+    expect(message).toBeUndefined();
+    const [receipt] = await db.select().from(schema.chatReceipts).where(and(eq(schema.chatReceipts.conversation_id, denied.id), eq(schema.chatReceipts.user_id, actorId))).limit(1);
+    expect(receipt).toBeUndefined();
+
+    const legacyPeerId = randomUUID();
+    await db.insert(schema.users).values({
+      id: legacyPeerId,
+      email: `legacy-only-peer-${legacyPeerId}@example.com`,
+      password_hash: await hashPassword('Password123!'),
+      first_name: 'Legacy',
+      last_name: 'Only',
+      role_id: operatorRole.id,
+      department_id: owner.department_id,
+      is_active: true,
+    });
+    const [participantA, participantB] = [actorId, legacyPeerId].sort();
+    const [legacyOnly] = await db.insert(schema.conversations).values({
+      participant_a: participantA,
+      participant_b: participantB,
+    }).returning();
+    const legacyRead = await server.inject({ method: 'GET', url: `/api/v1/conversations/${legacyOnly.id}/messages`, headers });
+    expect(legacyRead.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const [migrated] = await db.select().from(schema.chatConversations).where(eq(schema.chatConversations.dm_pair_key, `${participantA}:${participantB}`)).limit(1);
+    expect(migrated).toBeUndefined();
   });
 });

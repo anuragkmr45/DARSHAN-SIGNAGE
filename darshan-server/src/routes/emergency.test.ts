@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
 import { eq, inArray } from 'drizzle-orm';
@@ -9,6 +9,7 @@ import { getDatabase, schema } from '@/db';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { reconcileEmergencyTransitions } from '@/services/emergency-transition-outbox';
 import { getActiveEmergencyForScreen } from '@/screens/playback';
+import * as s3 from '@/s3';
 
 function emergencyHeaders(adminToken: string, idempotencyKey = randomUUID()) {
   return {
@@ -108,6 +109,105 @@ describe('Emergency routes production contract', () => {
     });
     expect(typeResponse.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
     expect(JSON.parse(typeResponse.body).error.details.reason).toBe('MEDIA_NOT_READY');
+  });
+
+  it('derives emergency loop intent from the resolved media type', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    const videoId = randomUUID();
+    const imageId = randomUUID();
+    const videoObjectId = randomUUID();
+    const imageObjectId = randomUUID();
+    const presignedSpy = vi
+      .spyOn(s3, 'getPresignedUrl')
+      .mockImplementation(async (_bucket, key) => `https://cdn.example.test/${key}`);
+    const headObjectSpy = vi
+      .spyOn(s3, 'headObject')
+      .mockResolvedValue({ ContentType: 'application/octet-stream' });
+
+    try {
+      await db.insert(schema.storageObjects).values([
+        {
+          id: videoObjectId,
+          bucket: 'media-ready',
+          object_key: `emergency/${videoId}.mp4`,
+          content_type: 'video/mp4',
+          size: 1024,
+        },
+        {
+          id: imageObjectId,
+          bucket: 'media-ready',
+          object_key: `emergency/${imageId}.png`,
+          content_type: 'image/png',
+          size: 512,
+        },
+      ]);
+      await db.insert(schema.media).values([
+        {
+          id: videoId,
+          name: 'Emergency loop video',
+          type: 'VIDEO',
+          status: 'READY',
+          ready_object_id: videoObjectId,
+          created_by: testUser.id,
+        },
+        {
+          id: imageId,
+          name: 'Emergency still image',
+          type: 'IMAGE',
+          status: 'READY',
+          ready_object_id: imageObjectId,
+          created_by: testUser.id,
+        },
+      ]);
+      const inserted = await db.insert(schema.emergencies).values([
+        {
+          message: 'Video emergency',
+          priority: 'CRITICAL',
+          media_id: videoId,
+          screen_ids: [screenId],
+          screen_group_ids: [],
+          target_all: false,
+          triggered_by: testUser.id,
+        },
+        {
+          message: 'Image emergency',
+          priority: 'CRITICAL',
+          media_id: imageId,
+          screen_ids: [screenId],
+          screen_group_ids: [],
+          target_all: false,
+          triggered_by: testUser.id,
+        },
+      ]).returning();
+
+      const video = await getActiveEmergencyForScreen(screenId, {
+        db,
+        includeUrls: true,
+        groupIds: [],
+        activeEmergencies: [inserted[0]!],
+      });
+      const image = await getActiveEmergencyForScreen(screenId, {
+        db,
+        includeUrls: true,
+        groupIds: [],
+        activeEmergencies: [inserted[1]!],
+      });
+
+      expect(video).toEqual(expect.objectContaining({
+        media_id: videoId,
+        type: 'VIDEO',
+        loop_enabled: true,
+      }));
+      expect(image).toEqual(expect.objectContaining({
+        media_id: imageId,
+        type: 'IMAGE',
+        loop_enabled: false,
+      }));
+    } finally {
+      headObjectSpy.mockRestore();
+      presignedSpy.mockRestore();
+    }
   });
 
   it('allows multiple concurrent active emergencies and exposes sorted status details', async () => {

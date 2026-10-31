@@ -13,6 +13,13 @@ function repoPath(...segments) {
   return path.join(repositoryRoot, ...segments)
 }
 
+function canonicalJson(value) {
+  const visit = (item) => Array.isArray(item) ? item.map(visit) : item && typeof item === 'object'
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map(([key, child]) => [key, visit(child)]))
+    : item
+  return Buffer.from(`${JSON.stringify(visit(value))}\n`)
+}
+
 test('parser rejects unknown, duplicate, placeholder, and interpolated values', () => {
   assert.throws(() => parseBundleEnvText('UNKNOWN=value\n'), /unknown key/)
   assert.throws(() => parseBundleEnvText('SITE_NAME=a\nSITE_NAME=b\n'), /duplicates key/)
@@ -54,7 +61,7 @@ test('production config derives HTTPS and separates transport from device CA', (
     fs.chmodSync(file, name.endsWith('.key') ? 0o600 : 0o644)
   }
   const signingKey = path.join(secure, 'release-signing.key')
-  fs.writeFileSync(signingKey, 'test signing key')
+  fs.writeFileSync(signingKey, crypto.generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }))
   fs.chmodSync(signingKey, 0o600)
   const capacityEvidence = path.join(secure, 'capacity-evidence.json')
   fs.writeFileSync(capacityEvidence, `${JSON.stringify({
@@ -115,6 +122,10 @@ WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=24
 WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=100
 BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_DAYS=30
+BACKUP_REPOSITORY_KIND=LEGACY_OFF_HOST
+BACKUP_SITE_ID=site-a
+BACKUP_SCHEDULE_TIME=02:30
+BACKUP_SCHEDULE_TIMEZONE=Asia/Kolkata
 BACKUP_OFFHOST_DESTINATION=s3://offhost-backups.example.test/darshan/site-a
 BACKUP_OFFHOST_ENDPOINT=https://s3.offhost-backups.example.test
 BACKUP_OFFHOST_REGION=us-east-1
@@ -173,6 +184,8 @@ EXPORTER_PIDS_LIMIT=128
   assert.equal(loaded.config.OBSERVABILITY_METRICS_BEARER_TOKEN, 'abcdefghijklmnopqrstuvwxyz0123456789')
   assert.equal(loaded.config.POSTGRES_MONITORING_USER, 'darshan_monitoring')
   assert.equal(loaded.config.BACKUP_OFFHOST_ENDPOINT, 'https://s3.offhost-backups.example.test')
+  assert.equal(loaded.config.BACKUP_REPOSITORY_KIND, 'LEGACY_OFF_HOST')
+  assert.equal(loaded.config.BACKUP_SCHEDULE_TIMEZONE, 'Asia/Kolkata')
   assert.equal(loaded.config.CAPACITY_EVIDENCE_PROFILE_NAME, 'site-a-500-player-profile')
   assert.equal(loaded.config.CAPACITY_EVIDENCE_MAX_PLAYERS, '500')
   assert.equal(loaded.config.CAPACITY_EVIDENCE_VALID_UNTIL, '2099-01-01T00:00:00.000Z')
@@ -264,6 +277,192 @@ EXPORTER_PIDS_LIMIT=128
 
   fs.writeFileSync(envFile, validText.replace(/^BACKUP_OFFHOST_SECRET_KEY=.*\n/m, ''))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_OFFHOST_SECRET_KEY is required/)
+
+  const localText = validText
+    .replace('BACKUP_REPOSITORY_KIND=LEGACY_OFF_HOST', 'BACKUP_REPOSITORY_KIND=LOCAL_FILESYSTEM')
+    .replace(/^BACKUP_INTERVAL_HOURS=.*\n/m, '')
+    .replace(/^BACKUP_OFFHOST_DESTINATION=.*\n/m, '')
+    .replace(/^BACKUP_OFFHOST_ENDPOINT=.*\n/m, '')
+    .replace(/^BACKUP_OFFHOST_REGION=.*\n/m, '')
+    .replace(/^BACKUP_OFFHOST_ACCESS_KEY=.*\n/m, '')
+    .replace(/^BACKUP_OFFHOST_SECRET_KEY=.*\n/m, '')
+    .replace('BACKUP_RETENTION_DAYS=30', `BACKUP_RETENTION_DAYS=30
+BACKUP_REPOSITORY_ROOT=/var/lib/darshan/site-a/backup-repository
+BACKUP_REPOSITORY_DEVICE_ID=2049
+BACKUP_REPOSITORY_OWNER_UID=1000
+BACKUP_REPOSITORY_OWNER_GID=1000
+BACKUP_REPOSITORY_MIN_FREE_BYTES=10737418240
+BACKUP_REPOSITORY_ID=e7e59c16-0743-4fde-95c4-71853e935acd
+BACKUP_ENCRYPTION_RECIPIENT=age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+BACKUP_ENCRYPTION_KEY_ID=site-a-recovery-2026
+BACKUP_LOCAL_PROTOCOL=V1_HELPER
+AGE_PATH=/usr/local/bin/age
+AGE_VERSION=1.3.2
+AGE_SHA256=eb7dd1b518f0a307c99cd97782623c5321da049154b04acd2d98d21aa7bc9b2c
+BACKUP_CAPSULE_HELPER_PATH=/usr/local/libexec/darshan-backup-capsule
+BACKUP_CAPSULE_HELPER_VERSION=1
+BACKUP_CAPSULE_HELPER_SHA256=${'c'.repeat(64)}`)
+  fs.writeFileSync(envFile, localText)
+  const local = loadProductionBundleConfig(envFile, root)
+  assert.equal(local.config.BACKUP_REPOSITORY_KIND, 'LOCAL_FILESYSTEM')
+  assert.equal(local.config.BACKUP_REPOSITORY_ROOT, '/var/lib/darshan/site-a/backup-repository')
+  assert.equal(local.config.BACKUP_REPOSITORY_ID, 'e7e59c16-0743-4fde-95c4-71853e935acd')
+  assert.equal(local.config.BACKUP_OFFHOST_DESTINATION, undefined)
+  fs.writeFileSync(envFile, `${localText}\nRECOVERY_DOCKER_CONFIG_ROOT=/var/lib/darshan/site-a/recovery-docker-config\n`)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /RECOVERY_DOCKER_CONFIG_ROOT must be omitted/)
+
+  const capsule = Buffer.from('age-encryption.org/v1\nsynthetic-encrypted-test-capsule\n')
+  const capsuleFile = path.join(secure, 'configuration.tar.age')
+  const brokerPolicyFile = path.join(secure, 'capsule-policy.signed.json')
+  const brokerTrustFile = path.join(secure, 'capsule-policy-trust.json')
+  const manifestPrivateFile = path.join(secure, 'manifest-signing.key')
+  const manifestKeyringFile = path.join(secure, 'manifest-keyring.json')
+  const policyKeys = crypto.generateKeyPairSync('ed25519')
+  const manifestKeys = crypto.generateKeyPairSync('ed25519')
+  const retainedManifestKeys = crypto.generateKeyPairSync('ed25519')
+  const roles = ['backend', 'data', 'cms', 'valkey', 'observability']
+  const policy = {
+    version: 2,
+    generation: 'site-a-r1-capsule-1',
+    site_id: 'site-a',
+    repository_id: 'e7e59c16-0743-4fde-95c4-71853e935acd',
+    created_at: '2026-10-28T00:00:00.000Z',
+    capsule_sha256: crypto.createHash('sha256').update(capsule).digest('hex'),
+    capsule_size_bytes: String(capsule.byteLength),
+    release_generation: 'r1',
+    deployment_generation: 'site-a',
+    compatibility_generation: 1,
+    age_recipient_key_id: 'site-a-recovery-2026',
+    contract_id: 'darshan-production-capsule-v2:b0a8949493ef11cf3a045a74c17f9a29192f73db1d386b240253e59407bb3678',
+    encrypted_inventory_sha256: crypto.createHash('sha256').update('encrypted inventory fixture').digest('hex'),
+    required_roles: roles,
+  }
+  const signedPolicy = {
+    policy,
+    signature: {
+      algorithm: 'Ed25519',
+      key_id: 'capsule-policy-2026',
+      value_base64: crypto.sign(null, canonicalJson(policy), policyKeys.privateKey).toString('base64'),
+    },
+  }
+  const policyPublic = policyKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+  const manifestPrivate = manifestKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+  const manifestPublic = manifestKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+  fs.writeFileSync(capsuleFile, capsule)
+  fs.writeFileSync(brokerPolicyFile, `${JSON.stringify(signedPolicy)}\n`)
+  fs.writeFileSync(brokerTrustFile, `${JSON.stringify({ 'capsule-policy-2026': policyPublic })}\n`)
+  for (const file of [capsuleFile, brokerPolicyFile, brokerTrustFile]) fs.chmodSync(file, 0o640)
+  fs.writeFileSync(manifestPrivateFile, manifestPrivate)
+  fs.chmodSync(manifestPrivateFile, 0o600)
+  const retainedManifestPublic = retainedManifestKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString()
+  fs.writeFileSync(manifestKeyringFile, `${JSON.stringify({ 'manifest-2025': retainedManifestPublic, 'manifest-2026': manifestPublic })}\n`)
+  fs.chmodSync(manifestKeyringFile, 0o640)
+  const v2Text = localText
+    .replace('BACKUP_LOCAL_PROTOCOL=V1_HELPER', 'BACKUP_LOCAL_PROTOCOL=V2_BROKER')
+    .replace(/^BACKUP_CAPSULE_HELPER_PATH=.*\n/m, '')
+    .replace(/^BACKUP_CAPSULE_HELPER_VERSION=.*\n/m, '')
+    .replace(/^BACKUP_CAPSULE_HELPER_SHA256=.*\n/m, '')
+    .concat(`BACKUP_BROKER_SOCKET_DIR=/var/lib/darshan/site-a/backup-broker-socket
+BACKUP_RECOVERY_SOCKET_DIR=/var/lib/darshan/site-a/recovery-broker-socket
+BACKUP_WORKER_SPOOL_ROOT=/var/lib/darshan/site-a/backup-spool
+BACKUP_WORKER_SPOOL_DEVICE_ID=2049
+BACKUP_WORKER_SPOOL_MIN_FREE_BYTES=10737418240
+BACKUP_BROKER_HELPER_VERSION=2.0.0
+BACKUP_BROKER_ARTIFACT_MODE=PREBUILT
+BACKUP_BROKER_CAPSULE_FILE=${capsuleFile}
+BACKUP_BROKER_POLICY_FILE=${brokerPolicyFile}
+BACKUP_BROKER_POLICY_TRUST_FILE=${brokerTrustFile}
+BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE=${manifestPrivateFile}
+BACKUP_MANIFEST_PUBLIC_KEYRING_FILE=${manifestKeyringFile}
+BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID=manifest-2026
+BACKUP_BROKER_CPU_LIMIT=1
+BACKUP_BROKER_MEMORY_LIMIT=1g
+BACKUP_BROKER_PIDS_LIMIT=128
+RECOVERY_OPERATOR_CONFIG_ROOT=/var/lib/darshan/site-a/recovery-operator-config
+RECOVERY_PLAN_ROOT=/var/lib/darshan/site-a/recovery-plans
+RECOVERY_JOURNAL_ROOT=/var/lib/darshan/site-a/recovery-journal
+RECOVERY_REVIEW_ROOT=/var/lib/darshan/site-a/recovery-reviews
+RECOVERY_EVIDENCE_ROOT=/var/lib/darshan/site-a/recovery-evidence
+RECOVERY_DOCKER_CONFIG_ROOT=/var/lib/darshan/site-a/recovery-docker-config
+RECOVERY_CPU_LIMIT=1
+RECOVERY_MEMORY_LIMIT=512m
+RECOVERY_PIDS_LIMIT=128
+RECOVERY_SCRATCH_TMPFS_BYTES=268435456
+RECOVERY_HOME_TMPFS_BYTES=16777216
+RECOVERY_TMP_TMPFS_BYTES=67108864
+RECOVERY_JOURNAL_MIN_FREE_BYTES=1073741824
+RECOVERY_EVIDENCE_MIN_FREE_BYTES=1073741824
+RECOVERY_OUTPUT_MIN_FREE_BYTES=1073741824
+RECOVERY_BROKER_CONTROL_TIMEOUT_MS=60000
+RECOVERY_RUN_TIMEOUT_MS=14400000
+RECOVERY_STDOUT_MAX_BYTES=524288
+RECOVERY_STDERR_MAX_BYTES=524288
+`)
+  fs.writeFileSync(envFile, v2Text)
+  const v2 = loadProductionBundleConfig(envFile, root).config
+  assert.equal(v2.BACKUP_CAPSULE_GENERATION, policy.generation)
+  assert.equal(v2.BACKUP_CAPSULE_SHA256, policy.capsule_sha256)
+  assert.equal(v2.BACKUP_CAPSULE_SIZE_BYTES, policy.capsule_size_bytes)
+  assert.equal(v2.BACKUP_BROKER_POLICY_SHA256, crypto.createHash('sha256').update(canonicalJson(signedPolicy)).digest('hex'))
+  fs.writeFileSync(capsuleFile, 'not-an-age-capsule')
+  fs.writeFileSync(envFile, v2Text)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /age v1 framing header/)
+  fs.writeFileSync(capsuleFile, capsule)
+  fs.writeFileSync(brokerTrustFile, `${JSON.stringify({ 'capsule-policy-2026': policyKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString() })}\n`)
+  fs.writeFileSync(envFile, v2Text)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /public PEM only/)
+  fs.writeFileSync(brokerTrustFile, `${JSON.stringify({ 'capsule-policy-2026': policyPublic })}\n`)
+  const incompletePolicy = { ...policy, required_roles: ['backend'] }
+  const incompleteSignedPolicy = { policy: incompletePolicy, signature: { algorithm: 'Ed25519', key_id: 'capsule-policy-2026',
+    value_base64: crypto.sign(null, canonicalJson(incompletePolicy), policyKeys.privateKey).toString('base64') } }
+  fs.writeFileSync(brokerPolicyFile, canonicalJson(incompleteSignedPolicy))
+  fs.writeFileSync(envFile, v2Text)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /required_roles must be the exact production role set/)
+  fs.writeFileSync(brokerPolicyFile, canonicalJson(signedPolicy))
+  const manifestHardlink = path.join(secure, 'manifest-signing-hardlink.key')
+  fs.linkSync(manifestPrivateFile, manifestHardlink)
+  fs.writeFileSync(envFile, v2Text)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /single-link regular file/)
+  fs.unlinkSync(manifestHardlink)
+  fs.writeFileSync(manifestKeyringFile, `${JSON.stringify({ 'manifest-2025': retainedManifestKeys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), 'manifest-2026': manifestPublic })}\n`)
+  fs.writeFileSync(envFile, v2Text)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /public PEM only/)
+  fs.writeFileSync(manifestKeyringFile, `${JSON.stringify({ 'manifest-2025': retainedManifestPublic, 'manifest-2026': manifestPublic })}\n`)
+  fs.writeFileSync(envFile, `${v2Text}BACKUP_CAPSULE_HELPER_VERSION=1\n`)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /must be omitted for BACKUP_LOCAL_PROTOCOL=V2_BROKER/)
+
+  fs.writeFileSync(envFile, localText.replace(/^BACKUP_REPOSITORY_DEVICE_ID=.*\n/m, ''))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_REPOSITORY_DEVICE_ID is required/)
+
+  fs.writeFileSync(envFile, `${localText}\nBACKUP_OFFHOST_ENDPOINT=https://s3.offhost-backups.example.test\n`)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /must be omitted when BACKUP_REPOSITORY_KIND=LOCAL_FILESYSTEM/)
+
+  fs.writeFileSync(envFile, localText.replace(/^BACKUP_ENCRYPTION_RECIPIENT=.*\n/m, ''))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_ENCRYPTION_RECIPIENT is required/)
+
+  fs.writeFileSync(envFile, localText.replace(/^BACKUP_REPOSITORY_ID=.*$/m, 'BACKUP_REPOSITORY_ID=not-a-uuid'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_REPOSITORY_ID must be a canonical lowercase UUID/)
+
+  fs.writeFileSync(envFile, `${localText}\nAGE_IDENTITY_FILE=/run/secrets/recovery-key\n`)
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /forbidden private age identity field AGE_IDENTITY_FILE/)
+
+  fs.writeFileSync(envFile, localText.replace('/var/lib/darshan/site-a/backup-repository', '/tmp/site-a/backup-repository'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /canonical site-owned path/)
+
+  fs.writeFileSync(envFile, localText.replace('BACKUP_SCHEDULE_TIME=02:30', 'BACKUP_SCHEDULE_TIME=25:30'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_SCHEDULE_TIME must use 24-hour HH:mm format/)
+
+  fs.writeFileSync(envFile, localText.replace('BACKUP_SCHEDULE_TIMEZONE=Asia\/Kolkata', 'BACKUP_SCHEDULE_TIMEZONE=Not\/A_Zone'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /valid IANA timezone/)
+
+  fs.writeFileSync(envFile, localText.replace('BACKUP_SITE_ID=site-a', 'BACKUP_SITE_ID=site-b'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_SITE_ID must match SITE_NAME/)
+
+  fs.writeFileSync(envFile, validText.replace(/^BACKUP_REPOSITORY_KIND=.*\n/m, ''))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_REPOSITORY_KIND is required/)
+
+  fs.writeFileSync(envFile, validText.replace('BACKUP_RETENTION_DAYS=30', 'BACKUP_RETENTION_DAYS=29'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_RETENTION_DAYS must be an integer from 30/)
 
   fs.writeFileSync(envFile, validText.replace('POSTGRES_MEMORY_LIMIT=4g', 'POSTGRES_MEMORY_LIMIT=4096'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /POSTGRES_MEMORY_LIMIT must be/)
@@ -408,7 +607,7 @@ test('production web media runtime settings are emitted by generated artifacts',
     serverPackage.indexOf('    depends_on:', serverPackage.indexOf('  worker:')),
   )
 
-  assert.match(backendCompose, /TMPDIR: \/tmp/)
+  assert.match(backendCompose, /TMPDIR: \/var\/lib\/darshan-worker\/tmp/)
   assert.match(backendCompose, /DARSHAN_PROCESS_ROLE: worker/)
   assert.match(standaloneWorker, /DARSHAN_PROCESS_ROLE: worker/)
   assert.match(backendCompose, /HOME: \/tmp\/darshan-worker-home/)
@@ -416,13 +615,24 @@ test('production web media runtime settings are emitted by generated artifacts',
   assert.match(backendCompose, /XDG_CACHE_HOME: \/tmp\/darshan-worker-home\/\.cache/)
   assert.match(backendCompose, /DARSHAN_EXPECTED_WORKER_UID: "1000"/)
   assert.match(backendCompose, /DARSHAN_EXPECTED_WORKER_GID: "1000"/)
-  assert.doesNotMatch(backendCompose, /TMPDIR: \/var\/lib\/darshan-worker\/tmp/)
+  assert.doesNotMatch(backendCompose, /TMPDIR: \/tmp/)
   assert.match(assembler, /chromium-runtime-check\.sh/)
   assert.match(assembler, /production:verify-chromium-runtime/)
   assert.match(assembler, /run --rm --no-deps worker/)
   assert.match(cmsNginx, /client_max_body_size 1000M;/)
   assert.match(sharedCmsTemplate, /client_max_body_size 1000M;/)
   assert.match(productionCmsTemplate, /client_max_body_size 1000M;/)
+  for (const nginxConfig of [cmsNginx, sharedCmsTemplate, productionCmsTemplate]) {
+    assert.match(nginxConfig, /location \^~ \/media-staging\//)
+    assert.match(nginxConfig, /location \^~ \/media-source\//)
+    assert.doesNotMatch(
+      nginxConfig,
+      /location ~ \^\/\(\?:media-staging\|media-source\|media-ready/
+    )
+  }
+  assert.match(cmsNginx, /proxy_pass https:\/\/\$BACKEND_PRIVATE_HOST:\$API_HOST_PORT;/)
+  assert.match(sharedCmsTemplate, /proxy_pass http:\/\/__BACKEND_UPSTREAM_HOST__:__BACKEND_UPSTREAM_PORT__;/)
+  assert.match(productionCmsTemplate, /proxy_pass https:\/\/\$\{BACKEND_HOST\}:\$\{BACKEND_PORT\};/)
   assert.match(bundleConfig, /MAX_UPLOAD_MB must be exactly 500/)
   assert.doesNotMatch(bundleConfig, /512m proxy envelope/)
 })
@@ -473,8 +683,13 @@ test('production bundle requires and applies the explicit operations policy', ()
   const config = fs.readFileSync(repoPath('scripts/bundle/production-bundle-config.mjs'), 'utf8')
 
   for (const field of [
-    'BACKUP_INTERVAL_HOURS', 'BACKUP_RETENTION_DAYS', 'BACKUP_OFFHOST_DESTINATION',
-    'BACKUP_OFFHOST_ENDPOINT', 'BACKUP_OFFHOST_REGION',
+    'BACKUP_REPOSITORY_KIND', 'BACKUP_REPOSITORY_ROOT', 'BACKUP_REPOSITORY_DEVICE_ID',
+    'BACKUP_REPOSITORY_OWNER_UID', 'BACKUP_REPOSITORY_OWNER_GID', 'BACKUP_REPOSITORY_MIN_FREE_BYTES',
+    'BACKUP_REPOSITORY_ID', 'BACKUP_ENCRYPTION_RECIPIENT', 'BACKUP_ENCRYPTION_KEY_ID',
+    'AGE_PATH', 'AGE_VERSION', 'AGE_SHA256', 'BACKUP_CAPSULE_HELPER_PATH',
+    'BACKUP_CAPSULE_HELPER_VERSION', 'BACKUP_CAPSULE_HELPER_SHA256',
+    'BACKUP_SITE_ID', 'BACKUP_SCHEDULE_TIME', 'BACKUP_SCHEDULE_TIMEZONE', 'BACKUP_RETENTION_DAYS',
+    'BACKUP_INTERVAL_HOURS', 'BACKUP_OFFHOST_DESTINATION', 'BACKUP_OFFHOST_ENDPOINT', 'BACKUP_OFFHOST_REGION',
     'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES', 'DATA_MIN_FREE_DISK_BYTES',
   ]) {
     assert.match(config, new RegExp(`['\\\"]${field}['\\\"]`))
@@ -504,8 +719,78 @@ test('production bundle requires and applies the explicit operations policy', ()
   const apiBlock = productionBackendCompose.slice(productionBackendCompose.indexOf('  api:'), productionBackendCompose.indexOf('  worker:'))
   const workerBlock = productionBackendCompose.slice(productionBackendCompose.indexOf('  worker:'), productionBackendCompose.indexOf('  node-exporter:'))
   assert.doesNotMatch(apiBlock, /worker-secrets/)
-  assert.match(workerBlock, /\.\/worker-secrets:\/run\/darshan-input-worker-secrets:ro/)
+  assert.match(assembler, /kind === 'LOCAL_FILESYSTEM'/)
+  assert.match(assembler, /create_host_path: false/)
+  assert.match(assembler, /`        source: \$\{root\}`/)
+  assert.match(assembler, /`        target: \$\{root\}`/)
+  assert.match(assembler, /\.\/worker-secrets:\/run\/darshan-input-worker-secrets:ro/)
   assert.match(workerBlock, /\/run\/worker-secrets:mode=0700/)
+})
+
+test('worker runtime requires off-host secrets only for explicit legacy repository policy', () => {
+  const entrypoint = fs.readFileSync(repoPath('darshan-server/docker/runtime-entrypoint.sh'), 'utf8')
+  const workerPolicy = entrypoint.slice(entrypoint.indexOf('case "${BACKUP_REPOSITORY_KIND:-}"'))
+
+  assert.match(workerPolicy, /LEGACY_OFF_HOST\)[\s\S]*copy_inputs \/run\/darshan-input-worker-secrets \/run\/worker-secrets true/)
+  assert.match(workerPolicy, /LOCAL_FILESYSTEM\|""\)[\s\S]*;;/)
+  const localBranch = workerPolicy.slice(workerPolicy.indexOf('LOCAL_FILESYSTEM|""'), workerPolicy.indexOf(';;', workerPolicy.indexOf('LOCAL_FILESYSTEM|""')))
+  assert.doesNotMatch(localBranch, /copy_inputs/)
+})
+
+test('V2 broker generation isolates repository authority and keeps V1 and off-host branches explicit', () => {
+  const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
+  const entrypoint = fs.readFileSync(repoPath('darshan-server/docker/runtime-entrypoint.sh'), 'utf8')
+  const v2 = assembler.slice(
+    assembler.indexOf("kind === 'LOCAL_FILESYSTEM' && protocol === 'V2_BROKER'"),
+    assembler.indexOf("} else if (kind === 'LEGACY_OFF_HOST')"),
+  )
+
+  assert.match(assembler, /kind === 'LOCAL_FILESYSTEM' && protocol === 'V1_HELPER'/)
+  assert.match(assembler, /kind === 'LOCAL_FILESYSTEM' && protocol === 'V2_BROKER'/)
+  assert.match(v2, /user: \"0:0\"/)
+  assert.match(v2, /network_mode: none/)
+  assert.match(v2, /read_only: true/)
+  assert.match(v2, /cap_drop:/)
+  assert.match(v2, /no-new-privileges:true/)
+  assert.match(v2, /command: \[\"\/usr\/local\/bin\/backup-broker-listener\", \"\/usr\/local\/bin\/node\", \"\/app\/dist\/backups\/backup-broker-main\.js\"\]/)
+  for (const capability of ['CHOWN', 'KILL', 'SETGID', 'SETUID']) assert.match(v2, new RegExp(`- ${capability}`))
+  assert.match(v2, /source: \$\{root\}[\s\S]*target: \$\{root\}[\s\S]*read_only: false/)
+  assert.match(v2, /source: \$\{spoolRoot\}[\s\S]*target: \$\{spoolRoot\}[\s\S]*read_only: true/)
+  assert.match(v2, /source: \$\{socketDir\}[\s\S]*target: \/run\/darshan-backup-broker[\s\S]*read_only: false/)
+  assert.match(v2, /source: \.\/backup-worker-public[\s\S]*target: \/run\/darshan-backup-worker-public[\s\S]*create_host_path: false/)
+  assert.match(v2, /const apiVolumes = \[[\s\S]*source: \$\{root\}[\s\S]*target: \$\{root\}[\s\S]*read_only: true/)
+  assert.match(v2, /const apiVolumes = \[[\s\S]*source: \.\/backup-worker-public[\s\S]*target: \/run\/darshan-backup-worker-public[\s\S]*read_only: true/)
+  for (const name of ['configuration.tar.age', 'capsule-policy.signed.json', 'policy-trust.json', 'manifest-keyring.json', 'manifest-signing.key']) {
+    assert.ok(v2.includes(`['${name}', '${name}']`))
+  }
+  assert.match(v2, /source: \.\/backup-broker-inputs\/\$\{source\}[\s\S]*target: \/run\/darshan-backup-broker-inputs\/\$\{target\}[\s\S]*create_host_path: false/)
+  assert.match(v2, /BackupBrokerClient[\s\S]*await client\.describe\(\)/)
+  assert.match(v2, /test: \["CMD", "\/usr\/bin\/setpriv", "--reuid=1000", "--regid=1000", "--clear-groups", "--no-new-privs", "--inh-caps=-all", "--ambient-caps=-all", "--", "\/usr\/local\/bin\/node"/)
+  assert.doesNotMatch(v2, /env_file:/)
+  assert.doesNotMatch(v2, /ports:/)
+  assert.doesNotMatch(v2, /extra_hosts:/)
+  assert.doesNotMatch(v2, /docker\.sock/)
+  assert.doesNotMatch(v2, /pid: host/)
+  assert.match(v2, /condition: service_healthy/)
+  assert.match(assembler, /install -d -m 0710 -o root -g 1000 "\\\$BACKUP_BROKER_SOCKET_DIR" "\\\$BACKUP_RECOVERY_SOCKET_DIR"/)
+  assert.match(assembler, /Broker listener directory exclusion boundary is invalid/)
+  assert.match(entrypoint, /Backup broker must start through the fixed listener supervisor/)
+  assert.match(entrypoint, /elif \[ \"\$role\" = backup-broker \]; then[\s\S]*exec \"\$@\"/)
+})
+
+test('generated recovery bootstrap keeps preflight arguments usable and gives uid 1000 a private workspace', () => {
+  const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
+  const recovery = assembler.slice(
+    assembler.indexOf('cat > "$PROD_RECOVERY_DIR/docker-compose.yml"'),
+    assembler.indexOf('cat > "$PROD_RECOVERY_DIR/prepare-host.sh"'),
+  )
+
+  assert.match(recovery, /\[\[ "\$\{1:-\}" == "image-load" \]\]/)
+  assert.doesNotMatch(recovery, /\\\$\{1:-\}/)
+  assert.match(recovery, /\/tmp:rw,noexec,nosuid,nodev,mode=1700,uid=1000,gid=1000/)
+  for (const capability of ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETGID', 'SETUID']) {
+    assert.match(recovery, new RegExp(`- ${capability}`))
+  }
 })
 
 test('source-free validator forbids runtime admin password leakage', () => {

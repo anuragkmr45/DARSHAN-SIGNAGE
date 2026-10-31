@@ -3,6 +3,7 @@ import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import {
   createScheduleReservationRepository,
+  isScheduleReservationActiveAt,
   type ScheduleReservationState,
 } from '@/db/repositories/schedule-reservation';
 import { AppError } from '@/utils/app-error';
@@ -213,6 +214,7 @@ export class ScheduleReservationService {
     },
     db: DBLike = getDatabase()
   ): Promise<ReservationConflictItem[]> {
+    const now = new Date();
     await this.expireStaleHolds(db);
 
     const screenIds = Array.from(new Set(params.windows.map((window) => window.screen_id)));
@@ -244,6 +246,7 @@ export class ScheduleReservationService {
         }
         if (existing.screen_id !== window.screen_id) continue;
         if (!ACTIVE_STATES.has(existing.state as ScheduleReservationState)) continue;
+        if (!isScheduleReservationActiveAt(existing as any, now)) continue;
         if (!isOverlap(window.start_at, window.end_at, existing.start_at, existing.end_at)) continue;
 
         conflicts.push({

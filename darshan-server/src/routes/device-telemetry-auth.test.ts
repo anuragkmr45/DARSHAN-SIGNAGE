@@ -13,6 +13,8 @@ import {
   listDuplicateIdentityConflicts,
   recordDeviceIdentitySession,
 } from '@/services/device-identity-session-service';
+import { generateAccessToken } from '@/auth/jwt';
+import { processDeviceOperationalObservation } from '@/jobs/device-operational-observation';
 
 function createSignedDeviceHeaders(params: {
   method: string;
@@ -65,6 +67,98 @@ describe('Device telemetry auth runtime validation', () => {
     await closeTestServer(server);
   });
 
+  it('applies conditional Screen grants to the concrete CMS-token device target', async () => {
+    const db = getDatabase();
+    const readableScreenId = randomUUID();
+    const updateOnlyScreenId = randomUUID();
+    const hiddenScreenId = randomUUID();
+    const roleId = randomUUID();
+    const userId = randomUUID();
+    const roleName = `SCREEN_SCOPED_${roleId}`;
+    const email = `screen-scoped-${userId}@example.test`;
+
+    await db.insert(schema.screens).values([
+      { id: readableScreenId, name: 'Readable policy screen', status: 'ACTIVE' },
+      { id: updateOnlyScreenId, name: 'Update-only policy screen', status: 'ACTIVE' },
+      { id: hiddenScreenId, name: 'Hidden policy screen', status: 'ACTIVE' },
+    ]);
+    await db.insert(schema.roles).values({
+      id: roleId,
+      name: roleName,
+      is_system: false,
+      permissions: {
+        grants: [
+          { action: 'read', subject: 'Screen', conditions: { id: readableScreenId } },
+          { action: 'update', subject: 'Screen', conditions: { id: updateOnlyScreenId } },
+        ],
+      },
+    });
+    await db.insert(schema.users).values({
+      id: userId,
+      email,
+      password_hash: 'not-used-by-token-test',
+      role_id: roleId,
+      is_active: true,
+    });
+    const access = await generateAccessToken(userId, email, roleId, roleName);
+    await db.insert(schema.sessions).values({
+      user_id: userId,
+      access_jti: access.jti,
+      expires_at: access.expiresAt,
+    });
+
+    for (const screenId of [readableScreenId, updateOnlyScreenId]) {
+      const allowed = await server.inject({
+        method: 'GET',
+        url: `/api/v1/device/${screenId}/screenshot-policy`,
+        headers: { authorization: `Bearer ${access.token}` },
+      });
+      expect(allowed.statusCode).toBe(HTTP_STATUS.OK);
+    }
+
+    const denied = await server.inject({
+      method: 'GET',
+      url: `/api/v1/device/${hiddenScreenId}/screenshot-policy`,
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    expect(denied.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+
+    const readOnlyCommand = await server.inject({
+      method: 'POST',
+      url: `/api/v1/device/${readableScreenId}/commands`,
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { type: 'PING', payload: { reason: 'read_only_must_not_control' } },
+    });
+    expect(readOnlyCommand.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+
+    const updateCommand = await server.inject({
+      method: 'POST',
+      url: `/api/v1/device/${updateOnlyScreenId}/commands`,
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { type: 'PING', payload: { reason: 'matching_update_grant' } },
+    });
+    expect(updateCommand.statusCode).toBe(HTTP_STATUS.CREATED);
+    expect(JSON.parse(updateCommand.body)).toEqual(expect.objectContaining({
+      screen_id: updateOnlyScreenId,
+      type: 'PING',
+      status: 'PENDING',
+    }));
+
+    const hiddenCommand = await server.inject({
+      method: 'POST',
+      url: `/api/v1/device/${hiddenScreenId}/commands`,
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { type: 'PING', payload: { reason: 'hidden_must_not_control' } },
+    });
+    expect(hiddenCommand.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const commands = await db
+      .select()
+      .from(schema.deviceCommands)
+      .where(eq(schema.deviceCommands.created_by, userId));
+    expect(commands).toHaveLength(1);
+    expect(commands[0].screen_id).toBe(updateOnlyScreenId);
+  });
+
   it('accepts heartbeat in signature mode when the request signature is valid', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();
@@ -75,6 +169,9 @@ describe('Device telemetry auth runtime validation', () => {
     });
     const previousMode = process.env.HEXMON_DEVICE_AUTH_MODE;
     const queueHeartbeatSpy = vi.spyOn(jobs, 'queueHeartbeatTelemetry').mockResolvedValueOnce('job-1');
+    const queueObservationSpy = vi
+      .spyOn(jobs, 'queueDeviceOperationalObservation')
+      .mockResolvedValueOnce('auth-observation-job');
 
     process.env.HEXMON_DEVICE_AUTH_MODE = 'signature';
     try {
@@ -125,6 +222,19 @@ describe('Device telemetry auth runtime validation', () => {
           }),
         }),
       }));
+      const queuedObservation = queueObservationSpy.mock.calls[0]?.[0];
+      expect(queuedObservation).toMatchObject({
+        type: 'auth_rollout',
+        screenId: deviceId,
+        channel: 'http',
+        method: 'signed',
+        observedAt: expect.any(String),
+      });
+      expect(await db
+        .select()
+        .from(schema.deviceAuthRolloutObservations)
+        .where(eq(schema.deviceAuthRolloutObservations.screen_id, deviceId))).toHaveLength(0);
+      await processDeviceOperationalObservation(queuedObservation!);
       const [observation] = await db
         .select()
         .from(schema.deviceAuthRolloutObservations)
@@ -133,6 +243,7 @@ describe('Device telemetry auth runtime validation', () => {
       expect(observation?.last_legacy_http_at).toBeNull();
     } finally {
       queueHeartbeatSpy.mockRestore();
+      queueObservationSpy.mockRestore();
       if (previousMode == null) {
         delete process.env.HEXMON_DEVICE_AUTH_MODE;
       } else {
@@ -274,6 +385,10 @@ describe('Device telemetry auth runtime validation', () => {
       expires_at: new Date(Date.now() + 60_000),
     });
 
+    const queueObservationSpy = vi
+      .spyOn(jobs, 'queueDeviceOperationalObservation')
+      .mockResolvedValue('pairing-observation-job');
+
     const response = await server.inject({
       method: 'GET',
       url: `/api/v1/device/${deviceId}/pairing-status`,
@@ -297,6 +412,31 @@ describe('Device telemetry auth runtime validation', () => {
       })
     );
     expect(body.certExpiresAt).toBeTruthy();
+
+    const identityJob = queueObservationSpy.mock.calls
+      .map(([job]) => job)
+      .find((job) => job.type === 'identity_session');
+    expect(identityJob).toMatchObject({
+      type: 'identity_session',
+      observation: {
+        deviceId,
+        source: 'pairing_status',
+        observedAt: expect.any(String),
+      },
+    });
+    const [beforeReplay] = await db
+      .select({ device_info: schema.screens.device_info })
+      .from(schema.screens)
+      .where(eq(schema.screens.id, deviceId));
+    expect((beforeReplay?.device_info as any)?.identity_sessions).toBeUndefined();
+
+    await processDeviceOperationalObservation(identityJob!);
+    const [afterReplay] = await db
+      .select({ device_info: schema.screens.device_info })
+      .from(schema.screens)
+      .where(eq(schema.screens.id, deviceId));
+    expect((afterReplay?.device_info as any)?.identity_sessions).toBeTruthy();
+    queueObservationSpy.mockRestore();
   });
 
   it('detects duplicate active runtime sessions without flagging quick restarts', async () => {
@@ -1273,10 +1413,11 @@ describe('Device telemetry auth runtime validation', () => {
     );
   });
 
-  it('persists screenshot uploads as storage objects and screenshot rows', async () => {
+  it('enqueues screenshot uploads with their receipt identity and performs no inline persistence', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();
     const serial = `serial-${randomUUID()}`;
+    const queueSpy = vi.spyOn(jobs, 'queueScreenshotTelemetry').mockResolvedValueOnce('screenshot-job');
     const putObjectSpy = vi.spyOn(s3, 'putObject').mockResolvedValue({ etag: 'etag-1', sha256: 'sha-1' });
     const presignedSpy = vi.spyOn(s3, 'getPresignedUrl').mockResolvedValue('https://cdn.example.com/screens/device.png');
 
@@ -1312,31 +1453,35 @@ describe('Device telemetry auth runtime validation', () => {
     expect(body.success).toBe(true);
     expect(typeof body.storage_object_id).toBe('string');
     expect(body.timestamp).toBe(timestamp);
-    expect(putObjectSpy).toHaveBeenCalledOnce();
-    expect(presignedSpy).toHaveBeenCalledOnce();
+    expect(queueSpy).toHaveBeenCalledOnce();
+    expect(queueSpy.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      deviceId,
+      timestamp,
+      storageObjectId: body.storage_object_id,
+    }));
+    expect(putObjectSpy).not.toHaveBeenCalled();
+    expect(presignedSpy).not.toHaveBeenCalled();
 
     const [storageObject] = await db
       .select()
       .from(schema.storageObjects)
       .where(eq(schema.storageObjects.id, body.storage_object_id))
       .limit(1);
-    expect(storageObject).toBeTruthy();
-    expect(storageObject.bucket).toBe('device-screenshots');
-    expect(storageObject.content_type).toBe('image/png');
+    expect(storageObject).toBeUndefined();
 
     const [screenshot] = await db
       .select()
       .from(schema.screenshots)
       .where(eq(schema.screenshots.storage_object_id, body.storage_object_id))
       .limit(1);
-    expect(screenshot).toBeTruthy();
-    expect(screenshot.screen_id).toBe(deviceId);
+    expect(screenshot).toBeUndefined();
 
+    queueSpy.mockRestore();
     putObjectSpy.mockRestore();
     presignedSpy.mockRestore();
   });
 
-  it('falls back to inline screenshot persistence when queueing is unavailable', async () => {
+  it('fails closed without inline screenshot persistence when durable queueing is unavailable', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();
     const serial = `serial-${randomUUID()}`;
@@ -1370,18 +1515,16 @@ describe('Device telemetry auth runtime validation', () => {
       },
     });
 
-    expect(response.statusCode).toBe(HTTP_STATUS.CREATED);
+    expect(response.statusCode).toBe(HTTP_STATUS.INTERNAL_SERVER_ERROR);
     expect(queueSpy).toHaveBeenCalledOnce();
-    expect(putObjectSpy).toHaveBeenCalledOnce();
+    expect(putObjectSpy).not.toHaveBeenCalled();
 
-    const body = JSON.parse(response.body);
-    const [screenshot] = await db
+    const screenshots = await db
       .select()
       .from(schema.screenshots)
-      .where(eq(schema.screenshots.storage_object_id, body.storage_object_id))
-      .limit(1);
+      .where(eq(schema.screenshots.screen_id, deviceId));
 
-    expect(screenshot).toBeTruthy();
+    expect(screenshots).toHaveLength(0);
 
     queueSpy.mockRestore();
     putObjectSpy.mockRestore();
@@ -1391,6 +1534,7 @@ describe('Device telemetry auth runtime validation', () => {
     const db = getDatabase();
     const deviceId = randomUUID();
     const serial = `serial-${randomUUID()}`;
+    const queueSpy = vi.spyOn(jobs, 'queueScreenshotTelemetry').mockResolvedValueOnce('large-screenshot-job');
     const putObjectSpy = vi.spyOn(s3, 'putObject').mockResolvedValue({ etag: 'etag-large', sha256: 'sha-large' });
     const presignedSpy = vi.spyOn(s3, 'getPresignedUrl').mockResolvedValue('https://cdn.example.com/screens/device-large.png');
 
@@ -1430,9 +1574,11 @@ describe('Device telemetry auth runtime validation', () => {
     const body = JSON.parse(response.body);
     expect(body.success).toBe(true);
     expect(body.timestamp).toBe(timestamp);
-    expect(putObjectSpy).toHaveBeenCalledOnce();
-    expect(presignedSpy).toHaveBeenCalledOnce();
+    expect(queueSpy).toHaveBeenCalledOnce();
+    expect(putObjectSpy).not.toHaveBeenCalled();
+    expect(presignedSpy).not.toHaveBeenCalled();
 
+    queueSpy.mockRestore();
     putObjectSpy.mockRestore();
     presignedSpy.mockRestore();
   });

@@ -1,0 +1,24 @@
+{
+  "format": "darshan-controlled-docker-recovery-packet2-profile-v1",
+  "profile_id": "darshan-release-02-controlled-recovery",
+  "release_id": "release-02",
+  "target_id": "darshan-server-release-02-controlled",
+  "terminal_migration_id": "0056_recovery_runtime_authority.sql",
+  "migration_manifest_sha256": "69b84a7d0bdebf17df6bec95f907791d586cc9558ec33fb18b79eb41b6e62a2b",
+  "topology": {
+    "kind": "SPLIT_HOST_PRIVATE_TLS",
+    "data_host_private_address": "10.20.0.10",
+    "backend_host_private_address": "10.20.0.11",
+    "cms_host_private_address": "10.20.0.12",
+    "data_tls_server_identity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "backend_tls_client_identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "firewall_contract_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "deployment": {
+    "fixed_overlay_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "api_image": "registry.local/darshan-api@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "worker_image": "registry.local/darshan-worker@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "cms_image": "registry.local/darshan-cms@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "previous_pointer_root_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  }
+}

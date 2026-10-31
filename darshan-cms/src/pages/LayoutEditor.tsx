@@ -528,7 +528,7 @@ const LayoutEditor = () => {
         search: debouncedSearchTerm || undefined,
         configured_only: true,
       }),
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData,
   });
 
   const aspectRatioOptions = useMemo<ScreenAspectRatio[]>(() => {

@@ -140,7 +140,7 @@ export function AppSidebar() {
   const isCollapsed = state === "collapsed";
   const { can, isLoading: isAuthzLoading } = useAuthorization();
   const user = useAppSelector((appState) => appState.auth.user);
-  const { data: branding } = useBrandingSettings();
+  const { data: branding } = useBrandingSettings(can("read", "BrandingSettings"));
 
   const canShowItem = (item: NavItem) => {
     if (item.moduleKey) {

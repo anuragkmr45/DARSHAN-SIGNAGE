@@ -6,6 +6,7 @@ import { generateAccessToken } from '@/auth/jwt';
 import { hashPassword } from '@/auth/password';
 import { createSessionRepository } from '@/db/repositories/session';
 import { SYSTEM_ROLE_DEFAULTS } from '@/rbac/system-roles';
+import { randomUUID } from 'node:crypto';
 
 export async function createTestServer(): Promise<FastifyInstance> {
   await initializeDatabase();
@@ -21,7 +22,14 @@ export async function createTestServer(): Promise<FastifyInstance> {
 
 export async function generateTestToken(userId: string, role: keyof typeof testRoles = 'ADMIN') {
   const roleRecord = testRoles[role];
-  const result = await generateAccessToken(userId, 'test@example.com', roleRecord.id, roleRecord.name);
+  const [storedUser] = await getDatabase()
+    .select({ role_id: schema.users.role_id, email: schema.users.email, department_id: schema.users.department_id })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId));
+  if (!storedUser || storedUser.role_id !== roleRecord.id) {
+    throw new Error(`Test token role ${role} does not match the stored user role`);
+  }
+  const result = await generateAccessToken(userId, storedUser.email, roleRecord.id, roleRecord.name, storedUser.department_id);
   const sessionRepo = createSessionRepository();
   await sessionRepo.create({
     user_id: userId,
@@ -29,6 +37,23 @@ export async function generateTestToken(userId: string, role: keyof typeof testR
     expires_at: result.expiresAt,
   });
   return result.token;
+}
+
+/** A real actor fixture: database role, JWT role and session always agree. */
+export async function createTestActor(role: keyof typeof testRoles) {
+  const db = getDatabase();
+  const id = randomUUID();
+  const email = `actor-${id}@example.test`;
+  await db.insert(schema.users).values({
+    id,
+    email,
+    password_hash: await hashPassword('TestPassword123!'),
+    role_id: testRoles[role].id,
+    is_active: true,
+  });
+  const access = await generateAccessToken(id, email, testRoles[role].id, role);
+  await createSessionRepository().create({ user_id: id, access_jti: access.jti, expires_at: access.expiresAt });
+  return { id, email, token: access.token };
 }
 
 export async function cleanupDatabase() {
@@ -80,6 +105,7 @@ export async function seedTestData() {
       first_name: testUser.first_name,
       last_name: testUser.last_name,
       role_id: testUser.role_id,
+      department_id: null,
       is_active: true,
     })
     .onConflictDoUpdate({
@@ -90,6 +116,7 @@ export async function seedTestData() {
         first_name: testUser.first_name,
         last_name: testUser.last_name,
         role_id: testUser.role_id,
+        department_id: null,
         is_active: true,
       },
     });

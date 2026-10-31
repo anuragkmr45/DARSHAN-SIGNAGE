@@ -142,11 +142,21 @@ export async function putFile(
   bucket: string,
   key: string,
   filePath: string,
-  contentType?: string
+  contentType?: string,
+  options: { signal?: AbortSignal } = {}
 ): Promise<{ etag: string; sha256: string }> {
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(filePath)) {
-    hash.update(chunk);
+  const hashStream = createReadStream(filePath);
+  const abortHash = () => hashStream.destroy(new Error('Backup upload aborted'));
+  options.signal?.throwIfAborted();
+  options.signal?.addEventListener('abort', abortHash, { once: true });
+  try {
+    for await (const chunk of hashStream) {
+      options.signal?.throwIfAborted();
+      hash.update(chunk);
+    }
+  } finally {
+    options.signal?.removeEventListener('abort', abortHash);
   }
   const sha256 = hash.digest('hex');
   const client = getS3Client();
@@ -156,7 +166,7 @@ export async function putFile(
     Body: createReadStream(filePath),
     ContentType: contentType,
     Metadata: { 'x-sha256': sha256 },
-  })));
+  }), { abortSignal: options.signal }));
   return { etag: response.ETag || '', sha256 };
 }
 

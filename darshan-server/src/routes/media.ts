@@ -608,7 +608,14 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             return { session: existing, actor, ability, existing: true as const };
           }
 
-          const ownership = ownershipForNewContent(actor, ability, 'Media');
+          const ownership = ownershipForNewContent(actor, ability, 'Media', {
+            id: mediaId,
+            name: displayName,
+            type: inferUploadMediaType(data.content_type),
+            status: PENDINGSTATUS,
+            source_content_type: data.content_type,
+            source_size: data.size,
+          });
           await executor.insert(schema.media).values({
             id: mediaId,
             name: displayName,
@@ -1098,7 +1105,14 @@ export async function mediaRoutes(fastify: FastifyInstance) {
             source_size: data.size,
             status_reason: null,
             created_by: actor.userId,
-            ...ownershipForNewContent(actor, ability, 'Media'),
+            ...ownershipForNewContent(actor, ability, 'Media', {
+              id: mediaId,
+              name: displayName,
+              type: inferredType,
+              status: PENDINGSTATUS,
+              source_content_type: data.content_type,
+              source_size: data.size,
+            }),
           }).returning();
           return { media, actor, ability };
         });
@@ -1175,7 +1189,12 @@ export async function mediaRoutes(fastify: FastifyInstance) {
                 webpage_preview_refresh_token: webpagePreviewRefreshToken!,
                 webpage_preview_last_error: null,
                 created_by: actor.userId,
-                ...ownershipForNewContent(actor, ability, 'Media'),
+                ...ownershipForNewContent(actor, ability, 'Media', {
+                  name: normalizeDisplayName(data.display_name || data.name),
+                  type: 'WEBPAGE',
+                  status: 'PROCESSING',
+                  source_url: normalizedWebpageUrl,
+                }),
               }
             : {
                 name: normalizeDisplayName(normalizeOriginalFilename(data.name)),
@@ -1183,7 +1202,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
                 status: 'PENDING',
                 status_reason: null,
                 created_by: actor.userId,
-                ...ownershipForNewContent(actor, ability, 'Media'),
+                ...ownershipForNewContent(actor, ability, 'Media', {
+                  name: normalizeDisplayName(normalizeOriginalFilename(data.name)),
+                  type: data.type,
+                  status: 'PENDING',
+                }),
               };
           const [media] = await executor.insert(schema.media).values(insertData).returning();
           return { media, actor, ability };

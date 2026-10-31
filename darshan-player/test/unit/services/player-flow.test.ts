@@ -650,6 +650,95 @@ describe('Player Flow', () => {
     await playerFlow.stop()
   })
 
+  it('should preserve identity and cached playback while server quarantine awaits review, then recover after approval', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const { getDefaultMediaService } = require('../../../src/main/services/settings/default-media-service')
+
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({ deviceId: '11111111-1111-4111-8111-111111111111', fingerprint: 'fingerprint-1' })
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    const status = sandbox.stub(pairingService, 'fetchBackendPairingStatus')
+    status.onFirstCall().resolves({
+      status: 'RECOVERY_PAIRING_REVIEW_REQUIRED', code: 'RECOVERY_PAIRING_REVIEW_REQUIRED',
+      message: 'Recovered pairing is quarantined pending review.', deviceId: '11111111-1111-4111-8111-111111111111',
+      screenVisible: true, requiresReclaim: false,
+    })
+    status.onSecondCall().resolves({
+      status: 'VALID', deviceId: '11111111-1111-4111-8111-111111111111', screenId: 'screen-1', screenVisible: true,
+      requiresReclaim: false, serverTime: new Date().toISOString(), certExpiresAt: null,
+      serverIdentity: { environment: 'test', deploymentId: 'test-suite', serverId: 'darshan-api-test' },
+    })
+    const snapshotClear = sandbox.spy(getSnapshotManager(), 'clearIdentityBoundState')
+    const defaultClear = sandbox.spy(getDefaultMediaService(), 'clearIdentityBoundState')
+    createCompleteBootstrapStubs()
+
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+    expect(playerFlow.getState()).to.equal('LOCAL_IDENTITY_PRESENT')
+    expect(stateStore.getState().deviceId).to.equal('11111111-1111-4111-8111-111111111111')
+    expect(stateStore.getState().fingerprint).to.equal('fingerprint-1')
+    expect(stateStore.getState().lastPairingValidationStatus).to.equal('RECOVERY_PAIRING_REVIEW_REQUIRED')
+    expect(snapshotClear.called).to.equal(false)
+    expect(defaultClear.called).to.equal(false)
+
+    await (playerFlow as any).bootstrapAuthenticatedRuntime()
+    expect(playerFlow.getState()).to.equal('PAIRED_RUNTIME')
+    expect(stateStore.getState().deviceId).to.equal('11111111-1111-4111-8111-111111111111')
+    await playerFlow.stop()
+  })
+
+  it('should preserve a running player identity and cache through runtime quarantine, then resume after approval', async () => {
+    const { DeviceApiError } = require('../../../src/common/types')
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const { getDefaultMediaService } = require('../../../src/main/services/settings/default-media-service')
+    const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+
+    const stateStore = getDeviceStateStore()
+    await stateStore.clearIdentity()
+    await stateStore.update({ deviceId: '11111111-1111-4111-8111-111111111111', fingerprint: 'fingerprint-1' })
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    createCompleteBootstrapStubs()
+    const snapshotClear = sandbox.spy(getSnapshotManager(), 'clearIdentityBoundState')
+    const defaultClear = sandbox.spy(getDefaultMediaService(), 'clearIdentityBoundState')
+
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+    expect(playerFlow.getState()).to.equal('PAIRED_RUNTIME')
+
+    getLifecycleEvents().emitRuntimeAuthFailure({
+      source: 'heartbeat',
+      error: new DeviceApiError({ code: 'RECOVERY_PAIRING_REVIEW_REQUIRED', status: 403,
+        message: 'Recovered pairing is quarantined pending operator review.' }),
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(playerFlow.getState()).to.equal('LOCAL_IDENTITY_PRESENT')
+    expect(stateStore.getState().deviceId).to.equal('11111111-1111-4111-8111-111111111111')
+    expect(stateStore.getState().fingerprint).to.equal('fingerprint-1')
+    expect(stateStore.getState().lastPairingValidationStatus).to.equal('RECOVERY_PAIRING_REVIEW_REQUIRED')
+    expect(snapshotClear.called).to.equal(false)
+    expect(defaultClear.called).to.equal(false)
+
+    await (playerFlow as any).bootstrapAuthenticatedRuntime()
+    expect(playerFlow.getState()).to.equal('PAIRED_RUNTIME')
+    expect(stateStore.getState().deviceId).to.equal('11111111-1111-4111-8111-111111111111')
+    expect(stateStore.getState().fingerprint).to.equal('fingerprint-1')
+    expect(snapshotClear.called).to.equal(false)
+    expect(defaultClear.called).to.equal(false)
+    await playerFlow.stop()
+  })
+
   it('should force re-pair when backend reports environment mismatch', async () => {
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')

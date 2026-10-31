@@ -59,6 +59,7 @@ describe('Device Pairing Routes', () => {
       { action: 'read', subject: 'DevicePairing' },
       { action: 'manage', subject: 'DevicePairing' },
       { action: 'create', subject: 'Screen' },
+      { action: 'update', subject: 'Screen' },
     ]) {
       if (!mergedGrants.some((current) => current.action === grant.action && current.subject === grant.subject)) {
         mergedGrants.push(grant);
@@ -93,15 +94,10 @@ describe('Device Pairing Routes', () => {
   });
 
   it('retries device-request pairing when the generated active code collides', async () => {
-    const originalCreate = DevicePairingRepository.prototype.create;
-    const createSpy = vi.spyOn(DevicePairingRepository.prototype, 'create');
-    createSpy.mockImplementationOnce(async () => {
-      const error = new Error('duplicate pairing code') as Error & { code?: string; constraint?: string };
-      error.code = '23505';
-      error.constraint = 'device_pairings_active_code_idx';
-      throw error;
-    });
-    createSpy.mockImplementation(function (this: DevicePairingRepository, ...args: Parameters<DevicePairingRepository['create']>) {
+    const originalCreate = DevicePairingRepository.prototype.createIfCodeAvailable;
+    const createSpy = vi.spyOn(DevicePairingRepository.prototype, 'createIfCodeAvailable');
+    createSpy.mockResolvedValueOnce(null);
+    createSpy.mockImplementation(function (this: DevicePairingRepository, ...args: Parameters<DevicePairingRepository['createIfCodeAvailable']>) {
       return originalCreate.apply(this, args);
     });
 
@@ -126,15 +122,10 @@ describe('Device Pairing Routes', () => {
       status: 'OFFLINE',
     });
 
-    const originalCreate = DevicePairingRepository.prototype.create;
-    const createSpy = vi.spyOn(DevicePairingRepository.prototype, 'create');
-    createSpy.mockImplementationOnce(async () => {
-      const error = new Error('duplicate pairing code') as Error & { code?: string; constraint?: string };
-      error.code = '23505';
-      error.constraint = 'device_pairings_active_code_idx';
-      throw error;
-    });
-    createSpy.mockImplementation(function (this: DevicePairingRepository, ...args: Parameters<DevicePairingRepository['create']>) {
+    const originalCreate = DevicePairingRepository.prototype.createIfCodeAvailable;
+    const createSpy = vi.spyOn(DevicePairingRepository.prototype, 'createIfCodeAvailable');
+    createSpy.mockResolvedValueOnce(null);
+    createSpy.mockImplementation(function (this: DevicePairingRepository, ...args: Parameters<DevicePairingRepository['createIfCodeAvailable']>) {
       return originalCreate.apply(this, args);
     });
 
@@ -457,6 +448,54 @@ describe('Device Pairing Routes', () => {
     expect(body.success).toBe(false);
     expect(body.error.code).toBe('CONFLICT');
     expect(body.error.message).toBe('CSR deviceId does not match pairing deviceId');
+  });
+
+  it('rejects pairing identity drift re-read inside the completion transaction', async () => {
+    const requestRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device-pairing/request',
+      payload: { device_label: 'Identity Drift Device', expires_in: 600 },
+    });
+    const requestBody = JSON.parse(requestRes.body);
+    const confirmRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device-pairing/confirm',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { pairing_code: requestBody.pairing_code, name: 'Identity Drift Screen' },
+    });
+    expect(confirmRes.statusCode).toBe(HTTP_STATUS.OK);
+
+    const originalFind = DevicePairingRepository.prototype.findActiveById;
+    const driftedDeviceId = randomUUID();
+    vi.spyOn(DevicePairingRepository.prototype, 'findActiveById').mockImplementation(
+      async function (this: DevicePairingRepository, ...args: Parameters<DevicePairingRepository['findActiveById']>) {
+        const found = await originalFind.apply(this, args);
+        return found ? { ...found, device_id: driftedDeviceId } : found;
+      },
+    );
+
+    const completeRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/device-pairing/complete',
+      payload: {
+        pairing_code: requestBody.pairing_code,
+        csr: buildCsrWithDeviceId(requestBody.device_id),
+      },
+    });
+    expect(completeRes.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(completeRes.body).error.message).toMatch(/pairing identity changed/i);
+
+    const db = getDatabase();
+    const [unchangedPairing] = await db
+      .select()
+      .from(schema.devicePairings)
+      .where(eq(schema.devicePairings.id, requestBody.id));
+    expect(unchangedPairing.used).toBe(false);
+    expect(
+      await db.select().from(schema.deviceCertificates)
+        .where(eq(schema.deviceCertificates.screen_id, requestBody.device_id)),
+    ).toHaveLength(0);
+    expect(await db.select().from(schema.screens).where(eq(schema.screens.id, requestBody.device_id))).toHaveLength(0);
   });
 
   it('should return 400 when CSR commonName is missing', async () => {

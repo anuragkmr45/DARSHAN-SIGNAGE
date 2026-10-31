@@ -276,4 +276,100 @@ describe('deleted-user upload cleanup retries', () => {
     expect(deleteObjectMock).not.toHaveBeenCalled();
     await db.delete(schema.storageObjects).where(eq(schema.storageObjects.id, freshStorageObjectId));
   });
+
+  it('does not delete a legacy storage object retained by backup run files', async () => {
+    const db = getDatabase();
+    const storageObjectId = randomUUID();
+    const backupRunId = randomUUID();
+    const objectKey = `backups/${backupRunId}/database.dump`;
+    await db.insert(schema.storageObjects).values({
+      id: storageObjectId,
+      bucket: 'backups',
+      object_key: objectKey,
+      content_type: 'application/octet-stream',
+      size: 128,
+      created_at: new Date('2000-01-01T00:00:00.000Z'),
+    });
+    await db.insert(schema.backupRuns).values({
+      id: backupRunId,
+      trigger_type: 'MANUAL',
+      status: 'COMPLETED',
+      files: [{
+        bucket: 'backups',
+        object_key: objectKey,
+        name: 'database.dump',
+        size: 128,
+        content_type: 'application/octet-stream',
+        storage_object_id: storageObjectId,
+      }],
+    });
+
+    expect(
+      await cleanupOrphanedStorageObjects({ storageObjectIds: [storageObjectId] })
+    ).toEqual({ cleaned: 0, pending: 0 });
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+    const [preserved] = await db
+      .select()
+      .from(schema.storageObjects)
+      .where(eq(schema.storageObjects.id, storageObjectId));
+    expect(preserved?.id).toBe(storageObjectId);
+
+    await db.delete(schema.backupRuns).where(eq(schema.backupRuns.id, backupRunId));
+    await db.delete(schema.storageObjects).where(eq(schema.storageObjects.id, storageObjectId));
+  });
+
+  it('does not collect a canonical legacy archive while its backup is still publishing', async () => {
+    const db = getDatabase();
+    const storageObjectId = randomUUID();
+    const backupRunId = randomUUID();
+    const attemptId = randomUUID();
+    const objectKey = `backups/${backupRunId}/database.dump.gz`;
+    await db.insert(schema.backupRuns).values({
+      id: backupRunId,
+      trigger_type: 'MANUAL',
+      status: 'RUNNING',
+      stage: 'PUBLISHING',
+      repository_kind: 'LEGACY_OFF_HOST',
+      coordination_key: `gc-${backupRunId}`,
+      attempt_id: attemptId,
+      attempt_number: 1,
+      lease_expires_at: new Date(Date.now() + 60_000),
+      deadline_at: new Date(Date.now() + 4 * 60 * 60 * 1000),
+    });
+    await db.insert(schema.storageObjects).values({
+      id: storageObjectId,
+      bucket: 'archives',
+      object_key: objectKey,
+      content_type: 'application/gzip',
+      size: 128,
+      created_at: new Date('2000-01-01T00:00:00.000Z'),
+    });
+
+    expect(
+      await cleanupOrphanedStorageObjects({ storageObjectIds: [storageObjectId] })
+    ).toEqual({ cleaned: 0, pending: 0 });
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+
+    await db.update(schema.backupRuns).set({
+      status: 'COMPLETED',
+      stage: 'COMPLETED',
+      files: [{
+        bucket: 'archives',
+        object_key: objectKey,
+        name: 'database.dump.gz',
+        size: 128,
+        content_type: 'application/gzip',
+        storage_object_id: storageObjectId,
+      }],
+      completed_at: new Date(),
+    }).where(eq(schema.backupRuns.id, backupRunId));
+
+    expect(
+      await cleanupOrphanedStorageObjects({ storageObjectIds: [storageObjectId] })
+    ).toEqual({ cleaned: 0, pending: 0 });
+    expect(deleteObjectMock).not.toHaveBeenCalled();
+
+    await db.delete(schema.backupRuns).where(eq(schema.backupRuns.id, backupRunId));
+    await db.delete(schema.storageObjects).where(eq(schema.storageObjects.id, storageObjectId));
+  });
 });

@@ -142,7 +142,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
         status: "READY",
         type: typeFilter,
       }),
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData,
   });
 
   useEffect(() => {

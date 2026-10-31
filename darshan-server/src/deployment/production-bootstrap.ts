@@ -1,7 +1,8 @@
 import { eq, sql } from 'drizzle-orm';
 import { hashPassword, validatePasswordStrength } from '@/auth/password';
 import { schema, type Database } from '@/db';
-import { SYSTEM_ROLE_DEFAULTS, SYSTEM_ROLE_NAMES, type SystemRoleName } from '@/rbac/system-roles';
+import { findSystemRoleIdentityConflict, SYSTEM_ROLE_DEFAULTS, SYSTEM_ROLE_NAMES, type SystemRoleName } from '@/rbac/system-roles';
+import { canAuthenticateInviteState } from '@/auth/invite-state';
 import { acquireTransactionAdvisoryLock, type BoundedAdvisoryLockOptions } from './bounded-advisory-lock';
 
 const BOOTSTRAP_ID = 'production';
@@ -107,7 +108,10 @@ async function readBootstrapState(tx: Database) {
     .select({
       adminEmail: schema.users.email,
       isActive: schema.users.is_active,
+      deletedAt: schema.users.deleted_at,
+      ext: schema.users.ext,
       roleName: schema.roles.name,
+      roleIsSystem: schema.roles.is_system,
     })
     .from(schema.productionBootstrapStates)
     .leftJoin(schema.users, eq(schema.productionBootstrapStates.admin_user_id, schema.users.id))
@@ -117,7 +121,16 @@ async function readBootstrapState(tx: Database) {
   return state ?? null;
 }
 
-async function reconcileSystemRoles(tx: Database): Promise<Map<SystemRoleName, string>> {
+async function canonicalRoleConflict(db: Database): Promise<ProductionBootstrapResult | null> {
+  const conflict = await findSystemRoleIdentityConflict(db);
+  return conflict ? {
+    status: 'conflict',
+    code: 'PRODUCTION_BOOTSTRAP_CONFLICT',
+    reason: `Reserved role ${conflict.name} does not have a canonical built-in identity; review the database before bootstrap or adoption.`,
+  } : null;
+}
+
+async function insertSystemRoles(tx: Database): Promise<Map<SystemRoleName, string>> {
   const ids = new Map<SystemRoleName, string>();
   for (const name of SYSTEM_ROLE_NAMES) {
     const [role] = await tx
@@ -127,15 +140,6 @@ async function reconcileSystemRoles(tx: Database): Promise<Map<SystemRoleName, s
         description: `${name} role`,
         is_system: true,
         permissions: SYSTEM_ROLE_DEFAULTS[name],
-      })
-      .onConflictDoUpdate({
-        target: schema.roles.name,
-        set: {
-          description: `${name} role`,
-          is_system: true,
-          permissions: SYSTEM_ROLE_DEFAULTS[name],
-          updated_at: new Date(),
-        },
       })
       .returning({ id: schema.roles.id });
     ids.set(name, role.id);
@@ -158,9 +162,13 @@ export async function bootstrapProductionDatabase(
     await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`));
     await acquireTransactionAdvisoryLock(tx as Database, 'darshan:production-bootstrap', input.lockOptions);
 
+    const roleConflict = await canonicalRoleConflict(tx as Database);
+    if (roleConflict) return roleConflict;
     const existingState = await readBootstrapState(tx as Database);
     if (existingState) {
-      if (existingState.adminEmail && existingState.isActive && existingState.roleName === 'SUPER_ADMIN') {
+      if (existingState.adminEmail && existingState.isActive && !existingState.deletedAt &&
+          canAuthenticateInviteState(existingState.ext) &&
+          existingState.roleName === 'SUPER_ADMIN' && existingState.roleIsSystem) {
         return {
           status: 'already_initialized',
           code: 'PRODUCTION_BOOTSTRAP_ALREADY_INITIALIZED',
@@ -170,7 +178,7 @@ export async function bootstrapProductionDatabase(
       return {
         status: 'conflict',
         code: 'PRODUCTION_BOOTSTRAP_CONFLICT',
-        reason: 'Recorded bootstrap administrator is missing, inactive, or not a SUPER_ADMIN.',
+        reason: 'Recorded bootstrap administrator is missing, inactive, deleted, invitation-pending, or not a system SUPER_ADMIN.',
       };
     }
 
@@ -186,7 +194,7 @@ export async function bootstrapProductionDatabase(
     const releaseId = requireReleaseId(input.releaseId);
     const credentials = requireBootstrapCredentials(email, input.password);
     const passwordHash = await hashPassword(credentials.password);
-    const roleIds = await reconcileSystemRoles(tx as Database);
+    const roleIds = await insertSystemRoles(tx as Database);
     const [admin] = await tx
       .insert(schema.users)
       .values({
@@ -246,9 +254,13 @@ export async function adoptProductionBootstrapState(
     await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`));
     await acquireTransactionAdvisoryLock(tx as Database, 'darshan:production-bootstrap', input.lockOptions);
 
+    const roleConflict = await canonicalRoleConflict(tx as Database);
+    if (roleConflict) return roleConflict;
     const existingState = await readBootstrapState(tx as Database);
     if (existingState) {
-      if (existingState.adminEmail && existingState.isActive && existingState.roleName === 'SUPER_ADMIN') {
+      if (existingState.adminEmail && existingState.isActive && !existingState.deletedAt &&
+          canAuthenticateInviteState(existingState.ext) &&
+          existingState.roleName === 'SUPER_ADMIN' && existingState.roleIsSystem) {
         return {
           status: 'already_initialized',
           code: 'PRODUCTION_BOOTSTRAP_ALREADY_INITIALIZED',
@@ -258,7 +270,7 @@ export async function adoptProductionBootstrapState(
       return {
         status: 'conflict',
         code: 'PRODUCTION_BOOTSTRAP_CONFLICT',
-        reason: 'Recorded bootstrap administrator is missing, inactive, or not a SUPER_ADMIN.',
+        reason: 'Recorded bootstrap administrator is missing, inactive, deleted, invitation-pending, or not a system SUPER_ADMIN.',
       };
     }
 
@@ -268,7 +280,10 @@ export async function adoptProductionBootstrapState(
         id: schema.users.id,
         email: schema.users.email,
         isActive: schema.users.is_active,
+        deletedAt: schema.users.deleted_at,
+        ext: schema.users.ext,
         roleName: schema.roles.name,
+        roleIsSystem: schema.roles.is_system,
       })
       .from(schema.users)
       .leftJoin(schema.roles, eq(schema.users.role_id, schema.roles.id))
@@ -282,11 +297,12 @@ export async function adoptProductionBootstrapState(
       };
     }
     const administrator = candidates[0];
-    if (!administrator.isActive || administrator.roleName !== 'SUPER_ADMIN') {
+    if (!administrator.isActive || administrator.deletedAt || !canAuthenticateInviteState(administrator.ext) ||
+        administrator.roleName !== 'SUPER_ADMIN' || !administrator.roleIsSystem) {
       return {
         status: 'conflict',
         code: 'PRODUCTION_BOOTSTRAP_CONFLICT',
-        reason: 'The requested adoption administrator must be active and hold the SUPER_ADMIN role.',
+        reason: 'The requested adoption administrator must be active and hold the SUPER_ADMIN role marked as system, without deletion or a pending invitation.',
       };
     }
 
@@ -322,6 +338,8 @@ export async function adoptProductionBootstrapState(
 }
 
 export async function inspectProductionBootstrap(db: Database): Promise<ProductionBootstrapResult> {
+  const roleConflict = await canonicalRoleConflict(db);
+  if (roleConflict) return roleConflict;
   const state = await readBootstrapState(db);
   if (!state) {
     return {
@@ -330,11 +348,12 @@ export async function inspectProductionBootstrap(db: Database): Promise<Producti
       reason: 'No production bootstrap state exists.',
     };
   }
-  if (!state.adminEmail || !state.isActive || state.roleName !== 'SUPER_ADMIN') {
+  if (!state.adminEmail || !state.isActive || state.deletedAt || !canAuthenticateInviteState(state.ext) ||
+      state.roleName !== 'SUPER_ADMIN' || !state.roleIsSystem) {
     return {
       status: 'conflict',
       code: 'PRODUCTION_BOOTSTRAP_CONFLICT',
-      reason: 'Recorded bootstrap administrator is missing, inactive, or not a SUPER_ADMIN.',
+      reason: 'Recorded bootstrap administrator is missing, inactive, deleted, invitation-pending, or not a system SUPER_ADMIN.',
     };
   }
   return {

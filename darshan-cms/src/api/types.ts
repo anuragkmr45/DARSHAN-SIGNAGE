@@ -4,6 +4,22 @@ export type RoleName = string;
 export interface RolePermissionGrant {
   action: string;
   subject: string;
+  conditions?: Record<string, string>;
+}
+
+export interface AuthorizationRule extends RolePermissionGrant {
+  inverted?: boolean;
+}
+
+export interface AuthorizationContext {
+  rules: AuthorizationRule[];
+  is_global_user_manager: boolean;
+}
+
+export interface UserActionPermissions {
+  can_update: boolean;
+  can_delete: boolean;
+  can_reset_password: boolean;
 }
 
 export interface RolePermissions {
@@ -24,6 +40,7 @@ export interface Role {
 export interface PermissionsMetadata {
   actions: string[];
   subjects: string[];
+  subject_actions?: Record<string, string[]>;
 }
 
 export interface User {
@@ -35,6 +52,16 @@ export interface User {
   role: RoleName;
   department_id?: string | null;
   is_active?: boolean;
+  authorization?: AuthorizationContext;
+  permissions?: UserActionPermissions;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UserManagementOptions {
+  roles: Array<{ id: RoleId; name: RoleName }>;
+  departments: Array<{ id: string; name: string }>;
+  is_global_user_manager: boolean;
 }
 
 export interface AuthResponse {
@@ -72,10 +99,14 @@ export interface ApiKey {
   name: string;
   roles?: RoleName[];
   scopes?: string[];
+  token_prefix?: string;
+  created_by?: string;
   expires_at?: string | null;
+  is_revoked?: boolean;
+  last_used_at?: string | null;
   secret?: string;
   created_at?: string;
-  revoked_at?: string | null;
+  updated_at?: string;
 }
 
 export interface LayoutSlot {
@@ -170,6 +201,7 @@ export interface Webhook {
   last_status?: string | null;
   last_status_at?: string | null;
   created_at?: string;
+  secret?: string;
 }
 
 export interface SsoConfig {
@@ -235,26 +267,128 @@ export interface BackupSettings {
   retention_days?: number | null;
 }
 
-export interface BackupRunDownload {
-  bucket: string;
-  object_key: string;
+export interface BackupArtifact {
+  kind: string;
   name: string;
-  size: number;
-  content_type: string;
-  storage_object_id: string;
-  url: string;
+  size_bytes: string | null;
+  sha256: string | null;
 }
 
-export interface BackupRun {
-  id: string;
-  trigger_type: string;
+export interface BackupOperationProgress {
+  kind: string;
+  size_bytes: string | null;
   status: string;
+  attempt_count: number;
+  deleted_at: string | null;
+  error_code: string | null;
+}
+
+export interface BackupOperation {
+  id: string;
+  kind: string | null;
+  status: string | null;
+  requested_at: string | null;
   started_at: string | null;
   completed_at: string | null;
-  created_at: string;
-  error_message: string | null;
-  downloads: BackupRunDownload[];
+  retry_at: string | null;
+  error_code: string | null;
+  progress: BackupOperationProgress[];
 }
+
+export interface BackupRecord {
+  id: string;
+  trigger_type: string;
+  repository: { kind: string; id: string | null };
+  stage: string;
+  attempt: { id: string | null; number: number; heartbeat_at: string | null;
+    lease_expires_at: string | null; retry_at: string | null; deadline_at: string | null };
+  capture: null | {
+    id: string;
+    generation: string | null;
+    status: string | null;
+    started_at: string | null;
+    sealed_at: string | null;
+  };
+  verification: {
+    provenance: string;
+    publication_id: string | null;
+    publication_status: string | null;
+    verified_at: string | null;
+    manifest_sha256: string | null;
+  };
+  execution: {
+    status: string;
+    outcome: string | null;
+    error_code: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    captured_at: string | null;
+  };
+  lifecycle: { state: string; version: number | null; error_code: string | null };
+  artifacts: BackupArtifact[];
+  retention: {
+    eligible: boolean;
+    expires_at: string | null;
+    protection_codes: string[];
+    restore_hold: "NONE" | "ACTIVE" | "UNCERTAIN";
+    runtime_supported: boolean;
+    runtime_reason_code: string | null;
+  };
+  permissions: {
+    can_delete: boolean;
+    can_download: boolean;
+    download_unavailable_code: string | null;
+    download_unavailable_reason: string | null;
+  };
+  operation: BackupOperation | null;
+  tombstone: null | { disposition: string; recorded_at: string | null; reason_code: string | null };
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface BackupHistoryResponse {
+  items: BackupRecord[];
+  next_cursor: string | null;
+  health: {
+    latest_run_id: string | null;
+    latest_status: string | null;
+    latest_stage: string | null;
+    latest_updated_at: string | null;
+    active_operation_count: string;
+    retention_runtime_supported: boolean;
+    retention_runtime_reason_code: string | null;
+    latest_verified_success: null | { run_id: string; verified_at: string | null };
+    latest_failure: null | { run_id: string; failed_at: string | null; error_code: string | null; attempt_number: number };
+    active: null | { run_id: string; stage: string | null; attempt_id: string | null; attempt_number: number;
+      heartbeat_at: string | null; lease_expires_at: string | null; retry_at: string | null; deadline_at: string | null };
+    repository_capacity: { status: "HEALTHY" | "LOW" | "UNAVAILABLE" | "UNSUPPORTED";
+      available_bytes: string | null; minimum_free_bytes: string | null; reason_code: string | null };
+    alert_codes: string[];
+    recovery_report: null | { operation_id: string; sequence: string; report_sha256: string;
+      source_run_id: string; source_manifest_sha256: string; profile_sha256: string;
+      configuration_sha256: string; release_id: string; schema_migration_id: string; target_id: string;
+      recovery_generation: string | null; state: string; results: { data: string; application: string;
+        promotion: string; rollback: string }; report_created_at: string | null; imported_at: string | null;
+      unexecuted_gates: string[] };
+  };
+}
+
+export interface BackupOperationDetail extends BackupOperation {
+  backup_run_id: string;
+  lifecycle_state: string;
+  tombstone: null | { disposition: string };
+}
+
+export interface BackupRunResponse {
+  id: string;
+  status: string;
+  trigger_type: string;
+  coalesced: boolean;
+}
+
+export type BackupDeleteResponse =
+  | { disposition: "ACCEPTED"; operation_id: string; backup_run_id: string; status: string; duplicate: boolean }
+  | { disposition: "DELETED"; operation_id: string; backup_run_id: string; tombstone: Record<string, unknown> };
 
 export interface RecentAppLog {
   id: string;
@@ -1204,6 +1338,7 @@ export interface ScreenSnapshotScheduleItem extends ScheduleItem {
       id: string;
       slot_id: string;
       media_id: string;
+      order?: number;
       duration_seconds?: number;
       fit_mode?: PresentationFitMode;
       audio_enabled?: boolean;

@@ -714,6 +714,99 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     expect(body.error.code).toBe('MEDIA_NOT_READY');
   });
 
+  it('does not treat a record-limited Media update grant as attachment-wide override', async () => {
+    const db = getDatabase();
+    const actorId = randomUUID();
+    const roleId = randomUUID();
+    const permittedMediaId = randomUUID();
+    const deniedMediaId = randomUUID();
+    const crossDepartmentMediaId = randomUUID();
+    const restrictedMediaId = randomUUID();
+    const nonReadyCrossDepartmentMediaId = randomUUID();
+    const otherDepartmentId = randomUUID();
+    const conversationId = randomUUID();
+    const roleName = `MEDIA_ATTACHMENT_${roleId}`;
+
+    await db.insert(schema.roles).values({
+      id: roleId,
+      name: roleName,
+      is_system: false,
+      permissions: { grants: [
+        { action: 'read', subject: 'Media' },
+        { action: 'update', subject: 'Media', conditions: { id: permittedMediaId } },
+      ] },
+    });
+    await db.insert(schema.departments).values({ id: otherDepartmentId, name: `Attachment department ${otherDepartmentId}` });
+    const email = `media-attachment-${actorId}@example.com`;
+    await db.insert(schema.users).values({
+      id: actorId,
+      email,
+      password_hash: await hashPassword('Password123!'),
+      first_name: 'Media',
+      last_name: 'Attacher',
+      role_id: roleId,
+      is_active: true,
+    });
+    await db.insert(schema.chatConversations).values({
+      id: conversationId,
+      type: 'GROUP_CLOSED',
+      created_by: testUser.id,
+      state: 'ACTIVE',
+      invite_policy: 'ANY_MEMBER_CAN_INVITE',
+      title: 'Conditional media attachment',
+      metadata: {},
+    });
+    await db.insert(schema.chatMembers).values({
+      conversation_id: conversationId,
+      user_id: actorId,
+      role: 'MEMBER',
+      is_system: false,
+    });
+    await db.insert(schema.media).values([
+      { id: permittedMediaId, name: 'Permitted attachment', type: 'IMAGE', status: 'READY', created_by: testUser.id, owner_scope: 'ORGANIZATION' },
+      { id: deniedMediaId, name: 'Denied attachment', type: 'IMAGE', status: 'READY', created_by: testUser.id, owner_scope: 'ORGANIZATION' },
+      { id: crossDepartmentMediaId, name: 'Cross-department attachment', type: 'IMAGE', status: 'READY', created_by: actorId, owner_scope: 'DEPARTMENT', owner_department_id: otherDepartmentId },
+      { id: restrictedMediaId, name: 'Restricted attachment', type: 'IMAGE', status: 'READY', created_by: actorId, owner_scope: 'RESTRICTED' },
+      { id: nonReadyCrossDepartmentMediaId, name: 'Non-ready cross-department attachment', type: 'IMAGE', status: 'PROCESSING', created_by: actorId, owner_scope: 'DEPARTMENT', owner_department_id: otherDepartmentId },
+    ]);
+    const token = await issueTokenForUser({ id: actorId, email, roleId, roleName });
+    const headers = { authorization: `Bearer ${token}` };
+
+    const permitted = await server.inject({
+      method: 'POST',
+      url: `/api/v1/chat/conversations/${conversationId}/messages`,
+      headers,
+      payload: { text: 'permitted attachment', attachmentMediaIds: [permittedMediaId] },
+    });
+    expect(permitted.statusCode).toBe(HTTP_STATUS.CREATED);
+
+    const denied = await server.inject({
+      method: 'POST',
+      url: `/api/v1/chat/conversations/${conversationId}/messages`,
+      headers,
+      payload: { text: 'denied attachment', attachmentMediaIds: [permittedMediaId, deniedMediaId] },
+    });
+    expect(denied.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const [written] = await db.select().from(schema.chatMessages).where(eq(schema.chatMessages.body_text, 'denied attachment')).limit(1);
+    expect(written).toBeUndefined();
+
+    for (const [id, text] of [
+      [crossDepartmentMediaId, 'cross-department attachment'],
+      [restrictedMediaId, 'restricted attachment'],
+      [nonReadyCrossDepartmentMediaId, 'non-ready cross-department attachment'],
+    ]) {
+      const response = await server.inject({
+        method: 'POST',
+        url: `/api/v1/chat/conversations/${conversationId}/messages`,
+        headers,
+        payload: { text, attachmentMediaIds: [id] },
+      });
+      expect(response.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+      const [message] = await db.select().from(schema.chatMessages).where(eq(schema.chatMessages.body_text, text)).limit(1);
+      expect(message).toBeUndefined();
+    }
+  });
+
   it('recreates ACTIVE DM after hard delete and hides old deleted DM in list', async () => {
     const db = getDatabase();
     const operatorRole = await ensureRole('OPERATOR');

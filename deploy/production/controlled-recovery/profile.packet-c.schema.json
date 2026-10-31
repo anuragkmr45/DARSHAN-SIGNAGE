@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DARSHAN controlled recovery Packet C profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "profile_id", "release_id", "target_id", "terminal_migration_id", "migration_manifest_sha256", "topology", "deployment"],
+  "properties": {
+    "format": { "const": "darshan-controlled-docker-recovery-packet2-profile-v2" },
+    "profile_id": { "const": "darshan-release-03-controlled-recovery-packet-c" },
+    "release_id": { "const": "release-03" },
+    "target_id": { "const": "darshan-server-release-03-controlled" },
+    "terminal_migration_id": { "const": "0057_controlled_recovery_report_projection.sql" },
+    "migration_manifest_sha256": { "const": "05561d3b1c8cac7fa57f6d47503835d23c2b88f7886203ab9c8207238762c438" },
+    "topology": { "type": "object" },
+    "deployment": { "type": "object", "required": ["fixed_overlay_sha256", "api_image", "worker_image", "cms_image", "previous_pointer_root_sha256", "packet_c_assets_sha256", "operation_store_sha256", "promotion_authority_sha256", "e2e_tiny_profile_sha256"] }
+  }
+}

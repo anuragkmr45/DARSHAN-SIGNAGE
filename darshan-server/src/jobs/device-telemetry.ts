@@ -1,11 +1,19 @@
 import { createHash } from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { createLogger } from '@/utils/logger';
 import { getPresignedUrl, putObject } from '@/s3';
 import { buildScreenPlaybackStateById } from '@/screens/playback';
 import { emitScreenPreviewUpdateGlobal, emitScreenStateUpdateGlobal } from '@/realtime/screens-namespace';
 import { getSocketServer } from '@/realtime/socket-server';
+import { runWithWorkerAdmission } from '@/maintenance/worker-admission';
+import { recordDisplayProfile } from '@/services/screen-display-state-service';
+import { queueScreenStateRefresh } from '@/services/screen-state-refresh';
+import type { DisplayProfileV1 } from '@/utils/display-profile';
+import {
+  persistDeviceIdentitySessionObservation,
+  type DeviceIdentitySessionObservation,
+} from '@/services/device-identity-session-service';
 
 const logger = createLogger('device-telemetry-jobs');
 
@@ -20,6 +28,15 @@ export interface HeartbeatTelemetryJob {
   receivedAt: string;
   objectKey: string;
   storageObjectId: string;
+  screenObservation?: {
+    status: 'ACTIVE' | 'OFFLINE' | 'INACTIVE';
+    currentScheduleId: string | null;
+    currentMediaId: string | null;
+    currentSceneId: string | null;
+    activeSlots: unknown[];
+  };
+  displayProfile?: DisplayProfileV1;
+  identityObservation?: DeviceIdentitySessionObservation;
 }
 
 export interface ProofOfPlayTelemetryJob {
@@ -53,9 +70,14 @@ function hashSuffix(input: string) {
   return createHash('sha256').update(input).digest('hex').slice(0, 12);
 }
 
-export function buildHeartbeatObjectKey(deviceId: string, receivedAt: string, payload: Record<string, unknown>) {
+export function buildHeartbeatObjectKey(
+  deviceId: string,
+  receivedAt: string,
+  storageObjectId: string,
+  payload: Record<string, unknown>
+) {
   const stamp = Date.parse(receivedAt) || Date.now();
-  return `heartbeats/${deviceId}/${stamp}-${hashSuffix(JSON.stringify(payload))}.json`;
+  return `heartbeats/${deviceId}/${stamp}-${storageObjectId}-${hashSuffix(JSON.stringify(payload))}.json`;
 }
 
 export function buildScreenshotObjectKey(
@@ -105,7 +127,7 @@ export function buildProofOfPlayObjectKey(deviceId: string, idempotencyKey: stri
   return `proof-of-play/${deviceId}/${idempotencyKey}.json`;
 }
 
-export async function processHeartbeatTelemetry(job: HeartbeatTelemetryJob) {
+async function persistHeartbeatTelemetry(job: HeartbeatTelemetryJob) {
   const db = getDatabase();
   const existing = await db
     .select({ id: schema.heartbeats.id })
@@ -114,6 +136,7 @@ export async function processHeartbeatTelemetry(job: HeartbeatTelemetryJob) {
     .limit(1);
 
   if (existing.length > 0) {
+    queueScreenStateRefresh(job.deviceId);
     return;
   }
 
@@ -122,43 +145,88 @@ export async function processHeartbeatTelemetry(job: HeartbeatTelemetryJob) {
     received_at: job.receivedAt,
   });
   const upload = await putObject(HEARTBEAT_BUCKET, job.objectKey, payload, 'application/json');
-  const [existingStorageObject] = await db
-    .select({ id: schema.storageObjects.id })
-    .from(schema.storageObjects)
-    .where(eq(schema.storageObjects.id, job.storageObjectId))
-    .limit(1);
+  const receivedAt = new Date(job.receivedAt);
+  await db.transaction(async (tx) => {
+    const [existingStorageObject] = await tx
+      .select({ id: schema.storageObjects.id })
+      .from(schema.storageObjects)
+      .where(eq(schema.storageObjects.id, job.storageObjectId))
+      .limit(1);
 
-  if (existingStorageObject) {
-    await db
-      .update(schema.storageObjects)
-      .set({
+    if (existingStorageObject) {
+      await tx
+        .update(schema.storageObjects)
+        .set({
+          bucket: HEARTBEAT_BUCKET,
+          object_key: job.objectKey,
+          content_type: 'application/json',
+          size: Buffer.byteLength(payload),
+          sha256: upload.sha256,
+        })
+        .where(eq(schema.storageObjects.id, job.storageObjectId));
+    } else {
+      await tx.insert(schema.storageObjects).values({
+        id: job.storageObjectId,
         bucket: HEARTBEAT_BUCKET,
         object_key: job.objectKey,
         content_type: 'application/json',
         size: Buffer.byteLength(payload),
         sha256: upload.sha256,
-      })
-      .where(eq(schema.storageObjects.id, job.storageObjectId));
-  } else {
-    await db.insert(schema.storageObjects).values({
-      id: job.storageObjectId,
-      bucket: HEARTBEAT_BUCKET,
-      object_key: job.objectKey,
-      content_type: 'application/json',
-      size: Buffer.byteLength(payload),
-      sha256: upload.sha256,
-    });
-  }
+      });
+    }
 
-  await db.insert(schema.heartbeats).values({
-    screen_id: job.deviceId,
-    status: job.status,
-    storage_object_id: job.storageObjectId,
-    created_at: new Date(job.receivedAt),
+    const inserted = await tx
+      .insert(schema.heartbeats)
+      .values({
+        screen_id: job.deviceId,
+        status: job.status,
+        storage_object_id: job.storageObjectId,
+        created_at: receivedAt,
+      })
+      .onConflictDoNothing({ target: schema.heartbeats.storage_object_id })
+      .returning({ id: schema.heartbeats.id });
+    if (!inserted.length) return;
+
+    if (job.identityObservation) {
+      await persistDeviceIdentitySessionObservation(job.identityObservation, tx);
+    }
+    if (job.displayProfile) {
+      const displayWrite = await recordDisplayProfile(job.deviceId, job.displayProfile, tx);
+      if (!displayWrite.applied) {
+        logger.debug({ deviceId: job.deviceId, reason: displayWrite.reason }, 'Ignored stale display profile observation');
+      }
+    }
+
+    if (job.screenObservation) {
+      await tx
+        .update(schema.screens)
+        .set({
+          status: job.screenObservation.status,
+          // Drizzle 0.29 serializes Date values for timestamptz via
+          // toUTCString(), which drops milliseconds. Preserve the accepted
+          // event instant so same-second out-of-order delivery cannot regress
+          // device state.
+          last_heartbeat_at: sql`${job.receivedAt}::timestamptz`,
+          current_schedule_id: job.screenObservation.currentScheduleId,
+          current_media_id: job.screenObservation.currentMediaId,
+          current_scene_id: job.screenObservation.currentSceneId,
+          active_slots: job.screenObservation.activeSlots,
+          updated_at: sql`GREATEST(${schema.screens.updated_at}, ${receivedAt})`,
+        })
+        .where(and(
+          eq(schema.screens.id, job.deviceId),
+          sql`(${schema.screens.last_heartbeat_at} IS NULL OR ${schema.screens.last_heartbeat_at} <= ${job.receivedAt}::timestamptz)`
+        ));
+    }
   });
+  queueScreenStateRefresh(job.deviceId);
 }
 
-export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) {
+export async function processHeartbeatTelemetry(job: HeartbeatTelemetryJob) {
+  return runWithWorkerAdmission('telemetry:heartbeat', () => persistHeartbeatTelemetry(job));
+}
+
+async function persistProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) {
   const db = getDatabase();
   const existing = await db
     .select({ id: schema.proofOfPlay.id })
@@ -247,7 +315,11 @@ export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) 
   }
 }
 
-export async function processScreenshotTelemetry(job: ScreenshotTelemetryJob) {
+export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) {
+  return runWithWorkerAdmission('telemetry:proof-of-play', () => persistProofOfPlayTelemetry(job));
+}
+
+async function persistScreenshotTelemetry(job: ScreenshotTelemetryJob) {
   const db = getDatabase();
   const existing = await db
     .select({ id: schema.screenshots.id })
@@ -314,4 +386,8 @@ export async function processScreenshotTelemetry(job: ScreenshotTelemetryJob) {
     stale: false,
     storage_object_id: job.storageObjectId,
   });
+}
+
+export async function processScreenshotTelemetry(job: ScreenshotTelemetryJob) {
+  return runWithWorkerAdmission('telemetry:screenshot', () => persistScreenshotTelemetry(job));
 }

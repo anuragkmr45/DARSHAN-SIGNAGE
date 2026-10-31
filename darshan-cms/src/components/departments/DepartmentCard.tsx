@@ -15,11 +15,12 @@ import type { Department } from "@/api/types";
 
 interface DepartmentCardProps {
   department: Department;
-  onEdit: (dept: Department) => void;
+  onEdit?: (dept: Department) => void;
   onDelete?: (dept: Department) => void;
+  canViewOperators?: boolean;
 }
 
-export const DepartmentCard = ({ department, onEdit, onDelete }: DepartmentCardProps) => {
+export const DepartmentCard = ({ department, onEdit, onDelete, canViewOperators = true }: DepartmentCardProps) => {
   const operators = department.operators ?? [];
   const [isOperatorsOpen, setIsOperatorsOpen] = useState(false);
 
@@ -33,17 +34,19 @@ export const DepartmentCard = ({ department, onEdit, onDelete }: DepartmentCardP
               {department.description || "No description provided."}
             </p>
           </div>
-          <DropdownMenu>
+          {(onEdit || onDelete) && <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 -mt-1">
+              <Button variant="ghost" size="icon" className="h-8 w-8 -mt-1" aria-label={`Actions for ${department.name}`}>
                 <MoreVertical className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onClick={() => onEdit(department)} className="gap-2">
-                <Edit className="h-4 w-4" />
-                Edit
-              </DropdownMenuItem>
+              {onEdit && (
+                <DropdownMenuItem onClick={() => onEdit(department)} className="gap-2">
+                  <Edit className="h-4 w-4" />
+                  Edit
+                </DropdownMenuItem>
+              )}
               {onDelete && (
                 <DropdownMenuItem
                   onClick={() => onDelete(department)}
@@ -54,7 +57,7 @@ export const DepartmentCard = ({ department, onEdit, onDelete }: DepartmentCardP
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
-          </DropdownMenu>
+          </DropdownMenu>}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -69,7 +72,7 @@ export const DepartmentCard = ({ department, onEdit, onDelete }: DepartmentCardP
             </div>
           )}
 
-          <div className="rounded-lg border bg-muted/30 p-4">
+          {canViewOperators && <div className="rounded-lg border bg-muted/30 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-sm font-medium">
@@ -93,11 +96,11 @@ export const DepartmentCard = ({ department, onEdit, onDelete }: DepartmentCardP
             >
               View Operators
             </Button>
-          </div>
+          </div>}
         </CardContent>
       </Card>
 
-      <Dialog open={isOperatorsOpen} onOpenChange={setIsOperatorsOpen}>
+      <Dialog open={canViewOperators && isOperatorsOpen} onOpenChange={setIsOperatorsOpen}>
         <DialogContent className="max-h-[88vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{department.name} Operators</DialogTitle>

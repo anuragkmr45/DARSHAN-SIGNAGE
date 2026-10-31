@@ -1,27 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
-import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
-import { createSessionRepository } from '@/db/repositories/session';
-import { generateAccessToken } from '@/auth/jwt';
+import { closeTestServer, createTestActor, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 
 async function issueSuperAdminToken() {
-  const db = getDatabase();
-  const [role] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'SUPER_ADMIN')).limit(1);
-  if (!role) {
-    throw new Error('SUPER_ADMIN role is required for reports export tests');
-  }
-
-  const token = await generateAccessToken(testUser.id, testUser.email, role.id, role.name);
-  await createSessionRepository().create({
-    user_id: testUser.id,
-    access_jti: token.jti,
-    expires_at: token.expiresAt,
-  });
-
-  return token.token;
+  return (await createTestActor('SUPER_ADMIN')).token;
 }
 
 describe('Reports PDF exports', () => {

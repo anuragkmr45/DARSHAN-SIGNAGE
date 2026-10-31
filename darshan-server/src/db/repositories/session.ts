@@ -40,7 +40,7 @@ export class SessionRepository {
     await db.delete(schema.sessions).where(eq(schema.sessions.user_id, userId));
   }
 
-  async extendByJti(jti: string, expiresAt: Date) {
+  async extendByJti(jti: string, expiresAt: Date): Promise<typeof schema.sessions.$inferSelect | null> {
     const db = getDatabase();
     const [session] = await db
       .update(schema.sessions)

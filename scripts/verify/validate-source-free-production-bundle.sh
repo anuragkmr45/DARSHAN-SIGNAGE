@@ -124,6 +124,8 @@ verify_no_plaintext_runtime_credentials() {
 
 verify_runtime_secret_files() {
   local bundle_root="$1"
+  local repository_kind
+  repository_kind="$(sed -n 's/^BACKUP_REPOSITORY_KIND=//p' "$bundle_root/production/backend/.env.production")"
   local required_secret_files=(
     "$bundle_root/production/data/secrets/postgres-password"
     "$bundle_root/production/data/secrets/postgres-monitoring-password"
@@ -137,9 +139,21 @@ verify_runtime_secret_files() {
     "$bundle_root/production/backend/secrets/minio-access-key"
     "$bundle_root/production/backend/secrets/minio-secret-key"
     "$bundle_root/production/backend/secrets/observability-metrics-bearer-token"
-    "$bundle_root/production/backend/worker-secrets/backup-offhost-access-key"
-    "$bundle_root/production/backend/worker-secrets/backup-offhost-secret-key"
   )
+  if [[ "$repository_kind" == "LEGACY_OFF_HOST" ]]; then
+    required_secret_files+=(
+      "$bundle_root/production/backend/worker-secrets/backup-offhost-access-key"
+      "$bundle_root/production/backend/worker-secrets/backup-offhost-secret-key"
+    )
+  elif [[ "$repository_kind" == "LOCAL_FILESYSTEM" ]]; then
+    if find "$bundle_root/production/backend/worker-secrets" -type f -name 'backup-offhost-*' | grep -q .; then
+      echo "LOCAL_FILESYSTEM bundle unexpectedly contains legacy off-host credentials." >&2
+      exit 1
+    fi
+  else
+    echo "Generated backend role has no explicit backup repository kind." >&2
+    exit 1
+  fi
   if [[ -d "$bundle_root/production/observability" ]]; then
     required_secret_files+=(
       "$bundle_root/production/observability/secrets/backend-metrics-bearer-token"
@@ -174,6 +188,8 @@ write_config() {
   local tls_mode="$4"
   local observability_host="${5-observe.acceptance.test}"
   local capacity_evidence="$WORK_DIR/$site_name-capacity-evidence.json"
+  local repository_device_id
+  repository_device_id="$(stat -c '%d' /var/lib)"
   cat > "$capacity_evidence" <<EOF
 {
   "evidence_type": "darshan.production.capacity-certification.v1",
@@ -241,13 +257,26 @@ JWT_SECRET=01234567890123456789012345678901
 INITIAL_ADMIN_EMAIL=admin@example.test
 WEBPAGE_NAVIGATION_ALLOWLIST=display-content.acceptance.test
 WEBPAGE_RESOURCE_ALLOWLIST=assets.acceptance.test
-BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_DAYS=30
-BACKUP_OFFHOST_DESTINATION=s3://offhost-backups.acceptance.test/darshan/$site_name
-BACKUP_OFFHOST_ENDPOINT=https://s3.offhost-backups.acceptance.test
-BACKUP_OFFHOST_REGION=us-east-1
-BACKUP_OFFHOST_ACCESS_KEY=offhost-acceptance-access-key
-BACKUP_OFFHOST_SECRET_KEY=offhost-acceptance-secret-key
+BACKUP_REPOSITORY_KIND=LOCAL_FILESYSTEM
+BACKUP_SITE_ID=$site_name
+BACKUP_SCHEDULE_TIME=02:30
+BACKUP_SCHEDULE_TIMEZONE=Asia/Kolkata
+BACKUP_REPOSITORY_ROOT=/var/lib/darshan/$site_name/backup-repository
+BACKUP_REPOSITORY_DEVICE_ID=$repository_device_id
+BACKUP_REPOSITORY_OWNER_UID=1000
+BACKUP_REPOSITORY_OWNER_GID=1000
+BACKUP_REPOSITORY_MIN_FREE_BYTES=1073741824
+BACKUP_REPOSITORY_ID=e7e59c16-0743-4fde-95c4-71853e935acd
+BACKUP_ENCRYPTION_RECIPIENT=age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+BACKUP_ENCRYPTION_KEY_ID=$site_name-recovery-2026
+BACKUP_LOCAL_PROTOCOL=V1_HELPER
+AGE_PATH=/usr/local/bin/age
+AGE_VERSION=1.3.2
+AGE_SHA256=eb7dd1b518f0a307c99cd97782623c5321da049154b04acd2d98d21aa7bc9b2c
+BACKUP_CAPSULE_HELPER_PATH=/usr/local/libexec/darshan-backup-capsule
+BACKUP_CAPSULE_HELPER_VERSION=1
+BACKUP_CAPSULE_HELPER_SHA256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 CONTAINER_LOG_MAX_SIZE=20m
 CONTAINER_LOG_MAX_FILES=5
 DATA_MIN_FREE_DISK_BYTES=21474836480
@@ -288,6 +317,66 @@ EXPORTER_PIDS_LIMIT=128
 EOF
 }
 
+select_legacy_off_host_policy() {
+  local config_file="$1"
+  sed -i \
+    -e 's/^BACKUP_REPOSITORY_KIND=.*/BACKUP_REPOSITORY_KIND=LEGACY_OFF_HOST/' \
+    -e '/^BACKUP_REPOSITORY_ROOT=/d' \
+    -e '/^BACKUP_REPOSITORY_DEVICE_ID=/d' \
+    -e '/^BACKUP_REPOSITORY_OWNER_UID=/d' \
+    -e '/^BACKUP_REPOSITORY_OWNER_GID=/d' \
+    -e '/^BACKUP_REPOSITORY_MIN_FREE_BYTES=/d' \
+    -e '/^BACKUP_REPOSITORY_ID=/d' \
+    -e '/^BACKUP_ENCRYPTION_RECIPIENT=/d' \
+    -e '/^BACKUP_ENCRYPTION_KEY_ID=/d' \
+    -e '/^BACKUP_LOCAL_PROTOCOL=/d' \
+    -e '/^AGE_PATH=/d' \
+    -e '/^AGE_VERSION=/d' \
+    -e '/^AGE_SHA256=/d' \
+    -e '/^BACKUP_CAPSULE_HELPER_PATH=/d' \
+    -e '/^BACKUP_CAPSULE_HELPER_VERSION=/d' \
+    -e '/^BACKUP_CAPSULE_HELPER_SHA256=/d' \
+    "$config_file"
+  cat >> "$config_file" <<'EOF'
+BACKUP_INTERVAL_HOURS=24
+BACKUP_OFFHOST_DESTINATION=s3://offhost-backups.acceptance.test/darshan/acceptance-provided
+BACKUP_OFFHOST_ENDPOINT=https://s3.offhost-backups.acceptance.test
+BACKUP_OFFHOST_REGION=us-east-1
+BACKUP_OFFHOST_ACCESS_KEY=offhost-acceptance-access-key
+BACKUP_OFFHOST_SECRET_KEY=offhost-acceptance-secret-key
+EOF
+}
+
+select_v2_producer_policy() {
+  local config_file="$1" site_name="$2" age_binary="$3" recipient="$4" policy_key="$5" manifest_key="$6" manifest_keyring="$7"
+  local device_id
+  device_id="$(stat -c '%d' /var/lib)"
+  sed -i \
+    -e 's/^BACKUP_LOCAL_PROTOCOL=.*/BACKUP_LOCAL_PROTOCOL=V2_BROKER/' \
+    -e "s|^BACKUP_ENCRYPTION_RECIPIENT=.*|BACKUP_ENCRYPTION_RECIPIENT=$recipient|" \
+    -e '/^BACKUP_CAPSULE_HELPER_PATH=/d' \
+    -e '/^BACKUP_CAPSULE_HELPER_VERSION=/d' \
+    -e '/^BACKUP_CAPSULE_HELPER_SHA256=/d' \
+    "$config_file"
+  cat >> "$config_file" <<EOF
+BACKUP_BROKER_SOCKET_DIR=/var/lib/darshan/$site_name/backup-broker-socket
+BACKUP_WORKER_SPOOL_ROOT=/var/lib/darshan/$site_name/backup-spool
+BACKUP_WORKER_SPOOL_DEVICE_ID=$device_id
+BACKUP_WORKER_SPOOL_MIN_FREE_BYTES=1073741824
+BACKUP_BROKER_HELPER_VERSION=2.0.0
+BACKUP_BROKER_ARTIFACT_MODE=PRODUCE
+BACKUP_AGE_BUILD_BINARY_FILE=$age_binary
+BACKUP_CAPSULE_POLICY_PRIVATE_KEY_FILE=$policy_key
+BACKUP_CAPSULE_POLICY_KEY_ID=$site_name-policy-2026
+BACKUP_BROKER_MANIFEST_PRIVATE_KEY_FILE=$manifest_key
+BACKUP_MANIFEST_PUBLIC_KEYRING_FILE=$manifest_keyring
+BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID=$site_name-manifest-2026
+BACKUP_BROKER_CPU_LIMIT=1
+BACKUP_BROKER_MEMORY_LIMIT=512m
+BACKUP_BROKER_PIDS_LIMIT=128
+EOF
+}
+
 verify_generated_shell_syntax() {
   local bundle_dir="$1"
   local script
@@ -320,16 +409,50 @@ rg -qx 'REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS=false' "$INTERNAL_BUNDLE/product
 rg -q 'CMS public Socket.IO WebSocket upgrade failed' "$INTERNAL_BUNDLE/production/cms/health-check.sh"
 node -e '
 const policy = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-if (policy.backup?.offHostDestination !== process.argv[2]) process.exit(1);
+if (policy.backup?.repositoryKind !== "LOCAL_FILESYSTEM") process.exit(1);
+if (policy.backup?.siteId !== "acceptance-internal") process.exit(1);
+if (policy.backup?.repositoryRoot !== "/var/lib/darshan/acceptance-internal/backup-repository") process.exit(1);
+if (policy.backup?.repositoryId !== "e7e59c16-0743-4fde-95c4-71853e935acd") process.exit(1);
+if (policy.backup?.age?.version !== "1.3.2" || !/^[a-f0-9]{64}$/.test(policy.backup?.age?.sha256 ?? "")) process.exit(1);
+if (policy.backup?.scheduleTime !== "02:30" || policy.backup?.scheduleTimezone !== "Asia/Kolkata") process.exit(1);
 if (policy.capacity?.profileName !== "acceptance-internal-acceptance-capacity") process.exit(1);
 if (policy.capacity?.maxPlayers !== 500) process.exit(1);
 if (!/^[a-f0-9]{64}$/.test(policy.capacity?.evidenceSha256 ?? "")) process.exit(1);
 if (policy.capacity?.modelOnlyAccepted !== false) process.exit(1);
-if (policy.backup?.intervalHours !== 24 || policy.backup?.retentionDays !== 30) process.exit(1);
+if (policy.backup?.intervalHours !== undefined || policy.backup?.retentionDays !== 30) process.exit(1);
 if (policy.containerLogging?.driver !== "local" || policy.containerLogging?.maxSize !== "20m" || policy.containerLogging?.maxFiles !== 5) process.exit(1);
 if (policy.minimumDockerDataFreeBytes?.data !== 21474836480) process.exit(1);
 if (policy.containerLimits?.postgres?.memory !== "4g" || policy.containerLimits?.backendWorker?.pids !== 512) process.exit(1);
-' "$INTERNAL_BUNDLE/OPERATIONS_POLICY.json" 's3://offhost-backups.acceptance.test/darshan/acceptance-internal'
+' "$INTERNAL_BUNDLE/OPERATIONS_POLICY.json"
+rg -qx 'BACKUP_REPOSITORY_KIND=LOCAL_FILESYSTEM' "$INTERNAL_BUNDLE/production/backend/.env.production"
+rg -qx 'BACKUP_LOCAL_PROTOCOL=V1_HELPER' "$INTERNAL_BUNDLE/production/backend/.env.production"
+rg -qx 'BACKUP_REPOSITORY_ROOT=/var/lib/darshan/acceptance-internal/backup-repository' "$INTERNAL_BUNDLE/production/backend/.env.production"
+for env_file in \
+  "$INTERNAL_BUNDLE/production/backend/.env.production" \
+  "$INTERNAL_BUNDLE/production/recovery/.env.recovery"; do
+  if rg -q '^(BACKUP_INTERVAL_HOURS|BACKUP_OFFHOST_DESTINATION|BACKUP_OFFHOST_ENDPOINT|BACKUP_OFFHOST_REGION)=' "$env_file"; then
+    echo "LOCAL_FILESYSTEM generated env retained inactive legacy fields: $env_file" >&2
+    exit 1
+  fi
+done
+rg -q -- 'source: /var/lib/darshan/acceptance-internal/backup-repository' "$INTERNAL_BUNDLE/production/backend/docker-compose.yml"
+rg -q -- 'target: /var/lib/darshan/acceptance-internal/backup-repository' "$INTERNAL_BUNDLE/production/backend/docker-compose.yml"
+rg -q -- 'create_host_path: false' "$INTERNAL_BUNDLE/production/backend/docker-compose.yml"
+rg -q -- 'TMPDIR: /var/lib/darshan-worker/tmp' "$INTERNAL_BUNDLE/production/backend/docker-compose.yml"
+if rg -q '^  backup-broker:' "$INTERNAL_BUNDLE/production/backend/docker-compose.yml"; then
+  echo "V1_HELPER bundle must not generate the V2 backup broker service." >&2
+  exit 1
+fi
+if rg -q 'BACKUP_OFFHOST_(ACCESS_KEY|SECRET_KEY)_FILE|worker-secrets:/run/darshan-input-worker-secrets' \
+  "$INTERNAL_BUNDLE/production/backend/docker-compose.yml"; then
+  echo "LOCAL_FILESYSTEM worker compose retained legacy credential injection." >&2
+  exit 1
+fi
+api_compose_block="$(sed -n '/^  api:/,/^  worker:/p' "$INTERNAL_BUNDLE/production/backend/docker-compose.yml")"
+if grep -q '/backup-repository' <<<"$api_compose_block"; then
+  echo "Backend API must receive backup policy metadata without repository filesystem access." >&2
+  exit 1
+fi
 for role in data valkey backend cms observability recovery; do
   cmp -s "$INTERNAL_BUNDLE/OPERATIONS_POLICY.json" "$INTERNAL_BUNDLE/production/$role/OPERATIONS_POLICY.json" || {
     echo "Production operations policy is missing or differs in role: $role" >&2
@@ -392,6 +515,7 @@ if bash "$ROOT_DIR/scripts/bootstrap/prepare-transport-tls.sh" \
 fi
 
 write_config "$WORK_DIR/provided.env" acceptance-provided "$WORK_DIR/provided-output" provided
+select_legacy_off_host_policy "$WORK_DIR/provided.env"
 cat >> "$WORK_DIR/provided.env" <<EOF
 CMS_TLS_CERT_FILE=$INTERNAL_BUNDLE/production/cms/tls/tls.crt
 CMS_TLS_KEY_FILE=$INTERNAL_BUNDLE/production/cms/tls/tls.key
@@ -410,6 +534,18 @@ bash "$ROOT_DIR/scripts/bundle/build-production-bundle.sh" --skip-docker "$WORK_
 
 PROVIDED_BUNDLE="$WORK_DIR/provided-output/acceptance-provided/r1"
 verify_generated_shell_syntax "$PROVIDED_BUNDLE"
+rg -qx 'BACKUP_REPOSITORY_KIND=LEGACY_OFF_HOST' "$PROVIDED_BUNDLE/production/backend/.env.production"
+for env_file in \
+  "$PROVIDED_BUNDLE/production/backend/.env.production" \
+  "$PROVIDED_BUNDLE/production/recovery/.env.recovery"; do
+  if rg -q '^(BACKUP_REPOSITORY_ROOT|BACKUP_REPOSITORY_DEVICE_ID|BACKUP_REPOSITORY_OWNER_UID|BACKUP_REPOSITORY_OWNER_GID|BACKUP_REPOSITORY_MIN_FREE_BYTES)=' "$env_file"; then
+    echo "LEGACY_OFF_HOST generated env retained inactive local repository fields: $env_file" >&2
+    exit 1
+  fi
+done
+rg -qx 'BACKUP_INTERVAL_HOURS=24' "$PROVIDED_BUNDLE/production/backend/.env.production"
+rg -q 'BACKUP_OFFHOST_ACCESS_KEY_FILE: /run/worker-secrets/backup-offhost-access-key' "$PROVIDED_BUNDLE/production/backend/docker-compose.yml"
+rg -q -- '- ./worker-secrets:/run/darshan-input-worker-secrets:ro' "$PROVIDED_BUNDLE/production/backend/docker-compose.yml"
 cmp "$WORK_DIR/pki/transport-ca.crt" "$PROVIDED_BUNDLE/production/cms/tls/transport-ca.crt"
 verify_no_plaintext_runtime_credentials "$PROVIDED_BUNDLE"
 sabotage_env="$PROVIDED_BUNDLE/production/backend/.env.production"
@@ -461,6 +597,138 @@ if find "$PROVIDED_BUNDLE" -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.
 fi
 verify_certificate_fingerprints "$PROVIDED_BUNDLE"
 
+# Exercise the production V2 producer with the exact pinned age binary. The
+# downloaded archive is not trusted directly; the extracted executable must
+# match the source-controlled SHA-256 before it is used.
+age_fixture="$WORK_DIR/age-fixture"
+mkdir -m 0700 "$age_fixture"
+curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.3.2/age-v1.3.2-linux-amd64.tar.gz -o "$age_fixture/age.tgz"
+tar -xzf "$age_fixture/age.tgz" -C "$age_fixture"
+age_binary="$age_fixture/age/age"
+age_keygen="$age_fixture/age/age-keygen"
+echo 'eb7dd1b518f0a307c99cd97782623c5321da049154b04acd2d98d21aa7bc9b2c  '"$age_binary" | sha256sum -c -
+age_identity="$WORK_DIR/v2-recovery.agekey"
+wrong_age_identity="$WORK_DIR/v2-wrong.agekey"
+"$age_keygen" -o "$age_identity" >/dev/null
+"$age_keygen" -o "$wrong_age_identity" >/dev/null
+age_recipient="$("$age_keygen" -y "$age_identity")"
+policy_private="$WORK_DIR/v2-capsule-policy.key"
+manifest_private="$WORK_DIR/v2-manifest-active.key"
+manifest_old_private="$WORK_DIR/v2-manifest-retained-old.key"
+manifest_keyring="$WORK_DIR/v2-manifest-keyring.json"
+openssl genpkey -algorithm Ed25519 -out "$policy_private" >/dev/null 2>&1
+openssl genpkey -algorithm Ed25519 -out "$manifest_private" >/dev/null 2>&1
+openssl genpkey -algorithm Ed25519 -out "$manifest_old_private" >/dev/null 2>&1
+openssl pkey -in "$manifest_private" -pubout -out "$WORK_DIR/v2-manifest-active.pub" >/dev/null 2>&1
+openssl pkey -in "$manifest_old_private" -pubout -out "$WORK_DIR/v2-manifest-retained-old.pub" >/dev/null 2>&1
+node - "$WORK_DIR/v2-manifest-active.pub" "$WORK_DIR/v2-manifest-retained-old.pub" "$manifest_keyring" <<'NODE'
+const fs = require('node:fs'); const [active, old, output] = process.argv.slice(2);
+fs.writeFileSync(output, `${JSON.stringify({ 'acceptance-v2-manifest-2025': fs.readFileSync(old, 'utf8'), 'acceptance-v2-manifest-2026': fs.readFileSync(active, 'utf8') })}\n`);
+NODE
+chmod 0600 "$age_identity" "$wrong_age_identity" "$policy_private" "$manifest_private" "$manifest_old_private"
+chmod 0640 "$manifest_keyring"
+
+write_config "$WORK_DIR/v2.env" acceptance-v2 "$WORK_DIR/v2-output" internal-ca
+printf 'TRANSPORT_CA_KEY_FILE=%s\n' "$WORK_DIR/pki/transport-ca.key" >> "$WORK_DIR/v2.env"
+select_v2_producer_policy "$WORK_DIR/v2.env" acceptance-v2 "$age_binary" "$age_recipient" "$policy_private" "$manifest_private" "$manifest_keyring"
+bash "$ROOT_DIR/scripts/bundle/build-production-bundle.sh" --skip-docker "$WORK_DIR/v2.env"
+V2_BUNDLE="$WORK_DIR/v2-output/acceptance-v2/r1"
+verify_generated_shell_syntax "$V2_BUNDLE"
+v2_backend="$V2_BUNDLE/production/backend"
+v2_policy="$v2_backend/backup-broker-inputs/capsule-policy.signed.json"
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  docker compose --env-file "$v2_backend/.env.production" -f "$v2_backend/docker-compose.yml" config --quiet
+fi
+node - "$v2_policy" "$v2_backend/docker-compose.yml" "$policy_private" "$WORK_DIR/release-signing.key" "$age_identity" <<'NODE'
+const crypto = require('node:crypto'); const fs = require('node:fs');
+const [policyFile, composeFile, policyPrivateFile, releasePrivateFile, ageIdentityFile] = process.argv.slice(2);
+const document = JSON.parse(fs.readFileSync(policyFile, 'utf8'));
+const expectedRoles = ['backend', 'data', 'cms', 'valkey', 'observability'];
+if (document.policy.required_roles.join(',') !== expectedRoles.join(',')) throw new Error('V2 policy is missing the exact ordered required roles.');
+if ('entries' in document.policy || 'inventory_sha256' in document.policy) throw new Error('Public signed descriptor leaked the private per-file inventory.');
+if (!/^darshan-production-capsule-v2:[a-f0-9]{64}$/.test(document.policy.contract_id) || !/^[a-f0-9]{64}$/.test(document.policy.encrypted_inventory_sha256)) throw new Error('V2 descriptor contract binding is invalid.');
+const compose = fs.readFileSync(composeFile, 'utf8');
+const worker = compose.slice(compose.indexOf('  worker:'), compose.indexOf('  backup-broker:'));
+const broker = compose.slice(compose.indexOf('  backup-broker:'), compose.indexOf('  node-exporter:'));
+if (worker.includes('/backup-repository') || !worker.includes('/backup-spool') || !worker.includes('backup-worker-public')) throw new Error('V2 worker mount authority is invalid.');
+for (const required of ['network_mode: none', 'user: "0:0"', 'read_only: true', 'cap_drop:', 'cap_add:', '- CHOWN', '- KILL', '- SETGID', '- SETUID', 'backup-broker-listener', 'create_host_path: false', 'manifest-signing.key']) if (!broker.includes(required)) throw new Error(`V2 broker isolation missing ${required}`);
+for (const forbidden of ['env_file:', 'ports:', 'extra_hosts:', 'docker.sock', 'pid: host']) if (broker.includes(forbidden)) throw new Error(`V2 broker contains forbidden ${forbidden}`);
+if ((broker.match(/create_host_path: false/g) ?? []).length < 8) throw new Error('Every V2 broker bind must disable host-path creation.');
+const hashes = new Set([policyPrivateFile, releasePrivateFile, ageIdentityFile].map((file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')));
+function walk(dir) { return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]); }
+for (const file of walk(process.argv[2].replace('/backup-broker-inputs/capsule-policy.signed.json', ''))) {
+  if (hashes.has(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'))) throw new Error(`Build-only private material leaked: ${file}`);
+}
+NODE
+node - "$v2_backend" "$WORK_DIR/release-signing.key" <<'NODE' | "$ROOT_DIR/darshan-server/node_modules/.bin/tsx" "$ROOT_DIR/darshan-server/scripts/validate-backup-broker-artifacts.ts" >/dev/null
+const path = require('node:path'); const [root, releaseSigningPrivateKeyFile] = process.argv.slice(2); const env = Object.fromEntries(require('node:fs').readFileSync(path.join(root, '.env.production'), 'utf8').trim().split('\n').map((line) => line.split(/=(.*)/s).slice(0, 2)));
+process.stdout.write(`${JSON.stringify({ capsuleFile: path.join(root, 'backup-broker-inputs/configuration.tar.age'), policyFile: path.join(root, 'backup-broker-inputs/capsule-policy.signed.json'), policyTrustFile: path.join(root, 'backup-broker-inputs/policy-trust.json'), manifestPrivateKeyFile: path.join(root, 'backup-broker-inputs/manifest-signing.key'), manifestPublicKeyringFile: path.join(root, 'backup-broker-inputs/manifest-keyring.json'), releaseSigningPrivateKeyFile, manifestActiveKeyId: env.BACKUP_BROKER_MANIFEST_ACTIVE_KEY_ID, siteId: env.BACKUP_SITE_ID, repositoryId: env.BACKUP_REPOSITORY_ID, releaseGeneration: env.DARSHAN_RELEASE_ID, deploymentGeneration: env.SIGNHEX_DEPLOYMENT_ID, compatibilityGeneration: Number(env.DARSHAN_COMPATIBILITY_GENERATION), ageRecipientKeyId: env.BACKUP_ENCRYPTION_KEY_ID })}\n`);
+NODE
+decrypted_tar="$WORK_DIR/v2-configuration.tar"
+"$age_binary" --decrypt --identity "$age_identity" --output "$decrypted_tar" "$v2_backend/backup-broker-inputs/configuration.tar.age"
+tar -tf "$decrypted_tar" | grep -q './backend/certs/transport-ca.crt'
+decrypted_root="$WORK_DIR/v2-decrypted"
+mkdir -m 0700 "$decrypted_root"
+tar -xf "$decrypted_tar" -C "$decrypted_root"
+node - "$decrypted_root" "$v2_policy" <<'NODE' | "$ROOT_DIR/darshan-server/node_modules/.bin/tsx" "$ROOT_DIR/darshan-server/scripts/validate-decrypted-configuration-capsule.ts"
+const fs = require('node:fs'); const [root, policy] = process.argv.slice(2); const document = JSON.parse(fs.readFileSync(policy, 'utf8'));
+process.stdout.write(`${JSON.stringify({ root, encryptedInventorySha256: document.policy.encrypted_inventory_sha256 })}\n`);
+NODE
+for required in \
+  backend/.env.production \
+  backend/secrets/jwt-secret \
+  backend/secrets/backup-manifest-signing.key \
+  data/secrets/postgres-password \
+  data/tls/private.key \
+  valkey/secrets/valkey-password \
+  valkey/tls/server.key \
+  cms/tls/tls.key \
+  observability/secrets/grafana-admin-password \
+  observability/certs/server.key \
+  observability/grafana/provisioning/datasources/prometheus.yml; do
+  [[ -s "$decrypted_root/$required" ]] || { echo "Produced V2 capsule is missing required recovery input: $required" >&2; exit 1; }
+done
+if rg -q '^(BACKUP_BROKER_POLICY_SHA256|BACKUP_CAPSULE_GENERATION|BACKUP_CAPSULE_SHA256)=' "$decrypted_root/backend/.env.production"; then
+  echo "Produced backend base environment retained derived overlay fields." >&2; exit 1
+fi
+cmp "$decrypted_root/backend/secrets/backup-manifest-signing.key" "$v2_backend/backup-broker-inputs/manifest-signing.key"
+node - "$v2_backend/backup-broker-inputs/manifest-keyring.json" <<'NODE'
+const fs = require('node:fs'); const keyring = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (!keyring['acceptance-v2-manifest-2025'] || !keyring['acceptance-v2-manifest-2026'] || Object.keys(keyring).length !== 2) throw new Error('Generated keyring did not retain the old manifest authority.');
+NODE
+if rg -q 'AGE-SECRET-KEY' "$decrypted_root"; then
+  echo "Private age recovery identity leaked into the decrypted capsule." >&2; exit 1
+fi
+node - "$decrypted_root" "$policy_private" "$WORK_DIR/release-signing.key" "$age_identity" "$manifest_old_private" <<'NODE'
+const crypto = require('node:crypto'); const fs = require('node:fs'); const path = require('node:path');
+const [root, ...forbidden] = process.argv.slice(2); const forbiddenHashes = new Set(forbidden.map((file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')));
+function walk(directory) { return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(path.join(directory, entry.name)) : [path.join(directory, entry.name)]); }
+for (const file of walk(root)) if (forbiddenHashes.has(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'))) throw new Error(`Build-only private material entered the recovery capsule: ${file}`);
+NODE
+cp -a "$decrypted_root" "$WORK_DIR/v2-decrypted-tampered"
+printf 'tamper' >> "$WORK_DIR/v2-decrypted-tampered/backend/secrets/jwt-secret"
+if node - "$WORK_DIR/v2-decrypted-tampered" "$v2_policy" <<'NODE' | "$ROOT_DIR/darshan-server/node_modules/.bin/tsx" "$ROOT_DIR/darshan-server/scripts/validate-decrypted-configuration-capsule.ts" >/dev/null 2>&1; then
+const fs = require('node:fs'); const [root, policy] = process.argv.slice(2); const document = JSON.parse(fs.readFileSync(policy, 'utf8'));
+process.stdout.write(`${JSON.stringify({ root, encryptedInventorySha256: document.policy.encrypted_inventory_sha256 })}\n`);
+NODE
+  echo "Tampered decrypted V2 capsule passed inventory validation." >&2; exit 1
+fi
+rm "$WORK_DIR/v2-decrypted-tampered/capsule-inventory.json"
+if node - "$WORK_DIR/v2-decrypted-tampered" "$v2_policy" <<'NODE' | "$ROOT_DIR/darshan-server/node_modules/.bin/tsx" "$ROOT_DIR/darshan-server/scripts/validate-decrypted-configuration-capsule.ts" >/dev/null 2>&1; then
+const fs = require('node:fs'); const [root, policy] = process.argv.slice(2); const document = JSON.parse(fs.readFileSync(policy, 'utf8'));
+process.stdout.write(`${JSON.stringify({ root, encryptedInventorySha256: document.policy.encrypted_inventory_sha256 })}\n`);
+NODE
+  echo "Decrypted V2 capsule without inventory passed validation." >&2; exit 1
+fi
+if "$age_binary" --decrypt --identity "$wrong_age_identity" --output "$WORK_DIR/v2-wrong.tar" "$v2_backend/backup-broker-inputs/configuration.tar.age" >/dev/null 2>&1; then
+  echo "V2 capsule decrypted under the wrong age identity." >&2; exit 1
+fi
+cp "$v2_backend/backup-broker-inputs/configuration.tar.age" "$WORK_DIR/v2-tampered.age"
+printf 'tamper' >> "$WORK_DIR/v2-tampered.age"
+if "$age_binary" --decrypt --identity "$age_identity" --output "$WORK_DIR/v2-tampered.tar" "$WORK_DIR/v2-tampered.age" >/dev/null 2>&1; then
+  echo "Tampered V2 capsule decrypted successfully." >&2; exit 1
+fi
+
 printf 'tamper\n' >> "$PROVIDED_BUNDLE/BUNDLE_OVERVIEW.md"
 if (cd "$PROVIDED_BUNDLE" && DARSHAN_RELEASE_TRUST_KEY="$WORK_DIR/release-signing.pem" ./verify-bundle.sh >/dev/null 2>&1); then
   echo "Bundle checksum verification accepted a modified file." >&2
@@ -509,6 +777,7 @@ EOF
   bash "$ROOT_DIR/scripts/bundle/build-production-bundle.sh" "$WORK_DIR/docker.env"
 
   DOCKER_BUNDLE="$WORK_DIR/docker-output/$docker_site/r1"
+  install -d -m 0700 -o 1000 -g 1000 "/var/lib/darshan/$docker_site/backup-repository"
   docker run --rm --entrypoint promtool \
     -v "$DOCKER_BUNDLE/production/observability/prometheus:/etc/darshan/prometheus:ro" \
     -v "$DOCKER_BUNDLE/production/observability/secrets:/etc/darshan/secrets:ro" \
@@ -778,4 +1047,4 @@ EOF
 fi
 
 node --test "$ROOT_DIR/scripts/bundle/production-bundle-config.test.mjs"
-echo "Source-free production bundle acceptance passed for internal-ca and provided TLS modes."
+echo "Source-free production bundle acceptance passed for V1, legacy off-host, and produced V2 policies across internal-ca and provided TLS modes."

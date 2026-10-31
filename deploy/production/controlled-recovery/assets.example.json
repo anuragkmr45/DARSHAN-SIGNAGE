@@ -1,0 +1,15 @@
+{
+  "format": "darshan-controlled-recovery-assets-v1",
+  "files": [
+    { "path": "/opt/darshan/controlled-recovery/activation.schema.json", "sha256": "1212121212121212121212121212121212121212121212121212121212121212" },
+    { "path": "/opt/darshan/controlled-recovery/profile.schema.json", "sha256": "1313131313131313131313131313131313131313131313131313131313131313" },
+    { "path": "/opt/darshan/controlled-recovery/profile.packet-c.schema.json", "sha256": "1616161616161616161616161616161616161616161616161616161616161616" },
+    { "path": "/opt/darshan/controlled-recovery/profile.packet-c.json", "sha256": "1717171717171717171717171717171717171717171717171717171717171717" },
+    { "path": "/opt/darshan/controlled-recovery/recovery-runtime-manifest.json", "sha256": "1414141414141414141414141414141414141414141414141414141414141414" },
+    { "path": "/opt/darshan/controlled-recovery/production-build-manifest.json", "sha256": "1515151515151515151515151515151515151515151515151515151515151515" },
+    { "path": "/opt/darshan/controlled-recovery/docker-compose.yml", "sha256": "9999999999999999999999999999999999999999999999999999999999999999" },
+    { "path": "/usr/bin/age", "sha256": "5555555555555555555555555555555555555555555555555555555555555555" },
+    { "path": "/usr/bin/tar", "sha256": "6666666666666666666666666666666666666666666666666666666666666666" },
+    { "path": "/usr/bin/psql", "sha256": "7777777777777777777777777777777777777777777777777777777777777777" }
+  ]
+}

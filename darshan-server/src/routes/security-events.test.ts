@@ -1,35 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { desc, eq } from 'drizzle-orm';
-import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
-import { createSessionRepository } from '@/db/repositories/session';
-import { generateAccessToken } from '@/auth/jwt';
+import { closeTestServer, createTestActor, createTestServer } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
-
-async function issueSuperAdminToken() {
-  const db = getDatabase();
-  const [role] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'SUPER_ADMIN')).limit(1);
-  if (!role) {
-    throw new Error('SUPER_ADMIN role is required for security event route tests');
-  }
-
-  const token = await generateAccessToken(testUser.id, testUser.email, role.id, role.name);
-  await createSessionRepository().create({
-    user_id: testUser.id,
-    access_jti: token.jti,
-    expires_at: token.expiresAt,
-  });
-
-  return token.token;
-}
 
 describe('Security event routes', () => {
   let server: FastifyInstance;
   let token: string;
+  let actorId: string;
 
   beforeAll(async () => {
     server = await createTestServer();
-    token = await issueSuperAdminToken();
+    const actor = await createTestActor('SUPER_ADMIN');
+    token = actor.token;
+    actorId = actor.id;
   });
 
   afterAll(async () => {
@@ -64,7 +48,7 @@ describe('Security event routes', () => {
       .orderBy(desc(schema.auditLogs.created_at));
 
     expect(auditLog).toBeTruthy();
-    expect(auditLog?.user_id).toBe(testUser.id);
+    expect(auditLog?.user_id).toBe(actorId);
     expect(auditLog?.entity_type).toBe('SECURITY_EVENT');
     expect(auditLog?.ip_address).toBeTruthy();
   });

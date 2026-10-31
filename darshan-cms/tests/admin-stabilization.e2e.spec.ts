@@ -7,6 +7,7 @@ type MockUser = {
   last_name: string;
   role_id: string;
   role: string;
+  authorization: { rules: Array<{ action: string; subject: string }>; is_global_user_manager: boolean };
 };
 
 type ApiKeyRecord = {
@@ -64,6 +65,7 @@ const adminUser: MockUser = {
   last_name: "User",
   role_id: "role-admin",
   role: "ADMIN",
+  authorization: { rules: [{ action: "manage", subject: "all" }], is_global_user_manager: true },
 };
 
 const limitedUser: MockUser = {
@@ -73,6 +75,7 @@ const limitedUser: MockUser = {
   last_name: "User",
   role_id: "role-operator",
   role: "OPERATOR",
+  authorization: { rules: [{ action: "read", subject: "Dashboard" }], is_global_user_manager: false },
 };
 
 const adminRolesPayload = {

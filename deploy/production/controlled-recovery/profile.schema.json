@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://darshan.invalid/schemas/controlled-recovery-profile-v1.json",
+  "title": "DARSHAN controlled Docker recovery profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "profile_id", "site_id", "release_id", "target_id", "terminal_migration_id", "repository", "journal_root", "protected_workspace_root", "recovery_key_root", "docker", "images", "tools", "configuration", "limits", "capacity"],
+  "properties": {
+    "format": { "const": "darshan-controlled-docker-recovery-profile-v1" },
+    "profile_id": { "const": "darshan-release-01-controlled-recovery" },
+    "site_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$" },
+    "release_id": { "const": "release-01" },
+    "target_id": { "const": "darshan-server-release-01" },
+    "terminal_migration_id": { "const": "0055_backup_deletion_idempotency_bindings.sql" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "journal_root": { "$ref": "#/$defs/absolutePath" },
+    "protected_workspace_root": { "$ref": "#/$defs/absolutePath" },
+    "recovery_key_root": { "$ref": "#/$defs/absolutePath" },
+    "docker": { "$ref": "#/$defs/docker" },
+    "images": { "$ref": "#/$defs/images" },
+    "tools": { "$ref": "#/$defs/tools" },
+    "configuration": { "$ref": "#/$defs/configuration" },
+    "limits": { "$ref": "#/$defs/limits" },
+    "capacity": { "$ref": "#/$defs/capacity" }
+  },
+  "$defs": {
+    "absolutePath": { "type": "string", "pattern": "^/", "maxLength": 1024 },
+    "decimal": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "repository": { "type": "object", "additionalProperties": false, "required": ["root", "device_id", "repository_id", "owner_uid", "owner_gid"], "properties": { "root": { "$ref": "#/$defs/absolutePath" }, "device_id": { "type": "string" }, "repository_id": { "type": "string", "format": "uuid" }, "owner_uid": { "type": "integer", "minimum": 0 }, "owner_gid": { "type": "integer", "minimum": 0 } } },
+    "docker": { "type": "object", "additionalProperties": false, "required": ["context", "compose_file", "executable", "private_network_prefix", "postgres_volume_prefix", "minio_volume_prefix", "mount_destinations"], "properties": { "context": { "const": "darshan-controlled-recovery" }, "compose_file": { "$ref": "#/$defs/absolutePath" }, "executable": { "$ref": "#/$defs/absolutePath" }, "private_network_prefix": { "const": "darshan-recovery-net" }, "postgres_volume_prefix": { "const": "darshan-recovery-pg" }, "minio_volume_prefix": { "const": "darshan-recovery-minio" }, "mount_destinations": { "type": "object", "additionalProperties": false, "required": ["postgres", "minio"], "properties": { "postgres": { "const": "/var/lib/postgresql/data" }, "minio": { "const": "/data" } } } } },
+    "image": { "type": "object", "additionalProperties": false, "required": ["reference"], "properties": { "reference": { "type": "string", "pattern": "@sha256:[a-f0-9]{64}$" } } },
+    "images": { "type": "object", "additionalProperties": false, "required": ["postgres", "minio", "importer", "validator"], "properties": { "postgres": { "$ref": "#/$defs/image" }, "minio": { "$ref": "#/$defs/image" }, "importer": { "$ref": "#/$defs/image" }, "validator": { "$ref": "#/$defs/image" } } },
+    "tool": { "type": "object", "additionalProperties": false, "required": ["executable", "version", "sha256"], "properties": { "executable": { "$ref": "#/$defs/absolutePath" }, "version": { "type": "string" }, "sha256": { "$ref": "#/$defs/sha256" } } },
+    "tools": { "type": "object", "additionalProperties": false, "required": ["age", "tar", "psql"], "properties": { "age": { "$ref": "#/$defs/tool" }, "tar": { "$ref": "#/$defs/tool" }, "psql": { "$ref": "#/$defs/tool" } } },
+    "configuration": { "type": "object", "additionalProperties": false, "required": ["asset_manifest", "expected_sha256"], "properties": { "asset_manifest": { "$ref": "#/$defs/absolutePath" }, "expected_sha256": { "$ref": "#/$defs/sha256" } } },
+    "limits": { "type": "object", "additionalProperties": false, "required": ["max_artifact_bytes", "max_entries", "max_path_bytes", "object_batch_size", "phase_timeout_ms"], "properties": { "max_artifact_bytes": { "$ref": "#/$defs/decimal" }, "max_entries": { "type": "integer", "minimum": 1 }, "max_path_bytes": { "type": "integer", "minimum": 1, "maximum": 4096 }, "object_batch_size": { "type": "integer", "minimum": 1, "maximum": 1000 }, "phase_timeout_ms": { "type": "integer", "minimum": 1, "maximum": 86400000 } } },
+    "capacity": { "type": "object", "additionalProperties": false, "required": ["protected_workspace_headroom_bytes", "pg_multiplier_numerator", "pg_multiplier_denominator", "wal_headroom_bytes", "minio_headroom_bytes", "target_disk_headroom_bytes", "required_memory_bytes", "required_inodes"], "properties": { "protected_workspace_headroom_bytes": { "$ref": "#/$defs/decimal" }, "pg_multiplier_numerator": { "$ref": "#/$defs/decimal" }, "pg_multiplier_denominator": { "$ref": "#/$defs/decimal" }, "wal_headroom_bytes": { "$ref": "#/$defs/decimal" }, "minio_headroom_bytes": { "$ref": "#/$defs/decimal" }, "target_disk_headroom_bytes": { "$ref": "#/$defs/decimal" }, "required_memory_bytes": { "$ref": "#/$defs/decimal" }, "required_inodes": { "$ref": "#/$defs/decimal" } } }
+  }
+}

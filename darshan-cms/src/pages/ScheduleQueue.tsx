@@ -175,7 +175,7 @@ export default function ScheduleQueue() {
         date_to: sharedFilters.date_to,
         sort_direction: sortDirection,
       }),
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData,
     staleTime: 30_000,
   });
 

@@ -1,0 +1,10 @@
+(node:918500) Warning: NodeVersionSupportWarning: The AWS SDK for JavaScript (v3)
+versions published after the first week of January 2027
+will require node >=22. You are running node v20.20.2.
+
+To continue receiving updates to AWS services, bug fixes,
+and security updates please upgrade to node >=22.
+
+More information can be found at: https://a.co/c895JFp
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"captureEnabled":false,"codes":["CONTROLLED_RECOVERY_D3_SOURCE_HEADROOM_UNSAFE"],"diagnostics":[{"comparison":"MAXIMUM","kind":"headroom","observed":"1450000","resource":"PRESSURE_MICROS","threshold":"500000"}],"format":"darshan-d3-source-provider-report-v1","nextAction":"REVIEW_RETAINED_RESOURCES","status":"BLOCKED","wholeRunEnabled":false}

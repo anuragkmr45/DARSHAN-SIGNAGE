@@ -166,7 +166,7 @@ export async function createPlaybackRefreshCommands(params: PlaybackRefreshComma
         requested_at: requestedAt,
       },
     })),
-    { ignoreIdempotencyConflicts: true }
+    { ignoreIdempotencyConflicts: true, missingScreenBehavior: 'skip' }
   );
 
   return {

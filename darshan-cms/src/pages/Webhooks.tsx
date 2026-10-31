@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Plus, Send, Trash2, Webhook } from "lucide-react";
 import { ApiError } from "@/api/apiClient";
@@ -28,6 +28,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthorization } from "@/hooks/useAuthorization";
+import { useAppSelector } from "@/store/hooks";
 
 const availableEvents = [
   { id: "screen.online", label: "Screen Comes Online" },
@@ -57,27 +59,49 @@ const statusLabel = (webhook: WebhookRecord) => {
 export default function Webhooks() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const currentUser = useAppSelector((state) => state.auth.user);
+  const { can, canRecord, isLoading: isAuthorizationLoading } = useAuthorization();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [webhookName, setWebhookName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+  const [createdSecret, setCreatedSecret] = useState<{ id: string; secret: string } | null>(null);
+  const webhookQueryKey = ["webhooks", currentUser?.id ?? "anonymous"] as const;
+  const proposedWebhook = {
+    name: webhookName.trim(),
+    target_url: webhookUrl.trim(),
+    event_types: selectedEvents,
+    is_active: true,
+    created_by: currentUser?.id,
+  };
+  const canCreateWebhook = can("create", "Webhook") &&
+    canRecord("create", "Webhook", proposedWebhook);
 
   const { data: webhooks = [], isLoading, error } = useQuery({
-    queryKey: ["webhooks"],
+    queryKey: webhookQueryKey,
     queryFn: webhooksApi.list,
+    enabled: Boolean(currentUser) && can("read", "Webhook"),
   });
+
+  useEffect(() => {
+    setCreatedSecret(null);
+    setIsCreateDialogOpen(false);
+  }, [currentUser?.id]);
 
   const createMutation = useMutation({
     mutationFn: webhooksApi.create,
-    onSuccess: () => {
+    onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
       setWebhookName("");
       setWebhookUrl("");
       setSelectedEvents([]);
       setIsCreateDialogOpen(false);
+      if (created.secret) setCreatedSecret({ id: created.id, secret: created.secret });
       toast({
         title: "Webhook created",
-        description: "The webhook is now persisted through the backend API.",
+        description: created.secret
+          ? "Copy the signing secret now; it will not be shown again."
+          : "The webhook is now persisted through the backend API.",
       });
     },
     onError: (mutationError) => {
@@ -164,6 +188,14 @@ export default function Webhooks() {
       });
       return;
     }
+    if (!canCreateWebhook) {
+      toast({
+        title: "Not permitted",
+        description: "This webhook does not match your current create permission.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     createMutation.mutate({
       name: webhookName.trim(),
@@ -171,6 +203,12 @@ export default function Webhooks() {
       event_types: selectedEvents,
       is_active: true,
     });
+  };
+
+  const copyCreatedSecret = async () => {
+    if (!createdSecret) return;
+    await navigator.clipboard.writeText(createdSecret.secret);
+    toast({ title: "Copied", description: "Webhook signing secret copied to clipboard." });
   };
 
   return (
@@ -182,9 +220,12 @@ export default function Webhooks() {
             Persist webhook endpoints and trigger a real delivery test through the backend.
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <Dialog
+          open={can("create", "Webhook") && isCreateDialogOpen}
+          onOpenChange={(open) => setIsCreateDialogOpen(open && can("create", "Webhook"))}
+        >
           <DialogTrigger asChild>
-            <Button>
+            <Button disabled={isAuthorizationLoading || !can("create", "Webhook")}>
               <Plus className="mr-2 h-4 w-4" />
               Add Webhook
             </Button>
@@ -250,7 +291,7 @@ export default function Webhooks() {
               >
                 Cancel
               </Button>
-              <Button onClick={createWebhook} disabled={createMutation.isPending}>
+              <Button onClick={createWebhook} disabled={createMutation.isPending || !canCreateWebhook}>
                 {createMutation.isPending ? "Creating..." : "Create Webhook"}
               </Button>
             </DialogFooter>
@@ -299,7 +340,10 @@ export default function Webhooks() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  webhooks.map((webhook) => (
+                  webhooks.map((webhook) => {
+                    const canUpdate = canRecord("update", "Webhook", webhook);
+                    const canDelete = canRecord("delete", "Webhook", webhook);
+                    return (
                     <TableRow key={webhook.id}>
                       <TableCell className="font-medium">{webhook.name}</TableCell>
                       <TableCell className="max-w-[20rem] truncate">{webhook.target_url}</TableCell>
@@ -328,7 +372,7 @@ export default function Webhooks() {
                             variant="outline"
                             size="sm"
                             onClick={() => testMutation.mutate(webhook.id)}
-                            disabled={testMutation.isPending}
+                            disabled={testMutation.isPending || !canUpdate}
                           >
                             <Send className="mr-2 h-4 w-4" />
                             Test
@@ -342,7 +386,7 @@ export default function Webhooks() {
                                 is_active: webhook.is_active === false,
                               })
                             }
-                            disabled={toggleMutation.isPending}
+                            disabled={toggleMutation.isPending || !canUpdate}
                           >
                             {webhook.is_active === false ? "Activate" : "Deactivate"}
                           </Button>
@@ -350,7 +394,7 @@ export default function Webhooks() {
                             variant="destructive"
                             size="sm"
                             onClick={() => deleteMutation.mutate(webhook.id)}
-                            disabled={deleteMutation.isPending}
+                            disabled={deleteMutation.isPending || !canDelete}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
@@ -358,7 +402,8 @@ export default function Webhooks() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -378,6 +423,34 @@ export default function Webhooks() {
           page reflects that persisted state instead of simulating a local delivery log.
         </CardContent>
       </Card>
+
+      <Dialog open={createdSecret !== null} onOpenChange={(open) => !open && setCreatedSecret(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Copy webhook signing secret</DialogTitle>
+            <DialogDescription>
+              This secret is available only once. Store it in the approved secret manager before closing.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="webhook-created-secret">Signing secret</Label>
+            <Input
+              id="webhook-created-secret"
+              value={createdSecret?.secret ?? ""}
+              readOnly
+              autoComplete="off"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCreatedSecret(null)}>
+              Close
+            </Button>
+            <Button type="button" onClick={copyCreatedSecret}>
+              Copy secret
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

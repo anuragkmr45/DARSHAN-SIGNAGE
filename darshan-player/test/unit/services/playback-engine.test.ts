@@ -183,6 +183,78 @@ describe('Playback Engine', () => {
     expect(startPlaylistStub.called).to.equal(false)
   })
 
+  it('keeps the same emergency video mounted across equivalent snapshot refreshes', async () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+
+    const engine = getPlaybackEngine()
+    sandbox.stub(engine, 'stop')
+    const startPlaylistStub = sandbox.stub(engine, 'startPlaylist').resolves()
+    const emergencyPlaylist = {
+      mode: 'emergency',
+      snapshotId: 'snapshot-1',
+      items: [{
+        id: 'emergency-1',
+        type: 'video',
+        mediaId: 'emergency-video',
+        remoteUrl: 'https://cdn.example.com/emergency.mp4?X-Amz-Signature=one',
+        displayMs: 10_000,
+        fit: 'contain',
+        muted: false,
+        loop: true,
+        transitionDurationMs: 0,
+        meta: {
+          emergency_version: 'emergency-1:1',
+          expires_at: '2026-10-27T12:00:00.000Z',
+        },
+      }],
+    }
+
+    engine.state = 'emergency'
+    engine.currentTimelineFingerprint = engine.fingerprintPlaylist(emergencyPlaylist)
+
+    getSnapshotManager().emit('playlist-updated', {
+      ...emergencyPlaylist,
+      snapshotId: 'snapshot-2',
+      lastSnapshotAt: '2026-10-27T11:00:05.000Z',
+      items: [{
+        ...emergencyPlaylist.items[0],
+        remoteUrl: 'https://cdn.example.com/emergency.mp4?X-Amz-Signature=two',
+      }],
+    })
+    await Promise.resolve()
+
+    expect(engine.stop.called).to.equal(false)
+    expect(startPlaylistStub.called).to.equal(false)
+  })
+
+  it('restarts emergency playback when the winning emergency version changes', async () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+
+    const engine = getPlaybackEngine()
+    sandbox.stub(engine, 'stop')
+    const startPlaylistStub = sandbox.stub(engine, 'startPlaylist').resolves()
+    const baseItem = {
+      id: 'emergency-1', type: 'video', mediaId: 'emergency-video',
+      remoteUrl: 'https://cdn.example.com/emergency.mp4', displayMs: 10_000,
+      fit: 'contain', muted: false, loop: true, transitionDurationMs: 0,
+      meta: { emergency_version: 'emergency-1:1' },
+    }
+    engine.state = 'emergency'
+    engine.currentTimelineFingerprint = engine.fingerprintPlaylist({ mode: 'emergency', items: [baseItem] })
+
+    const replacement = {
+      mode: 'emergency',
+      items: [{ ...baseItem, meta: { emergency_version: 'emergency-1:2' } }],
+    }
+    getSnapshotManager().emit('playlist-updated', replacement)
+    await Promise.resolve()
+
+    expect(engine.stop.calledOnce).to.equal(true)
+    expect(startPlaylistStub.calledOnceWith(replacement)).to.equal(true)
+  })
+
   it('changes the playlist fingerprint when only the selected PDF page changes', () => {
     const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
     const engine = getPlaybackEngine()

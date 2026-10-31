@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { config } from '@/config';
-import { getDatabase, schema, type Database } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+import { lockDevicePairingIdentity } from '@/db/repositories/device-pairing';
 import { recordDesiredStateForCommand } from '@/services/device-desired-state-service';
 import { AppError } from '@/utils/app-error';
 
@@ -12,7 +13,7 @@ const ACTIVE_LEASE_STATUSES = ['SENT', 'LEASED', 'PROCESSING'] as const;
 const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'ACKED_SUCCESS', 'ACKED_FAILURE', 'EXPIRED', 'DEAD_LETTER', 'CANCELLED'] as const;
 type DeviceCommandRecord = typeof schema.deviceCommands.$inferSelect;
 type DeviceDesiredStateRecord = typeof schema.deviceDesiredState.$inferSelect;
-type CommandLifecycleTx = Pick<Database, 'insert' | 'update' | 'select' | 'execute'>;
+type CommandLifecycleTx = DbExecutor;
 
 type CommandStatus =
   | 'PENDING'
@@ -42,6 +43,7 @@ type CommandType =
 
 export type CommandAckInput = {
   delivery_token?: string;
+  recovery_generation?: string;
   success?: boolean;
   error?: string;
   message?: string;
@@ -74,10 +76,24 @@ export type ClaimedDeviceCommand = {
   expiresAt: Date | null;
   leaseExpiresAt: Date | null;
   attemptCount: number;
+  recoveryGeneration: string | null;
 };
 
 function addMs(ms: number) {
   return new Date(Date.now() + ms);
+}
+
+async function activeRecoveryGenerationInTransaction(tx: CommandLifecycleTx): Promise<string | null> {
+  const [authority] = await tx.select({ generation: schema.siteRecoveryGenerations.generation })
+    .from(schema.siteRecoveryGenerations)
+    .where(eq(schema.siteRecoveryGenerations.site_id, config.BACKUP_SITE_ID ?? 'local'))
+    .orderBy(desc(schema.siteRecoveryGenerations.updated_at))
+    .limit(1);
+  return authority?.generation ?? null;
+}
+
+export function commandRecoveryGenerationIsCurrent(stored: string | null, active: string | null): boolean {
+  return stored === active;
 }
 
 export function normalizeCommandType(type: string): CommandType {
@@ -252,6 +268,7 @@ async function recordDesiredStatesSequentially(
         snapshotId: desiredSnapshotId,
         defaultMediaVersion: desiredDefaultMediaVersion,
         emergencyVersion: desiredEmergencyVersion,
+        recoveryGeneration: command.recovery_generation,
         metadata: buildDesiredStateMetadata({
           command,
           desiredSnapshotId,
@@ -291,6 +308,7 @@ async function recordDesiredStatesForCommands(
 
     return {
       screen_id: command.screen_id,
+      recovery_generation: command.recovery_generation,
       snapshot_id: desiredSnapshotId,
       default_media_version: desiredDefaultMediaVersion,
       emergency_version: desiredEmergencyVersion,
@@ -317,6 +335,7 @@ async function recordDesiredStatesForCommands(
     .onConflictDoUpdate({
       target: schema.deviceDesiredState.screen_id,
       set: {
+        recovery_generation: sql`excluded.recovery_generation`,
         snapshot_id:
           mode.snapshotId === 'preserve'
             ? sql`COALESCE(${schema.deviceDesiredState.snapshot_id}, excluded.snapshot_id)`
@@ -350,6 +369,7 @@ async function recordDesiredStatesForCommands(
     return [
       {
         screen_id: state.screen_id,
+        recovery_generation: command.recovery_generation,
         state_version: state.state_version,
         command_version: state.command_version,
         snapshot_id: state.snapshot_id,
@@ -411,6 +431,7 @@ async function insertCommandOutboxEvents(
           desired_snapshot_id: desiredSnapshotId ?? null,
           desired_default_media_version: desiredDefaultMediaVersion ?? null,
           desired_emergency_version: desiredEmergencyVersion ?? null,
+          recovery_generation: command.recovery_generation,
         },
         priority: command.priority,
         max_attempts: config.COMMAND_MAX_ATTEMPTS,
@@ -419,14 +440,16 @@ async function insertCommandOutboxEvents(
   );
 }
 
-function buildCreateCommandValues(input: CreateDeviceCommandInput) {
+export function buildCreateCommandValues(input: CreateDeviceCommandInput, id = randomUUID(), recoveryGeneration: string | null = null) {
   const reason = resolveReason(input.payload);
   const expiresAt = input.expiresAt === undefined ? resolveCommandExpiresAt(reason) : input.expiresAt;
   const maxAttempts = input.maxAttempts ?? config.COMMAND_MAX_ATTEMPTS;
   const priority = resolveCommandPriority(reason, input.priority);
 
   return {
+    id,
     screen_id: input.screenId,
+    recovery_generation: recoveryGeneration,
     type: normalizeCommandType(input.type),
     payload: input.payload ?? null,
     status: 'PENDING' as const,
@@ -444,15 +467,41 @@ function buildCreateCommandValues(input: CreateDeviceCommandInput) {
 
 export async function createDeviceCommands(
   inputs: CreateDeviceCommandInput[],
-  options: { ignoreIdempotencyConflicts?: boolean } = {}
+  options: {
+    ignoreIdempotencyConflicts?: boolean;
+    missingScreenBehavior?: 'error' | 'skip';
+  } = {},
+  executor?: DbExecutor,
 ) {
-  const db = getDatabase();
   if (inputs.length === 0) {
     return [];
   }
 
-  return await db.transaction(async (tx) => {
-    const commandValues = inputs.map(buildCreateCommandValues);
+  const create = async (tx: CommandLifecycleTx) => {
+    const requestedScreenIds = Array.from(new Set(inputs.map((input) => input.screenId))).sort();
+    for (const screenId of requestedScreenIds) {
+      await lockDevicePairingIdentity(tx, screenId, { wait: true });
+    }
+    const screenRows = await tx
+      .select({ id: schema.screens.id })
+      .from(schema.screens)
+      .where(inArray(schema.screens.id, requestedScreenIds));
+    const existingScreenIds = new Set(screenRows.map((screen) => screen.id));
+    const missingScreenIds = requestedScreenIds.filter((screenId) => !existingScreenIds.has(screenId));
+    if (missingScreenIds.length > 0 && options.missingScreenBehavior !== 'skip') {
+      throw AppError.notFound('Screen not found', { screen_ids: missingScreenIds });
+    }
+    const eligibleInputs = options.missingScreenBehavior === 'skip'
+      ? inputs.filter((input) => existingScreenIds.has(input.screenId))
+      : inputs;
+    if (eligibleInputs.length === 0) return [];
+    const activeRecoveryGeneration = await activeRecoveryGenerationInTransaction(tx);
+
+    const pendingCommands = eligibleInputs.map((input) => {
+      const id = randomUUID();
+      return { id, input, values: buildCreateCommandValues(input, id, activeRecoveryGeneration) };
+    });
+    const commandValues = pendingCommands.map((pending) => pending.values);
     const insert = tx.insert(schema.deviceCommands).values(commandValues);
     const commands = await (options.ignoreIdempotencyConflicts
       ? insert.onConflictDoNothing().returning()
@@ -462,11 +511,13 @@ export async function createDeviceCommands(
       return [];
     }
 
-    const inputByScreenId = new Map(inputs.map((input) => [input.screenId, input]));
+    const inputByCommandId = new Map<string, CreateDeviceCommandInput>(
+      pendingCommands.map((pending) => [pending.id, pending.input])
+    );
     const insertedInputs = commands.map((command) => {
-      const input = inputByScreenId.get(command.screen_id);
+      const input = inputByCommandId.get(command.id);
       if (!input) {
-        throw new Error(`Unable to match inserted command to input for screen ${command.screen_id}`);
+        throw new Error(`Unable to match inserted command ${command.id} to its input`);
       }
       return input;
     });
@@ -476,11 +527,13 @@ export async function createDeviceCommands(
     await insertCommandOutboxEvents(tx, commands, insertedInputs, desiredStates);
 
     return commands;
-  });
+  };
+
+  return executor ? create(executor) : getDatabase().transaction(create);
 }
 
-export async function createDeviceCommand(input: CreateDeviceCommandInput) {
-  const [command] = await createDeviceCommands([input]);
+export async function createDeviceCommand(input: CreateDeviceCommandInput, executor?: DbExecutor) {
+  const [command] = await createDeviceCommands([input], {}, executor);
   return command;
 }
 
@@ -490,10 +543,11 @@ export async function claimDeviceCommands(deviceId: string): Promise<ClaimedDevi
     const now = new Date();
     const legacyReclaimBefore = new Date(now.getTime() - config.COMMAND_LEASE_MS);
     const leaseExpiresAt = new Date(now.getTime() + config.COMMAND_LEASE_MS);
+    const activeRecoveryGeneration = await activeRecoveryGenerationInTransaction(tx);
 
     const claimableResult = await tx.execute(sql`
       SELECT id, type, payload, status, created_at, expires_at, lease_expires_at, claimed_at,
-             delivery_attempts, attempt_count, max_attempts, priority
+             delivery_attempts, attempt_count, max_attempts, priority, recovery_generation
       FROM device_commands
       WHERE screen_id = ${deviceId}
         AND (
@@ -526,6 +580,7 @@ export async function claimDeviceCommands(deviceId: string): Promise<ClaimedDevi
           attempt_count: number | string | null;
           max_attempts: number | string | null;
           priority: number | string | null;
+          recovery_generation: string | null;
         }>;
       }).rows ?? [];
 
@@ -536,6 +591,18 @@ export async function claimDeviceCommands(deviceId: string): Promise<ClaimedDevi
       const currentAttemptCount = Number(candidate.attempt_count ?? candidate.delivery_attempts ?? 0);
       const maxAttempts = Number(candidate.max_attempts ?? config.COMMAND_MAX_ATTEMPTS);
       const expiresAt = parseDbTimestamp(candidate.expires_at);
+
+      if (!commandRecoveryGenerationIsCurrent(candidate.recovery_generation, activeRecoveryGeneration)) {
+        const [cancelled] = await tx.update(schema.deviceCommands).set({ status: 'CANCELLED', delivery_token: null,
+          claimed_at: null, lease_expires_at: null, cancelled_at: now, completed_at: now,
+          last_error: 'RECOVERY_GENERATION_MISMATCH_BEFORE_CLAIM', updated_at: now })
+          .where(and(eq(schema.deviceCommands.id, candidate.id), eq(schema.deviceCommands.screen_id, deviceId)))
+          .returning({ id: schema.deviceCommands.id, screenId: schema.deviceCommands.screen_id });
+        if (cancelled) await insertStatusHistory(tx, { commandId: cancelled.id, screenId: cancelled.screenId,
+          oldStatus, newStatus: 'CANCELLED', reason: 'recovery_generation_mismatch_before_claim', attemptCount: currentAttemptCount,
+          metadata: { stored_generation: candidate.recovery_generation, active_generation: activeRecoveryGeneration } });
+        continue;
+      }
 
       if (isActiveLeaseStatus(oldStatus)) {
         const activeLeaseExpiresAt = parseDbTimestamp(candidate.lease_expires_at);
@@ -623,6 +690,7 @@ export async function claimDeviceCommands(deviceId: string): Promise<ClaimedDevi
           expiresAt: schema.deviceCommands.expires_at,
           leaseExpiresAt: schema.deviceCommands.lease_expires_at,
           attemptCount: schema.deviceCommands.attempt_count,
+          recoveryGeneration: schema.deviceCommands.recovery_generation,
         });
 
       if (claimed) {
@@ -648,6 +716,7 @@ export async function claimDeviceCommands(deviceId: string): Promise<ClaimedDevi
           expiresAt: claimed.expiresAt,
           leaseExpiresAt: claimed.leaseExpiresAt,
           attemptCount: claimed.attemptCount,
+          recoveryGeneration: claimed.recoveryGeneration,
         });
       }
     }
@@ -666,6 +735,13 @@ export async function acknowledgeDeviceCommand(deviceId: string, commandId: stri
       .for('update');
 
     if (!command) {
+      throw AppError.notFound('Command not found');
+    }
+
+    const activeRecoveryGeneration = await activeRecoveryGenerationInTransaction(tx);
+    const suppliedRecoveryGeneration = ackBody?.recovery_generation ?? null;
+    if (!commandRecoveryGenerationIsCurrent(command.recovery_generation, activeRecoveryGeneration) ||
+        command.recovery_generation !== suppliedRecoveryGeneration) {
       throw AppError.notFound('Command not found');
     }
 

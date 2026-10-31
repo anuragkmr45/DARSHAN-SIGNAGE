@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Key, Copy, Trash2, Plus, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,8 +28,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiKeysApi } from "@/api/domains/apiKeys";
 import { ApiError } from "@/api/apiClient";
 import type { ApiKey as ApiKeyModel } from "@/api/types";
-import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { setApiKey } from "@/store/authSlice";
+import { useAppSelector } from "@/store/hooks";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 const availableScopes = [
   { id: "read", label: "Read" },
@@ -45,24 +45,39 @@ const maskKey = (key?: string) => {
 
 const ApiKeys = () => {
   const { toast } = useToast();
-  const dispatch = useAppDispatch();
   const queryClient = useQueryClient();
   const authToken = useAppSelector((state) => state.auth.token);
   const user = useAppSelector((state) => state.auth.user);
   const isAuthenticated = Boolean(authToken || user);
+  const { can, canRecord, isLoading: isAuthorizationLoading } = useAuthorization();
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [keyName, setKeyName] = useState("");
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
   const [secrets, setSecrets] = useState<Record<string, string>>({});
+  const apiKeyQueryKey = ["api-keys", user?.id ?? "anonymous"] as const;
+  const proposedKey = {
+    name: keyName.trim(),
+    scopes: selectedScopes,
+    roles: ["ADMIN"],
+    created_by: user?.id,
+    is_revoked: false,
+  };
+  const canCreateKey = can("create", "ApiKey") && canRecord("create", "ApiKey", proposedKey);
 
   const { data: apiKeys, isLoading, isFetching } = useQuery({
-    queryKey: ["api-keys"],
+    queryKey: apiKeyQueryKey,
     queryFn: apiKeysApi.list,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && can("read", "ApiKey"),
     staleTime: 30_000,
   });
+
+  useEffect(() => {
+    setSecrets({});
+    setVisibleKeys(new Set());
+    setIsCreateDialogOpen(false);
+  }, [user?.id]);
 
   const handleApiError = (error: unknown, title = "Request failed") => {
     const description =
@@ -78,7 +93,6 @@ const ApiKeys = () => {
       setIsCreateDialogOpen(false);
       if (created.secret) {
         setSecrets((prev) => ({ ...prev, [created.id]: created.secret! }));
-        dispatch(setApiKey(created.secret));
       }
       queryClient.invalidateQueries({ queryKey: ["api-keys"] });
       toast({
@@ -94,7 +108,6 @@ const ApiKeys = () => {
     onSuccess: (rotated) => {
       if (rotated.secret) {
         setSecrets((prev) => ({ ...prev, [rotated.id]: rotated.secret! }));
-        dispatch(setApiKey(rotated.secret));
       }
       queryClient.invalidateQueries({ queryKey: ["api-keys"] });
       toast({
@@ -119,6 +132,14 @@ const ApiKeys = () => {
       toast({
         title: "Validation error",
         description: "Provide a name and select at least one scope.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!canCreateKey) {
+      toast({
+        title: "Not permitted",
+        description: "This API key does not match your current create permission.",
         variant: "destructive",
       });
       return;
@@ -158,9 +179,12 @@ const ApiKeys = () => {
             Generate and manage API keys for programmatic access
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <Dialog
+          open={can("create", "ApiKey") && isCreateDialogOpen}
+          onOpenChange={(open) => setIsCreateDialogOpen(open && can("create", "ApiKey"))}
+        >
           <DialogTrigger asChild>
-            <Button disabled={!isAuthenticated}>
+            <Button disabled={!isAuthenticated || isAuthorizationLoading || !can("create", "ApiKey")}>
               <Plus className="mr-2 h-4 w-4" />
               Create API Key
             </Button>
@@ -214,7 +238,7 @@ const ApiKeys = () => {
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleCreateKey} disabled={createMutation.isPending}>
+              <Button onClick={handleCreateKey} disabled={createMutation.isPending || !canCreateKey}>
                 {createMutation.isPending ? "Creating..." : "Generate Key"}
               </Button>
             </DialogFooter>
@@ -262,9 +286,11 @@ const ApiKeys = () => {
                 </TableRow>
               ) : (
                 resolvedKeys.map((apiKey) => {
-                  const status = apiKey.revoked_at ? "revoked" : "active";
-                  const secret = secrets[apiKey.id];
-                  const displayKey = secret ?? apiKey.secret ?? apiKey.id;
+                  const status = apiKey.is_revoked ? "revoked" : "active";
+                  const oneTimeSecret = secrets[apiKey.id] ?? apiKey.secret;
+                  const displayKey = oneTimeSecret ?? `${apiKey.token_prefix ?? apiKey.id.slice(0, 12)}…`;
+                  const canRotate = canRecord("update", "ApiKey", apiKey);
+                  const canRevoke = canRecord("delete", "ApiKey", apiKey);
 
                   return (
                     <TableRow key={apiKey.id}>
@@ -278,6 +304,8 @@ const ApiKeys = () => {
                             variant="ghost"
                             size="sm"
                             onClick={() => toggleKeyVisibility(apiKey.id)}
+                            disabled={!oneTimeSecret}
+                            aria-label={oneTimeSecret ? "Show or hide one-time API key" : "API key secret is no longer available"}
                           >
                             {visibleKeys.has(apiKey.id) ? (
                               <EyeOff className="h-3 w-3" />
@@ -317,8 +345,9 @@ const ApiKeys = () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleCopyKey(displayKey)}
-                            disabled={status === "revoked"}
+                            onClick={() => handleCopyKey(oneTimeSecret)}
+                            disabled={status === "revoked" || !oneTimeSecret}
+                            aria-label={oneTimeSecret ? "Copy one-time API key" : "API key secret is no longer available"}
                           >
                             <Copy className="h-3 w-3" />
                           </Button>
@@ -326,7 +355,8 @@ const ApiKeys = () => {
                             variant="ghost"
                             size="sm"
                             onClick={() => rotateMutation.mutate(apiKey.id)}
-                            disabled={status === "revoked"}
+                            disabled={status === "revoked" || !canRotate || rotateMutation.isPending}
+                            aria-label="Rotate API key"
                           >
                             <RefreshCw className="h-3 w-3" />
                           </Button>
@@ -334,7 +364,8 @@ const ApiKeys = () => {
                             variant="ghost"
                             size="sm"
                             onClick={() => revokeMutation.mutate(apiKey.id)}
-                            disabled={status === "revoked"}
+                            disabled={status === "revoked" || !canRevoke || revokeMutation.isPending}
+                            aria-label="Revoke API key"
                           >
                             <Trash2 className="h-3 w-3 text-destructive" />
                           </Button>

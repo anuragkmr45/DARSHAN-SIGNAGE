@@ -195,6 +195,12 @@ export const screensApi = {
       query: params,
     }),
 
+  getGroupById: (groupId: string) =>
+    apiClient.request<ScreenGroup>({
+      path: endpoints.screens.groupById(groupId),
+      method: "GET",
+    }),
+
   listGroupSummaries: (
     params?: PaginationParams & {
       q?: string;

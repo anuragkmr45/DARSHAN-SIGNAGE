@@ -24,32 +24,32 @@ import {
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { usePermissionsMetadata, useRolesApi, useRolesList } from "@/hooks/useRolesApi";
 import { useAuthorization } from "@/hooks/useAuthorization";
-import { useAppSelector } from "@/store/hooks";
 import type { Role, RolePermissionGrant } from "@/api/types";
-import { canEditSystemRole, canViewRoleInSettings } from "@/lib/access";
+import { actionsForPermissionSubject } from "@/lib/permissionMetadata";
 
-const emptyGrant = (actions: string[], subjects: string[]): RolePermissionGrant => ({
-  action: actions[0] ?? "",
-  subject: subjects[0] ?? "",
-});
+const emptyGrant = (
+  actions: string[],
+  subjects: string[],
+  subjectActions?: Record<string, string[]>,
+): RolePermissionGrant => {
+  const selectedSubject = subjects[0] ?? "";
+  return {
+    action: actionsForPermissionSubject(selectedSubject, actions, subjectActions)[0] ?? "",
+    subject: selectedSubject,
+  };
+};
 
 export function RolesPermissionsTab() {
   const { data: rolesData, isLoading: isRolesLoading } = useRolesList();
   const { data: metadata, isLoading: isMetadataLoading } = usePermissionsMetadata();
   const { createRole, updateRole, deleteRole } = useRolesApi();
-  const { can } = useAuthorization();
-  const currentRoleName = useAppSelector((state) => state.auth.user?.role);
-  const allowSystemRoleEdits = currentRoleName === "SUPER_ADMIN";
+  const { can, canRecord } = useAuthorization();
   const canCreateRole = can("create", "Role");
-  const canUpdateRole = can("update", "Role");
-  const canDeleteRole = can("delete", "Role");
 
-  const roles = useMemo(
-    () => (rolesData?.items ?? []).filter((role) => !role.is_system || canViewRoleInSettings(currentRoleName, role.name)),
-    [currentRoleName, rolesData?.items],
-  );
+  const roles = useMemo(() => rolesData?.items ?? [], [rolesData?.items]);
   const actions = metadata?.actions ?? [];
   const subjects = metadata?.subjects ?? [];
+  const subjectActions = metadata?.subject_actions;
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
@@ -71,7 +71,9 @@ export function RolesPermissionsTab() {
       setName(editingRole.name);
       setDescription(editingRole.description ?? "");
       setInherits(editingRole.permissions?.inherits ?? []);
-      setGrants(editingRole.permissions?.grants ?? []);
+      setGrants((editingRole.permissions?.grants ?? []).map((grant) => grant.subject === "Backup"
+        ? { action: grant.action, subject: grant.subject }
+        : grant));
     } else {
       setName("");
       setDescription("");
@@ -88,7 +90,7 @@ export function RolesPermissionsTab() {
 
   const addGrant = () => {
     if (actions.length === 0 || subjects.length === 0) return;
-    setGrants((prev) => [...prev, emptyGrant(actions, subjects)]);
+    setGrants((prev) => [...prev, emptyGrant(actions, subjects, subjectActions)]);
   };
 
   const updateGrant = (index: number, patch: Partial<RolePermissionGrant>) => {
@@ -101,20 +103,24 @@ export function RolesPermissionsTab() {
     setGrants((prev) => prev.filter((_, idx) => idx !== index));
   };
 
-  const handleSave = () => {
-    const trimmedName = name.trim();
-    if (!trimmedName) return;
-    if (editingRole ? !canUpdateRole : !canCreateRole) return;
-    if (editingRole?.is_system && !allowSystemRoleEdits) return;
+  const draftRole = {
+    name: name.trim(),
+    description: description.trim(),
+    permissions: {
+      inherits,
+      grants: grants.filter((grant) => grant.action && grant.subject),
+    },
+  };
 
-    const payload = {
-      name: trimmedName,
-      description: description.trim() || null,
-      permissions: {
-        inherits,
-        grants: grants.filter((grant) => grant.action && grant.subject),
-      },
-    };
+  const handleSave = () => {
+    if (!draftRole.name) return;
+    if (editingRole
+      ? !canRecord("update", "Role", editingRole) ||
+        !canRecord("update", "Role", { ...editingRole, ...draftRole })
+      : !canRecord("create", "Role", draftRole)) return;
+    if (editingRole?.is_system) return;
+
+    const payload = draftRole;
 
     if (editingRole) {
       updateRole.mutate(
@@ -136,7 +142,10 @@ export function RolesPermissionsTab() {
   };
 
   const isSaving = createRole.isPending || updateRole.isPending;
-  const canSave = name.trim().length > 0 && !isSaving && (editingRole ? canUpdateRole : canCreateRole);
+  const canSave = draftRole.name.length > 0 && !isSaving && !editingRole?.is_system && (editingRole
+    ? canRecord("update", "Role", editingRole) &&
+      canRecord("update", "Role", { ...editingRole, ...draftRole })
+    : canRecord("create", "Role", draftRole));
 
   return (
     <div className="space-y-6">
@@ -157,7 +166,7 @@ export function RolesPermissionsTab() {
         <CardHeader>
           <CardTitle>Roles</CardTitle>
           <CardDescription>
-            System-role hierarchy remains protected; custom roles follow their permission grants.
+            Built-in roles are read-only; custom roles follow their permission grants.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -193,8 +202,12 @@ export function RolesPermissionsTab() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => { setEditingRole(role); setIsDialogOpen(true); }}
-                      disabled={!canUpdateRole || (role.is_system && !canEditSystemRole(currentRoleName, role.name))}
+                      onClick={() => {
+                        if (role.is_system || !canRecord("update", "Role", role)) return;
+                        setEditingRole(role);
+                        setIsDialogOpen(true);
+                      }}
+                      disabled={!canRecord("update", "Role", role) || role.is_system}
                     >
                       <Pencil className="mr-2 h-3 w-3" />
                       Edit
@@ -203,8 +216,11 @@ export function RolesPermissionsTab() {
                       variant="outline"
                       size="sm"
                       className="text-destructive"
-                      disabled={!canDeleteRole || (role.is_system && !canEditSystemRole(currentRoleName, role.name))}
-                      onClick={() => setRoleToDelete(role)}
+                      disabled={!canRecord("delete", "Role", role) || role.is_system}
+                      onClick={() => {
+                        if (role.is_system || !canRecord("delete", "Role", role)) return;
+                        setRoleToDelete(role);
+                      }}
                     >
                       <Trash2 className="mr-2 h-3 w-3" />
                       Delete
@@ -287,7 +303,7 @@ export function RolesPermissionsTab() {
                           <SelectValue placeholder="Action" />
                         </SelectTrigger>
                         <SelectContent>
-                          {actions.map((action) => (
+                          {actionsForPermissionSubject(grant.subject, actions, subjectActions).map((action) => (
                             <SelectItem key={action} value={action}>
                               {action}
                             </SelectItem>
@@ -298,7 +314,14 @@ export function RolesPermissionsTab() {
                     <div className="min-w-[200px] flex-1">
                       <Select
                         value={grant.subject}
-                        onValueChange={(value) => updateGrant(index, { subject: value })}
+                        onValueChange={(value) => {
+                          const allowed = actionsForPermissionSubject(value, actions, subjectActions);
+                          updateGrant(index, {
+                            subject: value,
+                            action: allowed.includes(grant.action) ? grant.action : (allowed[0] ?? ""),
+                            ...(value === "Backup" ? { conditions: undefined } : {}),
+                          });
+                        }}
                         disabled={isMetadataLoading}
                       >
                         <SelectTrigger>
@@ -316,6 +339,15 @@ export function RolesPermissionsTab() {
                     <Button variant="ghost" size="icon" onClick={() => removeGrant(index)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
+                  {grant.subject === "Backup" ? (
+                    <p className="w-full text-xs text-muted-foreground">
+                      Backup access is installation-wide and cannot have conditions. Available actions come from server metadata.
+                    </p>
+                  ) : grant.conditions && Object.keys(grant.conditions).length > 0 && (
+                    <p className="w-full text-xs text-muted-foreground">
+                      Conditions: {JSON.stringify(grant.conditions)}
+                    </p>
+                  )}
                   </div>
                 ))}
 
@@ -345,13 +377,13 @@ export function RolesPermissionsTab() {
         confirmLabel="Delete"
         onCancel={() => setRoleToDelete(null)}
         onConfirm={() => {
-          if (!roleToDelete) return;
+          if (!roleToDelete || roleToDelete.is_system || !canRecord("delete", "Role", roleToDelete)) return;
           deleteRole.mutate(roleToDelete.id, {
             onSuccess: () => setRoleToDelete(null),
           });
         }}
         isLoading={deleteRole.isPending}
-        confirmDisabled={!canDeleteRole || Boolean(roleToDelete?.is_system && !canEditSystemRole(currentRoleName, roleToDelete.name))}
+        confirmDisabled={!roleToDelete || roleToDelete.is_system || !canRecord("delete", "Role", roleToDelete)}
       />
     </div>
   );

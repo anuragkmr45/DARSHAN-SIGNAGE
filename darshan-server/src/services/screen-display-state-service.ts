@@ -1,5 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+import { lockDevicePairingIdentity } from '@/db/repositories/device-pairing';
+import { tryRunWithContentMutationAdmission } from '@/maintenance/content-mutation-admission';
 import { AppError } from '@/utils/app-error';
 import {
   DisplayProfileV1,
@@ -16,23 +18,58 @@ export type DisplayProfileWriteResult =
 
 const defaultSelection = { mode: 'PRIMARY', preferred_key: null } as const;
 
-async function ensureState(screenId: string) {
-  const db = getDatabase();
+async function ensureState(
+  screenId: string,
+  db: DbExecutor = getDatabase(),
+  lockForUpdate = false,
+) {
   await db
     .insert(schema.screenDisplayStates)
     .values({ screen_id: screenId, desired_selection: defaultSelection })
     .onConflictDoNothing();
+  const query = db
+    .select()
+    .from(schema.screenDisplayStates)
+    .where(eq(schema.screenDisplayStates.screen_id, screenId))
+    .limit(1);
+  const [state] = lockForUpdate ? await query.for('update') : await query;
+  if (!state) throw AppError.notFound('Display state not found');
+  return state;
+}
+
+export async function getScreenDisplayState(screenId: string, executor?: DbExecutor) {
+  const db = executor ?? getDatabase();
   const [state] = await db
     .select()
     .from(schema.screenDisplayStates)
     .where(eq(schema.screenDisplayStates.screen_id, screenId))
     .limit(1);
-  if (!state) throw AppError.notFound('Display state not found');
-  return state;
-}
+  if (state) return state;
 
-export async function getScreenDisplayState(screenId: string) {
-  return await ensureState(screenId);
+  const creation = await tryRunWithContentMutationAdmission(
+    'hidden-read:screen-display-state-ensure',
+    () => ensureState(screenId, db),
+  );
+  if (creation.admitted) return creation.value;
+
+  // Preserve the GET contract without inserting a lazy default during capture.
+  // A later read after admission reopens converges by creating this same row.
+  const now = new Date();
+  return {
+    screen_id: screenId,
+    desired_selection: defaultSelection,
+    selection_version: 1,
+    active_display_key: null,
+    placement: 'UNVERIFIED',
+    display_profile: null,
+    profile_hash: null,
+    profile_revision: 0,
+    runtime_session_id: null,
+    observation_seq: 0,
+    observed_at: null,
+    created_at: now,
+    updated_at: now,
+  } satisfies DisplayStateRow;
 }
 
 /**
@@ -40,9 +77,16 @@ export async function getScreenDisplayState(screenId: string) {
  * same player process. A new runtime session intentionally resets the
  * sequence domain after a player restart.
  */
-export async function recordDisplayProfile(screenId: string, profile: DisplayProfileV1): Promise<DisplayProfileWriteResult> {
-  const db = getDatabase();
-  const current = await ensureState(screenId);
+async function recordDisplayProfileWithExecutor(
+  screenId: string,
+  profile: DisplayProfileV1,
+  db: DbExecutor,
+): Promise<DisplayProfileWriteResult> {
+  // Heartbeats wait rather than fail while an operator performs a short
+  // pairing/Screen/display mutation. Sharing the lifecycle lock prevents an
+  // inverse screen-display-state/Screen row-lock order from deadlocking.
+  await lockDevicePairingIdentity(db, screenId, { wait: true });
+  const current = await ensureState(screenId, db, true);
   const isSameSession = current.runtime_session_id === profile.runtime_session_id;
   const observedAt = new Date(profile.observed_at);
   if (isSameSession && Number(current.observation_seq) >= profile.observation_seq) {
@@ -94,7 +138,7 @@ export async function recordDisplayProfile(screenId: string, profile: DisplayPro
   // A concurrent heartbeat won the race. Re-read rather than overwriting a
   // newer observation with a stale one.
   if (!state) {
-    const latest = await ensureState(screenId);
+    const latest = await ensureState(screenId, db);
     return { applied: false, reason: 'STALE_OBSERVATION', state: latest };
   }
 
@@ -112,9 +156,21 @@ export async function recordDisplayProfile(screenId: string, profile: DisplayPro
   return { applied: true, state };
 }
 
-export async function updateDisplaySelection(screenId: string, selection: DisplaySelection) {
-  const db = getDatabase();
-  const current = await ensureState(screenId);
+export async function recordDisplayProfile(
+  screenId: string,
+  profile: DisplayProfileV1,
+  executor?: DbExecutor,
+): Promise<DisplayProfileWriteResult> {
+  if (executor) return recordDisplayProfileWithExecutor(screenId, profile, executor);
+  return getDatabase().transaction((tx) => recordDisplayProfileWithExecutor(screenId, profile, tx));
+}
+
+async function updateDisplaySelectionWithExecutor(
+  screenId: string,
+  selection: DisplaySelection,
+  db: DbExecutor,
+) {
+  const current = await ensureState(screenId, db, true);
   if (selection.mode === 'PINNED' && selection.expected_profile_revision !== current.profile_revision) {
     throw AppError.conflict('The display inventory changed. Refresh the screen and choose the output again.', {
       code: 'DISPLAY_PROFILE_STALE',
@@ -154,6 +210,15 @@ export async function updateDisplaySelection(screenId: string, selection: Displa
     });
   }
   return updated;
+}
+
+export async function updateDisplaySelection(
+  screenId: string,
+  selection: DisplaySelection,
+  executor?: DbExecutor,
+) {
+  if (executor) return updateDisplaySelectionWithExecutor(screenId, selection, executor);
+  return getDatabase().transaction((tx) => updateDisplaySelectionWithExecutor(screenId, selection, tx));
 }
 
 export function serializeDisplayState(state: DisplayStateRow) {

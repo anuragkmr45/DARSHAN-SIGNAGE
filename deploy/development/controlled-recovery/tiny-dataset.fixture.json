@@ -1,0 +1,21 @@
+{
+  "format": "darshan-controlled-recovery-tiny-dataset-v1",
+  "maximum_bytes": "33554432",
+  "seed": "darshan-d2-fixed-seed-20261030",
+  "cases": [
+    { "kind": "IMAGE", "bytes": "4096", "expectation": "ready-image" },
+    { "kind": "SHORT_VIDEO", "bytes": "262144", "expectation": "two-loop-playback" },
+    { "kind": "MULTIPAGE_PDF_SELECTED_PAGE", "bytes": "65536", "expectation": "page-2-of-3" },
+    { "kind": "OFFLINE_WEBPAGE", "bytes": "8192", "expectation": "offline-render" },
+    { "kind": "LAYOUT_PRESENTATION", "bytes": "16384", "expectation": "fixed-region-order" },
+    { "kind": "SCHEDULE_DEFAULT", "bytes": "8192", "expectation": "current-schedule-and-fallback" },
+    { "kind": "EMERGENCY_LOOP", "bytes": "262144", "expectation": "takeover-and-two-loops" },
+    { "kind": "CHAT_ATTACHMENT", "bytes": "4096", "expectation": "authorized-download" },
+    { "kind": "PROOF_OF_PLAY", "bytes": "2048", "expectation": "accepted-record" },
+    { "kind": "SCREENSHOT", "bytes": "16384", "expectation": "stored-reference" },
+    { "kind": "LOGS", "bytes": "8192", "expectation": "bounded-archive" },
+    { "kind": "OLD_SESSION_PAIRING_COMMAND_OUTBOX_JOBS", "bytes": "4096", "expectation": "reconciled-suppressed" }
+  ],
+  "external_web": false,
+  "real_user_data": false
+}

@@ -68,7 +68,12 @@ export class ConversationRepository {
     return Array.from(mediaIds);
   }
 
-  private async resolveDmConversationForUser(conversationId: string, userId: string) {
+  private async resolveDmConversationForUser(
+    conversationId: string,
+    userId: string,
+    authorize?: (conversation: object) => void,
+    allowLegacyMigration = true
+  ) {
     const db = getDatabase();
 
     const [direct] = await db
@@ -86,6 +91,7 @@ export class ConversationRepository {
     if (direct) {
       const member = await this.chatRepo.getMember(direct.id, userId);
       if (!member) throw AppError.forbidden('Forbidden');
+      authorize?.(direct);
       return direct;
     }
 
@@ -101,30 +107,60 @@ export class ConversationRepository {
     ) {
       throw AppError.forbidden('Forbidden');
     }
+    // Legacy IDs do not identify the resulting chat_* row. A record-limited
+    // grant cannot safely authorize the migration before that row exists.
+    if (!allowLegacyMigration) throw AppError.forbidden('Forbidden');
 
     const ensured = await this.chatRepo.getOrCreateDm(
       legacyConversation.participant_a,
-      legacyConversation.participant_b
+      legacyConversation.participant_b,
+      authorize
     );
     return ensured;
   }
 
-  async getOrCreate(participantA: string, participantB: string) {
-    const conversation = await this.chatRepo.getOrCreateDm(participantA, participantB);
+  async getOrCreate(participantA: string, participantB: string, authorize?: (conversation: object) => void) {
+    if (authorize) {
+      const db = getDatabase();
+      const ordered = this.orderParticipants(participantA, participantB);
+      const pairKey = `${ordered.a}:${ordered.b}`;
+      const [existing] = await db
+        .select()
+        .from(schema.chatConversations)
+        .where(and(
+          eq(schema.chatConversations.type, 'DM'),
+          eq(schema.chatConversations.dm_pair_key, pairKey),
+          eq(schema.chatConversations.state, 'ACTIVE')
+        ))
+        .limit(1);
+      authorize(existing ?? {
+        type: 'DM',
+        dm_pair_key: pairKey,
+        state: 'ACTIVE',
+        created_by: participantA,
+        invite_policy: 'INVITES_DISABLED',
+      });
+    }
+    const conversation = await this.chatRepo.getOrCreateDm(participantA, participantB, authorize);
     return this.toLegacyConversation(conversation);
   }
 
-  async listForUser(userId: string) {
+  async listForUser(
+    userId: string,
+    options: { authorize?: (conversation: object) => void; allowLegacyMigration?: boolean } = {}
+  ) {
     const db = getDatabase();
-    const legacyItems = await db
-      .select()
-      .from(schema.conversations)
-      .where(or(eq(schema.conversations.participant_a, userId), eq(schema.conversations.participant_b, userId)))
-      .orderBy(desc(schema.conversations.updated_at))
-      .limit(500);
+    if (options.allowLegacyMigration !== false) {
+      const legacyItems = await db
+        .select()
+        .from(schema.conversations)
+        .where(or(eq(schema.conversations.participant_a, userId), eq(schema.conversations.participant_b, userId)))
+        .orderBy(desc(schema.conversations.updated_at))
+        .limit(500);
 
-    for (const legacyConversation of legacyItems) {
-      await this.chatRepo.getOrCreateDm(legacyConversation.participant_a, legacyConversation.participant_b);
+      for (const legacyConversation of legacyItems) {
+        await this.chatRepo.getOrCreateDm(legacyConversation.participant_a, legacyConversation.participant_b);
+      }
     }
 
     const rows = await db
@@ -146,13 +182,30 @@ export class ConversationRepository {
       )
       .orderBy(desc(schema.chatConversations.updated_at));
 
-    const items = rows.map((row) => this.toLegacyConversation(row.conversation));
+    const items = rows
+      .filter((row) => {
+        try {
+          options.authorize?.(row.conversation);
+          return true;
+        } catch (error) {
+          if (error instanceof AppError && error.statusCode === 403) return false;
+          throw error;
+        }
+      })
+      .map((row) => this.toLegacyConversation(row.conversation));
     return items;
   }
 
-  async addMessage(conversationId: string, authorId: string, content: string, attachments?: any[]) {
+  async addMessage(
+    conversationId: string,
+    authorId: string,
+    content: string,
+    attachments?: any[],
+    authorize?: (conversation: object) => void,
+    allowLegacyMigration = true
+  ) {
     const db = getDatabase();
-    const conversation = await this.resolveDmConversationForUser(conversationId, authorId);
+    const conversation = await this.resolveDmConversationForUser(conversationId, authorId, authorize, allowLegacyMigration);
     const mediaIds = this.extractMediaIds(attachments);
     const resolvedMediaIds = mediaIds.length
       ? (
@@ -182,10 +235,17 @@ export class ConversationRepository {
     };
   }
 
-  async listMessages(conversationId: string, page = 1, limit = 50, userId?: string) {
+  async listMessages(
+    conversationId: string,
+    page = 1,
+    limit = 50,
+    userId?: string,
+    authorize?: (conversation: object) => void,
+    allowLegacyMigration = true
+  ) {
     const db = getDatabase();
     if (!userId) throw AppError.forbidden('Forbidden');
-    const conversation = await this.resolveDmConversationForUser(conversationId, userId);
+    const conversation = await this.resolveDmConversationForUser(conversationId, userId, authorize, allowLegacyMigration);
     const offset = (page - 1) * limit;
     const items = await db
       .select()
@@ -226,8 +286,13 @@ export class ConversationRepository {
     return { items: mapped, total: Number(count || 0), page, limit };
   }
 
-  async markRead(conversationId: string, userId: string) {
-    const conversation = await this.resolveDmConversationForUser(conversationId, userId);
+  async markRead(
+    conversationId: string,
+    userId: string,
+    authorize?: (conversation: object) => void,
+    allowLegacyMigration = true
+  ) {
+    const conversation = await this.resolveDmConversationForUser(conversationId, userId, authorize, allowLegacyMigration);
     const receipt = await this.chatRepo.markRead(conversation.id, userId, conversation.last_seq);
     return {
       id: receipt.id,

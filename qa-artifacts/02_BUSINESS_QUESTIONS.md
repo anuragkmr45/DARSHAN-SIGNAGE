@@ -1,8 +1,30 @@
 # Business Questions
 
-Status: SOURCE-BEHAVIOR ANSWERED FOR ALL 20 TOPICS. User-approved rules are identified separately. This file keeps the original questions as a decision/provenance log, not as requests for QA or the user to rediscover code behavior. Use `12_CODE_BASELINE_EXPECTATIONS.md` for concise current-code expectations and `05_TEST_CASES.csv` for blank actual results.
+Status: SOURCE-BEHAVIOR ANSWERED FOR THE ORIGINAL 20 TOPICS; BQ-021 REMAINS OPEN FOR SSO DELEGATION POLICY; BQ-022/023/024 PENDING-INVITE LOGIN, LOST-LINK RECOVERY AND INVITE-CREDENTIAL EXPOSURE ARE ANSWERED. User-approved rules are identified separately. This file keeps questions as a decision/provenance log, not as requests for QA or the user to rediscover code behavior. Use `12_CODE_BASELINE_EXPECTATIONS.md` for concise current-code expectations and `05_TEST_CASES.csv` for blank actual results.
 
 Source behavior for all BQ-001 through BQ-020 has been recorded. A question's remaining `TBD` means business approval or an actual site target is missing, not that code behavior is unknown. QA can characterize the implementation now; release acceptance for an undecided policy remains separate. Do not include passwords, keys, production tokens or customer data.
+
+## First Human Decision Gate
+
+Step 2C confirmed eight answers; the P01 SSO audit added a ninth before the linked
+acceptance results can be finalized. Everything the repository can answer is
+already recorded below; the human only needs to supply these product/site
+choices.
+
+| Order | ID | Simple answer needed |
+| ---: | --- | --- |
+| 1 | BQ-013 | Is any proof-of-play loss acceptable? If yes, state the minimum offline duration or maximum loss the business accepts. |
+| 2 | BQ-014 | Should “uptime” mean current online screens or historical availability? State the reporting timezone and what counts as completed playback. |
+| 3 | BQ-015 | State how long each data class must be kept and any legal-hold or mandatory-erasure rule. |
+| 4 | BQ-016 | List supported Windows/Ubuntu versions, CMS browsers, player hardware/displays and any accessibility standard. |
+| 5 | BQ-017 | State expected fleet/users/uploads/media volumes plus measurable latency, error-rate and display-delay targets. |
+| 6 | BQ-018 | State RPO, RTO, allowed maintenance downtime, starting deployed versions and the allowed mixed-version period. |
+| 7 | BQ-019 | State permitted internet egress, which endpoints may leave the trusted LAN, and whether HTTP inside private role networks is approved. |
+| 8 | BQ-020 | Should deleted Media or chat attachments be recoverable? If yes, state the recycle/undelete period for each. |
+| 9 | BQ-021 | Must SSO access be organization-wide only, or may a custom role view/deactivate one provider? If delegated, may that role see its client secret? |
+
+Answer one row at a time or as a batch. “No requirement” is a valid explicit
+decision where appropriate; silence is not approval of the current code.
 
 Unless a section says otherwise, historical observed behavior refers to its
 dated static baseline. BQ-002/003/006/007/008/009 were refreshed through source
@@ -173,6 +195,8 @@ Answer, 2026-09-24: "built-in roles stay fixed and customization use only custom
 
 Resolution: RESOLVED under BR-071/092. Custom-role permissions decide access everywhere regardless of role display name; protected system-role hierarchy remains identity-based. Runtime inheritance/condition/session-withdrawal coverage is `AUTHZ-02`.
 
+Follow-up answer, 2026-10-22: if startup finds a canonical built-in role name with `is_system=false`, **stop for administrator review**. Do not automatically set `is_system=true` or install built-in grants. A genuine `is_system=true` built-in may have its permission drift repaired. This is a confirmed business/security rule under BR-071; test it separately as `AUTHZ-16`.
+
 ### BQ-009: Existing Sessions After Account Changes
 
 Question: When an account is disabled, its password is reset, or its role/department changes, must all existing REST and realtime sessions lose old access immediately, within an agreed delay, or only at expiry/new login?
@@ -285,7 +309,7 @@ Evidence: `darshan-server/src/jobs/index.ts`; `darshan-server/src/utils/settings
 
 Affected areas: UC-020..UC-024, UC-028; BR-045, BR-062; data lifecycle, privacy, volume and DR.
 
-Code answer, 2026-09-25: Production backups are enabled at a configured interval and the check runs hourly. Weekly archive copies log records, while the 30-day old-log deletion handler and off-host pruning function have no non-test callers found. Prometheus retention defaults to 30d and is configurable. Media, chat, screenshots and PoP use distinct lifecycles. See `evidence/operational-behavior-review.md::BQ-015`. These settings and unused handlers do not prove effective retention or any legal policy.
+Code answer, refreshed 2026-10-28: Backup/recovery Packet 1 requires production retention of at least 30 days and a deployment-owned daily `HH:mm`/IANA-timezone schedule with one automatic local-date identity. That is configuration/coordination, not effective retention. Local archive publication, encryption and retention enforcement remain later packets. Retained legacy off-host settings, the 30-day old-log deletion handler and off-host pruning function do not prove every required lifecycle executes. Prometheus retention remains separately configurable, and Media, chat, screenshots and PoP use distinct lifecycles. See `evidence/operational-behavior-review.md::BQ-015` and `evidence/backup-recovery-packet-01-developer-verification-2026-10-28.md`. No legal policy is inferred.
 
 Human input still needed: Approved retention and legal-hold/erasure rules by data class. This cannot be chosen from current cleanup code; use TBD until the site owner specifies it.
 
@@ -335,9 +359,11 @@ Evidence: `scripts/bundle/assemble-runtime-bundle.sh::write_backend_lifecycle_sc
 
 Affected areas: UC-001, UC-014, UC-027, UC-028; BR-044, BR-045, BR-065; release, migrations, partial updates, rollback and DR.
 
-Code answer, 2026-09-25: The managed upgrade is a maintenance flow: verify compatibility and signed restore evidence, stop API/worker, migrate forward, start/check, mark active. There is no automatic database downgrade. Compatibility generation does not prove semantic compatibility. See `evidence/operational-behavior-review.md::BQ-018`.
+Code answer, refreshed 2026-10-28: The managed upgrade remains a maintenance flow: verify compatibility and signed restore evidence, stop API/worker, migrate forward, start/check, mark active. Packets 1 and 2 coordinate and seal a bounded consistent capture. Packet 3 adds tested configuration-capsule, deterministic packaging, pinned native `age`, signed-manifest, atomic-publication and crash-reconciliation primitives. The worker now injects a pinned helper policy and publication inspector, but the actual privileged helper/cross-role capsule is not shipped, so production deployment is still incomplete and fails startup when helper policy is absent/invalid. There is no automatic database downgrade, local-retention service, clean local restore/promotion workflow or full-topology recovery proof. See `evidence/operational-behavior-review.md::BQ-018` and the three dated backup/recovery developer-verification reports.
 
-Human input still needed: Approved RPO, RTO, planned downtime, deployed release/schema/player baseline and mixed-version support window. No actual production VM or recovery rehearsal was accessed. Identify release IDs only, not credentials.
+Confirmed product targets: run a backup at least once every 24 hours, keep backups at least 30 days, automatically remove copies older than the approved retention period, restore service within 4 hours, and allow no more than 2 hours of planned maintenance downtime. These are acceptance targets, not evidence that the current implementation meets them.
+
+Human input still needed: the maximum accepted data-loss window (RPO; a 24-hour schedule alone does not prove a 24-hour RPO), the exact daily time/timezone, deployed release/schema/player baseline and any supported mixed-version window. No actual production VM or recovery rehearsal was accessed. Identify release IDs only, not credentials.
 
 ### BQ-019: Network And Trust Acceptance Boundary
 
@@ -373,6 +399,153 @@ Account-deletion decision received 2026-10-16: deleted accounts are not user-res
 
 Human input still needed: whether a user-facing recycle/undelete period is required for independently deleted Media and chat attachments. Do not apply the account-tombstone decision to those object-deletion workflows.
 
+### BQ-021: SSO Configuration Delegation Granularity
+
+Question: Must SSO configuration access always be organization-wide through unconditional `read`/`update SsoConfig` grants, or should a custom role be able to view or deactivate only a named provider record? If record-limited access is required, should its client secret be returned to that reader?
+
+Why this changes testing: The current list exposes active-provider configuration, including its client secret, while upsert changes the organization-wide active provider. A record condition has no safe meaning for the full list or provider replacement; permitting individual-provider delegation would need an explicit detail/deactivate contract and secret-display policy.
+
+Observed implementation, 2026-10-22: the P01 source now requires unconditional effective SSO read/update for list, upsert and deactivate. The CMS route guard and mutation controls use the same subject-wide rule. This is a fail-closed implementation choice, not a user-confirmed delegation policy. The API/browser scenarios are authored but not run.
+
+Evidence: `darshan-server/src/routes/sso-config.ts`; `darshan-server/src/db/repositories/sso-config.ts`; `darshan-cms/src/hooks/useAuthorization.ts`; `darshan-cms/src/pages/SsoConfig.tsx`.
+
+Choices: keep unconditional organization-wide SSO administration (current fail-closed behavior); or design separate record-scoped endpoints and secret-redaction rules before permitting narrower delegation.
+
+Affected areas: UC-004; BR-009/092; `AUTHZ-14`; SSO API, CMS route/form and credential confidentiality.
+
+Answer: TBD — NEEDS_BUSINESS_CONFIRMATION. Until answered, QA verifies the current fail-closed behavior but does not claim that SSO delegation policy is product-approved.
+
+### BQ-022: Pending Invitation Login
+
+Question: May a newly invited user sign in with the temporary password before using the activation link, or must activation happen first? If immediate temporary-password login is allowed, should the invitation remain PENDING and expirable after successful login?
+
+Why this changes testing: The answer determines whether a manager-visible credential can create a session before the invitee proves possession of the activation token. It also determines the expected status and account-recovery flow after an invite expires.
+
+Observed implementation before the answer, 2026-10-22: invite creation stores a generated password hash and PENDING token metadata, while the users table defaults `is_active=true`. Login checked password and `is_active`, but not invite status or expiry, so possession of the temporary password appeared sufficient to log in before activation. The activation endpoint also requires the user to be active. An older feature inventory calls new invites “dormant,” which conflicted with the route/schema behavior; no live login was run. The current uncommitted implementation adds invitation-state checks at password login, token/session verification and mutation reauthorization. Its offline unit checks pass, but the database-backed lifecycle test has not run.
+
+Evidence: `darshan-server/src/routes/users-invite.ts::userInviteRoutes`; `darshan-server/src/routes/auth.ts::authRoutes`; `darshan-server/src/routes/users-activate.ts::userActivateRoutes`; `darshan-server/src/db/schema.ts::users`; `docs/qa/FEATURE_INVENTORY.md::BE-004`.
+
+Choices: require token activation before any login (recommended; needs an explicit pending-invite login check and lifecycle tests); or allow immediate temporary-password login and define when PENDING becomes ACTIVATED.
+
+Affected areas: UC-002/003; BR-012; `AUTHN-03`; invitation API, account state and CMS onboarding.
+
+Answer: The user selected **No—require activation first**, 2026-10-22. A PENDING or expired invitation must not create a session from its temporary password. Activation must consume the token and set the invitee's chosen new password before login. This is a confirmed business rule (BR-108), not proof of runtime compliance.
+
+### BQ-023: Lost One-Time Invitation Link
+
+Question: If the manager closes the one-time link before sharing it, may a permitted manager generate a replacement link for the still-PENDING account, invalidating the old token?
+
+Why this changes testing: The current invite API rejects the existing email on a second invite and the invitation list deliberately omits tokens. Without replacement, an invitee can be stranded after an accidental close or failed delivery.
+
+Observed implementation: The user chose a one-time copyable manager link instead of automatic email. The CMS shows the link after creation and, in the current uncommitted source, adds a confirmation-based replacement action for pending/expired invitations. The server rotates the token under a row lock, rechecks actor authority and returns the new token once. The old token no longer matches the account. The route/browser regressions are authored but not runtime-executed.
+
+Evidence: `darshan-cms/src/pages/Users.tsx`; `darshan-server/src/routes/users-invite.ts`.
+
+Choices: allow authorized replacement with old-token invalidation; or require a separate administrator recovery procedure.
+
+Affected areas: UC-002/003; BR-108; `AUTHN-03`; pending invitation lifecycle and credential safety.
+
+Answer: The user selected **Yes, add replacement link**, 2026-10-22. A permitted manager may replace a still-PENDING invitation (including one whose token expired); the old link becomes invalid and the new link is shown once. Activated, disabled and deleted accounts are not eligible. This is a confirmed business rule, not proof of runtime compliance.
+
+### BQ-024: Temporary Password In Invitation Response
+
+Question: Since activation is mandatory, should `POST /api/v1/users/invite` stop returning an unused temporary password to the manager, or retain that response field for a documented compatibility need?
+
+Why this changes testing: The temporary password cannot sign in but is still a credential-like secret exposed by the API, while the CMS uses only the activation token. Removing it changes the API contract; retaining it requires a clear reason and handling policy.
+
+Observed implementation before the answer: invite creation generated, hashed and returned `temp_password`, but the CMS invitation flow neither declared nor used that field and pending login was denied by BR-108. A repository-wide source scan found no invite consumer outside database-backed denial tests. This is separate from the authorized **reset-password** response: Operators display that generated reset password, so BQ-024 does not remove the reset-password field.
+
+Evidence: `darshan-server/src/routes/users-invite.ts`; `darshan-cms/src/api/domains/users.ts`; `darshan-server/src/auth/invite-state.ts`.
+
+Choices: remove the invite-create field and store a high-entropy, unreturned placeholder hash until activation (recommended); or retain it temporarily for a specifically identified external API consumer, never treating it as a login method. The reset-password response is unchanged in either choice.
+
+Affected areas: UC-002/003; BR-108; `AUTHN-03`; API compatibility and secret exposure.
+
+Answer: The user selected **remove the invite temporary password**, 2026-10-27. `POST /api/v1/users/invite` returns only the one-time activation credential and invite metadata. The server stores a high-entropy, unreturned placeholder hash until activation replaces it with the invitee's chosen password. The separate authorized reset-password response is unchanged. This is confirmed product behavior; PostgreSQL/API/browser execution remains a separate developer and QA gate.
+
+### BQ-025: Deleting A Screen Still Targeted By A Schedule
+
+Question: What should happen when an administrator deletes a Screen that is still directly listed in a current or future Schedule item (or an active Emergency selector)?
+
+Why this changes testing: Schedule targets are JSON arrays rather than foreign keys. Silently removing the last direct Screen ID can produce an empty target list, and current playback filtering treats an item with no Screen/group targets as global. A cleanup intended for one decommissioned Screen could therefore make content eligible on every Screen.
+
+Observed implementation: Screen deletion removes reservations, publish targets, group membership, default-media targets and operational/device rows. It does not rewrite `schedule_items.screen_ids`, immutable publish snapshots or Emergency selector JSON. Consequently, a deleted ID can remain in authoring state, while automatically pruning it would be unsafe under the current empty-means-global rule. The latest source explicitly cleans non-foreign-key command/display/telemetry rows but deliberately does not invent a Schedule/Emergency policy.
+
+Evidence: `darshan-server/src/routes/screens.ts` DELETE handler; `darshan-server/src/db/schema.ts::scheduleItems,publishTargets,emergencies`; `darshan-server/src/routes/screens.ts::filterItemsForScreen`; `darshan-server/src/screens/playback.ts` target filtering.
+
+Choices: block deletion while any active/current/future mutable Schedule item or active Emergency directly targets the Screen, returning actionable reference counts (recommended; preserve immutable publish/history snapshots); or define a transactional retarget/removal rule that can never convert the item to global scope. Allowing stale mutable targets is not recommended.
+
+Affected areas: UC-015/017/019; BR-013/029/033; `AUTHZ-19`, `DATA-02`, `CONC-07`; Screen deletion, Schedule authoring/publish and Emergency targeting.
+
+Answer: TBD — NEEDS_BUSINESS_CONFIRMATION. Until answered, QA must treat deleting a still-targeted Screen as release-blocking ambiguity and verify that no deletion path broadens content to all Screens.
+
+### BQ-026: Deleting A Screen Group Still In Use
+
+Question: What should happen when an administrator deletes a Screen Group that is still referenced by a current/future Schedule item, active publish, active Emergency, or group-targeted default-media assignment?
+
+Why this changes testing: Group membership and all four target references are stored without a foreign key. Current deletion removes the group and memberships and refreshes the former member Screens, but it does not rewrite Schedule/Emergency/default-media JSON or historical publish targets. The stale group ID does not become global by itself, yet current playback/default behavior can stop without an explicit operator decision and unusable references remain.
+
+Observed implementation: group create/update/delete and member-device serialization are now transactional in source. Deletion still intentionally leaves target references untouched because pruning the last Schedule group target could produce the same empty-target/global ambiguity as BQ-025, while rewriting immutable snapshots would corrupt history.
+
+Evidence: `darshan-server/src/routes/screen-groups.ts`; `darshan-server/src/db/repositories/screen-group.ts`; `darshan-server/src/db/schema.ts::scheduleItems,publishTargets,emergencies,settings`; `darshan-server/src/routes/settings.ts`.
+
+Choices: block deletion and return counts/identifiers until mutable active references are retargeted or cleared (recommended); allow deletion only through an explicit force workflow that records exactly which mutable references become inactive; or silently leave stale references (not recommended). Immutable publish/history snapshots remain unchanged in every choice.
+
+Affected areas: UC-018/019/024; BR-023/068/092/101; `AUTHZ-19`, `DATA-02`, `DEF-01..03`, `CONC-07`; playback refresh and operator messaging.
+
+Answer: TBD — NEEDS_BUSINESS_CONFIRMATION. Recommended: transactionally block ordinary deletion while any mutable current/future Schedule, active publish, active Emergency or group-default assignment references the group; return actionable counts, require the operator to resolve them, and preserve immutable history.
+
+### BQ-027: Local Backup Trust, Configuration And Failure Domain — RESOLVED
+
+Question: For `LOCAL_FILESYSTEM` production backup, which authority may sign,
+publish and delete backups; which VM roles must contribute recovery configuration;
+must an independent encrypted copy exist outside the Backend VM/site; and what exact
+daily time/timezone and failure domains are promised?
+
+Why this changes testing: The worker currently needs write access to the repository,
+but giving a network-facing application process deletion and signing authority lets one
+compromise destroy earlier copies or sign misleading evidence. A Backend-only capsule
+cannot recreate secrets and deployment state owned by Data, CMS, Valkey and
+Observability roles. A local repository also disappears with its host/site unless a
+separate copy exists.
+
+Observed implementation, refreshed 2026-10-28: Packet 3 provides strict capsule
+validation, deterministic encrypted packages, a signed-manifest interface, atomic
+publication, database fencing, restart reconciliation and offline discovery. The
+production worker now negotiates a pinned helper policy and injects its configuration
+contract, signer/verifier and publication inspector. The source still does not ship the
+actual privileged helper/service, exact cross-role capsule producer or an independent-
+copy implementation, so production deployment remains incomplete and fails at startup
+when the configured helper is absent or invalid.
+
+Evidence: `darshan-server/src/utils/backup-runs.ts::runFullBackup`;
+`darshan-server/src/jobs/index.ts`; `darshan-server/src/backups/local-backup-orchestrator.ts`;
+`evidence/backup-recovery-packet-03-developer-verification-2026-10-28.md`.
+
+Confirmed answer (current backup/recovery goal):
+
+1. Use a narrow deployment/host helper on the Backend host. The API receives no
+   unrestricted host or Docker access. Implement it as a root-owned Unix-socket broker
+   or equivalently isolated fixed-operation helper that accepts only structured
+   site/run/attempt/capture operations—never arbitrary commands, paths or signing.
+2. Use a dedicated Ed25519 manifest-signing key, separate from the public `age`
+   recipient/private recovery identity, release-signing key and recovery-attestation
+   key. Keep the private `age` identity outside all application VMs.
+3. Include the versioned recovery configuration required to reconstruct every deployed
+   role (Data, Backend, CMS, Valkey and Observability), with secrets staged through the
+   deployment/rotation process rather than read across VMs by the worker.
+4. Require an independent encrypted copy outside the Backend VM/shared site when the
+   deployment promises shared-host/shared-disk/whole-site recovery. The local repository
+   covers Data-VM loss only while the Backend backup disk survives.
+5. Deployment must supply the daily time/timezone, repository identity/device/owner and
+   capacity, age recipient/key ID, manifest trust/key-rotation data, exact configuration
+   inventory/source locations and the site failure-domain promise. The 4-hour RTO,
+   2-hour planned-maintenance limit and 30-day minimum retention are already confirmed.
+
+Answer: RESOLVED — CONFIRMED BUSINESS/ARCHITECTURE RULE. Remaining values are
+site/deployment inputs and measured release evidence; they are not permission to weaken
+the narrow helper, key separation, encryption, retention or failure-domain rules.
+
 ## Answer And Resolution Log
 
 | Batch | Questions | Status | Business source |
@@ -383,11 +556,20 @@ Human input still needed: whether a user-facing recycle/undelete period is requi
 | 1 follow-up | BQ-002, BQ-003 | Core rules resolved; separate edge-policy limits documented | User follow-up answers, 2026-09-24 |
 | 1 follow-up | BQ-004 | Exact authenticated-success +120s deadline, targeted media purge, all-authority stop and ordered fresh recovery confirmed | User requirement 24, 2026-10-17 |
 | 2a | BQ-008 | Fixed built-ins/custom-role customization confirmed | User answer, 2026-09-24 |
+| P01 startup follow-up | BQ-008 | Canonical built-in name with `is_system=false` stops startup for review; no automatic promotion | User answer, 2026-10-22 |
 | 2a | BQ-009 | Immediate withdrawal recorded as the intended acceptance rule; implementation gap retained | Latest user follow-up, 2026-09-24 |
 | 2b | BQ-010 | Self-approval and direct administrator publish confirmed | User answer, 2026-09-25 |
-| 2b | BQ-007, BQ-011..BQ-013 | Code-derived answers recorded for characterization; unapproved policy expectations remain TBD | User answers and source review, 2026-09-25 |
+| Access/content follow-up | BQ-007 | Ownership, directory and template-sharing policy resolved under BR-048 and BR-084..093 | User decisions, 2026-10-16 |
+| Web/default follow-up | BQ-011..BQ-012 | Resolved under BR-097..101 | User decisions, 2026-10-17 |
+| PoP characterization | BQ-013 | Code behavior recorded; acceptable evidence loss/offline retention pending human input | Source review, refreshed 2026-10-21 |
 | Ownership delta | BQ-007, BQ-020 | Stable organization/original-department ownership and permanent user tombstones confirmed; account portion resolved; directory and Media/chat recycle policy remain separate | User product decision and source implementation, 2026-10-16 |
+| P01 SSO permission audit | BQ-021 | Current unconditional-only SSO access is implemented fail-closed; product delegation granularity remains unanswered | Source/contract review, 2026-10-22 |
+| P01 invitation audit | BQ-022 | Activation-before-login confirmed; prior source gap addressed in current uncommitted code, runtime still pending | User answer and source/contract review, 2026-10-22 |
+| P01 invitation delivery | BQ-023..024 | One-time manager copyable link and replacement confirmed; invite-create temporary-password response removed while reset-password remains unchanged | User answers and source/contract review, 2026-10-22 and 2026-10-27 |
+| P01 Screen lifecycle audit | BQ-025 | Direct Schedule/Emergency target behavior on Screen deletion is unresolved; block-while-live is recommended because empty targets mean global | Source/contract review, 2026-10-27 |
+| P01 Screen Group lifecycle audit | BQ-026 | Schedule/publish/Emergency/default references on group deletion are unresolved; block-while-active is recommended and immutable history must remain unchanged | Source/contract review, 2026-10-27 |
+| Backup/recovery Packet 3 trust gate | BQ-027 | Resolved: narrow Backend host helper, separated keys, cross-role recovery configuration, conditional independent copy and deployment-supplied schedule/failure-domain inputs | Confirmed backup/recovery goal and source/developer evidence review, 2026-10-28 |
 | 2c | BQ-014 | Code behavior recorded; reporting meaning/timezone pending human input | Source review, 2026-09-25 |
-| 3 | BQ-015..BQ-020 | Code behavior recorded; site policies and actual target state pending human input | Source review, 2026-09-25 |
+| 3 | BQ-015..BQ-020 | Code behavior recorded; seven site/product answers remain, with account deletion already resolved inside BQ-020 | Source review, refreshed 2026-10-21 |
 
 No question asks the user to discover implementation details that can be inspected locally. Answers define intended outcomes, release scope and operational commitments. Existing evidence of a behavior remains available even when the user chooses a different requirement.

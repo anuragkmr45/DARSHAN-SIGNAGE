@@ -1,16 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { shouldPersistTelemetryInline } from '@/routes/device-telemetry';
+import { classifyWorkerQueue } from '@/maintenance/worker-admission';
 
 describe('device telemetry runtime mode', () => {
-  it('uses inline persistence in development api-only mode', () => {
-    expect(shouldPersistTelemetryInline('development', 'api')).toBe(true);
-  });
-
-  it('does not use inline persistence outside development api-only mode', () => {
-    expect(shouldPersistTelemetryInline('production', 'api')).toBe(false);
-    expect(shouldPersistTelemetryInline('development', 'worker')).toBe(false);
-    expect(shouldPersistTelemetryInline('development', 'all')).toBe(false);
-    expect(shouldPersistTelemetryInline('test', 'api')).toBe(false);
-    expect(shouldPersistTelemetryInline('development', undefined)).toBe(false);
+  it('gates every telemetry persistence worker behind maintenance admission', () => {
+    expect(classifyWorkerQueue('telemetry:heartbeat')).toBe('gated');
+    expect(classifyWorkerQueue('telemetry:proof-of-play')).toBe('gated');
+    expect(classifyWorkerQueue('telemetry:screenshot')).toBe('gated');
+    expect(classifyWorkerQueue('telemetry:device-observation')).toBe('gated');
+    expect(classifyWorkerQueue('telemetry:media-cache-report')).toBe('gated');
   });
 });

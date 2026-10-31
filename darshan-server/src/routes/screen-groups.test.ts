@@ -1,11 +1,11 @@
 import { randomUUID } from 'crypto';
 import { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { createSessionRepository } from '@/db/repositories/session';
 import { generateAccessToken } from '@/auth/jwt';
 import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, getDatabasePool, schema } from '@/db';
 import { HTTP_STATUS } from '@/http-status-codes';
 
 async function issueAdminToken() {
@@ -100,5 +100,210 @@ describe('Screen group list summaries', () => {
     );
     expect(Array.isArray(body.items[0].active_items)).toBe(true);
     expect(Array.isArray(body.items[0].upcoming_items)).toBe(true);
+  });
+
+  it('applies group screenshot controls atomically only when every member Screen is permitted and unlocked', async () => {
+    const db = getDatabase();
+    const pool = getDatabasePool();
+    if (!pool) throw new Error('PostgreSQL pool is required for screen group lifecycle tests');
+    const groupId = randomUUID();
+    const screenA = randomUUID();
+    const screenB = randomUUID();
+    const roleId = randomUUID();
+    const userId = randomUUID();
+    const roleName = `SCOPED_GROUP_CONTROL_${roleId}`;
+    const email = `scoped-group-${userId}@example.test`;
+
+    await db.insert(schema.screens).values([
+      { id: screenA, name: 'Scoped group screen A' },
+      { id: screenB, name: 'Scoped group screen B' },
+    ]);
+    await db.insert(schema.screenGroups).values({ id: groupId, name: 'Scoped control group' });
+    await db.insert(schema.screenGroupMembers).values([
+      { group_id: groupId, screen_id: screenA },
+      { group_id: groupId, screen_id: screenB },
+    ]);
+    await db.insert(schema.roles).values({
+      id: roleId,
+      name: roleName,
+      is_system: false,
+      permissions: {
+        grants: [
+          { action: 'create', subject: 'ScreenGroup' },
+          { action: 'update', subject: 'ScreenGroup', conditions: { id: groupId } },
+          { action: 'delete', subject: 'ScreenGroup', conditions: { id: groupId } },
+          { action: 'update', subject: 'Screen', conditions: { id: screenA } },
+        ],
+      },
+    });
+    await db.insert(schema.users).values({
+      id: userId,
+      email,
+      password_hash: 'not-used-by-token-test',
+      role_id: roleId,
+      is_active: true,
+    });
+    const access = await generateAccessToken(userId, email, roleId, roleName);
+    await createSessionRepository().create({
+      user_id: userId,
+      access_jti: access.jti,
+      expires_at: access.expiresAt,
+    });
+
+    const denied = await server.inject({
+      method: 'POST',
+      url: `/api/v1/screen-groups/${groupId}/screenshot-settings`,
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { enabled: true, interval_seconds: 45 },
+    });
+    expect(denied.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(
+      await db.select().from(schema.deviceCommands).where(eq(schema.deviceCommands.created_by, userId)),
+    ).toHaveLength(0);
+    const deniedScreens = await db
+      .select()
+      .from(schema.screens)
+      .where(inArray(schema.screens.id, [screenA, screenB]));
+    expect(deniedScreens.every((screen) => !screen.screenshot_enabled)).toBe(true);
+
+    const deniedCreateName = `Must not create ${randomUUID()}`;
+    const deniedCreate = await server.inject({
+      method: 'POST',
+      url: '/api/v1/screen-groups',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { name: deniedCreateName, screen_ids: [screenA, screenB] },
+    });
+    expect(deniedCreate.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(
+      await db.select().from(schema.screenGroups).where(eq(schema.screenGroups.name, deniedCreateName)),
+    ).toHaveLength(0);
+
+    const deniedDelete = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/screen-groups/${groupId}`,
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    expect(deniedDelete.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(await db.select().from(schema.screenGroups).where(eq(schema.screenGroups.id, groupId))).toHaveLength(1);
+
+    const deniedMembershipChange = await server.inject({
+      method: 'PATCH',
+      url: `/api/v1/screen-groups/${groupId}`,
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { screen_ids: [screenA] },
+    });
+    expect(deniedMembershipChange.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    expect(
+      (await db
+        .select({ screen_id: schema.screenGroupMembers.screen_id })
+        .from(schema.screenGroupMembers)
+        .where(eq(schema.screenGroupMembers.group_id, groupId)))
+        .map((member) => member.screen_id)
+        .sort(),
+    ).toEqual([screenA, screenB].sort());
+
+    await db
+      .update(schema.roles)
+      .set({
+        permissions: {
+          grants: [
+            { action: 'create', subject: 'ScreenGroup' },
+            { action: 'update', subject: 'ScreenGroup', conditions: { id: groupId } },
+            { action: 'delete', subject: 'ScreenGroup', conditions: { id: groupId } },
+            { action: 'update', subject: 'Screen', conditions: { id: screenA } },
+            { action: 'update', subject: 'Screen', conditions: { id: screenB } },
+          ],
+        },
+      })
+      .where(eq(schema.roles.id, roleId));
+
+    const permitted = await server.inject({
+      method: 'POST',
+      url: `/api/v1/screen-groups/${groupId}/screenshot-settings`,
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { enabled: true, interval_seconds: 45 },
+    });
+    expect(permitted.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(permitted.body).commands).toHaveLength(2);
+
+    const triggered = await server.inject({
+      method: 'POST',
+      url: `/api/v1/screen-groups/${groupId}/screenshot`,
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { reason: 'scoped_group_test' },
+    });
+    expect(triggered.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(triggered.body).commands_created).toBe(2);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`darshan:device-pairing:${screenB}`],
+      );
+      const contended = await server.inject({
+        method: 'POST',
+        url: `/api/v1/screen-groups/${groupId}/screenshot-settings`,
+        headers: { authorization: `Bearer ${access.token}` },
+        payload: { enabled: false },
+      });
+      expect(contended.statusCode).toBe(HTTP_STATUS.CONFLICT);
+      const unchanged = await db
+        .select()
+        .from(schema.screens)
+        .where(inArray(schema.screens.id, [screenA, screenB]));
+      expect(unchanged.every((screen) => screen.screenshot_enabled && screen.screenshot_interval_seconds === 45)).toBe(true);
+      expect(
+        await db.select().from(schema.deviceCommands).where(eq(schema.deviceCommands.created_by, userId)),
+      ).toHaveLength(4);
+
+      const contendedMembershipChange = await server.inject({
+        method: 'PATCH',
+        url: `/api/v1/screen-groups/${groupId}`,
+        headers: { authorization: `Bearer ${access.token}` },
+        payload: { screen_ids: [screenA] },
+      });
+      expect(contendedMembershipChange.statusCode).toBe(HTTP_STATUS.CONFLICT);
+      expect(
+        (await db
+          .select({ screen_id: schema.screenGroupMembers.screen_id })
+          .from(schema.screenGroupMembers)
+          .where(eq(schema.screenGroupMembers.group_id, groupId)))
+          .map((member) => member.screen_id)
+          .sort(),
+      ).toEqual([screenA, screenB].sort());
+      expect(
+        await db.select().from(schema.deviceCommands).where(eq(schema.deviceCommands.created_by, userId)),
+      ).toHaveLength(4);
+      await client.query('ROLLBACK');
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+    }
+
+    const retry = await server.inject({
+      method: 'POST',
+      url: `/api/v1/screen-groups/${groupId}/screenshot-settings`,
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { enabled: false },
+    });
+    expect(retry.statusCode).toBe(HTTP_STATUS.OK);
+    const disabled = await db
+      .select()
+      .from(schema.screens)
+      .where(inArray(schema.screens.id, [screenA, screenB]));
+    expect(disabled.every((screen) => !screen.screenshot_enabled)).toBe(true);
+
+    const deleted = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/screen-groups/${groupId}`,
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    expect(deleted.statusCode).toBe(HTTP_STATUS.NO_CONTENT);
+    expect(await db.select().from(schema.screenGroups).where(eq(schema.screenGroups.id, groupId))).toHaveLength(0);
+    expect(
+      await db.select().from(schema.screenGroupMembers).where(eq(schema.screenGroupMembers.group_id, groupId)),
+    ).toHaveLength(0);
   });
 });

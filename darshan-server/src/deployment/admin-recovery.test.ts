@@ -159,6 +159,70 @@ suite('administrator recovery and maintenance', () => {
     expect(await verifyPassword('PrivilegedRecoveryPassword123!', privilegedRecovered.password_hash)).toBe(true);
   });
 
+  it('inspects a canonical-name collision but refuses administrator maintenance without writes', async () => {
+    const db = database();
+    const [customAdmin] = await db.insert(schema.roles).values({
+      name: 'ADMIN', permissions: {}, is_system: false,
+    }).returning({ id: schema.roles.id });
+    await db.insert(schema.roles).values({ name: 'SUPER_ADMIN', permissions: {}, is_system: true });
+    const [account] = await db.insert(schema.users).values({
+      email: 'legacy-admin@example.test', password_hash: 'unchanged-hash',
+      role_id: customAdmin.id, is_active: true,
+    }).returning({ id: schema.users.id });
+    await db.insert(schema.sessions).values({
+      user_id: account.id, access_jti: 'legacy-active', expires_at: new Date(Date.now() + 60_000),
+    });
+
+    expect(await inspectAdministrator(db, 'legacy-admin@example.test')).toMatchObject([
+      { roleName: 'ADMIN', roleIsSystem: false },
+    ]);
+    const created = await createAdministrator(db, {
+      email: 'new-admin@example.test', password: 'NewAdminPassword123!', ticket: 'CHG-IDENTITY',
+    });
+    const recovered = await recoverAdministrator(db, {
+      email: 'legacy-admin@example.test', password: 'NewRecoveryPassword123!',
+      ticket: 'INC-IDENTITY', grantSuperAdmin: true,
+    });
+    const deactivated = await deactivateAdministrator(db, {
+      email: 'legacy-admin@example.test', ticket: 'INC-IDENTITY',
+    });
+    for (const result of [created, recovered, deactivated]) {
+      expect(result).toMatchObject({
+        status: 'conflict', reason: expect.stringContaining('Reserved role ADMIN'),
+      });
+    }
+    expect((await db.select().from(schema.users))[0]).toMatchObject({
+      id: account.id, password_hash: 'unchanged-hash', is_active: true, role_id: customAdmin.id,
+    });
+    expect((await db.select().from(schema.sessions)).map((session) => session.access_jti))
+      .toEqual(['legacy-active']);
+    expect(await db.select().from(schema.auditLogs)).toHaveLength(0);
+    expect(await db.select().from(schema.systemLogs)).toHaveLength(0);
+  });
+
+  it('will not grant a non-system SUPER_ADMIN role during recovery', async () => {
+    const db = database();
+    const [admin] = await db.insert(schema.roles).values({
+      name: 'ADMIN', permissions: {}, is_system: true,
+    }).returning({ id: schema.roles.id });
+    await db.insert(schema.roles).values({ name: 'SUPER_ADMIN', permissions: {}, is_system: false });
+    const [account] = await db.insert(schema.users).values({
+      email: 'existing-admin@example.test', password_hash: 'unchanged-hash',
+      role_id: admin.id, is_active: true,
+    }).returning({ id: schema.users.id });
+
+    expect(await recoverAdministrator(db, {
+      email: 'existing-admin@example.test', password: 'NewRecoveryPassword123!',
+      ticket: 'INC-IDENTITY', grantSuperAdmin: true,
+    })).toMatchObject({
+      status: 'conflict', reason: expect.stringContaining('Reserved role SUPER_ADMIN'),
+    });
+    expect((await db.select().from(schema.users))[0]).toMatchObject({
+      id: account.id, password_hash: 'unchanged-hash', role_id: admin.id,
+    });
+    expect(await db.select().from(schema.auditLogs)).toHaveLength(0);
+  });
+
   it('does not inspect, recover, or mutate a deleted-user tombstone', async () => {
     const db = database();
     await seedRoles();

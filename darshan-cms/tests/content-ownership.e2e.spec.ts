@@ -7,6 +7,7 @@ const adminUser = {
   last_name: "User",
   role_id: "role-admin",
   role: "ADMIN",
+  authorization: { rules: [{ action: "manage", subject: "all" }], is_global_user_manager: true },
 };
 
 const rolesPayload = {
@@ -258,6 +259,7 @@ test.describe("Owned content response contract", () => {
       role: "OPERATOR",
       department_id: "department-a",
       is_active: true,
+      permissions: { can_update: true, can_delete: true, can_reset_password: true },
       created_at: "2026-10-16T00:00:00.000Z",
       updated_at: "2026-10-16T00:00:00.000Z",
     };
@@ -296,6 +298,224 @@ test.describe("Owned content response contract", () => {
     await expect(cancel).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
+  });
+
+  test("a stale user edit denial closes the form and refreshes server-driven controls", async ({ page }) => {
+    let rejected = false;
+    let listCalls = 0;
+    let authorizationRefreshes = 0;
+    const target = {
+      id: "operator-stale-id",
+      email: "stale.operator@example.test",
+      first_name: "Stale",
+      last_name: "Operator",
+      role_id: "role-operator",
+      role: "OPERATOR",
+      department_id: "department-a",
+      is_active: true,
+      created_at: "2026-10-16T00:00:00.000Z",
+      updated_at: "2026-10-16T00:00:00.000Z",
+    };
+
+    await installCommonRoutes(page, async (route, pathname, method) => {
+      if (pathname === "/api/v1/auth/me" && method === "GET") {
+        if (!rejected) {
+          await route.fulfill({
+            status: 401,
+            contentType: "application/json",
+            body: JSON.stringify({ error: { code: "UNAUTHORIZED", message: "No session yet" } }),
+          });
+          return true;
+        }
+        authorizationRefreshes += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...adminUser,
+            authorization: { rules: [{ action: "read", subject: "User" }], is_global_user_manager: false },
+          }),
+        });
+        return true;
+      }
+      if (pathname === "/api/v1/users/management-options" && method === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            roles: [{ id: "role-operator", name: "OPERATOR" }],
+            departments: [{ id: "department-a", name: "Operations" }],
+            is_global_user_manager: true,
+          }),
+        });
+        return true;
+      }
+      if (pathname === "/api/v1/users" && method === "GET") {
+        listCalls += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [{ ...target, permissions: { can_update: !rejected, can_delete: !rejected, can_reset_password: !rejected } }],
+            pagination: { page: 1, limit: 9, total: 1 },
+          }),
+        });
+        return true;
+      }
+      if (pathname === "/api/v1/users/invite" && method === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], pagination: { page: 1, limit: 9, total: 0 } }) });
+        return true;
+      }
+      if (pathname === `/api/v1/users/${target.id}` && method === "PATCH") {
+        rejected = true;
+        await route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "FORBIDDEN", message: "Forbidden" } }),
+        });
+        return true;
+      }
+      return false;
+    });
+
+    await login(page);
+    await page.goto("/users");
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Edit User" })).toBeVisible();
+    await page.getByRole("button", { name: "Update User" }).click();
+
+    await expect(page.getByRole("dialog", { name: "Edit User" })).toHaveCount(0);
+    await expect(page.getByText("You do not have permission to perform this action.")).toBeVisible();
+    await expect.poll(() => listCalls).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => authorizationRefreshes).toBeGreaterThanOrEqual(1);
+    await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+  });
+
+  test("an open user edit closes when a refreshed directory withdraws record permission", async ({ page }) => {
+    let canUpdate = true;
+    let listCalls = 0;
+    let updatedAt = "2026-10-22T00:00:00.000Z";
+    await installCommonRoutes(page, async (route, pathname, method) => {
+      if (pathname === "/api/v1/auth/me" && method === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(adminUser) });
+        return true;
+      }
+      if (pathname === "/api/v1/users/management-options" && method === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+          roles: [{ id: "role-operator", name: "OPERATOR" }],
+          departments: [{ id: "department-a", name: "Operations" }],
+          is_global_user_manager: true,
+        }) });
+        return true;
+      }
+      if (pathname === "/api/v1/users" && method === "GET") {
+        listCalls += 1;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+          items: [{
+            id: "operator-refreshed", email: "refreshed@example.test", first_name: "Refreshed", last_name: "Operator",
+            role_id: "role-operator", role: "OPERATOR", department_id: "department-a", is_active: true,
+            updated_at: updatedAt,
+            permissions: { can_update: canUpdate, can_delete: false, can_reset_password: false },
+          }],
+          pagination: { page: 1, limit: 9, total: 1 },
+        }) });
+        return true;
+      }
+      if (pathname === "/api/v1/users/invite" && method === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], pagination: { page: 1, limit: 9, total: 0 } }) });
+        return true;
+      }
+      return false;
+    });
+
+    await login(page);
+    await page.goto("/users");
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Edit User" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Update User" })).toBeEnabled();
+    await page.locator("#first_name").fill("Unsaved change");
+
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => listCalls).toBeGreaterThanOrEqual(2);
+    await expect(page.locator("#first_name")).toHaveValue("Unsaved change");
+
+    canUpdate = false;
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => listCalls).toBeGreaterThanOrEqual(3);
+    await expect(page.getByRole("dialog", { name: "Edit User" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+
+    canUpdate = true;
+    updatedAt = "2026-10-22T01:00:00.000Z";
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => listCalls).toBeGreaterThanOrEqual(4);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Edit User" })).toBeVisible();
+    updatedAt = "2026-10-22T02:00:00.000Z";
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => listCalls).toBeGreaterThanOrEqual(5);
+    await expect(page.getByRole("dialog", { name: "Edit User" })).toHaveCount(0);
+  });
+
+  test("operator edit keeps unsaved fields on a harmless refresh and closes on a changed record", async ({ page }) => {
+    let updatedAt = "2026-10-22T00:00:00.000Z";
+    let canUpdate = true;
+    let listCalls = 0;
+    await installCommonRoutes(page, async (route, pathname, method) => {
+      if (pathname === "/api/v1/auth/me" && method === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(adminUser) });
+        return true;
+      }
+      if (pathname === "/api/v1/users/management-options" && method === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+          roles: [{ id: "role-operator", name: "OPERATOR" }],
+          departments: [{ id: "department-a", name: "Operations" }],
+          is_global_user_manager: true,
+        }) });
+        return true;
+      }
+      if (pathname === "/api/v1/users" && method === "GET") {
+        listCalls += 1;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+          items: [{
+            id: "operator-refreshed", email: "refreshed@example.test", first_name: "Refreshed", last_name: "Operator",
+            role_id: "role-operator", role: "OPERATOR", department_id: "department-a", is_active: true,
+            updated_at: updatedAt,
+            permissions: { can_update: canUpdate, can_delete: false, can_reset_password: false },
+          }],
+          pagination: { page: 1, limit: 9, total: 1 },
+        }) });
+        return true;
+      }
+      return false;
+    });
+
+    await login(page);
+    await page.goto("/operators");
+    const actions = page.getByRole("button", { name: "Actions for refreshed@example.test" });
+    await actions.click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+    await expect(page.getByRole("dialog", { name: "Edit Operator" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Edit Operator" }).getByRole("button", { name: "Update", exact: true })).toBeEnabled();
+    await page.locator("#first-name").fill("Unsaved change");
+
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => listCalls).toBeGreaterThanOrEqual(2);
+    await expect(page.locator("#first-name")).toHaveValue("Unsaved change");
+
+    updatedAt = "2026-10-22T01:00:00.000Z";
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => listCalls).toBeGreaterThanOrEqual(3);
+    await expect(page.getByRole("dialog", { name: "Edit Operator" })).toHaveCount(0);
+
+    await actions.click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+    await expect(page.getByRole("dialog", { name: "Edit Operator" })).toBeVisible();
+    canUpdate = false;
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => listCalls).toBeGreaterThanOrEqual(4);
+    await expect(page.getByRole("dialog", { name: "Edit Operator" })).toHaveCount(0);
+    await expect(actions).toHaveCount(0);
   });
 
   test("Schedule Queue and Request Detail preserve nested owner, creator, page, and loop labels", async ({ page }) => {

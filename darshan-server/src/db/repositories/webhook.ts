@@ -1,6 +1,6 @@
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, type SQL } from 'drizzle-orm';
 import crypto from 'crypto';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 
 export class WebhookRepository {
   private generateSecret() {
@@ -14,8 +14,8 @@ export class WebhookRepository {
     headers?: Record<string, string>;
     is_active?: boolean;
     created_by: string;
-  }) {
-    const db = getDatabase();
+  }, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const secret = this.generateSecret();
     const [record] = await db
       .insert(schema.webhookSubscriptions)
@@ -32,20 +32,33 @@ export class WebhookRepository {
     return { record, secret };
   }
 
-  async list() {
-    const db = getDatabase();
-    const items = await db.select().from(schema.webhookSubscriptions).orderBy(desc(schema.webhookSubscriptions.created_at));
+  async list(readCondition?: SQL, executor: DbExecutor = getDatabase()) {
+    const db = executor;
+    const items = await db
+      .select()
+      .from(schema.webhookSubscriptions)
+      .where(readCondition)
+      .orderBy(desc(schema.webhookSubscriptions.created_at));
     return items;
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
+  async findById(id: string, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const [record] = await db.select().from(schema.webhookSubscriptions).where(eq(schema.webhookSubscriptions.id, id));
     return record || null;
   }
 
-  async update(id: string, data: Partial<typeof schema.webhookSubscriptions.$inferInsert>) {
-    const db = getDatabase();
+  async findByIdForUpdate(id: string, executor: DbExecutor) {
+    const [record] = await executor
+      .select()
+      .from(schema.webhookSubscriptions)
+      .where(eq(schema.webhookSubscriptions.id, id))
+      .for('update');
+    return record || null;
+  }
+
+  async update(id: string, data: Partial<typeof schema.webhookSubscriptions.$inferInsert>, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const [record] = await db
       .update(schema.webhookSubscriptions)
       .set({ ...data, updated_at: new Date() })
@@ -54,8 +67,8 @@ export class WebhookRepository {
     return record || null;
   }
 
-  async delete(id: string) {
-    const db = getDatabase();
+  async delete(id: string, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     await db.delete(schema.webhookSubscriptions).where(eq(schema.webhookSubscriptions.id, id));
   }
 }

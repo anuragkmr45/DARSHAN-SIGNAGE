@@ -20,6 +20,7 @@
   - scope
   - optional expiry
   - required audit note
+- Select a READY video and verify the CMS explains that it repeats until clear/expiry without exposing a Schedule-style loop toggle.
 - Clear an active emergency with a required clear reason.
 
 ## Validation cases
@@ -28,6 +29,9 @@
 - Group scope requires at least one group.
 - Message or media must be provided before trigger.
 - Clear reason must be provided before clear.
+- Device snapshot derives `loop_enabled=true` only for the resolved READY video; non-video emergency content remains non-looping.
+- The same emergency/version remains mounted across equivalent refreshes; a replacement version starts at zero.
+- Observe at least three natural wraps, then verify clear, expiry, replacement and security lock stop picture/audio before the correct Schedule/default resumes.
 
 ## Regression commands
 - `npm run build`

@@ -222,7 +222,7 @@ export function DefaultMediaSection() {
     queryKey: ["media", "default-media-picker", typeFilter],
     queryFn: () => mediaApi.list({ limit: MEDIA_PAGE_SIZE, page: 1, status: "READY", type: typeFilter }),
     enabled: isPickerOpen,
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData,
   });
 
   useEffect(() => {

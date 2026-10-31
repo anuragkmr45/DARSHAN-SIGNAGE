@@ -122,7 +122,7 @@ export async function layoutRoutes(fastify: FastifyInstance) {
           const layout = await repo.create({
             ...data,
             created_by: actor.userId,
-            ...ownershipForNewContent(actor, ability, 'Layout'),
+            ...ownershipForNewContent(actor, ability, 'Layout', data),
           }, executor);
           return { layout, actor, ability };
         });

@@ -374,3 +374,63 @@ groups:
         annotations:
           summary: "Critical media/cache failures remain unresolved"
           description: "At least one critical player media/cache failure report is still open."
+
+      - alert: DARSHANBackupVerifiedSuccessMissingOrOverdue
+        expr: absent(darshan_server_backup_last_verified_success_timestamp_seconds) or darshan_server_backup_last_verified_success_timestamp_seconds <= 0 or darshan_server_backup_last_verified_success_age_seconds > 90000
+        for: 15m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Daily verified backup is missing or overdue"
+          description: "No publication-read-back verified backup exists, or the latest verified success is older than 25 hours."
+
+      - alert: DARSHANBackupAttemptStuck
+        expr: darshan_server_backup_active_attempt_stuck == 1
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Backup attempt is stuck"
+          description: "An active backup attempt has a stale heartbeat or an expired lease."
+
+      - alert: DARSHANBackupCaptureDurationHigh
+        expr: darshan_server_backup_capture_last_duration_seconds > 14400
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Latest backup capture duration exceeded four hours"
+          description: "The latest completed backup attempt took more than four hours from start through completion."
+
+      - alert: DARSHANBackupRepositoryCapacityLow
+        expr: darshan_server_backup_repository_free_bytes < darshan_server_backup_repository_minimum_free_bytes
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Encrypted backup repository capacity is low"
+          description: "The identity-verified backup repository is below its configured minimum free-byte threshold."
+
+      - alert: DARSHANBackupRetriesExhausted
+        expr: darshan_server_backup_retry_exhausted_total > 0
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Backup retries are exhausted"
+          description: "At least one failed backup exhausted the configured retry sequence and needs operator action."
+
+      - alert: DARSHANBackupRetentionFailures
+        expr: darshan_server_backup_retention_failures > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Backup retention has unresolved failures"
+          description: "A failed, partial, or uncertain retention operation requires operator review."

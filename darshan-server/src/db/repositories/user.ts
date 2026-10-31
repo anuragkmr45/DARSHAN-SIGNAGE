@@ -1,12 +1,65 @@
-import { eq, and, sql, desc, or, getTableColumns, inArray, isNull } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { eq, and, sql, desc, asc, or, getTableColumns, inArray, isNull, type SQL } from 'drizzle-orm';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 import { lockUserAndAssertSuperAdminSurvives } from '@/auth/super-admin-invariant';
+import { CANONICAL_INVITE_EXPIRY_PATTERN, CANONICAL_INVITE_TOKEN_PATTERN, parseInviteToken } from '@/auth/invite-state';
+import { directorySignInEligiblePredicate } from '@/rbac/user-directory';
 
-type UserDirectoryVisibility = {
+export type UserDirectoryVisibility = {
   actorUserId: string;
   actorDepartmentId?: string | null;
   global: boolean;
+  readPredicate?: ReturnType<typeof sql>;
 };
+
+function scopedDirectoryPredicates(visibility: UserDirectoryVisibility): SQL[] {
+  return [
+    eq(schema.users.is_active, true),
+    visibility.readPredicate ?? sql`false`,
+    visibility.actorDepartmentId
+      ? eq(schema.users.department_id, visibility.actorDepartmentId)
+      : eq(schema.users.id, visibility.actorUserId),
+  ];
+}
+
+/** Pending invitation records belong in the invitation workflow, not the people directory. */
+export function scopedPeopleDirectoryPredicates(visibility: UserDirectoryVisibility): SQL[] {
+  const [active, ...scoped] = scopedDirectoryPredicates(visibility);
+  return [active, directorySignInEligiblePredicate(), ...scoped];
+}
+
+/** Invitation managers retain pending and expired records within their permitted scope. */
+export function scopedInvitationDirectoryPredicates(visibility: UserDirectoryVisibility): SQL[] {
+  return scopedDirectoryPredicates(visibility);
+}
+
+export function inviteStatusPredicate(status: 'pending' | 'expired' | 'activated', nowIso: string): SQL {
+  const inviteToken = sql`${schema.users.ext}->>'invite_token'`;
+  const inviteExpiry = sql`${schema.users.ext}->>'invite_expires_at'`;
+  const inviteStatus = sql`${schema.users.ext}->>'invite_status'`;
+  const recoverable = sql`((${inviteStatus}) IN ('PENDING', 'EXPIRED') OR ((${inviteStatus}) IS NULL AND (${inviteToken}) IS NOT NULL))`;
+  const canonicalToken = sql`(${inviteToken}) ~ ${CANONICAL_INVITE_TOKEN_PATTERN}`;
+  // App-written expiries use Date#toISOString, whose fixed-width UTC form
+  // sorts chronologically as text. Avoid casting legacy JSON: one malformed
+  // value must not turn the complete invitation directory into a 500.
+  const canonicalExpiry = sql`(${inviteExpiry}) ~ ${CANONICAL_INVITE_EXPIRY_PATTERN}`;
+  if (status === 'pending') {
+    return sql`${recoverable} AND ${canonicalToken} AND ${canonicalExpiry} AND (${inviteExpiry}) > ${nowIso}`;
+  }
+  if (status === 'expired') {
+    return sql`${recoverable} AND (((${inviteToken}) IS NULL) OR NOT (${canonicalToken}) OR ((${inviteExpiry}) IS NULL) OR NOT (${canonicalExpiry}) OR (${inviteExpiry}) <= ${nowIso})`;
+  }
+  return sql`COALESCE(${schema.users.ext}->>'invite_status', '') = 'ACTIVATED'`;
+}
+
+/**
+ * Legacy JSON may contain arbitrary text. PostgreSQL timestamp casts throw on
+ * malformed input, so validate the exact app-written UTC format first and use
+ * the row creation time when invitation history is incomplete or corrupt.
+ */
+export function inviteInvitedAtExpression(): SQL {
+  const invitedAt = sql`${schema.users.ext}->>'invited_at'`;
+  return sql`CASE WHEN (${invitedAt}) ~ ${CANONICAL_INVITE_EXPIRY_PATTERN} THEN (${invitedAt})::timestamptz ELSE ${schema.users.created_at} END`;
+}
 
 export class UserRepository {
   private async countRows(
@@ -29,8 +82,8 @@ export class UserRepository {
     last_name?: string;
     role_id: string;
     department_id?: string;
-  }) {
-    const db = getDatabase();
+  }, executor: DbExecutor = getDatabase()) {
+    const db = executor;
     const result = await db.insert(schema.users).values(data).returning();
     return result[0];
   }
@@ -42,13 +95,16 @@ export class UserRepository {
   }
 
   async findByInviteToken(token: string) {
-    const normalizedToken = token.trim().toLowerCase();
+    const normalizedToken = parseInviteToken(token);
+    if (!normalizedToken) return null;
     const db = getDatabase();
     const result = await db
       .select()
       .from(schema.users)
       .where(and(sql`LOWER(ext->>'invite_token') = ${normalizedToken}`, isNull(schema.users.deleted_at)));
-    return (result as any)[0] || null;
+    // A token is a public bearer credential. Ambiguous legacy/corrupt matches
+    // must fail closed instead of activating whichever row the database emits first.
+    return result.length === 1 ? result[0] : null;
   }
 
   async listInvites(options: {
@@ -85,14 +141,9 @@ export class UserRepository {
       conditions.push(eq(schema.users.department_id, options.department_id));
     }
     if (options.visibility && !options.visibility.global) {
-      conditions.push(eq(schema.users.is_active, true));
-      conditions.push(
-        options.visibility.actorDepartmentId
-          ? eq(schema.users.department_id, options.visibility.actorDepartmentId)
-          : eq(schema.users.id, options.visibility.actorUserId)
-      );
+      conditions.push(...scopedInvitationDirectoryPredicates(options.visibility));
     }
-    const invitedAtExpr = sql`COALESCE((${schema.users.ext}->>'invited_at')::timestamptz, ${schema.users.created_at})`;
+    const invitedAtExpr = inviteInvitedAtExpression();
     if (options.invited_before) {
       conditions.push(sql`${invitedAtExpr} <= ${options.invited_before}`);
     }
@@ -101,18 +152,7 @@ export class UserRepository {
     }
 
     if (options.statuses && options.statuses.length > 0) {
-      const statusConds = options.statuses.map((status) => {
-        switch (status) {
-          case 'pending':
-            return sql`(ext->>'invite_token') IS NOT NULL AND (ext->>'invite_expires_at')::timestamptz > ${nowIso}`;
-          case 'expired':
-            return sql`(ext->>'invite_token') IS NOT NULL AND (ext->>'invite_expires_at')::timestamptz <= ${nowIso}`;
-          case 'activated':
-            return sql`COALESCE(ext->>'invite_status', '') = 'ACTIVATED'`;
-          default:
-            return null;
-        }
-      }).filter(Boolean) as any[];
+      const statusConds = options.statuses.map((status) => inviteStatusPredicate(status, nowIso));
 
       if (statusConds.length > 0) {
         conditions.push(or(...statusConds));
@@ -125,11 +165,12 @@ export class UserRepository {
       .select({
         ...getTableColumns(schema.users),
         role: schema.roles.name,
+        role_is_system: schema.roles.is_system,
       })
       .from(schema.users)
       .leftJoin(schema.roles, eq(schema.users.role_id, schema.roles.id))
       .where(whereClause)
-      .orderBy(desc(schema.users.created_at))
+      .orderBy(desc(schema.users.created_at), asc(schema.users.id))
       .limit(limit)
       .offset(offset);
 
@@ -146,11 +187,6 @@ export class UserRepository {
       page,
       limit,
     };
-  }
-
-  async listPendingInvites() {
-    const result = await this.listInvites({ statuses: ['pending'], page: 1, limit: 1000 });
-    return result.items;
   }
 
   async findByEmail(email: string) {
@@ -190,11 +226,7 @@ export class UserRepository {
       conditions.push(eq(schema.users.is_active, options.is_active));
     }
     if (options.visibility && !options.visibility.global) {
-      conditions.push(
-        options.visibility.actorDepartmentId
-          ? eq(schema.users.department_id, options.visibility.actorDepartmentId)
-          : eq(schema.users.id, options.visibility.actorUserId)
-      );
+      conditions.push(...scopedPeopleDirectoryPredicates(options.visibility));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -203,11 +235,12 @@ export class UserRepository {
       .select({
         ...getTableColumns(schema.users),
         role: schema.roles.name,
+        role_is_system: schema.roles.is_system,
       })
       .from(schema.users)
       .leftJoin(schema.roles, eq(schema.users.role_id, schema.roles.id))
       .where(whereClause)
-      .orderBy(desc(schema.users.created_at))
+      .orderBy(desc(schema.users.created_at), asc(schema.users.id))
       .limit(limit)
       .offset(offset);
 
@@ -225,9 +258,9 @@ export class UserRepository {
     };
   }
 
-  async update(id: string, data: Partial<typeof schema.users.$inferInsert>) {
+  async update(id: string, data: Partial<typeof schema.users.$inferInsert>, executor?: DbExecutor) {
     const db = getDatabase();
-    return db.transaction(async (tx) => {
+    const updateInTransaction = async (tx: DbExecutor) => {
       const current =
         data.is_active === false || data.role_id !== undefined
           ? await lockUserAndAssertSuperAdminSurvives(tx, id, {
@@ -252,12 +285,13 @@ export class UserRepository {
 
       await tx.delete(schema.sessions).where(eq(schema.sessions.user_id, id));
       return user;
-    });
+    };
+    return executor ? updateInTransaction(executor) : db.transaction(updateInTransaction);
   }
 
-  async tombstone(id: string, deletedBy: string, invalidPasswordHash: string) {
+  async tombstone(id: string, deletedBy: string, invalidPasswordHash: string, executor?: DbExecutor) {
     const db = getDatabase();
-    return db.transaction(async (tx) => {
+    const tombstoneInTransaction = async (tx: DbExecutor) => {
       const current = await lockUserAndAssertSuperAdminSurvives(tx, id, { deleting: true });
       if (!current) return null;
       if (current.deleted_at) {
@@ -324,7 +358,8 @@ export class UserRepository {
       });
 
       return { user, alreadyDeleted: false, abortedUploads, failedMedia };
-    });
+    };
+    return executor ? tombstoneInTransaction(executor) : db.transaction(tombstoneInTransaction);
   }
 
   async getDeleteUsageSummary(id: string) {

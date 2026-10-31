@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { Socket } from 'socket.io';
+import { randomUUID } from 'crypto';
 import { config } from '@/config';
 import {
   recordDeviceRealtimeAuth,
@@ -33,10 +34,11 @@ import {
   type SocketAck,
 } from '@/realtime/socket-hardening';
 import { authenticateDeviceSocketHandshake, type DeviceSocketAuthFailure } from '@/realtime/device-socket-auth';
-import { recordDeviceAuthRolloutObservation } from '@/deployment/device-auth-rollout';
 import { createLogger } from '@/utils/logger';
-import { getDatabase, schema } from '@/db';
-import { eq, sql } from 'drizzle-orm';
+import { queueDeviceOperationalObservation } from '@/jobs';
+import { getActiveRecoveryGeneration } from '@/services/recovery-runtime-authority';
+import { acceptDeviceRecoveryGenerationProof, issueDeviceRecoveryGenerationChallenge } from '@/services/recovery-generation-handshake';
+import { ControlledRecoveryError } from '@/recovery/controlled-docker/contracts';
 
 const logger = createLogger('device-realtime-gateway');
 let deviceNodeRefreshTimer: NodeJS.Timeout | null = null;
@@ -45,6 +47,8 @@ const devicePingRateLimiter = new SocketEventRateLimiter(30, 1);
 export const DEVICE_REALTIME_MESSAGE_TYPES = [
   'HELLO',
   'HELLO_ACK',
+  'RECOVERY_GENERATION_PROOF',
+  'RECOVERY_GENERATION_ACCEPTED',
   'COMMAND_AVAILABLE',
   'RESYNC_REQUIRED',
   'SERVER_TIME',
@@ -58,6 +62,7 @@ type DeviceHelloPayload = {
   protocol_version?: string;
   device_id?: string;
   session_id?: string;
+  recovery_nonce?: string;
   app?: { version?: string };
   platform?: { family?: string };
   capabilities?: {
@@ -93,6 +98,8 @@ function buildHelloAck(input: {
   sessionId: string | null;
   connectionId: string;
   protocolVersion: string;
+  recoveryGeneration: string | null;
+  recoveryChallenge?: Record<string, unknown> | null;
 }) {
   return {
     type: 'HELLO_ACK',
@@ -103,6 +110,8 @@ function buildHelloAck(input: {
     connection_id: input.connectionId,
     server_release_id: config.DARSHAN_RELEASE_ID,
     compatibility_generation: config.DARSHAN_COMPATIBILITY_GENERATION,
+    recovery_generation: input.recoveryGeneration,
+    recovery_challenge: input.recoveryChallenge ?? null,
     recommended_intervals: {
       heartbeat_ms: 30_000,
       command_safety_poll_ms: 60_000,
@@ -151,11 +160,15 @@ export async function setupDeviceRealtimeGateway(fastify: FastifyInstance, optio
       (socket.data as any).deviceId = result.deviceId;
       (socket.data as any).deviceSerial = result.serial;
       (socket.data as any).deviceAuthMode = result.mode;
+      (socket.data as any).deviceCertificateId = result.certificateId;
       try {
-        await recordDeviceAuthRolloutObservation({
+        await queueDeviceOperationalObservation({
+          eventId: randomUUID(),
+          type: 'auth_rollout',
           screenId: result.deviceId,
           channel: 'socket',
           method: result.mode === 'signed' ? 'signed' : 'legacy',
+          observedAt: new Date().toISOString(),
         });
       } catch (observationError) {
         // The handshake is already cryptographically authenticated. Retain
@@ -184,11 +197,13 @@ export async function setupDeviceRealtimeGateway(fastify: FastifyInstance, optio
     });
     recordRealtimeSocketAuth(config.REALTIME_DEVICE_NAMESPACE, 'failure', failure.reason);
     logger.warn({ mode: failure.mode, reason: failure.reason }, 'Device realtime socket auth failed');
-    return next(new Error('Unauthorized'));
+    return next(new Error(failure.reason === 'recovery_pairing_review_required'
+      ? 'RECOVERY_PAIRING_REVIEW_REQUIRED'
+      : 'Unauthorized'));
   });
 
   nsp.on('connection', (socket: Socket) => {
-    socket.on('HELLO', (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+    socket.on('HELLO', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
       recordRealtimeSocketClientEvent(config.REALTIME_DEVICE_NAMESPACE, 'HELLO');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
@@ -232,28 +247,37 @@ export async function setupDeviceRealtimeGateway(fastify: FastifyInstance, optio
           platformFamily: typeof payload?.platform?.family === 'string' ? payload.platform.family : null,
         });
         if (payload.capabilities) {
-          const capabilityDocument = JSON.stringify({
-            player_capabilities: payload.capabilities,
-            player_capabilities_observed_at: new Date().toISOString(),
-          });
-          void getDatabase()
-            .update(schema.screens)
-            .set({
-              device_info: sql`COALESCE(${schema.screens.device_info}, '{}'::jsonb) || ${capabilityDocument}::jsonb`,
-              updated_at: new Date(),
-            })
-            .where(eq(schema.screens.id, deviceId))
-            .catch((error) => {
-              logger.warn({ err: error, device_id: deviceId }, 'Failed to persist player capability report');
+          try {
+            await queueDeviceOperationalObservation({
+              eventId: randomUUID(),
+              type: 'hello_capabilities',
+              screenId: deviceId,
+              capabilities: payload.capabilities,
+              observedAt: new Date().toISOString(),
             });
+          } catch (error) {
+            logger.warn({ err: error, device_id: deviceId }, 'Failed to queue player capability report');
+          }
         }
         void registerDeviceForFanout(deviceId);
 
+        const recoveryGeneration = await getActiveRecoveryGeneration();
+        const recoveryChallenge = recoveryGeneration && (socket.data as any).deviceAuthMode === 'signed' && payload.recovery_nonce
+          ? await issueDeviceRecoveryGenerationChallenge({ screenId: deviceId,
+              certificateId: (socket.data as any).deviceCertificateId as string, clientNonce: payload.recovery_nonce })
+          : null;
         const response = buildHelloAck({
           deviceId,
           sessionId,
           connectionId: entry.connectionId,
           protocolVersion,
+          recoveryGeneration,
+          recoveryChallenge: recoveryChallenge ? {
+            challenge_id: recoveryChallenge.id, site_id: recoveryChallenge.siteId,
+            recovery_generation: recoveryChallenge.generation, screen_id: recoveryChallenge.screenId,
+            certificate_id: recoveryChallenge.certificateId, client_nonce: recoveryChallenge.clientNonce,
+            server_challenge: recoveryChallenge.serverChallenge, expires_at: recoveryChallenge.expiresAt,
+          } : null,
         });
         assertNotificationPayloadAllowed(response);
         recordRealtimeSocketServerEvent(config.REALTIME_DEVICE_NAMESPACE, 'HELLO_ACK');
@@ -273,6 +297,24 @@ export async function setupDeviceRealtimeGateway(fastify: FastifyInstance, optio
         recordRealtimeSocketServerEvent(config.REALTIME_DEVICE_NAMESPACE, 'ERROR');
         socket.emit('ERROR', response);
         if (ack) ack(response);
+      }
+    });
+
+    socket.on('RECOVERY_GENERATION_PROOF', async (payload: unknown, ack?: SocketAck) => {
+      try {
+        const value = payload as { challenge_id?: unknown; signature_base64?: unknown };
+        if (typeof value?.challenge_id !== 'string' || typeof value?.signature_base64 !== 'string' ||
+            !/^[A-Za-z0-9+/]{64,2048}={0,2}$/.test(value.signature_base64)) throw new Error('Invalid recovery generation proof');
+        const accepted = await acceptDeviceRecoveryGenerationProof({ challengeId: value.challenge_id,
+          screenId: (socket.data as any).deviceId as string, certificateId: (socket.data as any).deviceCertificateId as string,
+          signatureBase64: value.signature_base64 });
+        const response = { type: 'RECOVERY_GENERATION_ACCEPTED', device_id: (socket.data as any).deviceId,
+          recovery_generation: accepted.generation, receipt_sha256: accepted.receiptSha256, sent_at: new Date().toISOString() };
+        socket.emit('RECOVERY_GENERATION_ACCEPTED', response); if (ack) ack(response);
+      } catch (error) {
+        const response = buildDeviceSocketError(error instanceof ControlledRecoveryError ? error.code : 'RECOVERY_GENERATION_PROOF_INVALID',
+          'Recovery generation proof rejected', false);
+        sendDeviceError(socket, ack, response);
       }
     });
 
@@ -378,11 +420,13 @@ export async function setupDeviceRealtimeGateway(fastify: FastifyInstance, optio
 }
 
 export async function sendDeviceNotification(deviceId: string, type: 'COMMAND_AVAILABLE' | 'RESYNC_REQUIRED' | 'SERVER_TIME', payload: unknown) {
+  const recoveryGeneration = await getActiveRecoveryGeneration();
   const message = {
     ...(payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}),
     type,
     device_id: deviceId,
     sent_at: new Date().toISOString(),
+    recovery_generation: recoveryGeneration,
   };
   try {
     assertNotificationPayloadAllowed(message);

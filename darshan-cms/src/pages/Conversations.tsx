@@ -216,7 +216,7 @@ export default function Conversations() {
   const authToken = useAppSelector((state) => state.auth.token);
   const currentUserId = useAppSelector((state) => state.auth.user?.id);
   const isAuthenticated = Boolean(authToken || currentUserId);
-  const { can } = useAuthorization();
+  const { can, canRecord } = useAuthorization();
   const usersDirectoryQuery = useChatUserDirectory(isAuthenticated);
 
   const [search, setSearch] = useState("");
@@ -505,8 +505,12 @@ export default function Conversations() {
       : null;
   const effectiveStatus = chatStatus ?? archivedStatus;
 
-  const canModerate = can("manage", "Conversation");
-  const canHardDelete = can("delete", "Conversation");
+  const canModerate = Boolean(
+    selectedConversation && canRecord("manage", "Conversation", selectedConversation),
+  );
+  const canHardDelete = Boolean(
+    selectedConversation && canRecord("delete", "Conversation", selectedConversation),
+  );
   const canShowModeration = Boolean(canModerate && selectedConversation?.type !== "DM");
   const canManage =
     canModerate ||

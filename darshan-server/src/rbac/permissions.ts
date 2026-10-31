@@ -1,4 +1,5 @@
-export const PERMISSION_ACTIONS = ['create', 'read', 'update', 'delete', 'manage', 'approve', 'publish'] as const;
+export const PERMISSION_ACTIONS = ['create', 'read', 'update', 'delete', 'download', 'manage', 'approve', 'publish'] as const;
+export const BACKUP_PERMISSION_ACTIONS = ['read', 'create', 'delete', 'download'] as const;
 
 export const PERMISSION_SUBJECTS = [
   'User',
@@ -21,6 +22,7 @@ export const PERMISSION_SUBJECTS = [
   'SsoConfig',
   'OrgSettings',
   'BrandingSettings',
+  'Backup',
   'Conversation',
   'ProofOfPlay',
   'Dashboard',

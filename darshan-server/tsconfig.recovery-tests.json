@@ -1,0 +1,62 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "outDir": null,
+    "rootDir": ".",
+    "types": [
+      "node",
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "src/recovery/target-constrained-engine.unit.test.ts",
+    "src/recovery/target-engine-journal.unit.test.ts",
+    "src/recovery/target-native-engine.unit.test.ts",
+    "src/recovery/target-credential-admission.unit.test.ts",
+    "src/recovery/target-native-engine-wire-v4.unit.test.ts",
+    "src/recovery/target-native-engine-assets-v4.unit.test.ts",
+    "src/recovery/controlled-docker/packet1.unit.test.ts",
+    "src/recovery/controlled-docker/packet2.unit.test.ts",
+    "src/recovery/controlled-docker/activation.unit.test.ts",
+    "src/recovery/controlled-docker/fixed-docker-runner.unit.test.ts",
+    "src/recovery/controlled-docker/streaming-artifacts.unit.test.ts",
+    "src/recovery/controlled-docker/deployment-adapter.unit.test.ts",
+    "src/recovery/controlled-docker/packet2-deployment-adapter.unit.test.ts",
+    "scripts/development/controlled-recovery-readiness.unit.test.ts",
+    "scripts/development/controlled-recovery-d2.unit.test.ts",
+    "scripts/development/controlled-recovery-d3.unit.test.ts",
+    "scripts/development/controlled-recovery-d4-tools.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-foundation.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-execution.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-state.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-backup.integration.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-layout.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-runtime.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-health.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-installed.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-data.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-data-clients.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-ledger.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-source-observability.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-capsule.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-capsule-provider.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-capsule-installed.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-age-staging.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-age-legacy-handoff.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-reservation.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-broker.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-broker-protocol.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-recovery-prefix.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-capture.unit.test.ts",
+    "scripts/development/controlled-recovery-d3-backup-publication.unit.test.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-production",
+    "dist-cli"
+  ]
+}

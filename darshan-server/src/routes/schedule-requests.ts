@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { subject as caslSubject } from '@casl/ability';
 import { z } from 'zod';
 import { createScheduleRequestRepository } from '@/db/repositories/schedule-request';
 import { createScheduleRepository } from '@/db/repositories/schedule';
@@ -8,7 +9,7 @@ import {
   withCurrentMutationAuthorization,
   type MutationAuthorizationContext,
 } from '@/auth/mutation-authorization';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
@@ -669,10 +670,6 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
   ) =>
     withCurrentMutationAuthorization(payload, async (context) => {
       const action = options.action ?? 'update';
-      if (!context.ability.can(action, 'ScheduleRequest')) {
-        throw AppError.forbidden('Forbidden');
-      }
-
       const [requestReference] = await context.executor
         .select()
         .from(schema.scheduleRequests)
@@ -698,8 +695,11 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
       if (scheduleRequest.schedule_id !== schedule.id) {
         throw AppError.conflict('Schedule request changed while it was being authorized. Please retry.');
       }
+      if (!(context.ability as any).can(action, caslSubject('ScheduleRequest', { ...scheduleRequest }))) {
+        throw AppError.forbidden('Forbidden');
+      }
       if (
-        !context.ability.can('manage', 'ScheduleRequest') &&
+        !canUnconditionally(context.ability, 'manage', 'ScheduleRequest') &&
         !canAccessContentMutationScope(context.actor, schedule, context.ability, 'Schedule')
       ) {
         throw AppError.forbidden('Forbidden');
@@ -727,15 +727,19 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const query = createRequestQuerySchema.parse(request.query);
         const include = parseInclude(query.include);
         const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
-          if (!ability.can('create', 'ScheduleRequest')) throw AppError.forbidden('Forbidden');
           const [schedule] = await executor
             .select()
             .from(schema.schedules)
             .where(eq(schema.schedules.id, data.schedule_id))
             .for('update');
           if (!schedule) throw AppError.notFound('Schedule not found');
+          if (!(ability as any).can('create', caslSubject('ScheduleRequest', {
+            ...data,
+            requested_by: actor.userId,
+            status: 'PENDING',
+          }))) throw AppError.forbidden('Forbidden');
           if (
-            !ability.can('manage', 'ScheduleRequest') &&
+            !canUnconditionally(ability, 'manage', 'ScheduleRequest') &&
             !canAccessContentMutationScope(actor, schedule, ability, 'Schedule')
           ) {
             throw AppError.forbidden('Forbidden');
@@ -756,7 +760,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               scheduleRequestId: createdRequest.id,
               scheduleId: data.schedule_id,
               ownerUserId: actor.userId,
-              allowPrivateRefs: ability.can('manage', 'Schedule'),
+              allowPrivateRefs: canUnconditionally(ability, 'manage', 'Schedule'),
             },
             executor
           );
@@ -1017,6 +1021,9 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
 
         const req = await repo.findById((request.params as any).id);
         if (!req) throw AppError.notFound('Schedule request not found');
+        if (!(ability as any).can('read', caslSubject('ScheduleRequest', { ...req }))) {
+          throw AppError.forbidden('Forbidden');
+        }
         await assertScheduleRequestAccess(payload, req);
 
         if (include.size === 0) {
@@ -1070,7 +1077,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const updated = await withScheduleRequestMutation(
           payload,
           (request.params as any).id,
-          async ({ scheduleRequest, actor, ability, executor }) => {
+          async ({ scheduleRequest, actor, executor }) => {
           await reservationService.promoteRequestHold(
             {
               scheduleRequestId: scheduleRequest.id,
@@ -1308,10 +1315,10 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               scheduleRequestId: scheduleRequest.id,
               nextStatus: 'CANCELLED',
               releaseState: 'CANCELLED',
-              releaseReason: ability.can('manage', 'ScheduleRequest')
+              releaseReason: canUnconditionally(ability, 'manage', 'ScheduleRequest')
                 ? 'request-cancelled-by-admin'
                 : 'request-cancelled-by-schedule-owner',
-              reviewedBy: ability.can('manage', 'ScheduleRequest') ? actor.userId : null,
+              reviewedBy: canUnconditionally(ability, 'manage', 'ScheduleRequest') ? actor.userId : null,
             },
             executor
           );

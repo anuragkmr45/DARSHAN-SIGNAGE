@@ -1,11 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
-import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
-import { createSessionRepository } from '@/db/repositories/session';
+import { closeTestServer, createTestActor, createTestServer } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
-import { generateAccessToken } from '@/auth/jwt';
 
 describe('Proof of play export', () => {
   let server: FastifyInstance;
@@ -13,19 +10,7 @@ describe('Proof of play export', () => {
 
   beforeAll(async () => {
     server = await createTestServer();
-    const db = getDatabase();
-    const [role] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'SUPER_ADMIN')).limit(1);
-    if (!role) {
-      throw new Error('SUPER_ADMIN role is required for proof-of-play export tests');
-    }
-
-    const issued = await generateAccessToken(testUser.id, testUser.email, role.id, role.name);
-    await createSessionRepository().create({
-      user_id: testUser.id,
-      access_jti: issued.jti,
-      expires_at: issued.expiresAt,
-    });
-    adminToken = issued.token;
+    adminToken = (await createTestActor('SUPER_ADMIN')).token;
   });
 
   afterAll(async () => {

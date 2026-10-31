@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import { z } from 'zod';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import { createLogger, getRecentLogs, setRuntimeLogLevel } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
@@ -30,7 +30,6 @@ import {
   GENERAL_SETTINGS_KEY,
   SECURITY_SETTINGS_KEY,
   appearanceSettingsSchema,
-  applyProductionBackupSchedule,
   backupsSettingsSchema,
   brandingSettingsSchema,
   generalSettingsSchema,
@@ -44,10 +43,18 @@ import {
   type GeneralSettings,
   type SecuritySettings,
 } from '@/utils/settings';
-import { createBackupRun, deleteBackupRun, listBackupRuns } from '@/utils/backup-runs';
-import { queueBackup } from '@/jobs';
+import { requestCoordinatedBackup, queueManualBackupDeletion } from '@/jobs';
 import { resolveAspectRatio } from '@/utils/aspect-ratio';
 import { config as appConfig } from '@/config';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
+import {
+  admitManualBackupDeletion,
+  getBackupDetail,
+  getBackupOperation,
+  listBackupHistory,
+} from '@/backups/api-service';
+import { openEncryptedBackupArtifact } from '@/backups/encrypted-download';
+import { createAuditLogRepository } from '@/db/repositories/audit-log';
 
 const logger = createLogger('settings-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -104,19 +111,41 @@ const logsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 });
 
+const backupIdSchema = z.object({ id: z.string().uuid() });
+const backupOperationParamsSchema = z.object({ operationId: z.string().uuid() });
+const backupHistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().min(1).max(2_000).optional(),
+});
+const backupDownloadQuerySchema = z.object({ artifact: z.enum(['DATABASE', 'OBJECTS', 'CONFIGURATION']) });
+const idempotencyKeySchema = z.string().trim().min(1).max(200);
+
+async function getSettingsActor(request: FastifyRequest) {
+  const token = extractTokenFromHeader(request.headers.authorization);
+  if (!token) throw AppError.unauthorized('Missing authorization header');
+  const payload = await verifyAccessToken(token);
+  const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+  return { payload, ability };
+}
+
 async function requireAccess(
   request: FastifyRequest,
   action: 'read' | 'update',
   subject: 'OrgSettings' | 'BrandingSettings'
 ) {
-  const token = extractTokenFromHeader(request.headers.authorization);
-  if (!token) throw AppError.unauthorized('Missing authorization header');
-  const payload = await verifyAccessToken(token);
-  const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-  if (!ability.can(action, subject)) {
+  const { payload, ability } = await getSettingsActor(request);
+  // These settings endpoints operate on a singleton or entire collection;
+  // there is no resource record on which a conditional grant can be checked.
+  if (!canUnconditionally(ability, action, subject)) {
     throw AppError.forbidden('Forbidden');
   }
   return payload;
+}
+
+async function requireBackupAccess(request: FastifyRequest, action: 'read' | 'create' | 'delete' | 'download') {
+  const { payload, ability } = await getSettingsActor(request);
+  if (!canUnconditionally(ability, action, 'Backup')) throw AppError.forbidden('Forbidden');
+  return { payload, ability };
 }
 
 async function ensureMediaIdsExist(ids: Array<string | null | undefined>) {
@@ -340,8 +369,13 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        await requireAccess(request, 'read', 'OrgSettings');
-        const items = await db.select().from(schema.settings);
+        const { ability } = await getSettingsActor(request);
+        if (!canUnconditionally(ability, 'read', 'OrgSettings')) throw AppError.forbidden('Forbidden');
+        const canReadBranding = canUnconditionally(ability, 'read', 'BrandingSettings');
+        const canReadBackups = canUnconditionally(ability, 'read', 'Backup');
+        const items = (await db.select().from(schema.settings))
+          .filter((item) => item.key !== BRANDING_SETTINGS_KEY || canReadBranding)
+          .filter((item) => item.key !== BACKUPS_SETTINGS_KEY || canReadBackups);
         return reply.send({ items });
       } catch (error) {
         logger.error(error, 'List settings error');
@@ -361,15 +395,19 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        await requireAccess(request, 'update', 'OrgSettings');
+        const { ability } = await getSettingsActor(request);
         const data = upsertSettingSchema.parse(request.body);
+        if (data.key === BACKUPS_SETTINGS_KEY) {
+          throw AppError.badRequest('Backup settings must be updated through the dedicated backup settings endpoint.');
+        }
+        const subject = data.key === BRANDING_SETTINGS_KEY ? 'BrandingSettings' : 'OrgSettings';
+        if (!canUnconditionally(ability, 'update', subject)) throw AppError.forbidden('Forbidden');
 
         const knownSections = {
           [GENERAL_SETTINGS_KEY]: generalSettingsSchema,
           [BRANDING_SETTINGS_KEY]: brandingSettingsSchema,
           [SECURITY_SETTINGS_KEY]: securitySettingsSchema,
           [APPEARANCE_SETTINGS_KEY]: appearanceSettingsSchema,
-          [BACKUPS_SETTINGS_KEY]: backupsSettingsSchema,
         } as const;
 
         let value = data.value;
@@ -378,9 +416,6 @@ export async function settingsRoutes(fastify: FastifyInstance) {
           await ensureMediaIdsExist([value.logo_media_id, value.icon_media_id, value.favicon_media_id]);
         } else if (data.key in knownSections) {
           value = (knownSections as any)[data.key].parse(data.value);
-          if (data.key === BACKUPS_SETTINGS_KEY) {
-            value = applyProductionBackupSchedule(value as BackupsSettings);
-          }
         }
 
         const [record] = await db
@@ -391,10 +426,6 @@ export async function settingsRoutes(fastify: FastifyInstance) {
             set: { value, updated_at: new Date() },
           })
           .returning();
-
-        if (data.key === BACKUPS_SETTINGS_KEY) {
-          setRuntimeLogLevel((value as BackupsSettings).log_level);
-        }
 
         return reply.status(OK).send(record);
       } catch (error) {
@@ -581,7 +612,7 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        await requireAccess(request, 'read', 'OrgSettings');
+        await requireBackupAccess(request, 'read');
         return reply.send(serializeBackupSettings(await getSettingsSection(BACKUPS_SETTINGS_KEY)));
       } catch (error) {
         logger.error(error, 'Get backups settings error');
@@ -601,9 +632,14 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        await requireAccess(request, 'update', 'OrgSettings');
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
         const data = backupsSettingsSchema.parse(request.body);
-        const saved = await saveSettingsSection(BACKUPS_SETTINGS_KEY, data);
+        const saved = await withCurrentMutationAuthorization(payload, async ({ ability }) => {
+          if (!canUnconditionally(ability, 'update', 'OrgSettings')) throw AppError.forbidden('Forbidden');
+          return saveSettingsSection(BACKUPS_SETTINGS_KEY, data);
+        });
         setRuntimeLogLevel(saved.log_level);
         return reply.status(OK).send(serializeBackupSettings(saved));
       } catch (error) {
@@ -624,13 +660,18 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const payload = await requireAccess(request, 'update', 'OrgSettings');
-        const run = await createBackupRun('MANUAL', payload.sub);
-        await queueBackup({ runId: run.id });
-        return reply.status(CREATED).send({
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const { run, coalesced } = await withCurrentMutationAuthorization(payload, async ({ ability, actor }) => {
+          if (!canUnconditionally(ability, 'create', 'Backup')) throw AppError.forbidden('Forbidden');
+          return requestCoordinatedBackup({ triggerType: 'MANUAL', triggeredBy: actor.userId });
+        });
+        return reply.status(coalesced ? OK : CREATED).send({
           id: run.id,
           status: run.status,
           trigger_type: run.trigger_type,
+          coalesced,
         });
       } catch (error) {
         logger.error(error, 'Run backup error');
@@ -639,20 +680,36 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     }
   );
 
-  fastify.delete<{ Params: { id: string } }>(
+  fastify.delete<{ Params: { id: string }; Headers: { 'idempotency-key'?: string } }>(
     apiEndpoints.settings.backupById,
     {
       schema: {
-        description: 'Delete a completed or failed backup run and its archive files',
+        description: 'Admit durable asynchronous deletion of eligible backup artifacts',
         tags: ['Settings'],
         security: [{ bearerAuth: [] }],
       },
     },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Params: { id: string }; Headers: { 'idempotency-key'?: string } }>, reply: FastifyReply) => {
       try {
-        await requireAccess(request, 'update', 'OrgSettings');
-        const result = await deleteBackupRun(request.params.id);
-        return reply.status(OK).send(result);
+        const { id } = backupIdSchema.parse(request.params);
+        const idempotencyKey = request.headers['idempotency-key']
+          ? idempotencyKeySchema.parse(request.headers['idempotency-key']) : undefined;
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const result = await withCurrentMutationAuthorization(payload, async ({ ability, actor, executor }) => {
+          if (!canUnconditionally(ability, 'delete', 'Backup')) throw AppError.forbidden('Forbidden');
+          return admitManualBackupDeletion({ executor, backupRunId: id, requesterId: actor.userId, idempotencyKey });
+        });
+        if (result.disposition === 'DELETED') return reply.status(OK).send(result);
+        try {
+          await queueManualBackupDeletion(id);
+        } catch (deliveryError) {
+          logger.error({ deliveryError, backupRunId: id, operationId: result.operation_id },
+            'Manual backup deletion was admitted but immediate worker delivery failed');
+        }
+        const location = apiEndpoints.settings.backupOperation.replace(':operationId', result.operation_id);
+        return reply.header('Location', location).header('Retry-After', '5').status(HTTP_STATUS.ACCEPTED).send(result);
       } catch (error) {
         logger.error(error, 'Delete backup run error');
         return respondWithError(reply, error);
@@ -660,7 +717,7 @@ export async function settingsRoutes(fastify: FastifyInstance) {
     }
   );
 
-  fastify.get(
+  fastify.get<{ Querystring: z.infer<typeof backupHistoryQuerySchema> }>(
     apiEndpoints.settings.backupHistory,
     {
       schema: {
@@ -669,12 +726,113 @@ export async function settingsRoutes(fastify: FastifyInstance) {
         security: [{ bearerAuth: [] }],
       },
     },
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Querystring: z.infer<typeof backupHistoryQuerySchema> }>, reply: FastifyReply) => {
       try {
-        await requireAccess(request, 'read', 'OrgSettings');
-        return reply.send({ items: await listBackupRuns() });
+        const { ability } = await requireBackupAccess(request, 'read');
+        const query = backupHistoryQuerySchema.parse(request.query);
+        return reply.send(await listBackupHistory({
+          executor: db,
+          limit: query.limit,
+          cursor: query.cursor,
+          canDelete: canUnconditionally(ability, 'delete', 'Backup'),
+          canDownload: canUnconditionally(ability, 'download', 'Backup'),
+        }));
       } catch (error) {
         logger.error(error, 'List backup history error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.get<{ Params: { id: string }; Querystring: z.infer<typeof backupDownloadQuerySchema>;
+    Headers: { range?: string } }>(
+    apiEndpoints.settings.backupById,
+    {
+      schema: { description: 'Get a safe backup history record', tags: ['Settings'], security: [{ bearerAuth: [] }] },
+    },
+    async (request, reply) => {
+      try {
+        const { id } = backupIdSchema.parse(request.params);
+        const { ability } = await requireBackupAccess(request, 'read');
+        return reply.send(await getBackupDetail({ executor: db, backupRunId: id,
+          canDelete: canUnconditionally(ability, 'delete', 'Backup'),
+          canDownload: canUnconditionally(ability, 'download', 'Backup') }));
+      } catch (error) {
+        logger.error(error, 'Get backup detail error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.get<{ Params: { operationId: string } }>(
+    apiEndpoints.settings.backupOperation,
+    {
+      schema: { description: 'Get a backup deletion operation', tags: ['Settings'], security: [{ bearerAuth: [] }] },
+    },
+    async (request, reply) => {
+      try {
+        const { operationId } = backupOperationParamsSchema.parse(request.params);
+        await requireBackupAccess(request, 'read');
+        return reply.send(await getBackupOperation(db, operationId));
+      } catch (error) {
+        logger.error(error, 'Get backup operation error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.get<{ Params: { id: string } }>(
+    apiEndpoints.settings.backupDownload,
+    {
+      schema: { description: 'Download one trusted encrypted backup artifact', tags: ['Settings'], security: [{ bearerAuth: [] }] },
+    },
+    async (request, reply) => {
+      try {
+        const { id } = backupIdSchema.parse(request.params);
+        const { artifact } = backupDownloadQuerySchema.parse(request.query);
+        if (request.headers.range) {
+          throw new AppError({ statusCode: 416, code: 'BACKUP_DOWNLOAD_RANGE_NOT_SUPPORTED',
+            message: 'Encrypted backup downloads require a complete trusted stream.' });
+        }
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const detail = await withCurrentMutationAuthorization(payload, async ({ ability, executor }) => {
+          if (!canUnconditionally(ability, 'download', 'Backup')) throw AppError.forbidden('Forbidden');
+          return getBackupDetail({ executor, backupRunId: id, canDelete: false, canDownload: true });
+        });
+        if (!detail.permissions.can_download || !detail.verification.manifest_sha256) {
+          throw new AppError({ statusCode: 409,
+            code: detail.permissions.download_unavailable_code ?? 'BACKUP_DOWNLOAD_SOURCE_NOT_VERIFIED',
+            message: 'This backup does not have a trusted encrypted download source.' });
+        }
+        const controller = new AbortController();
+        request.raw.once('aborted', () => controller.abort(new Error('client aborted')));
+        const download = await openEncryptedBackupArtifact({ runId: id,
+          manifestSha256: detail.verification.manifest_sha256, artifactKind: artifact, signal: controller.signal });
+        try {
+          const freshPayload = await verifyAccessToken(token);
+          await withCurrentMutationAuthorization(freshPayload, async ({ ability }) => {
+            if (!canUnconditionally(ability, 'download', 'Backup')) throw AppError.forbidden('Forbidden');
+          });
+          await createAuditLogRepository().create({ user_id: freshPayload.sub,
+            action: 'BACKUP_ENCRYPTED_ARTIFACT_DOWNLOAD', resource_type: 'Backup', resource_id: id,
+            changes: { artifact_kind: artifact, ciphertext_sha256: download.sha256,
+              ciphertext_size_bytes: download.contentLength, manifest_sha256: download.manifestSha256 } });
+        } catch (error) {
+          download.stream.destroy();
+          throw error;
+        }
+        return reply
+          .header('Content-Type', 'application/octet-stream')
+          .header('Content-Length', download.contentLength)
+          .header('Content-Disposition', `attachment; filename="${download.filename}"`)
+          .header('Cache-Control', 'no-store')
+          .header('X-Content-Type-Options', 'nosniff')
+          .header('Accept-Ranges', 'none')
+          .send(download.stream);
+      } catch (error) {
+        logger.error(error, 'Download backup error');
         return respondWithError(reply, error);
       }
     }

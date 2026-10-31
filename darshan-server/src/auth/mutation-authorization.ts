@@ -1,9 +1,10 @@
 import { and, asc, eq } from 'drizzle-orm';
-import type { JWTPayload } from '@/auth/jwt';
+import { tokenClaimsMatchAccount, type JWTPayload } from '@/auth/jwt';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import { defineAbilityFor, type AppAbility } from '@/rbac';
 import type { ActorContext } from '@/rbac/policy';
 import { AppError } from '@/utils/app-error';
+import { canAuthenticateInviteState } from '@/auth/invite-state';
 
 export type MutationAuthorizationContext = {
   actor: ActorContext;
@@ -20,7 +21,7 @@ export type MutationAuthorizationContext = {
  * the session and this write is rejected before mutating content.
  */
 export async function withCurrentMutationAuthorization<T>(
-  payload: Pick<JWTPayload, 'sub' | 'jti'>,
+  payload: Pick<JWTPayload, 'sub' | 'jti' | 'role_id' | 'role' | 'department_id'>,
   execute: (context: MutationAuthorizationContext) => Promise<T>,
   options: { roleLock?: 'share' | 'update' } = {}
 ): Promise<T> {
@@ -42,12 +43,13 @@ export async function withCurrentMutationAuthorization<T>(
         department_id: schema.users.department_id,
         is_active: schema.users.is_active,
         deleted_at: schema.users.deleted_at,
+        ext: schema.users.ext,
       })
       .from(schema.users)
       .where(eq(schema.users.id, payload.sub))
       .for('update');
 
-    if (!user || !user.is_active || user.deleted_at) {
+    if (!user || !user.is_active || user.deleted_at || !canAuthenticateInviteState(user.ext)) {
       throw AppError.unauthorized('Authorization context is no longer active. Please sign in again.');
     }
 
@@ -70,7 +72,11 @@ export async function withCurrentMutationAuthorization<T>(
     }
 
     const role = roles.find((candidate) => candidate.id === user.role_id);
-    if (!role) {
+    if (!role || !tokenClaimsMatchAccount(payload, {
+      role_id: user.role_id,
+      role: role.name,
+      department_id: user.department_id,
+    })) {
       throw AppError.unauthorized('Authorization context is stale. Please sign in again.');
     }
 
@@ -79,7 +85,7 @@ export async function withCurrentMutationAuthorization<T>(
       roleName: role.name,
       departmentId: user.department_id,
     };
-    const ability = await defineAbilityFor(role.id, user.id, user.department_id ?? undefined);
+    const ability = await defineAbilityFor(role.id, user.id, user.department_id ?? undefined, tx);
     return execute({ actor, ability, executor: tx });
   });
 }

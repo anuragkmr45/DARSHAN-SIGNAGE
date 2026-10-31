@@ -1,0 +1,22 @@
+{
+  "format": "darshan-controlled-recovery-activation-v1",
+  "enabled": true,
+  "activation_mode": "TINY_DISPOSABLE_FIXTURE",
+  "non_production_acknowledgement": "PACKET_A_HAS_NO_EFFECT_ADAPTER",
+  "site_id": "fixture-site",
+  "release": {
+    "release_id": "release-03", "target_id": "darshan-server-release-03-controlled", "terminal_migration_id": "0057_controlled_recovery_report_projection.sql", "migration_manifest_sha256": "05561d3b1c8cac7fa57f6d47503835d23c2b88f7886203ab9c8207238762c438",
+    "profile": { "path": "/opt/darshan/fixture/profile.release-03.json", "sha256": "1111111111111111111111111111111111111111111111111111111111111111" }, "assets_manifest": { "path": "/opt/darshan/fixture/assets.json", "sha256": "2222222222222222222222222222222222222222222222222222222222222222" }, "recovery_runtime_manifest": { "path": "/opt/darshan/fixture/runtime.json", "sha256": "3333333333333333333333333333333333333333333333333333333333333333" }, "production_build_manifest": { "path": "/opt/darshan/fixture/build.json", "sha256": "4444444444444444444444444444444444444444444444444444444444444444" }
+  },
+  "docker": { "executable": { "path": "/usr/bin/docker", "sha256": "5555555555555555555555555555555555555555555555555555555555555555" }, "config_identity": { "path": "/opt/darshan/fixture/docker-context.json", "sha256": "6666666666666666666666666666666666666666666666666666666666666666" }, "context": "darshan-controlled-recovery", "endpoint": "unix:///var/run/docker.sock", "daemon_identity_sha256": "7777777777777777777777777777777777777777777777777777777777777777" },
+  "source": { "repository_root": "/opt/darshan/fixture/repository", "manifest_keyring": { "path": "/opt/darshan/fixture/manifest-keyring.json", "sha256": "8888888888888888888888888888888888888888888888888888888888888888" }, "policy_keyring": { "path": "/opt/darshan/fixture/policy-keyring.json", "sha256": "9999999999999999999999999999999999999999999999999999999999999999" }, "broker_socket": "/run/darshan-fixture-broker/control.sock", "recovery_key_root": "/run/darshan-fixture/keys", "recipients": [{ "key_id": "fixture-key", "recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq" }] },
+  "resources": {
+    "postgres": { "image": "fixture.invalid/postgres@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "user": "999:999", "entrypoint": ["docker-entrypoint.sh"], "command": ["postgres"], "memory_bytes": "268435456", "nano_cpus": "250000000", "pids_limit": 64, "read_only_root": true, "no_new_privileges": true, "cap_drop_all": true },
+    "minio": { "image": "fixture.invalid/minio@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "user": "1000:1000", "entrypoint": ["/usr/bin/docker-entrypoint.sh"], "command": ["server", "/data"], "memory_bytes": "268435456", "nano_cpus": "250000000", "pids_limit": 64, "read_only_root": true, "no_new_privileges": true, "cap_drop_all": true },
+    "importer": { "image": "fixture.invalid/importer@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "user": "65532:65532", "entrypoint": ["/opt/darshan/import"], "command": ["--fixed-contract"], "memory_bytes": "134217728", "nano_cpus": "125000000", "pids_limit": 32, "read_only_root": true, "no_new_privileges": true, "cap_drop_all": true },
+    "validator": { "image": "fixture.invalid/validator@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "user": "65532:65532", "entrypoint": ["/opt/darshan/validate"], "command": ["--fixed-contract"], "memory_bytes": "134217728", "nano_cpus": "125000000", "pids_limit": 32, "read_only_root": true, "no_new_privileges": true, "cap_drop_all": true }
+  },
+  "packet2": { "profile": { "path": "/opt/darshan/fixture/profile.packet2.json", "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }, "fixed_overlay": { "path": "/opt/darshan/fixture/promotion-overlay.json", "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" } },
+  "report_authority": { "public_keyring": { "path": "/opt/darshan/fixture/report-keyring.json", "sha256": "abababababababababababababababababababababababababababababababab" }, "active_key_id": "fixture-report" },
+  "limits": { "command_timeout_ms": 15000, "stdout_max_bytes": 262144, "stderr_max_bytes": 262144 }
+}

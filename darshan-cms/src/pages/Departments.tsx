@@ -14,6 +14,8 @@ import { queryKeys } from "@/api/queryKeys";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { LoadingIndicator } from "@/components/common/LoadingIndicator";
 import { PageNavigation } from "@/components/common/PageNavigation";
+import { useAuthorization } from "@/hooks/useAuthorization";
+import { useAppSelector } from "@/store/hooks";
 
 const PAGE_SIZE = 9;
 const USERS_PAGE_SIZE = 100;
@@ -40,6 +42,10 @@ const fetchAllOperators = async () => {
 
 const Departments = () => {
   const queryClient = useQueryClient();
+  const { can, canRecord } = useAuthorization();
+  const currentUserId = useAppSelector((state) => state.auth.user?.id);
+  const canReadDepartments = can("read", "Department");
+  const canReadUsers = can("read", "User");
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
@@ -52,19 +58,21 @@ const Departments = () => {
     isLoading,
     isFetching,
   } = useQuery({
-    queryKey: [...queryKeys.departments, page, PAGE_SIZE],
+    queryKey: [...queryKeys.departments, currentUserId ?? "anonymous", page, PAGE_SIZE],
     queryFn: () => departmentsApi.list({ page, limit: PAGE_SIZE }),
-    placeholderData: (previousData) => previousData,
+    enabled: Boolean(currentUserId) && canReadDepartments,
   });
 
   const operatorsQuery = useQuery({
-    queryKey: [...queryKeys.users, "departments-page", "operators"],
+    queryKey: [...queryKeys.users, "departments-page", currentUserId ?? "anonymous", "operators"],
     queryFn: fetchAllOperators,
     staleTime: 60_000,
+    enabled: Boolean(currentUserId) && canReadUsers,
   });
 
-  const departments = useMemo(() => data?.items ?? [], [data]);
+  const departments = useMemo(() => canReadDepartments ? data?.items ?? [] : [], [canReadDepartments, data]);
   const operatorsByDepartment = useMemo(() => {
+    if (!canReadUsers) return {};
     return (operatorsQuery.data ?? []).reduce<Record<string, User[]>>((acc, operator) => {
       if (!operator.department_id) return acc;
       if (!acc[operator.department_id]) {
@@ -73,7 +81,7 @@ const Departments = () => {
       acc[operator.department_id].push(operator);
       return acc;
     }, {});
-  }, [operatorsQuery.data]);
+  }, [canReadUsers, operatorsQuery.data]);
 
   const departmentsWithOperators = useMemo(
     () =>
@@ -83,11 +91,21 @@ const Departments = () => {
       })),
     [departments, operatorsByDepartment],
   );
-  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
+  const visibleTotal = canReadDepartments ? data?.total ?? 0 : 0;
+  const totalPages = Math.max(1, Math.ceil(visibleTotal / PAGE_SIZE));
 
   useEffect(() => {
     setPage(1);
   }, [searchQuery]);
+
+  useEffect(() => {
+    setFormOpen(false);
+    setSelectedDepartment(null);
+    setDeleteTarget(null);
+    setIsConfirmOpen(false);
+    setPage(1);
+    setSearchQuery("");
+  }, [currentUserId]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -102,7 +120,17 @@ const Departments = () => {
         throw new Error("Name is required");
       }
       if (payload.id) {
+        const current = selectedDepartment?.id === payload.id
+          ? selectedDepartment
+          : departments.find((department) => department.id === payload.id);
+        if (!current || !canRecord("update", "Department", current) ||
+            !canRecord("update", "Department", { ...current, ...trimmed })) {
+          throw new Error("You no longer have permission to update this department.");
+        }
         return departmentsApi.update(payload.id, trimmed);
+      }
+      if (!canRecord("create", "Department", trimmed)) {
+        throw new Error("You do not have permission to create this department.");
       }
       return departmentsApi.create(trimmed);
     },
@@ -114,7 +142,12 @@ const Departments = () => {
   }, "Unable to save department.");
 
   const deleteDepartment = useSafeMutation({
-    mutationFn: async (id: string) => departmentsApi.remove(id),
+    mutationFn: async (id: string) => {
+      if (!deleteTarget || deleteTarget.id !== id || !canRecord("delete", "Department", deleteTarget)) {
+        throw new Error("You no longer have permission to delete this department.");
+      }
+      return departmentsApi.remove(id);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.departments });
       setSelectedDepartment(null);
@@ -151,7 +184,7 @@ const Departments = () => {
         description="Organize screens, users, and content by department"
         actionLabel="New Department"
         actionIcon={<Plus className="h-4 w-4" />}
-        onAction={() => setFormOpen(true)}
+        onAction={can("create", "Department") ? () => setFormOpen(true) : undefined}
       />
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -159,7 +192,7 @@ const Departments = () => {
           <SearchBar placeholder="Search departments..." onSearch={setSearchQuery} initialValue={searchQuery} />
         </div>
         <div className="text-sm text-muted-foreground">
-          {isFetching ? "Refreshing..." : `${data?.total ?? filteredDepartments.length} departments`}
+          {isFetching ? "Refreshing..." : `${visibleTotal} departments`}
         </div>
       </div>
 
@@ -178,14 +211,15 @@ const Departments = () => {
                   <DepartmentCard
                     key={dept.id}
                     department={dept}
-                    onEdit={(d) => {
+                    canViewOperators={canReadUsers}
+                    onEdit={canRecord("update", "Department", dept) ? (d) => {
                       setSelectedDepartment(d);
                       setFormOpen(true);
-                    }}
-                    onDelete={(d) => {
+                    } : undefined}
+                    onDelete={canRecord("delete", "Department", dept) ? (d) => {
                       setDeleteTarget(d);
                       setIsConfirmOpen(true);
-                    }}
+                    } : undefined}
                   />
                 ))}
               </div>
@@ -206,7 +240,7 @@ const Departments = () => {
         onSubmit={async (values, id) => {
           await createOrUpdate.mutateAsync({ values, id });
         }}
-        onDelete={(deptId) => {
+        onDelete={selectedDepartment && canRecord("delete", "Department", selectedDepartment) ? (deptId) => {
           if (!deptId) return;
           const resolvedDepartment =
             departmentsWithOperators.find((d) => d.id === deptId) ??
@@ -216,7 +250,7 @@ const Departments = () => {
             setDeleteTarget(resolvedDepartment);
             setIsConfirmOpen(true);
           }
-        }}
+        } : undefined}
       />
 
       <ConfirmDialog
@@ -229,7 +263,7 @@ const Departments = () => {
           setDeleteTarget(null);
         }}
         onConfirm={async () => {
-          if (!deleteTarget) return;
+          if (!deleteTarget || !canRecord("delete", "Department", deleteTarget)) return;
           await deleteDepartment.mutateAsync(deleteTarget.id);
         }}
         isLoading={deleteDepartment.isPending}

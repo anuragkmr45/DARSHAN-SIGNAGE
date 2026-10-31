@@ -44,6 +44,7 @@ import { formatErrorResponse } from '@/utils/app-error';
 import { toAppError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { syncSystemRolePermissions } from '@/rbac/system-roles';
+import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
 import { createSessionRepository } from '@/db/repositories/session';
 import { extractTokenFromHeader, refreshAccessToken, verifyAccessToken } from '@/auth/jwt';
 import {
@@ -60,6 +61,14 @@ import { ensureObservabilityInitialized } from '@/observability/metrics';
 import { loadServerTlsOptions } from '@/server/tls';
 import { collectReadiness } from '@/runtime/readiness';
 import { buildFastifyLoggerOptions } from '@/server/logger-options';
+import { getDatabasePool } from '@/db';
+import { installHttpAdmission } from '@/maintenance/http-admission';
+import {
+  MaintenanceCoordinator,
+  MaintenanceCoordinatorError,
+  MaintenanceOperationScope,
+} from '@/maintenance';
+import { mediaUploadGatewayRoutes } from '@/routes/media-upload-gateway';
 
 const REFRESHED_AUTH_KEY = Symbol.for('darshan.refreshedAuth');
 const DEVICE_SCREENSHOT_BODY_LIMIT_BYTES = 4 * 1024 * 1024;
@@ -107,7 +116,8 @@ async function refreshSessionFromRequestToken(request: FastifyRequest) {
 
   const expiresInSeconds = getIdleTimeoutSeconds();
   const refreshed = await refreshAccessToken(payload, expiresInSeconds);
-  await sessionRepo.extendByJti(payload.jti, refreshed.expiresAt);
+  const extended = await sessionRepo.extendByJti(payload.jti, refreshed.expiresAt);
+  if (!extended) throw AppError.unauthorized('Token has been revoked');
   (request as unknown as RequestWithRefresh)[REFRESHED_AUTH_KEY] = {
     token: refreshed.token,
     expiresAt: refreshed.expiresAt,
@@ -217,7 +227,27 @@ export async function createServer(options: CreateServerOptions = {}) {
     certificatePath: appConfig.TLS_CERT_PATH,
     privateKeyPath: appConfig.TLS_KEY_PATH,
   });
-  await syncSystemRolePermissions();
+  const databasePool = getDatabasePool();
+  if (!databasePool) throw new Error('Database pool is not initialized.');
+  const maintenanceCoordinator = new MaintenanceCoordinator(databasePool);
+  const startupScope = new MaintenanceOperationScope(maintenanceCoordinator);
+  const siteKey = appConfig.BACKUP_SITE_ID ?? 'local';
+  let roleSyncDeferred = false;
+  let reconciledRoleUserIds: string[] = [];
+  try {
+    reconciledRoleUserIds = await startupScope.run({
+      siteKey,
+      operationKind: 'startup:system-role-permissions',
+    }, async () => syncSystemRolePermissions());
+  } catch (error) {
+    if (!(error instanceof MaintenanceCoordinatorError) || error.code !== 'MAINTENANCE_ADMISSION_CLOSED') {
+      throw error;
+    }
+    // Start the operational API surface during a capture, but never mutate
+    // roles behind its barrier. Ordinary handlers remain gated; role repair is
+    // retried immediately after shared admission reopens.
+    roleSyncDeferred = true;
+  }
   await preloadSettingsCache();
   setRuntimeLogLevel(getRuntimeLogLevelSetting());
   ensureObservabilityInitialized();
@@ -233,6 +263,16 @@ export async function createServer(options: CreateServerOptions = {}) {
     },
   });
 
+  await installHttpAdmission(fastify, {
+    pool: databasePool,
+    siteKey,
+    coordinator: maintenanceCoordinator,
+    onWatchdogError: (error) => {
+      fastify.log.error({ err: error }, 'Maintenance watchdog reconciliation failed');
+    },
+  });
+  await fastify.register(mediaUploadGatewayRoutes);
+
   fastify.addHook('onRequest', (request, reply, done) => {
     reply.header('x-request-id', request.id);
     done();
@@ -246,7 +286,7 @@ export async function createServer(options: CreateServerOptions = {}) {
 
   fastify.addHook('onSend', async (request, reply, payload) => {
     const refreshed = (request as unknown as RequestWithRefresh)[REFRESHED_AUTH_KEY];
-    if (!refreshed) return payload;
+    if (!refreshed || request.url.split('?')[0] === apiEndpoints.auth.logout) return payload;
 
     const secure = appConfig.AUTH_COOKIE_SECURE;
     const maxAge = Math.max(Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000), 0);
@@ -452,10 +492,41 @@ export async function createServer(options: CreateServerOptions = {}) {
   await fastify.register(permissionRoutes);
 
   await setupDeviceRealtimeGateway(fastify);
+  await broadcastSessionInvalidation(reconciledRoleUserIds);
+  let deferredRoleSyncTimer: NodeJS.Timeout | null = null;
+  let deferredRoleSyncInFlight: Promise<void> | null = null;
+  const retryDeferredRoleSync = async () => {
+    if (!roleSyncDeferred || deferredRoleSyncInFlight) return deferredRoleSyncInFlight;
+    deferredRoleSyncInFlight = startupScope.run({
+      siteKey,
+      operationKind: 'startup:system-role-permissions',
+    }, async () => syncSystemRolePermissions())
+      .then(async (userIds) => {
+        roleSyncDeferred = false;
+        if (deferredRoleSyncTimer) clearInterval(deferredRoleSyncTimer);
+        deferredRoleSyncTimer = null;
+        await broadcastSessionInvalidation(userIds);
+      })
+      .catch((error) => {
+        if (error instanceof MaintenanceCoordinatorError && error.code === 'MAINTENANCE_ADMISSION_CLOSED') return;
+        fastify.log.error({ err: error }, 'Deferred system-role permission reconciliation failed');
+      })
+      .finally(() => { deferredRoleSyncInFlight = null; });
+    return deferredRoleSyncInFlight;
+  };
+  fastify.addHook('onReady', async () => {
+    if (!roleSyncDeferred) return;
+    deferredRoleSyncTimer = setInterval(() => { void retryDeferredRoleSync(); }, 1_000);
+    deferredRoleSyncTimer.unref();
+    await retryDeferredRoleSync();
+  });
   if (options.startOutboxDispatcher !== false) {
     startOutboxDispatcher();
   }
   fastify.addHook('onClose', async () => {
+    if (deferredRoleSyncTimer) clearInterval(deferredRoleSyncTimer);
+    deferredRoleSyncTimer = null;
+    await deferredRoleSyncInFlight;
     await stopOutboxDispatcher();
   });
 

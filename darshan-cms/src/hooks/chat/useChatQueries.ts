@@ -157,8 +157,8 @@ export const useChatMessages = (conversationId?: string, params?: ChatCursorPara
   }, [conversationId, lastFetchCount, latestSeq, queryClient]);
 
   const fetchNewer = useCallback(
-    () => fetchNextPage({ pageParam: latestSeq }),
-    [fetchNextPage, latestSeq],
+    () => fetchNextPage(),
+    [fetchNextPage],
   );
 
   return {
@@ -212,8 +212,8 @@ export const useChatThread = (
   }, [conversationId, lastFetchCount, latestSeq, queryClient, threadRootId]);
 
   const fetchNewer = useCallback(
-    () => fetchNextPage({ pageParam: latestSeq }),
-    [fetchNextPage, latestSeq],
+    () => fetchNextPage(),
+    [fetchNextPage],
   );
 
   return {

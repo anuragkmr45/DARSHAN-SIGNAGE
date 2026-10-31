@@ -1,13 +1,15 @@
 import { FastifyRequest } from 'fastify';
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { AppError } from '@/utils/app-error';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
+import { canObserveScreen } from '@/rbac/screen-access';
 import { createLogger } from '@/utils/logger';
 import { recordDeviceAuthAttempt } from '@/observability/metrics';
-import { recordDeviceAuthRolloutObservation } from '@/deployment/device-auth-rollout';
+import { queueDeviceOperationalObservation } from '@/jobs';
 import {
   hasAnySignatureHeader,
   hasCompleteSignatureHeaders,
@@ -16,6 +18,7 @@ import {
   resolveDeviceAuthSignatureMaxSkewSeconds,
   verifyDeviceRequestSignature,
 } from '@/utils/device-request-auth';
+import { getRecoveryCertificateAdmission, recoveryCertificateAdmissionFailure } from '@/services/recovery-runtime-authority';
 
 const logger = createLogger('device-auth');
 const deviceIdSchema = z.string().uuid();
@@ -52,6 +55,7 @@ export async function authenticateDeviceOrThrow(
   }
 
   const authMode = resolveDeviceAuthMode();
+  const observedAt = new Date().toISOString();
   const signatureHeaders = parseDeviceRequestSignatureHeaders(request.headers as Record<string, string | string[] | undefined>);
   const hasSignatureHeaders = hasAnySignatureHeader(signatureHeaders);
   const bearerToken = options.allowUserToken ? extractTokenFromHeader(request.headers.authorization) : null;
@@ -112,6 +116,16 @@ export async function authenticateDeviceOrThrow(
         throw AppError.forbidden('Device credentials expired', {
           reason: 'DEVICE_CREDENTIALS_EXPIRED',
           expires_at: cert.expires_at.toISOString(),
+        });
+      }
+
+      const recoveryAdmission = await getRecoveryCertificateAdmission({ screenId: deviceId, certificateId: cert.id });
+      const recoveryFailure = recoveryCertificateAdmissionFailure(recoveryAdmission,
+        authMode === 'legacy' && !hasSignatureHeaders ? 'http-legacy' : 'http-signed');
+      if (recoveryFailure) {
+        throw AppError.forbidden('Recovered device pairing requires operator review', {
+          reason: recoveryFailure,
+          recovery_generation: recoveryAdmission.active ? recoveryAdmission.generation : null,
         });
       }
 
@@ -183,10 +197,13 @@ export async function authenticateDeviceOrThrow(
       };
 
       try {
-        await recordDeviceAuthRolloutObservation({
+        await queueDeviceOperationalObservation({
+          eventId: randomUUID(),
+          type: 'auth_rollout',
           screenId: deviceId,
           channel: 'http',
           method: authMethod === 'signature' ? 'signed' : 'legacy',
+          observedAt,
         });
       } catch (observationError) {
         // Observation failure must not change a cryptographically valid device
@@ -208,7 +225,15 @@ export async function authenticateDeviceOrThrow(
       try {
         const payload = await verifyAccessToken(bearerToken);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) {
+        const db = getDatabase();
+        const [screen] = await db
+          .select()
+          .from(schema.screens)
+          .where(eq(schema.screens.id, deviceId));
+        if (!screen) {
+          throw AppError.notFound('Device not registered');
+        }
+        if (!canObserveScreen(ability, screen)) {
           throw AppError.forbidden('Forbidden');
         }
         request.device = {

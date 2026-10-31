@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { subject as caslSubject } from '@casl/ability';
 import { desc, eq, inArray, and } from 'drizzle-orm';
 import {
   createScheduleSchema,
@@ -17,7 +18,7 @@ import {
   withCurrentMutationAuthorization,
   type MutationAuthorizationContext,
 } from '@/auth/mutation-authorization';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
@@ -195,16 +196,19 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     ) => Promise<T>
   ) =>
     withCurrentMutationAuthorization(payload, async (context) => {
-      if (
-        !context.ability.can(permission.action, permission.subject) &&
-        !context.ability.can('manage', 'Schedule')
-      ) throw AppError.forbidden('Forbidden');
       const [schedule] = await context.executor
         .select()
         .from(schema.schedules)
         .where(eq(schema.schedules.id, scheduleId))
         .for('update');
       if (!schedule) throw AppError.notFound('Schedule not found');
+      const scheduleSubject = caslSubject('Schedule', { ...schedule });
+      const hasAction = permission.subject === 'Schedule'
+        ? (context.ability as any).can(permission.action, scheduleSubject)
+        : canUnconditionally(context.ability, permission.action, permission.subject);
+      if (!hasAction && !(context.ability as any).can('manage', scheduleSubject)) {
+        throw AppError.forbidden('Forbidden');
+      }
       if (!canAccessContentMutationScope(context.actor, schedule, context.ability, 'Schedule')) {
         throw AppError.forbidden('Forbidden');
       }
@@ -278,7 +282,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
             start_at: startAt,
             end_at: endAt,
             created_by: actor.userId,
-            ...ownershipForNewContent(actor, ability, 'Schedule'),
+            ...ownershipForNewContent(actor, ability, 'Schedule', { ...data, timezone, start_at: startAt, end_at: endAt }),
           }, executor);
           return { schedule, actor, ability };
         });
@@ -1020,9 +1024,6 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const body = takeDownPublishSchema.parse(request.body ?? {});
         const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
-          if (!ability.can('publish', 'ScheduleRequest') && !ability.can('manage', 'Schedule')) {
-            throw AppError.forbidden('Forbidden');
-          }
           const [publish] = await executor
             .select()
             .from(schema.publishes)
@@ -1034,6 +1035,10 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
             .from(schema.schedules)
             .where(eq(schema.schedules.id, publish.schedule_id))
             .for('update');
+          if (schedule && !canUnconditionally(ability, 'publish', 'ScheduleRequest') &&
+              !(ability as any).can('manage', caslSubject('Schedule', { ...schedule }))) {
+            throw AppError.forbidden('Forbidden');
+          }
           if (!schedule || !canAccessContentMutationScope(actor, schedule, ability, 'Schedule')) {
             throw AppError.forbidden('Forbidden');
           }

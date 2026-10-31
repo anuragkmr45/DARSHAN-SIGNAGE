@@ -413,12 +413,18 @@ export function EmergencyTakeoverModal({
                           videoControls={false}
                           videoMuted
                           videoAutoPlay={selectedMedia.type === "VIDEO"}
+                          videoLoop={selectedMedia.type === "VIDEO"}
                         />
                         <div className="min-w-0">
                           <p className="font-medium">{resolveMediaDisplayName(selectedMedia)}</p>
                           <p className="text-sm text-muted-foreground">
                             {selectedMedia.source_content_type ?? selectedMedia.content_type ?? selectedMedia.type ?? "Media"}
                           </p>
+                          {selectedMedia.type === "VIDEO" ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Emergency videos repeat from the beginning until the takeover is cleared or expires.
+                            </p>
+                          ) : null}
                         </div>
                       </div>
                     ) : (

@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
-  canDeleteUserTarget,
+  canConfirmScreenPairing,
+  canAccessModule,
   canDeleteLayoutRecord,
   canDeleteMediaRecord,
   canManageLayoutRecord,
-  canManageOperatorsModule,
-  canManageUserTarget,
-  canReadUserTarget,
+  canStartScreenRecovery,
+  canUseSubjectWidePermission,
   getContentCreatorLabel,
   getContentOwnershipLabel,
 } from "@/lib/access";
+import { createMongoAbility, subject } from "@casl/ability";
 import type { User } from "@/api/types";
 
 const makeUser = (overrides: Partial<User>): User => ({
@@ -22,35 +23,89 @@ const makeUser = (overrides: Partial<User>): User => ({
 });
 
 describe("access helpers", () => {
-  it("allows super admin to manage every role while protecting super-admin deletion", () => {
-    expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "ADMIN")).toBe(true);
-    expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "DEPARTMENT")).toBe(true);
-    expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "OPERATOR")).toBe(true);
-    expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "CUSTOM_EDITOR")).toBe(true);
-    expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "SUPER_ADMIN")).toBe(true);
-    expect(canDeleteUserTarget(makeUser({ role: "SUPER_ADMIN" }), "SUPER_ADMIN")).toBe(true);
-    expect(canDeleteUserTarget(makeUser({ role: "SUPER_ADMIN" }), "DEPARTMENT")).toBe(true);
-    expect(canManageUserTarget(makeUser({ role: "ADMIN" }), "DEPARTMENT")).toBe(true);
-    expect(canManageUserTarget(makeUser({ role: "ADMIN" }), "OPERATOR")).toBe(true);
+  it("checks concrete current and proposed Screen records for pairing and recovery", () => {
+    const ability = createMongoAbility([
+      { action: "update", subject: "Screen", conditions: { id: "screen-a", location: "Lobby" } },
+      { action: "create", subject: "DevicePairing", conditions: { screen_id: "screen-a" } },
+      { action: "create", subject: "Screen", conditions: { location: "Lobby" } },
+    ]);
+    const canRecord = (action: string, resource: string, record: object) =>
+      ability.can(action, subject(resource, record));
+    const current = { id: "screen-a", location: "Lobby" };
+
+    expect(canStartScreenRecovery(canRecord, current)).toBe(true);
+    expect(canStartScreenRecovery(canRecord, { id: "screen-b", location: "Lobby" })).toBe(false);
+    expect(canConfirmScreenPairing(canRecord, current, current)).toBe(true);
+    expect(canConfirmScreenPairing(
+      canRecord,
+      { id: "screen-a", location: "Other" },
+      current,
+    )).toBe(false);
+    expect(canConfirmScreenPairing(canRecord, { name: "New", location: "Lobby" })).toBe(true);
+    expect(canConfirmScreenPairing(canRecord, { name: "New", location: "Other" })).toBe(false);
   });
 
-  it("allows department users to manage only their own operators in the Users page", () => {
-    const departmentUser = makeUser({ role: "DEPARTMENT", department_id: "dept-a" });
-
-    expect(canManageUserTarget(departmentUser, "OPERATOR", "dept-a")).toBe(true);
-    expect(canManageUserTarget(departmentUser, "OPERATOR", "dept-b")).toBe(false);
+  it("does not treat a conditional grant as permission to use subject-wide resources", () => {
+    expect(canUseSubjectWidePermission([
+      { action: "update", subject: "OrgSettings", conditions: { id: "only-one" } },
+    ], "update", "OrgSettings")).toBe(false);
+    expect(canUseSubjectWidePermission([
+      { action: "update", subject: "BrandingSettings", conditions: { id: "only-one" } },
+    ], "update", "BrandingSettings")).toBe(false);
+    expect(canUseSubjectWidePermission([
+      { action: "read", subject: "SsoConfig", conditions: { id: "only-one" } },
+    ], "read", "SsoConfig")).toBe(false);
+    expect(canUseSubjectWidePermission([
+      { action: "update", subject: "SsoConfig", conditions: { id: "only-one" } },
+    ], "update", "SsoConfig")).toBe(false);
+    for (const resource of ["Dashboard", "Report", "AuditLog", "ProofOfPlay"] as const) {
+      expect(canUseSubjectWidePermission([
+        { action: "read", subject: resource, conditions: { id: "only-one" } },
+      ], "read", resource)).toBe(false);
+      expect(canUseSubjectWidePermission([
+        { action: "read", subject: resource },
+      ], "read", resource)).toBe(true);
+    }
+    expect(canUseSubjectWidePermission([
+      { action: "manage", subject: "Emergency", conditions: { id: "only-one" } },
+    ], "manage", "Emergency")).toBe(false);
+    expect(canUseSubjectWidePermission([
+      { action: "manage", subject: "Emergency" },
+    ], "manage", "Emergency")).toBe(true);
+    expect(canUseSubjectWidePermission([
+      { action: "read", subject: "Backup", conditions: { id: "one-run" } },
+    ], "read", "Backup")).toBe(false);
+    expect(canUseSubjectWidePermission([
+      { action: "read", subject: "Backup" },
+    ], "read", "Backup")).toBe(true);
+    expect(canUseSubjectWidePermission([
+      { action: "manage", subject: "all" },
+    ], "update", "OrgSettings")).toBe(true);
+    expect(canUseSubjectWidePermission([
+      { action: "manage", subject: "all" },
+    ], "update", "SsoConfig")).toBe(true);
+    expect(canUseSubjectWidePermission([
+      { action: "manage", subject: "all" },
+    ], "read", "Report")).toBe(true);
+    expect(canUseSubjectWidePermission([
+      { action: "manage", subject: "all" },
+      { action: "manage", subject: "BrandingSettings", inverted: true },
+      { action: "update", subject: "BrandingSettings" },
+    ], "update", "BrandingSettings")).toBe(true);
   });
 
-  it("limits directory records to the current department", () => {
-    const operatorUser = makeUser({ role: "OPERATOR", department_id: "dept-a" });
-
-    expect(canReadUserTarget(operatorUser, "OPERATOR", "dept-b")).toBe(false);
-    expect(canReadUserTarget(operatorUser, "DEPARTMENT", "dept-a")).toBe(true);
-  });
-
-  it("uses permissions rather than role names for operator management", () => {
-    expect(canManageOperatorsModule((action, subject) => action === "update" && subject === "User")).toBe(true);
-    expect(canManageOperatorsModule(() => false)).toBe(false);
+  it("allows a backup-only role to reach settings without granting other settings access", () => {
+    const rules = [{ action: "read", subject: "Backup" }];
+    const ability = createMongoAbility(rules);
+    const can = (action: string, resource: string) => canUseSubjectWidePermission(
+      rules,
+      action,
+      resource as "Backup" | "OrgSettings" | "BrandingSettings",
+    ) || ability.can(action, resource);
+    expect(canAccessModule("settings", null, can)).toBe(true);
+    expect(can("read", "OrgSettings")).toBe(false);
+    expect(can("read", "AuditLog")).toBe(false);
+    expect(can("update", "OrgSettings")).toBe(false);
   });
 
   it("uses server resource permissions instead of guessing from the creator", () => {

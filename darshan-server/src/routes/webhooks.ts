@@ -1,8 +1,12 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { subject } from '@casl/ability';
 import { z } from 'zod';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
 import { createWebhookRepository } from '@/db/repositories/webhook';
+import { schema } from '@/db';
+import { integrationReadCondition } from '@/rbac/integration-access';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
@@ -22,6 +26,19 @@ const webhookSchema = z.object({
 
 const WEBHOOK_TEST_EVENT = 'webhook.test';
 const WEBHOOK_TEST_TIMEOUT_MS = 5_000;
+
+const serializeWebhook = (record: typeof schema.webhookSubscriptions.$inferSelect) => ({
+  id: record.id,
+  name: record.name,
+  event_types: record.event_types,
+  target_url: record.target_url,
+  is_active: record.is_active,
+  last_status: record.last_status,
+  last_status_at: record.last_status_at,
+  created_by: record.created_by,
+  created_at: record.created_at,
+  updated_at: record.updated_at,
+});
 
 async function deliverWebhookTest(
   record:
@@ -78,12 +95,15 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('create', 'Webhook')) throw AppError.forbidden('Forbidden');
-
         const data = webhookSchema.parse(request.body);
-        const { record, secret } = await repo.create({ ...data, created_by: payload.sub });
-        return reply.status(CREATED).send({ ...record, secret });
+        const { record, secret } = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+          const proposed = { ...data, is_active: data.is_active ?? true, created_by: actor.userId };
+          if (!(ability as any).can('create', subject('Webhook', proposed))) {
+            throw AppError.forbidden('Forbidden');
+          }
+          return repo.create(proposed, executor);
+        });
+        return reply.header('Cache-Control', 'no-store').status(CREATED).send({ ...serializeWebhook(record), secret });
       } catch (error) {
         logger.error(error, 'Create webhook error');
         return respondWithError(reply, error);
@@ -108,8 +128,10 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         if (!ability.can('read', 'Webhook')) throw AppError.forbidden('Forbidden');
 
-        const items = await repo.list();
-        return reply.send({ items });
+        const items = await repo.list(
+          integrationReadCondition(ability, 'Webhook', schema.webhookSubscriptions)
+        );
+        return reply.send({ items: items.map(serializeWebhook) });
       } catch (error) {
         logger.error(error, 'List webhooks error');
         return respondWithError(reply, error);
@@ -131,12 +153,18 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Webhook')) throw AppError.forbidden('Forbidden');
-
-        const record = await repo.update((request.params as any).id, webhookSchema.partial().parse(request.body));
+        const data = webhookSchema.partial().parse(request.body);
+        const record = await withCurrentMutationAuthorization(payload, async ({ ability, executor }) => {
+          const current = await repo.findByIdForUpdate((request.params as any).id, executor);
+          if (!current) throw AppError.notFound('Webhook not found');
+          if (!(ability as any).can('update', subject('Webhook', { ...current })) ||
+              !(ability as any).can('update', subject('Webhook', { ...current, ...data }))) {
+            throw AppError.forbidden('Forbidden');
+          }
+          return repo.update(current.id, data, executor);
+        });
         if (!record) throw AppError.notFound('Webhook not found');
-        return reply.send(record);
+        return reply.send(serializeWebhook(record));
       } catch (error) {
         logger.error(error, 'Update webhook error');
         return respondWithError(reply, error);
@@ -158,10 +186,14 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('delete', 'Webhook')) throw AppError.forbidden('Forbidden');
-
-        await repo.delete((request.params as any).id);
+        await withCurrentMutationAuthorization(payload, async ({ ability, executor }) => {
+          const current = await repo.findByIdForUpdate((request.params as any).id, executor);
+          if (!current) throw AppError.notFound('Webhook not found');
+          if (!(ability as any).can('delete', subject('Webhook', { ...current }))) {
+            throw AppError.forbidden('Forbidden');
+          }
+          await repo.delete(current.id, executor);
+        });
         return reply.status(NO_CONTENT).send();
       } catch (error) {
         logger.error(error, 'Delete webhook error');
@@ -185,11 +217,14 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Webhook')) throw AppError.forbidden('Forbidden');
-
-        const record = await repo.findById((request.params as any).id);
-        if (!record) throw AppError.notFound('Webhook not found');
+        const record = await withCurrentMutationAuthorization(payload, async ({ ability, executor }) => {
+          const current = await repo.findByIdForUpdate((request.params as any).id, executor);
+          if (!current) throw AppError.notFound('Webhook not found');
+          if (!(ability as any).can('update', subject('Webhook', { ...current }))) {
+            throw AppError.forbidden('Forbidden');
+          }
+          return current;
+        });
 
         const attemptedAt = new Date();
 

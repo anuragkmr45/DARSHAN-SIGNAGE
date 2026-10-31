@@ -4,16 +4,16 @@ import { eq } from 'drizzle-orm';
 import { createRoleRepository } from '@/db/repositories/role';
 import { schema } from '@/db';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
-import { PERMISSION_ACTIONS } from '@/rbac/permissions';
-import { canManageSystemRole } from '@/rbac/policy';
+import { BACKUP_PERMISSION_ACTIONS, PERMISSION_ACTIONS } from '@/rbac/permissions';
 import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
 import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
+import { subject } from '@casl/ability';
 
 const logger = createLogger('role-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -22,6 +22,21 @@ const permissionGrantSchema = z.object({
   action: z.enum(PERMISSION_ACTIONS),
   subject: z.string().min(1),
   conditions: z.record(z.string()).optional(),
+}).superRefine((grant, context) => {
+  if (grant.subject === 'Backup' && grant.conditions && Object.keys(grant.conditions).length > 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['conditions'],
+      message: 'Backup grants must be unconditional.',
+    });
+  }
+  if (grant.subject === 'Backup' && !BACKUP_PERMISSION_ACTIONS.includes(grant.action as typeof BACKUP_PERMISSION_ACTIONS[number])) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['action'],
+      message: 'Backup action must be read, create, delete, or download.',
+    });
+  }
 });
 
 const permissionsSchema = z.object({
@@ -65,16 +80,16 @@ export async function roleRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('create', 'Role')) throw AppError.forbidden('Forbidden');
-
         const data = createRoleSchema.parse(request.body);
-        const role = await roleRepo.create({
-          name: data.name,
-          description: data.description,
-          permissions: data.permissions,
-          is_system: false,
-        });
+        const role = await withCurrentMutationAuthorization(payload, async ({ ability, executor }) => {
+          if (!(ability as any).can('create', subject('Role', data))) throw AppError.forbidden('Forbidden');
+          return roleRepo.create({
+            name: data.name,
+            description: data.description,
+            permissions: data.permissions,
+            is_system: false,
+          }, executor);
+        }, { roleLock: 'update' });
 
         return reply.status(CREATED).send({
           id: role.id,
@@ -108,7 +123,7 @@ export async function roleRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Role')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Role')) throw AppError.forbidden('Forbidden');
 
         const query = listRolesQuerySchema.parse(request.query);
         const result = await roleRepo.list({
@@ -156,10 +171,9 @@ export async function roleRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Role')) throw AppError.forbidden('Forbidden');
-
         const role = await roleRepo.findById(request.params.id);
         if (!role) throw AppError.notFound('Role not found');
+        if (!(ability as any).can('read', subject('Role', role))) throw AppError.forbidden('Forbidden');
 
         return reply.send({
           id: role.id,
@@ -198,14 +212,14 @@ export async function roleRoutes(fastify: FastifyInstance) {
         const data = updateRoleSchema.parse(request.body);
         const result = await withCurrentMutationAuthorization(
           payload,
-          async ({ actor, ability, executor }) => {
-            if (!ability.can('update', 'Role')) throw AppError.forbidden('Forbidden');
+          async ({ ability, executor }) => {
             const [existingRole] = await executor
               .select()
               .from(schema.roles)
               .where(eq(schema.roles.id, request.params.id));
             if (!existingRole) throw AppError.notFound('Role not found');
-            if (existingRole.is_system && !canManageSystemRole(actor.roleName, existingRole.name)) {
+            if (!(ability as any).can('update', subject('Role', existingRole))) throw AppError.forbidden('Forbidden');
+            if (!(ability as any).can('update', subject('Role', { ...existingRole, ...data }))) {
               throw AppError.forbidden('Forbidden');
             }
             return roleRepo.update(request.params.id, data, executor);
@@ -249,17 +263,13 @@ export async function roleRoutes(fastify: FastifyInstance) {
         const payload = await verifyAccessToken(token);
         const deletion = await withCurrentMutationAuthorization(
           payload,
-          async ({ actor, ability, executor }) => {
-            if (!ability.can('delete', 'Role')) throw AppError.forbidden('Forbidden');
+          async ({ ability, executor }) => {
             const [role] = await executor
               .select()
               .from(schema.roles)
               .where(eq(schema.roles.id, request.params.id));
             if (!role) throw AppError.notFound('Role not found');
-            if (role.is_system && !canManageSystemRole(actor.roleName, role.name)) {
-              throw AppError.forbidden('Forbidden');
-            }
-            if (role.is_system) throw AppError.conflict('System roles cannot be deleted.');
+            if (!(ability as any).can('delete', subject('Role', role))) throw AppError.forbidden('Forbidden');
             return roleRepo.delete(request.params.id, executor);
           },
           { roleLock: 'update' }

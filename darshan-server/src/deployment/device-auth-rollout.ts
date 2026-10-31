@@ -35,16 +35,22 @@ export async function recordDeviceAuthRolloutObservation(input: {
   screenId: string;
   channel: DeviceAuthObservationChannel;
   method: DeviceAuthObservationMethod;
+  observedAt?: Date;
 }): Promise<void> {
   const column = observationColumn[`${input.method}:${input.channel}`];
   // `column` comes only from the closed map above. The screen id remains a
   // bound parameter, so a caller cannot affect the SQL structure.
   const columnIdentifier = sql.raw(column);
+  const observedAt = input.observedAt ?? new Date();
   await getDatabase().execute(sql`
     INSERT INTO device_auth_rollout_observations (screen_id, ${columnIdentifier}, updated_at)
-    VALUES (${input.screenId}, now(), now())
+    VALUES (${input.screenId}, ${observedAt}, ${observedAt})
     ON CONFLICT (screen_id) DO UPDATE
-      SET ${columnIdentifier} = EXCLUDED.${columnIdentifier}, updated_at = now()
+      SET ${columnIdentifier} = GREATEST(
+            device_auth_rollout_observations.${columnIdentifier},
+            EXCLUDED.${columnIdentifier}
+          ),
+          updated_at = GREATEST(device_auth_rollout_observations.updated_at, EXCLUDED.updated_at)
   `);
 }
 

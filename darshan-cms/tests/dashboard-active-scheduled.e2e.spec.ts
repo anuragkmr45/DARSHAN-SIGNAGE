@@ -7,6 +7,7 @@ const adminUser = {
   last_name: "User",
   role_id: "role-admin",
   role: "ADMIN",
+  authorization: { rules: [{ action: "manage", subject: "all" }], is_global_user_manager: true },
 };
 
 const rolesPayload = {

@@ -187,9 +187,9 @@ export const useChatRealtime = ({
           items: current.items.map((item) => {
             const typedItem = item as { id: string; metadata?: { settings?: unknown } | null };
             if (typedItem.id !== payload.conversationId) return item;
-            if (!payload.patch.settings) return { ...item, ...payload.patch };
+            if (!payload.patch.settings) return { ...typedItem, ...payload.patch };
             return {
-              ...item,
+              ...typedItem,
               ...payload.patch,
               settings: payload.patch.settings,
               metadata: {

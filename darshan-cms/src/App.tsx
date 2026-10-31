@@ -2,7 +2,8 @@ import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/api/queryClient";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { GlobalLoader } from "@/components/common/GlobalLoader";
@@ -10,15 +11,9 @@ import { ProductionSecurityBoundary } from "@/components/security/ProductionSecu
 import { AuthSessionBootstrap } from "@/components/auth/AuthSessionBootstrap";
 import Home from "./pages/Home";
 import Auth from "./pages/Auth";
+import ActivateInvite from "./pages/ActivateInvite";
 
 const AuthenticatedAppShell = lazy(() => import("./AuthenticatedAppShell"));
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { staleTime: 60_000, gcTime: 300_000, refetchOnWindowFocus: false, retry: 1 },
-    mutations: { retry: 1 },
-  },
-});
 
 const AppRoutes = () => (
   <BrowserRouter>
@@ -26,6 +21,7 @@ const AppRoutes = () => (
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Auth />} />
+      <Route path="/activate" element={<ActivateInvite />} />
       <Route
         path="/*"
         element={

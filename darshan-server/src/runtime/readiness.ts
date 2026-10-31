@@ -41,7 +41,19 @@ async function verifyBootstrap() {
     INNER JOIN roles role ON role.id = administrator.role_id
     WHERE bootstrap.id = 'production'
       AND administrator.is_active = true
+      AND administrator.deleted_at IS NULL
       AND role.name = 'SUPER_ADMIN'
+      AND role.is_system = true
+      AND (
+        administrator.ext IS NULL OR (
+          jsonb_typeof(administrator.ext) = 'object' AND (
+            NOT (administrator.ext ?| ARRAY['invite_token', 'invite_status', 'invite_expires_at', 'invited_at']) OR (
+              administrator.ext->>'invite_status' = 'ACTIVATED'
+              AND administrator.ext->>'invite_token' IS NULL
+            )
+          )
+        )
+      )
   `);
   const rows = (result as { rows?: unknown[] }).rows ?? [];
   if (rows.length !== 1) throw new Error('Production bootstrap state is invalid');

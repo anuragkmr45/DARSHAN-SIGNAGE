@@ -1,6 +1,6 @@
 import type { InfiniteData } from "@tanstack/react-query";
 import { normalizeCursorParams } from "@/api/domains/chat";
-import type { ChatListMessagesResponse, ChatMessage } from "@/api/types";
+import type { ChatListMessagesResponse, ChatMessage, ChatThreadResponse } from "@/api/types";
 import {
   appendMessageInInfiniteData,
   clampChatCursorLimit,

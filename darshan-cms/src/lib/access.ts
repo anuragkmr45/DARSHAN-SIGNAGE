@@ -1,6 +1,35 @@
-import type { ContentOwnership, LayoutItem, MediaAsset, Role, RoleName, User } from "@/api/types";
+import { createMongoAbility } from "@casl/ability";
+import type { AuthorizationRule, ContentOwnership, LayoutItem, MediaAsset, Role, User } from "@/api/types";
 
 type CanFn = (action: string, subject: string) => boolean;
+type CanRecordFn = (action: string, subject: string, record: object) => boolean;
+
+/** Subject-wide settings, aggregates, and unfiltered collections have no one record for condition evaluation. */
+export const canUseSubjectWidePermission = (
+  rules: AuthorizationRule[],
+  action: string,
+  resource: "OrgSettings" | "BrandingSettings" | "SsoConfig" | "Dashboard" | "Report" | "AuditLog" | "ProofOfPlay" | "Emergency" | "Backup",
+) => createMongoAbility(rules.filter((rule) =>
+  !rule.conditions || Object.keys(rule.conditions).length === 0,
+)).can(action, resource);
+
+export const canStartScreenRecovery = <T extends object & { id: string }>(
+  canRecord: CanRecordFn,
+  screen: T,
+) => canRecord("update", "Screen", screen) && canRecord(
+  "create",
+  "DevicePairing",
+  { device_id: screen.id, screen_id: screen.id },
+);
+
+export const canConfirmScreenPairing = (
+  canRecord: CanRecordFn,
+  proposedScreen: object,
+  currentScreen?: object & { id: string } | null,
+) => currentScreen
+  ? canRecord("update", "Screen", currentScreen) && canRecord("update", "Screen", proposedScreen)
+  : canRecord("create", "Screen", proposedScreen);
+
 
 export type ModuleKey =
   | "dashboard"
@@ -15,10 +44,6 @@ export type ModuleKey =
   | "users"
   | "reports"
   | "settings";
-
-const isAdmin = (role?: string | null) => role === "ADMIN";
-const isSuperAdmin = (role?: string | null) => role === "SUPER_ADMIN";
-export const isAdminLike = (role?: string | null) => isAdmin(role) || isSuperAdmin(role);
 
 export const canAccessModule = (moduleKey: ModuleKey, _user: User | null | undefined, can: CanFn) => {
   switch (moduleKey) {
@@ -45,27 +70,29 @@ export const canAccessModule = (moduleKey: ModuleKey, _user: User | null | undef
     case "reports":
       return can("read", "Report") || can("read", "AuditLog");
     case "settings":
-      return can("read", "OrgSettings");
+      return can("read", "OrgSettings") || can("read", "BrandingSettings") || can("read", "Role") ||
+        can("read", "Backup");
     default:
       return false;
   }
 };
 
+const MODULE_FALLBACKS: Array<[ModuleKey, string]> = [
+  ["dashboard", "/dashboard"], ["screens", "/screens"], ["schedule", "/schedule"],
+  ["media", "/media"], ["layouts", "/layouts"], ["conversations", "/chat"],
+  ["notifications", "/notifications"], ["operators", "/operators"],
+  ["departments", "/departments"], ["users", "/users"], ["reports", "/reports"],
+  ["settings", "/settings"],
+];
+
+export const getFirstAccessibleModulePath = (user: User | null | undefined, can: CanFn) =>
+  MODULE_FALLBACKS.find(([moduleKey]) => canAccessModule(moduleKey, user, can))?.[1] ?? "/dashboard";
+
 export const canManageBrandingSettings = (
-  user: User | null | undefined,
-  role: Role | undefined,
+  _user: User | null | undefined,
+  _role: Role | undefined,
   can: CanFn,
 ) => {
-  if (user?.role === "SUPER_ADMIN") return true;
-  if (user?.role === "ADMIN") {
-    return Boolean(
-      role?.permissions?.grants?.some(
-        (grant) =>
-          grant.subject === "BrandingSettings" &&
-          (grant.action === "manage" || grant.action === "update" || grant.action === "read"),
-      ),
-    );
-  }
   return can("manage", "BrandingSettings") || can("update", "BrandingSettings");
 };
 
@@ -105,51 +132,3 @@ export const getContentCreatorLabel = (
   const status = creator.status === "DELETED" ? "Deleted" : "Inactive";
   return `Created by ${creator.display_name} (${status})`;
 };
-
-export const canEditSystemRole = (currentRoleName: RoleName | undefined, targetRoleName: string) => {
-  if (currentRoleName === "SUPER_ADMIN") return true;
-  if (currentRoleName === "ADMIN") {
-    return targetRoleName === "DEPARTMENT" || targetRoleName === "OPERATOR";
-  }
-  return false;
-};
-
-export const canViewRoleInSettings = (currentRoleName: RoleName | undefined, targetRoleName: string) => {
-  if (currentRoleName === "SUPER_ADMIN") return true;
-  if (currentRoleName === "ADMIN") {
-    return targetRoleName === "DEPARTMENT" || targetRoleName === "OPERATOR";
-  }
-  return false;
-};
-
-export const canManageUserTarget = (
-  actor: User | null | undefined,
-  targetRoleName: string | null | undefined,
-  targetDepartmentId?: string | null,
-) => {
-  if (!actor?.role || !targetRoleName) return false;
-  if (actor.role === "SUPER_ADMIN") return true;
-  if (actor.role === "ADMIN") return targetRoleName === "DEPARTMENT" || targetRoleName === "OPERATOR";
-  if (actor.role === "DEPARTMENT") {
-    return targetRoleName === "OPERATOR" && actor.department_id === targetDepartmentId;
-  }
-  return false;
-};
-
-export const canDeleteUserTarget = (
-  actor: User | null | undefined,
-  targetRoleName: string | null | undefined,
-  targetDepartmentId?: string | null,
-) => canManageUserTarget(actor, targetRoleName, targetDepartmentId);
-
-export const canReadUserTarget = (
-  actor: User | null | undefined,
-  targetRoleName: string | null | undefined,
-  targetDepartmentId?: string | null,
-) => {
-  if (!actor?.role || !targetRoleName) return false;
-  return actor.department_id === targetDepartmentId || isAdminLike(actor.role);
-};
-
-export const canManageOperatorsModule = (can: CanFn) =>
-  can("create", "User") || can("update", "User") || can("delete", "User") || can("manage", "User");

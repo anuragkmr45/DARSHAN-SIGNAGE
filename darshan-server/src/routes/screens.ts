@@ -2,7 +2,9 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { createScreenRepository } from '@/db/repositories/screen';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
 import { defineAbilityFor } from '@/rbac';
+import { lockDevicePairingIdentity } from '@/db/repositories/device-pairing';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
@@ -44,7 +46,12 @@ import {
   updateDisplaySelection,
 } from '@/services/screen-display-state-service';
 import { displaySelectionSchema } from '@/utils/display-profile';
-import { subject } from '@casl/ability';
+import {
+  canAccessScreen,
+  canObserveScreen,
+  observableScreenGroupIds,
+  observableScreenIds,
+} from '@/rbac/screen-access';
 
 const logger = createLogger('screen-routes');
 const { OK } = HTTP_STATUS;
@@ -162,6 +169,24 @@ export async function screenRoutes(fastify: FastifyInstance) {
     return members.map((m) => m.group_id);
   };
 
+  const getObservableScreenIds = async (ability: Awaited<ReturnType<typeof defineAbilityFor>>) =>
+    observableScreenIds(ability, await db.select().from(schema.screens));
+
+  const requireScreen = async (
+    screenId: string,
+    ability: Awaited<ReturnType<typeof defineAbilityFor>>,
+    action: 'read' | 'update' | 'delete',
+    allowUpdateToObserve = false
+  ) => {
+    const screen = await screenRepo.findById(screenId);
+    if (!screen) throw AppError.notFound('Screen not found');
+    const allowed = allowUpdateToObserve && action === 'read'
+      ? canObserveScreen(ability, screen)
+      : canAccessScreen(ability, action, screen);
+    if (!allowed) throw AppError.forbidden('Forbidden');
+    return screen;
+  };
+
   const fetchHeartbeatPayload = async (bucket?: string | null, objectKey?: string | null) => {
     if (!bucket || !objectKey) return null;
     try {
@@ -263,8 +288,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        const data = createScreenSchema.parse(request.body);
 
-        if (!ability.can('create', 'Screen')) {
+        if (!canAccessScreen(ability, 'create', data)) {
           throw AppError.forbidden('Forbidden');
         }
 
@@ -297,13 +323,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        const screenRows = await db.select().from(schema.screens);
-        const accessibleScreenIds = screenRows
-          .filter((screen) =>
-            (ability as any).can('read', subject('Screen', screen)) ||
-            (ability as any).can('update', subject('Screen', screen))
-          )
-          .map((screen) => screen.id);
+        const accessibleScreenIds = await getObservableScreenIds(ability);
         if (accessibleScreenIds.length === 0) throw AppError.forbidden('Forbidden');
 
         const query = listScreensQuerySchema.parse(request.query);
@@ -395,8 +415,11 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
-        return reply.send(await buildScreensFleetSummary({ db }));
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        const screenIds = await getObservableScreenIds(ability);
+        if (screenIds.length === 0) throw AppError.forbidden('Forbidden');
+        return reply.send(await buildScreensFleetSummary({ db, screenIds }));
       } catch (error) {
         logger.error(error, 'Get screens summary error');
         return respondWithError(reply, error);
@@ -421,10 +444,11 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
+        const screenIds = await getObservableScreenIds(ability);
+        if (screenIds.length === 0) throw AppError.forbidden('Forbidden');
 
         const query = aspectRatiosQuerySchema.parse(request.query);
-        const screens = await screenRepo.listAspectRatios({ search: query.search });
+        const screens = await screenRepo.listAspectRatios({ search: query.search, ids: screenIds });
         const configuredOnly = query.configured_only === 'true';
         const resolvedItems = screens
           .map((s) => {
@@ -473,7 +497,14 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        const [screenIds, groupRows] = await Promise.all([
+          getObservableScreenIds(ability),
+          db.select().from(schema.screenGroups),
+        ]);
+        const groupIds = observableScreenGroupIds(ability, groupRows);
+        if (screenIds.length === 0 && groupIds.length === 0) throw AppError.forbidden('Forbidden');
         const query = overviewQuerySchema.parse(request.query);
         const includeMedia = query.include_media?.toLowerCase() === 'true';
         const includePreview = query.include_preview?.toLowerCase() === 'true';
@@ -485,6 +516,8 @@ export async function screenRoutes(fastify: FastifyInstance) {
             includeMedia,
             includePreview,
             onlineOnly,
+            screenIds,
+            groupIds,
           })
         );
       } catch (error) {
@@ -510,7 +543,10 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        const screenIds = await getObservableScreenIds(ability);
+        if (screenIds.length === 0) throw AppError.forbidden('Forbidden');
         const query = scheduleTimelineQuerySchema.parse(request.query);
 
         return reply.send(
@@ -519,6 +555,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
             windowStart: new Date(query.window_start),
             windowHours: query.window_hours,
             onlyActiveNow: query.only_active_now?.toLowerCase() === 'true',
+            screenIds,
           })
         );
       } catch (error) {
@@ -547,13 +584,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
 
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        await requireScreen(screenId, ability, 'read', true);
 
         const query = recentCommandsQuerySchema.parse(request.query ?? {});
         const commands = await listRecentDeviceCommands(screenId, query.limit);
@@ -626,13 +659,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
 
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        await requireScreen(screenId, ability, 'read', true);
 
         const query = mediaCacheReportsQuerySchema.parse(request.query ?? {});
         const reports = await listRecentMediaCacheReports(screenId, query.limit);
@@ -691,13 +720,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
 
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        await requireScreen(screenId, ability, 'read', true);
 
         const query = deliveryStatusQuerySchema.parse(request.query ?? {});
         const recentCommands = await listRecentDeviceCommands(screenId, query.limit);
@@ -894,11 +919,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
 
         const screenId = (request.params as any).id;
-        const [screen] = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
-        if (!screen) throw AppError.notFound('Screen not found');
+        await requireScreen(screenId, ability, 'read', true);
         return reply.send(serializeDisplayState(await getScreenDisplayState(screenId)));
       } catch (error) {
         logger.error(error, 'Get screen display state error');
@@ -921,27 +944,37 @@ export async function screenRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
-
-        const screenId = (request.params as any).id;
-        const [screen] = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
-        if (!screen) throw AppError.notFound('Screen not found');
-
+        const screenId = z.string().uuid().parse((request.params as any).id);
         const selection = displaySelectionSchema.parse(request.body);
-        const state = await updateDisplaySelection(screenId, selection);
-        const command = await createDeviceCommand({
-          screenId,
-          type: 'SET_ACTIVE_DISPLAY',
-          createdBy: payload.sub,
-          idempotencyKey: `display-selection:${screenId}:${state.selection_version}`,
-          payload: {
-            selection: state.desired_selection,
-            selection_version: state.selection_version,
-            profile_revision: state.profile_revision,
-            reason: 'DISPLAY_SELECTION_CHANGED',
+        const { state, command } = await withCurrentMutationAuthorization(
+          payload,
+          async ({ actor, ability, executor }) => {
+            await lockDevicePairingIdentity(executor, screenId);
+            const [screen] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, screenId))
+              .for('update');
+            if (!screen) throw AppError.notFound('Screen not found');
+            if (!canAccessScreen(ability, 'update', screen)) throw AppError.forbidden('Forbidden');
+
+            const state = await updateDisplaySelection(screenId, selection, executor);
+            const command = await createDeviceCommand({
+              screenId,
+              type: 'SET_ACTIVE_DISPLAY',
+              createdBy: actor.userId,
+              idempotencyKey: `display-selection:${screenId}:${state.selection_version}`,
+              payload: {
+                selection: state.desired_selection,
+                selection_version: state.selection_version,
+                profile_revision: state.profile_revision,
+                reason: 'DISPLAY_SELECTION_CHANGED',
+              },
+            }, executor);
+            if (!command) throw AppError.internal('Unable to create the display-selection command.');
+            return { state, command };
           },
-        });
+        );
         emitScreensRefreshRequired(fastify, { reason: 'DISPLAY_SELECTION', screen_ids: [screenId] });
         return reply.send({
           ...serializeDisplayState(state),
@@ -970,9 +1003,12 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        const screenId = (request.params as any).id;
+        await requireScreen(screenId, ability, 'read', true);
 
-        const summary = await buildScreenPlaybackStateById((request.params as any).id, { db });
+        const summary = await buildScreenPlaybackStateById(screenId, { db });
         if (!summary) {
           throw AppError.notFound('Screen not found');
         }
@@ -1020,12 +1056,10 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         const screenId = (request.params as any).id;
-        const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        const screen = await requireScreen(screenId, ability, 'read', true);
 
         const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
         const serializedDefaultMedia = resolvedDefaultMedia.media
@@ -1066,12 +1100,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
-
-        const screen = await screenRepo.findById((request.params as any).id);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        const screen = await requireScreen((request.params as any).id, ability, 'read', true);
 
         const [latestHeartbeat] = await db
           .select({
@@ -1139,13 +1170,10 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
-
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        await requireScreen(screenId, ability, 'read', true);
 
         const query = listHeartbeatsQuerySchema.parse(request.query);
         if (query.start_at && query.end_at) {
@@ -1231,15 +1259,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
-
-        const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
-
+        const screenId = z.string().uuid().parse((request.params as any).id);
         const data = screenshotSettingsSchema.parse(request.body);
         const enabled = typeof data.enabled === 'boolean' ? data.enabled : true;
         const intervalSeconds = typeof data.interval_seconds === 'number' ? data.interval_seconds : null;
@@ -1247,17 +1267,43 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.badRequest('interval_seconds is required when enabled');
         }
 
-        const updated = await screenRepo.update(screenId, {
-          screenshot_interval_seconds: intervalSeconds,
-          screenshot_enabled: enabled,
-        } as any);
+        const { updated, command } = await withCurrentMutationAuthorization(
+          payload,
+          async ({ actor, ability, executor }) => {
+            await lockDevicePairingIdentity(executor, screenId);
+            const [screen] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, screenId))
+              .for('update');
+            if (!screen) throw AppError.notFound('Screen not found');
 
-        const command = await createDeviceCommand({
-          screenId,
-          type: 'SET_SCREENSHOT_INTERVAL',
-          payload: { interval_seconds: intervalSeconds, enabled, reason: 'SCREENSHOT_POLICY' },
-          createdBy: payload.sub,
-        });
+            const proposal = {
+              ...screen,
+              screenshot_interval_seconds: intervalSeconds,
+              screenshot_enabled: enabled,
+            };
+            if (
+              !canAccessScreen(ability, 'update', screen) ||
+              !canAccessScreen(ability, 'update', proposal)
+            ) throw AppError.forbidden('Forbidden');
+
+            const updated = await screenRepo.update(screenId, {
+              screenshot_interval_seconds: intervalSeconds,
+              screenshot_enabled: enabled,
+            } as any, executor);
+            if (!updated) throw AppError.notFound('Screen not found');
+
+            const command = await createDeviceCommand({
+              screenId,
+              type: 'SET_SCREENSHOT_INTERVAL',
+              payload: { interval_seconds: intervalSeconds, enabled, reason: 'SCREENSHOT_POLICY' },
+              createdBy: actor.userId,
+            }, executor);
+            if (!command) throw AppError.internal('Unable to create the screenshot-policy command.');
+            return { updated, command };
+          },
+        );
 
         return reply.send({
           screen_id: screenId,
@@ -1290,23 +1336,30 @@ export async function screenRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
-
-        const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
-
+        const screenId = z.string().uuid().parse((request.params as any).id);
         const data = screenshotTriggerSchema.parse(request.body);
+        const command = await withCurrentMutationAuthorization(
+          payload,
+          async ({ actor, ability, executor }) => {
+            await lockDevicePairingIdentity(executor, screenId);
+            const [screen] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, screenId))
+              .for('update');
+            if (!screen) throw AppError.notFound('Screen not found');
+            if (!canAccessScreen(ability, 'update', screen)) throw AppError.forbidden('Forbidden');
 
-        const command = await createDeviceCommand({
-          screenId,
-          type: 'TAKE_SCREENSHOT',
-          payload: { reason: data.reason ?? 'SCREENSHOT' },
-          createdBy: payload.sub,
-        });
+            const command = await createDeviceCommand({
+              screenId,
+              type: 'TAKE_SCREENSHOT',
+              payload: { reason: data.reason ?? 'SCREENSHOT' },
+              createdBy: actor.userId,
+            }, executor);
+            if (!command) throw AppError.internal('Unable to create the screenshot command.');
+            return command;
+          },
+        );
 
         return reply.send({
           screen_id: screenId,
@@ -1336,8 +1389,10 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         const screenId = (request.params as any).id;
+        await requireScreen(screenId, ability, 'read', true);
         const query = nowPlayingQuerySchema.parse(request.query);
         const includeUrls = query.include_urls?.toLowerCase() === 'true';
         const includeMedia = query.include_media?.toLowerCase() === 'true';
@@ -1402,8 +1457,10 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         const screenId = (request.params as any).id;
+        await requireScreen(screenId, ability, 'read', true);
         const latest = await getLatestPublishForScreen(screenId, db);
 
         if (!latest) {
@@ -1476,14 +1533,12 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         const screenId = (request.params as any).id;
         const query = snapshotQuerySchema.parse(request.query);
         const includeUrls = query.include_urls?.toLowerCase() === 'true';
-        const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        const screen = await requireScreen(screenId, ability, 'read', true);
 
         const serverTime = new Date().toISOString();
         const preview = await getLatestScreenshotPreview(screenId, { db });
@@ -1589,18 +1644,27 @@ export async function screenRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('update', 'Screen')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const data = createScreenSchema.partial().parse(request.body);
-        const screen = await screenRepo.update((request.params as any).id, data);
-
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        const screenId = z.string().uuid().parse((request.params as any).id);
+        const screen = await withCurrentMutationAuthorization(
+          payload,
+          async ({ ability, executor }) => {
+            await lockDevicePairingIdentity(executor, screenId);
+            const [existing] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, screenId))
+              .for('update');
+            if (!existing) throw AppError.notFound('Screen not found');
+            if (
+              !canAccessScreen(ability, 'update', existing) ||
+              !canAccessScreen(ability, 'update', { ...existing, ...data })
+            ) throw AppError.forbidden('Forbidden');
+            const updated = await screenRepo.update(screenId, data, executor);
+            if (!updated) throw AppError.notFound('Screen not found');
+            return updated;
+          },
+        );
 
         return reply.send({
           id: screen.id,
@@ -1643,90 +1707,142 @@ export async function screenRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        const screenId = z.string().uuid().parse((request.params as any).id);
 
-        if (!ability.can('delete', 'Screen')) {
-          throw AppError.forbidden('Forbidden');
-        }
+        const { cleanup, storageRows } = await withCurrentMutationAuthorization(
+          payload,
+          async ({ ability, executor }) => {
+            await lockDevicePairingIdentity(executor, screenId);
+            const [screen] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, screenId))
+              .for('update');
+            if (!screen) throw AppError.notFound('Screen not found');
+            if (!canAccessScreen(ability, 'delete', screen)) throw AppError.forbidden('Forbidden');
 
-        const screenId = (request.params as any).id;
+            const heartbeatStorageRefs = await executor
+              .select({ storage_object_id: schema.heartbeats.storage_object_id })
+              .from(schema.heartbeats)
+              .where(eq(schema.heartbeats.screen_id, screenId));
+            const proofOfPlayStorageRefs = await executor
+              .select({ storage_object_id: schema.proofOfPlay.storage_object_id })
+              .from(schema.proofOfPlay)
+              .where(eq(schema.proofOfPlay.screen_id, screenId));
+            const screenshotStorageRefs = await executor
+              .select({ storage_object_id: schema.screenshots.storage_object_id })
+              .from(schema.screenshots)
+              .where(eq(schema.screenshots.screen_id, screenId));
 
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+            const storageObjectIds = Array.from(
+              new Set(
+                [...heartbeatStorageRefs, ...proofOfPlayStorageRefs, ...screenshotStorageRefs]
+                  .map((row) => row.storage_object_id)
+                  .filter((value): value is string => Boolean(value)),
+              ),
+            );
+            const storageRows = storageObjectIds.length
+              ? await executor
+                  .select({
+                    id: schema.storageObjects.id,
+                    bucket: schema.storageObjects.bucket,
+                    object_key: schema.storageObjects.object_key,
+                  })
+                  .from(schema.storageObjects)
+                  .where(inArray(schema.storageObjects.id, storageObjectIds))
+              : [];
 
-        const [heartbeatStorageRefs, proofOfPlayStorageRefs, screenshotStorageRefs] = await Promise.all([
-          db
-            .select({ storage_object_id: schema.heartbeats.storage_object_id })
-            .from(schema.heartbeats)
-            .where(eq(schema.heartbeats.screen_id, screenId)),
-          db
-            .select({ storage_object_id: schema.proofOfPlay.storage_object_id })
-            .from(schema.proofOfPlay)
-            .where(eq(schema.proofOfPlay.screen_id, screenId)),
-          db
-            .select({ storage_object_id: schema.screenshots.storage_object_id })
-            .from(schema.screenshots)
-            .where(eq(schema.screenshots.screen_id, screenId)),
-        ]);
+            const commandOutboxDeleted = await executor
+              .delete(schema.commandOutbox)
+              .where(eq(schema.commandOutbox.screen_id, screenId))
+              .returning({ id: schema.commandOutbox.id });
+            const commandHistoryDeleted = await executor
+              .delete(schema.deviceCommandStatusHistory)
+              .where(eq(schema.deviceCommandStatusHistory.screen_id, screenId))
+              .returning({ id: schema.deviceCommandStatusHistory.id });
+            const desiredStateHistoryDeleted = await executor
+              .delete(schema.deviceDesiredStateHistory)
+              .where(eq(schema.deviceDesiredStateHistory.screen_id, screenId))
+              .returning({ id: schema.deviceDesiredStateHistory.id });
+            const desiredStateDeleted = await executor
+              .delete(schema.deviceDesiredState)
+              .where(eq(schema.deviceDesiredState.screen_id, screenId))
+              .returning({ screen_id: schema.deviceDesiredState.screen_id });
+            const displayStateDeleted = await executor
+              .delete(schema.screenDisplayStates)
+              .where(eq(schema.screenDisplayStates.screen_id, screenId))
+              .returning({ screen_id: schema.screenDisplayStates.screen_id });
+            const commandsDeleted = await executor
+              .delete(schema.deviceCommands)
+              .where(eq(schema.deviceCommands.screen_id, screenId))
+              .returning({ id: schema.deviceCommands.id });
+            const mediaCacheReportsDeleted = await executor
+              .delete(schema.mediaCacheReports)
+              .where(eq(schema.mediaCacheReports.screen_id, screenId))
+              .returning({ id: schema.mediaCacheReports.id });
+            const heartbeatsDeleted = await executor
+              .delete(schema.heartbeats)
+              .where(eq(schema.heartbeats.screen_id, screenId))
+              .returning({ id: schema.heartbeats.id });
+            const popDeleted = await executor
+              .delete(schema.proofOfPlay)
+              .where(eq(schema.proofOfPlay.screen_id, screenId))
+              .returning({ id: schema.proofOfPlay.id });
+            const screenshotsDeleted = await executor
+              .delete(schema.screenshots)
+              .where(eq(schema.screenshots.screen_id, screenId))
+              .returning({ id: schema.screenshots.id });
+            const reservationsDeleted = await executor
+              .delete(schema.scheduleReservations)
+              .where(eq(schema.scheduleReservations.screen_id, screenId))
+              .returning({ id: schema.scheduleReservations.id });
+            const publishTargetsDeleted = await executor
+              .delete(schema.publishTargets)
+              .where(eq(schema.publishTargets.screen_id, screenId))
+              .returning({ id: schema.publishTargets.id });
+            const pairingsDeleted = await executor
+              .delete(schema.devicePairings)
+              .where(eq(schema.devicePairings.device_id, screenId))
+              .returning({ id: schema.devicePairings.id });
+            const certsDeleted = await executor
+              .delete(schema.deviceCertificates)
+              .where(eq(schema.deviceCertificates.screen_id, screenId))
+              .returning({ id: schema.deviceCertificates.id });
+            const groupMembersDeleted = await executor
+              .delete(schema.screenGroupMembers)
+              .where(eq(schema.screenGroupMembers.screen_id, screenId))
+              .returning({ id: schema.screenGroupMembers.id });
+            const defaultMediaTargetsRemoved = await pruneDefaultMediaTargetsForScreen(screenId, executor);
 
-        const storageObjectIds = Array.from(
-          new Set(
-            [...heartbeatStorageRefs, ...proofOfPlayStorageRefs, ...screenshotStorageRefs]
-              .map((row) => row.storage_object_id)
-              .filter((value): value is string => Boolean(value))
-          )
+            const [deletedScreen] = await executor
+              .delete(schema.screens)
+              .where(eq(schema.screens.id, screenId))
+              .returning({ id: schema.screens.id });
+            if (!deletedScreen) throw AppError.conflict('Screen changed while it was being deleted. Refresh and try again.');
+
+            return {
+              storageRows,
+              cleanup: {
+                command_outbox: commandOutboxDeleted.length,
+                command_history: commandHistoryDeleted.length,
+                desired_state_history: desiredStateHistoryDeleted.length,
+                desired_state: desiredStateDeleted.length,
+                display_state: displayStateDeleted.length,
+                device_commands: commandsDeleted.length,
+                media_cache_reports: mediaCacheReportsDeleted.length,
+                heartbeats: heartbeatsDeleted.length,
+                proof_of_play: popDeleted.length,
+                screenshots: screenshotsDeleted.length,
+                schedule_reservations: reservationsDeleted.length,
+                publish_targets: publishTargetsDeleted.length,
+                device_pairings: pairingsDeleted.length,
+                device_certificates: certsDeleted.length,
+                screen_group_members: groupMembersDeleted.length,
+                default_media_targets: defaultMediaTargetsRemoved,
+              },
+            };
+          },
         );
-
-        const storageRows = storageObjectIds.length
-          ? await db
-              .select({
-                id: schema.storageObjects.id,
-                bucket: schema.storageObjects.bucket,
-                object_key: schema.storageObjects.object_key,
-              })
-              .from(schema.storageObjects)
-              .where(inArray(schema.storageObjects.id, storageObjectIds))
-          : [];
-
-        const cleanup = await db.transaction(async (tx) => {
-          const displayStateDeleted = await tx
-            .delete(schema.screenDisplayStates)
-            .where(eq(schema.screenDisplayStates.screen_id, screenId));
-          const commandsDeleted = await tx.delete(schema.deviceCommands).where(eq(schema.deviceCommands.screen_id, screenId));
-          const heartbeatsDeleted = await tx.delete(schema.heartbeats).where(eq(schema.heartbeats.screen_id, screenId));
-          const popDeleted = await tx.delete(schema.proofOfPlay).where(eq(schema.proofOfPlay.screen_id, screenId));
-          const screenshotsDeleted = await tx.delete(schema.screenshots).where(eq(schema.screenshots.screen_id, screenId));
-          const reservationsDeleted = await tx
-            .delete(schema.scheduleReservations)
-            .where(eq(schema.scheduleReservations.screen_id, screenId));
-          const publishTargetsDeleted = await tx
-            .delete(schema.publishTargets)
-            .where(eq(schema.publishTargets.screen_id, screenId));
-          const pairingsDeleted = await tx.delete(schema.devicePairings).where(eq(schema.devicePairings.device_id, screenId));
-          const certsDeleted = await tx.delete(schema.deviceCertificates).where(eq(schema.deviceCertificates.screen_id, screenId));
-          const groupMembersDeleted = await tx
-            .delete(schema.screenGroupMembers)
-            .where(eq(schema.screenGroupMembers.screen_id, screenId));
-          const defaultMediaTargetsRemoved = await pruneDefaultMediaTargetsForScreen(screenId, tx);
-
-          await tx.delete(schema.screens).where(eq(schema.screens.id, screenId));
-
-          return {
-            display_state: (displayStateDeleted as any)?.length ?? 0,
-            device_commands: (commandsDeleted as any)?.length ?? 0,
-            heartbeats: (heartbeatsDeleted as any)?.length ?? 0,
-            proof_of_play: (popDeleted as any)?.length ?? 0,
-            screenshots: (screenshotsDeleted as any)?.length ?? 0,
-            schedule_reservations: (reservationsDeleted as any)?.length ?? 0,
-            publish_targets: (publishTargetsDeleted as any)?.length ?? 0,
-            device_pairings: (pairingsDeleted as any)?.length ?? 0,
-            device_certificates: (certsDeleted as any)?.length ?? 0,
-            screen_group_members: (groupMembersDeleted as any)?.length ?? 0,
-            default_media_targets: defaultMediaTargetsRemoved,
-          };
-        });
 
         const uniqueStorageRows = Array.from(
           new Map(storageRows.map((row) => [row.id, row])).values()

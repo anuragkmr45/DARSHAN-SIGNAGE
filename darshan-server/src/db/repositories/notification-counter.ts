@@ -1,5 +1,9 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
+import {
+  runWithContentMutationAdmission,
+  tryRunWithContentMutationAdmission,
+} from '@/maintenance/content-mutation-admission';
 
 export class NotificationCounterRepository {
   async getUnreadTotal(userId: string): Promise<number> {
@@ -11,7 +15,15 @@ export class NotificationCounterRepository {
       .limit(1);
 
     if (counter) return Number(counter.unread_total || 0);
-    return this.reconcile(userId);
+    const reconciliation = await tryRunWithContentMutationAdmission(
+      'hidden-read:notification-counter-reconcile',
+      () => this.reconcilePersisted(userId),
+    );
+    if (reconciliation.admitted) return reconciliation.value;
+
+    // Count from the source of truth while capture owns a write-stable view.
+    // The next read after reopening will persist the counter normally.
+    return this.countUnread(userId);
   }
 
   async increment(userId: string, by = 1): Promise<number> {
@@ -85,6 +97,27 @@ export class NotificationCounterRepository {
   }
 
   async reconcile(userId: string): Promise<number> {
+    return runWithContentMutationAdmission(
+      'notification-counter:reconcile',
+      () => this.reconcilePersisted(userId),
+    );
+  }
+
+  private async countUnread(userId: string): Promise<number> {
+    const db = getDatabase();
+    const [unreadRow] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.notifications)
+      .where(
+        and(
+          eq(schema.notifications.user_id, userId),
+          eq(schema.notifications.is_read, false)
+        )
+      );
+    return Number(unreadRow?.count || 0);
+  }
+
+  private async reconcilePersisted(userId: string): Promise<number> {
     const db = getDatabase();
     return db.transaction(async (tx) => {
       const [unreadRow] = await tx

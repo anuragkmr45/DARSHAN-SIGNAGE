@@ -1,6 +1,6 @@
 import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
-import type { PaginatedResponse, PaginationParams, User } from "../types";
+import type { PaginatedResponse, PaginationParams, User, UserManagementOptions } from "../types";
 
 export interface InviteUserPayload {
   email: string;
@@ -8,15 +8,34 @@ export interface InviteUserPayload {
   department_id?: string;
 }
 
+export interface InviteUserResponse {
+  email: string;
+  invite_token: string;
+  invite_expires_at: string;
+}
+
 export interface UserInvitation {
   id: string;
   email?: string;
-  role_id?: User["role_id"];
-  role?: User["role"];
-  invited_at?: string;
-  expires_at?: string;
-  status?: string;
+  role?: User["role"] | null;
+  department_id?: string | null;
+  invited_at?: string | null;
+  invite_expires_at?: string | null;
+  invite_status?: string | null;
+  can_replace?: boolean;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
+
+export type InvitationListParams = PaginationParams & {
+  status?: string;
+  email?: string;
+  role?: "ADMIN" | "OPERATOR" | "DEPARTMENT";
+  department_id?: string;
+  invited_before?: string;
+  invited_after?: string;
+};
 
 export interface CreateUserPayload {
   email: string;
@@ -28,6 +47,9 @@ export interface CreateUserPayload {
 }
 
 export type UpdateUserPayload = Partial<Omit<User, "role">> & { role_id?: User["role_id"] };
+
+/** The edit forms' None choice must be sent as null, not omitted. */
+export const departmentUpdateValue = (value?: string): string | null => value?.trim() || null;
 
 const normalizePaginatedResponse = <T>(
   payload: PaginatedResponse<T> | { items?: T[]; pagination?: { page?: number; limit?: number; total?: number } },
@@ -47,6 +69,10 @@ const normalizePaginatedResponse = <T>(
 };
 
 export const usersApi = {
+  managementOptions: () => apiClient.request<UserManagementOptions>({
+    path: endpoints.users.managementOptions,
+    method: "GET",
+  }),
   create: (payload: CreateUserPayload) =>
     apiClient.request<User>({
       path: endpoints.users.base,
@@ -55,15 +81,20 @@ export const usersApi = {
     }),
 
   invite: (payload: InviteUserPayload) =>
-    apiClient.request<{ invite_token: string; invite_expires_at?: string; temp_password: string }>({
+    apiClient.request<InviteUserResponse>({
       path: endpoints.users.invite,
       method: "POST",
       body: payload,
     }),
 
-  listInvitations: (
-    params?: PaginationParams & { status?: string; email?: string; invited_after?: string; role_id?: string },
-  ) =>
+  replaceInvite: (inviteId: string, expectedUpdatedAt: string) =>
+    apiClient.request<InviteUserResponse>({
+      path: endpoints.users.replaceInvite(inviteId),
+      method: "POST",
+      body: { expected_updated_at: expectedUpdatedAt },
+    }),
+
+  listInvitations: (params?: InvitationListParams) =>
     apiClient
       .request<
         PaginatedResponse<UserInvitation> | { items?: UserInvitation[]; pagination?: { page?: number; limit?: number; total?: number } }
@@ -74,8 +105,8 @@ export const usersApi = {
       })
       .then((response) => normalizePaginatedResponse(response, params?.page ?? 1, params?.limit ?? 10)),
 
-  activate: (payload: { token: string; password: string; role_id?: User["role_id"] }) =>
-    apiClient.request<void>({
+  activate: (payload: { token: string; password: string }) =>
+    apiClient.request<{ success: true; user_id: string }>({
       path: endpoints.users.activate,
       method: "POST",
       body: payload,

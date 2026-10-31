@@ -7,6 +7,7 @@ const adminUser = {
   last_name: "User",
   role_id: "role-admin",
   role: "ADMIN",
+  authorization: { rules: [{ action: "manage", subject: "all" }], is_global_user_manager: true },
 };
 
 const rolesPayload = {
@@ -473,6 +474,12 @@ test.describe("Scheduling and emergency operator flow", () => {
     const dialog = page.getByRole("dialog", { name: /emergency takeover/i });
     await expect(dialog.getByText("Lift outage advisory")).toBeVisible();
 
+    await dialog.getByText("Hero Loop", { exact: true }).last().click();
+    await expect(
+      dialog.getByText("Emergency videos repeat from the beginning until the takeover is cleared or expires.")
+    ).toBeVisible();
+    await expect(dialog.locator("video[loop]")).toHaveCount(1);
+
     await dialog.getByRole("button", { name: /^clear$/i }).click();
     await dialog.locator("#clear-reason-emergency-1").fill("Incident resolved");
     await dialog.getByRole("button", { name: /confirm clear/i }).click();
@@ -495,6 +502,8 @@ test.describe("Scheduling and emergency operator flow", () => {
     expect(await page.evaluate(() => typeof window.crypto.randomUUID)).toBe("undefined");
     expect(capturedIdempotencyKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(capturedTriggerPayload?.screen_group_ids).toEqual(["group-1"]);
+    expect(capturedTriggerPayload?.media_id).toBe("media-1");
+    expect(capturedTriggerPayload).not.toHaveProperty("loop_enabled");
     expect(capturedTriggerPayload?.severity).toBe("CRITICAL");
     expect(capturedTriggerPayload?.audit_note).toBe("Fire drill initiated by facilities");
     expect(typeof capturedTriggerPayload?.expires_at).toBe("string");

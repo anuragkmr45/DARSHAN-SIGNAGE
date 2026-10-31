@@ -11,6 +11,7 @@ import {
   DEVICE_REQUEST_SIGNATURE_VERSION,
   isDeviceLegacyAuthCompatibilityActive,
 } from '@/utils/device-request-auth';
+import { getRecoveryCertificateAdmission, recoveryCertificateAdmissionFailure, type RecoveryCertificateAdmission } from '@/services/recovery-runtime-authority';
 
 export const DEVICE_SOCKET_SIGNATURE_PREFIX = 'DARSHAN_DEVICE_SOCKET_AUTH_V1';
 export const DEVICE_SOCKET_SIGNATURE_ACTION = 'CONNECT';
@@ -32,6 +33,7 @@ export type DeviceSocketAuthReason =
   | 'replay_detected'
   | 'replay_store_unavailable'
   | 'replay_store_error'
+  | 'recovery_pairing_review_required'
   | 'unknown';
 
 export type DeviceSocketAuthSuccess = {
@@ -70,6 +72,7 @@ export type DeviceSocketAuthOptions = {
   config?: Partial<DeviceSocketAuthConfig>;
   nowMs?: () => number;
   replayStore?: DeviceSocketReplayStore;
+  recoveryAdmission?: (input: { screenId: string; certificateId: string }) => Promise<RecoveryCertificateAdmission>;
 };
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -235,7 +238,8 @@ async function deviceExists(deviceId: string) {
   return Boolean(screen);
 }
 
-async function authenticateLegacy(input: DeviceSocketHandshakeInput, authConfig: DeviceSocketAuthConfig): Promise<DeviceSocketAuthResult> {
+async function authenticateLegacy(input: DeviceSocketHandshakeInput, authConfig: DeviceSocketAuthConfig,
+  recoveryAdmission = getRecoveryCertificateAdmission): Promise<DeviceSocketAuthResult> {
   if (!authConfig.legacyAuthAllowed) {
     return buildFailure('legacy', 'legacy_disabled');
   }
@@ -252,6 +256,9 @@ async function authenticateLegacy(input: DeviceSocketHandshakeInput, authConfig:
   if (!cert) {
     return buildFailure('legacy', 'invalid_credentials');
   }
+
+  const recovery = await recoveryAdmission({ screenId: identity.deviceId, certificateId: cert.id });
+  if (recoveryCertificateAdmissionFailure(recovery, 'socket-legacy')) return buildFailure('legacy', 'recovery_pairing_review_required');
 
   if (!(await deviceExists(identity.deviceId))) {
     return buildFailure('legacy', 'device_not_registered');
@@ -271,7 +278,8 @@ async function authenticateSigned(
   input: DeviceSocketHandshakeInput,
   authConfig: DeviceSocketAuthConfig,
   nowMs: () => number,
-  replayStore?: DeviceSocketReplayStore
+  replayStore?: DeviceSocketReplayStore,
+  recoveryAdmission = getRecoveryCertificateAdmission,
 ): Promise<DeviceSocketAuthResult> {
   if (!authConfig.signedAuthEnabled) {
     return buildFailure('signed', 'signed_disabled');
@@ -302,6 +310,11 @@ async function authenticateSigned(
   const cert = await loadActiveCertificate(signed.deviceId, signed.serial);
   if (!cert) {
     return buildFailure('signed', 'invalid_credentials');
+  }
+
+  const recovery = await recoveryAdmission({ screenId: signed.deviceId, certificateId: cert.id });
+  if (recoveryCertificateAdmissionFailure(recovery, 'socket-signed')) {
+    return buildFailure('signed', 'recovery_pairing_review_required');
   }
 
   if (!(await deviceExists(signed.deviceId))) {
@@ -358,7 +371,7 @@ export async function authenticateDeviceSocketHandshake(
   const authConfig = resolveAuthConfig(options.config);
   const auth = input.auth ?? {};
   if (hasSignedAuthFields(auth)) {
-    return authenticateSigned(input, authConfig, options.nowMs ?? Date.now, options.replayStore);
+    return authenticateSigned(input, authConfig, options.nowMs ?? Date.now, options.replayStore, options.recoveryAdmission);
   }
-  return authenticateLegacy(input, authConfig);
+  return authenticateLegacy(input, authConfig, options.recoveryAdmission);
 }

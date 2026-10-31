@@ -1,6 +1,7 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { schema, type DbExecutor } from '@/db';
 import { AppError } from '@/utils/app-error';
+import { canAuthenticateInviteState } from '@/auth/invite-state';
 
 export const LAST_ACTIVE_SUPER_ADMIN = 'LAST_ACTIVE_SUPER_ADMIN';
 
@@ -23,7 +24,7 @@ export async function lockUserAndAssertSuperAdminSurvives(
   const [superAdminRole] = await executor
     .select({ id: schema.roles.id })
     .from(schema.roles)
-    .where(eq(schema.roles.name, 'SUPER_ADMIN'))
+    .where(and(eq(schema.roles.name, 'SUPER_ADMIN'), eq(schema.roles.is_system, true)))
     .for('update');
 
   const [current] = await executor
@@ -37,14 +38,15 @@ export async function lockUserAndAssertSuperAdminSurvives(
   const removesActiveSuperAdmin =
     current.role_id === superAdminRole.id &&
     current.is_active &&
+    canAuthenticateInviteState(current.ext) &&
     (mutation.deleting === true ||
       mutation.isActive === false ||
       (mutation.roleId !== undefined && mutation.roleId !== superAdminRole.id));
 
   if (!removesActiveSuperAdmin) return current;
 
-  const [active] = await executor
-    .select({ count: sql<number>`count(*)` })
+  const active = await executor
+    .select({ ext: schema.users.ext })
     .from(schema.users)
     .where(
       and(
@@ -54,7 +56,7 @@ export async function lockUserAndAssertSuperAdminSurvives(
       )
     );
 
-  if (Number(active?.count ?? 0) <= 1) {
+  if (active.filter((candidate) => canAuthenticateInviteState(candidate.ext)).length <= 1) {
     throw new AppError({
       statusCode: 409,
       code: LAST_ACTIVE_SUPER_ADMIN,

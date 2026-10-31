@@ -180,7 +180,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
         const data = createPresentationSchema.parse(request.body);
         const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
           if (!ability.can('create', 'Presentation')) throw AppError.forbidden('Forbidden');
-          const newOwnership = ownershipForNewContent(actor, ability, 'Presentation');
+          const newOwnership = ownershipForNewContent(actor, ability, 'Presentation', data);
 
           if (data.layout_id) {
             const layout = await layoutRepo.findById(data.layout_id, executor);

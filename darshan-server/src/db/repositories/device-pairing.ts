@@ -1,10 +1,31 @@
-import { eq, and, desc, gt, lte, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
-
-type DbExecutor = any;
+import { eq, and, asc, desc, gt, lte, sql, type SQL } from 'drizzle-orm';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+import { AppError } from '@/utils/app-error';
 
 function resolveDb(executor?: DbExecutor) {
   return executor ?? getDatabase();
+}
+
+/** Serialize every lifecycle mutation for one physical device/screen. */
+export async function lockDevicePairingIdentity(
+  executor: DbExecutor,
+  deviceId: string,
+  options: { wait?: boolean } = {},
+) {
+  const lockName = `darshan:device-pairing:${deviceId}`;
+  if (options.wait) {
+    await executor.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockName}, 0))`,
+    );
+    return;
+  }
+  const result = await executor.execute(
+    sql`SELECT pg_try_advisory_xact_lock(hashtextextended(${lockName}, 0)) AS acquired`,
+  );
+  const rows = (result as { rows?: Array<{ acquired?: boolean }> }).rows ?? [];
+  if (rows[0]?.acquired !== true) {
+    throw AppError.conflict('Another device lifecycle operation is in progress. Try again.');
+  }
 }
 
 export class DevicePairingRepository {
@@ -23,6 +44,31 @@ export class DevicePairingRepository {
     const db = resolveDb(executor);
     const result = await db.insert(schema.devicePairings).values(data).returning();
     return result[0];
+  }
+
+  /**
+   * Reserve a code without aborting an enclosing transaction when another
+   * request won the active-code uniqueness race.
+   */
+  async createIfCodeAvailable(data: {
+    device_id?: string | null;
+    pairing_code: string;
+    expires_at: Date;
+    width?: number | null;
+    height?: number | null;
+    aspect_ratio?: string | null;
+    orientation?: string | null;
+    model?: string | null;
+    codecs?: string[] | null;
+    device_info?: Record<string, any> | null;
+  }, executor?: DbExecutor) {
+    const db = resolveDb(executor);
+    const result = await db
+      .insert(schema.devicePairings)
+      .values(data)
+      .onConflictDoNothing()
+      .returning();
+    return result[0] || null;
   }
 
   async findByCode(code: string, executor?: DbExecutor) {
@@ -62,7 +108,7 @@ export class DevicePairingRepository {
       .select()
       .from(schema.devicePairings)
       .where(eq(schema.devicePairings.pairing_code, code))
-      .orderBy(desc(schema.devicePairings.created_at))
+      .orderBy(desc(schema.devicePairings.created_at), asc(schema.devicePairings.id))
       .limit(1);
     return result[0] || null;
   }
@@ -73,7 +119,7 @@ export class DevicePairingRepository {
       .select()
       .from(schema.devicePairings)
       .where(eq(schema.devicePairings.device_id, deviceId))
-      .orderBy(desc(schema.devicePairings.created_at));
+      .orderBy(desc(schema.devicePairings.created_at), asc(schema.devicePairings.id));
     return result[0] || null;
   }
 
@@ -89,7 +135,7 @@ export class DevicePairingRepository {
           gt(schema.devicePairings.expires_at, new Date())
         )
       )
-      .orderBy(desc(schema.devicePairings.created_at));
+      .orderBy(desc(schema.devicePairings.created_at), asc(schema.devicePairings.id));
     return result[0] || null;
   }
 
@@ -188,18 +234,23 @@ export class DevicePairingRepository {
   async list(options: {
     page?: number;
     limit?: number;
-  }) {
-    const db = getDatabase();
+    readCondition?: SQL;
+  }, executor?: DbExecutor) {
+    const db = resolveDb(executor);
     const page = options.page || 1;
     const limit = options.limit || 20;
     const offset = (page - 1) * limit;
 
-    const [total] = await db.select({ count: sql<number>`count(*)` }).from(schema.devicePairings);
+    const [total] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.devicePairings)
+      .where(options.readCondition);
 
     const items = await db
       .select()
       .from(schema.devicePairings)
-      .orderBy(desc(schema.devicePairings.created_at))
+      .where(options.readCondition)
+      .orderBy(desc(schema.devicePairings.created_at), asc(schema.devicePairings.id))
       .limit(limit)
       .offset(offset);
 

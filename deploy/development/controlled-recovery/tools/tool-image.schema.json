@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Darshan development-only D4 tools image lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "enrolled",
+    "base",
+    "dockerfile",
+    "packages",
+    "image",
+    "wrapper",
+    "build_dependencies"
+  ],
+  "properties": {
+    "format": {
+      "const": "darshan-controlled-recovery-d4-tools-lock-v1"
+    },
+    "enrolled": {
+      "type": "boolean"
+    },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "repo_digest"
+      ],
+      "properties": {
+        "reference": {
+          "const": "postgres:16-alpine"
+        },
+        "repo_digest": {
+          "pattern": "^postgres@sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "dockerfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "const": "/home/hexmon/Desktop/DARSHAN-SIGNAGE/deploy/development/controlled-recovery/tools/Dockerfile"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "age",
+        "ffmpeg"
+      ],
+      "properties": {
+        "age": {
+          "$ref": "#/$defs/package"
+        },
+        "ffmpeg": {
+          "$ref": "#/$defs/package"
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "image_id",
+        "repo_digest",
+        "config_sha256"
+      ],
+      "properties": {
+        "reference": {
+          "const": "darshan-d3-tools:packet-d4"
+        },
+        "image_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/imageId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repo_digest": {
+          "oneOf": [
+            {
+              "pattern": "^darshan-d3-tools@sha256:[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "config_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "wrapper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_path",
+        "source_sha256",
+        "binary_path",
+        "binary_sha256",
+        "umask"
+      ],
+      "properties": {
+        "source_path": {
+          "const": "/home/hexmon/Desktop/DARSHAN-SIGNAGE/deploy/development/controlled-recovery/tools/darshan-d3-tool.c"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha"
+        },
+        "binary_path": {
+          "const": "/usr/local/bin/darshan-d3-tool"
+        },
+        "binary_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "umask": {
+          "const": "0077"
+        }
+      }
+    },
+    "build_dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apk",
+        "version"
+      ],
+      "properties": {
+        "apk": {
+          "const": "build-base"
+        },
+        "version": {
+          "const": "0.5-r4"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "imageId": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apk",
+        "version"
+      ],
+      "properties": {
+        "apk": {
+          "type": "string",
+          "pattern": "^[a-z0-9+_.-]+$"
+        },
+        "version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9.+_~-]+-r[0-9]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

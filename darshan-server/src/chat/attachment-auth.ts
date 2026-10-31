@@ -4,10 +4,8 @@ type MediaScopeRow = {
   id: string;
   created_by?: string | null;
   createdBy?: string | null;
-  department_id?: string | null;
-  departmentId?: string | null;
-  scope_department_id?: string | null;
-  scopeDepartmentId?: string | null;
+  owner_scope?: string | null;
+  owner_department_id?: string | null;
   status?: string | null;
 };
 
@@ -15,14 +13,9 @@ type AttachmentAuthInput = {
   requestedMediaIds: string[];
   mediaRows: MediaScopeRow[];
   senderId: string;
-  senderRole?: string;
-  senderDepartmentId?: string | null;
-  canOverrideMedia: boolean;
+  canReadMedia: (media: MediaScopeRow) => boolean;
+  canOverrideMedia: boolean | ((media: MediaScopeRow) => boolean);
 };
-
-function isAdminRole(roleName?: string): boolean {
-  return roleName === 'ADMIN' || roleName === 'SUPER_ADMIN';
-}
 
 export function assertAttachmentAccess(input: AttachmentAuthInput): void {
   if (input.mediaRows.length !== input.requestedMediaIds.length) {
@@ -30,16 +23,15 @@ export function assertAttachmentAccess(input: AttachmentAuthInput): void {
   }
 
   for (const media of input.mediaRows) {
-    const ownerId = media.created_by ?? media.createdBy ?? null;
-    const mediaDepartmentId =
-      media.department_id ?? media.departmentId ?? media.scope_department_id ?? media.scopeDepartmentId ?? null;
-
-    if (mediaDepartmentId && input.senderDepartmentId && mediaDepartmentId !== input.senderDepartmentId) {
-      throw AppError.forbidden('Attachment media is outside your department scope');
+    if (!input.canReadMedia(media)) {
+      throw AppError.forbidden('Attachment media is outside your access scope');
     }
-
+    const ownerId = media.created_by ?? media.createdBy ?? null;
     const isOwner = ownerId === input.senderId;
-    if (!isOwner && !isAdminRole(input.senderRole) && !input.canOverrideMedia) {
+    const canOverride = typeof input.canOverrideMedia === 'function'
+      ? input.canOverrideMedia(media)
+      : input.canOverrideMedia;
+    if (!isOwner && !canOverride) {
       throw AppError.forbidden('You cannot attach this media');
     }
   }

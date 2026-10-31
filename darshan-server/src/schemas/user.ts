@@ -26,7 +26,7 @@ export const updateUserSchema = z.object({
   first_name: z.string().optional(),
   last_name: z.string().optional(),
   role_id: z.string().uuid().optional(),
-  department_id: z.string().uuid().optional(),
+  department_id: z.string().uuid().nullable().optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -39,7 +39,7 @@ export const userResponseSchema = z.object({
   last_name: z.string().optional(),
   role: z.string().nullable(),
   role_id: z.string().uuid(),
-  department_id: z.string().uuid().optional(),
+  department_id: z.string().uuid().nullable().optional(),
   is_active: z.boolean(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),

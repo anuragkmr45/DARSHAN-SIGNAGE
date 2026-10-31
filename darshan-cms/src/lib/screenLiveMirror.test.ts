@@ -16,6 +16,7 @@ const baseSnapshot: ScreenSnapshot = {
       items: [
         {
           id: "item-1",
+          schedule_id: "schedule-1",
           presentation_id: "presentation-1",
           start_at: "2026-03-24T11:59:00.000Z",
           end_at: "2026-03-24T12:10:00.000Z",
@@ -48,6 +49,7 @@ const baseSnapshot: ScreenSnapshot = {
                   id: "hero-1",
                   type: "IMAGE",
                   name: "Hero image",
+                  filename: "hero-1.png",
                   source_content_type: "image/png",
                 },
               },
@@ -64,6 +66,7 @@ const baseSnapshot: ScreenSnapshot = {
                   id: "hero-2",
                   type: "VIDEO",
                   name: "Hero video",
+                  filename: "hero-2.mp4",
                   source_content_type: "video/mp4",
                 },
               },
@@ -81,6 +84,7 @@ const baseSnapshot: ScreenSnapshot = {
                   id: "sidebar-1",
                   type: "DOCUMENT",
                   name: "Sidebar PDF",
+                  filename: "sidebar-1.pdf",
                   source_content_type: "application/pdf",
                 },
               },

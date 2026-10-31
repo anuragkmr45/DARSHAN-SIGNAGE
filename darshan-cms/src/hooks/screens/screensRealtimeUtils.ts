@@ -197,7 +197,7 @@ export const applyScreensSyncAck = (
     } satisfies ScreensOverview;
   }
 
-  let next = {
+  let next: ScreensOverview = {
     ...current,
     server_time: ack.server_time ?? current.server_time,
     groups: ack.groups ?? current.groups,

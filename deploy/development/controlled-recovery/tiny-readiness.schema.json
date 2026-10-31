@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": { "additionalProperties": false, "properties": { "cms": { "type": "string" }, "player": { "type": "string" }, "server": { "type": "string" } }, "required": ["cms", "player", "server"], "type": "object" },
+    "docker": {
+      "additionalProperties": false,
+      "properties": {
+        "config_directory": { "type": "string" }, "context": { "type": "string" }, "endpoint": { "const": "unix:///var/run/docker.sock" }, "executable": { "type": "string" },
+        "expected_daemon_sha256": { "pattern": "^[a-f0-9]{64}$", "type": "string" }, "expected_root_dir": { "type": "string" }, "expected_server_version": { "type": "string" },
+        "expected_socket_sha256": { "pattern": "^[a-f0-9]{64}$", "type": "string" },
+        "images": { "items": { "additionalProperties": false, "properties": { "image_id": { "pattern": "^sha256:[a-f0-9]{64}$", "type": "string" }, "reference": { "type": "string" }, "repo_digest": { "pattern": "^[^@\\s]+@sha256:[a-f0-9]{64}$", "type": "string" }, "role": { "enum": ["postgres", "minio", "valkey"] } }, "required": ["image_id", "reference", "repo_digest", "role"], "type": "object" }, "maxItems": 3, "minItems": 3, "type": "array" },
+        "socket_path": { "const": "/var/run/docker.sock" }
+      },
+      "required": ["config_directory", "context", "endpoint", "executable", "expected_daemon_sha256", "expected_root_dir", "expected_server_version", "expected_socket_sha256", "images", "socket_path"], "type": "object"
+    },
+    "firefox_executable": { "type": "string" }, "format": { "const": "darshan-controlled-recovery-development-readiness-v1" }, "mode": { "const": "READ_ONLY_TINY_D1" }, "non_production": { "const": true },
+    "paths": { "additionalProperties": false, "properties": { "target": { "type": "string" }, "workspace": { "type": "string" } }, "required": ["target", "workspace"], "type": "object" },
+    "resources": {
+      "additionalProperties": false,
+      "properties": { "host_reserve_bytes": { "pattern": "^(0|[1-9][0-9]*)$", "type": "string" }, "maximum_memory_pressure_avg10": { "type": "string" }, "maximum_swap_used_bytes": { "type": "string" }, "production_minimum_ram_bytes": { "type": "string" }, "required_target_bytes": { "type": "string" }, "required_target_inodes": { "type": "string" }, "required_workspace_bytes": { "type": "string" }, "required_workspace_inodes": { "type": "string" }, "serial_stage_peaks": { "items": { "additionalProperties": false, "properties": { "bytes": { "type": "string" }, "stage": { "type": "string" } }, "required": ["bytes", "stage"], "type": "object" }, "minItems": 1, "type": "array" } },
+      "required": ["host_reserve_bytes", "maximum_memory_pressure_avg10", "maximum_swap_used_bytes", "production_minimum_ram_bytes", "required_target_bytes", "required_target_inodes", "required_workspace_bytes", "required_workspace_inodes", "serial_stage_peaks"], "type": "object"
+    },
+    "site_id": { "type": "string" }
+  },
+  "required": ["artifacts", "docker", "firefox_executable", "format", "mode", "non_production", "paths", "resources", "site_id"],
+  "type": "object"
+}

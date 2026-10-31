@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -61,12 +62,16 @@ describe('runtime dependency resolution', () => {
     const sofficePath = createExecutable(binDir, 'custom-soffice');
     const pgDumpPath = createExecutable(binDir, 'custom-pg-dump');
     const tarPath = createExecutable(binDir, 'custom-tar');
+    const agePath = createExecutable(binDir, 'custom-age');
     const chromiumPath = createExecutable(binDir, 'custom-chromium');
 
     process.env.FFMPEG_PATH = ffmpegPath;
     process.env.LIBREOFFICE_PATH = sofficePath;
     process.env.PG_DUMP_PATH = pgDumpPath;
     process.env.TAR_PATH = tarPath;
+    process.env.AGE_PATH = agePath;
+    process.env.AGE_VERSION = 'ok';
+    process.env.AGE_SHA256 = createHash('sha256').update(readFileSync(agePath)).digest('hex');
     process.env.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH = chromiumPath;
     process.env.PATH = '';
     applyMinimumEnv();
@@ -79,7 +84,48 @@ describe('runtime dependency resolution', () => {
     expect(report.dependencies.find((dependency) => dependency.name === 'libreoffice')?.path).toBe(sofficePath);
     expect(report.dependencies.find((dependency) => dependency.name === 'pg_dump')?.path).toBe(pgDumpPath);
     expect(report.dependencies.find((dependency) => dependency.name === 'tar')?.path).toBe(tarPath);
+    expect(report.dependencies.find((dependency) => dependency.name === 'age')?.path).toBe(agePath);
     expect(report.dependencies.find((dependency) => dependency.name === 'chromium')?.path).toBe(chromiumPath);
+  });
+
+  it('reports pinned age version and executable digest metadata', async () => {
+    const binDir = mkdtempSync(join(tmpdir(), 'darshan-runtime-age-'));
+    mkdirSync(binDir, { recursive: true });
+    const agePath = join(binDir, 'age');
+    const ageContents = '#!/bin/sh\necho v1.3.2\n';
+    writeFileSync(agePath, ageContents, { mode: 0o755 });
+    const ageSha256 = createHash('sha256').update(ageContents).digest('hex');
+
+    process.env.AGE_PATH = agePath;
+    process.env.AGE_VERSION = '1.3.2';
+    process.env.AGE_SHA256 = ageSha256;
+    applyMinimumEnv();
+
+    const { inspectRuntimeDependencies } = await import('@/utils/runtime-dependencies');
+    const report = await inspectRuntimeDependencies('api');
+    expect(report.dependencies.find((dependency) => dependency.name === 'age')).toMatchObject({
+      status: 'available',
+      path: agePath,
+      version: '1.3.2',
+      sha256: ageSha256,
+    });
+  });
+
+  it('reports an age digest mismatch instead of trusting only the configured path', async () => {
+    const binDir = mkdtempSync(join(tmpdir(), 'darshan-runtime-age-mismatch-'));
+    mkdirSync(binDir, { recursive: true });
+    const agePath = createExecutable(binDir, 'age');
+    process.env.AGE_PATH = agePath;
+    process.env.AGE_VERSION = 'ok';
+    process.env.AGE_SHA256 = '0'.repeat(64);
+    applyMinimumEnv();
+
+    const { inspectRuntimeDependencies } = await import('@/utils/runtime-dependencies');
+    const report = await inspectRuntimeDependencies('api');
+    expect(report.dependencies.find((dependency) => dependency.name === 'age')).toMatchObject({
+      status: 'optional',
+      detail: 'age executable digest does not match pinned AGE_SHA256.',
+    });
   });
 
   it('keeps the legacy HEXMON webpage capture path as a compatibility alias', async () => {

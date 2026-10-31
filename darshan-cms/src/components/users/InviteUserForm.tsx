@@ -7,13 +7,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DialogFooter } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Info, Loader2 } from "lucide-react";
-import { departmentsApi } from "@/api/domains/departments";
+import { usersApi } from "@/api/domains/users";
+import { queryKeys } from "@/api/queryKeys";
 import type { InviteFormData } from "@/types/user";
-import { useRolesList } from "@/hooks/useRolesApi";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { useAppSelector } from "@/store/hooks";
-import { canManageUserTarget } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
+import {
+    canSubmitUserMutation,
+    isManagementDepartmentSelectionValid,
+} from "@/lib/userProposalAuthorization";
 
 interface InviteUserFormProps {
     onSubmit: (data: InviteFormData) => void;
@@ -23,31 +26,23 @@ interface InviteUserFormProps {
 
 export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserFormProps) {
     const currentUser = useAppSelector((state) => state.auth.user);
-    const { can } = useAuthorization();
-    const canManageUsersGlobally = can("manage", "User");
-    const canPickDepartment = canManageUsersGlobally && can("read", "Department");
+    const { can, canRecord, isLoading: isAuthorizationLoading } = useAuthorization();
+    const optionsQuery = useQuery({
+        queryKey: queryKeys.userManagementOptions(currentUser?.id),
+        queryFn: usersApi.managementOptions,
+        enabled: Boolean(currentUser) && can("create", "User"),
+    });
+    const canPickDepartment = optionsQuery.data?.is_global_user_manager === true;
     const [formData, setFormData] = useState<InviteFormData>({
         email: "",
         role_id: "",
         department_id: !canPickDepartment ? currentUser?.department_id || "" : "",
     });
 
-    const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
-        queryKey: ["departments"],
-        queryFn: () => departmentsApi.list({ page: 1, limit: 100 }),
-        enabled: canPickDepartment,
-    });
-
-    const { data: rolesData, isLoading: isRolesLoading, error: rolesError } = useRolesList();
-    const roles = useMemo(
-        () =>
-            (rolesData?.items ?? []).filter((role) =>
-                canManageUserTarget(currentUser, role.name, currentUser?.department_id) ||
-                (canManageUsersGlobally && !role.is_system),
-            ),
-        [canManageUsersGlobally, currentUser, rolesData?.items],
-    );
-    const rolesErrorMessage = rolesError ? mapUsersErrorToUx(rolesError, "Failed to load roles") : null;
+    const roles = useMemo(() => optionsQuery.data?.roles ?? [], [optionsQuery.data?.roles]);
+    const rolesErrorMessage = optionsQuery.error ? mapUsersErrorToUx(optionsQuery.error, "Failed to load account options") : null;
+    const isRolesLoading = optionsQuery.isLoading || isAuthorizationLoading;
+    const isDepartmentsLoading = optionsQuery.isLoading;
     const currentDepartmentLabel = currentUser?.department_id ? "Assigned to your department" : "No department assigned";
 
     useEffect(() => {
@@ -56,24 +51,38 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
         }
     }, [formData.role_id, roles]);
 
-    const departments = departmentsData?.items || [];
-
-    const handleSubmit = () => {
-        onSubmit(formData);
-    };
+    const departments = optionsQuery.data?.departments ?? [];
 
     const updateField = (field: keyof InviteFormData, value: string) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
-    const isValid = formData.email.trim() && Boolean(formData.role_id);
+    const departmentSelectionValid = isManagementDepartmentSelectionValid(
+        canPickDepartment,
+        formData.department_id,
+        departments,
+    );
+    const isValid = formData.email.trim() &&
+        roles.some((role) => role.id === formData.role_id) &&
+        departmentSelectionValid;
+    const proposalAllowed = !isAuthorizationLoading && canSubmitUserMutation(canRecord, "create", null, {
+        email: formData.email.trim(),
+        role_id: formData.role_id,
+        department_id: formData.department_id?.trim() || undefined,
+        is_active: true,
+    });
+
+    const handleSubmit = () => {
+        if (!isValid || !proposalAllowed) return;
+        onSubmit(formData);
+    };
 
     return (
         <div className="space-y-4 py-2">
             <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription className="text-xs">
-                    An invitation email will be sent to the user with instructions to activate their account.
+                    The activation link will be shown once after creation. Copy it and share it securely; no email is sent automatically.
                 </AlertDescription>
             </Alert>
 
@@ -150,11 +159,6 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
                             {departments.map((dept) => (
                                 <SelectItem key={dept.id} value={dept.id}>
                                     {dept.name}
-                                    {dept.description && (
-                                        <span className="text-xs text-muted-foreground ml-2">
-                                            - {dept.description}
-                                        </span>
-                                    )}
                                 </SelectItem>
                             ))}
                         </SelectContent>
@@ -162,12 +166,32 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
                 )}
             </div>
 
+            {optionsQuery.data && !departmentSelectionValid ? (
+                <Alert variant="destructive">
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                        {formData.department_id
+                            ? "The selected department is no longer available for this invitation."
+                            : "No permitted department is available for this invitation."}
+                    </AlertDescription>
+                </Alert>
+            ) : null}
+
+            {Boolean(isValid) && !isAuthorizationLoading && !proposalAllowed ? (
+                <Alert variant="destructive">
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                        These invitation details are outside your current permission scope.
+                    </AlertDescription>
+                </Alert>
+            ) : null}
+
             <DialogFooter>
                 <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>
                     Cancel
                 </Button>
-                <Button onClick={handleSubmit} disabled={isLoading || !isValid}>
-                    {isLoading ? "Sending..." : "Send Invitation"}
+                <Button onClick={handleSubmit} disabled={isLoading || isRolesLoading || !isValid || !proposalAllowed}>
+                    {isLoading ? "Creating..." : "Create Invitation Link"}
                 </Button>
             </DialogFooter>
         </div>

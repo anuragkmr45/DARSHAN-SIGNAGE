@@ -1,11 +1,11 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
-import { PERMISSION_ACTIONS, PERMISSION_SUBJECTS } from '@/rbac/permissions';
+import { BACKUP_PERMISSION_ACTIONS, PERMISSION_ACTIONS, PERMISSION_SUBJECTS } from '@/rbac/permissions';
 
 const logger = createLogger('permission-routes');
 
@@ -25,11 +25,12 @@ export async function permissionRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Role')) throw AppError.forbidden('Forbidden');
+        if (!canUnconditionally(ability, 'read', 'Role')) throw AppError.forbidden('Forbidden');
 
         return reply.send({
           actions: PERMISSION_ACTIONS,
           subjects: PERMISSION_SUBJECTS,
+          subject_actions: { Backup: BACKUP_PERMISSION_ACTIONS },
         });
       } catch (error) {
         logger.error(error, 'Get permissions metadata error');

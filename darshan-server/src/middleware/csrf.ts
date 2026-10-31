@@ -6,7 +6,11 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const CSRF_HEADER_NAMES = ['x-csrf-token', 'x-xsrf-token'];
 const CSRF_EXEMPT_PATHS = new Set([
   '/api/v1/device-pairing/request',
+  '/api/v1/users/activate',
 ]);
+
+export const isCsrfExemptPath = (path: string | undefined): boolean =>
+  Boolean(path && CSRF_EXEMPT_PATHS.has(path));
 
 export const csrfProtectionPlugin: FastifyPluginAsync = async (fastify) => {
   if (!appConfig.CSRF_ENABLED) return;
@@ -14,7 +18,7 @@ export const csrfProtectionPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.addHook('preHandler', async (request, _reply) => {
     if (SAFE_METHODS.has(request.method)) return;
 
-    if (request.routerPath && CSRF_EXEMPT_PATHS.has(request.routerPath)) return;
+    if (isCsrfExemptPath(request.routerPath)) return;
 
     // Skip CSRF check for token-based auth without cookies
     const hasAuthHeader = Boolean(request.headers.authorization);

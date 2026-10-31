@@ -3,7 +3,14 @@ import { initializeDatabase, getDatabase } from '@/db';
 import { config as appConfig } from '@/config';
 import { sql } from 'drizzle-orm';
 
-const QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup'] as const;
+const QUEUE_NAMES = [
+  'cleanup',
+  'archive',
+  'chat:media-cleanup',
+  'backup',
+  'backup:check',
+  'backup:reconcile',
+] as const;
 
 function getPartitionName(queueName: string) {
   return `j${createHash('sha224').update(queueName).digest('hex')}`;

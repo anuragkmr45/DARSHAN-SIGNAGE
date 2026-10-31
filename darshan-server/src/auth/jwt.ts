@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { AuthError } from '@/auth/errors';
 import { getDatabase, schema } from '@/db';
 import { and, eq, gt, isNull } from 'drizzle-orm';
+import { canAuthenticateInviteState } from '@/auth/invite-state';
 
 export interface JWTPayload extends JoseJWTPayload {
   sub: string; // user ID
@@ -18,6 +19,15 @@ export interface JWTPayload extends JoseJWTPayload {
 
 const encoder = new TextEncoder();
 const secret = encoder.encode(appConfig.JWT_SECRET);
+
+export function tokenClaimsMatchAccount(
+  claims: Pick<JWTPayload, 'role_id' | 'role' | 'department_id'>,
+  account: { role_id: string; role: string; department_id: string | null }
+): boolean {
+  return account.role_id === claims.role_id &&
+    account.role === claims.role &&
+    account.department_id === (claims.department_id ?? null);
+}
 
 export async function generateAccessToken(
   userId: string,
@@ -59,9 +69,16 @@ export async function verifyAccessToken(token: string): Promise<JWTPayload> {
 
     const db = getDatabase();
     const [authenticated] = await db
-      .select({ user_id: schema.sessions.user_id })
+      .select({
+        user_id: schema.sessions.user_id,
+        role_id: schema.users.role_id,
+        role: schema.roles.name,
+        department_id: schema.users.department_id,
+        ext: schema.users.ext,
+      })
       .from(schema.sessions)
       .innerJoin(schema.users, eq(schema.users.id, schema.sessions.user_id))
+      .innerJoin(schema.roles, eq(schema.roles.id, schema.users.role_id))
       .where(
         and(
           eq(schema.sessions.access_jti, payload.jti),
@@ -72,7 +89,8 @@ export async function verifyAccessToken(token: string): Promise<JWTPayload> {
         )
       )
       .limit(1);
-    if (!authenticated) {
+    if (!authenticated || !canAuthenticateInviteState(authenticated.ext) ||
+        !tokenClaimsMatchAccount(payload, authenticated)) {
       throw new AuthError('Token has been revoked');
     }
     return payload;

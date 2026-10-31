@@ -1,0 +1,1 @@
+{"captureEnabled":false,"codes":["CONTROLLED_RECOVERY_D3_SOURCE_HEADROOM_UNSAFE"],"diagnostics":[{"comparison":"MAXIMUM","kind":"headroom","observed":"650000","resource":"PRESSURE_MICROS","threshold":"500000"}],"format":"darshan-d3-source-provider-report-v1","nextAction":"REVIEW_RETAINED_RESOURCES","status":"BLOCKED","wholeRunEnabled":false}

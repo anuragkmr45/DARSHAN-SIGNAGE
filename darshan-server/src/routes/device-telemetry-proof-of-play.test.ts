@@ -73,7 +73,7 @@ describe('device telemetry proof-of-play idempotency', () => {
 
   beforeEach(() => {
     queueProofOfPlayTelemetryMock.mockReset();
-    queueProofOfPlayTelemetryMock.mockRejectedValue(new Error('queue unavailable'));
+    queueProofOfPlayTelemetryMock.mockResolvedValue('telemetry-job');
     putObjectMock.mockReset();
     putObjectMock.mockResolvedValue({ etag: 'etag-test', sha256: 'sha-test' });
   });
@@ -82,7 +82,7 @@ describe('device telemetry proof-of-play idempotency', () => {
     await closeTestServer(server);
   });
 
-  it('treats duplicate proof-of-play delivery as success with one durable row when persisting inline', async () => {
+  it('enqueues duplicate proof-of-play delivery with one stable idempotency identity', async () => {
     const db = getDatabase();
     const deviceId = randomUUID();
     const serial = `serial-${randomUUID()}`;
@@ -152,8 +152,21 @@ describe('device telemetry proof-of-play idempotency', () => {
       .from(schema.proofOfPlay)
       .where(eq(schema.proofOfPlay.idempotency_key, idempotencyKey));
 
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.page_number).toBe(4);
-    expect(putObjectMock).toHaveBeenCalledOnce();
+    expect(rows).toHaveLength(0);
+    expect(putObjectMock).not.toHaveBeenCalled();
+    expect(queueProofOfPlayTelemetryMock).toHaveBeenCalledTimes(2);
+    const firstJob = queueProofOfPlayTelemetryMock.mock.calls[0]?.[0];
+    const secondJob = queueProofOfPlayTelemetryMock.mock.calls[1]?.[0];
+    expect(firstJob).toEqual(expect.objectContaining({
+      idempotencyKey,
+      objectKey: `proof-of-play/${deviceId}/${idempotencyKey}.json`,
+      pageNumber: 4,
+    }));
+    expect(secondJob).toEqual(expect.objectContaining({
+      idempotencyKey,
+      objectKey: firstJob.objectKey,
+    }));
+    expect(new Date(firstJob.receivedAt).toString()).not.toBe('Invalid Date');
+    expect(new Date(secondJob.receivedAt).toString()).not.toBe('Invalid Date');
   });
 });

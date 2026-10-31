@@ -22,6 +22,8 @@ import type { PairingStatusResponse, ScreenOverviewItem } from "@/api/types";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { formatMaskedScreenId } from "@/lib/screens";
+import { useAuthorization } from "@/hooks/useAuthorization";
+import { canConfirmScreenPairing, canStartScreenRecovery } from "@/lib/access";
 
 interface PairDeviceModalProps {
   open: boolean;
@@ -40,6 +42,7 @@ function formatDateTime(value?: string | null) {
 
 export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: PairDeviceModalProps) {
   const queryClient = useQueryClient();
+  const { canRecord, isLoading: isAuthorizationLoading, isError: isAuthorizationError } = useAuthorization();
   const [tab, setTab] = useState<"confirm" | "recover">(recoveryScreen ? "recover" : "confirm");
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -107,6 +110,23 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
     [generatedCode],
   );
 
+  const proposedScreen = useMemo(() => ({
+    ...(recoveryScreen ?? {}),
+    name: confirmForm.name.trim(),
+    location: confirmForm.location.trim() || null,
+  }), [confirmForm.location, confirmForm.name, recoveryScreen]);
+  const canConfirm = !isAuthorizationLoading && !isAuthorizationError && canConfirmScreenPairing(
+    canRecord,
+    proposedScreen,
+    recoveryScreen,
+  );
+  const canGenerateRecovery = Boolean(
+    recoveryScreen &&
+    !isAuthorizationLoading &&
+    !isAuthorizationError &&
+    canStartScreenRecovery(canRecord, recoveryScreen),
+  );
+
   const handleCopyCode = async () => {
     if (!generatedCode) return;
     await navigator.clipboard.writeText(generatedCode);
@@ -116,10 +136,25 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
   };
 
   const handleConfirm = () => {
+    if (!canConfirm) {
+      toast.error("Your current permissions do not allow this pairing or recovery action.");
+      return;
+    }
     confirmPairing.mutate({
       pairing_code: confirmForm.pairingCode.trim(),
       name: confirmForm.name.trim(),
       location: confirmForm.location.trim() || undefined,
+    });
+  };
+
+  const handleGenerateRecoveryCode = () => {
+    if (!recoveryScreen || !canGenerateRecovery) {
+      toast.error("Your current permissions do not allow recovery for this screen.");
+      return;
+    }
+    generateRecoveryCode.mutate({
+      device_id: recoveryScreen.id,
+      expires_in: DEFAULT_EXPIRES_IN,
     });
   };
 
@@ -207,10 +242,17 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
                 </p>
               </Card>
 
+              {!isAuthorizationLoading && !canConfirm ? (
+                <p role="alert" className="text-sm text-destructive">
+                  Your current permissions do not allow confirmation for these screen details.
+                </p>
+              ) : null}
+
               <Button
                 onClick={handleConfirm}
                 disabled={
                   confirmPairing.isPending ||
+                  !canConfirm ||
                   !confirmForm.pairingCode.trim() ||
                   !confirmForm.name.trim()
                 }
@@ -263,6 +305,11 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
                 <p className="text-xs text-muted-foreground">
                   Only the most recently generated recovery code remains valid for this screen.
                 </p>
+                {!isAuthorizationLoading && !canGenerateRecovery ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    Your current permissions do not allow recovery for this screen.
+                  </p>
+                ) : null}
               </Card>
 
               {generatedCode ? (
@@ -284,8 +331,9 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
                         variant="outline"
                         size="icon"
                         className="shrink-0"
-                        onClick={() => generateRecoveryCode.mutate({ device_id: recoveryScreen.id, expires_in: DEFAULT_EXPIRES_IN })}
-                        disabled={generateRecoveryCode.isPending}
+                        aria-label="Generate a new recovery code"
+                        onClick={handleGenerateRecoveryCode}
+                        disabled={generateRecoveryCode.isPending || !canGenerateRecovery}
                       >
                         <RefreshCw className="h-4 w-4" />
                       </Button>
@@ -300,8 +348,8 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
                 </Card>
               ) : (
                 <Button
-                  onClick={() => generateRecoveryCode.mutate({ device_id: recoveryScreen.id, expires_in: DEFAULT_EXPIRES_IN })}
-                  disabled={generateRecoveryCode.isPending}
+                  onClick={handleGenerateRecoveryCode}
+                  disabled={generateRecoveryCode.isPending || !canGenerateRecovery}
                   className="w-full"
                 >
                   {generateRecoveryCode.isPending ? "Generating recovery code..." : "Generate Recovery Code"}

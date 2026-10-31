@@ -10,7 +10,6 @@ import {
   Palette,
   Save,
   Shield,
-  Trash2,
   Upload,
   Users,
 } from "lucide-react";
@@ -37,29 +36,24 @@ import {
 } from "@/components/ui/dialog";
 import { RolesPermissionsTab } from "@/components/settings/RolesPermissionsTab";
 import { DefaultMediaSection } from "@/components/settings/DefaultMediaSection";
+import { BackupsSection } from "@/components/settings/BackupsSection";
 import { MediaPreview } from "@/components/common/MediaPreview";
-import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useAuthorization } from "@/hooks/useAuthorization";
 import { useAppSelector } from "@/store/hooks";
 import {
   useAppearanceSettings,
-  useBackupRuns,
-  useBackupSettings,
   useBrandingSettings,
-  useDeleteBackupRun,
   useGeneralSettings,
   useRecentLogs,
-  useRunBackupNow,
   useSecuritySettings,
   useUpdateAppearanceSettings,
-  useUpdateBackupSettings,
   useUpdateBrandingSettings,
   useUpdateGeneralSettings,
   useUpdateSecuritySettings,
 } from "@/hooks/useSettingsApi";
 import { canManageBrandingSettings } from "@/lib/access";
 import { mediaApi } from "@/api/domains/media";
-import type { BackupRun, BackupSettings, MediaAsset } from "@/api/types";
+import type { AppearanceSettings, MediaAsset } from "@/api/types";
 import { uploadMediaWithPresign, validateUploadFile, getFriendlyUploadError } from "@/lib/mediaUploadFlow";
 import { useToast } from "@/hooks/use-toast";
 
@@ -82,11 +76,6 @@ const accentPresets = [
   { value: "amber", label: "Amber" },
   { value: "slate", label: "Slate" },
 ] as const;
-
-function formatBackupError(message: string | null | undefined) {
-  if (!message) return null;
-  return message.replace(/\s+/g, " ").trim();
-}
 
 function BrandingAssetField({
   label,
@@ -242,26 +231,36 @@ const Settings = () => {
   const { can, role } = useAuthorization();
   const currentUser = useAppSelector((state) => state.auth.user);
   const canEditBranding = canManageBrandingSettings(currentUser ?? undefined, role, can);
+  const canReadOrgSettings = can("read", "OrgSettings");
+  const canReadBranding = can("read", "BrandingSettings");
+  const canReadBackups = can("read", "Backup");
+  const canReadRoles = can("read", "Role");
+  const allowedTabs = useMemo(() => [
+    ...(canReadOrgSettings ? ["general", "security", "appearance", "default-media", "advanced"] : []),
+    ...(canReadBranding ? ["branding"] : []),
+    ...(canReadBackups ? ["backups"] : []),
+    ...(canReadRoles ? ["roles"] : []),
+  ], [canReadBackups, canReadBranding, canReadOrgSettings, canReadRoles]);
+  const [activeTab, setActiveTab] = useState(() => allowedTabs[0] ?? "backups");
 
-  const generalQuery = useGeneralSettings();
-  const brandingQuery = useBrandingSettings();
-  const securityQuery = useSecuritySettings();
-  const appearanceQuery = useAppearanceSettings();
-  const backupSettingsQuery = useBackupSettings();
-  const backupRunsQuery = useBackupRuns();
+  useEffect(() => {
+    if (!allowedTabs.includes(activeTab) && allowedTabs[0]) setActiveTab(allowedTabs[0]);
+  }, [activeTab, allowedTabs]);
+
+  const generalQuery = useGeneralSettings(canReadOrgSettings);
+  const brandingQuery = useBrandingSettings(canReadBranding);
+  const securityQuery = useSecuritySettings(canReadOrgSettings);
+  const appearanceQuery = useAppearanceSettings(canReadOrgSettings);
   const [logLevelFilter, setLogLevelFilter] = useState<string>("all");
   const recentLogsQuery = useRecentLogs({
     limit: 100,
     level: logLevelFilter === "all" ? undefined : logLevelFilter,
-  });
+  }, canReadOrgSettings);
 
   const updateGeneral = useUpdateGeneralSettings();
   const updateBranding = useUpdateBrandingSettings();
   const updateSecurity = useUpdateSecuritySettings();
   const updateAppearance = useUpdateAppearanceSettings();
-  const updateBackups = useUpdateBackupSettings();
-  const runBackupNow = useRunBackupNow();
-  const deleteBackupRun = useDeleteBackupRun();
 
   const [general, setGeneral] = useState({ company_name: "", timezone: "UTC", language: "en" });
   const [branding, setBranding] = useState({
@@ -283,17 +282,11 @@ const Settings = () => {
       require_special: true,
     },
   });
-  const [appearance, setAppearance] = useState({
-    theme_mode: "light" as const,
-    accent_preset: "crimson" as const,
-    sidebar_mode: "expanded" as const,
+  const [appearance, setAppearance] = useState<AppearanceSettings>({
+    theme_mode: "light",
+    accent_preset: "crimson",
+    sidebar_mode: "expanded",
   });
-  const [backups, setBackups] = useState<BackupSettings>({
-    automatic_enabled: false,
-    interval_hours: 24,
-    log_level: "info" as const,
-  });
-  const [backupPendingDelete, setBackupPendingDelete] = useState<BackupRun | null>(null);
 
   useEffect(() => {
     if (generalQuery.data) setGeneral(generalQuery.data);
@@ -311,14 +304,7 @@ const Settings = () => {
     if (appearanceQuery.data) setAppearance(appearanceQuery.data);
   }, [appearanceQuery.data]);
 
-  useEffect(() => {
-    if (backupSettingsQuery.data) setBackups(backupSettingsQuery.data);
-  }, [backupSettingsQuery.data]);
-
-  const backupRuns = backupRunsQuery.data?.items ?? [];
   const recentLogs = recentLogsQuery.data?.items ?? [];
-  const automaticBackupsEnabled = backups.automatic_enabled;
-  const backupScheduleManaged = backups.schedule_managed_by_deployment === true;
 
   const brandingPreviewName = branding.app_name.trim() || "DARSHAN CMS";
 
@@ -344,8 +330,6 @@ const Settings = () => {
     return rules.join(", ");
   }, [security.password_policy]);
 
-  const canDeleteBackup = (run: BackupRun) => run.status !== "PENDING" && run.status !== "RUNNING";
-
   return (
     <div className="space-y-6">
       <div>
@@ -355,15 +339,16 @@ const Settings = () => {
         </p>
       </div>
 
-      <Tabs defaultValue="general" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="flex flex-wrap h-auto">
-          <TabsTrigger value="general"><Globe className="mr-2 h-4 w-4" />General</TabsTrigger>
-          <TabsTrigger value="branding"><ImageUp className="mr-2 h-4 w-4" />Branding</TabsTrigger>
-          <TabsTrigger value="security"><Lock className="mr-2 h-4 w-4" />Security</TabsTrigger>
-          <TabsTrigger value="appearance"><Palette className="mr-2 h-4 w-4" />Appearance</TabsTrigger>
-          <TabsTrigger value="default-media"><Shield className="mr-2 h-4 w-4" />Default Media</TabsTrigger>
-          <TabsTrigger value="advanced"><Database className="mr-2 h-4 w-4" />Advanced</TabsTrigger>
-          <TabsTrigger value="roles"><Users className="mr-2 h-4 w-4" />Roles</TabsTrigger>
+          {canReadOrgSettings ? <TabsTrigger value="general"><Globe className="mr-2 h-4 w-4" />General</TabsTrigger> : null}
+          {canReadBranding ? <TabsTrigger value="branding"><ImageUp className="mr-2 h-4 w-4" />Branding</TabsTrigger> : null}
+          {canReadOrgSettings ? <TabsTrigger value="security"><Lock className="mr-2 h-4 w-4" />Security</TabsTrigger> : null}
+          {canReadOrgSettings ? <TabsTrigger value="appearance"><Palette className="mr-2 h-4 w-4" />Appearance</TabsTrigger> : null}
+          {canReadOrgSettings ? <TabsTrigger value="default-media"><Shield className="mr-2 h-4 w-4" />Default Media</TabsTrigger> : null}
+          {canReadBackups ? <TabsTrigger value="backups"><Database className="mr-2 h-4 w-4" />Backups</TabsTrigger> : null}
+          {canReadOrgSettings ? <TabsTrigger value="advanced"><Clock3 className="mr-2 h-4 w-4" />Logs</TabsTrigger> : null}
+          {canReadRoles ? <TabsTrigger value="roles"><Users className="mr-2 h-4 w-4" />Roles</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
@@ -652,151 +637,15 @@ const Settings = () => {
           <DefaultMediaSection />
         </TabsContent>
 
-        <TabsContent value="advanced" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Backups</CardTitle>
-              <CardDescription>Automatic full backups for PostgreSQL and MinIO archives.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-4 py-3 text-sm">
-                <Badge variant={automaticBackupsEnabled ? "default" : "outline"}>
-                  {automaticBackupsEnabled ? "Automatic backups on" : "Automatic backups off"}
-                </Badge>
-                <span className="text-muted-foreground">
-                  {automaticBackupsEnabled
-                    ? `Recurring backups are enabled for this installation and will be checked every ${backups.interval_hours} hour${backups.interval_hours === 1 ? "" : "s"}.`
-                    : "Automatic backups stay off until you enable them and save this section."}
-                  {backupScheduleManaged && ` Production policy requires an independently operated off-host copy${backups.retention_days ? ` retained for ${backups.retention_days} days` : ""}.`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border p-4">
-                <div>
-                  <p className="font-medium">Automatic backups</p>
-                  <p className="text-sm text-muted-foreground">
-                    {backupScheduleManaged
-                      ? "This production cadence is locked by the signed deployment policy."
-                      : "Run recurring full backups into the archives bucket."}
-                  </p>
-                </div>
-                <Switch
-                  checked={backups.automatic_enabled}
-                  onCheckedChange={(checked) => setBackups((current) => ({ ...current, automatic_enabled: checked }))}
-                  disabled={backupScheduleManaged}
-                />
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="backup-interval">Backup interval (hours)</Label>
-                  <Input
-                    id="backup-interval"
-                    type="number"
-                    min={1}
-                    max={168}
-                    value={backups.interval_hours}
-                    disabled={backupScheduleManaged}
-                    onChange={(event) =>
-                      setBackups((current) => ({ ...current, interval_hours: Number(event.target.value || 24) }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Log level</Label>
-                  <Select
-                    value={backups.log_level}
-                    onValueChange={(value: typeof backups.log_level) =>
-                      setBackups((current) => ({ ...current, log_level: value }))
-                    }
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["trace", "debug", "info", "warn", "error", "fatal"].map((level) => (
-                        <SelectItem key={level} value={level}>
-                          {level.toUpperCase()}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={() => updateBackups.mutate(backups)} disabled={updateBackups.isPending}>
-                  <Save className="mr-2 h-4 w-4" />
-                  Save Advanced
-                </Button>
-                <Button variant="outline" onClick={() => runBackupNow.mutate()} disabled={runBackupNow.isPending}>
-                  <Database className="mr-2 h-4 w-4" />
-                  {runBackupNow.isPending ? "Queueing..." : "Run Backup Now"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Backup history</CardTitle>
-              <CardDescription>Recent manual and automatic backup runs.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {backupRuns.map((run) => (
-                <div key={run.id} className="rounded-lg border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline">{run.trigger_type}</Badge>
-                      <Badge>{run.status}</Badge>
-                      <span className="text-sm text-muted-foreground">{new Date(run.created_at).toLocaleString()}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {run.downloads.map((download) => (
-                        <Button key={download.object_key} asChild size="sm" variant="ghost">
-                          <a href={download.url} target="_blank" rel="noreferrer">{download.name}</a>
-                        </Button>
-                      ))}
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={!canDeleteBackup(run) || deleteBackupRun.isPending}
-                        onClick={() => setBackupPendingDelete(run)}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-                  {run.error_message ? (
-                    <p className="mt-2 text-sm text-destructive">{formatBackupError(run.error_message)}</p>
-                  ) : null}
-                </div>
-              ))}
-              {backupRuns.length === 0 ? <p className="text-sm text-muted-foreground">No backup history yet.</p> : null}
-            </CardContent>
-          </Card>
-
-          <ConfirmDialog
-            open={Boolean(backupPendingDelete)}
-            title="Delete backup"
-            description={
-              backupPendingDelete
-                ? "This will permanently remove the backup archives from storage and delete the history entry. This action cannot be undone."
-                : undefined
-            }
-            confirmLabel="Delete backup"
-            isLoading={deleteBackupRun.isPending}
-            confirmDisabled={!backupPendingDelete || !canDeleteBackup(backupPendingDelete)}
-            onCancel={() => {
-              if (deleteBackupRun.isPending) return;
-              setBackupPendingDelete(null);
-            }}
-            onConfirm={() => {
-              if (!backupPendingDelete) return;
-              deleteBackupRun.mutate(backupPendingDelete.id, {
-                onSuccess: () => {
-                  setBackupPendingDelete(null);
-                },
-              });
-            }}
+        <TabsContent value="backups" className="space-y-4">
+          <BackupsSection
+            canCreate={can("create", "Backup")}
+            canDelete={can("delete", "Backup")}
+            canDownload={can("download", "Backup")}
           />
+        </TabsContent>
 
+        <TabsContent value="advanced" className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Recent logs</CardTitle>

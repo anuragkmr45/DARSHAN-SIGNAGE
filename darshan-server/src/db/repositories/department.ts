@@ -1,28 +1,28 @@
-import { eq, desc, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { and, eq, desc, asc, sql, type SQL } from 'drizzle-orm';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 
 export class DepartmentRepository {
   async create(data: {
     name: string;
     description?: string;
-  }) {
-    const db = getDatabase();
-    const result = await db.insert(schema.departments).values(data).returning();
+  }, executor: DbExecutor = getDatabase()) {
+    const result = await executor.insert(schema.departments).values(data).returning();
     return result[0];
   }
 
-  async findById(id: string) {
+  async findById(id: string, predicate?: SQL) {
     const db = getDatabase();
     const result = await db
       .select()
       .from(schema.departments)
-      .where(eq(schema.departments.id, id));
+      .where(predicate ? and(eq(schema.departments.id, id), predicate) : eq(schema.departments.id, id));
     return result[0] || null;
   }
 
   async list(options: {
     page?: number;
     limit?: number;
+    predicate?: SQL;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -31,12 +31,14 @@ export class DepartmentRepository {
 
     const [totalRow] = await db
       .select({ count: sql<number>`count(*)` })
-      .from(schema.departments);
+      .from(schema.departments)
+      .where(options.predicate);
 
     const items = await db
       .select()
       .from(schema.departments)
-      .orderBy(desc(schema.departments.created_at))
+      .where(options.predicate)
+      .orderBy(desc(schema.departments.created_at), asc(schema.departments.id))
       .limit(limit)
       .offset(offset);
 
@@ -48,9 +50,8 @@ export class DepartmentRepository {
     };
   }
 
-  async update(id: string, data: Partial<typeof schema.departments.$inferInsert>) {
-    const db = getDatabase();
-    const result = await db
+  async update(id: string, data: Partial<typeof schema.departments.$inferInsert>, executor: DbExecutor = getDatabase()) {
+    const result = await executor
       .update(schema.departments)
       .set({ ...data, updated_at: new Date() })
       .where(eq(schema.departments.id, id))
@@ -58,10 +59,9 @@ export class DepartmentRepository {
     return result[0] || null;
   }
 
-  async getDeleteUsageSummary(id: string) {
-    const db = getDatabase();
+  async getDeleteUsageSummary(id: string, executor: DbExecutor = getDatabase()) {
     const count = async (table: any, column: any) => {
-      const [row] = await db
+      const [row] = await executor
         .select({ count: sql<number>`count(*)` })
         .from(table)
         .where(eq(column, id));
@@ -77,9 +77,28 @@ export class DepartmentRepository {
     return { users, media, layouts, presentations, schedules };
   }
 
-  async delete(id: string) {
-    const db = getDatabase();
-    await db.delete(schema.departments).where(eq(schema.departments.id, id));
+  // The caller supplies its current authorization transaction. The row lock,
+  // record-specific permission check, usage count and delete share one commit.
+  async deleteIfUnused(
+    id: string,
+    executor: DbExecutor,
+    authorize: (department: typeof schema.departments.$inferSelect) => void
+  ) {
+    const [department] = await executor
+      .select()
+      .from(schema.departments)
+      .where(eq(schema.departments.id, id))
+      .for('update');
+    if (!department) return { status: 'not_found' as const };
+
+    authorize(department);
+    const usage = await this.getDeleteUsageSummary(id, executor);
+    if (Object.values(usage).some((value) => value > 0)) {
+      return { status: 'in_use' as const, usage };
+    }
+
+    await executor.delete(schema.departments).where(eq(schema.departments.id, id));
+    return { status: 'deleted' as const };
   }
 }
 

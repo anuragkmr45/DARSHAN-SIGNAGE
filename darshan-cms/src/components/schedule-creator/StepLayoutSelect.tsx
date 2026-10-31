@@ -69,7 +69,7 @@ export function StepLayoutSelect({ selectedLayout, onSelectLayout }: StepLayoutS
         search: trimmedSearchQuery || undefined,
         aspect_ratio: aspectRatioQuery,
       }),
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData,
     refetchOnMount: "always",
   });
 
@@ -80,7 +80,7 @@ export function StepLayoutSelect({ selectedLayout, onSelectLayout }: StepLayoutS
         search: debouncedSearchTerm || undefined,
         configured_only: true,
       }),
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData,
   });
 
   const aspectRatioOptions = useMemo<ScreenAspectRatio[]>(() => {

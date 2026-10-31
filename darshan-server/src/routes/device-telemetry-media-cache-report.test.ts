@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
@@ -6,6 +6,8 @@ import { eq } from 'drizzle-orm';
 import { createTestServer, closeTestServer, generateTestToken, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { HTTP_STATUS } from '@/http-status-codes';
+import * as jobs from '@/jobs';
+import { processMediaCacheReportTelemetry } from '@/jobs/media-cache-report';
 
 describe('device media/cache failure reporting', () => {
   let server: FastifyInstance;
@@ -46,6 +48,7 @@ describe('device media/cache failure reporting', () => {
     const scheduleId = randomUUID();
     const reportedAt = new Date().toISOString();
 
+    const queueSpy = vi.spyOn(jobs, 'queueMediaCacheReportTelemetry').mockResolvedValueOnce('report-job');
     const reportResponse = await server.inject({
       method: 'POST',
       url: `/api/v1/device/${screenId}/media-cache-report`,
@@ -79,15 +82,34 @@ describe('device media/cache failure reporting', () => {
     expect(created.success).toBe(true);
     expect(created.id).toBeTruthy();
 
-    const [stored] = await db
+    expect(queueSpy).toHaveBeenCalledOnce();
+    const queued = queueSpy.mock.calls[0]![0];
+    expect(queued).toMatchObject({
+      reportId: created.id,
+      receivedAt: created.received_at,
+      report: { screenId, eventType: 'DOWNLOAD_FAILED' },
+    });
+
+    expect(await db
+      .select()
+      .from(schema.mediaCacheReports)
+      .where(eq(schema.mediaCacheReports.id, created.id))).toHaveLength(0);
+
+    await processMediaCacheReportTelemetry(queued);
+    await processMediaCacheReportTelemetry(queued);
+
+    const storedRows = await db
       .select()
       .from(schema.mediaCacheReports)
       .where(eq(schema.mediaCacheReports.id, created.id));
+    expect(storedRows).toHaveLength(1);
+    const [stored] = storedRows;
     expect(stored?.screen_id).toBe(screenId);
     expect(stored?.media_id).toBe(mediaId);
     expect(stored?.event_type).toBe('DOWNLOAD_FAILED');
     expect(stored?.status).toBe('OPEN');
     expect(stored?.http_status).toBe(503);
+    expect(stored?.received_at.toISOString()).toBe(created.received_at);
 
     const token = await generateTestToken(testUser.id);
     const cmsResponse = await server.inject({
@@ -112,5 +134,6 @@ describe('device media/cache failure reporting', () => {
       http_status: 503,
       message: 'CDN returned 503',
     });
+    queueSpy.mockRestore();
   });
 });

@@ -565,7 +565,7 @@ export default function MediaLibrary() {
 
       <Card className="p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as MediaTab)}>
             <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto p-1">
               <TabsTrigger value="all" className="shrink-0">All</TabsTrigger>
               <TabsTrigger value="image" className="shrink-0">Images</TabsTrigger>

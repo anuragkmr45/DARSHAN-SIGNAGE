@@ -1,7 +1,8 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { subject as caslSubject } from '@casl/ability';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor, type AppAbility } from '@/rbac';
 import { createConversationRepository } from '@/db/repositories/conversation';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
@@ -22,6 +23,15 @@ const startConversationSchema = z.object({
 const sendMessageSchema = z.object({
   content: z.string().min(1),
   attachments: z.array(z.any()).optional(),
+});
+
+export const conversationReadAccess = (ability: AppAbility) => ({
+  authorize: (conversation: object) => {
+    if (!(ability as any).can('read', caslSubject('Conversation', { ...conversation }))) {
+      throw AppError.forbidden('Forbidden');
+    }
+  },
+  allowLegacyMigration: canUnconditionally(ability, 'read', 'Conversation'),
 });
 
 export async function conversationRoutes(fastify: FastifyInstance) {
@@ -52,7 +62,11 @@ export async function conversationRoutes(fastify: FastifyInstance) {
           participant,
           ability
         )) throw AppError.notFound('User not found');
-        const conversation = await repo.getOrCreate(payload.sub, data.participant_id);
+        const conversation = await repo.getOrCreate(
+          payload.sub,
+          data.participant_id,
+          conversationReadAccess(ability).authorize
+        );
         return reply.status(CREATED).send(conversation);
       } catch (error) {
         logger.error(error, 'Start conversation error');
@@ -78,7 +92,7 @@ export async function conversationRoutes(fastify: FastifyInstance) {
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         if (!ability.can('read', 'Conversation')) throw AppError.forbidden('Forbidden');
 
-        const items = await repo.listForUser(payload.sub);
+        const items = await repo.listForUser(payload.sub, conversationReadAccess(ability));
         return reply.send({ items });
       } catch (error) {
         logger.error(error, 'List conversations error');
@@ -106,7 +120,11 @@ export async function conversationRoutes(fastify: FastifyInstance) {
 
         const page = (request.query as any).page ? parseInt((request.query as any).page as string) : 1;
         const limit = (request.query as any).limit ? parseInt((request.query as any).limit as string) : 50;
-        const result = await repo.listMessages((request.params as any).id, page, limit, payload.sub);
+        const access = conversationReadAccess(ability);
+        const result = await repo.listMessages(
+          (request.params as any).id, page, limit, payload.sub,
+          access.authorize, access.allowLegacyMigration
+        );
         return reply.send(result);
       } catch (error) {
         logger.error(error, 'List messages error');
@@ -133,7 +151,11 @@ export async function conversationRoutes(fastify: FastifyInstance) {
         if (!ability.can('read', 'Conversation')) throw AppError.forbidden('Forbidden');
 
         const data = sendMessageSchema.parse(request.body);
-        const message = await repo.addMessage((request.params as any).id, payload.sub, data.content, data.attachments);
+        const access = conversationReadAccess(ability);
+        const message = await repo.addMessage(
+          (request.params as any).id, payload.sub, data.content, data.attachments,
+          access.authorize, access.allowLegacyMigration
+        );
         return reply.status(CREATED).send(message);
       } catch (error) {
         logger.error(error, 'Send message error');
@@ -159,7 +181,11 @@ export async function conversationRoutes(fastify: FastifyInstance) {
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         if (!ability.can('read', 'Conversation')) throw AppError.forbidden('Forbidden');
 
-        const record = await repo.markRead((request.params as any).id, payload.sub);
+        const access = conversationReadAccess(ability);
+        const record = await repo.markRead(
+          (request.params as any).id, payload.sub,
+          access.authorize, access.allowLegacyMigration
+        );
         return reply.send(record);
       } catch (error) {
         logger.error(error, 'Read conversation error');

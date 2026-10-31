@@ -1,14 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { resolveValkeyUrl } from '@/config';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { config, resolveValkeyUrl } from '@/config';
 import { InMemoryDeviceNodeRegistry, ValkeyDeviceNodeRegistry } from '@/realtime/device-node-registry';
 import { InMemoryRealtimeBus, ValkeyRealtimeBus } from '@/realtime/realtime-bus';
 import {
   initializeRealtimeFanout,
+  getRealtimeFanoutState,
   publishWakeToDevice,
   registerDeviceForFanout,
   resetRealtimeFanoutForTests,
 } from '@/realtime/realtime-fanout';
 import { resetObservabilityMetricsForTests } from '@/observability/metrics';
+import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
 
 describe('realtime bus and Valkey fanout safety', () => {
   afterEach(async () => {
@@ -55,6 +58,41 @@ describe('realtime bus and Valkey fanout safety', () => {
     expect(result).toMatchObject({ status: 'published' });
     expect(nodeA).toEqual([message]);
     expect(nodeB).toEqual([message]);
+  });
+
+  it('splits a large role-repair invalidation into payload-safe broadcasts without dropping IDs', async () => {
+    const received: Array<{ user_ids?: string[]; sent_at?: string }> = [];
+    await getRealtimeFanoutState().bus.subscribeBroadcast((message) => received.push(message));
+    const userIds = Array.from({ length: 1_000 }, () => randomUUID());
+
+    await broadcastSessionInvalidation([...userIds, userIds[0]]);
+
+    expect(received.length).toBeGreaterThan(1);
+    expect(received.flatMap((message) => message.user_ids ?? [])).toEqual(userIds);
+    expect(new Set(received.map((message) => message.sent_at)).size).toBe(1);
+    for (const message of received) {
+      expect(Buffer.byteLength(JSON.stringify(message), 'utf8')).toBeLessThanOrEqual(config.WS_NOTIFICATION_MAX_BYTES);
+    }
+  });
+
+  it('stops retrying remaining invalidation batches when the bus is unavailable', async () => {
+    const bus = getRealtimeFanoutState().bus;
+    const publish = vi.spyOn(bus, 'publishBroadcast').mockResolvedValue({ status: 'unavailable', reason: 'test outage' });
+    const userIds = Array.from({ length: 1_000 }, () => randomUUID());
+
+    await broadcastSessionInvalidation(userIds);
+
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not turn a committed revocation into an error when broadcast unexpectedly throws', async () => {
+    const bus = getRealtimeFanoutState().bus;
+    const publish = vi.spyOn(bus, 'publishBroadcast').mockRejectedValue(new Error('test publish exception'));
+    const userIds = Array.from({ length: 1_000 }, () => randomUUID());
+
+    await expect(broadcastSessionInvalidation(userIds)).resolves.toBeUndefined();
+
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 
   it('enforces the WebSocket notification hard payload limit before publishing', async () => {

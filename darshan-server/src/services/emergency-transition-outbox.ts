@@ -1,7 +1,9 @@
 import { and, asc, eq, gt, inArray, like, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, getDatabasePool, schema } from '@/db';
 import { createPlaybackRefreshCommands } from '@/services/playback-refresh-commands';
 import { createLogger } from '@/utils/logger';
+import { MaintenanceCoordinator } from '@/maintenance';
+import { config as appConfig } from '@/config';
 
 const logger = createLogger('emergency-transition-outbox');
 const BATCH_SIZE = 100;
@@ -11,20 +13,22 @@ type TransitionRow = typeof schema.emergencyTransitionOutbox.$inferSelect;
 
 async function expireDueEmergencies() {
   const db = getDatabase();
-  const now = new Date();
+  const pool = getDatabasePool();
+  if (!pool) throw new Error('Database pool is not initialized.');
+  const maintenanceCoordinator = new MaintenanceCoordinator(pool);
   return await db.transaction(async (tx) => {
     const expired = await tx
       .update(schema.emergencies)
       .set({
         is_active: false,
         transition_version: sql`${schema.emergencies.transition_version} + 1`,
-        updated_at: now,
+        updated_at: sql`clock_timestamp()`,
       })
       .where(sql`
         ${schema.emergencies.is_active} = true
         AND ${schema.emergencies.cleared_at} IS NULL
         AND ${schema.emergencies.expires_at} IS NOT NULL
-        AND ${schema.emergencies.expires_at} <= ${now}
+        AND ${schema.emergencies.expires_at} <= clock_timestamp()
       `)
       .returning();
 
@@ -42,6 +46,7 @@ async function expireDueEmergencies() {
           actor_id: emergency.triggered_by,
         }))
       );
+      await maintenanceCoordinator.preemptForEmergency(tx, appConfig.BACKUP_SITE_ID ?? 'local');
     }
 
     return expired.length;

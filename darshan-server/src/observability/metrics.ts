@@ -2,6 +2,7 @@ import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config as appConfig } from '@/config';
 import { getDatabasePool } from '@/db';
+import { observeBackupRepositoryCapacity } from '@/backups/status-health';
 
 const registry = new Registry();
 
@@ -19,6 +20,8 @@ const OBSERVED_QUEUE_NAMES = [
   'chat:media-cleanup',
   'backup',
   'backup:check',
+  'backup:reconcile',
+  'backup:retention',
 ] as const;
 
 const OBSERVED_QUEUE_STATES = ['created', 'retry', 'active'] as const;
@@ -362,6 +365,130 @@ const jobProcessingDurationHistogram = new Histogram({
   labelNames: ['queue', 'result'],
   buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300],
   registers: [registry],
+});
+
+const backupRetentionCandidatesCounter = new Counter({
+  name: 'darshan_server_backup_retention_candidates_total',
+  help: 'Backup retention candidates and outcomes by bounded result or protection reason.',
+  labelNames: ['result'],
+  registers: [registry],
+});
+
+const backupRetentionBytesDeletedCounter = new Counter({
+  name: 'darshan_server_backup_retention_deleted_bytes_total',
+  help: 'Known encrypted repository bytes deleted by retention.',
+  registers: [registry],
+});
+
+const backupRetentionLastCheckGauge = new Gauge({
+  name: 'darshan_server_backup_retention_last_check_timestamp_seconds',
+  help: 'Database-clock timestamp of the last completed retention check.',
+  registers: [registry],
+});
+
+const backupRetentionLastSuccessGauge = new Gauge({
+  name: 'darshan_server_backup_retention_last_success_timestamp_seconds',
+  help: 'Database-clock timestamp of the last retention pass without failed, partial, or uncertain candidates.',
+  registers: [registry],
+});
+
+const backupRetentionLastFailureGauge = new Gauge({
+  name: 'darshan_server_backup_retention_last_failure_timestamp_seconds',
+  help: 'Database-clock timestamp of the last retention pass with failed, partial, or uncertain candidates.',
+  registers: [registry],
+});
+
+const backupCaptureLastDurationGauge = new Gauge({
+  name: 'darshan_server_backup_capture_last_duration_seconds',
+  help: 'Duration of the latest completed backup attempt from start through completion.',
+  registers: [registry],
+});
+const backupLastVerifiedSuccessGauge = new Gauge({
+  name: 'darshan_server_backup_last_verified_success_timestamp_seconds',
+  help: 'Timestamp of the latest independently publication-read-back verified backup success.',
+  registers: [registry],
+});
+const backupLastVerifiedSuccessAgeGauge = new Gauge({
+  name: 'darshan_server_backup_last_verified_success_age_seconds',
+  help: 'Database-clock age of the latest independently verified backup success.',
+  registers: [registry],
+});
+const backupActiveAttemptHeartbeatAgeGauge = new Gauge({
+  name: 'darshan_server_backup_active_attempt_heartbeat_age_seconds',
+  help: 'Oldest heartbeat age among active backup attempts; zero when none are active.',
+  registers: [registry],
+});
+const backupActiveAttemptStuckGauge = new Gauge({
+  name: 'darshan_server_backup_active_attempt_stuck',
+  help: 'Whether any active backup attempt has a stale heartbeat or expired lease.',
+  registers: [registry],
+});
+const backupRepositoryFreeBytesGauge = new Gauge({
+  name: 'darshan_server_backup_repository_free_bytes',
+  help: 'Free bytes on the identity-verified local encrypted backup repository.',
+  registers: [registry],
+});
+const backupRepositoryMinimumFreeBytesGauge = new Gauge({
+  name: 'darshan_server_backup_repository_minimum_free_bytes',
+  help: 'Configured minimum free-byte threshold for the local encrypted backup repository.',
+  registers: [registry],
+});
+const backupRetryExhaustedGauge = new Gauge({
+  name: 'darshan_server_backup_retry_exhausted_total',
+  help: 'Count of failed backup runs that exhausted the configured four-attempt retry sequence.',
+  registers: [registry],
+});
+const backupRetentionFailuresGauge = new Gauge({
+  name: 'darshan_server_backup_retention_failures',
+  help: 'Count of failed, partial, or uncertain retention operations requiring review.',
+  registers: [registry],
+});
+
+const backupHealthCollector = new Gauge({
+  name: 'darshan_server_backup_health_collector',
+  help: 'Collector liveness for bounded backup health projections.',
+  registers: [registry],
+  collect: async function collectBackupHealth() {
+    const pool = getDatabasePool();
+    if (!pool) { this.set(0); return; }
+    try {
+      const result = await pool.query<{ now_epoch: string; last_duration: string | null; last_verified_epoch: string | null;
+        verified_age: string | null; heartbeat_age: string; stuck: boolean; retry_exhausted: string; retention_failures: string }>(`
+        SELECT extract(epoch from clock_timestamp())::text AS now_epoch,
+          (SELECT extract(epoch from (completed_at - started_at))::text FROM backup_runs
+            WHERE status = 'COMPLETED' AND completed_at IS NOT NULL AND started_at IS NOT NULL
+            ORDER BY completed_at DESC, id DESC LIMIT 1) AS last_duration,
+          (SELECT extract(epoch from verified_good_at)::text FROM backup_execution_outcomes
+            WHERE outcome = 'SUCCEEDED' AND verification_provenance = 'PUBLICATION_READ_BACK'
+              AND verified_good_at IS NOT NULL ORDER BY verified_good_at DESC, backup_run_id DESC LIMIT 1) AS last_verified_epoch,
+          (SELECT extract(epoch from (clock_timestamp() - max(verified_good_at)))::text FROM backup_execution_outcomes
+            WHERE outcome = 'SUCCEEDED' AND verification_provenance = 'PUBLICATION_READ_BACK') AS verified_age,
+          COALESCE((SELECT extract(epoch from (clock_timestamp() - min(COALESCE(heartbeat_at, updated_at))))::text FROM backup_runs
+            WHERE status IN ('PENDING','RUNNING','RETRY_WAIT')), '0') AS heartbeat_age,
+          EXISTS (SELECT 1 FROM backup_runs WHERE status IN ('PENDING','RUNNING','RETRY_WAIT')
+            AND (COALESCE(heartbeat_at, updated_at) < clock_timestamp() - interval '5 minutes'
+              OR lease_expires_at < clock_timestamp())) AS stuck,
+          (SELECT count(*)::text FROM backup_runs WHERE status = 'FAILED' AND attempt_number >= 4) AS retry_exhausted,
+          (SELECT count(*)::text FROM backup_retention_operations WHERE status IN ('FAILED','PARTIAL','UNCERTAIN')) AS retention_failures`);
+      const row = result.rows[0];
+      const finite = (value: string | null) => value === null ? null : Number(value);
+      const setOptional = (gauge: Gauge, value: string | null) => {
+        gauge.reset(); const number = finite(value); if (number !== null && Number.isFinite(number) && number >= 0) gauge.set(number);
+      };
+      setOptional(backupCaptureLastDurationGauge, row?.last_duration ?? null);
+      setOptional(backupLastVerifiedSuccessGauge, row?.last_verified_epoch ?? null);
+      setOptional(backupLastVerifiedSuccessAgeGauge, row?.verified_age ?? null);
+      backupActiveAttemptHeartbeatAgeGauge.set(Math.max(0, finite(row?.heartbeat_age ?? '0') ?? 0));
+      backupActiveAttemptStuckGauge.set(row?.stuck ? 1 : 0);
+      backupRetryExhaustedGauge.set(Math.max(0, finite(row?.retry_exhausted ?? '0') ?? 0));
+      backupRetentionFailuresGauge.set(Math.max(0, finite(row?.retention_failures ?? '0') ?? 0));
+      const capacity = await observeBackupRepositoryCapacity();
+      backupRepositoryFreeBytesGauge.reset(); backupRepositoryMinimumFreeBytesGauge.reset();
+      if (capacity.available_bytes) backupRepositoryFreeBytesGauge.set(Number(capacity.available_bytes));
+      if (capacity.minimum_free_bytes) backupRepositoryMinimumFreeBytesGauge.set(Number(capacity.minimum_free_bytes));
+      this.set(1);
+    } catch { this.set(0); }
+  },
 });
 
 const pgBossQueueStateGauge = new Gauge({
@@ -819,6 +946,7 @@ const registeredCollectors = [
   commandOutboxOldestPendingAgeGauge,
   unresolvedMediaCacheReportsGauge,
   fleetPlayersGauge,
+  backupHealthCollector,
 ];
 void registeredCollectors;
 
@@ -1278,6 +1406,32 @@ export async function observeJobProcessing<T>(queue: string, work: () => Promise
   }
 }
 
+export function recordBackupRetentionSummary(summary: {
+  checked: number; eligible: number; claimed: number; deleted: number; partial: number; uncertain: number; failed: number;
+  protected: Readonly<Record<string, number>>; bytesDeleted: string;
+  budgetExhausted?: boolean;
+  lastCheckAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null;
+}) {
+  safeRecord(() => {
+    for (const [result, count] of Object.entries({ checked: summary.checked, eligible: summary.eligible,
+      claimed: summary.claimed, deleted: summary.deleted, partial: summary.partial,
+      uncertain: summary.uncertain, failed: summary.failed,
+      ...(summary.budgetExhausted ? { budget_exhausted: 1 } : {}), ...summary.protected })) {
+      if (count > 0) backupRetentionCandidatesCounter.inc({ result }, count);
+    }
+    const bytes = Number(summary.bytesDeleted);
+    if (Number.isSafeInteger(bytes) && bytes > 0) backupRetentionBytesDeletedCounter.inc(bytes);
+    const setTimestamp = (gauge: Gauge, value: string | null) => {
+      if (!value) return;
+      const milliseconds = Date.parse(value);
+      if (Number.isFinite(milliseconds)) gauge.set(milliseconds / 1_000);
+    };
+    setTimestamp(backupRetentionLastCheckGauge, summary.lastCheckAt);
+    setTimestamp(backupRetentionLastSuccessGauge, summary.lastSuccessAt);
+    setTimestamp(backupRetentionLastFailureGauge, summary.lastFailureAt);
+  });
+}
+
 function classifyS3Error(error: unknown): S3Result {
   const metadataStatus = typeof error === 'object' && error !== null ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode : undefined;
   if (metadataStatus === 404) return 'not_found';
@@ -1324,4 +1478,16 @@ export function resetObservabilityMetricsForTests() {
   pgBossAvailableGauge.set(0);
   latestHeartbeatAgeGauge.set(0);
   recentHeartbeatsGauge.set(0);
+  backupRetentionLastCheckGauge.set(0);
+  backupRetentionLastSuccessGauge.set(0);
+  backupRetentionLastFailureGauge.set(0);
+  backupCaptureLastDurationGauge.set(0);
+  backupLastVerifiedSuccessGauge.set(0);
+  backupLastVerifiedSuccessAgeGauge.set(0);
+  backupActiveAttemptHeartbeatAgeGauge.set(0);
+  backupActiveAttemptStuckGauge.set(0);
+  backupRepositoryFreeBytesGauge.set(0);
+  backupRepositoryMinimumFreeBytesGauge.set(0);
+  backupRetryExhaustedGauge.set(0);
+  backupRetentionFailuresGauge.set(0);
 }

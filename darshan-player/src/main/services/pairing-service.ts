@@ -39,6 +39,7 @@ const BACKEND_PAIRING_STATUS_VALUES = new Set<BackendPairingValidationStatus>([
   'ENVIRONMENT_MISMATCH',
   'RECLAIM_REQUIRED',
   'BACKEND_REPAIR_REQUIRED',
+  'RECOVERY_PAIRING_REVIEW_REQUIRED',
 ])
 
 export interface NetworkDiagnostics {

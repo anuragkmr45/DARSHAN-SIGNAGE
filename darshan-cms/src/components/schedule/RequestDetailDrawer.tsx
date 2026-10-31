@@ -103,7 +103,7 @@ const normalizeLayoutSlots = (spec?: unknown): LayoutSlot[] => {
 };
 
 export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerProps) {
-  const { can, isLoading: isAuthzLoading } = useAuthorization();
+  const { canRecord, isLoading: isAuthzLoading } = useAuthorization();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [currentRequest, setCurrentRequest] = useState(request);
@@ -116,8 +116,8 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
     setCurrentRequest(request);
   }, [request]);
 
-  const canApprove = can("approve", "ScheduleRequest") || can("manage", "ScheduleRequest");
-  const canPublish = can("publish", "ScheduleRequest") || can("manage", "Schedule");
+  const canApprove = canRecord("approve", "ScheduleRequest", currentRequest);
+  const canPublish = canRecord("publish", "ScheduleRequest", currentRequest);
   const allowApprove = !isAuthzLoading && canApprove;
   const allowPublish = !isAuthzLoading && canPublish;
   const allowTakeDown = !isAuthzLoading && canPublish;
@@ -317,7 +317,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   };
 
   const handlePublish = async () => {
-    const scheduleId = currentRequest.schedule_id || currentRequest.schedule?.id;
+    const scheduleId = currentRequest.schedule?.id;
     if (!scheduleId) {
       publishMutation.mutate({ id: currentRequest.id });
       return;
@@ -338,7 +338,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   };
 
   const handleApproveAndPublish = async (comment?: string) => {
-    const scheduleId = currentRequest.schedule_id || currentRequest.schedule?.id;
+    const scheduleId = currentRequest.schedule?.id;
     if (!scheduleId) {
       approvePublishMutation.mutate({ id: currentRequest.id, comment });
       return;

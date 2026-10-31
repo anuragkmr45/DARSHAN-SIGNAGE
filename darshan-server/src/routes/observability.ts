@@ -1,10 +1,13 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { createLogger } from '@/utils/logger';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
+import { getDatabase, schema } from '@/db';
+import { eq } from 'drizzle-orm';
+import { canObserveScreen } from '@/rbac/screen-access';
 import {
   buildMachineSummaries,
   buildObservabilityOverviewSummary,
@@ -20,9 +23,20 @@ async function requireAbility(request: FastifyRequest, subject: 'Dashboard' | 'S
 
   const payload = await verifyAccessToken(token);
   const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-  if (!ability.can('read', subject)) {
+  if (!canUnconditionally(ability, 'read', subject)) {
     throw AppError.forbidden('Forbidden');
   }
+  return ability;
+}
+
+async function requireScreenAbility(request: FastifyRequest, screenId: string) {
+  const token = extractTokenFromHeader(request.headers.authorization);
+  if (!token) throw AppError.unauthorized('Missing authorization header');
+  const payload = await verifyAccessToken(token);
+  const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+  const [screen] = await getDatabase().select().from(schema.screens).where(eq(schema.screens.id, screenId));
+  if (!screen) throw AppError.notFound('Screen not found');
+  if (!canObserveScreen(ability, screen)) throw AppError.forbidden('Forbidden');
 }
 
 export async function observabilityRoutes(fastify: FastifyInstance) {
@@ -81,7 +95,7 @@ export async function observabilityRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       try {
-        await requireAbility(request, 'Screen');
+        await requireScreenAbility(request, request.params.id);
         const summary = await buildScreenObservabilitySummary(request.params.id);
         if (!summary) {
           throw AppError.notFound('Screen not found');

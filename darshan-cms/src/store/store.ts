@@ -12,7 +12,10 @@ import {
 import storageSession from "redux-persist/lib/storage/session";
 import { rootReducer } from "./rootReducer";
 import { apiClient } from "@/api/apiClient";
+import { queryClient } from "@/api/queryClient";
 import { getCookie } from "@/lib/cookies";
+import { subscribeToAuthContextChanges } from "@/lib/authTabSync";
+import { disconnectAllRealtimeSockets } from "@/lib/realtimeSockets";
 import { clearAuth, setCredentials } from "./authSlice";
 
 const createNoopStorage = () => ({
@@ -70,8 +73,11 @@ apiClient.setRefreshedAuthHandler(({ token }) => {
     }),
   );
 });
-apiClient.setUnauthorizedHandler(() => {
+export const clearLocalAuthState = () => {
+  apiClient.markAuthContextChanged();
+  disconnectAllRealtimeSockets();
   store.dispatch(clearAuth());
+  queryClient.clear();
   if (typeof window === "undefined") return;
   try {
     window.sessionStorage.removeItem("persist:darshan");
@@ -79,7 +85,10 @@ apiClient.setUnauthorizedHandler(() => {
   } catch {
     /* ignore storage cleanup failures */
   }
-});
+};
+
+apiClient.setUnauthorizedHandler(clearLocalAuthState);
+subscribeToAuthContextChanges(clearLocalAuthState);
 
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;

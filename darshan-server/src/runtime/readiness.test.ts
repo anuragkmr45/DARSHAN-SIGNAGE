@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PgDialect } from 'drizzle-orm/pg-core';
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -71,6 +72,13 @@ describe('runtime readiness', () => {
     });
     expect(mocks.send).toHaveBeenCalledTimes(PRODUCTION_BUCKETS.length);
     expect(mocks.send.mock.calls.map(([command]) => command.input.Bucket)).toEqual([...PRODUCTION_BUCKETS]);
+
+    const executedSql = mocks.execute.mock.calls.map(([query]) => new PgDialect().sqlToQuery(query).sql);
+    const bootstrapSql = executedSql.find((query) => query.includes('production_bootstrap_states'));
+    expect(bootstrapSql).toContain('administrator.deleted_at IS NULL');
+    expect(bootstrapSql).toContain('role.is_system = true');
+    expect(bootstrapSql).toContain("administrator.ext->>'invite_status' = 'ACTIVATED'");
+    expect(bootstrapSql).toContain("administrator.ext->>'invite_token' IS NULL");
   });
 
   it('requires Valkey readiness when login throttling uses Valkey even if realtime fanout does not', async () => {

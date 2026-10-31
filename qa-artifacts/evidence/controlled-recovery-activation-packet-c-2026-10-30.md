@@ -1,0 +1,13 @@
+# Controlled Recovery Activation Packet C — Developer Evidence
+
+Date: 2026-10-30
+
+Scope is static/injected Packet 2 and E2E-harness foundation only. No live Docker, service, network, Firefox/browser, key, decrypt, import, restore, promotion, rollback or cleanup action was performed. Native recovery remains unavailable / `ENOTSUP`.
+
+Implemented: transaction-coupled reconciliation receipt; operation-store Packet 2 receipts/report aggregates; fixed application case executor; protected prior deployment byte snapshots; fixed promotion/rollback boundary and lock order; separate immutable release-03/0057 Packet C profile; fail-closed controlled CLI handler construction; readiness/report-first tiny disposable E2E stage machine with RAM/disk/swap/ownership gates.
+
+Developer verification passed: final focused Packet C and direct Packet 1/2/activation/runner/archive predecessors **7 files / 96 tests**; the single post-stability full recovery regression **33 files / 509 tests**; server build; recovery-test, scripts and production-CLI no-emit typechecks; focused lint with zero warnings/errors; bundle predecessor, schema/JSON/CSV/static secret checks and `git diff --check`. Two additional test-only assertions for promotion binding/fencing, approval replay and protected post-write rollback refusal were added after that full run and passed in the final focused run; product behavior did not change, so the full regression was not repeated. Live disposable Docker E2E, actual encrypted backup/decrypt/import, CMS/browser/player validation, worker drain, promotion/rollback rehearsal, Packet C activation enrollment, production topology and RTO remain Not Tested.
+
+## Independent-review correction addendum
+
+Prior deployment snapshots are now immutable at first publication: exact byte/binding/receipt replay is accepted, conflict is rejected, and a promotion retry reuses the original protected bytes instead of recapturing post-cutover state. Acceptance and rollback now hold `SITE → OPERATION → DEPLOYMENT_ROLE → PROMOTION` across protected reobservation, authorization, all effects and transition; a deterministic accept-versus-rollback fixture proves rollback observes resumed writes only after acceptance releases the lock and performs no rollback effect. Final correction results: focused **6 files / 82 tests**, direct predecessors **4 files / 11 tests**, server build, three no-emit typechecks and focused lint passed. The initial full recovery regression passed **33 files / 519 tests**; after the final behavior-changing exclusive-publication settlement correction, the approved repeat also passed **33/519**. No live cutover, write-resume, promotion or rollback was performed; disposable E2E and installed authority gates remain pending.

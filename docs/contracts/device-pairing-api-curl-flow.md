@@ -1063,7 +1063,7 @@ Endpoint:
 - `POST /api/v1/device-pairing/generate`
 
 Why this call exists:
-- admin can generate a pairing code for a known `device_id`
+- an authorized CMS actor can generate a pairing code for a known `device_id`
 - this is a CMS-driven pairing helper, not the normal first-time device-led flow
 
 ### Curl
@@ -1092,12 +1092,14 @@ curl 'http://localhost:3000/api/v1/device-pairing/generate' \
 
 ### Possible Error Responses
 
-`401 UNAUTHORIZED`, `403 FORBIDDEN`, `422 VALIDATION_ERROR`, `500 INTERNAL_ERROR`
+`401 UNAUTHORIZED`, `403 FORBIDDEN`, `409 CONFLICT`, `422 VALIDATION_ERROR`, `500 INTERNAL_ERROR`
 
 ### Important Notes
 
 - This call is for `CMS`, not the screen.
 - It is not required for the normal device-first pairing flow.
+- Existing-screen recovery requires both matching `update Screen` and `create DevicePairing` permissions.
+- `409 CONFLICT` means another generate/confirm/complete/revoke operation currently owns the device lifecycle; refresh and retry without assuming the earlier request failed.
 
 ## Header Rules For Authenticated Device Calls
 
@@ -1472,7 +1474,7 @@ Use this policy:
 ### What The Electron Player Should Notice
 
 - There is no dedicated standalone recovery endpoint.
-- In-place credential recovery is now possible through the existing admin-driven flow:
+- In-place credential recovery is available through the permission-controlled CMS flow:
   - `POST /api/v1/device-pairing/generate` with the current `device_id`
   - `POST /api/v1/device-pairing/confirm`
   - device-side `POST /api/v1/device-pairing/complete`
@@ -1481,7 +1483,7 @@ Use this policy:
   - local credential checks
   - runtime auth failures
   - `GET /api/v1/device-pairing/status`
-  - in-place recovery for existing screen identities when admin assistance is available
+  - in-place recovery for existing screen identities when an authorized CMS operator is available
   - fresh pairing flow when the old identity is gone or local identity is corrupt
 
 - Do not wipe local credentials on the first `403`.

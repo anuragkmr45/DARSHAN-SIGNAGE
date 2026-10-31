@@ -76,8 +76,10 @@ const formatDateTime = (value?: string | null) => {
 
 export default function Screens() {
   const queryClient = useQueryClient();
-  const { can } = useAuthorization();
-  const canManageScreens = can("manage", "Screen") || can("update", "Screen");
+  const { can, canRecord } = useAuthorization();
+  const canPairScreen = can("create", "Screen");
+  const canCreateGroup = can("create", "ScreenGroup");
+  const canReadPairings = can("read", "DevicePairing");
   const [search, setSearch] = useState("");
   const [isPairModalOpen, setIsPairModalOpen] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -142,7 +144,7 @@ export default function Screens() {
   const { data: pairingsData } = useQuery({
     queryKey: ["device-pairings"],
     queryFn: () => devicePairingApi.list({ page: 1, limit: 10 }),
-    enabled: canManageScreens,
+    enabled: canReadPairings,
   });
 
   const screens = useMemo(() => screensQuery.data?.items ?? [], [screensQuery.data?.items]);
@@ -280,10 +282,10 @@ export default function Screens() {
       <PageHeader
         title="Screens"
         description="Manage and monitor all display screens across locations"
-        actionLabel={canManageScreens ? "Pair Device" : undefined}
-        actionIcon={canManageScreens ? <QrCode className="h-4 w-4" /> : undefined}
+        actionLabel={canPairScreen ? "Pair Device" : undefined}
+        actionIcon={canPairScreen ? <QrCode className="h-4 w-4" /> : undefined}
         onAction={
-          canManageScreens
+          canPairScreen
             ? () => {
                 setRecoveryScreenId(null);
                 setIsPairModalOpen(true);
@@ -320,9 +322,9 @@ export default function Screens() {
         />
       </div>
 
-      {canManageScreens ? (
+      {canReadPairings ? (
         <PairingHealthPanel
-          canManage={canManageScreens}
+          canManage={canReadPairings}
           visibleScreenCount={screensQuery.data?.pagination?.total ?? screens.length}
         />
       ) : null}
@@ -425,6 +427,13 @@ export default function Screens() {
                             : "Awaiting scheduled playback");
                   const healthBadge = health_state || status || "offline";
                   const healthRank = HEALTH_PRIORITY[health_state || ""] ?? 99;
+                  const canRecoverScreen =
+                    canRecord("create", "DevicePairing", { device_id: id, screen_id: id }) &&
+                    canRecord("update", "Screen", screen);
+                  const canRevokeScreen =
+                    canRecord("manage", "DevicePairing", { device_id: id, screen_id: id }) ||
+                    canRecord("delete", "Screen", screen);
+                  const canDeleteScreen = canRecord("delete", "Screen", screen);
 
                   return (
                     <Card key={id} className="p-5 hover:shadow-lg transition-shadow space-y-4">
@@ -518,37 +527,43 @@ export default function Screens() {
                           <Eye className="h-3 w-3 mr-1" />
                           Details
                         </Button>
-                        {canManageScreens ? (
+                        {canRecoverScreen || canRevokeScreen || canDeleteScreen ? (
                           <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setRecoveryScreenId(id);
-                                setIsPairModalOpen(true);
-                              }}
-                              aria-label={`Recover Screen ${name}`}
-                            >
-                              <QrCode className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRevokeScreenPairing(screen)}
-                              disabled={revokePairing.isPending}
-                              aria-label={`Revoke pairing for ${name}`}
-                            >
-                              <ShieldAlert className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDeleteScreen(screen)}
-                              disabled={deleteScreen.isPending}
-                              aria-label={`Delete Screen ${name}`}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                            {canRecoverScreen ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setRecoveryScreenId(id);
+                                  setIsPairModalOpen(true);
+                                }}
+                                aria-label={`Recover Screen ${name}`}
+                              >
+                                <QrCode className="h-3 w-3" />
+                              </Button>
+                            ) : null}
+                            {canRevokeScreen ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRevokeScreenPairing(screen)}
+                                disabled={revokePairing.isPending}
+                                aria-label={`Revoke pairing for ${name}`}
+                              >
+                                <ShieldAlert className="h-3 w-3" />
+                              </Button>
+                            ) : null}
+                            {canDeleteScreen ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDeleteScreen(screen)}
+                                disabled={deleteScreen.isPending}
+                                aria-label={`Delete Screen ${name}`}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            ) : null}
                           </>
                         ) : null}
                       </div>
@@ -569,7 +584,7 @@ export default function Screens() {
               <Users className="h-4 w-4 text-primary" />
               <h2 className="font-semibold">Screen Groups</h2>
             </div>
-            {canManageScreens ? (
+            {canCreateGroup ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -592,6 +607,8 @@ export default function Screens() {
               <>
                 {screenGroups.map((group: ScreenGroup) => {
                   const { id, name, description, screen_ids, booked_until, active_items, upcoming_items } = group;
+                  const canUpdateGroup = canRecord("update", "ScreenGroup", group);
+                  const canDeleteGroup = canRecord("delete", "ScreenGroup", group);
 
                   return (
                     <div
@@ -614,24 +631,28 @@ export default function Screens() {
                           </p>
                         )}
                       </div>
-                      {canManageScreens ? (
+                      {canUpdateGroup || canDeleteGroup ? (
                         <div className="flex items-center gap-2 ml-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={(event) => handleEditGroup(id, event)}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={(event) => handleDeleteGroup(id, event)}
-                            className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          {canUpdateGroup ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={(event) => handleEditGroup(id, event)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
+                          {canDeleteGroup ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={(event) => handleDeleteGroup(id, event)}
+                              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -642,17 +663,19 @@ export default function Screens() {
           </div>
         </Card>
 
-        {canManageScreens ? (
+        {canReadPairings ? (
         <Card className="p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <QrCode className="h-4 w-4 text-primary" />
               <h2 className="font-semibold">Device Pairings</h2>
             </div>
-            <Button size="sm" onClick={() => setIsPairModalOpen(true)}>
-              <Plus className="h-3 w-3 mr-1" />
-              Pair Device
-            </Button>
+            {canPairScreen ? (
+              <Button size="sm" onClick={() => setIsPairModalOpen(true)}>
+                <Plus className="h-3 w-3 mr-1" />
+                Pair Device
+              </Button>
+            ) : null}
           </div>
 
           <p className="text-xs text-muted-foreground">

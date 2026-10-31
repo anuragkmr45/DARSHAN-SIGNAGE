@@ -7,10 +7,12 @@ import {
   isNull,
   or,
   sql,
+  type SQL,
 } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { AppError } from '@/utils/app-error';
-import { defineAbilityFor } from '@/rbac';
+import { canUnconditionally, defineAbilityFor } from '@/rbac';
+import { directorySignInEligiblePredicate } from '@/rbac/user-directory';
 
 type ConversationType = 'DM' | 'GROUP_CLOSED' | 'FORUM_OPEN';
 type ConversationState = 'ACTIVE' | 'ARCHIVED' | 'DELETED';
@@ -19,6 +21,21 @@ type ModerationAction = 'MUTE' | 'BAN' | 'UNMUTE' | 'UNBAN';
 type BookmarkType = 'LINK' | 'FILE' | 'MESSAGE';
 
 const INDEFINITE_UNTIL = new Date('9999-12-31T23:59:59.999Z');
+
+/**
+ * Automatic chat administration is a built-in-role compatibility feature.
+ * A role name alone must never grant it, and an invitation that cannot yet
+ * authenticate must not be materialized as an active conversation admin.
+ */
+export function systemChatAdminPredicate(): SQL {
+  return and(
+    eq(schema.users.is_active, true),
+    isNull(schema.users.deleted_at),
+    directorySignInEligiblePredicate(),
+    eq(schema.roles.is_system, true),
+    inArray(schema.roles.name, ['ADMIN', 'SUPER_ADMIN'])
+  )!;
+}
 
 function normalizeDmPair(a: string, b: string) {
   return a < b ? `${a}:${b}` : `${b}:${a}`;
@@ -40,7 +57,7 @@ export class ChatRepository {
       ));
     if (!user) return false;
     const ability = await defineAbilityFor(user.role_id, userId, user.department_id ?? undefined);
-    return ability.can('manage', 'Conversation');
+    return canUnconditionally(ability, 'manage', 'Conversation');
   }
 
   async getConversationById(id: string) {
@@ -119,7 +136,11 @@ export class ChatRepository {
     return row || null;
   }
 
-  async getOrCreateDm(userId: string, otherUserId: string) {
+  async getOrCreateDm(
+    userId: string,
+    otherUserId: string,
+    authorize?: (conversation: typeof schema.chatConversations.$inferSelect) => void
+  ) {
     const db = getDatabase();
     const pairKey = normalizeDmPair(userId, otherUserId);
     const findActiveDm = async () => {
@@ -161,6 +182,7 @@ export class ChatRepository {
 
     const existing = await findActiveDm();
     if (existing) {
+      authorize?.(existing);
       await upsertMembers(existing.id);
       return existing;
     }
@@ -191,6 +213,7 @@ export class ChatRepository {
       throw AppError.internal('Failed to create DM conversation');
     }
 
+    authorize?.(created);
     await upsertMembers(created.id);
     return created;
   }
@@ -201,12 +224,7 @@ export class ChatRepository {
       .select({ id: schema.users.id })
       .from(schema.users)
       .innerJoin(schema.roles, eq(schema.users.role_id, schema.roles.id))
-      .where(
-        and(
-          eq(schema.users.is_active, true),
-          inArray(schema.roles.name, ['ADMIN', 'SUPER_ADMIN'])
-        )
-      );
+      .where(systemChatAdminPredicate());
 
     if (!rows.length) return;
 

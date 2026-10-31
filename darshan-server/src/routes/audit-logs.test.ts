@@ -1,27 +1,12 @@
 import { randomUUID } from 'crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { eq, inArray } from 'drizzle-orm';
-import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
+import { inArray } from 'drizzle-orm';
+import { closeTestServer, createTestActor, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
-import { generateAccessToken } from '@/auth/jwt';
-import { createSessionRepository } from '@/db/repositories/session';
 
 async function issueSuperAdminToken() {
-  const db = getDatabase();
-  const [role] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'SUPER_ADMIN')).limit(1);
-  if (!role) {
-    throw new Error('SUPER_ADMIN role is required for audit log route tests');
-  }
-
-  const token = await generateAccessToken(testUser.id, testUser.email, role.id, role.name);
-  await createSessionRepository().create({
-    user_id: testUser.id,
-    access_jti: token.jti,
-    expires_at: token.expiresAt,
-  });
-
-  return token.token;
+  return (await createTestActor('SUPER_ADMIN')).token;
 }
 
 describe('Audit log routes', () => {

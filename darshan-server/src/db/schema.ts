@@ -13,6 +13,7 @@ import {
   index,
   check,
   foreignKey,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -114,6 +115,16 @@ export const roles = pgTable(
   })
 );
 
+// Departments must be declared before users because the user schema owns a
+// database-enforced reference to this table.
+export const departments = pgTable('departments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  created_at: timestamp('created_at').notNull().defaultNow(),
+  updated_at: timestamp('updated_at').notNull().defaultNow(),
+});
+
 export const users = pgTable(
   'users',
   {
@@ -134,7 +145,13 @@ export const users = pgTable(
   (table) => ({
     emailIdx: uniqueIndex('users_email_idx').on(table.email),
     roleIdx: index('users_role_id_idx').on(table.role_id),
+    departmentIdx: index('users_department_id_idx').on(table.department_id),
     deletedAtIdx: index('users_deleted_at_idx').on(table.deleted_at),
+    departmentFk: foreignKey({
+      columns: [table.department_id],
+      foreignColumns: [departments.id],
+      name: 'users_department_id_fk',
+    }).onDelete('restrict'),
     deletedByFk: foreignKey({
       columns: [table.deleted_by],
       foreignColumns: [table.id],
@@ -142,15 +159,6 @@ export const users = pgTable(
     }).onDelete('restrict'),
   })
 );
-
-// Departments table
-export const departments = pgTable('departments', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: varchar('name', { length: 255 }).notNull(),
-  description: text('description'),
-  created_at: timestamp('created_at').notNull().defaultNow(),
-  updated_at: timestamp('updated_at').notNull().defaultNow(),
-});
 
 // Sessions table (for JWT JTI revocation)
 export const sessions = pgTable(
@@ -453,7 +461,7 @@ export const screens = pgTable(
     orientation: varchar('orientation', { length: 50 }),
     device_info: jsonb('device_info'),
     status: screenStatusEnum('status').notNull().default('OFFLINE'),
-    last_heartbeat_at: timestamp('last_heartbeat_at'),
+    last_heartbeat_at: timestamp('last_heartbeat_at', { withTimezone: true }),
     current_schedule_id: uuid('current_schedule_id'),
     current_media_id: uuid('current_media_id'),
     current_scene_id: text('current_scene_id'),
@@ -678,6 +686,7 @@ export const deviceCommands = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     screen_id: uuid('screen_id').notNull(),
+    recovery_generation: uuid('recovery_generation'),
     type: commandTypeEnum('type').notNull(),
     status: commandStatusEnum('status').notNull().default('PENDING'),
     payload: jsonb('payload'),
@@ -794,6 +803,7 @@ export const deviceDesiredState = pgTable(
   'device_desired_state',
   {
     screen_id: uuid('screen_id').primaryKey(),
+    recovery_generation: uuid('recovery_generation'),
     snapshot_id: uuid('snapshot_id'),
     default_media_version: text('default_media_version'),
     emergency_version: text('emergency_version'),
@@ -818,6 +828,7 @@ export const deviceDesiredStateHistory = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     screen_id: uuid('screen_id').notNull(),
+    recovery_generation: uuid('recovery_generation'),
     state_version: bigint('state_version', { mode: 'number' }).notNull(),
     command_version: bigint('command_version', { mode: 'number' }).notNull(),
     snapshot_id: uuid('snapshot_id'),
@@ -1156,6 +1167,98 @@ export const schemaMigrations = pgTable('darshan_schema_migrations', {
   applied_at: timestamp('applied_at').notNull().defaultNow(),
 });
 
+// Recovery authority is application-visible but is advanced only by the
+// controlled operator workflow. It fences restored runtime state without
+// revoking the retained device certificate.
+export const siteRecoveryGenerations = pgTable('site_recovery_generations', {
+  site_id: varchar('site_id', { length: 63 }).primaryKey(),
+  generation: uuid('generation').notNull().unique(),
+  operation_id: uuid('operation_id').notNull().unique(),
+  source_run_id: uuid('source_run_id').notNull(),
+  source_manifest_sha256: varchar('source_manifest_sha256', { length: 64 }).notNull(),
+  state: varchar('state', { length: 40 }).notNull().default('APPLICATION_RECONCILED'),
+  reconciliation_completed_at: timestamp('reconciliation_completed_at', { withTimezone: true }),
+  reconciliation_receipt_sha256: varchar('reconciliation_receipt_sha256', { length: 64 }),
+  reconciliation_action_counts: jsonb('reconciliation_action_counts').$type<Record<string, string>>(),
+  write_freeze: boolean('write_freeze').notNull().default(true),
+  promoted_at: timestamp('promoted_at', { withTimezone: true }),
+  accepted_at: timestamp('accepted_at', { withTimezone: true }),
+  rolled_back_at: timestamp('rolled_back_at', { withTimezone: true }),
+  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const recoveryPairingReviews = pgTable(
+  'recovery_pairing_reviews',
+  {
+    generation: uuid('generation').notNull(),
+    certificate_id: uuid('certificate_id').notNull(),
+    screen_id: uuid('screen_id').notNull(),
+    status: varchar('status', { length: 16 }).notNull().default('PENDING'),
+    actor_id: uuid('actor_id'),
+    reason: text('reason'),
+    reviewed_at: timestamp('reviewed_at', { withTimezone: true }),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    identity: uniqueIndex('recovery_pairing_reviews_identity_idx').on(table.generation, table.certificate_id),
+    screenStatus: index('recovery_pairing_reviews_screen_idx').on(table.generation, table.screen_id, table.status),
+  })
+);
+
+export const recoveryGenerationChallenges = pgTable(
+  'recovery_generation_challenges',
+  {
+    id: uuid('id').primaryKey(),
+    generation: uuid('generation').notNull(),
+    screen_id: uuid('screen_id').notNull(),
+    certificate_id: uuid('certificate_id').notNull(),
+    client_nonce: varchar('client_nonce', { length: 172 }).notNull(),
+    server_challenge: varchar('server_challenge', { length: 172 }).notNull().unique(),
+    expires_at: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumed_at: timestamp('consumed_at', { withTimezone: true }),
+    receipt_sha256: varchar('receipt_sha256', { length: 64 }),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    identity: uniqueIndex('recovery_generation_challenges_identity_idx')
+      .on(table.generation, table.screen_id, table.certificate_id, table.client_nonce),
+    expiry: index('recovery_generation_challenges_expiry_idx').on(table.expires_at, table.consumed_at),
+  })
+);
+
+export const controlledRecoveryReportProjections = pgTable(
+  'controlled_recovery_report_projections',
+  {
+    operation_id: uuid('operation_id').primaryKey(),
+    site_id: varchar('site_id', { length: 63 }).notNull(),
+    sequence: bigint('sequence', { mode: 'number' }).notNull(),
+    report_sha256: varchar('report_sha256', { length: 64 }).notNull(),
+    envelope_sha256: varchar('envelope_sha256', { length: 64 }).notNull().unique(),
+    source_run_id: uuid('source_run_id').notNull(),
+    source_manifest_sha256: varchar('source_manifest_sha256', { length: 64 }).notNull(),
+    profile_sha256: varchar('profile_sha256', { length: 64 }).notNull(),
+    configuration_sha256: varchar('configuration_sha256', { length: 64 }).notNull(),
+    release_id: varchar('release_id', { length: 64 }).notNull(),
+    schema_migration_id: varchar('schema_migration_id', { length: 128 }).notNull(),
+    target_id: varchar('target_id', { length: 128 }).notNull(),
+    recovery_generation: uuid('recovery_generation'),
+    state: varchar('state', { length: 40 }).notNull(),
+    data_result: varchar('data_result', { length: 64 }).notNull(),
+    application_result: varchar('application_result', { length: 64 }).notNull(),
+    promotion_result: varchar('promotion_result', { length: 64 }).notNull(),
+    rollback_result: varchar('rollback_result', { length: 64 }).notNull(),
+    report_created_at: timestamp('report_created_at', { withTimezone: true }).notNull(),
+    imported_at: timestamp('imported_at', { withTimezone: true }).notNull().defaultNow(),
+    unexecuted_gates: jsonb('unexecuted_gates').$type<string[]>().notNull().default([]),
+  },
+  (table) => ({
+    siteSequenceIdx: uniqueIndex('controlled_recovery_report_site_sequence_idx').on(table.site_id, table.sequence),
+    latestIdx: index('controlled_recovery_report_latest_idx').on(table.site_id, table.sequence, table.imported_at),
+  }),
+);
+
 // One row per worker identity keeps readiness data bounded while allowing an
 // API process to reject a deployment whose worker is stale or from another release.
 export const workerRuntimeHeartbeats = pgTable(
@@ -1211,9 +1314,27 @@ export const backupRuns = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     trigger_type: varchar('trigger_type', { length: 20 }).notNull(),
     status: varchar('status', { length: 20 }).notNull().default('PENDING'),
+    repository_kind: varchar('repository_kind', { length: 32 }).notNull().default('LEGACY_OFF_HOST'),
+    coordination_key: varchar('coordination_key', { length: 100 }).notNull().default('site-backup'),
+    schedule_identity: varchar('schedule_identity', { length: 10 }),
+    stage: varchar('stage', { length: 32 }).notNull().default('QUEUED'),
+    attempt_id: uuid('attempt_id'),
+    attempt_number: integer('attempt_number').notNull().default(0),
+    queue_job_id: uuid('queue_job_id'),
+    heartbeat_at: timestamp('heartbeat_at', { withTimezone: true }),
+    lease_expires_at: timestamp('lease_expires_at', { withTimezone: true }),
+    deadline_at: timestamp('deadline_at', { withTimezone: true }),
+    retry_at: timestamp('retry_at', { withTimezone: true }),
+    cancellation_requested_at: timestamp('cancellation_requested_at', { withTimezone: true }),
+    error_code: varchar('error_code', { length: 100 }),
+    captured_at: timestamp('captured_at', { withTimezone: true }),
+    verified_at: timestamp('verified_at', { withTimezone: true }),
+    repository_id: uuid('repository_id'),
+    manifest_sha256: varchar('manifest_sha256', { length: 64 }),
+    repository_manifest: jsonb('repository_manifest').$type<Record<string, unknown>>(),
     triggered_by: uuid('triggered_by'),
-    started_at: timestamp('started_at'),
-    completed_at: timestamp('completed_at'),
+    started_at: timestamp('started_at', { withTimezone: true }),
+    completed_at: timestamp('completed_at', { withTimezone: true }),
     error_message: text('error_message'),
     files: jsonb('files').$type<
       Array<{
@@ -1246,12 +1367,462 @@ export const backupRuns = pgTable(
         content_type: string;
       }>;
     }>(),
-    created_at: timestamp('created_at').notNull().defaultNow(),
-    updated_at: timestamp('updated_at').notNull().defaultNow(),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     statusIdx: index('backup_runs_status_idx').on(table.status),
+    activeCoordinationIdx: uniqueIndex('backup_runs_one_active_execution_idx')
+      .on(table.coordination_key)
+      .where(sql`${table.status} in ('PENDING', 'RUNNING', 'RETRY_WAIT')`),
+    scheduledIdentityIdx: uniqueIndex('backup_runs_automatic_schedule_identity_idx')
+      .on(table.coordination_key, table.schedule_identity)
+      .where(sql`${table.trigger_type} = 'AUTOMATIC' and ${table.schedule_identity} is not null`),
     createdAtIdx: index('backup_runs_created_at_idx').on(table.created_at),
+  })
+);
+
+/**
+ * The single PostgreSQL-authoritative coordination row for a logical site.
+ * Every admission, capture transition, seal, expiry and emergency preemption
+ * linearizes by locking this row.
+ */
+export const maintenanceSiteState = pgTable(
+  'maintenance_site_state',
+  {
+    site_key: varchar('site_key', { length: 100 }).primaryKey(),
+    admission_open: boolean('admission_open').notNull().default(true),
+    generation: bigint('generation', { mode: 'number' }).notNull().default(0),
+    current_capture_id: uuid('current_capture_id').references(
+      (): AnyPgColumn => backupCaptures.id,
+      { onDelete: 'restrict' }
+    ),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  }
+);
+
+export const backupCaptures = pgTable(
+  'backup_captures',
+  {
+    id: uuid('id').primaryKey(),
+    site_key: varchar('site_key', { length: 100 }).notNull().references(() => maintenanceSiteState.site_key, { onDelete: 'restrict' }),
+    generation: bigint('generation', { mode: 'number' }).notNull(),
+    backup_run_id: uuid('backup_run_id').notNull().references(() => backupRuns.id, { onDelete: 'restrict' }),
+    backup_attempt_id: uuid('backup_attempt_id').notNull(),
+    capture_owner: varchar('capture_owner', { length: 160 }).notNull(),
+    status: varchar('status', { length: 20 }).notNull(),
+    started_at: timestamp('started_at', { withTimezone: true }).notNull(),
+    deadline_at: timestamp('deadline_at', { withTimezone: true }).notNull(),
+    staging_inventory_digest: varchar('staging_inventory_digest', { length: 64 }),
+    sealed_at: timestamp('sealed_at', { withTimezone: true }),
+    reopened_at: timestamp('reopened_at', { withTimezone: true }),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    siteGenerationUnique: uniqueIndex('backup_captures_site_generation_unique').on(table.site_key, table.generation),
+    attemptUnique: uniqueIndex('backup_captures_attempt_unique').on(table.backup_run_id, table.backup_attempt_id),
+    siteStatusIdx: index('backup_captures_site_status_idx').on(table.site_key, table.status, table.started_at),
+    statusCheck: check(
+      'backup_captures_status_check',
+      sql`${table.status} in ('DRAINING', 'COPYING', 'SEALED', 'ABORTED', 'EXPIRED', 'PREEMPTED')`
+    ),
+    digestCheck: check(
+      'backup_captures_digest_check',
+      sql`${table.staging_inventory_digest} is null or ${table.staging_inventory_digest} ~ '^[a-f0-9]{64}$'`
+    ),
+    exactDeadlineCheck: check(
+      'backup_captures_exact_deadline_check',
+      sql`${table.deadline_at} = ${table.started_at} + interval '300 seconds'`
+    ),
+    terminalEvidenceCheck: check(
+      'backup_captures_terminal_evidence_check',
+      sql`(${table.status} in ('DRAINING', 'COPYING') and ${table.staging_inventory_digest} is null and ${table.sealed_at} is null and ${table.reopened_at} is null)
+        or (${table.status} = 'SEALED' and ${table.staging_inventory_digest} is not null and ${table.sealed_at} is not null and ${table.reopened_at} is not null)
+        or (${table.status} in ('ABORTED', 'EXPIRED', 'PREEMPTED') and ${table.staging_inventory_digest} is null and ${table.sealed_at} is null and ${table.reopened_at} is not null)`
+    ),
+  })
+);
+
+/**
+ * Durable intent and evidence for the filesystem publication side of a local
+ * backup. A directory rename and the backup_runs completion update cannot be
+ * one transaction; this row lets restart reconciliation determine whether the
+ * exact current attempt published bytes without granting a stale attempt new
+ * authority.
+ */
+export const backupPublications = pgTable(
+  'backup_publications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    backup_run_id: uuid('backup_run_id').notNull().references(() => backupRuns.id, { onDelete: 'restrict' }),
+    backup_attempt_id: uuid('backup_attempt_id').notNull(),
+    capture_id: uuid('capture_id').notNull().references(() => backupCaptures.id, { onDelete: 'restrict' }),
+    repository_id: uuid('repository_id').notNull(),
+    manifest_sha256: varchar('manifest_sha256', { length: 64 }).notNull(),
+    incomplete_relative_path: varchar('incomplete_relative_path', { length: 512 }).notNull(),
+    published_relative_path: varchar('published_relative_path', { length: 512 }).notNull(),
+    status: varchar('status', { length: 20 }).notNull().default('PREPARED'),
+    prepared_at: timestamp('prepared_at', { withTimezone: true }).notNull().defaultNow(),
+    published_at: timestamp('published_at', { withTimezone: true }),
+    verified_at: timestamp('verified_at', { withTimezone: true }),
+    error_code: varchar('error_code', { length: 100 }),
+    error_message: text('error_message'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    attemptUnique: uniqueIndex('backup_publications_run_attempt_unique')
+      .on(table.backup_run_id, table.backup_attempt_id),
+    repositoryManifestUnique: uniqueIndex('backup_publications_repository_manifest_unique')
+      .on(table.repository_id, table.manifest_sha256),
+    statusIdx: index('backup_publications_status_idx').on(table.status, table.updated_at),
+    statusCheck: check(
+      'backup_publications_status_check',
+      sql`${table.status} in ('PREPARED', 'PUBLISHED', 'VERIFIED', 'UNCERTAIN', 'QUARANTINED')`
+    ),
+    digestCheck: check(
+      'backup_publications_manifest_digest_check',
+      sql`${table.manifest_sha256} ~ '^[a-f0-9]{64}$'`
+    ),
+    evidenceCheck: check(
+      'backup_publications_evidence_check',
+      sql`(${table.status} = 'PREPARED' and ${table.published_at} is null and ${table.verified_at} is null)
+        or (${table.status} in ('PUBLISHED', 'UNCERTAIN', 'QUARANTINED') and ${table.verified_at} is null)
+        or (${table.status} = 'VERIFIED' and ${table.published_at} is not null and ${table.verified_at} is not null)`
+    ),
+  })
+);
+
+/**
+ * Immutable terminal execution evidence. Artifact deletion mutates the
+ * lifecycle row below and never rewrites whether the backup execution
+ * succeeded or how a verified-good determination was proven.
+ */
+export const backupExecutionOutcomes = pgTable(
+  'backup_execution_outcomes',
+  {
+    backup_run_id: uuid('backup_run_id').primaryKey().references(() => backupRuns.id, { onDelete: 'restrict' }),
+    site_key: varchar('site_key', { length: 100 }).notNull(),
+    repository_id: uuid('repository_id'),
+    outcome: varchar('outcome', { length: 32 }).notNull(),
+    completed_at: timestamp('completed_at', { withTimezone: true }).notNull(),
+    captured_at: timestamp('captured_at', { withTimezone: true }),
+    verification_provenance: varchar('verification_provenance', { length: 32 }).notNull().default('NONE'),
+    publication_id: uuid('publication_id').references(() => backupPublications.id, { onDelete: 'restrict' }),
+    verified_good_at: timestamp('verified_good_at', { withTimezone: true }),
+    manifest_sha256: varchar('manifest_sha256', { length: 64 }),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    publicationUnique: uniqueIndex('backup_execution_outcomes_publication_unique')
+      .on(table.publication_id)
+      .where(sql`${table.publication_id} is not null`),
+    identityUnique: uniqueIndex('backup_execution_outcomes_identity_unique')
+      .on(table.backup_run_id, table.site_key, table.repository_id, table.manifest_sha256),
+    retentionOrderIdx: index('backup_execution_outcomes_retention_order_idx')
+      .on(table.site_key, table.repository_id, table.captured_at, table.backup_run_id)
+      .where(sql`${table.verification_provenance} = 'PUBLICATION_READ_BACK'`),
+    outcomeCheck: check(
+      'backup_execution_outcomes_outcome_check',
+      sql`${table.outcome} in ('SUCCEEDED', 'FAILED', 'CANCELLED')`
+    ),
+    provenanceCheck: check(
+      'backup_execution_outcomes_provenance_check',
+      sql`(${table.verification_provenance} = 'PUBLICATION_READ_BACK'
+          and ${table.outcome} = 'SUCCEEDED'
+          and ${table.repository_id} is not null
+          and ${table.publication_id} is not null
+          and ${table.captured_at} is not null
+          and ${table.verified_good_at} is not null
+          and ${table.manifest_sha256} ~ '^[a-f0-9]{64}$')
+        or (${table.verification_provenance} = 'LEGACY_UNVERIFIED'
+          and ${table.outcome} = 'SUCCEEDED'
+          and ${table.publication_id} is null
+          and ${table.verified_good_at} is null)
+        or (${table.verification_provenance} = 'NONE'
+          and ${table.outcome} in ('FAILED', 'CANCELLED')
+          and ${table.publication_id} is null
+          and ${table.verified_good_at} is null)`
+    ),
+  })
+);
+
+export const backupArtifactLifecycles = pgTable(
+  'backup_artifact_lifecycles',
+  {
+    backup_run_id: uuid('backup_run_id').primaryKey().references(() => backupExecutionOutcomes.backup_run_id, { onDelete: 'restrict' }),
+    state: varchar('state', { length: 32 }).notNull().default('UNCERTAIN'),
+    state_version: integer('state_version').notNull().default(0),
+    last_error_code: varchar('last_error_code', { length: 100 }),
+    last_error_message: text('last_error_message'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    stateIdx: index('backup_artifact_lifecycles_state_idx').on(table.state, table.updated_at),
+    stateCheck: check(
+      'backup_artifact_lifecycles_state_check',
+      sql`${table.state} in ('AVAILABLE', 'DELETE_REQUESTED', 'DELETING', 'PARTIALLY_DELETED', 'DELETED', 'UNCERTAIN', 'QUARANTINED')`
+    ),
+    versionCheck: check('backup_artifact_lifecycles_version_check', sql`${table.state_version} >= 0`),
+    errorCheck: check(
+      'backup_artifact_lifecycles_error_check',
+      sql`(${table.last_error_code} is null) = (${table.last_error_message} is null)`
+    ),
+  })
+);
+
+export const backupRetentionOperations = pgTable(
+  'backup_retention_operations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    backup_run_id: uuid('backup_run_id').notNull().references(() => backupArtifactLifecycles.backup_run_id, { onDelete: 'restrict' }),
+    operation_kind: varchar('operation_kind', { length: 32 }).notNull(),
+    status: varchar('status', { length: 20 }).notNull().default('PREPARED'),
+    requested_by: uuid('requested_by').references(() => users.id, { onDelete: 'restrict' }),
+    request_action: varchar('request_action', { length: 32 }),
+    idempotency_key: varchar('idempotency_key', { length: 200 }),
+    owner_token: uuid('owner_token').notNull().defaultRandom(),
+    fence_token: uuid('fence_token').notNull(),
+    expected_lifecycle_version: integer('expected_lifecycle_version').notNull(),
+    requested_at: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    started_at: timestamp('started_at', { withTimezone: true }),
+    completed_at: timestamp('completed_at', { withTimezone: true }),
+    retry_at: timestamp('retry_at', { withTimezone: true }),
+    error_code: varchar('error_code', { length: 100 }),
+    error_message: text('error_message'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    unresolvedUnique: uniqueIndex('backup_retention_operations_one_unresolved_idx')
+      .on(table.backup_run_id)
+      .where(sql`${table.status} in ('PREPARED', 'RUNNING', 'RETRY_WAIT', 'PARTIAL', 'UNCERTAIN')`),
+    retryIdx: index('backup_retention_operations_retry_idx')
+      .on(table.retry_at)
+      .where(sql`${table.status} in ('RETRY_WAIT', 'PARTIAL')`),
+    ownerIdx: index('backup_retention_operations_owner_idx').on(table.owner_token, table.fence_token),
+    requestIdempotencyUnique: uniqueIndex('backup_retention_operations_request_idempotency_unique')
+      .on(table.requested_by, table.request_action, table.idempotency_key)
+      .where(sql`${table.idempotency_key} is not null`),
+    kindCheck: check(
+      'backup_retention_operations_kind_check',
+      sql`${table.operation_kind} in ('AUTOMATIC_RETENTION', 'MANUAL_DELETE')`
+    ),
+    requestMetadataCheck: check(
+      'backup_retention_operations_request_metadata_check',
+      sql`(${table.operation_kind} = 'MANUAL_DELETE'
+          and ${table.requested_by} is not null and ${table.request_action} = 'delete')
+        or (${table.operation_kind} = 'AUTOMATIC_RETENTION'
+          and ${table.requested_by} is null and ${table.request_action} is null and ${table.idempotency_key} is null)`
+    ),
+    statusCheck: check(
+      'backup_retention_operations_status_check',
+      sql`${table.status} in ('PREPARED', 'RUNNING', 'RETRY_WAIT', 'SUCCEEDED', 'PARTIAL', 'FAILED', 'UNCERTAIN')`
+    ),
+    versionCheck: check('backup_retention_operations_version_check', sql`${table.expected_lifecycle_version} >= 0`),
+    terminalCheck: check(
+      'backup_retention_operations_terminal_check',
+      sql`(${table.status} = 'SUCCEEDED' and ${table.completed_at} is not null) or (${table.status} <> 'SUCCEEDED')`
+    ),
+  })
+);
+
+export const backupRetentionRequestIdempotency = pgTable(
+  'backup_retention_request_idempotency',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    requested_by: uuid('requested_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    request_action: varchar('request_action', { length: 32 }).notNull(),
+    backup_run_id: uuid('backup_run_id').notNull().references(() => backupRuns.id, { onDelete: 'restrict' }),
+    operation_id: uuid('operation_id').notNull().references(() => backupRetentionOperations.id, { onDelete: 'restrict' }),
+    idempotency_key: varchar('idempotency_key', { length: 200 }).notNull(),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorKeyUnique: uniqueIndex('backup_retention_request_idempotency_actor_key_unique')
+      .on(table.requested_by, table.request_action, table.idempotency_key),
+    operationIdx: index('backup_retention_request_idempotency_operation_idx').on(table.operation_id),
+    actionCheck: check('backup_retention_request_idempotency_action_check', sql`${table.request_action} = 'delete'`),
+  })
+);
+
+export const backupRetentionArtifactProgress = pgTable(
+  'backup_retention_artifact_progress',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    operation_id: uuid('operation_id').notNull().references(() => backupRetentionOperations.id, { onDelete: 'restrict' }),
+    artifact_key: varchar('artifact_key', { length: 1024 }).notNull(),
+    artifact_kind: varchar('artifact_kind', { length: 32 }).notNull(),
+    expected_sha256: varchar('expected_sha256', { length: 64 }),
+    expected_size_bytes: varchar('expected_size_bytes', { length: 40 }),
+    status: varchar('status', { length: 20 }).notNull().default('PENDING'),
+    attempt_count: integer('attempt_count').notNull().default(0),
+    deleted_at: timestamp('deleted_at', { withTimezone: true }),
+    error_code: varchar('error_code', { length: 100 }),
+    error_message: text('error_message'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    identityUnique: uniqueIndex('backup_retention_artifact_progress_identity_unique')
+      .on(table.operation_id, table.artifact_key),
+    statusIdx: index('backup_retention_artifact_progress_status_idx')
+      .on(table.operation_id, table.status, table.artifact_key),
+    kindCheck: check(
+      'backup_retention_artifact_progress_kind_check',
+      sql`${table.artifact_kind} in ('DATABASE', 'OBJECTS', 'CONFIGURATION', 'MANIFEST', 'SIGNATURE', 'OTHER')`
+    ),
+    statusCheck: check(
+      'backup_retention_artifact_progress_status_check',
+      sql`${table.status} in ('PENDING', 'DELETING', 'DELETED', 'FAILED', 'UNCERTAIN')`
+    ),
+    digestCheck: check(
+      'backup_retention_artifact_progress_digest_check',
+      sql`${table.expected_sha256} is null or ${table.expected_sha256} ~ '^[a-f0-9]{64}$'`
+    ),
+    sizeCheck: check(
+      'backup_retention_artifact_progress_size_check',
+      sql`${table.expected_size_bytes} is null or ${table.expected_size_bytes} ~ '^(0|[1-9][0-9]*)$'`
+    ),
+    attemptCheck: check('backup_retention_artifact_progress_attempt_check', sql`${table.attempt_count} >= 0`),
+    deletedCheck: check(
+      'backup_retention_artifact_progress_deleted_check',
+      sql`(${table.status} = 'DELETED' and ${table.deleted_at} is not null)
+        or (${table.status} <> 'DELETED' and ${table.deleted_at} is null)`
+    ),
+  })
+);
+
+export const backupRestoreHoldProjections = pgTable(
+  'backup_restore_hold_projections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    backup_run_id: uuid('backup_run_id').notNull().references(() => backupArtifactLifecycles.backup_run_id, { onDelete: 'restrict' }),
+    restore_operation_id: uuid('restore_operation_id').notNull(),
+    site_key: varchar('site_key', { length: 100 }).notNull(),
+    repository_id: uuid('repository_id').notNull(),
+    manifest_sha256: varchar('manifest_sha256', { length: 64 }).notNull(),
+    capture_generation: bigint('capture_generation', { mode: 'bigint' }).notNull(),
+    owner_token: uuid('owner_token').notNull(),
+    status: varchar('status', { length: 20 }).notNull().default('ACTIVE'),
+    projection_version: integer('projection_version').notNull().default(0),
+    acquired_at: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
+    released_at: timestamp('released_at', { withTimezone: true }),
+    uncertain_at: timestamp('uncertain_at', { withTimezone: true }),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    restoreUnique: uniqueIndex('backup_restore_hold_projections_restore_unique').on(table.restore_operation_id),
+    identityFk: foreignKey({
+      columns: [table.backup_run_id, table.site_key, table.repository_id, table.manifest_sha256],
+      foreignColumns: [
+        backupExecutionOutcomes.backup_run_id,
+        backupExecutionOutcomes.site_key,
+        backupExecutionOutcomes.repository_id,
+        backupExecutionOutcomes.manifest_sha256,
+      ],
+      name: 'backup_restore_hold_projections_identity_fk',
+    }).onDelete('restrict'),
+    protectionIdx: index('backup_restore_hold_projections_protection_idx')
+      .on(
+        table.site_key,
+        table.repository_id,
+        table.manifest_sha256,
+        table.capture_generation,
+        table.backup_run_id,
+        table.status
+      )
+      .where(sql`${table.status} in ('ACTIVE', 'UNCERTAIN')`),
+    statusCheck: check(
+      'backup_restore_hold_projections_status_check',
+      sql`${table.status} in ('ACTIVE', 'RELEASED', 'UNCERTAIN')`
+    ),
+    siteCheck: check(
+      'backup_restore_hold_projections_site_check',
+      sql`${table.site_key} ~ '^[a-z0-9][a-z0-9_-]{0,62}$'`
+    ),
+    digestCheck: check(
+      'backup_restore_hold_projections_digest_check',
+      sql`${table.manifest_sha256} ~ '^[a-f0-9]{64}$'`
+    ),
+    generationCheck: check(
+      'backup_restore_hold_projections_generation_check',
+      sql`${table.capture_generation} > 0`
+    ),
+    versionCheck: check('backup_restore_hold_projections_version_check', sql`${table.projection_version} >= 0`),
+    evidenceCheck: check(
+      'backup_restore_hold_projections_evidence_check',
+      sql`(${table.status} = 'ACTIVE' and ${table.released_at} is null and ${table.uncertain_at} is null)
+        or (${table.status} = 'RELEASED' and ${table.released_at} is not null)
+        or (${table.status} = 'UNCERTAIN' and ${table.released_at} is null and ${table.uncertain_at} is not null)`
+    ),
+  })
+);
+
+export const backupRetentionTombstones = pgTable(
+  'backup_retention_tombstones',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    backup_run_id: uuid('backup_run_id').notNull().references(() => backupExecutionOutcomes.backup_run_id, { onDelete: 'restrict' }),
+    operation_id: uuid('operation_id').notNull().references(() => backupRetentionOperations.id, { onDelete: 'restrict' }),
+    site_key: varchar('site_key', { length: 100 }).notNull(),
+    repository_id: uuid('repository_id'),
+    manifest_sha256: varchar('manifest_sha256', { length: 64 }),
+    disposition: varchar('disposition', { length: 20 }).notNull(),
+    artifact_summary: jsonb('artifact_summary').$type<Record<string, unknown>>().notNull(),
+    reason_code: varchar('reason_code', { length: 100 }).notNull(),
+    recorded_at: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    runUnique: uniqueIndex('backup_retention_tombstones_run_unique').on(table.backup_run_id),
+    repositoryIdx: index('backup_retention_tombstones_repository_idx')
+      .on(table.site_key, table.repository_id, table.recorded_at),
+    dispositionCheck: check(
+      'backup_retention_tombstones_disposition_check',
+      sql`${table.disposition} in ('PARTIAL', 'DELETED')`
+    ),
+    digestCheck: check(
+      'backup_retention_tombstones_digest_check',
+      sql`${table.manifest_sha256} is null or ${table.manifest_sha256} ~ '^[a-f0-9]{64}$'`
+    ),
+  })
+);
+
+export const maintenanceOperations = pgTable(
+  'maintenance_operations',
+  {
+    id: uuid('id').primaryKey(),
+    site_key: varchar('site_key', { length: 100 }).notNull().references(() => maintenanceSiteState.site_key, { onDelete: 'restrict' }),
+    generation: bigint('generation', { mode: 'number' }).notNull(),
+    owner_token: uuid('owner_token').notNull(),
+    operation_kind: varchar('operation_kind', { length: 80 }).notNull(),
+    status: varchar('status', { length: 20 }).notNull().default('ACTIVE'),
+    admitted_at: timestamp('admitted_at', { withTimezone: true }).notNull().defaultNow(),
+    lease_expires_at: timestamp('lease_expires_at', { withTimezone: true }).notNull(),
+    completed_at: timestamp('completed_at', { withTimezone: true }),
+    uncertain_at: timestamp('uncertain_at', { withTimezone: true }),
+    resolved_at: timestamp('resolved_at', { withTimezone: true }),
+    resolution: varchar('resolution', { length: 32 }),
+    resolution_note: text('resolution_note'),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    unresolvedIdx: index('maintenance_operations_unresolved_idx')
+      .on(table.site_key, table.status, table.admitted_at)
+      .where(sql`${table.status} in ('ACTIVE', 'UNCERTAIN')`),
+    leaseIdx: index('maintenance_operations_lease_idx')
+      .on(table.lease_expires_at)
+      .where(sql`${table.status} = 'ACTIVE'`),
+    statusCheck: check(
+      'maintenance_operations_status_check',
+      sql`${table.status} in ('ACTIVE', 'COMPLETED', 'UNCERTAIN')`
+    ),
+    resolutionCheck: check(
+      'maintenance_operations_resolution_check',
+      sql`${table.resolution} is null or ${table.resolution} in ('CONFIRMED_COMPLETED', 'CONFIRMED_ABORTED')`
+    ),
   })
 );
 

@@ -5,6 +5,7 @@ import {
   lockUserAndAssertSuperAdminSurvives,
 } from '@/auth/super-admin-invariant';
 import { schema, type Database } from '@/db';
+import { findSystemRoleIdentityConflict } from '@/rbac/system-roles';
 import { AppError } from '@/utils/app-error';
 import { acquireTransactionAdvisoryLock, type BoundedAdvisoryLockOptions } from './bounded-advisory-lock';
 
@@ -13,6 +14,7 @@ export type AdminAccountInspection = {
   email: string;
   isActive: boolean;
   roleName: string | null;
+  roleIsSystem: boolean | null;
 };
 
 export type AdminRecoveryResult =
@@ -84,6 +86,7 @@ async function findAccountsByEmail(db: Database, email: string): Promise<AdminAc
       email: schema.users.email,
       isActive: schema.users.is_active,
       roleName: schema.roles.name,
+      roleIsSystem: schema.roles.is_system,
     })
     .from(schema.users)
     .leftJoin(schema.roles, eq(schema.users.role_id, schema.roles.id))
@@ -117,13 +120,17 @@ export async function createAdministrator(
   return db.transaction(async (tx) => {
     await tx.execute(sql.raw("SET LOCAL lock_timeout = '30s'"));
     await acquireTransactionAdvisoryLock(tx as Database, 'darshan:administrator-maintenance', input.lockOptions);
+    const roleConflict = await findSystemRoleIdentityConflict(tx);
+    if (roleConflict) {
+      return { status: 'conflict', reason: `Reserved role ${roleConflict.name} does not have a canonical built-in identity; review the database before administrator maintenance.` };
+    }
     const existing = await findAccountsByEmail(tx as Database, email);
     if (existing.length > 0) {
       return { status: 'conflict', reason: 'An account already exists with this normalized email address.' };
     }
 
     const [role] = await tx
-      .select({ id: schema.roles.id, name: schema.roles.name })
+      .select({ id: schema.roles.id, name: schema.roles.name, is_system: schema.roles.is_system })
       .from(schema.roles)
       .where(eq(schema.roles.name, roleName));
     if (!role) {
@@ -152,7 +159,7 @@ export async function createAdministrator(
       message: 'Administrator account created',
       context: { ticket, target_user_id: account.id, role: role.name },
     });
-    return { status: 'created', account: { ...account, roleName: role.name } };
+    return { status: 'created', account: { ...account, roleName: role.name, roleIsSystem: role.is_system } };
   });
 }
 
@@ -169,6 +176,10 @@ export async function recoverAdministrator(db: Database, input: AdminRecoveryInp
   return db.transaction(async (tx) => {
     await tx.execute(sql.raw("SET LOCAL lock_timeout = '30s'"));
     await acquireTransactionAdvisoryLock(tx as Database, 'darshan:administrator-recovery', input.lockOptions);
+    const roleConflict = await findSystemRoleIdentityConflict(tx);
+    if (roleConflict) {
+      return { status: 'conflict', reason: `Reserved role ${roleConflict.name} does not have a canonical built-in identity; review the database before administrator recovery.` };
+    }
     const accounts = await findAccountsByEmail(tx as Database, email);
     if (accounts.length === 0) return { status: 'not_found' };
     if (accounts.length > 1) {
@@ -181,16 +192,18 @@ export async function recoverAdministrator(db: Database, input: AdminRecoveryInp
     const account = accounts[0];
     let roleId: string | undefined;
     let roleName = account.roleName;
+    let roleIsSystem = account.roleIsSystem;
     if (input.grantSuperAdmin) {
       const [superAdmin] = await tx
-        .select({ id: schema.roles.id, name: schema.roles.name })
+        .select({ id: schema.roles.id, name: schema.roles.name, is_system: schema.roles.is_system })
         .from(schema.roles)
-        .where(eq(schema.roles.name, 'SUPER_ADMIN'));
+        .where(and(eq(schema.roles.name, 'SUPER_ADMIN'), eq(schema.roles.is_system, true)));
       if (!superAdmin) {
         return { status: 'conflict', reason: 'SUPER_ADMIN role does not exist; complete production bootstrap or adoption first.' };
       }
       roleId = superAdmin.id;
       roleName = superAdmin.name;
+      roleIsSystem = superAdmin.is_system;
     }
 
     const [updated] = await tx
@@ -229,6 +242,7 @@ export async function recoverAdministrator(db: Database, input: AdminRecoveryInp
         email: updated.email,
         isActive: updated.isActive,
         roleName,
+        roleIsSystem,
       },
     };
   });
@@ -249,6 +263,10 @@ export async function deactivateAdministrator(
   return db.transaction(async (tx) => {
     await tx.execute(sql.raw("SET LOCAL lock_timeout = '30s'"));
     await acquireTransactionAdvisoryLock(tx as Database, 'darshan:administrator-maintenance', input.lockOptions);
+    const roleConflict = await findSystemRoleIdentityConflict(tx);
+    if (roleConflict) {
+      return { status: 'conflict', reason: `Reserved role ${roleConflict.name} does not have a canonical built-in identity; review the database before administrator maintenance.` };
+    }
     const accounts = await findAccountsByEmail(tx as Database, email);
     if (accounts.length === 0) return { status: 'not_found' };
     if (accounts.length > 1) {
@@ -283,7 +301,7 @@ export async function deactivateAdministrator(
       message: 'Administrator account deactivated',
       context: { ticket, target_user_id: account.id },
     });
-    return { status: 'deactivated', account: { ...updated, roleName: account.roleName } };
+    return { status: 'deactivated', account: { ...updated, roleName: account.roleName, roleIsSystem: account.roleIsSystem } };
   });
 }
 

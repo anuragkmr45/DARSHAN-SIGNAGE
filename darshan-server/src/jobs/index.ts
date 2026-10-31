@@ -6,13 +6,26 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { and, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
-import { getDatabase, schema, type DbExecutor } from '@/db';
+import { getDatabase, getDatabasePool, schema, type DbExecutor } from '@/db';
 import { config as appConfig } from '@/config';
 import { abortMultipartUpload, deleteObject, getObject, putObject } from '@/s3';
 import { createLogger } from '@/utils/logger';
 import { createMediaRepository } from '@/db/repositories/media';
-import { createBackupRun, getLatestBackupRun, runFullBackup } from '@/utils/backup-runs';
-import { getCachedSettings } from '@/utils/settings';
+import { runFullBackup } from '@/utils/backup-runs';
+import { getSettingsSection } from '@/utils/settings';
+import {
+  BACKUP_LEASE_MS,
+  acquireBackupExecutionLock,
+  claimBackupAttempt,
+  deferBackupDelivery,
+  getLatestSuccessfulBackupRun,
+  heartbeatBackupAttempt,
+  reconcileBackupRuns,
+  requestBackupRun,
+  settleFailedBackupAttempt,
+  type BackupQueuePayload,
+} from '@/backups/coordination';
+import { backupScheduleCron, getDailyScheduleIdentity, type BackupRepositoryKind } from '@/backups/policy';
 import { buildSourceFilename, isPdfDocument, requiresDocumentConversion } from '@/utils/media-processing';
 import { inspectPdfPageCount, PdfInspectionError } from '@/utils/pdf-metadata';
 import { captureWebpagePreview } from '@/utils/webpage-capture';
@@ -39,14 +52,44 @@ import {
   processProofOfPlayTelemetry,
   processScreenshotTelemetry,
 } from '@/jobs/device-telemetry';
-import { observeJobProcessing, recordJobEnqueue } from '@/observability/metrics';
+import {
+  processDeviceOperationalObservation,
+  type DeviceOperationalObservationJob,
+} from '@/jobs/device-operational-observation';
+import {
+  processMediaCacheReportTelemetry,
+  type MediaCacheReportTelemetryJob,
+} from '@/jobs/media-cache-report';
+import { observeJobProcessing, recordBackupRetentionSummary, recordJobEnqueue } from '@/observability/metrics';
 import {
   createPlaybackRefreshCommands,
   type PlaybackRefreshCommandBatch,
 } from '@/services/playback-refresh-commands';
 import { reconcileEmergencyTransitions } from '@/services/emergency-transition-outbox';
+import {
+  classifyWorkerQueue,
+  runWithWorkerAdmission,
+  stopWorkerAdmissionController,
+} from '@/maintenance/worker-admission';
+import {
+  registerGatedPgBossWorker,
+  stopGatedPgBossWorkers,
+  type GatedPgBossClient,
+} from '@/maintenance/pgboss-worker';
+import {
+  createLocalBackupWorkerRuntime,
+  type LocalBackupWorkerRuntime,
+} from '@/backups/worker-runtime';
+import {
+  BACKUP_RETENTION_JOB_GRACE_MS,
+  BACKUP_RETENTION_PASS_BUDGET_MS,
+  runBackupRetentionPass,
+} from '@/backups/retention-runtime';
+import { projectTerminalBackupExecutionOutcomes } from '@/backups/retention-store';
+import { createBackupRetentionPolicy } from '@/backups/retention-policy';
 
 const logger = createLogger('jobs');
+let localBackupWorkerRuntime: LocalBackupWorkerRuntime | null = null;
 
 ffmpeg.setFfmpegPath(getResolvedFfmpegPath() || appConfig.FFMPEG_PATH);
 
@@ -325,24 +368,24 @@ async function verifyWebpageSource(
 
 type WebpageJobLogger = Pick<typeof logger, 'warn' | 'error'>;
 
-export async function processWebpageVerifyCaptureJob(
+type WebpageVerifyCaptureDependencies = {
+  db?: ReturnType<typeof getDatabase>;
+  logger?: WebpageJobLogger;
+  verifySource?: typeof verifyWebpageSource;
+  putObject?: typeof putObject;
+  upsertStorageObject?: typeof upsertStorageObject;
+  now?: () => Date;
+};
+
+async function processWebpageVerifyCaptureJobImpl(
   job: WebpageVerifyCaptureJob,
-  dependencies: {
-    db?: ReturnType<typeof getDatabase>;
-    logger?: WebpageJobLogger;
-    verifySource?: typeof verifyWebpageSource;
-    putObject?: typeof putObject;
-    deleteObject?: typeof deleteObject;
-    upsertStorageObject?: typeof upsertStorageObject;
-    now?: () => Date;
-  } = {}
+  dependencies: WebpageVerifyCaptureDependencies = {}
 ) {
   const db = dependencies.db ?? getDatabase();
   const jobLogger = dependencies.logger ?? logger;
   const now = dependencies.now ?? (() => new Date());
   const verifySource = dependencies.verifySource ?? verifyWebpageSource;
   const putReadyObject = dependencies.putObject ?? putObject;
-  const deleteReadyObject = dependencies.deleteObject ?? deleteObject;
   const upsertReadyStorageObject = dependencies.upsertStorageObject ?? upsertStorageObject;
   const { mediaId, sourceUrl } = job;
   const mode = job.mode ?? 'INITIAL';
@@ -497,6 +540,16 @@ export async function processWebpageVerifyCaptureJob(
   }
 }
 
+export async function processWebpageVerifyCaptureJob(
+  job: WebpageVerifyCaptureJob,
+  dependencies: WebpageVerifyCaptureDependencies = {}
+) {
+  return runWithWorkerAdmission(
+    'webpage:verify-capture',
+    () => processWebpageVerifyCaptureJobImpl(job, dependencies)
+  );
+}
+
 async function queueWebpagePreviewPlaybackRefresh(input: {
   mediaId: string;
   readyObjectId: string;
@@ -528,11 +581,15 @@ export type WebpagePreviewRefreshRequestResult = {
   refreshToken: string;
 };
 
-export async function requestWebpagePreviewRefresh(input: {
+type WebpagePreviewRefreshRequest = {
   mediaId: string;
   executor?: DbExecutor;
   requestedAt?: Date;
-}): Promise<WebpagePreviewRefreshRequestResult> {
+};
+
+async function requestWebpagePreviewRefreshImpl(
+  input: WebpagePreviewRefreshRequest
+): Promise<WebpagePreviewRefreshRequestResult> {
   const db = input.executor ?? getDatabase();
   const requestedAt = input.requestedAt ?? new Date();
   const [media] = await db.select().from(schema.media).where(eq(schema.media.id, input.mediaId));
@@ -627,13 +684,24 @@ export async function requestWebpagePreviewRefresh(input: {
   return { mediaId: media.id, refreshStatus: 'QUEUED', requestedAt, refreshToken };
 }
 
-export async function processWebpageRefreshDueJob(
+export async function requestWebpagePreviewRefresh(
+  input: WebpagePreviewRefreshRequest
+): Promise<WebpagePreviewRefreshRequestResult> {
+  return runWithWorkerAdmission(
+    'webpage:verify-capture',
+    () => requestWebpagePreviewRefreshImpl(input)
+  );
+}
+
+type WebpageRefreshDueDependencies = {
+  db?: DbExecutor;
+  now?: () => Date;
+  requestRefresh?: typeof requestWebpagePreviewRefresh;
+};
+
+async function processWebpageRefreshDueJobImpl(
   _job: WebpageRefreshDueJob,
-  dependencies: {
-    db?: DbExecutor;
-    now?: () => Date;
-    requestRefresh?: typeof requestWebpagePreviewRefresh;
-  } = {}
+  dependencies: WebpageRefreshDueDependencies = {}
 ) {
   const db = dependencies.db ?? getDatabase();
   const now = dependencies.now?.() ?? new Date();
@@ -673,6 +741,16 @@ export async function processWebpageRefreshDueJob(
   return { due: due.length, queued };
 }
 
+export async function processWebpageRefreshDueJob(
+  job: WebpageRefreshDueJob,
+  dependencies: WebpageRefreshDueDependencies = {}
+) {
+  return runWithWorkerAdmission(
+    'webpage:refresh-due',
+    () => processWebpageRefreshDueJobImpl(job, dependencies)
+  );
+}
+
 async function convertDocumentWithLibreOffice(inputPath: string, outputDir: string) {
   const libreOfficeExecutable = getLibreOfficeExecutable();
   if (!libreOfficeExecutable) {
@@ -708,12 +786,14 @@ type PgBossError = Error & {
   code?: string;
 };
 
-const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'emergency:reconcile', 'webpage:refresh-due'] as const;
+const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'backup:reconcile', 'backup:retention', 'emergency:reconcile', 'webpage:refresh-due'] as const;
 const WORK_QUEUE_NAMES = [
   'playback:refresh-dispatch',
   'telemetry:heartbeat',
   'telemetry:proof-of-play',
   'telemetry:screenshot',
+  'telemetry:device-observation',
+  'telemetry:media-cache-report',
   'ffmpeg:transcode',
   'ffmpeg:thumbnail',
   'document:convert',
@@ -724,6 +804,8 @@ const WORK_QUEUE_NAMES = [
   'chat:media-cleanup',
   'backup',
   'backup:check',
+  'backup:reconcile',
+  'backup:retention',
   'emergency:reconcile',
 ] as const;
 
@@ -829,6 +911,8 @@ export function isJobsInitialized() {
 }
 
 export async function stopJobs(): Promise<void> {
+  await stopGatedPgBossWorkers();
+  stopWorkerAdmissionController();
   if (boss) {
     await boss.stop();
     boss = null;
@@ -886,12 +970,30 @@ export interface ChatMediaCleanupJob {
   messageId?: string;
 }
 
-export interface BackupJob {
-  runId: string;
-}
+export interface BackupJob extends BackupQueuePayload {}
 
 export interface BackupCheckJob {
   trigger: 'scheduled-check';
+}
+
+export interface BackupReconcileJob {
+  trigger: 'scheduled-reconcile';
+}
+
+export interface BackupRetentionJob {
+  trigger: 'scheduled-retention' | 'startup-reconciliation' | 'manual-delete';
+  backupRunId?: string;
+}
+
+export async function queueManualBackupDeletion(backupRunId: string) {
+  return sendJob('backup:retention', { trigger: 'manual-delete', backupRunId }, {
+    singletonKey: `backup-retention-manual:${backupRunId}`,
+    singletonSeconds: 60,
+    expireInMinutes: Math.ceil((BACKUP_RETENTION_PASS_BUDGET_MS + BACKUP_RETENTION_JOB_GRACE_MS) / 60_000),
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+  });
 }
 
 export interface PlaybackRefreshDispatchJob extends PlaybackRefreshCommandBatch {}
@@ -924,20 +1026,48 @@ export async function queueHeartbeatTelemetry(job: HeartbeatTelemetryJob, option
   });
 }
 
-export async function queueProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob, options?: any) {
-  return sendJob('telemetry:proof-of-play', job, {
+export function getProofOfPlayQueueOptions(options: Record<string, unknown> = {}) {
+  return {
     retryLimit: 5,
     retryDelay: 15,
-    singletonKey: job.idempotencyKey,
-    singletonSeconds: 60 * 60,
     ...options,
-  });
+  };
+}
+
+export async function queueProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob, options?: any) {
+  return sendJob('telemetry:proof-of-play', job, getProofOfPlayQueueOptions(options));
 }
 
 export async function queueScreenshotTelemetry(job: ScreenshotTelemetryJob, options?: any) {
   return sendJob('telemetry:screenshot', job, {
     retryLimit: 5,
     retryDelay: 30,
+    ...options,
+  });
+}
+
+export async function queueDeviceOperationalObservation(
+  job: DeviceOperationalObservationJob,
+  options?: any
+) {
+  return sendJob('telemetry:device-observation', job, {
+    retryLimit: 5,
+    retryDelay: 15,
+    singletonKey: job.eventId,
+    singletonSeconds: 60 * 60 * 24,
+    ...options,
+  });
+}
+
+export async function queueMediaCacheReportTelemetry(
+  job: MediaCacheReportTelemetryJob,
+  options?: any
+) {
+  return sendJob('telemetry:media-cache-report', job, {
+    retryLimit: 5,
+    retryDelay: 15,
+    singletonKey: job.reportId,
+    singletonSeconds: 60 * 60 * 24,
     ...options,
   });
 }
@@ -1022,11 +1152,17 @@ export async function queueCleanup(job: CleanupJob, options?: any) {
   });
 }
 
-export async function queueBackup(job: BackupJob, options?: any) {
-  return sendJob('backup', job, {
-    retryLimit: 1,
-    retryDelay: 60,
-    ...options,
+export async function requestCoordinatedBackup(input: {
+  triggerType: 'MANUAL' | 'AUTOMATIC';
+  triggeredBy?: string | null;
+  scheduleIdentity?: string | null;
+}) {
+  const jobs = getJobs();
+  await ensureQueueExists(jobs, 'backup');
+  return requestBackupRun(jobs, {
+    ...input,
+    repositoryKind: (appConfig.BACKUP_REPOSITORY_KIND ?? 'LEGACY_OFF_HOST') as BackupRepositoryKind,
+    coordinationKey: 'site-backup',
   });
 }
 
@@ -1038,12 +1174,14 @@ export async function queueChatMediaCleanup(job: ChatMediaCleanupJob, options?: 
   });
 }
 
-export async function cleanupChatMediaAssets(input: {
+type ChatMediaCleanupInput = {
   mediaAssetIds: string[];
   conversationId?: string;
   source?: 'message-delete' | 'conversation-delete' | 'fallback-reconcile';
   messageId?: string;
-}) {
+};
+
+async function cleanupChatMediaAssetsImpl(input: ChatMediaCleanupInput) {
   const db = getDatabase();
   const mediaRepo = createMediaRepository();
   const mediaIds = Array.from(new Set(input.mediaAssetIds || []));
@@ -1136,10 +1274,19 @@ export async function cleanupChatMediaAssets(input: {
   }
 }
 
-export async function cleanupDeletedUserUploads(options: {
+export async function cleanupChatMediaAssets(input: ChatMediaCleanupInput) {
+  return runWithWorkerAdmission(
+    'chat:media-cleanup',
+    () => cleanupChatMediaAssetsImpl(input)
+  );
+}
+
+type DeletedUserUploadCleanupOptions = {
   now?: () => Date;
   limit?: number;
-} = {}) {
+};
+
+async function cleanupDeletedUserUploadsImpl(options: DeletedUserUploadCleanupOptions = {}) {
   const db = getDatabase();
   const runAt = options.now?.() ?? new Date();
   const terminalCutoff = runAt.getTime() - 2 * 60 * 60 * 1000;
@@ -1269,12 +1416,18 @@ export async function cleanupDeletedUserUploads(options: {
   return result;
 }
 
-export async function cleanupOrphanedStorageObjects(options: {
+export async function cleanupDeletedUserUploads(options: DeletedUserUploadCleanupOptions = {}) {
+  return runWithWorkerAdmission('cleanup', () => cleanupDeletedUserUploadsImpl(options));
+}
+
+type OrphanedStorageObjectCleanupOptions = {
   storageObjectIds?: string[];
   now?: () => Date;
   minimumAgeMs?: number;
   limit?: number;
-} = {}) {
+};
+
+async function cleanupOrphanedStorageObjectsImpl(options: OrphanedStorageObjectCleanupOptions = {}) {
   const db = getDatabase();
   const minimumAgeMs = options.minimumAgeMs ?? 2 * 60 * 60 * 1000;
   const cutoff = new Date((options.now?.() ?? new Date()).getTime() - minimumAgeMs);
@@ -1294,6 +1447,19 @@ export async function cleanupOrphanedStorageObjects(options: {
         AND NOT EXISTS (SELECT 1 FROM system_logs sl WHERE sl.storage_object_id = so.id)
         AND NOT EXISTS (SELECT 1 FROM login_attempts la WHERE la.storage_object_id = so.id)
         AND NOT EXISTS (SELECT 1 FROM log_archives lga WHERE lga.storage_object_id = so.id)
+        AND NOT EXISTS (
+          SELECT 1
+          FROM backup_runs br
+          CROSS JOIN LATERAL jsonb_array_elements(COALESCE(br.files, '[]'::jsonb)) backup_file
+          WHERE backup_file->>'storage_object_id' = so.id::text
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM backup_runs active_br
+          WHERE active_br.status IN ('PENDING', 'RUNNING', 'RETRY_WAIT')
+            AND so.bucket = ${ARCHIVE_BUCKET}
+            AND so.object_key LIKE ('backups/' || active_br.id::text || '/%')
+        )
       ORDER BY so.created_at ASC
       LIMIT ${limit}
     `
@@ -1328,9 +1494,37 @@ export async function cleanupOrphanedStorageObjects(options: {
   return { cleaned: cleanedIds.length, pending };
 }
 
+export async function cleanupOrphanedStorageObjects(options: OrphanedStorageObjectCleanupOptions = {}) {
+  return runWithWorkerAdmission('cleanup', () => cleanupOrphanedStorageObjectsImpl(options));
+}
+
+async function reconcileBackupsWithLock(jobs: PgBoss) {
+  // Reconciliation and live execution must serialize on the same site lock;
+  // otherwise an expired attempt can be adopted while a replacement starts.
+  const lock = await acquireBackupExecutionLock(`site:${appConfig.BACKUP_SITE_ID ?? 'local'}`);
+  if (!lock) return { skipped: true, retried: 0, requeued: 0 };
+  try {
+    return {
+      skipped: false,
+      ...(await reconcileBackupRuns(jobs, new Date(), {
+        inspectPublication: localBackupWorkerRuntime?.inspectPublication,
+      })),
+    };
+  } finally {
+    await lock.release();
+  }
+}
+
 // Job handlers registration
-export async function registerJobHandlers() {
+export async function registerJobHandlers(dependencies: {
+  createBackupRuntime?: () => Promise<LocalBackupWorkerRuntime | null>;
+} = {}) {
   const jobs = getJobs();
+
+  // Fail worker startup visibly when the configured production helper policy
+  // cannot provide a capsule contract and manifest authority. API/player
+  // runtimes do not execute this composition root.
+  localBackupWorkerRuntime = await (dependencies.createBackupRuntime ?? createLocalBackupWorkerRuntime)();
 
   for (const queueName of WORK_QUEUE_NAMES) {
     await ensureQueueExists(jobs, queueName);
@@ -1338,13 +1532,23 @@ export async function registerJobHandlers() {
 
   const registerObservedWorker = async <TPayload extends object>(
     queueName: string,
-    handler: (jobBatch: Array<{ data: TPayload }>) => Promise<void>
+    handler: (jobBatch: Array<{ id: string; data: TPayload }>) => Promise<void>
   ) => {
+    if (classifyWorkerQueue(queueName) === 'gated') {
+      registerGatedPgBossWorker<TPayload>({
+        boss: jobs as unknown as GatedPgBossClient,
+        schema: appConfig.PG_BOSS_SCHEMA,
+        queueName,
+        handler: async (jobBatch) => {
+          await observeJobProcessing(queueName, () => handler(jobBatch));
+        },
+      });
+      return;
+    }
+
     await jobs.work<TPayload>(queueName, async (jobBatch) => {
       const batch = Array.isArray(jobBatch) ? jobBatch : [jobBatch];
-      await observeJobProcessing(queueName, async () => {
-        await handler(batch);
-      });
+      await observeJobProcessing(queueName, () => handler(batch));
     });
   };
 
@@ -1375,6 +1579,18 @@ export async function registerJobHandlers() {
   await registerObservedWorker<ScreenshotTelemetryJob>('telemetry:screenshot', async (batch) => {
     for (const job of batch) {
       await processScreenshotTelemetry(job.data);
+    }
+  });
+
+  await registerObservedWorker<DeviceOperationalObservationJob>('telemetry:device-observation', async (batch) => {
+    for (const job of batch) {
+      await processDeviceOperationalObservation(job.data);
+    }
+  });
+
+  await registerObservedWorker<MediaCacheReportTelemetryJob>('telemetry:media-cache-report', async (batch) => {
+    for (const job of batch) {
+      await processMediaCacheReportTelemetry(job.data);
     }
   });
 
@@ -1982,34 +2198,139 @@ export async function registerJobHandlers() {
 
   await registerObservedWorker<BackupJob>('backup', async (batch) => {
     for (const job of batch) {
-      logger.info({ runId: job.data.runId }, 'Processing backup job');
-      await runFullBackup(job.data.runId);
+      if (job.id !== job.data.queueJobId) {
+        logger.warn({ actualJobId: job.id, payloadJobId: job.data.queueJobId }, 'Ignoring backup job with mismatched identity');
+        continue;
+      }
+      const lock = await acquireBackupExecutionLock(`site:${appConfig.BACKUP_SITE_ID ?? 'local'}`);
+      if (!lock) {
+        const deferred = await deferBackupDelivery(jobs, job.data);
+        logger.info({ runId: job.data.runId, deferred }, 'Deferred backup while another process holds the execution lock');
+        continue;
+      }
+      try {
+        const attempt = await claimBackupAttempt(job.data);
+        if (!attempt?.attempt_id || !attempt.deadline_at) {
+          logger.info({ runId: job.data.runId, queueJobId: job.data.queueJobId }, 'Ignoring stale backup delivery');
+          continue;
+        }
+        logger.info({ runId: job.data.runId, attemptId: attempt.attempt_id }, 'Processing backup job');
+        const controller = new AbortController();
+        const deadlineTimer = setTimeout(() => {
+          controller.abort(new Error('Backup absolute execution deadline expired.'));
+        }, Math.max(1, new Date(attempt.deadline_at).getTime() - Date.now()));
+        deadlineTimer.unref();
+        let guardInFlight: Promise<void> | null = null;
+        const guard = setInterval(() => {
+          if (guardInFlight || controller.signal.aborted) return;
+          guardInFlight = heartbeatBackupAttempt(job.data.runId, attempt.attempt_id!)
+            .then((valid) => {
+              if (!valid) controller.abort(new Error('Backup attempt cancellation, deadline, or lease fence was lost.'));
+            })
+            .catch((error) => {
+              controller.abort(error instanceof Error ? error : new Error(String(error)));
+            })
+            .finally(() => { guardInFlight = null; });
+        }, Math.min(5_000, Math.floor(BACKUP_LEASE_MS / 3)));
+        guard.unref();
+        try {
+          await runFullBackup(
+            job.data.runId,
+            attempt.attempt_id,
+            new Date(attempt.deadline_at),
+            controller.signal,
+            localBackupWorkerRuntime?.runDependencies,
+          );
+        } catch (error) {
+          const pool = getDatabasePool();
+          if (!pool) throw new Error('Database pool is not initialized.');
+          const publication = await pool.query<{ id: string }>(
+            `SELECT id FROM backup_publications
+             WHERE backup_run_id = $1 AND backup_attempt_id = $2
+               AND status IN ('PREPARED', 'PUBLISHED', 'UNCERTAIN', 'VERIFIED')
+             LIMIT 1`,
+            [job.data.runId, attempt.attempt_id]
+          );
+          if (publication.rows[0]) {
+            logger.warn(
+              { runId: job.data.runId, attemptId: attempt.attempt_id },
+              'Preserving unresolved local publication for fenced reconciliation'
+            );
+            throw error;
+          }
+          await settleFailedBackupAttempt(jobs, {
+            runId: job.data.runId,
+            attemptId: attempt.attempt_id,
+            attemptNumber: attempt.attempt_number,
+            error,
+          });
+          throw error;
+        } finally {
+          clearTimeout(deadlineTimer);
+          clearInterval(guard);
+          const pendingGuard = guardInFlight as Promise<void> | null;
+          if (pendingGuard) await pendingGuard.catch(() => undefined);
+        }
+      } finally {
+        await lock.release();
+      }
     }
   });
 
   await registerObservedWorker<BackupCheckJob>('backup:check', async () => {
-    const backupsSettings = getCachedSettings('org.backups');
+    const backupsSettings = await getSettingsSection('org.backups');
     if (!backupsSettings.automatic_enabled) {
       return;
     }
 
-    const latestRun = await getLatestBackupRun();
-    const now = Date.now();
-    const latestFinishedAt =
-      latestRun?.completed_at ?? latestRun?.started_at ?? latestRun?.created_at ?? null;
-    const latestTimestamp = latestFinishedAt ? new Date(latestFinishedAt).getTime() : 0;
+    const now = new Date();
+    const latestSuccess = await getLatestSuccessfulBackupRun();
+    if (appConfig.NODE_ENV === 'production') {
+      const scheduleIdentity = getDailyScheduleIdentity(now, appConfig.BACKUP_SCHEDULE_TIMEZONE!, appConfig.BACKUP_SCHEDULE_TIME!);
+      if (latestSuccess?.schedule_identity && latestSuccess.schedule_identity >= scheduleIdentity) return;
+      await requestCoordinatedBackup({ triggerType: 'AUTOMATIC', scheduleIdentity });
+      return;
+    }
+    const latestTimestamp = latestSuccess?.captured_at ?? latestSuccess?.completed_at ?? null;
     const intervalMs = backupsSettings.interval_hours * 60 * 60 * 1000;
+    if (latestTimestamp && now.getTime() - new Date(latestTimestamp).getTime() < intervalMs) return;
+    await requestCoordinatedBackup({ triggerType: 'AUTOMATIC' });
+  });
 
-    if (latestRun && ['PENDING', 'RUNNING'].includes(latestRun.status)) {
+  await registerObservedWorker<BackupReconcileJob>('backup:reconcile', async () => {
+    try {
+      const result = await reconcileBackupsWithLock(jobs);
+      if (!result.skipped && (result.retried > 0 || result.requeued > 0)) {
+        logger.info(result, 'Reconciled stranded backup runs');
+      }
+    } catch (error) {
+      logger.error({ error }, 'Recurring backup reconciliation failed');
+      throw error;
+    }
+  });
+
+  await registerObservedWorker<BackupRetentionJob>('backup:retention', async (batch) => {
+    const job = batch[0]?.data;
+    if (!job) return;
+    const broker = localBackupWorkerRuntime?.retentionBroker;
+    if (appConfig.BACKUP_REPOSITORY_KIND !== 'LOCAL_FILESYSTEM') return;
+    const siteKey = appConfig.BACKUP_SITE_ID;
+    const repositoryId = appConfig.BACKUP_REPOSITORY_ID;
+    if (!siteKey || !repositoryId) throw new Error('Retention runtime requires exact site and repository identity.');
+    if (!broker) {
+      const projection = await projectTerminalBackupExecutionOutcomes({ siteKey, repositoryId });
+      logger.info({ projection }, 'Backup retention projection reconciliation completed without deletion authority');
       return;
     }
-
-    if (latestTimestamp && now - latestTimestamp < intervalMs) {
-      return;
+    if (job.trigger === 'manual-delete' && !job.backupRunId) {
+      throw new Error('Manual backup retention delivery requires a backup run ID.');
     }
-
-    const run = await createBackupRun('AUTOMATIC');
-    await queueBackup({ runId: run.id });
+    const summary = await runBackupRetentionPass({ siteKey, repositoryId, broker,
+      policy: createBackupRetentionPolicy({ retentionDays: appConfig.BACKUP_RETENTION_DAYS }),
+      mode: job.trigger === 'manual-delete' ? { kind: 'MANUAL_DELETE', backupRunId: job.backupRunId! } : undefined,
+      maxCandidates: 25 });
+    recordBackupRetentionSummary(summary);
+    logger.info(summary, 'Backup retention pass completed');
   });
 
   logger.info('Job handlers registered');
@@ -2063,17 +2384,58 @@ export async function scheduleRecurringJobs() {
     await jobs.unschedule('cleanup').catch(() => { });
     await jobs.unschedule('archive').catch(() => { });
     await jobs.unschedule('backup:check').catch(() => { });
+    await jobs.unschedule('backup:reconcile').catch(() => { });
+    await jobs.unschedule('backup:retention').catch(() => { });
     await jobs.unschedule('emergency:reconcile').catch(() => { });
     await jobs.unschedule('webpage:refresh-due').catch(() => { });
 
     // Now schedule safely (queues exist)
     await jobs.schedule('cleanup', '15 * * * *', { type: 'expired_sessions' });      // hourly upload/session expiry cleanup
     await jobs.schedule('archive', '0 3 * * 0', { type: 'logs', startDate: '', endDate: '' }); // Sun 3 AM
-    await jobs.schedule('backup:check', '0 * * * *', { trigger: 'scheduled-check' }); // hourly
+    if (appConfig.NODE_ENV === 'production') {
+      await jobs.schedule(
+        'backup:check',
+        backupScheduleCron(appConfig.BACKUP_SCHEDULE_TIME!),
+        { trigger: 'scheduled-check' },
+        { tz: appConfig.BACKUP_SCHEDULE_TIMEZONE! }
+      );
+    } else {
+      await jobs.schedule('backup:check', '0 * * * *', { trigger: 'scheduled-check' });
+    }
+    await jobs.schedule('backup:reconcile', '* * * * *', { trigger: 'scheduled-reconcile' }, {
+      singletonKey: `backup-reconcile:${appConfig.BACKUP_SITE_ID ?? 'local'}`,
+      singletonSeconds: 55,
+      expireInMinutes: 2,
+      retryLimit: 3,
+      retryDelay: 15,
+    });
+    await jobs.schedule('backup:retention', '7 * * * *', { trigger: 'scheduled-retention' }, {
+      singletonKey: `backup-retention:${appConfig.BACKUP_SITE_ID ?? 'local'}:${appConfig.BACKUP_REPOSITORY_ID ?? 'unconfigured'}`,
+      singletonSeconds: 55 * 60,
+      expireInMinutes: Math.ceil((BACKUP_RETENTION_PASS_BUDGET_MS + BACKUP_RETENTION_JOB_GRACE_MS) / 60_000),
+      retryLimit: 3,
+      retryDelay: 60,
+      retryBackoff: true,
+    });
     await jobs.schedule('emergency:reconcile', '* * * * *', {}); // every minute
     await jobs.schedule('webpage:refresh-due', '20 * * * *', { trigger: 'scheduled-scan' }); // hourly
 
-    logger.info('Recurring jobs scheduled successfully');
+    const reconciled = await reconcileBackupsWithLock(jobs);
+    await sendJob('backup:retention', { trigger: 'startup-reconciliation' }, {
+      singletonKey: `backup-retention-startup:${appConfig.BACKUP_SITE_ID ?? 'local'}:${appConfig.BACKUP_REPOSITORY_ID ?? 'unconfigured'}`,
+      singletonSeconds: 60 * 60,
+      expireInMinutes: Math.ceil((BACKUP_RETENTION_PASS_BUDGET_MS + BACKUP_RETENTION_JOB_GRACE_MS) / 60_000),
+      retryLimit: 3,
+      retryDelay: 60,
+      retryBackoff: true,
+    });
+    await sendJob('backup:check', { trigger: 'scheduled-check' }, {
+      singletonKey: 'backup-startup-check',
+      singletonSeconds: 60,
+      expireInMinutes: 10,
+      retryLimit: 1,
+    });
+    logger.info({ reconciled }, 'Recurring jobs scheduled and backup state reconciled');
   } catch (error) {
     logger.error(error, 'Failed to schedule recurring jobs');
     if (appConfig.NODE_ENV === 'production') {

@@ -49,6 +49,7 @@ type UploadFileInput = {
   key: string;
   filePath: string;
   contentType: string;
+  signal?: AbortSignal;
 };
 
 export type OffHostBackupPolicyInput = {
@@ -114,9 +115,20 @@ export function getOffHostBackupClient(policy: OffHostBackupPolicy): S3Client {
   });
 }
 
-async function sha256File(filePath: string): Promise<string> {
+async function sha256File(filePath: string, signal?: AbortSignal): Promise<string> {
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
+  const stream = createReadStream(filePath);
+  const abort = () => stream.destroy(new Error('Backup upload aborted'));
+  signal?.throwIfAborted();
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    for await (const chunk of stream) {
+      signal?.throwIfAborted();
+      hash.update(chunk);
+    }
+  } finally {
+    signal?.removeEventListener('abort', abort);
+  }
   return hash.digest('hex');
 }
 
@@ -128,8 +140,8 @@ function metadataSha256(metadata: Record<string, string> | undefined) {
   return metadata?.['x-sha256'] ?? metadata?.['X-Sha256'];
 }
 
-async function verifyUploadedObject(client: S3CommandClient, input: { bucket: string; key: string; size: number; sha256: string }) {
-  const response = await client.send(new HeadObjectCommand({ Bucket: input.bucket, Key: input.key }));
+async function verifyUploadedObject(client: S3CommandClient, input: { bucket: string; key: string; size: number; sha256: string; signal?: AbortSignal }) {
+  const response = await client.send(new HeadObjectCommand({ Bucket: input.bucket, Key: input.key }), { abortSignal: input.signal });
   if (response.ContentLength !== input.size) {
     throw new Error(`Off-host object ${input.key} has an unexpected size after upload.`);
   }
@@ -143,7 +155,7 @@ async function verifyUploadedObject(client: S3CommandClient, input: { bucket: st
 export async function uploadOffHostFile(client: S3CommandClient, input: UploadFileInput): Promise<OffHostBackupArtifact> {
   const details = await stat(input.filePath);
   if (!details.isFile() || details.size < 0) throw new Error(`Backup artifact is not a regular file: ${input.filePath}`);
-  const sha256 = await sha256File(input.filePath);
+  const sha256 = await sha256File(input.filePath, input.signal);
   const metadata = { 'x-sha256': sha256 };
 
   if (details.size < MIN_MULTIPART_PART_BYTES) {
@@ -155,7 +167,7 @@ export async function uploadOffHostFile(client: S3CommandClient, input: UploadFi
       ContentType: input.contentType,
       Metadata: metadata,
       ChecksumSHA256: base64Sha256(sha256),
-    }));
+    }), { abortSignal: input.signal });
   } else {
     const create = await client.send(new CreateMultipartUploadCommand({
       Bucket: input.bucket,
@@ -163,12 +175,13 @@ export async function uploadOffHostFile(client: S3CommandClient, input: UploadFi
       ContentType: input.contentType,
       Metadata: metadata,
       ChecksumAlgorithm: 'SHA256',
-    }));
+    }), { abortSignal: input.signal });
     if (!create.UploadId) throw new Error(`Off-host S3 did not return an upload ID for ${input.key}.`);
 
     try {
       const parts: Array<{ ETag: string; PartNumber: number; ChecksumSHA256?: string }> = [];
       for (let offset = 0, partNumber = 1; offset < details.size; offset += MULTIPART_PART_BYTES, partNumber += 1) {
+        input.signal?.throwIfAborted();
         const end = Math.min(offset + MULTIPART_PART_BYTES, details.size) - 1;
         const partHash = createHash('sha256');
         for await (const chunk of createReadStream(input.filePath, { start: offset, end })) partHash.update(chunk);
@@ -181,7 +194,7 @@ export async function uploadOffHostFile(client: S3CommandClient, input: UploadFi
           Body: createReadStream(input.filePath, { start: offset, end }),
           ContentLength: end - offset + 1,
           ChecksumSHA256: base64Sha256(partDigest),
-        }));
+        }), { abortSignal: input.signal });
         if (!uploaded.ETag) throw new Error(`Off-host S3 did not return an ETag for ${input.key} part ${partNumber}.`);
         parts.push({ ETag: uploaded.ETag, PartNumber: partNumber, ChecksumSHA256: uploaded.ChecksumSHA256 });
       }
@@ -190,14 +203,20 @@ export async function uploadOffHostFile(client: S3CommandClient, input: UploadFi
         Key: input.key,
         UploadId: create.UploadId,
         MultipartUpload: { Parts: parts },
-      }));
+      }), { abortSignal: input.signal });
     } catch (error) {
-      await client.send(new AbortMultipartUploadCommand({ Bucket: input.bucket, Key: input.key, UploadId: create.UploadId })).catch(() => undefined);
+      const cleanup = new AbortController();
+      const cleanupTimer = setTimeout(() => cleanup.abort(), 5_000);
+      cleanupTimer.unref();
+      await client.send(
+        new AbortMultipartUploadCommand({ Bucket: input.bucket, Key: input.key, UploadId: create.UploadId }),
+        { abortSignal: cleanup.signal }
+      ).catch(() => undefined).finally(() => clearTimeout(cleanupTimer));
       throw error;
     }
   }
 
-  await verifyUploadedObject(client, { bucket: input.bucket, key: input.key, size: details.size, sha256 });
+  await verifyUploadedObject(client, { bucket: input.bucket, key: input.key, size: details.size, sha256, signal: input.signal });
   return {
     name: input.key.split('/').at(-1) ?? input.key,
     object_key: input.key,
@@ -235,7 +254,8 @@ export function createOffHostBackupManifest(input: {
 export async function uploadOffHostManifest(
   client: S3CommandClient,
   location: OffHostBackupLocation,
-  manifest: OffHostBackupManifest
+  manifest: OffHostBackupManifest,
+  signal?: AbortSignal
 ): Promise<void> {
   const body = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
   const sha256 = createHash('sha256').update(body).digest('hex');
@@ -247,12 +267,13 @@ export async function uploadOffHostManifest(
     ContentType: 'application/json',
     Metadata: { 'x-sha256': sha256 },
     ChecksumSHA256: base64Sha256(sha256),
-  }));
+  }), { abortSignal: signal });
   await verifyUploadedObject(client, {
     bucket: location.bucket,
     key: manifest.manifest_key,
     size: body.length,
     sha256,
+    signal,
   });
 }
 
@@ -316,7 +337,7 @@ function manifestRunPrefix(location: OffHostBackupLocation, manifestKey: string)
   return `${runDirectory}/`;
 }
 
-export async function verifyOffHostBackupManifest(client: S3CommandClient, location: OffHostBackupLocation, manifest: OffHostBackupManifest): Promise<void> {
+export async function verifyOffHostBackupManifest(client: S3CommandClient, location: OffHostBackupLocation, manifest: OffHostBackupManifest, signal?: AbortSignal): Promise<void> {
   if (manifest.off_host_uri !== location.uri) {
     throw new Error('Off-host manifest destination does not match the configured destination.');
   }
@@ -345,7 +366,8 @@ export async function verifyOffHostBackupManifest(client: S3CommandClient, locat
       throw new Error('Off-host manifest contains an invalid backup artifact.');
     }
     artifactKeys.add(file.object_key);
-    await verifyUploadedObject(client, { bucket: location.bucket, key: file.object_key, size: file.size, sha256: file.sha256 });
+    signal?.throwIfAborted();
+    await verifyUploadedObject(client, { bucket: location.bucket, key: file.object_key, size: file.size, sha256: file.sha256, signal });
   }
 }
 

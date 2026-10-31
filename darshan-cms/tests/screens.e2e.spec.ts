@@ -30,6 +30,19 @@ type MockState = {
   confirmModeByCode: Record<string, "PAIRING" | "RECOVERY">;
 };
 
+type MockAuthUser = {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  role_id: string;
+  role: string;
+  authorization: {
+    rules: Array<{ action: string; subject: string; conditions?: Record<string, string> }>;
+    is_global_user_manager: boolean;
+  };
+};
+
 const adminUser = {
   id: "admin-user-id",
   email: "admin@darshan.local",
@@ -37,6 +50,7 @@ const adminUser = {
   last_name: "User",
   role_id: "role-admin",
   role: "ADMIN",
+  authorization: { rules: [{ action: "manage", subject: "all" }], is_global_user_manager: true },
 };
 
 const rolesPayload = {
@@ -59,7 +73,7 @@ const rolesPayload = {
   total: 1,
 };
 
-const login = async (page: Page) => {
+const login = async (page: Page, user: MockAuthUser = adminUser) => {
   await page.addInitScript((user) => {
     window.sessionStorage.setItem(
       "persist:darshan",
@@ -76,7 +90,7 @@ const login = async (page: Page) => {
       }),
     );
     document.cookie = "csrf_token=csrf-token; path=/";
-  }, adminUser);
+  }, user);
   await page.goto("/dashboard");
   await page.waitForURL(/\/dashboard/);
 };
@@ -88,7 +102,7 @@ const openScreensPage = async (page: Page) => {
   await expect(page.locator("main").getByRole("heading", { name: "Screens", exact: true })).toBeVisible({ timeout: 15_000 });
 };
 
-const installApiMocks = async (page: Page, state: MockState) => {
+const installApiMocks = async (page: Page, state: MockState, user: MockAuthUser = adminUser) => {
   await page.route("**/api/v1/**", async (route: Route) => {
     const url = new URL(route.request().url());
     const { pathname, searchParams } = url;
@@ -101,7 +115,7 @@ const installApiMocks = async (page: Page, state: MockState) => {
         body: JSON.stringify({
           token: "cms-token",
           csrf_token: "csrf-token",
-          user: adminUser,
+          user,
         }),
       });
     }
@@ -450,6 +464,96 @@ const installApiMocks = async (page: Page, state: MockState) => {
 };
 
 test.describe("Screens operator flow", () => {
+  test("uses record-scoped Screen grants for per-screen actions", async ({ page }) => {
+    const deletableScreenId = "00000000-0000-4000-8000-000000000101";
+    const recoverableScreenId = "00000000-0000-4000-8000-000000000102";
+    const pairingDeniedScreenId = "00000000-0000-4000-8000-000000000103";
+    const scopedUser: MockAuthUser = {
+      id: "screen-delegate-user",
+      email: "screen-delegate@example.test",
+      first_name: "Screen",
+      last_name: "Delegate",
+      role_id: "screen-delegate-role",
+      role: "DISPLAY_DELEGATE",
+      authorization: {
+        rules: [
+          { action: "read", subject: "Screen", conditions: { id: deletableScreenId } },
+          { action: "delete", subject: "Screen", conditions: { id: deletableScreenId } },
+          {
+            action: "update",
+            subject: "Screen",
+            conditions: { id: recoverableScreenId, location: "Lobby" },
+          },
+          { action: "update", subject: "Screen", conditions: { id: pairingDeniedScreenId } },
+          { action: "create", subject: "DevicePairing", conditions: { screen_id: recoverableScreenId } },
+        ],
+        is_global_user_manager: false,
+      },
+    };
+    const state: MockState = {
+      // The real API has already filtered out every other Screen. This browser
+      // assertion covers record-specific action rendering on the visible rows.
+      screens: [
+        {
+          id: deletableScreenId,
+          name: "Deletable Screen",
+          status: "ACTIVE",
+          health_state: "ONLINE",
+          active_items: [],
+          upcoming_items: [],
+        },
+        {
+          id: recoverableScreenId,
+          name: "Recoverable Screen",
+          location: "Lobby",
+          status: "ACTIVE",
+          health_state: "RECOVERY_REQUIRED",
+          health_reason: "Credential recovery required.",
+          active_pairing: null,
+          active_items: [],
+          upcoming_items: [],
+        },
+        {
+          id: pairingDeniedScreenId,
+          name: "Pairing-denied Screen",
+          status: "ACTIVE",
+          health_state: "RECOVERY_REQUIRED",
+          health_reason: "Pairing permission is not assigned for this screen.",
+          active_pairing: null,
+          active_items: [],
+          upcoming_items: [],
+        },
+      ],
+      groups: [],
+      pairings: [],
+      recoveryByDeviceId: {},
+      confirmModeByCode: {},
+    };
+
+    await installApiMocks(page, state, scopedUser);
+    await login(page, scopedUser);
+    await openScreensPage(page);
+
+    await expect(page.getByText("Deletable Screen")).toBeVisible();
+    await expect(page.getByText("Recoverable Screen")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete Screen Deletable Screen" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete Screen Recoverable Screen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Recover Screen Recoverable Screen" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Recover Screen Pairing-denied Screen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Recover Screen Deletable Screen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Pair Device" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Recover Screen Recoverable Screen" }).click();
+    await expect(page.getByRole("dialog", { name: /Recover Screen/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Generate Recovery Code/i })).toBeEnabled();
+    await page.getByRole("tab", { name: "Confirm" }).click();
+    await page.getByLabel("Pairing Code *").fill("RECOVERY123");
+    await expect(page.getByRole("button", { name: /Confirm Pairing \/ Recovery/i })).toBeEnabled();
+    await page.getByLabel("Location (Optional)").fill("Other");
+    await expect(page.getByRole("button", { name: /Confirm Pairing \/ Recovery/i })).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText(/current permissions/i);
+  });
+
   test("renders screen health and recovery info and handles delete refresh", async ({ page }) => {
     const state: MockState = {
       screens: [

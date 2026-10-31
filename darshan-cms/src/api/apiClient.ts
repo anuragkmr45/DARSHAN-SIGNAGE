@@ -80,6 +80,13 @@ export class ApiClient {
   private refreshedAuthHandler?: RefreshedAuthHandler;
   private unauthorizedHandler?: UnauthorizedHandler;
   private inflightGetRequests = new Map<string, Promise<unknown>>();
+  private authContextVersion = 0;
+
+  /** Separate pending responses when the browser changes authenticated identity. */
+  markAuthContextChanged() {
+    this.authContextVersion += 1;
+    this.inflightGetRequests.clear();
+  }
 
   setAuthTokenProvider(getToken: TokenProvider) {
     this.authTokenProvider = getToken;
@@ -113,6 +120,12 @@ export class ApiClient {
     };
     const authToken = this.authTokenProvider();
     const apiKey = options.useApiKey ? this.apiKeyProvider() : undefined;
+    const requestAuthContextVersion = this.authContextVersion;
+    const staleAuthContext = () => new ApiError({
+      status: 0,
+      code: "STALE_AUTH_CONTEXT",
+      message: "The account changed while this request was in progress.",
+    });
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
     if (apiKey) headers["X-API-Key"] = apiKey;
 
@@ -122,8 +135,11 @@ export class ApiClient {
 
     headers["Cache-Control"] = "no-store";
 
-    const requestKey = method === "GET" ? `${method}:${url}` : undefined;
+    const requestKey = method === "GET" && !options.signal
+      ? JSON.stringify([method, url, headers, options.responseType ?? "json", options.timeoutMs ?? DEFAULT_TIMEOUT_MS, requestAuthContextVersion])
+      : undefined;
     if (requestKey && this.inflightGetRequests.has(requestKey)) {
+      clearTimeout(timeout);
       return this.inflightGetRequests.get(requestKey) as Promise<TResponse>;
     }
 
@@ -145,6 +161,8 @@ export class ApiClient {
           signal: options.signal ?? controller.signal,
           credentials: "include",
         });
+
+        if (requestAuthContextVersion !== this.authContextVersion) throw staleAuthContext();
 
         const contentType = response.headers.get("content-type");
         const isJson = contentType?.includes("application/json");
@@ -174,14 +192,18 @@ export class ApiClient {
         }
 
         if (options.responseType === "blob") {
-          return (await response.blob()) as TResponse;
+          const blob = await response.blob();
+          if (requestAuthContextVersion !== this.authContextVersion) throw staleAuthContext();
+          return blob as TResponse;
         }
 
         const payload =
           options.responseType === "text" || !isJson ? await response.text() : await response.json();
 
+        if (requestAuthContextVersion !== this.authContextVersion) throw staleAuthContext();
         return payload as TResponse;
       } catch (error) {
+        if (requestAuthContextVersion !== this.authContextVersion) throw staleAuthContext();
         if (error instanceof ApiError) {
           if (typeof window !== "undefined" && error.status === 401 && !["/auth/login", "/auth/me"].includes(options.path)) {
             try {

@@ -9,7 +9,9 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization';
+import { lockDevicePairingIdentity } from '@/db/repositories/device-pairing';
+import { canAccessScreen } from '@/rbac/screen-access';
 import { resolveDefaultMediaForScreen } from '@/utils/default-media';
 import { AppError } from '@/utils/app-error';
 import { authenticateDeviceOrThrow } from '@/middleware/device-auth';
@@ -25,15 +27,18 @@ import {
   getActiveEmergencyForScreen as getActiveEmergencyForRuntime,
   getLatestPublishForScreen,
 } from '@/screens/playback';
-import { queueHeartbeatTelemetry, queueProofOfPlayTelemetry, queueScreenshotTelemetry } from '@/jobs';
+import {
+  queueDeviceOperationalObservation,
+  queueHeartbeatTelemetry,
+  queueMediaCacheReportTelemetry,
+  queueProofOfPlayTelemetry,
+  queueScreenshotTelemetry,
+} from '@/jobs';
 import {
   buildHeartbeatObjectKey,
   buildProofOfPlayIdempotencyKey,
   buildProofOfPlayObjectKey,
   buildScreenshotObjectKey,
-  processHeartbeatTelemetry,
-  processProofOfPlayTelemetry,
-  processScreenshotTelemetry,
 } from '@/jobs/device-telemetry';
 import {
   recordDeviceCommandAck,
@@ -42,7 +47,6 @@ import {
   recordPlayerRealtimeDiagnostics,
   recordTelemetryIngest,
 } from '@/observability/metrics';
-import { queueScreenStateRefresh } from '@/services/screen-state-refresh';
 import {
   acknowledgeDeviceCommand,
   claimDeviceCommands,
@@ -51,12 +55,12 @@ import {
   resolveCommandPriority,
 } from '@/services/command-lifecycle-service';
 import { getDeviceDesiredState } from '@/services/device-desired-state-service';
-import { createMediaCacheReport } from '@/services/media-cache-report-service';
+import { getActiveRecoveryGeneration } from '@/services/recovery-runtime-authority';
 import {
   extractDeviceIdentitySessionInput,
-  recordDeviceIdentitySession,
+  prepareDeviceIdentitySessionObservation,
+  previewDeviceIdentitySessionObservation,
 } from '@/services/device-identity-session-service';
-import { recordDisplayProfile } from '@/services/screen-display-state-service';
 import { getScreenDisplayState, serializeDisplayState } from '@/services/screen-display-state-service';
 import { displayProfileV1Schema } from '@/utils/display-profile';
 
@@ -241,6 +245,7 @@ const snapshotQuerySchema = z.object({
 
 const ackCommandSchema = z.object({
   delivery_token: z.string().uuid().optional(),
+  recovery_generation: z.string().uuid().optional(),
   success: z.boolean().optional(),
   error: z.string().min(1).optional(),
   message: z.string().min(1).optional(),
@@ -328,13 +333,22 @@ function getEnvironmentMismatchError(request: FastifyRequest) {
   );
 }
 
-function normalizePairingStatusError(error: unknown) {
+export function normalizePairingStatusError(error: unknown) {
   if (!(error instanceof AppError)) {
     return error;
   }
 
   const details = error.details && !Array.isArray(error.details) ? error.details : {};
   const reason = typeof details.reason === 'string' ? details.reason : undefined;
+
+  if (reason === 'RECOVERY_PAIRING_REVIEW_REQUIRED') {
+    return pairingStatusError(
+      HTTP_STATUS.FORBIDDEN,
+      'RECOVERY_PAIRING_REVIEW_REQUIRED',
+      'Recovered device pairing is quarantined pending exact operator review.',
+      { recovery_generation: typeof details.recovery_generation === 'string' ? details.recovery_generation : undefined }
+    );
+  }
 
   if (reason === 'DEVICE_CREDENTIALS_REVOKED') {
     return pairingStatusError(HTTP_STATUS.GONE, 'PAIRING_REVOKED', 'This screen pairing was revoked. Pair again.');
@@ -373,50 +387,13 @@ function normalizePairingStatusError(error: unknown) {
   return error;
 }
 
-export function shouldPersistTelemetryInline(
-  nodeEnv: string = appConfig.NODE_ENV,
-  processRole?: string
-) {
-  // Inline persistence is a deliberate development-only single-process mode.
-  // Do not infer `api` from the ambient environment here: callers that have
-  // not established a process role must take the queue path, otherwise a
-  // worker-capable deployment can silently run two persistence paths.
-  return nodeEnv === 'development' && processRole === 'api';
-}
-
-async function enqueueTelemetryWithFallback(params: {
+async function enqueueTelemetry(params: {
   telemetryType: 'heartbeat' | 'proof_of_play' | 'screenshot';
   label: string;
   enqueue: () => Promise<unknown>;
-  fallback: () => Promise<void>;
   heartbeatStatus?: 'ONLINE' | 'OFFLINE' | 'ERROR';
 }) {
   const startedAt = process.hrtime.bigint();
-  const processRole = process.env.DARSHAN_PROCESS_ROLE?.trim() || process.env.HEXMON_PROCESS_ROLE?.trim();
-  if (shouldPersistTelemetryInline(appConfig.NODE_ENV, processRole)) {
-    try {
-      logger.info({ label: params.label, processRole, env: appConfig.NODE_ENV }, 'Persisting telemetry inline in api-only runtime');
-      await params.fallback();
-      recordTelemetryIngest({
-        telemetryType: params.telemetryType,
-        persistMode: 'inline',
-        result: 'success',
-        heartbeatStatus: params.heartbeatStatus,
-        durationSeconds: Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
-      });
-      return 'inline' as const;
-    } catch (error) {
-      recordTelemetryIngest({
-        telemetryType: params.telemetryType,
-        persistMode: 'inline',
-        result: 'error',
-        heartbeatStatus: params.heartbeatStatus,
-        durationSeconds: Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
-      });
-      throw error;
-    }
-  }
-
   try {
     await params.enqueue();
     recordTelemetryIngest({
@@ -428,27 +405,15 @@ async function enqueueTelemetryWithFallback(params: {
     });
     return 'queue' as const;
   } catch (error) {
-    logger.warn({ error, label: params.label }, 'Telemetry queue unavailable; using inline fallback');
-    try {
-      await params.fallback();
-      recordTelemetryIngest({
-        telemetryType: params.telemetryType,
-        persistMode: 'fallback',
-        result: 'success',
-        heartbeatStatus: params.heartbeatStatus,
-        durationSeconds: Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
-      });
-      return 'fallback' as const;
-    } catch (fallbackError) {
-      recordTelemetryIngest({
-        telemetryType: params.telemetryType,
-        persistMode: 'fallback',
-        result: 'error',
-        heartbeatStatus: params.heartbeatStatus,
-        durationSeconds: Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
-      });
-      throw fallbackError;
-    }
+    logger.warn({ error, label: params.label }, 'Durable telemetry enqueue failed; refusing inline persistence');
+    recordTelemetryIngest({
+      telemetryType: params.telemetryType,
+      persistMode: 'queue',
+      result: 'error',
+      heartbeatStatus: params.heartbeatStatus,
+      durationSeconds: Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+    });
+    throw error;
   }
 }
 
@@ -551,13 +516,31 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const emergency = await getActiveEmergencyForRuntime(deviceId, { db, includeUrls: false });
         const latest = await getLatestPublishForScreen(deviceId, db);
         const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
+        const recoveryGeneration = await getActiveRecoveryGeneration();
         const hasContent = Boolean(emergency || latest?.snapshot_id || resolvedDefaultMedia.media_id);
-        const duplicateIdentity = await recordDeviceIdentitySession(
+        const identityObservation = prepareDeviceIdentitySessionObservation(
           extractDeviceIdentitySessionInput(request, {
             deviceId,
             source: 'pairing_status',
+            body: undefined,
           })
         );
+        const duplicateIdentity = await previewDeviceIdentitySessionObservation(identityObservation);
+        try {
+          await queueDeviceOperationalObservation({
+            eventId: randomUUID(),
+            type: 'identity_session',
+            observation: identityObservation,
+          });
+        } catch (observationError) {
+          // Pairing validation is an operational read. A later poll can retry this
+          // observation, so queue availability must not take an authenticated
+          // player offline while the maintenance barrier or worker is recovering.
+          logger.warn(
+            { err: observationError, device_id: deviceId },
+            'Failed to record pairing-status identity observation'
+          );
+        }
 
         if (duplicateIdentity.active && appConfig.DUPLICATE_IDENTITY_ENFORCEMENT === 'block') {
           throw pairingStatusError(
@@ -571,6 +554,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         }
 
         return reply.send({
+          recovery_generation: recoveryGeneration,
           status: hasContent ? 'VALID' : 'VALID_NO_CONTENT',
           deviceId,
           screenId: screen.id,
@@ -644,6 +628,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         }
 
         const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
+        const recoveryGeneration = await getActiveRecoveryGeneration();
         const defaultMediaAccess = resolvedDefaultMedia.media
           ? await resolveMediaAccess(resolvedDefaultMedia.media, db, { audience: 'device' })
           : null;
@@ -662,6 +647,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             )
           : null;
         return reply.send({
+          recovery_generation: recoveryGeneration,
           source: resolvedDefaultMedia.source,
           aspect_ratio: resolvedDefaultMedia.aspect_ratio,
           media_id: resolvedDefaultMedia.media_id,
@@ -705,6 +691,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         }
 
         const emergency = await getActiveEmergencyForRuntime(deviceId, { db, includeUrls });
+        const recoveryGeneration = await getActiveRecoveryGeneration();
         const resolvedDefaultMedia = await resolveDefaultMediaForScreen(screen, db);
         const defaultMediaPayload = await serializeResolvedDefaultMedia(resolvedDefaultMedia, includeUrls);
 
@@ -736,7 +723,12 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             reservation_end_at: (latest as any)?.reservation_end_at ?? null,
             groups: groupIds,
             emergency: emergency
-              ? { id: emergency.id, version: emergency.version, expires_at: emergency.expires_at }
+              ? {
+                  id: emergency.id,
+                  version: emergency.version,
+                  expires_at: emergency.expires_at,
+                  loop_enabled: emergency.loop_enabled,
+                }
               : null,
             default_media: {
               id: resolvedDefaultMedia.media_id,
@@ -757,6 +749,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         if (!latest) {
           return reply.send({
             device_id: deviceId,
+            recovery_generation: recoveryGeneration,
             content_state: defaultMediaPayload.default_media ? 'default' : 'empty',
             server_time: new Date().toISOString(),
             representation_revision: representationRevision,
@@ -808,6 +801,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
 
         return reply.send({
           device_id: deviceId,
+          recovery_generation: recoveryGeneration,
           content_state: hasFilteredScheduledContent ? 'scheduled' : defaultMediaPayload.default_media ? 'default' : 'empty',
           server_time: new Date().toISOString(),
           representation_revision: representationRevision,
@@ -847,34 +841,44 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const data = createCommandSchema.parse(request.body);
-        const screenId = (request.params as any).deviceId;
+        const screenId = z.string().uuid().parse((request.params as any).deviceId);
 
-        const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, screenId));
-        if (!screen) throw AppError.notFound('Screen not found');
+        const command = await withCurrentMutationAuthorization(
+          payload,
+          async ({ actor, ability, executor }) => {
+            await lockDevicePairingIdentity(executor, screenId);
+            const [screen] = await executor
+              .select()
+              .from(schema.screens)
+              .where(eq(schema.screens.id, screenId))
+              .for('update');
+            if (!screen) throw AppError.notFound('Screen not found');
+            if (!canAccessScreen(ability, 'update', screen)) throw AppError.forbidden('Forbidden');
 
-        const command = await createDeviceCommand({
-          screenId,
-          type: data.type,
-          payload: data.payload,
-          priority: resolveCommandPriority(
-            typeof data.payload?.reason === 'string' ? data.payload.reason : null,
-            data.priority ?? null
-          ),
-          expiresAt: data.expires_at
-            ? new Date(data.expires_at)
-            : resolveCommandExpiresAt(typeof data.payload?.reason === 'string' ? data.payload.reason : null),
-          maxAttempts: data.max_attempts,
-          correlationId: data.correlation_id ?? null,
-          idempotencyKey: data.idempotency_key ?? null,
-          desiredSnapshotId: data.desired_snapshot_id ?? null,
-          desiredDefaultMediaVersion: data.desired_default_media_version ?? null,
-          desiredEmergencyVersion: data.desired_emergency_version ?? null,
-          createdBy: payload.sub,
-        });
+            const command = await createDeviceCommand({
+              screenId,
+              type: data.type,
+              payload: data.payload,
+              priority: resolveCommandPriority(
+                typeof data.payload?.reason === 'string' ? data.payload.reason : null,
+                data.priority ?? null
+              ),
+              expiresAt: data.expires_at
+                ? new Date(data.expires_at)
+                : resolveCommandExpiresAt(typeof data.payload?.reason === 'string' ? data.payload.reason : null),
+              maxAttempts: data.max_attempts,
+              correlationId: data.correlation_id ?? null,
+              idempotencyKey: data.idempotency_key ?? null,
+              desiredSnapshotId: data.desired_snapshot_id ?? null,
+              desiredDefaultMediaVersion: data.desired_default_media_version ?? null,
+              desiredEmergencyVersion: data.desired_emergency_version ?? null,
+              createdBy: actor.userId,
+            }, executor);
+            if (!command) throw AppError.internal('Unable to create the device command.');
+            return command;
+          },
+        );
 
         return reply.status(CREATED).send({
           id: command.id,
@@ -919,16 +923,25 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         }
 
         const receivedAt = new Date();
-        const duplicateIdentity = await recordDeviceIdentitySession(
-          extractDeviceIdentitySessionInput(request, {
+        const identityObservation = prepareDeviceIdentitySessionObservation({
+          ...extractDeviceIdentitySessionInput(request, {
             deviceId: data.device_id,
             source: 'heartbeat',
             body: data as unknown as Record<string, unknown>,
-          })
-        );
+          }),
+          now: receivedAt,
+        });
+        const duplicateIdentity = await previewDeviceIdentitySessionObservation(identityObservation);
         const receivedAtIso = receivedAt.toISOString();
         const storageObjectId = randomUUID();
-        const objectKey = buildHeartbeatObjectKey(data.device_id, receivedAtIso, data as unknown as Record<string, unknown>);
+        const objectKey = buildHeartbeatObjectKey(
+          data.device_id,
+          receivedAtIso,
+          storageObjectId,
+          data as unknown as Record<string, unknown>
+        );
+        const screenStatus: 'ACTIVE' | 'OFFLINE' | 'INACTIVE' =
+          data.status === 'ONLINE' ? 'ACTIVE' : data.status === 'OFFLINE' ? 'OFFLINE' : 'INACTIVE';
         const heartbeatJob = {
           deviceId: data.device_id,
           status: data.status,
@@ -936,30 +949,16 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           receivedAt: receivedAtIso,
           objectKey,
           storageObjectId,
+          screenObservation: {
+            status: screenStatus,
+            currentScheduleId: data.current_schedule_id ?? null,
+            currentMediaId: data.current_media_id ?? null,
+            currentSceneId: data.current_scene_id ?? null,
+            activeSlots: data.active_slots ?? [],
+          },
+          displayProfile: data.display_profile_v1,
+          identityObservation,
         };
-
-        const screenStatus =
-          data.status === 'ONLINE' ? 'ACTIVE' : data.status === 'OFFLINE' ? 'OFFLINE' : 'INACTIVE';
-
-        if (data.display_profile_v1) {
-          const displayWrite = await recordDisplayProfile(data.device_id, data.display_profile_v1);
-          if (!displayWrite.applied) {
-            logger.debug({ deviceId: data.device_id, reason: displayWrite.reason }, 'Ignored stale display profile observation');
-          }
-        }
-
-        await db
-          .update(schema.screens)
-          .set({
-            status: screenStatus as any,
-            last_heartbeat_at: receivedAt,
-            current_schedule_id: data.current_schedule_id ?? null,
-            current_media_id: data.current_media_id ?? null,
-            current_scene_id: data.current_scene_id ?? null,
-            active_slots: data.active_slots ?? [],
-            updated_at: receivedAt,
-          })
-          .where(eq(schema.screens.id, data.device_id));
 
         if (data.realtime_diagnostics) {
           recordPlayerRealtimeDiagnostics({
@@ -969,13 +968,10 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           });
         }
 
-        queueScreenStateRefresh(data.device_id);
-
-        await enqueueTelemetryWithFallback({
+        await enqueueTelemetry({
           telemetryType: 'heartbeat',
           label: 'heartbeat',
           enqueue: () => queueHeartbeatTelemetry(heartbeatJob),
-          fallback: () => processHeartbeatTelemetry(heartbeatJob),
           heartbeatStatus: data.status,
         });
 
@@ -1006,6 +1002,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             : undefined,
           commands: pendingCommands.map((command) => ({
             id: command.id,
+            recovery_generation: command.recoveryGeneration,
             type: command.type,
             payload: command.payload,
             delivery_token: command.deliveryToken,
@@ -1066,11 +1063,10 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           objectKey: buildProofOfPlayObjectKey(data.device_id, idempotencyKey),
         };
 
-        await enqueueTelemetryWithFallback({
+        await enqueueTelemetry({
           telemetryType: 'proof_of_play',
           label: 'proof-of-play',
           enqueue: () => queueProofOfPlayTelemetry(proofOfPlayJob),
-          fallback: () => processProofOfPlayTelemetry(proofOfPlayJob),
         });
 
         logger.info(
@@ -1124,11 +1120,10 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           storageObjectId,
         };
 
-        await enqueueTelemetryWithFallback({
+        await enqueueTelemetry({
           telemetryType: 'screenshot',
           label: 'screenshot',
           enqueue: () => queueScreenshotTelemetry(screenshotJob),
-          fallback: () => processScreenshotTelemetry(screenshotJob),
         });
 
         logger.info(
@@ -1195,34 +1190,40 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('Device not registered');
         }
 
-        const report = await createMediaCacheReport({
-          screenId: deviceId,
-          mediaId: data.media_id ?? null,
-          eventType: data.event_type,
-          severity: data.severity,
-          source: data.source ?? null,
-          errorCode: data.error_code ?? null,
-          httpStatus: data.http_status ?? null,
-          message: data.message ?? null,
-          cacheKey: data.cache_key ?? null,
-          urlHost: data.url_host ?? null,
-          urlPathHash: data.url_path_hash ?? null,
-          snapshotId: data.snapshot_id ?? null,
-          scheduleId: data.schedule_id ?? null,
-          defaultMediaVersion: data.default_media_version ?? null,
-          playbackMode: data.playback_mode ?? null,
-          attemptCount: data.attempt_count ?? null,
-          metadata: data.metadata ?? null,
-          reportedAt: data.reported_at ? new Date(data.reported_at) : null,
+        const reportId = randomUUID();
+        const receivedAt = new Date();
+        await queueMediaCacheReportTelemetry({
+          reportId,
+          receivedAt: receivedAt.toISOString(),
+          report: {
+            screenId: deviceId,
+            mediaId: data.media_id ?? null,
+            eventType: data.event_type,
+            severity: data.severity,
+            source: data.source ?? null,
+            errorCode: data.error_code ?? null,
+            httpStatus: data.http_status ?? null,
+            message: data.message ?? null,
+            cacheKey: data.cache_key ?? null,
+            urlHost: data.url_host ?? null,
+            urlPathHash: data.url_path_hash ?? null,
+            snapshotId: data.snapshot_id ?? null,
+            scheduleId: data.schedule_id ?? null,
+            defaultMediaVersion: data.default_media_version ?? null,
+            playbackMode: data.playback_mode ?? null,
+            attemptCount: data.attempt_count ?? null,
+            metadata: data.metadata ?? null,
+            reportedAt: data.reported_at ?? null,
+          },
         });
 
         logger.warn(
           {
             deviceId,
-            reportId: report.id,
-            eventType: report.event_type,
-            severity: report.severity,
-            mediaId: report.media_id,
+            reportId,
+            eventType: data.event_type,
+            severity: data.severity,
+            mediaId: data.media_id ?? null,
           },
           'Device media/cache failure report received'
         );
@@ -1235,8 +1236,8 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
 
         return reply.status(CREATED).send({
           success: true,
-          id: report.id,
-          received_at: report.received_at?.toISOString?.() ?? report.received_at,
+          id: reportId,
+          received_at: receivedAt.toISOString(),
         });
       } catch (error) {
         recordMediaCacheReport({
@@ -1265,10 +1266,12 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         await authenticateDeviceOrThrow(request, deviceId);
 
         const state = await getDeviceDesiredState(deviceId);
+        const recoveryGeneration = state?.recovery_generation ?? await getActiveRecoveryGeneration();
         const displayState = await getScreenDisplayState(deviceId);
 
         return reply.send({
           device_id: deviceId,
+          recovery_generation: recoveryGeneration,
           server_time: new Date().toISOString(),
           state: state
             ? {
@@ -1338,6 +1341,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         return reply.send({
           commands: pendingCommands.map((command) => ({
             id: command.id,
+            recovery_generation: command.recoveryGeneration,
             type: command.type,
             payload: command.payload,
             delivery_token: command.deliveryToken,

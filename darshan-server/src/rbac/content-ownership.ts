@@ -1,7 +1,9 @@
 import { and, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { subject as caslSubject } from '@casl/ability';
 import { getDatabase, schema } from '@/db';
 import { AppError } from '@/utils/app-error';
 import { type ActorContext } from '@/rbac/policy';
+import { canUnconditionally, type AppAbility } from '@/rbac';
 
 export const CONTENT_OWNER_SCOPES = ['DEPARTMENT', 'ORGANIZATION', 'RESTRICTED'] as const;
 export type ContentOwnerScope = (typeof CONTENT_OWNER_SCOPES)[number];
@@ -14,6 +16,9 @@ export type ContentOwnedResource = {
 };
 
 type OwnershipColumns = {
+  id: any;
+  name: any;
+  created_by: any;
   owner_scope: any;
   owner_department_id: any;
 };
@@ -29,9 +34,7 @@ export type ContentOwnershipView = {
   };
 };
 
-export type ContentAbility = {
-  can(action: string, subject: string): boolean;
-};
+export type ContentAbility = AppAbility;
 
 export type ContentSubject = 'Media' | 'Layout' | 'Presentation' | 'Schedule';
 
@@ -44,21 +47,28 @@ export function normalizeContentOwnerScope(value?: string | null): ContentOwnerS
 export function ownershipForNewContent(
   actor: ActorContext,
   ability: ContentAbility,
-  subject: ContentSubject
+  subject: ContentSubject,
+  proposed: Record<string, unknown>
 ): {
   owner_scope: ContentOwnerScope;
   owner_department_id: string | null;
 } {
-  if (actor.roleName === 'SUPER_ADMIN') {
-    return { owner_scope: 'RESTRICTED', owner_department_id: null };
-  }
-  if (actor.roleName === 'ADMIN' || ability.can('manage', subject)) {
-    return { owner_scope: 'ORGANIZATION', owner_department_id: null };
-  }
-  if (!actor.departmentId) {
+  let ownership: { owner_scope: ContentOwnerScope; owner_department_id: string | null };
+  if (actor.roleName === 'SUPER_ADMIN' && canUnconditionally(ability, 'manage', 'all')) {
+    ownership = { owner_scope: 'RESTRICTED', owner_department_id: null };
+  } else if (canUnconditionally(ability, 'manage', subject)) {
+    ownership = { owner_scope: 'ORGANIZATION', owner_department_id: null };
+  } else if (actor.departmentId) {
+    ownership = { owner_scope: 'DEPARTMENT', owner_department_id: actor.departmentId };
+  } else {
     throw AppError.forbidden('A department is required to create department-owned content.');
   }
-  return { owner_scope: 'DEPARTMENT', owner_department_id: actor.departmentId };
+  if (!(ability as any).can('create', caslSubject(subject, {
+    ...proposed,
+    created_by: actor.userId,
+    ...ownership,
+  }))) throw AppError.forbidden('Forbidden');
+  return ownership;
 }
 
 export function canReadContentResource(
@@ -67,8 +77,8 @@ export function canReadContentResource(
   ability: ContentAbility,
   subject: ContentSubject
 ): boolean {
-  if (!ability.can('read', subject)) return false;
-  if (ability.can('manage', subject)) return true;
+  if (!(ability as any).can('read', caslSubject(subject, { ...resource }))) return false;
+  if (canUnconditionally(ability, 'manage', subject)) return true;
   const scope = normalizeContentOwnerScope(resource.owner_scope);
   if (scope === 'ORGANIZATION') return true;
   return scope === 'DEPARTMENT' && Boolean(
@@ -83,9 +93,9 @@ export function canManageContentResource(
   subject: ContentSubject,
   action: 'update' | 'delete' | 'create' | 'approve' | 'publish' = 'update'
 ): boolean {
-  if (!ability.can(action, subject)) return false;
+  if (!(ability as any).can(action, caslSubject(subject, { ...resource }))) return false;
   if (!canAccessContentMutationScope(actor, resource, ability, subject)) return false;
-  if (ability.can('manage', subject)) return true;
+  if (canUnconditionally(ability, 'manage', subject)) return true;
   if (subject === 'Schedule') return true;
   return Boolean(resource.created_by && resource.created_by === actor.userId);
 }
@@ -96,7 +106,7 @@ export function canAccessContentMutationScope(
   ability: ContentAbility,
   subject: ContentSubject
 ): boolean {
-  if (ability.can('manage', subject)) return true;
+  if (canUnconditionally(ability, 'manage', subject)) return true;
   return normalizeContentOwnerScope(resource.owner_scope) === 'DEPARTMENT' && Boolean(
     actor.departmentId && resource.owner_department_id === actor.departmentId
   );
@@ -141,18 +151,52 @@ export function contentReadCondition(
   ability?: ContentAbility,
   subject?: ContentSubject
 ): SQL | undefined {
-  if (ability && subject && !ability.can('read', subject)) return sql`false`;
-  if (ability && subject && ability.can('manage', subject)) return undefined;
-  if (!actor.departmentId) {
-    return eq(columns.owner_scope, 'ORGANIZATION');
+  if (ability && subject && canUnconditionally(ability, 'manage', subject)) return undefined;
+  const ownership = actor.departmentId
+    ? or(
+        eq(columns.owner_scope, 'ORGANIZATION'),
+        and(eq(columns.owner_scope, 'DEPARTMENT'), eq(columns.owner_department_id, actor.departmentId))
+      )!
+    : eq(columns.owner_scope, 'ORGANIZATION');
+  if (!ability || !subject) return ownership;
+  const permission = contentGrantReadPredicate(ability, subject, columns);
+  return and(ownership, permission)!;
+}
+
+const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Translate only supported equality conditions; unknown conditions fail closed in lists. */
+function contentGrantReadPredicate(ability: ContentAbility, subject: ContentSubject, columns: OwnershipColumns): SQL {
+  const permitted: SQL[] = [];
+  for (const rule of ability.rules) {
+    if (rule.inverted) continue;
+    const actions = Array.isArray(rule.action) ? rule.action : [rule.action];
+    const subjects = Array.isArray(rule.subject) ? rule.subject : [rule.subject];
+    if (!actions.some((action) => action === 'read' || action === 'manage') ||
+        !subjects.some((item) => item === subject || item === 'all')) continue;
+    const conditions = rule.conditions as Record<string, unknown> | undefined;
+    if (conditions === undefined) return sql`true`;
+    if (!conditions || typeof conditions !== 'object' || Array.isArray(conditions)) continue;
+    if (Object.keys(conditions).length === 0) return sql`true`;
+    const parts: SQL[] = [];
+    let supported = true;
+    for (const [key, value] of Object.entries(conditions)) {
+      if (typeof value !== 'string') { supported = false; break; }
+      if (key === 'id' || key === 'created_by' || key === 'owner_department_id') {
+        if (!canonicalUuid.test(value)) { supported = false; break; }
+        parts.push(eq(columns[key], value));
+      } else if (key === 'name') {
+        parts.push(eq(columns.name, value));
+      } else if (key === 'owner_scope' && CONTENT_OWNER_SCOPES.includes(value as ContentOwnerScope)) {
+        parts.push(eq(columns.owner_scope, value));
+      } else {
+        supported = false;
+        break;
+      }
+    }
+    if (supported && parts.length > 0) permitted.push(and(...parts)!);
   }
-  return or(
-    eq(columns.owner_scope, 'ORGANIZATION'),
-    and(
-      eq(columns.owner_scope, 'DEPARTMENT'),
-      eq(columns.owner_department_id, actor.departmentId)
-    )
-  );
+  return permitted.length > 0 ? or(...permitted)! : sql`false`;
 }
 
 function creatorDisplayName(user: {
