@@ -131,7 +131,7 @@ CMS_HOST=192.168.1.102
 OBSERVABILITY_HOST=192.168.1.104
 
 POSTGRES_IMAGE=postgres:15-alpine
-MINIO_IMAGE=minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+MINIO_IMAGE=darshan-minio:RELEASE.2025-10-15T17-29-55Z
 VALKEY_IMAGE=valkey/valkey:7-alpine
 BACKEND_IMAGE=darshan-server-api:production
 CMS_IMAGE=darshan-cms:production
@@ -162,6 +162,10 @@ PLAYER_BACKEND_BASE_URL=http://192.168.1.103:3000
 PLAYER_SOCKET_IO_URL=http://192.168.1.103:3000/socket.io/
 PLAYER_CONFIG_FILE_PATH=/etc/darshan/player/config.json
 ```
+
+The bundle build creates this image from the official MinIO release source at
+commit `9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a`; it does not pull the withdrawn
+Docker Hub image. The packaged Data role remains source-free and offline.
 
 Use the same MinIO credentials on Data and Backend. Data uses them as MinIO bootstrap credentials; Backend uses them to access object storage.
 

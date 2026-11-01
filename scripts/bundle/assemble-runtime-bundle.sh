@@ -46,7 +46,7 @@ Optional operational inputs:
   CMS_TLS_CERT_FILE=/path/to/fullchain.pem
   CMS_TLS_KEY_FILE=/path/to/privkey.pem
   POSTGRES_IMAGE=postgres:15-alpine
-  MINIO_IMAGE=minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+  MINIO_IMAGE=darshan-minio:RELEASE.2025-10-15T17-29-55Z
   VALKEY_IMAGE=valkey/valkey:7-alpine
   NGINX_IMAGE=nginx:1.27-alpine
   PROMETHEUS_IMAGE=prom/prometheus:v3.3.1
@@ -2172,7 +2172,8 @@ DEVICE_CA_CERT_FILE="${DEVICE_CA_CERT_FILE:-}"
 DEVICE_CA_KEY_FILE="${DEVICE_CA_KEY_FILE:-}"
 
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-${SERVER_PACKAGE_POSTGRES_IMAGE_REF:-postgres:15-alpine}}"
-MINIO_IMAGE="${MINIO_IMAGE:-${SERVER_PACKAGE_MINIO_IMAGE_REF:-minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}}"
+DEFAULT_MINIO_IMAGE="darshan-minio:RELEASE.2025-10-15T17-29-55Z"
+MINIO_IMAGE="${MINIO_IMAGE:-${SERVER_PACKAGE_MINIO_IMAGE_REF:-$DEFAULT_MINIO_IMAGE}}"
 MINIO_RUNTIME_IMAGE="$(runtime_image_reference "$MINIO_IMAGE")"
 VALKEY_IMAGE="${VALKEY_IMAGE:-${SERVER_PACKAGE_VALKEY_IMAGE_REF:-valkey/valkey:7-alpine}}"
 BACKUP_IMAGE="${BACKUP_IMAGE:-${SERVER_PACKAGE_BACKUP_IMAGE_REF:-}}"
@@ -2631,6 +2632,9 @@ elif [[ "$SKIP_DOCKER" == "true" ]]; then
   fi
 else
   echo "Preparing base image: $MINIO_IMAGE"
+  if [[ "$MINIO_IMAGE" == "$DEFAULT_MINIO_IMAGE" ]]; then
+    bash "$PLATFORM_ROOT/scripts/export/build-minio-image.sh" "$MINIO_IMAGE"
+  fi
   docker image inspect "$MINIO_IMAGE" >/dev/null 2>&1 || docker pull "$MINIO_IMAGE"
   if [[ "$MINIO_RUNTIME_IMAGE" != "$MINIO_IMAGE" ]]; then
     docker image tag "$MINIO_IMAGE" "$MINIO_RUNTIME_IMAGE"

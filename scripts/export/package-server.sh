@@ -13,7 +13,7 @@ Optional environment overrides:
   BACKUP_IMAGE_REF=darshan-simple-backup:<release-id>
   INSTALL_PLAYWRIGHT_CHROMIUM=true
   POSTGRES_IMAGE=postgres:15-alpine
-  MINIO_IMAGE=minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+  MINIO_IMAGE=darshan-minio:RELEASE.2025-10-15T17-29-55Z
   VALKEY_IMAGE=valkey/valkey:7-alpine
 EOF
 }
@@ -70,7 +70,8 @@ BACKUP_IMAGE_REF="${BACKUP_IMAGE_REF:-darshan-simple-backup:$RELEASE_ID}"
 BACKUP_BUILD_DIR="${BACKUP_BUILD_DIR:-$PLATFORM_ROOT/deploy/production/docker/backup}"
 INSTALL_PLAYWRIGHT_CHROMIUM="${INSTALL_PLAYWRIGHT_CHROMIUM:-true}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:15-alpine}"
-MINIO_IMAGE="${MINIO_IMAGE:-minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}"
+DEFAULT_MINIO_IMAGE="darshan-minio:RELEASE.2025-10-15T17-29-55Z"
+MINIO_IMAGE="${MINIO_IMAGE:-$DEFAULT_MINIO_IMAGE}"
 VALKEY_IMAGE="${VALKEY_IMAGE:-valkey/valkey:7-alpine}"
 
 OUTPUT_DIR="$OUTPUT_BASE/$RELEASE_ID/server"
@@ -100,6 +101,10 @@ docker build --build-arg INSTALL_PLAYWRIGHT_CHROMIUM="$INSTALL_PLAYWRIGHT_CHROMI
 
 export_common_log "Building backup image $BACKUP_IMAGE_REF"
 docker build -t "$BACKUP_IMAGE_REF" "$BACKUP_BUILD_DIR"
+
+if [[ "$MINIO_IMAGE" == "$DEFAULT_MINIO_IMAGE" ]]; then
+  bash "$SCRIPT_DIR/build-minio-image.sh" "$MINIO_IMAGE"
+fi
 
 export_common_log "Ensuring base images are available"
 docker image inspect "$POSTGRES_IMAGE" >/dev/null 2>&1 || docker pull "$POSTGRES_IMAGE"

@@ -468,6 +468,29 @@ test('production web media runtime settings are emitted by generated artifacts',
   assert.doesNotMatch(bundleConfig, /512m proxy envelope/)
 })
 
+test('production MinIO image is built from one pinned official source revision', () => {
+  const bundleConfig = fs.readFileSync(repoPath('scripts/bundle/production-bundle-config.mjs'), 'utf8')
+  const packageServer = fs.readFileSync(repoPath('scripts/export/package-server.sh'), 'utf8')
+  const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
+  const imageBuilder = fs.readFileSync(repoPath('scripts/export/build-minio-image.sh'), 'utf8')
+  const dockerfile = fs.readFileSync(repoPath('deploy/production/docker/minio/Dockerfile'), 'utf8')
+  const verifier = fs.readFileSync(repoPath('scripts/verify/validate-source-free-production-bundle.sh'), 'utf8')
+
+  const image = 'darshan-minio:RELEASE.2025-10-15T17-29-55Z'
+  const commit = '9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a'
+  for (const file of [bundleConfig, packageServer, assembler, imageBuilder, verifier]) {
+    assert.match(file, new RegExp(image.replace(/[.]/g, '\\.'), 'm'))
+  }
+  assert.match(dockerfile, new RegExp(`ARG MINIO_SOURCE_COMMIT=${commit}`))
+  assert.match(dockerfile, /git fetch --depth 1 origin "refs\/tags\/\$\{MINIO_SOURCE_TAG\}"/)
+  assert.match(dockerfile, /test "\$\(git rev-parse HEAD\)" = "\$\{MINIO_SOURCE_COMMIT\}"/)
+  assert.match(packageServer, /build-minio-image\.sh/)
+  assert.match(assembler, /build-minio-image\.sh/)
+  assert.doesNotMatch(bundleConfig, /minio\/minio/)
+  assert.doesNotMatch(packageServer, /minio\/minio/)
+  assert.doesNotMatch(assembler, /minio\/minio/)
+})
+
 test('production observability deploys every static exporter target from signed role images', () => {
   const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
   const template = fs.readFileSync(repoPath('deploy/shared/observability/prometheus/prometheus.yml.template'), 'utf8')

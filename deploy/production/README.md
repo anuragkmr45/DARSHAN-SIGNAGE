@@ -150,7 +150,7 @@ CMS_HOST=192.168.1.102
 OBSERVABILITY_HOST=192.168.1.104
 
 POSTGRES_IMAGE=postgres:15-alpine
-MINIO_IMAGE=minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+MINIO_IMAGE=darshan-minio:RELEASE.2025-10-15T17-29-55Z
 VALKEY_IMAGE=valkey/valkey:7-alpine
 BACKEND_IMAGE=darshan-server-api:production
 CMS_IMAGE=darshan-cms:production
@@ -190,6 +190,12 @@ PLAYER_BACKEND_BASE_URL=http://192.168.1.103:3000
 PLAYER_SOCKET_IO_URL=http://192.168.1.103:3000/socket.io/
 PLAYER_CONFIG_FILE_PATH=/etc/darshan/player/config.json
 ```
+
+The default MinIO image is built locally from the official
+`RELEASE.2025-10-15T17-29-55Z` source tag and is verified against commit
+`9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a`. Production bundles include the
+resulting image archive, so Data VMs do not need internet access. An explicit
+`MINIO_IMAGE` override remains supported for an approved internal registry.
 
 Use the same `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` for Data VM and Backend VM. Data maps them to MinIO root credentials, and Backend uses them to access object storage.
 

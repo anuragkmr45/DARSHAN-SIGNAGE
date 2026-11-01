@@ -485,7 +485,7 @@ if [[ "${DARSHAN_VERIFY_IMAGE_LOADER:-false}" == "true" ]]; then
   }
   docker image inspect nginx:alpine >/dev/null
   docker image inspect postgres:15-alpine >/dev/null
-  docker image inspect minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e >/dev/null
+  docker image inspect darshan-minio:RELEASE.2025-10-15T17-29-55Z >/dev/null
   docker image inspect valkey/valkey:7-alpine >/dev/null
   docker image inspect prom/prometheus:v3.3.1 >/dev/null
   docker image inspect grafana/grafana:12.0.2 >/dev/null
@@ -525,7 +525,7 @@ EOF
       ./load-images.sh --verify-loaded
     )
   done
-  grep -q $'\tminio/minio:darshan-' "$DOCKER_BUNDLE/production/data/images/IMAGE_MANIFEST.tsv"
+  grep -q $'\tdarshan-minio:RELEASE.2025-10-15T17-29-55Z' "$DOCKER_BUNDLE/production/data/images/IMAGE_MANIFEST.tsv"
 
   # Exercise the signed state-service roles, not merely their Compose syntax.
   # The target VM topology is distributed, but this deliberately verifies both
