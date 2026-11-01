@@ -176,7 +176,8 @@ Edit only that private file. Important values include:
 - `RELEASE_SIGNING_PRIVATE_KEY=/secure/darshan-signing/release-signing.key`
 - stable external volume names and provisioning mode
 - all runtime credentials
-- measured capacity evidence and per-service resource limits
+- measured capacity evidence and per-service resource limits, or an explicit
+  owner-approved capacity waiver expiring within 90 days
 - minimum free disk policy for every VM role
 - one explicit backup mode: independently operated off-host storage, or the
   accepted-risk Data-VM `EXTERNAL_SIDECAR` policy with its site-scoped host path
@@ -186,6 +187,11 @@ Edit only that private file. Important values include:
 For a fresh site use `VOLUME_PROVISIONING_MODE=create`. For an update use
 `require-existing` and explicitly copy the six deployed volume names into the
 new configuration. Do not assume volume names.
+
+`CAPACITY_VALIDATION_MODE=waived` is a temporary release-risk acceptance, not
+capacity evidence. It requires an approval authority, reason and future expiry;
+the signed operations policy records all three. Replace it with `measured` and
+an approved evidence file before the waiver expires.
 
 Validate, build, and verify:
 

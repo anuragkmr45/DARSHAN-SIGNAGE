@@ -78,7 +78,8 @@ const VOLUME_FIELDS = [
   'PROMETHEUS_VOLUME_NAME', 'ALERTMANAGER_VOLUME_NAME', 'GRAFANA_VOLUME_NAME',
 ]
 const OPERATIONS_POLICY_FIELDS = [
-  'CAPACITY_EVIDENCE_FILE',
+  'CAPACITY_VALIDATION_MODE', 'CAPACITY_EVIDENCE_FILE',
+  'CAPACITY_WAIVER_APPROVED_BY', 'CAPACITY_WAIVER_REASON', 'CAPACITY_WAIVER_EXPIRES_AT',
   'MAXIMUM_EXPECTED_PLAYERS', 'TEMPORARY_SPIKE_PLAYERS',
   'BACKUP_MODE', 'BACKUP_INTERVAL_HOURS', 'BACKUP_RETENTION_DAYS',
   'BACKUP_SCHEDULE_TIME', 'BACKUP_SCHEDULE_TIMEZONE', 'BACKUP_RETRY_SECONDS',
@@ -91,7 +92,7 @@ const OPERATIONS_POLICY_FIELDS = [
   ...VOLUME_FIELDS,
 ]
 const REQUIRED_OPERATIONS_POLICY_FIELDS = [
-  'CAPACITY_EVIDENCE_FILE',
+  'CAPACITY_VALIDATION_MODE',
   'MAXIMUM_EXPECTED_PLAYERS', 'TEMPORARY_SPIKE_PLAYERS',
   'BACKUP_MODE', 'BACKUP_INTERVAL_HOURS', 'BACKUP_RETENTION_DAYS',
   'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES',
@@ -149,6 +150,10 @@ const OUTPUTS = {
   BACKUP_OFFHOST_ENDPOINT: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
   BACKUP_OFFHOST_REGION: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
   CAPACITY_EVIDENCE_FILE: ['OPERATIONS_POLICY.json', 'CONFIGURATION_MANIFEST.json'],
+  CAPACITY_VALIDATION_MODE: ['OPERATIONS_POLICY.json', 'CONFIGURATION_MANIFEST.json'],
+  CAPACITY_WAIVER_APPROVED_BY: ['OPERATIONS_POLICY.json'],
+  CAPACITY_WAIVER_REASON: ['OPERATIONS_POLICY.json'],
+  CAPACITY_WAIVER_EXPIRES_AT: ['OPERATIONS_POLICY.json'],
   MAXIMUM_EXPECTED_PLAYERS: ['OPERATIONS_POLICY.json'],
   TEMPORARY_SPIKE_PLAYERS: ['OPERATIONS_POLICY.json'],
   BACKUP_OFFHOST_ACCESS_KEY: ['production/backend/worker-secrets/backup-offhost-access-key'],
@@ -198,6 +203,7 @@ const ALLOWED_FIELDS = new Set([
   'DEVICE_CA_CERT_FILE', 'DEVICE_CA_KEY_FILE', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_MONITORING_USER', 'POSTGRES_MONITORING_PASSWORD', 'POSTGRES_DB',
   'RELEASE_SIGNING_PRIVATE_KEY',
   'CAPACITY_EVIDENCE_FILE',
+  'CAPACITY_VALIDATION_MODE', 'CAPACITY_WAIVER_APPROVED_BY', 'CAPACITY_WAIVER_REASON', 'CAPACITY_WAIVER_EXPIRES_AT',
   'MAXIMUM_EXPECTED_PLAYERS', 'TEMPORARY_SPIKE_PLAYERS',
   'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'MINIO_REGION', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'JWT_EXPIRY', 'INITIAL_ADMIN_EMAIL',
   'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
@@ -248,6 +254,7 @@ const DEFAULTS = {
   VITE_ENABLE_PRODUCTION_LOCKDOWN: 'true', VITE_REALTIME_DELIVERY_STATUS_UI: 'true',
   VITE_MEDIA_CACHE_STATUS_UI: 'true',
   BACKUP_MODE: 'APPLICATION_OFFHOST',
+  CAPACITY_VALIDATION_MODE: 'measured',
   // Fresh installations do not need a legacy protocol window. Existing fleets
   // must explicitly opt into dual mode and provide a finite expiry below.
   DEVICE_AUTH_MODE: 'signature',
@@ -619,6 +626,33 @@ function validateCapacityEvidence(config, addError) {
   config.CAPACITY_EVIDENCE_VALID_UNTIL = evidence.valid_until
 }
 
+function validateCapacityWaiver(config, addError) {
+  const approvedBy = config.CAPACITY_WAIVER_APPROVED_BY ?? ''
+  const reason = config.CAPACITY_WAIVER_REASON ?? ''
+  const expiresAt = new Date(config.CAPACITY_WAIVER_EXPIRES_AT ?? '')
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._()\/-]{2,99}$/.test(approvedBy)) {
+    addError('CAPACITY_WAIVER_APPROVED_BY must name a 3-100 character approval authority')
+  }
+  if (reason.length < 12 || reason.length > 240 || /["\\\r\n\0]/.test(reason)) {
+    addError('CAPACITY_WAIVER_REASON must be 12-240 characters without quotes, backslashes, or control characters')
+  }
+  if (!config.CAPACITY_WAIVER_EXPIRES_AT || Number.isNaN(expiresAt.getTime())) {
+    addError('CAPACITY_WAIVER_EXPIRES_AT must be an ISO-8601 timestamp')
+  } else {
+    const now = Date.now()
+    if (expiresAt.getTime() <= now) addError('CAPACITY_WAIVER_EXPIRES_AT must be in the future')
+    if (expiresAt.getTime() > now + 90 * 24 * 60 * 60 * 1000) {
+      addError('CAPACITY_WAIVER_EXPIRES_AT must be no more than 90 days in the future')
+    }
+  }
+  const waiverText = [config.SITE_NAME, config.RELEASE_ID, approvedBy, reason, config.CAPACITY_WAIVER_EXPIRES_AT].join('\n')
+  config.CAPACITY_WAIVER_SHA256 = crypto.createHash('sha256').update(waiverText).digest('hex')
+  config.CAPACITY_EVIDENCE_SHA256 = ''
+  config.CAPACITY_EVIDENCE_PROFILE_NAME = 'waived'
+  config.CAPACITY_EVIDENCE_MAX_PLAYERS = config.MAXIMUM_EXPECTED_PLAYERS
+  config.CAPACITY_EVIDENCE_VALID_UNTIL = config.CAPACITY_WAIVER_EXPIRES_AT
+}
+
 export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   const absoluteEnvFile = path.resolve(envFile)
   let text
@@ -852,10 +886,24 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   for (const name of privateKeys) {
     if (config[name]) requirePrivateKeyPermissions(name, config[name], addError)
   }
-  if (config.CAPACITY_EVIDENCE_FILE) {
-    requireReadableFile('CAPACITY_EVIDENCE_FILE', config.CAPACITY_EVIDENCE_FILE, addError)
+  if (!['measured', 'waived'].includes(config.CAPACITY_VALIDATION_MODE)) {
+    addError('CAPACITY_VALIDATION_MODE must be measured or waived')
+  } else if (config.CAPACITY_VALIDATION_MODE === 'measured') {
+    if (!config.CAPACITY_EVIDENCE_FILE && !parsed.invalidKeys.has('CAPACITY_EVIDENCE_FILE')) {
+      addError('CAPACITY_EVIDENCE_FILE is required when CAPACITY_VALIDATION_MODE=measured')
+    } else if (config.CAPACITY_EVIDENCE_FILE) {
+      requireReadableFile('CAPACITY_EVIDENCE_FILE', config.CAPACITY_EVIDENCE_FILE, addError)
+    }
+    for (const name of ['CAPACITY_WAIVER_APPROVED_BY', 'CAPACITY_WAIVER_REASON', 'CAPACITY_WAIVER_EXPIRES_AT']) {
+      if (config[name]) addError(`${name} must be empty when CAPACITY_VALIDATION_MODE=measured`)
+    }
+    validateCapacityEvidence(config, addError)
+  } else {
+    if (config.CAPACITY_EVIDENCE_FILE) {
+      addError('CAPACITY_EVIDENCE_FILE must be empty when CAPACITY_VALIDATION_MODE=waived')
+    }
+    validateCapacityWaiver(config, addError)
   }
-  validateCapacityEvidence(config, addError)
   if (errors.length) throw createValidationError(errors)
   return { config, explicit: parsed.explicit, envFile: absoluteEnvFile, sourceText: text, secretFields: SECRET_FIELDS, outputs: OUTPUTS }
 }

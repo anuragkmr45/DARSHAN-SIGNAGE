@@ -2232,6 +2232,11 @@ BACKUP_OFFHOST_SECRET_KEY="${BACKUP_OFFHOST_SECRET_KEY:-}"
 BACKUP_CPU_LIMIT="${BACKUP_CPU_LIMIT:-}"
 BACKUP_MEMORY_LIMIT="${BACKUP_MEMORY_LIMIT:-}"
 BACKUP_PIDS_LIMIT="${BACKUP_PIDS_LIMIT:-}"
+CAPACITY_VALIDATION_MODE="${CAPACITY_VALIDATION_MODE:-measured}"
+CAPACITY_WAIVER_APPROVED_BY="${CAPACITY_WAIVER_APPROVED_BY:-}"
+CAPACITY_WAIVER_REASON="${CAPACITY_WAIVER_REASON:-}"
+CAPACITY_WAIVER_EXPIRES_AT="${CAPACITY_WAIVER_EXPIRES_AT:-}"
+CAPACITY_WAIVER_SHA256="${CAPACITY_WAIVER_SHA256:-}"
 JWT_SECRET="${JWT_SECRET:-replace-with-32-char-secret-value}"
 JWT_EXPIRY="${JWT_EXPIRY:-900}"
 INITIAL_ADMIN_EMAIL="${INITIAL_ADMIN_EMAIL:-${ADMIN_EMAIL:-admin@darshan.invalid}}"
@@ -5588,6 +5593,7 @@ cat > "$BUNDLE_ROOT/CONFIGURATION_MANIFEST.json" <<EOF
 {
   "releaseId": "$DARSHAN_RELEASE_ID",
   "siteName": "$SITE_NAME",
+  "capacityValidationMode": "$CAPACITY_VALIDATION_MODE",
   "profiles": "$PROFILE",
   "backendImage": "$BACKEND_IMAGE_REF",
   "cmsImage": "$NGINX_IMAGE",
@@ -5604,19 +5610,31 @@ EOF
 
 if profile_enabled production; then
   BACKUP_SAME_VM_RISK_ACCEPTED=false
+  CAPACITY_WAIVED=false
   if [[ "$BACKUP_MODE" == "EXTERNAL_SIDECAR" ]]; then
     BACKUP_SAME_VM_RISK_ACCEPTED=true
+  fi
+  if [[ "$CAPACITY_VALIDATION_MODE" == "waived" ]]; then
+    CAPACITY_WAIVED=true
   fi
   cat > "$BUNDLE_ROOT/OPERATIONS_POLICY.json" <<EOF
 {
   "capacity": {
+    "validationMode": "$CAPACITY_VALIDATION_MODE",
+    "waived": $CAPACITY_WAIVED,
     "profileName": "$CAPACITY_EVIDENCE_PROFILE_NAME",
     "maxPlayers": $CAPACITY_EVIDENCE_MAX_PLAYERS,
     "configuredMaximumPlayers": $MAXIMUM_EXPECTED_PLAYERS,
     "temporarySpikePlayers": $TEMPORARY_SPIKE_PLAYERS,
     "evidenceSha256": "$CAPACITY_EVIDENCE_SHA256",
     "validUntil": "$CAPACITY_EVIDENCE_VALID_UNTIL",
-    "modelOnlyAccepted": false
+    "modelOnlyAccepted": false,
+    "waiver": {
+      "approvedBy": "$CAPACITY_WAIVER_APPROVED_BY",
+      "reason": "$CAPACITY_WAIVER_REASON",
+      "expiresAt": "$CAPACITY_WAIVER_EXPIRES_AT",
+      "sha256": "$CAPACITY_WAIVER_SHA256"
+    }
   },
   "backup": {
     "mode": "$BACKUP_MODE",

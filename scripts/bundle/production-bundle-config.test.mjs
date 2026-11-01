@@ -288,6 +288,24 @@ BACKUP_PIDS_LIMIT=128`)
   fs.writeFileSync(envFile, sidecarText.replace('BACKUP_RETENTION_DAYS=30', 'BACKUP_RETENTION_DAYS=3'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /requires BACKUP_RETENTION_DAYS=30/)
 
+  const waiverExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+  const waiverText = validText.replace(
+    `CAPACITY_EVIDENCE_FILE=${capacityEvidence}`,
+    `CAPACITY_VALIDATION_MODE=waived
+CAPACITY_EVIDENCE_FILE=
+CAPACITY_WAIVER_APPROVED_BY=Site Project Owner
+CAPACITY_WAIVER_REASON=Initial internal deployment with measured capacity testing deferred
+CAPACITY_WAIVER_EXPIRES_AT=${waiverExpiry}`
+  )
+  fs.writeFileSync(envFile, waiverText)
+  const waived = loadProductionBundleConfig(envFile, root).config
+  assert.equal(waived.CAPACITY_VALIDATION_MODE, 'waived')
+  assert.equal(waived.CAPACITY_EVIDENCE_PROFILE_NAME, 'waived')
+  assert.equal(waived.CAPACITY_EVIDENCE_MAX_PLAYERS, '500')
+  assert.match(waived.CAPACITY_WAIVER_SHA256, /^[a-f0-9]{64}$/)
+  fs.writeFileSync(envFile, waiverText.replace(waiverExpiry, '2020-01-01T00:00:00.000Z'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /CAPACITY_WAIVER_EXPIRES_AT must be in the future/)
+
   fs.writeFileSync(envFile, validText.replace('POSTGRES_MEMORY_LIMIT=4g', 'POSTGRES_MEMORY_LIMIT=4096'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /POSTGRES_MEMORY_LIMIT must be/)
 
@@ -509,6 +527,9 @@ test('production bundle requires and applies the explicit operations policy', ()
   assert.match(assembler, /OPERATIONS_POLICY\.json/)
   assert.match(assembler, /"capacity": \{/)
   assert.match(assembler, /"evidenceSha256": "\$CAPACITY_EVIDENCE_SHA256"/)
+  assert.match(assembler, /"validationMode": "\$CAPACITY_VALIDATION_MODE"/)
+  assert.match(assembler, /"waived": \$CAPACITY_WAIVED/)
+  assert.match(assembler, /"approvedBy": "\$CAPACITY_WAIVER_APPROVED_BY"/)
   assert.match(assembler, /"modelOnlyAccepted": false/)
   assert.match(assembler, /for role_dir in "\$PROD_DATA_DIR" "\$PROD_VALKEY_DIR" "\$PROD_BACKEND_DIR" "\$PROD_CMS_DIR"/)
   assert.match(assembler, /driver: local/)
