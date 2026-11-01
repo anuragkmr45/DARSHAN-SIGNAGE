@@ -628,6 +628,7 @@ if [[ -f ./deployment-control.sh ]]; then
 fi
 
 ./verify-role.sh
+source ./$env_file
 if ! ./load-images.sh --verify-loaded; then
   echo "Required image is absent or differs from signed release metadata; reloading role archives."
   ./load-images.sh
@@ -650,6 +651,9 @@ for attempt in \$(seq 1 30); do
 done
 ./configure-monitoring-role.sh
 docker compose --env-file $env_file -f docker-compose.yml up -d postgres-exporter
+if [[ "\$BACKUP_MODE" == "EXTERNAL_SIDECAR" ]]; then
+  docker compose --env-file $env_file -f docker-compose.yml up -d backup
+fi
 healthy=false
 for attempt in \$(seq 1 30); do
   if ./health-check.sh; then healthy=true; break; fi
@@ -1472,6 +1476,14 @@ if [[ "$role" == "backend" ]]; then
   install -d -m 0700 -o 1000 -g 1000 "\$BACKEND_WORKER_SCRATCH_DIR"
   install -d -m 0770 -o root -g docker ./bootstrap-secrets
 fi
+if [[ "$role" == "data" && "${BACKUP_MODE:-APPLICATION_OFFHOST}" == "EXTERNAL_SIDECAR" ]]; then
+  expected_backup_path="/var/lib/darshan/backups/$SITE_NAME"
+  [[ "$BACKUP_HOST_PATH" == "$expected_backup_path" ]] || { echo "Unexpected backup host path: $BACKUP_HOST_PATH" >&2; exit 1; }
+  for path in /var/lib/darshan /var/lib/darshan/backups "$BACKUP_HOST_PATH"; do
+    [[ ! -L "$path" ]] || { echo "Backup path must not contain symlinks: $path" >&2; exit 1; }
+  done
+  install -d -m 0700 -o root -g root "$BACKUP_HOST_PATH"
+fi
 role_root="\$(pwd -P)"
 marker="\$state_root/prepared/\$DARSHAN_ROLE_NAME-\$DARSHAN_RELEASE_ID"
 printf '%s\n' "\$role_root" > "\$marker"
@@ -2163,6 +2175,7 @@ POSTGRES_IMAGE="${POSTGRES_IMAGE:-${SERVER_PACKAGE_POSTGRES_IMAGE_REF:-postgres:
 MINIO_IMAGE="${MINIO_IMAGE:-${SERVER_PACKAGE_MINIO_IMAGE_REF:-minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}}"
 MINIO_RUNTIME_IMAGE="$(runtime_image_reference "$MINIO_IMAGE")"
 VALKEY_IMAGE="${VALKEY_IMAGE:-${SERVER_PACKAGE_VALKEY_IMAGE_REF:-valkey/valkey:7-alpine}}"
+BACKUP_IMAGE="${BACKUP_IMAGE:-${SERVER_PACKAGE_BACKUP_IMAGE_REF:-}}"
 NGINX_IMAGE="${NGINX_IMAGE:-${CMS_PACKAGE_NGINX_IMAGE_REF:-nginx:1.27-alpine}}"
 PROMETHEUS_IMAGE="${PROMETHEUS_IMAGE:-prom/prometheus:v3.3.1}"
 ALERTMANAGER_IMAGE="${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.28.1}"
@@ -2174,6 +2187,7 @@ NGINX_PROMETHEUS_EXPORTER_IMAGE="${NGINX_PROMETHEUS_EXPORTER_IMAGE:-nginx/nginx-
 POSTGRES_PACKAGE_ARCHIVE=""
 MINIO_PACKAGE_ARCHIVE=""
 VALKEY_PACKAGE_ARCHIVE=""
+BACKUP_PACKAGE_ARCHIVE=""
 NGINX_PACKAGE_ARCHIVE=""
 if [[ -n "$SERVER_PACKAGE_DIR" && -n "${SERVER_PACKAGE_POSTGRES_IMAGE_ARCHIVE:-}" ]]; then
   POSTGRES_PACKAGE_ARCHIVE="$SERVER_PACKAGE_DIR/${SERVER_PACKAGE_POSTGRES_IMAGE_ARCHIVE}"
@@ -2183,6 +2197,9 @@ if [[ -n "$SERVER_PACKAGE_DIR" && -n "${SERVER_PACKAGE_MINIO_IMAGE_ARCHIVE:-}" ]
 fi
 if [[ -n "$SERVER_PACKAGE_DIR" && -n "${SERVER_PACKAGE_VALKEY_IMAGE_ARCHIVE:-}" ]]; then
   VALKEY_PACKAGE_ARCHIVE="$SERVER_PACKAGE_DIR/${SERVER_PACKAGE_VALKEY_IMAGE_ARCHIVE}"
+fi
+if [[ -n "$SERVER_PACKAGE_DIR" && -n "${SERVER_PACKAGE_BACKUP_IMAGE_ARCHIVE:-}" ]]; then
+  BACKUP_PACKAGE_ARCHIVE="$SERVER_PACKAGE_DIR/${SERVER_PACKAGE_BACKUP_IMAGE_ARCHIVE}"
 fi
 if [[ -n "$CMS_PACKAGE_DIR" && -n "${CMS_PACKAGE_NGINX_IMAGE_ARCHIVE:-}" ]]; then
   NGINX_PACKAGE_ARCHIVE="$CMS_PACKAGE_DIR/${CMS_PACKAGE_NGINX_IMAGE_ARCHIVE}"
@@ -2198,6 +2215,23 @@ MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}"
 MINIO_USE_SSL="${MINIO_USE_SSL:-false}"
 MINIO_REGION="${MINIO_REGION:-us-east-1}"
+BACKUP_MODE="${BACKUP_MODE:-APPLICATION_OFFHOST}"
+BACKUP_INTERVAL_HOURS="${BACKUP_INTERVAL_HOURS:-}"
+BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-}"
+BACKUP_SCHEDULE_TIME="${BACKUP_SCHEDULE_TIME:-}"
+BACKUP_SCHEDULE_TIMEZONE="${BACKUP_SCHEDULE_TIMEZONE:-}"
+BACKUP_RETRY_SECONDS="${BACKUP_RETRY_SECONDS:-}"
+BACKUP_MAX_AGE_SECONDS="${BACKUP_MAX_AGE_SECONDS:-}"
+BACKUP_MIN_FREE_BYTES="${BACKUP_MIN_FREE_BYTES:-}"
+BACKUP_HOST_PATH="${BACKUP_HOST_PATH:-}"
+BACKUP_OFFHOST_DESTINATION="${BACKUP_OFFHOST_DESTINATION:-}"
+BACKUP_OFFHOST_ENDPOINT="${BACKUP_OFFHOST_ENDPOINT:-}"
+BACKUP_OFFHOST_REGION="${BACKUP_OFFHOST_REGION:-}"
+BACKUP_OFFHOST_ACCESS_KEY="${BACKUP_OFFHOST_ACCESS_KEY:-}"
+BACKUP_OFFHOST_SECRET_KEY="${BACKUP_OFFHOST_SECRET_KEY:-}"
+BACKUP_CPU_LIMIT="${BACKUP_CPU_LIMIT:-}"
+BACKUP_MEMORY_LIMIT="${BACKUP_MEMORY_LIMIT:-}"
+BACKUP_PIDS_LIMIT="${BACKUP_PIDS_LIMIT:-}"
 JWT_SECRET="${JWT_SECRET:-replace-with-32-char-secret-value}"
 JWT_EXPIRY="${JWT_EXPIRY:-900}"
 INITIAL_ADMIN_EMAIL="${INITIAL_ADMIN_EMAIL:-${ADMIN_EMAIL:-admin@darshan.invalid}}"
@@ -2360,6 +2394,11 @@ if [[ -n "$VALKEY_PACKAGE_ARCHIVE" ]]; then
   require_file "VALKEY_PACKAGE_ARCHIVE" "$VALKEY_PACKAGE_ARCHIVE"
 fi
 
+if profile_enabled production && [[ "${BACKUP_MODE:-APPLICATION_OFFHOST}" == "EXTERNAL_SIDECAR" ]]; then
+  [[ -n "$BACKUP_IMAGE" ]] || { echo "BACKUP_IMAGE is required for EXTERNAL_SIDECAR." >&2; exit 1; }
+  require_file "BACKUP_PACKAGE_ARCHIVE" "$BACKUP_PACKAGE_ARCHIVE"
+fi
+
 if [[ -n "$NGINX_PACKAGE_ARCHIVE" ]]; then
   require_file "NGINX_PACKAGE_ARCHIVE" "$NGINX_PACKAGE_ARCHIVE"
 fi
@@ -2503,6 +2542,7 @@ POSTGRES_IMAGE_ARCHIVE_NAME="$(basename "${POSTGRES_PACKAGE_ARCHIVE:-${POSTGRES_
 MINIO_IMAGE_ARCHIVE_NAME="$(basename "${MINIO_PACKAGE_ARCHIVE:-${MINIO_IMAGE//[:\/]/-}.tar}")"
 VALKEY_IMAGE_ARCHIVE_NAME="$(basename "${VALKEY_PACKAGE_ARCHIVE:-${VALKEY_IMAGE//[:\/]/-}.tar}")"
 NGINX_IMAGE_ARCHIVE_NAME="$(basename "${NGINX_PACKAGE_ARCHIVE:-${NGINX_IMAGE//[:\/]/-}.tar}")"
+BACKUP_IMAGE_ARCHIVE_NAME="$(basename "${BACKUP_PACKAGE_ARCHIVE:-${BACKUP_IMAGE//[:\/]/-}.tar}")"
 PROMETHEUS_IMAGE_ARCHIVE_NAME="$(basename "${PROMETHEUS_IMAGE//[:\/]/-}.tar")"
 ALERTMANAGER_IMAGE_ARCHIVE_NAME="$(basename "${ALERTMANAGER_IMAGE//[:\/]/-}.tar")"
 GRAFANA_IMAGE_ARCHIVE_NAME="$(basename "${GRAFANA_IMAGE//[:\/]/-}.tar")"
@@ -2597,6 +2637,10 @@ else
   if profile_enabled production; then
     copy_archive_to_targets "$MINIO_IMAGE_ARCHIVE_TEMP" "$PROD_DATA_DIR/images"
   fi
+fi
+
+if profile_enabled production && [[ "${BACKUP_MODE:-APPLICATION_OFFHOST}" == "EXTERNAL_SIDECAR" ]]; then
+  copy_archive_to_targets "$BACKUP_PACKAGE_ARCHIVE" "$PROD_DATA_DIR/images" "$PROD_RECOVERY_DIR/images"
 fi
 
 if [[ -n "$VALKEY_PACKAGE_ARCHIVE" ]]; then
@@ -2737,12 +2781,18 @@ fi
 if [[ "$SKIP_DOCKER" != "true" ]] && profile_enabled production; then
   if [[ -f "$PROD_DATA_DIR/images/$POSTGRES_IMAGE_ARCHIVE_NAME" && -f "$PROD_DATA_DIR/images/$MINIO_IMAGE_ARCHIVE_NAME" && \
     -f "$PROD_DATA_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" && -f "$PROD_DATA_DIR/images/$POSTGRES_EXPORTER_IMAGE_ARCHIVE_NAME" && -f "$PROD_DATA_DIR/images/$NGINX_IMAGE_ARCHIVE_NAME" ]]; then
-    write_image_metadata_manifest "$PROD_DATA_DIR/images" \
+    data_image_manifest=(
       "$POSTGRES_IMAGE_ARCHIVE_NAME" "$POSTGRES_IMAGE" \
       "$MINIO_IMAGE_ARCHIVE_NAME" "$MINIO_RUNTIME_IMAGE" \
       "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE" \
       "$POSTGRES_EXPORTER_IMAGE_ARCHIVE_NAME" "$POSTGRES_EXPORTER_IMAGE" \
       "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
+    )
+    if [[ "${BACKUP_MODE:-APPLICATION_OFFHOST}" == "EXTERNAL_SIDECAR" ]]; then
+      [[ -f "$PROD_DATA_DIR/images/$BACKUP_IMAGE_ARCHIVE_NAME" ]] || { echo "Backup image archive is missing from the Data role." >&2; exit 1; }
+      data_image_manifest+=("$BACKUP_IMAGE_ARCHIVE_NAME" "$BACKUP_IMAGE")
+    fi
+    write_image_metadata_manifest "$PROD_DATA_DIR/images" "${data_image_manifest[@]}"
   fi
   if [[ -f "$PROD_VALKEY_DIR/images/$VALKEY_IMAGE_ARCHIVE_NAME" && -f "$PROD_VALKEY_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" && -f "$PROD_VALKEY_DIR/images/$NGINX_IMAGE_ARCHIVE_NAME" ]]; then
     write_image_metadata_manifest "$PROD_VALKEY_DIR/images" \
@@ -2764,8 +2814,12 @@ if [[ "$SKIP_DOCKER" != "true" ]] && profile_enabled production; then
       "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
   fi
   if [[ -f "$PROD_RECOVERY_DIR/images/$BACKEND_IMAGE_ARCHIVE_NAME" ]]; then
-    write_image_metadata_manifest "$PROD_RECOVERY_DIR/images" \
-      "$BACKEND_IMAGE_ARCHIVE_NAME" "$BACKEND_IMAGE_REF"
+    recovery_image_manifest=("$BACKEND_IMAGE_ARCHIVE_NAME" "$BACKEND_IMAGE_REF")
+    if [[ "${BACKUP_MODE:-APPLICATION_OFFHOST}" == "EXTERNAL_SIDECAR" ]]; then
+      [[ -f "$PROD_RECOVERY_DIR/images/$BACKUP_IMAGE_ARCHIVE_NAME" ]] || { echo "Backup image archive is missing from the Recovery role." >&2; exit 1; }
+      recovery_image_manifest+=("$BACKUP_IMAGE_ARCHIVE_NAME" "$BACKUP_IMAGE")
+    fi
+    write_image_metadata_manifest "$PROD_RECOVERY_DIR/images" "${recovery_image_manifest[@]}"
   fi
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" && \
     -f "$PROD_OBSERVABILITY_DIR/images/$PROMETHEUS_IMAGE_ARCHIVE_NAME" && \
@@ -3000,6 +3054,8 @@ EOF
 
   cat > "$QA_BACKEND_DIR/.env.qa" <<EOF
 BACKEND_IMAGE=$BACKEND_IMAGE_REF
+BACKUP_IMAGE=$BACKUP_IMAGE
+BACKUP_MODE=$BACKUP_MODE
 NGINX_IMAGE=$NGINX_IMAGE
 METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 NODE_ENV=production
@@ -3406,11 +3462,23 @@ if profile_enabled production; then
   write_runtime_secret "$PROD_BACKEND_DIR/secrets/minio-access-key" "$MINIO_ACCESS_KEY"
   write_runtime_secret "$PROD_BACKEND_DIR/secrets/minio-secret-key" "$MINIO_SECRET_KEY"
   install -d -m 750 "$PROD_BACKEND_DIR/worker-secrets"
-  write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-access-key" "$BACKUP_OFFHOST_ACCESS_KEY"
-  write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-secret-key" "$BACKUP_OFFHOST_SECRET_KEY"
+  if [[ "$BACKUP_MODE" == "APPLICATION_OFFHOST" ]]; then
+    write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-access-key" "$BACKUP_OFFHOST_ACCESS_KEY"
+    write_runtime_secret "$PROD_BACKEND_DIR/worker-secrets/backup-offhost-secret-key" "$BACKUP_OFFHOST_SECRET_KEY"
+  fi
+  BACKUP_COMPOSE_PROFILES=""
+  BACKUP_OFFHOST_ACCESS_KEY_FILE_VALUE=""
+  BACKUP_OFFHOST_SECRET_KEY_FILE_VALUE=""
+  if [[ "$BACKUP_MODE" == "EXTERNAL_SIDECAR" ]]; then
+    BACKUP_COMPOSE_PROFILES="external-backup"
+  else
+    BACKUP_OFFHOST_ACCESS_KEY_FILE_VALUE="/run/worker-secrets/backup-offhost-access-key"
+    BACKUP_OFFHOST_SECRET_KEY_FILE_VALUE="/run/worker-secrets/backup-offhost-secret-key"
+  fi
 
   cat > "$PROD_DATA_DIR/.env.production" <<EOF
 COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-data
+COMPOSE_PROFILES=$BACKUP_COMPOSE_PROFILES
 SITE_NAME=$SITE_NAME
 DARSHAN_RELEASE_ID=$DARSHAN_RELEASE_ID
 DARSHAN_ROLE_NAME=data
@@ -3420,6 +3488,7 @@ POSTGRES_VOLUME_NAME=$POSTGRES_VOLUME_NAME
 MINIO_VOLUME_NAME=$MINIO_VOLUME_NAME
 POSTGRES_IMAGE=$POSTGRES_IMAGE
 MINIO_IMAGE=$MINIO_RUNTIME_IMAGE
+BACKUP_IMAGE=$BACKUP_IMAGE
 NGINX_IMAGE=$NGINX_IMAGE
 METRICS_GATEWAY_HOST_PORT=$METRICS_GATEWAY_HOST_PORT
 POSTGRES_USER=$POSTGRES_USER
@@ -3440,8 +3509,17 @@ MINIO_ROOT_USER_FILE=/run/secrets/minio-access-key
 MINIO_ROOT_PASSWORD_FILE=/run/secrets/minio-secret-key
 MINIO_HOST_PORT=$MINIO_HOST_PORT
 MINIO_CONSOLE_PORT=$MINIO_CONSOLE_PORT
+MINIO_REGION=$MINIO_REGION
 MINIO_API_CORS_ALLOW_ORIGIN=$CMS_PRODUCTION_ORIGIN
 DATA_PRIVATE_HOST=$DATA_PRIVATE_HOST
+BACKUP_MODE=$BACKUP_MODE
+BACKUP_RETENTION_DAYS=$BACKUP_RETENTION_DAYS
+BACKUP_SCHEDULE_TIME=$BACKUP_SCHEDULE_TIME
+BACKUP_SCHEDULE_TIMEZONE=$BACKUP_SCHEDULE_TIMEZONE
+BACKUP_RETRY_SECONDS=$BACKUP_RETRY_SECONDS
+BACKUP_MAX_AGE_SECONDS=$BACKUP_MAX_AGE_SECONDS
+BACKUP_MIN_FREE_BYTES=$BACKUP_MIN_FREE_BYTES
+BACKUP_HOST_PATH=$BACKUP_HOST_PATH
 CONTAINER_LOG_MAX_SIZE=$CONTAINER_LOG_MAX_SIZE
 CONTAINER_LOG_MAX_FILES=$CONTAINER_LOG_MAX_FILES
 POSTGRES_CPU_LIMIT=$POSTGRES_CPU_LIMIT
@@ -3450,6 +3528,9 @@ POSTGRES_PIDS_LIMIT=$POSTGRES_PIDS_LIMIT
 MINIO_CPU_LIMIT=$MINIO_CPU_LIMIT
 MINIO_MEMORY_LIMIT=$MINIO_MEMORY_LIMIT
 MINIO_PIDS_LIMIT=$MINIO_PIDS_LIMIT
+BACKUP_CPU_LIMIT=$BACKUP_CPU_LIMIT
+BACKUP_MEMORY_LIMIT=$BACKUP_MEMORY_LIMIT
+BACKUP_PIDS_LIMIT=$BACKUP_PIDS_LIMIT
 EXPORTER_CPU_LIMIT=$EXPORTER_CPU_LIMIT
 EXPORTER_MEMORY_LIMIT=$EXPORTER_MEMORY_LIMIT
 EXPORTER_PIDS_LIMIT=$EXPORTER_PIDS_LIMIT
@@ -3597,11 +3678,16 @@ OUTBOX_DISPATCH_ENABLED=$OUTBOX_DISPATCH_ENABLED
 OUTBOX_DISPATCH_BATCH_SIZE=$OUTBOX_DISPATCH_BATCH_SIZE
 OUTBOX_DISPATCH_INTERVAL_MS=$OUTBOX_DISPATCH_INTERVAL_MS
 OUTBOX_DISPATCH_LEASE_MS=$OUTBOX_DISPATCH_LEASE_MS
+BACKUP_MODE=$BACKUP_MODE
 BACKUP_INTERVAL_HOURS=$BACKUP_INTERVAL_HOURS
 BACKUP_RETENTION_DAYS=$BACKUP_RETENTION_DAYS
+BACKUP_SCHEDULE_TIME=$BACKUP_SCHEDULE_TIME
+BACKUP_SCHEDULE_TIMEZONE=$BACKUP_SCHEDULE_TIMEZONE
 BACKUP_OFFHOST_DESTINATION=$BACKUP_OFFHOST_DESTINATION
 BACKUP_OFFHOST_ENDPOINT=$BACKUP_OFFHOST_ENDPOINT
 BACKUP_OFFHOST_REGION=$BACKUP_OFFHOST_REGION
+BACKUP_OFFHOST_ACCESS_KEY_FILE=$BACKUP_OFFHOST_ACCESS_KEY_FILE_VALUE
+BACKUP_OFFHOST_SECRET_KEY_FILE=$BACKUP_OFFHOST_SECRET_KEY_FILE_VALUE
 CONTAINER_LOG_MAX_SIZE=$CONTAINER_LOG_MAX_SIZE
 CONTAINER_LOG_MAX_FILES=$CONTAINER_LOG_MAX_FILES
 BACKEND_API_CPU_LIMIT=$BACKEND_API_CPU_LIMIT
@@ -3771,6 +3857,22 @@ docker compose --env-file .env.recovery -f docker-compose.yml run --rm --no-deps
 chmod 0600 "$output"
 echo "Signed restore evidence created: $output"
 EOF
+
+  if [[ "$BACKUP_MODE" == "EXTERNAL_SIDECAR" ]]; then
+    cp "$RUNBOOKS_DIR/simple-daily-backup.md" "$PROD_RECOVERY_DIR/LOCAL_BACKUP_RESTORE.md"
+    cat > "$PROD_RECOVERY_DIR/restore-rehearsal.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat >&2 <<'MESSAGE'
+This release uses Data-VM EXTERNAL_SIDECAR backups, not the signed off-host
+repository protocol. Copy a checksum-verified daily set and use the isolated
+PostgreSQL/MinIO procedure in ./LOCAL_BACKUP_RESTORE.md. The backup
+tools image is included in this signed Recovery role, but restore remains a
+manual release gate and must not target the production Data VM.
+MESSAGE
+exit 1
+EOF
+  fi
 
   cat > "$PROD_CMS_DIR/.env.production" <<EOF
 COMPOSE_PROJECT_NAME=darshan-$SITE_NAME-cms
@@ -4052,6 +4154,10 @@ x-minio-resources: &minio-resources
   cpus: ${MINIO_CPU_LIMIT}
   mem_limit: ${MINIO_MEMORY_LIMIT}
   pids_limit: ${MINIO_PIDS_LIMIT}
+x-backup-resources: &backup-resources
+  cpus: ${BACKUP_CPU_LIMIT:-0.1}
+  mem_limit: ${BACKUP_MEMORY_LIMIT:-128m}
+  pids_limit: ${BACKUP_PIDS_LIMIT:-64}
 x-exporter-resources: &exporter-resources
   cpus: ${EXPORTER_CPU_LIMIT}
   mem_limit: ${EXPORTER_MEMORY_LIMIT}
@@ -4215,6 +4321,57 @@ services:
       - darshan_minio_data:/data
       - ./tls:/certs:ro
       - ./secrets:/run/secrets:ro
+
+  backup:
+    profiles: ["external-backup"]
+    image: ${BACKUP_IMAGE}
+    pull_policy: never
+    restart: unless-stopped
+    <<: [*darshan-log, *backup-resources]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      BACKUP_ROOT: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS}
+      BACKUP_SCHEDULE_TIME: ${BACKUP_SCHEDULE_TIME}
+      BACKUP_SCHEDULE_TIMEZONE: ${BACKUP_SCHEDULE_TIMEZONE}
+      BACKUP_RETRY_SECONDS: ${BACKUP_RETRY_SECONDS}
+      BACKUP_MAX_AGE_SECONDS: ${BACKUP_MAX_AGE_SECONDS}
+      BACKUP_MIN_FREE_BYTES: ${BACKUP_MIN_FREE_BYTES}
+      POSTGRES_HOST: ${DATA_PRIVATE_HOST}
+      POSTGRES_PORT: ${POSTGRES_HOST_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD_FILE: ${POSTGRES_PASSWORD_FILE}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /etc/darshan/tls/transport-ca.crt
+      MINIO_ENDPOINT: https://${DATA_PRIVATE_HOST}:${MINIO_HOST_PORT}
+      MINIO_ACCESS_KEY_FILE: ${MINIO_ROOT_USER_FILE}
+      MINIO_SECRET_KEY_FILE: ${MINIO_ROOT_PASSWORD_FILE}
+      MINIO_REGION: ${MINIO_REGION}
+      AWS_CA_BUNDLE: /etc/darshan/tls/transport-ca.crt
+    extra_hosts:
+      - "${DATA_PRIVATE_HOST}:${DATA_BIND_ADDRESS}"
+    volumes:
+      - ${BACKUP_HOST_PATH}:/backups
+      - ./secrets:/run/secrets:ro
+      - ./tls/CAs/transport-ca.crt:/etc/darshan/tls/transport-ca.crt:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/darshan-backup", "health"]
+      interval: 5m
+      timeout: 30s
+      retries: 1
+      start_period: 15m
 
 volumes:
   darshan_postgres_data:
@@ -4427,8 +4584,8 @@ services:
       TMPDIR: /tmp
       DARSHAN_EXPECTED_WORKER_UID: "1000"
       DARSHAN_EXPECTED_WORKER_GID: "1000"
-      BACKUP_OFFHOST_ACCESS_KEY_FILE: /run/worker-secrets/backup-offhost-access-key
-      BACKUP_OFFHOST_SECRET_KEY_FILE: /run/worker-secrets/backup-offhost-secret-key
+      BACKUP_OFFHOST_ACCESS_KEY_FILE: ${BACKUP_OFFHOST_ACCESS_KEY_FILE:-}
+      BACKUP_OFFHOST_SECRET_KEY_FILE: ${BACKUP_OFFHOST_SECRET_KEY_FILE:-}
     volumes:
       - ./certs:/run/darshan-input-certs:ro
       - ./secrets:/run/darshan-input-secrets:ro
@@ -4827,6 +4984,13 @@ curl --fail --silent --show-error \
   --cacert ./tls/CAs/transport-ca.crt \
   --resolve "${DATA_PRIVATE_HOST:-localhost}:${MINIO_HOST_PORT}:${DATA_BIND_ADDRESS}" \
   "https://${DATA_PRIVATE_HOST:-localhost}:${MINIO_HOST_PORT}/minio/health/live" >/dev/null
+if [[ "${BACKUP_MODE:-APPLICATION_OFFHOST}" == "EXTERNAL_SIDECAR" ]]; then
+  backup_container="$(docker compose --env-file .env.production -f docker-compose.yml ps -q backup)"
+  [[ -n "$backup_container" && "$(docker inspect --format '{{.State.Running}}' "$backup_container" 2>/dev/null)" == "true" ]] || {
+    echo "Backup sidecar is not running." >&2
+    exit 1
+  }
+fi
 require_metric "$DATA_PRIVATE_HOST" "$DATA_BIND_ADDRESS" /node/metrics '^node_exporter_build_info'
 require_metric "$DATA_PRIVATE_HOST" "$DATA_BIND_ADDRESS" /postgres/metrics '^pg_up 1(\.0+)?$'
 echo "Production data tier healthy."
@@ -5430,6 +5594,7 @@ cat > "$BUNDLE_ROOT/CONFIGURATION_MANIFEST.json" <<EOF
   "postgresImage": "$POSTGRES_IMAGE",
   "minioSourceImage": "$MINIO_IMAGE",
   "minioImage": "$MINIO_RUNTIME_IMAGE",
+  "backupImage": "$BACKUP_IMAGE",
   "valkeyImage": "$VALKEY_IMAGE",
   "nodeExporterImage": "$NODE_EXPORTER_IMAGE",
   "postgresExporterImage": "$POSTGRES_EXPORTER_IMAGE",
@@ -5438,21 +5603,35 @@ cat > "$BUNDLE_ROOT/CONFIGURATION_MANIFEST.json" <<EOF
 EOF
 
 if profile_enabled production; then
+  BACKUP_SAME_VM_RISK_ACCEPTED=false
+  if [[ "$BACKUP_MODE" == "EXTERNAL_SIDECAR" ]]; then
+    BACKUP_SAME_VM_RISK_ACCEPTED=true
+  fi
   cat > "$BUNDLE_ROOT/OPERATIONS_POLICY.json" <<EOF
 {
   "capacity": {
     "profileName": "$CAPACITY_EVIDENCE_PROFILE_NAME",
     "maxPlayers": $CAPACITY_EVIDENCE_MAX_PLAYERS,
+    "configuredMaximumPlayers": $MAXIMUM_EXPECTED_PLAYERS,
+    "temporarySpikePlayers": $TEMPORARY_SPIKE_PLAYERS,
     "evidenceSha256": "$CAPACITY_EVIDENCE_SHA256",
     "validUntil": "$CAPACITY_EVIDENCE_VALID_UNTIL",
     "modelOnlyAccepted": false
   },
   "backup": {
+    "mode": "$BACKUP_MODE",
     "intervalHours": $BACKUP_INTERVAL_HOURS,
     "retentionDays": $BACKUP_RETENTION_DAYS,
+    "scheduleTime": "$BACKUP_SCHEDULE_TIME",
+    "scheduleTimeZone": "$BACKUP_SCHEDULE_TIMEZONE",
+    "retrySeconds": ${BACKUP_RETRY_SECONDS:-0},
+    "maxAgeSeconds": ${BACKUP_MAX_AGE_SECONDS:-0},
+    "minimumFreeBytes": ${BACKUP_MIN_FREE_BYTES:-0},
+    "hostPath": "$BACKUP_HOST_PATH",
     "offHostDestination": "$BACKUP_OFFHOST_DESTINATION",
     "offHostEndpoint": "$BACKUP_OFFHOST_ENDPOINT",
     "offHostRegion": "$BACKUP_OFFHOST_REGION",
+    "sameDataVmRiskAccepted": $BACKUP_SAME_VM_RISK_ACCEPTED,
     "restoreRehearsalRequiredBeforeMigration": true
   },
   "containerLogging": {
@@ -5470,6 +5649,7 @@ if profile_enabled production; then
   "containerLimits": {
     "postgres": { "cpus": "$POSTGRES_CPU_LIMIT", "memory": "$POSTGRES_MEMORY_LIMIT", "pids": $POSTGRES_PIDS_LIMIT },
     "minio": { "cpus": "$MINIO_CPU_LIMIT", "memory": "$MINIO_MEMORY_LIMIT", "pids": $MINIO_PIDS_LIMIT },
+    "backup": { "cpus": "${BACKUP_CPU_LIMIT:-0}", "memory": "${BACKUP_MEMORY_LIMIT:-0m}", "pids": ${BACKUP_PIDS_LIMIT:-0} },
     "valkey": { "cpus": "$VALKEY_CPU_LIMIT", "memory": "$VALKEY_MEMORY_LIMIT", "pids": $VALKEY_PIDS_LIMIT },
     "backendApi": { "cpus": "$BACKEND_API_CPU_LIMIT", "memory": "$BACKEND_API_MEMORY_LIMIT", "pids": $BACKEND_API_PIDS_LIMIT },
     "backendWorker": { "cpus": "$BACKEND_WORKER_CPU_LIMIT", "memory": "$BACKEND_WORKER_MEMORY_LIMIT", "pids": $BACKEND_WORKER_PIDS_LIMIT },

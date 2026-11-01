@@ -19,7 +19,23 @@ require_value() {
   [[ -n "${!name:-}" ]] || fail "$name is required"
 }
 
+load_secret_file() {
+  local name="$1"
+  local file_name="${name}_FILE"
+  local file="${!file_name:-}"
+  local value
+  [[ -z "${!name:-}" && -n "$file" ]] || return 0
+  [[ -f "$file" && ! -L "$file" ]] || fail "$file_name must reference a regular non-symlink file"
+  IFS= read -r value < "$file" || [[ -n "$value" ]] || fail "$file_name is empty"
+  [[ -n "$value" && "$value" != *$'\n'* && "$value" != *$'\r'* ]] || fail "$file_name contains an invalid value"
+  printf -v "$name" '%s' "$value"
+  export "$name"
+}
+
 validate_configuration() {
+  load_secret_file POSTGRES_PASSWORD
+  load_secret_file MINIO_ACCESS_KEY
+  load_secret_file MINIO_SECRET_KEY
   BACKUP_ROOT="${BACKUP_ROOT:-/backups}"
   BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}"
   BACKUP_SCHEDULE_TIME="${BACKUP_SCHEDULE_TIME:-00:00}"

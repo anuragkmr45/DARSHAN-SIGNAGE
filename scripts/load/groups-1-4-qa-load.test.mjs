@@ -12,6 +12,7 @@ const directory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(directory, '../..');
 const examplePath = path.join(directory, 'groups-1-4-qa-load.example.json');
 const example = JSON.parse(String(await import('node:fs/promises').then(({ readFile }) => readFile(examplePath))));
+const siteCapacityExample = JSON.parse(String(await import('node:fs/promises').then(({ readFile }) => readFile(path.join(directory, 'pxe-drdo-site-capacity.example.json')))));
 
 const keyPair = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
 
@@ -55,6 +56,18 @@ test('release-gate example validates and produces the fixed required shape', () 
   assert.equal(plan.required_release_shape.upload_bytes_each, 500 * 1024 * 1024);
   const serialized = JSON.stringify(plan);
   assert.doesNotMatch(serialized, /privateKeyPath|accessToken|serial-0|\/secure\//);
+});
+
+test('site capacity profile preserves the approved 10-player maximum and 20-player spike', () => {
+  const config = validateConfig(structuredClone(siteCapacityExample));
+  const credentials = validateCredentialManifest(manifest(20, 40), config);
+  for (const player of credentials.players) player.keyFingerprint = 'b'.repeat(64);
+  const plan = buildDryRunPlan(config, credentials);
+  assert.equal(plan.required_release_shape.profile, 'site-capacity-v1');
+  assert.equal(plan.required_release_shape.baseline_players, 10);
+  assert.equal(plan.required_release_shape.spike_players, 20);
+  const reduced = structuredClone(siteCapacityExample); reduced.baseline.players = 9;
+  assert.throws(() => validateConfig(reduced), /must equal capacity.maximumExpectedPlayers/);
 });
 
 test('device signature matches the production canonical payload exactly', () => {

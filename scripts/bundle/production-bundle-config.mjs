@@ -58,12 +58,17 @@ const SECRET_FIELDS = new Set([
 // Production capacity is deliberately a site decision. These values have no
 // defaults and are consumed by the generated Compose roles.
 const RESOURCE_COMPONENTS = [
-  'POSTGRES', 'MINIO', 'VALKEY', 'BACKEND_API', 'BACKEND_WORKER', 'CMS',
+  'POSTGRES', 'MINIO', 'VALKEY', 'BACKEND_API', 'BACKEND_WORKER', 'CMS', 'BACKUP',
   'PROMETHEUS', 'ALERTMANAGER', 'GRAFANA', 'EXPORTER',
 ]
 const RESOURCE_LIMIT_FIELDS = RESOURCE_COMPONENTS.flatMap((component) => [
   `${component}_CPU_LIMIT`, `${component}_MEMORY_LIMIT`, `${component}_PIDS_LIMIT`,
 ])
+const REQUIRED_RESOURCE_LIMIT_FIELDS = RESOURCE_COMPONENTS
+  .filter((component) => component !== 'BACKUP')
+  .flatMap((component) => [
+    `${component}_CPU_LIMIT`, `${component}_MEMORY_LIMIT`, `${component}_PIDS_LIMIT`,
+  ])
 const DISK_FREE_FIELDS = [
   'DATA_MIN_FREE_DISK_BYTES', 'VALKEY_MIN_FREE_DISK_BYTES', 'BACKEND_MIN_FREE_DISK_BYTES',
   'CMS_MIN_FREE_DISK_BYTES', 'OBSERVABILITY_MIN_FREE_DISK_BYTES',
@@ -74,11 +79,24 @@ const VOLUME_FIELDS = [
 ]
 const OPERATIONS_POLICY_FIELDS = [
   'CAPACITY_EVIDENCE_FILE',
-  'BACKUP_INTERVAL_HOURS', 'BACKUP_RETENTION_DAYS', 'BACKUP_OFFHOST_DESTINATION',
-  'BACKUP_OFFHOST_ENDPOINT', 'BACKUP_OFFHOST_REGION',
+  'MAXIMUM_EXPECTED_PLAYERS', 'TEMPORARY_SPIKE_PLAYERS',
+  'BACKUP_MODE', 'BACKUP_INTERVAL_HOURS', 'BACKUP_RETENTION_DAYS',
+  'BACKUP_SCHEDULE_TIME', 'BACKUP_SCHEDULE_TIMEZONE', 'BACKUP_RETRY_SECONDS',
+  'BACKUP_MAX_AGE_SECONDS', 'BACKUP_MIN_FREE_BYTES', 'BACKUP_HOST_PATH',
+  'BACKUP_OFFHOST_DESTINATION', 'BACKUP_OFFHOST_ENDPOINT', 'BACKUP_OFFHOST_REGION',
   'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES',
   ...DISK_FREE_FIELDS,
   ...RESOURCE_LIMIT_FIELDS,
+  'VOLUME_PROVISIONING_MODE',
+  ...VOLUME_FIELDS,
+]
+const REQUIRED_OPERATIONS_POLICY_FIELDS = [
+  'CAPACITY_EVIDENCE_FILE',
+  'MAXIMUM_EXPECTED_PLAYERS', 'TEMPORARY_SPIKE_PLAYERS',
+  'BACKUP_MODE', 'BACKUP_INTERVAL_HOURS', 'BACKUP_RETENTION_DAYS',
+  'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES',
+  ...DISK_FREE_FIELDS,
+  ...REQUIRED_RESOURCE_LIMIT_FIELDS,
   'VOLUME_PROVISIONING_MODE',
   ...VOLUME_FIELDS,
 ]
@@ -119,11 +137,20 @@ const OUTPUTS = {
   MINIO_SECRET_KEY: ['production/data/.env.production', 'production/backend/.env.production'],
   JWT_SECRET: ['production/backend/.env.production'],
   BACKUP_INTERVAL_HOURS: ['OPERATIONS_POLICY.json'],
+  BACKUP_MODE: ['OPERATIONS_POLICY.json', 'production/data/.env.production', 'production/backend/.env.production'],
   BACKUP_RETENTION_DAYS: ['OPERATIONS_POLICY.json'],
+  BACKUP_SCHEDULE_TIME: ['OPERATIONS_POLICY.json', 'production/data/.env.production', 'production/backend/.env.production'],
+  BACKUP_SCHEDULE_TIMEZONE: ['OPERATIONS_POLICY.json', 'production/data/.env.production', 'production/backend/.env.production'],
+  BACKUP_RETRY_SECONDS: ['OPERATIONS_POLICY.json', 'production/data/.env.production'],
+  BACKUP_MAX_AGE_SECONDS: ['OPERATIONS_POLICY.json', 'production/data/.env.production'],
+  BACKUP_MIN_FREE_BYTES: ['OPERATIONS_POLICY.json', 'production/data/.env.production'],
+  BACKUP_HOST_PATH: ['OPERATIONS_POLICY.json', 'production/data/.env.production'],
   BACKUP_OFFHOST_DESTINATION: ['OPERATIONS_POLICY.json'],
   BACKUP_OFFHOST_ENDPOINT: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
   BACKUP_OFFHOST_REGION: ['OPERATIONS_POLICY.json', 'production/backend/.env.production'],
   CAPACITY_EVIDENCE_FILE: ['OPERATIONS_POLICY.json', 'CONFIGURATION_MANIFEST.json'],
+  MAXIMUM_EXPECTED_PLAYERS: ['OPERATIONS_POLICY.json'],
+  TEMPORARY_SPIKE_PLAYERS: ['OPERATIONS_POLICY.json'],
   BACKUP_OFFHOST_ACCESS_KEY: ['production/backend/worker-secrets/backup-offhost-access-key'],
   BACKUP_OFFHOST_SECRET_KEY: ['production/backend/worker-secrets/backup-offhost-secret-key'],
   VOLUME_PROVISIONING_MODE: ['OPERATIONS_POLICY.json', 'production/*/.env.production'],
@@ -171,8 +198,11 @@ const ALLOWED_FIELDS = new Set([
   'DEVICE_CA_CERT_FILE', 'DEVICE_CA_KEY_FILE', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_MONITORING_USER', 'POSTGRES_MONITORING_PASSWORD', 'POSTGRES_DB',
   'RELEASE_SIGNING_PRIVATE_KEY',
   'CAPACITY_EVIDENCE_FILE',
+  'MAXIMUM_EXPECTED_PLAYERS', 'TEMPORARY_SPIKE_PLAYERS',
   'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'MINIO_REGION', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'JWT_EXPIRY', 'INITIAL_ADMIN_EMAIL',
   'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+  'BACKUP_MODE', 'BACKUP_SCHEDULE_TIME', 'BACKUP_SCHEDULE_TIMEZONE', 'BACKUP_RETRY_SECONDS',
+  'BACKUP_MAX_AGE_SECONDS', 'BACKUP_MIN_FREE_BYTES', 'BACKUP_HOST_PATH', 'BACKUP_IMAGE',
   'VOLUME_PROVISIONING_MODE', ...VOLUME_FIELDS,
   'DEVICE_AUTH_MODE', 'DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT',
   'MAX_UPLOAD_MB',
@@ -193,10 +223,9 @@ const REQUIRED_FIELDS = [
   'TRANSPORT_TLS_MODE', 'TRANSPORT_CA_CERT_FILE', 'DEVICE_CA_CERT_FILE', 'DEVICE_CA_KEY_FILE',
   'RELEASE_SIGNING_PRIVATE_KEY',
   'POSTGRES_PASSWORD', 'POSTGRES_MONITORING_PASSWORD', 'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'INITIAL_ADMIN_EMAIL',
-  'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
   'VOLUME_PROVISIONING_MODE',
   'WEBPAGE_NAVIGATION_ALLOWLIST',
-  ...OPERATIONS_POLICY_FIELDS,
+  ...REQUIRED_OPERATIONS_POLICY_FIELDS,
 ]
 
 const DEFAULTS = {
@@ -218,6 +247,7 @@ const DEFAULTS = {
   PROMETHEUS_SCRAPE_INTERVAL: '30s', PROMETHEUS_EVALUATION_INTERVAL: '30s', PROMETHEUS_RETENTION_TIME: '30d',
   VITE_ENABLE_PRODUCTION_LOCKDOWN: 'true', VITE_REALTIME_DELIVERY_STATUS_UI: 'true',
   VITE_MEDIA_CACHE_STATUS_UI: 'true',
+  BACKUP_MODE: 'APPLICATION_OFFHOST',
   // Fresh installations do not need a legacy protocol window. Existing fleets
   // must explicitly opt into dual mode and provide a finite expiry below.
   DEVICE_AUTH_MODE: 'signature',
@@ -549,6 +579,8 @@ function validateCapacityEvidence(config, addError) {
   }
   if (!Number.isSafeInteger(evidence.max_players) || evidence.max_players < 1) {
     addError('CAPACITY_EVIDENCE_FILE max_players must be a positive integer')
+  } else if (String(evidence.max_players) !== config.MAXIMUM_EXPECTED_PLAYERS) {
+    addError('CAPACITY_EVIDENCE_FILE max_players must match MAXIMUM_EXPECTED_PLAYERS')
   }
   if (evidence.resource_policy_reviewed !== true) {
     addError('CAPACITY_EVIDENCE_FILE resource_policy_reviewed must be true')
@@ -637,6 +669,7 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   config.PROMETHEUS_VOLUME_NAME ||= `${defaultVolumePrefix}-prometheus-data`
   config.ALERTMANAGER_VOLUME_NAME ||= `${defaultVolumePrefix}-alertmanager-data`
   config.GRAFANA_VOLUME_NAME ||= `${defaultVolumePrefix}-grafana-data`
+  config.BACKUP_IMAGE ||= `darshan-simple-backup:${config.RELEASE_ID}`
   for (const name of REQUIRED_FIELDS) {
     if (!config[name] && !parsed.invalidKeys.has(name)) addError(`${name} is required`)
   }
@@ -703,6 +736,12 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   validateWebpageCidrs(config.WEBPAGE_ALLOWED_CIDRS, addError)
   validateWebpagePorts(config.WEBPAGE_ALLOWED_PORTS, addError)
   if (config.INITIAL_ADMIN_EMAIL && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.INITIAL_ADMIN_EMAIL)) addError('INITIAL_ADMIN_EMAIL must be valid')
+  if (config.MAXIMUM_EXPECTED_PLAYERS) validatePositiveInteger('MAXIMUM_EXPECTED_PLAYERS', config.MAXIMUM_EXPECTED_PLAYERS, 1, 1000, addError)
+  if (config.TEMPORARY_SPIKE_PLAYERS) validatePositiveInteger('TEMPORARY_SPIKE_PLAYERS', config.TEMPORARY_SPIKE_PLAYERS, 1, 2000, addError)
+  if (/^\d+$/.test(config.MAXIMUM_EXPECTED_PLAYERS ?? '') && /^\d+$/.test(config.TEMPORARY_SPIKE_PLAYERS ?? '')
+    && Number(config.TEMPORARY_SPIKE_PLAYERS) < Number(config.MAXIMUM_EXPECTED_PLAYERS)) {
+    addError('TEMPORARY_SPIKE_PLAYERS must be at least MAXIMUM_EXPECTED_PLAYERS')
+  }
   if (!['dual', 'signature'].includes(config.DEVICE_AUTH_MODE)) {
     addError('DEVICE_AUTH_MODE must be dual or signature for production')
   }
@@ -727,10 +766,58 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   if (config.GRAFANA_ADMIN_PASSWORD) validateSecret('GRAFANA_ADMIN_PASSWORD', config.GRAFANA_ADMIN_PASSWORD, 24, addError)
   if (config.BACKUP_OFFHOST_ACCESS_KEY) validateBackupCredential('BACKUP_OFFHOST_ACCESS_KEY', config.BACKUP_OFFHOST_ACCESS_KEY, 8, addError)
   if (config.BACKUP_OFFHOST_SECRET_KEY) validateBackupCredential('BACKUP_OFFHOST_SECRET_KEY', config.BACKUP_OFFHOST_SECRET_KEY, 16, addError)
+  if (!['APPLICATION_OFFHOST', 'EXTERNAL_SIDECAR'].includes(config.BACKUP_MODE)) {
+    addError('BACKUP_MODE must be APPLICATION_OFFHOST or EXTERNAL_SIDECAR')
+  }
   if (config.BACKUP_INTERVAL_HOURS) validatePositiveInteger('BACKUP_INTERVAL_HOURS', config.BACKUP_INTERVAL_HOURS, 1, 168, addError)
   if (config.BACKUP_RETENTION_DAYS) validatePositiveInteger('BACKUP_RETENTION_DAYS', config.BACKUP_RETENTION_DAYS, 1, 3650, addError)
-  if (config.BACKUP_OFFHOST_DESTINATION) validateOffHostBackupDestination(config.BACKUP_OFFHOST_DESTINATION, addError)
-  if (config.BACKUP_OFFHOST_ENDPOINT) validateOffHostBackupEndpoint(config.BACKUP_OFFHOST_ENDPOINT, addError)
+  if (config.BACKUP_MODE === 'APPLICATION_OFFHOST') {
+    for (const name of [
+      'BACKUP_OFFHOST_DESTINATION', 'BACKUP_OFFHOST_ENDPOINT', 'BACKUP_OFFHOST_REGION',
+      'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+    ]) {
+      if (!config[name] && !parsed.invalidKeys.has(name)) addError(`${name} is required when BACKUP_MODE=APPLICATION_OFFHOST`)
+    }
+    if (config.BACKUP_OFFHOST_DESTINATION) validateOffHostBackupDestination(config.BACKUP_OFFHOST_DESTINATION, addError)
+    if (config.BACKUP_OFFHOST_ENDPOINT) validateOffHostBackupEndpoint(config.BACKUP_OFFHOST_ENDPOINT, addError)
+  }
+  if (config.BACKUP_MODE === 'EXTERNAL_SIDECAR') {
+    const requiredSidecarFields = [
+      'BACKUP_SCHEDULE_TIME', 'BACKUP_SCHEDULE_TIMEZONE', 'BACKUP_RETRY_SECONDS',
+      'BACKUP_MAX_AGE_SECONDS', 'BACKUP_MIN_FREE_BYTES', 'BACKUP_HOST_PATH',
+    ]
+    for (const name of requiredSidecarFields) {
+      if (!config[name] && !parsed.invalidKeys.has(name)) addError(`${name} is required when BACKUP_MODE=EXTERNAL_SIDECAR`)
+    }
+    for (const name of ['BACKUP_CPU_LIMIT', 'BACKUP_MEMORY_LIMIT', 'BACKUP_PIDS_LIMIT']) {
+      if (!config[name] && !parsed.invalidKeys.has(name)) addError(`${name} is required when BACKUP_MODE=EXTERNAL_SIDECAR`)
+    }
+    if (config.BACKUP_INTERVAL_HOURS && config.BACKUP_INTERVAL_HOURS !== '24') {
+      addError('EXTERNAL_SIDECAR requires BACKUP_INTERVAL_HOURS=24')
+    }
+    if (config.BACKUP_RETENTION_DAYS && config.BACKUP_RETENTION_DAYS !== '30') {
+      addError('EXTERNAL_SIDECAR requires BACKUP_RETENTION_DAYS=30')
+    }
+    if (config.BACKUP_SCHEDULE_TIME && config.BACKUP_SCHEDULE_TIME !== '00:00') {
+      addError('EXTERNAL_SIDECAR requires BACKUP_SCHEDULE_TIME=00:00')
+    }
+    if (config.BACKUP_SCHEDULE_TIMEZONE && config.BACKUP_SCHEDULE_TIMEZONE !== 'Asia/Kolkata') {
+      addError('EXTERNAL_SIDECAR requires BACKUP_SCHEDULE_TIMEZONE=Asia/Kolkata')
+    }
+    if (config.BACKUP_RETRY_SECONDS) validatePositiveInteger('BACKUP_RETRY_SECONDS', config.BACKUP_RETRY_SECONDS, 60, 86400, addError)
+    if (config.BACKUP_MAX_AGE_SECONDS) validatePositiveInteger('BACKUP_MAX_AGE_SECONDS', config.BACKUP_MAX_AGE_SECONDS, 86400, 604800, addError)
+    if (config.BACKUP_MIN_FREE_BYTES) validatePositiveInteger('BACKUP_MIN_FREE_BYTES', config.BACKUP_MIN_FREE_BYTES, 1_073_741_824, 9_007_199_254_740_991, addError)
+    const expectedBackupPath = config.SITE_NAME ? `/var/lib/darshan/backups/${config.SITE_NAME}` : ''
+    if (config.BACKUP_HOST_PATH && config.BACKUP_HOST_PATH !== expectedBackupPath) {
+      addError(`EXTERNAL_SIDECAR requires BACKUP_HOST_PATH=${expectedBackupPath}`)
+    }
+    for (const name of [
+      'BACKUP_OFFHOST_DESTINATION', 'BACKUP_OFFHOST_ENDPOINT',
+      'BACKUP_OFFHOST_ACCESS_KEY', 'BACKUP_OFFHOST_SECRET_KEY',
+    ]) {
+      if (config[name]) addError(`${name} must be empty when BACKUP_MODE=EXTERNAL_SIDECAR`)
+    }
+  }
   if (config.CONTAINER_LOG_MAX_SIZE) validateMemoryLimit('CONTAINER_LOG_MAX_SIZE', config.CONTAINER_LOG_MAX_SIZE, addError)
   if (config.CONTAINER_LOG_MAX_FILES) validatePositiveInteger('CONTAINER_LOG_MAX_FILES', config.CONTAINER_LOG_MAX_FILES, 2, 100, addError)
   for (const name of DISK_FREE_FIELDS) {

@@ -22,7 +22,7 @@ Use these values in the data-stack `.env.production` file:
 ```dotenv
 BACKUP_MODE=EXTERNAL_SIDECAR
 BACKUP_RETENTION_DAYS=30
-BACKUP_HOST_PATH=/var/lib/darshan/backups
+BACKUP_HOST_PATH=/var/lib/darshan/backups/<site-name>
 SIMPLE_BACKUP_RETENTION_DAYS=30
 SIMPLE_BACKUP_SCHEDULE_TIME=00:00
 SIMPLE_BACKUP_TIMEZONE=Asia/Kolkata
@@ -31,13 +31,16 @@ SIMPLE_BACKUP_MAX_AGE_SECONDS=129600
 SIMPLE_BACKUP_MIN_FREE_BYTES=1073741824
 ```
 
-`BACKUP_HOST_PATH` is on the data VM. Before enabling the scheduled sidecar, make one full backup with representative data, verify its checksums, and run the capacity gate against the Data VM's actual volume paths:
+`BACKUP_HOST_PATH` is on the data VM. The signed source-free bundle requires
+the exact site-scoped path `/var/lib/darshan/backups/<SITE_NAME>`; the direct
+Compose example may use a different administrator-approved non-root path.
+Before enabling the scheduled sidecar, make one full backup with representative data, verify its checksums, and run the capacity gate against the Data VM's actual volume paths:
 
 ```bash
 POSTGRES_VOLUME_PATH="$(docker volume inspect --format '{{ .Mountpoint }}' data_postgres_data)"
 MINIO_VOLUME_PATH="$(docker volume inspect --format '{{ .Mountpoint }}' data_minio_data)"
 ./deploy/production/docker/backup/check-capacity.sh \
-  /var/lib/darshan/backups "$POSTGRES_VOLUME_PATH" "$MINIO_VOLUME_PATH"
+  /var/lib/darshan/backups/<site-name> "$POSTGRES_VOLUME_PATH" "$MINIO_VOLUME_PATH"
 ```
 
 Compose volume names can differ by project name; obtain the actual names with `docker volume ls`. Run this script from the repository checkout on the Data VM. It verifies the latest set and measures the live PostgreSQL and MinIO volumes and a full set. Because the age cutoff is inclusive, steady state can contain 31 published daily sets (today through 30 days ago); while the next capture runs, one additional staging set coexists until pruning is allowed. The gate therefore requires room for 31 measured published sets, one staging set, and at least 20% projected margin (minimum 10 GiB). Its JSON result must be `"status":"pass"` for the release gate. A 600 GB allocation is not proof of sufficient capacity. Recheck after major data growth and before each release.
@@ -178,7 +181,10 @@ Restore on the designated recovery VM, never inside the production Data VM Compo
 - Sidecar backups are intentionally not shown in the CMS backup-history screen. Manual backup actions in the CMS return a conflict while sidecar mode is active.
 - Restore remains an administrator-run procedure for this small release.
 - Rehearse an isolated, production-sized PostgreSQL and MinIO restore before every production release and monthly afterward. Measure actual RPO ≤24 hours, RTO ≤4 hours, and maintenance downtime ≤2 hours; verify row counts, object hashes, playback, and final readiness. An overdue backup, failed restore, or missing measurement blocks release approval.
-- This sidecar is supported through direct Compose deployment. The source-free/offline bundle does not yet include its image.
+- The signed source-free/offline Data and Recovery roles include the sidecar
+  image when `BACKUP_MODE=EXTERNAL_SIDECAR`. Restore is still the manual
+  isolated procedure above; the off-host signed-evidence command is deliberately
+  disabled for this local-only mode.
 - A crash may leave an unpublished staging directory; the next exclusively locked run removes it before checking capacity.
 
 The advanced encrypted, signed, restartable backup/restore implementation and its unfinished status are preserved only on branch `codex/advanced-backup-recovery-archive-20261031`; its advanced recovery source is not part of the lightweight release commit.

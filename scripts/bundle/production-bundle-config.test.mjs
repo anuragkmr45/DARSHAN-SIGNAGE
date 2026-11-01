@@ -96,6 +96,8 @@ TRANSPORT_TLS_MODE=internal-ca
 PKI_ROOT_DIR=${pkiRoot}
 RELEASE_SIGNING_PRIVATE_KEY=${signingKey}
 CAPACITY_EVIDENCE_FILE=${capacityEvidence}
+MAXIMUM_EXPECTED_PLAYERS=500
+TEMPORARY_SPIKE_PLAYERS=1000
 POSTGRES_PASSWORD=strong-postgres-pass
 POSTGRES_MONITORING_PASSWORD=strong-monitoring-password-123
 VALKEY_PASSWORD=strong-valkey-password-123
@@ -264,6 +266,27 @@ EXPORTER_PIDS_LIMIT=128
 
   fs.writeFileSync(envFile, validText.replace(/^BACKUP_OFFHOST_SECRET_KEY=.*\n/m, ''))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /BACKUP_OFFHOST_SECRET_KEY is required/)
+
+  const sidecarText = validText
+    .replace('BACKUP_RETENTION_DAYS=30', `BACKUP_RETENTION_DAYS=30
+BACKUP_MODE=EXTERNAL_SIDECAR
+BACKUP_SCHEDULE_TIME=00:00
+BACKUP_SCHEDULE_TIMEZONE=Asia/Kolkata
+BACKUP_RETRY_SECONDS=3600
+BACKUP_MAX_AGE_SECONDS=129600
+BACKUP_MIN_FREE_BYTES=1073741824
+BACKUP_HOST_PATH=/var/lib/darshan/backups/site-a
+BACKUP_CPU_LIMIT=0.2
+BACKUP_MEMORY_LIMIT=512m
+BACKUP_PIDS_LIMIT=128`)
+    .replace(/^BACKUP_OFFHOST_(?:DESTINATION|ENDPOINT|REGION|ACCESS_KEY|SECRET_KEY)=.*\n/gm, '')
+  fs.writeFileSync(envFile, sidecarText)
+  const sidecar = loadProductionBundleConfig(envFile, root).config
+  assert.equal(sidecar.BACKUP_MODE, 'EXTERNAL_SIDECAR')
+  assert.equal(sidecar.BACKUP_HOST_PATH, '/var/lib/darshan/backups/site-a')
+  assert.equal(sidecar.BACKUP_IMAGE, 'darshan-simple-backup:r1')
+  fs.writeFileSync(envFile, sidecarText.replace('BACKUP_RETENTION_DAYS=30', 'BACKUP_RETENTION_DAYS=3'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /requires BACKUP_RETENTION_DAYS=30/)
 
   fs.writeFileSync(envFile, validText.replace('POSTGRES_MEMORY_LIMIT=4g', 'POSTGRES_MEMORY_LIMIT=4096'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /POSTGRES_MEMORY_LIMIT must be/)
@@ -499,7 +522,7 @@ test('production bundle requires and applies the explicit operations policy', ()
   assert.match(evidenceVerifier, /evidence\.backup_interval_hours/)
   assert.match(evidenceVerifier, /evidence\.retention_days/)
   assert.match(assembler, /backup-offhost-access-key/)
-  assert.match(assembler, /BACKUP_OFFHOST_ACCESS_KEY_FILE: \/run\/worker-secrets\/backup-offhost-access-key/)
+  assert.match(assembler, /BACKUP_OFFHOST_ACCESS_KEY_FILE: \$\{BACKUP_OFFHOST_ACCESS_KEY_FILE:-\}/)
   const productionBackendCompose = assembler.slice(assembler.indexOf('cat > "$PROD_BACKEND_DIR/docker-compose.yml"'))
   const apiBlock = productionBackendCompose.slice(productionBackendCompose.indexOf('  api:'), productionBackendCompose.indexOf('  worker:'))
   const workerBlock = productionBackendCompose.slice(productionBackendCompose.indexOf('  worker:'), productionBackendCompose.indexOf('  node-exporter:'))

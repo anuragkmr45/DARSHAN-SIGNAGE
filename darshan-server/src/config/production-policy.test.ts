@@ -112,7 +112,7 @@ describe('production config policy', () => {
     configureProductionEnv({
       DARSHAN_PROCESS_ROLE: 'worker',
       BACKUP_MODE: 'EXTERNAL_SIDECAR',
-      BACKUP_RETENTION_DAYS: '3',
+      BACKUP_RETENTION_DAYS: '30',
       BACKUP_SCHEDULE_TIME: '00:00',
       BACKUP_SCHEDULE_TIMEZONE: 'Asia/Kolkata',
     });
@@ -128,14 +128,14 @@ describe('production config policy', () => {
     const { config } = await loadConfig();
 
     expect(config.BACKUP_MODE).toBe('EXTERNAL_SIDECAR');
-    expect(config.BACKUP_RETENTION_DAYS).toBe(3);
+    expect(config.BACKUP_RETENTION_DAYS).toBe(30);
     expect(config.BACKUP_SCHEDULE_TIMEZONE).toBe('Asia/Kolkata');
   });
 
   it('rejects an external sidecar schedule outside midnight IST', async () => {
     configureProductionEnv({
       BACKUP_MODE: 'EXTERNAL_SIDECAR',
-      BACKUP_RETENTION_DAYS: '3',
+      BACKUP_RETENTION_DAYS: '30',
       BACKUP_SCHEDULE_TIME: '00:00',
       BACKUP_SCHEDULE_TIMEZONE: 'UTC',
     });

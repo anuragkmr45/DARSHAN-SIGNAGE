@@ -297,8 +297,8 @@ function requestedProductionDeviceAuthMode(input: z.infer<typeof envSchema>) {
 function assertProductionBackupPolicy(input: z.infer<typeof envSchema>) {
   if (input.NODE_ENV !== 'production') return;
   if (input.BACKUP_MODE === 'EXTERNAL_SIDECAR') {
-    if (input.BACKUP_RETENTION_DAYS !== 3) {
-      throw new Error('EXTERNAL_SIDECAR requires BACKUP_RETENTION_DAYS=3.');
+    if (input.BACKUP_RETENTION_DAYS !== 30) {
+      throw new Error('EXTERNAL_SIDECAR requires BACKUP_RETENTION_DAYS=30.');
     }
     if (input.BACKUP_SCHEDULE_TIME !== '00:00') {
       throw new Error('EXTERNAL_SIDECAR requires BACKUP_SCHEDULE_TIME=00:00.');

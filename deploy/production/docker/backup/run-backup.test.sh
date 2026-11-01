@@ -49,10 +49,13 @@ export BACKUP_RETENTION_DAYS=30
 export BACKUP_MIN_FREE_BYTES=1
 export BACKUP_SET_DATE=2026-10-31
 export POSTGRES_USER=darshan
-export POSTGRES_PASSWORD=secret
 export POSTGRES_DB=darshan
-export MINIO_ACCESS_KEY=minio
-export MINIO_SECRET_KEY=secret
+printf '%s\n' secret > "$TEST_ROOT/postgres-password"
+printf '%s\n' minio > "$TEST_ROOT/minio-access-key"
+printf '%s\n' secret > "$TEST_ROOT/minio-secret-key"
+export POSTGRES_PASSWORD_FILE="$TEST_ROOT/postgres-password"
+export MINIO_ACCESS_KEY_FILE="$TEST_ROOT/minio-access-key"
+export MINIO_SECRET_KEY_FILE="$TEST_ROOT/minio-secret-key"
 
 for day in 28 29 30; do
   directory="$BACKUPS/backup-2026-10-$day"

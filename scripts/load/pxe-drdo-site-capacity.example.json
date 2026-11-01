@@ -1,0 +1,68 @@
+{
+  "profile": "site-capacity-v1",
+  "environment": "qa",
+  "baseUrl": "https://192.168.128.72:3000",
+  "allowProductionLookingTarget": false,
+  "capacity": {
+    "maximumExpectedPlayers": 10,
+    "temporarySpikePlayers": 20
+  },
+  "baseline": {
+    "players": 10,
+    "durationSeconds": 900
+  },
+  "spike": {
+    "players": 20,
+    "durationSeconds": 300
+  },
+  "intervals": {
+    "heartbeatSeconds": 30,
+    "commandPollSeconds": 5,
+    "desiredStateSeconds": 60,
+    "playbackTransitionSeconds": 15
+  },
+  "requestTimeoutMs": 15000,
+  "maxInflight": 100,
+  "realtime": {
+    "enabled": true,
+    "url": "https://192.168.128.72:3000",
+    "namespace": "/device",
+    "connectTimeoutMs": 15000
+  },
+  "cms": {
+    "users": 40,
+    "intervalSeconds": 5,
+    "flows": [
+      { "name": "screens", "method": "GET", "path": "/api/v1/screens?page=1&limit=50" },
+      { "name": "media", "method": "GET", "path": "/api/v1/media?page=1&limit=50" },
+      { "name": "reports", "method": "GET", "path": "/api/v1/reports/summary" }
+    ]
+  },
+  "uploads": {
+    "concurrency": 5,
+    "sizeBytes": 524288000,
+    "contentType": "video/mp4",
+    "partConcurrency": 3
+  },
+  "backlog": {
+    "players": 2,
+    "offlineStartSeconds": 300,
+    "offlineDurationSeconds": 120
+  },
+  "proxyScenario": {
+    "enabled": true,
+    "mode": "trusted",
+    "headerName": "x-forwarded-for"
+  },
+  "fanout": {
+    "enabled": false,
+    "phase": "baseline",
+    "method": "POST",
+    "path": "/api/v1/qa/preprovisioned-fanout-trigger",
+    "body": {},
+    "cmsUserIndex": 0,
+    "expectedRecipients": 10
+  },
+  "resourceProbes": [],
+  "outputDirectory": "/var/lib/darshan-qa-evidence/pxe-drdo-2026-11-01-r1"
+}

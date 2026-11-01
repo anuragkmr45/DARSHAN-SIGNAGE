@@ -10,6 +10,7 @@ Optional environment overrides:
   SERVER_REPO_DIR=/path/to/darshan-server
   OUTPUT_BASE=/path/to/darshan/out
   BACKEND_IMAGE_REF=darshan-server-export:<release-id>
+  BACKUP_IMAGE_REF=darshan-simple-backup:<release-id>
   INSTALL_PLAYWRIGHT_CHROMIUM=true
   POSTGRES_IMAGE=postgres:15-alpine
   MINIO_IMAGE=minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
@@ -65,6 +66,8 @@ esac
 SERVER_REPO_DIR="${SERVER_REPO_DIR:-$PLATFORM_ROOT/darshan-server}"
 OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
 BACKEND_IMAGE_REF="${BACKEND_IMAGE_REF:-darshan-server-export:$RELEASE_ID}"
+BACKUP_IMAGE_REF="${BACKUP_IMAGE_REF:-darshan-simple-backup:$RELEASE_ID}"
+BACKUP_BUILD_DIR="${BACKUP_BUILD_DIR:-$PLATFORM_ROOT/deploy/production/docker/backup}"
 INSTALL_PLAYWRIGHT_CHROMIUM="${INSTALL_PLAYWRIGHT_CHROMIUM:-true}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:15-alpine}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}"
@@ -79,18 +82,24 @@ export_require_command docker
 export_require_directory "Server repo" "$SERVER_REPO_DIR"
 export_require_file "Server Dockerfile" "$SERVER_REPO_DIR/Dockerfile"
 export_require_file "Server env template" "$SERVER_REPO_DIR/.env.example"
+export_require_file "Backup Dockerfile" "$BACKUP_BUILD_DIR/Dockerfile"
+export_require_file "Backup entrypoint" "$BACKUP_BUILD_DIR/run-backup.sh"
 export_assert_clean_git_tree "$SERVER_REPO_DIR"
 
 export_make_clean_dir "$OUTPUT_DIR"
 mkdir -p "$IMAGES_DIR" "$CERTS_DIR" "$OBSERVABILITY_DIR"
 
 BACKEND_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$BACKEND_IMAGE_REF")"
+BACKUP_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$BACKUP_IMAGE_REF")"
 POSTGRES_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$POSTGRES_IMAGE")"
 MINIO_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$MINIO_IMAGE")"
 VALKEY_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$VALKEY_IMAGE")"
 
 export_common_log "Building backend image $BACKEND_IMAGE_REF"
 docker build --build-arg INSTALL_PLAYWRIGHT_CHROMIUM="$INSTALL_PLAYWRIGHT_CHROMIUM" -t "$BACKEND_IMAGE_REF" "$SERVER_REPO_DIR"
+
+export_common_log "Building backup image $BACKUP_IMAGE_REF"
+docker build -t "$BACKUP_IMAGE_REF" "$BACKUP_BUILD_DIR"
 
 export_common_log "Ensuring base images are available"
 docker image inspect "$POSTGRES_IMAGE" >/dev/null 2>&1 || docker pull "$POSTGRES_IMAGE"
@@ -99,6 +108,7 @@ docker image inspect "$VALKEY_IMAGE" >/dev/null 2>&1 || docker pull "$VALKEY_IMA
 
 export_common_log "Saving server package images"
 docker save -o "$IMAGES_DIR/$BACKEND_IMAGE_ARCHIVE_NAME" "$BACKEND_IMAGE_REF"
+docker save -o "$IMAGES_DIR/$BACKUP_IMAGE_ARCHIVE_NAME" "$BACKUP_IMAGE_REF"
 docker save -o "$IMAGES_DIR/$POSTGRES_IMAGE_ARCHIVE_NAME" "$POSTGRES_IMAGE"
 docker save -o "$IMAGES_DIR/$MINIO_IMAGE_ARCHIVE_NAME" "$MINIO_IMAGE"
 docker save -o "$IMAGES_DIR/$VALKEY_IMAGE_ARCHIVE_NAME" "$VALKEY_IMAGE"
@@ -109,6 +119,8 @@ RELEASE_ID=$RELEASE_ID
 SERVER_PACKAGE_LAYOUT=$DEPLOYMENT_LAYOUT
 SERVER_PACKAGE_BACKEND_IMAGE_REF=$BACKEND_IMAGE_REF
 SERVER_PACKAGE_BACKEND_IMAGE_ARCHIVE=images/$BACKEND_IMAGE_ARCHIVE_NAME
+SERVER_PACKAGE_BACKUP_IMAGE_REF=$BACKUP_IMAGE_REF
+SERVER_PACKAGE_BACKUP_IMAGE_ARCHIVE=images/$BACKUP_IMAGE_ARCHIVE_NAME
 SERVER_PACKAGE_POSTGRES_IMAGE_REF=$POSTGRES_IMAGE
 SERVER_PACKAGE_POSTGRES_IMAGE_ARCHIVE=images/$POSTGRES_IMAGE_ARCHIVE_NAME
 SERVER_PACKAGE_MINIO_IMAGE_REF=$MINIO_IMAGE

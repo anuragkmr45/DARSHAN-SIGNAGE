@@ -66,7 +66,11 @@ else
   fi
   if [ "$role" = worker ]; then
     prepare_worker_runtime_dirs
-    copy_inputs /run/darshan-input-worker-secrets /run/worker-secrets true
+    worker_secrets_required=true
+    if [ "${BACKUP_MODE:-APPLICATION_OFFHOST}" = EXTERNAL_SIDECAR ]; then
+      worker_secrets_required=false
+    fi
+    copy_inputs /run/darshan-input-worker-secrets /run/worker-secrets "$worker_secrets_required"
     install -d -m 0700 -o node -g node /var/lib/darshan-worker/tmp
   fi
 fi

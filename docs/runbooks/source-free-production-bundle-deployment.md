@@ -178,7 +178,8 @@ Edit only that private file. Important values include:
 - all runtime credentials
 - measured capacity evidence and per-service resource limits
 - minimum free disk policy for every VM role
-- independent off-host backup destination, policy, and worker-only credentials
+- one explicit backup mode: independently operated off-host storage, or the
+  accepted-risk Data-VM `EXTERNAL_SIDECAR` policy with its site-scoped host path
 - `INSTALL_PLAYWRIGHT_CHROMIUM=true`
 - player target platforms and native installer inputs
 
@@ -232,13 +233,13 @@ Apply a source/port firewall allowlist before starting services:
 - operator and player networks to CMS HTTPS
 - player and CMS VM networks to Backend HTTPS/WSS
 - Backend VM to Data PostgreSQL TLS and MinIO HTTPS
-- Backend VM to Valkey TLS and approved off-host S3 HTTPS
+- Backend VM to Valkey TLS and, for `APPLICATION_OFFHOST`, approved off-host S3 HTTPS
 - CMS VM to Data MinIO HTTPS and Observability Grafana HTTPS
 - Observability VM to each role's TLS metrics gateway, Backend metrics HTTPS,
   and MinIO metrics HTTPS
 - approved operator network to direct Prometheus, Alertmanager, and Grafana
   HTTPS only when those consoles are intentionally exposed
-- Recovery VM only to the off-host repository and isolated recovery targets
+- Recovery VM only to the configured backup source and isolated recovery targets
 
 Deny PostgreSQL, Valkey, MinIO Console, metrics gateways, and observability
 listeners from all other sources. Use the configured ports in the signed role

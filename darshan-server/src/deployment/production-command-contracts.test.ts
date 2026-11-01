@@ -11,6 +11,13 @@ function readText(relativePath: string) {
 }
 
 describe('production command contracts', () => {
+  it('does not require off-host worker secrets when the external sidecar owns backups', () => {
+    const entrypoint = readText('docker/runtime-entrypoint.sh');
+    expect(entrypoint).toContain('if [ "${BACKUP_MODE:-APPLICATION_OFFHOST}" = EXTERNAL_SIDECAR ]');
+    expect(entrypoint).toContain('worker_secrets_required=false');
+    expect(entrypoint).toContain('copy_inputs /run/darshan-input-worker-secrets /run/worker-secrets "$worker_secrets_required"');
+  });
+
   it('exposes the canonical database lifecycle commands required by production runbooks', () => {
     const packageJson = JSON.parse(readText('package.json')) as PackageJson;
 

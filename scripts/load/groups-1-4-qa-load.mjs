@@ -62,13 +62,21 @@ export function validateConfig(config) {
   assert(baseUrl.pathname === '/' || baseUrl.pathname === '', 'baseUrl must not include an API path');
   assert(baseUrl.protocol === 'https:' || (baseUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '::1'].includes(baseUrl.hostname)), 'non-loopback QA targets require HTTPS');
   assert(!baseUrl.username && !baseUrl.password, 'baseUrl must not contain credentials');
-  assert(config.profile === 'packet4-release-gate-v1', 'profile must be packet4-release-gate-v1');
+  assert(['packet4-release-gate-v1', 'site-capacity-v1'].includes(config.profile), 'profile must be packet4-release-gate-v1 or site-capacity-v1');
   integer(config.baseline?.players, 'baseline.players', 1, 1000);
   integer(config.baseline?.durationSeconds, 'baseline.durationSeconds', 1, 86400);
   integer(config.spike?.players, 'spike.players', config.baseline.players, 2000);
   integer(config.spike?.durationSeconds, 'spike.durationSeconds', 1, 3600);
-  assert(config.baseline.players === 500, 'release-gate baseline must use exactly 500 players');
-  assert(config.spike.players === 1000 && config.spike.durationSeconds === 300, 'release-gate spike must use exactly 1000 players for 300 seconds');
+  if (config.profile === 'packet4-release-gate-v1') {
+    assert(config.baseline.players === 500, 'packet4 release-gate baseline must use exactly 500 players');
+    assert(config.spike.players === 1000 && config.spike.durationSeconds === 300, 'packet4 release-gate spike must use exactly 1000 players for 300 seconds');
+  } else {
+    integer(config.capacity?.maximumExpectedPlayers, 'capacity.maximumExpectedPlayers', 1, 1000);
+    integer(config.capacity?.temporarySpikePlayers, 'capacity.temporarySpikePlayers', config.capacity.maximumExpectedPlayers, 2000);
+    assert(config.baseline.players === config.capacity.maximumExpectedPlayers, 'site-capacity baseline.players must equal capacity.maximumExpectedPlayers');
+    assert(config.spike.players === config.capacity.temporarySpikePlayers, 'site-capacity spike.players must equal capacity.temporarySpikePlayers');
+    assert(config.spike.durationSeconds === 300, 'site-capacity spike must run for exactly 300 seconds');
+  }
   for (const [key, min, max] of [
     ['heartbeatSeconds', 5, 300], ['commandPollSeconds', 1, 300],
     ['desiredStateSeconds', 5, 600], ['playbackTransitionSeconds', 1, 3600],
@@ -166,7 +174,15 @@ export function buildDryRunPlan(config, manifest) {
     credential_counts: { players: manifest.players.length, cms_users: manifest.cmsUsers.length },
     device_key_set_sha256: sha256(manifest.players.map((player) => player.keyFingerprint).sort().join('\n')),
     phases: [config.baseline, config.spike],
-    required_release_shape: { baseline_players: 500, spike_players: 1000, spike_seconds: 300, cms_users: 40, uploads: 5, upload_bytes_each: 500 * 1024 * 1024 },
+    required_release_shape: {
+      profile: config.profile,
+      baseline_players: config.baseline.players,
+      spike_players: config.spike.players,
+      spike_seconds: config.spike.durationSeconds,
+      cms_users: config.cms.users,
+      uploads: config.uploads.concurrency,
+      upload_bytes_each: config.uploads.sizeBytes,
+    },
     realtime: { enabled: true, namespace: config.realtime.namespace, target: config.realtime.url },
     projected_pop_events_minimum: baselineTransitions + spikeTransitions,
     proxy_scenario: config.proxyScenario,
