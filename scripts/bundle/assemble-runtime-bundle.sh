@@ -1477,12 +1477,12 @@ if [[ "$role" == "backend" ]]; then
   install -d -m 0770 -o root -g docker ./bootstrap-secrets
 fi
 if [[ "$role" == "data" && "${BACKUP_MODE:-APPLICATION_OFFHOST}" == "EXTERNAL_SIDECAR" ]]; then
-  expected_backup_path="/var/lib/darshan/backups/$SITE_NAME"
-  [[ "$BACKUP_HOST_PATH" == "$expected_backup_path" ]] || { echo "Unexpected backup host path: $BACKUP_HOST_PATH" >&2; exit 1; }
-  for path in /var/lib/darshan /var/lib/darshan/backups "$BACKUP_HOST_PATH"; do
-    [[ ! -L "$path" ]] || { echo "Backup path must not contain symlinks: $path" >&2; exit 1; }
+  expected_backup_path="/var/lib/darshan/backups/\$SITE_NAME"
+  [[ "\$BACKUP_HOST_PATH" == "\$expected_backup_path" ]] || { echo "Unexpected backup host path: \$BACKUP_HOST_PATH" >&2; exit 1; }
+  for path in /var/lib/darshan /var/lib/darshan/backups "\$BACKUP_HOST_PATH"; do
+    [[ ! -L "\$path" ]] || { echo "Backup path must not contain symlinks: \$path" >&2; exit 1; }
   done
-  install -d -m 0700 -o root -g root "$BACKUP_HOST_PATH"
+  install -d -m 0700 -o root -g root "\$BACKUP_HOST_PATH"
 fi
 role_root="\$(pwd -P)"
 marker="\$state_root/prepared/\$DARSHAN_ROLE_NAME-\$DARSHAN_RELEASE_ID"

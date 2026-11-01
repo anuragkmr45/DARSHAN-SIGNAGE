@@ -491,6 +491,19 @@ test('production MinIO image is built from one pinned official source revision',
   assert.doesNotMatch(assembler, /minio\/minio/)
 })
 
+test('generated Data host preparation defers backup paths to role runtime', () => {
+  const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
+  const controls = assembler.slice(
+    assembler.indexOf('write_production_role_controls()'),
+    assembler.indexOf('write_compatibility_check()'),
+  )
+
+  assert.ok(controls.includes('expected_backup_path="/var/lib/darshan/backups/\\$SITE_NAME"'))
+  assert.ok(controls.includes('[[ "\\$BACKUP_HOST_PATH" == "\\$expected_backup_path" ]]'))
+  assert.ok(controls.includes('[[ ! -L "\\$path" ]]'))
+  assert.ok(controls.includes('install -d -m 0700 -o root -g root "\\$BACKUP_HOST_PATH"'))
+})
+
 test('production observability deploys every static exporter target from signed role images', () => {
   const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
   const template = fs.readFileSync(repoPath('deploy/shared/observability/prometheus/prometheus.yml.template'), 'utf8')
