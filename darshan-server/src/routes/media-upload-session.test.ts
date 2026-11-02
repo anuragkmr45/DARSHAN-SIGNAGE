@@ -293,7 +293,21 @@ describe('Media upload sessions', () => {
       multipart_threshold_bytes: MULTIPART_SIZE,
       part_size_bytes: PART_SIZE,
       multipart_concurrency: 3,
-      allowed_mime_types: [],
+      allowed_mime_types: [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'video/mp4',
+        'video/quicktime',
+        'application/pdf',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'text/csv',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ],
     });
   });
 
@@ -376,14 +390,14 @@ describe('Media upload sessions', () => {
       .where(eq(schema.storageObjects.object_key, upload.object_key));
     expect(media).toMatchObject({
       status: 'FAILED',
-      status_reason: 'USER_DELETED_UPLOAD_ABORTED',
+      status_reason: 'USER_DELETED_UPLOAD_ABORTED_RETAINED',
     });
     expect(sourceRows).toHaveLength(0);
     expect(
       deleteObjectMock.mock.calls.filter(
         ([bucket, key]) => bucket === upload.bucket && key === upload.object_key
       )
-    ).toHaveLength(2);
+    ).toHaveLength(1);
   });
 
   it.each([

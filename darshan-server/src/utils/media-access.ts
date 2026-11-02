@@ -53,6 +53,18 @@ const normalizeHeadSize = (value: unknown) => {
   return undefined;
 };
 
+export const resolveMediaDeliveryFilename = (
+  media: Pick<MediaRecord, 'name' | 'type'>,
+  contentType: string | null,
+  originalFilename?: string | null
+) => {
+  const filename = originalFilename?.trim() || media.name?.trim() || 'file';
+  if (media.type === 'DOCUMENT' && contentType?.toLowerCase() === 'application/pdf') {
+    return `${filename.replace(/\.(pdf|ppt|pptx|csv|doc|docx|xls|xlsx)$/i, '')}.pdf`;
+  }
+  return filename;
+};
+
 async function getReadyStorageObject(
   media: MediaRecord,
   options: ResolveMediaAccessOptions,
@@ -93,7 +105,6 @@ export async function resolveMediaAccess(
     };
   }
   const filename = (media as { original_filename?: string | null }).original_filename ?? media.name ?? 'file';
-  const contentDisposition = buildContentDisposition(filename, 'inline');
 
   let bucket: string | null = null;
   let objectKey: string | null = null;
@@ -181,6 +192,10 @@ export async function resolveMediaAccess(
   }
 
   try {
+    const contentDisposition = buildContentDisposition(
+      resolveMediaDeliveryFilename(media, resolvedContentType, filename),
+      'inline'
+    );
     const mediaUrl = await getPresignedUrl(bucket, objectKey, {
       expiresIn: 3600,
       responseContentDisposition: contentDisposition,

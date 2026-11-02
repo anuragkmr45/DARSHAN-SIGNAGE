@@ -22,22 +22,24 @@ export const allowedMimeTypes = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-export const allowedExtensions = new Set([
-  ".jpg",
-  ".jpeg",
-  ".png",
-  ".webp",
-  ".mp4",
-  ".mov",
-  ".pdf",
-  ".ppt",
-  ".pptx",
-  ".csv",
-  ".doc",
-  ".docx",
-  ".xls",
-  ".xlsx",
-]);
+const mimeTypeByExtension: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".pdf": "application/pdf",
+  ".ppt": "application/vnd.ms-powerpoint",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".csv": "text/csv",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+
+export const allowedExtensions = new Set(Object.keys(mimeTypeByExtension));
 
 export interface UploadMediaResult extends CompressionResult {
   media: MediaAsset;
@@ -114,10 +116,15 @@ const isImageOrVideo = (contentType: string) =>
 const extFromName = (name: string) =>
   name.includes(".") ? name.slice(name.lastIndexOf(".")).toLowerCase() : "";
 
+export const resolveUploadContentType = (file: File): string | null => {
+  const extension = extFromName(file.name);
+  if (extension) return mimeTypeByExtension[extension] ?? null;
+  const mimeType = file.type.toLowerCase();
+  return allowedMimeTypes.has(mimeType) ? mimeType : null;
+};
+
 export const validateUploadFile = (file: File): string | null => {
-  const ext = extFromName(file.name);
-  const allowed = allowedMimeTypes.has(file.type) || (ext && allowedExtensions.has(ext));
-  if (!allowed) {
+  if (!resolveUploadContentType(file)) {
     return "Unsupported file type. Allowed: JPEG, PNG, WEBP, MP4, MOV, PDF, PPT/PPTX, CSV, DOC/DOCX, XLS/XLSX.";
   }
   return null;
@@ -392,9 +399,19 @@ export const uploadMediaWithPresign = async (
   } catch (error) {
     throw new UploadPipelineError("policy", error);
   }
-  const processed = await maybeCompressForUpload(file);
+  const originalContentType = resolveUploadContentType(file);
+  if (!originalContentType) {
+    throw new UploadHttpError(415, "Unsupported file type.", "policy");
+  }
+  const normalizedFile = file.type === originalContentType
+    ? file
+    : new File([file], file.name, { type: originalContentType, lastModified: file.lastModified });
+  const processed = await maybeCompressForUpload(normalizedFile);
   const finalFile = processed.file;
-  const contentType = finalFile.type || "application/octet-stream";
+  const contentType = resolveUploadContentType(finalFile);
+  if (!contentType || (policy.allowed_mime_types?.length && !policy.allowed_mime_types.includes(contentType))) {
+    throw new UploadHttpError(415, "Unsupported file type in the current upload policy.", "policy");
+  }
 
   if (finalFile.size > policy.max_bytes) {
     throw new UploadHttpError(

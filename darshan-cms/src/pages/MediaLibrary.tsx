@@ -22,12 +22,14 @@ import {
   waitForMediaReady,
   uploadMediaWithPresign,
   validateUploadFile,
+  resolveUploadContentType,
   type UploadMediaResult,
 } from "@/lib/mediaUploadFlow";
 import { mapMediaDeleteError } from "@/lib/mediaDeleteErrors";
-import { deriveDisplayNameFromFilename, resolveMediaDisplayName } from "@/lib/media";
+import { deriveDisplayNameFromFilename, isPdfLikeMedia, resolveMediaDisplayName, resolveMediaSourceFormat } from "@/lib/media";
 import { canDeleteMediaRecord, getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 import { PageNavigation } from "@/components/common/PageNavigation";
+import { MediaPreview } from "@/components/common/MediaPreview";
 import { useAuthorization } from "@/hooks/useAuthorization";
 
 type MediaLibraryLocationState = {
@@ -65,7 +67,13 @@ const resolveCopyTargetUrl = (media: MediaAsset) =>
 
 const resolveStatusLabel = (media: MediaAsset) => media.status ?? "PENDING";
 const resolvePlayableMimeType = (media: MediaAsset) => media.content_type || media.source_content_type || null;
-const resolveOriginalMimeType = (media: MediaAsset) => media.source_content_type || null;
+const resolveFormatBadge = (media: MediaAsset) =>
+  resolveLibraryMediaType(media) === "DOCUMENT" ? resolveMediaSourceFormat(media).badge : resolveLibraryMediaType(media);
+const isConvertedDocument = (media: MediaAsset) =>
+  resolveLibraryMediaType(media) === "DOCUMENT" &&
+  Boolean(media.source_content_type) &&
+  media.source_content_type !== "application/pdf" &&
+  resolvePlayableMimeType(media) === "application/pdf";
 
 const getFriendlyWebpagePolicyError = (error: unknown) => {
   if (!(error instanceof ApiError)) return "Unable to add webpage.";
@@ -158,6 +166,13 @@ export default function MediaLibrary() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadResult, setUploadResult] = useState<UploadMediaResult | null>(null);
   const [previewMedia, setPreviewMedia] = useState<MediaAsset | null>(null);
+  const [previewPage, setPreviewPage] = useState(1);
+  const previewDetailQuery = useQuery({
+    queryKey: ["media", "preview", previewMedia?.id],
+    queryFn: () => mediaApi.getById(previewMedia!.id),
+    enabled: Boolean(previewMedia),
+  });
+  const previewRecord = previewDetailQuery.data?.id === previewMedia?.id ? previewDetailQuery.data : previewMedia;
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
   const [showDeleted, setShowDeleted] = useState(false);
   const [deletedPage, setDeletedPage] = useState(1);
@@ -203,7 +218,7 @@ export default function MediaLibrary() {
         : "";
       const isProcessing = result.media.status === "PROCESSING";
       const description = isProcessing
-        ? `Media uploaded successfully.${compressionNote} Server verification is still running; the file will appear once it is marked ready.`
+        ? `Media uploaded and verified.${compressionNote} Playback preparation is running; the preview will appear when ready.`
         : `Media uploaded and verified.${compressionNote}`;
       toast({ title: "Upload complete", description });
       setIsUploadOpen(false);
@@ -385,6 +400,7 @@ export default function MediaLibrary() {
         type: typeFilter,
       }),
     placeholderData: (previousData) => previousData,
+    refetchInterval: 45 * 60 * 1000,
   });
 
   const statsQueries = useQueries({
@@ -465,9 +481,8 @@ export default function MediaLibrary() {
   };
 
   const handlePreview = (item: MediaAsset) => {
-    if (resolvePrimaryMediaUrl(item) || item.source_url) {
-      setPreviewMedia(item);
-    }
+    setPreviewPage(1);
+    setPreviewMedia(item);
   };
 
   const closePreview = () => setPreviewMedia(null);
@@ -611,7 +626,7 @@ export default function MediaLibrary() {
                 <div className="space-y-2">
                   <CardTitle className="text-base flex items-center justify-between gap-2">
                     <span className="truncate">{resolveMediaLabel(item)}</span>
-                    <Badge variant="outline">{resolveLibraryMediaType(item)}</Badge>
+                    <Badge variant="outline">{resolveFormatBadge(item)}</Badge>
                   </CardTitle>
                   <div className="flex flex-wrap gap-2">
                     {getContentOwnershipLabel(item) ? (
@@ -655,6 +670,19 @@ export default function MediaLibrary() {
                           </div>
                           <Globe className="h-4 w-4 shrink-0" />
                         </div>
+                      </div>
+                    ) : resolveLibraryMediaType(item) === "DOCUMENT" && isPdfLikeMedia(item) ? (
+                      <div className="relative h-40 w-full">
+                        <MediaPreview
+                          media={item}
+                          url={resolvePrimaryMediaUrl(item) ?? undefined}
+                          className="h-40 w-full"
+                          fit="contain"
+                          alt={`${resolveMediaLabel(item)} first page`}
+                        />
+                        <span className="absolute bottom-2 right-2 rounded bg-background/90 px-2 py-1 text-xs font-medium shadow">
+                          {resolveMediaSourceFormat(item).badge} · Preview
+                        </span>
                       </div>
                     ) : (
                       <div className="h-40 w-full flex flex-col items-center justify-center gap-2 text-center px-3">
@@ -735,8 +763,9 @@ export default function MediaLibrary() {
                 ) : null}
                 {resolveLibraryMediaType(item) === "DOCUMENT" ? (
                   <div className="space-y-1 text-xs">
-                    {resolveOriginalMimeType(item) ? <div>Original type: {resolveOriginalMimeType(item)}</div> : null}
-                    {resolvePlayableMimeType(item) ? <div>Playback type: {resolvePlayableMimeType(item)}</div> : null}
+                    <div>Original format: {resolveMediaSourceFormat(item).label}</div>
+                    {isConvertedDocument(item) ? <div>Screen playback: converted PDF</div> : null}
+                    {item.page_count ? <div>{item.page_count} page{item.page_count === 1 ? "" : "s"}</div> : null}
                   </div>
                 ) : null}
                 {resolveLibraryMediaType(item) === "WEBPAGE" && item.source_url ? (
@@ -808,7 +837,9 @@ export default function MediaLibrary() {
               <div className="rounded-md border p-3 text-sm text-muted-foreground space-y-2">
                 <div className="flex items-center justify-between text-foreground">
                   <span className="font-medium truncate">{selectedFile.name}</span>
-                  <Badge variant="outline">{selectedFile.type || "unknown"}</Badge>
+                  <Badge variant="outline">
+                    {resolveMediaSourceFormat({ source_content_type: resolveUploadContentType(selectedFile) ?? undefined }).label}
+                  </Badge>
                 </div>
                 <div>Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB</div>
                 {uploadResult?.didCompress && (
@@ -838,7 +869,7 @@ export default function MediaLibrary() {
               </div>
             )}
             <p className="text-xs text-muted-foreground">
-              We request a presigned upload URL, upload directly to storage, then the server verifies the object and marks it READY.
+              The server verifies the upload. Videos and documents are prepared for playback, then their previews appear when ready.
             </p>
           </div>
           <DialogFooter>
@@ -898,29 +929,36 @@ export default function MediaLibrary() {
 
       {previewMedia && (
         <Dialog open={!!previewMedia} onOpenChange={(open) => (open ? null : closePreview())}>
-          <DialogContent className="sm:max-w-[720px]">
+          <DialogContent className="max-h-[95vh] overflow-y-auto sm:max-w-[800px]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <span className="truncate">{resolveMediaLabel(previewMedia)}</span>
-                {previewMedia.type && <Badge variant="outline">{previewMedia.type}</Badge>}
+                <Badge variant="outline">{resolveFormatBadge(previewMedia)}</Badge>
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-3">
-              {resolvePrimaryMediaUrl(previewMedia) || previewMedia.source_url ? (
-                resolveLibraryMediaType(previewMedia) === "IMAGE" || (previewMedia.content_type || "").startsWith("image/") ? (
+              {previewDetailQuery.isFetching ? (
+                <p className="text-sm text-muted-foreground">Loading current preview...</p>
+              ) : previewDetailQuery.isError ? (
+                <div className="space-y-2 text-sm">
+                  <p>Could not load a current preview link.</p>
+                  <Button variant="outline" onClick={() => void previewDetailQuery.refetch()}>Retry</Button>
+                </div>
+              ) : previewRecord && (resolvePrimaryMediaUrl(previewRecord) || previewRecord.source_url) ? (
+                resolveLibraryMediaType(previewRecord) === "IMAGE" || (previewRecord.content_type || "").startsWith("image/") ? (
                   <img
-                    src={resolvePrimaryMediaUrl(previewMedia) ?? undefined}
-                    alt={resolveMediaLabel(previewMedia)}
+                    src={resolvePrimaryMediaUrl(previewRecord) ?? undefined}
+                    alt={resolveMediaLabel(previewRecord)}
                     className="w-full max-h-[480px] object-contain"
                   />
-                ) : resolveLibraryMediaType(previewMedia) === "VIDEO" || (previewMedia.content_type || "").startsWith("video/") ? (
+                ) : resolveLibraryMediaType(previewRecord) === "VIDEO" || (previewRecord.content_type || "").startsWith("video/") ? (
                   <video
-                    src={resolvePrimaryMediaUrl(previewMedia) ?? undefined}
+                    src={resolvePrimaryMediaUrl(previewRecord) ?? undefined}
                     className="w-full max-h-[480px]"
                     controls
                     preload="metadata"
                   />
-                ) : resolveLibraryMediaType(previewMedia) === "WEBPAGE" ? (
+                ) : resolveLibraryMediaType(previewRecord) === "WEBPAGE" ? (
                   <div className="space-y-3">
                     {resolvePrimaryMediaUrl(previewMedia) ? (
                       <img
@@ -970,23 +1008,50 @@ export default function MediaLibrary() {
                       ) : null}
                     </div>
                   </div>
+                ) : resolveLibraryMediaType(previewRecord) === "DOCUMENT" && isPdfLikeMedia(previewRecord) ? (
+                  <div className="space-y-3">
+                    <MediaPreview
+                      media={previewRecord}
+                      url={resolvePrimaryMediaUrl(previewRecord) ?? undefined}
+                      type="application/pdf"
+                      alt={`${resolveMediaLabel(previewRecord)} page ${previewPage}`}
+                      className="h-[55vh] min-h-[320px] w-full border"
+                      fit="contain"
+                      pdfPage={previewPage}
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                      <div>
+                        <span>Original format: {resolveMediaSourceFormat(previewRecord).label}</span>
+                        {isConvertedDocument(previewRecord) ? <span className="ml-2 text-muted-foreground">Converted to PDF for screen playback</span> : null}
+                      </div>
+                      {previewRecord.page_count && previewRecord.page_count > 1 ? (
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" disabled={previewPage <= 1} onClick={() => setPreviewPage((page) => page - 1)}>Previous page</Button>
+                          <span>Page {previewPage} of {previewRecord.page_count}</span>
+                          <Button variant="outline" size="sm" disabled={previewPage >= previewRecord.page_count} onClick={() => setPreviewPage((page) => page + 1)}>Next page</Button>
+                        </div>
+                      ) : null}
+                    </div>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={resolvePrimaryMediaUrl(previewRecord) ?? undefined} target="_blank" rel="noreferrer">Open PDF in new tab</a>
+                    </Button>
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center gap-3 rounded-md border bg-muted/40 p-6 text-center">
                     <FileText className="h-10 w-10 text-primary" />
-                    <p className="text-sm text-muted-foreground">Document preview unavailable. Open in a new tab.</p>
-                    <div className="space-y-1 text-xs text-muted-foreground">
-                      {resolveOriginalMimeType(previewMedia) ? <div>Original type: {resolveOriginalMimeType(previewMedia)}</div> : null}
-                      {resolvePlayableMimeType(previewMedia) ? <div>Playback type: {resolvePlayableMimeType(previewMedia)}</div> : null}
-                    </div>
+                    <p className="text-sm text-muted-foreground">Preview is unavailable for this file.</p>
+                    <div className="text-xs text-muted-foreground">Original format: {resolveMediaSourceFormat(previewRecord).label}</div>
                     <Button variant="outline" asChild>
-                      <a href={resolveCopyTargetUrl(previewMedia) ?? undefined} target="_blank" rel="noreferrer">
+                      <a href={resolveCopyTargetUrl(previewRecord) ?? undefined} target="_blank" rel="noreferrer">
                         Open document
                       </a>
                     </Button>
                   </div>
                 )
               ) : (
-                <p className="text-sm text-muted-foreground">No media URL available.</p>
+                <p className="text-sm text-muted-foreground">
+                  {previewRecord?.status === "PROCESSING" ? "This file is still being prepared." : previewRecord?.status === "FAILED" ? "Processing failed; this file has no preview." : "No media URL available."}
+                </p>
               )}
             </div>
             <DialogFooter>

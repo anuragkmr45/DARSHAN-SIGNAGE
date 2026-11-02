@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import {
+  allowedContentTypes,
   completeUploadSchema,
   completeUploadSessionSchema,
   createUploadSessionSchema,
@@ -184,7 +185,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           multipart_threshold_bytes: UPLOAD_MULTIPART_THRESHOLD_BYTES,
           part_size_bytes: UPLOAD_PART_SIZE_BYTES,
           multipart_concurrency: 3,
-          allowed_mime_types: [],
+          allowed_mime_types: [...allowedContentTypes],
         });
       } catch (error) {
         logger.error(error, 'Get upload policy error');

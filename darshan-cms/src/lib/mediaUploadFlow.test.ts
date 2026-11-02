@@ -4,6 +4,8 @@ import {
   getFriendlyUploadError,
   sha256File,
   uploadMediaWithPresign,
+  validateUploadFile,
+  resolveUploadContentType,
   UploadHttpError,
   UploadPipelineError,
 } from "@/lib/mediaUploadFlow";
@@ -74,6 +76,23 @@ const activeSingleSession = (mediaId: string, uploadUrl = "https://cms.test/medi
 });
 
 describe("uploadMediaWithPresign", () => {
+  test.each([
+    ["photo.jpg", "image/jpeg"], ["photo.jpeg", "image/jpeg"],
+    ["photo.png", "image/png"], ["photo.webp", "image/webp"],
+    ["clip.mp4", "video/mp4"], ["clip.mov", "video/quicktime"],
+    ["report.pdf", "application/pdf"],
+    ["slides.ppt", "application/vnd.ms-powerpoint"],
+    ["slides.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+    ["sheet.csv", "text/csv"], ["report.doc", "application/msword"],
+    ["report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["sheet.xls", "application/vnd.ms-excel"],
+    ["sheet.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  ])("normalizes %s to the server-supported MIME %s", (name, mimeType) => {
+    const file = makeFile(name, "application/octet-stream", 1);
+    expect(validateUploadFile(file)).toBeNull();
+    expect(resolveUploadContentType(file)).toBe(mimeType);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     MockXMLHttpRequest.instances = [];
@@ -192,6 +211,54 @@ describe("uploadMediaWithPresign", () => {
     );
     expect(mockedMediaApi.completeUploadSession).toHaveBeenCalledWith("session-media-2", {});
     expect(result.didCompress).toBe(false);
+  });
+
+  test("uses an accepted extension when the browser reports a generic MIME type", async () => {
+    const file = makeFile("report.pdf", "application/octet-stream", 32);
+    mockedCompress.mockImplementation(async (normalized) => ({
+      file: normalized,
+      didCompress: false,
+      originalSize: normalized.size,
+      finalSize: normalized.size,
+    }));
+    mockedMediaApi.createUploadSession.mockResolvedValue(activeSingleSession("media-generic"));
+    mockedMediaApi.completeUploadSession.mockResolvedValue({
+      ...activeSingleSession("media-generic"),
+      state: "COMPLETED",
+      media: { id: "media-generic", filename: "report.pdf", status: "READY" },
+    });
+
+    expect(validateUploadFile(file)).toBeNull();
+    await uploadMediaWithPresign(file);
+
+    expect(mockedCompress.mock.calls[0][0].type).toBe("application/pdf");
+    expect(mockedMediaApi.createUploadSession).toHaveBeenCalledWith(
+      expect.objectContaining({ filename: "report.pdf", content_type: "application/pdf" }),
+      expect.any(String),
+    );
+  });
+
+  test("rejects unsupported extensions even when the browser supplies an accepted MIME", async () => {
+    const file = makeFile("disguised.txt", "image/png", 12);
+    expect(resolveUploadContentType(file)).toBeNull();
+    expect(validateUploadFile(file)).toContain("Unsupported file type");
+    await expect(uploadMediaWithPresign(file)).rejects.toMatchObject({ status: 415, stage: "policy" });
+    expect(mockedCompress).not.toHaveBeenCalled();
+  });
+
+  test("stops before hashing when a current server policy excludes the prepared MIME type", async () => {
+    const file = makeFile("report.pdf", "application/pdf", 32);
+    mockedCompress.mockResolvedValue({ file, didCompress: false, originalSize: file.size, finalSize: file.size });
+    mockedMediaApi.getUploadPolicy.mockResolvedValue({
+      max_bytes: 500 * 1024 * 1024,
+      max_mb: 500,
+      multipart_threshold_bytes: 100 * 1024 * 1024,
+      part_size_bytes: 16 * 1024 * 1024,
+      multipart_concurrency: 3,
+      allowed_mime_types: ["image/png"],
+    });
+    await expect(uploadMediaWithPresign(file)).rejects.toMatchObject({ status: 415, stage: "policy" });
+    expect(mockedMediaApi.createUploadSession).not.toHaveBeenCalled();
   });
 
   test("rejects an oversized prepared file before hashing or session creation", async () => {

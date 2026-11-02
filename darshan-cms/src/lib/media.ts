@@ -42,6 +42,27 @@ export const resolveMediaFilename = (media?: MediaLike | null) =>
 export const resolveMediaMimeType = (media?: MediaLike | null) =>
   trimToUndefined(media?.content_type) ?? trimToUndefined(media?.source_content_type);
 
+const sourceFormats: Record<string, { badge: string; label: string }> = {
+  "image/jpeg": { badge: "JPEG", label: "JPEG image" },
+  "image/png": { badge: "PNG", label: "PNG image" },
+  "image/webp": { badge: "WEBP", label: "WebP image" },
+  "video/mp4": { badge: "MP4", label: "MP4 video" },
+  "video/quicktime": { badge: "MOV", label: "MOV video" },
+  "application/pdf": { badge: "PDF", label: "PDF document" },
+  "application/vnd.ms-powerpoint": { badge: "PPT", label: "PowerPoint (.ppt)" },
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": { badge: "PPTX", label: "PowerPoint (.pptx)" },
+  "text/csv": { badge: "CSV", label: "CSV spreadsheet" },
+  "application/msword": { badge: "DOC", label: "Word (.doc)" },
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": { badge: "DOCX", label: "Word (.docx)" },
+  "application/vnd.ms-excel": { badge: "XLS", label: "Excel (.xls)" },
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": { badge: "XLSX", label: "Excel (.xlsx)" },
+};
+
+export const resolveMediaSourceFormat = (media?: MediaLike | null) => {
+  const mimeType = (trimToUndefined(media?.source_content_type) ?? trimToUndefined(media?.content_type))?.toLowerCase();
+  return mimeType ? sourceFormats[mimeType] ?? { badge: "FILE", label: mimeType } : { badge: "FILE", label: "Unknown file" };
+};
+
 export const resolveMediaPreviewType = (media?: MediaLike | null) => {
   const explicitType = trimToUndefined(media?.type)?.toUpperCase();
   if (explicitType === "IMAGE" || explicitType === "VIDEO" || explicitType === "DOCUMENT" || explicitType === "WEBPAGE") {
