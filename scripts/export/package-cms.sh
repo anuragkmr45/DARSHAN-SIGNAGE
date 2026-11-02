@@ -211,7 +211,8 @@ source ./.env
 
 curl -fsS "http://127.0.0.1:${CMS_HTTP_PORT}/" >/dev/null
 curl -fsS "http://127.0.0.1:${CMS_HTTP_PORT}/api/v1/health" >/dev/null
-if curl -fsS --max-time 5 "http://127.0.0.1:${CMS_HTTP_PORT}/grafana/api/health" >/dev/null; then
+if curl -fsS --max-time 5 "http://127.0.0.1:${CMS_HTTP_PORT}/grafana/api/health" >/dev/null \
+  && curl -fsSL --max-time 5 --max-redirs 3 "http://127.0.0.1:${CMS_HTTP_PORT}/grafana/login" >/dev/null; then
   echo "Grafana proxy healthy."
 else
   echo "Grafana proxy unavailable; check GRAFANA_UPSTREAM_HOST, GRAFANA_UPSTREAM_PORT, and the observability VM." >&2

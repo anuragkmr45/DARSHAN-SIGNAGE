@@ -12,6 +12,10 @@ export function useGrafanaAvailability(enabled: boolean) {
       if (!response.ok) throw new Error(`Grafana proxy returned ${response.status}`);
       const health = await response.json() as { database?: string };
       if (health.database !== "ok") throw new Error("Grafana is not ready");
+      // A proxy can answer /api/health while stripping Grafana's subpath.
+      // Its login route then redirects back to itself forever.
+      const login = await fetch("/grafana/login", { cache: "no-store", redirect: "manual" });
+      if (!login.ok) throw new Error("Grafana login is not reachable through the CMS");
       return true;
     },
   });

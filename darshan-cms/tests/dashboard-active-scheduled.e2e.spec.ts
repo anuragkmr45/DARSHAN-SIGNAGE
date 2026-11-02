@@ -319,6 +319,7 @@ test.describe("Dashboard active scheduled modal", () => {
   test("shows database fleet totals separately from optional player scrapes and opens valid Grafana links", async ({ page }) => {
     await installApiMocks(page);
     await page.route("**/grafana/api/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ database: "ok" }) }));
+    await page.route("**/grafana/login", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "Grafana login" }));
     await login(page);
     await expect(page.getByText("2 screens not online")).toBeVisible();
     await expect(page.getByText("Online (5m) 2 · Status offline 1")).toBeVisible();
@@ -330,6 +331,15 @@ test.describe("Dashboard active scheduled modal", () => {
   test("does not offer broken Grafana links when the CMS proxy is unavailable", async ({ page }) => {
     await installApiMocks(page);
     await page.route("**/grafana/api/health", (route) => route.fulfill({ status: 502, body: "Bad Gateway" }));
+    await login(page);
+    await expect(page.getByText("Grafana unavailable through this CMS")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Backend" })).toHaveCount(0);
+  });
+
+  test("detects a Grafana login redirect loop despite a healthy API", async ({ page }) => {
+    await installApiMocks(page);
+    await page.route("**/grafana/api/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ database: "ok" }) }));
+    await page.route("**/grafana/login", (route) => route.fulfill({ status: 301, headers: { location: "/grafana/login" } }));
     await login(page);
     await expect(page.getByText("Grafana unavailable through this CMS")).toBeVisible();
     await expect(page.getByRole("link", { name: "Backend" })).toHaveCount(0);
