@@ -197,7 +197,7 @@ describe('production command contracts', () => {
     expect(allPackage).toContain('SERVER_DEPLOYMENT_LAYOUT="production-split"');
     expect(serverPackage).toContain('NODE_ENV: ${STANDALONE_NODE_ENV:-development}');
     expect(serverPackage).toContain('Do not use it for production promotion.');
-    expect(serverPackage).toContain('npm run --silent db:migrate');
+    expect(serverPackage).toContain('npm run --silent production:db:migrate');
     expect(serverPackage).not.toContain('npm run migration:apply');
   });
 

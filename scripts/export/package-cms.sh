@@ -209,8 +209,14 @@ set -euo pipefail
 [[ -f ".env" ]] || { echo ".env is missing." >&2; exit 1; }
 source ./.env
 
-curl -fsS "http://127.0.0.1:${CMS_HTTP_PORT}/" >/dev/null
-curl -fsS "http://127.0.0.1:${CMS_HTTP_PORT}/api/v1/health" >/dev/null
+for attempt in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:${CMS_HTTP_PORT}/" >/dev/null 2>&1 \
+    && curl -fsS "http://127.0.0.1:${CMS_HTTP_PORT}/api/v1/health" >/dev/null 2>&1; then
+    break
+  fi
+  [[ "$attempt" == "30" ]] && { echo "CMS or backend proxy did not become ready in time." >&2; exit 1; }
+  sleep 2
+done
 if curl -fsS --max-time 5 "http://127.0.0.1:${CMS_HTTP_PORT}/grafana/api/health" >/dev/null \
   && curl -fsSL --max-time 5 --max-redirs 3 "http://127.0.0.1:${CMS_HTTP_PORT}/grafana/login" >/dev/null; then
   echo "Grafana proxy healthy."

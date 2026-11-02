@@ -220,6 +220,8 @@ services:
       # production-split source-free bundle is the production path with TLS,
       # file-backed secrets, signed roles, and strict cross-VM readiness.
       NODE_ENV: ${STANDALONE_NODE_ENV:-development}
+      DARSHAN_CONTAINER_ROLE: api
+      DARSHAN_PROCESS_ROLE: api
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
@@ -247,8 +249,8 @@ services:
       valkey:
         condition: service_healthy
     volumes:
-      - ./certs:/app/certs:ro
-      - ./secrets:/run/secrets:ro
+      - ./certs:/run/darshan-input-certs:ro
+      - ./.env:/run/darshan-input-secrets/standalone.env:ro
     command: npm run start:api
     healthcheck:
       test:
@@ -273,6 +275,7 @@ services:
       # production-split source-free bundle is the production path with TLS,
       # file-backed secrets, signed roles, and strict cross-VM readiness.
       NODE_ENV: ${STANDALONE_NODE_ENV:-development}
+      DARSHAN_CONTAINER_ROLE: worker
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
@@ -296,6 +299,7 @@ services:
       VALKEY_AUTH_REQUIRED: "false"
       VALKEY_PUBSUB_ENABLED: "true"
       OUTBOX_DISPATCH_ENABLED: "true"
+      BACKUP_MODE: EXTERNAL_SIDECAR
     depends_on:
       postgres:
         condition: service_healthy
@@ -304,8 +308,9 @@ services:
       valkey:
         condition: service_healthy
     volumes:
-      - ./certs:/app/certs:ro
-      - ./secrets:/run/secrets:ro
+      - ./certs:/run/darshan-input-certs:ro
+      - ./.env:/run/darshan-input-secrets/standalone.env:ro
+      - ./secrets:/run/darshan-input-worker-secrets:ro
     command: npm run start:worker
 
 volumes:
@@ -398,7 +403,7 @@ wait_for_postgres() {
 docker compose --env-file .env up -d postgres minio valkey
 wait_for_postgres
 [[ -n "${DARSHAN_RELEASE_ID:-}" ]] || { echo "DARSHAN_RELEASE_ID is required." >&2; exit 1; }
-docker compose --env-file .env run --rm api npm run --silent db:migrate -- --release-id "$DARSHAN_RELEASE_ID" --json
+docker compose --env-file .env run --rm api npm run --silent production:db:migrate -- --release-id "$DARSHAN_RELEASE_ID" --json
 docker compose --env-file .env up -d --remove-orphans api worker
 exec ./health-check.sh
 EOF
@@ -421,8 +426,8 @@ for attempt in $(seq 1 30); do
   [[ "$attempt" == "30" ]] && { echo "Postgres did not become ready in time." >&2; exit 1; }
   sleep 2
 done
-docker compose --env-file .env run --rm api npm run --silent db:migrate -- --release-id "$DARSHAN_RELEASE_ID" --json
-docker compose --env-file .env run --rm --volume "$(pwd)/bootstrap-secrets/admin-password:/run/darshan-bootstrap/admin-password:ro" api npm run --silent bootstrap:production -- --email "$INITIAL_ADMIN_EMAIL" --release-id "$DARSHAN_RELEASE_ID" --password-file /run/darshan-bootstrap/admin-password --json
+docker compose --env-file .env run --rm api npm run --silent production:db:migrate -- --release-id "$DARSHAN_RELEASE_ID" --json
+docker compose --env-file .env run --rm --volume "$(pwd)/bootstrap-secrets/admin-password:/run/darshan-input-bootstrap/admin-password:ro" api npm run --silent production:bootstrap -- --email "$INITIAL_ADMIN_EMAIL" --release-id "$DARSHAN_RELEASE_ID" --password-file /run/darshan-bootstrap/admin-password --json
 ./start.sh
 ./acceptance-check.sh --password-file bootstrap-secrets/admin-password
 rm -f bootstrap-secrets/admin-password
@@ -461,7 +466,13 @@ source ./.env
 docker compose --env-file .env exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 curl -fsS "http://127.0.0.1:${MINIO_HOST_PORT:-9000}/minio/health/live" >/dev/null
 docker compose --env-file .env exec -T valkey valkey-cli ping | grep -q PONG
-curl -fsS "http://127.0.0.1:${API_HOST_PORT:-3000}/api/v1/health/ready" >/dev/null
+for attempt in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:${API_HOST_PORT:-3000}/api/v1/health/ready" >/dev/null 2>&1; then
+    break
+  fi
+  [[ "$attempt" == "30" ]] && { echo "Backend did not become ready in time." >&2; exit 1; }
+  sleep 2
+done
 docker compose --env-file .env ps --services --status running | grep -qx worker
 echo "Server package healthy."
 EOF

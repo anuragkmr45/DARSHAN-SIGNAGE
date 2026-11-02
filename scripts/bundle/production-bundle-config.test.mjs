@@ -486,6 +486,37 @@ test('standalone server package env contains every Compose lifecycle input', () 
   ]) {
     assert.match(envWriter, new RegExp(`printf '${name}=`))
   }
+
+  const composeStart = packageServer.indexOf("cat > \"$OUTPUT_DIR/docker-compose.yml\"")
+  const composeEnd = packageServer.indexOf('export_write_load_images_script', composeStart)
+  const compose = packageServer.slice(composeStart, composeEnd)
+  assert.match(compose, /DARSHAN_CONTAINER_ROLE: api/)
+  assert.match(compose, /DARSHAN_PROCESS_ROLE: api/)
+  assert.match(compose, /DARSHAN_CONTAINER_ROLE: worker/)
+  assert.match(compose, /BACKUP_MODE: EXTERNAL_SIDECAR/)
+  assert.match(compose, /NODE_ENV: \$\{STANDALONE_NODE_ENV:-development\}/)
+  assert.match(compose, /\.\/certs:\/run\/darshan-input-certs:ro/)
+  assert.match(compose, /\.\/\.env:\/run\/darshan-input-secrets\/standalone\.env:ro/)
+  assert.match(compose, /\.\/secrets:\/run\/darshan-input-worker-secrets:ro/)
+
+  assert.match(
+    packageServer,
+    /bootstrap-secrets\/admin-password:\/run\/darshan-input-bootstrap\/admin-password:ro/,
+  )
+  assert.match(packageServer, /npm run --silent production:db:migrate/)
+  assert.match(packageServer, /npm run --silent production:bootstrap/)
+  assert.doesNotMatch(packageServer, /npm run --silent db:migrate(?:\s|$)/)
+  assert.doesNotMatch(packageServer, /npm run --silent bootstrap:production/)
+  assert.match(packageServer, /Backend did not become ready in time\./)
+})
+
+test('standalone CMS health check waits for nginx and the backend proxy', () => {
+  const packageCms = fs.readFileSync(repoPath('scripts/export/package-cms.sh'), 'utf8')
+
+  assert.match(packageCms, /for attempt in \$\(seq 1 30\)/)
+  assert.match(packageCms, /CMS or backend proxy did not become ready in time\./)
+  assert.match(packageCms, /\/grafana\/api\/health/)
+  assert.match(packageCms, /\/grafana\/login/)
 })
 
 test('production MinIO image is built from one pinned official source revision', () => {
