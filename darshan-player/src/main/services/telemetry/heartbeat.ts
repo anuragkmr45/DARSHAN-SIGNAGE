@@ -188,6 +188,8 @@ export class HeartbeatService {
       uptime: stats.uptime,
       memory_usage: memoryUsagePercent,
       cpu_usage: Math.round(stats.cpuUsage * 100) / 100,
+      request_queue_items: getRequestQueue().getStats().pendingItems,
+      request_queue_oldest_age_seconds: getRequestQueue().getOldestAgeSeconds().all,
       temperature: stats.temperature,
       current_schedule_id: this.currentScheduleId,
       current_media_id: this.currentMediaId,

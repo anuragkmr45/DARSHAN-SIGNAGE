@@ -4951,6 +4951,11 @@ server {
 
   location /grafana/ {
     proxy_pass https://$PROD_GRAFANA_UPSTREAM_HOST:$PROD_GRAFANA_UPSTREAM_PORT/;
+    proxy_hide_header X-Frame-Options;
+    proxy_hide_header X-Content-Type-Options;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
     proxy_http_version 1.1;
     proxy_ssl_server_name on;
     proxy_ssl_name $OBSERVABILITY_PRIVATE_HOST;
@@ -4974,6 +4979,9 @@ server {
 
   location = /config/app-config.json {
     add_header Cache-Control "no-store";
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
     try_files \$uri =404;
   }
 
@@ -4981,11 +4989,17 @@ server {
     try_files \$uri =404;
     access_log off;
     add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
   }
 
   location / {
     try_files \$uri \$uri/ /index.html;
     add_header Cache-Control "no-store";
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
   }
 }
 EOF

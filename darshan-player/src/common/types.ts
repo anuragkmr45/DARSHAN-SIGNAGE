@@ -624,6 +624,8 @@ export interface HeartbeatPayload {
   uptime: number
   memory_usage: number
   cpu_usage: number
+  request_queue_items?: number
+  request_queue_oldest_age_seconds?: number
   temperature?: number
   current_schedule_id?: string
   current_media_id?: string

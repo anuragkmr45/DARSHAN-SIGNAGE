@@ -463,6 +463,16 @@ test('production web media runtime settings are emitted by generated artifacts',
   assert.match(assembler, /run --rm --no-deps worker/)
   assert.match(cmsNginx, /client_max_body_size 1000M;/)
   assert.match(sharedCmsTemplate, /client_max_body_size 1000M;/)
+  for (const template of [cmsNginx, sharedCmsTemplate, productionCmsTemplate]) {
+    const grafanaStart = template.indexOf('location /grafana/ {')
+    const cmsStart = template.lastIndexOf('location / {')
+    assert.ok(grafanaStart >= 0 && cmsStart >= 0)
+    const grafanaLocation = template.slice(grafanaStart, template.indexOf('\n  }', grafanaStart))
+    const cmsLocation = template.slice(cmsStart, template.indexOf('\n  }', cmsStart))
+    assert.match(grafanaLocation, /proxy_hide_header X-Frame-Options;/)
+    assert.match(grafanaLocation, /add_header X-Frame-Options "SAMEORIGIN" always;/)
+    assert.match(cmsLocation, /add_header X-Frame-Options "DENY" always;/)
+  }
   assert.match(productionCmsTemplate, /client_max_body_size 1000M;/)
   assert.match(bundleConfig, /MAX_UPLOAD_MB must be exactly 500/)
   assert.doesNotMatch(bundleConfig, /512m proxy envelope/)

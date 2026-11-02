@@ -30,6 +30,10 @@ type MockState = {
   confirmModeByCode: Record<string, "PAIRING" | "RECOVERY">;
   screenDeleteBlocked?: boolean;
   groupDeleteBlocked?: boolean;
+  observabilityScrapeStatus?: "up" | "unconfigured" | "unavailable";
+  observabilityMetricsSource?: "prometheus" | "backend_heartbeat";
+  grafanaEmbed?: boolean;
+  grafanaAuthenticated?: boolean;
 };
 
 const adminUser = {
@@ -97,6 +101,8 @@ const installApiMocks = async (page: Page, state: MockState) => {
     body: JSON.stringify({ database: "ok" }),
   }));
   await page.route("**/grafana/login", (route) => route.fulfill({ status: 200, body: "Grafana login" }));
+  await page.route("**/grafana/api/user", (route) => route.fulfill({ status: state.grafanaAuthenticated === false ? 401 : 200, contentType: "application/json", body: state.grafanaAuthenticated === false ? "{}" : '{"id":1}' }));
+  await page.route("**/grafana/d/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<html><body>Grafana trends</body></html>" }));
   await page.route("**/api/v1/**", async (route: Route) => {
     const url = new URL(route.request().url());
     const { pathname, searchParams } = url;
@@ -314,10 +320,12 @@ const installApiMocks = async (page: Page, state: MockState) => {
             last_backend_heartbeat_at: screen?.last_heartbeat_at ?? "2026-03-12T11:59:00.000Z",
           },
           player_scrape: {
-            configured: true,
-            status: "up",
+            configured: state.observabilityScrapeStatus === undefined || state.observabilityScrapeStatus === "up",
+            status: state.observabilityScrapeStatus ?? "up",
             last_successful_player_heartbeat_at: "2026-03-12T11:59:30.000Z",
           },
+          latest_player_metrics_source: state.observabilityMetricsSource ?? "prometheus",
+          latest_player_metrics_observed_at: "2026-03-12T11:59:30.000Z",
           latest_player_metrics: {
             cpu_percent: 12.5,
             memory_used_bytes: 1073741824,
@@ -337,11 +345,13 @@ const installApiMocks = async (page: Page, state: MockState) => {
           latest_backend_telemetry: {
             cpu_usage: 14.2,
             memory_used_mb: 1024,
+            hostname: "lobby-player",
+            player_version: "1.0.0",
           },
           grafana: {
             enabled: true,
-            embed_enabled: false,
-            embed_url: null,
+            embed_enabled: state.grafanaEmbed ?? false,
+            embed_url: state.grafanaEmbed ? "/grafana/d/darshan-players-fleet?var-screen_id=" + screenId : null,
             links: [
               {
                 label: "Open player fleet dashboard",
@@ -534,13 +544,51 @@ test.describe("Screens operator flow", () => {
     await page.getByRole("button", { name: "Details" }).click();
     await expect(page.getByRole("tab", { name: "Observability" })).toBeVisible();
     await page.getByRole("tab", { name: "Observability" }).click();
-    await expect(page.getByText(/Player scrape up/i)).toBeVisible();
+    await expect(page.getByText("Direct scrape reachable")).toBeVisible();
     await expect(page.getByRole("link", { name: /Open player fleet dashboard/i })).toBeVisible();
     await page.getByRole("button", { name: /Close/i }).click();
 
     await page.getByRole("button", { name: "Delete Screen Lobby Screen" }).click();
     await page.getByRole("button", { name: "Delete Screen" }).click();
     await expect(page.getByRole("button", { name: "Delete Screen Lobby Screen" })).toHaveCount(0);
+  });
+
+  test("explains heartbeat fallback and shows readable details and Grafana trends", async ({ page }) => {
+    const state: MockState = {
+      screens: [{ id: "screen-1", name: "Lobby Screen", status: "ACTIVE", active_items: [], upcoming_items: [] }],
+      groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+      observabilityScrapeStatus: "unconfigured",
+      observabilityMetricsSource: "backend_heartbeat",
+      grafanaEmbed: true,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await page.getByRole("button", { name: "Details" }).click();
+    await page.getByRole("tab", { name: "Observability" }).click();
+    await expect(page.getByText("Direct scrape not configured")).toBeVisible();
+    await expect(page.getByText(/Recent player heartbeat received by backend/)).toBeVisible();
+    await expect(page.getByText("Last reported device details")).toBeVisible();
+    await expect(page.getByText("lobby-player")).toBeVisible();
+    await expect(page.getByText("Backend telemetry payload")).toHaveCount(0);
+    await expect(page.getByText("Grafana trend view")).toBeVisible();
+    await expect(page.getByTitle("Observability trends for Lobby Screen")).toBeVisible();
+  });
+
+  test("asks for Grafana sign-in instead of showing an empty trend frame", async ({ page }) => {
+    const state: MockState = {
+      screens: [{ id: "screen-1", name: "Lobby Screen", status: "ACTIVE", active_items: [], upcoming_items: [] }],
+      groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+      grafanaEmbed: true,
+      grafanaAuthenticated: false,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await page.getByRole("button", { name: "Details" }).click();
+    await page.getByRole("tab", { name: "Observability" }).click();
+    await expect(page.getByText(/Sign in to Grafana using Open in Grafana/)).toBeVisible();
+    await expect(page.getByTitle("Observability trends for Lobby Screen")).toHaveCount(0);
   });
 
   test("keeps stale delete dialogs open and shows server blockers for screens and groups", async ({ page }) => {

@@ -8,21 +8,31 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatMaskedScreenId } from "@/lib/screens";
 import { formatBytes, formatPercent, formatRelativeTimestamp, getMachineStatusTone } from "@/lib/observability";
-import { useGrafanaAvailability } from "@/hooks/useGrafanaAvailability";
+import { useGrafanaAuthentication, useGrafanaAvailability } from "@/hooks/useGrafanaAvailability";
 
 interface ScreenHealthDashboardProps {
   screenId: string;
   screenName: string;
 }
 
+function reportedValue(value: unknown): string {
+  return typeof value === "string" && value.trim() ? value : "—";
+}
+
+function reportedNumber(value: unknown, suffix = ""): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toLocaleString()}${suffix}` : "—";
+}
+
 export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDashboardProps) {
   const observabilityQuery = useQuery({
     queryKey: queryKeys.observabilityScreen(screenId),
     queryFn: () => observabilityApi.getScreen(screenId),
+    refetchInterval: 30_000,
   });
 
   const summary = observabilityQuery.data;
   const grafanaHealth = useGrafanaAvailability(summary?.grafana.enabled === true);
+  const grafanaAuthentication = useGrafanaAuthentication(grafanaHealth.data === true && summary?.grafana.embed_enabled === true);
 
   if (observabilityQuery.isLoading) {
     return (
@@ -54,6 +64,20 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
         : summary.player_scrape.configured
           ? "unknown"
           : "unconfigured";
+  const scrapeLabel = {
+    up: "Direct scrape reachable",
+    down: "Direct scrape unreachable",
+    unconfigured: "Direct scrape not configured",
+    unavailable: "Direct scrape status unavailable",
+    unknown: "Direct scrape status unknown",
+  }[summary.player_scrape.status];
+  const metricsSourceLabel = {
+    prometheus: "Direct Prometheus scrape",
+    backend_heartbeat: "Recent player heartbeat received by backend",
+    mixed: "Prometheus scrape and recent player heartbeat",
+    none: "No recent player measurements",
+  }[summary.latest_player_metrics_source ?? "none"];
+  const telemetry = summary.latest_backend_telemetry;
 
   return (
     <div className="space-y-4">
@@ -64,13 +88,19 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="outline" className={getMachineStatusTone(scrapeTone)}>
-            Player scrape {summary.player_scrape.status}
+            {scrapeLabel}
           </Badge>
           <Badge variant="outline">
             Health {summary.screen.health_state ?? "unknown"}
           </Badge>
         </div>
       </div>
+
+      <p className="text-sm text-muted-foreground">
+        Measurements: {metricsSourceLabel}
+        {summary.latest_player_metrics_observed_at ? ` · ${formatRelativeTimestamp(summary.latest_player_metrics_observed_at)}` : ""}.
+        {summary.player_scrape.status === "unconfigured" ? " Direct player scraping is optional; fresh backend heartbeats provide the device values shown here." : ""}
+      </p>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card className="p-4">
@@ -93,7 +123,9 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
             <div>
               <p className="text-xs text-muted-foreground">Memory</p>
               <p className="text-sm font-semibold">
-                {formatBytes(playerMetrics.memory_used_bytes)} / {formatBytes(playerMetrics.memory_total_bytes)}
+                {playerMetrics.memory_used_bytes !== null && playerMetrics.memory_total_bytes !== null
+                  ? `${formatBytes(playerMetrics.memory_used_bytes)} / ${formatBytes(playerMetrics.memory_total_bytes)}`
+                  : formatPercent(playerMetrics.memory_percent ?? null, 1)}
               </p>
             </div>
           </div>
@@ -107,7 +139,9 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
             <div>
               <p className="text-xs text-muted-foreground">Disk</p>
               <p className="text-sm font-semibold">
-                {formatBytes(playerMetrics.disk_used_bytes)} / {formatBytes(playerMetrics.disk_total_bytes)}
+                {playerMetrics.disk_used_bytes !== null && playerMetrics.disk_total_bytes !== null
+                  ? `${formatBytes(playerMetrics.disk_used_bytes)} / ${formatBytes(playerMetrics.disk_total_bytes)}`
+                  : formatPercent(playerMetrics.disk_percent ?? null, 1)}
               </p>
             </div>
           </div>
@@ -126,6 +160,51 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
         </Card>
       </div>
 
+      {summary.latest_player_metrics_source === "none" ? (
+        <p className="rounded-lg border p-3 text-sm text-muted-foreground">
+          No recent hardware measurements are available. Check the player heartbeat and its last reported time below.
+        </p>
+      ) : null}
+
+      {summary.grafana.enabled ? (
+        <Card className="overflow-hidden p-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Thermometer className="h-4 w-4 text-primary" />
+              <div>
+                <p className="font-medium">Grafana trend view</p>
+                <p className="text-xs text-muted-foreground">Historical direct player scrapes require a configured player target and Grafana sign-in.</p>
+              </div>
+            </div>
+            {summary.grafana.links[0] ? (
+              <Button variant="outline" size="sm" asChild>
+                <a href={summary.grafana.links[0].url} target="_blank" rel="noopener noreferrer">Open in Grafana</a>
+              </Button>
+            ) : null}
+          </div>
+          {grafanaHealth.data === true && summary.grafana.embed_enabled && summary.grafana.embed_url && grafanaAuthentication.data === true ? (
+            <iframe
+              title={`Observability trends for ${screenName}`}
+              src={summary.grafana.embed_url}
+              className="h-[360px] w-full border-0"
+              loading="lazy"
+            />
+          ) : (
+            <p className="p-4 text-sm text-muted-foreground">
+              {grafanaHealth.data !== true
+                ? "Grafana is unavailable through this CMS. Check the site proxy and Grafana service."
+                : !summary.grafana.embed_enabled
+                  ? "Grafana embedding is disabled for this site. Open the dashboard in Grafana."
+                  : grafanaAuthentication.data === false
+                    ? "Sign in to Grafana using Open in Grafana, then return here to view trends."
+                    : grafanaAuthentication.isError
+                      ? "Grafana session status could not be checked. Open the dashboard in Grafana."
+                      : "Checking Grafana sign-in…"}
+            </p>
+          )}
+        </Card>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4 space-y-3">
           <h3 className="font-semibold">Current Player State</h3>
@@ -135,7 +214,7 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
               <p className="text-sm font-medium">{formatRelativeTimestamp(summary.screen.last_backend_heartbeat_at)}</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Player heartbeat</p>
+              <p className="text-xs text-muted-foreground">Last heartbeat seen by direct scrape</p>
               <p className="text-sm font-medium">
                 {formatRelativeTimestamp(summary.player_scrape.last_successful_player_heartbeat_at)}
               </p>
@@ -212,36 +291,24 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
           <div className="rounded-lg border p-3 text-sm">
             <div className="mb-2 flex items-center gap-2 font-medium">
               <Clock3 className="h-4 w-4" />
-              Backend telemetry payload
+              Last reported device details
             </div>
-            {summary.latest_backend_telemetry ? (
-              <pre className="max-h-56 overflow-auto rounded bg-muted p-3 text-xs">
-                {JSON.stringify(summary.latest_backend_telemetry, null, 2)}
-              </pre>
+            {telemetry ? (
+              <dl className="grid gap-2 sm:grid-cols-2">
+                <div><dt className="text-muted-foreground">Hostname</dt><dd>{reportedValue(telemetry.hostname)}</dd></div>
+                <div><dt className="text-muted-foreground">Player version</dt><dd>{reportedValue(telemetry.player_version)}</dd></div>
+                <div><dt className="text-muted-foreground">Operating system</dt><dd>{reportedValue(telemetry.os_version)}</dd></div>
+                <div><dt className="text-muted-foreground">CPU cores</dt><dd>{reportedNumber(telemetry.cpu_cores)}</dd></div>
+                <div><dt className="text-muted-foreground">Network address</dt><dd>{reportedValue(telemetry.network_ip)}</dd></div>
+                <div><dt className="text-muted-foreground">Player uptime</dt><dd>{reportedNumber(telemetry.player_uptime_seconds, " s")}</dd></div>
+              </dl>
             ) : (
-              <p className="text-muted-foreground">No backend telemetry payload stored for this screen yet.</p>
+              <p className="text-muted-foreground">No player heartbeat details have been stored for this screen yet.</p>
             )}
           </div>
         </Card>
       </div>
 
-      {grafanaHealth.data === true && summary.grafana.embed_enabled && summary.grafana.embed_url ? (
-        <Card className="overflow-hidden p-0">
-          <div className="flex items-center gap-2 border-b px-4 py-3">
-            <Thermometer className="h-4 w-4 text-primary" />
-            <div>
-              <p className="font-medium">Grafana trend view</p>
-              <p className="text-xs text-muted-foreground">Historical player metrics over the same-origin Grafana path.</p>
-            </div>
-          </div>
-          <iframe
-            title={`Observability trends for ${screenName}`}
-            src={summary.grafana.embed_url}
-            className="h-[420px] w-full border-0"
-            loading="lazy"
-          />
-        </Card>
-      ) : null}
     </div>
   );
 }

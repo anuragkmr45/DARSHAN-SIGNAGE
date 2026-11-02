@@ -559,13 +559,17 @@ export interface ScreenObservabilitySummary {
   };
   player_scrape: {
     configured: boolean;
-    status: "up" | "down" | "unknown";
+    status: "up" | "down" | "unknown" | "unconfigured" | "unavailable";
     last_successful_player_heartbeat_at: string | null;
   };
+  latest_player_metrics_source?: "prometheus" | "backend_heartbeat" | "mixed" | "none";
+  latest_player_metrics_observed_at?: string | null;
   latest_player_metrics: {
     cpu_percent: number | null;
+    memory_percent?: number | null;
     memory_used_bytes: number | null;
     memory_total_bytes: number | null;
+    disk_percent?: number | null;
     disk_used_bytes: number | null;
     disk_total_bytes: number | null;
     temperature_celsius: number | null;

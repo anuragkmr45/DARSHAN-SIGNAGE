@@ -126,6 +126,7 @@ describe('Heartbeat Service', () => {
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
     const { getPlayerMetrics } = require('../../../src/main/services/telemetry/player-metrics')
     const { getSecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
+    const { getRequestQueue } = require('../../../src/main/services/network/request-queue')
 
     const heartbeatService = getHeartbeatService()
     const httpClient = getHttpClient()
@@ -134,6 +135,10 @@ describe('Heartbeat Service', () => {
     const commandProcessor = getCommandProcessor()
     const deviceStateStore = getDeviceStateStore()
     const securePlaybackGuard = getSecurePlaybackGuard()
+    const requestQueue = getRequestQueue()
+    const originalQueueStats = requestQueue.getStats()
+    sandbox.stub(requestQueue, 'getStats').returns({ ...originalQueueStats, pendingItems: 4 })
+    sandbox.stub(requestQueue, 'getOldestAgeSeconds').returns({ all: 27, heartbeat: 0, screenshot: 0, 'command-ack': 0, default: 0 })
 
     sandbox.stub(pairingService, 'isPairedDevice').returns(true)
     sandbox.stub(pairingService, 'getDeviceId').returns('device-123')
@@ -209,6 +214,8 @@ describe('Heartbeat Service', () => {
       uptime: 7200,
       memory_usage: 50,
       cpu_usage: 37.25,
+      request_queue_items: 4,
+      request_queue_oldest_age_seconds: 27,
       current_schedule_id: 'schedule-1',
       current_media_id: 'media-1',
       applied_publish_id: '11111111-1111-4111-8111-111111111111',

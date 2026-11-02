@@ -9,6 +9,8 @@
 - Production direct scrape uses HTTPS mutual TLS. The player validates the observability client certificate, and Prometheus validates each player's certificate against the site CA.
 - The generated Observability role keeps live site files under `/etc/darshan/sites/<site>/player-metrics`: `players.targets.json`, `ca.crt`, `client.crt`, and mode-`0600` `client.key`. `prepare-host.sh` creates an empty inventory once. Release artifacts contain only an example and validator; they never contain the site client private key or player addresses.
 - Run `./validate-player-scrape-config.sh "$PLAYER_METRICS_CONFIG_DIR"` before reloading Prometheus. `start.sh` performs this check automatically. An empty inventory is valid and leaves direct player scrape disabled.
+- The Screens observability modal still shows current hardware measurements from a recent backend-received heartbeat when direct scrape is disabled or unreachable. The badge reports the direct scrape state separately. Queue backlog requires the newer player heartbeat field; an older player may leave it unavailable.
+- Grafana historical per-player hardware trends require direct scrape targets. Operators must sign in to Grafana through the CMS `/grafana/` path before its embedded dashboard appears. If the frame is blank, verify `/grafana/api/user` authentication and that the CMS proxy returns `X-Frame-Options: SAMEORIGIN` for `/grafana/` while other CMS pages retain `DENY`.
 
 ## VM Networking
 
