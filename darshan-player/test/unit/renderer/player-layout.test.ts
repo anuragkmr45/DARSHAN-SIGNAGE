@@ -65,6 +65,17 @@ describe('Player layout helpers', () => {
     expect(resolveSceneSlotOccurrenceBoundaryDelayMs(10_000, -10, 2500)).to.equal(0)
   })
 
+  it('keeps successfully rendered static single-slot content active after its nominal duration', () => {
+    const { shouldReportSceneSlotPlayback } = require('../../../src/renderer/player-layout-helpers.ts')
+
+    expect(shouldReportSceneSlotPlayback('image', true, true)).to.equal(true)
+    expect(shouldReportSceneSlotPlayback('pdf', true, true)).to.equal(true)
+    expect(shouldReportSceneSlotPlayback('url', true, true)).to.equal(true)
+    expect(shouldReportSceneSlotPlayback('video', true, true)).to.equal(false)
+    expect(shouldReportSceneSlotPlayback('video', false, true)).to.equal(true)
+    expect(shouldReportSceneSlotPlayback('image', false, false)).to.equal(false)
+  })
+
   it('applies configured opacity transition styles to entering and exiting scheduled elements', async () => {
     const {
       resolveOpacityTransitionStyle,

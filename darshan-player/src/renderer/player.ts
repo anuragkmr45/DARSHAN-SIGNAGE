@@ -30,6 +30,7 @@ import {
   prepareElementForFadeOut,
   resolveSceneSlotOccurrenceBoundaryDelayMs,
   resolveSceneSlotRecoveryDelayMs,
+  shouldReportSceneSlotPlayback,
   shouldAdvanceSceneSlot,
   teardownScheduledElementTree,
   type DisposableMediaNode,
@@ -1534,7 +1535,9 @@ class Player {
         }
 
         activeElement = renderedElement
-        if (resumeDecision.completed) {
+        const compatibility = this.getItemCompatibility(item)
+        const playable = item.type === 'message' || compatibility.status === 'PLAYABLE_NOW'
+        if (!shouldReportSceneSlotPlayback(item.type, resumeDecision.completed, playable)) {
           this.clearActiveSlotPlayback(slot.id)
         } else {
           this.setActiveSlotPlayback(slot.id, {

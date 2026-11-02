@@ -1,3 +1,5 @@
+import type { MediaType } from '../common/types'
+
 export function parseAspectRatio(aspectRatio?: string): number | null {
   if (!aspectRatio || typeof aspectRatio !== 'string') {
     return null
@@ -19,6 +21,21 @@ export function parseAspectRatio(aspectRatio?: string): number | null {
 
 export function shouldAdvanceSceneSlot(itemCount: number): boolean {
   return Number.isInteger(itemCount) && itemCount > 1
+}
+
+/**
+ * Static scene content remains visibly active after its nominal occurrence
+ * duration when it is the only item in a slot. A completed non-looping video,
+ * by contrast, is only holding its final frame and must not be reported as
+ * active playback. Compatibility placeholders are never playback evidence.
+ */
+export function shouldReportSceneSlotPlayback(
+  mediaType: MediaType,
+  occurrenceCompleted: boolean,
+  playable: boolean,
+): boolean {
+  if (!playable) return false
+  return mediaType !== 'video' || !occurrenceCompleted
 }
 
 export function resolveSceneSlotRecoveryDelayMs(displayMs: number): number {
