@@ -20,6 +20,10 @@ console.log(`  ${srcHtml} -> ${destHtml}`)
 
 fs.copyFileSync(srcHtml, destHtml)
 
+for (const name of ['live-prototype', 'live-prototype-shell']) {
+  fs.copyFileSync(path.join(__dirname, `../src/renderer/${name}.html`), path.join(distRendererDir, `${name}.html`))
+}
+
 // Copy config.json for runtime config resolution
 const distMainDir = path.join(__dirname, '../dist/main')
 if (!fs.existsSync(distMainDir)) {

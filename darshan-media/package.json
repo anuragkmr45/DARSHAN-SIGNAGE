@@ -1,0 +1,14 @@
+{
+  "name": "darshan-media",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20.16.0" },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js",
+    "supervise": "node src/supervisor.js",
+    "check": "node --check src/controller.js && node --check src/gateway.js && node --check src/livekit-adapter.js && node --check src/index.js && node --check src/supervisor.js"
+  },
+  "dependencies": { "livekit-server-sdk": "2.19.2" }
+}

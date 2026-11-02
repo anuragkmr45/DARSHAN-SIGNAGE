@@ -57,6 +57,42 @@ gateway checks on every new connection/reconnect plus media-node termination
 of existing traffic. A failed gate requires revising the integration before
 building the complete workflow, not weakening the accepted cutoff.
 
+### Source checkpoints for the scheduling/authority loops
+
+The November 3 source audit found these integration constraints. These are
+implementation checkpoints, not completed behavior:
+
+- Schedule-item input is validated independently in `routes/schedules.ts` and
+  `schemas/schedule.ts`; align both and repository create/list serialization.
+  Keep `presentation_id` as the fallback, add a default ordinary source kind,
+  and advertise `live_broadcast_v1` only after the normal player supports it.
+- Migration `0048` serializes target-reference writes, but the group-expansion
+  read happens earlier. Acquire that same target lock before expansion and
+  before the schedule row lock in both request and direct publishing. Preserve
+  the existing role graph → user → session authorization lock order.
+- Reservation reuse/approval currently compares revision and row counts. Live
+  approval must compare sorted concrete targets and the complete frozen policy;
+  replacing one group member with another must invalidate approval even when
+  the count is unchanged. Allocate screen holds and ten-slot capacity together.
+- `schedule-publish-helper.ts` snapshots item group IDs but aggregate resolved
+  targets. Add immutable **per-item** resolved live targets and use them in all
+  device snapshot/read-model filters; group changes cannot enlarge a live run.
+- Fallback media must remain protected through immutable published asset
+  revisions, including when the mutable presentation changes. Existing media
+  usage/deletion checks do not cover that new reference graph. Historical-only
+  screen references must still permit the accepted deletion behavior.
+- Apply mutability checks to actual item add/delete operations. Existing checks
+  on schedule/item GET handlers do not protect those writes.
+- Screens currently have no department-owner mapping. Do not invent target
+  authorization from department membership. Evaluate conditional permissions
+  against actual records, and assigned presenter/current session authority.
+- Extend every desired-state writer/reader, including bulk updates, with live
+  versions. The normal player currently rejects lower versions first; verify
+  an authenticated authority epoch before that ordering after a restore.
+- Keep admission tickets outside persisted snapshots. Extend the ordinary
+  main-process state machine and snapshot evaluator; the development dispatcher
+  and receiver alone do not implement scheduled playback in the installed app.
+
 ## Runtime and fault verification
 
 Use independent real CMS sessions and the newly built Electron application.

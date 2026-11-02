@@ -1,0 +1,31 @@
+{
+  "elapsed_ms": 9303,
+  "event": "result",
+  "status": "PASS_SFU_CUTOFF",
+  "same_run_confirmed": true,
+  "samples": 93,
+  "results": {
+    "presenter": {
+      "proven": true,
+      "absence_after_last_authority_upper_ms": 7139,
+      "absence_vs_full_deadline_upper_ms": -2861,
+      "authority_deadline_uncertainty_ms": 4,
+      "observed_renewals": 1,
+      "last_control_state": "REVOKED",
+      "last_control_error": null,
+      "absence_observed_after_ready_ms": 9276
+    },
+    "receiver": {
+      "proven": true,
+      "absence_after_last_authority_upper_ms": 1375,
+      "absence_vs_full_deadline_upper_ms": -8625,
+      "authority_deadline_uncertainty_ms": 3,
+      "observed_renewals": 3,
+      "last_control_state": "REVOKED",
+      "last_control_error": null,
+      "absence_observed_after_ready_ms": 9276
+    }
+  },
+  "evidence_scope": "SFU participant absence against observed full authority deadlines; player display/audio require separate runtime evidence",
+  "fixture": "Synthetic canvas video over actual WebRTC to actual Electron; no audio track in this run"
+}

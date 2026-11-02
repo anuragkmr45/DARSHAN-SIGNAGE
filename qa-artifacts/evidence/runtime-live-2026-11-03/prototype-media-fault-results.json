@@ -1,0 +1,80 @@
+{
+  "collected_at": "2026-11-02T23:30:28.101800+00:00",
+  "suite_result": {
+    "passed": 4,
+    "failed_open_gate": 1,
+    "skipped": 0
+  },
+  "execution": "Actual isolated Docker containers with current source mounted read-only; test image IDs retained per case. Not five-VM or rendered audio proof.",
+  "faults": [
+    {
+      "fault": "controller-sigstop",
+      "actual_sfu_termination_upper_ms": 1820,
+      "bound_ms": 2000,
+      "within_bound": true,
+      "image_id": "sha256:6716856e9e7acc9e63b4c9527b14cd4492509c67bda1ad9ab75002f2528f6b36",
+      "supervisor_sha256": "1813cc5eea87780cd69011e8a9335ede05de629cfc1de047be878b1ce113aaee",
+      "core_source_sha256": "5fdbbf524b22b2cb003d56f10a66b2d6815e8880d8c9cb3751b812e175465d98",
+      "resources": {
+        "memory_mib": 256,
+        "cpus": 0.5
+      },
+      "scope": "Actual Docker process/SFU/RPC evidence with admitted participant; no rendered media/audio claim"
+    },
+    {
+      "fault": "controller-crash",
+      "actual_sfu_termination_upper_ms": 46,
+      "bound_ms": 2000,
+      "within_bound": true,
+      "image_id": "sha256:6716856e9e7acc9e63b4c9527b14cd4492509c67bda1ad9ab75002f2528f6b36",
+      "supervisor_sha256": "1813cc5eea87780cd69011e8a9335ede05de629cfc1de047be878b1ce113aaee",
+      "core_source_sha256": "5fdbbf524b22b2cb003d56f10a66b2d6815e8880d8c9cb3751b812e175465d98",
+      "resources": {
+        "memory_mib": 256,
+        "cpus": 0.5
+      },
+      "scope": "Actual Docker process/SFU/RPC evidence with admitted participant; no rendered media/audio claim"
+    },
+    {
+      "fault": "management-timeout-isolation",
+      "actual_sfu_termination_upper_ms": 1578,
+      "bound_ms": 3000,
+      "within_bound": true,
+      "image_id": "sha256:6716856e9e7acc9e63b4c9527b14cd4492509c67bda1ad9ab75002f2528f6b36",
+      "supervisor_sha256": "1813cc5eea87780cd69011e8a9335ede05de629cfc1de047be878b1ce113aaee",
+      "core_source_sha256": "5fdbbf524b22b2cb003d56f10a66b2d6815e8880d8c9cb3751b812e175465d98",
+      "resources": {
+        "memory_mib": 256,
+        "cpus": 0.5
+      },
+      "scope": "Actual Docker process/SFU/RPC evidence with admitted participant; no rendered media/audio claim"
+    },
+    {
+      "fault": "supervisor-sigstop-host-watchdog",
+      "actual_sfu_termination_upper_ms": 1717,
+      "bound_ms": 3000,
+      "within_bound": true,
+      "image_id": "sha256:6716856e9e7acc9e63b4c9527b14cd4492509c67bda1ad9ab75002f2528f6b36",
+      "supervisor_sha256": "1813cc5eea87780cd69011e8a9335ede05de629cfc1de047be878b1ce113aaee",
+      "core_source_sha256": "5fdbbf524b22b2cb003d56f10a66b2d6815e8880d8c9cb3751b812e175465d98",
+      "host_watchdog_sha256": "ab08cd8b5953dbd9e1e631fc8df7efd1583adc0d98c753daadb851ec9fe89b3e",
+      "resources": {
+        "memory_mib": 256,
+        "cpus": 0.5
+      },
+      "scope": "Actual Docker process/SFU/RPC evidence with admitted participant; no rendered media/audio claim"
+    },
+    {
+      "fault": "supervisor-stall-pidfd-docker-unavailable",
+      "status": "UNCONFIRMED",
+      "within_bound": false,
+      "actual_sfu_termination_upper_ms": null,
+      "code": "OS_ERROR_13",
+      "stage": "SIGNAL_PINNED_HANDLE",
+      "image_id": "sha256:6716856e9e7acc9e63b4c9527b14cd4492509c67bda1ad9ab75002f2528f6b36",
+      "core_source_sha256": "5fdbbf524b22b2cb003d56f10a66b2d6815e8880d8c9cb3751b812e175465d98",
+      "host_watchdog_sha256": "ab08cd8b5953dbd9e1e631fc8df7efd1583adc0d98c753daadb851ec9fe89b3e",
+      "scope": "Permission/LSM prevented real pidfd enforcement; owned container was stopped only by test cleanup. This is an open gate."
+    }
+  ]
+}

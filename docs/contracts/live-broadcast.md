@@ -23,6 +23,10 @@ scheduled feature or production acceptance.
 - V1 is fullscreen live video, optional microphone and captured sound according
   to browser/OS support. Recording, remote input, additional administrator
   viewers and multiple live layout slots are excluded.
+- A scheduled live event is selected automatically by the already paired,
+  installed DARSHAN desktop player. Receivers need no separate application,
+  manual launch, browser page or interaction at each event. The presenter alone
+  chooses the capture source and explicitly starts transmission in the CMS.
 - A schedule item identifies a live session and a required approved fallback
   presentation. The player downloads/verifies the fallback before joining live.
   Missing/corrupt fallback shows **Content unavailable** during that live window.

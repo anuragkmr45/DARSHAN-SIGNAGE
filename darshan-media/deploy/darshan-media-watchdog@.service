@@ -1,0 +1,22 @@
+[Unit]
+Description=DARSHAN media host watchdog for pinned instance %i
+Requires=docker.service
+After=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/darshan/media-watchdog/%i.env
+ExecStart=/usr/bin/python3 /opt/darshan/media/host-watchdog.py --docker-context default --container-id ${DARSHAN_MEDIA_CONTAINER_ID} --instance-id ${DARSHAN_MEDIA_NODE_INSTANCE_ID} --heartbeat ${DARSHAN_MEDIA_HOST_HEARTBEAT_FILE} --heartbeat-uid ${DARSHAN_MEDIA_HOST_HEARTBEAT_UID}
+Restart=on-failure
+RestartPreventExitStatus=2
+RestartSec=250ms
+TimeoutStopSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

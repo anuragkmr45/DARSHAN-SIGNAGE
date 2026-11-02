@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DARSHAN live media prototype</title>
+<style>body{font:17px system-ui;background:#15151c;color:#eee;margin:2rem;max-width:1100px}button,input{font:inherit;padding:.65rem;margin:.35rem}button{cursor:pointer}label{display:inline-block;margin:.4rem}video{width:100%;max-height:55vh;background:#000}pre{white-space:pre-wrap;background:#252530;padding:1rem}aside{color:#ffd782}h1{margin-bottom:.25rem}</style></head>
+<body><h1>DARSHAN live media prototype</h1><aside>Developer experiment — scheduling and production authorization are not connected yet. Only the selected source is transmitted to this local test receiver.</aside>
+<p><label>Prototype session token <input id="token" type="password" autocomplete="off"></label></p>
+<p><label><input id="captured-audio" type="checkbox">Request captured sound</label><label><input id="microphone" type="checkbox">Request microphone</label></p>
+<p><button id="choose">Choose screen or window</button><button id="pattern">Use synthetic transport test pattern</button><button id="start" disabled>Start broadcast</button><button id="stop" disabled>Stop broadcast</button><label><input id="renew" type="checkbox" checked>Renew live authority</label></p>
+<p id="status" role="status">Choose a source to preview.</p><video id="preview" autoplay playsinline muted></video><pre id="details"></pre>
+<script type="module" src="/presenter.js"></script></body></html>

@@ -1,0 +1,21 @@
+{
+  "scenario": "real-flowing-synthetic-video/controller-SIGSTOP",
+  "fixture": "Synthetic video only; no audio; v1 packaged Linux receiver",
+  "run_id": "30f74a35-3d27-48dc-83be-a44957c730c5",
+  "trigger_at": "2026-11-02T23:15:23.929Z",
+  "observed_at": "2026-11-02T23:15:27.540Z",
+  "container_stopped": true,
+  "exit_code": 1,
+  "oom": false,
+  "container_stop_upper_ms": 3611,
+  "sfu_before_trigger": {
+    "participants": 2,
+    "screen_share_tracks": 1
+  },
+  "uses_trusted_https_wss": true,
+  "player_first_frame_at": "2026-11-02T23:13:25.133Z",
+  "player_disconnect_at": "2026-11-02T23:15:27.181Z",
+  "player_fallback_at": "2026-11-02T23:15:27.223Z",
+  "fallback_after_fault_trigger_ms": 3294,
+  "evidence_scope": "Container-stop bound includes Docker execution/inspection overhead; not a direct SFU process-death measurement. Real synthetic video only, no audio. Browser visibility was visible; no hidden/minimized claim."
+}

@@ -1,0 +1,13 @@
+{
+  "name": "darshan-live-prototype",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20 <21" },
+  "scripts": {
+    "build": "esbuild presenter.js --bundle --format=esm --platform=browser --outfile=dist/presenter.js",
+    "start": "node authority.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": { "livekit-client": "2.23.0" },
+  "devDependencies": { "esbuild": "0.27.0" }
+}
