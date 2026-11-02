@@ -245,6 +245,7 @@ WEBPAGE_NAVIGATION_ALLOWLIST=display-content.acceptance.test
 WEBPAGE_RESOURCE_ALLOWLIST=assets.acceptance.test
 BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_DAYS=30
+BACKUP_HOST_PATH=/var/lib/darshan/backups/$site_name
 BACKUP_OFFHOST_DESTINATION=s3://offhost-backups.acceptance.test/darshan/$site_name
 BACKUP_OFFHOST_ENDPOINT=https://s3.offhost-backups.acceptance.test
 BACKUP_OFFHOST_REGION=us-east-1
