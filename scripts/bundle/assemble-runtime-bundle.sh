@@ -557,13 +557,24 @@ process.stdout.write(matching[0].Config);
 ' "$image_ref")" || { echo "Docker archive $archive_path does not contain exactly the expected image tag $image_ref." >&2; exit 1; }
     if tar -tf "$archive_path" | grep -qx 'index.json'; then
       image_id="$(tar -xOf "$archive_path" index.json | node -e '
+const expectedRef = process.argv[1];
 let index;
 try { index = JSON.parse(require("node:fs").readFileSync(0, "utf8")); } catch { process.exit(2); }
-if (!Array.isArray(index.manifests) || index.manifests.length !== 1 || typeof index.manifests[0].digest !== "string") process.exit(3);
-const digest = index.manifests[0].digest;
-if (!/^sha256:[a-f0-9]{64}$/.test(digest)) process.exit(4);
-process.stdout.write(digest);
-')" || { echo "Docker archive OCI index is invalid: $archive_path" >&2; exit 1; }
+if (!Array.isArray(index.manifests)) process.exit(3);
+const imageDescriptors = index.manifests.filter((entry) => entry && entry.artifactType === undefined);
+const artifactDescriptors = index.manifests.filter((entry) => entry && entry.artifactType !== undefined);
+if (imageDescriptors.length !== 1) process.exit(4);
+if (artifactDescriptors.some((entry) => entry.artifactType !== "application/vnd.docker.attestation.manifest.v1+json")) process.exit(5);
+const image = imageDescriptors[0];
+if (!["application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.index.v1+json"].includes(image.mediaType)) process.exit(6);
+if (typeof image.digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(image.digest)) process.exit(7);
+const lastSlash = expectedRef.lastIndexOf("/");
+const lastColon = expectedRef.lastIndexOf(":");
+const expectedTag = lastColon > lastSlash ? expectedRef.slice(lastColon + 1) : "latest";
+const archiveTag = image.annotations?.["org.opencontainers.image.ref.name"];
+if (archiveTag !== undefined && archiveTag !== expectedTag) process.exit(8);
+process.stdout.write(image.digest);
+' "$image_ref")" || { echo "Docker archive OCI index is invalid: $archive_path" >&2; exit 1; }
     else
       image_id="sha256:$(tar -xOf "$archive_path" "$config_path" | sha256sum | awk '{print $1}')"
     fi
