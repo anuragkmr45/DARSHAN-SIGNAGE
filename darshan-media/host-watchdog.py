@@ -144,8 +144,10 @@ def read_heartbeat(filename, expected_uid):
         try:
             metadata = os.fstat(fd)
             if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != expected_uid
-                    or metadata.st_mode & 0o077 or metadata.st_nlink != 1):
+                    or metadata.st_mode & 0o077 or metadata.st_nlink not in (0, 1)):
                 raise WatchdogError('HEARTBEAT_FILE_OWNERSHIP')
+            # Atomic replacement may unlink the already-opened private old inode.
+            # It stays safe to read; content freshness/instance fences still apply.
             content = os.read(fd, 4097)
         finally:
             os.close(fd)
@@ -216,6 +218,12 @@ def pidfd_dead(fd):
     return bool(poll.poll(0))
 
 
+def wait_pinned_exit(fd, deadline):
+    poll = select.poll()
+    poll.register(fd, select.POLLIN)
+    return bool(poll.poll(max(0, int((deadline - time.monotonic()) * 1000))))
+
+
 def enforce_pidfd(args, reason, deadline):
     """Kill only the originally pinned private-namespace PID1; never reopen by PID."""
     stage = 'PINNED_HANDLE'
@@ -237,15 +245,20 @@ def enforce_pidfd(args, reason, deadline):
         stage = 'SIGNAL_PINNED_HANDLE'
         signal.pidfd_send_signal(args.pidfd, signal.SIGKILL)
         stage = 'CONFIRM_PINNED_EXIT'
-        poll = select.poll()
-        poll.register(args.pidfd, select.POLLIN)
-        if poll.poll(max(0, int((deadline - time.monotonic()) * 1000))):
+        if wait_pinned_exit(args.pidfd, deadline):
             event('watchdog_pidfd_enforced', reason=reason, container_id=args.container_id[:12])
             return 0
     except WatchdogError as error:
         event('watchdog_pidfd_rejected', code=str(error))
     except OSError as error:
         event('watchdog_pidfd_rejected', code='OS_ERROR_%s' % error.errno, stage=stage)
+        # A prior Docker SIGKILL can still be completing when this fallback is
+        # denied by host policy. Observe the original handle until the original
+        # deadline; never reopen a PID or claim this denied signal killed it.
+        if stage == 'SIGNAL_PINNED_HANDLE' and wait_pinned_exit(args.pidfd, deadline):
+            event('watchdog_pinned_exit_observed', reason=reason, container_id=args.container_id[:12],
+                  pidfd_signal_confirmed=False)
+            return 0
     event('watchdog_enforcement_unconfirmed', reason=reason, container_id=args.container_id[:12])
     return 3
 

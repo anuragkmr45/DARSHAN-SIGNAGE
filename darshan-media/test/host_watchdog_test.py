@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import importlib.util
 import io
 import os
@@ -72,6 +73,32 @@ class WatchdogTests(unittest.TestCase):
             file.symlink_to('/dev/null')
             with self.assertRaises((OSError, watchdog.WatchdogError)):
                 watchdog.read_heartbeat(str(file), os.getuid())
+
+    def test_atomic_replacement_after_open_can_unlink_the_safe_opened_inode(self):
+        import json
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            os.chmod(directory, 0o700)
+            file = directory / 'supervisor.json'
+            replacement = directory / 'next.json'
+            original = heartbeat(sequence=1)
+            file.write_text(json.dumps(original), encoding='utf8')
+            replacement.write_text(json.dumps(heartbeat(sequence=2)), encoding='utf8')
+            os.chmod(file, 0o600)
+            os.chmod(replacement, 0o600)
+            real_fstat = os.fstat
+            observed_links = []
+
+            def replace_before_fstat(fd):
+                os.replace(replacement, file)  # Real atomic rename after the reader opened the old inode.
+                metadata = real_fstat(fd)
+                observed_links.append(metadata.st_nlink)
+                return metadata
+
+            with mock.patch.object(watchdog.os, 'fstat', side_effect=replace_before_fstat):
+                self.assertEqual(watchdog.read_heartbeat(str(file), os.getuid()), original)
+            self.assertEqual(observed_links, [0])
+            self.assertEqual(os.lstat(file).st_nlink, 1)
 
     def test_target_labels_instance_and_mount_fence_are_mandatory(self):
         info = {'Id': ID, 'Config': {'Labels': {watchdog.LABEL_MANAGED: '1', watchdog.LABEL_ROLE: 'media-node', watchdog.LABEL_INSTANCE: INSTANCE},
@@ -148,6 +175,56 @@ class WatchdogTests(unittest.TestCase):
             if child.poll() is None:
                 child.kill()
                 child.wait()
+
+    def test_denied_pidfd_signal_observes_a_concurrent_exit_to_the_same_deadline(self):
+        import json
+        import subprocess
+        import sys
+        import threading
+        import time
+        for exits in (True, False):
+            with self.subTest(concurrent_exit=exits):
+                child = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(10)'])
+                fd = os.pidfd_open(child.pid)
+                timer = threading.Timer(0.06, child.terminate) if exits else None
+                try:
+                    with open('/proc/sys/kernel/random/boot_id', encoding='ascii') as stream:
+                        boot_id = stream.read().strip()
+                    ticks = watchdog.process_start_ticks(child.pid)
+                    args = SimpleNamespace(pidfd=fd, container_id=ID, boot_id=boot_id,
+                                           process_fence={'pid': child.pid, 'start_ticks': ticks},
+                                           pid_namespace=os.readlink('/proc/%d/ns/pid' % child.pid))
+                    output = io.StringIO()
+                    began = time.monotonic()
+                    deadline = began + 0.18
+                    if timer:
+                        timer.start()
+                    with mock.patch.object(watchdog, 'validate_host_pid', return_value=ticks), \
+                            mock.patch.object(watchdog.signal, 'pidfd_send_signal', side_effect=PermissionError(errno.EACCES, 'denied')), \
+                            mock.patch.object(watchdog.os, 'pidfd_open', side_effect=AssertionError('must never reopen')), \
+                            contextlib.redirect_stdout(output):
+                        self.assertEqual(watchdog.enforce_pidfd(args, 'stale', deadline), 0 if exits else 3)
+                    elapsed = time.monotonic() - began
+                    events = [json.loads(line)['event'] for line in output.getvalue().splitlines()]
+                    self.assertIn('watchdog_pidfd_rejected', events)
+                    self.assertNotIn('watchdog_pidfd_enforced', events)
+                    if exits:
+                        self.assertIn('watchdog_pinned_exit_observed', events)
+                        self.assertGreaterEqual(elapsed, 0.04)
+                    else:
+                        self.assertIn('watchdog_enforcement_unconfirmed', events)
+                        self.assertNotIn('watchdog_pinned_exit_observed', events)
+                        self.assertGreaterEqual(elapsed, 0.15)
+                        self.assertIsNone(child.poll())
+                    self.assertLess(elapsed, 0.4)
+                finally:
+                    if timer:
+                        timer.cancel()
+                        timer.join()
+                    os.close(fd)
+                    if child.poll() is None:
+                        child.kill()
+                    child.wait(timeout=1)
 
 
 if __name__ == '__main__':

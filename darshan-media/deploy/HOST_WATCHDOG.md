@@ -90,6 +90,10 @@ is unavailable, it revalidates the original boot ID, cgroup, start ticks and PID
 namespace, then signals only the held pidfd. It never reopens a numeric PID or
 looks up a replacement by name. Linux private-namespace PID1 death terminates
 that namespace's children. A dead pinned handle cannot signal a reused PID.
+If the pidfd signal is denied after a Docker kill request, the watchdog still
+observes the held handle until the same original enforcement deadline. A
+concurrent confirmed exit is reported as `watchdog_pinned_exit_observed`, not as
+successful pidfd actuation. A still-live handle remains unconfirmed.
 
 Unexpected target/label/namespace/endpoint changes prevent destructive Docker
 actuation. Unsupported pidfd operations, insufficient privileges, denied LSM
@@ -104,7 +108,8 @@ privileged capability.
 Python units cover wrong labels/instance/mounts, local versus remote endpoint,
 cgroup/namespace checks, ownership/mode, symlink/hardlink, future/foreign clocks,
 sequence replay, long own-monitor gaps, rejected pidfd fences and dead-handle
-reuse safety. Node units cover atomic supervisor state, unsafe directory refusal,
+reuse safety, plus a real delayed child exit after denied signaling and a denied
+still-live child. Node units cover atomic supervisor state, unsafe directory refusal,
 resume gap refusal and first controller heartbeat/readiness ordering.
 
 The opt-in Docker suite uses only uniquely named test nodes on ports 19780–19784
@@ -124,7 +129,9 @@ profile's permission. Preserve this distinction in QA evidence.
 
 The watchdog process itself must be supervised. The supplied unit restarts
 unexpected failures after 250 ms and refuses to restart known configuration
-errors. Watchdog death/systemd restart and host scheduling under production load
+errors. It uses `Wants=docker.service` with `After=`, so an explicit Docker stop
+does not stop the watchdog and disable its independent pidfd fallback.
+Watchdog death/systemd restart and host scheduling under production load
 have not been rehearsed by merely testing the Python process. Stop the watchdog
 only after the pinned media node has stopped. No service installation or full
 production host-watchdog sign-off is claimed.

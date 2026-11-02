@@ -1,6 +1,6 @@
 [Unit]
 Description=DARSHAN media host watchdog for pinned instance %i
-Requires=docker.service
+Wants=docker.service
 After=docker.service
 StartLimitIntervalSec=0
 

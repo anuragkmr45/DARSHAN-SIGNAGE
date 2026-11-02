@@ -608,3 +608,50 @@ readiness endpoint simultaneously passed all six checks. This proves configured
 startup, not a rerun of every fault against this new image. No systemd service
 was installed. The native capture chooser and v2 player runtime remain pending;
 the loop and feature remain unfinished, with no independent QA Pass claimed.
+
+### Later continuous-runtime findings — acceptance remains open
+
+After checkpoint `cf44fa2`, the host watchdog stopped the configured test node
+with `HEARTBEAT_FILE_OWNERSHIP`, despite its last file being owned by UID 1000
+with mode 0600 in a private 0700 directory. A deterministic real-filesystem
+test reproduced the defect: opening the old file, atomically replacing its
+path, then checking the opened inode yields link count **zero**. The earlier
+guard incorrectly rejected that safely opened inode. The scoped fix allows
+link counts zero or one only for the already-opened regular, private,
+correctly-owned file. Symlinks and extra hardlinks remain blocked; content,
+instance and clock checks stay enforced. Python tests initially passed **12/12**.
+
+The systemd template also now uses `Wants=docker.service` with `After=`.
+Installed systemd documentation confirmed that `Requires=` would stop the host
+watchdog when Docker was explicitly stopped, defeating its independent
+actuation path. `systemd-analyze verify` passed without installing a service.
+
+The fresh one-CPU root node initially remained healthy for 134.027 seconds,
+with 1336 heartbeats and no restarts/OOM. **It subsequently exited at about
+152.5 seconds**, after `SUPERVISOR_HEARTBEAT_STALE`; direct pidfd signaling again
+returned EACCES and enforcement was reported unconfirmed. Its last heartbeat
+was sequence 1495/RUNNING, written 2330 ms before container exit. Comparing the
+boot-clock age with the file mtime agreed within 8 ms. The separate half-CPU
+steady experiment also stopped early, around 91.5 seconds, through the stale
+heartbeat path. These observations do not establish a CPU, memory or IO cause.
+
+The zero-link regression is fixed, but **steady-runtime acceptance and the
+host-service/LSM actuation gate remain open**. The shorter healthy observation
+must not be presented as an overall soak pass. Sanitized initial-failure,
+regression, shorter checkpoint and later failure evidence is preserved in
+[prototype-watchdog-atomic-replace-result.json](runtime-live-2026-11-03/prototype-watchdog-atomic-replace-result.json).
+Its SHA-256 is `0cf506e8b6481e5ed86f8a962b940e52f68a598a500ad55ec90be991eadc7fe2`.
+No liveness threshold or security profile was relaxed and no QA-owned case was
+changed to Pass. The newly built image's separate actual-SFU RPC/race suite
+passed **2/2**, without skips; that result does not close these runtime gates.
+
+A separate reporting race was then corrected: after Docker has requested
+SIGKILL, a denied fallback signal must still observe the already-held pidfd
+until the original deadline. Otherwise a process exiting just afterward can
+be reported unconfirmed prematurely. The new event explicitly reports observed
+exit with `pidfd_signal_confirmed=false`; it does not claim the denied signal
+killed anything. A real delayed child exits about 60 ms after denial and is
+observed, while a denied child that stays alive remains unconfirmed at the
+same 180 ms test deadline. Current Python tests passed **13/13**. No deadline
+was extended, PID reopened or production pidfd gate declared passed. Further
+instrumented steady-runtime diagnosis is still required.

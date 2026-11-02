@@ -1,0 +1,61 @@
+{
+  "failure": {
+    "observed_at": "2026-11-02T23:32:50.690442+00:00",
+    "container_id_prefix": "94d81e043ec5",
+    "exit_code": 137,
+    "oom": false,
+    "reason": "HEARTBEAT_FILE_OWNERSHIP",
+    "last_file_uid": 1000,
+    "last_file_mode": "0o600",
+    "diagnosis": "Opened old heartbeat inode can have link count zero during atomic replacement; deterministic real-filesystem regression confirms."
+  },
+  "regression": {
+    "test": "test_atomic_replacement_after_open_can_unlink_the_safe_opened_inode",
+    "uses_real_filesystem": true,
+    "observed_open_inode_link_count": 0,
+    "old_check_rejected": true,
+    "fixed_reader_accepts_only_owned_private_regular_inode_with_link_count_0_or_1": true,
+    "hardlinked_symlink_and_other_fences_preserved": true,
+    "python_tests_passed": 13
+  },
+  "root_steady_check": {
+    "checked_at": "2026-11-02T23:35:05.125358+00:00",
+    "container_running": true,
+    "restart_count": 0,
+    "oom": false,
+    "elapsed_from_container_start_seconds": 134.027,
+    "heartbeat_sequence": 1336,
+    "phase": "RUNNING",
+    "watchdog_events": [
+      "watchdog_ready"
+    ],
+    "image": "sha256:702c71b504c8673747809191195e3c8248c56947ddaa3f36486369f14346475f",
+    "host_watchdog_sha256": "956fd36b022fb90c3a92cc3c08cab1ad93e8c6bdf5b60bdfc09ed5ed401eb374",
+    "scope": "Healthy configured node and independent watchdog continuity after atomic-read fix, without rendered broadcast.",
+    "passed": true
+  },
+  "scope": "Prototype watchdog false-positive fix only. Production pidfd/LSM gate remains open. No rendered stream or human QA pass.",
+  "root_later_observation": {
+    "status": "FAILED_OPEN_RELIABILITY_GATE",
+    "container_finish": "2026-11-02T23:35:23.602406524Z",
+    "container_exit_code": 137,
+    "oom": false,
+    "elapsed_from_start_seconds": 152.504,
+    "last_heartbeat_mtime": "2026-11-02T23:35:21.271967+00:00",
+    "last_heartbeat_sequence": 1495,
+    "last_heartbeat_phase": "RUNNING",
+    "watchdog_reason": "SUPERVISOR_HEARTBEAT_STALE",
+    "direct_pidfd_result": "OS_ERROR_13",
+    "enforcement_observation": "UNCONFIRMED",
+    "cause": "Not established; no CPU, IO or memory cause is asserted."
+  },
+  "overall_steady_acceptance": "OPEN; initial134-second observation did not establish longer steady operation.",
+  "bounded_exit_observation_regression": {
+    "uses_real_child_pidfd": true,
+    "delayed_exit_after_signal_denial_is_observed": true,
+    "still_live_denied_child_remains_unconfirmed": true,
+    "no_original_deadline_extension": true,
+    "no_pidfd_actuation_claim_after_denial": true
+  },
+  "current_host_watchdog_sha256": "f2d959a7a439324249e886b6011012e11ac92e2d7bfb7c72629ddf5eaf86519c"
+}
