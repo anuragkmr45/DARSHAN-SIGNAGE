@@ -6,6 +6,8 @@ Baseline: beta6 observability/delivery candidate
 `evidence/playback-recovery-developer-verification-2026-10-21.md`; beta6
 delivery/availability/observability evidence is in
 `evidence/dashboard-observability-report-developer-verification-2026-11-02.md`.
+OTP renewal developer evidence is in
+`evidence/otp-pairing-renewal-developer-verification-2026-11-02.md`.
 Focused developer runs passed, while human QA fields remain unexecuted.
 Execute remaining work only on authorized isolated test environments. Each checkbox names detailed rows in
 `05_TEST_CASES.csv`; QA records actual status, evidence and defects there.
@@ -46,7 +48,7 @@ Execute remaining work only on authorized isolated test environments. Each check
 - [ ] `FUN-06`, `DEF-01..03`: eligible screen > group priority descending > target ID ascending tie-break > aspect > global > none. Priority is integer `0..100`, legacy/missing is `0`, non-priority edits preserve it, and concurrent same-revision writes yield one success plus one `409` without silent overwrite.
 - [ ] `DEF-04`, `PLAYER-05`: with no active Schedule or eligible Screen/Group/aspect/global default, show the approved standard company fallback image online and offline on every supported display. Expected: a visible fitted image, never a blank or text-only idle card. The 2026-10-17 developer runtime failed this expectation.
 - [ ] `FUN-07`, `CONC-03`: emergency READY media/message capability, selected targets, severity/recency ordering, duplicate key, clear/expiry, offline policy and safe fallback.
-- [ ] `PLAYER-01..02`, `API-02`: device pairing/recovery/revocation, signed REST/WSS, snapshot 304/404 and convergence through polling when wake-ups fail.
+- [ ] `PLAYER-01..02`, `PLAYER-17`, `API-02`: device pairing/recovery/revocation, stable Device ID on OTP renewal, immediate old-code invalidation, idempotent timeout/restart recovery, visible OS hostname and server-time countdown on Ubuntu/Windows, legacy expiry rollover, signed REST/WSS, snapshot 304/404 and convergence through polling when wake-ups fail.
 - [ ] `API-03`, `PLAYER-06`, `CONC-05`: command lease/ACK, screenshot, display selection, expiration and nonrepeated destructive commands.
 - [ ] `PLAYER-03..04`, `PLAYER-16`: the secure deadline is exactly 120 seconds after the last authenticated success; reachability-only heartbeat cannot renew or unlock it. Lock stops schedule/default/emergency and purges only media cache. Recovery is single-flight and ordered identity validation -> forced fresh snapshot -> current-media sync/check -> authority apply -> unlock; stale authority never resumes.
 - [ ] `PLAYER-05`, `COMP-01..03`: fullscreen kiosk, display choice/orientation/DPI, real Windows x64 and Ubuntu desktop packages, X11/Wayland difference, CMS browsers. Site hardware/browser/accessibility matrix remains BQ-016.
