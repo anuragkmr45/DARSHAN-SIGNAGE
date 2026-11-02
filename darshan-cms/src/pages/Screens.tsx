@@ -81,6 +81,8 @@ export default function Screens() {
   const canManageScreens = can("manage", "Screen") || can("update", "Screen");
   const [search, setSearch] = useState("");
   const [isPairModalOpen, setIsPairModalOpen] = useState(false);
+  const [pairingView, setPairingView] = useState<"active" | "history">("active");
+  const [pairingPage, setPairingPage] = useState(1);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -144,9 +146,10 @@ export default function Screens() {
   });
 
   const { data: pairingsData } = useQuery({
-    queryKey: ["device-pairings"],
-    queryFn: () => devicePairingApi.list({ page: 1, limit: 10 }),
+    queryKey: ["device-pairings", pairingView, pairingPage],
+    queryFn: () => devicePairingApi.list({ page: pairingPage, limit: 10, status: pairingView }),
     enabled: canManageScreens,
+    refetchInterval: pairingView === "active" ? 3000 : false,
   });
 
   const screens = useMemo(() => screensQuery.data?.items ?? [], [screensQuery.data?.items]);
@@ -668,14 +671,17 @@ export default function Screens() {
             </Button>
           </div>
 
-          <p className="text-xs text-muted-foreground">
-            View all device pairing records for first-time pairing and same-screen recovery.
-          </p>
+          <div className="flex gap-2" role="group" aria-label="Pairing record view">
+            <Button size="sm" variant={pairingView === "active" ? "default" : "outline"}
+              onClick={() => { setPairingView("active"); setPairingPage(1); }}>Active codes</Button>
+            <Button size="sm" variant={pairingView === "history" ? "default" : "outline"}
+              onClick={() => { setPairingView("history"); setPairingPage(1); }}>History</Button>
+          </div>
 
           <div className="divide-y rounded-md border max-h-72 overflow-auto">
             {pairings.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground text-center">
-                No pairings yet. Generate a code to pair a new device.
+                {pairingView === "active" ? "No active pairing codes." : "No pairing history yet."}
               </div>
             ) : (
               <>
@@ -688,13 +694,13 @@ export default function Screens() {
                         <p className="font-medium font-mono text-sm">{pairing_code || "—"}</p>
                         <Badge
                           variant={
-                            status === "used" ? "default" :
-                              status === "expired" ? "destructive" :
+                            status === "USED" ? "default" :
+                              status === "EXPIRED" || status === "SUPERSEDED" || status === "REVOKED" ? "destructive" :
                                 "secondary"
                           }
                           className="text-[10px]"
                         >
-                          {status || "pending"}
+                          {status || "PENDING"}
                         </Badge>
                       </div>
                       {pair.recovery?.mode ? (
@@ -710,7 +716,7 @@ export default function Screens() {
                       <div className="text-[10px] text-muted-foreground space-y-0.5">
                         {created_at && <p>Created: {formatDateTime(created_at)}</p>}
                         {used_at && <p>Used: {formatDateTime(used_at)}</p>}
-                        {expires_at && status !== "used" && <p>Expires: {formatDateTime(expires_at)}</p>}
+                        {expires_at && status === "PENDING" && <p>Expires: {formatDateTime(expires_at)}</p>}
                       </div>
                     </div>
                   );
@@ -718,6 +724,16 @@ export default function Screens() {
               </>
             )}
           </div>
+          {(pairingsData?.pagination?.total ?? 0) > 10 && (
+            <div className="flex items-center justify-end gap-2">
+              <Button size="sm" variant="outline" disabled={pairingPage <= 1}
+                onClick={() => setPairingPage((current) => current - 1)}>Previous</Button>
+              <span className="text-xs">Page {pairingPage}</span>
+              <Button size="sm" variant="outline"
+                disabled={pairingPage * 10 >= (pairingsData?.pagination?.total ?? 0)}
+                onClick={() => setPairingPage((current) => current + 1)}>Next</Button>
+            </div>
+          )}
         </Card>
         ) : null}
       </div>

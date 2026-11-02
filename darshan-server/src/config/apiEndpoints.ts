@@ -171,6 +171,7 @@ export const apiEndpoints = {
     orphans: withBase('/device-pairing/orphans'),
     revoke: withBase('/device-pairing/:deviceId/revoke'),
     request: withBase('/device-pairing/request'),
+    renew: withBase('/device-pairing/renew'),
     status: withBase('/device-pairing/status'),
     confirm: withBase('/device-pairing/confirm'),
     recovery: withBase('/device-pairing/recovery/:deviceId'),

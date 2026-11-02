@@ -1391,7 +1391,8 @@ export interface DevicePairing {
   id: string;
   device_id?: string;
   pairing_code?: string;
-  status?: "pending" | "used" | "expired";
+  status?: "PENDING" | "USED" | "EXPIRED" | "SUPERSEDED" | "REVOKED";
+  retired_reason?: string | null;
   used_at?: string | null;
   expires_at?: string;
   confirmed_at?: string;

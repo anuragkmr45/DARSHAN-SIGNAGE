@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron'
+import * as os from 'os'
 import { EventEmitter } from 'events'
 import {
   DeviceApiError,
@@ -13,6 +14,7 @@ import {
   PlayerState,
   PlayerStatus,
   TimelineItem,
+  isDeviceApiError,
 } from '../../common/types'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
@@ -77,6 +79,7 @@ export class PlayerFlow extends EventEmitter {
   private rendererServicesInitialized = false
   private screenshotInterval?: NodeJS.Timeout
   private pairingPollTimer?: NodeJS.Timeout
+  private pairingRenewalPromise?: Promise<PairingCodeResponse | null>
   private bootstrapRetryTimer?: NodeJS.Timeout
   private secureRecoveryRetryTimer?: NodeJS.Timeout
   private secureRecoveryPromise?: Promise<void>
@@ -175,7 +178,7 @@ export class PlayerFlow extends EventEmitter {
       return
     }
 
-    if (persisted.pairingCode && trustworthyDeviceId && this.isPairingCodeStillValid(persisted.pairingExpiresAt)) {
+    if (persisted.pairingCode && trustworthyDeviceId) {
       await this.transitionState('PAIRING_PENDING', {
         error: 'Waiting for admin approval...',
       })
@@ -188,6 +191,14 @@ export class PlayerFlow extends EventEmitter {
       return
     }
 
+    if (identity.health === 'missing' && !trustworthyDeviceId && this.pairingService.hasPairingCredential()) {
+      await this.transitionState('HARD_RECOVERY', {
+        error: 'Recovering the existing pairing request from the backend...',
+      })
+      await this.requestFreshPairingCode(undefined, 'HARD_RECOVERY')
+      return
+    }
+
     await this.enterHardRecovery('No trustworthy persisted device identity is available')
   }
 
@@ -196,7 +207,11 @@ export class PlayerFlow extends EventEmitter {
   }
 
   getStatus(): PlayerStatus {
-    return { ...this.status }
+    return {
+      ...this.status,
+      hostname: os.hostname(),
+      pairingRemainingMs: this.pairingService.getPairingRemainingMs(),
+    }
   }
 
   getPresentationSnapshot(): PlayerPresentationSnapshot {
@@ -213,11 +228,10 @@ export class PlayerFlow extends EventEmitter {
   }
 
   async requestPairingCode(overrides?: Partial<PairingCodeRequest>): Promise<PairingCodeResponse | null> {
-    const fallbackState: Extract<PlayerState, 'HARD_RECOVERY' | 'PAIRING_PENDING'> =
-      this.state === 'PAIRING_PENDING' || this.state === 'PAIRING_CONFIRMED' || this.state === 'PAIRING_COMPLETING'
-        ? 'PAIRING_PENDING'
-        : 'HARD_RECOVERY'
-    return await this.requestFreshPairingCode(overrides, fallbackState)
+    if (this.state === 'PAIRING_PENDING' || this.state === 'PAIRING_CONFIRMED' || this.state === 'PAIRING_COMPLETING') {
+      return await this.renewCurrentPairing(overrides)
+    }
+    return await this.requestFreshPairingCode(overrides, 'HARD_RECOVERY')
   }
 
   async checkPairingStatus(): Promise<PairingStatusResponse> {
@@ -237,9 +251,11 @@ export class PlayerFlow extends EventEmitter {
         await this.retryRecovery()
         break
       case 're-pair':
-      case 'refresh-pairing':
       case 'reset-doubtful-pairing':
         await this.enterHardRecovery('Fresh pairing requested', payload)
+        break
+      case 'refresh-pairing':
+        await this.renewCurrentPairing(payload)
         break
       default:
         break
@@ -956,7 +972,80 @@ export class PlayerFlow extends EventEmitter {
         error: (error as Error).message,
         recoveryReason: (error as Error).message,
       })
+      this.pairingPollTimer = setTimeout(() => {
+        void this.requestFreshPairingCode(overrides, failureState)
+      }, this.pairingPollBackoff.getDelay())
       return null
+    }
+  }
+
+  private async renewCurrentPairing(overrides?: Partial<PairingCodeRequest>): Promise<PairingCodeResponse | null> {
+    if (this.pairingRenewalPromise) return this.pairingRenewalPromise
+    const renewal = async (): Promise<PairingCodeResponse | null> => {
+      this.stopPairingTimers()
+      if (!this.pairingService.hasPairingCredential()) {
+        try {
+          const status = await this.pairingService.fetchPairingStatus()
+          if (status.active_pairing) {
+            await this.syncActivePairingMetadata(status.active_pairing)
+            await this.transitionState('PAIRING_PENDING', {
+              error: 'Pre-upgrade code: wait for expiry before a protected new code can be issued.',
+            })
+            this.schedulePairingStatusPoll(PAIRING_POLL_INTERVAL_MS)
+            return null
+          }
+          if (status.screen) {
+            await this.enterRecoveryRequired('Pairing completed on the backend; device credentials need recovery')
+            return null
+          }
+          await this.enterHardRecovery('Pre-upgrade pairing code expired; starting protected pairing', overrides)
+        } catch (error) {
+          await this.transitionState('PAIRING_PENDING', { error: (error as Error).message })
+          this.schedulePairingStatusPoll(this.pairingPollBackoff.getDelay())
+        }
+        return null
+      }
+      try {
+        const response = await this.pairingService.renewPairingCode(overrides)
+        this.pairingPollBackoff.reset()
+        await this.transitionState('PAIRING_PENDING', { error: 'New code generated. Waiting for admin approval...' })
+        this.startPairingStatusPolling()
+        return response
+      } catch (error) {
+        if (isDeviceApiError(error) && error.code === 'PAIRING_RENEWAL_EXPIRED') {
+          await this.store.update({ pendingRenewalRequestId: undefined, pairingRequestInDoubtAt: undefined })
+          await this.transitionState('PAIRING_PENDING', { error: 'Code expired. Requesting a new code...' })
+          this.schedulePairingStatusPoll(0)
+          return null
+        }
+        if (isDeviceApiError(error) &&
+            (error.code === 'PAIRING_SESSION_REVOKED' || error.code === 'PAIRING_ALREADY_PAIRED')) {
+          try {
+            const status = await this.pairingService.fetchPairingStatus()
+            if (status.screen) {
+              await this.enterRecoveryRequired('Pairing completed or changed on the backend; device credentials need recovery')
+              return null
+            }
+            if (!status.active_pairing) {
+              await this.enterHardRecovery('Pairing session was revoked by the backend', overrides)
+              return null
+            }
+          } catch (verificationError) {
+            logger.warn({ error: verificationError }, 'Could not verify revoked pairing session')
+          }
+        }
+        logger.warn({ error }, 'Pairing renewal needs reconciliation')
+        await this.pairingService.markPairingRequestInDoubt((error as Error).message)
+        await this.transitionState('PAIRING_PENDING', { error: 'Checking the latest code with the backend...' })
+        this.schedulePairingStatusPoll(this.pairingPollBackoff.getDelay())
+        return null
+      }
+    }
+    this.pairingRenewalPromise = renewal()
+    try {
+      return await this.pairingRenewalPromise
+    } finally {
+      this.pairingRenewalPromise = undefined
     }
   }
 
@@ -988,18 +1077,26 @@ export class PlayerFlow extends EventEmitter {
       return
     }
 
-    const current = this.store.getState()
-    if (!this.isPairingCodeStillValid(current.pairingExpiresAt)) {
-      await this.pairingService.clearPairingMetadata()
-      await this.enterHardRecovery('Fresh pairing code expired before completion')
-      return
-    }
-
     try {
       const status = await this.pairingService.fetchPairingStatus()
       const activePairing = status.active_pairing || null
+      const beforeSync = this.store.getState()
       await this.syncActivePairingMetadata(activePairing)
       this.pairingPollBackoff.reset()
+
+      if (beforeSync.pendingRenewalRequestId && this.store.getState().pendingRenewalRequestId &&
+          (!activePairing || (activePairing.generation ?? 0) <= (beforeSync.pairingGeneration ?? 0))) {
+        await this.renewCurrentPairing()
+        return
+      }
+      if (!activePairing) {
+        if (status.screen) {
+          await this.enterRecoveryRequired('Pairing completed on the backend; device credentials need recovery')
+        } else {
+          await this.renewCurrentPairing()
+        }
+        return
+      }
 
       if (activePairing?.mode === 'PAIRING' && activePairing.confirmed) {
         await this.transitionState('PAIRING_CONFIRMED', {
@@ -1093,10 +1190,16 @@ export class PlayerFlow extends EventEmitter {
       return
     }
 
+    const current = this.store.getState()
+    const advanced = (activePairing.generation ?? 0) > (current.pairingGeneration ?? 0) ||
+      Boolean(activePairing.pairing_code && activePairing.pairing_code !== current.pairingCode)
     await this.store.update({
       activePairingMode: activePairing.mode,
-      pairingCode: activePairing.pairing_code || this.store.getState().pairingCode,
-      pairingExpiresAt: activePairing.expires_at || this.store.getState().pairingExpiresAt,
+      pairingCode: activePairing.pairing_code || current.pairingCode,
+      pairingExpiresAt: activePairing.expires_at || current.pairingExpiresAt,
+      pairingGeneration: activePairing.generation ?? current.pairingGeneration,
+      pendingRenewalRequestId: advanced ? undefined : current.pendingRenewalRequestId,
+      pairingRequestInDoubtAt: advanced ? undefined : current.pairingRequestInDoubtAt,
     })
   }
 
@@ -1135,12 +1238,16 @@ export class PlayerFlow extends EventEmitter {
       }
 
       if (this.pairingService.isExpiredPairingCodeError(error)) {
-        await this.pairingService.clearPairingMetadata()
         if (currentMode === 'RECOVERY') {
+          await this.pairingService.clearPairingMetadata()
           await this.enterRecoveryRequired(
             'Recovery pairing expired. Waiting for admin to create a new recovery pairing...'
           )
+        } else if (this.pairingService.hasPairingCredential()) {
+          await this.transitionState('PAIRING_PENDING', { error: 'Code changed or expired. Checking the latest code...' })
+          this.startPairingStatusPolling()
         } else {
+          await this.pairingService.clearPairingMetadata()
           await this.enterHardRecovery('Fresh pairing code expired before completion')
         }
         return null
@@ -1221,12 +1328,6 @@ export class PlayerFlow extends EventEmitter {
     await this.enterHardRecovery(event.error.message || 'Stored device identity is unusable')
   }
 
-  private isPairingCodeStillValid(expiresAt?: string): boolean {
-    if (!expiresAt) return false
-    const parsed = Date.parse(expiresAt)
-    return !Number.isNaN(parsed) && parsed > Date.now()
-  }
-
   private async transitionState(next: PlayerState, statusPatch: Partial<PlayerStatus> = {}): Promise<void> {
     this.state = next
     await this.store.setLifecycleState(next)
@@ -1259,7 +1360,7 @@ export class PlayerFlow extends EventEmitter {
       ...this.status,
       state: persisted.lifecycleState || this.state,
       deviceId: persisted.deviceId,
-      pairingCode: persisted.pairingCode,
+      pairingCode: persisted.pairingRequestInDoubtAt ? undefined : persisted.pairingCode,
       pairingExpiresAt: persisted.pairingExpiresAt,
       recoveryReason: persisted.recoveryReason,
       hardRecoveryDeadlineAt: persisted.hardRecoveryDeadlineAt,

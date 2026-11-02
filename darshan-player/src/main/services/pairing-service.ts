@@ -1,5 +1,6 @@
 import * as os from 'os'
 import { randomUUID } from 'crypto'
+import { performance } from 'perf_hooks'
 import WebSocket from 'ws'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
@@ -22,6 +23,7 @@ import {
 import { getCertificateManager } from './cert-manager'
 import { getHttpClient } from './network/http-client'
 import { getDeviceStateStore } from './device-state-store'
+import { getPairingCredentialStore } from './pairing-credential-store'
 import { createTransportHttpsAgent } from './network/transport-tls'
 
 const logger = getLogger('pairing-service')
@@ -58,6 +60,32 @@ export interface NetworkDiagnostics {
 }
 
 export class PairingService {
+  private pairingClock?: { remainingMs: number; receivedAt: number }
+
+  hasPairingCredential(): boolean {
+    return Boolean(getPairingCredentialStore().read())
+  }
+
+  getPairingRemainingMs(): number | undefined {
+    if (!this.pairingClock) return undefined
+    return Math.max(0, this.pairingClock.remainingMs - (performance.now() - this.pairingClock.receivedAt))
+  }
+
+  private anchorPairingClock(expiresAt?: string, serverTime?: string, requestStartedAt?: number): void {
+    const expiry = expiresAt ? Date.parse(expiresAt) : Number.NaN
+    const server = serverTime ? Date.parse(serverTime) : Number.NaN
+    if (!Number.isFinite(expiry) || !Number.isFinite(server)) {
+      this.pairingClock = undefined
+      return
+    }
+    // Subtract the full request duration so network latency never makes the
+    // displayed code look valid longer than the backend considers it valid.
+    const elapsed = requestStartedAt === undefined ? 0 : performance.now() - requestStartedAt
+    this.pairingClock = {
+      remainingMs: Math.max(0, expiry - server - elapsed),
+      receivedAt: performance.now(),
+    }
+  }
   isPairedDevice(): boolean {
     const certManager = getCertificateManager()
     const state = getDeviceStateStore().getState()
@@ -136,37 +164,82 @@ export class PairingService {
   async requestPairingCode(overrides: Partial<PairingCodeRequest> = {}): Promise<PairingCodeResponse> {
     const payload = this.buildPairingCodeRequest(overrides)
     const httpClient = getHttpClient()
+    const current = getDeviceStateStore().getState()
+    if (this.isPairedDevice()) {
+      throw new Error('Paired device cannot request a fresh identity without authorized recovery')
+    }
+    if (current.deviceId && current.pairingCode && !this.hasPairingCredential()) {
+      throw new Error('The existing pre-upgrade code must expire before a protected pairing session can start')
+    }
+    const credential = getPairingCredentialStore().ensure()
 
     try {
-      const response = await httpClient.post<PairingCodeResponse>('/api/v1/device-pairing/request', payload, {
+      const startedAt = performance.now()
+      const response = await httpClient.post<PairingCodeResponse>('/api/v1/device-pairing/request', {
+        ...payload,
+        pairing_credential: credential,
+      }, {
         mtls: false,
         retry: false,
       })
-
-      await getDeviceStateStore().update({
-        lifecycleState: 'PAIRING_PENDING',
-        deviceId: response.device_id,
-        pairingCode: response.pairing_code,
-        pairingExpiresAt: response.expires_at,
-        activePairingMode: 'PAIRING',
-        pairingRequestInDoubtAt: undefined,
-        recoveryReason: undefined,
-        lastPairingValidationStatus: undefined,
-        lastPairingValidatedAt: undefined,
-        lastValidatedDeviceId: undefined,
-        lastValidatedServerIdentity: undefined,
-        duplicateIdentity: undefined,
-      })
-
-      getConfigManager().updateConfig({
-        deviceId: response.device_id,
-      })
-
+      await this.acceptPairingCode(response, startedAt)
       return response
     } catch (error) {
       logger.error({ error }, 'Failed to request pairing code')
       throw error
     }
+  }
+
+  async renewPairingCode(overrides: Partial<PairingCodeRequest> = {}): Promise<PairingCodeResponse> {
+    const current = getDeviceStateStore().getState()
+    const credential = getPairingCredentialStore().read()
+    if (!credential || !current.deviceId) {
+      throw new Error('Protected pairing renewal is unavailable for this device')
+    }
+    const renewalRequestId = current.pendingRenewalRequestId || randomUUID()
+    if (!current.pendingRenewalRequestId) {
+      await getDeviceStateStore().update({ pendingRenewalRequestId: renewalRequestId })
+    }
+    const startedAt = performance.now()
+    const response = await getHttpClient().post<PairingCodeResponse>('/api/v1/device-pairing/renew', {
+      ...this.buildPairingCodeRequest(overrides),
+      device_id: current.deviceId,
+      pairing_credential: credential,
+      renewal_request_id: renewalRequestId,
+    }, { mtls: false, retry: false })
+    if (response.device_id !== current.deviceId) {
+      throw new Error('Pairing renewal changed the device ID unexpectedly')
+    }
+    await this.acceptPairingCode(response, startedAt)
+    return response
+  }
+
+  private async acceptPairingCode(response: PairingCodeResponse, startedAt: number): Promise<void> {
+    const current = getDeviceStateStore().getState()
+    if (
+      response.generation !== undefined && current.pairingGeneration !== undefined &&
+      response.generation < current.pairingGeneration
+    ) {
+      throw new Error('Stale pairing response; checking the latest code with the backend')
+    }
+    this.anchorPairingClock(response.expires_at, response.server_time, startedAt)
+    await getDeviceStateStore().update({
+      lifecycleState: 'PAIRING_PENDING',
+      deviceId: response.device_id,
+      pairingCode: response.pairing_code,
+      pairingExpiresAt: response.expires_at,
+      pairingGeneration: response.generation,
+      pendingRenewalRequestId: undefined,
+      activePairingMode: 'PAIRING',
+      pairingRequestInDoubtAt: undefined,
+      recoveryReason: undefined,
+      lastPairingValidationStatus: undefined,
+      lastPairingValidatedAt: undefined,
+      lastValidatedDeviceId: undefined,
+      lastValidatedServerIdentity: undefined,
+      duplicateIdentity: undefined,
+    })
+    getConfigManager().updateConfig({ deviceId: response.device_id })
   }
 
   async fetchPairingStatus(deviceIdOverride?: string): Promise<PairingStatusResponse> {
@@ -183,10 +256,13 @@ export class PairingService {
     }
 
     const httpClient = getHttpClient()
-    return await httpClient.get<PairingStatusResponse>(
+    const startedAt = performance.now()
+    const response = await httpClient.get<PairingStatusResponse>(
       `/api/v1/device-pairing/status?device_id=${encodeURIComponent(deviceId)}`,
       { mtls: false }
     )
+    this.anchorPairingClock(response.active_pairing?.expires_at, response.server_time, startedAt)
+    return response
   }
 
   async fetchBackendPairingStatus(deviceIdOverride?: string): Promise<BackendPairingStatusResponse> {
@@ -321,6 +397,8 @@ export class PairingService {
       fingerprint: response.fingerprint,
       pairingCode: undefined,
       pairingExpiresAt: undefined,
+      pairingGeneration: undefined,
+      pendingRenewalRequestId: undefined,
       activePairingMode: undefined,
       pairingRequestInDoubtAt: undefined,
       recoveryReason: undefined,
@@ -340,6 +418,7 @@ export class PairingService {
         enabled: false,
       },
     })
+    getPairingCredentialStore().clear()
   }
 
   async markPairingRequestInDoubt(reason: string): Promise<void> {
@@ -361,6 +440,8 @@ export class PairingService {
   }
 
   async resetStoredIdentity(reason?: string): Promise<void> {
+    getPairingCredentialStore().clear()
+    this.pairingClock = undefined
     await getCertificateManager().deleteCertificates()
     await getDeviceStateStore().clearIdentity(reason)
     getConfigManager().updateConfig({

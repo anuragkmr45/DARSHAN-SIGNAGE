@@ -197,6 +197,13 @@
         text-align: center;
       }
 
+      .pairing-hostname {
+        max-width: 100%;
+        font-size: clamp(13px, 1.5vw, 18px);
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+
       .pairing-form {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -748,6 +755,7 @@
         </div>
 
         <div class="pairing-code-card">
+          <div class="pairing-hostname">Hostname: <span id="pairing-hostname">Detecting…</span></div>
           <div class="pairing-code-label">Pairing Code</div>
           <div class="pairing-code" id="pairing-code">- - - - - -</div>
           <div class="pairing-code-meta">

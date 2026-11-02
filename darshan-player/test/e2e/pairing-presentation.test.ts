@@ -221,7 +221,7 @@ describe('Pairing presentation browser regression', () => {
             onPlayerStatus: noOp,
             getDefaultMedia: async () => ({ source: 'NONE', aspect_ratio: null, media_id: null, media: null }),
             onDefaultMediaChanged: () => () => undefined,
-            getConfig: async () => ({ log: { level: 'info' } }),
+            getConfig: async () => ({ runtime: { mode: 'production' }, log: { level: 'info' } }),
             getDeviceInfo: async () => ({ hostname: 'e2e-player', platform: 'linux', arch: 'x64' }),
             getDiagnostics: async () => ({ hostname: 'e2e-player', ipAddresses: ['127.0.0.1'], dnsResolution: true, apiReachable: true, latency: 1 }),
             playerAction: async () => undefined,
@@ -260,7 +260,8 @@ describe('Pairing presentation browser regression', () => {
       session,
       `window.__darshanE2E.emitPresentation({ revision: 3, status: {
         state: 'PAIRING_PENDING', mode: 'empty', online: false, pairingCode: '222222',
-        pairingExpiresAt: ${JSON.stringify(new Date(Date.now() + 10 * 60 * 1000).toISOString())}
+        pairingExpiresAt: ${JSON.stringify(new Date(Date.now() + 10 * 60 * 1000).toISOString())},
+        pairingRemainingMs: 600000, hostname: 'windows-kiosk-9'
       } })`
     )
     // Simulate a delayed initial IPC snapshot arriving after the live pairing
@@ -271,6 +272,25 @@ describe('Pairing presentation browser regression', () => {
     )
 
     await waitFor(session, "document.getElementById('pairing-code')?.textContent === '2 2 2 2 2 2'", 'replacement OTP')
+    await evaluate(session, `(() => {
+      const originalNow = Date.now.bind(Date);
+      Date.now = () => originalNow() + 60 * 60 * 1000;
+      document.getElementById('pairing-screen').dataset.density = 'MINIMAL';
+    })()`)
+    const visibility = await evaluate(session, `(() => {
+      const host = document.getElementById('pairing-hostname');
+      const expiry = document.getElementById('pairing-expiry');
+      return {
+        hostname: host?.textContent,
+        hostnameVisible: host && getComputedStyle(host).display !== 'none' && host.getBoundingClientRect().width > 0,
+        countdown: expiry?.textContent,
+        mode: document.body.dataset.runtimeMode,
+      };
+    })()`)
+    expect(visibility.hostname).to.equal('windows-kiosk-9')
+    expect(visibility.hostnameVisible).to.equal(true)
+    expect(visibility.mode).to.equal('production')
+    expect(visibility.countdown).to.match(/^Expires in (9:|10:)/)
     const result = await evaluate(
       session,
       `(() => {

@@ -93,6 +93,8 @@ export class DeviceStateStore {
     return await this.update({
       pairingCode: undefined,
       pairingExpiresAt: undefined,
+      pairingGeneration: undefined,
+      pendingRenewalRequestId: undefined,
       activePairingMode: undefined,
       pairingRequestInDoubtAt: undefined,
     })
@@ -104,6 +106,8 @@ export class DeviceStateStore {
       deviceId: undefined,
       pairingCode: undefined,
       pairingExpiresAt: undefined,
+      pairingGeneration: undefined,
+      pendingRenewalRequestId: undefined,
       activePairingMode: undefined,
       fingerprint: undefined,
       lastSuccessfulPairingAt: undefined,

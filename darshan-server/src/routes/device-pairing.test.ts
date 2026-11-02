@@ -1,4 +1,4 @@
-import { randomUUID, X509Certificate } from 'node:crypto';
+import { randomBytes, randomUUID, X509Certificate } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import forge from 'node-forge';
@@ -126,15 +126,10 @@ describe('Device Pairing Routes', () => {
       status: 'OFFLINE',
     });
 
-    const originalCreate = DevicePairingRepository.prototype.create;
-    const createSpy = vi.spyOn(DevicePairingRepository.prototype, 'create');
-    createSpy.mockImplementationOnce(async () => {
-      const error = new Error('duplicate pairing code') as Error & { code?: string; constraint?: string };
-      error.code = '23505';
-      error.constraint = 'device_pairings_active_code_idx';
-      throw error;
-    });
-    createSpy.mockImplementation(function (this: DevicePairingRepository, ...args: Parameters<DevicePairingRepository['create']>) {
+    const originalCreate = DevicePairingRepository.prototype.createIfAvailable;
+    const createSpy = vi.spyOn(DevicePairingRepository.prototype, 'createIfAvailable');
+    createSpy.mockImplementationOnce(async () => null);
+    createSpy.mockImplementation(function (this: DevicePairingRepository, ...args: Parameters<DevicePairingRepository['createIfAvailable']>) {
       return originalCreate.apply(this, args);
     });
 
@@ -156,6 +151,158 @@ describe('Device Pairing Routes', () => {
     expect(createSpy).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a protected device ID stable and immediately supersedes its old OTP', async () => {
+    const credential = randomBytes(32).toString('hex');
+    const initialPayload = { pairing_credential: credential, device_label: 'Protected test player' };
+    const firstResponse = await server.inject({ method: 'POST', url: '/api/v1/device-pairing/request', payload: initialPayload });
+    expect(firstResponse.statusCode).toBe(HTTP_STATUS.CREATED);
+    const first = JSON.parse(firstResponse.body);
+    expect(Date.parse(first.expires_at) - Date.parse(first.server_time)).toBeGreaterThan(598_000);
+    expect(first.generation).toBe(1);
+
+    const duplicateResponse = await server.inject({ method: 'POST', url: '/api/v1/device-pairing/request', payload: initialPayload });
+    const duplicate = JSON.parse(duplicateResponse.body);
+    expect(duplicate.device_id).toBe(first.device_id);
+    expect(duplicate.pairing_code).toBe(first.pairing_code);
+
+    const requestId = randomUUID();
+    const renewalPayload = {
+      device_id: first.device_id,
+      pairing_credential: credential,
+      renewal_request_id: requestId,
+    };
+    const renewedResponse = await server.inject({ method: 'POST', url: '/api/v1/device-pairing/renew', payload: renewalPayload });
+    expect(renewedResponse.statusCode).toBe(HTTP_STATUS.CREATED);
+    const renewed = JSON.parse(renewedResponse.body);
+    expect(renewed.device_id).toBe(first.device_id);
+    expect(renewed.pairing_code).not.toBe(first.pairing_code);
+    expect(renewed.generation).toBe(2);
+
+    const repeatRenewal = await server.inject({ method: 'POST', url: '/api/v1/device-pairing/renew', payload: renewalPayload });
+    expect(JSON.parse(repeatRenewal.body).pairing_code).toBe(renewed.pairing_code);
+
+    const oldApproval = await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/confirm',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { pairing_code: first.pairing_code, name: 'Old approval' },
+    });
+    expect(oldApproval.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    const oldCompletion = await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/complete',
+      payload: { pairing_code: first.pairing_code, csr: 'invalid' },
+    });
+    expect(oldCompletion.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
+
+    const activeResponse = await server.inject({
+      method: 'GET', url: '/api/v1/device-pairing?status=active&limit=100',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    const active = JSON.parse(activeResponse.body).items.filter((item: any) => item.device_id === first.device_id);
+    expect(active).toHaveLength(1);
+    expect(active[0].pairing_code).toBe(renewed.pairing_code);
+    const historyResponse = await server.inject({
+      method: 'GET', url: '/api/v1/device-pairing?status=history&limit=100',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    const history = JSON.parse(historyResponse.body).items.filter((item: any) => item.device_id === first.device_id);
+    expect(history.some((item: any) => item.pairing_code === first.pairing_code && item.status === 'SUPERSEDED')).toBe(true);
+    expect(JSON.stringify(activeResponse.body)).not.toContain(credential);
+  });
+
+  it('rejects unauthorized renewal and serializes concurrent rotations', async () => {
+    const credential = randomBytes(32).toString('hex');
+    const initial = JSON.parse((await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/request', payload: { pairing_credential: credential },
+    })).body);
+    const wrongCredential = await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/renew',
+      payload: { device_id: initial.device_id, pairing_credential: randomBytes(32).toString('hex'), renewal_request_id: randomUUID() },
+    });
+    expect(wrongCredential.statusCode).toBe(HTTP_STATUS.UNAUTHORIZED);
+
+    const [a, b] = await Promise.all([randomUUID(), randomUUID()].map((renewal_request_id) =>
+      server.inject({
+        method: 'POST', url: '/api/v1/device-pairing/renew',
+        payload: { device_id: initial.device_id, pairing_credential: credential, renewal_request_id },
+      })
+    ));
+    expect(a.statusCode).toBe(HTTP_STATUS.CREATED);
+    expect(b.statusCode).toBe(HTTP_STATUS.CREATED);
+    const generations = [JSON.parse(a.body).generation, JSON.parse(b.body).generation].sort();
+    expect(generations).toEqual([2, 3]);
+    const rows = await getDatabase().select().from(schema.devicePairings)
+      .where(eq(schema.devicePairings.device_id, initial.device_id));
+    expect(rows.filter((row) => !row.used)).toHaveLength(1);
+    expect(rows.find((row) => !row.used)?.generation).toBe(3);
+  });
+
+  it('cancels an uncompleted approval on renewal and revokes renewal after pairing completes', async () => {
+    const credential = randomBytes(32).toString('hex');
+    const first = JSON.parse((await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/request', payload: { pairing_credential: credential },
+    })).body);
+    const approval = await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/confirm',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { pairing_code: first.pairing_code, name: 'Protected screen' },
+    });
+    expect(approval.statusCode).toBe(HTTP_STATUS.OK);
+    const renewalPayload = {
+      device_id: first.device_id, pairing_credential: credential, renewal_request_id: randomUUID(),
+    };
+    const renewed = JSON.parse((await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/renew', payload: renewalPayload,
+    })).body);
+    expect(renewed.pairing_code).not.toBe(first.pairing_code);
+    const state = JSON.parse((await server.inject({
+      method: 'GET', url: `/api/v1/device-pairing/status?device_id=${first.device_id}`,
+    })).body);
+    expect(state.active_pairing.pairing_code).toBe(renewed.pairing_code);
+    expect(state.active_pairing.confirmed).toBe(false);
+
+    const newApproval = await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/confirm',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { pairing_code: renewed.pairing_code, name: 'Protected screen' },
+    });
+    expect(newApproval.statusCode).toBe(HTTP_STATUS.OK);
+    const completion = await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/complete',
+      payload: { pairing_code: renewed.pairing_code, csr: buildCsrWithDeviceId(first.device_id) },
+    });
+    expect(completion.statusCode).toBe(HTTP_STATUS.CREATED);
+    const afterCompletion = await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/renew',
+      payload: { ...renewalPayload, renewal_request_id: randomUUID() },
+    });
+    expect(afterCompletion.statusCode).toBe(HTTP_STATUS.CONFLICT);
+  });
+
+  it('keeps approval and renewal ordered when they arrive concurrently', async () => {
+    const credential = randomBytes(32).toString('hex');
+    const first = JSON.parse((await server.inject({
+      method: 'POST', url: '/api/v1/device-pairing/request', payload: { pairing_credential: credential },
+    })).body);
+    const [approval, renewal] = await Promise.all([
+      server.inject({
+        method: 'POST', url: '/api/v1/device-pairing/confirm',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { pairing_code: first.pairing_code, name: 'Racing screen' },
+      }),
+      server.inject({
+        method: 'POST', url: '/api/v1/device-pairing/renew',
+        payload: { device_id: first.device_id, pairing_credential: credential, renewal_request_id: randomUUID() },
+      }),
+    ]);
+    expect([HTTP_STATUS.OK, HTTP_STATUS.CONFLICT]).toContain(approval.statusCode);
+    expect(renewal.statusCode).toBe(HTTP_STATUS.CREATED);
+    const latest = JSON.parse((await server.inject({
+      method: 'GET', url: `/api/v1/device-pairing/status?device_id=${first.device_id}`,
+    })).body);
+    expect(latest.active_pairing.pairing_code).toBe(JSON.parse(renewal.body).pairing_code);
+    expect(latest.active_pairing.confirmed).toBe(false);
+  });
+
   it('lists orphan device pairing state without exposing full credential material', async () => {
     const db = getDatabase();
     const orphanDeviceId = randomUUID();
@@ -175,17 +322,6 @@ describe('Device Pairing Routes', () => {
       used: false,
     });
 
-    await db.insert(schema.heartbeats).values({
-      screen_id: orphanDeviceId,
-      status: 'ONLINE',
-    });
-
-    await db.insert(schema.deviceCommands).values({
-      screen_id: orphanDeviceId,
-      type: 'REFRESH',
-      created_by: testUser.id,
-    });
-
     const response = await server.inject({
       method: 'GET',
       url: '/api/v1/device-pairing/orphans?limit=10',
@@ -198,8 +334,8 @@ describe('Device Pairing Routes', () => {
     const body = JSON.parse(response.body);
     expect(body.counts.device_certificates).toBeGreaterThanOrEqual(1);
     expect(body.counts.device_pairings).toBeGreaterThanOrEqual(1);
-    expect(body.counts.heartbeats).toBeGreaterThanOrEqual(1);
-    expect(body.counts.device_commands).toBeGreaterThanOrEqual(1);
+    // Current telemetry triggers prevent inserting heartbeat/command rows for
+    // an absent screen, so this fixture covers the reachable orphan types.
 
     const orphanCert = body.orphans.device_certificates.find((row: any) => row.screen_id === orphanDeviceId);
     expect(orphanCert).toBeTruthy();
@@ -357,6 +493,14 @@ describe('Device Pairing Routes', () => {
       .where(eq(schema.devicePairings.device_id, deviceId));
     expect(pairing?.used).toBe(true);
     expect(pairing?.used_at).toBeTruthy();
+    const historyResponse = await server.inject({
+      method: 'GET',
+      url: '/api/v1/device-pairing?status=history&limit=100',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(historyResponse.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(historyResponse.body).items.find((item: any) => item.device_id === deviceId)?.status)
+      .toBe('REVOKED');
 
     const statusResponse = await server.inject({
       method: 'GET',

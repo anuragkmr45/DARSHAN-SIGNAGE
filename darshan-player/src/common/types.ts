@@ -272,6 +272,8 @@ export interface PlayerStatus {
   deviceId?: string
   pairingCode?: string
   pairingExpiresAt?: string
+  pairingRemainingMs?: number
+  hostname?: string
   recoveryReason?: string
   hardRecoveryDeadlineAt?: string
   backendAvailable?: boolean
@@ -885,6 +887,7 @@ export interface ActivePairingStatus {
   expires_in?: number
   confirmed: boolean
   mode: ActivePairingMode
+  generation?: number | null
 }
 
 export interface PairingStatusResponse {
@@ -896,6 +899,7 @@ export interface PairingStatusResponse {
     status: string
   } | null
   active_pairing?: ActivePairingStatus | null
+  server_time?: string
 }
 
 export type BackendPairingValidationStatus =
@@ -984,6 +988,8 @@ export interface PairingCodeResponse {
   pairing_code: string
   expires_at: string
   expires_in: number
+  server_time?: string
+  generation?: number
   connected: boolean
   observed_ip?: string
   specs?: Record<string, unknown>
@@ -1018,6 +1024,8 @@ export interface DeviceStateRecord {
   deviceId?: string
   pairingCode?: string
   pairingExpiresAt?: string
+  pairingGeneration?: number
+  pendingRenewalRequestId?: string
   activePairingMode?: ActivePairingMode
   fingerprint?: string
   lastSuccessfulPairingAt?: string
