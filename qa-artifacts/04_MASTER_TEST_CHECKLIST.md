@@ -1,9 +1,12 @@
 # Master Human QA Checklist
 
-Baseline: uncommitted `release-01` working tree based on `d8281db`. Playback
-recovery developer evidence is in
-`evidence/playback-recovery-developer-verification-2026-10-21.md`; two Linux
-Electron developer runs passed, while human QA fields remain unexecuted.
+Baseline: beta6 observability/delivery candidate
+`codex/dashboard-observability-report-audit-20261102` at developer-evidence tip
+`6a34b2f`. Playback/recovery evidence is in
+`evidence/playback-recovery-developer-verification-2026-10-21.md`; beta6
+delivery/availability/observability evidence is in
+`evidence/dashboard-observability-report-developer-verification-2026-11-02.md`.
+Focused developer runs passed, while human QA fields remain unexecuted.
 Execute remaining work only on authorized isolated test environments. Each checkbox names detailed rows in
 `05_TEST_CASES.csv`; QA records actual status, evidence and defects there.
 
@@ -54,7 +57,7 @@ Execute remaining work only on authorized isolated test environments. Each check
 - [ ] `DATA-04`, `PLAYER-07`: actual PoP duration, deduplication, 100-event/512-KiB memory and 32-file/derived-byte spool budgets, discard counters, replay and media-purge preservation. The code does not guarantee lossless offline evidence; acceptable loss remains BQ-013.
 - [ ] `OBS-03`: selected document page remains intact through live telemetry, offline spool/replay, idempotency, PoP database/list/CMS and CSV export; non-document/legacy rows remain compatible.
 - [ ] `OBS-04`: internal native loop cycles retain one active occurrence identity, failures and boundary reasons are diagnosable once without signed URL/secret leakage, and PoP meaning is explicitly characterized before acceptance.
-- [ ] `FUN-11`, `UI-04`: current online fraction versus historical uptime, null/zero denominator, PoP ended_at status, UTC/database/browser timezone differences, filters and PDF export. Reporting meaning/day remains BQ-014.
+- [ ] `FUN-11`, `UI-04`: verify server-received availability end to end: ONLINE at receipt, estimated outage at last receipt +90 seconds or immediate explicit OFFLINE/ERROR, recovery at the next receipt, backend/pre-first-heartbeat UNKNOWN, Never seen, known-time denominator and Asia/Kolkata daily buckets. Keep the legacy current ACTIVE fraction visibly separate. Verify assigned, exact publish/snapshot applied, fresh reported playback and publish-linked renderer PoP as distinct evidence levels; no UI/export may claim physical-display proof.
 - [ ] `UI-02..03`: route/action visibility, direct URL permission enforcement, keyboard/focus/labels/errors and assistive technology against the BQ-016 target.
 
 ## Data, Operations And Release
@@ -65,7 +68,7 @@ Execute remaining work only on authorized isolated test environments. Each check
 - [ ] `CONC-07`: deletion/transfer/disablement/demotion races with REST/session/socket reconnect, ordinary ownership-sensitive writes, notification creation, multipart/legacy upload create/activate/finalize, object cleanup failure/retry and every schedule lifecycle state. Exactly one legal commit order wins, no stale authority or incomplete Media becomes effective, retained work stays with its stable owner, and cleanup converges without account reactivation.
 - [ ] `DEP-01..07`: signed role/transfer verification, malicious archive rejection, five-VM first install, resumability, source-free content, compatibility, backend-only update, legacy adoption, low disk, TLS and operational acceptance.
 - [ ] `BKP-01..03`: actual full backup, contract buckets including logs-auth, independent clean restore, hashes, signed evidence, archive safety, failed migration recovery and old/new schema compatibility. Measure BQ-018 RPO ≤24 hours, RTO ≤4 hours and maintenance ≤2 hours; broader data-class retention remains BQ-015.
-- [ ] `OBS-01..02`: liveness versus readiness, worker heartbeat, dependency failures, metrics/auth/TLS/alert evaluation and log redaction.
+- [ ] `OBS-01..02`: liveness versus readiness, worker heartbeat, dependency failures, metrics/auth/TLS/alert evaluation and log redaction. Populate site-local player file-discovery with both players, enforce mTLS and the observability-only port-3300 firewall, prove Prometheus target state, machine/player telemetry, alert transitions and CMS `/grafana/` health/login/drill-down links. Empty or failed inventories must show unavailable/down truthfully, never fabricated fleet totals.
 - [ ] `REL-01..02`: Valkey/WSS outage fallback, API/worker outage, retry/restart, idempotent processing and convergence without silently using stale content.
 - [ ] `PERF-01..04`, `PERF-06`: execute the BQ-017 gate—500 connected players, 40 CMS users, five concurrent 500 MiB uploads and a five-minute 1,000-player spike—plus saturation/stress, reconnect/emergency, multi-day soak and long-running video loops on isolated representative hardware. No representative five-VM performance execution has occurred.
 - [ ] `BKP-01`, `PERF-04`: compare actual archive/retention behavior with required data-class lifetimes. A configured retention value is not evidence that pruning runs. BQ-015/020 remain business inputs.

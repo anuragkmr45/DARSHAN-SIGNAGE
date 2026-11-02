@@ -9,9 +9,17 @@ image (BR-102/DEF-04/R-38). Physical-player security recovery,
 all-player deployment verification, capacity, soak and final release evidence
 remain QA/release gates.
 
-Repository baseline: uncommitted `release-01` working tree based on `d8281db`.
-QA must receive a fixed commit and build hashes before execution evidence is
-used for release approval. Earlier feature evidence remains separately dated.
+Current observability/delivery candidate: branch
+`codex/dashboard-observability-report-audit-20261102`, implementation and
+developer-evidence tip `6a34b2f`, packaged as signed release
+`2026-11-02-beta6`. The beta6 run passed focused server/CMS/player suites, a
+source-free local deployment, and a packaged Linux player publish/apply/render/
+proof-of-play journey. It did not execute the five-VM site, real Prometheus
+player targets, physical displays, Windows, representative load, or production
+restore gates. Exact results and checksums are in
+`evidence/dashboard-observability-report-developer-verification-2026-11-02.md`.
+QA must use the eventual merged commit and rebuilt artifact hashes; local
+developer evidence is not independent release approval.
 
 A disposable local API/CMS/dependency stack, browser flow, real Linux Electron player, freshly migrated test database, focused DB-backed suite and Linux packaging command were executed on 2026-10-15 for the document-page and video-loop scope. Results and screenshots are in `evidence/runtime-2026-10-15/runtime-validation.md`. This targeted run did not execute the full product checklist, Windows/physical-hardware matrix, long soak, security assessment, penetration test, backup/restore rehearsal or production deployment.
 
@@ -62,6 +70,7 @@ must not be read as runtime completion or independent QA approval.
 17. [Authorization and playback developer-QA closure](evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md): final multi-loop server/database/API/browser/player results, defect corrections, catalogue integrity and explicit independent-QA gaps.
 18. [Requirements 1-18 live runtime validation](evidence/runtime-2026-10-17/runtime-validation.md): exact built-API/worker/Chromium observations, machine-readable results, cleanup and the requirement 18 release blocker.
 19. [Playback/recovery developer verification](evidence/playback-recovery-developer-verification-2026-10-21.md): requirements 19-24 implementation, automated results, two Linux Electron runs, selected screenshots and remaining independent-QA gates.
+20. [Player delivery, availability and observability developer verification](evidence/dashboard-observability-report-developer-verification-2026-11-02.md): beta6 automated, source-free and packaged-player evidence plus the exact five-VM and physical-player gates still open.
 
 The inventory is supporting evidence, not a completed authorization audit. Source references are repository-relative. Only results explicitly linked to the dated runtime report are current execution evidence; test-file presence and historical QA reports do not mean tests currently pass.
 
@@ -74,10 +83,10 @@ The 2026-09-25 answer confirms administrator self-approval and direct publishing
 | File | Contents | Current status |
 | --- | --- | --- |
 | `00_SYSTEM_UNDERSTANDING.md` | System understanding and 29 use cases | Provisional |
-| `01_BUSINESS_RULES.md` | Classified rules and business sources | Latest playback/recovery decisions are BR-103..107; all prior rules retain source review |
+| `01_BUSINESS_RULES.md` | Classified rules and business sources | BQ-014 availability/evidence semantics and BR-103..107 playback/recovery decisions are reconciled; all human QA gates remain explicit |
 | `02_BUSINESS_QUESTIONS.md` | Questions, answers, affected expectations | Source answers complete; site and business inputs still TBD |
 | `03_RISK_REGISTER.csv` | 42 scored risks and risk-to-test links | R-38 remains an observed release blocker; R-39..42 cover requirements 20-24 |
-| `04_MASTER_TEST_CHECKLIST.md` | Product and cross-cutting testing checklist | Provisional |
+| `04_MASTER_TEST_CHECKLIST.md` | Product and cross-cutting testing checklist | Reconciled for beta6 delivery, availability, player scrape and Grafana paths; human execution remains open |
 | `05_TEST_CASES.csv` | 116 detailed, human-executable cases | All 116 have Expected Result; 29 are Partially Tested from dated developer evidence and 87 are Not Tested |
 | `06_TRACEABILITY_MATRIX.csv` | 140 requirement/use-case-to-test/risk rows | Latest playback/recovery rules, cases and risks are explicitly traced |
 | `07_SECURITY_CHECKLIST.md` | Authorized security verification plan, no execution | Provisional |
@@ -105,7 +114,7 @@ Priority distribution: 84 P0, 31 P1 and 1 P2. Twenty-nine cases are `Partially T
 
 ## How QA Uses This Package
 
-1. Open `05_TEST_CASES.csv` and filter `Status`. For this delta start with `API-06`, `UI-05`, `PLAYER-03..04`, `PLAYER-10..16`, `COMP-04` and `OBS-04`, then continue the remaining `Not Tested` rows. Re-run every `Partially Tested` row on the approved target matrix.
+1. Open `05_TEST_CASES.csv` and filter `Status`. For the beta6 delta start with `FUN-11`, `UI-04`, `OBS-02`, `PLAYER-07`, then run the delivery/playback paths in `FUN-03..05` and the relevant player cases. Retain `API-06`, `UI-05`, `PLAYER-03..04`, `PLAYER-10..16`, `COMP-04` and `OBS-04` for the earlier playback/recovery delta, then continue every remaining `Not Tested` row. Re-run every `Partially Tested` row on the approved target matrix.
 2. For each row, prepare the stated preconditions/test data, perform `Steps`, and compare the observation with `Expected Result`. The expected-result field is populated for all 116 cases.
 3. Write what actually happened in `Actual Result`, set `Status`, link sanitized screenshots/logs/queries in `Execution Evidence`, and add a `Defect ID` when observed behavior differs.
 4. Use `10_SMOKE_REGRESSION_UAT.md` to choose the smoke/regression/UAT order; use `06_TRACEABILITY_MATRIX.csv` to see which business rule and risk each case covers.
@@ -115,4 +124,4 @@ Priority distribution: 84 P0, 31 P1 and 1 P2. Twenty-nine cases are `Partially T
 
 The tracked-file index was obtained with Git. TypeScript syntax trees were read without executing application modules to enumerate explicit `fastify` route declarations, resolve their `apiEndpoints` strings, and enumerate CMS routes and Drizzle tables/enums. Existing tests were inventoried by tracked filename. Detailed analysis used targeted reads across handlers, policy helpers, repositories, services, schemas, migrations, renderer/main-process code, configuration loaders, release scripts, representative tests, and contracts.
 
-The inventory excludes generated framework routes from its route count, and excludes SQL-only and pg-boss tables from its Drizzle-table count. It was refreshed for the document-page and video-loop source/test deltas, but is not a fresh semantic audit of every unrelated route. Vendored dependencies, generated builds, binary installers, local output/log directories, private configuration and credentials were not audited.
+The inventory excludes generated framework routes from its route count, and excludes SQL-only and pg-boss tables from its Drizzle-table count. The semantic QA documents were refreshed for the document/video and beta6 delivery/availability/observability deltas, but this is not a new audit of every unrelated route. Vendored dependencies, generated builds, binary installers, local output/log directories, private configuration and credentials were not audited.

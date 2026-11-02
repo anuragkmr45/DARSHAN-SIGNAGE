@@ -1,5 +1,14 @@
 # Pre-QA Development Completion Plan
 
+> **Beta6 delivery/availability/observability checkpoint — 2026-11-02:** exact
+> publish/snapshot acknowledgement, renderer-linked PoP, server-received
+> availability, truthful observability summaries, player mTLS scrape support
+> and Grafana proxy fixes have focused developer and packaged Linux AppImage
+> evidence through `6a34b2f`. Exact results and the five-VM/physical-player
+> boundary are in
+> `evidence/dashboard-observability-report-developer-verification-2026-11-02.md`.
+> This checkpoint extends rather than erases the historical plan below.
+
 > **Requirements 19-24 checkpoint — 2026-10-21:** PDF invalid-page,
 > corrupt-video retry/boundary, universal schedule hard-stop and secure recovery
 > implementation plus automated component gates are complete in the working

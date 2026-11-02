@@ -1,6 +1,6 @@
 # Smoke, Regression And UAT Selection
 
-These suites select case IDs from `05_TEST_CASES.csv`; they do not duplicate steps. Targeted PDF-page/video-loop paths were partially executed on a disposable Linux setup on 2026-10-15 and are linked from the CSV and `evidence/runtime-2026-10-15/runtime-validation.md`. This does not mean the complete smoke, regression or UAT suites passed. Run remaining cases on the approved setup and record screenshots/logs/results in the CSV or linked test-management record.
+These suites select case IDs from `05_TEST_CASES.csv`; they do not duplicate steps. Targeted PDF-page/video-loop paths were partially executed on a disposable Linux setup on 2026-10-15 and are linked from the CSV and `evidence/runtime-2026-10-15/runtime-validation.md`. Beta6 delivery/availability/observability developer evidence is in `evidence/dashboard-observability-report-developer-verification-2026-11-02.md`. Neither record means the complete smoke, regression or UAT suites passed. Run remaining cases on the approved setup and record screenshots/logs/results in the CSV or linked test-management record.
 
 ## Post-Deployment Smoke
 
@@ -22,7 +22,7 @@ Sequence after a fresh install or planned update:
 14. `UI-06`, `API-07`, `PLAYER-11..15`, `OBS-04`: keep a selected page-2 PDF beside a short Loop On video for three cycles, then test corrupt video before valid content and a corrupt only-item frame. Expect original-boundary advance, one bounded 1–30 second retry, authority-change cancellation, and display/audio clear within 250 ms of schedule end. Repeat the critical path once.
 15. `PLAYER-03..04`, `PLAYER-16`: after an authenticated success disconnect the backend; expect playback at 119 seconds and security lock at 120 seconds within one-second observation tolerance. While locked change server authority, restore reachability, and verify one ordered identity/fresh-snapshot/content/authority recovery; no heartbeat unlock or stale replay. Confirm only media cache was purged.
 16. `FUN-09`, `FUN-10`: send a private test message and verify notification/read state.
-17. `FUN-11`, `OBS-02`: verify report endpoint and authenticated metrics scrape/alert pipeline access.
+17. `FUN-11`, `UI-04`, `OBS-02`, `PLAYER-07`: verify known-time availability, estimated outage, backend unknown, Never seen and IST buckets; publish one target and distinguish assigned, exact application, fresh reported playback and renderer PoP. Verify authenticated machine/player scrapes, truthful target/fleet totals, `/grafana/` health/login/drill-down and one controlled alert transition.
 
 Smoke stops on failed signing/trust, data integrity, login, worker readiness, publish, player visibility, or emergency takeover. Report the specific failed ID; no pass by inference from a healthy container alone.
 
@@ -50,7 +50,7 @@ Always run all `P0` cases after a release touching shared API, schema, permissio
 | Emergency delegate | Open CMS control, select screens, trigger and clear | `AUTHZ-03`, `FUN-07`, `PLAYER-03` | Selected-screen delegation and emergency stop on lock |
 | Viewer/field operator | Pair updated player, verify capability, validate fullscreen/portrait, schedule/default fallback, PDF errors, video failure/retry/boundary and locked recovery | `PLAYER-01..05`, `PLAYER-10..16`, `COMP-01..02`, `FUN-06`, `DEF-04` | Correct output, exact Unavailable state, original-boundary advance, bounded retry, 250 ms hard stop, selected PDF page, exact 120-second lock, targeted purge and fresh-authority recovery |
 | Web content administrator | Register approved HTTP/HTTPS pages, reject login-required/escaping redirects, refresh preview and configure overlapping-group priority | `WEB-01..06`, `DEF-01..03`, `FUN-08`, `PLAYER-09` | Clear policy errors, latest successful fallback, deterministic priority and recoverable stale-save workflow |
-| Communications/reporting user | Chat, notifications, PoP and report export | `FUN-09..11`, `UI-04`, `PLAYER-07` | Private membership, counts, evidence loss and report meaning TBD |
+| Communications/reporting user | Chat, notifications, availability, delivery evidence, PoP and report export | `FUN-09..11`, `UI-04`, `PLAYER-07`, `OBS-02` | Private membership; known-time uptime/unknown; exact application versus reported playback versus PoP; bounded evidence loss; IST availability day; no physical-display claim |
 | Release/recovery operator | Fresh signed role install, backend-only update, backup and isolated restore | `DEP-01..07`, `BKP-01..03` | Compatible releases, complete data, no silent schema rollback, RPO/RTO TBD |
 
 The general Requests workboard is disabled; `AUTHZ-06` verifies absence and confirms Schedule Requests remain usable. SSO login, business API-key authentication and automatic webhook delivery are not UAT requirements for this release; management screens remain in `FUN-12`.

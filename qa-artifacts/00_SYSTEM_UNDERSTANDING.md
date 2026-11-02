@@ -2,28 +2,35 @@
 
 Status: PRE-QA DEVELOPMENT VERIFICATION IN PROGRESS, NOT RELEASE-APPROVED. The
 requirements 19-24 playback/recovery source, automation and two current Linux
-Electron journeys are developer-verified.
+Electron journeys are developer-verified. The beta6 player-delivery,
+availability and observability candidate also passed focused automation,
+source-free package acceptance and one packaged Linux AppImage journey.
 The required no-Schedule/no-default company fallback image also remains a
 separate blocker. Real network/capture/object-store failure, physical
-platforms, security, capacity and soak remain QA/release gates.
+platforms, the five-VM/player observability network, security, capacity,
+restore and soak remain QA/release gates.
 
 ## Baseline And Scope
 
 - Product: DARSHAN digital signage, CMS administration, and Electron playback.
-- Branch/commit: uncommitted `release-01` working tree based on `d8281db`.
-- Source/runtime evidence refreshed: 2026-10-21. PDF/video targeted Linux
-  runtime evidence remains dated 2026-10-15. These describe disposable
-  developer environments, not a production site or independent QA result.
-- 1,323 files are tracked at the base working tree; the new migration and three
-  new test files are currently intended untracked feature files. Freeze all of
-  them in one reviewed release-candidate commit before QA.
-- 239 explicit Fastify route registrations, all resolved to paths by static parsing. Some registrations are configuration-dependent, including `/metrics`.
-- 29 CMS route declarations, including shell/catch-all and legacy route aliases. This is not a count of 29 distinct product screens.
-- 69 `pgTable` declarations and 15 enums in `darshan-server/src/db/schema.ts`;
-  49 workspace SQL migrations through `0047`. The SQL-only
+- Current delta: `codex/dashboard-observability-report-audit-20261102`; beta6
+  implementation/developer-evidence tip `6a34b2f`.
+- Source/runtime evidence refreshed: 2026-11-02 for delivery, availability and
+  observability. PDF/video targeted Linux runtime evidence remains separately
+  dated. These describe disposable developer environments, not a production
+  site or independent QA result.
+- 1,393 files are tracked at this candidate. Freeze the final reviewed merge
+  commit and rebuilt artifact hashes before QA.
+- The explicit route and CMS declaration counts in
+  `evidence/repository-inventory.json` are a historical supporting inventory;
+  use the current route registrations for execution and regenerate that broad
+  inventory before treating its totals as release evidence.
+- 71 `pgTable` declarations and 15 enums are present in
+  `darshan-server/src/db/schema.ts`; workspace SQL migrations run through
+  `0053`. The SQL-only
   `darshan_deployment_runs` table and pg-boss internals are additional data
   surfaces.
-- 209 workspace TypeScript/JavaScript `*.test`/`*.spec` files. Targeted
+- 219 workspace TypeScript/JavaScript `*.test`/`*.spec` files. Targeted
   browser/Linux Electron/DB execution is recorded in dated evidence, including
   `evidence/runtime-2026-10-16/authorization-end-to-end-devqa.md`. Test-file
   presence alone is not proof.

@@ -14,6 +14,10 @@ QA, multi-process live sockets and the remaining release matrix are still
 unverified. The 2026-10-21 playback/recovery implementation and two current
 Linux Electron passes are recorded in
 `evidence/playback-recovery-developer-verification-2026-10-21.md`.
+The 2026-11-02 BQ-014 availability/delivery decision and beta6 developer
+evidence are recorded in
+`evidence/dashboard-observability-report-developer-verification-2026-11-02.md`;
+five-VM, real-player scrape and physical-display acceptance remain open.
 
 ## Batch 1: Core Behavior And Scope
 

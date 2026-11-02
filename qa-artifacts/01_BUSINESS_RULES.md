@@ -2,14 +2,17 @@
 
 Status: PRE-QA DEVELOPMENT VERIFICATION IN PROGRESS, NOT RELEASE-APPROVED. The
 document/video/boundary/security-recovery upgrade is implemented in the
-working tree based on `release-01` commit `d8281db`. Focused and component
-automated suites/builds and two Linux Electron runtime passes have developer
-evidence; target-network, physical-player, capacity and soak execution remain
-QA/release gates.
+release lineage. The beta6 delivery/availability/observability delta is on
+`codex/dashboard-observability-report-audit-20261102`, with implementation and
+developer evidence through `6a34b2f`. Focused/component suites, source-free
+package acceptance and Linux Electron runtime passes have developer evidence;
+the five-VM target network, real player scrapes, physical players, capacity,
+restore and soak remain QA/release gates.
 
-Baseline: uncommitted `release-01` working tree based on `d8281db`. A fixed
-release-candidate commit and build hashes are still required before QA signs
-off. Older rules retain their historical evidence anchors.
+Baseline for the beta6 delta: developer-evidence tip `6a34b2f` and the dated
+verification record. A merged release-candidate commit and rebuilt artifact
+hashes are still required before QA signs off. Older rules retain their
+historical evidence anchors.
 
 ## Classification
 
@@ -115,7 +118,7 @@ Evidence references use repository-relative paths and symbols where helpful. `S`
 | BR-035 | Chat has DM/closed-group/open-forum types, per-conversation membership/moderation, archive read-only rules, transactional sequence allocation, message revisions, pins/bookmarks/attachments. Global admin override applies to non-DM conversations. | Chat participants/admins; C/S | `darshan-server/src/routes/chat.ts`; `darshan-server/src/chat/guard.ts`; `darshan-server/src/db/repositories/chat.ts::canAccessConversation`, `sendMessageTx`, `markRead` | Private data exposure, lost/reordered messages, incorrect moderation |
 | BR-036 | Chat read/delivered cursors use monotonic updates; notification rows/counters and browser realtime updates are separate data surfaces that need reconciliation. | Users; S/C | `darshan-server/src/db/repositories/chat.ts::markRead`; `notification-counter.ts`; `darshan-server/src/routes/notifications.ts`; `darshan-server/src/realtime/notifications-namespace.ts` | Negative/stale unread counts or notifications delivered to wrong user |
 | BR-037 | General request APIs authenticate but traced handlers do not apply Request ability/owner checks matching the CMS guard. List schema accepts OPEN/IN_PROGRESS/CLOSED, while request_status enum instead includes approval states and COMPLETED. | Workboard users; S/C/DB | `darshan-server/src/routes/requests.ts`; `darshan-server/src/db/schema.ts::requestStatusEnum`; `darshan-cms/src/AuthenticatedAppShell.tsx`; `darshan-cms/src/pages/Requests.tsx` | Authorization or workflow expectations conflict; BQ-006 |
-| BR-038 | Uptime KPI is current ACTIVE/(ACTIVE+OFFLINE)*100 rounded to two decimals or null on zero denominator, not elapsed availability. PoP COMPLETED means non-null ended_at; day aggregation uses database date(created_at) without explicit site timezone. PDF dates are UTC while CMS audit dates use browser locale. | Reporting users; S/C | `darshan-server/src/routes/reports.ts:307`; `darshan-server/src/routes/proof-of-play.ts:24`; `darshan-cms/src/pages/Reports.tsx:46` | Misleading operational or contractual reporting; BQ-013/014 business meaning TBD |
+| BR-038 | Historical availability is reconstructed from server-received heartbeats: ONLINE begins at receipt, estimated OFFLINE begins after 90 seconds without a heartbeat (or immediately on explicit OFFLINE/ERROR), and the next ONLINE receipt closes it. Backend-readiness gaps and pre-first-heartbeat time are UNKNOWN. Uptime is online/(online+estimated offline), UNKNOWN is shown separately, and availability day buckets use Asia/Kolkata. The compatibility `screen_uptime_percent` remains only the current ACTIVE/(ACTIVE+OFFLINE) fraction. Delivery SUCCESS requires the exact applied publish and snapshot IDs; publish-linked PoP is separate player-reported render-start evidence, not proof of physical pixels. | Reporting users; S/C/P | `darshan-server/src/services/screen-availability.ts`; `darshan-server/src/services/publish-delivery-service.ts`; `darshan-server/src/routes/reports.ts`; `darshan-cms/src/pages/Reports.tsx`; `evidence/dashboard-observability-report-developer-verification-2026-11-02.md` | Legacy/current-state and historical metrics or assigned/applied/playback/PoP evidence may be conflated; BQ-013/014 |
 | BR-039 | API-key CRUD/rotation/revocation, persisted SSO config/deactivation, webhook subscription CRUD and explicit test delivery exist. No working SSO login callback, API-key auth consumer or automatic business-event dispatcher was identified in the traced server call sites. | Integration admins; S/C | `darshan-server/src/routes/api-keys.ts`, `sso-config.ts`, `webhooks.ts`; `darshan-server/src/db/repositories/api-key.ts`; `darshan-server/src/server/index.ts`; matching CMS pages | Configured appearance mistaken for delivered integration; BQ-005 |
 | BR-040 | Production API and worker initialize shared dependencies separately. Readiness checks DB, migration ledger, bootstrap admin, required buckets, configured Valkey and a fresh same-release worker heartbeat. | Ops; S/worker/dependencies | `darshan-server/src/runtime/bootstrap.ts`; `darshan-server/src/runtime/readiness.ts::collectReadiness`; `darshan-server/src/jobs/index.ts` | Listening API reported as a fully working site while jobs fail |
 | BR-041 | Source-free config enforces a production profile distinct from dev/QA: TLS, signing/provenance, runtime resource policy, fixed upload cap, webpage policy and controlled legacy-auth window. | Release ops; bundle/S/C/P | `scripts/bundle/production-bundle-config.mjs`; `build-production-bundle.mjs`; server/player config loaders | Dev-only behavior silently used as production acceptance |
@@ -150,6 +153,7 @@ Evidence references use repository-relative paths and symbols where helpful. `S`
 | --- | --- | --- | --- | --- |
 | BR-064 | Release workload is 500 connected players, 40 active CMS users, five concurrent 500 MiB uploads and a five-minute 1,000-player spike. API p95 ≤1 second, p99 ≤2 seconds, non-chaos errors <1%, cached emergency display ≤3 seconds on healthy WebSocket and ≤7 seconds on fallback, lossless command fanout, backlog recovery, no normal-load PoP discard and sustained CPU/memory <80% are gates. | BQ-017 release decision and `evidence/groups-1-4-release-gates-2026-11-01.md`; representative five-VM measurement is Not Tested | Ops/site users; all roles | Unmeasured capacity blocks release |
 | BR-065 | Measured RPO ≤24 hours, RTO ≤4 hours and planned maintenance ≤2 hours are gates. Rehearse an isolated production-sized PostgreSQL/MinIO restore before every release and monthly. Same-Data-VM backup cannot meet RPO for VM/disk loss and needs explicit accepted-risk disposition. | BQ-018 release decision and `evidence/groups-1-4-release-gates-2026-11-01.md`; production-sized restore is Not Tested | Ops/DBA/recovery; all roles | Missing/failed/late recovery evidence blocks release |
+| BR-061 | Availability uses server-received heartbeat intervals with a 90-second grace period, backend-unknown separation, known-time uptime denominator, Never-seen state and Asia/Kolkata daily availability buckets. Assigned schedules, exact publish application, fresh reported playback and publish-linked PoP are distinct evidence levels. | BQ-014 release decision, 2026-11-02; BR-038; focused developer verification passed, five-VM/physical verification is Not Tested | Reporting users/operations; S/C/P/observability | Misleading availability or playback claim; R-10 |
 
 ## Rules Requiring Business Confirmation
 
@@ -157,7 +161,6 @@ Evidence references use repository-relative paths and symbols where helpful. `S`
 | --- | --- | --- | --- | --- |
 | BR-052 | Remaining content/directory sharing boundaries, last-active-SUPER_ADMIN demotion/disablement safeguards and any delegation scope beyond explicitly selected screens. All-user-role management, protected deletion, screen-permission delegation and fixed built-ins are confirmed separately. | BR-006..009, BR-025, BR-047..049, BR-067, BR-068, BR-070, BR-071 | All roles; S/C/realtime | Authorization/privacy; BQ-002/003 edge policies, BQ-007 |
 | BR-060 | PoP durability/loss tolerance and evidence completeness requirement | BR-005,034,038 | Auditor/ops; P/S | Evidence loss; BQ-013 |
-| BR-061 | Meaning of uptime/report counts and reporting-day timezone | BR-038 | Reporting users; S/C | Wrong calculations; BQ-014 |
 | BR-062 | Retention periods and deletion/restorability expectations by data class | BR-015,035,045 | Data owner/support; DB/S3/P | Irrecoverable loss/privacy violation; BQ-015,020 |
 | BR-063 | Supported browser, OS/package, display/GPU and accessibility acceptance matrix | BR-017,018,032,033; package and test manifests | Operators/viewers; C/P | Untested platform advertised as supported; BQ-016 |
 | BR-066 | Approved network exposure, outbound integrations and certificate/trust boundary | BR-018,028,041,046,047 | Security/ops; all roles | Wrong isolation/security acceptance; BQ-019 |

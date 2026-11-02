@@ -1,13 +1,16 @@
 # Code-Derived Expectations For QA
 
-Baseline: uncommitted `release-01` working tree based on `d8281db`,
-source-reviewed 2026-10-17. These are code expectations, **not independent QA
-proof**. The webpage/default delta is reviewed in
+Baseline: beta6 delivery/availability/observability developer-evidence tip
+`6a34b2f`, source-reviewed through 2026-11-02. These are code expectations,
+**not independent QA proof**. The webpage/default delta is reviewed in
 `evidence/webpage-default-priority-review.md`; developer commands are in
 `evidence/webpage-default-priority-developer-verification-2026-10-17.md`.
 The current playback/recovery delta is recorded in
 `evidence/playback-recovery-developer-verification-2026-10-21.md`; two current
 Linux Electron runtime passes are recorded and independent QA remains pending.
+The current beta6 delta is recorded in
+`evidence/dashboard-observability-report-developer-verification-2026-11-02.md`;
+its five-VM, real-player and physical-display gates remain pending.
 Catalogue cases remain `Not Tested` or `Partially Tested` until QA records its
 own result.
 

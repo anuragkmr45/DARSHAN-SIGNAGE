@@ -9,6 +9,12 @@ automated evidence in
 do not replace independent QA, platform, security, recovery, soak or deployment
 gates.
 
+The beta6 delivery, availability, observability and packaged-player record is
+`evidence/dashboard-observability-report-developer-verification-2026-11-02.md`.
+It proves the bounded developer scenarios listed there, not the real five-VM
+network, real player scrape inventory, physical displays, capacity or restore
+gates.
+
 The webpage/default-priority developer review and exact bounded commands are in
 `evidence/webpage-default-priority-review.md` and
 `evidence/webpage-default-priority-developer-verification-2026-10-17.md`.
@@ -72,6 +78,8 @@ developer evidence, not an independent QA or release pass.
 - [ ] Delegated emergencies are accessible in CMS and constrained to authorized direct Screens for trigger/status/history/clear; global Emergency managers control group/global targets; READY/readable media and transaction-time recheck pass. An exact 120-second authenticated-backend outage still stops every authority and erases only media cache. `AUTHZ-03`, `PLAYER-03..04`, `PLAYER-16`.
 - [ ] Migration `0044` is rehearsed; the document page-count backfill dry-run is reviewed before apply; malformed/encrypted failures are resolved; rollback retains nullable compatibility columns until affected snapshots/PoP age out. `DATA-05`, `FILE-06`.
 - [ ] Media upload, conversion, selected-page CMS preview, immutable snapshot, capable-player playback, page-aware PoP, webpage preview, chat and reports pass smoke/UAT on actual target hardware. `10_SMOKE_REGRESSION_UAT.md`.
+- [ ] Historical availability and delivery evidence pass on the frozen candidate: 90-second server-received outage threshold, immediate explicit OFFLINE/ERROR, next-heartbeat recovery, backend/pre-first-heartbeat UNKNOWN, Never seen, known-time denominator and Asia/Kolkata buckets. Assigned, exact publish/snapshot application, fresh reported playback and publish-linked renderer PoP remain separate; no surface claims human-visible proof. `FUN-11`, `UI-04`, `PLAYER-07`; R-10.
+- [ ] Observability uses the approved site-local player inventory and PKI. Both real players scrape over mTLS from the observability VM only, machine/player target and fleet totals match Prometheus, CMS `/grafana/` health/login/drill-down works, and empty/down/unreachable states remain truthful. `OBS-01..02`, `DEP-06`; R-10/R-20.
 - [ ] Video-only loop selection survives CMS draft/review/request and API/snapshot round trips; a short video completes at least three native cycles on one mounted occurrence, coexists with the selected PDF page, and stops at every hard boundary. Corrupt multi-item video shows `Unavailable` until its original boundary; a failed only-item frame retries once per clamped 1–30 second interval; no hidden audio, timer storm, stale callback or resource growth occurs. `UI-06`, `API-07`, `PLAYER-11..15`, `OBS-04`, `PERF-06`; R-24/R-40/R-41.
 - [ ] Every target player is updated, has connected once and has advertised `pdf_page_selection_v1`; schedules using page >1 are blocked until that prerequisite is complete. Page 1 remains compatible while capability data is absent, but mixed-version playback is not an accepted release mode. `API-06`, `COMP-04`; R-22.
 - [ ] Post-publish PDF page mismatch and CMS stale-page restoration meet BR-103: CMS preserves/blocks the invalid value; player shows exact `Unavailable`, emits safe requested/actual context, and never renders a substitute page. `UI-05`, `PLAYER-10`; R-39.
@@ -81,7 +89,7 @@ developer evidence, not an independent QA or release pass.
 - [ ] Default priority `0..100`, deterministic tie-break, direct-Screen precedence, legacy zero, edit preservation and two-writer stale conflict pass on the frozen database/CMS/player build. `FUN-06`, `DEF-01..03`; R-37.
 - [ ] The approved standard company fallback asset is versioned in the release, resolves when no Schedule/default is eligible, renders online/offline on packaged physical players and survives restart/cache damage as specified. `DEF-04`, `PLAYER-05`; R-38.
 - [ ] General Requests old URLs/OpenAPI/CMS/client/report/webhook surfaces are absent and legacy rows are not exposed; Schedule Requests still pass smoke. `AUTHZ-06`; R-18/R-34.
-- [ ] Human policies remaining for BQ-013/014/015/016/017/018/019 and BQ-020 Media/chat recycle behavior are answered or accepted as explicit limits. BQ-011/012 are closed by BR-097..101. A remaining TBD affecting recovery, capacity or critical playback cannot be silently converted to Pass.
+- [ ] Human policies remaining for BQ-013/015/016/017/018/019 and BQ-020 Media/chat recycle behavior are answered or accepted as explicit limits. BQ-014 availability/delivery semantics are closed by BR-038/061 but still require the execution evidence above; BQ-011/012 are closed by BR-097..101. A remaining TBD affecting recovery, capacity or critical playback cannot be silently converted to Pass.
 
 ## Decision Record
 
