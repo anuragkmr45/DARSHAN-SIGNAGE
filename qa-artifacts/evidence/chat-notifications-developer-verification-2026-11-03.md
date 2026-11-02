@@ -39,7 +39,7 @@ Ran the built CMS in three independent browser origins against the isolated test
 - Mention text in the chat sidebar now resolves to a readable name. New notification snippets use `@you` for the recipient, and the CMS renders older stored UUID snippets as `@you` or `@User`. A self-mention is displayed as text rather than a non-working "Open DM" button.
 - Repeated forum *titles* in the QA sidebar were investigated: the isolated database contains five separate records with each title, created by repeated test fixtures; this was not duplicate rendering of a single conversation ID.
 
-These checks support BR-035/036 and FUN-09/10 for the tested local cases. They do not establish production, separate-installation organization isolation, a full moderator/member-removal journey, network partition recovery, or measured concurrency at scale. Those remain human QA cases in `05_TEST_CASES.csv`.
+These checks support BR-035/036 and FUN-09/10 for the tested local cases. They do not establish production, separate-installation organization isolation, a full moderator/member-removal journey, network partition recovery, or measured concurrency at scale. The dedicated human matrix is `CHAT-01..08` in `05_TEST_CASES.csv`; all eight retain `Not Tested` and empty QA Actual Result/Execution Evidence fields. The three local CMS sessions used separate origins in one browser, so QA must repeat with independent profiles and the approved browser matrix.
 
 ## Remaining QA
 

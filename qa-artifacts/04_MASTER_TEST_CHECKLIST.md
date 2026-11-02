@@ -8,6 +8,9 @@ delivery/availability/observability evidence is in
 `evidence/dashboard-observability-report-developer-verification-2026-11-02.md`.
 OTP renewal developer evidence is in
 `evidence/otp-pairing-renewal-developer-verification-2026-11-02.md`.
+Chat/notification local developer evidence is in
+`evidence/chat-notifications-developer-verification-2026-11-03.md`;
+`CHAT-01..08` are still human QA work.
 Focused developer runs passed, while human QA fields remain unexecuted.
 Execute remaining work only on authorized isolated test environments. Each checkbox names detailed rows in
 `05_TEST_CASES.csv`; QA records actual status, evidence and defects there.
@@ -55,7 +58,10 @@ Execute remaining work only on authorized isolated test environments. Each check
 
 ## Collaboration, Evidence And Reports
 
-- [ ] `FUN-09..10`, `CONC-04`: DM/group/forum membership, moderation, attachments, message order, notifications, unread counters and reconnect.
+- [ ] `FUN-09`, `CHAT-01..03`: use three independently signed-in CMS browser profiles across two departments. Create a DM, invite-only group and open forum while recipients keep chat open; check live discovery, outsider direct-link denial, concurrent send, edit/delete tombstones, reaction/thread/pin/bookmark and unique database sequence. Remove a member while their socket and second tab remain open; prove REST, socket and stale CMS access stop immediately. The current CMS member-removal control is a developer-observed gap, not a QA pass.
+- [ ] `CHAT-04..05`: exercise mute/ban/expiry, archive/unarchive and owner versus global/custom-role permissions from CMS and direct API. Upload, convert, share and preview every accepted chat file class; forge cross-department media IDs, revoke access and inspect object/signed-URL behavior. Archive must be read-only and failed conversion must never be offered as READY.
+- [ ] `FUN-10`, `CHAT-06..07`, `CONC-04`: DM/mention/thread notifications must target only entitled users and open exact visible content. Use at least 55 notifications, two tabs for one recipient, read-all concurrent with creation, out-of-order/duplicate delivery and DB/API/UI comparison; count and read cursor never regress or cross users.
+- [ ] `CHAT-08`: interrupt API, WSS and Valkey separately during navigation, invitation, send and read. Verify explicit error/Retry, socket reconnect plus REST-authoritative refresh, the documented polling bound, no duplicate/stale private content, session expiry and revocation on two API nodes. Local developer evidence covers only bounded cases; human execution fields remain open.
 - [ ] `DATA-04`, `PLAYER-07`: actual PoP duration, deduplication, 100-event/512-KiB memory and 32-file/derived-byte spool budgets, discard counters, replay and media-purge preservation. The code does not guarantee lossless offline evidence; acceptable loss remains BQ-013.
 - [ ] `OBS-03`: selected document page remains intact through live telemetry, offline spool/replay, idempotency, PoP database/list/CMS and CSV export; non-document/legacy rows remain compatible.
 - [ ] `OBS-04`: internal native loop cycles retain one active occurrence identity, failures and boundary reasons are diagnosable once without signed URL/secret leakage, and PoP meaning is explicitly characterized before acceptance.

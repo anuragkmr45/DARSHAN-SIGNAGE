@@ -21,6 +21,13 @@ restore gates. Exact results and checksums are in
 QA must use the eventual merged commit and rebuilt artifact hashes; local
 developer evidence is not independent release approval.
 
+Chat/notification developer evidence on branch `codex/chat-notifications-runtime-20261103`
+at commits `8413dd5` and `ed2bd2b` covers three simultaneous local CMS
+sessions, two departments, message/notification journeys and selected file
+sharing. The deeper human QA cases `CHAT-01..08` remain Not Tested; the CMS
+member-removal control is a developer-observed gap. See
+`evidence/chat-notifications-developer-verification-2026-11-03.md`.
+
 A disposable local API/CMS/dependency stack, browser flow, real Linux Electron player, freshly migrated test database, focused DB-backed suite and Linux packaging command were executed on 2026-10-15 for the document-page and video-loop scope. Results and screenshots are in `evidence/runtime-2026-10-15/runtime-validation.md`. This targeted run did not execute the full product checklist, Windows/physical-hardware matrix, long soak, security assessment, penetration test, backup/restore rehearsal or production deployment.
 
 On 2026-10-16, an isolated API/worker/PostgreSQL/Valkey/S3-compatible/CMS developer run exercised ownership, tombstones, every supported document extension, selected-page persistence/publication and loop-flag publication. It used RustFS rather than the exact approved MinIO image and stopped before migration `0045`, deterministic race/socket coverage, a valid final CMS page/loop browser result or current Linux Electron playback. Later low-memory builds and automated suites passed. Subsequent static passes masked deleted-user email in legacy Request history; made late upload validation conditional; prevented a late document/video/webpage worker from changing deletion-stopped PROCESSING Media back to READY; and made stale produced-object/thumbnail cleanup retryable. The new database/object-store regressions are authored but unexecuted. See `evidence/runtime-2026-10-16/runtime-validation.md` and `evidence/deleted-user-ownership-review.md`. This remains partial developer evidence; QA execution fields stay independent.
@@ -71,6 +78,7 @@ must not be read as runtime completion or independent QA approval.
 18. [Requirements 1-18 live runtime validation](evidence/runtime-2026-10-17/runtime-validation.md): exact built-API/worker/Chromium observations, machine-readable results, cleanup and the requirement 18 release blocker.
 19. [Playback/recovery developer verification](evidence/playback-recovery-developer-verification-2026-10-21.md): requirements 19-24 implementation, automated results, two Linux Electron runs, selected screenshots and remaining independent-QA gates.
 20. [Player delivery, availability and observability developer verification](evidence/dashboard-observability-report-developer-verification-2026-11-02.md): beta6 automated, source-free and packaged-player evidence plus the exact five-VM and physical-player gates still open.
+21. [Chat and notification developer verification](evidence/chat-notifications-developer-verification-2026-11-03.md): local three-session behavior, corrected defects, automated checks and remaining independent QA gates. Execute `CHAT-01..08` for the human matrix.
 
 The inventory is supporting evidence, not a completed authorization audit. Source references are repository-relative. Only results explicitly linked to the dated runtime report are current execution evidence; test-file presence and historical QA reports do not mean tests currently pass.
 
@@ -87,7 +95,7 @@ The 2026-09-25 answer confirms administrator self-approval and direct publishing
 | `02_BUSINESS_QUESTIONS.md` | Questions, answers, affected expectations | Source answers complete; site and business inputs still TBD |
 | `03_RISK_REGISTER.csv` | 42 scored risks and risk-to-test links | R-38 remains an observed release blocker; R-39..42 cover requirements 20-24 |
 | `04_MASTER_TEST_CHECKLIST.md` | Product and cross-cutting testing checklist | Reconciled for beta6 delivery, availability, player scrape and Grafana paths; human execution remains open |
-| `05_TEST_CASES.csv` | 116 detailed, human-executable cases | All 116 have Expected Result; 29 are Partially Tested from dated developer evidence and 87 are Not Tested |
+| `05_TEST_CASES.csv` | 125 detailed, human-executable cases | All 125 have Expected Result; 30 are Partially Tested from dated developer evidence and 95 are Not Tested, including `CHAT-01..08` |
 | `06_TRACEABILITY_MATRIX.csv` | 140 requirement/use-case-to-test/risk rows | Latest playback/recovery rules, cases and risks are explicitly traced |
 | `07_SECURITY_CHECKLIST.md` | Authorized security verification plan, no execution | Provisional |
 | `08_PERFORMANCE_RELIABILITY_CHECKLIST.md` | Load, stress, spike, soak, resilience and recovery plans | Provisional |
@@ -97,9 +105,9 @@ The 2026-09-25 answer confirms administrator self-approval and direct publishing
 | `12_CODE_BASELINE_EXPECTATIONS.md` | Code-derived expectations for all 20 business topics | Static baseline; not test results |
 | `13_PRE_QA_DEVELOPMENT_PLAN.md` | Original deep plan, fast-smoke decision and later end-to-end developer closure | Developer closure complete; listed cross-node/platform/security/recovery/soak gates remain with QA/release validation |
 
-This file grouping covers all requested deliverables without duplicating the detailed cases. Suites reference the master case IDs rather than cloning cases. The detailed CSV has 116 data rows and all required planning fields are populated: Test ID, objective, preconditions, test data, steps, expected result, priority, risk level, design evidence, environment/dependencies and status. QA-owned Actual Result, Execution Evidence and Defect ID fields intentionally remain blank for unexecuted cases.
+This file grouping covers all requested deliverables without duplicating the detailed cases. Suites reference the master case IDs rather than cloning cases. The detailed CSV has 125 data rows and all required planning fields are populated: Test ID, objective, preconditions, test data, steps, expected result, priority, risk level, design evidence, environment/dependencies and status. QA-owned Actual Result, Execution Evidence and Defect ID fields intentionally remain blank for unexecuted cases.
 
-Priority distribution: 84 P0, 31 P1 and 1 P2. Twenty-nine cases are `Partially Tested` and 87 remain `Not Tested`; the new playback/recovery cases contain developer automation evidence but still require the listed Electron/physical execution. New case DEF-04 is Partially Tested because the developer runtime produced an explicit failure; this is not a QA Pass.
+Priority distribution: 90 P0, 34 P1 and 1 P2. Thirty cases are `Partially Tested` and 95 remain `Not Tested`; the new chat cases include developer evidence in Notes but retain empty QA-owned result fields. The playback/recovery cases contain developer automation evidence but still require the listed Electron/physical execution. Case DEF-04 is Partially Tested because the developer runtime produced an explicit failure; this is not a QA Pass.
 
 ## Acceptance Controls
 
@@ -114,8 +122,8 @@ Priority distribution: 84 P0, 31 P1 and 1 P2. Twenty-nine cases are `Partially T
 
 ## How QA Uses This Package
 
-1. Open `05_TEST_CASES.csv` and filter `Status`. For the beta6 delta start with `FUN-11`, `UI-04`, `OBS-02`, `PLAYER-07`, then run the delivery/playback paths in `FUN-03..05` and the relevant player cases. Retain `API-06`, `UI-05`, `PLAYER-03..04`, `PLAYER-10..16`, `COMP-04` and `OBS-04` for the earlier playback/recovery delta, then continue every remaining `Not Tested` row. Re-run every `Partially Tested` row on the approved target matrix.
-2. For each row, prepare the stated preconditions/test data, perform `Steps`, and compare the observation with `Expected Result`. The expected-result field is populated for all 116 cases.
+1. Open `05_TEST_CASES.csv` and filter `Status`. For the chat delta run `CHAT-01..08`, `FUN-09..10` and `CONC-04` with three independent CMS profiles; the first full QA run must address the absent member-removal control. For the beta6 delta start with `FUN-11`, `UI-04`, `OBS-02`, `PLAYER-07`, then run the delivery/playback paths in `FUN-03..05` and the relevant player cases. Retain `API-06`, `UI-05`, `PLAYER-03..04`, `PLAYER-10..16`, `COMP-04` and `OBS-04` for the earlier playback/recovery delta, then continue every remaining `Not Tested` row. Re-run every `Partially Tested` row on the approved target matrix.
+2. For each row, prepare the stated preconditions/test data, perform `Steps`, and compare the observation with `Expected Result`. The expected-result field is populated for all 125 cases.
 3. Write what actually happened in `Actual Result`, set `Status`, link sanitized screenshots/logs/queries in `Execution Evidence`, and add a `Defect ID` when observed behavior differs.
 4. Use `10_SMOKE_REGRESSION_UAT.md` to choose the smoke/regression/UAT order; use `06_TRACEABILITY_MATRIX.csv` to see which business rule and risk each case covers.
 5. Do not approve release until the open items in `11_RELEASE_READINESS_CHECKLIST.md` have owners/evidence and the final Go/No-go decision is signed by the responsible humans.

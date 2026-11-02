@@ -21,7 +21,7 @@ Sequence after a fresh install or planned update:
 13. `UI-05`, `API-05..06`, `PLAYER-10`, `OBS-03`: verify every updated target has connected and reported `pdf_page_selection_v1`; assign page 2, confirm it in author/review preview and immutable snapshot, play and record PoP. Isolate a post-publish page-count mismatch: expect exact `Unavailable`, `DOCUMENT_PAGE_OUT_OF_RANGE` diagnostics and no substitute page. Restore an invalid draft and confirm CMS preserves/blocks it rather than clamping.
 14. `UI-06`, `API-07`, `PLAYER-11..15`, `OBS-04`: keep a selected page-2 PDF beside a short Loop On video for three cycles, then test corrupt video before valid content and a corrupt only-item frame. Expect original-boundary advance, one bounded 1–30 second retry, authority-change cancellation, and display/audio clear within 250 ms of schedule end. Repeat the critical path once.
 15. `PLAYER-03..04`, `PLAYER-16`: after an authenticated success disconnect the backend; expect playback at 119 seconds and security lock at 120 seconds within one-second observation tolerance. While locked change server authority, restore reachability, and verify one ordered identity/fresh-snapshot/content/authority recovery; no heartbeat unlock or stale replay. Confirm only media cache was purged.
-16. `FUN-09`, `FUN-10`: send a private test message and verify notification/read state.
+16. `FUN-09..10`, `CHAT-01`, `CHAT-05..07`: keep two operator CMS profiles open, create a private DM and an open forum, send a synthetic message and one READY attachment, verify live recipient view, scoped preview, correct notification deep link and unread count after reading. The full membership/moderation/fault matrix remains regression QA.
 17. `FUN-11`, `UI-04`, `OBS-02`, `PLAYER-07`: verify known-time availability, estimated outage, backend unknown, Never seen and IST buckets; publish one target and distinguish assigned, exact application, fresh reported playback and renderer PoP. Verify authenticated machine/player scrapes, truthful target/fleet totals, `/grafana/` health/login/drill-down and one controlled alert transition.
 
 Smoke stops on failed signing/trust, data integrity, login, worker readiness, publish, player visibility, or emergency takeover. Report the specific failed ID; no pass by inference from a healthy container alone.
@@ -34,11 +34,11 @@ Always run all `P0` cases after a release touching shared API, schema, permissio
 - Media/content: `FILE-01..06`, `FUN-01..02`, `FUN-06`, `FUN-08`, `WEB-01..06`, `DEF-01..04`, `UI-05..06`, `API-05..07`, `DATA-05`, `CONC-06`, `PLAYER-05`, `PLAYER-08..16`, `OBS-03..04`, `COMP-04`, `PERF-05..06`.
 - Schedules/emergencies: `FUN-03..05`, `FUN-07`, `CONC-01`, `CONC-03`, `DATA-02`.
 - Device/runtime: `API-02..03`, `CONC-05`, `PLAYER-01..07`, `REL-01`.
-- Collaboration/reporting: `FUN-09..12`, `CONC-04`, `DATA-04`, `UI-04`.
+- Collaboration/reporting: `FUN-09..12`, `CHAT-01..08`, `CONC-04`, `DATA-04`, `UI-04`.
 - Operations: `DATA-01..03`, `DATA-06`, `DEP-01..07`, `BKP-01..03`, `OBS-01..02`, `REL-02`.
 - Clients: `COMP-01..03`, `UI-01..03` on approved physical/browser targets.
 
-`PERF-01..06` require a separate approved isolated capacity run and site thresholds; they are not part of every code-change regression. Full planned coverage is the 112-case CSV. Do not treat a unit-test file, TypeScript build or generated bundle validator as proof these live paths passed.
+`PERF-01..06` require a separate approved isolated capacity run and site thresholds; they are not part of every code-change regression. Full planned coverage is the current `05_TEST_CASES.csv`; verify its row count before selecting a run. Do not treat a unit-test file, TypeScript build or generated bundle validator as proof these live paths passed.
 
 ## UAT Journeys
 
@@ -50,7 +50,7 @@ Always run all `P0` cases after a release touching shared API, schema, permissio
 | Emergency delegate | Open CMS control, select screens, trigger and clear | `AUTHZ-03`, `FUN-07`, `PLAYER-03` | Selected-screen delegation and emergency stop on lock |
 | Viewer/field operator | Pair updated player, verify capability, validate fullscreen/portrait, schedule/default fallback, PDF errors, video failure/retry/boundary and locked recovery | `PLAYER-01..05`, `PLAYER-10..16`, `COMP-01..02`, `FUN-06`, `DEF-04` | Correct output, exact Unavailable state, original-boundary advance, bounded retry, 250 ms hard stop, selected PDF page, exact 120-second lock, targeted purge and fresh-authority recovery |
 | Web content administrator | Register approved HTTP/HTTPS pages, reject login-required/escaping redirects, refresh preview and configure overlapping-group priority | `WEB-01..06`, `DEF-01..03`, `FUN-08`, `PLAYER-09` | Clear policy errors, latest successful fallback, deterministic priority and recoverable stale-save workflow |
-| Communications/reporting user | Chat, notifications, availability, delivery evidence, PoP and report export | `FUN-09..11`, `UI-04`, `PLAYER-07`, `OBS-02` | Private membership; known-time uptime/unknown; exact application versus reported playback versus PoP; bounded evidence loss; IST availability day; no physical-display claim |
+| Communications/reporting user | In three separate browser profiles, create DM/group/forum, invite then remove a member, send text and shared files, react/reply/mention, read notifications, archive and recover after a controlled API/WSS interruption; then inspect availability, delivery evidence, PoP and report export | `FUN-09..11`, `CHAT-01..08`, `CONC-04`, `UI-04`, `PLAYER-07`, `OBS-02` | Private access and post-removal revocation; readable exact notification links; authoritative counts and recovery; known-time uptime/unknown; exact application versus reported playback versus PoP; bounded evidence loss; IST availability day; no physical-display claim |
 | Release/recovery operator | Fresh signed role install, backend-only update, backup and isolated restore | `DEP-01..07`, `BKP-01..03` | Compatible releases, complete data, no silent schema rollback, RPO/RTO TBD |
 
 The general Requests workboard is disabled; `AUTHZ-06` verifies absence and confirms Schedule Requests remain usable. SSO login, business API-key authentication and automatic webhook delivery are not UAT requirements for this release; management screens remain in `FUN-12`.
