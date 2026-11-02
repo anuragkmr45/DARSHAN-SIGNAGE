@@ -397,6 +397,7 @@ export interface ScheduleActivityReport {
   summary: {
     schedules: number;
     target_events: number;
+    pending_targets: number;
     successful_targets: number;
     failed_targets: number;
     screens: number;
@@ -477,6 +478,7 @@ export interface ObservabilityOverview {
   current_state_source: "backend_and_prometheus";
   fleet: {
     total_players: number | null;
+    online_players: number | null;
     active_players: number | null;
     inactive_players: number | null;
     offline_players: number | null;
@@ -566,13 +568,13 @@ export interface StorageReport {
 
 export interface SystemHealthReport {
   transcode_queue?: {
-    pending?: number;
+    pending?: number | null;
   };
   publishes?: {
     last_published_at?: string | null;
   };
   jobs?: {
-    failed_last_24h?: number;
+    failed_last_24h?: number | null;
   };
   operators?: {
     active?: number;

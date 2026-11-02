@@ -370,15 +370,6 @@ describe('Screens routes realtime playback bootstrap', () => {
     const startAt = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
     const endAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
 
-    await db.insert(schema.screens).values({
-      id: screenId,
-      name: 'Overview Screen',
-      status: 'ACTIVE',
-      last_heartbeat_at: now,
-      current_schedule_id: scheduleId,
-      current_media_id: mediaId,
-    });
-
     await db.insert(schema.media).values({
       id: mediaId,
       name: 'Overview Media',
@@ -388,6 +379,15 @@ describe('Screens routes realtime playback bootstrap', () => {
       duration_seconds: 15,
       width: 1920,
       height: 1080,
+    });
+
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Overview Screen',
+      status: 'ACTIVE',
+      last_heartbeat_at: now,
+      current_schedule_id: scheduleId,
+      current_media_id: mediaId,
     });
 
     await db.insert(schema.schedules).values({
@@ -555,15 +555,6 @@ describe('Screens routes realtime playback bootstrap', () => {
     const startAt = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
     const endAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
 
-    await db.insert(schema.screens).values({
-      id: screenId,
-      name: 'Now Playing Screen',
-      status: 'ACTIVE',
-      last_heartbeat_at: now,
-      current_schedule_id: scheduleId,
-      current_media_id: mediaId,
-    });
-
     await db.insert(schema.media).values({
       id: mediaId,
       name: 'Now Playing Media',
@@ -571,6 +562,15 @@ describe('Screens routes realtime playback bootstrap', () => {
       status: 'READY',
       created_by: testUser.id,
       duration_seconds: 30,
+    });
+
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Now Playing Screen',
+      status: 'ACTIVE',
+      last_heartbeat_at: now,
+      current_schedule_id: scheduleId,
+      current_media_id: mediaId,
     });
 
     await db.insert(schema.schedules).values({
@@ -1047,6 +1047,23 @@ describe('Screens routes realtime playback bootstrap', () => {
     const inactiveStart = new Date(now.getTime() + 5 * 60 * 60 * 1000).toISOString();
     const inactiveEnd = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString();
 
+    await db.insert(schema.media).values([
+      {
+        id: activeMediaId,
+        name: 'Active Timeline Media',
+        type: 'VIDEO',
+        status: 'READY',
+        created_by: testUser.id,
+      },
+      {
+        id: inactiveMediaId,
+        name: 'Inactive Timeline Media',
+        type: 'VIDEO',
+        status: 'READY',
+        created_by: testUser.id,
+      },
+    ]);
+
     await db.insert(schema.screens).values([
       {
         id: activeScreenId,
@@ -1065,23 +1082,6 @@ describe('Screens routes realtime playback bootstrap', () => {
         last_heartbeat_at: now,
         current_schedule_id: inactiveScheduleId,
         current_media_id: inactiveMediaId,
-      },
-    ]);
-
-    await db.insert(schema.media).values([
-      {
-        id: activeMediaId,
-        name: 'Active Timeline Media',
-        type: 'VIDEO',
-        status: 'READY',
-        created_by: testUser.id,
-      },
-      {
-        id: inactiveMediaId,
-        name: 'Inactive Timeline Media',
-        type: 'VIDEO',
-        status: 'READY',
-        created_by: testUser.id,
       },
     ]);
 
@@ -1196,6 +1196,7 @@ describe('Screens routes realtime playback bootstrap', () => {
     const metricsBody = JSON.parse(metricsResponse.body) as any;
     expect(metricsBody.schedules.active).toBeGreaterThanOrEqual(1);
     expect(metricsBody.schedules.active_screens_now).toBeGreaterThanOrEqual(1);
+    expect(metricsBody.screens.online_last_5m).toBeGreaterThanOrEqual(2);
   });
 
   it('returns 404 when deleting a missing screen', async () => {

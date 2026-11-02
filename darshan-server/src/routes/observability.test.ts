@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { createSessionRepository } from '@/db/repositories/session';
 import { generateAccessToken } from '@/auth/jwt';
@@ -13,6 +13,7 @@ type OverviewResponseBody = {
   current_state_source: string;
   fleet: {
     total_players: number | null;
+    online_players: number | null;
   };
   alerts: {
     available: boolean;
@@ -159,10 +160,10 @@ describe('Observability CMS summary routes', () => {
           JSON.stringify(
             createPrometheusResponse([
               {
-                metric: { __name__: 'up', machine: 'dev-local', job: 'darshan-server' },
+                metric: { __name__: 'up', machine: 'vm2', job: 'darshan-server' },
                 value: '1',
               },
-              { metric: { __name__: 'up', machine: 'dev-local', job: 'vm2-node' }, value: '1' },
+              { metric: { __name__: 'up', machine: 'vm2', job: 'vm2-node' }, value: '1' },
             ])
           ),
           { status: 200, headers: { 'content-type': 'application/json' } }
@@ -172,7 +173,7 @@ describe('Observability CMS summary routes', () => {
       if (query.startsWith('100 * (1 - avg by(machine)')) {
         return new Response(
           JSON.stringify(
-            createPrometheusResponse([{ metric: { machine: 'dev-local' }, value: '21.3' }])
+            createPrometheusResponse([{ metric: { machine: 'vm2' }, value: '21.3' }])
           ),
           { status: 200, headers: { 'content-type': 'application/json' } }
         );
@@ -181,7 +182,7 @@ describe('Observability CMS summary routes', () => {
       if (query.startsWith('100 * (1 - (node_memory_MemAvailable_bytes')) {
         return new Response(
           JSON.stringify(
-            createPrometheusResponse([{ metric: { machine: 'dev-local' }, value: '47.9' }])
+            createPrometheusResponse([{ metric: { machine: 'vm2' }, value: '47.9' }])
           ),
           { status: 200, headers: { 'content-type': 'application/json' } }
         );
@@ -190,7 +191,7 @@ describe('Observability CMS summary routes', () => {
       if (query.startsWith('max by(machine) (100 * (1 - (node_filesystem_avail_bytes')) {
         return new Response(
           JSON.stringify(
-            createPrometheusResponse([{ metric: { machine: 'dev-local' }, value: '62.5' }])
+            createPrometheusResponse([{ metric: { machine: 'vm2' }, value: '62.5' }])
           ),
           { status: 200, headers: { 'content-type': 'application/json' } }
         );
@@ -215,7 +216,8 @@ describe('Observability CMS summary routes', () => {
     expect(response.statusCode).toBe(HTTP_STATUS.OK);
     const body = JSON.parse(response.body) as OverviewResponseBody;
     expect(body.current_state_source).toBe('backend_and_prometheus');
-    expect(body.fleet.total_players).toBe(6);
+    const [registeredScreens] = await getDatabase().select({ count: sql<number>`count(*)` }).from(schema.screens);
+    expect(body.fleet.total_players).toBe(Number(registeredScreens.count));
     expect(body.alerts.firing).toBe(2);
     expect(body.machines).toHaveLength(1);
     expect(body.machines[0].name).toContain('Development');
@@ -246,6 +248,33 @@ describe('Observability CMS summary routes', () => {
     expect(body.machines.length).toBeGreaterThan(0);
     expect(body.machines.every((machine) => machine.status === 'unknown')).toBe(true);
     expect(body.machines.every((machine) => machine.scrape_status.reachable_targets === 0)).toBe(true);
+  });
+
+  it('keeps fleet totals current when Prometheus is unreachable', async () => {
+    const screenId = randomUUID();
+    const db = getDatabase();
+    const [before] = await db.select({ total: sql<number>`count(*)` }).from(schema.screens);
+    await db.insert(schema.screens).values({
+      id: screenId,
+      name: 'Fleet fallback test',
+      status: 'ACTIVE',
+      last_heartbeat_at: new Date(),
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Prometheus unavailable'); }));
+    try {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/v1/observability/overview',
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      const body = response.json() as OverviewResponseBody;
+      expect(body.fleet.total_players).toBe(Number(before.total) + 1);
+      expect(body.fleet.online_players).toBeGreaterThanOrEqual(1);
+      expect(body.alerts.available).toBe(false);
+    } finally {
+      await db.delete(schema.screens).where(eq(schema.screens.id, screenId));
+    }
   });
 
   it('allows operators to read the observability overview route', async () => {

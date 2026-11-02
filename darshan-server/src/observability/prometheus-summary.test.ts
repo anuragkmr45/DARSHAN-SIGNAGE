@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { getMachineDefinitions } from './prometheus-summary';
 
 describe('getMachineDefinitions', () => {
+  it('uses the machine label emitted by the development Prometheus configuration', () => {
+    expect(getMachineDefinitions('development')[0].id).toBe('vm2');
+  });
   it('matches the production bundle topology and does not expect undeployed cAdvisor jobs', () => {
     const machines = getMachineDefinitions('production');
 

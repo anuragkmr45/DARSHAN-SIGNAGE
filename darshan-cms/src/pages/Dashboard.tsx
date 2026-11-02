@@ -41,6 +41,7 @@ import { AllScreensDetailsModal } from "@/components/dashboard/AllScreensDetails
 import { ScheduleReportModal } from "@/components/dashboard/ScheduleReportModal";
 import { getMachineStatusTone, getServiceStatusTone } from "@/lib/observability";
 import { resolveMediaDisplayName } from "@/lib/media";
+import { useGrafanaAvailability } from "@/hooks/useGrafanaAvailability";
 
 const formatBytes = (bytes?: number | null) => {
   if (bytes === undefined || bytes === null) return "—";
@@ -99,6 +100,7 @@ export default function Dashboard() {
     queryFn: metricsApi.getOverview,
     enabled: isAuthenticated,
     staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 
   const {
@@ -110,6 +112,7 @@ export default function Dashboard() {
     queryKey: ["health"],
     queryFn: healthApi.get,
     staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 
   const {
@@ -122,6 +125,7 @@ export default function Dashboard() {
     queryFn: observabilityApi.getOverview,
     enabled: isAuthenticated,
     staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 
   const {
@@ -134,6 +138,7 @@ export default function Dashboard() {
     queryFn: reportsApi.getOfflineScreens,
     enabled: isAuthenticated,
     staleTime: 60_000,
+    refetchInterval: 60_000,
   });
 
   const {
@@ -146,6 +151,7 @@ export default function Dashboard() {
     queryFn: reportsApi.getStorageReport,
     enabled: isAuthenticated,
     staleTime: 60_000,
+    refetchInterval: 60_000,
   });
 
   const {
@@ -158,6 +164,7 @@ export default function Dashboard() {
     queryFn: reportsApi.getSystemHealth,
     enabled: isAuthenticated,
     staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 
   const {
@@ -346,8 +353,8 @@ export default function Dashboard() {
       : isApiHealthy
         ? "bg-success text-success-foreground"
         : "bg-destructive text-destructive-foreground";
-  const pendingJobs = systemHealth?.transcode_queue?.pending ?? 0;
-  const failedTasks = systemHealth?.jobs?.failed_last_24h ?? 0;
+  const pendingJobs = systemHealth?.transcode_queue?.pending;
+  const failedTasks = systemHealth?.jobs?.failed_last_24h;
   const lastPublishAt = systemHealth?.publishes?.last_published_at;
   const activeOperators = systemHealth?.operators?.active;
   const heartbeats5m = overview?.system_health?.heartbeats?.last_5m ?? screensMetrics.online_last_5m;
@@ -360,6 +367,8 @@ export default function Dashboard() {
   const hasOperatorData = hasMetricNumber(activeOperators) && activeOperators > 0;
   const machineSummaries = observabilityOverview?.machines ?? [];
   const observabilityGrafanaLinks = observabilityOverview?.grafana?.links;
+  const grafanaHealth = useGrafanaAvailability(isAuthenticated && observabilityOverview?.grafana?.enabled === true);
+  const grafanaAvailable = grafanaHealth.data === true;
   const machineTelemetryUnavailable =
     !isObservabilityLoading && observabilityOverview?.alerts?.available === false;
   const observabilityAvailable = observabilityOverview?.alerts?.available === true;
@@ -380,14 +389,14 @@ export default function Dashboard() {
       {
         id: "total-screens",
         title: "Total Screens",
-        value: isMetricsLoading ? "…" : String(totalsMetrics.screens ?? screensMetrics.total ?? 0),
+        value: isMetricsLoading ? "…" : isMetricsError ? "Unavailable" : String(totalsMetrics.screens ?? screensMetrics.total ?? 0),
         subtitle: "Registered devices",
         icon: Monitor,
       },
       {
         id: "online-screens",
         title: "Online Screens",
-        value: isMetricsLoading ? "…" : String(screensMetrics.online_last_5m ?? screensMetrics.online ?? 0),
+        value: isMetricsLoading ? "…" : isMetricsError ? "Unavailable" : String(screensMetrics.online_last_5m ?? screensMetrics.online ?? 0),
         subtitle: "Active heartbeat in last 5m",
         icon: Activity,
         variant: "success" as const,
@@ -395,8 +404,8 @@ export default function Dashboard() {
       {
         id: "storage",
         title: "Media Storage",
-        value: isMetricsLoading ? "…" : formatBytes(storageBytes),
-        subtitle: quotaBytes ? `of ${formatBytes(quotaBytes)}` : "Used capacity",
+        value: isMetricsLoading ? "…" : isMetricsError && isStorageError ? "Unavailable" : formatBytes(storageBytes),
+        subtitle: quotaBytes ? `Source bytes of ${formatBytes(quotaBytes)} quota` : "Stored media source bytes",
         icon: HardDrive,
         variant: "warning" as const,
         trend: storageTrend
@@ -408,14 +417,19 @@ export default function Dashboard() {
         title: "Active Scheduled",
         value: isMetricsLoading
           ? "…"
-          : String(overview?.schedules?.active_screens_now ?? overview?.schedules?.active ?? 0),
-        subtitle: "Screens running playlists",
+          : isMetricsError
+            ? "Unavailable"
+            : hasMetricNumber(overview?.schedules?.active_screens_now)
+              ? String(overview?.schedules?.active_screens_now)
+              : "Unavailable",
+        subtitle: "Active schedule assignments now",
         icon: Calendar,
       },
     ];
   }, [
     isMetricsLoading,
-    overview?.schedules?.active,
+    isMetricsError,
+    isStorageError,
     overview?.schedules?.active_screens_now,
     quotaPercent,
     quotaBytes,
@@ -459,27 +473,34 @@ export default function Dashboard() {
         id: "observability-alerts",
         type: observabilityOverview?.alerts?.highest_severity === "critical" ? "error" : "warning",
         message: `${observabilityOverview?.alerts?.firing ?? 0} observability alert${(observabilityOverview?.alerts?.firing ?? 0) === 1 ? "" : "s"} currently firing`,
-        action: "Open Grafana",
+        action: grafanaAvailable ? "Open Grafana" : "Grafana unavailable",
         onClick: () => {
-          if (observabilityGrafanaLinks?.players_fleet) {
-            window.open(observabilityGrafanaLinks.players_fleet, "_blank", "noopener,noreferrer");
+          if (grafanaAvailable && observabilityGrafanaLinks?.players_fleet) {
+            window.location.assign(observabilityGrafanaLinks.players_fleet);
           }
         },
       });
     }
 
     return items;
-  }, [offlineScreens, observabilityGrafanaLinks?.players_fleet, observabilityOverview?.alerts?.firing, observabilityOverview?.alerts?.highest_severity, quotaPercent, navigate]);
+  }, [offlineScreens, grafanaAvailable, observabilityGrafanaLinks?.players_fleet, observabilityOverview?.alerts?.firing, observabilityOverview?.alerts?.highest_severity, quotaPercent, navigate]);
 
   const onlineScreens = screensMetrics.online_last_5m ?? screensMetrics.online ?? 0;
+  const notOnlineScreens = Math.max(0, totalScreens - onlineScreens);
   const longOfflineCount = offlineScreens?.count ?? 0;
-  const activeScheduledScreens = overview?.schedules?.active_screens_now ?? overview?.schedules?.active ?? 0;
+  const activeScheduledScreens = overview?.schedules?.active_screens_now;
   const commandPosture =
-    alerts.length > 0
-      ? `${alerts.length} notice${alerts.length === 1 ? "" : "s"} need review`
-      : isApiHealthy
-        ? "System checks nominal"
-        : "API health needs review";
+    isMetricsError || isSystemHealthError || isOfflineError || isObservabilityError
+      ? "Dashboard data unavailable"
+      : !isMetricsLoading && notOnlineScreens > 0
+        ? `${notOnlineScreens} screen${notOnlineScreens === 1 ? "" : "s"} not online`
+        : !isObservabilityLoading && !isObservabilityError && !observabilityAvailable
+          ? "Observability unavailable"
+          : alerts.length > 0
+            ? `${alerts.length} notice${alerts.length === 1 ? "" : "s"} need review`
+            : isApiHealthy
+              ? "System checks nominal"
+              : "API health needs review";
 
   const readyMedia = useMemo(() => (allMedia ?? []).filter((item) => item.status === "READY"), [allMedia]);
 
@@ -533,20 +554,20 @@ export default function Dashboard() {
           <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
             <p className="text-xs uppercase tracking-[0.14em] text-white/60">Screens</p>
             <p className="mt-1 text-sm font-semibold">
-              {onlineScreens} online / {totalScreens} total
+              {isMetricsLoading ? "Loading…" : isMetricsError ? "Unavailable" : `${onlineScreens} online / ${totalScreens} total`}
             </p>
           </div>
           <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
             <p className="text-xs uppercase tracking-[0.14em] text-white/60">Long offline</p>
-            <p className="mt-1 text-sm font-semibold">{longOfflineCount} screens</p>
+            <p className="mt-1 text-sm font-semibold">{isOfflineLoading ? "Loading…" : isOfflineError ? "Unavailable" : `${longOfflineCount} screens`}</p>
           </div>
           <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
-            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Active schedule</p>
-            <p className="mt-1 text-sm font-semibold">{activeScheduledScreens} screens now</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Active schedule assignments</p>
+            <p className="mt-1 text-sm font-semibold">{isMetricsLoading ? "Loading…" : isMetricsError || !hasMetricNumber(activeScheduledScreens) ? "Unavailable" : `${activeScheduledScreens} screens now`}</p>
           </div>
           <div className="p-4">
             <p className="text-xs uppercase tracking-[0.14em] text-white/60">Last publish</p>
-            <p className="mt-1 text-sm font-semibold">{formatRelativeTime(lastPublishAt)}</p>
+            <p className="mt-1 text-sm font-semibold">{isSystemHealthLoading ? "Loading…" : isSystemHealthError ? "Unavailable" : hasPublishData ? formatRelativeTime(lastPublishAt) : "No publish yet"}</p>
           </div>
         </div>
       </section>
@@ -588,7 +609,7 @@ export default function Dashboard() {
                   className="flex flex-col gap-3 rounded-lg bg-background p-3 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <span className="text-sm">{alert.message}</span>
-                  <Button variant="outline" size="sm" onClick={alert.onClick}>
+                  <Button variant="outline" size="sm" onClick={alert.onClick} disabled={alert.id === "observability-alerts" && !grafanaAvailable}>
                     {alert.action}
                   </Button>
                 </div>
@@ -611,6 +632,8 @@ export default function Dashboard() {
                 <p className="mt-1 text-lg font-semibold">
                   {isObservabilityLoading
                     ? "Loading..."
+                    : isObservabilityError
+                      ? "Unavailable"
                     : hasFleetData
                       ? String(fleetTotalPlayers)
                       : observabilityAvailable
@@ -621,30 +644,30 @@ export default function Dashboard() {
                   {isObservabilityLoading
                     ? "Loading fleet state"
                     : hasRegisteredPlayers
-                      ? `Active ${observabilityOverview?.fleet?.active_players ?? 0} · Offline ${observabilityOverview?.fleet?.offline_players ?? 0}`
+                      ? `Online (5m) ${observabilityOverview?.fleet?.online_players ?? 0} · Status offline ${observabilityOverview?.fleet?.offline_players ?? 0}`
                       : hasFleetData
                         ? "No players registered"
-                        : observabilityAvailable
-                          ? "Backend fleet metric has not emitted yet"
-                          : "Prometheus is not reachable"}
+                        : "Fleet data unavailable"}
                 </p>
               </div>
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Player scrape reachability</p>
+                <p className="text-xs text-muted-foreground">Direct player scrapes (optional)</p>
                 <p className="mt-1 text-lg font-semibold">
                   {isObservabilityLoading
                     ? "Loading..."
-                    : hasPlayerScrapeTargets
-                      ? `${playerTargetsReachable ?? 0} / ${playerTargetsConfigured}`
-                      : observabilityAvailable
-                        ? "Not configured"
-                        : "Unavailable"}
+                    : isObservabilityError
+                      ? "Unavailable"
+                      : hasPlayerScrapeTargets
+                        ? `${playerTargetsReachable ?? 0} / ${playerTargetsConfigured}`
+                        : observabilityAvailable
+                          ? "Not configured"
+                          : "Unavailable"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {hasPlayerScrapeTargets
                     ? "Reachable Prometheus player targets"
                     : observabilityAvailable
-                      ? "Add player targets to Prometheus file discovery"
+                      ? "Players can be online without direct scrape targets"
                       : "Prometheus player scrape state is unavailable"}
                 </p>
               </div>
@@ -654,30 +677,23 @@ export default function Dashboard() {
                   <Badge variant="outline" className={observabilityOverview?.alerts ? getMachineStatusTone(observabilityOverview.alerts.status) : "border-slate-400 text-slate-700"}>
                     {isObservabilityLoading ? "Loading..." : observabilityOverview?.alerts?.status ?? "unknown"}
                   </Badge>
-                  <span className="text-sm font-medium">{observabilityOverview?.alerts?.firing ?? 0} firing</span>
+                  <span className="text-sm font-medium">{observabilityAvailable ? `${observabilityOverview?.alerts?.firing ?? 0} firing` : "Alert count unavailable"}</span>
                 </div>
               </div>
               <div className="rounded-lg border p-3">
                 <p className="text-xs text-muted-foreground">Historical drill-down</p>
                 <div className="mt-2 flex gap-2">
-                  {observabilityGrafanaLinks?.backend_service ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(observabilityGrafanaLinks.backend_service!, "_blank", "noopener,noreferrer")}
-                    >
-                      Backend
+                  {grafanaAvailable && observabilityGrafanaLinks?.backend_service ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={observabilityGrafanaLinks.backend_service} target="_blank" rel="noopener noreferrer">Backend</a>
                     </Button>
                   ) : null}
-                  {observabilityGrafanaLinks?.players_fleet ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(observabilityGrafanaLinks.players_fleet!, "_blank", "noopener,noreferrer")}
-                    >
-                      Players
+                  {grafanaAvailable && observabilityGrafanaLinks?.players_fleet ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={observabilityGrafanaLinks.players_fleet} target="_blank" rel="noopener noreferrer">Players</a>
                     </Button>
                   ) : null}
+                  {!grafanaAvailable && !grafanaHealth.isLoading ? <span className="text-sm text-muted-foreground">Grafana unavailable through this CMS</span> : null}
                 </div>
               </div>
             </div>
@@ -688,7 +704,7 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>System Health</CardTitle>
-            <CardDescription>Real-time system metrics</CardDescription>
+            <CardDescription>Current backend and job summaries</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
@@ -696,12 +712,12 @@ export default function Dashboard() {
               <Badge
                 variant="outline"
                 className={
-                  pendingJobs > 0 ? "border-warning text-warning" : "border-success text-success"
+                  hasMetricNumber(pendingJobs) && pendingJobs > 0 ? "border-warning text-warning" : hasMetricNumber(pendingJobs) ? "border-success text-success" : ""
                 }
               >
                 {isSystemHealthLoading
                   ? "Loading..."
-                  : `${pendingJobs} job${pendingJobs === 1 ? "" : "s"}`}
+                  : hasMetricNumber(pendingJobs) ? `${pendingJobs} job${pendingJobs === 1 ? "" : "s"}` : "Unavailable"}
               </Badge>
             </div>
             <div className="flex items-center justify-between">
@@ -713,21 +729,21 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Failed Tasks (24h)</span>
               <Badge
-                variant={failedTasks > 0 ? "destructive" : "outline"}
-                className={failedTasks > 0 ? "" : "border-success text-success"}
+                variant={hasMetricNumber(failedTasks) && failedTasks > 0 ? "destructive" : "outline"}
+                className={hasMetricNumber(failedTasks) && failedTasks === 0 ? "border-success text-success" : ""}
               >
-                {isSystemHealthLoading ? "Loading..." : failedTasks}
+                {isSystemHealthLoading ? "Loading..." : hasMetricNumber(failedTasks) ? failedTasks : "Unavailable"}
               </Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Active Operators</span>
+              <span className="text-sm text-muted-foreground">Enabled operator accounts</span>
               <span className="text-sm font-medium">
                 {isSystemHealthLoading
                   ? "Loading..."
                   : hasOperatorData
                     ? activeOperators
                     : activeOperators === 0
-                      ? "No active operators"
+                      ? "No enabled operators"
                       : "—"}
               </span>
             </div>
@@ -779,8 +795,8 @@ export default function Dashboard() {
           <div className="grid gap-4 md:grid-cols-3">
             {machineTelemetryUnavailable ? (
               <div className="col-span-full rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                Machine metrics are unavailable because Prometheus is not reachable from the backend. Start the
-                observability stack and exporters to populate CPU, memory, disk, and scrape target data.
+                Machine metrics are unavailable because Prometheus is not configured or reachable from the backend.
+                Check the observability stack, backend Prometheus URL, and exporters.
               </div>
             ) : null}
 
@@ -826,14 +842,10 @@ export default function Dashboard() {
                   ))}
                 </div>
 
-                {machine.grafana.dashboard_url ? (
+                {grafanaAvailable && machine.grafana.dashboard_url ? (
                   <div className="mt-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(machine.grafana.dashboard_url!, "_blank", "noopener,noreferrer")}
-                    >
-                      Open in Grafana
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={machine.grafana.dashboard_url} target="_blank" rel="noopener noreferrer">Open in Grafana</a>
                     </Button>
                   </div>
                 ) : null}

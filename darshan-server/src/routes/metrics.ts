@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { sql } from 'drizzle-orm';
+import { and, eq, gt, gte, lte, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
@@ -43,19 +43,17 @@ export async function metricsRoutes(fastify: FastifyInstance) {
         const [popDay] = await db
           .select({ count: sql<number>`count(*)` })
           .from(schema.proofOfPlay)
-          .where(sql`${schema.proofOfPlay.created_at} >= ${dayAgo}`);
+          .where(gte(schema.proofOfPlay.created_at, dayAgo));
 
         const [popWeek] = await db
           .select({ count: sql<number>`count(*)` })
           .from(schema.proofOfPlay)
-          .where(sql`${schema.proofOfPlay.created_at} >= ${weekAgo}`);
+          .where(gte(schema.proofOfPlay.created_at, weekAgo));
 
         const [onlineScreensCount] = await db
           .select({ count: sql<number>`count(*)` })
           .from(schema.screens)
-          .where(
-            sql`${schema.screens.status} = 'ACTIVE' AND ${schema.screens.last_heartbeat_at} IS NOT NULL AND ${schema.screens.last_heartbeat_at} >= ${fiveMinutesAgo}`
-          );
+          .where(and(eq(schema.screens.status, 'ACTIVE'), gte(schema.screens.last_heartbeat_at, fiveMinutesAgo)));
 
         const [mediaStorageBytes] = await db
           .select({ total: sql<number>`COALESCE(SUM(${schema.media.source_size}), 0)` })
@@ -64,19 +62,17 @@ export async function metricsRoutes(fastify: FastifyInstance) {
         const [activeSchedulesCount] = await db
           .select({ count: sql<number>`count(*)` })
           .from(schema.schedules)
-          .where(
-            sql`${schema.schedules.is_active} = true AND ${schema.schedules.start_at} <= ${now} AND ${schema.schedules.end_at} > ${now}`
-          );
+          .where(and(eq(schema.schedules.is_active, true), lte(schema.schedules.start_at, now), gt(schema.schedules.end_at, now)));
 
         const [heartbeatsLast5m] = await db
           .select({ count: sql<number>`count(*)` })
           .from(schema.heartbeats)
-          .where(sql`${schema.heartbeats.created_at} >= ${fiveMinutesAgo}`);
+          .where(gte(schema.heartbeats.created_at, fiveMinutesAgo));
 
         const [heartbeatsLast1h] = await db
           .select({ count: sql<number>`count(*)` })
           .from(schema.heartbeats)
-          .where(sql`${schema.heartbeats.created_at} >= ${hourAgo}`);
+          .where(gte(schema.heartbeats.created_at, hourAgo));
 
         const [latestHeartbeat] = await db
           .select({ timestamp: sql<Date | null>`max(${schema.heartbeats.created_at})` })
@@ -103,8 +99,8 @@ export async function metricsRoutes(fastify: FastifyInstance) {
                     AND ${schema.publishes.status} = 'ACTIVE'
                     AND ${schema.publishes.taken_down_at} IS NULL
                     AND ${schema.schedules.is_active} = true
-                    AND ${schema.schedules.start_at} <= ${now}
-                    AND ${schema.schedules.end_at} > ${now}
+                    AND ${schema.schedules.start_at} <= ${sql.param(now, schema.schedules.start_at)}
+                    AND ${schema.schedules.end_at} > ${sql.param(now, schema.schedules.end_at)}
                 )
                 OR EXISTS (
                   SELECT 1
@@ -120,8 +116,8 @@ export async function metricsRoutes(fastify: FastifyInstance) {
                     AND ${schema.publishes.status} = 'ACTIVE'
                     AND ${schema.publishes.taken_down_at} IS NULL
                     AND ${schema.schedules.is_active} = true
-                    AND ${schema.schedules.start_at} <= ${now}
-                    AND ${schema.schedules.end_at} > ${now}
+                    AND ${schema.schedules.start_at} <= ${sql.param(now, schema.schedules.start_at)}
+                    AND ${schema.schedules.end_at} > ${sql.param(now, schema.schedules.end_at)}
                 )
                 OR (
                   ${schema.screens.current_schedule_id} IS NOT NULL
@@ -132,8 +128,8 @@ export async function metricsRoutes(fastify: FastifyInstance) {
                     FROM ${schema.schedules}
                     WHERE ${schema.schedules.id} = ${schema.screens.current_schedule_id}
                       AND ${schema.schedules.is_active} = true
-                      AND ${schema.schedules.start_at} <= ${now}
-                      AND ${schema.schedules.end_at} > ${now}
+                      AND ${schema.schedules.start_at} <= ${sql.param(now, schema.schedules.start_at)}
+                      AND ${schema.schedules.end_at} > ${sql.param(now, schema.schedules.end_at)}
                   )
                 )
               )`

@@ -118,7 +118,7 @@ function ReportEntryCard({ entry }: { entry: ScheduleReportEntry }) {
                 : "secondary"
           }
         >
-          Target {entry.target_status}
+          {entry.target_status === "PENDING" ? "Delivery unconfirmed" : `Target ${entry.target_status}`}
         </Badge>
       </div>
       <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
@@ -132,7 +132,7 @@ function ReportEntryCard({ entry }: { entry: ScheduleReportEntry }) {
         </div>
         <div>
           <span className="font-medium text-foreground">Taken down:</span>{" "}
-          {formatTimestamp(entry.taken_down_at)}
+          {entry.taken_down_at ? formatTimestamp(entry.taken_down_at) : "Not taken down"}
         </div>
         <div>
           <span className="font-medium text-foreground">Publish ID:</span> {entry.publish_id}
@@ -160,6 +160,7 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
     queryKey: ["dashboard", "schedule-report", days],
     enabled: open,
     staleTime: 60_000,
+    refetchInterval: 30_000,
     queryFn: () => reportsApi.getScheduleActivity({ days }),
   });
 
@@ -178,7 +179,7 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
         <DialogHeader>
           <DialogTitle>Schedule Report</DialogTitle>
           <DialogDescription>
-            Schedule activity grouped by screen and screen group for the selected reporting window.
+            Publish target records grouped by screen and explicit screen group for the selected reporting window.
           </DialogDescription>
         </DialogHeader>
 
@@ -214,7 +215,7 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm font-medium">
@@ -230,7 +231,7 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm font-medium">
                 <Layers3 className="h-4 w-4" />
-                Target events
+                Publish target records
               </CardTitle>
             </CardHeader>
             <CardContent className="text-2xl font-semibold">
@@ -240,8 +241,19 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                <Clock3 className="h-4 w-4" />
+                Unconfirmed targets
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-2xl font-semibold">
+              {reportQuery.isLoading ? "…" : reportQuery.data?.summary.pending_targets ?? 0}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-medium">
                 <ScreenShare className="h-4 w-4" />
-                Successful targets
+                Recorded successes
               </CardTitle>
             </CardHeader>
             <CardContent className="text-2xl font-semibold">
@@ -252,7 +264,7 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm font-medium">
                 <Clock3 className="h-4 w-4" />
-                Failed targets
+                Recorded failures
               </CardTitle>
             </CardHeader>
             <CardContent className="text-2xl font-semibold">
@@ -287,13 +299,13 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
         ) : (
           <div className="space-y-6">
             <TargetReportSection
-              title="By Screen"
+              title="By Screen (includes group members)"
               icon={Monitor}
               reports={reportQuery.data?.by_screen ?? []}
               emptyMessage="No screen-targeted schedule activity was found for the selected range."
             />
             <TargetReportSection
-              title="By Screen Group"
+              title="By Explicit Screen Group"
               icon={Users}
               reports={reportQuery.data?.by_group ?? []}
               emptyMessage="No group-targeted schedule activity was found for the selected range."
@@ -307,8 +319,8 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
                 </CardTitle>
               </CardHeader>
               <CardContent className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
-                <div>Current report includes publish lifecycle, target delivery status, schedule window, and takedown timing.</div>
-                <div>Next useful report expansions are proof-of-play compliance, publish-to-play latency, target failure reasons, and heartbeat freshness during active windows.</div>
+                <div>Screen group publishes also create individual screen target rows. These sections overlap; do not add their counts together.</div>
+                <div>Pending means delivery has not been confirmed in the target record. “Not taken down” means no takedown timestamp is stored; it is not a downtime measure. Playback proof and downtime are not measured here.</div>
               </CardContent>
             </Card>
           </div>

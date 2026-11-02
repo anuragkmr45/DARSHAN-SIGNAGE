@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatMaskedScreenId } from "@/lib/screens";
 import { formatBytes, formatPercent, formatRelativeTimestamp, getMachineStatusTone } from "@/lib/observability";
+import { useGrafanaAvailability } from "@/hooks/useGrafanaAvailability";
 
 interface ScreenHealthDashboardProps {
   screenId: string;
@@ -21,6 +22,7 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
   });
 
   const summary = observabilityQuery.data;
+  const grafanaHealth = useGrafanaAvailability(summary?.grafana.enabled === true);
 
   if (observabilityQuery.isLoading) {
     return (
@@ -200,16 +202,11 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
             Current values above are CMS-native summaries. Use Grafana for historical trends and scrape diagnostics.
           </p>
           <div className="flex flex-wrap gap-2">
-            {summary.grafana.links.map((link) => (
-              <Button
-                key={link.label}
-                variant="outline"
-                size="sm"
-                onClick={() => window.open(link.url, "_blank", "noopener,noreferrer")}
-              >
-                {link.label}
+            {grafanaHealth.data === true ? summary.grafana.links.map((link) => (
+              <Button key={link.label} variant="outline" size="sm" asChild>
+                <a href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>
               </Button>
-            ))}
+            )) : <span className="text-sm text-muted-foreground">Grafana unavailable through this CMS</span>}
           </div>
 
           <div className="rounded-lg border p-3 text-sm">
@@ -228,7 +225,7 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
         </Card>
       </div>
 
-      {summary.grafana.enabled && summary.grafana.embed_enabled && summary.grafana.embed_url ? (
+      {grafanaHealth.data === true && summary.grafana.embed_enabled && summary.grafana.embed_url ? (
         <Card className="overflow-hidden p-0">
           <div className="flex items-center gap-2 border-b px-4 py-3">
             <Thermometer className="h-4 w-4 text-primary" />

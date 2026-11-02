@@ -1,5 +1,5 @@
 import { URL } from 'node:url';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, gte, sql } from 'drizzle-orm';
 import { config as appConfig } from '@/config';
 import { getDatabase, schema } from '@/db';
 import { buildScreenPlaybackStateById } from '@/screens/playback';
@@ -69,6 +69,7 @@ export type ObservabilityOverviewSummary = {
   current_state_source: 'backend_and_prometheus';
   fleet: {
     total_players: number | null;
+    online_players: number | null;
     active_players: number | null;
     inactive_players: number | null;
     offline_players: number | null;
@@ -198,7 +199,7 @@ export function getMachineDefinitions(
   if (deploymentMode === 'development') {
     return [
       {
-        id: 'dev-local',
+        id: 'vm2',
         name: 'Development Host',
         role: 'development',
         dashboardUid: 'darshan-vm2-backend',
@@ -354,9 +355,8 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
   const machineDefinitions = getMachineDefinitions();
   const grafanaBasePath = normalizeGrafanaBasePath(appConfig.OBSERVABILITY_GRAFANA_BASE_PATH);
 
-  const [fleetStateResults, playerTargetResults, alertResults, hostUpResults, cpuResults, memoryResults, diskResults] =
+  const [playerTargetResults, alertResults, hostUpResults, cpuResults, memoryResults, diskResults] =
     await Promise.all([
-      prometheus.query('darshan_fleet_players_total'),
       prometheus.query('up{job="players"}'),
       prometheus.query('count by (severity) (ALERTS{alertstate="firing"})'),
       prometheus.query(`up{machine=~"${PROMETHEUS_MACHINE_REGEX}"}`),
@@ -371,13 +371,16 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
       ),
     ]);
 
-  const fleetTotals = new Map<string, number>();
-  for (const result of fleetStateResults) {
-    const state = result.metric.state;
-    const value = toScalar(result);
-    if (!state || value === null) continue;
-    fleetTotals.set(state, value);
-  }
+  // PostgreSQL is authoritative for registered screens. The Prometheus fleet gauge
+  // can be absent or stale when the observability VM or backend scrape is down.
+  const onlineCutoff = new Date(Date.now() - 5 * 60 * 1000);
+  const [fleetRow] = await getDatabase().select({
+    total: sql<number>`count(*)`,
+    active: sql<number>`count(*) filter (where ${schema.screens.status} = 'ACTIVE')`,
+    inactive: sql<number>`count(*) filter (where ${schema.screens.status} = 'INACTIVE')`,
+    offline: sql<number>`count(*) filter (where ${schema.screens.status} = 'OFFLINE')`,
+    online: sql<number>`count(*) filter (where ${schema.screens.status} = 'ACTIVE' and ${gte(schema.screens.last_heartbeat_at, onlineCutoff)})`,
+  }).from(schema.screens);
 
   const cpuByMachine = mapInstantValuesByMachine(cpuResults);
   const memoryByMachine = mapInstantValuesByMachine(memoryResults);
@@ -459,15 +462,11 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
     deployment_mode: appConfig.OBSERVABILITY_DEPLOYMENT_MODE,
     current_state_source: 'backend_and_prometheus',
     fleet: {
-      total_players:
-        fleetTotals.get('ACTIVE') !== undefined ||
-        fleetTotals.get('INACTIVE') !== undefined ||
-        fleetTotals.get('OFFLINE') !== undefined
-          ? (fleetTotals.get('ACTIVE') ?? 0) + (fleetTotals.get('INACTIVE') ?? 0) + (fleetTotals.get('OFFLINE') ?? 0)
-          : null,
-      active_players: fleetTotals.get('ACTIVE') ?? null,
-      inactive_players: fleetTotals.get('INACTIVE') ?? null,
-      offline_players: fleetTotals.get('OFFLINE') ?? null,
+      total_players: Number(fleetRow?.total ?? 0),
+      online_players: Number(fleetRow?.online ?? 0),
+      active_players: Number(fleetRow?.active ?? 0),
+      inactive_players: Number(fleetRow?.inactive ?? 0),
+      offline_players: Number(fleetRow?.offline ?? 0),
       reachable_players: reachablePlayerTargets,
       configured_player_targets: configuredPlayerTargets,
     },
@@ -487,7 +486,7 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
       embed_enabled: appConfig.OBSERVABILITY_GRAFANA_EMBED_ENABLED,
       base_path: grafanaBasePath,
       links: {
-        backend_service: appConfig.OBSERVABILITY_GRAFANA_ENABLED ? buildDashboardUrl('darshan-backend-service') : null,
+        backend_service: appConfig.OBSERVABILITY_GRAFANA_ENABLED ? buildDashboardUrl('darshan-vm2-backend') : null,
         players_fleet: appConfig.OBSERVABILITY_GRAFANA_ENABLED ? buildDashboardUrl('darshan-players-fleet') : null,
         machines: Object.fromEntries(
           machineDefinitions.map((machine) => [
@@ -574,7 +573,7 @@ export async function buildScreenObservabilitySummary(screenId: string): Promise
     });
     grafanaLinks.push({
       label: 'Open backend service dashboard',
-      url: buildDashboardUrl('darshan-backend-service'),
+      url: buildDashboardUrl('darshan-vm2-backend'),
     });
   }
 

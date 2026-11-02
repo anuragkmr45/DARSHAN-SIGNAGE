@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FastifyInstance } from 'fastify';
 import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
@@ -106,6 +106,7 @@ describe('Schedule activity report', () => {
     const body = response.json();
     expect(body.summary.schedules).toBeGreaterThan(0);
     expect(body.summary.target_events).toBeGreaterThanOrEqual(2);
+    expect(body.summary.pending_targets).toBeGreaterThanOrEqual(1);
     expect(body.by_screen).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -122,5 +123,56 @@ describe('Schedule activity report', () => {
         }),
       ]),
     );
+  });
+
+  it('counts screens with stale heartbeats even when the last reported status is ACTIVE', async () => {
+    const db = getDatabase();
+    const staleId = randomUUID();
+    const newId = randomUUID();
+    const neverSeenId = randomUUID();
+    await db.insert(schema.screens).values([
+      {
+        id: staleId,
+        name: 'Stale active screen',
+        status: 'ACTIVE',
+        last_heartbeat_at: new Date(Date.now() - 25 * 60 * 60 * 1000),
+      },
+      { id: newId, name: 'New unpaired screen', status: 'ACTIVE' },
+      { id: neverSeenId, name: 'Never seen old screen', status: 'OFFLINE', created_at: new Date(Date.now() - 25 * 60 * 60 * 1000) },
+    ]);
+    try {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/v1/reports/offline-screens',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const ids = response.json().screens.map((screen: { id: string }) => screen.id);
+      expect(ids).toContain(staleId);
+      expect(ids).toContain(neverSeenId);
+      expect(ids).not.toContain(newId);
+    } finally {
+      await db.delete(schema.screens).where(eq(schema.screens.id, staleId));
+      await db.delete(schema.screens).where(eq(schema.screens.id, newId));
+      await db.delete(schema.screens).where(eq(schema.screens.id, neverSeenId));
+    }
+  });
+
+  it('keeps last publish available when pg-boss statistics fail', async () => {
+    const db = getDatabase();
+    const execute = vi.spyOn(db, 'execute').mockRejectedValue(new Error('pg-boss unavailable'));
+    try {
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/v1/reports/system-health',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().transcode_queue.pending).toBeNull();
+      expect(response.json().jobs.failed_last_24h).toBeNull();
+      expect(response.json().publishes).toHaveProperty('last_published_at');
+    } finally {
+      execute.mockRestore();
+    }
   });
 });

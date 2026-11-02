@@ -176,6 +176,15 @@ const installApiMocks = async (page: Page, overrides?: { emptyTimeline?: boolean
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "healthy" }) });
     }
 
+    if (pathname === "/api/v1/observability/overview" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        fleet: { total_players: 4, online_players: 2, active_players: 3, inactive_players: 0, offline_players: 1, reachable_players: null, configured_player_targets: null },
+        alerts: { available: true, firing: 0, status: "healthy" },
+        machines: [],
+        grafana: { enabled: true, links: { backend_service: "/grafana/d/darshan-vm2-backend", players_fleet: "/grafana/d/darshan-players-fleet" } },
+      }) });
+    }
+
     if (pathname === "/api/v1/reports/requests-by-department" && method === "GET") {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
     }
@@ -203,6 +212,23 @@ const installApiMocks = async (page: Page, overrides?: { emptyTimeline?: boolean
           operators: { active: 1 },
         }),
       });
+    }
+
+    if (pathname === "/api/v1/reports/schedules" && method === "GET") {
+      const now = new Date().toISOString();
+      const entry = {
+        publish_id: "publish-1", schedule_id: "schedule-1", schedule_name: "Lobby rotation",
+        target_id: "screen-1", target_name: "Lobby Screen", target_type: "screen",
+        published_at: now, taken_down_at: null, schedule_start_at: now,
+        schedule_end_at: new Date(Date.now() + 3600000).toISOString(),
+        lifecycle_status: "ACTIVE", target_status: "PENDING", target_error: null,
+      };
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        range_start: new Date(Date.now() - 86400000).toISOString(), range_end: now,
+        summary: { schedules: 1, target_events: 1, pending_targets: 1, successful_targets: 0, failed_targets: 0, screens: 1, groups: 0 },
+        by_screen: [{ target_id: "screen-1", target_name: "Lobby Screen", target_type: "screen", latest_activity_at: now, entries: [entry] }],
+        by_group: [],
+      }) });
     }
 
     if (pathname === "/api/v1/screens/schedule-timeline" && method === "GET") {
@@ -278,6 +304,37 @@ const installApiMocks = async (page: Page, overrides?: { emptyTimeline?: boolean
 };
 
 test.describe("Dashboard active scheduled modal", () => {
+  test("explains explicit group targets and untaken-down publishes in the schedule report", async ({ page }) => {
+    await installApiMocks(page);
+    await login(page);
+    await page.getByRole("button", { name: "Schedule Report" }).click();
+    const dialog = page.getByRole("dialog", { name: "Schedule Report" });
+    await expect(dialog.getByText("By Explicit Screen Group")).toBeVisible();
+    await expect(dialog.getByText("No group-targeted schedule activity was found for the selected range.")).toBeVisible();
+    await expect(dialog.getByText("Delivery unconfirmed")).toBeVisible();
+    await expect(dialog.getByText("Unconfirmed targets")).toBeVisible();
+    await expect(dialog.getByText("Not taken down").first()).toBeVisible();
+  });
+
+  test("shows database fleet totals separately from optional player scrapes and opens valid Grafana links", async ({ page }) => {
+    await installApiMocks(page);
+    await page.route("**/grafana/api/health", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ database: "ok" }) }));
+    await login(page);
+    await expect(page.getByText("2 screens not online")).toBeVisible();
+    await expect(page.getByText("Online (5m) 2 · Status offline 1")).toBeVisible();
+    await expect(page.getByText("Direct player scrapes (optional)")).toBeVisible();
+    await expect(page.getByText("Players can be online without direct scrape targets")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Backend" })).toHaveAttribute("href", "/grafana/d/darshan-vm2-backend");
+  });
+
+  test("does not offer broken Grafana links when the CMS proxy is unavailable", async ({ page }) => {
+    await installApiMocks(page);
+    await page.route("**/grafana/api/health", (route) => route.fulfill({ status: 502, body: "Bad Gateway" }));
+    await login(page);
+    await expect(page.getByText("Grafana unavailable through this CMS")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Backend" })).toHaveCount(0);
+  });
+
   test("opens the modal and renders one timeline row per active scheduled screen", async ({ page }) => {
     const requestCounts = await installApiMocks(page);
     const consoleErrors: string[] = [];

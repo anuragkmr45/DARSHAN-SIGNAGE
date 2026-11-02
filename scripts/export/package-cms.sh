@@ -141,6 +141,13 @@ set -euo pipefail
 [[ -f ".env" ]] || { echo ".env is missing. Run ./init-env.sh first." >&2; exit 1; }
 source ./.env
 
+for upstream_name in BACKEND_UPSTREAM_HOST GRAFANA_UPSTREAM_HOST MINIO_UPSTREAM_HOST; do
+  upstream_host="${!upstream_name:-}"
+  if [[ "$upstream_host" == "127.0.0.1" || "$upstream_host" == "localhost" ]]; then
+    echo "Warning: $upstream_name points to the CMS container itself; set the reachable service host before using this package across machines." >&2
+  fi
+done
+
 mkdir -p nginx
 
 sed \
@@ -204,6 +211,11 @@ source ./.env
 
 curl -fsS "http://127.0.0.1:${CMS_HTTP_PORT}/" >/dev/null
 curl -fsS "http://127.0.0.1:${CMS_HTTP_PORT}/api/v1/health" >/dev/null
+if curl -fsS --max-time 5 "http://127.0.0.1:${CMS_HTTP_PORT}/grafana/api/health" >/dev/null; then
+  echo "Grafana proxy healthy."
+else
+  echo "Grafana proxy unavailable; check GRAFANA_UPSTREAM_HOST, GRAFANA_UPSTREAM_PORT, and the observability VM." >&2
+fi
 echo "CMS package healthy."
 EOF
 
@@ -232,10 +244,10 @@ This folder is a source-free CMS deploy package built as static assets behind Do
 
 ## Runtime notes
 
-- edit \`.env\` to point nginx at the backend host
+- edit \`.env\` to point nginx at reachable backend, MinIO, and Grafana hosts; the template's \`127.0.0.1\` values refer to the CMS container and are not valid for services on other VMs
 - static assets are in \`www/\`
 - nginx config is rendered from \`nginx/default.conf.template\`
-- Grafana provisioning and dashboards are staged in \`observability/grafana/\`
+- Grafana provisioning and dashboards are staged in \`observability/grafana/\`; this CMS package does not start the observability VM
 EOF
 
 chmod +x \

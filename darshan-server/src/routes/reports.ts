@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { config as appConfig } from '@/config';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
@@ -287,6 +287,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           summary: {
             schedules: schedules.length,
             target_events: entries.length,
+            pending_targets: entries.filter((entry) => entry.target_status === 'PENDING').length,
             successful_targets: entries.filter((entry) => entry.target_status === 'SUCCESS').length,
             failed_targets: entries.filter((entry) => entry.target_status === 'FAILED').length,
             screens: new Set(entries.filter((entry) => entry.target_type === 'screen').map((entry) => entry.target_id)).size,
@@ -529,12 +530,13 @@ export async function reportsRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Offline screens older than 24h
+  // Screens not seen for more than 24 hours. A stale ACTIVE status must not
+  // hide a disconnected device when no newer heartbeat arrived.
   fastify.get(
     apiEndpoints.reports.offlineScreens,
     {
       schema: {
-        description: 'Screens offline for more than 24 hours',
+        description: 'Screens without a heartbeat for more than 24 hours',
         tags: ['Reports'],
         security: [{ bearerAuth: [] }],
       },
@@ -557,11 +559,13 @@ export async function reportsRoutes(fastify: FastifyInstance) {
             location: schema.screens.location,
             status: schema.screens.status,
             lastHeartbeatAt: schema.screens.last_heartbeat_at,
+            registeredAt: schema.screens.created_at,
           })
           .from(schema.screens)
-          .where(
-            sql`${schema.screens.status} = 'OFFLINE' AND (${schema.screens.last_heartbeat_at} IS NULL OR ${schema.screens.last_heartbeat_at} < ${cutoff})`
-          );
+          .where(or(
+            and(isNotNull(schema.screens.last_heartbeat_at), lt(schema.screens.last_heartbeat_at, cutoff)),
+            and(isNull(schema.screens.last_heartbeat_at), lt(schema.screens.created_at, cutoff)),
+          ));
 
         const items = offline.map((s) => ({
           id: s.id,
@@ -569,6 +573,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           location: s.location,
           status: s.status,
           last_heartbeat_at: s.lastHeartbeatAt?.toISOString() ?? null,
+          never_seen: s.lastHeartbeatAt === null,
           offline_hours: s.lastHeartbeatAt ? Math.floor((now.getTime() - s.lastHeartbeatAt.getTime()) / 3600000) : null,
         }));
 
@@ -647,24 +652,28 @@ export async function reportsRoutes(fastify: FastifyInstance) {
 
         const bossSchema = (appConfig.PG_BOSS_SCHEMA || 'pgboss').replace(/"/g, '');
 
-        const transcodeQueueResult = await db.execute(
-          sql.raw(`
+        const [transcodeQueueResult, failedJobsResult] = await Promise.allSettled([
+          db.execute(sql.raw(`
             SELECT count(*)::int AS count
             FROM "${bossSchema}".job
             WHERE name = 'ffmpeg:transcode'
               AND state IN ('created', 'retry', 'active')
-          `)
-        );
-        const transcodeQueue = Number((transcodeQueueResult as any)?.rows?.[0]?.count || 0);
-
-        const failedJobsResult = await db.execute(
-          sql.raw(`
+          `)),
+          db.execute(sql.raw(`
             SELECT count(*)::int AS count
             FROM "${bossSchema}".job
             WHERE state = 'failed' AND created_on >= NOW() - INTERVAL '24 hours'
-          `)
-        );
-        const failedJobs24h = Number((failedJobsResult as any)?.rows?.[0]?.count || 0);
+          `)),
+        ]);
+        const transcodeQueue = transcodeQueueResult.status === 'fulfilled'
+          ? Number((transcodeQueueResult.value as any)?.rows?.[0]?.count || 0)
+          : null;
+        const failedJobs24h = failedJobsResult.status === 'fulfilled'
+          ? Number((failedJobsResult.value as any)?.rows?.[0]?.count || 0)
+          : null;
+        if (transcodeQueueResult.status === 'rejected' || failedJobsResult.status === 'rejected') {
+          logger.warn('pg-boss job statistics unavailable; returning publish and operator summaries');
+        }
 
         const [lastPublish] = await db
           .select({ lastPublishedAt: sql<Date | null>`max(${schema.publishes.published_at})` })
