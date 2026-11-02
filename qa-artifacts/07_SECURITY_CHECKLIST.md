@@ -26,3 +26,24 @@ Planning only. Perform the following checks only in an approved isolated environ
 | Cache, identity and locked recovery | Verify the exact 120-second authenticated-success deadline stops schedule/default/emergency and removes only media-cache targets while preserving identity, certificates, logs, PoP and request queues. Reachability while locked may start one recovery but cannot unlock directly. Require identity validation and a forced fresh snapshot before current-content sync/authority apply; revoked/mismatched identity returns to pairing and stale cached authority never resumes. Inspect permissions and stale content after purge/reconnect; do not infer secure overwrite. | `PLAYER-03..04`, `PLAYER-07`, `PLAYER-16`; heartbeat, secure guard, PlayerFlow, snapshot manager and media-cache purge |
 
 Security cases are planned assessments, not penetration-test results. Record evidence of both allowed and denied actors. The content-resource and people-directory boundaries are now explicit release requirements; BQ-020 Media/chat recycle behavior and BQ-015/019 site-policy inputs still require human acceptance.
+
+## Live broadcast implementation delta — 2026-11-03
+
+- [ ] `LIVE-02`, `LIVE-05..06`, `LIVE-11`: effective custom/conditional grants,
+  stable ownership, assigned presenter, authenticated concrete receivers,
+  permission/account/membership revocation racing admission, duplicate-tab and
+  consumed-ticket replay. A second connection must not evict the legitimate one.
+- [ ] `LIVE-11..13`: attempt original and SDK-refreshed token reconnect through
+  every reachable signaling path; inspect existing media during management
+  partition, controller crash and supervisor failure. Prove local watchdog
+  termination within authority policy; short token TTL alone is not evidence.
+- [ ] `LIVE-10`, `LIVE-14`: main-process deadlines, restricted IPC, receiver
+  no-publish/camera/mic/data grants, emergency/identity precedence and complete
+  audio/track/view disposal. Transient credentials never enter cached snapshots.
+- [ ] `LIVE-15..16`, `LIVE-19`: trusted CMS HTTPS/WSS, browser versus Chromium
+  certificate stores, wrong-host/expired cert rejection, private media addresses,
+  firewall bypass attempts, offline dependency audit, redacted logs and external
+  authority epoch/signing rotation after restore.
+
+Security cases are planned, not assessed/passed. See [contract](../docs/contracts/live-broadcast.md) and
+[developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md); retain existing human security/release controls.

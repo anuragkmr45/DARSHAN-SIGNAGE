@@ -370,3 +370,25 @@ Development may hand the build to QA only when all answers below are **Yes**:
 - [ ] Is the handoff tied to a fixed commit/build with no Critical/High defect lacking an approved disposition?
 
 Until every required gate is satisfied, the correct state is **development validation in progress**, not QA-ready and not release-approved.
+
+## Live broadcast implementation delta — 2026-11-03
+
+This new delta uses [live implementation loops](../docs/plans/live-broadcast-implementation-loops.md) and
+[accepted contract](../docs/contracts/live-broadcast.md). It does not reuse the older scope-limited
+10–15 minute smoke exception as completion for the new feature.
+
+| Loop | Current state | Closure gate |
+| --- | --- | --- |
+| 0 baseline | In progress | Current CMS/real-player ordinary playback/emergency/offline baseline and isolated inventory |
+| 1 capture/enforcement | Being built | Real capture→SFU→packaged Electron plus replay/removal/watchdog technical gate |
+| 2 reservations | Not executed | Frozen audience/fingerprint and 10/25 concurrent DB plus CMS journeys |
+| 3 authority | Not executed | Idempotency/generations/current permissions/epoch/reconciliation with actual media faults |
+| 4 player | Not executed | Same ordinary installed DARSHAN player scheduled live source and normal pairing/cache/emergency integration; deadline/fallback/precedence/cleanup journeys |
+| 5 CMS | Not executed | Every real visible control and denied/stale/multiple-session path |
+| 6 deployment | Not executed | Offline sixth role, TLS/transports, disable/update/restore/rollback |
+| 7 handoff | Not executed | Stable-packet regression, dated artifacts and concrete independent human checks |
+
+Each loop is inspect→implement→focused checks→actual application→fault→fix→
+repeat affected paths→evidence→commit. A failure blocks that loop. Resource-
+bounded local verification is not 250-player/Windows/physical/network approval.
+Developer ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md); human cases remain Not Tested.

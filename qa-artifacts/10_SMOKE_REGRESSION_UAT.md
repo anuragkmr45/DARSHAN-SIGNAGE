@@ -54,3 +54,25 @@ Always run all `P0` cases after a release touching shared API, schema, permissio
 | Release/recovery operator | Fresh signed role install, backend-only update, backup and isolated restore | `DEP-01..07`, `BKP-01..03` | Compatible releases, complete data, no silent schema rollback, RPO/RTO TBD |
 
 The general Requests workboard is disabled; `AUTHZ-06` verifies absence and confirms Schedule Requests remain usable. SSO login, business API-key authentication and automatic webhook delivery are not UAT requirements for this release; management screens remain in `FUN-12`.
+
+## Live broadcast implementation delta — 2026-11-03
+
+1. Each loop: focused source/DB/lifecycle checks, then the running CMS with
+   independent admin/presenter sessions and real packaged Electron receiver.
+   Failures keep the loop open; fix and rerun the failed journey plus neighbors.
+2. Local live smoke in the same ordinary installed DARSHAN desktop player:
+   authorize the scheduled event/fallback, preview/cancel, start and see
+   a decoded frame, optional audio, stop/restart, administrator disable,
+   live→fallback→live, emergency/clear, local end and authority cutoff.
+3. Security/fault delta: `LIVE-02..06`, `LIVE-08..16`, especially same-size group
+   replacement, replay versus existing flow, revocation racing admission, late
+   picker, supervisor failure, old cleanup, epoch restore and no hidden audio.
+4. Stable packet regression: `LIVE-20` plus affected existing scheduling,
+   default, emergency, pairing, ownership, cache, delivery and PoP cases.
+   Complete server/CMS/player required builds/suites and `/screens` browser gate.
+5. Human UAT: execute all `LIVE-01..20` on frozen artifacts; record real
+   presenter/player/display/audio, supported browser/OS and site network/capacity
+   outcomes. Local developer evidence does not pre-populate QA results.
+
+For every fault require trigger→display→audio→recovery→cleanup evidence. Exact
+source/artifact identifiers and remaining gates belong in [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).

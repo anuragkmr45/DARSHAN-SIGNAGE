@@ -65,3 +65,34 @@ Use distinct accounts and browser profiles for concurrent sessions. Store creden
 ## Acceptance Inputs Not Established By Source
 
 Code-based expectations for every BQ topic are in `12_CODE_BASELINE_EXPECTATIONS.md`; none require a person to explain what the source currently does. Webpage, competing-default priority and the required company fallback are confirmed under BR-097..102. Current runtime conflicts with BR-102. Actual site workload/SLO, RPO/RTO/downtime, retention/legal hold, hardware/browser/accessibility targets, deployed release baseline and network exposure/egress are external facts or commitments that the repository cannot supply. QA may record actual behavior now, but release owners must not silently replace an unresolved external requirement with a code default.
+
+## Live broadcast implementation delta — 2026-11-03
+
+Use `docker --context default` and explicitly selected Node 20; sequential
+builds on the observed approximately 6 GiB/swap-using host. The selected
+Docker Desktop socket failure does not prove Docker Engine is absent. Record
+actual dependency versions/health and resource observations before launching.
+
+Create feature-only API/CMS ports, DB, buckets, namespace and credentials;
+independent admin/presenter browser sessions; the normal DARSHAN installed
+player with an isolated profile (not a separately installed receiver);
+two departments/custom-role and
+revoked/unauthorized actors; an isolated real Electron user-data profile. Do
+not overwrite existing deployments, player identities, private recovery data or
+runtime directories. Start one receiver; only add another after independent
+profile/singleton proof.
+
+Fixtures: image, selected PDF page and video fallbacks; corrupt/missing/hash-
+mismatched fallback; cache-full state; readable slide, changing counter/motion,
+optional mic and capture sound, static slide; current and unsupported player;
+25/26 targets and ten/eleven overlapping windows; original/refreshed admission
+replay, late picker/callback/cleanup; expired/wrong-host trust fixture.
+
+Log exact commit/worktree delta, package SHA-256, Node/dependency versions,
+CMS/Backend/media URLs without credentials, profile aliases, time source,
+resource use, transport and fault boundaries. Available Firefox/Chromium do not
+establish actual Chrome/Edge or Windows coverage. Physical audio/display,
+whole-machine sleep with separate Backend and cross-VM partitions remain
+external. Never commit generated credentials/keys/certificates/profiles.
+
+[Execution plan](../docs/plans/live-broadcast-implementation-loops.md); [in-progress ledger](evidence/live-broadcast-developer-verification-2026-11-03.md).

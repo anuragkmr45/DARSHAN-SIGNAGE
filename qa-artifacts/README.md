@@ -1,5 +1,13 @@
 # DARSHAN Human QA Planning Package
 
+> **Live broadcast delta — 2026-11-03:** implementation is in progress on
+> `codex/live-screen-broadcast-planning-20261103` from `499bcdf`. Loop 0 is in
+> progress and loop 1 is being built. Accepted behavior is in
+> `../docs/contracts/live-broadcast.md`; ordered execution is in
+> `../docs/plans/live-broadcast-implementation-loops.md`. The in-progress ledger
+> `evidence/live-broadcast-developer-verification-2026-11-03.md` claims no completed
+> live runtime pass. `LIVE-01..20` remain **Not Tested**.
+
 Status: **PRE-QA DEVELOPMENT VERIFICATION IN PROGRESS; not release-approved.**
 The document/video/boundary/security-recovery upgrade has passed focused and
 component automated checks/builds plus two current Linux Electron runs. The earlier live
@@ -90,13 +98,13 @@ The 2026-09-25 answer confirms administrator self-approval and direct publishing
 
 | File | Contents | Current status |
 | --- | --- | --- |
-| `00_SYSTEM_UNDERSTANDING.md` | System understanding and 29 use cases | Provisional |
+| `00_SYSTEM_UNDERSTANDING.md` | System understanding and 32 use cases | Provisional |
 | `01_BUSINESS_RULES.md` | Classified rules and business sources | BQ-014 availability/evidence semantics and BR-103..107 playback/recovery decisions are reconciled; all human QA gates remain explicit |
 | `02_BUSINESS_QUESTIONS.md` | Questions, answers, affected expectations | Source answers complete; site and business inputs still TBD |
-| `03_RISK_REGISTER.csv` | 42 scored risks and risk-to-test links | R-38 remains an observed release blocker; R-39..42 cover requirements 20-24 |
+| `03_RISK_REGISTER.csv` | 51 scored risks and risk-to-test links | R-38 remains an observed release blocker; R-39..42 cover requirements 20-24 |
 | `04_MASTER_TEST_CHECKLIST.md` | Product and cross-cutting testing checklist | Reconciled for beta6 delivery, availability, player scrape and Grafana paths; human execution remains open |
-| `05_TEST_CASES.csv` | 125 detailed, human-executable cases | All 125 have Expected Result; 30 are Partially Tested from dated developer evidence and 95 are Not Tested, including `CHAT-01..08` |
-| `06_TRACEABILITY_MATRIX.csv` | 140 requirement/use-case-to-test/risk rows | Latest playback/recovery rules, cases and risks are explicitly traced |
+| `05_TEST_CASES.csv` | 150 detailed, human-executable cases | All 150 have Expected Result; 30 are Partially Tested from dated developer evidence and 120 are Not Tested, including `LIVE-01..20` |
+| `06_TRACEABILITY_MATRIX.csv` | 152 requirement/use-case-to-test/risk rows | Latest playback/recovery rules, cases and risks are explicitly traced |
 | `07_SECURITY_CHECKLIST.md` | Authorized security verification plan, no execution | Provisional |
 | `08_PERFORMANCE_RELIABILITY_CHECKLIST.md` | Load, stress, spike, soak, resilience and recovery plans | Provisional |
 | `09_TEST_DATA_AND_ENVIRONMENT.md` | Data recipes, isolation, topology, tools, cleanup rules | Provisional |
@@ -105,9 +113,9 @@ The 2026-09-25 answer confirms administrator self-approval and direct publishing
 | `12_CODE_BASELINE_EXPECTATIONS.md` | Code-derived expectations for all 20 business topics | Static baseline; not test results |
 | `13_PRE_QA_DEVELOPMENT_PLAN.md` | Original deep plan, fast-smoke decision and later end-to-end developer closure | Developer closure complete; listed cross-node/platform/security/recovery/soak gates remain with QA/release validation |
 
-This file grouping covers all requested deliverables without duplicating the detailed cases. Suites reference the master case IDs rather than cloning cases. The detailed CSV has 125 data rows and all required planning fields are populated: Test ID, objective, preconditions, test data, steps, expected result, priority, risk level, design evidence, environment/dependencies and status. QA-owned Actual Result, Execution Evidence and Defect ID fields intentionally remain blank for unexecuted cases.
+This file grouping covers all requested deliverables without duplicating the detailed cases. Suites reference the master case IDs rather than cloning cases. The detailed CSV has 150 data rows and all required planning fields are populated: Test ID, objective, preconditions, test data, steps, expected result, priority, risk level, design evidence, environment/dependencies and status. QA-owned Actual Result, Execution Evidence and Defect ID fields intentionally remain blank for unexecuted cases.
 
-Priority distribution: 90 P0, 34 P1 and 1 P2. Thirty cases are `Partially Tested` and 95 remain `Not Tested`; the new chat cases include developer evidence in Notes but retain empty QA-owned result fields. The playback/recovery cases contain developer automation evidence but still require the listed Electron/physical execution. Case DEF-04 is Partially Tested because the developer runtime produced an explicit failure; this is not a QA Pass.
+Priority distribution: 114 P0, 35 P1 and 1 P2. Thirty cases are `Partially Tested` and 120 remain `Not Tested`; the new chat cases include developer evidence in Notes but retain empty QA-owned result fields. The playback/recovery cases contain developer automation evidence but still require the listed Electron/physical execution. Case DEF-04 is Partially Tested because the developer runtime produced an explicit failure; this is not a QA Pass.
 
 ## Acceptance Controls
 
@@ -123,7 +131,7 @@ Priority distribution: 90 P0, 34 P1 and 1 P2. Thirty cases are `Partially Tested
 ## How QA Uses This Package
 
 1. Open `05_TEST_CASES.csv` and filter `Status`. For the chat delta run `CHAT-01..08`, `FUN-09..10` and `CONC-04` with three independent CMS profiles; the first full QA run must address the absent member-removal control. For the beta6 delta start with `FUN-11`, `UI-04`, `OBS-02`, `PLAYER-07`, then run the delivery/playback paths in `FUN-03..05` and the relevant player cases. Retain `API-06`, `UI-05`, `PLAYER-03..04`, `PLAYER-10..16`, `COMP-04` and `OBS-04` for the earlier playback/recovery delta, then continue every remaining `Not Tested` row. Re-run every `Partially Tested` row on the approved target matrix.
-2. For each row, prepare the stated preconditions/test data, perform `Steps`, and compare the observation with `Expected Result`. The expected-result field is populated for all 125 cases.
+2. For each row, prepare the stated preconditions/test data, perform `Steps`, and compare the observation with `Expected Result`. The expected-result field is populated for all 150 cases.
 3. Write what actually happened in `Actual Result`, set `Status`, link sanitized screenshots/logs/queries in `Execution Evidence`, and add a `Defect ID` when observed behavior differs.
 4. Use `10_SMOKE_REGRESSION_UAT.md` to choose the smoke/regression/UAT order; use `06_TRACEABILITY_MATRIX.csv` to see which business rule and risk each case covers.
 5. Do not approve release until the open items in `11_RELEASE_READINESS_CHECKLIST.md` have owners/evidence and the final Go/No-go decision is signed by the responsible humans.
@@ -133,3 +141,24 @@ Priority distribution: 90 P0, 34 P1 and 1 P2. Thirty cases are `Partially Tested
 The tracked-file index was obtained with Git. TypeScript syntax trees were read without executing application modules to enumerate explicit `fastify` route declarations, resolve their `apiEndpoints` strings, and enumerate CMS routes and Drizzle tables/enums. Existing tests were inventoried by tracked filename. Detailed analysis used targeted reads across handlers, policy helpers, repositories, services, schemas, migrations, renderer/main-process code, configuration loaders, release scripts, representative tests, and contracts.
 
 The inventory excludes generated framework routes from its route count, and excludes SQL-only and pg-boss tables from its Drizzle-table count. The semantic QA documents were refreshed for the document/video and beta6 delivery/availability/observability deltas, but this is not a new audit of every unrelated route. Vendored dependencies, generated builds, binary installers, local output/log directories, private configuration and credentials were not audited.
+
+## Live broadcast implementation delta — 2026-11-03
+
+Current catalog integrity at this delta: **150 cases**, **51
+risks**, **152 traceability rows**; 120 Not Tested,
+30 Partially Tested and no independent QA Pass.
+New scope is `UC-030..032`, `BR-109..116`, `BQ-027`, `R-44..51`, `LIVE-01..20`.
+
+The finished feature is a scheduled live event/media source in the same ordinary
+installed DARSHAN desktop player and normal pairing/lifecycle/cache/emergency.
+The temporary prototype is a technical gate. Root reported a real capture and
+receiver first-frame event during loop 1, with interrupted disconnect/fallback;
+no pixel artifact, physical sound, measured cutoff or completed loop-1 pass is
+claimed. See the dated ledger for the exact partial observation.
+
+Use [contract](../docs/contracts/live-broadcast.md), [execution loops](../docs/plans/live-broadcast-implementation-loops.md) and
+[developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md). The expected behavior is accepted; code and
+runtime verification remain in progress. Add runtime results only with exact
+source/artifact/environment identifiers. Keep QA-owned fields independent and
+all existing release blockers visible. No installed `qa-master-checklist` skill
+was found; this packet follows the existing Acceptance Controls above.

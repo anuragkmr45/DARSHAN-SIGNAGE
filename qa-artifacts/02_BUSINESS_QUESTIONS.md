@@ -413,3 +413,34 @@ Release decision, 2026-11-01: Block a Screen or Screen Group with editable draft
 | 3 | BQ-015..BQ-020 | Code behavior recorded; site policies and actual target state pending human input | Source review, 2026-09-25 |
 
 No question asks the user to discover implementation details that can be inspected locally. Answers define intended outcomes, release scope and operational commitments. Existing evidence of a behavior remains available even when the user chooses a different requirement.
+
+## Live broadcast implementation delta — 2026-11-03
+
+### BQ-027: Live broadcast behavior and deployment boundary
+
+Decision source: accepted user implementation goal, 2026-11-03.
+
+**Resolved intended behavior:** the scheduled live event/media source runs in
+the same ordinary installed DARSHAN desktop player with its normal pairing,
+lifecycle/cache/emergency; no separate installed receiver is the deliverable.
+Developer-only prototypes prove technical gates only. Six initial VM roles with one shared media VM;
+ten concurrent broadcasts, one presenter and at most 25 approved screens each;
+fullscreen within an approved window; optional microphone/captured sound only
+where actually available; frozen concrete per-item audience; verified pinned
+fallback required before join; missing/corrupt fallback is **Content unavailable**.
+Renew every 3 seconds and stop video/audio within 10 seconds without authority;
+local live end tolerance is 1 second for a running player. Identity/security and
+emergency override live. Presenter stop permits explicit retry in the remaining
+window; administrative stop disables until authorized re-enable. V1 excludes
+recording, remote input, extra administrator viewers and multiple live slots.
+
+**Technical gates still unmeasured:** media-engine replay/removal enforcement,
+actual sixth-VM sizing/network capacity, Windows/real Chrome/Edge capture/audio,
+physical display/audio, cross-VM TLS/firewall/TURN and production-sized restore.
+A single local test host cannot close those gates or reduce the agreed limits.
+No further product decision is inferred from the current presentation-only code.
+
+Affected rules/use cases: `BR-109..116`, `UC-030..032`; cases `LIVE-01..20`;
+risks `R-44..51`. [Contract](../docs/contracts/live-broadcast.md); [execution plan](../docs/plans/live-broadcast-implementation-loops.md);
+[developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md). Resolved behavior does not mean implemented or
+QA-approved behavior.

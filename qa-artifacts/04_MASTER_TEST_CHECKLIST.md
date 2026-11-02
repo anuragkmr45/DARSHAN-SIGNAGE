@@ -87,3 +87,29 @@ Execute remaining work only on authorized isolated test environments. Each check
 For each applicable scenario, capture happy path plus invalid input, boundary, unauthorized actor, duplicate action, interruption/retry, stale state, dependency outage, and post-recovery consistency. The detailed case rows identify the highest-risk combinations, avoiding duplicate cases for every Cartesian product. Use a real physical player for display/audio/fullscreen assertions and an isolated recovery target for destructive rehearsal. Never run the release or backup tests against the production database.
 
 Business source and code answer can disagree. Mark observed behavior separately from intended acceptance, file a defect for confirmed-rule conflicts, and leave genuinely unapproved business outcomes as `TBD - NEEDS_BUSINESS_CONFIRMATION (BQ-nnn)`.
+
+## Live broadcast implementation delta — 2026-11-03
+
+- [ ] `LIVE-01..06`: real CMS author/hold/approve/request/direct-publish and
+  presenter start/stop flows; current custom roles/departments, frozen audience,
+  same-size member change, 25/26 targets, 10/11 overlaps, duplicate starts/tabs.
+- [ ] `LIVE-07..10`: real packaged receiver frame/audio truth, verified pinned
+  fallback, missing/corrupt Content unavailable, start/end boundaries,
+  three-second renewal/ten-second cutoff, emergency/security and resume cleanup.
+- [ ] `LIVE-11..14`: original/refreshed ticket/token replay, already flowing SFU
+  media removal, API/DB/worker/Valkey/media partitions, supervisor/watchdog,
+  delayed cleanup, runtime-capacity retention and renderer/static-slide cases.
+- [ ] `LIVE-15..18`: trusted CMS HTTPS/browser/Electron paths, blocked media
+  transport, offline package/update/rollback/restore epoch, actual supported OS/
+  browser/audio and representative 1x25/5x25/10x25 load/soak.
+- [ ] `LIVE-19..20`: ordered/fresh diagnostics, log redaction and complete
+  existing schedule/default/emergency/pairing/cache/delivery/PoP regression.
+
+Final `LIVE-01..20` acceptance must exercise a scheduled live event/media source
+inside the same ordinary installed DARSHAN player, including normal pairing,
+lifecycle, cache and emergency transitions. A developer-only prototype or
+separate receiver application cannot close those integrated cases.
+
+For every fault record trigger, visible display, audio, allowed recovery and
+cleanup. [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md) is an in-progress developer ledger;
+all new human cases remain Not Tested.

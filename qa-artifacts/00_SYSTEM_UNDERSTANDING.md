@@ -247,3 +247,32 @@ implementation is not independent human QA evidence.
 This is a repository-wide surface inventory plus risk-focused tracing and targeted disposable feature execution, not a claim to have read and proved every source line. No live VM, certificate store, production archive, physical player hardware, external identity provider or production S3 destination was accessed. No secret/configuration values from private environments were needed. Only the dated runtime report is current execution evidence.
 
 The detailed cases, traceability, security/performance/reliability plans, data requirements, suites and release gates are present in this package. QA's next step is authorized execution and evidence capture. An external target or business acceptance decision not supplied by code or user remains explicitly TBD; test observations must not silently approve it.
+
+## Live broadcast implementation delta — 2026-11-03
+
+Status: **live implementation in progress, not runtime verified or release-approved**.
+Starting feature baseline is `499bcdf` on
+`codex/live-screen-broadcast-planning-20261103`; loop 0 is in progress and loop 1
+is being built. Historical source counts/checkpoints above are not a refreshed
+live implementation inventory. See [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).
+
+The final feature is a scheduled live event/media source inside the same
+ordinary installed DARSHAN desktop player, sharing its pairing, lifecycle,
+cache/defaults, emergency and security behavior. Developer-only prototype
+capture/receiver pages prove a technical gate and cannot replace final scheduled
+player acceptance. The accepted target adds a sixth shared media VM to the existing five roles.
+The Backend/PostgreSQL retains schedule, ownership, capacity and admission
+authority; the media service forwards presenter video/audio inside the site.
+CMS captures only with explicit browser consent; the Electron main process
+owns receiver identity/deadlines and applies emergency/security/fallback.
+Snapshots contain frozen per-item audience and approved fallback references,
+not media tickets. Additional departments do not grant global display control.
+
+| ID | New journey | Important alternate paths | Contract |
+| --- | --- | --- | --- |
+| UC-030 | Author, hold, approve and publish a live occurrence with presenter, target screens and fallback | Same-size group replacement, stale approval, direct publish, 25/26 screens, 10/11 overlapping runs and incompatible player | `BR-109..111`; [contract](../docs/contracts/live-broadcast.md) |
+| UC-031 | Assigned presenter previews, starts, controls and explicitly restarts a broadcast | Capture denied/cancelled, late picker, optional audio loss, duplicate tab, Stop sharing, account/session revocation and administrator disable | `BR-112..113`; [contract](../docs/contracts/live-broadcast.md) |
+| UC-032 | Authorized player receives, falls back and recovers; operator diagnoses/deploys | Expiry, emergency/security, missing fallback, renderer crash, network/service partition, stale operation, restore and offline deployment | `BR-114..116`; [contract](../docs/contracts/live-broadcast.md) |
+
+Human cases `LIVE-01..20` remain Not Tested. Local developer verification and
+external Windows/browser/physical/cross-VM/restore/capacity evidence are separate.

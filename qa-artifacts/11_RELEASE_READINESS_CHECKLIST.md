@@ -105,3 +105,34 @@ developer evidence, not an independent QA or release pass.
 | Open defects and risk exceptions | Pending |
 | Product/security/operations approvers | Pending |
 | Decision: Go / No-go / Conditional with owner and date | Pending |
+
+## Live broadcast implementation delta — 2026-11-03
+
+- [ ] LiveKit/adapted media-engine gate proves every signaling reconnect and
+  original/refreshed replay denied after withdrawal, existing media terminated,
+  legitimate connection preserved on duplicate/replay and supervisor/watchdog
+  isolation when removal cannot be confirmed (`LIVE-06`, `LIVE-11..13`).
+- [ ] Real CMS request/direct publish, frozen per-item audiences, current
+  permissions and constrained scheduled/runtime capacity pass concurrent tests
+  (`LIVE-01..06`). No old CMS/player silently mutates/displays unsupported live.
+- [ ] The scheduled live event/media source runs in the same ordinary installed
+  DARSHAN player with normal pairing/lifecycle/cache/emergency; no separate
+  receiver app or developer-only prototype is accepted as the final feature.
+- [ ] Real packaged player meets 3s renewal/10s video-and-audio cutoff, 1s local
+  live end, verified pinned fallback/Content unavailable and emergency/security/
+  resume behavior (`LIVE-07..10`, `LIVE-14`).
+- [ ] Sixth role signed/offline artifacts, trusted CMS HTTPS and player Chromium
+  trust, firewall/UDP/TURN, feature disable, update/rollback and rotated external
+  restore epoch are rehearsed (`LIVE-15..16`).
+- [ ] Windows/actual Chrome/Edge/Firefox matrix, physical display/audio,
+  whole-machine sleep with separate Backend and cross-VM fault evidence are
+  complete (`LIVE-15..17`).
+- [ ] Representative 1x25,5x25,10x25, simultaneous transitions/reconnect and soak
+  evidence supports the agreed six-VM deployment hardware; report unmet
+  resources rather than reducing limits or assuming seamless failover
+  (`LIVE-18`). Existing BQ-017/RPO/RTO gates still apply.
+- [ ] Fresh truthful diagnostics, sanitized audit, stable-packet regression and
+  independent human `LIVE-01..20` results bind to frozen commits/artifact hashes
+  (`LIVE-19..20`). Existing unrelated blockers remain open.
+
+Current status is in progress; no new item above is a pass. See [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).

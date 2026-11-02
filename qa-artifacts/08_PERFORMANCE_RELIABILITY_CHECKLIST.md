@@ -58,3 +58,18 @@ For document-page rollout, overlap large-PDF inspection/Office conversion with m
 ## Recovery Measures
 
 For backup/restore and role update, record start/end timestamps, last durable transaction, object counts/hashes, last displayed schedule, accepted versus persisted PoP and queue backlog. Calculate observed data loss and recovery time from these records. Pass only with measured RPO ≤24 hours, RTO ≤4 hours and planned maintenance ≤2 hours, using an isolated production-sized restore before every production release and monthly thereafter. Preserve the distinction between application rollback and database/object restore; the migration code has no automatic reverse schema path. Same-Data-VM backup cannot pass the RPO for VM/disk loss and requires explicit risk acceptance.
+
+## Live broadcast implementation delta — 2026-11-03
+
+| Live workload/fault | Acceptance evidence | Cases |
+| --- | --- | --- |
+| Authority/visibility | Renewal every 3s; visible video and audio stop within 10s without renewal; local live schedule end within 1s on a running player; conservative request time and resume revalidation | LIVE-09..12 |
+| Full target workload | One, five, then ten rooms with 25 actual or qualified representative receivers each; 26th screen and 11th overlap reject; record CPU/RAM/GPU/NIC, bitrate, readability and source-to-display delay | LIVE-04, LIVE-17..18 |
+| Boundary/reconnect burst | Ten ending runs versus ten replacements; delayed teardown; concurrent reconnect. Never exceed occupied capacity and never resurrect old authority | LIVE-13, LIVE-18 |
+| Faults/soak | API/DB/worker/Valkey/SFU/controller/supervisor fault, constrained/blocked media path, static slide, renderer crash and long run; bound retries/leaks and measure recovery | LIVE-11..18 |
+
+At illustrative 3 Mb/s per receiver, 250 receivers require 750 Mb/s video before
+overhead. This calculation is not sizing evidence. Six initial VM roles are the
+accepted topology; actual hardware/network suitability remains a release gate.
+Keep existing BQ-017 fleet/API workload gates as well. A local one/two-player
+run only proves the exercised functional/fault scope. Ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).

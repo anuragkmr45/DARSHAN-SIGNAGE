@@ -63,3 +63,24 @@ When a user-confirmed rule disagrees with code, report the observed difference a
 ## Inputs That Code Cannot Supply
 
 Release owners, not QA observation, must provide actual site-specific target values where acceptance depends on them: approved fleet/workload and latency targets; RPO/RTO and maintenance allowance; data-class retention/legal-hold and recoverability policy; exact supported player hardware, OS/browser/accessibility matrix; and real site network exposure/egress policy. The current code behavior above is the starting characterization for all other topics. If product owners choose a different rule, record that decision against its BQ/BR ID before scoring acceptance. QA should leave actual behavior blank until execution; no human is being asked to rediscover source behavior.
+
+## Live broadcast implementation delta — 2026-11-03
+
+Starting-source checkpoint `499bcdf`: schedule items require presentation_id;
+there is no LIVE source/receiver. Reservations expand groups, but hold reuse
+checks schedule revision/count; snapshots and summaries filter current group
+membership; cache protection concerns currently playing items; delivery Success
+acknowledges a cached/applied snapshot. These are discoverable baseline facts,
+not the accepted live contract and not live runtime evidence.
+
+The final source target is a scheduled live event/media source in the same
+ordinary installed DARSHAN player and normal pairing/lifecycle/cache/emergency.
+A temporary developer prototype establishes only the media gate; its first-frame
+event does not establish completed production lifecycle integration.
+
+The implementation target is `BR-109..116` and [live contract](../docs/contracts/live-broadcast.md).
+Loop 0 is in progress; loop 1 is being built. Update this checkpoint with actual
+implemented routes/types and source commit after each verified loop. Until then,
+do not describe target behavior as code-derived or mark human cases Pass.
+
+Current delta ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md); cases `LIVE-01..20`.
