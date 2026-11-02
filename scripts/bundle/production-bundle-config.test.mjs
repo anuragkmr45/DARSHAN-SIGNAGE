@@ -481,6 +481,7 @@ test('standalone server package env contains every Compose lifecycle input', () 
     'POSTGRES_HOST_PORT',
     'MINIO_HOST_PORT',
     'MINIO_CONSOLE_PORT',
+    'MINIO_PUBLIC_ENDPOINT',
     'VALKEY_HOST_PORT',
     'API_HOST_PORT',
   ]) {
@@ -498,6 +499,8 @@ test('standalone server package env contains every Compose lifecycle input', () 
   assert.match(compose, /\.\/certs:\/run\/darshan-input-certs:ro/)
   assert.match(compose, /\.\/\.env:\/run\/darshan-input-secrets\/standalone\.env:ro/)
   assert.match(compose, /\.\/secrets:\/run\/darshan-input-worker-secrets:ro/)
+  assert.match(envWriter, /MINIO_PUBLIC_ENDPOINT=http:\/\/127\.0\.0\.1:8080/)
+  assert.match(packageServer, /Docker-only names such as \\`minio\\` are not/)
 
   assert.match(
     packageServer,

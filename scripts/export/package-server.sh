@@ -151,11 +151,16 @@ EOF
   printf 'POSTGRES_HOST_PORT=5432\n'
   printf 'MINIO_HOST_PORT=9000\n'
   printf 'MINIO_CONSOLE_PORT=9001\n'
+  # Presigned URLs are consumed by browsers and players, not by the backend
+  # container. The isolated package pairs with the standalone CMS default on
+  # the same host; operators using a different reachable origin must replace
+  # this value before installation.
+  printf 'MINIO_PUBLIC_ENDPOINT=http://127.0.0.1:8080\n'
   printf 'VALKEY_HOST_PORT=6379\n'
   printf 'API_HOST_PORT=3000\n\n'
   # Demo-seed credentials belong to local development only. A production
   # bundle receives a one-time password via bootstrap-secrets/admin-password.
-  grep -v -E '^ADMIN_(EMAIL|PASSWORD)=' "$SERVER_REPO_DIR/.env.example"
+  grep -v -E '^ADMIN_(EMAIL|PASSWORD)=|^[[:space:]]*#?[[:space:]]*MINIO_PUBLIC_ENDPOINT=' "$SERVER_REPO_DIR/.env.example"
 } > "$OUTPUT_DIR/.env.template"
 
 cat > "$OUTPUT_DIR/docker-compose.yml" <<'EOF'
@@ -560,6 +565,13 @@ cat >> "$OUTPUT_DIR/README.md" <<'EOF'
 ./install.sh
 ./health-check.sh
 \`\`\`
+
+The isolated same-host defaults sign browser/player media URLs for
+\`http://127.0.0.1:8080\`, the standalone CMS origin. If CMS is exposed on a
+different host or port, set \`MINIO_PUBLIC_ENDPOINT\` to that recipient-facing
+CMS origin before \`./install.sh\`. Docker-only names such as \`minio\` are not
+valid player endpoints. The production-split bundle supplies its own
+site-specific CMS HTTPS origin.
 
 ## Update
 
