@@ -199,6 +199,30 @@ describe('WebpageViewManager', () => {
     })
   })
 
+  it('keeps the saved preview visible for an HTTP error page and recovers after a successful reload', async () => {
+    const clock = sinon.useFakeTimers()
+    await manager.mount(request('status-slot', 1, 1))
+    const view = views[0]
+
+    view.webContents.emit('did-navigate', {}, 'https://10.20.1.9/private', 403, 'Forbidden')
+    view.webContents.emit('dom-ready')
+    view.webContents.emit('did-stop-loading')
+    await clock.tickAsync(151)
+
+    expect(statuses).to.deep.include({
+      id: 'status-slot', generation: 1, state: 'fallback', reason: 'http-403',
+    })
+    expect(statuses.some((status) => status.state === 'healthy')).to.equal(false)
+    expect(view.setVisible.lastCall.args[0]).to.equal(false)
+
+    view.webContents.emit('did-navigate', {}, 'https://10.20.1.9/private', 200, 'OK')
+    view.webContents.emit('did-stop-loading')
+    await clock.tickAsync(151)
+    expect(statuses).to.deep.include({ id: 'status-slot', generation: 1, state: 'healthy' })
+    expect(view.setVisible.lastCall.args[0]).to.equal(true)
+    clock.restore()
+  })
+
   it('keeps the fallback visible when a loaded page remains empty through the readiness deadline', async () => {
     const clock = sinon.useFakeTimers({ shouldClearNativeTimers: true })
     await manager.mount(request('blank-slot', 1, 1))

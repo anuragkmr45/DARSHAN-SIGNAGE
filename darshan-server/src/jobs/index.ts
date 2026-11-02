@@ -394,7 +394,6 @@ export async function processWebpageVerifyCaptureJob(
           .update(schema.media)
           .set({
             ready_object_id: readyObject.id,
-            source_url: verification.finalUrl,
             webpage_preview_captured_at: completedAt,
             webpage_preview_attempted_at: completedAt,
             webpage_preview_refresh_token: null,
@@ -420,7 +419,6 @@ export async function processWebpageVerifyCaptureJob(
           readyObjectId: readyObject.id,
           expectedWebpagePreviewRefreshToken: job.refreshToken,
           values: {
-            source_url: verification.finalUrl,
             webpage_preview_captured_at: completedAt,
             webpage_preview_attempted_at: completedAt,
             webpage_preview_refresh_token: null,

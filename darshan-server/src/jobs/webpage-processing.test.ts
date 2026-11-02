@@ -93,7 +93,6 @@ describe('webpage media processing job', () => {
       sha256: 'a'.repeat(64),
     });
     expect(updates).toContainEqual({
-      source_url: 'https://example.com/',
       webpage_preview_captured_at: updatedAt,
       webpage_preview_attempted_at: updatedAt,
       webpage_preview_refresh_token: null,
@@ -103,6 +102,7 @@ describe('webpage media processing job', () => {
       status_reason: null,
       updated_at: updatedAt,
     });
+    expect(updates).not.toContainEqual(expect.objectContaining({ source_url: expect.anything() }));
     expect(logger.error).not.toHaveBeenCalled();
   });
 
@@ -165,6 +165,38 @@ describe('webpage media processing job', () => {
     });
     expect(updates).not.toContainEqual(expect.objectContaining({ status: 'FAILED' }));
     expect(updates).not.toContainEqual(expect.objectContaining({ ready_object_id: expect.anything() }));
+  });
+
+  it('keeps the entry URL after a refresh redirects to a cookie-gated page', async () => {
+    const mediaId = randomUUID();
+    const refreshToken = randomUUID();
+    const { db, updates } = createDb({
+      id: mediaId,
+      status: 'READY',
+      ready_object_id: 'previous-preview',
+      webpage_preview_refresh_token: refreshToken,
+      source_url: 'https://example.com/cookie-gate',
+      created_by: randomUUID(),
+    } as any);
+
+    await processWebpageVerifyCaptureJob(
+      { mediaId, sourceUrl: 'https://example.com/cookie-gate', mode: 'REFRESH', refreshToken },
+      {
+        db,
+        verifySource: vi.fn().mockResolvedValue({
+          finalUrl: 'https://example.com/cookie-content',
+          contentType: 'text/html',
+          title: 'Cookie content',
+          screenshot: Buffer.from('cookie-preview'),
+        }),
+        putObject: vi.fn().mockResolvedValue({ sha256: 'a'.repeat(64), etag: 'etag' }),
+        upsertStorageObject: vi.fn().mockResolvedValue({ id: 'new-preview' }),
+        logger: { warn: vi.fn(), error: vi.fn() },
+      }
+    );
+
+    expect(updates).toContainEqual(expect.objectContaining({ ready_object_id: 'new-preview' }));
+    expect(updates).not.toContainEqual(expect.objectContaining({ source_url: expect.anything() }));
   });
 
   it('discards a newly produced preview when deletion wins the refresh commit race', async () => {

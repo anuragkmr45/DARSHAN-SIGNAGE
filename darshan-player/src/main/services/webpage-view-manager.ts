@@ -57,6 +57,7 @@ type Entry = {
   disposed: boolean
   retryCount: number
   probeGeneration: number
+  lastMainFrameHttpStatus?: number
   timers: Set<NodeJS.Timeout>
   retryTimer?: NodeJS.Timeout
 }
@@ -234,6 +235,10 @@ export class WebpageViewManager {
       }
       this.showFallbackWhileNavigating(entry)
     })
+    contents.on('did-navigate', (_event, _url, httpResponseCode) => {
+      entry.lastMainFrameHttpStatus = httpResponseCode
+      if (httpResponseCode >= 400) this.fail(entry, `http-${httpResponseCode}`)
+    })
     contents.on('dom-ready', () => {
       void contents.executeJavaScript(`${LOCKDOWN_SCRIPT}(${JSON.stringify(this.isInputLocked())})`, false).catch(() => undefined)
       this.beginProbe(entry)
@@ -247,7 +252,7 @@ export class WebpageViewManager {
   }
 
   private beginProbe(entry: Entry): void {
-    if (entry.disposed) return
+    if (entry.disposed || (entry.lastMainFrameHttpStatus ?? 0) >= 400) return
     entry.probeGeneration += 1
     const generation = entry.probeGeneration
     const deadline = Date.now() + READY_DEADLINE_MS
