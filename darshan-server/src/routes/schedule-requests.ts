@@ -626,10 +626,11 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
   const reservationService = createScheduleReservationService();
   const db = getDatabase();
 
-  const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
+  const actorFor = (payload: { sub: string; role: string; department_id?: string | null; department_ids?: string[] }): ActorContext => ({
     userId: payload.sub,
     roleName: payload.role,
     departmentId: payload.department_id,
+    departmentIds: payload.department_ids,
   });
 
   const assertScheduleAccess = async (

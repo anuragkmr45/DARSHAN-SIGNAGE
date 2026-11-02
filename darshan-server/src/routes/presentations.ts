@@ -87,10 +87,11 @@ export async function presentationRoutes(fastify: FastifyInstance) {
   const slotItemRepo = createPresentationSlotItemRepository();
   const layoutRepo = createLayoutRepository();
   const db = getDatabase();
-  const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
+  const actorFor = (payload: { sub: string; role: string; department_id?: string | null; department_ids?: string[] }): ActorContext => ({
     userId: payload.sub,
     roleName: payload.role,
     departmentId: payload.department_id,
+    departmentIds: payload.department_ids,
   });
   const authorizePresentation = async (
     payload: { sub: string; role: string; role_id: string; department_id?: string | null },

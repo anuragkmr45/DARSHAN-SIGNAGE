@@ -81,7 +81,13 @@ function getAccessTokenFromCookie(request: FastifyRequest) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isLoginRequest(request: FastifyRequest): boolean {
+  return request.method === 'POST' && request.url.split('?')[0] === apiEndpoints.auth.login;
+}
+
 function hydrateAuthorizationHeaderFromCookie(request: FastifyRequest) {
+  // A revoked cookie must not prevent its owner from signing in again.
+  if (isLoginRequest(request)) return;
   if (request.headers.authorization) return;
   const cookieToken = getAccessTokenFromCookie(request);
   if (!cookieToken) return;
@@ -89,6 +95,7 @@ function hydrateAuthorizationHeaderFromCookie(request: FastifyRequest) {
 }
 
 async function refreshSessionFromRequestToken(request: FastifyRequest) {
+  if (isLoginRequest(request)) return;
   if ((request as unknown as RequestWithRefresh)[REFRESHED_AUTH_KEY]) {
     return;
   }

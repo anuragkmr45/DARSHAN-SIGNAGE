@@ -20,6 +20,7 @@ const createDepartmentSchema = z.object({
 const listDepartmentsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
+  search: z.string().trim().max(120).optional(),
 });
 
 export async function departmentRoutes(fastify: FastifyInstance) {
@@ -93,6 +94,7 @@ export async function departmentRoutes(fastify: FastifyInstance) {
         const result = await deptRepo.list({
           page: query.page,
           limit: query.limit,
+          search: query.search,
         });
 
         return reply.send({

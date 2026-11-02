@@ -155,6 +155,12 @@ Evidence references use repository-relative paths and symbols where helpful. `S`
 | BR-065 | Measured RPO ≤24 hours, RTO ≤4 hours and planned maintenance ≤2 hours are gates. Rehearse an isolated production-sized PostgreSQL/MinIO restore before every release and monthly. Same-Data-VM backup cannot meet RPO for VM/disk loss and needs explicit accepted-risk disposition. | BQ-018 release decision and `evidence/groups-1-4-release-gates-2026-11-01.md`; production-sized restore is Not Tested | Ops/DBA/recovery; all roles | Missing/failed/late recovery evidence blocks release |
 | BR-061 | Availability uses server-received heartbeat intervals with a 90-second grace period, backend-unknown separation, known-time uptime denominator, Never-seen state and Asia/Kolkata daily availability buckets. Assigned schedules, exact publish application, fresh reported playback and publish-linked PoP are distinct evidence levels. | BQ-014 release decision, 2026-11-02; BR-038; focused developer verification passed, five-VM/physical verification is Not Tested | Reporting users/operations; S/C/P/observability | Misleading availability or playback claim; R-10 |
 
+## Confirmed Operator Membership Rule
+
+| ID | Confirmed requirement | Evidence / status | Actors/components | Risk |
+| --- | --- | --- | --- | --- |
+| BR-108 | An OPERATOR may have one primary department and explicit additional assignments. The primary stays in `users.department_id`, owns new content, and retains existing client/JWT/custom-role condition meaning. Permitted reads and people discovery use all current assignments; unassigned departments remain denied. Only global User managers assign extras; department managers govern accounts by target primary. Membership changes revoke sessions. Existing chat members retain previously shared message files after source-department removal, while new discovery and source-library access stop. | User decision 2026-11-03; implementation/migration `0055`; developer verification pending independent QA | Operators, User managers, CMS, API, PostgreSQL, chat | R-43 |
+
 ## Rules Requiring Business Confirmation
 
 | ID | Acceptance decision not settled by code | Observed evidence / related implemented rules | Actors/components | Risk / question |

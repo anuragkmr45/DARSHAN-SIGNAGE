@@ -6,6 +6,7 @@ export interface InviteUserPayload {
   email: string;
   role_id: User["role_id"];
   department_id?: string;
+  additional_department_ids?: string[];
 }
 
 export interface UserInvitation {
@@ -22,6 +23,7 @@ export interface CreateUserPayload {
   email: string;
   role_id: User["role_id"];
   department_id?: string;
+  additional_department_ids?: string[];
   password?: string;
   first_name?: string;
   last_name?: string;
@@ -93,6 +95,7 @@ export const usersApi = {
       role?: string;
       department_id?: string;
       is_active?: boolean;
+      search?: string;
     },
   ) =>
     apiClient

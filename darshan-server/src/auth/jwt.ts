@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { AuthError } from '@/auth/errors';
 import { getDatabase, schema } from '@/db';
 import { and, eq, gt, isNull } from 'drizzle-orm';
+import { getUserDepartments } from '@/db/repositories/user-departments';
 
 export interface JWTPayload extends JoseJWTPayload {
   sub: string; // user ID
@@ -11,6 +12,8 @@ export interface JWTPayload extends JoseJWTPayload {
   role_id: string;
   role: string;
   department_id?: string;
+  /** Resolved from PostgreSQL after token verification; never signed into the JWT. */
+  department_ids?: string[];
   jti: string; // JWT ID for revocation
   iat: number;
   exp: number;
@@ -75,7 +78,13 @@ export async function verifyAccessToken(token: string): Promise<JWTPayload> {
     if (!authenticated) {
       throw new AuthError('Token has been revoked');
     }
-    return payload;
+    const membership = await getUserDepartments(payload.sub, db);
+    if (!membership) throw new AuthError('Token has been revoked');
+    return {
+      ...payload,
+      department_id: membership.primaryDepartmentId ?? undefined,
+      department_ids: membership.departmentIds,
+    };
   } catch (error) {
     if (error instanceof AuthError) throw error;
     throw new AuthError('Invalid or expired token');

@@ -13,8 +13,9 @@ import {
   index,
   check,
   foreignKey,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 // Enums
 export const requestStatusEnum = pgEnum('request_status', [
@@ -151,6 +152,49 @@ export const departments = pgTable('departments', {
   created_at: timestamp('created_at').notNull().defaultNow(),
   updated_at: timestamp('updated_at').notNull().defaultNow(),
 });
+
+// The scalar users.department_id stays the primary department and the legacy
+// API/JWT field. Only explicitly assigned extra memberships live here.
+export const userAdditionalDepartments = pgTable(
+  'user_additional_departments',
+  {
+    user_id: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    department_id: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'restrict' }),
+    assigned_by: uuid('assigned_by').references(() => users.id, { onDelete: 'set null' }),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.user_id, table.department_id] }),
+    userIdx: index('user_additional_departments_user_id_idx').on(table.user_id),
+    departmentIdx: index('user_additional_departments_department_id_idx').on(table.department_id),
+  })
+);
+
+export const userDepartmentRelations = relations(users, ({ one, many }) => ({
+  primaryDepartment: one(departments, {
+    fields: [users.department_id],
+    references: [departments.id],
+    relationName: 'primaryDepartment',
+  }),
+  additionalDepartments: many(userAdditionalDepartments, { relationName: 'memberUser' }),
+}));
+
+export const departmentMembershipRelations = relations(departments, ({ many }) => ({
+  additionalUsers: many(userAdditionalDepartments, { relationName: 'memberDepartment' }),
+}));
+
+export const additionalDepartmentRelations = relations(userAdditionalDepartments, ({ one }) => ({
+  user: one(users, {
+    fields: [userAdditionalDepartments.user_id],
+    references: [users.id],
+    relationName: 'memberUser',
+  }),
+  department: one(departments, {
+    fields: [userAdditionalDepartments.department_id],
+    references: [departments.id],
+    relationName: 'memberDepartment',
+  }),
+}));
 
 // Sessions table (for JWT JTI revocation)
 export const sessions = pgTable(
@@ -1551,6 +1595,7 @@ export const chatBookmarks = pgTable(
     media_asset_id: uuid('media_asset_id'),
     message_id: uuid('message_id'),
     created_by: uuid('created_by').notNull(),
+    share_authorized_at: timestamp('share_authorized_at'),
     metadata: jsonb('metadata'),
     created_at: timestamp('created_at').notNull().defaultNow(),
   },

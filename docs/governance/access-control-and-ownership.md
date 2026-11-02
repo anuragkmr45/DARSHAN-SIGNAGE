@@ -57,6 +57,13 @@ DARSHAN governance is split by runtime ownership. Product code, deployment roles
 
 ## Operator Boundaries
 
+Operators can have explicitly assigned additional departments while retaining
+one primary `users.department_id`. The primary owns new content; current
+membership broadens only permitted department reads and people discovery.
+Account management remains scoped to the target's primary department. See
+`docs/governance/operator-multi-department-membership.md` for the API,
+session, chat and compatibility contract.
+
 - Operators may change site secrets/config files and run documented start/health/rollback commands.
 - Operators must not edit product source code to change deployment behavior.
 - Operators must not delete player runtime state, Docker volumes, DB data, media buckets, or certificates unless a runbook explicitly calls for it.

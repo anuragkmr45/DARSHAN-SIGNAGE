@@ -34,6 +34,9 @@ export interface User {
   role_id: RoleId;
   role: RoleName;
   department_id?: string | null;
+  department_ids?: string[];
+  additional_department_ids?: string[];
+  departments?: { id: string; name: string; is_primary: boolean }[];
   is_active?: boolean;
 }
 

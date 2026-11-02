@@ -16,6 +16,7 @@ import { createRoleRepository } from '@/db/repositories/role';
 import { getIdleTimeoutSeconds } from '@/utils/settings';
 import { getDatabase, schema } from '@/db';
 import { eq } from 'drizzle-orm';
+import { getUserDepartmentMetadataBatch } from '@/db/repositories/user-departments';
 
 const logger = createLogger('auth-routes');
 const { TOO_MANY_REQUESTS } = HTTP_STATUS;
@@ -166,6 +167,7 @@ export async function authRoutes(fastify: FastifyInstance) {
         }
 
         const { current, role, token, expiresAt } = issued;
+        const membership = (await getUserDepartmentMetadataBatch([current.id])).get(current.id);
         const csrfToken = randomUUID();
 
         // Issue cookies (JWT as HttpOnly, CSRF as readable token)
@@ -202,6 +204,9 @@ export async function authRoutes(fastify: FastifyInstance) {
             role: string;
             role_id: string;
             department_id: string | null;
+            department_ids?: string[];
+            additional_department_ids?: string[];
+            departments?: { id: string; name: string; is_primary: boolean }[];
           };
           expiresAt: string;
           token?: string;
@@ -215,6 +220,7 @@ export async function authRoutes(fastify: FastifyInstance) {
             role: role.name,
             role_id: role.id,
             department_id: current.department_id ?? null,
+            ...membership,
           },
           expiresAt: expiresAt.toISOString(),
         };
@@ -296,6 +302,7 @@ export async function authRoutes(fastify: FastifyInstance) {
         }
 
         const role = await roleRepo.findById(user.role_id);
+        const membership = (await getUserDepartmentMetadataBatch([user.id])).get(user.id);
 
         return reply.send({
           id: user.id,
@@ -305,6 +312,7 @@ export async function authRoutes(fastify: FastifyInstance) {
           role: role?.name ?? null,
           role_id: user.role_id,
           department_id: user.department_id,
+          ...membership,
           is_active: user.is_active,
           created_at: user.created_at.toISOString(),
           updated_at: user.updated_at.toISOString(),

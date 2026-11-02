@@ -52,8 +52,8 @@ const Departments = () => {
     isLoading,
     isFetching,
   } = useQuery({
-    queryKey: [...queryKeys.departments, page, PAGE_SIZE],
-    queryFn: () => departmentsApi.list({ page, limit: PAGE_SIZE }),
+    queryKey: [...queryKeys.departments, page, PAGE_SIZE, searchQuery],
+    queryFn: () => departmentsApi.list({ page, limit: PAGE_SIZE, search: searchQuery || undefined }),
     placeholderData: (previousData) => previousData,
   });
 
@@ -66,11 +66,10 @@ const Departments = () => {
   const departments = useMemo(() => data?.items ?? [], [data]);
   const operatorsByDepartment = useMemo(() => {
     return (operatorsQuery.data ?? []).reduce<Record<string, User[]>>((acc, operator) => {
-      if (!operator.department_id) return acc;
-      if (!acc[operator.department_id]) {
-        acc[operator.department_id] = [];
+      for (const id of new Set(operator.department_ids ?? (operator.department_id ? [operator.department_id] : []))) {
+        if (!acc[id]) acc[id] = [];
+        acc[id].push(operator);
       }
-      acc[operator.department_id].push(operator);
       return acc;
     }, {});
   }, [operatorsQuery.data]);
@@ -83,17 +82,9 @@ const Departments = () => {
       })),
     [departments, operatorsByDepartment],
   );
-  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
-
   useEffect(() => {
     setPage(1);
   }, [searchQuery]);
-
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
 
   const createOrUpdate = useSafeMutation({
     mutationFn: async (payload: { values: { name: string; description?: string }; id?: string }) => {
@@ -124,25 +115,12 @@ const Departments = () => {
     },
   }, "Unable to delete department.");
 
-  const filteredDepartments = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return departmentsWithOperators;
-    return departmentsWithOperators.filter((dept) => {
-      const haystack = [
-        dept.name,
-        dept.description ?? "",
-        dept.id,
-        ...(dept.operators ?? []).flatMap((operator) => [
-          operator.first_name ?? "",
-          operator.last_name ?? "",
-          operator.email,
-        ]),
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [departmentsWithOperators, searchQuery]);
+  const filteredDepartments = departmentsWithOperators;
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   return (
     <div className="space-y-6">

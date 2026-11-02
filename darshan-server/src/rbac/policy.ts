@@ -5,6 +5,7 @@ export type ActorContext = {
   userId: string;
   roleName: string;
   departmentId?: string | null;
+  departmentIds?: string[];
 };
 
 export const isSuperAdmin = (roleName?: string | null) => roleName === 'SUPER_ADMIN';
@@ -52,12 +53,14 @@ export const canManageUserRecord = (
 
 export const canReadUserRecord = (
   actor: ActorContext,
-  target: { id?: string; roleName?: string; departmentId?: string | null },
+  target: { id?: string; roleName?: string; departmentId?: string | null; departmentIds?: string[] },
   options: { global?: boolean } = {}
 ) => {
   if (options.global) return true;
   if (target.id && target.id === actor.userId) return true;
-  return isSameDepartment(actor.departmentId, target.departmentId);
+  const actorIds = actor.departmentIds ?? (actor.departmentId ? [actor.departmentId] : []);
+  const targetIds = target.departmentIds ?? (target.departmentId ? [target.departmentId] : []);
+  return actorIds.some((id) => targetIds.includes(id));
 };
 
 export async function getDepartmentUserIds(departmentId?: string | null) {

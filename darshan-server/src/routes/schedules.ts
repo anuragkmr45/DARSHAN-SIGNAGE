@@ -64,10 +64,11 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
   const presentationRepo = createPresentationRepository();
   const reservationService = createScheduleReservationService();
   const db = getDatabase();
-  const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
+  const actorFor = (payload: { sub: string; role: string; department_id?: string | null; department_ids?: string[] }): ActorContext => ({
     userId: payload.sub,
     roleName: payload.role,
     departmentId: payload.department_id,
+    departmentIds: payload.department_ids,
   });
   const serializeSchedule = (schedule: any, ownership: any, ability: any, actor: ActorContext) => {
     return {

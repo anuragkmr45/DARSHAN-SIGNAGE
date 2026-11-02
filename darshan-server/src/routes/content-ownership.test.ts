@@ -322,7 +322,7 @@ describe('content ownership routes', () => {
     const deniedMutations = [
       server.inject({
         method: 'DELETE',
-        url: `${detailUrl('media', departmentResources.media)}?hard=true`,
+        url: detailUrl('media', departmentResources.media),
         headers: auth(customReadToken),
       }),
       server.inject({
@@ -1021,7 +1021,7 @@ describe('content ownership routes', () => {
   it('enforces delete ownership for media, layouts, and presentations', async () => {
     const deleteSet = await insertResourceSet('Delete matrix', peerId, 'DEPARTMENT', departmentA);
     const methods = [
-      { kind: 'media' as const, suffix: '?hard=true', success: 200 },
+      { kind: 'media' as const, suffix: '', success: 200 },
       { kind: 'layouts' as const, suffix: '', success: 204 },
       { kind: 'presentations' as const, suffix: '', success: 204 },
     ];
@@ -1032,6 +1032,16 @@ describe('content ownership routes', () => {
       expect(denied.statusCode).toBe(403);
       const deleted = await server.inject({ method: 'DELETE', url, headers: auth(peerToken) });
       expect(deleted.statusCode).toBe(entry.success);
+      if (entry.kind === 'media') {
+        const [stored] = await getDatabase().select({ deleted_at: schema.media.deleted_at })
+          .from(schema.media).where(eq(schema.media.id, deleteSet.media));
+        expect(stored.deleted_at).toBeTruthy();
+        const permanent = await server.inject({
+          method: 'DELETE', url: `${url}?hard=true`, headers: auth(peerToken),
+        });
+        expect(permanent.statusCode).toBe(400);
+        expect(permanent.json().error.code).toBe('MEDIA_HARD_DELETE_DISABLED');
+      }
     }
   });
 });

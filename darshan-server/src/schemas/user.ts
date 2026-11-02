@@ -18,6 +18,7 @@ export const createUserSchema = z.object({
   last_name: z.string().optional(),
   role_id: z.string().uuid(),
   department_id: z.string().uuid().optional(),
+  additional_department_ids: z.array(z.string().uuid()).optional(),
 });
 
 export type CreateUserRequest = z.infer<typeof createUserSchema>;
@@ -27,6 +28,7 @@ export const updateUserSchema = z.object({
   last_name: z.string().optional(),
   role_id: z.string().uuid().optional(),
   department_id: z.string().uuid().optional(),
+  additional_department_ids: z.array(z.string().uuid()).optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -40,6 +42,8 @@ export const userResponseSchema = z.object({
   role: z.string().nullable(),
   role_id: z.string().uuid(),
   department_id: z.string().uuid().optional(),
+  department_ids: z.array(z.string().uuid()).optional(),
+  additional_department_ids: z.array(z.string().uuid()).optional(),
   is_active: z.boolean(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
@@ -54,6 +58,7 @@ export const listUsersQuerySchema = z.object({
   role_id: z.string().uuid().optional(),
   department_id: z.string().uuid().optional(),
   is_active: z.enum(['true', 'false']).optional(),
+  search: z.string().trim().max(120).optional(),
 });
 
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;

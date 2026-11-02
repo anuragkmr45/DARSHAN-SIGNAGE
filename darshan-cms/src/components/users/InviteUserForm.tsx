@@ -14,6 +14,7 @@ import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { useAppSelector } from "@/store/hooks";
 import { canManageUserTarget } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
+import { AdditionalDepartmentsPicker } from "@/components/users/AdditionalDepartmentsPicker";
 
 interface InviteUserFormProps {
     onSubmit: (data: InviteFormData) => void;
@@ -30,11 +31,12 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
         email: "",
         role_id: "",
         department_id: !canPickDepartment ? currentUser?.department_id || "" : "",
+        additional_department_ids: [],
     });
 
     const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
-        queryKey: ["departments"],
-        queryFn: () => departmentsApi.list({ page: 1, limit: 100 }),
+        queryKey: ["departments", "all"],
+        queryFn: departmentsApi.listAll,
         enabled: canPickDepartment,
     });
 
@@ -56,10 +58,15 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
         }
     }, [formData.role_id, roles]);
 
-    const departments = departmentsData?.items || [];
+    const departments = departmentsData || [];
+    const isOperatorRole = roles.find((role) => role.id === formData.role_id)?.name === "OPERATOR";
 
     const handleSubmit = () => {
-        onSubmit(formData);
+        onSubmit({
+            ...formData,
+            additional_department_ids: canManageUsersGlobally && isOperatorRole
+                ? formData.additional_department_ids ?? [] : undefined,
+        });
     };
 
     const updateField = (field: keyof InviteFormData, value: string) => {
@@ -124,7 +131,7 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
             </div>
 
             <div className="space-y-2">
-                <Label htmlFor="invite-department">Department (Optional)</Label>
+                <Label htmlFor="invite-department">Primary department (optional)</Label>
                 {!canPickDepartment ? (
                     <Input id="invite-department" value={currentDepartmentLabel} disabled />
                 ) : isDepartmentsLoading ? (
@@ -139,7 +146,12 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
                 ) : (
                     <Select
                         value={formData.department_id || "none"}
-                        onValueChange={(value: string) => updateField("department_id", value === "none" ? "" : value)}
+                        onValueChange={(value: string) => setFormData((prev) => ({
+                            ...prev,
+                            department_id: value === "none" ? "" : value,
+                            additional_department_ids: value === "none"
+                                ? [] : (prev.additional_department_ids ?? []).filter((id) => id !== value),
+                        }))}
                         disabled={!canPickDepartment}
                     >
                         <SelectTrigger id="invite-department">
@@ -161,6 +173,16 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
                     </Select>
                 )}
             </div>
+
+            {canPickDepartment && isOperatorRole ? (
+                <AdditionalDepartmentsPicker
+                    departments={departments}
+                    primaryDepartmentId={formData.department_id ?? ""}
+                    value={formData.additional_department_ids ?? []}
+                    onChange={(ids) => setFormData((prev) => ({ ...prev, additional_department_ids: ids }))}
+                    disabled={isLoading || isDepartmentsLoading}
+                />
+            ) : null}
 
             <DialogFooter>
                 <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>

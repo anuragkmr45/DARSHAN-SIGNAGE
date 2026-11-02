@@ -72,7 +72,8 @@ export function canReadContentResource(
   const scope = normalizeContentOwnerScope(resource.owner_scope);
   if (scope === 'ORGANIZATION') return true;
   return scope === 'DEPARTMENT' && Boolean(
-    actor.departmentId && resource.owner_department_id === actor.departmentId
+    resource.owner_department_id &&
+    (actor.departmentIds ?? (actor.departmentId ? [actor.departmentId] : [])).includes(resource.owner_department_id)
   );
 }
 
@@ -98,7 +99,8 @@ export function canAccessContentMutationScope(
 ): boolean {
   if (ability.can('manage', subject)) return true;
   return normalizeContentOwnerScope(resource.owner_scope) === 'DEPARTMENT' && Boolean(
-    actor.departmentId && resource.owner_department_id === actor.departmentId
+    resource.owner_department_id &&
+    (actor.departmentIds ?? (actor.departmentId ? [actor.departmentId] : [])).includes(resource.owner_department_id)
   );
 }
 
@@ -143,14 +145,15 @@ export function contentReadCondition(
 ): SQL | undefined {
   if (ability && subject && !ability.can('read', subject)) return sql`false`;
   if (ability && subject && ability.can('manage', subject)) return undefined;
-  if (!actor.departmentId) {
+  const departmentIds = actor.departmentIds ?? (actor.departmentId ? [actor.departmentId] : []);
+  if (!departmentIds.length) {
     return eq(columns.owner_scope, 'ORGANIZATION');
   }
   return or(
     eq(columns.owner_scope, 'ORGANIZATION'),
     and(
       eq(columns.owner_scope, 'DEPARTMENT'),
-      eq(columns.owner_department_id, actor.departmentId)
+      inArray(columns.owner_department_id, departmentIds)
     )
   );
 }

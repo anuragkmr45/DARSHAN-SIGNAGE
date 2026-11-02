@@ -15,6 +15,7 @@ import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { useAppSelector } from "@/store/hooks";
 import { canManageUserTarget } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
+import { AdditionalDepartmentsPicker } from "@/components/users/AdditionalDepartmentsPicker";
 
 interface UserFormProps {
     user?: User | null;
@@ -34,14 +35,15 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
         last_name: user?.last_name || "",
         role_id: user?.role_id || "",
         department_id: user?.department_id || "",
+        additional_department_ids: user?.additional_department_ids ?? [],
         is_active: user?.is_active ?? true,
     });
 
     const canManageUsersGlobally = can("manage", "User");
     const canPickDepartment = canManageUsersGlobally && can("read", "Department");
     const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
-        queryKey: ["departments"],
-        queryFn: () => departmentsApi.list({ page: 1, limit: 100 }),
+        queryKey: ["departments", "all"],
+        queryFn: departmentsApi.listAll,
         enabled: canPickDepartment,
     });
 
@@ -64,6 +66,7 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
             last_name: user?.last_name || "",
             role_id: user?.role_id || "",
             department_id: !canPickDepartment ? currentUser?.department_id || "" : user?.department_id || "",
+            additional_department_ids: user?.additional_department_ids ?? [],
             is_active: user?.is_active ?? true,
         });
     }, [canPickDepartment, currentUser?.department_id, user]);
@@ -74,11 +77,17 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
         }
     }, [formData.role_id, roles]);
 
-    const departments = departmentsData?.items || [];
+    const departments = departmentsData || [];
     const currentDepartmentLabel = currentUser?.department_id ? "Assigned to your department" : "No department assigned";
+    const isOperatorRole = roles.find((role) => role.id === formData.role_id)?.name === "OPERATOR";
 
     const handleSubmit = () => {
-        onSubmit(formData);
+        onSubmit({
+            ...formData,
+            additional_department_ids: canManageUsersGlobally
+                ? isOperatorRole ? formData.additional_department_ids ?? [] : []
+                : undefined,
+        });
     };
 
     const updateField = (field: keyof UserFormData, value: string | boolean) => {
@@ -226,7 +235,7 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
             </div>
 
             <div className="space-y-2">
-                <Label htmlFor="department_id">Department (Optional)</Label>
+                <Label htmlFor="department_id">Primary department (optional)</Label>
                 {!canPickDepartment ? (
                     <Input id="department_id" value={currentDepartmentLabel} disabled />
                 ) : isDepartmentsLoading ? (
@@ -241,7 +250,17 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
                 ) : (
                     <Select
                         value={formData.department_id || "none"}
-                        onValueChange={(value: string) => updateField("department_id", value === "none" ? "" : value)}
+                        onValueChange={(value: string) => setFormData((prev) => {
+                            const additional = (prev.additional_department_ids ?? []).filter((id) => id !== value);
+                            if (user && prev.department_id && value !== "none" && prev.department_id !== value) {
+                                additional.push(prev.department_id);
+                            }
+                            return {
+                                ...prev,
+                                department_id: value === "none" ? "" : value,
+                                additional_department_ids: value === "none" ? [] : Array.from(new Set(additional)),
+                            };
+                        })}
                         disabled={!canPickDepartment}
                     >
                         <SelectTrigger id="department_id">
@@ -263,6 +282,21 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
                     </Select>
                 )}
             </div>
+
+            {canPickDepartment && isOperatorRole ? (
+                <AdditionalDepartmentsPicker
+                    departments={departments}
+                    primaryDepartmentId={formData.department_id ?? ""}
+                    value={formData.additional_department_ids ?? []}
+                    onChange={(ids) => setFormData((prev) => ({ ...prev, additional_department_ids: ids }))}
+                    disabled={isLoading || isDepartmentsLoading}
+                />
+            ) : null}
+            {canPickDepartment && !isOperatorRole && Boolean(user?.additional_department_ids?.length) ? (
+                <p className="text-sm text-amber-700" role="alert">
+                    Saving a non-operator role will remove this user’s additional department assignments and end their sessions.
+                </p>
+            ) : null}
 
             <DialogFooter>
                 <Button type="button" variant="outline" onClick={onCancel} disabled={isLoading}>

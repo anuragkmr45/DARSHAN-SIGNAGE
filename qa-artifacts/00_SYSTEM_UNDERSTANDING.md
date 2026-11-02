@@ -228,6 +228,14 @@ transaction advisory lock so two same-revision writes cannot both commit.
 
 ## Existing QA Evidence And Gaps
 
+Operator identity now retains a scalar primary `users.department_id` and may
+have explicit additional memberships in `user_additional_departments`.
+PostgreSQL resolves current sets for authorization and list filtering; CMS
+shows Primary/Additional relationships. New content remains primary-owned.
+The exact contract and compatibility boundary are in
+`docs/governance/operator-multi-department-membership.md`; source
+implementation is not independent human QA evidence.
+
 - Backend route tests use a dedicated test database guard and disable file parallelism. The focused page/loop suites ran against a freshly migrated disposable `_test` database; unrelated route suites remain unexecuted.
 - CMS Playwright configuration targets Chromium and may start Vite. Representative screen tests intercept routes and use mocked responses. Such cases do not prove actual VM/API/player integration.
 - Player tests include unit, integration, fault, browser and performance files. Their names do not prove real hardware or outage execution.

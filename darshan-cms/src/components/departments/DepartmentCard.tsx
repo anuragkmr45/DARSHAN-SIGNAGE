@@ -135,6 +135,9 @@ export const DepartmentCard = ({ department, onEdit, onDelete }: DepartmentCardP
                         <Badge variant={operator.is_active ? "secondary" : "outline"} className="shrink-0">
                           {operator.is_active ? "Active" : "Inactive"}
                         </Badge>
+                        <Badge variant="outline" className="shrink-0">
+                          {operator.department_id === department.id ? "Primary" : "Additional"}
+                        </Badge>
                       </div>
                     </AccordionTrigger>
                     <AccordionContent>

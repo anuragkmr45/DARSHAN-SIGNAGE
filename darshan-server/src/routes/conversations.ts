@@ -11,6 +11,7 @@ import { AppError } from '@/utils/app-error';
 import { getDatabase, schema } from '@/db';
 import { eq } from 'drizzle-orm';
 import { canAccessDirectoryUser } from '@/rbac/user-directory';
+import { getUserDepartmentsBatch } from '@/db/repositories/user-departments';
 
 const logger = createLogger('conversation-routes');
 const { CREATED } = HTTP_STATUS;
@@ -47,9 +48,13 @@ export async function conversationRoutes(fastify: FastifyInstance) {
 
         const data = startConversationSchema.parse(request.body);
         const [participant] = await db.select().from(schema.users).where(eq(schema.users.id, data.participant_id));
+        const memberships = participant
+          ? await getUserDepartmentsBatch([participant.id], db)
+          : new Map();
         if (!participant || !canAccessDirectoryUser(
-          { userId: payload.sub, departmentId: payload.department_id },
-          participant,
+          { userId: payload.sub, departmentId: payload.department_id,
+            departmentIds: payload.department_ids },
+          { ...participant, department_ids: memberships.get(participant.id)?.departmentIds },
           ability
         )) throw AppError.notFound('User not found');
         const conversation = await repo.getOrCreate(payload.sub, data.participant_id);

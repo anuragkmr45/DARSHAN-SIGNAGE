@@ -19,6 +19,7 @@ import { assertCanWriteToConversation, assertConversationWritable, assertNotBann
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import { headObject } from '@/s3';
 import { canAccessDirectoryUser } from '@/rbac/user-directory';
+import { getUserDepartmentsBatch } from '@/db/repositories/user-departments';
 import { canReadContentResource } from '@/rbac/content-ownership';
 import { serializeMediaRecord } from '@/utils/media';
 import { resolveMediaAccess } from '@/utils/media-access';
@@ -382,11 +383,13 @@ export async function chatRoutes(fastify: FastifyInstance) {
     const uniqueIds = Array.from(new Set(userIds));
     if (uniqueIds.length === 0) return;
     const users = await db.select().from(schema.users).where(inArray(schema.users.id, uniqueIds as any));
+    const memberships = await getUserDepartmentsBatch(uniqueIds, db);
     if (
       users.length !== uniqueIds.length ||
       users.some((user) => !canAccessDirectoryUser(
-        { userId: payload.sub, departmentId: payload.department_id },
-        user,
+        { userId: payload.sub, departmentId: payload.department_id,
+          departmentIds: payload.department_ids },
+        { ...user, department_ids: memberships.get(user.id)?.departmentIds },
         ability
       ))
     ) throw AppError.notFound('User not found');
@@ -527,6 +530,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
         const [fileBookmark] = messageAttachment ? [] : await db.select({
           id: schema.chatBookmarks.id,
           created_by: schema.chatBookmarks.created_by,
+          share_authorized_at: schema.chatBookmarks.share_authorized_at,
         })
           .from(schema.chatBookmarks)
           .where(and(
@@ -538,9 +542,10 @@ export async function chatRoutes(fastify: FastifyInstance) {
 
         const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId)).limit(1);
         if (!media || media.deleted_at || media.status !== 'READY') throw AppError.notFound('Attachment not found');
-        // Older bookmarks may predate the sender-side media scope check. Verify
-        // that their creator is still authorized before treating them as a share.
-        if (!messageAttachment && fileBookmark) {
+        // Legacy bookmarks have no immutable proof of authorization at share
+        // time. New bookmarks retain their verified share after role or
+        // department changes, while legacy bookmarks keep the old guard.
+        if (!messageAttachment && fileBookmark && !fileBookmark.share_authorized_at) {
           const [creator] = await db.select({
             id: schema.users.id,
             role_id: schema.users.role_id,
@@ -552,10 +557,12 @@ export async function chatRoutes(fastify: FastifyInstance) {
             creator.id,
             creator.department_id ?? undefined
           );
+          const creatorMembership = await getUserDepartmentsBatch([creator.id], db);
           if (!canReadContentResource({
             userId: creator.id,
             roleName: '',
             departmentId: creator.department_id,
+            departmentIds: creatorMembership.get(creator.id)?.departmentIds,
           }, media, creatorAbility, 'Media')) {
             throw AppError.notFound('Attachment not found');
           }
@@ -721,6 +728,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
             userId: payload.sub,
             roleName: payload.role,
             departmentId: payload.department_id,
+            departmentIds: payload.department_ids,
           }, media, ability, 'Media'))) {
             throw AppError.forbidden('Attachment media is outside your readable scope');
           }
@@ -731,6 +739,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
             senderId: payload.sub,
             senderRole: payload.role,
             senderDepartmentId: payload.department_id,
+            senderDepartmentIds: payload.department_ids,
             canOverrideMedia: ability.can('update', 'Media'),
             canManageMedia: ability.can('manage', 'Media'),
           });
@@ -1167,6 +1176,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
             userId: payload.sub,
             roleName: payload.role,
             departmentId: payload.department_id,
+            departmentIds: payload.department_ids,
           }, media, ability, 'Media')) {
             throw AppError.forbidden('Attachment media is outside your readable scope');
           }
@@ -1176,6 +1186,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
             senderId: payload.sub,
             senderRole: payload.role,
             senderDepartmentId: payload.department_id,
+            senderDepartmentIds: payload.department_ids,
             canOverrideMedia: ability.can('update', 'Media'),
             canManageMedia: ability.can('manage', 'Media'),
           });
@@ -1191,6 +1202,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
           messageId: data.messageId,
           metadata: data.metadata,
           createdBy: payload.sub,
+          shareAuthorizedAt: data.type === 'FILE' ? new Date() : undefined,
         });
         if (created) {
           await appendAudit(request, payload.sub, 'CHAT_BOOKMARK_ADD', 'ChatConversation', conversationId);

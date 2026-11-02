@@ -7,6 +7,7 @@ export interface UserFormData {
     last_name: string;
     role_id: RoleId;
     department_id?: string;
+    additional_department_ids?: string[];
     is_active?: boolean;
 }
 
@@ -14,4 +15,5 @@ export interface InviteFormData {
     email: string;
     role_id: RoleId;
     department_id?: string;
+    additional_department_ids?: string[];
 }

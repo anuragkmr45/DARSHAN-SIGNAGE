@@ -17,6 +17,7 @@ import { createMediaUploadSessionRepository } from '@/db/repositories/media-uplo
 import { createMediaRepository } from '@/db/repositories/media';
 import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
 import { subject } from '@casl/ability';
+import { getUserDepartmentMetadataBatch } from '@/db/repositories/user-departments';
 
 const logger = createLogger('user-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -58,6 +59,9 @@ export async function userRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('Role not found');
         }
         const hasGlobalUserManagement = ability.can('manage', 'User');
+        if (!hasGlobalUserManagement && data.additional_department_ids !== undefined) {
+          throw AppError.forbidden('Only a global User manager may assign additional departments.');
+        }
         if (
           !canManageUserRoleTarget(payload.role, role.name) &&
           !((!role.is_system || role.name === 'OPERATOR') &&
@@ -76,7 +80,11 @@ export async function userRoutes(fastify: FastifyInstance) {
           last_name: data.last_name,
           role_id: data.role_id,
           department_id: data.department_id,
+          additional_department_ids: data.additional_department_ids,
+          assigned_by: payload.sub,
         });
+
+        const membership = (await getUserDepartmentMetadataBatch([user.id])).get(user.id);
 
         return reply.status(CREATED).send({
           id: user.id,
@@ -86,6 +94,7 @@ export async function userRoutes(fastify: FastifyInstance) {
           role: role.name,
           role_id: user.role_id,
           department_id: user.department_id,
+          ...membership,
           is_active: user.is_active,
           created_at: user.created_at.toISOString(),
           updated_at: user.updated_at.toISOString(),
@@ -135,12 +144,16 @@ export async function userRoutes(fastify: FastifyInstance) {
           role_id: query.role_id,
           department_id: query.department_id,
           is_active: query.is_active === 'true' ? true : query.is_active === 'false' ? false : undefined,
+          search: query.search,
           visibility: {
             actorUserId: payload.sub,
             actorDepartmentId: payload.department_id,
+            actorDepartmentIds: payload.department_ids,
             global: ability.can('manage', 'User'),
           },
         });
+
+        const memberships = await getUserDepartmentMetadataBatch(result.items.map((user) => user.id));
 
         return reply.send({
           items: result.items.map((user) => ({
@@ -151,6 +164,7 @@ export async function userRoutes(fastify: FastifyInstance) {
             role: (user as any).role ?? null,
             role_id: user.role_id,
             department_id: user.department_id,
+            ...memberships.get(user.id),
             is_active: user.is_active,
             created_at: user.created_at.toISOString(),
             updated_at: user.updated_at.toISOString(),
@@ -193,13 +207,16 @@ export async function userRoutes(fastify: FastifyInstance) {
         }
 
         const role = await roleRepo.findById(user.role_id);
+        const membership = (await getUserDepartmentMetadataBatch([user.id])).get(user.id);
         if (!(ability as any).can('read', subject('User', user))) {
           throw AppError.notFound('User not found');
         }
         if (
           !canReadUserRecord(
-            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id },
-            { id: user.id, roleName: role?.name ?? '', departmentId: user.department_id },
+            { userId: payload.sub, roleName: payload.role, departmentId: payload.department_id,
+              departmentIds: payload.department_ids },
+            { id: user.id, roleName: role?.name ?? '', departmentId: user.department_id,
+              departmentIds: membership?.department_ids },
             { global: ability.can('manage', 'User') }
           )
         ) {
@@ -214,6 +231,7 @@ export async function userRoutes(fastify: FastifyInstance) {
           role: role?.name ?? null,
           role_id: user.role_id,
           department_id: user.department_id,
+          ...membership,
           is_active: user.is_active,
           created_at: user.created_at.toISOString(),
           updated_at: user.updated_at.toISOString(),
@@ -254,6 +272,9 @@ export async function userRoutes(fastify: FastifyInstance) {
           throw AppError.forbidden('Forbidden');
         }
         const hasGlobalUserManagement = ability.can('manage', 'User');
+        if (!hasGlobalUserManagement && data.additional_department_ids !== undefined) {
+          throw AppError.forbidden('Only a global User manager may assign additional departments.');
+        }
         if (data.role_id) {
           const role = await roleRepo.findById(data.role_id);
           if (!role) {
@@ -293,7 +314,11 @@ export async function userRoutes(fastify: FastifyInstance) {
         ) {
           throw AppError.forbidden('Forbidden');
         }
-        const user = await userRepo.update((request.params as any).id, data);
+        const { additional_department_ids, ...userData } = data;
+        const user = await userRepo.update((request.params as any).id, userData, {
+          additionalDepartmentIds: additional_department_ids,
+          assignedBy: payload.sub,
+        });
 
         if (!user) {
           throw AppError.notFound('User not found');
@@ -301,6 +326,7 @@ export async function userRoutes(fastify: FastifyInstance) {
         await broadcastSessionInvalidation([user.id]);
 
         const role = await roleRepo.findById(user.role_id);
+        const membership = (await getUserDepartmentMetadataBatch([user.id])).get(user.id);
 
         return reply.send({
           id: user.id,
@@ -310,6 +336,7 @@ export async function userRoutes(fastify: FastifyInstance) {
           role: role?.name ?? null,
           role_id: user.role_id,
           department_id: user.department_id,
+          ...membership,
           is_active: user.is_active,
           created_at: user.created_at.toISOString(),
           updated_at: user.updated_at.toISOString(),

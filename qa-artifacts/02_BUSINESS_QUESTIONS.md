@@ -163,6 +163,8 @@ Latest decisions: non-global users see people only in their department; Media/La
 
 Resolution: RESOLVED under BR-085..093. Detailed Expected Results are in `AUTHZ-08..13`. Deleting/transferring the creator does not change stable owner scope/department or published playback.
 
+Additional decision received 2026-11-03: one `OPERATOR` may have a primary department plus explicitly assigned additional departments. The scalar `department_id` remains primary and owns new content; permitted read/discovery uses all current assignments, without a role or active-department switch. Only a global User manager assigns additional departments. A department manager's account-management responsibility follows the target's primary department. Membership changes revoke sessions. A former department does not retain library or new-discovery access after removal, but previously shared chat-message files stay available through continuing conversation membership. This extends the resolved BQ-007 policy under BR-108; verify `AUTHZ-14..18` and the dated developer evidence before release sign-off.
+
 ### BQ-008: Saved Role Customizations
 
 Question: Must edits to built-in role permissions survive API restarts and upgrades, or are built-in roles deliberately fixed with persistent customization allowed only in custom roles? Must custom roles work in workflows currently restricted by role name?

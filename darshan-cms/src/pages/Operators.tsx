@@ -32,6 +32,7 @@ import { useAppSelector } from "@/store/hooks";
 import { departmentsApi } from "@/api/domains/departments";
 import { canManageOperatorsModule } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
+import { AdditionalDepartmentsPicker } from "@/components/users/AdditionalDepartmentsPicker";
 
 const PAGE_SIZE = 9;
 
@@ -50,6 +51,7 @@ export default function Operators() {
     last_name: "",
     role_id: "",
     department_id: "",
+    additional_department_ids: [] as string[],
     password: "",
     confirm_password: "",
   });
@@ -57,11 +59,11 @@ export default function Operators() {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isActivateConfirmOpen, setIsActivateConfirmOpen] = useState(false);
-  const operatorsQueryKey = ["users", "operators", page, PAGE_SIZE] as const;
+  const operatorsQueryKey = ["users", "operators", page, PAGE_SIZE, searchQuery] as const;
 
   const { data, isLoading, isFetching, isError, error } = useQuery({
     queryKey: operatorsQueryKey,
-    queryFn: () => usersApi.list({ page, limit: PAGE_SIZE, role: "OPERATOR" }),
+    queryFn: () => usersApi.list({ page, limit: PAGE_SIZE, role: "OPERATOR", search: searchQuery || undefined }),
     placeholderData: (previousData) => previousData,
   });
 
@@ -71,11 +73,11 @@ export default function Operators() {
   const canManageOperators = canManageOperatorsModule(can);
   const canPickDepartment = can("manage", "User") && can("read", "Department");
   const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
-    queryKey: ["departments"],
-    queryFn: () => departmentsApi.list({ page: 1, limit: 100 }),
+    queryKey: [...queryKeys.departments, "all"],
+    queryFn: departmentsApi.listAll,
     enabled: canPickDepartment,
   });
-  const departments = useMemo(() => departmentsData?.items ?? [], [departmentsData?.items]);
+  const departments = useMemo(() => departmentsData ?? [], [departmentsData]);
   const departmentMap = useMemo(() => new Map(departments.map((department) => [department.id, department.name])), [departments]);
   const passwordMismatch = !selectedUser && Boolean(formData.confirm_password) && formData.password !== formData.confirm_password;
 
@@ -88,19 +90,7 @@ export default function Operators() {
 
   const users = useMemo(() => data?.items ?? [], [data]);
 
-  const filtered = useMemo(
-    () =>
-      users.filter((user) => {
-        const q = searchQuery.toLowerCase();
-        return (
-          q === "" ||
-          user.email.toLowerCase().includes(q) ||
-          (user.first_name || "").toLowerCase().includes(q) ||
-          (user.last_name || "").toLowerCase().includes(q)
-        );
-      }),
-    [users, searchQuery]
-  );
+  const filtered = users;
   const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
 
   useEffect(() => {
@@ -122,6 +112,7 @@ export default function Operators() {
         role_id: operatorRole?.id ?? selectedUser.role_id,
         department_id:
           !canPickDepartment ? currentUser?.department_id ?? "" : selectedUser.department_id ?? "",
+        additional_department_ids: selectedUser.additional_department_ids ?? [],
         password: "",
         confirm_password: "",
       });
@@ -132,6 +123,7 @@ export default function Operators() {
         last_name: "",
         role_id: operatorRole?.id ?? "",
         department_id: !canPickDepartment ? currentUser?.department_id ?? "" : "",
+        additional_department_ids: [],
         password: "",
         confirm_password: "",
       });
@@ -158,6 +150,7 @@ export default function Operators() {
           last_name: formData.last_name.trim() || undefined,
           role_id: formData.role_id,
           department_id: formData.department_id.trim() || undefined,
+          additional_department_ids: canPickDepartment ? formData.additional_department_ids : undefined,
         };
         return usersApi.update(selectedUser.id, payload);
       }
@@ -169,6 +162,7 @@ export default function Operators() {
         last_name: formData.last_name.trim() || undefined,
         role_id: formData.role_id,
         department_id: formData.department_id.trim() || undefined,
+        additional_department_ids: canPickDepartment ? formData.additional_department_ids : undefined,
         password: formData.password,
       };
       return usersApi.create(payload);
@@ -176,6 +170,7 @@ export default function Operators() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users });
       queryClient.invalidateQueries({ queryKey: ["users", "operators"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.departments });
       setIsFormOpen(false);
       setSelectedUser(null);
     },
@@ -268,8 +263,9 @@ export default function Operators() {
                 {canManageOperators ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Actions for ${operator.email}`}>
                       <MoreVertical className="h-4 w-4" />
+                      <span className="sr-only">Actions for {operator.email}</span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -335,11 +331,13 @@ export default function Operators() {
                   <Mail className="h-4 w-4" />
                   <span className="truncate">{operator.email}</span>
                 </div>
-                {operator.department_id && (
-                  <Badge variant="outline" className="text-xs">
-                    Department: {departmentMap.get(operator.department_id) ?? operator.department_id}
-                  </Badge>
-                )}
+                <div className="flex flex-wrap gap-1">
+                  {Array.from(new Set(operator.department_ids ?? (operator.department_id ? [operator.department_id] : []))).map((id) => (
+                    <Badge key={id} variant="outline" className="text-xs">
+                      {id === operator.department_id ? "Primary" : "Additional"}: {departmentMap.get(id) ?? operator.departments?.find((item) => item.id === id)?.name ?? id}
+                    </Badge>
+                  ))}
+                </div>
               </CardContent>
               </Card>
             ))}
@@ -435,7 +433,7 @@ export default function Operators() {
                 )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="department">Department</Label>
+                <Label htmlFor="department">Primary department</Label>
                 {!canPickDepartment ? (
                   <Input id="department" value={currentUser?.department_id ? "Assigned to your department" : "No department assigned"} disabled />
                 ) : isDepartmentsLoading ? (
@@ -450,7 +448,18 @@ export default function Operators() {
                 ) : (
                   <Select
                     value={formData.department_id || "none"}
-                    onValueChange={(val) => setFormData((p) => ({ ...p, department_id: val === "none" ? "" : val }))}
+                    onValueChange={(val) => setFormData((p) => {
+                      const previousPrimary = p.department_id;
+                      const additional = p.additional_department_ids.filter((id) => id !== val);
+                      if (selectedUser && previousPrimary && val !== "none" && previousPrimary !== val) {
+                        additional.push(previousPrimary);
+                      }
+                      return {
+                        ...p,
+                        department_id: val === "none" ? "" : val,
+                        additional_department_ids: val === "none" ? [] : Array.from(new Set(additional)),
+                      };
+                    })}
                     disabled={createOrUpdate.isPending}
                   >
                     <SelectTrigger id="department">
@@ -468,6 +477,15 @@ export default function Operators() {
                 )}
               </div>
             </div>
+            {canPickDepartment ? (
+              <AdditionalDepartmentsPicker
+                departments={departments}
+                primaryDepartmentId={formData.department_id}
+                value={formData.additional_department_ids}
+                onChange={(ids) => setFormData((prev) => ({ ...prev, additional_department_ids: ids }))}
+                disabled={createOrUpdate.isPending || isDepartmentsLoading}
+              />
+            ) : null}
           </div>
           <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="outline" onClick={() => setIsFormOpen(false)} disabled={createOrUpdate.isPending}>

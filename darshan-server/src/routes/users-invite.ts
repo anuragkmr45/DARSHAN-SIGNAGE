@@ -15,6 +15,7 @@ import { AppError } from '@/utils/app-error';
 import { canManageUserRecord, canManageUserRoleTarget } from '@/rbac/policy';
 import { broadcastSessionInvalidation } from '@/realtime/session-invalidation';
 import { subject } from '@casl/ability';
+import { getUserDepartmentMetadataBatch } from '@/db/repositories/user-departments';
 
 const logger = createLogger('users-invite-routes');
 const { CREATED, OK } = HTTP_STATUS;
@@ -24,6 +25,7 @@ const inviteSchema = z.object({
   role: z.enum(['ADMIN', 'OPERATOR', 'DEPARTMENT']).optional(),
   role_id: z.string().uuid().optional(),
   department_id: z.string().uuid().optional(),
+  additional_department_ids: z.array(z.string().uuid()).optional(),
 });
 
 const listInvitesQuerySchema = z.object({
@@ -46,7 +48,7 @@ const resetPasswordSchema = z
 
 const createInviteSerializer =
   (referenceDate: Date) =>
-    (user: any) => {
+    (user: any, membership?: { department_ids: string[]; additional_department_ids: string[]; departments: { id: string; name: string; is_primary: boolean }[] }) => {
       const ext = user.ext || {};
       const expiresAt = ext.invite_expires_at ? new Date(ext.invite_expires_at) : null;
       let derivedStatus: string | null = null;
@@ -61,6 +63,7 @@ const createInviteSerializer =
         email: user.email,
         role: user.role,
         department_id: user.department_id,
+        ...membership,
         invite_token: ext.invite_token ?? null,
         invite_expires_at: ext.invite_expires_at ?? null,
         invite_status: derivedStatus,
@@ -102,6 +105,9 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           throw AppError.badRequest('Role not found');
         }
         const hasGlobalUserManagement = ability.can('manage', 'User');
+        if (!hasGlobalUserManagement && data.additional_department_ids !== undefined) {
+          throw AppError.forbidden('Only a global User manager may assign additional departments.');
+        }
         if (
           !canManageUserRoleTarget(payload.role, targetRole.name) &&
           !((!targetRole.is_system || targetRole.name === 'OPERATOR') &&
@@ -123,7 +129,11 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           password_hash: passwordHash,
           role_id: targetRole.id,
           department_id: data.department_id,
+          additional_department_ids: data.additional_department_ids,
+          assigned_by: payload.sub,
         });
+
+        const membership = (await getUserDepartmentMetadataBatch([user.id])).get(user.id);
 
         // Update with invite metadata using SQL
         await db
@@ -144,6 +154,7 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           email: user.email,
           role: targetRole.name,
           department_id: user.department_id,
+          ...membership,
           invite_token: inviteToken,
           invite_expires_at: expires.toISOString(),
           invite_status: 'PENDING',
@@ -229,14 +240,16 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           visibility: {
             actorUserId: payload.sub,
             actorDepartmentId: payload.department_id,
+            actorDepartmentIds: payload.department_ids,
             global: ability.can('manage', 'User'),
           },
         });
 
         const serializeInvite = createInviteSerializer(new Date());
+        const memberships = await getUserDepartmentMetadataBatch(result.items.map((user) => user.id));
 
         return reply.status(OK).send({
-          items: result.items.map(serializeInvite),
+          items: result.items.map((user) => serializeInvite(user, memberships.get(user.id))),
           pagination: {
             page: result.page,
             limit: result.limit,
@@ -282,13 +295,15 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           visibility: {
             actorUserId: payload.sub,
             actorDepartmentId: payload.department_id,
+            actorDepartmentIds: payload.department_ids,
             global: ability.can('manage', 'User'),
           },
         });
         const serializeInvite = createInviteSerializer(new Date());
+        const memberships = await getUserDepartmentMetadataBatch(result.items.map((user) => user.id));
 
         return reply.status(OK).send({
-          items: result.items.map(serializeInvite),
+          items: result.items.map((user) => serializeInvite(user, memberships.get(user.id))),
           pagination: {
             page: result.page,
             limit: result.limit,

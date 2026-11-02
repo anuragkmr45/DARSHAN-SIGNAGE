@@ -4,6 +4,7 @@ import { getDatabase, schema, type DbExecutor } from '@/db';
 import { defineAbilityFor, type AppAbility } from '@/rbac';
 import type { ActorContext } from '@/rbac/policy';
 import { AppError } from '@/utils/app-error';
+import { getUserDepartments } from '@/db/repositories/user-departments';
 
 export type MutationAuthorizationContext = {
   actor: ActorContext;
@@ -51,6 +52,7 @@ export async function withCurrentMutationAuthorization<T>(
       throw AppError.unauthorized('Authorization context is no longer active. Please sign in again.');
     }
 
+    const memberships = await getUserDepartments(user.id, tx);
     const [session] = await tx
       .select({
         user_id: schema.sessions.user_id,
@@ -78,6 +80,7 @@ export async function withCurrentMutationAuthorization<T>(
       userId: user.id,
       roleName: role.name,
       departmentId: user.department_id,
+      departmentIds: memberships?.departmentIds ?? (user.department_id ? [user.department_id] : []),
     };
     const ability = await defineAbilityFor(role.id, user.id, user.department_id ?? undefined);
     return execute({ actor, ability, executor: tx });

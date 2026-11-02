@@ -33,6 +33,17 @@ Use distinct accounts and browser profiles for concurrent sessions. Store creden
 
 ## Environment Controls
 
+- For `AUTHZ-14..18`, seed primary A, additional B/C, unassigned D,
+  primary-only A/B/C operators, an A department manager, a global User
+  manager, an inactive operator, an invitee, and a deleted user. Create
+  A/B/C/D-owned Media/Layout/Presentation/Schedule fixtures with stable
+  creator and owner columns, plus an A/B chat with a message attachment.
+  Keep two independent CMS cookie origins, one old CMS build, current API and
+  worker, and a real migrated PostgreSQL/Valkey/MinIO stack. Capture list
+  totals and row IDs before/after primary changes and membership removal.
+  Gate deterministic races with user-row locks and concurrent department
+  deletion; avoid real user data and production storage.
+
 - Treat the 2026-10-16 workstation OOM as an execution constraint, not a product result. Kernel evidence shows three `chrome-headless` processes launched inside the VS Code user scope were killed at approximately 2.4 GiB, 2.84 GiB and 2.91 GiB resident memory; VS Code then stopped with the same OOM scope. For the bounded sequential developer runtime, require at least 2 GiB `MemAvailable` and 1 GiB free swap after the disposable service tier is healthy. QA should use a larger representative host and record its own approved guardrails.
 - Run resource-heavy phases sequentially: database/services and API checks first; one Playwright browser worker second; close it and verify process exit; Electron/player third; and the combined soak only after moving it to an approved host with adequate measured headroom. Never overlap Playwright/Chromium with Electron on this workstation.
 - Constrain Node-based build/test commands with `NODE_OPTIONS=--max-old-space-size=768` unless a recorded test requirement proves that insufficient. Configure Playwright with one worker and no fully-parallel projects for the workstation run. A test retry must reuse the same controlled sequence rather than starting another browser concurrently.

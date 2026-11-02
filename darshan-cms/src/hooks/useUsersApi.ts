@@ -8,6 +8,7 @@ import { mapUsersErrorToUx } from "@/lib/usersErrors";
 type UseUsersApiOptions = {
     usersPage?: number;
     usersLimit?: number;
+    usersSearch?: string;
     invitationsPage?: number;
     invitationsLimit?: number;
     enableInvitations?: boolean;
@@ -16,6 +17,7 @@ type UseUsersApiOptions = {
 export const useUsersApi = ({
     usersPage = 1,
     usersLimit = 100,
+    usersSearch = "",
     invitationsPage = 1,
     invitationsLimit = 100,
     enableInvitations = true,
@@ -28,8 +30,8 @@ export const useUsersApi = ({
     ============================ */
 
     const listUsers = useQuery({
-        queryKey: ["users", usersPage, usersLimit],
-        queryFn: () => usersApi.list({ page: usersPage, limit: usersLimit }),
+        queryKey: ["users", usersPage, usersLimit, usersSearch],
+        queryFn: () => usersApi.list({ page: usersPage, limit: usersLimit, search: usersSearch || undefined }),
         retry: false,
         refetchOnWindowFocus: false,
         staleTime: 0, // always refetch when invalidated
@@ -63,6 +65,7 @@ export const useUsersApi = ({
             last_name: string;
             role_id: RoleId;
             department_id?: string;
+            additional_department_ids?: string[];
         }) => usersApi.create(payload),
         retry: false,
         onSuccess: async () => {
@@ -88,6 +91,7 @@ export const useUsersApi = ({
             email: string;
             role_id: RoleId;
             department_id?: string;
+            additional_department_ids?: string[];
         }) => usersApi.invite(payload),
         retry: false,
         onSuccess: async () => {

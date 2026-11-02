@@ -769,6 +769,7 @@ export class ChatRepository {
     mediaAssetId?: string;
     messageId?: string;
     createdBy: string;
+    shareAuthorizedAt?: Date;
     metadata?: Record<string, unknown>;
   }): Promise<{ bookmark: typeof schema.chatBookmarks.$inferSelect; created: boolean }> {
     const db = getDatabase();
@@ -832,6 +833,7 @@ export class ChatRepository {
         media_asset_id: input.mediaAssetId,
         message_id: input.messageId,
         created_by: input.createdBy,
+        share_authorized_at: input.shareAuthorizedAt,
         metadata: input.metadata,
       })
       .returning();

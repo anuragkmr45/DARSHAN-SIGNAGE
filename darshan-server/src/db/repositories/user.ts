@@ -1,10 +1,19 @@
 import { eq, and, sql, desc, or, getTableColumns, inArray, isNull } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { lockUserAndAssertSuperAdminSurvives } from '@/auth/super-admin-invariant';
+import {
+  assertPrimaryDepartmentExists,
+  getUserDepartments,
+  replaceAdditionalDepartments,
+  userInAnyDepartmentCondition,
+  userInDepartmentCondition,
+} from '@/db/repositories/user-departments';
+import { AppError } from '@/utils/app-error';
 
 type UserDirectoryVisibility = {
   actorUserId: string;
   actorDepartmentId?: string | null;
+  actorDepartmentIds?: string[];
   global: boolean;
 };
 
@@ -29,10 +38,26 @@ export class UserRepository {
     last_name?: string;
     role_id: string;
     department_id?: string;
+    additional_department_ids?: string[];
+    assigned_by?: string;
   }) {
     const db = getDatabase();
-    const result = await db.insert(schema.users).values(data).returning();
-    return result[0];
+    return db.transaction(async (tx) => {
+      const { additional_department_ids = [], assigned_by, ...userData } = data;
+      await assertPrimaryDepartmentExists(userData.department_id, tx);
+      const [role] = await tx.select({ name: schema.roles.name })
+        .from(schema.roles).where(eq(schema.roles.id, userData.role_id));
+      if (!role) throw AppError.notFound('Role not found');
+      const [user] = await tx.insert(schema.users).values(userData).returning();
+      await replaceAdditionalDepartments(tx, {
+        userId: user.id,
+        primaryDepartmentId: user.department_id,
+        roleName: role.name,
+        additionalDepartmentIds: additional_department_ids,
+        assignedBy: assigned_by,
+      });
+      return user;
+    });
   }
 
   async findById(id: string) {
@@ -82,13 +107,15 @@ export class UserRepository {
       conditions.push(eq(schema.users.role_id, options.role_id));
     }
     if (options.department_id) {
-      conditions.push(eq(schema.users.department_id, options.department_id));
+      conditions.push(userInDepartmentCondition(options.department_id));
     }
     if (options.visibility && !options.visibility.global) {
       conditions.push(eq(schema.users.is_active, true));
       conditions.push(
-        options.visibility.actorDepartmentId
-          ? eq(schema.users.department_id, options.visibility.actorDepartmentId)
+        (options.visibility.actorDepartmentIds?.length || options.visibility.actorDepartmentId)
+          ? userInAnyDepartmentCondition(
+              options.visibility.actorDepartmentIds ?? [options.visibility.actorDepartmentId!]
+            )
           : eq(schema.users.id, options.visibility.actorUserId)
       );
     }
@@ -169,6 +196,7 @@ export class UserRepository {
     role_id?: string;
     department_id?: string;
     is_active?: boolean;
+    search?: string;
     visibility?: UserDirectoryVisibility;
   }) {
     const db = getDatabase();
@@ -184,15 +212,27 @@ export class UserRepository {
       conditions.push(eq(schema.users.role_id, options.role_id as any));
     }
     if (options.department_id) {
-      conditions.push(eq(schema.users.department_id, options.department_id));
+      conditions.push(userInDepartmentCondition(options.department_id));
     }
     if (options.is_active !== undefined) {
       conditions.push(eq(schema.users.is_active, options.is_active));
     }
+    if (options.search?.trim()) {
+      const escaped = options.search.trim().replace(/[!%_]/g, '!$&');
+      const pattern = `%${escaped}%`;
+      conditions.push(or(
+        sql`${schema.users.email} ILIKE ${pattern} ESCAPE '!'`,
+        sql`${schema.users.first_name} ILIKE ${pattern} ESCAPE '!'`,
+        sql`${schema.users.last_name} ILIKE ${pattern} ESCAPE '!'`,
+        sql`${schema.roles.name} ILIKE ${pattern} ESCAPE '!'`
+      )!);
+    }
     if (options.visibility && !options.visibility.global) {
       conditions.push(
-        options.visibility.actorDepartmentId
-          ? eq(schema.users.department_id, options.visibility.actorDepartmentId)
+        (options.visibility.actorDepartmentIds?.length || options.visibility.actorDepartmentId)
+          ? userInAnyDepartmentCondition(
+              options.visibility.actorDepartmentIds ?? [options.visibility.actorDepartmentId!]
+            )
           : eq(schema.users.id, options.visibility.actorUserId)
       );
     }
@@ -225,7 +265,11 @@ export class UserRepository {
     };
   }
 
-  async update(id: string, data: Partial<typeof schema.users.$inferInsert>) {
+  async update(
+    id: string,
+    data: Partial<typeof schema.users.$inferInsert>,
+    options: { additionalDepartmentIds?: string[]; assignedBy?: string } = {}
+  ) {
     const db = getDatabase();
     return db.transaction(async (tx) => {
       const current =
@@ -243,12 +287,54 @@ export class UserRepository {
             )[0];
       if (!current || current.deleted_at) return null;
 
+      const primaryDepartmentId = data.department_id !== undefined
+        ? data.department_id ?? null
+        : current.department_id;
+      if (data.department_id !== undefined || options.additionalDepartmentIds !== undefined) {
+        await assertPrimaryDepartmentExists(primaryDepartmentId, tx);
+      }
+      const roleId = data.role_id ?? current.role_id;
+      const [role] = await tx.select({ name: schema.roles.name })
+        .from(schema.roles).where(eq(schema.roles.id, roleId));
+      if (!role) throw AppError.notFound('Role not found');
+      const currentMembership = await getUserDepartments(id, tx);
+      const additionalDepartmentIds = options.additionalDepartmentIds
+        ?? currentMembership?.additionalDepartmentIds ?? [];
+      if (
+        options.additionalDepartmentIds === undefined &&
+        data.department_id !== undefined &&
+        additionalDepartmentIds.includes(primaryDepartmentId ?? '')
+      ) {
+        throw new AppError({
+          statusCode: 409,
+          code: 'PRIMARY_DEPARTMENT_CONFLICT',
+          message: 'The new primary department is already additional. Submit an explicit additional department list.',
+        });
+      }
+      if (role.name !== 'OPERATOR' && options.additionalDepartmentIds?.length) {
+        throw new AppError({
+          statusCode: 422,
+          code: 'INVALID_DEPARTMENT_MEMBERSHIP',
+          message: 'Additional departments are available only to operators.',
+        });
+      }
+
       const [user] = await tx
         .update(schema.users)
         .set({ ...data, updated_at: new Date() })
         .where(and(eq(schema.users.id, id), isNull(schema.users.deleted_at)))
         .returning();
       if (!user) return null;
+
+      if (options.additionalDepartmentIds !== undefined || data.department_id !== undefined || data.role_id !== undefined) {
+        await replaceAdditionalDepartments(tx, {
+          userId: id,
+          primaryDepartmentId,
+          roleName: role.name,
+          additionalDepartmentIds: role.name === 'OPERATOR' ? additionalDepartmentIds : [],
+          assignedBy: options.assignedBy,
+        });
+      }
 
       await tx.delete(schema.sessions).where(eq(schema.sessions.user_id, id));
       return user;
@@ -300,6 +386,8 @@ export class UserRepository {
       }
 
       await tx.delete(schema.sessions).where(eq(schema.sessions.user_id, id));
+      await tx.delete(schema.userAdditionalDepartments)
+        .where(eq(schema.userAdditionalDepartments.user_id, id));
 
       const [user] = await tx
         .update(schema.users)

@@ -89,10 +89,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
   const auditRepo = createAuditLogRepository();
   const uploadSessionRepo = createMediaUploadSessionRepository();
   const db = getDatabase();
-  const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
+  const actorFor = (payload: { sub: string; role: string; department_id?: string | null; department_ids?: string[] }): ActorContext => ({
     userId: payload.sub,
     roleName: payload.role,
     departmentId: payload.department_id,
+    departmentIds: payload.department_ids,
   });
   const assertRestoreAdmin = (actor: ActorContext, ability: ContentAbility) => {
     if (!['SUPER_ADMIN', 'ADMIN'].includes(actor.roleName) || !ability.can('manage', 'Media')) {

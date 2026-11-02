@@ -39,6 +39,7 @@ export default function Users() {
     const { listUsers, createUser, updateUser, deleteUser, listInvitations, inviteUser } = useUsersApi({
         usersPage,
         usersLimit: PAGE_SIZE,
+        usersSearch: activeTab === "users" ? searchQuery : "",
         invitationsPage,
         invitationsLimit: PAGE_SIZE,
         enableInvitations: canManageUsers,
@@ -52,22 +53,7 @@ export default function Users() {
         ? mapUsersErrorToUx(invitationsError, "Failed to load invitations")
         : null;
 
-    const filteredUsers = useMemo(
-        () =>
-            users.filter((user) => {
-                const query = searchQuery.toLowerCase();
-                const { email, first_name, last_name, role } = user;
-
-                return (
-                    query === "" ||
-                    email.toLowerCase().includes(query) ||
-                    (first_name || "").toLowerCase().includes(query) ||
-                    (last_name || "").toLowerCase().includes(query) ||
-                        (role || "").toLowerCase().includes(query)
-                );
-            }),
-        [users, searchQuery],
-    );
+    const filteredUsers = users;
 
     const filteredInvitations = useMemo(
         () =>
@@ -122,6 +108,7 @@ export default function Users() {
                 last_name: formData.last_name,
                 role_id: formData.role_id,
                 department_id: formData.department_id || undefined,
+                additional_department_ids: formData.additional_department_ids,
             },
             {
                 onSuccess: () => {
@@ -137,6 +124,7 @@ export default function Users() {
                 email: formData.email,
                 role_id: formData.role_id,
                 department_id: formData.department_id || undefined,
+                additional_department_ids: formData.additional_department_ids,
             },
             {
                 onSuccess: () => {
@@ -157,6 +145,7 @@ export default function Users() {
                     last_name: formData.last_name,
                     role_id: formData.role_id,
                     department_id: formData.department_id || undefined,
+                    additional_department_ids: formData.additional_department_ids,
                     is_active: formData.is_active,
                 },
             },

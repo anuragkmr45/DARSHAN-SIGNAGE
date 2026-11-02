@@ -16,6 +16,7 @@ type AttachmentAuthInput = {
   senderId: string;
   senderRole?: string;
   senderDepartmentId?: string | null;
+  senderDepartmentIds?: string[];
   canOverrideMedia: boolean;
   canManageMedia: boolean;
 };
@@ -34,7 +35,9 @@ export function assertAttachmentAccess(input: AttachmentAuthInput): void {
     const scope = media.owner_scope ?? 'RESTRICTED';
     if (!input.canManageMedia && (
       scope === 'RESTRICTED' ||
-      (scope === 'DEPARTMENT' && (!input.senderDepartmentId || media.owner_department_id !== input.senderDepartmentId)) ||
+      (scope === 'DEPARTMENT' && !(
+        input.senderDepartmentIds ?? (input.senderDepartmentId ? [input.senderDepartmentId] : [])
+      ).includes(media.owner_department_id ?? '')) ||
       (scope !== 'DEPARTMENT' && scope !== 'ORGANIZATION' && scope !== 'RESTRICTED')
     )) {
       throw AppError.forbidden('Attachment media is outside your department scope');

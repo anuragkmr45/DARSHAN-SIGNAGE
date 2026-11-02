@@ -14,6 +14,16 @@ its five-VM, real-player and physical-display gates remain pending.
 Catalogue cases remain `Not Tested` or `Partially Tested` until QA records its
 own result.
 
+The current operator-membership delta adds `user_additional_departments` and
+an additive API/CMS contract while preserving the primary scalar field and
+ownership. Current assigned departments affect permitted reads, directory
+discovery, and new chat file sharing; existing message attachments remain
+conversation-scoped after a source membership is removed. Old PATCH requests
+that omit additional IDs preserve them; a primary/additional collision returns
+`409 PRIMARY_DEPARTMENT_CONFLICT`. Source and developer results are in
+`docs/governance/operator-multi-department-membership.md` and the dated
+verification artifact; independent `AUTHZ-14..18` execution remains open.
+
 When a user-confirmed rule disagrees with code, report the observed difference against that rule even if the software behaves exactly as this sheet predicts. For code-only topics, report the observed behavior and its risk; do not call an insecure behavior a security pass merely because it matches source. Site-specific commitments without a value in code remain unscored until the release owner supplies an acceptance target.
 
 | Topic | Expected from current code, to verify | Requirement or scope boundary | QA cases |

@@ -37,10 +37,11 @@ const listLayoutsQuerySchema = z.object({
 
 export async function layoutRoutes(fastify: FastifyInstance) {
   const repo = createLayoutRepository();
-  const actorFor = (payload: { sub: string; role: string; department_id?: string | null }): ActorContext => ({
+  const actorFor = (payload: { sub: string; role: string; department_id?: string | null; department_ids?: string[] }): ActorContext => ({
     userId: payload.sub,
     roleName: payload.role,
     departmentId: payload.department_id,
+    departmentIds: payload.department_ids,
   });
   const serializeLayout = (layout: any, ownership: any, ability: any, actor: ActorContext) => {
     return {

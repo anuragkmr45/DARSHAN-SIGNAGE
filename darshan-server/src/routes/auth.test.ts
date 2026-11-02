@@ -6,6 +6,7 @@ import { createTestServer, generateTestToken, testRoles, testUser, closeTestServ
 import { HTTP_STATUS } from '@/http-status-codes';
 import { getDatabase, getDatabasePool, schema } from '@/db';
 import { hashPassword } from '@/auth/password';
+import { verifyAccessToken } from '@/auth/jwt';
 
 async function waitForDatabaseCondition(
   check: () => Promise<boolean>,
@@ -80,6 +81,24 @@ describe('Auth Routes', () => {
       const body = JSON.parse(response.body);
       expect(body).toHaveProperty('user');
       expect(body).toHaveProperty('expiresAt');
+    });
+
+    it('allows a fresh login when the browser still sends a revoked access token', async () => {
+      const staleToken = await generateTestToken(testUser.id, 'ADMIN');
+      const stalePayload = await verifyAccessToken(staleToken);
+      await getDatabase().delete(schema.sessions)
+        .where(eq(schema.sessions.access_jti, stalePayload.jti));
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        headers: {
+          authorization: `Bearer ${staleToken}`,
+          cookie: `access_token=${staleToken}`,
+        },
+        payload: { email: testUser.email, password: testUser.password },
+      });
+      expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      expect(response.json().user.email).toBe(testUser.email);
     });
 
     it('does not issue a session from credentials invalidated by a concurrent password change', async () => {

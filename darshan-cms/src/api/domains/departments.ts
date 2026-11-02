@@ -20,7 +20,7 @@ const normalizePaginatedResponse = <T>(
 };
 
 export const departmentsApi = {
-  list: (params?: PaginationParams) =>
+  list: (params?: PaginationParams & { search?: string }) =>
     apiClient
       .request<
         PaginatedResponse<Department> | { items?: Department[]; pagination?: { page?: number; limit?: number; total?: number } }
@@ -30,6 +30,19 @@ export const departmentsApi = {
         query: params,
       })
       .then((response) => normalizePaginatedResponse(response, params?.page ?? 1, params?.limit ?? 10)),
+
+  listAll: async () => {
+    const items = new Map<string, Department>();
+    let page = 1;
+    let totalPages = 1;
+    while (page <= totalPages) {
+      const response = await departmentsApi.list({ page, limit: 100 });
+      for (const department of response.items) items.set(department.id, department);
+      totalPages = Math.max(1, Math.ceil(response.total / 100));
+      page += 1;
+    }
+    return Array.from(items.values());
+  },
 
   create: (payload: { name: string; description?: string }) =>
     apiClient.request<Department>({
