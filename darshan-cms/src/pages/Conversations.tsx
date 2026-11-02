@@ -823,6 +823,7 @@ export default function Conversations() {
             <div className="min-h-0 flex-1">
               <ConversationList
                 conversations={conversations}
+                mentionDisplayById={mentionDisplayById}
                 selectedConversationId={routeConversationId}
                 search={search}
                 onSearch={setSearch}
@@ -876,9 +877,20 @@ export default function Conversations() {
               <p className="max-w-md text-sm text-muted-foreground">{routeAccessState.description}</p>
             </div>
             {!resolveConversationQuery.isLoading ? (
-              <Button variant="outline" onClick={backToChats}>
-                Back to chats
-              </Button>
+              <div className="flex gap-2">
+                {resolveConversationError?.code !== "CHAT_BANNED" &&
+                 resolveConversationError?.code !== "FORBIDDEN" &&
+                 resolveConversationError?.code !== "NOT_FOUND" &&
+                 resolveConversationError?.status !== 403 &&
+                 resolveConversationError?.status !== 404 && (
+                  <Button variant="outline" onClick={() => void resolveConversationQuery.refetch()}>
+                    Retry
+                  </Button>
+                )}
+                <Button variant="outline" onClick={backToChats}>
+                  Back to chats
+                </Button>
+              </div>
             ) : null}
           </div>
         ) : !selectedConversation ? (
@@ -1008,6 +1020,7 @@ export default function Conversations() {
         onOpenChange={setSettingsOpen}
         conversation={selectedConversation}
         canManage={Boolean(canManage)}
+        canManageLifecycle={canModerate}
         canMutateItems={!composerDisabled}
         isSuperAdmin={canHardDelete}
         pins={pinsQuery.data?.items ?? []}

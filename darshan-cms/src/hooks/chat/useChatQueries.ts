@@ -63,6 +63,7 @@ export const useChatConversationsList = () =>
     queryKey: chatQueryKeys.conversations,
     queryFn: chatApi.listConversations,
     staleTime: 20_000,
+    refetchInterval: 60_000,
   });
 
 export const useConversationSettings = (conversationId?: string) => {

@@ -368,7 +368,12 @@ export class ChatRepository {
         )
       );
     const lastMessageByConversation = new Map(
-      lastMessageRows.map((row) => [row.message.conversation_id, row.message])
+      lastMessageRows.map((row) => [
+        row.message.conversation_id,
+        row.message.deleted_at
+          ? { ...row.message, body_text: null, body_rich: null }
+          : row.message,
+      ])
     );
 
     const unreadRows = await db

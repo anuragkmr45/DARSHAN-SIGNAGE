@@ -384,3 +384,27 @@ export function emitChatEvent(
   recordRealtimeSocketServerEvent(CHAT_NAMESPACE, event);
   io.of(CHAT_NAMESPACE).to(chatConversationRoom(conversationId)).emit(event, payload);
 }
+
+/** A private refresh hint; REST decides which conversations the recipient may see. */
+export function emitChatInboxChanged(
+  fastify: FastifyInstance,
+  userIds?: string[],
+  conversationId?: string
+) {
+  const namespace = getOrCreateSocketServer(fastify).of(CHAT_NAMESPACE);
+  recordRealtimeSocketServerEvent(CHAT_NAMESPACE, 'chat:inbox:changed');
+  const payload = conversationId ? { conversationId } : {};
+  if (!userIds) {
+    namespace.emit('chat:inbox:changed', payload);
+    return;
+  }
+  for (const userId of new Set(userIds)) {
+    namespace.to(authenticatedUserRoom(userId)).emit('chat:inbox:changed', payload);
+  }
+}
+
+/** Revoked members must stop receiving room broadcasts before another send. */
+export function evictChatUserFromConversation(fastify: FastifyInstance, conversationId: string, userId: string) {
+  getOrCreateSocketServer(fastify).of(CHAT_NAMESPACE)
+    .in(authenticatedUserRoom(userId)).socketsLeave(chatConversationRoom(conversationId));
+}

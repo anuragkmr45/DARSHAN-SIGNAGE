@@ -34,6 +34,7 @@ const mentionTokenPattern = /^@([0-9a-fA-F-]{36})$/;
 const renderMessageText = (
   content: string,
   mentionDisplayById: Record<string, string>,
+  currentUserId: string,
   onMentionClick?: (userId: string) => void,
 ) => {
   const parts = content.split(mentionPattern);
@@ -45,6 +46,7 @@ const renderMessageText = (
 
     const userId = tokenMatch[1];
     const label = `@${mentionDisplayById[userId] || "User"}`;
+    if (userId === currentUserId || !onMentionClick) return <span key={`${part}-${index}`}>{label}</span>;
     return (
       <button
         key={`${part}-${index}`}
@@ -153,7 +155,7 @@ export function MessageItem({
         </div>
       ) : (
         <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
-          {renderMessageText(message.body_text || "", mentionDisplayById, onMentionClick)}
+          {renderMessageText(message.body_text || "", mentionDisplayById, currentUserId, onMentionClick)}
         </div>
       )}
 

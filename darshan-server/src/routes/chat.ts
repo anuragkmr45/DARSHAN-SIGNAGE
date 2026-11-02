@@ -9,7 +9,7 @@ import { createAuditLogRepository } from '@/db/repositories/audit-log';
 import { createLogger } from '@/utils/logger';
 import { AppError } from '@/utils/app-error';
 import { respondWithError } from '@/utils/errors';
-import { emitChatEvent, setupChatNamespace } from '@/realtime/chat-namespace';
+import { emitChatEvent, emitChatInboxChanged, evictChatUserFromConversation, setupChatNamespace } from '@/realtime/chat-namespace';
 import { emitNotificationCountEvent } from '@/realtime/notifications-namespace';
 import { notifyMessageEvent } from '@/chat/notify';
 import { createNotificationCounterRepository } from '@/db/repositories/notification-counter';
@@ -404,6 +404,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
 
         const conversation = await chatRepo.getOrCreateDm(payload.sub, data.otherUserId);
         await appendAudit(request, payload.sub, 'CHAT_CONVERSATION_CREATE', 'ChatConversation', conversation.id);
+        emitChatInboxChanged(fastify, [payload.sub, data.otherUserId], conversation.id);
         return reply.send({ conversation });
       } catch (error) {
         logger.error(error, 'Create DM error');
@@ -436,6 +437,16 @@ export async function chatRoutes(fastify: FastifyInstance) {
           conversationId: conversation.id,
           patch: { state: conversation.state },
         });
+        if (conversation.type === 'FORUM_OPEN') {
+          emitChatInboxChanged(fastify);
+        } else {
+          try {
+            const members = await chatRepo.listMembers(conversation.id);
+            emitChatInboxChanged(fastify, members.map((member) => member.user_id), conversation.id);
+          } catch (error) {
+            logger.warn(error, 'Conversation created but inbox refresh could not be sent');
+          }
+        }
         return reply.send({ conversation });
       } catch (error) {
         logger.error(error, 'Create conversation error');
@@ -755,6 +766,7 @@ export async function chatRoutes(fastify: FastifyInstance) {
           message: {
             id: message.id,
             body_text: message.body_text,
+            threadRootId: message.thread_root_id,
           },
           senderId: payload.sub,
           mentionedUserIds: bodyRich.mentions,
@@ -1309,6 +1321,12 @@ export async function chatRoutes(fastify: FastifyInstance) {
           conversationId,
           patch: { membersChanged: true },
         });
+        try {
+          const members = await chatRepo.listMembers(conversationId);
+          emitChatInboxChanged(fastify, members.map((member) => member.user_id), conversationId);
+        } catch (error) {
+          logger.warn(error, 'Members invited but inbox refresh could not be sent');
+        }
         return reply.send({ success: true });
       } catch (error) {
         logger.error(error, 'Invite members error');
@@ -1334,8 +1352,10 @@ export async function chatRoutes(fastify: FastifyInstance) {
         await appendAudit(request, payload.sub, 'CHAT_MEMBER_REMOVE', 'ChatConversation', conversationId);
         emitChatEvent(fastify, conversationId, 'chat:conversation:updated', {
           conversationId,
-          patch: { membersChanged: true },
+          patch: { membersChanged: true, userId: data.userId },
         });
+        evictChatUserFromConversation(fastify, conversationId, data.userId);
+        emitChatInboxChanged(fastify, [data.userId], conversationId);
         return reply.send({ success: true });
       } catch (error) {
         logger.error(error, 'Remove member error');
@@ -1503,6 +1523,8 @@ export async function chatRoutes(fastify: FastifyInstance) {
             userId: data.userId,
           },
         });
+        if (data.action === 'BAN') evictChatUserFromConversation(fastify, conversationId, data.userId);
+        emitChatInboxChanged(fastify, [data.userId], conversationId);
 
         return reply.send({ moderation });
       } catch (error) {

@@ -2058,6 +2058,7 @@ export interface ChatNormalizedError {
 export interface ChatNotificationData {
   conversationId: string;
   messageId?: string;
+  threadRootId?: string;
   notificationType: "DM" | "MENTION" | "THREAD_REPLY";
   snippet?: string;
 }

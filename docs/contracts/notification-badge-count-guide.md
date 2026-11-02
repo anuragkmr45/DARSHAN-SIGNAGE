@@ -107,6 +107,8 @@ Emission rules:
 4. On reconnect:
    - Keep last known badge.
    - Immediately call `GET /notifications/unread-count` or emit `notifications:sync`.
+
+Chat reply notifications include `threadRootId` when the message belongs to a thread. The CMS opens `/chat/:conversationId/thread/:threadRootId` for those notifications so the reply is visible inside its thread. A DM thread reply to the root author is labeled `THREAD_REPLY` instead of a generic DM.
 5. If socket fails:
    - Keep REST polling fallback (for example every 30–60s on Home page).
 

@@ -455,6 +455,11 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     expect(JSON.parse(deletedMessage.body).message.body_text).toBeNull();
     const [retained] = await db.select().from(schema.chatMessages).where(eq(schema.chatMessages.id, messageId));
     expect(retained?.body_text).toBe('retained secret');
+    const conversationList = await server.inject({ method: 'GET', url: '/api/v1/chat/conversations', headers: auth });
+    expect(conversationList.statusCode).toBe(HTTP_STATUS.OK);
+    const listed = JSON.parse(conversationList.body).items.find((item: { id: string }) => item.id === conversationId);
+    expect(listed.last_message.body_text).toBeNull();
+    expect(listed.last_message.deleted_at).toBeTruthy();
 
     const deletedConversation = await server.inject({ method: 'DELETE', url: `/api/v1/chat/conversations/${conversationId}`, headers: auth });
     expect(deletedConversation.statusCode).toBe(HTTP_STATUS.OK);

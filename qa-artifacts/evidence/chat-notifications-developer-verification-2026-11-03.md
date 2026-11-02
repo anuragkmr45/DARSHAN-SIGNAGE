@@ -25,6 +25,22 @@ The schema has no organization/tenant entity. `ORGANIZATION` is a content owners
 - The live chat browser suite covered sending, a thread reply, reaction, edit/delete, attachment upload, and share link. The notification deep-link case was skipped because that test account had no suitable notification at that moment. The focused notification browser test covers list pagination, unread count, and opening an ordinary notification.
 - `git diff --check`: passed.
 
+## Three simultaneous CMS sessions (follow-up)
+
+Ran the built CMS in three independent browser origins against the isolated test database: two operators in department A and one in department B. These were signed-in, interactive CMS sessions with the chat and notification pages open concurrently. No production user or message was used.
+
+- Department A operators exchanged DM text in both directions, including Hindi and emoji, without reloading either page. Concurrent group sends arrived once each in the timeline; rapid double-click of Send created one message.
+- A newly created private group appeared in the invited operator's sidebar without reload. The department B operator could neither discover it nor open its direct link. A newly created open forum appeared to the department B operator without reload, who could post there; this is the intended installation-wide forum scope.
+- Typing appeared in the other session and cleared when the draft was removed. A reaction and an edited message appeared in the other session. A group mention generated a notification; its link focused the message. Notification counts changed after a new DM and after Mark all read.
+- A DM thread reply generated a **New thread reply** notification. Opening it displayed the thread and reply, rather than an empty main timeline. Deleting the latest forum message replaced the other operator's sidebar preview with a tombstone without reload.
+- The sender selected a DOCX and CSV using the CMS file chooser. The isolated Docker worker converted both to READY PDF previews. The recipient saw both attachments on the live DM without reloading and opened the converted CSV as a rendered canvas. Earlier browser checks also covered PNG, PDF, XLSX, PPTX, MP4, unsupported `.exe`, and a corrupt DOCX failure.
+- A private-group owner with ordinary operator permissions saw an Archive button, but the server correctly returned 403 because archive requires global `manage Conversation`. The CMS control was aligned with that server policy. The owner still sees the settings that owner policy permits.
+- When the isolated API was stopped during conversation navigation, the page showed a fetch error. After restart, a new **Retry** control reopened the group without a page reload; socket reconnect also invalidates stale conversation data. The API interruption expired the short-lived browser sessions during a longer run, so the three operators signed in again using test credentials.
+- Mention text in the chat sidebar now resolves to a readable name. New notification snippets use `@you` for the recipient, and the CMS renders older stored UUID snippets as `@you` or `@User`. A self-mention is displayed as text rather than a non-working "Open DM" button.
+- Repeated forum *titles* in the QA sidebar were investigated: the isolated database contains five separate records with each title, created by repeated test fixtures; this was not duplicate rendering of a single conversation ID.
+
+These checks support BR-035/036 and FUN-09/10 for the tested local cases. They do not establish production, separate-installation organization isolation, a full moderator/member-removal journey, network partition recovery, or measured concurrency at scale. Those remain human QA cases in `05_TEST_CASES.csv`.
+
 ## Remaining QA
 
 This is developer verification on one machine. A separate deployment is needed to test organization isolation. Repeat simultaneous-account, notification, attachment conversion, and large-file checks on the packaged artifact and target VMs. No production or multi-node result is claimed here.

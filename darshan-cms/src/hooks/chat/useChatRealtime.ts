@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { InfiniteData, useQueryClient } from "@tanstack/react-query";
-import { chatApi } from "@/api/domains/chat";
+import { chatApi, normalizeChatError } from "@/api/domains/chat";
 import type {
   ChatBookmarkUpdateEvent,
   ChatBookmarksListResponse,
@@ -120,6 +120,10 @@ export const useChatRealtime = ({
 
     const onConnect = () => {
       setIsConnected(true);
+      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
+      if (activeConversationId) {
+        void queryClient.invalidateQueries({ queryKey: chatQueryKeys.resolveConversation(activeConversationId) });
+      }
       subscribe();
     };
     const onDisconnect = () => setIsConnected(false);
@@ -178,6 +182,7 @@ export const useChatRealtime = ({
         (current: InfiniteData<ChatThreadResponse> | undefined) =>
           patchMessageInInfiniteData(current, payload.messageId, payload.patch),
       );
+      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
     };
 
     const onMessageDeleted = (payload: ChatMessageDeletedEvent) => {
@@ -192,6 +197,7 @@ export const useChatRealtime = ({
         (current: InfiniteData<ChatThreadResponse> | undefined) =>
           patchMessageInInfiniteData(current, payload.messageId, patch),
       );
+      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
     };
 
     const onConversationUpdated = (payload: ChatConversationUpdatedEvent) => {
@@ -214,6 +220,16 @@ export const useChatRealtime = ({
             };
           }),
         };
+      });
+      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
+    };
+
+    const onInboxChanged = (payload?: { conversationId?: string }) => {
+      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations }).then(() => subscribe());
+      if (!activeConversationId || payload?.conversationId !== activeConversationId) return;
+      void chatApi.resolveConversation(activeConversationId).catch((error) => {
+        const status = normalizeChatError(error).httpStatus;
+        if (status === 403 || status === 404) onActiveConversationRejected?.(activeConversationId);
       });
     };
 
@@ -315,6 +331,7 @@ export const useChatRealtime = ({
     socket.on("chat:message:updated", onMessageUpdated);
     socket.on("chat:message:deleted", onMessageDeleted);
     socket.on("chat:conversation:updated", onConversationUpdated);
+    socket.on("chat:inbox:changed", onInboxChanged);
     socket.on("chat:pin:update", onPinUpdate);
     socket.on("chat:bookmark:update", onBookmarkUpdate);
     socket.on("chat:typing", onTyping);
@@ -331,6 +348,7 @@ export const useChatRealtime = ({
       socket.off("chat:message:updated", onMessageUpdated);
       socket.off("chat:message:deleted", onMessageDeleted);
       socket.off("chat:conversation:updated", onConversationUpdated);
+      socket.off("chat:inbox:changed", onInboxChanged);
       socket.off("chat:pin:update", onPinUpdate);
       socket.off("chat:bookmark:update", onBookmarkUpdate);
       socket.off("chat:typing", onTyping);

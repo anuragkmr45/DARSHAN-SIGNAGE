@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatChatTime } from "@/lib/chatTime";
+import { useAppSelector } from "@/store/hooks";
 
 type ReadFilter = "all" | "unread" | "read";
 
@@ -20,6 +21,7 @@ const toChatData = (notification: Notification): ChatNotificationData | null => 
   return {
     conversationId: typed.conversationId as string,
     messageId: typeof typed.messageId === "string" ? typed.messageId : undefined,
+    threadRootId: typeof typed.threadRootId === "string" ? typed.threadRootId : undefined,
     notificationType:
       typed.notificationType === "DM" || typed.notificationType === "MENTION" || typed.notificationType === "THREAD_REPLY"
         ? (typed.notificationType as "DM" | "MENTION" | "THREAD_REPLY")
@@ -30,6 +32,7 @@ const toChatData = (notification: Notification): ChatNotificationData | null => 
 
 export default function Notifications() {
   const navigate = useNavigate();
+  const currentUserId = useAppSelector((state) => state.auth.user?.id);
   const queryClient = useQueryClient();
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
   const [page, setPage] = useState(1);
@@ -77,7 +80,9 @@ export default function Notifications() {
     }
     if (!data) return;
 
-    const target = data.messageId
+    const target = data.threadRootId
+      ? `/chat/${data.conversationId}/thread/${encodeURIComponent(data.threadRootId)}`
+      : data.messageId
       ? `/chat/${data.conversationId}?focusMessageId=${encodeURIComponent(data.messageId)}`
       : `/chat/${data.conversationId}`;
     navigate(target);
@@ -128,7 +133,7 @@ export default function Notifications() {
                       <div className="min-w-0 space-y-1">
                         <p className="text-sm font-semibold">{notification.title || chatData?.notificationType || "Notification"}</p>
                         <p className="break-words text-xs text-muted-foreground">
-                          {chatData?.snippet || notification.message || notification.body || "Notification"}
+                          {chatData?.snippet?.replace(/@([0-9a-fA-F-]{36})/g, (_token, id: string) => id === currentUserId ? "@you" : "@User") || notification.message || notification.body || "Notification"}
                         </p>
                       </div>
                       <span className="text-[11px] text-muted-foreground">

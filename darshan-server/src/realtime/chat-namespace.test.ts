@@ -2,7 +2,8 @@ import { AddressInfo } from 'net';
 import { FastifyInstance } from 'fastify';
 import { io as createClient, Socket as ClientSocket } from 'socket.io-client';
 import { afterAll, afterEach, beforeAll, describe, it, expect } from 'vitest';
-import { canSocketSubscribe, resolveSocketAuthToken } from '@/realtime/chat-namespace';
+import { canSocketSubscribe, chatConversationRoom, emitChatInboxChanged, evictChatUserFromConversation, resolveSocketAuthToken } from '@/realtime/chat-namespace';
+import { getOrCreateSocketServer } from '@/realtime/socket-server';
 import { closeTestServer, createTestServer, generateTestToken, testUser } from '@/test/helpers';
 import { createChatRepository } from '@/db/repositories/chat';
 import { getObservabilityRegistry } from '@/observability/metrics';
@@ -232,5 +233,27 @@ describe('chat namespace socket payload hardening', () => {
     expect(responses.some((response) => response?.ok === true)).toBe(true);
     expect(responses.some((response) => response?.error?.code === 'RATE_LIMITED')).toBe(true);
     expect(chatSocket.connected).toBe(true);
+  });
+
+  it('refreshes a recipient inbox and removes revoked room membership', async () => {
+    const conversation = await createChatRepository().createConversation({
+      type: 'GROUP_CLOSED', title: 'Recipient refresh test', createdBy: testUser.id,
+    });
+    const chatSocket = await connectChatSocket();
+    const subscribed = await emitWithAck<any>(chatSocket, 'chat:subscribe', { conversationIds: [conversation.id] });
+    expect(subscribed.subscribed).toContain(conversation.id);
+
+    const refresh = new Promise<{ conversationId: string }>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Inbox refresh timeout')), 3000);
+      chatSocket.once('chat:inbox:changed', (payload) => { clearTimeout(timer); resolve(payload); });
+    });
+    emitChatInboxChanged(server!, [testUser.id], conversation.id);
+    expect(await refresh).toEqual({ conversationId: conversation.id });
+
+    const namespace = getOrCreateSocketServer(server!).of('/chat');
+    const room = chatConversationRoom(conversation.id);
+    expect((await namespace.in(room).allSockets()).has(chatSocket.id!)).toBe(true);
+    evictChatUserFromConversation(server!, conversation.id, testUser.id);
+    expect((await namespace.in(room).allSockets()).has(chatSocket.id!)).toBe(false);
   });
 });

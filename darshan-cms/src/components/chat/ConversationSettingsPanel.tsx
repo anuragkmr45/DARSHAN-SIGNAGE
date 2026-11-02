@@ -49,6 +49,7 @@ interface ConversationSettingsPanelProps {
   conversation?: ChatConversationListItem;
   open: boolean;
   canManage: boolean;
+  canManageLifecycle: boolean;
   canMutateItems?: boolean;
   isSuperAdmin?: boolean;
   pins?: ChatPin[];
@@ -84,6 +85,7 @@ export function ConversationSettingsPanel({
   conversation,
   open,
   canManage,
+  canManageLifecycle,
   canMutateItems = false,
   isSuperAdmin = false,
   pins = [],
@@ -274,18 +276,18 @@ export function ConversationSettingsPanel({
                 Save settings
               </Button>
 
-              <div className="space-y-2 rounded-md border p-3">
+              {canManageLifecycle && <div className="space-y-2 rounded-md border p-3">
                 <p className="text-xs font-semibold uppercase text-muted-foreground">Lifecycle</p>
                 {isArchived ? (
-                  <Button className="w-full" variant="outline" onClick={() => onUnarchive()} disabled={!canManage}>
+                  <Button className="w-full" variant="outline" onClick={() => onUnarchive()}>
                     Unarchive conversation
                   </Button>
                 ) : (
-                  <Button className="w-full" variant="outline" onClick={() => onArchive()} disabled={!canManage}>
+                  <Button className="w-full" variant="outline" onClick={() => onArchive()}>
                     Archive conversation
                   </Button>
                 )}
-              </div>
+              </div>}
 
               {isSuperAdmin && (
                 <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">

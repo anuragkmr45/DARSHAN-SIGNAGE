@@ -6,6 +6,7 @@ import type { ChatConversationListItem } from "@/api/types";
 
 interface ConversationListProps {
   conversations: ChatConversationListItem[];
+  mentionDisplayById?: Record<string, string>;
   selectedConversationId?: string;
   search: string;
   onSearch: (value: string) => void;
@@ -23,8 +24,16 @@ const getConversationTitle = (conversation: ChatConversationListItem) => {
   return conversation.title || conversation.topic || conversation.purpose || conversation.id;
 };
 
+const getLastMessagePreview = (conversation: ChatConversationListItem, mentionDisplayById: Record<string, string>) => {
+  const last = conversation.last_message;
+  if (!last) return "No messages yet";
+  if (last.deleted_at) return "This message was deleted.";
+  return last.body_text?.replace(/@([0-9a-fA-F-]{36})/g, (_token, id: string) => `@${mentionDisplayById[id] || "User"}`) || "Attachment";
+};
+
 export function ConversationList({
   conversations,
+  mentionDisplayById = {},
   selectedConversationId,
   search,
   onSearch,
@@ -38,7 +47,7 @@ export function ConversationList({
       conversation.title,
       conversation.topic,
       conversation.purpose,
-      conversation.last_message?.body_text,
+      conversation.last_message?.deleted_at ? null : conversation.last_message?.body_text,
     ]
       .filter(Boolean)
       .join(" ")
@@ -94,7 +103,7 @@ export function ConversationList({
                             <p className="truncate text-sm font-medium">{getConversationTitle(conversation)}</p>
                           </div>
                           <p className="truncate text-xs text-muted-foreground">
-                            {conversation.last_message?.body_text || "No messages yet"}
+                            {getLastMessagePreview(conversation, mentionDisplayById)}
                           </p>
                         </div>
                         <div className="flex flex-col items-end gap-1">

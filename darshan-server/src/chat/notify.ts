@@ -16,6 +16,7 @@ export type NotifyMessageEventInput = {
   message: {
     id: string;
     body_text?: string | null;
+    threadRootId?: string | null;
   };
   senderId: string;
   mentionedUserIds?: string[];
@@ -24,9 +25,12 @@ export type NotifyMessageEventInput = {
   onNotificationCreated?: (input: { userId: string; type: ChatNotificationType }) => Promise<void> | void;
 };
 
-function buildSnippet(text?: string | null, maxLength = 140): string {
+function buildSnippet(text: string | null | undefined, recipientId: string, maxLength = 140): string {
   if (!text) return '';
-  const compact = text.replace(/\s+/g, ' ').trim();
+  const compact = text
+    .replace(/@([0-9a-fA-F-]{36})/g, (_token, userId: string) => userId === recipientId ? '@you' : '@User')
+    .replace(/\s+/g, ' ')
+    .trim();
   return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact;
 }
 
@@ -48,7 +52,7 @@ export function computeNotificationRecipients(
   if (
     input.threadRootSenderId &&
     input.threadRootSenderId !== input.senderId &&
-    !recipients.has(input.threadRootSenderId)
+    recipients.get(input.threadRootSenderId) !== 'MENTION'
   ) {
     recipients.set(input.threadRootSenderId, 'THREAD_REPLY');
   }
@@ -61,7 +65,6 @@ export async function notifyMessageEvent(input: NotifyMessageEventInput): Promis
   const recipients = computeNotificationRecipients(input);
   if (!recipients.length) return;
 
-  const snippet = buildSnippet(input.message.body_text);
   const label = input.conversation.title || 'Conversation';
 
   try {
@@ -86,8 +89,9 @@ export async function notifyMessageEvent(input: NotifyMessageEventInput): Promis
           data: {
             conversationId: input.conversation.id,
             messageId: input.message.id,
+            threadRootId: input.message.threadRootId ?? undefined,
             notificationType: type,
-            snippet,
+            snippet: buildSnippet(input.message.body_text, userId),
           },
         });
         if (created === null) return;
