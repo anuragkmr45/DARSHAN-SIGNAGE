@@ -42,8 +42,11 @@ production VM, player, existing local deployment, or release artifact changed.
   removing B, a fresh login still opened the image in the existing chat. The
   source Media Library omitted it, its copied Media API URL returned
   `FORBIDDEN`, and the new-chat picker no longer offered the B colleague.
-  Legacy file bookmarks without proof of share-time authorization retain the
-  old creator-scope check; new authorized bookmarks retain conversation access.
+  PostgreSQL-backed route tests separately verified that a new bookmark with
+  recorded share authorization retains conversation access. Legacy file
+  bookmarks without that proof retain the old creator-scope check and can stop
+  opening after the creator loses the source department. This legacy case was
+  not exercised as a direct browser journey and remains a release QA risk.
 - The pre-feature CMS logged in against the new API, listed the operator using
   scalar `department_id`, and saved an unrelated name change. The new CMS and
   read-only PostgreSQL inspection still showed A primary and B additional
@@ -79,7 +82,9 @@ Independent QA must execute and record `AUTHZ-14..18`, including two API nodes,
 network partitions, large directories, custom roles, concurrent upload
 finalization and Schedule mutation, old-client versions used at the site, and
 administrator workflow variants. A real user still needs to review the CMS
-wording and role-change warning. The source branch was not pushed or merged.
+wording and role-change warning. QA must also decide whether the conservative
+legacy-bookmark behavior is acceptable for already deployed conversations.
+The source branch was not pushed or merged.
 
 Independent QA release gates remain open until measured evidence is recorded
 in the master checklist.

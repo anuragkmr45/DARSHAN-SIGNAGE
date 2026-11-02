@@ -37,7 +37,8 @@ Use distinct accounts and browser profiles for concurrent sessions. Store creden
   primary-only A/B/C operators, an A department manager, a global User
   manager, an inactive operator, an invitee, and a deleted user. Create
   A/B/C/D-owned Media/Layout/Presentation/Schedule fixtures with stable
-  creator and owner columns, plus an A/B chat with a message attachment.
+  creator and owner columns, plus an A/B chat with a message attachment,
+  an authorized file bookmark, and a legacy bookmark lacking share proof.
   Keep two independent CMS cookie origins, one old CMS build, current API and
   worker, and a real migrated PostgreSQL/Valkey/MinIO stack. Capture list
   totals and row IDs before/after primary changes and membership removal.

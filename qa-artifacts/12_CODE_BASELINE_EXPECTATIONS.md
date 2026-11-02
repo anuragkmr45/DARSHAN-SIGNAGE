@@ -17,9 +17,12 @@ own result.
 The current operator-membership delta adds `user_additional_departments` and
 an additive API/CMS contract while preserving the primary scalar field and
 ownership. Current assigned departments affect permitted reads, directory
-discovery, and new chat file sharing; existing message attachments remain
-conversation-scoped after a source membership is removed. Old PATCH requests
-that omit additional IDs preserve them; a primary/additional collision returns
+discovery, and new chat file sharing; existing message attachments and new
+bookmarks with recorded share authorization remain conversation-scoped after a
+source membership is removed. Legacy file bookmarks without share proof can
+lose access after removal and require a release decision under `AUTHZ-16`.
+Old PATCH requests that omit additional IDs preserve them; a
+primary/additional collision returns
 `409 PRIMARY_DEPARTMENT_CONFLICT`. Source and developer results are in
 `docs/governance/operator-multi-department-membership.md` and the dated
 verification artifact; independent `AUTHZ-14..18` execution remains open.
