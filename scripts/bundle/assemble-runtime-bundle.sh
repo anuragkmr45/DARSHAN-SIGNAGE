@@ -566,7 +566,13 @@ const artifactDescriptors = index.manifests.filter((entry) => entry && entry.art
 if (imageDescriptors.length !== 1) process.exit(4);
 if (artifactDescriptors.some((entry) => entry.artifactType !== "application/vnd.docker.attestation.manifest.v1+json")) process.exit(5);
 const image = imageDescriptors[0];
-if (!["application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.index.v1+json"].includes(image.mediaType)) process.exit(6);
+const runnableMediaTypes = [
+  "application/vnd.oci.image.manifest.v1+json",
+  "application/vnd.oci.image.index.v1+json",
+  "application/vnd.docker.distribution.manifest.v2+json",
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+];
+if (!runnableMediaTypes.includes(image.mediaType)) process.exit(6);
 if (typeof image.digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(image.digest)) process.exit(7);
 const lastSlash = expectedRef.lastIndexOf("/");
 const lastColon = expectedRef.lastIndexOf(":");

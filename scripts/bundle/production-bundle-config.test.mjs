@@ -760,6 +760,7 @@ test('offline role loader verifies signed archive metadata, image ID, and host a
   assert.match(loader, /Loaded image ID mismatch/)
   assert.match(loader, /Loaded image platform mismatch/)
   assert.match(assembler, /application\/vnd\.docker\.attestation\.manifest\.v1\+json/)
+  assert.match(assembler, /application\/vnd\.docker\.distribution\.manifest\.list\.v2\+json/)
   assert.match(assembler, /imageDescriptors\.length !== 1/)
   assert.match(assembler, /org\.opencontainers\.image\.ref\.name/)
   assert.match(assembler, /runtime_image_reference\(\)/)
