@@ -19,6 +19,7 @@
 ## Messages
 - `GET /api/v1/chat/conversations/:id/messages`
 - `GET /api/v1/chat/conversations/:id/thread/:parentMessageId`
+- `GET /api/v1/chat/conversations/:id/attachments/:mediaId`
 - `POST /api/v1/chat/conversations/:id/messages`
 - `PATCH /api/v1/chat/messages/:id`
 - `DELETE /api/v1/chat/messages/:id`
@@ -27,7 +28,9 @@
 
 ## Security and lifecycle notes
 - All `/chat/*` routes enforce JWT + session/JTI revocation checks.
-- Attachments enforce ownership/scope checks, readiness (`READY`), and max count limits.
+- Senders can attach only readable `READY` media in their current ownership scope, with a limit of ten per message. File bookmarks use the same check. A user moved to another department cannot keep attaching media from the former department. Missing or deleted media cannot be attached.
+- A conversation reader can resolve an attachment through the chat attachment endpoint only while an undeleted message or a file bookmark in that conversation references it. For a file bookmark without a message attachment, the server also rechecks the bookmark creator's current media-read scope; this prevents legacy unauthorized bookmarks from exposing another department's media. The endpoint applies conversation access and ban checks, then returns a short-lived CMS media URL. It does not widen the normal Media Library list or `GET /media/:id` access.
+- Mention notifications are sent only to directory-visible users who can still read the conversation and are not banned. Pasted IDs outside those rules cannot receive a private snippet.
 - `ARCHIVED` conversations are read-only for content mutations.
 - `DELETED` conversations are hidden from normal list/access flows.
 

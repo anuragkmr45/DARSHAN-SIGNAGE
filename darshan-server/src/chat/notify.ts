@@ -20,6 +20,7 @@ export type NotifyMessageEventInput = {
   senderId: string;
   mentionedUserIds?: string[];
   threadRootSenderId?: string | null;
+  canNotifyUser?: (userId: string) => Promise<boolean>;
   onNotificationCreated?: (input: { userId: string; type: ChatNotificationType }) => Promise<void> | void;
 };
 
@@ -66,6 +67,7 @@ export async function notifyMessageEvent(input: NotifyMessageEventInput): Promis
   try {
     await Promise.all(
       recipients.map(async ({ userId, type }) => {
+        if (input.canNotifyUser && !(await input.canNotifyUser(userId))) return;
         const title =
           type === 'DM' ? 'New direct message' : type === 'MENTION' ? 'You were mentioned' : 'New thread reply';
 

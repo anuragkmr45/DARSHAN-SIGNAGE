@@ -21,6 +21,7 @@ import type {
   ChatUpdateMessageResponse,
   ChatDeleteMessageResponse,
   ChatConversationType,
+  MediaAsset,
 } from "@/api/types";
 
 export interface ChatCursorParams {
@@ -118,6 +119,11 @@ export const normalizeChatError = (error: unknown): ChatNormalizedError => {
 };
 
 export const chatApi = {
+  getAttachmentMedia: (conversationId: string, mediaId: string) =>
+    apiClient.request<MediaAsset>({
+      path: endpoints.chat.attachmentMedia(conversationId, mediaId),
+      method: "GET",
+    }),
   deletedConversations: (page = 1) => apiClient.request<{ items: Array<{ id: string; title: string | null; type: string; deleted_at: string }> }>({ path: `${endpoints.chat.deletedConversations}?page=${page}`, method: 'GET' }),
   deletedMessages: (page = 1) => apiClient.request<{ items: Array<{ id: string; conversation_id: string; deleted_at: string }> }>({ path: `${endpoints.chat.deletedMessages}?page=${page}`, method: 'GET' }),
   restoreConversation: (id: string) => apiClient.request<{ conversationId: string; already_restored: boolean }>({ path: endpoints.chat.restoreConversation(id), method: 'POST' }),

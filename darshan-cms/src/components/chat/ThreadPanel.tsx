@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,6 +13,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { useChatThread } from "@/hooks/chat/useChatQueries";
+import { chatApi } from "@/api/domains/chat";
 import type { ChatMessage, MediaAsset } from "@/api/types";
 import { ChatStatusBanner } from "@/components/chat/ChatStatusBanner";
 
@@ -55,6 +57,28 @@ export function ThreadPanel({
     () => [...threadQuery.items].sort((a, b) => b.seq - a.seq),
     [threadQuery.items],
   );
+  const replyMediaIds = useMemo(() => Array.from(new Set(threadQuery.items.flatMap((message) =>
+    (message.attachments ?? []).map((attachment) => typeof attachment === "string"
+      ? attachment
+      : attachment.media_asset_id || attachment.media_id || attachment.mediaId).filter((id): id is string => Boolean(id))
+  ))), [threadQuery.items]);
+  const replyMediaQueries = useQueries({
+    queries: replyMediaIds.map((mediaId) => ({
+      queryKey: ["media", "chat", conversationId, mediaId],
+      queryFn: () => chatApi.getAttachmentMedia(conversationId!, mediaId),
+      enabled: Boolean(open && conversationId),
+      staleTime: 60_000,
+      retry: 1,
+    })),
+  });
+  const resolvedAttachmentMediaById = useMemo(() => {
+    const result = { ...attachmentMediaById };
+    replyMediaIds.forEach((mediaId, index) => {
+      const media = replyMediaQueries[index]?.data;
+      if (media) result[mediaId] = media;
+    });
+    return result;
+  }, [attachmentMediaById, replyMediaIds, replyMediaQueries]);
 
   const submit = async () => {
     if (!threadRootId || !draft.trim() || !canMutate) return;
@@ -90,7 +114,7 @@ export function ThreadPanel({
                   canMutate={canMutate}
                   mentionDisplayById={mentionDisplayById}
                   onMentionClick={onMentionClick}
-                  attachmentMediaById={attachmentMediaById}
+                  attachmentMediaById={resolvedAttachmentMediaById}
                 />
               </div>
             )}
@@ -127,7 +151,7 @@ export function ThreadPanel({
                       canMutate={canMutate}
                       mentionDisplayById={mentionDisplayById}
                       onMentionClick={onMentionClick}
-                      attachmentMediaById={attachmentMediaById}
+                      attachmentMediaById={resolvedAttachmentMediaById}
                     />
                   ))}
                 </div>

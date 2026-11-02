@@ -32,23 +32,27 @@ export default function Notifications() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
+  const [page, setPage] = useState(1);
+
+  const unreadCountQuery = useQuery({
+    queryKey: notificationUnreadCountQueryKey,
+    queryFn: () => notificationsApi.getUnreadCount(),
+  });
 
   const notificationsQuery = useQuery({
-    queryKey: ["notifications", readFilter],
+    queryKey: ["notifications", "list", readFilter, page],
     queryFn: () =>
       notificationsApi.list({
-        page: 1,
+        page,
         limit: 50,
         read: readFilter === "all" ? undefined : readFilter === "read",
       }),
   });
 
   const notifications = useMemo(() => notificationsQuery.data?.items ?? [], [notificationsQuery.data?.items]);
-
-  const unreadCount = useMemo(
-    () => notifications.filter((notification) => !notification.read && !notification.read_at).length,
-    [notifications],
-  );
+  const pagination = notificationsQuery.data?.pagination;
+  const unreadCount = unreadCountQuery.data?.unread_total ?? pagination?.unread_total ?? 0;
+  const totalPages = Math.max(1, Math.ceil((pagination?.total ?? 0) / (pagination?.limit ?? 50)));
 
   const markReadMutation = useMutation({
     mutationFn: (notificationId: string) => notificationsApi.markRead(notificationId),
@@ -68,11 +72,10 @@ export default function Notifications() {
 
   const openNotification = async (notification: Notification) => {
     const data = toChatData(notification);
-    if (!data) return;
-
     if (!notification.read) {
       await markReadMutation.mutateAsync(notification.id);
     }
+    if (!data) return;
 
     const target = data.messageId
       ? `/chat/${data.conversationId}?focusMessageId=${encodeURIComponent(data.messageId)}`
@@ -94,7 +97,7 @@ export default function Notifications() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Tabs value={readFilter} onValueChange={(value) => setReadFilter(value as ReadFilter)}>
+          <Tabs value={readFilter} onValueChange={(value) => { setReadFilter(value as ReadFilter); setPage(1); }}>
             <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto p-1">
               <TabsTrigger value="all" className="shrink-0">All</TabsTrigger>
               <TabsTrigger value="unread" className="shrink-0">Unread ({unreadCount})</TabsTrigger>
@@ -120,13 +123,12 @@ export default function Notifications() {
                         ? "border-border bg-background"
                         : "border-primary/50 bg-primary/5"
                     }`}
-                    disabled={!chatData}
                   >
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0 space-y-1">
                         <p className="text-sm font-semibold">{notification.title || chatData?.notificationType || "Notification"}</p>
                         <p className="break-words text-xs text-muted-foreground">
-                          {chatData?.snippet || notification.body || "Open chat conversation"}
+                          {chatData?.snippet || notification.message || notification.body || "Notification"}
                         </p>
                       </div>
                       <span className="text-[11px] text-muted-foreground">
@@ -136,6 +138,15 @@ export default function Notifications() {
                   </button>
                 );
               })}
+            </div>
+          )}
+          {(pagination?.total ?? 0) > (pagination?.limit ?? 50) && (
+            <div className="flex items-center justify-between gap-3 pt-2 text-sm">
+              <span>Page {page} of {totalPages} · {pagination?.total ?? 0} notifications</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</Button>
+                <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>Next</Button>
+              </div>
             </div>
           )}
         </CardContent>

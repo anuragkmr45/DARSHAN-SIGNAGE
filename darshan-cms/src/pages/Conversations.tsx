@@ -3,6 +3,7 @@ import { useQueries } from "@tanstack/react-query";
 import { ArrowDown, PanelLeftClose, PanelLeftOpen, Plus, ShieldAlert, UserPlus } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError } from "@/api/apiClient";
+import { chatApi } from "@/api/domains/chat";
 import { mediaApi } from "@/api/domains/media";
 import type {
   ChatBookmark,
@@ -81,8 +82,8 @@ type ChatStatus = {
   until?: string;
 };
 
-const getAttachmentId = (attachment: string | { media_id?: string; mediaId?: string }) =>
-  typeof attachment === "string" ? attachment : attachment.media_id || attachment.mediaId;
+const getAttachmentId = (attachment: string | { media_asset_id?: string; media_id?: string; mediaId?: string }) =>
+  typeof attachment === "string" ? attachment : attachment.media_asset_id || attachment.media_id || attachment.mediaId;
 
 const conversationTitle = (conversation?: ChatConversationListItem) => {
   if (!conversation) return "";
@@ -450,7 +451,7 @@ export default function Conversations() {
             return attachments
               .map((attachment) =>
                 getAttachmentId(
-                  attachment as string | { media_id?: string; mediaId?: string },
+                  attachment as string | { media_asset_id?: string; media_id?: string; mediaId?: string },
                 ),
               )
               .filter((id): id is string => Boolean(id));
@@ -484,8 +485,11 @@ export default function Conversations() {
 
   const mediaQueries = useQueries({
     queries: allMediaIds.map((mediaId) => ({
-      queryKey: ["media", "chat", mediaId],
-      queryFn: () => mediaApi.getById(mediaId),
+      queryKey: ["media", "chat", activeConversationId, mediaId],
+      queryFn: () =>
+        activeConversationId && (messageMediaIds.includes(mediaId) || bookmarkFileMediaIds.includes(mediaId))
+          ? chatApi.getAttachmentMedia(activeConversationId, mediaId)
+          : mediaApi.getById(mediaId),
       enabled: Boolean(activeConversationId),
       staleTime: 60_000,
       retry: 1,

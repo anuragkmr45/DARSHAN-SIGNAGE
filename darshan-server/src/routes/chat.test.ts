@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { FastifyInstance } from 'fastify';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { closeTestServer, createTestServer, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
 import { and, eq, ne, sql } from 'drizzle-orm';
@@ -11,6 +11,7 @@ import { generateAccessToken } from '@/auth/jwt';
 import { createSessionRepository } from '@/db/repositories/session';
 import { hashPassword } from '@/auth/password';
 import { cleanupChatMediaAssets } from '@/jobs';
+import * as mediaAccess from '@/utils/media-access';
 
 async function applyMigrationFile(filename: string) {
   const db = getDatabase();
@@ -927,6 +928,141 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
 
     expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
     expect(JSON.parse(response.body).error.code).toBe('MEDIA_NOT_READY');
+  });
+
+  it('rejects cross-department media IDs before creating a chat message', async () => {
+    const db = getDatabase();
+    const operatorRole = await ensureRole('OPERATOR');
+    const departmentA = randomUUID();
+    const departmentB = randomUUID();
+    const operatorId = randomUUID();
+    const mediaId = randomUUID();
+    const conversationId = randomUUID();
+    await db.insert(schema.departments).values([
+      { id: departmentA, name: `Chat attachment A ${departmentA}` },
+      { id: departmentB, name: `Chat attachment B ${departmentB}` },
+    ]);
+    await db.insert(schema.users).values({
+      id: operatorId,
+      email: `chat-attachment-${operatorId}@example.com`,
+      password_hash: await hashPassword('Password123!'),
+      role_id: operatorRole.id,
+      department_id: departmentB,
+      is_active: true,
+    });
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: 'Other department media',
+      type: 'IMAGE',
+      status: 'READY',
+      created_by: testUser.id,
+      owner_scope: 'DEPARTMENT',
+      owner_department_id: departmentA,
+    });
+    await db.insert(schema.chatConversations).values({
+      id: conversationId,
+      type: 'FORUM_OPEN',
+      created_by: testUser.id,
+      state: 'ACTIVE',
+      invite_policy: 'ANY_MEMBER_CAN_INVITE',
+      title: 'Attachment scope forum',
+      metadata: {},
+      last_seq: 0,
+    });
+    const token = await issueTokenForUser({
+      id: operatorId,
+      email: `chat-attachment-${operatorId}@example.com`,
+      roleId: operatorRole.id,
+      roleName: operatorRole.name,
+    });
+    const response = await server.inject({
+      method: 'POST',
+      url: `/api/v1/chat/conversations/${conversationId}/messages`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { text: 'should not exist', attachmentMediaIds: [mediaId] },
+    });
+    expect(response.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const [conversation] = await db.select().from(schema.chatConversations)
+      .where(eq(schema.chatConversations.id, conversationId));
+    expect(conversation.last_seq).toBe(0);
+    const messages = await db.select().from(schema.chatMessages)
+      .where(eq(schema.chatMessages.conversation_id, conversationId));
+    expect(messages).toHaveLength(0);
+
+    const bookmarkResponse = await server.inject({
+      method: 'POST',
+      url: `/api/v1/chat/conversations/${conversationId}/bookmarks`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { type: 'FILE', label: 'outside department', mediaAssetId: mediaId },
+    });
+    expect(bookmarkResponse.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const bookmarks = await db.select().from(schema.chatBookmarks)
+      .where(eq(schema.chatBookmarks.conversation_id, conversationId));
+    expect(bookmarks).toHaveLength(0);
+
+    const unlinkedResponse = await server.inject({
+      method: 'GET',
+      url: `/api/v1/chat/conversations/${conversationId}/attachments/${mediaId}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(unlinkedResponse.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
+
+    const messageId = randomUUID();
+    await db.insert(schema.chatMessages).values({
+      id: messageId,
+      conversation_id: conversationId,
+      sender_id: testUser.id,
+      seq: 1,
+      body_text: 'shared file',
+      body_rich: {},
+    });
+    await db.insert(schema.chatAttachments).values({ message_id: messageId, media_asset_id: mediaId });
+    const accessSpy = vi.spyOn(mediaAccess, 'resolveMediaAccess').mockResolvedValue({
+      media_url: 'http://localhost:9000/media-staging/qa-object',
+      is_object_missing: false,
+      content_type: 'image/png',
+      source_content_type: 'image/png',
+      size: 4,
+      ready_object_id: null,
+      ready_object_sha256: null,
+      ready_object_created_at: null,
+    });
+    try {
+      const linkedResponse = await server.inject({
+        method: 'GET',
+        url: `/api/v1/chat/conversations/${conversationId}/attachments/${mediaId}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(linkedResponse.statusCode).toBe(HTTP_STATUS.OK);
+      expect(JSON.parse(linkedResponse.body).media_url).toContain('qa-object');
+    } finally {
+      accessSpy.mockRestore();
+    }
+
+    await db.update(schema.chatMessages).set({ deleted_at: new Date() })
+      .where(eq(schema.chatMessages.id, messageId));
+    const deletedMessageResponse = await server.inject({
+      method: 'GET',
+      url: `/api/v1/chat/conversations/${conversationId}/attachments/${mediaId}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(deletedMessageResponse.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
+
+    const legacyBookmarkId = randomUUID();
+    await db.insert(schema.chatBookmarks).values({
+      id: legacyBookmarkId,
+      conversation_id: conversationId,
+      type: 'FILE',
+      label: 'Old unauthorized bookmark',
+      media_asset_id: mediaId,
+      created_by: operatorId,
+    });
+    const legacyBookmarkResponse = await server.inject({
+      method: 'GET',
+      url: `/api/v1/chat/conversations/${conversationId}/attachments/${mediaId}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(legacyBookmarkResponse.statusCode).toBe(HTTP_STATUS.NOT_FOUND);
   });
 
   it('recreates ACTIVE DM after hard delete and hides old deleted DM in list', async () => {

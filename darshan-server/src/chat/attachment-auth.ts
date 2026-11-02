@@ -4,10 +4,8 @@ type MediaScopeRow = {
   id: string;
   created_by?: string | null;
   createdBy?: string | null;
-  department_id?: string | null;
-  departmentId?: string | null;
-  scope_department_id?: string | null;
-  scopeDepartmentId?: string | null;
+  owner_scope?: string | null;
+  owner_department_id?: string | null;
   status?: string | null;
   deleted_at?: Date | string | null;
 };
@@ -19,6 +17,7 @@ type AttachmentAuthInput = {
   senderRole?: string;
   senderDepartmentId?: string | null;
   canOverrideMedia: boolean;
+  canManageMedia: boolean;
 };
 
 function isAdminRole(roleName?: string): boolean {
@@ -32,10 +31,12 @@ export function assertAttachmentAccess(input: AttachmentAuthInput): void {
 
   for (const media of input.mediaRows) {
     const ownerId = media.created_by ?? media.createdBy ?? null;
-    const mediaDepartmentId =
-      media.department_id ?? media.departmentId ?? media.scope_department_id ?? media.scopeDepartmentId ?? null;
-
-    if (mediaDepartmentId && input.senderDepartmentId && mediaDepartmentId !== input.senderDepartmentId) {
+    const scope = media.owner_scope ?? 'RESTRICTED';
+    if (!input.canManageMedia && (
+      scope === 'RESTRICTED' ||
+      (scope === 'DEPARTMENT' && (!input.senderDepartmentId || media.owner_department_id !== input.senderDepartmentId)) ||
+      (scope !== 'DEPARTMENT' && scope !== 'ORGANIZATION' && scope !== 'RESTRICTED')
+    )) {
       throw AppError.forbidden('Attachment media is outside your department scope');
     }
 

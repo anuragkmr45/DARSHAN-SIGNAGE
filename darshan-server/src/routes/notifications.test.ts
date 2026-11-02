@@ -172,4 +172,28 @@ describe('Notification routes - unread badge counter', () => {
     expect(response.statusCode).toBe(HTTP_STATUS.OK);
     expect(await counterRepo.getUnreadTotal(testUser.id)).toBe(0);
   });
+
+  it('keeps the counter equal to unread rows when a notification arrives during read-all', async () => {
+    const db = getDatabase();
+    for (let index = 0; index < 10; index += 1) {
+      await Promise.all([
+        notifRepo.create({
+          user_id: testUser.id,
+          title: `Concurrent notification ${index}`,
+          message: 'created near read-all',
+          type: 'INFO',
+        }),
+        server.inject({
+          method: 'POST',
+          url: '/api/v1/notifications/read-all',
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      ]);
+      const [row] = await db.select({ count: sql<number>`count(*)` })
+        .from(schema.notifications)
+        .where(sql`${schema.notifications.user_id} = ${testUser.id} AND ${schema.notifications.is_read} = false`);
+      expect(await counterRepo.getUnreadTotal(testUser.id)).toBe(Number(row.count));
+      await notifRepo.markAllAsRead(testUser.id);
+    }
+  });
 });

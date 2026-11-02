@@ -26,6 +26,8 @@ export const endpoints = {
     conversations: "/chat/conversations",
     conversationById: (conversationId: string) => `/chat/conversations/${conversationId}`,
     messages: (conversationId: string) => `/chat/conversations/${conversationId}/messages`,
+    attachmentMedia: (conversationId: string, mediaId: string) =>
+      `/chat/conversations/${conversationId}/attachments/${mediaId}`,
     thread: (conversationId: string, parentMessageId: string) =>
       `/chat/conversations/${conversationId}/thread/${parentMessageId}`,
     shareLink: (conversationId: string) => `/chat/conversations/${conversationId}/share-link`,

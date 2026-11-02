@@ -212,8 +212,8 @@ export async function notificationRoutes(fastify: FastifyInstance) {
       try {
         const { payload } = await authenticate(request);
         await notifRepo.markAllAsRead(payload.sub);
-        await counterRepo.set(payload.sub, 0);
-        emitNotificationCountEvent(fastify, payload.sub, 0);
+        const unread_total = await counterRepo.getUnreadTotal(payload.sub);
+        emitNotificationCountEvent(fastify, payload.sub, unread_total);
 
         return reply.send({ success: true });
       } catch (error) {

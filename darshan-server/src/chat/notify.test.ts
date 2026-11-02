@@ -82,4 +82,20 @@ describe('notifyMessageEvent', () => {
       })
     ).resolves.toBeUndefined();
   });
+
+  it('does not notify mentioned or thread users who cannot read the conversation', async () => {
+    createMock.mockResolvedValue({ id: 'notification-1' });
+    const canNotifyUser = vi.fn(async (userId: string) => userId === 'member');
+    await notifyMessageEvent({
+      conversation: { id: 'private-group', type: 'GROUP_CLOSED' },
+      message: { id: 'message-1', body_text: 'private message snippet' },
+      senderId: 'sender',
+      mentionedUserIds: ['member', 'outsider'],
+      threadRootSenderId: 'banned-root-author',
+      canNotifyUser,
+    });
+    expect(canNotifyUser).toHaveBeenCalledTimes(3);
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(createMock.mock.calls[0][0].user_id).toBe('member');
+  });
 });

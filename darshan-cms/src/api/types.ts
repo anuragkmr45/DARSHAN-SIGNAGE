@@ -60,6 +60,7 @@ export interface PaginationEnvelope {
   page: number;
   limit: number;
   total: number;
+  unread_total?: number;
 }
 
 export interface PaginatedApiResponse<T> {
@@ -665,6 +666,7 @@ export interface Notification {
   type?: string;
   title?: string;
   body?: string;
+  message?: string | null;
   read?: boolean;
   read_at?: string | null;
   data?: Record<string, unknown> | ChatNotificationData;
@@ -1954,6 +1956,7 @@ export interface ChatConversationListItem extends ChatConversationSummary {
 }
 
 export interface ChatMessageAttachment {
+  media_asset_id?: string;
   media_id?: string;
   mediaId?: string;
   media_url?: string | null;

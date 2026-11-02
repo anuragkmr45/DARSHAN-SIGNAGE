@@ -134,15 +134,27 @@ export class NotificationRepository {
 
   async markAllAsRead(userId: string) {
     const db = getDatabase();
-    const rows = await db
-      .update(schema.notifications)
-      .set({ is_read: true })
-      .where(and(
-        eq(schema.notifications.user_id, userId),
-        eq(schema.notifications.is_read, false)
-      ))
-      .returning({ id: schema.notifications.id });
-    return rows.length;
+    return db.transaction(async (tx) => {
+      // Notification creation takes a share lock on the recipient. An update lock
+      // serializes read-all with new notifications so the counter cannot erase a
+      // notification that arrived between the update and reset.
+      await tx.select({ id: schema.users.id }).from(schema.users)
+        .where(eq(schema.users.id, userId)).for('update');
+      const rows = await tx.update(schema.notifications)
+        .set({ is_read: true })
+        .where(and(
+          eq(schema.notifications.user_id, userId),
+          eq(schema.notifications.is_read, false)
+        ))
+        .returning({ id: schema.notifications.id });
+      await tx.insert(schema.userNotificationCounters)
+        .values({ user_id: userId, unread_total: 0, updated_at: new Date() })
+        .onConflictDoUpdate({
+          target: schema.userNotificationCounters.user_id,
+          set: { unread_total: 0, updated_at: new Date() },
+        });
+      return rows.length;
+    });
   }
 
   async delete(id: string) {

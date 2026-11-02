@@ -242,6 +242,7 @@ export const apiEndpoints = {
     inviteMembers: withBase('/chat/conversations/:id/invite'),
     removeMember: withBase('/chat/conversations/:id/members/remove'),
     listMessages: withBase('/chat/conversations/:id/messages'),
+    attachmentMedia: withBase('/chat/conversations/:id/attachments/:mediaId'),
     listThread: withBase('/chat/conversations/:id/thread/:parentMessageId'),
     sendMessage: withBase('/chat/conversations/:id/messages'),
     editMessage: withBase('/chat/messages/:id'),

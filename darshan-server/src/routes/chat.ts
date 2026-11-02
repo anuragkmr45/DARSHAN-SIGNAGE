@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { config as appConfig } from '@/config';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { chatAuthPreHandler, getRequestAuthContext } from '@/auth/request-auth';
@@ -15,11 +15,14 @@ import { notifyMessageEvent } from '@/chat/notify';
 import { createNotificationCounterRepository } from '@/db/repositories/notification-counter';
 import { createRateLimiter } from '@/chat/rate-limit';
 import { assertAttachmentAccess, assertAttachmentMediaReady } from '@/chat/attachment-auth';
-import { assertCanWriteToConversation, assertConversationWritable, assertNotBanned } from '@/chat/guard';
+import { assertCanWriteToConversation, assertConversationWritable, assertNotBanned, getActiveModeration } from '@/chat/guard';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import { headObject } from '@/s3';
 import { canAccessDirectoryUser } from '@/rbac/user-directory';
-import type { AppAbility } from '@/rbac';
+import { canReadContentResource } from '@/rbac/content-ownership';
+import { serializeMediaRecord } from '@/utils/media';
+import { resolveMediaAccess } from '@/utils/media-access';
+import { defineAbilityFor, type AppAbility } from '@/rbac';
 
 const logger = createLogger('chat-routes');
 const chatRepo = createChatRepository();
@@ -140,7 +143,7 @@ function parseMentionedUserIds(text?: string): string[] {
   const regex = /@([0-9a-fA-F-]{36})/g;
   const ids = new Set<string>();
   for (const match of text.matchAll(regex)) {
-    if (match[1]) ids.add(match[1]);
+    if (match[1] && z.string().uuid().safeParse(match[1]).success) ids.add(match[1]);
   }
   return Array.from(ids);
 }
@@ -491,6 +494,79 @@ export async function chatRoutes(fastify: FastifyInstance) {
     }
   );
 
+  fastify.get<{ Params: { id: string; mediaId: string } }>(
+    apiEndpoints.chat.attachmentMedia,
+    { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
+    async (request, reply) => {
+      try {
+        const { payload } = await authenticate(request);
+        const { id: conversationId, mediaId } = request.params;
+        z.string().uuid().parse(mediaId);
+        await getConversationForAccess(conversationId, payload.sub, payload.role);
+        assertNotBanned(await chatRepo.getModeration(conversationId, payload.sub));
+
+        const [messageAttachment] = await db.select({ id: schema.chatAttachments.id })
+          .from(schema.chatAttachments)
+          .innerJoin(schema.chatMessages, eq(schema.chatAttachments.message_id, schema.chatMessages.id))
+          .where(and(
+            eq(schema.chatAttachments.media_asset_id, mediaId),
+            eq(schema.chatMessages.conversation_id, conversationId),
+            isNull(schema.chatMessages.deleted_at)
+          )).limit(1);
+        const [fileBookmark] = messageAttachment ? [] : await db.select({
+          id: schema.chatBookmarks.id,
+          created_by: schema.chatBookmarks.created_by,
+        })
+          .from(schema.chatBookmarks)
+          .where(and(
+            eq(schema.chatBookmarks.conversation_id, conversationId),
+            eq(schema.chatBookmarks.type, 'FILE'),
+            eq(schema.chatBookmarks.media_asset_id, mediaId)
+          )).limit(1);
+        if (!messageAttachment && !fileBookmark) throw AppError.notFound('Attachment not found');
+
+        const [media] = await db.select().from(schema.media).where(eq(schema.media.id, mediaId)).limit(1);
+        if (!media || media.deleted_at || media.status !== 'READY') throw AppError.notFound('Attachment not found');
+        // Older bookmarks may predate the sender-side media scope check. Verify
+        // that their creator is still authorized before treating them as a share.
+        if (!messageAttachment && fileBookmark) {
+          const [creator] = await db.select({
+            id: schema.users.id,
+            role_id: schema.users.role_id,
+            department_id: schema.users.department_id,
+          }).from(schema.users).where(eq(schema.users.id, fileBookmark.created_by)).limit(1);
+          if (!creator) throw AppError.notFound('Attachment not found');
+          const creatorAbility = await defineAbilityFor(
+            creator.role_id,
+            creator.id,
+            creator.department_id ?? undefined
+          );
+          if (!canReadContentResource({
+            userId: creator.id,
+            roleName: '',
+            departmentId: creator.department_id,
+          }, media, creatorAbility, 'Media')) {
+            throw AppError.notFound('Attachment not found');
+          }
+        }
+        const access = await resolveMediaAccess(media, db);
+        if (access.is_object_missing || !access.media_url) throw AppError.notFound('Attachment is unavailable');
+        reply.header('Cache-Control', 'no-store');
+        return reply.send(serializeMediaRecord(media, access.media_url, {
+          content_type: access.content_type,
+          source_content_type: access.source_content_type,
+          size: access.size,
+          ready_object_id: access.ready_object_id,
+          ready_object_sha256: access.ready_object_sha256,
+          ready_object_created_at: access.ready_object_created_at,
+        }));
+      } catch (error) {
+        logger.error(error, 'Get chat attachment error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
   fastify.post<{ Params: { id: string } }>(
     apiEndpoints.chat.shareLink,
     { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
@@ -630,6 +706,13 @@ export async function chatRoutes(fastify: FastifyInstance) {
             .where(inArray(schema.media.id, attachmentMediaIds));
 
           assertAttachmentMediaReady(mediaRows);
+          if (mediaRows.some((media) => !canReadContentResource({
+            userId: payload.sub,
+            roleName: payload.role,
+            departmentId: payload.department_id,
+          }, media, ability, 'Media'))) {
+            throw AppError.forbidden('Attachment media is outside your readable scope');
+          }
 
           assertAttachmentAccess({
             requestedMediaIds: attachmentMediaIds,
@@ -638,14 +721,15 @@ export async function chatRoutes(fastify: FastifyInstance) {
             senderRole: payload.role,
             senderDepartmentId: payload.department_id,
             canOverrideMedia: ability.can('update', 'Media'),
+            canManageMedia: ability.can('manage', 'Media'),
           });
 
           data.attachmentMediaIds = attachmentMediaIds;
         }
 
-        const bodyRich = {
-          mentions: parseMentionedUserIds(data.text),
-        };
+        const mentionedUserIds = parseMentionedUserIds(data.text);
+        await assertDirectoryTargets(payload, ability, mentionedUserIds);
+        const bodyRich = { mentions: mentionedUserIds };
 
         const { message, threadRootSenderId } = await chatRepo.sendMessageTx({
           conversationId,
@@ -675,6 +759,11 @@ export async function chatRoutes(fastify: FastifyInstance) {
           senderId: payload.sub,
           mentionedUserIds: bodyRich.mentions,
           threadRootSenderId,
+          canNotifyUser: async (userId) => {
+            if (!(await chatRepo.canAccessConversation(conversationId, userId))) return false;
+            const recipientModeration = await chatRepo.getModeration(conversationId, userId);
+            return !getActiveModeration(recipientModeration).bannedUntil;
+          },
           onNotificationCreated: async ({ userId }) => {
             const unread_total = await notificationCounterRepo.getUnreadTotal(userId);
             emitNotificationCountEvent(fastify, userId, unread_total);
@@ -1051,12 +1140,34 @@ export async function chatRoutes(fastify: FastifyInstance) {
     { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
     async (request, reply) => {
       try {
-        const { payload } = await authenticate(request);
+        const { payload, ability } = await authenticate(request);
         const data = bookmarkSchema.parse(request.body);
         const conversationId = (request.params as any).id;
         const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
         const moderation = await chatRepo.getModeration(conversationId, payload.sub);
         assertCanWriteToConversation(conversation, moderation);
+
+        if (data.type === 'FILE' && data.mediaAssetId) {
+          const [media] = await db.select().from(schema.media)
+            .where(eq(schema.media.id, data.mediaAssetId)).limit(1);
+          assertAttachmentMediaReady(media ? [media] : []);
+          if (media && !canReadContentResource({
+            userId: payload.sub,
+            roleName: payload.role,
+            departmentId: payload.department_id,
+          }, media, ability, 'Media')) {
+            throw AppError.forbidden('Attachment media is outside your readable scope');
+          }
+          assertAttachmentAccess({
+            requestedMediaIds: [data.mediaAssetId],
+            mediaRows: media ? [media] : [],
+            senderId: payload.sub,
+            senderRole: payload.role,
+            senderDepartmentId: payload.department_id,
+            canOverrideMedia: ability.can('update', 'Media'),
+            canManageMedia: ability.can('manage', 'Media'),
+          });
+        }
 
         const { bookmark, created } = await chatRepo.createBookmark({
           conversationId,

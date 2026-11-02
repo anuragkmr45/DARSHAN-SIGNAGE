@@ -125,31 +125,46 @@ export const useChatRealtime = ({
     const onDisconnect = () => setIsConnected(false);
 
     const onMessageNew = (payload: ChatMessageNewEvent) => {
-      if (includeInMainTimeline(payload.message)) {
-        queryClient.setQueriesData(
-          { queryKey: ["chat", "messages", payload.conversationId] },
-          (current: InfiniteData<ChatListMessagesResponse> | undefined) =>
-            appendMessageInInfiniteData(current, payload.message),
+      // The socket announces a committed sequence. REST supplies the complete
+      // message, including attachment rows that are absent from the event.
+      const inMainTimeline = includeInMainTimeline(payload.message);
+      const rootId = payload.message.thread_root_id;
+      const afterSeq = Math.max(0, (payload.message.seq ?? 1) - 1);
+      const loadMessage = inMainTimeline
+        ? chatApi.listMessages(payload.conversationId, { afterSeq, limit: 1 })
+        : rootId
+          ? chatApi.listThread(payload.conversationId, rootId, { afterSeq, limit: 1 })
+          : null;
+      if (!loadMessage) return;
+      void loadMessage.then((response) => {
+        const message = response.items.find((item) => item.id === payload.message.id);
+        if (!message) throw new Error('Announced chat message is not available through REST');
+        if (inMainTimeline) {
+          queryClient.setQueriesData(
+            { queryKey: ["chat", "messages", payload.conversationId] },
+            (current: InfiniteData<ChatListMessagesResponse> | undefined) =>
+              appendMessageInInfiniteData(current, message),
+          );
+        }
+        if (rootId) {
+          queryClient.setQueriesData(
+            { queryKey: ["chat", "thread", payload.conversationId, rootId] },
+            (current: InfiniteData<ChatThreadResponse> | undefined) =>
+              appendMessageInInfiniteData(current, message),
+          );
+        }
+        queryClient.setQueryData(
+          chatQueryKeys.messagesCursor(payload.conversationId),
+          (current: { lastSeenSeq?: number; lastFetchCount?: number } | undefined) => ({
+            lastSeenSeq: Math.max(current?.lastSeenSeq ?? 0, message.seq ?? 0),
+            lastFetchCount: current?.lastFetchCount ?? 0,
+          }),
         );
-      }
-
-      if (payload.message.thread_root_id) {
-        queryClient.setQueriesData(
-          { queryKey: ["chat", "thread", payload.conversationId, payload.message.thread_root_id] },
-          (current: InfiniteData<ChatThreadResponse> | undefined) =>
-            appendMessageInInfiniteData(current, payload.message),
-        );
-      }
-
-      queryClient.setQueryData(
-        chatQueryKeys.messagesCursor(payload.conversationId),
-        (current: { lastSeenSeq?: number; lastFetchCount?: number } | undefined) => ({
-          lastSeenSeq: Math.max(current?.lastSeenSeq ?? 0, payload.message.seq ?? 0),
-          lastFetchCount: current?.lastFetchCount ?? 0,
-        }),
-      );
-
-      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
+        void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
+      }).catch(() => {
+        void queryClient.invalidateQueries({ queryKey: ["chat", "messages", payload.conversationId] });
+        if (rootId) void queryClient.invalidateQueries({ queryKey: ["chat", "thread", payload.conversationId, rootId] });
+      });
     };
 
     const onMessageUpdated = (payload: ChatMessageUpdatedEvent) => {

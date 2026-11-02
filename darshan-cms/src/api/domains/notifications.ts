@@ -3,13 +3,13 @@ import { endpoints } from "../endpoints";
 import type {
   Notification,
   NotificationUnreadCountResponse,
-  PaginatedResponse,
+  PaginatedApiResponse,
   PaginationParams,
 } from "../types";
 
 export const notificationsApi = {
   list: (params?: PaginationParams & { read?: boolean }) =>
-    apiClient.request<PaginatedResponse<Notification>>({
+    apiClient.request<PaginatedApiResponse<Notification>>({
       path: endpoints.notifications.base,
       method: "GET",
       query: params,

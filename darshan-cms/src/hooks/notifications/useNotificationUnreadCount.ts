@@ -63,6 +63,7 @@ export const useNotificationUnreadCount = () => {
           queryClient.setQueryData<NotificationUnreadCountResponse>(notificationUnreadCountQueryKey, {
             unread_total: unreadTotal,
           });
+          void queryClient.invalidateQueries({ queryKey: ["notifications", "list"] });
           return;
         }
         void refetch();
@@ -75,6 +76,7 @@ export const useNotificationUnreadCount = () => {
       queryClient.setQueryData<NotificationUnreadCountResponse>(notificationUnreadCountQueryKey, {
         unread_total: unreadTotal,
       });
+      void queryClient.invalidateQueries({ queryKey: ["notifications", "list"] });
     };
 
     const onConnect = () => {

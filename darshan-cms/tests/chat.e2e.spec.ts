@@ -10,6 +10,19 @@ const TARGET_USER_ID = process.env.E2E_TARGET_USER_ID;
 const HAS_USER_CREDS = Boolean(USER_EMAIL && USER_PASSWORD);
 const HAS_ADMIN_CREDS = Boolean(ADMIN_EMAIL && ADMIN_PASSWORD);
 
+test.beforeEach(async ({ page }) => {
+  const apiBaseUrl = process.env.E2E_API_BASE_URL;
+  if (!apiBaseUrl) return;
+  await page.route("**/config/app-config.json", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ cms: {
+      environment: { name: "development", deploymentId: "chat-e2e", cmsId: "chat-e2e" },
+      api: { baseUrl: apiBaseUrl },
+      realtime: { socketBaseUrl: apiBaseUrl, socketTransports: ["websocket"] },
+    } }),
+  }));
+});
+
 const login = async (page: Page, email: string, password: string) => {
   await page.goto("/login");
   await page.fill("#login-email", email);
@@ -56,9 +69,10 @@ test.describe("Chat E2E", () => {
       await replyButton.click();
       const threadComposer = page.getByLabel("Thread reply composer");
       await expect(threadComposer).toBeVisible();
-      await threadComposer.fill(`thread-${Date.now()}`);
-      await page.getByRole("button", { name: /send thread reply|reply/i }).click();
-      await expect(page.getByText(/thread-/)).toBeVisible({ timeout: 15_000 });
+      const threadText = `thread-${Date.now()}`;
+      await threadComposer.fill(threadText);
+      await threadComposer.press("Enter");
+      await expect(page.getByRole("dialog", { name: "Thread" }).getByText(threadText, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
       await page.keyboard.press("Escape");
     }
 
@@ -90,12 +104,16 @@ test.describe("Chat E2E", () => {
     await page.getByRole("button", { name: /attach files/i }).click();
     await page.getByRole("tab", { name: /upload new/i }).click();
 
-    const filePath = testInfo.outputPath("chat-upload.txt");
-    await fs.writeFile(filePath, `chat upload ${Date.now()}`, "utf8");
+    const filePath = testInfo.outputPath("chat-upload.png");
+    await fs.writeFile(filePath, Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Yk9+EAAAAASUVORK5CYII=",
+      "base64",
+    ));
 
     const fileInput = page.locator('[role="dialog"] input[type="file"]').first();
     await fileInput.setInputFiles(filePath);
-    await expect(page.getByText(/uploaded|uploading/i).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("uploaded", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
 
     const composer = page.getByLabel("Message composer");
     await composer.fill(`attachment-${Date.now()}`);
@@ -123,20 +141,15 @@ test.describe("Chat E2E", () => {
     await expect(shareButton).toBeVisible();
     await shareButton.click();
 
-    const copiedText = await page.evaluate(async () => {
-      try {
-        return await navigator.clipboard.readText();
-      } catch {
-        return "";
+    await expect.poll(async () => {
+      if (await page.getByLabel("Conversation share link").isVisible().catch(() => false)) {
+        return "fallback";
       }
-    });
-
-    if (copiedText) {
-      expect(copiedText).toContain("/chat/");
-      return;
-    }
-
-    await expect(page.getByLabel("Conversation share link")).toBeVisible();
+      const copiedText = await page.evaluate(async () => {
+        try { return await navigator.clipboard.readText(); } catch { return ""; }
+      });
+      return copiedText.includes("/chat/") ? "copied" : "pending";
+    }, { timeout: 10_000 }).not.toBe("pending");
   });
 });
 

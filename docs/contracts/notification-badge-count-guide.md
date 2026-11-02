@@ -53,11 +53,12 @@ Error example `401`:
   - If unread -> read transition happens, badge count decrements once.
   - Repeated call is idempotent for badge count.
 - `POST /api/v1/notifications/read-all`
-  - Marks unread notifications as read and sets badge count to `0`.
+  - Marks unread notifications as read and resets the counter in one transaction. Creation and read-all serialize on the recipient row, so a concurrent new notification remains counted if it arrives afterward.
 - `DELETE /api/v1/notifications/:id`
   - If deleted notification was unread, badge count decrements.
 - `GET /api/v1/notifications` and `GET /api/v1/notifications/:id`
   - Existing response shape remains unchanged.
+  - The list response includes `pagination.total` for the selected filter and `pagination.unread_total` for the whole account.
 
 ## 5) WS contract
 
@@ -102,6 +103,7 @@ Emission rules:
 2. Open `/notifications` socket with token in `auth.token`.
 3. On `notifications:count`:
    - Replace badge value with `payload.unread_total` (server-authoritative).
+   - Refresh an open notification list through REST; the event is a refresh signal, not the list source.
 4. On reconnect:
    - Keep last known badge.
    - Immediately call `GET /notifications/unread-count` or emit `notifications:sync`.

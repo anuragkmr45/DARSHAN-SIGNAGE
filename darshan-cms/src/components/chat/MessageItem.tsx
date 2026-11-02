@@ -61,7 +61,7 @@ const renderMessageText = (
 
 const getAttachmentId = (attachment: string | ChatMessage["attachments"][number]) => {
   if (typeof attachment === "string") return attachment;
-  return attachment?.media_id || attachment?.mediaId;
+  return attachment?.media_asset_id || attachment?.media_id || attachment?.mediaId;
 };
 
 export function MessageItem({
