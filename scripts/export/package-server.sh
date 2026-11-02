@@ -141,6 +141,18 @@ EOF
   printf 'VALKEY_IMAGE=%s\n' "$VALKEY_IMAGE"
   printf 'DARSHAN_RELEASE_ID=%s\n' "$RELEASE_ID"
   printf 'INITIAL_ADMIN_EMAIL=admin@example.local\n\n'
+  # These values are consumed by the standalone Docker Compose file and its
+  # lifecycle scripts, not by the backend process itself. Keep usable local
+  # defaults in the isolated package; the production-split bundle supplies
+  # its own site-specific, file-backed secrets and never consumes this file.
+  printf 'POSTGRES_USER=postgres\n'
+  printf 'POSTGRES_PASSWORD=postgres\n'
+  printf 'POSTGRES_DB=darshan\n'
+  printf 'POSTGRES_HOST_PORT=5432\n'
+  printf 'MINIO_HOST_PORT=9000\n'
+  printf 'MINIO_CONSOLE_PORT=9001\n'
+  printf 'VALKEY_HOST_PORT=6379\n'
+  printf 'API_HOST_PORT=3000\n\n'
   # Demo-seed credentials belong to local development only. A production
   # bundle receives a one-time password via bootstrap-secrets/admin-password.
   grep -v -E '^ADMIN_(EMAIL|PASSWORD)=' "$SERVER_REPO_DIR/.env.example"

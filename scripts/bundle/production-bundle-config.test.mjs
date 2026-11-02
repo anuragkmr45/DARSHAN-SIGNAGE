@@ -468,6 +468,26 @@ test('production web media runtime settings are emitted by generated artifacts',
   assert.doesNotMatch(bundleConfig, /512m proxy envelope/)
 })
 
+test('standalone server package env contains every Compose lifecycle input', () => {
+  const packageServer = fs.readFileSync(repoPath('scripts/export/package-server.sh'), 'utf8')
+  const envWriterStart = packageServer.indexOf("  printf 'BACKEND_IMAGE=%s\\n'")
+  const envWriterEnd = packageServer.indexOf('} > "$OUTPUT_DIR/.env.template"', envWriterStart)
+  const envWriter = packageServer.slice(envWriterStart, envWriterEnd)
+
+  for (const name of [
+    'POSTGRES_USER',
+    'POSTGRES_PASSWORD',
+    'POSTGRES_DB',
+    'POSTGRES_HOST_PORT',
+    'MINIO_HOST_PORT',
+    'MINIO_CONSOLE_PORT',
+    'VALKEY_HOST_PORT',
+    'API_HOST_PORT',
+  ]) {
+    assert.match(envWriter, new RegExp(`printf '${name}=`))
+  }
+})
+
 test('production MinIO image is built from one pinned official source revision', () => {
   const bundleConfig = fs.readFileSync(repoPath('scripts/bundle/production-bundle-config.mjs'), 'utf8')
   const packageServer = fs.readFileSync(repoPath('scripts/export/package-server.sh'), 'utf8')
