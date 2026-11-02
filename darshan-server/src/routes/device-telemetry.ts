@@ -53,11 +53,16 @@ import {
 import { getDeviceDesiredState } from '@/services/device-desired-state-service';
 import { createMediaCacheReport } from '@/services/media-cache-report-service';
 import {
+  recordBackendReadinessCheckpoint,
+  recordScreenAvailabilityHeartbeat,
+} from '@/services/screen-availability';
+import {
   extractDeviceIdentitySessionInput,
   recordDeviceIdentitySession,
 } from '@/services/device-identity-session-service';
 import { recordDisplayProfile } from '@/services/screen-display-state-service';
 import { getScreenDisplayState, serializeDisplayState } from '@/services/screen-display-state-service';
+import { acknowledgeAppliedPublish } from '@/services/publish-delivery-service';
 import { displayProfileV1Schema } from '@/utils/display-profile';
 
 const logger = createLogger('device-telemetry-routes');
@@ -99,6 +104,8 @@ const heartbeatSchema = z.object({
   current_schedule_id: z.string().optional(),
   current_media_id: z.string().optional(),
   current_scene_id: z.string().optional(),
+  applied_publish_id: z.string().uuid().optional(),
+  applied_snapshot_id: z.string().uuid().optional(),
   active_slots: z.array(activeSlotSchema).optional(),
   memory_total_mb: z.number().nonnegative().optional(),
   memory_used_mb: z.number().nonnegative().optional(),
@@ -156,12 +163,21 @@ const heartbeatSchema = z.object({
   metrics: z.record(z.any()).optional(),
   display_profile_v1: displayProfileV1Schema.optional(),
   realtime_diagnostics: realtimeDiagnosticsSchema.optional(),
+}).superRefine((value, context) => {
+  if (Boolean(value.applied_publish_id) !== Boolean(value.applied_snapshot_id)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'applied_publish_id and applied_snapshot_id must be provided together',
+      path: value.applied_publish_id ? ['applied_snapshot_id'] : ['applied_publish_id'],
+    });
+  }
 });
 
 const proofOfPlaySchema = z.object({
   device_id: z.string().min(1),
   media_id: z.string().min(1),
   schedule_id: z.string().min(1),
+  publish_id: z.string().uuid().optional(),
   playback_instance_id: z.string().uuid().optional(),
   scene_id: z.string().optional(),
   slot_id: z.string().optional(),
@@ -909,15 +925,6 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
       try {
         const data = heartbeatSchema.parse(request.body);
         await authenticateDeviceOrThrow(request, data.device_id);
-        const [screen] = await db
-          .select({ id: schema.screens.id })
-          .from(schema.screens)
-          .where(eq(schema.screens.id, data.device_id));
-
-        if (!screen) {
-          throw AppError.notFound('Device not registered');
-        }
-
         const receivedAt = new Date();
         const duplicateIdentity = await recordDeviceIdentitySession(
           extractDeviceIdentitySessionInput(request, {
@@ -941,25 +948,51 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const screenStatus =
           data.status === 'ONLINE' ? 'ACTIVE' : data.status === 'OFFLINE' ? 'OFFLINE' : 'INACTIVE';
 
+        await db.transaction(async (tx) => {
+          const [screen] = await tx
+            .select({ id: schema.screens.id, lastHeartbeatAt: schema.screens.last_heartbeat_at })
+            .from(schema.screens)
+            .where(eq(schema.screens.id, data.device_id))
+            .for('update');
+          if (!screen) throw AppError.notFound('Device not registered');
+
+          await recordScreenAvailabilityHeartbeat(tx, {
+            screenId: data.device_id,
+            status: data.status,
+            receivedAt,
+            previousLastHeartbeatAt: screen.lastHeartbeatAt,
+          });
+          await recordBackendReadinessCheckpoint(receivedAt, tx);
+          await tx
+            .update(schema.screens)
+            .set({
+              status: screenStatus as any,
+              last_heartbeat_at: receivedAt,
+              current_schedule_id: data.current_schedule_id ?? null,
+              current_media_id: data.current_media_id ?? null,
+              current_scene_id: data.current_scene_id ?? null,
+              active_slots: data.active_slots ?? [],
+              updated_at: receivedAt,
+            })
+            .where(eq(schema.screens.id, data.device_id));
+        });
+
+        const publishDeliveryAck = data.applied_publish_id && data.applied_snapshot_id
+          ? await acknowledgeAppliedPublish({
+              screenId: data.device_id,
+              publishId: data.applied_publish_id,
+              snapshotId: data.applied_snapshot_id,
+              receivedAt,
+              db,
+            })
+          : null;
+
         if (data.display_profile_v1) {
           const displayWrite = await recordDisplayProfile(data.device_id, data.display_profile_v1);
           if (!displayWrite.applied) {
             logger.debug({ deviceId: data.device_id, reason: displayWrite.reason }, 'Ignored stale display profile observation');
           }
         }
-
-        await db
-          .update(schema.screens)
-          .set({
-            status: screenStatus as any,
-            last_heartbeat_at: receivedAt,
-            current_schedule_id: data.current_schedule_id ?? null,
-            current_media_id: data.current_media_id ?? null,
-            current_scene_id: data.current_scene_id ?? null,
-            active_slots: data.active_slots ?? [],
-            updated_at: receivedAt,
-          })
-          .where(eq(schema.screens.id, data.device_id));
 
         if (data.realtime_diagnostics) {
           recordPlayerRealtimeDiagnostics({
@@ -995,6 +1028,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         return reply.send({
           success: true,
           timestamp: new Date().toISOString(),
+          publish_delivery_ack: publishDeliveryAck,
           duplicate_identity: duplicateIdentity.active
             ? {
                 active: true,
@@ -1041,6 +1075,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           deviceId: data.device_id,
           mediaId: data.media_id,
           scheduleId: data.schedule_id,
+          publishId: data.publish_id ?? null,
           playbackInstanceId: data.playback_instance_id ?? null,
           startTime: data.start_time,
           endTime: data.end_time,
@@ -1052,6 +1087,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           deviceId: data.device_id,
           mediaId: data.media_id,
           scheduleId: data.schedule_id,
+          publishId: data.publish_id ?? null,
           playbackInstanceId: data.playback_instance_id ?? randomUUID(),
           sceneId: data.scene_id ?? null,
           slotId: data.slot_id ?? null,

@@ -22,6 +22,15 @@ import { PageNavigation } from "@/components/common/PageNavigation";
 
 const AUDIT_LOGS_PAGE_SIZE = 5;
 
+const formatDuration = (seconds?: number | null) => {
+  if (seconds === null || seconds === undefined) return "—";
+  const wholeMinutes = Math.round(seconds / 60);
+  const days = Math.floor(wholeMinutes / 1440);
+  const hours = Math.floor((wholeMinutes % 1440) / 60);
+  const minutes = wholeMinutes % 60;
+  return [days ? `${days}d` : "", hours ? `${hours}h` : "", `${minutes}m`].filter(Boolean).join(" ");
+};
+
 const downloadBlobFile = (blob: Blob, filename: string) => {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -146,6 +155,7 @@ export default function Reports() {
   const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [isExportingReportPdf, setIsExportingReportPdf] = useState(false);
   const [isExportingLogsPdf, setIsExportingLogsPdf] = useState(false);
+  const [availabilityDays, setAvailabilityDays] = useState(7);
   const debouncedResource = useDebounce(resourceFilter, 400);
   const debouncedAction = useDebounce(actionFilter, 400);
   const { can, isLoading: isAuthzLoading } = useAuthorization();
@@ -156,6 +166,12 @@ export default function Reports() {
   const summaryQuery = useQuery({
     queryKey: ["reports-summary"],
     queryFn: reportsApi.getSummary,
+    enabled: canReadReports,
+  });
+
+  const availabilityQuery = useQuery({
+    queryKey: ["reports-availability", availabilityDays],
+    queryFn: () => reportsApi.getAvailability(availabilityDays),
     enabled: canReadReports,
   });
 
@@ -193,7 +209,7 @@ export default function Reports() {
 
   useEffect(() => {
     const err =
-      (canReadReports && (summaryQuery.error || popQuery.error || notificationsQuery.error || emergencyQuery.error)) ||
+      (canReadReports && (summaryQuery.error || availabilityQuery.error || popQuery.error || notificationsQuery.error || emergencyQuery.error)) ||
       (canReadAuditLogs && auditLogsQuery.error);
     if (err) {
       const message = err instanceof ApiError ? err.message : "Unable to load reports.";
@@ -203,6 +219,7 @@ export default function Reports() {
     canReadReports,
     canReadAuditLogs,
     summaryQuery.error,
+    availabilityQuery.error,
     popQuery.error,
     auditLogsQuery.error,
     notificationsQuery.error,
@@ -211,6 +228,7 @@ export default function Reports() {
   ]);
 
   const summary = summaryQuery.data;
+  const availability = availabilityQuery.data;
   const popItems = (popQuery.data as ProofOfPlayListResponse | undefined)?.items ?? [];
   const auditLogs = auditLogsQuery.data?.items ?? [];
   const auditLogsTotal = auditLogsQuery.data?.total ?? 0;
@@ -496,6 +514,96 @@ export default function Reports() {
             </Card>
 
           </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle>Player Availability</CardTitle>
+                  <CardDescription>
+                    Server-received heartbeats; a gap beyond 90 seconds is estimated offline. Backend gaps stay unknown.
+                  </CardDescription>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  Period
+                  <select
+                    aria-label="Availability period"
+                    className="rounded-md border bg-background px-3 py-2"
+                    value={availabilityDays}
+                    onChange={(event) => setAvailabilityDays(Number(event.target.value))}
+                  >
+                    <option value={1}>Last 24 hours</option>
+                    <option value={7}>Last 7 days</option>
+                    <option value={30}>Last 30 days</option>
+                  </select>
+                </label>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {availabilityQuery.isLoading ? (
+                <div className="grid gap-3 md:grid-cols-3">
+                  <Skeleton className="h-20" />
+                  <Skeleton className="h-20" />
+                  <Skeleton className="h-20" />
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="rounded-md border p-3">
+                      <p className="text-xs text-muted-foreground">Uptime of known time</p>
+                      <p className="mt-1 text-2xl font-bold">
+                        {availability?.summary.uptime_percent === null || availability?.summary.uptime_percent === undefined
+                          ? "No known time"
+                          : `${availability.summary.uptime_percent}%`}
+                      </p>
+                    </div>
+                    <div className="rounded-md border p-3">
+                      <p className="text-xs text-muted-foreground">Estimated outage</p>
+                      <p className="mt-1 text-2xl font-bold">{formatDuration(availability?.summary.estimated_offline_seconds)}</p>
+                    </div>
+                    <div className="rounded-md border p-3">
+                      <p className="text-xs text-muted-foreground">Unknown time</p>
+                      <p className="mt-1 text-2xl font-bold">{formatDuration(availability?.summary.unknown_seconds)}</p>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/40 text-left">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">Screen</th>
+                          <th className="px-3 py-2 font-medium">Uptime</th>
+                          <th className="px-3 py-2 font-medium">Estimated outage</th>
+                          <th className="px-3 py-2 font-medium">Unknown</th>
+                          <th className="px-3 py-2 font-medium">Last heartbeat</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(availability?.screens ?? []).map((screen) => (
+                          <tr key={screen.screen_id} className="border-t">
+                            <td className="px-3 py-2 font-medium">{screen.screen_name}</td>
+                            <td className="px-3 py-2">
+                              {screen.never_seen ? "Never seen" : screen.uptime_percent === null ? "No known time" : `${screen.uptime_percent}%`}
+                            </td>
+                            <td className="px-3 py-2">{screen.never_seen ? "—" : formatDuration(screen.estimated_offline_seconds)}</td>
+                            <td className="px-3 py-2">{formatDuration(screen.unknown_seconds)}</td>
+                            <td className="px-3 py-2">
+                              {screen.last_heartbeat_at ? formatAuditTimestamp(screen.last_heartbeat_at) : "Never seen"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {(availability?.screens.length ?? 0) === 0 && (
+                      <p className="px-3 py-6 text-center text-muted-foreground">No registered screens in this period.</p>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Reporting timezone: {availability?.range.timezone ?? "Asia/Kolkata"}. Unknown time is excluded from uptime percentage.
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

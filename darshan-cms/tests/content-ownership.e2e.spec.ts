@@ -43,6 +43,7 @@ const ownership = (
 async function installCommonRoutes(
   page: Page,
   responder: (route: Route, pathname: string, method: string) => Promise<boolean>,
+  identity: { user: typeof adminUser; roles: typeof rolesPayload } = { user: adminUser, roles: rolesPayload },
 ) {
   await page.route("**/api/v1/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
@@ -51,12 +52,12 @@ async function installCommonRoutes(
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ token: "cms-token", csrf_token: "csrf-token", user: adminUser }),
+        body: JSON.stringify({ token: "cms-token", csrf_token: "csrf-token", user: identity.user }),
       });
       return;
     }
     if (pathname === "/api/v1/roles" && method === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(rolesPayload) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(identity.roles) });
       return;
     }
     if (pathname === "/api/v1/notifications/unread-count" && method === "GET") {
@@ -68,9 +69,9 @@ async function installCommonRoutes(
   });
 }
 
-async function login(page: Page) {
+async function login(page: Page, user = adminUser) {
   await page.goto("/login");
-  await page.fill("#login-email", adminUser.email);
+  await page.fill("#login-email", user.email);
   await page.fill("#login-password", "LocalDev@123");
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL(/\/dashboard/);
@@ -204,8 +205,55 @@ test.describe("Owned content response contract", () => {
     await page.getByRole('button', { name: 'Deleted Media' }).click();
     await expect(page.getByRole('dialog', { name: 'Deleted Media' }).getByText('Retained image')).toBeVisible();
     await page.getByRole('dialog', { name: 'Deleted Media' }).getByRole('button', { name: 'Restore' }).click();
-    await expect(page.getByText('Media restored')).toBeVisible();
+    await expect(page.getByText('Media restored', { exact: true })).toBeVisible();
     await expect(page.getByRole('dialog', { name: 'Deleted Media' }).getByText('No deleted media.')).toBeVisible();
+  });
+
+  test('custom role with Manage Media permission restores retained media', async ({ page }) => {
+    const customUser = {
+      ...adminUser,
+      id: 'media-curator-user-id',
+      email: 'curator@darshan.local',
+      role_id: 'role-media-curator',
+      role: 'MEDIA_CURATOR',
+    };
+    const customRoles = {
+      ...rolesPayload,
+      items: [{
+        id: 'role-media-curator',
+        name: 'MEDIA_CURATOR',
+        description: 'Custom retained-media administrator',
+        permissions: { inherits: [], grants: [{ action: 'manage', subject: 'Media' }] },
+        is_system: false,
+        created_at: '2026-11-01T00:00:00.000Z',
+        updated_at: '2026-11-01T00:00:00.000Z',
+      }],
+    };
+    let deleted = true;
+    await installCommonRoutes(page, async (route, pathname, method) => {
+      if (pathname === '/api/v1/media' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], pagination: { page: 1, limit: 20, total: 0 } }) });
+        return true;
+      }
+      if (pathname === '/api/v1/media/deleted' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: deleted ? [{ id: 'custom-media-restore', name: 'Curator retained image', type: 'IMAGE', deleted_at: '2026-11-01T00:00:00Z' }] : [] }) });
+        return true;
+      }
+      if (pathname === '/api/v1/media/custom-media-restore/restore' && method === 'POST') {
+        deleted = false;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'custom-media-restore', already_restored: false }) });
+        return true;
+      }
+      return false;
+    }, { user: customUser, roles: customRoles });
+
+    await login(page, customUser);
+    await page.goto('/media');
+    await page.getByRole('button', { name: 'Deleted Media' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Deleted Media' });
+    await expect(dialog.getByText('Curator retained image')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Restore' }).click();
+    await expect(page.getByText('Media restored', { exact: true })).toBeVisible();
   });
 
   test('administrator restores deleted chat content in conversation order', async ({ page }) => {

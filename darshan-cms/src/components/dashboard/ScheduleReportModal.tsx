@@ -137,6 +137,14 @@ function ReportEntryCard({ entry }: { entry: ScheduleReportEntry }) {
         <div>
           <span className="font-medium text-foreground">Publish ID:</span> {entry.publish_id}
         </div>
+        <div>
+          <span className="font-medium text-foreground">Applied:</span>{" "}
+          {entry.applied_at ? formatTimestamp(entry.applied_at) : "Not confirmed"}
+        </div>
+        <div>
+          <span className="font-medium text-foreground">Playback proof:</span>{" "}
+          {entry.proof_observed ? formatTimestamp(entry.proof_observed_at) : "Not observed"}
+        </div>
       </div>
       {entry.target_error ? (
         <div className="mt-2 rounded-md bg-destructive/5 p-2 text-sm text-destructive">
@@ -215,7 +223,7 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm font-medium">
@@ -225,6 +233,28 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
             </CardHeader>
             <CardContent className="text-2xl font-semibold">
               {reportQuery.isLoading ? "…" : reportQuery.data?.summary.schedules ?? 0}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                <ScreenShare className="h-4 w-4" />
+                Player-applied targets
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-2xl font-semibold">
+              {reportQuery.isLoading ? "…" : reportQuery.data?.summary.applied_targets ?? 0}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                <Presentation className="h-4 w-4" />
+                Targets with playback proof
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-2xl font-semibold">
+              {reportQuery.isLoading ? "…" : reportQuery.data?.summary.proof_observed_targets ?? 0}
             </CardContent>
           </Card>
           <Card>
@@ -320,7 +350,7 @@ export function ScheduleReportModal({ open, onOpenChange }: ScheduleReportModalP
               </CardHeader>
               <CardContent className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
                 <div>Screen group publishes also create individual screen target rows. These sections overlap; do not add their counts together.</div>
-                <div>Pending means delivery has not been confirmed in the target record. “Not taken down” means no takedown timestamp is stored; it is not a downtime measure. Playback proof and downtime are not measured here.</div>
+                <div>Pending means delivery has not been confirmed by the player. Playback proof means a matching proof-of-play start was reported; it is not human-visible display confirmation. Availability and downtime are reported separately under Reports &amp; Logs.</div>
               </CardContent>
             </Card>
           </div>

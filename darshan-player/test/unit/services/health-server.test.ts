@@ -1,6 +1,8 @@
 const { expect } = require('chai')
 const fs = require('fs')
 const http = require('http')
+const https = require('https')
+const { execFileSync } = require('child_process')
 const path = require('path')
 const sinon = require('sinon')
 const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils.ts')
@@ -65,6 +67,40 @@ describe('Health Server', () => {
       })
       req.on('error', reject)
     })
+  }
+
+  function httpsGet(
+    url: string,
+    options: Record<string, unknown>
+  ): Promise<{ statusCode?: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = https.get(url, options, (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+        res.on('end', () => resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString('utf-8') }))
+      })
+      req.on('error', reject)
+    })
+  }
+
+  function createMutualTlsFixture() {
+    const tlsDir = path.join(tempDir, 'tls')
+    fs.mkdirSync(tlsDir, { recursive: true })
+    const run = (...args: string[]) => execFileSync('openssl', args, { cwd: tlsDir, stdio: 'ignore' })
+    run('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'ca.key', '-out', 'ca.crt', '-subj', '/CN=DARSHAN Test CA', '-days', '1')
+    fs.writeFileSync(path.join(tlsDir, 'server.ext'), 'subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n')
+    run('req', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'server.key', '-out', 'server.csr', '-subj', '/CN=127.0.0.1')
+    run('x509', '-req', '-in', 'server.csr', '-CA', 'ca.crt', '-CAkey', 'ca.key', '-CAcreateserial', '-out', 'server.crt', '-days', '1', '-extfile', 'server.ext')
+    fs.writeFileSync(path.join(tlsDir, 'client.ext'), 'extendedKeyUsage=clientAuth\n')
+    run('req', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'client.key', '-out', 'client.csr', '-subj', '/CN=prometheus')
+    run('x509', '-req', '-in', 'client.csr', '-CA', 'ca.crt', '-CAkey', 'ca.key', '-CAcreateserial', '-out', 'client.crt', '-days', '1', '-extfile', 'client.ext')
+    return {
+      ca: path.join(tlsDir, 'ca.crt'),
+      serverCert: path.join(tlsDir, 'server.crt'),
+      serverKey: path.join(tlsDir, 'server.key'),
+      clientCert: path.join(tlsDir, 'client.crt'),
+      clientKey: path.join(tlsDir, 'client.key'),
+    }
   }
 
   beforeEach(() => {
@@ -278,5 +314,47 @@ describe('Health Server', () => {
     expect(parsedHealth.offlineReplay.requestQueue).to.be.an('object')
     expect(parsedHealth.offlineReplay.proofOfPlay).to.be.an('object')
     expect(metricsResponse.statusCode).to.equal(404)
+  })
+
+  it('requires a trusted client certificate on the HTTPS metrics listener', async () => {
+    const tls = createMutualTlsFixture()
+    writeConfig({
+      observability: {
+        enabled: true,
+        metricsEnabled: true,
+        bindAddress: '127.0.0.1',
+        port: 33303,
+        allowRemoteAccess: false,
+        tlsEnabled: true,
+        tlsCertPath: tls.serverCert,
+        tlsKeyPath: tls.serverKey,
+        tlsCaPath: tls.ca,
+        requireClientCertificate: true,
+      },
+    })
+    resetModules()
+
+    const { HealthServer } = require('../../../src/main/services/telemetry/health-server')
+    healthServer = new HealthServer()
+    healthServer.start()
+
+    let rejected = false
+    try {
+      await httpsGet('https://127.0.0.1:33303/not-found', {
+        ca: fs.readFileSync(tls.ca),
+        rejectUnauthorized: true,
+      })
+    } catch {
+      rejected = true
+    }
+    expect(rejected).to.equal(true)
+
+    const authorized = await httpsGet('https://127.0.0.1:33303/not-found', {
+      ca: fs.readFileSync(tls.ca),
+      cert: fs.readFileSync(tls.clientCert),
+      key: fs.readFileSync(tls.clientKey),
+      rejectUnauthorized: true,
+    })
+    expect(authorized.statusCode).to.equal(404)
   })
 })

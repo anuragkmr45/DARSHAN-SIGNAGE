@@ -1,6 +1,6 @@
 [
   {
-    "targets": ["10.30.0.101:3300"],
+    "targets": ["player-01.site.internal:3300"],
     "labels": {
       "site": "qa-example",
       "environment": "qa",

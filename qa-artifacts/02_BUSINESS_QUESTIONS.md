@@ -273,7 +273,11 @@ Affected areas: UC-020, UC-024; BR-038, BR-061; calculations, timezones and repo
 
 Code answer, 2026-09-25: `screen_uptime_percent` is the current ACTIVE/(ACTIVE+OFFLINE) percentage rounded to two decimals, null if neither exists. PoP COMPLETED means `ended_at IS NOT NULL`; INCOMPLETE means null. Daily grouping uses PostgreSQL `date(created_at)` with no explicit site timezone; PDF dates are UTC and CMS timestamps use the browser locale. See `evidence/operational-behavior-review.md::BQ-014`.
 
-Human input still needed: Is the current screen-state percentage acceptable as a field named uptime, or must historical availability be reported? Which reporting-day timezone and completion definition should QA accept? Mark these expected outcomes TBD until answered.
+Release decision, 2026-11-02: Keep the legacy current-state percentage only as a compatibility field and expose it truthfully as `current_screen_active_percent`. Historical availability uses server-received heartbeats: an online interval starts at receipt, estimated outage starts 90 seconds after the last receipt, and the next receipt ends it. Backend readiness gaps and pre-first-heartbeat time are unknown, not outage. Uptime is `online / (online + estimated offline)`; unknown time is shown separately and excluded from the denominator. A never-seen Screen is labelled `Never seen`. Daily availability buckets use `Asia/Kolkata`.
+
+Delivery and playback evidence are separate. A publish target becomes successful only after the player persists the exact immutable snapshot, verifies required media readiness, and acknowledges both publish and snapshot IDs. A matching proof-of-play event separately means the player reported media rendering started; it is not a human-visible display guarantee. PoP completion remains based on an end event, and the existing bounded best-effort replay contract still applies.
+
+Resolution: ANSWERED FOR AVAILABILITY, DELIVERY, AND PLAYBACK EVIDENCE. QA must test online/offline/unknown segmentation, known-time denominator, never-seen behavior, IST day boundaries, exact publish acknowledgement, legacy-player compatibility, renderer-confirmed PoP, and the distinction between assigned, applied, reporting-playback, and proof-observed counts.
 
 ## Batch 3: Operational Acceptance
 

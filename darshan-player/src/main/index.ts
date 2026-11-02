@@ -28,6 +28,7 @@ import { ensureAutostartRegistration } from './services/autostart'
 import { getDisplayManager } from './services/display-manager'
 import { RendererReadinessGate } from './services/renderer-readiness-gate'
 import { WebpageViewManager } from './services/webpage-view-manager'
+import { getPlaybackEngine } from './services/playback/playback-engine'
 
 console.log('Initializing logger...')
 const logger = getLogger('main')
@@ -824,19 +825,7 @@ function setupIPCHandlers(): void {
           if (lastReportedActiveSlots.has(playbackInstanceId)) {
             continue
           }
-          if (!slot.schedule_id || !slot.media_id) {
-            continue
-          }
-          popService.recordStart({
-            scheduleId: slot.schedule_id,
-            mediaId: slot.media_id,
-            playbackInstanceId,
-            sceneId: slot.scene_id,
-            slotId: slot.slot_id,
-            itemId: slot.item_id,
-            pageNumber: slot.page_number,
-            startedAt: slot.started_at,
-          })
+          getPlaybackEngine().recordRenderedLayoutPlayback(slot)
         }
 
         lastReportedActiveSlots = nextSlots
@@ -849,6 +838,19 @@ function setupIPCHandlers(): void {
       } catch (error) {
         logger.warn({ error }, 'Failed to process active playback update from renderer')
       }
+    }
+  )
+
+  ipcMain.handle(
+    'player-media-started',
+    async (_event: any, payload: { itemId?: string; mediaId?: string; renderToken?: string; pageNumber?: number }) => {
+      const accepted = getPlaybackEngine().confirmRenderedPlayback({
+        itemId: typeof payload?.itemId === 'string' ? payload.itemId : '',
+        mediaId: typeof payload?.mediaId === 'string' ? payload.mediaId : '',
+        renderToken: typeof payload?.renderToken === 'string' ? payload.renderToken : '',
+        pageNumber: typeof payload?.pageNumber === 'number' ? payload.pageNumber : undefined,
+      })
+      return { accepted }
     }
   )
 

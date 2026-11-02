@@ -190,6 +190,7 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       'runtime',
       'security',
       'transportTls',
+      'observability',
     ],
     'player'
   )
@@ -320,6 +321,41 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       ) as any
     )
     mappedConfigKeys.push('transportTls')
+  }
+
+  const observability = rawPlayer['observability']
+  if (observability !== undefined) {
+    assertPlainObject(observability, 'player.observability')
+    assertKnownKeys(
+      observability,
+      [
+        'enabled',
+        'metricsEnabled',
+        'mediaCacheReportingEnabled',
+        'bindAddress',
+        'port',
+        'allowRemoteAccess',
+        'tlsEnabled',
+        'tlsCertPath',
+        'tlsKeyPath',
+        'tlsCaPath',
+        'requireClientCertificate',
+      ],
+      'player.observability'
+    )
+    config.observability = {}
+    setNested(config.observability, 'enabled', booleanValue(observability['enabled'], 'player.observability.enabled'))
+    setNested(config.observability, 'metricsEnabled', booleanValue(observability['metricsEnabled'], 'player.observability.metricsEnabled'))
+    setNested(config.observability, 'mediaCacheReportingEnabled', booleanValue(observability['mediaCacheReportingEnabled'], 'player.observability.mediaCacheReportingEnabled'))
+    setNested(config.observability, 'bindAddress', stringValue(observability['bindAddress'], 'player.observability.bindAddress'))
+    setNested(config.observability, 'port', numberValue(observability['port'], 'player.observability.port', 1))
+    setNested(config.observability, 'allowRemoteAccess', booleanValue(observability['allowRemoteAccess'], 'player.observability.allowRemoteAccess'))
+    setNested(config.observability, 'tlsEnabled', booleanValue(observability['tlsEnabled'], 'player.observability.tlsEnabled'))
+    setNested(config.observability, 'tlsCertPath', stringValue(observability['tlsCertPath'], 'player.observability.tlsCertPath'))
+    setNested(config.observability, 'tlsKeyPath', stringValue(observability['tlsKeyPath'], 'player.observability.tlsKeyPath'))
+    setNested(config.observability, 'tlsCaPath', stringValue(observability['tlsCaPath'], 'player.observability.tlsCaPath'))
+    setNested(config.observability, 'requireClientCertificate', booleanValue(observability['requireClientCertificate'], 'player.observability.requireClientCertificate'))
+    mappedConfigKeys.push('observability')
   }
 
   const polling = rawPlayer['polling']

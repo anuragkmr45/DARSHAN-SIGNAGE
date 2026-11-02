@@ -9,6 +9,7 @@ import { NormalizedScheduleWindow, normalizeScheduleWindows } from './snapshot-e
 const logger = getLogger('snapshot-parser')
 
 export interface NormalizedSnapshot {
+  publishId?: string
   snapshotId?: string
   scheduleId?: string
   scheduleTimezone?: string | null
@@ -268,7 +269,13 @@ export function parseSnapshotResponse(raw: unknown): NormalizedSnapshot {
   const defaultItem = defaultInput ? normalizeItem(defaultInput, mediaUrlMap) || undefined : undefined
 
   const normalized: NormalizedSnapshot = {
-    snapshotId: snapshot.id || snapshot.snapshot_id,
+    publishId:
+      typeof wrapper?.publish?.publish_id === 'string'
+        ? wrapper.publish.publish_id
+        : typeof wrapper?.publish_id === 'string'
+          ? wrapper.publish_id
+          : undefined,
+    snapshotId: snapshot.id || snapshot.snapshot_id || wrapper?.publish?.snapshot_id,
     scheduleId: schedule?.id,
     scheduleTimezone: schedule?.timezone ?? null,
     contentState:
@@ -293,6 +300,7 @@ export function parseSnapshotResponse(raw: unknown): NormalizedSnapshot {
   logger.debug(
     {
       snapshotId: normalized.snapshotId,
+      publishId: normalized.publishId,
       scheduleId: normalized.scheduleId,
       contentState: normalized.contentState,
       itemCount: normalized.items.length,

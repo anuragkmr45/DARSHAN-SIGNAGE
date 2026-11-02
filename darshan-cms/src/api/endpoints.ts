@@ -126,6 +126,7 @@ export const endpoints = {
   },
   reports: {
     summary: "/reports/summary",
+    availability: "/reports/availability",
     schedules: "/reports/schedules",
     trends: "/reports/trends",
     offlineScreens: "/reports/offline-screens",

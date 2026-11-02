@@ -135,6 +135,49 @@ export async function metricsRoutes(fastify: FastifyInstance) {
               )`
           );
         const activeScreensNow = Number(activeScreensNowRow?.count || 0);
+        const deliveryEvidence = await db.execute<{
+          applied_screens_now: number | string;
+          reporting_playback_now: number | string;
+          proof_observed_now: number | string;
+        }>(sql`
+          SELECT
+            count(DISTINCT ${schema.publishTargets.screen_id}) FILTER (
+              WHERE ${schema.publishTargets.applied_at} IS NOT NULL
+            ) AS applied_screens_now,
+            count(DISTINCT ${schema.publishTargets.screen_id}) FILTER (
+              WHERE ${schema.publishTargets.applied_at} IS NOT NULL
+                AND ${schema.screens.status} = 'ACTIVE'
+                AND ${schema.screens.last_heartbeat_at} >= ${sql.param(fiveMinutesAgo, schema.screens.last_heartbeat_at)}
+                AND ${schema.screens.current_schedule_id} = ${schema.schedules.id}
+                AND jsonb_array_length(COALESCE(${schema.screens.active_slots}, '[]'::jsonb)) > 0
+            ) AS reporting_playback_now,
+            count(DISTINCT ${schema.publishTargets.screen_id}) FILTER (
+              WHERE EXISTS (
+                SELECT 1
+                FROM ${schema.proofOfPlay}
+                WHERE ${schema.proofOfPlay.publish_id} = ${schema.publishes.id}
+                  AND ${schema.proofOfPlay.screen_id} = ${schema.publishTargets.screen_id}
+                  AND ${schema.proofOfPlay.started_at} >= GREATEST(
+                    ${schema.schedules.start_at}, ${schema.publishes.published_at}
+                  )
+                  AND ${schema.proofOfPlay.started_at} <= ${sql.param(now, schema.proofOfPlay.started_at)}
+              )
+            ) AS proof_observed_now
+          FROM ${schema.publishTargets}
+          INNER JOIN ${schema.publishes}
+            ON ${schema.publishTargets.publish_id} = ${schema.publishes.id}
+          INNER JOIN ${schema.schedules}
+            ON ${schema.publishes.schedule_id} = ${schema.schedules.id}
+          INNER JOIN ${schema.screens}
+            ON ${schema.publishTargets.screen_id} = ${schema.screens.id}
+          WHERE ${schema.publishTargets.screen_id} IS NOT NULL
+            AND ${schema.publishes.status} = 'ACTIVE'
+            AND ${schema.publishes.taken_down_at} IS NULL
+            AND ${schema.schedules.is_active} = true
+            AND ${schema.schedules.start_at} <= ${sql.param(now, schema.schedules.start_at)}
+            AND ${schema.schedules.end_at} > ${sql.param(now, schema.schedules.end_at)}
+        `);
+        const evidenceRow = deliveryEvidence.rows[0];
         const lastHeartbeatAt = latestHeartbeat?.timestamp ? new Date(latestHeartbeat.timestamp) : null;
         const systemStatus =
           totalScreens === 0
@@ -163,6 +206,10 @@ export async function metricsRoutes(fastify: FastifyInstance) {
           schedules: {
             active: activeSchedules,
             active_screens_now: activeScreensNow,
+            assigned_screens_now: activeScreensNow,
+            applied_screens_now: Number(evidenceRow?.applied_screens_now ?? 0),
+            reporting_playback_now: Number(evidenceRow?.reporting_playback_now ?? 0),
+            proof_observed_now: Number(evidenceRow?.proof_observed_now ?? 0),
           },
           proof_of_play: {
             last_24h: Number(popDay?.count || 0),

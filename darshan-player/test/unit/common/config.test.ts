@@ -229,6 +229,29 @@ describe('Config Manager', () => {
       expect(config.observability.bindAddress).to.equal('127.0.0.1')
       expect(config.observability.port).to.equal(3300)
       expect(config.observability.allowRemoteAccess).to.equal(false)
+      expect(config.observability.tlsEnabled).to.equal(false)
+      expect(config.observability.requireClientCertificate).to.equal(true)
+    })
+
+    it('rejects remote observability access without TLS and validates mutual-TLS paths', () => {
+      const updatedConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+      updatedConfig.observability = {
+        enabled: true,
+        metricsEnabled: true,
+        bindAddress: '0.0.0.0',
+        port: 9300,
+        allowRemoteAccess: true,
+        tlsEnabled: false,
+        requireClientCertificate: true,
+      }
+      fs.writeFileSync(configPath, JSON.stringify(updatedConfig, null, 2))
+
+      delete require.cache[require.resolve('../../../src/common/config')]
+      const { getConfigManager } = require('../../../src/common/config')
+      const validation = getConfigManager().validateConfig()
+
+      expect(validation.valid).to.equal(false)
+      expect(validation.errors).to.include('observability.tlsEnabled is required when remote metrics access is enabled')
     })
 
     it('should normalize non-loopback metrics binding back to localhost unless remote access is explicitly enabled', () => {

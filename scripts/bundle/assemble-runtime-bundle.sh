@@ -594,8 +594,13 @@ if [[ -f ./deployment-control.sh ]]; then
   require_prepared_host
 fi
 ./verify-role.sh
+source ./$env_file
+export PLAYER_METRICS_CONFIG_DIR="\${PLAYER_METRICS_CONFIG_DIR:-/etc/darshan/sites/\${SITE_NAME}/player-metrics}"
 if [[ -x ./compatibility-check.sh ]]; then
   ./compatibility-check.sh
+fi
+if [[ -x ./validate-player-scrape-config.sh ]]; then
+  ./validate-player-scrape-config.sh "\$PLAYER_METRICS_CONFIG_DIR"
 fi
 if ! ./load-images.sh --verify-loaded; then
   echo "Required image is absent or differs from signed release metadata; reloading role archives."
@@ -1390,6 +1395,7 @@ source ./.env.production
 : "\${SITE_NAME:?SITE_NAME is required}"
 : "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
 : "\${DARSHAN_ROLE_NAME:?DARSHAN_ROLE_NAME is required}"
+: "\${PLAYER_METRICS_CONFIG_DIR:=/etc/darshan/sites/\${SITE_NAME}/player-metrics}"
 [[ "\$DARSHAN_ROLE_NAME" == "$role" ]] || { echo "Signed role identity mismatch." >&2; exit 1; }
 role_root="\$(pwd -P)"
 state_root="/var/lib/darshan/deployments/\$SITE_NAME"
@@ -1444,6 +1450,7 @@ source ./.env.production
 : "\${SITE_NAME:?SITE_NAME is required}"
 : "\${DARSHAN_RELEASE_ID:?DARSHAN_RELEASE_ID is required}"
 : "\${DARSHAN_ROLE_NAME:?DARSHAN_ROLE_NAME is required}"
+: "\${PLAYER_METRICS_CONFIG_DIR:=/etc/darshan/sites/\${SITE_NAME}/player-metrics}"
 [[ "\$DARSHAN_ROLE_NAME" == "$role" ]] || { echo "Signed role identity mismatch." >&2; exit 1; }
 getent group docker >/dev/null || { echo "Required docker group does not exist." >&2; exit 1; }
 for command in docker openssl curl tar sha256sum df flock stat jq readlink getent; do
@@ -1483,6 +1490,19 @@ if [[ "$role" == "data" && "${BACKUP_MODE:-APPLICATION_OFFHOST}" == "EXTERNAL_SI
     [[ ! -L "\$path" ]] || { echo "Backup path must not contain symlinks: \$path" >&2; exit 1; }
   done
   install -d -m 0700 -o root -g root "\$BACKUP_HOST_PATH"
+fi
+if [[ "$role" == "observability" ]]; then
+  expected_player_metrics_dir="/etc/darshan/sites/\$SITE_NAME/player-metrics"
+  [[ "\$PLAYER_METRICS_CONFIG_DIR" == "\$expected_player_metrics_dir" ]] || {
+    echo "Unexpected player metrics configuration path: \$PLAYER_METRICS_CONFIG_DIR" >&2
+    exit 1
+  }
+  install -d -m 0750 -o root -g docker "/etc/darshan/sites/\$SITE_NAME" "\$PLAYER_METRICS_CONFIG_DIR"
+  if [[ ! -e "\$PLAYER_METRICS_CONFIG_DIR/players.targets.json" ]]; then
+    printf '[]\n' > "\$PLAYER_METRICS_CONFIG_DIR/players.targets.json"
+    chown root:docker "\$PLAYER_METRICS_CONFIG_DIR/players.targets.json"
+    chmod 0640 "\$PLAYER_METRICS_CONFIG_DIR/players.targets.json"
+  fi
 fi
 role_root="\$(pwd -P)"
 marker="\$state_root/prepared/\$DARSHAN_ROLE_NAME-\$DARSHAN_RELEASE_ID"
@@ -1701,6 +1721,9 @@ render_prometheus_config() {
   local observability_metrics_scheme="${29:-http}"
   local observability_tls_server_name="${30:-}"
   local observability_node_target="${31:-${observability_host}:${node_exporter_port}}"
+  local player_metrics_scheme="${32:-http}"
+  local player_metrics_target_file="${33:-/etc/darshan/prometheus/file-sd/players.targets.json}"
+  local player_metrics_tls_dir="${34:-}"
   local remote_node_port="$node_exporter_port"
   local remote_postgres_port="$postgres_exporter_port"
   local remote_nginx_port="$nginx_exporter_port"
@@ -1751,6 +1774,8 @@ render_prometheus_config() {
     -e "s/__REMOTE_NGINX_EXPORTER_PORT__/${remote_nginx_port}/g" \
     -e "s/__OBSERVABILITY_METRICS_SCHEME__/${observability_metrics_scheme}/g" \
     -e "s/__OBSERVABILITY_NODE_TARGET__/${observability_node_target}/g" \
+    -e "s/__PLAYER_METRICS_SCHEME__/${player_metrics_scheme}/g" \
+    -e "s#__PLAYER_METRICS_TARGET_FILE__#${player_metrics_target_file}#g" \
     "$PLATFORM_ROOT/deploy/shared/observability/prometheus/prometheus.yml.template" > "$rendered_tmp"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -1770,6 +1795,12 @@ render_prometheus_config() {
           printf '    tls_config:\n      ca_file: %s\n      server_name: %s\n' "$transport_ca_path" "$observability_tls_server_name"
         fi
         ;;
+      *__PLAYER_METRICS_TLS_CONFIG__*)
+        if [[ "$player_metrics_scheme" == "https" && -n "$player_metrics_tls_dir" ]]; then
+          printf '    tls_config:\n      ca_file: %s/ca.crt\n      cert_file: %s/client.crt\n      key_file: %s/client.key\n' \
+            "$player_metrics_tls_dir" "$player_metrics_tls_dir" "$player_metrics_tls_dir"
+        fi
+        ;;
       *__BACKEND_METRICS_AUTHORIZATION__*)
         if [[ -n "$backend_metrics_bearer_token_file" ]]; then
           printf '    authorization:\n      type: Bearer\n      credentials_file: %s\n' "$backend_metrics_bearer_token_file"
@@ -1778,6 +1809,17 @@ render_prometheus_config() {
       *) printf '%s\n' "$line" ;;
     esac
   done < "$rendered_tmp" > "$destination"
+
+  # A config that references absent client-certificate files is rejected by
+  # Prometheus even when file_sd is empty. Production therefore ships a safe
+  # default config plus a signed mTLS companion selected only after the host
+  # validator confirms that a non-empty inventory and credentials are present.
+  if [[ "$player_metrics_scheme" == "http" && -n "$player_metrics_tls_dir" ]]; then
+    local -a mtls_args=("$@")
+    mtls_args[0]="${destination%.yml}.player-mtls.yml"
+    mtls_args[31]="https"
+    render_prometheus_config "${mtls_args[@]}"
+  fi
 }
 
 render_grafana_datasource() {
@@ -1874,18 +1916,24 @@ services:
       - |
         set -eu
         runtime=/etc/darshan
-        install -d -m 0750 -o root -g root "$${runtime}/prometheus" "$${runtime}/secrets" "$${runtime}/tls"
+        install -d -m 0750 -o root -g root "$${runtime}/prometheus" "$${runtime}/player-metrics" "$${runtime}/secrets" "$${runtime}/tls"
         cp -R /run/darshan-prometheus-input/prometheus/. "$${runtime}/prometheus/"
+        cp -R /run/darshan-prometheus-input/player-metrics/. "$${runtime}/player-metrics/"
         cp /run/darshan-prometheus-input/secrets/backend-metrics-bearer-token "$${runtime}/secrets/backend-metrics-bearer-token"
         cp /run/darshan-prometheus-input/tls/transport-ca.crt "$${runtime}/tls/transport-ca.crt"
         cp /run/darshan-prometheus-input/tls/server.crt "$${runtime}/tls/server.crt"
         cp /run/darshan-prometheus-input/tls/server.key "$${runtime}/tls/server.key"
-        chmod 0750 "$${runtime}" "$${runtime}/prometheus" "$${runtime}/secrets" "$${runtime}/tls"
+        chmod 0750 "$${runtime}" "$${runtime}/prometheus" "$${runtime}/player-metrics" "$${runtime}/secrets" "$${runtime}/tls"
+        if [ -f "$${runtime}/player-metrics/client.key" ]; then chmod 0400 "$${runtime}/player-metrics/client.key"; fi
         chmod 0400 "$${runtime}/secrets/backend-metrics-bearer-token"
         chmod 0400 "$${runtime}/tls/server.key"
         chown -R nobody:nobody "$${runtime}"
+        prometheus_config=/etc/darshan/prometheus/prometheus.yml
+        if grep -q '"targets"' "$${runtime}/player-metrics/players.targets.json"; then
+          prometheus_config=/etc/darshan/prometheus/prometheus.player-mtls.yml
+        fi
         exec chpst -u nobody:nobody /bin/prometheus \
-          --config.file=/etc/darshan/prometheus/prometheus.yml \
+          --config.file="$${prometheus_config}" \
           --web.config.file=/etc/darshan/prometheus/web-config.yml \
           --storage.tsdb.path=/prometheus \
           --storage.tsdb.retention.time="$${PROMETHEUS_RETENTION_TIME:-30d}" \
@@ -1902,6 +1950,7 @@ services:
       - "${OBSERVABILITY_PRIVATE_HOST}:${OBSERVABILITY_BIND_ADDRESS}"
     volumes:
       - ./prometheus:/run/darshan-prometheus-input/prometheus:ro
+      - ${PLAYER_METRICS_CONFIG_DIR}:/run/darshan-prometheus-input/player-metrics:ro
       - ./certs:/run/darshan-prometheus-input/tls:ro
       - ./secrets:/run/darshan-prometheus-input/secrets:ro
       - prometheus_data:/prometheus
@@ -2539,7 +2588,8 @@ if profile_enabled production; then
       "$PROD_OBSERVABILITY_DIR/alertmanager" \
       "$PROD_OBSERVABILITY_DIR/grafana" \
       "$PROD_OBSERVABILITY_DIR/secrets" \
-      "$PROD_OBSERVABILITY_DIR/certs"
+      "$PROD_OBSERVABILITY_DIR/certs" \
+      "$PROD_OBSERVABILITY_DIR/player-metrics-example"
   fi
 fi
 
@@ -3022,6 +3072,10 @@ if profile_enabled production; then
   stage_observability_assets "production" "$PROD_DATA_DIR" "$PROD_BACKEND_DIR" "$PROD_CMS_DIR"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     copy_tree_contents "$PLATFORM_ROOT/deploy/shared/observability/prometheus" "$PROD_OBSERVABILITY_DIR/prometheus"
+    cp "$PLATFORM_ROOT/deploy/shared/observability/prometheus/file-sd/players.targets.example.json" \
+      "$PROD_OBSERVABILITY_DIR/player-metrics-example/players.targets.example.json"
+    cp "$PLATFORM_ROOT/deploy/shared/observability/prometheus/validate-player-scrape-config.sh" \
+      "$PROD_OBSERVABILITY_DIR/validate-player-scrape-config.sh"
     copy_tree_contents "$PLATFORM_ROOT/deploy/shared/observability/alertmanager" "$PROD_OBSERVABILITY_DIR/alertmanager"
     copy_tree_contents "$PLATFORM_ROOT/deploy/shared/observability/grafana" "$PROD_OBSERVABILITY_DIR/grafana"
     cp "$PLATFORM_ROOT/deploy/production/docker/observability/README.md" "$PROD_OBSERVABILITY_DIR/README.md"
@@ -3938,6 +3992,7 @@ VM2_BACKEND_HOST=$BACKEND_PRIVATE_HOST
 VM3_CMS_HOST=$CMS_PUBLIC_HOST
 VM4_OBSERVABILITY_HOST=$OBSERVABILITY_PRIVATE_HOST
 OBSERVABILITY_PRIVATE_HOST=$OBSERVABILITY_PRIVATE_HOST
+PLAYER_METRICS_CONFIG_DIR=/etc/darshan/sites/$SITE_NAME/player-metrics
 DATA_PRIVATE_HOST=$DATA_PRIVATE_HOST
 BACKEND_PRIVATE_HOST=$BACKEND_PRIVATE_HOST
 CMS_PUBLIC_HOST=$CMS_PUBLIC_HOST
@@ -4017,7 +4072,10 @@ EOF
       "$METRICS_GATEWAY_HOST_PORT" \
       "https" \
       "$OBSERVABILITY_PRIVATE_HOST" \
-      "node-exporter:9100"
+      "node-exporter:9100" \
+      "http" \
+      "/etc/darshan/player-metrics/players.targets.json" \
+      "/etc/darshan/player-metrics"
 
     render_alert_rules "$PROD_OBSERVABILITY_DIR/prometheus/rules/alerts.yml"
 
@@ -5311,10 +5369,14 @@ This folder runs Prometheus, Alertmanager, and Grafana on the dedicated observab
 - MinIO scrape target: https://$DATA_PRIVATE_HOST:$MINIO_HOST_PORT/minio/v2/metrics/cluster
 - Static TLS metrics-gateway targets: Data, Valkey, Backend, and CMS
 - Local node exporter is private to the Observability Compose network
+- Optional player targets: HTTPS mutual TLS from the persistent \`\$PLAYER_METRICS_CONFIG_DIR\` inventory
 
 The generated health check requires every static target to report an up value
 of one.
 The site firewall must allow the TLS metrics-gateway port only from this VM.
+Copy \`player-metrics-example/players.targets.example.json\` into the persistent
+inventory when enabling player scrape, then install \`ca.crt\`, \`client.crt\`,
+and mode-0600 \`client.key\`. Startup validates the inventory and credentials.
 EOF
   fi
 
@@ -5589,7 +5651,8 @@ if profile_enabled production; then
       "$PROD_OBSERVABILITY_DIR/start.sh" \
       "$PROD_OBSERVABILITY_DIR/verify-role.sh" \
       "$PROD_OBSERVABILITY_DIR/stop.sh" \
-      "$PROD_OBSERVABILITY_DIR/health-check.sh"
+      "$PROD_OBSERVABILITY_DIR/health-check.sh" \
+      "$PROD_OBSERVABILITY_DIR/validate-player-scrape-config.sh"
   fi
 fi
 

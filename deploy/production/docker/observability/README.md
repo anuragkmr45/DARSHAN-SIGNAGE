@@ -15,6 +15,8 @@ Primary inputs:
 - use `deploy/production/docker/.env.example` as the starting point for site-specific host/port values
 - keep site IPs and secrets outside git-tracked files
 - keep player direct-scrape targets in the Prometheus `file_sd` inventory only if direct scrape is approved
+- generated source-free roles keep the production inventory and mutual-TLS client files in `/etc/darshan/sites/<site>/player-metrics`; `prepare-host.sh` creates the directory and empty inventory, and startup validates it
+- the persistent site directory is reused across release updates; do not copy its addresses or client private key into source control or a generic release artifact
 - keep Alertmanager outbound receiver settings site-local if Alertmanager is added
 - keep Prometheus retention aligned to observability VM storage sizing
 - Grafana normally uses `http://<cms-vm>:<cms-port>/grafana/` when exposed through CMS, or the direct observability VM URL for operator-only access

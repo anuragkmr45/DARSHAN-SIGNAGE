@@ -82,6 +82,41 @@ describe('Heartbeat Service', () => {
     })
   })
 
+  it('keeps applied delivery identity across playback clears and repeated heartbeat payloads', () => {
+    const { getHeartbeatService } = require('../../../src/main/services/telemetry/heartbeat')
+    const heartbeatService = getHeartbeatService()
+    const stats = {
+      uptime: 1,
+      memoryUsage: 1,
+      memoryTotal: 2,
+      memoryFree: 1,
+      cpuUsage: 3,
+      cpuCores: 1,
+      cpuLoad1m: 0,
+      cpuLoad5m: 0,
+      cpuLoad15m: 0,
+      diskUsage: 1,
+      diskTotal: 2,
+      diskFree: 1,
+      displayCount: 0,
+      displays: [],
+      hostname: 'player-test',
+      osVersion: 'test',
+    }
+
+    heartbeatService.setAppliedSnapshot('publish-1', 'snapshot-1')
+    const first = (heartbeatService as any).buildHeartbeatPayload('device-1', 'ONLINE', stats)
+    heartbeatService.setCurrentSchedule('schedule-1')
+    heartbeatService.clearCurrent()
+    const second = (heartbeatService as any).buildHeartbeatPayload('device-1', 'ONLINE', stats)
+
+    expect(first.applied_publish_id).to.equal('publish-1')
+    expect(first.applied_snapshot_id).to.equal('snapshot-1')
+    expect(second.applied_publish_id).to.equal('publish-1')
+    expect(second.applied_snapshot_id).to.equal('snapshot-1')
+    expect(second.current_schedule_id).to.equal(undefined)
+  })
+
   it('sends expanded system resource metrics in the heartbeat payload', async () => {
     const { getHeartbeatService } = require('../../../src/main/services/telemetry/heartbeat')
     const { getHttpClient } = require('../../../src/main/services/network/http-client')
@@ -158,6 +193,10 @@ describe('Heartbeat Service', () => {
 
     heartbeatService.setCurrentSchedule('schedule-1')
     heartbeatService.setCurrentMedia('media-1')
+    heartbeatService.setAppliedSnapshot(
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222'
+    )
 
     await heartbeatService.sendImmediate()
     const metrics = await getPlayerMetrics().renderPrometheusMetrics(async () => await statsCollector.collect())
@@ -172,6 +211,8 @@ describe('Heartbeat Service', () => {
       cpu_usage: 37.25,
       current_schedule_id: 'schedule-1',
       current_media_id: 'media-1',
+      applied_publish_id: '11111111-1111-4111-8111-111111111111',
+      applied_snapshot_id: '22222222-2222-4222-8222-222222222222',
       memory_total_mb: 8192,
       memory_used_mb: 4096,
       memory_free_mb: 4096,

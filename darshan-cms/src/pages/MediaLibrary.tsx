@@ -161,9 +161,7 @@ export default function MediaLibrary() {
   const [deleteTarget, setDeleteTarget] = useState<MediaAsset | null>(null);
   const [showDeleted, setShowDeleted] = useState(false);
   const [deletedPage, setDeletedPage] = useState(1);
-  const canRestore =
-    (currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPER_ADMIN') &&
-    can('manage', 'Media');
+  const canRestore = can('manage', 'Media');
   const deletedMediaQuery = useQuery({ queryKey: ['media', 'deleted', deletedPage], queryFn: () => mediaApi.deleted(deletedPage), enabled: canRestore && showDeleted });
   const restoreMutation = useMutation({
     mutationFn: mediaApi.restore,

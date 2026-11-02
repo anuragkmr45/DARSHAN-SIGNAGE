@@ -25,9 +25,16 @@ export class TelemetryService {
     logger.info('Starting telemetry service')
 
     try {
-      // Start health server
+      // Remote metrics are operationally useful but must never prevent the
+      // heartbeat/snapshot runtime from starting when certificates or the
+      // scrape port are misconfigured.
       const healthServer = getHealthServer()
-      healthServer.start()
+      try {
+        healthServer.start()
+      } catch (error) {
+        logger.error({ error }, 'Health/metrics server failed to start; continuing with backend telemetry')
+        healthServer.addError('Health/metrics server failed to start')
+      }
 
       // Start heartbeat service
       const heartbeatService = getHeartbeatService()

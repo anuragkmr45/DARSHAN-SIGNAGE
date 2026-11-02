@@ -269,6 +269,7 @@ export const apiEndpoints = {
   },
   reports: {
     summary: withBase('/reports/summary'),
+    availability: withBase('/reports/availability'),
     schedules: withBase('/reports/schedules'),
     trends: withBase('/reports/trends'),
     offlineScreens: withBase('/reports/offline-screens'),

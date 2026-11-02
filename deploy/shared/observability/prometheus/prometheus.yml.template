@@ -145,10 +145,12 @@ __OBSERVABILITY_SCRAPE_TLS_CONFIG__
           machine: __GRAFANA_MACHINE_LABEL__
 
   - job_name: players
+    scheme: __PLAYER_METRICS_SCHEME__
     metrics_path: /metrics
+__PLAYER_METRICS_TLS_CONFIG__
     file_sd_configs:
       - files:
-          - /etc/darshan/prometheus/file-sd/players.targets.json
+          - __PLAYER_METRICS_TARGET_FILE__
         refresh_interval: 1m
     relabel_configs:
       - target_label: role

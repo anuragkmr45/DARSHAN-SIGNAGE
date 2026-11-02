@@ -906,6 +906,45 @@ export const heartbeats = pgTable(
   })
 );
 
+// Server-received availability state. An open row has ended_at = NULL. The
+// partial uniqueness constraint that permits only one open row per Screen is
+// installed by migration 0052.
+export const screenAvailabilityIntervals = pgTable(
+  'screen_availability_intervals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    screen_id: uuid('screen_id').notNull(),
+    state: varchar('state', { length: 16 }).notNull(),
+    source: varchar('source', { length: 32 }).notNull(),
+    started_at: timestamp('started_at').notNull(),
+    ended_at: timestamp('ended_at'),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    screenStartedIdx: index('screen_availability_screen_started_idx').on(table.screen_id, table.started_at),
+    rangeIdx: index('screen_availability_range_idx').on(table.started_at, table.ended_at),
+  })
+);
+
+// One bounded row per API node and 30-second bucket. Reports use gaps between
+// these server-received checkpoints as unknown time rather than blaming every
+// player for an outage of the backend or its database.
+export const backendReadinessCheckpoints = pgTable(
+  'backend_readiness_checkpoints',
+  {
+    id: varchar('id', { length: 256 }).primaryKey(),
+    deployment_id: varchar('deployment_id', { length: 128 }).notNull(),
+    server_id: varchar('server_id', { length: 128 }).notNull(),
+    observed_at: timestamp('observed_at').notNull(),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    observedIdx: index('backend_readiness_observed_idx').on(table.observed_at),
+  })
+);
+
 // Proof of Play (PoP)
 export const proofOfPlay = pgTable(
   'proof_of_play',
@@ -915,6 +954,7 @@ export const proofOfPlay = pgTable(
     media_id: uuid('media_id'),
     presentation_id: uuid('presentation_id'),
     schedule_id: uuid('schedule_id'),
+    publish_id: uuid('publish_id'),
     scene_id: text('scene_id'),
     slot_id: varchar('slot_id', { length: 255 }),
     item_id: text('item_id'),
@@ -933,6 +973,7 @@ export const proofOfPlay = pgTable(
       table.playback_instance_id
     ),
     scheduleIdx: index('proof_of_play_schedule_id_idx').on(table.schedule_id),
+    publishIdx: index('proof_of_play_publish_id_idx').on(table.publish_id),
     idempotencyIdx: uniqueIndex('proof_of_play_idempotency_key_idx').on(table.idempotency_key),
   })
 );
@@ -1606,8 +1647,10 @@ export const publishTargets = pgTable(
     publish_id: uuid('publish_id').notNull(),
     screen_id: uuid('screen_id'),
     screen_group_id: uuid('screen_group_id'),
+    resolved_screen_ids: uuid('resolved_screen_ids').array().notNull().default([] as string[]),
     status: varchar('status', { length: 50 }).notNull().default('PENDING'),
     error: text('error'),
+    applied_at: timestamp('applied_at'),
     created_at: timestamp('created_at').notNull().defaultNow(),
     updated_at: timestamp('updated_at').notNull().defaultNow(),
   },

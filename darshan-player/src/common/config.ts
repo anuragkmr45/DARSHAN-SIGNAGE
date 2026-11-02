@@ -316,6 +316,11 @@ export class ConfigManager {
           'DARSHAN_OBSERVABILITY_ALLOW_REMOTE_ACCESS',
           'HEXMON_OBSERVABILITY_ALLOW_REMOTE_ACCESS'
         ),
+        tlsEnabled: envFlag(false, 'DARSHAN_OBSERVABILITY_TLS_ENABLED'),
+        tlsCertPath: envValue('DARSHAN_OBSERVABILITY_TLS_CERT_PATH') || '',
+        tlsKeyPath: envValue('DARSHAN_OBSERVABILITY_TLS_KEY_PATH') || '',
+        tlsCaPath: envValue('DARSHAN_OBSERVABILITY_TLS_CA_PATH') || '',
+        requireClientCertificate: envFlag(true, 'DARSHAN_OBSERVABILITY_REQUIRE_CLIENT_CERTIFICATE'),
       },
       pairing: {
         offlineValidationGraceMs: envNumber(
@@ -788,6 +793,11 @@ export class ConfigManager {
         allowRemoteAccess,
         bindAddress,
         port,
+        tlsEnabled: config.observability.tlsEnabled === true,
+        tlsCertPath: config.observability.tlsCertPath?.trim() || '',
+        tlsKeyPath: config.observability.tlsKeyPath?.trim() || '',
+        tlsCaPath: config.observability.tlsCaPath?.trim() || '',
+        requireClientCertificate: config.observability.requireClientCertificate !== false,
       },
       pairing: {
         offlineValidationGraceMs: Math.max(config.pairing?.offlineValidationGraceMs ?? 7 * 24 * 60 * 60 * 1000, 0),
@@ -1053,6 +1063,17 @@ export class ConfigManager {
       errors.push('observability.bindAddress must remain loopback unless observability.allowRemoteAccess is true')
     } else if (bindAddress !== 'localhost' && net.isIP(bindAddress) === 0 && !/^[a-z0-9.-]+$/i.test(bindAddress)) {
       errors.push('observability.bindAddress must be a valid IP address or hostname')
+    }
+
+    if (this.config.observability.allowRemoteAccess && !this.config.observability.tlsEnabled) {
+      errors.push('observability.tlsEnabled is required when remote metrics access is enabled')
+    }
+    if (this.config.observability.tlsEnabled) {
+      if (!this.config.observability.tlsCertPath) errors.push('observability.tlsCertPath is required when TLS is enabled')
+      if (!this.config.observability.tlsKeyPath) errors.push('observability.tlsKeyPath is required when TLS is enabled')
+      if (this.config.observability.requireClientCertificate && !this.config.observability.tlsCaPath) {
+        errors.push('observability.tlsCaPath is required when client certificates are required')
+      }
     }
 
     return {

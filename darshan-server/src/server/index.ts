@@ -60,6 +60,7 @@ import { ensureObservabilityInitialized } from '@/observability/metrics';
 import { loadServerTlsOptions } from '@/server/tls';
 import { collectReadiness } from '@/runtime/readiness';
 import { buildFastifyLoggerOptions } from '@/server/logger-options';
+import { startScreenAvailabilityMonitor, stopScreenAvailabilityMonitor } from '@/services/screen-availability';
 
 const REFRESHED_AUTH_KEY = Symbol.for('darshan.refreshedAuth');
 const DEVICE_SCREENSHOT_BODY_LIMIT_BYTES = 4 * 1024 * 1024;
@@ -209,6 +210,8 @@ export interface CreateServerOptions {
    * Isolated HTTP tests can opt out so they can exercise dispatch deterministically.
    */
   startOutboxDispatcher?: boolean;
+  /** Tests may disable the wall-clock monitor and drive availability explicitly. */
+  startAvailabilityMonitor?: boolean;
 }
 
 export async function createServer(options: CreateServerOptions = {}) {
@@ -455,7 +458,11 @@ export async function createServer(options: CreateServerOptions = {}) {
   if (options.startOutboxDispatcher !== false) {
     startOutboxDispatcher();
   }
+  if (options.startAvailabilityMonitor !== false) {
+    startScreenAvailabilityMonitor();
+  }
   fastify.addHook('onClose', async () => {
+    stopScreenAvailabilityMonitor();
     await stopOutboxDispatcher();
   });
 

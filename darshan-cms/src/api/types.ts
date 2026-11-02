@@ -361,10 +361,43 @@ export interface ReportExportParams {
 }
 
 export interface ReportSummary {
-  uptime?: number;
-  total_media?: number;
-  active_screens?: number;
-  offline_screens?: number;
+  media_total?: number;
+  screens_active?: number;
+  screens_offline?: number;
+  current_screen_active_percent?: number | null;
+  availability_uptime_percent?: number | null;
+  availability_last_24h?: AvailabilityDurationSummary;
+  screen_uptime_percent?: number | null;
+}
+
+export interface AvailabilityDurationSummary {
+  online_seconds: number;
+  estimated_offline_seconds: number;
+  unknown_seconds: number;
+  known_seconds: number;
+  uptime_percent: number | null;
+}
+
+export interface ScreenAvailabilityReport extends AvailabilityDurationSummary {
+  screen_id: string;
+  screen_name: string;
+  last_heartbeat_at: string | null;
+  never_seen: boolean;
+}
+
+export interface AvailabilityReport {
+  range: {
+    start_at: string;
+    end_at: string;
+    timezone: string;
+    offline_threshold_seconds: number;
+  };
+  summary: AvailabilityDurationSummary & {
+    screens: number;
+    monitored_seconds: number;
+  };
+  screens: ScreenAvailabilityReport[];
+  daily: Array<AvailabilityDurationSummary & { date: string }>;
 }
 
 export interface ScheduleReportEntry {
@@ -381,6 +414,9 @@ export interface ScheduleReportEntry {
   lifecycle_status: string;
   target_status: string;
   target_error?: string | null;
+  applied_at?: string | null;
+  proof_observed?: boolean;
+  proof_observed_at?: string | null;
 }
 
 export interface ScheduleReportGroup {
@@ -397,6 +433,9 @@ export interface ScheduleActivityReport {
   summary: {
     schedules: number;
     target_events: number;
+    assigned_targets: number;
+    applied_targets: number;
+    proof_observed_targets: number;
     pending_targets: number;
     successful_targets: number;
     failed_targets: number;
@@ -425,6 +464,10 @@ export interface MetricsOverview {
   schedules?: {
     active?: number;
     active_screens_now?: number;
+    assigned_screens_now?: number;
+    applied_screens_now?: number;
+    reporting_playback_now?: number;
+    proof_observed_now?: number;
   };
   proof_of_play?: Record<string, number>;
   system_health?: {

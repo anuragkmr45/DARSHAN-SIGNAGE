@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto'
 import { BrowserWindow } from 'electron'
 import { EventEmitter } from 'events'
 import { getLogger } from '../../../common/logger'
-import { PlaybackError, TimelineItem } from '../../../common/types'
+import { ActiveSlotPlayback, PlaybackError, TimelineItem } from '../../../common/types'
 import { getCacheManager } from '../cache/cache-manager'
 import { getProofOfPlayService } from '../pop-service'
 import { getTelemetryService } from '../telemetry/telemetry-service'
@@ -29,6 +29,8 @@ export class PlaybackEngine extends EventEmitter {
   private mainWindow?: BrowserWindow
   private currentItem?: TimelineItem
   private currentScheduleId?: string
+  private currentPublishId?: string
+  private currentRenderToken?: string
   private currentTimelineFingerprint?: string
   private currentPlaybackInstanceId?: string
   private currentPlaylistItemCount = 0
@@ -108,6 +110,8 @@ export class PlaybackEngine extends EventEmitter {
     }
     this.currentItem = undefined
     this.currentScheduleId = undefined
+    this.currentPublishId = undefined
+    this.currentRenderToken = undefined
     this.currentTimelineFingerprint = undefined
     this.currentPlaylistItemCount = 0
 
@@ -161,6 +165,7 @@ export class PlaybackEngine extends EventEmitter {
    */
   private async startPlaylist(playlist: PlaybackPlaylist): Promise<void> {
     this.currentScheduleId = playlist.scheduleId || playlist.snapshotId
+    this.currentPublishId = playlist.publishId
     this.currentPlaylistItemCount = playlist.items.length
     this.scheduler.stop()
 
@@ -251,6 +256,8 @@ export class PlaybackEngine extends EventEmitter {
     const item = scheduledItem.item
     this.currentItem = item
     this.currentPlaybackInstanceId = undefined
+    this.currentRenderToken =
+      item.type !== 'scene' && scheduledItem.resumeDecision?.completed !== true ? randomUUID() : undefined
 
     logger.info(
       {
@@ -270,20 +277,6 @@ export class PlaybackEngine extends EventEmitter {
       cacheManager.markNowPlaying(cacheKey)
     }
 
-    // Record proof-of-play start
-    if (this.currentScheduleId && item.type !== 'scene' && scheduledItem.resumeDecision?.completed !== true) {
-      const popService = getProofOfPlayService()
-      this.currentPlaybackInstanceId = randomUUID()
-      popService.recordStart({
-        scheduleId: this.currentScheduleId,
-        mediaId,
-        playbackInstanceId: this.currentPlaybackInstanceId,
-        itemId: item.id,
-        pageNumber: item.type === 'pdf' ? item.pageNumber ?? 1 : undefined,
-        startedAt: new Date(scheduledItem.startTime).toISOString(),
-      })
-    }
-
     // Update telemetry
     const telemetryService = getTelemetryService()
     if (item.type === 'scene') {
@@ -298,11 +291,73 @@ export class PlaybackEngine extends EventEmitter {
         item,
         scheduledItem,
         scheduleId: this.currentScheduleId,
+        renderToken: this.currentRenderToken,
         singleItemFrame: this.currentPlaylistItemCount === 1,
       })
     }
 
     this.emit('item-playing', item)
+  }
+
+  confirmRenderedPlayback(input: {
+    itemId: string
+    mediaId: string
+    renderToken: string
+    pageNumber?: number
+  }): boolean {
+    const current = this.currentItem
+    const currentMediaId = current?.mediaId || current?.objectKey || current?.id
+    if (!current || current.type === 'scene' || !this.currentScheduleId) {
+      return false
+    }
+    if (
+      input.itemId !== current.id ||
+      input.mediaId !== currentMediaId ||
+      input.renderToken !== this.currentRenderToken ||
+      this.currentPlaybackInstanceId
+    ) {
+      return false
+    }
+
+    this.currentPlaybackInstanceId = randomUUID()
+    getProofOfPlayService().recordStart({
+      scheduleId: this.currentScheduleId,
+      publishId: this.currentPublishId ?? null,
+      mediaId: currentMediaId,
+      playbackInstanceId: this.currentPlaybackInstanceId,
+      itemId: current.id,
+      pageNumber: current.type === 'pdf' ? current.pageNumber ?? 1 : undefined,
+      startedAt: new Date().toISOString(),
+    })
+    return true
+  }
+
+  getCurrentPublishId(): string | null {
+    return this.currentPublishId ?? null
+  }
+
+  recordRenderedLayoutPlayback(slot: ActiveSlotPlayback): boolean {
+    if (
+      !slot.schedule_id ||
+      !slot.media_id ||
+      this.currentItem?.type !== 'scene' ||
+      this.currentItem.id !== slot.scene_id ||
+      this.currentScheduleId !== slot.schedule_id
+    ) {
+      return false
+    }
+    getProofOfPlayService().recordStart({
+      scheduleId: slot.schedule_id,
+      publishId: this.getCurrentPublishId(),
+      mediaId: slot.media_id,
+      playbackInstanceId: slot.playback_instance_id,
+      sceneId: slot.scene_id,
+      slotId: slot.slot_id,
+      itemId: slot.item_id,
+      pageNumber: slot.page_number,
+      startedAt: new Date().toISOString(),
+    })
+    return true
   }
 
   /**
@@ -312,6 +367,9 @@ export class PlaybackEngine extends EventEmitter {
     const item = scheduledItem.item
 
     logger.debug({ itemId: item.id }, 'Item completed')
+    // Invalidate the renderer occurrence before ending PoP. A delayed or
+    // duplicated IPC confirmation must not reopen a completed occurrence.
+    this.currentRenderToken = undefined
 
     // Unmark as now-playing in cache
     const mediaId = item.mediaId || item.objectKey || item.id

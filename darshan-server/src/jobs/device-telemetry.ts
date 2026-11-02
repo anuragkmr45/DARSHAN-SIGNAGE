@@ -82,6 +82,7 @@ export interface ProofOfPlayTelemetryJob {
   deviceId: string;
   mediaId: string;
   scheduleId: string;
+  publishId?: string | null;
   playbackInstanceId: string;
   sceneId?: string | null;
   slotId?: string | null;
@@ -130,6 +131,7 @@ export function buildProofOfPlayIdempotencyKey(input: {
   deviceId: string;
   mediaId: string;
   scheduleId: string;
+  publishId?: string | null;
   playbackInstanceId?: string | null;
   startTime: string;
   endTime: string;
@@ -143,6 +145,7 @@ export function buildProofOfPlayIdempotencyKey(input: {
     input.scheduleId,
     input.playbackInstanceId ?? '',
   ];
+  if (input.publishId != null) identity.push(`publish:${input.publishId}`);
   // Preserve the pre-page-selection hash exactly for legacy/null events so an
   // upgrade cannot duplicate an event whose first response was lost.
   if (input.pageNumber != null) identity.push(`page:${input.pageNumber}`);
@@ -237,6 +240,7 @@ export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) 
     device_id: job.deviceId,
     media_id: job.mediaId,
     schedule_id: job.scheduleId,
+    publish_id: job.publishId ?? null,
     playback_instance_id: job.playbackInstanceId,
     scene_id: job.sceneId ?? null,
     slot_id: job.slotId ?? null,
@@ -290,6 +294,7 @@ export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) 
           media_id: job.mediaId,
           presentation_id: job.scheduleId,
           schedule_id: job.scheduleId,
+          publish_id: job.publishId ?? null,
           scene_id: job.sceneId ?? null,
           slot_id: job.slotId ?? null,
           item_id: job.itemId ?? null,

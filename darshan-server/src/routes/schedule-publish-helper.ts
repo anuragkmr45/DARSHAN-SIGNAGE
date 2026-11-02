@@ -743,10 +743,15 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
     notes: params.notes ?? null,
   };
 
-  const targetRows: { screen_id?: string; screen_group_id?: string }[] = [];
+  const targetRows: { screen_id?: string; screen_group_id?: string; resolved_screen_ids?: string[] }[] = [];
   const seenScreens = new Set<string>();
 
-  (params.screenGroupIds || []).forEach((gid) => targetRows.push({ screen_group_id: gid }));
+  (params.screenGroupIds || []).forEach((gid) =>
+    targetRows.push({
+      screen_group_id: gid,
+      resolved_screen_ids: [...(groupMemberMap.get(gid) || [])],
+    })
+  );
 
   resolveGroupScreens(params.screenGroupIds || []).forEach((sid) => {
     if (!seenScreens.has(sid)) {
@@ -788,6 +793,7 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
             publish_id: publish.id,
             screen_id: t.screen_id,
             screen_group_id: t.screen_group_id,
+            resolved_screen_ids: t.resolved_screen_ids ?? [],
           }))
         );
     }

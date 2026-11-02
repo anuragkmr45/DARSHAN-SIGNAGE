@@ -66,6 +66,11 @@
     "metricsEnabled": true,
     "bindAddress": "127.0.0.1",
     "port": 3300,
-    "allowRemoteAccess": false
+    "allowRemoteAccess": false,
+    "tlsEnabled": false,
+    "tlsCertPath": "",
+    "tlsKeyPath": "",
+    "tlsCaPath": "",
+    "requireClientCertificate": true
   }
 }

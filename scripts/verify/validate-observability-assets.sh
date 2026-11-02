@@ -61,6 +61,17 @@ sed \
   -e 's/__NODE_EXPORTER_HOST_PORT__/9100/g' \
   -e 's/__POSTGRES_EXPORTER_HOST_PORT__/9187/g' \
   -e 's/__NGINX_EXPORTER_HOST_PORT__/9113/g' \
+  -e 's/__OBSERVABILITY_METRICS_SCHEME__/http/g' \
+  -e "s/__OBSERVABILITY_NODE_TARGET__/${OBSERVABILITY_HOST}:9100/g" \
+  -e 's/__REMOTE_EXPORTER_SCHEME__/http/g' \
+  -e 's/__REMOTE_NODE_EXPORTER_PORT__/9100/g' \
+  -e 's/__REMOTE_POSTGRES_EXPORTER_PORT__/9187/g' \
+  -e 's/__REMOTE_NGINX_EXPORTER_PORT__/9113/g' \
+  -e 's#__NODE_EXPORTER_METRICS_PATH__#/metrics#g' \
+  -e 's#__POSTGRES_EXPORTER_METRICS_PATH__#/metrics#g' \
+  -e 's#__NGINX_EXPORTER_METRICS_PATH__#/metrics#g' \
+  -e 's/__PLAYER_METRICS_SCHEME__/http/g' \
+  -e 's#__PLAYER_METRICS_TARGET_FILE__#/etc/darshan/prometheus/file-sd/players.targets.json#g' \
   "$TEMPLATE_SOURCE" > "$RENDERED_PROMETHEUS"
 
 # The standalone asset check intentionally validates the HTTP development
@@ -70,6 +81,10 @@ sed -i \
   -e '/__BACKEND_METRICS_TLS_CONFIG__/d' \
   -e '/__BACKEND_METRICS_AUTHORIZATION__/d' \
   -e '/__MINIO_METRICS_TLS_CONFIG__/d' \
+  -e '/__PLAYER_METRICS_TLS_CONFIG__/d' \
+  -e '/__OBSERVABILITY_ALERTING_TLS_CONFIG__/d' \
+  -e '/__OBSERVABILITY_SCRAPE_TLS_CONFIG__/d' \
+  -e '/__REMOTE_EXPORTER_TLS_CONFIG__/d' \
   "$RENDERED_PROMETHEUS"
 
 cp -R "$PLATFORM_ROOT/deploy/shared/observability/prometheus" "$RENDERED_PROMETHEUS_ASSETS"

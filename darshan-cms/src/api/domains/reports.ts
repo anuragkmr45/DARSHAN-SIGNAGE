@@ -2,6 +2,7 @@ import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
 import type {
   OfflineScreensReport,
+  AvailabilityReport,
   ReportSummary,
   ScheduleActivityReport,
   StorageReport,
@@ -13,6 +14,13 @@ export const reportsApi = {
     apiClient.request<ReportSummary>({
       path: endpoints.reports.summary,
       method: "GET",
+    }),
+
+  getAvailability: (days: number) =>
+    apiClient.request<AvailabilityReport>({
+      path: endpoints.reports.availability,
+      method: "GET",
+      query: { days },
     }),
 
   getScheduleActivity: (params?: { days?: number }) =>

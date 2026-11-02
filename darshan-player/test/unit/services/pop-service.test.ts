@@ -133,6 +133,22 @@ describe('Proof-of-Play Service', () => {
       const buffer = (popService as any).eventBuffer
       expect(buffer[0].page_number).to.equal(4)
     })
+
+    it('preserves publish identity on a completed playback event', () => {
+      const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+      const popService = getProofOfPlayService()
+
+      popService.recordStart({
+        scheduleId: 'schedule-1',
+        publishId: 'publish-1',
+        mediaId: 'media-1',
+        playbackInstanceId: 'playback-publish-1',
+      })
+      popService.recordEnd('playback-publish-1', true)
+
+      const buffer = (popService as any).eventBuffer
+      expect(buffer[0].publish_id).to.equal('publish-1')
+    })
   })
 
   describe('Deduplication', () => {
@@ -173,6 +189,7 @@ describe('Proof-of-Play Service', () => {
 
       expect(postStub.calledOnce).to.be.true
       expect(postStub.firstCall.args[0]).to.equal('/api/v1/device/proof-of-play')
+      expect(postStub.firstCall.args[1].publish_id).to.equal(null)
     })
 
     it('should spool events when offline', async () => {
@@ -224,6 +241,7 @@ describe('Proof-of-Play Service', () => {
 
       expect(postStub.calledOnce).to.be.true
       expect(postStub.firstCall.args[1].page_number).to.equal(3)
+      expect(postStub.firstCall.args[1].publish_id).to.equal(null)
       expect(fs.existsSync(spoolFile)).to.be.false // Should be deleted after flush
     })
   })

@@ -210,13 +210,15 @@ describe('Playback Engine', () => {
     expect(pageOne).to.equal(legacyPageOne)
   })
 
-  it('records the selected PDF page for direct timeline proof-of-play', async () => {
+  it('records direct timeline proof-of-play only after the renderer confirms display', async () => {
     const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
     const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
     const engine = getPlaybackEngine()
     const recordStart = sandbox.stub(getProofOfPlayService(), 'recordStart')
     engine.currentScheduleId = 'schedule-1'
-    engine.mainWindow = { webContents: { send: sandbox.spy() } }
+    engine.currentPublishId = 'publish-1'
+    const send = sandbox.spy()
+    engine.mainWindow = { webContents: { send } }
 
     const now = Date.now()
     await engine.handlePlayItem({
@@ -237,11 +239,88 @@ describe('Playback Engine', () => {
       index: 0,
     })
 
+    expect(recordStart.called).to.equal(false)
+    const renderToken = send.firstCall.args[1].renderToken
+    expect(engine.confirmRenderedPlayback({
+      itemId: 'pdf-item',
+      mediaId: 'media-pdf',
+      renderToken,
+      pageNumber: 3,
+    })).to.equal(true)
     expect(recordStart.calledWithMatch({
       scheduleId: 'schedule-1',
+      publishId: 'publish-1',
       mediaId: 'media-pdf',
       pageNumber: 3,
     })).to.equal(true)
+    expect(engine.confirmRenderedPlayback({
+      itemId: 'pdf-item',
+      mediaId: 'media-pdf',
+      renderToken,
+      pageNumber: 3,
+    })).to.equal(false)
+  })
+
+  it('records layout proof-of-play with the authoritative applied publish identity', () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+    const engine = getPlaybackEngine()
+    engine.currentPublishId = 'publish-layout-1'
+    engine.currentScheduleId = 'schedule-1'
+    engine.currentItem = {
+      id: 'scene-1',
+      type: 'scene',
+      displayMs: 10000,
+      fit: 'contain',
+      muted: true,
+      loop: false,
+      transitionDurationMs: 0,
+    }
+    const recordStart = sandbox.stub(getProofOfPlayService(), 'recordStart')
+
+    expect(engine.recordRenderedLayoutPlayback({
+      scene_id: 'scene-1',
+      slot_id: 'slot-1',
+      item_id: 'item-1',
+      media_id: 'media-1',
+      schedule_id: 'schedule-1',
+      playback_instance_id: 'layout-instance-1',
+      started_at: '2000-01-01T00:00:00.000Z',
+    })).to.equal(true)
+
+    expect(recordStart.calledWithMatch({
+      scheduleId: 'schedule-1',
+      publishId: 'publish-layout-1',
+      mediaId: 'media-1',
+      playbackInstanceId: 'layout-instance-1',
+    })).to.equal(true)
+    expect(recordStart.firstCall.args[0].startedAt).not.to.equal('2000-01-01T00:00:00.000Z')
+  })
+
+  it('rejects a delayed renderer confirmation after the scheduled occurrence completed', async () => {
+    const { getPlaybackEngine } = require('../../../src/main/services/playback/playback-engine')
+    const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+    const engine = getPlaybackEngine()
+    const recordStart = sandbox.stub(getProofOfPlayService(), 'recordStart')
+    engine.currentScheduleId = 'schedule-1'
+    const send = sandbox.spy()
+    engine.mainWindow = { webContents: { send } }
+    const item = {
+      id: 'late-image', type: 'image', mediaId: 'media-late', remoteUrl: 'https://cdn.example/late.png',
+      displayMs: 1000, fit: 'contain', muted: true, loop: false, transitionDurationMs: 0,
+    }
+    const scheduledItem = { item, startTime: Date.now(), endTime: Date.now() + 1000, index: 0 }
+
+    await engine.handlePlayItem(scheduledItem)
+    const renderToken = send.firstCall.args[1].renderToken
+    engine.handleItemComplete(scheduledItem)
+
+    expect(engine.confirmRenderedPlayback({
+      itemId: item.id,
+      mediaId: item.mediaId,
+      renderToken,
+    })).to.equal(false)
+    expect(recordStart.called).to.equal(false)
   })
 
   it('ignores equivalent scene playlist updates when only remaining scene time changed', async () => {

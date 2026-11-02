@@ -489,6 +489,9 @@ export default function Dashboard() {
   const notOnlineScreens = Math.max(0, totalScreens - onlineScreens);
   const longOfflineCount = offlineScreens?.count ?? 0;
   const activeScheduledScreens = overview?.schedules?.active_screens_now;
+  const appliedScheduledScreens = overview?.schedules?.applied_screens_now;
+  const reportingPlaybackScreens = overview?.schedules?.reporting_playback_now;
+  const proofObservedScreens = overview?.schedules?.proof_observed_now;
   const commandPosture =
     isMetricsError || isSystemHealthError || isOfflineError || isObservabilityError
       ? "Dashboard data unavailable"
@@ -564,6 +567,11 @@ export default function Dashboard() {
           <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
             <p className="text-xs uppercase tracking-[0.14em] text-white/60">Active schedule assignments</p>
             <p className="mt-1 text-sm font-semibold">{isMetricsLoading ? "Loading…" : isMetricsError || !hasMetricNumber(activeScheduledScreens) ? "Unavailable" : `${activeScheduledScreens} screens now`}</p>
+            {!isMetricsLoading && !isMetricsError && hasMetricNumber(activeScheduledScreens) ? (
+              <p className="mt-1 text-xs text-white/70">
+                {appliedScheduledScreens ?? 0} applied · {reportingPlaybackScreens ?? 0} reporting playback · {proofObservedScreens ?? 0} with proof
+              </p>
+            ) : null}
           </div>
           <div className="p-4">
             <p className="text-xs uppercase tracking-[0.14em] text-white/60">Last publish</p>

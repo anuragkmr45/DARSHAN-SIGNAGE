@@ -85,6 +85,7 @@ describe('Schedule activity report', () => {
         publish_id: publishId,
         screen_id: screenId,
         status: 'SUCCESS',
+        applied_at: new Date(),
       },
       {
         id: randomUUID(),
@@ -93,6 +94,15 @@ describe('Schedule activity report', () => {
         status: 'PENDING',
       },
     ]);
+    await db.insert(schema.proofOfPlay).values({
+      screen_id: screenId,
+      schedule_id: scheduleId,
+      publish_id: publishId,
+      playback_instance_id: randomUUID(),
+      started_at: new Date(),
+      ended_at: new Date(),
+      idempotency_key: randomUUID().replaceAll('-', ''),
+    });
 
     const response = await server.inject({
       method: 'GET',
@@ -107,11 +117,16 @@ describe('Schedule activity report', () => {
     expect(body.summary.schedules).toBeGreaterThan(0);
     expect(body.summary.target_events).toBeGreaterThanOrEqual(2);
     expect(body.summary.pending_targets).toBeGreaterThanOrEqual(1);
+    expect(body.summary.applied_targets).toBeGreaterThanOrEqual(1);
+    expect(body.summary.proof_observed_targets).toBeGreaterThanOrEqual(1);
     expect(body.by_screen).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           target_id: screenId,
           target_name: 'Lobby Screen',
+          entries: expect.arrayContaining([
+            expect.objectContaining({ proof_observed: true }),
+          ]),
         }),
       ]),
     );
@@ -156,6 +171,28 @@ describe('Schedule activity report', () => {
       await db.delete(schema.screens).where(eq(schema.screens.id, newId));
       await db.delete(schema.screens).where(eq(schema.screens.id, neverSeenId));
     }
+  });
+
+  it('returns historical availability with explicit unknown time and IST report buckets', async () => {
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/reports/availability?days=1',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      range: {
+        timezone: 'Asia/Kolkata',
+        offline_threshold_seconds: 90,
+      },
+      summary: {
+        online_seconds: expect.any(Number),
+        estimated_offline_seconds: expect.any(Number),
+        unknown_seconds: expect.any(Number),
+      },
+      screens: expect.any(Array),
+      daily: expect.any(Array),
+    });
   });
 
   it('keeps last publish available when pg-boss statistics fail', async () => {

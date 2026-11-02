@@ -65,6 +65,75 @@ describe('Snapshot Manager', () => {
     clearRuntimeModuleCache()
   })
 
+  it('reports an exact publish as applied after persistence when required media is ready', async () => {
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    sandbox.stub(getHttpClient(), 'getResponse').resolves({
+      status: 200,
+      data: {
+        publish: {
+          publish_id: '11111111-1111-4111-8111-111111111111',
+          snapshot_id: '22222222-2222-4222-8222-222222222222',
+        },
+        content_state: 'scheduled',
+        snapshot: {
+          id: '22222222-2222-4222-8222-222222222222',
+          schedule: {
+            id: '33333333-3333-4333-8333-333333333333',
+            items: [{ id: 'message-1', type: 'message', message: 'Ready' }],
+          },
+        },
+      },
+    })
+    const { getHeartbeatService } = require('../../../src/main/services/telemetry/heartbeat')
+    const heartbeat = getHeartbeatService()
+    const applied = sandbox.stub(heartbeat, 'setAppliedSnapshot')
+    const immediate = sandbox.stub(heartbeat, 'sendImmediate').resolves()
+
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const playlist = await getSnapshotManager().refreshSnapshot()
+
+    expect(playlist?.publishId).to.equal('11111111-1111-4111-8111-111111111111')
+    expect(applied.calledOnceWithExactly(
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222'
+    )).to.equal(true)
+    expect(immediate.calledOnce).to.equal(true)
+    const persisted = JSON.parse(fs.readFileSync(path.join(cacheDir, 'last-snapshot.json'), 'utf8'))
+    expect(persisted.publish.publish_id).to.equal('11111111-1111-4111-8111-111111111111')
+  })
+
+  it('does not confirm a publish when required media could not be cached', async () => {
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    sandbox.stub(getHttpClient(), 'getResponse').resolves({
+      status: 200,
+      data: {
+        publish: {
+          publish_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          snapshot_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        },
+        content_state: 'scheduled',
+        snapshot: {
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          schedule: { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', items: [] },
+          items: [{ id: 'image-1', media_id: 'media-1', type: 'image', media_url: 'https://invalid.example/image.jpg' }],
+        },
+      },
+    })
+    const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+    sandbox.stub(getCacheManager(), 'prefetch').resolves()
+    sandbox.stub(getCacheManager(), 'has').resolves(false)
+    const { getHeartbeatService } = require('../../../src/main/services/telemetry/heartbeat')
+    const heartbeat = getHeartbeatService()
+    const applied = sandbox.stub(heartbeat, 'setAppliedSnapshot')
+    const immediate = sandbox.stub(heartbeat, 'sendImmediate').resolves()
+
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    await getSnapshotManager().refreshSnapshot()
+
+    expect(applied.called).to.equal(false)
+    expect(immediate.called).to.equal(false)
+  })
+
   it('should treat a 404 snapshot response as intentional no-content instead of offline fallback', async () => {
     const mediaDir = path.join(cacheDir, 'media')
     fs.mkdirSync(mediaDir, { recursive: true })
@@ -274,6 +343,7 @@ describe('Snapshot Manager', () => {
     fs.writeFileSync(
       snapshotFile,
       JSON.stringify({
+        publish_id: 'publish-local-window',
         snapshot_id: 'snap-local-window',
         schedule: {
           id: 'sched-window',
@@ -320,6 +390,9 @@ describe('Snapshot Manager', () => {
     fs.writeFileSync(path.join(mediaDir, 'media-1.mp4'), Buffer.from('scheduled'))
     fs.writeFileSync(path.join(mediaDir, 'media-default.jpg'), Buffer.from('default'))
 
+    const { getHeartbeatService } = require('../../../src/main/services/telemetry/heartbeat')
+    const heartbeat = getHeartbeatService()
+    const clearApplied = sandbox.spy(heartbeat, 'clearAppliedSnapshot')
     const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
     const snapshotManager = getSnapshotManager()
 
@@ -327,6 +400,7 @@ describe('Snapshot Manager', () => {
 
     const initialPlaylist = snapshotManager.getCurrentPlaylist()
     expect(initialPlaylist?.mode).to.equal('default')
+    expect((heartbeat as any).appliedPublishId).to.equal('publish-local-window')
     expect(initialPlaylist?.items.map((item: any) => item.mediaId)).to.deep.equal(['media-default'])
 
     await clock.tickAsync(1000)
@@ -335,12 +409,15 @@ describe('Snapshot Manager', () => {
     expect(transitionedPlaylist?.mode).to.equal('normal')
     expect(transitionedPlaylist?.items[0]?.type).to.equal('video')
     expect(transitionedPlaylist?.items.map((item: any) => item.mediaId)).to.deep.equal(['media-1'])
+    expect((heartbeat as any).appliedPublishId).to.equal('publish-local-window')
 
     await clock.tickAsync(9 * 60 * 1000 + 59 * 1000)
 
     const postWindowPlaylist = snapshotManager.getCurrentPlaylist()
     expect(postWindowPlaylist?.mode).to.equal('default')
     expect(postWindowPlaylist?.items.map((item: any) => item.mediaId)).to.deep.equal(['media-default'])
+    expect((heartbeat as any).appliedPublishId).to.equal('publish-local-window')
+    expect(clearApplied.called).to.equal(false)
   })
 
   it('should synthesize a layout scene for slot-based active schedule windows', async () => {

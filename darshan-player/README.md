@@ -299,7 +299,7 @@ Autostart is managed at the user-session level:
 curl http://127.0.0.1:3300/healthz
 ```
 
-The local health and metrics server stays bound to `127.0.0.1` by default. Remote scraping is disabled unless `observability.allowRemoteAccess` is explicitly turned on in the player config.
+The local health and metrics server stays bound to `127.0.0.1` by default. Remote scraping is disabled unless `observability.allowRemoteAccess` is explicitly turned on in the player config. Remote access also requires `observability.tlsEnabled=true`, a server certificate/key, and a trusted client CA; Prometheus must present a client certificate signed by that CA.
 
 Response:
 ```json
@@ -350,7 +350,7 @@ Safe defaults:
 - `observability.port=3300`
 - `observability.allowRemoteAccess=false`
 
-Use direct player scraping only on approved management networks. If direct scrape is not required, keep the default localhost binding and rely on backend summaries in the CMS.
+For an approved remote scrape, set `allowRemoteAccess=true`, `tlsEnabled=true`, and provide `tlsCertPath`, `tlsKeyPath`, and `tlsCaPath`. Keep `requireClientCertificate=true`; the Prometheus client certificate must chain to that CA. If direct scrape is not required, keep the backward-compatible localhost HTTP binding and rely on backend summaries in the CMS.
 
 ## API Contracts
 

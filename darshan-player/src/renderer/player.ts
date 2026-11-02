@@ -71,6 +71,7 @@ type PlaybackProgressContext = PlaybackProgressIdentity & {
 
 type ScheduledMediaOptions = {
   scheduleId?: string
+  renderToken?: string
   singleItemFrame?: boolean
   retryingFailedItem?: boolean
 }
@@ -191,6 +192,7 @@ class Player {
               {
                 item: data.item,
                 scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+                renderToken: typeof data.renderToken === 'string' ? data.renderToken : undefined,
                 singleItemFrame: data.singleItemFrame === true,
               },
               this.latestPresentationRevision,
@@ -207,6 +209,7 @@ class Player {
         this.setActiveSource('schedule')
         this.playMedia(data.item, {
           scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
+          renderToken: typeof data.renderToken === 'string' ? data.renderToken : undefined,
           singleItemFrame: data.singleItemFrame === true,
         }).catch((error) => {
           this.log('error', 'Failed to play media', { error: error.message })
@@ -272,6 +275,7 @@ class Player {
       this.setActiveSource('schedule')
       void this.playMedia(deferred.item, {
         scheduleId: deferred.scheduleId,
+        renderToken: deferred.renderToken,
         singleItemFrame: deferred.singleItemFrame,
       }).catch((error) => {
         this.log('error', 'Failed to play deferred media', { error: error.message })
@@ -474,6 +478,16 @@ class Player {
       this.showElement(element, undefined, transitionDurationMs)
 
       this.currentElement = element
+      const mediaId = item.mediaId || item.objectKey || item.id
+      const result = await window.darshan?.reportMediaStarted?.({
+        itemId: item.id,
+        mediaId,
+        renderToken: options.renderToken || '',
+        pageNumber: item.type === 'pdf' ? item.pageNumber ?? 1 : undefined,
+      })
+      if (result && !result.accepted) {
+        this.log('warn', 'Main process rejected stale rendered playback confirmation', { itemId: item.id })
+      }
     } catch (error) {
       this.log('error', 'Failed to play media', { error: (error as Error).message })
       if (item.type !== 'message' && typeof item.meta?.['emergency_message'] === 'string' && sessionId === this.playbackSession) {

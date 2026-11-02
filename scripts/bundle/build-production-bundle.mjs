@@ -278,6 +278,18 @@ function assertBundleContract() {
   if (!prometheus.includes('scheme: https') || !prometheus.includes('ca_file: /etc/darshan/tls/transport-ca.crt')) {
     fail('Generated Prometheus config must verify HTTPS scrape targets')
   }
+  const playerPrometheusPath = path.join(bundleRoot, 'production/observability/prometheus/prometheus.player-mtls.yml')
+  if (!fs.existsSync(playerPrometheusPath)) fail('Generated player mTLS Prometheus config is missing')
+  const playerPrometheus = fs.readFileSync(playerPrometheusPath, 'utf8')
+  for (const required of [
+    'job_name: players',
+    'scheme: https',
+    'ca_file: /etc/darshan/player-metrics/ca.crt',
+    'cert_file: /etc/darshan/player-metrics/client.crt',
+    'key_file: /etc/darshan/player-metrics/client.key',
+  ]) {
+    if (!playerPrometheus.includes(required)) fail(`Generated player mTLS Prometheus config is incomplete: ${required}`)
+  }
 
   const forbidden = /curl\s+-k\b|NODE_TLS_REJECT_UNAUTHORIZED|rejectUnauthorized\s*[:=]\s*false/
   for (const { relative, absolute } of files) {

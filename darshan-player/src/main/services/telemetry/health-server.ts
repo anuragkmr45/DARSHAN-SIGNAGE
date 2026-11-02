@@ -4,6 +4,8 @@
  */
 
 import * as http from 'http'
+import * as https from 'https'
+import * as fs from 'fs'
 import { app } from 'electron'
 import { getConfigManager } from '../../../common/config'
 import { getLogger } from '../../../common/logger'
@@ -25,7 +27,7 @@ function getSafeAppVersion(): string {
 }
 
 export class HealthServer {
-  private server?: http.Server
+  private server?: http.Server | https.Server
   private port = 3300
   private host = '127.0.0.1'
   private lastErrors: string[] = []
@@ -50,16 +52,33 @@ export class HealthServer {
     this.host = observabilityConfig.bindAddress
     this.port = observabilityConfig.port
 
-    this.server = http.createServer((req, res) => {
+    const handler = (req: http.IncomingMessage, res: http.ServerResponse): void => {
       this.handleRequest(req, res).catch((error: unknown) => {
         logger.error({ error }, 'Error handling request')
         res.writeHead(500, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Internal server error' }))
       })
-    })
+    }
+
+    this.server = observabilityConfig.tlsEnabled
+      ? https.createServer(
+          {
+            cert: fs.readFileSync(observabilityConfig.tlsCertPath),
+            key: fs.readFileSync(observabilityConfig.tlsKeyPath),
+            ca: observabilityConfig.tlsCaPath ? fs.readFileSync(observabilityConfig.tlsCaPath) : undefined,
+            requestCert: observabilityConfig.requireClientCertificate,
+            rejectUnauthorized: observabilityConfig.requireClientCertificate,
+            minVersion: 'TLSv1.2',
+          },
+          handler
+        )
+      : http.createServer(handler)
 
     this.server.listen(this.port, this.host, () => {
-      logger.info({ host: this.host, port: this.port }, 'Health server started')
+      logger.info(
+        { host: this.host, port: this.port, protocol: observabilityConfig.tlsEnabled ? 'https' : 'http' },
+        'Health server started'
+      )
     })
 
     this.server.on('error', (error) => {
@@ -227,7 +246,8 @@ export class HealthServer {
    * Get server address
    */
   getAddress(): string {
-    return `http://${this.host}:${this.port}`
+    const protocol = getConfigManager().getConfig().observability.tlsEnabled ? 'https' : 'http'
+    return `${protocol}://${this.host}:${this.port}`
   }
 }
 

@@ -10,6 +10,7 @@ import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 import { createEmergencyRepository } from '@/db/repositories/emergency';
 import { escapeHtml, renderPdfDocument } from '@/utils/pdf-render';
+import { buildAvailabilityReport } from '@/services/screen-availability';
 
 const logger = createLogger('reports-routes');
 
@@ -139,7 +140,9 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!ability.can('read', 'Dashboard') && !ability.can('read', 'Report')) {
+          throw AppError.forbidden('Forbidden');
+        }
 
         const parsedDays = Number(request.query.days ?? '7');
         const days = Number.isFinite(parsedDays) ? Math.min(365, Math.max(1, Math.floor(parsedDays))) : 7;
@@ -164,6 +167,20 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         const targets = publishIds.length
           ? await db.select().from(schema.publishTargets).where(inArray(schema.publishTargets.publish_id, publishIds))
           : [];
+        const proofRows = publishIds.length
+          ? await db
+              .select({
+                publish_id: schema.proofOfPlay.publish_id,
+                screen_id: schema.proofOfPlay.screen_id,
+                started_at: schema.proofOfPlay.started_at,
+              })
+              .from(schema.proofOfPlay)
+              .where(and(
+                inArray(schema.proofOfPlay.publish_id, publishIds),
+                lte(schema.proofOfPlay.started_at, rangeEnd),
+                gte(schema.proofOfPlay.started_at, rangeStart)
+              ))
+          : [];
 
         const screenIds = [...new Set(targets.map((item) => item.screen_id).filter((value): value is string => Boolean(value)))];
         const groupIds = [...new Set(targets.map((item) => item.screen_group_id).filter((value): value is string => Boolean(value)))];
@@ -185,6 +202,13 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         const targetsByPublishId = new Map<string, typeof targets>();
         const screenNameById = new Map(screens.map((item) => [item.id, item.name]));
         const groupNameById = new Map(screenGroups.map((item) => [item.id, item.name]));
+        const proofAtByPublishScreen = new Map<string, Date>();
+        for (const proof of proofRows) {
+          if (!proof.publish_id) continue;
+          const key = `${proof.publish_id}:${proof.screen_id}`;
+          const existing = proofAtByPublishScreen.get(key);
+          if (!existing || proof.started_at > existing) proofAtByPublishScreen.set(key, proof.started_at);
+        }
 
         for (const target of targets) {
           const existing = targetsByPublishId.get(target.publish_id) || [];
@@ -217,6 +241,15 @@ export async function reportsRoutes(fastify: FastifyInstance) {
               : target.screen_group_id
                 ? groupNameById.get(target.screen_group_id) || 'Unknown group'
                 : 'Unresolved target';
+            const resolvedProofDates = target.screen_id
+              ? [proofAtByPublishScreen.get(`${publish.id}:${target.screen_id}`)].filter((value): value is Date => Boolean(value))
+              : (target.resolved_screen_ids ?? [])
+                  .map((screenId) => proofAtByPublishScreen.get(`${publish.id}:${screenId}`))
+                  .filter((value): value is Date => Boolean(value));
+            const proofObserved = target.screen_id
+              ? resolvedProofDates.length === 1
+              : (target.resolved_screen_ids ?? []).length > 0 &&
+                resolvedProofDates.length === (target.resolved_screen_ids ?? []).length;
 
             return {
               publish_id: publish.id,
@@ -232,6 +265,11 @@ export async function reportsRoutes(fastify: FastifyInstance) {
               lifecycle_status: lifecycleStatus,
               target_status: target.status,
               target_error: target.error ?? null,
+              applied_at: toIsoOrNull(target.applied_at),
+              proof_observed: proofObserved,
+              proof_observed_at: proofObserved
+                ? resolvedProofDates.sort((left, right) => right.getTime() - left.getTime())[0]?.toISOString() ?? null
+                : null,
             };
           });
         });
@@ -287,6 +325,9 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           summary: {
             schedules: schedules.length,
             target_events: entries.length,
+            assigned_targets: entries.length,
+            applied_targets: entries.filter((entry) => entry.applied_at !== null).length,
+            proof_observed_targets: entries.filter((entry) => entry.proof_observed).length,
             pending_targets: entries.filter((entry) => entry.target_status === 'PENDING').length,
             successful_targets: entries.filter((entry) => entry.target_status === 'SUCCESS').length,
             failed_targets: entries.filter((entry) => entry.target_status === 'FAILED').length,
@@ -318,7 +359,9 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!ability.can('read', 'Dashboard') && !ability.can('read', 'Report')) {
+          throw AppError.forbidden('Forbidden');
+        }
 
         const [mediaCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.media);
         const [screensActive] = await db
@@ -333,11 +376,18 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         const totalScreens = Number(screensActive?.count || 0) + Number(screensOffline?.count || 0);
         const uptimePercent =
           totalScreens > 0 ? Number(((Number(screensActive?.count || 0) / totalScreens) * 100).toFixed(2)) : null;
+        const availability = await buildAvailabilityReport({
+          rangeStart: new Date(Date.now() - 24 * 60 * 60 * 1000),
+          rangeEnd: new Date(),
+        });
 
         return reply.send({
           media_total: Number(mediaCount?.count || 0),
           screens_active: Number(screensActive?.count || 0),
           screens_offline: Number(screensOffline?.count || 0),
+          current_screen_active_percent: uptimePercent,
+          availability_uptime_percent: availability.summary.uptime_percent,
+          availability_last_24h: availability.summary,
           screen_uptime_percent: uptimePercent,
         });
       } catch (error) {
@@ -345,6 +395,37 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         return respondWithError(reply, error);
       }
     }
+  );
+
+  fastify.get<{ Querystring: { days?: string } }>(
+    apiEndpoints.reports.availability,
+    {
+      schema: {
+        description: 'Historical player availability with online, estimated-offline, and unknown time',
+        tags: ['Reports'],
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Dashboard') && !ability.can('read', 'Report')) {
+          throw AppError.forbidden('Forbidden');
+        }
+
+        const parsedDays = Number(request.query.days ?? '7');
+        const days = Number.isFinite(parsedDays) ? Math.min(365, Math.max(1, Math.floor(parsedDays))) : 7;
+        const rangeEnd = new Date();
+        const rangeStart = new Date(rangeEnd.getTime() - days * 24 * 60 * 60 * 1000);
+        return reply.send(await buildAvailabilityReport({ rangeStart, rangeEnd }));
+      } catch (error) {
+        logger.error(error, 'Availability report error');
+        return respondWithError(reply, error);
+      }
+    },
   );
 
   fastify.get(
@@ -574,6 +655,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           status: s.status,
           last_heartbeat_at: s.lastHeartbeatAt?.toISOString() ?? null,
           never_seen: s.lastHeartbeatAt === null,
+          availability_label: s.lastHeartbeatAt === null ? 'Never seen' : 'Offline for more than 24 hours',
           offline_hours: s.lastHeartbeatAt ? Math.floor((now.getTime() - s.lastHeartbeatAt.getTime()) / 3600000) : null,
         }));
 

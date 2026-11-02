@@ -30,6 +30,7 @@ const logger = getLogger('pop-service')
 
 interface ActivePlayback {
   scheduleId: string
+  publishId: string | null
   mediaId: string
   playbackInstanceId: string
   sceneId?: string
@@ -41,6 +42,7 @@ interface ActivePlayback {
 
 interface PlaybackStartInput {
   scheduleId: string
+  publishId?: string | null
   mediaId: string
   playbackInstanceId: string
   sceneId?: string
@@ -76,6 +78,7 @@ function stripReplayMetadata(event: BufferedProofOfPlayEvent | ProofOfPlayEvent)
   return {
     device_id: event.device_id,
     schedule_id: event.schedule_id,
+    publish_id: event.publish_id ?? null,
     media_id: event.media_id,
     playback_instance_id: event.playback_instance_id,
     scene_id: event.scene_id,
@@ -148,6 +151,7 @@ export class ProofOfPlayService {
 
     this.activePlaybacks.set(normalizedInput.playbackInstanceId, {
       scheduleId: normalizedInput.scheduleId,
+      publishId: normalizedInput.publishId ?? null,
       mediaId: normalizedInput.mediaId,
       playbackInstanceId: normalizedInput.playbackInstanceId,
       sceneId: normalizedInput.sceneId,
@@ -231,6 +235,7 @@ export class ProofOfPlayService {
       source: 'live',
       device_id: deviceId,
       schedule_id: active.scheduleId,
+      publish_id: active.publishId,
       media_id: active.mediaId,
       playback_instance_id: active.playbackInstanceId,
       scene_id: active.sceneId,
@@ -694,6 +699,12 @@ export class ProofOfPlayService {
     return {
       device_id: event.device_id || event.deviceId || pairingService.getDeviceId() || '',
       schedule_id: event.schedule_id || event.scheduleId || '',
+      publish_id:
+        typeof event.publish_id === 'string'
+          ? event.publish_id
+          : typeof event.publishId === 'string'
+            ? event.publishId
+            : null,
       media_id: event.media_id || event.mediaId || '',
       playback_instance_id: event.playback_instance_id || event.playbackInstanceId || generateId(16),
       scene_id: event.scene_id || event.sceneId,

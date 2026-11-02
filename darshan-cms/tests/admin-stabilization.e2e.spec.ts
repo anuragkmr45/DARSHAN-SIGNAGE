@@ -339,11 +339,86 @@ const installCommonMocks = async (
       });
     }
 
+    if (pathname === "/api/v1/reports/availability" && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          range: {
+            start_at: "2026-04-08T12:00:00.000Z",
+            end_at: "2026-04-15T12:00:00.000Z",
+            timezone: "Asia/Kolkata",
+            offline_threshold_seconds: 90,
+          },
+          summary: {
+            screens: 2,
+            monitored_seconds: 1209600,
+            online_seconds: 600000,
+            estimated_offline_seconds: 3600,
+            unknown_seconds: 605000,
+            known_seconds: 603600,
+            uptime_percent: 99.4,
+          },
+          screens: [
+            {
+              screen_id: "screen-seen",
+              screen_name: "Reception Screen",
+              last_heartbeat_at: "2026-04-15T11:59:30.000Z",
+              never_seen: false,
+              online_seconds: 600000,
+              estimated_offline_seconds: 3600,
+              unknown_seconds: 1000,
+              known_seconds: 603600,
+              uptime_percent: 99.4,
+            },
+            {
+              screen_id: "screen-never-seen",
+              screen_name: "New Screen",
+              last_heartbeat_at: null,
+              never_seen: true,
+              online_seconds: 0,
+              estimated_offline_seconds: 0,
+              unknown_seconds: 604000,
+              known_seconds: 0,
+              uptime_percent: null,
+            },
+          ],
+          daily: [],
+        }),
+      });
+    }
+
+    if (pathname === "/api/v1/audit-logs" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0 }) });
+    }
+    if (pathname === "/api/v1/notifications" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    }
+    if (pathname === "/api/v1/emergencies/status" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ active: false, active_count: 0 }) });
+    }
+
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ user }) });
   });
 };
 
 test.describe("admin stabilization surfaces", () => {
+  test("shows historical player availability without inventing downtime for never-seen screens", async ({ page }) => {
+    await bootstrapSession(page, adminUser);
+    await installCommonMocks(page, {
+      user: adminUser,
+      rolesPayload: adminRolesPayload,
+      state: { apiKeys: [], webhooks: [], requests: [] },
+    });
+
+    await page.goto("/reports");
+    await expect(page.getByRole("heading", { name: "Reports & Logs" })).toBeVisible();
+    await expect(page.getByText("99.4%", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("cell", { name: "Reception Screen" })).toBeVisible();
+    await expect(page.getByRole("row", { name: /New Screen/ }).getByText("Never seen").first()).toBeVisible();
+    await expect(page.getByText(/Unknown time is excluded from uptime percentage/)).toBeVisible();
+  });
+
   test("guards sensitive admin routes and disables the global header search affordance", async ({ page }) => {
     await bootstrapSession(page, limitedUser);
     await installCommonMocks(page, {

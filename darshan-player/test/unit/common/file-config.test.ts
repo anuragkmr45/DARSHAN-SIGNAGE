@@ -385,6 +385,46 @@ describe('player file config loader', () => {
     expect(loaded.diagnostics.mappedConfigKeys).to.include('transportTls')
   })
 
+  it('loads an opt-in remote mTLS metrics listener from site config', () => {
+    const siteConfigPath = path.join(tempDir, 'player-config.json')
+    writeJson(siteConfigPath, {
+      player: {
+        observability: {
+          enabled: true,
+          metricsEnabled: true,
+          mediaCacheReportingEnabled: true,
+          bindAddress: '0.0.0.0',
+          port: 9464,
+          allowRemoteAccess: true,
+          tlsEnabled: true,
+          tlsCertPath: '/etc/darshan/player/metrics-server.crt',
+          tlsKeyPath: '/etc/darshan/player/metrics-server.key',
+          tlsCaPath: '/etc/darshan/player/metrics-client-ca.crt',
+          requireClientCertificate: true,
+        },
+      },
+    })
+    process.env.DARSHAN_PLAYER_CONFIG_FILE = siteConfigPath
+
+    const { loadPlayerFileConfig } = require('../../../src/common/file-config')
+    const loaded = loadPlayerFileConfig()
+
+    expect(loaded.config.observability).to.deep.equal({
+      enabled: true,
+      metricsEnabled: true,
+      mediaCacheReportingEnabled: true,
+      bindAddress: '0.0.0.0',
+      port: 9464,
+      allowRemoteAccess: true,
+      tlsEnabled: true,
+      tlsCertPath: '/etc/darshan/player/metrics-server.crt',
+      tlsKeyPath: '/etc/darshan/player/metrics-server.key',
+      tlsCaPath: '/etc/darshan/player/metrics-client-ca.crt',
+      requireClientCertificate: true,
+    })
+    expect(loaded.diagnostics.mappedConfigKeys).to.include('observability')
+  })
+
   it('redacts diagnostic URLs without changing useful host details', () => {
     const { redactUrlForDiagnostics } = require('../../../src/common/file-config')
 

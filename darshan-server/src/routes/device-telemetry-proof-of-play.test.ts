@@ -61,6 +61,16 @@ async function proofOfPlayIdempotencyColumnExists() {
   return Boolean((result.rows[0] as { exists?: boolean } | undefined)?.exists);
 }
 
+async function proofOfPlayPublishColumnExists() {
+  const result = await getDatabase().execute<{ exists: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'proof_of_play' AND column_name = 'publish_id'
+    ) AS exists
+  `);
+  return Boolean(result.rows[0]?.exists);
+}
+
 describe('device telemetry proof-of-play idempotency', () => {
   let server: FastifyInstance;
 
@@ -68,6 +78,9 @@ describe('device telemetry proof-of-play idempotency', () => {
     server = await createTestServer();
     if (!(await proofOfPlayIdempotencyColumnExists())) {
       await applyMigrationFile('0026_telemetry_async_persistence.sql');
+    }
+    if (!(await proofOfPlayPublishColumnExists())) {
+      await applyMigrationFile('0053_publish_delivery_evidence.sql');
     }
   });
 
@@ -88,6 +101,7 @@ describe('device telemetry proof-of-play idempotency', () => {
     const serial = `serial-${randomUUID()}`;
     const mediaId = randomUUID();
     const scheduleId = randomUUID();
+    const publishId = randomUUID();
     const startTime = new Date(Date.now() - 15_000).toISOString();
     const endTime = new Date().toISOString();
 
@@ -108,6 +122,7 @@ describe('device telemetry proof-of-play idempotency', () => {
       device_id: deviceId,
       media_id: mediaId,
       schedule_id: scheduleId,
+      publish_id: publishId,
       start_time: startTime,
       end_time: endTime,
       duration: 15,
@@ -140,6 +155,7 @@ describe('device telemetry proof-of-play idempotency', () => {
       deviceId,
       mediaId,
       scheduleId,
+      publishId,
       startTime,
       endTime,
       duration: 15,
@@ -154,6 +170,7 @@ describe('device telemetry proof-of-play idempotency', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.page_number).toBe(4);
+    expect(rows[0]?.publish_id).toBe(publishId);
     expect(putObjectMock).toHaveBeenCalledOnce();
   });
 });

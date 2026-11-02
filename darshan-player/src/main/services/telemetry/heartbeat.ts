@@ -26,6 +26,8 @@ export class HeartbeatService {
   private currentMediaId?: string
   private currentSceneId?: string
   private activeSlots: ActiveSlotPlayback[] = []
+  private appliedPublishId?: string
+  private appliedSnapshotId?: string
   private inFlightHeartbeat?: Promise<void>
   private followUpRequested = false
 
@@ -191,6 +193,8 @@ export class HeartbeatService {
       current_media_id: this.currentMediaId,
       current_scene_id: this.currentSceneId,
       active_slots: this.activeSlots,
+      applied_publish_id: this.appliedPublishId,
+      applied_snapshot_id: this.appliedSnapshotId,
       memory_total_mb: this.toMegabytes(stats.memoryTotal),
       memory_used_mb: this.toMegabytes(stats.memoryUsage),
       memory_free_mb: this.toMegabytes(stats.memoryFree),
@@ -364,6 +368,18 @@ export class HeartbeatService {
   setCurrentSchedule(scheduleId: string): void {
     this.currentScheduleId = scheduleId
     logger.debug({ scheduleId }, 'Current schedule updated')
+  }
+
+  setAppliedSnapshot(publishId: string, snapshotId: string): void {
+    this.appliedPublishId = publishId
+    this.appliedSnapshotId = snapshotId
+    logger.info({ publishId, snapshotId }, 'Applied snapshot delivery state updated')
+  }
+
+  clearAppliedSnapshot(): void {
+    this.appliedPublishId = undefined
+    this.appliedSnapshotId = undefined
+    logger.debug('Applied snapshot delivery state cleared')
   }
 
   /**

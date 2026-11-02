@@ -152,6 +152,11 @@ export interface ObservabilityConfig {
   bindAddress: string
   port: number
   allowRemoteAccess: boolean
+  tlsEnabled: boolean
+  tlsCertPath: string
+  tlsKeyPath: string
+  tlsCaPath: string
+  requireClientCertificate: boolean
 }
 
 export interface PairingConfig {
@@ -622,6 +627,8 @@ export interface HeartbeatPayload {
   current_media_id?: string
   current_scene_id?: string
   active_slots?: ActiveSlotPlayback[]
+  applied_publish_id?: string
+  applied_snapshot_id?: string
   memory_total_mb?: number
   memory_used_mb?: number
   memory_free_mb?: number
@@ -771,6 +778,7 @@ export interface HealthStatus {
 export interface ProofOfPlayEvent {
   device_id: string
   schedule_id: string
+  publish_id: string | null
   media_id: string
   playback_instance_id: string
   scene_id?: string

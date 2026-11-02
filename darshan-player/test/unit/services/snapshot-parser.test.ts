@@ -6,6 +6,22 @@ const { expect } = require('chai')
 const { parseSnapshotResponse } = require('../../../src/main/services/snapshot-parser.ts')
 
 describe('Snapshot Parser', () => {
+  it('preserves publish identity from the wrapped device response', () => {
+    const parsed = parseSnapshotResponse({
+      publish: {
+        publish_id: '11111111-1111-4111-8111-111111111111',
+        snapshot_id: '22222222-2222-4222-8222-222222222222',
+      },
+      snapshot: {
+        id: '22222222-2222-4222-8222-222222222222',
+        schedule: { id: '33333333-3333-4333-8333-333333333333', items: [] },
+      },
+    })
+
+    expect(parsed.publishId).to.equal('11111111-1111-4111-8111-111111111111')
+    expect(parsed.snapshotId).to.equal('22222222-2222-4222-8222-222222222222')
+  })
+
   it('should parse published snapshot with media URLs', () => {
     const raw = {
       id: 'snap-1',

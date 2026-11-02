@@ -161,7 +161,14 @@ const installApiMocks = async (page: Page, overrides?: { emptyTimeline?: boolean
         body: JSON.stringify({
           totals: { screens: 4 },
           screens: { total: 4, online_last_5m: 2, online: 2 },
-          schedules: { active: 5, active_screens_now: overrides?.emptyTimeline ? 0 : 2 },
+          schedules: {
+            active: 5,
+            active_screens_now: overrides?.emptyTimeline ? 0 : 2,
+            assigned_screens_now: overrides?.emptyTimeline ? 0 : 2,
+            applied_screens_now: overrides?.emptyTimeline ? 0 : 2,
+            reporting_playback_now: overrides?.emptyTimeline ? 0 : 1,
+            proof_observed_now: overrides?.emptyTimeline ? 0 : 1,
+          },
           storage: { media_bytes: 1024 },
           system_health: {
             status: "healthy",
@@ -221,11 +228,16 @@ const installApiMocks = async (page: Page, overrides?: { emptyTimeline?: boolean
         target_id: "screen-1", target_name: "Lobby Screen", target_type: "screen",
         published_at: now, taken_down_at: null, schedule_start_at: now,
         schedule_end_at: new Date(Date.now() + 3600000).toISOString(),
-        lifecycle_status: "ACTIVE", target_status: "PENDING", target_error: null,
+        lifecycle_status: "ACTIVE", target_status: "SUCCESS", target_error: null,
+        applied_at: now, proof_observed: true, proof_observed_at: now,
       };
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         range_start: new Date(Date.now() - 86400000).toISOString(), range_end: now,
-        summary: { schedules: 1, target_events: 1, pending_targets: 1, successful_targets: 0, failed_targets: 0, screens: 1, groups: 0 },
+        summary: {
+          schedules: 1, target_events: 1, assigned_targets: 1, applied_targets: 1,
+          proof_observed_targets: 1, pending_targets: 0, successful_targets: 1,
+          failed_targets: 0, screens: 1, groups: 0,
+        },
         by_screen: [{ target_id: "screen-1", target_name: "Lobby Screen", target_type: "screen", latest_activity_at: now, entries: [entry] }],
         by_group: [],
       }) });
@@ -311,8 +323,10 @@ test.describe("Dashboard active scheduled modal", () => {
     const dialog = page.getByRole("dialog", { name: "Schedule Report" });
     await expect(dialog.getByText("By Explicit Screen Group")).toBeVisible();
     await expect(dialog.getByText("No group-targeted schedule activity was found for the selected range.")).toBeVisible();
-    await expect(dialog.getByText("Delivery unconfirmed")).toBeVisible();
-    await expect(dialog.getByText("Unconfirmed targets")).toBeVisible();
+    await expect(dialog.getByText("Player-applied targets")).toBeVisible();
+    await expect(dialog.getByText("Targets with playback proof")).toBeVisible();
+    await expect(dialog.getByText(/Applied:/)).toBeVisible();
+    await expect(dialog.getByText(/Playback proof:/)).toBeVisible();
     await expect(dialog.getByText("Not taken down").first()).toBeVisible();
   });
 
@@ -325,6 +339,7 @@ test.describe("Dashboard active scheduled modal", () => {
     await expect(page.getByText("Online (5m) 2 · Status offline 1")).toBeVisible();
     await expect(page.getByText("Direct player scrapes (optional)")).toBeVisible();
     await expect(page.getByText("Players can be online without direct scrape targets")).toBeVisible();
+    await expect(page.getByText("2 applied · 1 reporting playback · 1 with proof")).toBeVisible();
     await expect(page.getByRole("link", { name: "Backend" })).toHaveAttribute("href", "/grafana/d/darshan-vm2-backend");
   });
 

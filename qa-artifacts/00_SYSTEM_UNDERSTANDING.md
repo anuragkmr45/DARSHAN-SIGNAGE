@@ -153,7 +153,7 @@ These are scope/use-case IDs, not executed test cases. Each final case will refe
 - Playback resume with a schedule start is wall-clock based. Multiple items repeat as a cycle; a single non-looping item can hold its terminal frame. Persisted progress is an alternate path with identity/freshness checks.
 - Display orientation is calculated from detected bounds; ratio reduces width/height by greatest common divisor. Native resolution, DIP/CSS sizes, rotation and scaling must not be conflated.
 - PoP duration derives from actual start/end event times. Bounded replay budgets can drop old events. Do not assume crash gaps or lost telemetry count as verified playback.
-- Reports `screen_uptime_percent` currently calculates `ACTIVE / (ACTIVE + OFFLINE) * 100`, rounded to two decimals, or null for zero denominator. This is a fleet snapshot, not historical uptime.
+- Reports retain `screen_uptime_percent` as a compatibility-only fleet snapshot. Historical availability is persisted from server-received heartbeats, estimates offline after 90 seconds, separates backend-unknown time, excludes unknown from the uptime denominator, labels never-seen Screens, and groups daily results in `Asia/Kolkata`.
 
 Evidence: server schema, reservation service, `screens/playback.ts`, `utils/default-media.ts`, `routes/reports.ts`; player `common/playback-policy.ts`, `common/display-profile.ts`, `main/services/pop-service.ts`.
 

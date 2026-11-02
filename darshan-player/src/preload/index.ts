@@ -56,6 +56,12 @@ export interface DarshanAPI {
   // Commands
   executeCommand: (command: string, payload?: unknown) => Promise<unknown>
   reportActivePlayback: (payload: { sceneId?: string; activeSlots: ActiveSlotPlayback[] }) => void
+  reportMediaStarted: (payload: {
+    itemId: string
+    mediaId: string
+    renderToken: string
+    pageNumber?: number
+  }) => Promise<{ accepted: boolean }>
   reportPlaybackProgress: (payload: PlaybackProgressEntry) => void
   reportViewport: (payload: {
     width_css_px: number
@@ -178,6 +184,10 @@ const darshanApi: DarshanAPI = {
 
   reportActivePlayback: (payload: { sceneId?: string; activeSlots: ActiveSlotPlayback[] }): void => {
     ipcRenderer.send('player-active-playback', payload)
+  },
+
+  reportMediaStarted: async (payload): Promise<{ accepted: boolean }> => {
+    return await ipcRenderer.invoke('player-media-started', payload)
   },
 
   reportPlaybackProgress: (payload: PlaybackProgressEntry): void => {

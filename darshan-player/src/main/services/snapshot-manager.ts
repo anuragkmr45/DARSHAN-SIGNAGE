@@ -16,6 +16,7 @@ import { buildRevisionedCacheKey, getCacheManager } from './cache/cache-manager'
 import { NormalizedSnapshot, parseSnapshotResponse } from './snapshot-parser'
 import { getLifecycleEvents } from './lifecycle-events'
 import { getSecurePlaybackGuard } from './secure-playback-guard'
+import { getHeartbeatService } from './telemetry/heartbeat'
 import { NormalizedScheduleWindow, evaluateScheduleWindows } from './snapshot-evaluator'
 
 const logger = getLogger('snapshot-manager')
@@ -25,6 +26,7 @@ export interface PlaybackPlaylist {
   items: TimelineItem[]
   scheduleId?: string
   snapshotId?: string
+  publishId?: string
   lastSnapshotAt?: string
 }
 
@@ -124,6 +126,7 @@ export class SnapshotManager extends EventEmitter {
     }
 
     this.currentSnapshot = undefined
+    this.clearAppliedSnapshot()
     this.lastError = undefined
     this.lastRefreshSucceeded = false
 
@@ -201,7 +204,7 @@ export class SnapshotManager extends EventEmitter {
         return this.currentPlaylist ?? null
       }
       options.onSnapshotFetched?.()
-      await this.cacheSnapshotMedia(normalized)
+      const mediaReady = await this.cacheSnapshotMedia(normalized)
       const playlist = await this.buildPlaylist(normalized, 'normal')
 
       if (generation !== this.refreshGeneration) {
@@ -216,6 +219,18 @@ export class SnapshotManager extends EventEmitter {
       this.currentPlaylist = playlist
       this.lastError = undefined
       this.lastRefreshSucceeded = true
+
+      if (mediaReady) {
+        this.recordAppliedSnapshot(normalized, true)
+      } else {
+        this.clearAppliedSnapshot()
+        if (normalized.publishId) {
+          logger.warn(
+            { publishId: normalized.publishId, snapshotId: normalized.snapshotId },
+            'Snapshot persisted but required media is not ready; delivery remains unconfirmed'
+          )
+        }
+      }
 
       this.emit('playlist-updated', playlist)
       return playlist
@@ -276,6 +291,15 @@ export class SnapshotManager extends EventEmitter {
       this.buildPlaylist(normalized, 'offline').then((playlist) => {
         this.currentPlaylist = playlist
         this.emit('playlist-updated', playlist)
+        void this.requiredSnapshotMediaIsReady(normalized)
+          .then((mediaReady) => {
+            if (mediaReady) {
+              this.recordAppliedSnapshot(normalized, false)
+            }
+          })
+          .catch((error) => {
+            logger.warn({ error }, 'Could not validate cached snapshot media readiness')
+          })
       })
       logger.info('Loaded cached snapshot for offline fallback')
     } catch (error) {
@@ -298,7 +322,7 @@ export class SnapshotManager extends EventEmitter {
     await atomicWrite(this.snapshotPath, JSON.stringify(cachedPayload, null, 2))
   }
 
-  private async cacheSnapshotMedia(snapshot: NormalizedSnapshot): Promise<void> {
+  private async cacheSnapshotMedia(snapshot: NormalizedSnapshot): Promise<boolean> {
     const cacheManager = getCacheManager()
     const prioritizedItems: TimelineItem[] = []
     const activeWindow = snapshot.scheduleWindows.length > 0
@@ -332,6 +356,13 @@ export class SnapshotManager extends EventEmitter {
         continue
       }
 
+      const source =
+        snapshot.emergencyItem === item
+          ? 'EMERGENCY'
+          : snapshot.defaultItem === item
+            ? 'DEFAULT_MEDIA'
+            : 'SNAPSHOT'
+
       const cacheUrl =
         item.type === 'url'
           ? (typeof item.meta?.['fallback_url'] === 'string' ? String(item.meta?.['fallback_url']) : undefined)
@@ -340,13 +371,6 @@ export class SnapshotManager extends EventEmitter {
       if (!cacheUrl) {
         continue
       }
-
-      const source =
-        snapshot.emergencyItem?.mediaId === item.mediaId
-          ? 'EMERGENCY'
-          : snapshot.defaultItem?.mediaId === item.mediaId
-            ? 'DEFAULT_MEDIA'
-            : 'SNAPSHOT'
 
       const fallbackRevision = item.type === 'url'
         ? (typeof item.meta?.['fallback_revision'] === 'string'
@@ -377,6 +401,41 @@ export class SnapshotManager extends EventEmitter {
       }
       logger.warn({ error }, 'Failed to prefetch snapshot media')
     }
+
+    return await this.requiredSnapshotMediaIsReady(snapshot)
+  }
+
+  private async requiredSnapshotMediaIsReady(snapshot: NormalizedSnapshot): Promise<boolean> {
+    const cacheManager = getCacheManager()
+    const scheduledItems = [
+      ...snapshot.items,
+      ...snapshot.scheduleWindows.flatMap((window) => window.items),
+    ]
+    const requiredKeys = new Set<string>()
+    for (const item of [...scheduledItems, snapshot.defaultItem, snapshot.emergencyItem].filter(Boolean) as TimelineItem[]) {
+      if (item.type === 'message') {
+        continue
+      }
+      if (item.type === 'url' && typeof item.meta?.['fallback_url'] !== 'string') {
+        if (!item.remoteUrl) {
+          return false
+        }
+        continue
+      }
+      if (!item.mediaId) {
+        return false
+      }
+      const revision = item.type === 'url'
+        ? (typeof item.meta?.['fallback_revision'] === 'string'
+            ? String(item.meta['fallback_revision'])
+            : typeof item.meta?.['fallback_sha256'] === 'string'
+              ? String(item.meta['fallback_sha256'])
+              : undefined)
+        : undefined
+      requiredKeys.add(buildRevisionedCacheKey(item.mediaId, revision))
+    }
+    const readiness = await Promise.all([...requiredKeys].map((cacheKey) => cacheManager.has(cacheKey)))
+    return readiness.every(Boolean)
   }
 
   private async buildPlaylist(snapshot: NormalizedSnapshot, _fallbackMode: PlaybackMode): Promise<PlaybackPlaylist> {
@@ -415,7 +474,13 @@ export class SnapshotManager extends EventEmitter {
       if (evaluation.activeWindow && evaluation.items.length > 0) {
         mode = 'normal'
         const hydratedWindowItems = await this.attachLocalMedia(evaluation.items)
-        items = this.buildLayoutSceneItems(evaluation.activeWindow, hydratedWindowItems, snapshot.scheduleId, snapshot.snapshotId)
+        items = this.buildLayoutSceneItems(
+          evaluation.activeWindow,
+          hydratedWindowItems,
+          snapshot.scheduleId,
+          snapshot.snapshotId,
+          snapshot.publishId
+        )
       } else if (snapshot.defaultItem) {
         mode = 'default'
         items = await this.attachLocalMedia([snapshot.defaultItem])
@@ -445,8 +510,29 @@ export class SnapshotManager extends EventEmitter {
       items,
       scheduleId: snapshot.scheduleId,
       snapshotId: snapshot.snapshotId,
+      publishId: snapshot.publishId,
       lastSnapshotAt: snapshot.fetchedAt,
     }
+  }
+
+  private recordAppliedSnapshot(snapshot: NormalizedSnapshot, sendImmediately: boolean): void {
+    if (!snapshot.publishId || !snapshot.snapshotId) {
+      return
+    }
+    const heartbeat = getHeartbeatService()
+    heartbeat.setAppliedSnapshot(snapshot.publishId, snapshot.snapshotId)
+    if (sendImmediately) {
+      void heartbeat.sendImmediate().catch((error) => {
+        logger.warn(
+          { error, publishId: snapshot.publishId, snapshotId: snapshot.snapshotId },
+          'Immediate applied-snapshot heartbeat failed; the next heartbeat will retry'
+        )
+      })
+    }
+  }
+
+  private clearAppliedSnapshot(): void {
+    getHeartbeatService().clearAppliedSnapshot()
   }
 
   private scheduleLocalEvaluation(snapshot: NormalizedSnapshot, nextTransitionAt?: number, forceRefresh = false): void {
@@ -594,8 +680,9 @@ export class SnapshotManager extends EventEmitter {
     items: TimelineItem[],
     scheduleId?: string,
     snapshotId?: string,
+    publishId?: string,
   ): TimelineItem[] {
-    const scheduledItems = this.addScheduleWindowMeta(window, items, scheduleId, snapshotId)
+    const scheduledItems = this.addScheduleWindowMeta(window, items, scheduleId, snapshotId, publishId)
     const slots = this.extractLayoutSlots(window)
     if (slots.length === 0) {
       return scheduledItems
@@ -672,6 +759,7 @@ export class SnapshotManager extends EventEmitter {
           source: 'schedule',
           scheduleId,
           snapshotId,
+          publishId,
           presentationId: window.presentationId,
           presentationName: window.presentationName,
           layout: window.layout,
@@ -686,6 +774,7 @@ export class SnapshotManager extends EventEmitter {
     items: TimelineItem[],
     scheduleId?: string,
     snapshotId?: string,
+    publishId?: string,
   ): TimelineItem[] {
     return items.map((item) => ({
       ...item,
@@ -694,6 +783,7 @@ export class SnapshotManager extends EventEmitter {
         source: 'schedule',
         scheduleId,
         snapshotId,
+        publishId,
         presentationId: window.presentationId,
         presentationName: window.presentationName,
         scheduleWindowId: window.id,
@@ -765,6 +855,7 @@ export class SnapshotManager extends EventEmitter {
     this.currentSnapshot = nextSnapshot
     const playlist = await this.buildPlaylist(nextSnapshot, 'normal')
     this.currentPlaylist = playlist
+    this.clearAppliedSnapshot()
     this.emit('playlist-updated', playlist)
     return playlist
   }

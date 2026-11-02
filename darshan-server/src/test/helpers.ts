@@ -12,7 +12,7 @@ export async function createTestServer(): Promise<FastifyInstance> {
   await seedTestData();
   // Tests invoke background work explicitly. Keeping the production dispatcher
   // off here prevents it from consuming fixtures between assertion steps.
-  const server = await createServer({ startOutboxDispatcher: false });
+  const server = await createServer({ startOutboxDispatcher: false, startAvailabilityMonitor: false });
   server.addHook('onClose', async () => {
     await closeDatabase();
   });
