@@ -81,7 +81,17 @@ server {
     try_files $uri =404;
   }
 
-  location ^~ /assets/ {
+  location /assets/ {
+    try_files $uri =404;
+    access_log off;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+  }
+
+  # pdf.js worker assets are .mjs and must be served as JavaScript modules.
+  location ~ ^/assets/.*\.mjs$ {
+    types { application/javascript mjs; }
     try_files $uri =404;
     access_log off;
     add_header Cache-Control "public, max-age=31536000, immutable";

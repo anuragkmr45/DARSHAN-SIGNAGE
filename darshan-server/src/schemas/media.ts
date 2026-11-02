@@ -23,7 +23,7 @@ export const createMediaSchema = z.union([
 
 export type CreateMediaRequest = z.infer<typeof createMediaSchema>;
 
-const allowedContentTypes = [
+export const allowedContentTypes = [
   'image/jpeg',
   'image/png',
   'image/webp',
