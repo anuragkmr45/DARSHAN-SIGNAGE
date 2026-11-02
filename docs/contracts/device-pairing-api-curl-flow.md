@@ -36,6 +36,12 @@ Core rule:
 
 ## 1. Device Requests Pairing Code
 
+Current players persist a random 64-character hex `pairing_credential` in a private local file before calling this endpoint. Add it to the request body. A retry with the same credential returns the current `device_id` and code instead of creating another identity. The response includes `server_time` and `generation`; calculate the visible countdown from `expires_at - server_time`, then advance it with a monotonic clock. The server remains authoritative for expiry.
+
+To replace an unpaired code, call `POST /api/v1/device-pairing/renew` with `device_id`, `pairing_credential`, and a new UUID `renewal_request_id`. The old code and any admin approval are invalidated in the same transaction. Retry a timed-out renewal with the **same** request ID. A new renewal request ID starts a new renewal. The Device ID stays the same. Never send the credential in a URL or log it.
+
+CMS uses `GET /api/v1/device-pairing?status=active` for current unused, unexpired codes and `status=history` for older codes. Legacy players that omit the credential retain the prior request behavior.
+
 Actor:
 - `Signage Screen`
 
@@ -130,15 +136,14 @@ curl 'http://localhost:3000/api/v1/device-pairing/request' \
 
 - This call is for `Signage Screen`, not CMS.
 - No authentication is required.
-- Every successful request creates a new pairing row and a new `device_id`.
-- If the device retries this call after a timeout, it may create multiple pending pairings.
+- These two statements apply only to legacy requests without `pairing_credential`: each request creates a new `device_id`, and a retry can create multiple pending pairings.
 - `codecs` is device-reported playback capability metadata. It is stored, but not currently enforced by the scheduler.
 
 ### Tips
 
 - Persist the returned `device_id` immediately.
 - Display `pairing_code` prominently.
-- Start a local expiry timer using `expires_at`.
+- For current players, anchor the countdown using backend `server_time`, `expires_at`, and monotonic elapsed time. Do not use the player wall clock as the expiry authority.
 - Do not call heartbeat or other authenticated device APIs yet.
 
 ## 2. Device Polls Pairing Status
@@ -258,7 +263,7 @@ curl 'http://localhost:3000/api/v1/device-pairing/status?device_id=a720d78d-62ca
 - `active_pairing.mode` is:
   - `PAIRING` for first-time/new-screen pairing
   - `RECOVERY` for in-place recovery on an existing screen identity
-- If local `expires_at` has passed, stop polling and restart at step 1.
+- When the displayed countdown reaches zero, ask the backend for status. A current player renews its credential-backed session; a legacy player waits until the backend confirms its prior code expired before requesting a new identity.
 
 ### Tips
 

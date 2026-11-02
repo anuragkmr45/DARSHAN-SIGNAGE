@@ -47,6 +47,7 @@ Primary code references:
 - `GET /api/v1/screens/:id/snapshot`
 - `GET /api/v1/screens/overview`
 - `POST /api/v1/device-pairing/request`
+- `POST /api/v1/device-pairing/renew`
 - `GET /api/v1/device-pairing/status`
 - `POST /api/v1/device-pairing/confirm`
 - `POST /api/v1/device-pairing/complete`
@@ -62,6 +63,16 @@ Primary code references:
 - `POST /api/v1/emergency/:id/clear`
 
 ## State Machines
+### Unpaired OTP renewal (current player)
+- The player creates a private 32-byte pairing credential before its first request and stores it separately from `device-state.json`. The server stores only its SHA-256 hash in `device_pairing_sessions`.
+- `POST /device-pairing/request` with `pairing_credential` allocates one `device_id`. Retrying that request with the same credential recovers the current code and ID after a lost response.
+- `POST /device-pairing/renew` requires that credential, the same `device_id`, and a UUID `renewal_request_id`. It retires the prior code and any approval, then issues a new code for the same device. Retrying the same request ID returns the current code; it cannot create a second renewal.
+- The player uses `server_time` and `expires_at` to anchor the OTP countdown to a monotonic clock. The backend alone decides expiry. A network failure does not erase the current identity or invent an expiry.
+- The OTP card shows the OS hostname on Linux and Windows, including production and minimal layouts. Device Label is a separate operator hint and cannot overwrite the hostname.
+- CMS `GET /device-pairing?status=active` shows only unused, unexpired codes. `status=history` retains consumed, expired, superseded, and revoked codes. Admin confirmation of a superseded code is rejected.
+- Completing pairing removes the local pairing credential. Revoking an unpaired session makes its credential unusable.
+- Older players without the credential can finish their existing code. If it expires, the player waits for backend confirmation before a one-time fresh identity request; it does not overlap two live codes.
+
 ### Screen Inventory State
 States:
 - `ABSENT`: no `screens` row
@@ -121,11 +132,11 @@ Transitions:
 - `AUTHENTICATED_DEVICE -> AUTH_BLOCKED_CERT_LOST`
   - local reinstall/wipe loses cert/private key
 
-Important limitation:
-- Certificate expiry is generated and returned, but not checked in device auth.
+Certificate expiry is checked during device authentication; an expired certificate requires recovery.
 
 ## What The Device Must Persist Locally
 - `device_id`
+- the unpaired session's private pairing credential until pairing completes or an operator resets identity
 - private key used to create CSR
 - server-issued certificate PEM
 - fingerprint returned by pairing complete

@@ -5,6 +5,7 @@ import './types'
 class PairingScreen {
   private pairingCodeElement: HTMLElement | null = null
   private pairingExpiryElement: HTMLElement | null = null
+  private hostnameElement: HTMLElement | null = null
   private refreshButton: HTMLButtonElement | null = null
   private completeButton: HTMLButtonElement | null = null
   private statusElement: HTMLElement | null = null
@@ -22,6 +23,9 @@ class PairingScreen {
   private recoveryRepairButton: HTMLButtonElement | null = null
   private connectivityBanner: HTMLElement | null = null
   private countdownTimer?: number
+  private pairingCountdown?: { remainingMs: number; receivedAt: number }
+  private refreshInFlight = false
+  private labelEdited = false
   private currentStatus: PlayerStatus | null = null
   private latestPresentationRevision = -1
   private currentDisplay: DisplayProfileV1 | undefined
@@ -48,6 +52,7 @@ class PairingScreen {
     this.pairingScreenElement = document.getElementById('pairing-screen')
     this.pairingCodeElement = document.getElementById('pairing-code')
     this.pairingExpiryElement = document.getElementById('pairing-expiry')
+    this.hostnameElement = document.getElementById('pairing-hostname')
     this.refreshButton = document.getElementById('pairing-refresh') as HTMLButtonElement
     this.completeButton = document.getElementById('pairing-complete') as HTMLButtonElement
     this.statusElement = document.getElementById('pairing-status')
@@ -66,8 +71,17 @@ class PairingScreen {
   }
 
   private setupEventListeners(): void {
-    this.refreshButton?.addEventListener('click', () => {
-      void window.darshan.playerAction('refresh-pairing', this.buildPairingRequestPayload())
+    this.deviceLabelInput?.addEventListener('input', () => { this.labelEdited = true })
+    this.refreshButton?.addEventListener('click', async () => {
+      if (this.refreshInFlight) return
+      this.refreshInFlight = true
+      if (this.refreshButton) this.refreshButton.disabled = true
+      try {
+        await window.darshan.playerAction('refresh-pairing', this.buildPairingRequestPayload())
+      } finally {
+        this.refreshInFlight = false
+        if (this.refreshButton) this.refreshButton.disabled = false
+      }
     })
 
     this.completeButton?.addEventListener('click', () => {
@@ -109,6 +123,7 @@ class PairingScreen {
     if (this.deviceLabelInput && info && typeof info === 'object') {
       const hostname = (info as { hostname?: string }).hostname || ''
       this.deviceLabelInput.value = hostname
+      if (this.hostnameElement) this.hostnameElement.textContent = hostname || 'Unavailable'
     }
 
     this.renderDisplayInfo()
@@ -196,7 +211,7 @@ class PairingScreen {
 
     if (showConfigurationRequired) {
       this.updatePairingCode('CONFIG')
-      this.updatePairingExpiry(undefined)
+      this.setPairingCountdown(undefined)
       this.showStatus(status.error || 'Backend IP configuration is required before pairing.', 'error')
       if (this.refreshButton) {
         this.refreshButton.disabled = true
@@ -206,11 +221,11 @@ class PairingScreen {
     }
 
     if (this.refreshButton) {
-      this.refreshButton.disabled = false
+      this.refreshButton.disabled = this.refreshInFlight
     }
 
     this.updatePairingCode(status.pairingCode || '------')
-    this.updatePairingExpiry(status.pairingExpiresAt)
+    this.setPairingCountdown(status.pairingRemainingMs)
 
     switch (status.state) {
       case 'PAIRING_PENDING':
@@ -310,6 +325,10 @@ class PairingScreen {
   }
 
   private renderSharedFields(status: PlayerStatus): void {
+    if (this.hostnameElement && status.hostname) {
+      this.hostnameElement.textContent = status.hostname
+      if (this.deviceLabelInput && !this.labelEdited) this.deviceLabelInput.value = status.hostname
+    }
     if (this.deviceIdElement) {
       this.deviceIdElement.textContent = status.deviceId || '-'
     }
@@ -328,9 +347,10 @@ class PairingScreen {
   }
 
   private buildPairingRequestPayload(): Partial<PairingCodeRequest> {
-    return {
-      device_label: this.deviceLabelInput?.value?.trim() || 'DARSHAN Screen',
+    if (this.labelEdited && document.body.dataset['runtimeMode'] === 'dev') {
+      return { device_label: this.deviceLabelInput?.value?.trim() || undefined }
     }
+    return {}
   }
 
   private updatePairingCode(code: string): void {
@@ -338,14 +358,28 @@ class PairingScreen {
     this.pairingCodeElement.textContent = code.split('').join(' ')
   }
 
-  private updatePairingExpiry(expiresAt?: string): void {
+  private setPairingCountdown(remainingMs?: number): void {
+    this.pairingCountdown = remainingMs === undefined
+      ? undefined
+      : { remainingMs, receivedAt: performance.now() }
+    this.drawPairingCountdown()
+  }
+
+  private drawPairingCountdown(): void {
     if (!this.pairingExpiryElement) return
-    if (!expiresAt) {
-      this.pairingExpiryElement.textContent = 'Expires in --:--'
+    if (!this.pairingCountdown) {
+      this.pairingExpiryElement.textContent = 'Checking expiry with server...'
       return
     }
-
-    this.pairingExpiryElement.textContent = this.formatDeadline(expiresAt, 'Expires in')
+    const remainingMs = Math.max(0, this.pairingCountdown.remainingMs -
+      (performance.now() - this.pairingCountdown.receivedAt))
+    if (remainingMs <= 0) {
+      this.pairingExpiryElement.textContent = 'Expired; checking server...'
+      return
+    }
+    const totalSeconds = Math.floor(remainingMs / 1000)
+    this.pairingExpiryElement.textContent =
+      `Expires in ${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`
   }
 
   private startCountdowns(): void {
@@ -358,7 +392,7 @@ class PairingScreen {
       if (!this.currentStatus) {
         return
       }
-      this.updatePairingExpiry(this.currentStatus.pairingExpiresAt)
+      this.drawPairingCountdown()
       if (
         this.recoveryMeta &&
         this.currentStatus.state === 'HARD_RECOVERY' &&

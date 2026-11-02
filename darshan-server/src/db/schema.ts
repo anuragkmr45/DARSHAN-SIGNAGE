@@ -1669,6 +1669,9 @@ export const devicePairings = pgTable(
     pairing_code: varchar('pairing_code', { length: 255 }).notNull(),
     used: boolean('used').notNull().default(false),
     used_at: timestamp('used_at'),
+    retired_reason: varchar('retired_reason', { length: 40 }),
+    renewal_request_id: uuid('renewal_request_id'),
+    generation: integer('generation'),
     expires_at: timestamp('expires_at').notNull(),
     width: integer('width'),
     height: integer('height'),
@@ -1683,8 +1686,22 @@ export const devicePairings = pgTable(
     activeCodeIdx: uniqueIndex('device_pairings_active_code_idx')
       .on(table.pairing_code)
       .where(sql`${table.used} = false`),
+    activeDeviceIdx: uniqueIndex('device_pairings_active_device_idx')
+      .on(table.device_id)
+      .where(sql`${table.used} = false AND ${table.device_id} IS NOT NULL`),
+    renewalRequestIdx: uniqueIndex('device_pairings_renewal_request_idx')
+      .on(table.device_id, table.renewal_request_id)
+      .where(sql`${table.renewal_request_id} IS NOT NULL`),
   })
 );
+
+export const devicePairingSessions = pgTable('device_pairing_sessions', {
+  device_id: uuid('device_id').primaryKey(),
+  credential_hash: varchar('credential_hash', { length: 64 }).notNull().unique(),
+  generation: integer('generation').notNull().default(0),
+  revoked_at: timestamp('revoked_at'),
+  created_at: timestamp('created_at').notNull().defaultNow(),
+});
 
 // Emergencies (for backward compatibility with repositories)
 export const emergencies = pgTable('emergencies', {

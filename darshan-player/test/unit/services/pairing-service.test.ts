@@ -112,6 +112,91 @@ describe('PairingService', () => {
     expect(capturedHeaders).not.to.have.property('x-signhex-server-id')
   })
 
+  it('persists a private credential before requesting an OTP and uses server time despite local clock skew', async () => {
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getConfigManager } = require('../../../src/common/config')
+    const httpClient = getHttpClient()
+    const pairingService = getPairingService()
+    const serverTime = '2020-01-01T00:00:00.000Z'
+    const expiresAt = '2020-01-01T00:10:00.000Z'
+    const deviceId = '22222222-2222-4222-8222-222222222222'
+    const captured = []
+    sandbox.stub(httpClient, 'post').callsFake(async (_url, payload) => {
+      captured.push(payload)
+      if (captured.length === 1) throw new Error('response lost')
+      return {
+        id: '33333333-3333-4333-8333-333333333333',
+        device_id: deviceId,
+        pairing_code: '123456',
+        expires_at: expiresAt,
+        expires_in: 600,
+        server_time: serverTime,
+        generation: 1,
+        connected: true,
+      }
+    })
+
+    try { await pairingService.requestPairingCode() } catch (error) {
+      expect(error.message).to.equal('response lost')
+    }
+    const credentialPath = path.join(path.dirname(getConfigManager().getConfigPath()), 'pairing-credential')
+    expect(fs.statSync(credentialPath).mode & 0o777).to.equal(0o600)
+    await pairingService.requestPairingCode()
+    expect(captured[0].pairing_credential).to.equal(captured[1].pairing_credential)
+    expect(getDeviceStateStore().getState().deviceId).to.equal(deviceId)
+    expect(pairingService.getPairingRemainingMs()).to.be.within(590000, 600000)
+  })
+
+  it('rejects a linked credential path without changing the target file', () => {
+    const { PairingCredentialStore } = require('../../../src/main/services/pairing-credential-store')
+    const target = path.join(tempDir, 'unrelated-file')
+    const link = path.join(tempDir, 'pairing-credential')
+    fs.writeFileSync(target, 'a'.repeat(64), { mode: 0o644 })
+    fs.symlinkSync(target, link)
+
+    expect(() => new PairingCredentialStore(link).read()).to.throw(/not a regular file/)
+    expect(fs.statSync(target).mode & 0o777).to.equal(0o644)
+  })
+
+  it('retries a timed-out renewal with the same request ID and keeps the device ID', async () => {
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const httpClient = getHttpClient()
+    const pairingService = getPairingService()
+    const deviceId = '22222222-2222-4222-8222-222222222222'
+    const now = new Date().toISOString()
+    const expiry = new Date(Date.now() + 600000).toISOString()
+    const requests = []
+    sandbox.stub(httpClient, 'post').callsFake(async (url, payload) => {
+      if (url.endsWith('/request')) return {
+        id: '33333333-3333-4333-8333-333333333333', device_id: deviceId,
+        pairing_code: '123456', expires_at: expiry, expires_in: 600,
+        server_time: now, generation: 1, connected: true,
+      }
+      requests.push(payload)
+      if (requests.length === 1) throw new Error('timeout')
+      return {
+        id: '44444444-4444-4444-8444-444444444444', device_id: deviceId,
+        pairing_code: '654321', expires_at: expiry, expires_in: 600,
+        server_time: now, generation: 2, connected: true,
+      }
+    })
+    await pairingService.requestPairingCode()
+    try { await pairingService.renewPairingCode() } catch (error) {
+      expect(error.message).to.equal('timeout')
+    }
+    const inDoubtId = getDeviceStateStore().getState().pendingRenewalRequestId
+    expect(inDoubtId).to.be.a('string')
+    await pairingService.renewPairingCode()
+    expect(requests[0].renewal_request_id).to.equal(requests[1].renewal_request_id)
+    expect(getDeviceStateStore().getState().deviceId).to.equal(deviceId)
+    expect(getDeviceStateStore().getState().pairingCode).to.equal('654321')
+    expect(getDeviceStateStore().getState().pendingRenewalRequestId).to.equal(undefined)
+  })
+
   it('redacts credentialed backend URLs from network diagnostics', async () => {
     process.env.DARSHAN_API_BASE_URL =
       'https://diag-user:diag-pass@localhost:3000/api?token=diag-token#diag-fragment'

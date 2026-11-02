@@ -91,6 +91,12 @@ const openScreensPage = async (page: Page) => {
 };
 
 const installApiMocks = async (page: Page, state: MockState) => {
+  await page.route("**/grafana/api/health", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ database: "ok" }),
+  }));
+  await page.route("**/grafana/login", (route) => route.fulfill({ status: 200, body: "Grafana login" }));
   await page.route("**/api/v1/**", async (route: Route) => {
     const url = new URL(route.request().url());
     const { pathname, searchParams } = url;
@@ -350,10 +356,20 @@ const installApiMocks = async (page: Page, state: MockState) => {
     if (pathname === "/api/v1/device-pairing" && method === "GET") {
       const pageNum = Number(searchParams.get("page") || 1);
       const limit = Number(searchParams.get("limit") || 10);
+      const status = searchParams.get("status") || "all";
+      const now = Date.now();
+      const filtered = state.pairings.filter((pair) => {
+        const active = pair.used !== true &&
+          typeof pair.expires_at === "string" && Date.parse(pair.expires_at) > now;
+        return status === "active" ? active : status === "history" ? !active : true;
+      });
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ items: state.pairings, page: pageNum, limit, total: state.pairings.length }),
+        body: JSON.stringify({
+          items: filtered.slice((pageNum - 1) * limit, pageNum * limit),
+          pagination: { page: pageNum, limit, total: filtered.length },
+        }),
       });
     }
 
@@ -519,7 +535,7 @@ test.describe("Screens operator flow", () => {
     await expect(page.getByRole("tab", { name: "Observability" })).toBeVisible();
     await page.getByRole("tab", { name: "Observability" }).click();
     await expect(page.getByText(/Player scrape up/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Open player fleet dashboard/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Open player fleet dashboard/i })).toBeVisible();
     await page.getByRole("button", { name: /Close/i }).click();
 
     await page.getByRole("button", { name: "Delete Screen Lobby Screen" }).click();
@@ -597,6 +613,32 @@ test.describe("Screens operator flow", () => {
     await page.getByRole("button", { name: /Confirm Pairing \/ Recovery/i }).click();
 
     await expect(page.getByRole("dialog", { name: /Pair Device/i })).toBeHidden();
+  });
+
+  test("shows only current OTPs by default and keeps superseded codes in history", async ({ page }) => {
+    const state: MockState = {
+      screens: [], groups: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+      pairings: [
+        {
+          id: "pairing-current", device_id: "device-a", pairing_code: "654321",
+          status: "PENDING", used: false, expires_at: "2099-01-01T00:00:00.000Z",
+          created_at: "2026-11-02T00:02:00.000Z",
+        },
+        {
+          id: "pairing-old", device_id: "device-a", pairing_code: "123456",
+          status: "SUPERSEDED", used: true, retired_reason: "SUPERSEDED",
+          expires_at: "2099-01-01T00:00:00.000Z", created_at: "2026-11-02T00:01:00.000Z",
+        },
+      ],
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await expect(page.getByText("654321")).toBeVisible();
+    await expect(page.getByText("123456")).toHaveCount(0);
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await expect(page.getByText("123456")).toBeVisible();
+    await expect(page.getByText("654321")).toHaveCount(0);
   });
 
   test("supports same-device recovery flow from the screens page", async ({ page }) => {

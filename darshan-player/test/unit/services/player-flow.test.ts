@@ -120,6 +120,143 @@ describe('Player Flow', () => {
     }
   }
 
+  it('refreshes a pending OTP without resetting the protected device identity', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getPairingCredentialStore } = require('../../../src/main/services/pairing-credential-store')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const deviceId = '11111111-1111-4111-8111-111111111111'
+    getPairingCredentialStore().ensure()
+    await getDeviceStateStore().update({
+      lifecycleState: 'PAIRING_PENDING', deviceId, pairingCode: '123456',
+      pairingExpiresAt: new Date(Date.now() + 600000).toISOString(), pairingGeneration: 1,
+    })
+    const service = getPairingService()
+    const reset = sandbox.spy(service, 'resetStoredIdentity')
+    const renew = sandbox.stub(service, 'renewPairingCode').callsFake(async () => {
+      await getDeviceStateStore().update({ deviceId, pairingCode: '654321', pairingGeneration: 2 })
+      return { device_id: deviceId, pairing_code: '654321' }
+    })
+    sandbox.stub(service, 'fetchPairingStatus').resolves({
+      device_id: deviceId, screen: null,
+      active_pairing: { pairing_code: '654321', confirmed: false, mode: 'PAIRING', generation: 2 },
+    })
+    const flow = getPlayerFlow()
+    await flow.performAction('refresh-pairing')
+    expect(renew.calledOnce).to.equal(true)
+    expect(reset.called).to.equal(false)
+    expect(getDeviceStateStore().getState().deviceId).to.equal(deviceId)
+    expect(flow.getStatus().pairingCode).to.equal('654321')
+    flow.stop()
+  })
+
+  it('does not renew a pre-upgrade code before the backend confirms expiry', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const deviceId = '11111111-1111-4111-8111-111111111111'
+    await getDeviceStateStore().update({
+      lifecycleState: 'PAIRING_PENDING', deviceId, pairingCode: '123456',
+      pairingExpiresAt: new Date(Date.now() + 600000).toISOString(),
+    })
+    const service = getPairingService()
+    const status = sandbox.stub(service, 'fetchPairingStatus').resolves({
+      device_id: deviceId, screen: null,
+      active_pairing: { pairing_code: '123456', confirmed: false, mode: 'PAIRING' },
+    })
+    const reset = sandbox.spy(service, 'resetStoredIdentity')
+    const flow = getPlayerFlow()
+    await flow.performAction('refresh-pairing')
+    expect(status.calledOnce).to.equal(true)
+    expect(reset.called).to.equal(false)
+    expect(getDeviceStateStore().getState().deviceId).to.equal(deviceId)
+    expect(flow.getStatus().error).to.include('Pre-upgrade code')
+    flow.stop()
+  })
+
+  it('recovers a lost initial response after restart using the persisted credential', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getPairingCredentialStore } = require('../../../src/main/services/pairing-credential-store')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    getPairingCredentialStore().ensure()
+    const service = getPairingService()
+    sandbox.stub(service, 'getStoredIdentityHealth').returns({ health: 'missing', issues: [] })
+    sandbox.stub(service, 'hasTrustworthyDeviceId').returns(false)
+    const reset = sandbox.spy(service, 'resetStoredIdentity')
+    const request = sandbox.stub(service, 'requestPairingCode').callsFake(async () => {
+      await getDeviceStateStore().update({
+        deviceId: '11111111-1111-4111-8111-111111111111', pairingCode: '123456',
+        pairingExpiresAt: new Date(Date.now() + 600000).toISOString(),
+      })
+      return { device_id: '11111111-1111-4111-8111-111111111111', pairing_code: '123456' }
+    })
+    const flow = getPlayerFlow()
+    await flow.start()
+    expect(request.calledOnce).to.equal(true)
+    expect(reset.called).to.equal(false)
+    expect(flow.getState()).to.equal('PAIRING_PENDING')
+    flow.stop()
+  })
+
+  it('does not discard a pending code because the player clock thinks it expired', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    await getDeviceStateStore().update({
+      deviceId: '11111111-1111-4111-8111-111111111111', pairingCode: '123456',
+      pairingExpiresAt: '2020-01-01T00:00:00.000Z',
+    })
+    const service = getPairingService()
+    sandbox.stub(service, 'getStoredIdentityHealth').returns({ health: 'missing', issues: [] })
+    sandbox.stub(service, 'hasTrustworthyDeviceId').returns(true)
+    const reset = sandbox.spy(service, 'resetStoredIdentity')
+    sandbox.stub(service, 'fetchPairingStatus').resolves({
+      device_id: '11111111-1111-4111-8111-111111111111', screen: null,
+      active_pairing: { pairing_code: '123456', confirmed: false, mode: 'PAIRING' },
+    })
+    const flow = getPlayerFlow()
+    await flow.start()
+    expect(flow.getState()).to.equal('PAIRING_PENDING')
+    expect(reset.called).to.equal(false)
+    flow.stop()
+  })
+
+  it('preserves the Device ID during backend loss and renews only after REST confirms expiry', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getPairingCredentialStore } = require('../../../src/main/services/pairing-credential-store')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const deviceId = '11111111-1111-4111-8111-111111111111'
+    getPairingCredentialStore().ensure()
+    await getDeviceStateStore().update({
+      deviceId, pairingCode: '123456', pairingGeneration: 1,
+      pairingExpiresAt: '2020-01-01T00:00:00.000Z',
+    })
+    const service = getPairingService()
+    sandbox.stub(service, 'getStoredIdentityHealth').returns({ health: 'missing', issues: [] })
+    sandbox.stub(service, 'hasTrustworthyDeviceId').returns(true)
+    const fetchStatus = sandbox.stub(service, 'fetchPairingStatus')
+    fetchStatus.onFirstCall().rejects(new Error('network unavailable'))
+    fetchStatus.onSecondCall().resolves({ device_id: deviceId, screen: null, active_pairing: null })
+    const renewal = sandbox.stub(service, 'renewPairingCode').callsFake(async () => {
+      await getDeviceStateStore().update({ deviceId, pairingCode: '654321', pairingGeneration: 2 })
+      return { device_id: deviceId, pairing_code: '654321' }
+    })
+    const reset = sandbox.spy(service, 'resetStoredIdentity')
+    const flow = getPlayerFlow()
+    await flow.start()
+    flow.stop()
+    await flow.pollPairingStatus()
+    expect(renewal.called).to.equal(false)
+    expect(reset.called).to.equal(false)
+    expect(getDeviceStateStore().getState().deviceId).to.equal(deviceId)
+    await flow.pollPairingStatus()
+    expect(renewal.calledOnce).to.equal(true)
+    expect(getDeviceStateStore().getState().deviceId).to.equal(deviceId)
+    flow.stop()
+  })
+
   it('should bootstrap to PAIRED_RUNTIME when stored credentials authenticate successfully', async () => {
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')

@@ -28,7 +28,7 @@ export const devicePairingApi = {
     }),
 
   // List all pairing records (for reviewing pending/used/expired codes)
-  list: (params?: PaginationParams) =>
+  list: (params?: PaginationParams & { status?: "all" | "active" | "history" }) =>
     apiClient.request<PaginatedResponse<DevicePairing>>({
       path: endpoints.devicePairing.base,
       method: "GET",

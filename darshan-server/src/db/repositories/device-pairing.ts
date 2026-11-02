@@ -1,4 +1,4 @@
-import { eq, and, desc, gt, lte, sql } from 'drizzle-orm';
+import { eq, and, desc, gt, lte, or, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 
 type DbExecutor = any;
@@ -19,10 +19,18 @@ export class DevicePairingRepository {
     model?: string | null;
     codecs?: string[] | null;
     device_info?: Record<string, any> | null;
+    renewal_request_id?: string | null;
+    generation?: number | null;
   }, executor?: DbExecutor) {
     const db = resolveDb(executor);
     const result = await db.insert(schema.devicePairings).values(data).returning();
     return result[0];
+  }
+
+  async createIfAvailable(data: Parameters<DevicePairingRepository['create']>[0], executor?: DbExecutor) {
+    const db = resolveDb(executor);
+    const result = await db.insert(schema.devicePairings).values(data).onConflictDoNothing().returning();
+    return result[0] || null;
   }
 
   async findByCode(code: string, executor?: DbExecutor) {
@@ -108,7 +116,7 @@ export class DevicePairingRepository {
     const now = new Date();
     const result = await db
       .update(schema.devicePairings)
-      .set({ used: true, used_at: now })
+      .set({ used: true, used_at: now, retired_reason: 'CONSUMED' })
       .where(
         and(
           eq(schema.devicePairings.id, id),
@@ -128,6 +136,7 @@ export class DevicePairingRepository {
       .set({
         used: true,
         used_at: now,
+        retired_reason: 'EXPIRED',
       })
       .where(
         and(
@@ -147,7 +156,7 @@ export class DevicePairingRepository {
         and(
           eq(schema.devicePairings.device_id, deviceId),
           eq(schema.devicePairings.used, false),
-          gt(schema.devicePairings.expires_at, new Date())
+          ...(exceptId ? [sql`${schema.devicePairings.id} <> ${exceptId}`] : [])
         )
       );
 
@@ -164,7 +173,7 @@ export class DevicePairingRepository {
     for (const id of retireIds) {
       const [row] = await db
         .update(schema.devicePairings)
-        .set({ used: true, used_at: usedAt })
+        .set({ used: true, used_at: usedAt, retired_reason: 'SUPERSEDED' })
         .where(eq(schema.devicePairings.id, id))
         .returning();
       if (row) {
@@ -188,17 +197,25 @@ export class DevicePairingRepository {
   async list(options: {
     page?: number;
     limit?: number;
+    status?: 'all' | 'active' | 'history';
   }) {
     const db = getDatabase();
     const page = options.page || 1;
     const limit = options.limit || 20;
     const offset = (page - 1) * limit;
+    const now = new Date();
+    const condition = options.status === 'active'
+      ? and(eq(schema.devicePairings.used, false), gt(schema.devicePairings.expires_at, now))
+      : options.status === 'history'
+        ? or(eq(schema.devicePairings.used, true), lte(schema.devicePairings.expires_at, now))
+        : undefined;
 
-    const [total] = await db.select({ count: sql<number>`count(*)` }).from(schema.devicePairings);
+    const [total] = await db.select({ count: sql<number>`count(*)` }).from(schema.devicePairings).where(condition);
 
     const items = await db
       .select()
       .from(schema.devicePairings)
+      .where(condition)
       .orderBy(desc(schema.devicePairings.created_at))
       .limit(limit)
       .offset(offset);
