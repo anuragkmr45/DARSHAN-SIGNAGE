@@ -20,3 +20,19 @@ export function useGrafanaAvailability(enabled: boolean) {
     },
   });
 }
+
+export function useGrafanaAuthentication(enabled: boolean) {
+  return useQuery({
+    queryKey: ["grafana", "authenticated"],
+    enabled,
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      const response = await fetch("/grafana/api/user", { cache: "no-store", credentials: "same-origin" });
+      if (response.status === 401 || response.status === 403) return false;
+      if (!response.ok) throw new Error(`Grafana session check returned ${response.status}`);
+      return true;
+    },
+  });
+}

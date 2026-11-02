@@ -100,6 +100,8 @@ const heartbeatSchema = z.object({
   uptime: z.number().nonnegative(),
   memory_usage: z.number().nonnegative(),
   cpu_usage: z.number().nonnegative(),
+  request_queue_items: z.number().int().nonnegative().optional(),
+  request_queue_oldest_age_seconds: z.number().nonnegative().optional(),
   temperature: z.number().optional(),
   current_schedule_id: z.string().optional(),
   current_media_id: z.string().optional(),

@@ -429,4 +429,117 @@ describe('Observability CMS summary routes', () => {
     expect(body.latest_backend_telemetry.cpu_usage).toBe(18.5);
     expect(body.grafana.links[0].url).toContain('/grafana/d/darshan-players-fleet');
   });
+
+  it('uses fresh backend heartbeat measurements when direct player scrape is absent or down', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    const storageObjectId = randomUUID();
+    await db.insert(schema.screens).values({ id: screenId, name: 'Heartbeat fallback', status: 'ACTIVE', last_heartbeat_at: new Date() });
+    await db.insert(schema.storageObjects).values({
+      id: storageObjectId,
+      bucket: 'telemetry',
+      object_key: `heartbeats/${screenId}.json`,
+      content_type: 'application/json',
+      size: 128,
+    });
+    const [heartbeat] = await db.insert(schema.heartbeats).values({
+      screen_id: screenId,
+      status: 'ONLINE',
+      storage_object_id: storageObjectId,
+    }).returning({ id: schema.heartbeats.id });
+    const currentHeartbeatPayload = Buffer.from(JSON.stringify({
+      cpu_usage: 34.5,
+      memory_used_mb: 1024,
+      memory_total_mb: 4096,
+      disk_used_gb: 12.5,
+      disk_total_gb: 64,
+      request_queue_items: 0,
+      request_queue_oldest_age_seconds: 0,
+      display_count: 1,
+      power_source: 'AC',
+    }));
+    const heartbeatObject = vi.spyOn(s3, 'getObject').mockResolvedValue(currentHeartbeatPayload);
+    const endpoint = `/api/v1/observability/screens/${screenId}`;
+    const headers = { authorization: `Bearer ${adminToken}` };
+    const respond = async () => server.inject({ method: 'GET', url: endpoint, headers });
+    const vectorResponse = (result: Array<{ metric: Record<string, string>; value: string }>) =>
+      new Response(JSON.stringify(createPrometheusResponse(result)), { status: 200, headers: { 'content-type': 'application/json' } });
+
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => vectorResponse([])));
+      let response = await respond();
+      expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      let body = response.json();
+      expect(body.player_scrape.status).toBe('unconfigured');
+      expect(body.latest_player_metrics_source).toBe('backend_heartbeat');
+      expect(body.latest_player_metrics.cpu_percent).toBe(34.5);
+      expect(body.latest_player_metrics.memory_used_bytes).toBe(1024 ** 3);
+      expect(body.latest_player_metrics.request_queue_items).toBe(0);
+      expect(body.latest_player_metrics.power_connected).toBe(true);
+
+      heartbeatObject.mockResolvedValue(Buffer.from(JSON.stringify({
+        cpu_usage: 18,
+        memory_usage: 55,
+        disk_usage_percent: 40,
+      })));
+      response = await respond();
+      body = response.json();
+      expect(body.latest_player_metrics.memory_used_bytes).toBeNull();
+      expect(body.latest_player_metrics.memory_percent).toBe(55);
+      expect(body.latest_player_metrics.disk_percent).toBe(40);
+      expect(body.latest_player_metrics.request_queue_items).toBeNull();
+      heartbeatObject.mockResolvedValue(currentHeartbeatPayload);
+
+      vi.stubGlobal('fetch', vi.fn(async () => vectorResponse([
+        { metric: { __name__: 'up', job: 'players', device_id: screenId }, value: '0' },
+        { metric: { __name__: 'darshan_player_system_cpu_usage_percent', device_id: screenId }, value: '91' },
+      ])));
+      response = await respond();
+      body = response.json();
+      expect(body.player_scrape.status).toBe('down');
+      expect(body.latest_player_metrics.cpu_percent).toBe(34.5);
+
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        status: 'success',
+        data: { resultType: 'vector', result: [
+          { metric: { __name__: 'up', job: 'players', device_id: screenId }, value: [Date.now() / 1000, '1'] },
+          { metric: { __name__: 'darshan_player_system_cpu_usage_percent', device_id: screenId }, value: [Date.now() / 1000 - 600, '91'] },
+        ] },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })));
+      response = await respond();
+      body = response.json();
+      expect(body.player_scrape.status).toBe('up');
+      expect(body.latest_player_metrics.cpu_percent).toBe(34.5);
+
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        status: 'success',
+        data: { resultType: 'vector', result: [
+          { metric: { __name__: 'up', job: 'players', device_id: screenId }, value: [Date.now() / 1000 - 600, '1'] },
+          { metric: { __name__: 'darshan_player_system_cpu_usage_percent', device_id: screenId }, value: [Date.now() / 1000 - 600, '91'] },
+        ] },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })));
+      response = await respond();
+      body = response.json();
+      expect(body.player_scrape.status).toBe('unavailable');
+      expect(body.latest_player_metrics.cpu_percent).toBe(34.5);
+
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Prometheus unavailable'); }));
+      response = await respond();
+      body = response.json();
+      expect(body.player_scrape.status).toBe('unavailable');
+      expect(body.latest_player_metrics.cpu_percent).toBe(34.5);
+
+      await db.update(schema.heartbeats).set({ created_at: new Date(Date.now() - 10 * 60_000) }).where(eq(schema.heartbeats.id, heartbeat.id));
+      response = await respond();
+      body = response.json();
+      expect(body.latest_player_metrics_source).toBe('none');
+      expect(body.latest_player_metrics.cpu_percent).toBeNull();
+    } finally {
+      await db.delete(schema.heartbeats).where(eq(schema.heartbeats.id, heartbeat.id));
+      await db.delete(schema.storageObjects).where(eq(schema.storageObjects.id, storageObjectId));
+      await db.delete(schema.screens).where(eq(schema.screens.id, screenId));
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
 });

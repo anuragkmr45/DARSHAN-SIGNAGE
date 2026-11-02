@@ -107,13 +107,17 @@ export type ScreenObservabilitySummary = {
   };
   player_scrape: {
     configured: boolean;
-    status: 'up' | 'down' | 'unknown';
+    status: 'up' | 'down' | 'unknown' | 'unconfigured' | 'unavailable';
     last_successful_player_heartbeat_at: string | null;
   };
+  latest_player_metrics_source: 'prometheus' | 'backend_heartbeat' | 'mixed' | 'none';
+  latest_player_metrics_observed_at: string | null;
   latest_player_metrics: {
     cpu_percent: number | null;
+    memory_percent: number | null;
     memory_used_bytes: number | null;
     memory_total_bytes: number | null;
+    disk_percent: number | null;
     disk_used_bytes: number | null;
     disk_total_bytes: number | null;
     temperature_celsius: number | null;
@@ -137,6 +141,7 @@ export type ScreenObservabilitySummary = {
 
 const PROMETHEUS_API_PATH = '/api/v1/query';
 const PROMETHEUS_MACHINE_REGEX = 'vm1|valkey|vm2|vm3|vm4|dev-local';
+const SCREEN_METRICS_FRESH_MS = 90_000;
 
 function normalizeGrafanaBasePath(basePath: string) {
   const trimmed = basePath.trim();
@@ -153,6 +158,20 @@ function toScalar(result?: PrometheusVectorResult | null) {
 function parseUnixTime(value: number | null) {
   if (value === null || !Number.isFinite(value) || value <= 0) return null;
   return new Date(value * 1000).toISOString();
+}
+
+function finiteNonnegative(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function heartbeatNumber(payload: Record<string, unknown> | null, key: string): number | null {
+  return finiteNonnegative(payload?.[key]);
+}
+
+// Heartbeat quantities use MiB/GiB despite their legacy field names.
+function heartbeatBytes(payload: Record<string, unknown> | null, key: string, unit: number): number | null {
+  const value = heartbeatNumber(payload, key);
+  return value === null ? null : Math.round(value * unit);
 }
 
 function classifyMachineStatus(params: {
@@ -516,6 +535,7 @@ export async function buildScreenObservabilitySummary(screenId: string): Promise
   const [latestHeartbeat] = await db
     .select({
       created_at: schema.heartbeats.created_at,
+      status: schema.heartbeats.status,
       bucket: schema.storageObjects.bucket,
       object_key: schema.storageObjects.object_key,
     })
@@ -555,12 +575,91 @@ export async function buildScreenObservabilitySummary(screenId: string): Promise
     ].join(' or ')
   );
 
-  const metricValue = (name: string, matcher?: (metric: PrometheusMetric) => boolean) =>
-    toScalar(
-      playerMetricResults.find(
-        (result) => result.metric.__name__ === name && (matcher ? matcher(result.metric) : true)
-      ) ?? null
+  const metricValue = (name: string, matcher?: (metric: PrometheusMetric) => boolean) => {
+    const result = playerMetricResults.find(
+      (entry) => entry.metric.__name__ === name && (matcher ? matcher(entry.metric) : true)
     );
+    if (!result) return null;
+    const sampleAgeMs = Date.now() - Number(result.value[0]) * 1000;
+    return sampleAgeMs >= 0 && sampleAgeMs <= SCREEN_METRICS_FRESH_MS ? toScalar(result) : null;
+  };
+
+  const scrapeUpResult = playerMetricResults.find((result) => result.metric.__name__ === 'up');
+  const scrapeUp = toScalar(scrapeUpResult);
+  const scrapeSampleAgeMs = scrapeUpResult ? Date.now() - Number(scrapeUpResult.value[0]) * 1000 : Number.POSITIVE_INFINITY;
+  const scrapeFresh = scrapeSampleAgeMs >= 0 && scrapeSampleAgeMs <= SCREEN_METRICS_FRESH_MS;
+  const scrapeStatus = scrapeUp !== null
+    ? !scrapeFresh ? 'unavailable' : scrapeUp >= 1 ? 'up' : 'down'
+    : !prometheus.configured || prometheus.available ? 'unconfigured' : 'unavailable';
+  const heartbeatAgeMs = latestHeartbeat?.created_at
+    ? Date.now() - latestHeartbeat.created_at.getTime()
+    : Number.POSITIVE_INFINITY;
+  const recentHeartbeat = latestHeartbeat?.status === 'ONLINE' &&
+    heartbeatAgeMs >= 0 && heartbeatAgeMs <= SCREEN_METRICS_FRESH_MS
+    ? latestBackendTelemetry
+    : null;
+  const metricSources = new Set<'prometheus' | 'backend_heartbeat'>();
+  const selectMetric = (prometheusValue: number | null, heartbeatValue: number | null): number | null => {
+    if (scrapeStatus === 'up' && prometheusValue !== null) {
+      metricSources.add('prometheus');
+      return prometheusValue;
+    }
+    if (heartbeatValue !== null) {
+      metricSources.add('backend_heartbeat');
+      return heartbeatValue;
+    }
+    return null;
+  };
+
+  const powerSource = recentHeartbeat?.power_source;
+  const heartbeatPowerConnected = powerSource === 'AC' || powerSource === 'USB'
+    ? true
+    : powerSource === 'BATTERY'
+      ? false
+      : typeof recentHeartbeat?.is_charging === 'boolean'
+        ? recentHeartbeat.is_charging
+        : null;
+  const scrapedPowerConnected = metricValue('darshan_player_power_connected');
+  let powerConnected: boolean | null = null;
+  if (scrapeStatus === 'up' && scrapedPowerConnected !== null) {
+    metricSources.add('prometheus');
+    powerConnected = scrapedPowerConnected >= 1;
+  } else if (heartbeatPowerConnected !== null) {
+    metricSources.add('backend_heartbeat');
+    powerConnected = heartbeatPowerConnected;
+  }
+
+  const latestPlayerMetrics: ScreenObservabilitySummary['latest_player_metrics'] = {
+    cpu_percent: selectMetric(metricValue('darshan_player_system_cpu_usage_percent'), heartbeatNumber(recentHeartbeat, 'cpu_usage')),
+    memory_percent: null,
+    memory_used_bytes: selectMetric(metricValue('darshan_player_system_memory_bytes', (metric) => metric.state === 'used'), heartbeatBytes(recentHeartbeat, 'memory_used_mb', 1024 ** 2)),
+    memory_total_bytes: selectMetric(metricValue('darshan_player_system_memory_bytes', (metric) => metric.state === 'total'), heartbeatBytes(recentHeartbeat, 'memory_total_mb', 1024 ** 2)),
+    disk_percent: null,
+    disk_used_bytes: selectMetric(metricValue('darshan_player_system_disk_bytes', (metric) => metric.state === 'used'), heartbeatBytes(recentHeartbeat, 'disk_used_gb', 1024 ** 3)),
+    disk_total_bytes: selectMetric(metricValue('darshan_player_system_disk_bytes', (metric) => metric.state === 'total'), heartbeatBytes(recentHeartbeat, 'disk_total_gb', 1024 ** 3)),
+    temperature_celsius: selectMetric(metricValue('darshan_player_system_temperature_celsius'), heartbeatNumber(recentHeartbeat, 'cpu_temp_c') ?? heartbeatNumber(recentHeartbeat, 'temperature')),
+    battery_percent: selectMetric(metricValue('darshan_player_battery_percent'), heartbeatNumber(recentHeartbeat, 'battery_percent')),
+    power_connected: powerConnected,
+    request_queue_items: selectMetric(metricValue('darshan_player_request_queue_items'), heartbeatNumber(recentHeartbeat, 'request_queue_items')),
+    request_queue_oldest_age_seconds: selectMetric(metricValue('darshan_player_request_queue_oldest_age_seconds'), heartbeatNumber(recentHeartbeat, 'request_queue_oldest_age_seconds')),
+    cache_used_bytes: selectMetric(metricValue('darshan_player_cache_bytes', (metric) => metric.state === 'used'), null),
+    cache_total_bytes: selectMetric(metricValue('darshan_player_cache_bytes', (metric) => metric.state === 'total'), null),
+    last_schedule_sync_at: scrapeStatus === 'up' ? parseUnixTime(metricValue('darshan_player_last_schedule_sync_unixtime')) : null,
+    display_count: selectMetric(metricValue('darshan_player_display_count'), heartbeatNumber(recentHeartbeat, 'display_count')),
+  };
+  latestPlayerMetrics.memory_percent = latestPlayerMetrics.memory_used_bytes !== null &&
+    latestPlayerMetrics.memory_total_bytes !== null && latestPlayerMetrics.memory_total_bytes > 0
+    ? 100 * latestPlayerMetrics.memory_used_bytes / latestPlayerMetrics.memory_total_bytes
+    : selectMetric(null, heartbeatNumber(recentHeartbeat, 'memory_usage'));
+  latestPlayerMetrics.disk_percent = latestPlayerMetrics.disk_used_bytes !== null &&
+    latestPlayerMetrics.disk_total_bytes !== null && latestPlayerMetrics.disk_total_bytes > 0
+    ? 100 * latestPlayerMetrics.disk_used_bytes / latestPlayerMetrics.disk_total_bytes
+    : selectMetric(null, heartbeatNumber(recentHeartbeat, 'disk_usage_percent'));
+  if (latestPlayerMetrics.last_schedule_sync_at) metricSources.add('prometheus');
+  const latestPlayerMetricsSource = metricSources.size === 2
+    ? 'mixed'
+    : metricSources.has('prometheus') ? 'prometheus'
+    : metricSources.has('backend_heartbeat') ? 'backend_heartbeat' : 'none';
 
   const grafanaLinks: ObservabilityGrafanaLink[] = [];
   if (appConfig.OBSERVABILITY_GRAFANA_ENABLED) {
@@ -588,36 +687,17 @@ export async function buildScreenObservabilitySummary(screenId: string): Promise
       last_backend_heartbeat_at: screenRow.last_heartbeat_at?.toISOString() ?? null,
     },
     player_scrape: {
-      configured: playerMetricResults.length > 0,
-      status: (() => {
-        const upValue = metricValue('up');
-        if (upValue === null) return 'unknown';
-        return upValue >= 1 ? 'up' : 'down';
-      })(),
+      configured: scrapeUp !== null,
+      status: scrapeStatus,
       last_successful_player_heartbeat_at: parseUnixTime(
         metricValue('darshan_player_last_successful_heartbeat_unixtime')
       ),
     },
-    latest_player_metrics: {
-      cpu_percent: metricValue('darshan_player_system_cpu_usage_percent'),
-      memory_used_bytes: metricValue('darshan_player_system_memory_bytes', (metric) => metric.state === 'used'),
-      memory_total_bytes: metricValue('darshan_player_system_memory_bytes', (metric) => metric.state === 'total'),
-      disk_used_bytes: metricValue('darshan_player_system_disk_bytes', (metric) => metric.state === 'used'),
-      disk_total_bytes: metricValue('darshan_player_system_disk_bytes', (metric) => metric.state === 'total'),
-      temperature_celsius: metricValue('darshan_player_system_temperature_celsius'),
-      battery_percent: metricValue('darshan_player_battery_percent'),
-      power_connected: (() => {
-        const value = metricValue('darshan_player_power_connected');
-        if (value === null) return null;
-        return value >= 1;
-      })(),
-      request_queue_items: metricValue('darshan_player_request_queue_items'),
-      request_queue_oldest_age_seconds: metricValue('darshan_player_request_queue_oldest_age_seconds'),
-      cache_used_bytes: metricValue('darshan_player_cache_bytes', (metric) => metric.state === 'used'),
-      cache_total_bytes: metricValue('darshan_player_cache_bytes', (metric) => metric.state === 'total'),
-      last_schedule_sync_at: parseUnixTime(metricValue('darshan_player_last_schedule_sync_unixtime')),
-      display_count: metricValue('darshan_player_display_count'),
-    },
+    latest_player_metrics_source: latestPlayerMetricsSource,
+    latest_player_metrics_observed_at: latestPlayerMetricsSource === 'none' ? null
+      : metricSources.has('backend_heartbeat') ? latestHeartbeat?.created_at.toISOString() ?? null
+      : new Date().toISOString(),
+    latest_player_metrics: latestPlayerMetrics,
     latest_backend_telemetry: latestBackendTelemetry,
     grafana: {
       enabled: appConfig.OBSERVABILITY_GRAFANA_ENABLED,
