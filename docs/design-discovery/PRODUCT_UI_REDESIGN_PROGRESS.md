@@ -15,6 +15,8 @@ This is a work-in-progress implementation record, not a release acceptance repor
 
 Developer verification on this branch: CMS production build and bundle budget passed; all 267 unit tests passed; the focused access-navigation browser case passed; all eight Screens browser cases passed; project skill validation passed. These browser cases use test fixtures and do not establish the required real-service regression.
 
+The eight selected upstream design skills and their required references are vendored at pinned commit `f1090bec277140d02ed202440185ad9d02ac1490` with the MIT license. Two unsupported upstream frontmatter keys were removed for local skill validation; the exception is recorded in `.agents/skills/EMIL-SKILLS-ORIGIN.md`.
+
 ## Pending
 
 The foundation needs rendered review across themes, accents and widths. Dashboard, Screens, content, schedules, live, chat, administration, player surfaces, full coverage register, real-application regression, final artifacts, and human release gates remain open. No existing screenshot or mocked browser result is being counted as full workflow sign-off.
