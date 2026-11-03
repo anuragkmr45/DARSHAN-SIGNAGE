@@ -34,6 +34,7 @@ export const useRolesApi = () => {
   const { toast } = useToast();
 
   const createRole = useMutation({
+    retry: false,
     mutationFn: (payload: RolePayload) => rolesApi.create(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["roles"] });
@@ -49,6 +50,7 @@ export const useRolesApi = () => {
   });
 
   const updateRole = useMutation({
+    retry: false,
     mutationFn: ({ roleId, payload }: { roleId: string; payload: RolePayload }) =>
       rolesApi.update(roleId, payload),
     onSuccess: async (_data, variables) => {
@@ -66,6 +68,7 @@ export const useRolesApi = () => {
   });
 
   const deleteRole = useMutation({
+    retry: false,
     mutationFn: (roleId: string) => rolesApi.remove(roleId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["roles"] });

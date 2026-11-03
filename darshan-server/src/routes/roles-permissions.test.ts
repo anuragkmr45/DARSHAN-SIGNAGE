@@ -105,6 +105,26 @@ describe('Role and permission routes', () => {
     expect(JSON.parse(superAdminResponse.body).name).toBe(`${createPayload.name}_SUPER`);
   });
 
+  it('keeps built-in roles fixed even when a privileged caller sends an update directly', async () => {
+    const db = getDatabase();
+    const [before] = await db.select().from(schema.roles).where(eq(schema.roles.name, 'ADMIN'));
+    expect(before).toBeDefined();
+
+    const response = await server.inject({
+      method: 'PUT',
+      url: `/api/v1/roles/${before.id}`,
+      headers: { authorization: `Bearer ${superAdminToken}` },
+      payload: {
+        name: 'RENAMED_ADMIN',
+        permissions: { grants: [{ action: 'read', subject: 'Dashboard' }] },
+      },
+    });
+
+    expect(response.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    const [after] = await db.select().from(schema.roles).where(eq(schema.roles.id, before.id));
+    expect(after).toEqual(before);
+  });
+
   it('revokes sessions for every user assigned to an updated role', async () => {
     const db = getDatabase();
     const roleId = randomUUID();

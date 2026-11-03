@@ -175,7 +175,7 @@ Question: Must edits to built-in role permissions survive API restarts and upgra
 
 Why this changes testing: A permission change that succeeds in the UI but disappears after restart can be correct policy or a serious defect.
 
-Observed implementation, refreshed 2026-10-16: feature routes and CMS controls use effective CASL permissions; inherited and conditional grants are resolved. A recursive regression test rejects feature-level custom-role name gates. Role-name identity remains only for protected system-role hierarchy and content ownership classification.
+Observed implementation, refreshed 2026-11-04: feature routes and CMS controls use effective CASL permissions; inherited and conditional grants are resolved. A recursive regression test rejects feature-level custom-role name gates. Built-in role edits are now absent from CMS and rejected by the direct update API, so startup synchronization no longer erases a permitted edit. Role-name identity remains only for protected system-role hierarchy and content ownership classification.
 
 Evidence: `darshan-server/src/routes/roles.ts`; `darshan-server/src/rbac/system-roles.ts`; `darshan-server/src/server/index.ts`; `darshan-cms/src/components/settings/RolesPermissionsTab.tsx`.
 
@@ -183,7 +183,7 @@ Affected areas: UC-004, UC-027; BR-009, BR-049, BR-052; persistence, authorizati
 
 Answer, 2026-09-24: "built-in roles stay fixed and customization use only custom roles"; check actual code behavior.
 
-Resolution: RESOLVED under BR-071/092. Custom-role permissions decide access everywhere regardless of role display name; protected system-role hierarchy remains identity-based. Runtime inheritance/condition/session-withdrawal coverage is `AUTHZ-02`.
+Resolution: RESOLVED under BR-071/092. Custom-role permissions decide access everywhere regardless of role display name; protected system-role hierarchy remains identity-based. Focused developer evidence is `evidence/product-ui-roles-developer-verification-2026-11-04.md`; runtime inheritance/condition/session-withdrawal and large-role-site coverage remain `AUTHZ-02`.
 
 ### BQ-009: Existing Sessions After Account Changes
 

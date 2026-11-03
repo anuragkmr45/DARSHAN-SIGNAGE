@@ -198,16 +198,14 @@ export async function roleRoutes(fastify: FastifyInstance) {
         const data = updateRoleSchema.parse(request.body);
         const result = await withCurrentMutationAuthorization(
           payload,
-          async ({ actor, ability, executor }) => {
+          async ({ ability, executor }) => {
             if (!ability.can('update', 'Role')) throw AppError.forbidden('Forbidden');
             const [existingRole] = await executor
               .select()
               .from(schema.roles)
               .where(eq(schema.roles.id, request.params.id));
             if (!existingRole) throw AppError.notFound('Role not found');
-            if (existingRole.is_system && !canManageSystemRole(actor.roleName, existingRole.name)) {
-              throw AppError.forbidden('Forbidden');
-            }
+            if (existingRole.is_system) throw AppError.conflict('Built-in roles are fixed. Create a custom role instead.');
             return roleRepo.update(request.params.id, data, executor);
           },
           { roleLock: 'update' }
