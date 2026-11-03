@@ -19,7 +19,7 @@ The eight selected upstream design skills and their required references are vend
 
 ## Pending
 
-The foundation needs rendered review across themes, accents and widths. Dashboard, Screens, schedules, the phone Layout editor, and chat navigation have prototypes; content beyond Layout editing, live, communication beyond navigation, administration, player surfaces, full coverage register, real-application regression, final artifacts, and human release gates remain open. No existing screenshot or mocked browser result is being counted as full workflow sign-off.
+The foundation needs rendered review across themes, accents and widths. Dashboard, Screens, schedules, the phone Layout editor, chat navigation, and player pairing/recovery have prototypes; content beyond Layout editing, live, communication beyond navigation, administration, other player surfaces, full coverage register, real-application regression, final artifacts, and human release gates remain open. No existing screenshot or mocked browser result is being counted as full workflow sign-off.
 
 ## Dashboard prototype in progress
 
@@ -56,3 +56,11 @@ Task: find a conversation, read it, and follow a reply into its thread. Priority
 Text drafts stay with their conversation when switching chats, and thread drafts stay with their thread while the page remains mounted. Per-conversation Composer instances prevent pending attachments from appearing in the wrong chat. Message Reply and React stay visible; Edit, Pin, Bookmark, and Delete are in a labeled More menu. Delete asks for confirmation, failed Edit retains its text, and thread messages no longer show actions without handlers. Optional details and share-link controls move into a phone More menu.
 
 Fixture-backed browser checks cover list → conversation → thread → Back, independent text drafts, unread refetch after a read receipt, 820-to-1440 responsive transition, deletion cancellation, failed edit retention, and absence of dead thread controls. Rendered captures live under `qa-artifacts/evidence/product-ui-chat-navigation/`. Uploads or attachments still in progress are not retained when changing conversations, and a deep link to an old thread may lack its parent message if that message is outside the loaded main timeline. Both require follow-up before the full communication packet can pass. Physical mobile behavior, real-service concurrent actors, moderation, invitations, attachments, notification deep links, and permissions remain open.
+
+## Player pairing and recovery prototype in progress
+
+Task: connect a screen without an input device, identify the correct host, and understand when administrator action is needed. Information priority: pairing instructions and OS hostname, six-digit code and expiry, then waiting/provisioning state. Device ID, model, resolution, and diagnostics remain secondary on larger surfaces. Operator-only buttons stay hidden in production. The visual presentation is neutral and restrained; authored playback geometry and main-process state ownership are unchanged.
+
+The recovery state now occupies the whole player window instead of a small corner panel. It shows the authoritative reason, network guidance, and available timing information. The security-lock surface uses the same restrained visual language, while its existing lock reason and resume condition remain visible.
+
+The built renderer was inspected at 1440×900, 820×768, 390×844, and 640×360 CSS pixels. Each keeps hostname, code, expiry, and status inside the viewport; production controls stay hidden. Rendered mock-state captures are under `qa-artifacts/evidence/product-ui-player-prototype/`. The browser pairing regression verifies OTP replacement, monotonic countdown despite a skewed wall clock, surface priority, production control hiding, and the new viewport checks. These are prototype checks; a packaged Ubuntu player, physical displays, Windows, actual backend pairing/recovery, and security-lock transition remain to be exercised in the later real-application regression.

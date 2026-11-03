@@ -704,6 +704,7 @@
         opacity: 0.75;
       }
     </style>
+    <link rel="stylesheet" href="./player-presentation.css" />
   </head>
   <body>
     <!-- Playback Container -->
@@ -734,25 +735,10 @@
     <div id="pairing-screen" class="hidden" data-density="FULL">
       <div class="pairing-main">
         <div class="pairing-logo">DARSHAN</div>
-        <h1 class="pairing-title">Device Pairing</h1>
+        <h1 class="pairing-title">Connect this screen</h1>
         <p class="pairing-instructions">
-          Use this code in your CMS to connect this screen. It refreshes automatically when it expires.
+          In DARSHAN CMS, open Screens, choose Pair Device, and enter this code.
         </p>
-
-        <div class="pairing-form" data-kiosk-priority="p3">
-          <div class="pairing-field">
-            <label for="device-label">Device Label</label>
-            <input id="device-label" class="pairing-input operator-control" placeholder="Lobby Screen" />
-          </div>
-          <div class="pairing-field">
-            <label>Resolution</label>
-            <div id="device-resolution" class="pairing-static">-</div>
-          </div>
-          <div class="pairing-field">
-            <label>Model</label>
-            <div id="device-model" class="pairing-static">-</div>
-          </div>
-        </div>
 
         <div class="pairing-code-card">
           <div class="pairing-hostname">Hostname: <span id="pairing-hostname">Detecting…</span></div>
@@ -767,10 +753,24 @@
         <div class="pairing-actions" data-kiosk-priority="p3">
           <button class="pairing-button operator-control" id="pairing-complete" disabled>Retry Provisioning</button>
         </div>
+        <div class="pairing-status" id="pairing-status"></div>
+
+        <div class="pairing-form" data-kiosk-priority="p3">
+          <div class="pairing-field operator-only-field">
+            <label for="device-label">Device Label</label>
+            <input id="device-label" class="pairing-input operator-control" placeholder="Lobby Screen" />
+          </div>
+          <div class="pairing-field">
+            <label>Resolution</label>
+            <div id="device-resolution" class="pairing-static">-</div>
+          </div>
+          <div class="pairing-field">
+            <label>Model</label>
+            <div id="device-model" class="pairing-static">-</div>
+          </div>
+        </div>
 
         <div class="pairing-meta" data-kiosk-priority="p2">Device ID: <span id="pairing-device-id">-</span></div>
-
-        <div class="pairing-status" id="pairing-status"></div>
 
         <div class="network-diagnostics" data-kiosk-priority="p2">
           <h3>Network Diagnostics</h3>
@@ -786,6 +786,7 @@
     <div id="recovery-overlay" class="hidden">
       <div class="recovery-title" id="recovery-title">Recovery Required</div>
       <div class="recovery-reason" id="recovery-reason">Device runtime needs attention.</div>
+      <p class="recovery-guidance">Keep this screen on the approved network. If it does not recover, contact your DARSHAN administrator.</p>
       <div class="recovery-actions">
         <button class="pairing-button secondary operator-control" id="recovery-retry">Retry</button>
         <button class="pairing-button operator-control" id="recovery-repair">Re-pair Device</button>

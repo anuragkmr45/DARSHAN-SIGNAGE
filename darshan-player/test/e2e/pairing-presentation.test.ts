@@ -317,5 +317,65 @@ describe('Pairing presentation browser regression', () => {
       falsePairedCopy: false,
       topSurface: 'pairing-screen',
     })
+
+    for (const [width, height] of [[1440, 900], [820, 768], [390, 844], [640, 360]]) {
+      await session.command('Emulation.setDeviceMetricsOverride', {
+        width,
+        height,
+        deviceScaleFactor: 1,
+        mobile: false,
+      })
+      if (height === 360) {
+        await evaluate(session, `(() => {
+          document.getElementById('pairing-hostname').textContent =
+            'darshan-player-east-wing-conference-floor-very-long-hostname-01'
+          document.getElementById('pairing-status').textContent =
+            'The backend is temporarily unavailable. Reconnecting and checking whether this pairing code is still active.'
+        })()`)
+      }
+      const layout = await evaluate(session, `(() => {
+        const ids = ['pairing-hostname', 'pairing-code', 'pairing-expiry', 'pairing-status']
+        const visible = ids.every((id) => {
+          const element = document.getElementById(id)
+          const rect = element?.getBoundingClientRect()
+          return rect && rect.width > 0 && rect.height > 0 &&
+            rect.left >= 0 && rect.top >= 0 &&
+            rect.right <= innerWidth && rect.bottom <= innerHeight
+        })
+        return {
+          visible,
+          surface: getComputedStyle(document.getElementById('pairing-screen')).backgroundColor,
+          operatorControlHidden: getComputedStyle(document.getElementById('pairing-refresh')).display === 'none',
+        }
+      })()`)
+      expect(layout, `pairing layout at ${width}x${height}`).to.deep.equal({
+        visible: true,
+        surface: 'rgb(17, 21, 27)',
+        operatorControlHidden: true,
+      })
+    }
+
+    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 4, status: {
+      state: 'RECOVERY_REQUIRED', mode: 'empty', online: false,
+      recoveryReason: 'Device credentials require administrator attention'
+    } })`)
+    const recovery = await evaluate(session, `(() => {
+      const element = document.getElementById('recovery-overlay')
+      const rect = element.getBoundingClientRect()
+      return {
+        visible: !element.classList.contains('hidden'),
+        pairingHidden: document.getElementById('pairing-screen').classList.contains('hidden'),
+        fullScreen: rect.width === innerWidth && rect.height === innerHeight,
+        reason: document.getElementById('recovery-reason').textContent,
+        controlsHidden: getComputedStyle(document.getElementById('recovery-retry')).display === 'none',
+      }
+    })()`)
+    expect(recovery).to.deep.equal({
+      visible: true,
+      pairingHidden: true,
+      fullScreen: true,
+      reason: 'Device credentials require administrator attention',
+      controlsHidden: true,
+    })
   })
 })

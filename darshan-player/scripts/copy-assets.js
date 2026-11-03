@@ -19,6 +19,10 @@ console.log('Copying assets...')
 console.log(`  ${srcHtml} -> ${destHtml}`)
 
 fs.copyFileSync(srcHtml, destHtml)
+fs.copyFileSync(
+  path.join(__dirname, '../src/renderer/player-presentation.css'),
+  path.join(distRendererDir, 'player-presentation.css')
+)
 
 for (const name of ['live-prototype', 'live-prototype-shell', 'live-receiver']) {
   fs.copyFileSync(path.join(__dirname, `../src/renderer/${name}.html`), path.join(distRendererDir, `${name}.html`))
