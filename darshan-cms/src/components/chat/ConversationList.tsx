@@ -2,6 +2,7 @@ import { MessageCircle, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import type { ChatConversationListItem } from "@/api/types";
 
 interface ConversationListProps {
@@ -11,6 +12,9 @@ interface ConversationListProps {
   search: string;
   onSearch: (value: string) => void;
   onSelect: (conversationId: string) => void;
+  isLoading?: boolean;
+  errorMessage?: string;
+  onRetry?: () => void;
 }
 
 const GROUPS: Array<{ key: ChatConversationListItem["type"]; label: string }> = [
@@ -38,6 +42,9 @@ export function ConversationList({
   search,
   onSearch,
   onSelect,
+  isLoading = false,
+  errorMessage,
+  onRetry,
 }: ConversationListProps) {
   const filtered = conversations.filter((conversation) => {
     const q = search.trim().toLowerCase();
@@ -56,7 +63,7 @@ export function ConversationList({
   });
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-lg border bg-card">
+    <div className="flex h-full min-h-0 flex-col bg-card">
       <div className="border-b p-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -64,20 +71,28 @@ export function ConversationList({
             value={search}
             onChange={(event) => onSearch(event.target.value)}
             placeholder="Search chats..."
+            aria-label="Search conversations"
             className="pl-9"
           />
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="space-y-4 p-3">
+      <ScrollArea className="flex-1 overscroll-contain">
+        <div className="space-y-4 px-2 py-3">
+          {isLoading && <p className="px-3 py-6 text-sm text-muted-foreground" role="status">Loading conversations…</p>}
+          {errorMessage && (
+            <div className="space-y-2 px-3 py-6">
+              <p className="text-sm text-destructive">Could not load conversations. {errorMessage}</p>
+              {onRetry && <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>}
+            </div>
+          )}
           {GROUPS.map((group) => {
             const items = filtered.filter((conversation) => conversation.type === group.key);
             if (!items.length) return null;
 
             return (
               <div key={group.key} className="space-y-1">
-                <p className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <p className="px-3 py-1 text-xs font-medium text-muted-foreground">
                   {group.label}
                 </p>
                 {items.map((conversation) => {
@@ -90,10 +105,11 @@ export function ConversationList({
                       key={conversation.id}
                       type="button"
                       onClick={() => onSelect(conversation.id)}
-                      className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                      aria-current={isSelected ? "page" : undefined}
+                      className={`w-full rounded-md px-3 py-3 text-left transition-colors ${
                         isSelected
-                          ? "border-primary bg-primary/10"
-                          : "border-transparent hover:border-border hover:bg-muted/60"
+                          ? "bg-primary/10"
+                          : "hover:bg-muted/60"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -107,7 +123,7 @@ export function ConversationList({
                           </p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
-                          {isArchived && <Badge variant="outline">ARCHIVED</Badge>}
+                          {isArchived && <Badge variant="outline">Archived</Badge>}
                           {unreadCount > 0 && <Badge>{unreadCount}</Badge>}
                         </div>
                       </div>
@@ -118,8 +134,8 @@ export function ConversationList({
             );
           })}
 
-          {filtered.length === 0 && (
-            <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+          {!isLoading && !errorMessage && filtered.length === 0 && (
+            <div className="p-6 text-center text-sm text-muted-foreground">
               No conversations found.
             </div>
           )}

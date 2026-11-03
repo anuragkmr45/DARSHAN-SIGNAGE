@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { Send } from "lucide-react";
+import { ArrowLeft, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -50,8 +50,13 @@ export function ThreadPanel({
   attachmentMediaById = {},
   onReplySubmit,
 }: ThreadPanelProps) {
-  const [draft, setDraft] = useState("");
-  const [alsoToChannel, setAlsoToChannel] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [channelChoices, setChannelChoices] = useState<Record<string, boolean>>({});
+  const draftKey = `${conversationId ?? ""}:${threadRootId ?? ""}`;
+  const draft = drafts[draftKey] ?? "";
+  const alsoToChannel = channelChoices[draftKey] ?? false;
+  const setDraft = (value: string) => setDrafts((current) => ({ ...current, [draftKey]: value }));
+  const setAlsoToChannel = (value: boolean) => setChannelChoices((current) => ({ ...current, [draftKey]: value }));
   const threadQuery = useChatThread(conversationId, threadRootId);
   const orderedReplies = useMemo(
     () => [...threadQuery.items].sort((a, b) => b.seq - a.seq),
@@ -82,20 +87,28 @@ export function ThreadPanel({
 
   const submit = async () => {
     if (!threadRootId || !draft.trim() || !canMutate) return;
-    await onReplySubmit({ text: draft.trim(), replyTo: threadRootId, alsoToChannel });
-    setDraft("");
-    setAlsoToChannel(false);
+    try {
+      await onReplySubmit({ text: draft.trim(), replyTo: threadRootId, alsoToChannel });
+      setDraft("");
+      setAlsoToChannel(false);
+    } catch {
+      // The parent displays the error; keep this thread's draft for retry.
+    }
   };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full max-w-[520px] p-0">
-        <SheetHeader className="border-b px-4 py-3">
+      <SheetContent side="right" className="flex h-[100dvh] w-full max-w-none flex-col p-0 sm:max-w-[520px]">
+        <SheetHeader className="border-b px-4 py-3 pr-12 text-left">
+          <Button size="sm" variant="ghost" className="w-fit sm:hidden" onClick={() => onOpenChange(false)}>
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            Conversation
+          </Button>
           <SheetTitle>Thread</SheetTitle>
-          <SheetDescription>Replies stay grouped under the selected message.</SheetDescription>
+          <SheetDescription className="sr-only">Replies grouped under the selected message.</SheetDescription>
         </SheetHeader>
 
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
           {statusBannerMode && (
             <ChatStatusBanner
               mode={statusBannerMode}
@@ -104,7 +117,7 @@ export function ThreadPanel({
               className="mx-3 mt-3"
             />
           )}
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3">
             {rootMessage && (
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Parent Message</p>
@@ -159,7 +172,7 @@ export function ThreadPanel({
             </div>
           </div>
 
-          <div className="border-t p-3">
+          <div className="border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <Textarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}

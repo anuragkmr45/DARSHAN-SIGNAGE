@@ -82,18 +82,29 @@ test.describe("Chat E2E", () => {
       await expect(page.getByText(":thumbsup:")).toBeVisible({ timeout: 10_000 });
     }
 
-    const editButton = page.getByRole("button", { name: /edit message/i }).first();
-    if (await editButton.isVisible().catch(() => false)) {
-      await editButton.click();
-      await page.locator('input[type="text"]').last().fill(`edited-${Date.now()}`);
-      await page.getByRole("button", { name: /save/i }).last().click();
-      await expect(page.getByText(/edited/i)).toBeVisible({ timeout: 10_000 });
-    }
-
-    const deleteButton = page.getByRole("button", { name: /delete message/i }).first();
-    if (await deleteButton.isVisible().catch(() => false)) {
-      await deleteButton.click();
-      await expect(page.getByText(/This message was deleted/i).first()).toBeVisible({ timeout: 10_000 });
+    const sentMessageId = await page.getByText(messageText, { exact: true }).first().locator("..").getAttribute("data-chat-message-id");
+    if (!sentMessageId) throw new Error("Sent message identity was unavailable");
+    const sentMessage = page.locator(`[data-chat-message-id="${sentMessageId}"]`);
+    const moreActions = sentMessage.getByRole("button", { name: "More message actions" });
+    if (await moreActions.isVisible().catch(() => false)) {
+      await moreActions.click();
+      const editAction = page.getByRole("menuitem", { name: "Edit message" });
+      if (await editAction.isVisible().catch(() => false)) {
+        await editAction.click();
+        const editedText = `edited-${Date.now()}`;
+        await sentMessage.getByLabel("Edit message text").fill(editedText);
+        await sentMessage.getByRole("button", { name: "Save" }).click();
+        await expect(page.getByText(editedText, { exact: true })).toBeVisible({ timeout: 10_000 });
+      }
+      await sentMessage.getByRole("button", { name: "More message actions" }).click();
+      const deleteAction = page.getByRole("menuitem", { name: "Delete message" });
+      if (await deleteAction.isVisible().catch(() => false)) {
+        await deleteAction.click();
+        const confirmation = page.getByRole("dialog", { name: "Delete this message?" });
+        await expect(confirmation).toBeVisible();
+        await confirmation.getByRole("button", { name: "Delete message" }).click();
+        await expect(page.getByText(/This message was deleted/i).first()).toBeVisible({ timeout: 10_000 });
+      }
     }
   });
 

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { BookmarkPlus, CornerDownRight, Pencil, Pin, PinOff, SmilePlus, Trash2 } from "lucide-react";
+import { BookmarkPlus, CornerDownRight, MoreHorizontal, Pencil, Pin, PinOff, SmilePlus, Trash2 } from "lucide-react";
 import { MediaPreview } from "@/components/common/MediaPreview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { formatChatTime } from "@/lib/chatTime";
 import type { ChatMessage, MediaAsset } from "@/api/types";
@@ -22,7 +24,7 @@ interface MessageItemProps {
   canDeleteMessage?: boolean;
   onReply?: (messageId: string) => void;
   onReact?: (messageId: string, emoji: string, op: "add" | "remove") => void;
-  onEdit?: (messageId: string, text: string) => void;
+  onEdit?: (messageId: string, text: string) => Promise<void> | void;
   onDelete?: (messageId: string) => void;
   onTogglePin?: (messageId: string, shouldPin: boolean) => void;
   onBookmark?: (messageId: string) => void;
@@ -86,6 +88,8 @@ export function MessageItem({
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(message.body_text || "");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editPending, setEditPending] = useState(false);
   const [viewer, setViewer] = useState<{
     media?: MediaAsset;
     url?: string;
@@ -95,8 +99,12 @@ export function MessageItem({
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
   const isDeleted = Boolean(message.deleted_at);
   const isMine = currentUserId ? currentUserId === message.sender_id : false;
-  const canEditResolved = canMutate && (typeof canEditMessage === "boolean" ? canEditMessage : isMine);
-  const canDeleteResolved = canMutate && (typeof canDeleteMessage === "boolean" ? canDeleteMessage : isMine);
+  const canEditResolved = Boolean(onEdit) && canMutate && (typeof canEditMessage === "boolean" ? canEditMessage : isMine);
+  const canDeleteResolved = Boolean(onDelete) && canMutate && (typeof canDeleteMessage === "boolean" ? canDeleteMessage : isMine);
+
+  useEffect(() => {
+    if (!isEditing) setDraft(message.body_text || "");
+  }, [isEditing, message.body_text]);
 
   const reactionsByEmoji = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -116,7 +124,7 @@ export function MessageItem({
   const senderLabel = mentionDisplayById[message.sender_id] || message.sender_id;
 
   return (
-    <div className="space-y-2 rounded-md border bg-background p-3">
+    <div className="space-y-2 rounded-md border bg-background p-3" data-chat-message-id={message.id}>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <div className="flex items-center gap-2">
           <span className="font-medium text-foreground">{senderLabel}</span>
@@ -138,18 +146,21 @@ export function MessageItem({
         </div>
       ) : isEditing ? (
         <div className="flex items-center gap-2">
-          <Input value={draft} onChange={(event) => setDraft(event.target.value)} />
+          <Input value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="Edit message text" />
           <Button
             size="sm"
             onClick={() => {
-              onEdit?.(message.id, draft.trim());
-              setIsEditing(false);
+              setEditPending(true);
+              void Promise.resolve().then(() => onEdit?.(message.id, draft.trim()))
+                .then(() => setIsEditing(false))
+                .catch(() => undefined)
+                .finally(() => setEditPending(false));
             }}
-            disabled={!draft.trim()}
+            disabled={!draft.trim() || editPending}
           >
-            Save
+            {editPending ? "Saving…" : "Save"}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setIsEditing(false)}>
+          <Button size="sm" variant="ghost" onClick={() => setIsEditing(false)} disabled={editPending}>
             Cancel
           </Button>
         </div>
@@ -231,72 +242,60 @@ export function MessageItem({
             );
           })}
 
-          <Button size="sm" variant="ghost" onClick={() => onReply?.(message.id)} aria-label="Reply in thread">
+          {onReply && <Button size="sm" variant="ghost" onClick={() => onReply(message.id)} aria-label="Reply in thread">
             <CornerDownRight className="mr-1 h-3.5 w-3.5" />
             Reply
-          </Button>
+          </Button>}
 
-          <Button size="sm" variant="ghost" onClick={() => onReact?.(message.id, ":thumbsup:", "add")} disabled={!canMutate} aria-label="Add reaction">
+          {onReact && <Button size="sm" variant="ghost" onClick={() => onReact(message.id, ":thumbsup:", "add")} disabled={!canMutate} aria-label="Add reaction">
             <SmilePlus className="mr-1 h-3.5 w-3.5" />
             React
-          </Button>
+          </Button>}
 
-          {canEditResolved && (
-            <Button size="sm" variant="ghost" onClick={() => setIsEditing(true)} disabled={!canMutate} aria-label="Edit message">
-              <Pencil className="mr-1 h-3.5 w-3.5" />
-              Edit
-            </Button>
-          )}
-
-          {canDeleteResolved && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => onDelete?.(message.id)}
-              disabled={!canMutate}
-              className="text-destructive"
-              aria-label="Delete message"
-            >
-              <Trash2 className="mr-1 h-3.5 w-3.5" />
-              Delete
-            </Button>
-          )}
-
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!canMutate}
-            onClick={() => onTogglePin?.(message.id, !isPinned)}
-            aria-label={isPinned ? "Unpin message" : "Pin message"}
-          >
-            {isPinned ? <PinOff className="mr-1 h-3.5 w-3.5" /> : <Pin className="mr-1 h-3.5 w-3.5" />}
-            {isPinned ? "Unpin" : "Pin"}
-          </Button>
-
-          {!isBookmarked ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!canMutate}
-              onClick={() => onBookmark?.(message.id)}
-              aria-label="Add bookmark"
-            >
-              <BookmarkPlus className="mr-1 h-3.5 w-3.5" />
-              Bookmark
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled
-              aria-label="Already bookmarked"
-            >
-              <BookmarkPlus className="mr-1 h-3.5 w-3.5" />
-              Bookmarked
-            </Button>
+          {(canEditResolved || canDeleteResolved || onTogglePin || onBookmark) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="ghost" aria-label="More message actions">
+                  <MoreHorizontal className="mr-1 h-3.5 w-3.5" />
+                  More
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {canEditResolved && (
+                  <DropdownMenuItem onSelect={() => setIsEditing(true)}>
+                    <Pencil className="mr-2 h-4 w-4" />Edit message
+                  </DropdownMenuItem>
+                )}
+                {onTogglePin && (
+                  <DropdownMenuItem disabled={!canMutate} onSelect={() => onTogglePin(message.id, !isPinned)}>
+                    {isPinned ? <PinOff className="mr-2 h-4 w-4" /> : <Pin className="mr-2 h-4 w-4" />}
+                    {isPinned ? "Unpin message" : "Pin message"}
+                  </DropdownMenuItem>
+                )}
+                {onBookmark && (
+                  <DropdownMenuItem disabled={!canMutate || isBookmarked} onSelect={() => onBookmark(message.id)}>
+                    <BookmarkPlus className="mr-2 h-4 w-4" />{isBookmarked ? "Bookmarked" : "Bookmark message"}
+                  </DropdownMenuItem>
+                )}
+                {canDeleteResolved && (
+                  <DropdownMenuItem className="text-destructive" onSelect={() => setDeleteOpen(true)}>
+                    <Trash2 className="mr-2 h-4 w-4" />Delete message
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete this message?"
+        description="The message will disappear from the conversation. An authorized administrator may still restore it."
+        confirmLabel="Delete message"
+        onConfirm={() => { setDeleteOpen(false); onDelete?.(message.id); }}
+        onCancel={() => setDeleteOpen(false)}
+      />
 
       <Dialog open={Boolean(viewer) && !isDeleted} onOpenChange={(open) => !open && setViewer(null)}>
         <DialogContent className="h-[90vh] w-[95vw] max-w-6xl p-4">

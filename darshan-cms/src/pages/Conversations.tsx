@@ -235,6 +235,19 @@ export default function Conversations() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isModerationPanelOpen, setIsModerationPanelOpen] = useState(false);
   const [shareLinkFallback, setShareLinkFallback] = useState<string | null>(null);
+  const [isCompactChatLayout, setIsCompactChatLayout] = useState(() => window.matchMedia("(max-width: 1023px)").matches);
+  const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const onChange = () => setIsCompactChatLayout(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    setComposerDrafts({});
+  }, [currentUserId]);
 
   const routeConversationId = params.conversationId;
   const threadRootId = params.threadRootId;
@@ -323,8 +336,9 @@ export default function Conversations() {
   useEffect(() => {
     if (conversations.length === 0) return;
     if (routeConversationId) return;
+    if (isCompactChatLayout) return;
     navigate(`/chat/${conversations[0].id}`, { replace: true });
-  }, [conversations, navigate, routeConversationId]);
+  }, [conversations, isCompactChatLayout, navigate, routeConversationId]);
 
   const resolveConversationError =
     resolveConversationQuery.error instanceof ApiError ? resolveConversationQuery.error : null;
@@ -768,12 +782,12 @@ export default function Conversations() {
   return (
     <div
       className={cn(
-        "grid min-h-[calc(100svh-11rem)] gap-4 lg:h-[calc(100svh-11rem)]",
-        isSidebarCollapsed ? "lg:grid-cols-[68px,1fr]" : "lg:grid-cols-[320px,1fr]",
+        "grid h-[calc(100dvh-7rem)] min-h-[28rem] min-w-0 grid-cols-1 overflow-hidden rounded-xl border bg-card lg:h-[calc(100dvh-9rem)]",
+        isSidebarCollapsed && !isCompactChatLayout ? "lg:grid-cols-[68px_minmax(0,1fr)]" : "lg:grid-cols-[320px_minmax(0,1fr)]",
       )}
     >
-      <div className="min-h-[5rem] lg:min-h-0">
-        {isSidebarCollapsed ? (
+      <div className={cn("min-h-0 min-w-0 border-r", routeConversationId && "hidden lg:block")}>
+        {isSidebarCollapsed && !isCompactChatLayout ? (
           <div className="flex h-full flex-col items-center gap-2 rounded-lg border bg-card p-2">
             <Button
               size="icon"
@@ -786,8 +800,8 @@ export default function Conversations() {
             <p className="text-xs text-muted-foreground">{conversations.length} chats</p>
           </div>
         ) : (
-          <div className="flex h-full min-h-[20rem] flex-col space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex flex-wrap items-center gap-2 border-b p-3">
               <Button className="min-w-[10rem] flex-1 sm:flex-none" onClick={() => setCreateOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
                 New chat
@@ -798,6 +812,7 @@ export default function Conversations() {
                 size="icon"
                 onClick={() => setIsSidebarCollapsed(true)}
                 aria-label="Collapse chat list"
+                className="hidden lg:inline-flex"
               >
                 <PanelLeftClose className="h-4 w-4" />
               </Button>
@@ -811,14 +826,14 @@ export default function Conversations() {
                   <ShieldAlert className="h-4 w-4" />
                 </Button>
               )}
-              <Button
+              {selectedConversation && <Button
                 variant="outline"
                 onClick={() => setInviteOpen(true)}
-                disabled={!selectedConversation || !canInvite}
+                disabled={!canInvite}
                 aria-label="Invite members"
               >
                 <UserPlus className="h-4 w-4" />
-              </Button>
+              </Button>}
             </div>
             <div className="min-h-0 flex-1">
               <ConversationList
@@ -828,6 +843,9 @@ export default function Conversations() {
                 search={search}
                 onSearch={setSearch}
                 onSelect={(conversationId) => navigate(`/chat/${conversationId}`)}
+                isLoading={conversationsQuery.isLoading}
+                errorMessage={conversationsQuery.isError ? (conversationsQuery.error instanceof Error ? conversationsQuery.error.message : "Try again.") : undefined}
+                onRetry={() => void conversationsQuery.refetch()}
               />
             </div>
             {canShowModeration && isModerationPanelOpen && (
@@ -854,9 +872,10 @@ export default function Conversations() {
         )}
       </div>
 
-      <div className="relative flex h-full min-h-[24rem] flex-col overflow-hidden rounded-lg border bg-card">
+      <div className={cn("relative h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card", routeConversationId ? "flex" : "hidden lg:flex")}>
         <ChatHeader
           conversation={selectedConversation}
+          onBack={backToChats}
           onOpenSettings={() => setSettingsOpen(true)}
           onShareLink={selectedConversation ? handleShareLink : undefined}
           isSharingLink={createShareLink.isPending}
@@ -899,7 +918,7 @@ export default function Conversations() {
           </div>
         ) : (
           <>
-            <div ref={messageViewportRef} className="min-h-0 flex-1 overflow-y-auto">
+            <div ref={messageViewportRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               <MessageList
                 conversationId={selectedConversation.id}
                 messages={messages}
@@ -943,6 +962,7 @@ export default function Conversations() {
                     await editMessage.mutateAsync({ conversationId: selectedConversation.id, messageId, text });
                   } catch (error) {
                     applyChatError(error);
+                    throw error;
                   }
                 }}
                 onDelete={async (messageId) => {
@@ -978,8 +998,11 @@ export default function Conversations() {
               userDisplayById={mentionDisplayById}
             />
 
-            <div className="sticky bottom-0 z-10 border-t bg-card p-3">
+            <div className="sticky bottom-0 z-10 border-t bg-card p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
               <Composer
+                key={selectedConversation.id}
+                draftText={composerDrafts[selectedConversation.id] ?? ""}
+                onDraftChange={(next) => setComposerDrafts((drafts) => ({ ...drafts, [selectedConversation.id]: next }))}
                 disabled={composerDisabled}
                 disabledReason={effectiveStatus?.message}
                 isSending={sendMessage.isPending}

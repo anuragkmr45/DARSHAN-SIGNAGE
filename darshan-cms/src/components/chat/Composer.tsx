@@ -23,6 +23,8 @@ import type { ChatMentionPolicy, User } from "@/api/types";
 import { resolveMediaDisplayName } from "@/lib/media";
 
 interface ComposerProps {
+  draftText?: string;
+  onDraftChange?: (text: string) => void;
   disabled?: boolean;
   disabledReason?: string;
   isSending?: boolean;
@@ -39,6 +41,8 @@ const formatUploadMb = (bytes?: number) => (typeof bytes === "number" ? `${(byte
 const isMediaReady = (status?: string) => status === "READY";
 
 export function Composer({
+  draftText,
+  onDraftChange,
   disabled = false,
   disabledReason,
   isSending = false,
@@ -52,7 +56,12 @@ export function Composer({
   const { toast } = useToast();
   const usersDirectoryQuery = useChatUserDirectory(!disabled);
   const [openPicker, setOpenPicker] = useState(false);
-  const [content, setContent] = useState("");
+  const [localContent, setLocalContent] = useState("");
+  const content = draftText ?? localContent;
+  const setContent = (next: string) => {
+    setLocalContent(next);
+    onDraftChange?.(next);
+  };
   const [isDragOver, setIsDragOver] = useState(false);
   const [attachments, setAttachments] = useState<ChatPendingAttachment[]>([]);
   const [uploadItems, setUploadItems] = useState<ComposerUploadItem[]>([]);
