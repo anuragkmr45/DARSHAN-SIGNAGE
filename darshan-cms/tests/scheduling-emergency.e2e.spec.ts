@@ -128,9 +128,12 @@ const login = async (page: Page) => {
 };
 
 test.describe("Scheduling and emergency operator flow", () => {
-  test("schedule creator persists audit timezone when creating a schedule", async ({ page }) => {
+  test("schedule creator reviews named targets, content and timing across viewports", async ({ page }, testInfo) => {
     let capturedSchedulePayload: Record<string, unknown> | null = null;
     let capturedSlotPayload: { items?: Array<Record<string, unknown>> } | null = null;
+    let reservationConflictOnReview = false;
+    let malformedReservationPreview = false;
+    let previewRequestCount = 0;
 
     await page.route("**/api/v1/**", async (route: Route) => {
       const url = new URL(route.request().url());
@@ -218,6 +221,27 @@ test.describe("Scheduling and emergency operator flow", () => {
         });
       }
 
+      if (pathname === "/api/v1/schedule-reservations/preview" && method === "POST") {
+        previewRequestCount += 1;
+        if (malformedReservationPreview) {
+          return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+        }
+        const conflictStart = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+        const conflictEnd = new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString();
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            server_time: new Date().toISOString(),
+            resolved_screen_ids: ["screen-1"],
+            reservation_conflicts: reservationConflictOnReview ? [{
+              screen_id: "screen-1", screen_name: "Lobby Screen", state: "HELD", owned_by_current_user: false,
+              conflict_start_at: conflictStart, conflict_end_at: conflictEnd,
+            }] : [],
+          }),
+        });
+      }
+
       if (pathname === "/api/v1/schedules" && method === "POST") {
         capturedSchedulePayload = route.request().postDataJSON() as Record<string, unknown>;
         return route.fulfill({
@@ -254,7 +278,7 @@ test.describe("Scheduling and emergency operator flow", () => {
     await expect(page.getByRole("heading", { name: "Create Schedule", exact: true })).toBeVisible({ timeout: 15_000 });
 
     await page.getByText("Lobby Layout", { exact: true }).click();
-    await page.getByRole("button", { name: /^next$/i }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
 
     await page.getByRole("button", { name: "Add Media", exact: true }).click();
     await expect(page.getByText("Organization owned", { exact: true })).toBeVisible();
@@ -272,7 +296,7 @@ test.describe("Scheduling and emergency operator flow", () => {
     await expect(firstDocumentPage).toHaveValue("6");
     await expect(firstDocumentPage).toHaveAttribute("aria-invalid", "true");
     await expect(page.getByText("Enter a whole page number from 1 to 5.", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^next$/i })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
     await firstDocumentPage.fill("2");
     await expect(firstDocumentPage).toHaveAttribute("aria-invalid", "false");
     await page.getByRole("button", { name: "Add Media", exact: true }).click();
@@ -280,7 +304,7 @@ test.describe("Scheduling and emergency operator flow", () => {
     await page.getByLabel("Page for Operations Handbook").nth(1).fill("5");
     await expect(page.getByText("Page 2 of 5", { exact: true })).toBeVisible();
     await expect(page.getByText("Page 5 of 5", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /^next$/i }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     expect(capturedSlotPayload?.items?.find((item) => item.media_id === "media-1")?.loop_enabled).toBe(true);
     expect(
       capturedSlotPayload?.items
@@ -289,17 +313,47 @@ test.describe("Scheduling and emergency operator flow", () => {
     ).toEqual([2, 5]);
 
     await page.getByText("Lobby Screen", { exact: true }).click();
-    await page.getByRole("button", { name: /^next$/i }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
 
     await page.fill("#schedule-name", "Lobby Morning");
     await page.getByLabel("Schedule timezone").click();
     await page.getByRole("option", { name: "Asia/Kolkata" }).click();
-    await page.fill("#start-at", "2026-03-15T09:00");
-    await page.fill("#end-at", "2026-03-15T18:00");
-    await page.getByRole("button", { name: /^next$/i }).click();
+    const futureStart = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    futureStart.setHours(9, 0, 0, 0);
+    const futureEnd = new Date(futureStart.getTime() + 9 * 60 * 60 * 1000);
+    const localDateTime = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    await page.fill("#start-at", localDateTime(futureStart));
+    await page.fill("#end-at", localDateTime(futureEnd));
+    await page.getByRole("button", { name: "Continue" }).click();
 
-    await expect(page.getByText("Audit Timezone")).toBeVisible();
-    await expect(page.getByText("Asia/Kolkata", { exact: true })).toBeVisible();
+    const summary = page.getByRole("region", { name: "Schedule summary" });
+    await expect(summary.getByText("Lobby Morning", { exact: true })).toBeVisible();
+    await expect(summary.getByText("Lobby Screen", { exact: true })).toBeVisible();
+    await expect(summary.getByText(/Recorded audit timezone: Asia\/Kolkata/)).toBeVisible();
+    reservationConflictOnReview = true;
+    const previewRequestsBeforeRecheck = previewRequestCount;
+    await page.getByRole("button", { name: "Check availability again" }).click();
+    await expect.poll(() => previewRequestCount).toBeGreaterThan(previewRequestsBeforeRecheck);
+    await expect(page.getByRole("alert").getByText(/Lobby Screen already has a held reservation/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Submit for Approval" })).toBeDisabled();
+    reservationConflictOnReview = false;
+    await page.getByRole("button", { name: "Check availability again" }).click();
+    await expect(page.getByRole("button", { name: "Submit for Approval" })).toBeEnabled();
+    malformedReservationPreview = true;
+    await page.getByRole("button", { name: "Check availability again" }).click();
+    await expect(page.getByRole("alert").getByText("Unable to verify reservation conflicts. Please try again.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Submit for Approval" })).toBeDisabled();
+    malformedReservationPreview = false;
+    await page.getByRole("button", { name: "Check availability again" }).click();
+    await expect(page.getByRole("button", { name: "Submit for Approval" })).toBeEnabled();
+    for (const width of [1440, 820, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.locator("main").evaluate((main) => { main.scrollTop = 0; });
+      await expect(summary).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+      await page.screenshot({ path: testInfo.outputPath(`schedule-review-${width}.png`), fullPage: true });
+    }
+    await page.getByText("Preview layout and item settings").click();
     await expect(page.getByText("Page 2 of 5", { exact: true })).toBeVisible();
     await expect(page.getByText("Page 5 of 5", { exact: true })).toBeVisible();
     await expect(page.getByText("Loop On", { exact: true }).first()).toBeVisible();

@@ -1,9 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Check, LayoutGrid, Image, Monitor, Calendar, Send } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useSafeMutation } from "@/hooks/useSafeMutation";
 import { useQueries, useQuery } from "@tanstack/react-query";
@@ -89,11 +87,11 @@ type ScheduleCreatorLocationState = {
 };
 
 const STEPS = [
-  { id: 1, label: "Layout", icon: LayoutGrid },
-  { id: 2, label: "Media", icon: Image },
-  { id: 3, label: "Screens", icon: Monitor },
-  { id: 4, label: "Schedule", icon: Calendar },
-  { id: 5, label: "Review", icon: Send },
+  { id: 1, label: "Layout" },
+  { id: 2, label: "Media" },
+  { id: 3, label: "Screens" },
+  { id: 4, label: "Schedule" },
+  { id: 5, label: "Review" },
 ];
 
 const initialState: ScheduleWizardState = {
@@ -142,8 +140,9 @@ export default function ScheduleCreator() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasRestored, setHasRestored] = useState(false);
 
-  const progress = (currentStep / STEPS.length) * 100;
   const isScheduleStep = currentStep === 4;
+  const isReviewStep = currentStep === 5;
+  const isTimingStep = isScheduleStep || isReviewStep;
 
   const screenSnapshotQueries = useQueries({
     queries: isScheduleStep
@@ -168,7 +167,7 @@ export default function ScheduleCreator() {
   });
 
   const reservationPreviewEnabled =
-    isScheduleStep &&
+    isTimingStep &&
     (wizardState.selectedScreenIds.length > 0 || wizardState.selectedGroupIds.length > 0) &&
     wizardState.startAt !== "" &&
     wizardState.endAt !== "";
@@ -189,7 +188,15 @@ export default function ScheduleCreator() {
       }),
     enabled: reservationPreviewEnabled,
     staleTime: 15_000,
+    refetchInterval: isReviewStep ? 30_000 : false,
   });
+  const { refetch: refetchReservationPreview } = reservationPreviewQuery;
+
+  useEffect(() => {
+    if (isReviewStep && reservationPreviewEnabled) {
+      void refetchReservationPreview();
+    }
+  }, [isReviewStep, reservationPreviewEnabled, refetchReservationPreview]);
 
   const scheduleTimingValidation = useMemo(() => {
     const errors: string[] = [];
@@ -218,12 +225,15 @@ export default function ScheduleCreator() {
       errors.push("End time must be after the start time.");
     }
 
-    const isChecking = isScheduleStep ? reservationPreviewQuery.isLoading : false;
+    const isChecking = isTimingStep ? reservationPreviewQuery.isFetching : false;
     const reservationConflicts = reservationPreviewQuery.data?.reservation_conflicts ?? [];
     if (reservationConflicts.length > 0) {
       errors.push(...reservationConflicts.map(formatConflictLabel));
     }
-    if (!reservationConflicts.length && reservationPreviewQuery.error) {
+    const previewAvailable = !reservationPreviewQuery.isError && reservationPreviewQuery.data &&
+      Number.isFinite(serverNowMs) &&
+      Array.isArray(reservationPreviewQuery.data.reservation_conflicts);
+    if (isTimingStep && reservationPreviewEnabled && !isChecking && !previewAvailable) {
       errors.push("Unable to verify reservation conflicts. Please try again.");
     }
 
@@ -235,10 +245,11 @@ export default function ScheduleCreator() {
   }, [
     wizardState.startAt,
     wizardState.endAt,
-    isScheduleStep,
+    isTimingStep,
+    reservationPreviewEnabled,
     reservationPreviewQuery.data,
-    reservationPreviewQuery.error,
-    reservationPreviewQuery.isLoading,
+    reservationPreviewQuery.isError,
+    reservationPreviewQuery.isFetching,
   ]);
 
   const selectedTargetScheduleItems = useMemo(() => {
@@ -398,7 +409,14 @@ export default function ScheduleCreator() {
           scheduleTimingValidation.isValid
         );
       case 5:
-        return true;
+        return Boolean(
+          wizardState.scheduleId &&
+          wizardState.selectedLayout &&
+          wizardState.slotMedia.length > 0 &&
+          (wizardState.selectedScreenIds.length > 0 || wizardState.selectedGroupIds.length > 0) &&
+          wizardState.scheduleName.trim() &&
+          scheduleTimingValidation.isValid
+        );
       default:
         return false;
     }
@@ -640,62 +658,39 @@ export default function ScheduleCreator() {
   }, [wizardState, currentStep, hasRestored]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-5 pb-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Create Schedule</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Build a presentation and schedule it to screens
-          </p>
+          <h1 className="text-2xl font-semibold text-foreground">Create Schedule</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Choose content, audience, and timing before submitting.</p>
         </div>
-        <Button variant="outline" onClick={() => navigate("/schedule")}>
+        <Button size="sm" variant="ghost" onClick={() => navigate("/schedule")}>
           Cancel
         </Button>
       </div>
 
-      {/* Progress bar */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          {STEPS.map((step, idx) => {
-            const Icon = step.icon;
+      <ol aria-label="Schedule steps" className="grid grid-cols-5 gap-1 border-b border-border">
+          {STEPS.map((step) => {
             const isActive = currentStep === step.id;
             const isCompleted = currentStep > step.id;
             return (
-              <div
+              <li
                 key={step.id}
-                className={`flex items-center gap-2 ${
-                  isActive
-                    ? "text-primary"
-                    : isCompleted
-                    ? "text-primary/70"
-                    : "text-muted-foreground"
+                aria-current={isActive ? "step" : undefined}
+                className={`flex min-w-0 flex-col items-center gap-1 border-b-2 px-1 pb-3 text-center text-xs sm:flex-row sm:justify-center sm:text-sm ${
+                  isActive ? "border-primary font-semibold text-foreground" : "border-transparent text-muted-foreground"
                 }`}
               >
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${
-                    isActive
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : isCompleted
-                      ? "border-primary bg-primary/20 text-primary"
-                      : "border-muted-foreground/30"
-                  }`}
-                >
-                  {isCompleted ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
-                </div>
-                <span className="text-sm font-medium hidden md:inline">{step.label}</span>
-                {idx < STEPS.length - 1 && (
-                  <div className="w-8 lg:w-16 h-px bg-border mx-2 hidden sm:block" />
-                )}
-              </div>
+                <span aria-hidden="true" className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs ${isCompleted ? "border-primary text-primary" : isActive ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}>
+                  {isCompleted ? <Check className="h-3.5 w-3.5" /> : step.id}
+                </span>
+                <span className="truncate">{step.label}</span>
+              </li>
             );
           })}
-        </div>
-        <Progress value={progress} className="h-1" />
-      </Card>
+      </ol>
 
-      {/* Step content */}
-      <Card className="p-6 min-h-[500px]">
+      <section aria-label={`${STEPS[currentStep - 1]?.label ?? "Schedule"} step`} className="min-h-[40vh]">
         {currentStep === 1 && (
           <StepLayoutSelect
             selectedLayout={wizardState.selectedLayout}
@@ -770,12 +765,14 @@ export default function ScheduleCreator() {
             state={wizardState}
             approvalNotes={wizardState.approvalNotes}
             onUpdateNotes={(approvalNotes) => updateState({ approvalNotes })}
+            validationErrors={scheduleTimingValidation.errors}
+            isCheckingAvailability={scheduleTimingValidation.isChecking}
+            onRecheckAvailability={() => { void refetchReservationPreview(); }}
           />
         )}
-      </Card>
+      </section>
 
-      {/* Navigation buttons */}
-      <div className="flex items-center justify-between">
+      <div className="sticky bottom-0 z-10 flex items-center justify-between gap-3 border-t border-border bg-background py-3">
         <Button variant="outline" onClick={handleBack} disabled={currentStep === 1}>
           <ChevronLeft className="h-4 w-4 mr-2" />
           Back
@@ -792,7 +789,7 @@ export default function ScheduleCreator() {
                 (createScheduleMutation.isPending || createScheduleItemsMutation.isPending))
             }
           >
-            Next
+            Continue
             <ChevronRight className="h-4 w-4 ml-2" />
           </Button>
         ) : (

@@ -1,9 +1,6 @@
 import {
   LayoutGrid,
   Image,
-  Monitor,
-  Calendar,
-  Check,
   Volume2,
   VolumeX,
   Clock,
@@ -11,9 +8,13 @@ import {
   Repeat,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useQuery } from "@tanstack/react-query";
+import { screensApi } from "@/api/domains/screens";
+import { queryKeys } from "@/api/queryKeys";
 import { MediaPreview } from "@/components/common/MediaPreview";
 import { AspectFrame } from "@/components/common/AspectFrame";
 import type { ScheduleWizardState, SlotMedia } from "@/pages/ScheduleCreator";
@@ -23,6 +24,9 @@ interface StepReviewProps {
   state: ScheduleWizardState;
   approvalNotes: string;
   onUpdateNotes: (notes: string) => void;
+  validationErrors: string[];
+  isCheckingAvailability: boolean;
+  onRecheckAvailability: () => void;
 }
 
 function SlotMediaPreview({ item, className }: { item: SlotMedia; className: string }) {
@@ -200,7 +204,7 @@ function MediaDetailsCard({
   );
 }
 
-export function StepReview({ state, approvalNotes, onUpdateNotes }: StepReviewProps) {
+export function StepReview({ state, approvalNotes, onUpdateNotes, validationErrors, isCheckingAvailability, onRecheckAvailability }: StepReviewProps) {
   const {
     selectedLayout,
     slotMedia,
@@ -214,23 +218,103 @@ export function StepReview({ state, approvalNotes, onUpdateNotes }: StepReviewPr
     priority,
   } = state;
 
+  const { data: screensData } = useQuery({
+    queryKey: queryKeys.screens,
+    queryFn: () => screensApi.list({ page: 1, limit: 100 }),
+    refetchOnMount: "always",
+  });
+  const { data: groupsData } = useQuery({
+    queryKey: queryKeys.screenGroups,
+    queryFn: () => screensApi.listGroups({ page: 1, limit: 100 }),
+    refetchOnMount: "always",
+  });
+  const screenNames = new Map((screensData?.items ?? []).map((screen) => [screen.id, screen.name]));
+  const groupNames = new Map((groupsData?.items ?? []).map((group) => [group.id, group.name]));
+  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
   const priorityLabel = ["Normal", "High", "Urgent"][priority] || "Normal";
 
   const formatDateTime = (dateStr: string) => {
     if (!dateStr) return "Not set";
-    return new Date(dateStr).toLocaleString();
+    const date = new Date(dateStr);
+    return Number.isNaN(date.getTime()) ? "Invalid time" : date.toLocaleString();
   };
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Review & Submit</h2>
-        <p className="text-sm text-muted-foreground">Review your schedule before submitting for approval.</p>
+        <h2 className="text-xl font-semibold">Review schedule</h2>
+        <p className="text-sm text-muted-foreground">Confirm what will play, where, and when.</p>
       </div>
 
-      <ScrollArea className="h-[500px] pr-4">
-        <div className="space-y-6">
-          <Card className="p-4">
+      <section aria-label="Schedule summary" className="divide-y divide-border rounded-lg border border-border bg-card">
+        <div className="grid gap-2 p-4 sm:grid-cols-[8rem_1fr]">
+          <h3 className="font-medium">Content</h3>
+          <div className="min-w-0 space-y-2 break-words text-sm">
+            <p><span className="font-medium">{selectedLayout?.name || "No layout selected"}</span> · {slotMedia.length} media item{slotMedia.length === 1 ? "" : "s"}</p>
+            <ul className="space-y-1 text-muted-foreground">
+              {slotMedia.map((item) => (
+                <li key={item.clientItemId}>
+                  {item.slotId}: {item.mediaName}{item.mediaType === "DOCUMENT" ? ` · page ${item.pageNumber ?? 1}${item.pageCount ? ` of ${item.pageCount}` : ""}` : ""}
+                  {item.mediaType === "VIDEO" ? ` · loop ${item.loopEnabled ? "on" : "off"}` : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="grid gap-2 p-4 sm:grid-cols-[8rem_1fr]">
+          <h3 className="font-medium">Audience</h3>
+          <div className="min-w-0 space-y-1 break-words text-sm">
+            {selectedScreenIds.map((id) => <p key={id}>Screen: <span className="font-medium">{screenNames.get(id) || id}</span></p>)}
+            {selectedGroupIds.map((id) => <p key={id}>Group: <span className="font-medium">{groupNames.get(id) || id}</span></p>)}
+            {selectedScreenIds.length + selectedGroupIds.length === 0 ? <p className="text-destructive">No targets selected</p> : null}
+            {selectedGroupIds.length > 0 ? <p className="text-xs text-muted-foreground">Group membership is resolved when the request is submitted.</p> : null}
+          </div>
+        </div>
+
+        <div className="grid gap-2 p-4 sm:grid-cols-[8rem_1fr]">
+          <h3 className="font-medium">Timing</h3>
+          <div className="min-w-0 space-y-1 break-words text-sm">
+            <p className="font-medium">{scheduleName || "Unnamed schedule"}</p>
+            <p>{formatDateTime(startAt)} → {formatDateTime(endAt)}</p>
+            <p className="text-muted-foreground">Times entered in browser time ({browserTimezone}). Recorded audit timezone: {timezone || "UTC"}.</p>
+            <p className="text-muted-foreground">Priority: {priorityLabel}</p>
+            {scheduleDescription ? <p className="text-muted-foreground">{scheduleDescription}</p> : null}
+          </div>
+        </div>
+      </section>
+
+      {isCheckingAvailability ? (
+        <p role="status" className="rounded-md border border-border p-3 text-sm">Checking target availability again before submission…</p>
+      ) : validationErrors.length > 0 ? (
+        <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <p className="font-medium">Resolve these issues before submitting:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">{validationErrors.map((error) => <li key={error}>{error}</li>)}</ul>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">The server checks target availability again when you submit. Submission requests approval; it does not start playback.</p>
+      )}
+
+      <Button size="sm" variant="outline" onClick={onRecheckAvailability} disabled={isCheckingAvailability}>
+        Check availability again
+      </Button>
+
+      <div className="space-y-2">
+        <Label htmlFor="schedule-approval-notes">Approval notes (optional)</Label>
+        <Textarea
+          id="schedule-approval-notes"
+          placeholder="Add context for the reviewer…"
+          value={approvalNotes}
+          onChange={(event) => onUpdateNotes(event.target.value)}
+          rows={3}
+        />
+      </div>
+
+      <details className="rounded-lg border border-border p-4">
+        <summary className="cursor-pointer font-medium">Preview layout and item settings</summary>
+        <div className="mt-4 space-y-6">
+          <section className="space-y-3 border-b border-border pb-5">
             <div className="mb-4 flex items-center gap-2">
               <LayoutGrid className="h-5 w-5 text-primary" />
               <h3 className="font-semibold">Layout Preview</h3>
@@ -250,7 +334,7 @@ export function StepReview({ state, approvalNotes, onUpdateNotes }: StepReviewPr
                     <span className="text-sm text-muted-foreground">- {selectedLayout.description}</span>
                   ) : null}
                 </div>
-                <LayoutPreview state={state} />
+                <div className="max-w-2xl"><LayoutPreview state={state} /></div>
               </div>
             ) : (
               <div className="py-8 text-center text-muted-foreground">
@@ -258,9 +342,9 @@ export function StepReview({ state, approvalNotes, onUpdateNotes }: StepReviewPr
                 <p>No layout selected</p>
               </div>
             )}
-          </Card>
+          </section>
 
-          <Card className="p-4">
+          <section className="space-y-3">
             <div className="mb-4 flex items-center gap-2">
               <Image className="h-5 w-5 text-primary" />
               <h3 className="font-semibold">Media Assignments</h3>
@@ -277,120 +361,10 @@ export function StepReview({ state, approvalNotes, onUpdateNotes }: StepReviewPr
                 <p>No media assigned yet</p>
               </div>
             )}
-          </Card>
+          </section>
 
-          <Card className="p-4">
-            <div className="mb-4 flex items-center gap-2">
-              <Monitor className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold">Target Screens</h3>
-              <Badge variant="secondary" className="ml-auto">
-                {selectedScreenIds.length + selectedGroupIds.length} selected
-              </Badge>
-            </div>
-
-            {selectedScreenIds.length > 0 || selectedGroupIds.length > 0 ? (
-              <div className="space-y-4">
-                {selectedScreenIds.length > 0 ? (
-                  <div>
-                    <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                      <Monitor className="h-4 w-4" />
-                      Individual Screens ({selectedScreenIds.length})
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedScreenIds.map((id) => (
-                        <Badge key={id} variant="outline">
-                          {id}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedGroupIds.length > 0 ? (
-                  <div>
-                    <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                      <Layers className="h-4 w-4" />
-                      Screen Groups ({selectedGroupIds.length})
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedGroupIds.map((id) => (
-                        <Badge key={id} variant="outline">
-                          {id}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="py-8 text-center text-muted-foreground">
-                <Monitor className="mx-auto mb-2 h-12 w-12 opacity-50" />
-                <p>No screens selected</p>
-              </div>
-            )}
-          </Card>
-
-          <Card className="p-4">
-            <div className="mb-4 flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold">Schedule Details</h3>
-              <Check className="ml-auto h-4 w-4 text-primary" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Name</p>
-                <p className="font-medium">
-                  {scheduleName || <span className="italic text-muted-foreground">Not set</span>}
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Priority</p>
-                <Badge variant={priority === 2 ? "destructive" : priority === 1 ? "default" : "secondary"}>
-                  {priorityLabel}
-                </Badge>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Start Time</p>
-                <p className="font-medium">{formatDateTime(startAt)}</p>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">End Time</p>
-                <p className="font-medium">{formatDateTime(endAt)}</p>
-              </div>
-
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Audit Timezone</p>
-                <p className="font-medium">{timezone || "UTC"}</p>
-                <p className="text-xs text-muted-foreground">Execution remains UTC-based on the player.</p>
-              </div>
-
-              {scheduleDescription ? (
-                <div className="col-span-2 space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Description</p>
-                  <p className="text-sm">{scheduleDescription}</p>
-                </div>
-              ) : null}
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="mb-4 flex items-center gap-2">
-              <Check className="h-5 w-5 text-primary" />
-              <h3 className="font-semibold">Approval Notes</h3>
-            </div>
-            <Textarea
-              placeholder="Add context for the reviewer…"
-              value={approvalNotes}
-              onChange={(event) => onUpdateNotes(event.target.value)}
-              rows={4}
-            />
-          </Card>
         </div>
-      </ScrollArea>
+      </details>
     </div>
   );
 }
