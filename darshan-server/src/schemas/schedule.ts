@@ -23,11 +23,18 @@ export type UpdateScheduleRequest = z.infer<typeof updateScheduleSchema>;
 
 export const createScheduleItemSchema = z.object({
   presentation_id: z.string().uuid(),
+  source_kind: z.enum(['PRESENTATION', 'LIVE']).default('PRESENTATION'),
+  live_session_id: z.string().uuid().nullable().optional(),
   start_at: z.string().datetime(),
   end_at: z.string().datetime(),
   priority: z.number().int().default(0),
   screen_ids: z.array(z.string().uuid()).default([]),
   screen_group_ids: z.array(z.string().uuid()).default([]),
+}).superRefine((item, context) => {
+  if ((item.source_kind === 'LIVE') !== Boolean(item.live_session_id)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['live_session_id'],
+      message: item.source_kind === 'LIVE' ? 'A live source is required for a live schedule item' : 'Only live schedule items may reference a live source' });
+  }
 });
 
 export type CreateScheduleItemRequest = z.infer<typeof createScheduleItemSchema>;

@@ -19,6 +19,8 @@ import { auditLogRoutes } from '@/routes/audit-logs';
 import { emergencyRoutes } from '@/routes/emergency';
 import { notificationRoutes } from '@/routes/notifications';
 import { presentationRoutes } from '@/routes/presentations';
+import { liveSessionRoutes } from '@/routes/live-sessions';
+import { liveFallbackRoutes } from '@/routes/live-fallbacks';
 import { devicePairingRoutes } from '@/routes/device-pairing';
 import { deviceTelemetryRoutes } from '@/routes/device-telemetry';
 import { apiKeyRoutes } from '@/routes/api-keys';
@@ -440,6 +442,8 @@ export async function createServer(options: CreateServerOptions = {}) {
   await fastify.register(emergencyRoutes);
   await fastify.register(notificationRoutes);
   await fastify.register(presentationRoutes);
+  await fastify.register(liveSessionRoutes);
+  await fastify.register(liveFallbackRoutes);
   await fastify.register(devicePairingRoutes);
   await fastify.register(deviceTelemetryRoutes);
   await fastify.register(apiKeyRoutes);

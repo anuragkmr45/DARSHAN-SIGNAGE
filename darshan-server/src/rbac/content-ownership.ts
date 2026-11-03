@@ -33,7 +33,7 @@ export type ContentAbility = {
   can(action: string, subject: string): boolean;
 };
 
-export type ContentSubject = 'Media' | 'Layout' | 'Presentation' | 'Schedule';
+export type ContentSubject = 'Media' | 'Layout' | 'Presentation' | 'Schedule' | 'LiveBroadcast';
 
 export function normalizeContentOwnerScope(value?: string | null): ContentOwnerScope {
   return CONTENT_OWNER_SCOPES.includes(value as ContentOwnerScope)

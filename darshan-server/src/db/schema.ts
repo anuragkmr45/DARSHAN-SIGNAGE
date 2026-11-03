@@ -424,6 +424,141 @@ export const schedules = pgTable(
   })
 );
 
+// Reusable live source policy. Published occurrences freeze this policy;
+// admission credentials never belong in these durable authoring records.
+export const liveSessions = pgTable(
+  'live_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: varchar('name', { length: 255 }).notNull(),
+    description: text('description'),
+    presenter_user_id: uuid('presenter_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    microphone: boolean('microphone').notNull().default(false),
+    screen_share_audio: boolean('screen_share_audio').notNull().default(false),
+    is_active: boolean('is_active').notNull().default(true),
+    revision: integer('revision').notNull().default(1),
+    policy_revision: integer('policy_revision').notNull().default(1),
+    created_by: uuid('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    owner_scope: varchar('owner_scope', { length: 16 }).notNull().default('RESTRICTED'),
+    owner_department_id: uuid('owner_department_id').references(() => departments.id, { onDelete: 'restrict' }),
+    deleted_at: timestamp('deleted_at'),
+    deleted_by: uuid('deleted_by').references(() => users.id, { onDelete: 'restrict' }),
+    created_at: timestamp('created_at').notNull().defaultNow(),
+    updated_at: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => ({
+    ownerIdx: index('live_sessions_owner_idx').on(table.owner_scope, table.owner_department_id),
+    presenterIdx: index('live_sessions_presenter_idx').on(table.presenter_user_id),
+    activeIdx: index('live_sessions_active_idx').on(table.is_active, table.deleted_at),
+    revisionCheck: check('live_sessions_revision_check', sql`${table.revision} > 0`),
+    policyRevisionCheck: check('live_sessions_policy_revision_check', sql`${table.policy_revision} > 0 AND ${table.policy_revision} <= ${table.revision}`),
+    deletedInactiveCheck: check('live_sessions_deleted_inactive_check', sql`${table.deleted_at} IS NULL OR ${table.is_active} = false`),
+    ownerScopeCheck: check('live_sessions_owner_scope_check', sql`(${table.owner_scope} = 'DEPARTMENT' AND ${table.owner_department_id} IS NOT NULL) OR (${table.owner_scope} IN ('ORGANIZATION', 'RESTRICTED') AND ${table.owner_department_id} IS NULL)`),
+  })
+);
+
+// Asynchronous preparation creates verified, content-addressed copies before
+// any approval transaction. Only the resulting manifest is approved/published.
+export const liveFallbackPreparations = pgTable('live_fallback_preparations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  presentation_id: uuid('presentation_id').notNull(),
+  created_by: uuid('created_by').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  state: varchar('state', { length: 16 }).$type<'PENDING' | 'PROCESSING' | 'READY' | 'FAILED' | 'CANCELLED'>().notNull().default('PENDING'),
+  source_fingerprint: varchar('source_fingerprint', { length: 64 }).notNull(),
+  source_graph: jsonb('source_graph').notNull(),
+  manifest: jsonb('manifest'),
+  claim_token: uuid('claim_token'),
+  lease_expires_at: timestamp('lease_expires_at'),
+  failure_code: varchar('failure_code', { length: 120 }),
+  created_at: timestamp('created_at').notNull().defaultNow(),
+  updated_at: timestamp('updated_at').notNull().defaultNow(),
+}, table => ({
+  presentationIdx: index('live_fallback_preparations_presentation_idx').on(table.presentation_id, table.state),
+  sourceIdx: index('live_fallback_preparations_source_idx').on(table.source_fingerprint),
+  leaseIdx: index('live_fallback_preparations_lease_idx').on(table.state, table.lease_expires_at),
+  stateCheck: check('live_fallback_preparations_state_check', sql`${table.state} IN ('PENDING','PROCESSING','READY','FAILED','CANCELLED')`),
+  fingerprintCheck: check('live_fallback_preparations_fingerprint_check', sql`${table.source_fingerprint} ~ '^[0-9a-f]{64}$'`),
+  readyCheck: check('live_fallback_preparations_ready_check', sql`${table.state} <> 'READY' OR (${table.manifest} IS NOT NULL AND jsonb_typeof(${table.manifest}) = 'object')`),
+  claimCheck: check('live_fallback_preparations_claim_check', sql`(${table.state} = 'PROCESSING' AND ${table.claim_token} IS NOT NULL AND ${table.lease_expires_at} IS NOT NULL) OR (${table.state} <> 'PROCESSING' AND ${table.claim_token} IS NULL AND ${table.lease_expires_at} IS NULL)`),
+}));
+
+const liveAssetColumns = () => ({
+  asset_id: uuid('asset_id').notNull(),
+  media_id: uuid('media_id').notNull(),
+  storage_object_id: uuid('storage_object_id').notNull().references(() => storageObjects.id, { onDelete: 'restrict' }),
+  sha256: varchar('sha256', { length: 64 }).notNull(),
+  size: bigint('size', { mode: 'number' }).notNull(),
+  content_type: varchar('content_type', { length: 255 }).notNull(),
+  render_type: varchar('render_type', { length: 16 }).$type<'image' | 'video' | 'pdf' | 'hls'>().notNull(),
+  source_type: varchar('source_type', { length: 16 }).$type<'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'WEBPAGE'>().notNull(),
+  status: varchar('status', { length: 16 }).$type<'READY'>().notNull().default('READY'),
+  representation: varchar('representation', { length: 64 }).notNull(),
+  dependencies: uuid('dependencies').array().notNull().default(sql`'{}'::uuid[]`),
+  source_object_id: uuid('source_object_id'),
+  source_sha256: varchar('source_sha256', { length: 64 }),
+  source_content_type: varchar('source_content_type', { length: 255 }),
+});
+
+export const liveFallbackPreparationAssets = pgTable('live_fallback_preparation_assets', {
+  preparation_id: uuid('preparation_id').notNull().references(() => liveFallbackPreparations.id, { onDelete: 'restrict' }),
+  ...liveAssetColumns(),
+}, table => ({
+  pk: primaryKey({ columns: [table.preparation_id, table.asset_id] }),
+  objectIdx: index('live_fallback_preparation_assets_object_idx').on(table.storage_object_id),
+  mediaIdx: index('live_fallback_preparation_assets_media_idx').on(table.media_id),
+  validCheck: check('live_fallback_preparation_assets_valid_check', sql`${table.status} = 'READY' AND ${table.sha256} ~ '^[0-9a-f]{64}$' AND ${table.size} > 0 AND ${table.render_type} IN ('image','video','pdf','hls') AND ${table.source_type} IN ('IMAGE','VIDEO','DOCUMENT','WEBPAGE')`),
+}));
+
+// These slots reserve scheduled intervals only. Actual running-room occupancy
+// is a separate authority and must survive hold/window expiry until teardown.
+export const liveScheduleOccurrences = pgTable('live_schedule_occurrences', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  schedule_id: uuid('schedule_id').notNull(),
+  schedule_item_id: uuid('schedule_item_id').notNull(),
+  schedule_request_id: uuid('schedule_request_id'),
+  reservation_token: uuid('reservation_token').notNull(),
+  schedule_revision: integer('schedule_revision').notNull(),
+  owner_user_id: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  live_session_id: uuid('live_session_id').notNull().references(() => liveSessions.id, { onDelete: 'restrict' }),
+  presenter_user_id: uuid('presenter_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  policy_revision: integer('policy_revision').notNull(),
+  preparation_id: uuid('preparation_id').notNull().references(() => liveFallbackPreparations.id, { onDelete: 'restrict' }),
+  approval_fingerprint: varchar('approval_fingerprint', { length: 64 }).notNull(),
+  item_fingerprint: varchar('item_fingerprint', { length: 64 }).notNull(),
+  frozen_policy: jsonb('frozen_policy').notNull(),
+  screen_ids: uuid('screen_ids').array().notNull(),
+  capacity_slot: integer('capacity_slot').notNull(),
+  start_at: timestamp('start_at').notNull(),
+  end_at: timestamp('end_at').notNull(),
+  state: varchar('state', { length: 16 }).$type<'HELD' | 'RESERVED' | 'PUBLISHED' | 'RELEASED' | 'EXPIRED' | 'CANCELLED'>().notNull(),
+  hold_expires_at: timestamp('hold_expires_at'),
+  publish_id: uuid('publish_id'),
+  approved_at: timestamp('approved_at'),
+  published_at: timestamp('published_at'),
+  released_at: timestamp('released_at'),
+  release_reason: text('release_reason'),
+  created_at: timestamp('created_at').notNull().defaultNow(),
+  updated_at: timestamp('updated_at').notNull().defaultNow(),
+}, table => ({
+  tokenItemIdx: uniqueIndex('live_schedule_occurrences_token_item_idx').on(table.reservation_token, table.schedule_item_id),
+  requestIdx: index('live_schedule_occurrences_request_idx').on(table.schedule_request_id),
+  publishIdx: index('live_schedule_occurrences_publish_idx').on(table.publish_id),
+  sourceIdx: index('live_schedule_occurrences_source_idx').on(table.live_session_id, table.state, table.end_at),
+  windowCheck: check('live_schedule_occurrences_window_check', sql`${table.start_at} < ${table.end_at}`),
+  slotCheck: check('live_schedule_occurrences_slot_check', sql`${table.capacity_slot} BETWEEN 1 AND 10`),
+  stateCheck: check('live_schedule_occurrences_state_check', sql`${table.state} IN ('HELD','RESERVED','PUBLISHED','RELEASED','EXPIRED','CANCELLED')`),
+}));
+
+export const liveOccurrenceAssets = pgTable('live_occurrence_assets', {
+  occurrence_id: uuid('occurrence_id').notNull().references(() => liveScheduleOccurrences.id, { onDelete: 'restrict' }),
+  ...liveAssetColumns(),
+}, table => ({
+  pk: primaryKey({ columns: [table.occurrence_id, table.asset_id] }),
+  objectIdx: index('live_occurrence_assets_object_idx').on(table.storage_object_id),
+  mediaIdx: index('live_occurrence_assets_media_idx').on(table.media_id),
+  validCheck: check('live_occurrence_assets_valid_check', sql`${table.status} = 'READY' AND ${table.sha256} ~ '^[0-9a-f]{64}$' AND ${table.size} > 0 AND ${table.render_type} IN ('image','video','pdf','hls') AND ${table.source_type} IN ('IMAGE','VIDEO','DOCUMENT','WEBPAGE')`),
+}));
+
 // Schedule items table
 export const scheduleItems = pgTable(
   'schedule_items',
@@ -431,6 +566,8 @@ export const scheduleItems = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     schedule_id: uuid('schedule_id').notNull(),
     presentation_id: uuid('presentation_id').notNull(),
+    source_kind: varchar('source_kind', { length: 16 }).$type<'PRESENTATION' | 'LIVE'>().notNull().default('PRESENTATION'),
+    live_session_id: uuid('live_session_id').references(() => liveSessions.id, { onDelete: 'restrict' }),
     start_at: timestamp('start_at').notNull(),
     end_at: timestamp('end_at').notNull(),
     priority: integer('priority').notNull().default(0),
@@ -446,6 +583,8 @@ export const scheduleItems = pgTable(
   },
   (table) => ({
     scheduleIdIdx: index('schedule_items_schedule_id_idx').on(table.schedule_id),
+    liveSessionIdx: index('schedule_items_live_session_idx').on(table.live_session_id),
+    sourceKindCheck: check('schedule_items_source_kind_check', sql`(${table.source_kind} = 'PRESENTATION' AND ${table.live_session_id} IS NULL) OR (${table.source_kind} = 'LIVE' AND ${table.live_session_id} IS NOT NULL)`),
     startAtIdx: index('schedule_items_start_at_idx').on(table.start_at),
   })
 );

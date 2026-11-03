@@ -1,0 +1,365 @@
+{
+  "scope": "Developer foundation verification only. Full live request/direct publication wiring, CMS controls, normal-player live behavior, native/browser/audio/production gates remain open. No independent QA case passed.",
+  "base_commit": "e634150",
+  "captured_at": "2026-11-03T00:44:41.164Z",
+  "source_sha256": {
+    "darshan-server/drizzle/migrations/0057_live_broadcast_sessions.sql": "1f05b6c17c82fcb4ec94512730f03976409d36885403e82f90a80629b4106bf8",
+    "darshan-server/drizzle/migrations/0058_live_scheduling.sql": "c8431077a72ce6faf8c0706d0130756bf534886f822cd1800cf90388526e804c",
+    "darshan-server/src/auth/mutation-authorization.ts": "1a3a20d538d2bd25cfe3a6dc414e976e3bda3dd16f1b97b5212d9b779d9bbc08",
+    "darshan-server/src/config/apiEndpoints.ts": "1e293854bdda8567b5d12dc16a53a561e193228fb26ab34aa79703f206d7c1c1",
+    "darshan-server/src/db/repositories/schedule-item.ts": "a95c6cee99364ed1a9a4c45b707b46b1db1a941a3cefbad0a59dc36e4ea41abf",
+    "darshan-server/src/db/schema.ts": "148fc73cab923a62ef41c18b193c8848c9e45ea69a897bac35bd3cd0ab0d0d49",
+    "darshan-server/src/jobs/index.ts": "e5d110d305a927043fe4eb7e6dc4671ad7f27ce5b3c0e9680859d9c37d689dc6",
+    "darshan-server/src/rbac/content-ownership.ts": "0ca058930f62c592009edd2647c370ee45eb1337ac4a712ce83174f78508e5a6",
+    "darshan-server/src/rbac/index.ts": "021c8ab045d8992640810a8e6892d313bc51513b3b45fabe18ec17663e458c95",
+    "darshan-server/src/rbac/live-authorization.unit.test.ts": "6a8e7c86412833822b41b643b6f922159c640bb6aaa3ccf32e86be0b1018bf14",
+    "darshan-server/src/rbac/permissions.ts": "40458095c8c9082e1bf884bea2edf2eb8640db9fe1b8338dbbb1adfd6b6e381e",
+    "darshan-server/src/rbac/system-roles.ts": "c299429a4a9c33da7ea9496284716630adb88d738010b3ae951bc3a63dc69b1f",
+    "darshan-server/src/routes/live-fallbacks.test.ts": "e316e5626d89990a6e271e8b8a7a85baef83cd5629894f528642437a9a91611f",
+    "darshan-server/src/routes/live-fallbacks.ts": "c0f43a83c433a5ec3e9fb37e23f53105ffd7fc5856694d97e79bc58039b0cf9c",
+    "darshan-server/src/routes/live-schedule-authoring.test.ts": "cbba0c8eeeff8bd52a70f98d61922096882f56c01c2a25d4c97b2300374c9cc8",
+    "darshan-server/src/routes/live-sessions.test.ts": "bc14110c668e2e152c6b71995eda219a09f731cb3711538f05122d29c9b6e4ea",
+    "darshan-server/src/routes/live-sessions.ts": "cd92a0310bb271559b2c62e79567905d6a4e82ec76bd248ff079ede6500c5974",
+    "darshan-server/src/routes/schedule-publish-helper.ts": "ef87a150a50fa228d7e6fb7d9ef546567bfed83c641d6d5778dceaf1f49c9523",
+    "darshan-server/src/routes/schedule-requests.ts": "b91327b1209bb08f6f6e4ac94a6011cf46b3f219b5d7d50782ff7fa43cc0546d",
+    "darshan-server/src/routes/schedules.ts": "efda421cc3cfdc5d2c599075f1f7ccb7917e8dd83199441ce67042587de35245",
+    "darshan-server/src/schemas/live-broadcast.ts": "d4efd70e9dc181635c10728fd84f6b6ee4e636b91ee2beb9051da2932ced7130",
+    "darshan-server/src/schemas/schedule.ts": "d84289f415e7dd0ddceae2fcb0c2b1dd1605a327519a29f0af494655bb4535af",
+    "darshan-server/src/server/index.ts": "721f3cbe9177cb7f3d569c4a0b53e3d55fc49b12458e6f60b804ca9aa59b1604",
+    "darshan-server/src/services/live-fallback-authorization.ts": "19dd42c87341010904cad0c72b63161f7b32035de26783310388e088c921cf6b",
+    "darshan-server/src/services/live-fallback-hls.ts": "c20deb14395622fda67ed7d2e2aeb0210ac480807689fd335e4bdc7ba05bbe6d",
+    "darshan-server/src/services/live-fallback-hls.unit.test.ts": "4ab6c10b95e28d290968f45e82b88af1b2d66c755d41e6586252774c814959ea",
+    "darshan-server/src/services/live-fallback-manifest.ts": "14488f27446725c425ddda796beae6dece874c20a551f2b1e5f9f42eb8cc0ec3",
+    "darshan-server/src/services/live-fallback-manifest.unit.test.ts": "cdad1a27aa591f50168e06a90dff82205109c97dc54045aeb898a747048410b0",
+    "darshan-server/src/services/live-fallback-preparation.ts": "5e36781a43853bb8741e0138586c017c48ad09e6419a4336499c4e1f41071208",
+    "darshan-server/src/services/live-fallback-preparation.unit.test.ts": "9fc4ee7ad4bc77ff5ae38cc59708d2de60009a9da4a16bfb107e4b2745245ea9",
+    "darshan-server/src/services/live-scheduling.test.ts": "204bc45197be90c0fc85fe3292986fe4b3a3a25e6c36bb54229391549f675980",
+    "darshan-server/src/services/live-scheduling.ts": "e1d2006b36bf533da7c8c64793534dac72faccdf5af00d860d875df464d4530f",
+    "darshan-server/src/services/scheduling/reservation-service.ts": "0681bb6e890cb0aed38b0ebf0c5d080dc59eb380b35826abd68ed41c7f0a08f3"
+  },
+  "compiled_sha256": {
+    "services/live-fallback-preparation.js": "65a44b0f4abf52f2390ead36aceda631a54665ad8480e44b6af0e3597b5b83e0",
+    "services/live-fallback-hls.js": "5ff8e6c6c0df33305fb38fe0e281152d724bb979ee7b8bd4c39355a5fa775cdb",
+    "services/live-scheduling.js": "67bf9fa4e089e9676d096c0f15a75ef5e380de13bec9361ab8d16acb56b31d7e",
+    "routes/live-fallbacks.js": "e3a4f4dc0c084bd9f447c4ee839f23e4165f753a0d76148e1abddbe4f7dd0f55",
+    "routes/live-sessions.js": "46da4a114b0670a015dc1141c38e96a3a2506cc49e4fdbe8118f7b21ec5d178b",
+    "routes/schedules.js": "9a7db772a4ce7f66e799bae550c4522f86077292067effb35a1796f5437c466b",
+    "services/scheduling/reservation-service.js": "f74eee64633c359d9fc480073bd1a8707e060905cca8d94863c03d493063abf0"
+  },
+  "checks": {
+    "server_build": "PASS (Node20.20.2, heap768)",
+    "focused_unit": {
+      "files": 6,
+      "passed": 68,
+      "failed": 0
+    },
+    "focused_database_http": {
+      "live_sessions": 13,
+      "live_scheduling": 24,
+      "fallback_api": 8,
+      "schedule_authoring": 7,
+      "failed": 0
+    },
+    "human_cases_status": "Not Tested",
+    "root_focused_lint": "PASS; no warnings",
+    "final_hls_focused": {
+      "passed": 20,
+      "failed": 0
+    }
+  },
+  "live_source_http": {
+    "captured_at": "2026-11-03T00:19:53.409Z",
+    "scope": "Actual isolated HTTP API, PostgreSQL and current cookie/CSRF authorization. Supporting API evidence, not CMS acceptance.",
+    "api_origin": "http://127.0.0.1:18120",
+    "checks": [
+      {
+        "method": "GET",
+        "path": "/auth/me",
+        "status": 200,
+        "error_code": null
+      },
+      {
+        "method": "POST",
+        "path": "/live-sessions",
+        "status": 201,
+        "error_code": null
+      },
+      {
+        "method": "GET",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 200,
+        "error_code": null
+      },
+      {
+        "method": "GET",
+        "path": "/live-sessions?limit=100",
+        "status": 200,
+        "error_code": null
+      },
+      {
+        "method": "PATCH",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 200,
+        "error_code": null
+      },
+      {
+        "method": "PATCH",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 409,
+        "error_code": "LIVE_SESSION_REVISION_CONFLICT"
+      },
+      {
+        "method": "GET",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 200,
+        "error_code": null
+      },
+      {
+        "method": "PATCH",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 200,
+        "error_code": null
+      },
+      {
+        "method": "PATCH",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 422,
+        "error_code": "VALIDATION_ERROR"
+      },
+      {
+        "method": "GET",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 401,
+        "error_code": "UNAUTHORIZED"
+      },
+      {
+        "method": "DELETE",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 200,
+        "error_code": null
+      },
+      {
+        "method": "GET",
+        "path": "/live-sessions/384a3fbe-77cb-426e-adff-a963e212ac18",
+        "status": 404,
+        "error_code": "LIVE_SESSION_NOT_FOUND"
+      }
+    ],
+    "revisions": {
+      "created": 1,
+      "metadata": 2,
+      "policy_edit": 3,
+      "policy_revision": 2
+    },
+    "fixture_cleanup": "Own temporary source soft-deleted; history retained"
+  },
+  "fallback_runtime": {
+    "captured_at": "2026-11-03T00:43:30.907Z",
+    "scope": "Actual isolated HTTP+CSRF+pg-boss worker+PostgreSQL+MinIO. Supporting developer evidence, not CMS/Electron acceptance.",
+    "checks": [
+      {
+        "method": "GET",
+        "path": "/presentations?limit=100",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/presentations",
+        "status": 201
+      },
+      {
+        "method": "PUT",
+        "path": "/presentations/485eb527-156d-4b28-ae92-e2afbdb27cd8/slots",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/presentations/485eb527-156d-4b28-ae92-e2afbdb27cd8/slots",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/live-fallback-preparations",
+        "status": 202
+      },
+      {
+        "method": "POST",
+        "path": "/live-fallback-preparations",
+        "status": 202
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/755fe99a-0290-406d-b97f-f6569439e3b0",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/755fe99a-0290-406d-b97f-f6569439e3b0",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/755fe99a-0290-406d-b97f-f6569439e3b0",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/755fe99a-0290-406d-b97f-f6569439e3b0",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/live-fallback-preparations",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/presentations",
+        "status": 201
+      },
+      {
+        "method": "PUT",
+        "path": "/presentations/2d33bb10-7cf5-4653-a145-33976196cb65/slots",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/presentations/2d33bb10-7cf5-4653-a145-33976196cb65/slots",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/live-fallback-preparations",
+        "status": 202
+      },
+      {
+        "method": "POST",
+        "path": "/live-fallback-preparations",
+        "status": 202
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/c16cce00-a31e-4c0d-989c-55a7950603e5",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/c16cce00-a31e-4c0d-989c-55a7950603e5",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/c16cce00-a31e-4c0d-989c-55a7950603e5",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/c16cce00-a31e-4c0d-989c-55a7950603e5",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/live-fallback-preparations/c16cce00-a31e-4c0d-989c-55a7950603e5",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/live-fallback-preparations",
+        "status": 200
+      }
+    ],
+    "preparations": [
+      {
+        "presentation_id": "485eb527-156d-4b28-ae92-e2afbdb27cd8",
+        "preparation_id": "755fe99a-0290-406d-b97f-f6569439e3b0",
+        "state": "READY",
+        "elapsed_ms": 1685,
+        "duplicate_coalesced": true,
+        "normalized_asset_count": 3,
+        "lease_released": true,
+        "source_fingerprint": "c474136a5ba236bab7fa96dbe0289a9101b954e5896bc5e7bdbb4f521b6763e7",
+        "assets": [
+          {
+            "media_type": "VIDEO",
+            "render_type": "video",
+            "representation": "READY",
+            "sha256": "5206198e93aa4a8b1fe7e5eb65b7f3b8292009dd844e6fc8c8f3c90bc6ff8b1c",
+            "size": 257651,
+            "copied_storage_object": true,
+            "bytes_verified": true
+          },
+          {
+            "media_type": "IMAGE",
+            "render_type": "image",
+            "representation": "SOURCE",
+            "sha256": "15835776e7f1bc6be660a3e03d2d8f8f604ea1166a7ff46b157271c492912cf4",
+            "size": 8022,
+            "copied_storage_object": true,
+            "bytes_verified": true
+          },
+          {
+            "media_type": "DOCUMENT",
+            "render_type": "pdf",
+            "representation": "SOURCE",
+            "sha256": "8362c191e2e483d4582d6c6b41b0ef463a9100ae915096962202bb991ccf4477",
+            "size": 7726,
+            "copied_storage_object": true,
+            "bytes_verified": true
+          }
+        ]
+      },
+      {
+        "presentation_id": "2d33bb10-7cf5-4653-a145-33976196cb65",
+        "preparation_id": "c16cce00-a31e-4c0d-989c-55a7950603e5",
+        "state": "READY",
+        "elapsed_ms": 1814,
+        "duplicate_coalesced": true,
+        "normalized_asset_count": 3,
+        "lease_released": true,
+        "source_fingerprint": "3fec1835bd52e8897d6887ad125bb90ea5277e7809179f2f611853b509173e7f",
+        "assets": [
+          {
+            "media_type": "VIDEO",
+            "render_type": "video",
+            "representation": "READY",
+            "sha256": "5206198e93aa4a8b1fe7e5eb65b7f3b8292009dd844e6fc8c8f3c90bc6ff8b1c",
+            "size": 257651,
+            "copied_storage_object": true,
+            "bytes_verified": true
+          },
+          {
+            "media_type": "IMAGE",
+            "render_type": "image",
+            "representation": "SOURCE",
+            "sha256": "15835776e7f1bc6be660a3e03d2d8f8f604ea1166a7ff46b157271c492912cf4",
+            "size": 8022,
+            "copied_storage_object": true,
+            "bytes_verified": true
+          },
+          {
+            "media_type": "DOCUMENT",
+            "render_type": "pdf",
+            "representation": "SOURCE",
+            "sha256": "8362c191e2e483d4582d6c6b41b0ef463a9100ae915096962202bb991ccf4477",
+            "size": 7726,
+            "copied_storage_object": true,
+            "bytes_verified": true
+          }
+        ]
+      }
+    ]
+  },
+  "hls_runtime": {
+    "case": "actual-FFmpeg-local-HLS-fallback-remux",
+    "passed": true,
+    "scope": "Actual pinned worker-image FFmpeg HLS generation, restricted helper remux and MP4 decode; storage adapter reads exact private local segments. Not S3 HLS or player rendering evidence.",
+    "segment_count": 1,
+    "render_type": "video",
+    "representation": "PREPARED_MP4",
+    "content_type": "video/mp4",
+    "output_size": 218386,
+    "output_sha256": "7cf0e29cd0a51981985186546389594e5bc128df4cdf8963468f65c89a5c0fe0",
+    "compiled_helper_sha256": "a3b547bd2bc70d13ba69575d48e5048d34333c84fa6e103ac11cedf8ef288bb6",
+    "checkpoint_note": "Actual FFmpeg run preceded an equivalent ASCII-control validation lint adjustment. The current helper reran its20 focused tests; FFmpeg arguments and segment-copy behavior are unchanged."
+  }
+}

@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { JWTPayload } from '@/auth/jwt';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import { defineAbilityFor, type AppAbility } from '@/rbac';
@@ -23,7 +23,12 @@ export type MutationAuthorizationContext = {
 export async function withCurrentMutationAuthorization<T>(
   payload: Pick<JWTPayload, 'sub' | 'jti'>,
   execute: (context: MutationAuthorizationContext) => Promise<T>,
-  options: { roleLock?: 'share' | 'update' } = {}
+  options: {
+    roleLock?: 'share' | 'update';
+    additionalUserIdsToLock?: string[];
+    /** Only for callbacks that read, and never update, the locked user records. */
+    userLock?: 'share' | 'update';
+  } = {}
 ): Promise<T> {
   return getDatabase().transaction(async (tx) => {
     // Effective grants may be inherited through any role in the graph. Lock
@@ -36,7 +41,12 @@ export async function withCurrentMutationAuthorization<T>(
       .orderBy(asc(schema.roles.id))
       .for(options.roleLock ?? 'share');
 
-    const [user] = await tx
+    // Cross-user author/presenter checks acquire one ordered set, avoiding
+    // opposite A→B/B→A row-lock order. Shared identity locks also remain
+    // compatible with foreign-key KEY SHARE checks on an assignment's creator.
+    const actorId = payload.sub.toLowerCase();
+    const identityIds = [...new Set([actorId, ...(options.additionalUserIdsToLock ?? []).map((id) => id.toLowerCase())])];
+    const users = await tx
       .select({
         id: schema.users.id,
         role_id: schema.users.role_id,
@@ -45,8 +55,10 @@ export async function withCurrentMutationAuthorization<T>(
         deleted_at: schema.users.deleted_at,
       })
       .from(schema.users)
-      .where(eq(schema.users.id, payload.sub))
-      .for('update');
+      .where(inArray(schema.users.id, identityIds))
+      .orderBy(asc(schema.users.id))
+      .for(options.userLock ?? 'update');
+    const user = users.find((candidate) => candidate.id.toLowerCase() === actorId);
 
     if (!user || !user.is_active || user.deleted_at) {
       throw AppError.unauthorized('Authorization context is no longer active. Please sign in again.');

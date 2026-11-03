@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { getDatabase, schema, type DbExecutor } from '@/db';
+import type { MutationAuthorizationContext } from '@/auth/mutation-authorization';
+import type { PreparedLiveSchedule } from '@/services/live-scheduling';
 import {
   createScheduleReservationRepository,
   type ScheduleReservationState,
@@ -11,6 +13,13 @@ type DBLike = ReturnType<typeof getDatabase> | any;
 
 const HOLD_TTL_MS = 4 * 60 * 60 * 1000;
 const ACTIVE_STATES = new Set<ScheduleReservationState>(['HELD', 'RESERVED', 'PUBLISHED']);
+let reservationSavepoint = 0;
+
+export type LiveReservationContext = {
+  context: MutationAuthorizationContext;
+  prepared: PreparedLiveSchedule;
+  expectedFingerprint?: string;
+};
 
 export type ReservationConflictItem = {
   screen_id: string;
@@ -58,8 +67,63 @@ function normalizePgConstraintError(error: unknown) {
 export class ScheduleReservationService {
   private repo = createScheduleReservationRepository();
 
+  private mutation<T>(db: DBLike, execute: (executor: DbExecutor) => Promise<T>): Promise<T> {
+    return db === getDatabase() ? getDatabase().transaction(execute) : execute(db);
+  }
+
+  private async requireLiveContext(scheduleId: string, live: LiveReservationContext | undefined, db: DbExecutor) {
+    const [item] = await db.select({ id: schema.scheduleItems.id }).from(schema.scheduleItems)
+      .where(and(eq(schema.scheduleItems.schedule_id, scheduleId), eq(schema.scheduleItems.source_kind, 'LIVE'))).limit(1);
+    if (item && !live) throw new AppError({ statusCode: 409, code: 'LIVE_APPROVAL_REQUIRED',
+      message: 'Live scheduling requires current policy and immutable fallback approval.' });
+    if (live) {
+      if (live.context.executor !== db || live.prepared.schedule_id !== scheduleId) throw new AppError({ statusCode: 409,
+        code: 'LIVE_AUTHORIZATION_RETRY', message: 'Revalidate live scheduling inside this transaction.' });
+      (await import('@/services/live-scheduling')).assertPreparedLiveSchedule(db, live.prepared);
+    }
+    return Boolean(item);
+  }
+
+  private async expectedLiveFingerprint(live: LiveReservationContext, token: string, db: DbExecutor) {
+    if (live.expectedFingerprint) return live.expectedFingerprint;
+    const rows = await db.select({ fingerprint: schema.liveScheduleOccurrences.approval_fingerprint })
+      .from(schema.liveScheduleOccurrences).where(eq(schema.liveScheduleOccurrences.reservation_token, token));
+    const fingerprints = [...new Set(rows.map(row => row.fingerprint))];
+    if (live.prepared.items.length && fingerprints.length !== 1) throw new AppError({ statusCode: 409,
+      code: 'LIVE_APPROVAL_STALE', message: 'The live reservation must be submitted for fresh approval.' });
+    return fingerprints[0] ?? live.prepared.fingerprint;
+  }
+
+  private async verifyLiveReuse(live: LiveReservationContext, token: string, db: DbExecutor) {
+    const rows = await db.select().from(schema.liveScheduleOccurrences).where(eq(schema.liveScheduleOccurrences.reservation_token, token));
+    if (rows.length !== live.prepared.items.length || rows.some(row => !ACTIVE_STATES.has(row.state as ScheduleReservationState) ||
+      row.approval_fingerprint !== live.prepared.fingerprint || !live.prepared.items.some(item =>
+        item.policy.schedule_item_id === row.schedule_item_id && item.item_fingerprint === row.item_fingerprint)) ||
+      (live.expectedFingerprint && live.expectedFingerprint !== live.prepared.fingerprint)) {
+      throw new AppError({ statusCode: 409, code: 'LIVE_APPROVAL_STALE', message: 'Live policy changed after its hold. Cancel and obtain fresh approval.' });
+    }
+  }
+
+  private async insertRows(rows: Array<typeof schema.scheduleReservations.$inferInsert>, db: DbExecutor, published = false) {
+    const name = `darshan_screen_reservations_${++reservationSavepoint}`;
+    await db.execute(sql.raw(`SAVEPOINT ${name}`));
+    try {
+      const inserted = published ? await this.repo.createPublishedRows(rows, db) : await this.repo.insertMany(rows, db);
+      await db.execute(sql.raw(`RELEASE SAVEPOINT ${name}`)); return inserted;
+    } catch (error) {
+      // An exclusion violation aborts its subtransaction. Restore it before the
+      // safe conflict query; otherwise PostgreSQL would replace409with25P02.
+      await db.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${name}`));
+      await db.execute(sql.raw(`RELEASE SAVEPOINT ${name}`)); throw error;
+    }
+  }
+
   async expireStaleHolds(db: DBLike = getDatabase()) {
-    return this.repo.expireStaleHolds(new Date(), db);
+    return this.mutation(db, async executor => {
+      const expired = await this.repo.expireStaleHolds(new Date(), executor);
+      await (await import('@/services/live-scheduling')).expireLiveHolds(executor);
+      return expired;
+    });
   }
 
   async resolveScreenIds(screenIds: string[] = [], screenGroupIds: string[] = [], db: DBLike = getDatabase()) {
@@ -183,6 +247,15 @@ export class ScheduleReservationService {
         for (const screenId of resolvedScreenIds) {
           targetedScreenIds.add(screenId);
         }
+      }
+
+      // Ordinary schedules retain their established targeting behavior. Live
+      // approval must never expand beyond an explicitly selected publish scope,
+      // including a selected group that currently has no members.
+      if (item.source_kind === 'LIVE' && (params.explicitScreenIds?.length || params.explicitScreenGroupIds?.length)) {
+        for (const screenId of targetedScreenIds) if (!publishScopeScreenIds.has(screenId)) targetedScreenIds.delete(screenId);
+        if (!targetedScreenIds.size) throw new AppError({ statusCode: 422, code: 'LIVE_AUDIENCE_LIMIT',
+          message: 'The selected live item has no target screens in this publish scope.', details: { target_count: 0, maximum: 25 } });
       }
 
       for (const screenId of targetedScreenIds) {
@@ -345,9 +418,13 @@ export class ScheduleReservationService {
       scheduleId: string;
       ownerUserId: string;
       allowPrivateRefs: boolean;
+      live?: LiveReservationContext;
     },
     db: DBLike = getDatabase()
   ) {
+    return this.mutation(db, async executor => {
+    db = executor;
+    await this.requireLiveContext(params.scheduleId, params.live, executor);
     await this.expireStaleHolds(db);
     const resolved = await this.resolveScheduleWindows({ scheduleId: params.scheduleId }, db);
     const holdExpiresAt = new Date(Date.now() + HOLD_TTL_MS);
@@ -361,6 +438,16 @@ export class ScheduleReservationService {
     }
 
     const existingRows = await this.repo.listActiveByRequest(params.scheduleRequestId, db);
+    if (existingRows.length && request.reservation_token) {
+      const key = (window: { screen_id: string; schedule_item_id: string; start_at: Date; end_at: Date }) =>
+        `${window.schedule_item_id}|${window.screen_id}|${window.start_at.toISOString()}|${window.end_at.toISOString()}`;
+      const expected = resolved.windows.map(key).sort();
+      const actual = existingRows.map(key).sort();
+      if (request.reservation_version !== resolved.schedule.revision || JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw AppError.conflict('The owned screen windows changed. Cancel and resubmit the request.', { conflict_type: 'STALE_RESERVATION' });
+      }
+      if (params.live) await this.verifyLiveReuse(params.live, request.reservation_token, executor);
+    }
     if (
       existingRows.length === resolved.windows.length &&
       existingRows.length > 0 &&
@@ -409,7 +496,7 @@ export class ScheduleReservationService {
     }));
 
     try {
-      await this.repo.insertMany(rows, db);
+      await this.insertRows(rows, executor);
     } catch (error) {
       const normalized = normalizePgConstraintError(error);
       if (normalized?.code === '23P01') {
@@ -441,6 +528,10 @@ export class ScheduleReservationService {
       })
       .where(eq(schema.scheduleRequests.id, params.scheduleRequestId));
 
+    if (params.live) await (await import('@/services/live-scheduling')).reserveLiveSchedule(params.live.context, {
+      prepared: params.live.prepared, reservationToken, state: 'HELD', scheduleRequestId: params.scheduleRequestId, holdExpiresAt,
+    });
+
     return {
       reservation_token: reservationToken,
       reservation_version: reservationVersion,
@@ -448,6 +539,7 @@ export class ScheduleReservationService {
       hold_expires_at: holdExpiresAt.toISOString(),
       resolved_screen_ids: resolved.resolvedScreenIds,
     };
+    });
   }
 
   async promoteRequestHold(
@@ -455,9 +547,12 @@ export class ScheduleReservationService {
       scheduleRequestId: string;
       reviewerId: string;
       reviewNotes?: string | null;
+      live?: LiveReservationContext;
     },
     db: DBLike = getDatabase()
   ) {
+    return this.mutation(db, async executor => {
+    db = executor;
     await this.expireStaleHolds(db);
 
     const [request] = await db
@@ -465,6 +560,7 @@ export class ScheduleReservationService {
       .from(schema.scheduleRequests)
       .where(eq(schema.scheduleRequests.id, params.scheduleRequestId));
     if (!request) throw AppError.notFound('Schedule request not found');
+    await this.requireLiveContext(request.schedule_id, params.live, executor);
     if (request.status === 'EXPIRED') {
       throw AppError.conflict('The pending hold expired before approval. Refresh and resubmit the request.');
     }
@@ -490,6 +586,7 @@ export class ScheduleReservationService {
     }
 
     if (request.status === 'APPROVED' && rows.every((row: any) => row.state === 'RESERVED')) {
+      if (params.live && request.reservation_token) await this.verifyLiveReuse(params.live, request.reservation_token, executor);
       return {
         reservation_state: 'RESERVED',
         reservation_token: request.reservation_token,
@@ -511,11 +608,17 @@ export class ScheduleReservationService {
       })
       .where(eq(schema.scheduleRequests.id, params.scheduleRequestId));
 
+    if (params.live) await (await import('@/services/live-scheduling')).transitionLiveReservations(executor, {
+      prepared: params.live.prepared, reservationToken: request.reservation_token!,
+      expectedFingerprint: await this.expectedLiveFingerprint(params.live, request.reservation_token!, executor), nextState: 'RESERVED',
+    });
+
     return {
       reservation_state: 'RESERVED',
       reservation_token: request.reservation_token,
       reservation_version: request.reservation_version,
     };
+    });
   }
 
   async releaseRequestReservations(
@@ -529,6 +632,8 @@ export class ScheduleReservationService {
     },
     db: DBLike = getDatabase()
   ) {
+    return this.mutation(db, async executor => {
+    db = executor;
     await this.repo.markRequestReservationsReleased(params.scheduleRequestId, params.releaseState, params.releaseReason, db);
     await db
       .update(schema.scheduleRequests)
@@ -542,6 +647,10 @@ export class ScheduleReservationService {
         updated_at: new Date(),
       })
       .where(eq(schema.scheduleRequests.id, params.scheduleRequestId));
+    await (await import('@/services/live-scheduling')).releaseLiveReservations(executor, {
+      scheduleRequestId: params.scheduleRequestId, nextState: params.releaseState, reason: params.releaseReason,
+    });
+    });
   }
 
   async assertScheduleMutable(scheduleId: string, db: DBLike = getDatabase()) {
@@ -568,14 +677,18 @@ export class ScheduleReservationService {
 
   async validateApprovedRequestForPublish(
     scheduleRequestId: string,
-    db: DBLike = getDatabase()
+    db: DBLike = getDatabase(),
+    live?: LiveReservationContext
   ) {
+    return this.mutation(db, async executor => {
+    db = executor;
     await this.expireStaleHolds(db);
     const [request] = await db
       .select()
       .from(schema.scheduleRequests)
       .where(eq(schema.scheduleRequests.id, scheduleRequestId));
     if (!request) throw AppError.notFound('Schedule request not found');
+    await this.requireLiveContext(request.schedule_id, live, executor);
 
     const rows = await this.repo.listActiveByRequest(scheduleRequestId, db);
     const publishId = Array.from(new Set(rows.map((row: any) => row.publish_id).filter(Boolean)))[0] as string | undefined;
@@ -607,20 +720,29 @@ export class ScheduleReservationService {
       });
     }
 
+    if (live && request.reservation_token) await this.verifyLiveReuse(live, request.reservation_token, executor);
+
     return {
       request,
       alreadyPublished: false,
       publishId: null,
     };
+    });
   }
 
   async finalizeRequestPublish(
     params: {
       scheduleRequestId: string;
       publishId: string;
+      live?: LiveReservationContext;
     },
     db: DBLike = getDatabase()
   ) {
+    return this.mutation(db, async executor => {
+    db = executor;
+    const [request] = await executor.select().from(schema.scheduleRequests).where(eq(schema.scheduleRequests.id, params.scheduleRequestId));
+    if (!request) throw AppError.notFound('Schedule request not found');
+    await this.requireLiveContext(request.schedule_id, params.live, executor);
     await this.repo.finalizeRequestPublish(params.scheduleRequestId, params.publishId, db);
     await db
       .update(schema.scheduleRequests)
@@ -631,6 +753,12 @@ export class ScheduleReservationService {
         updated_at: new Date(),
       })
       .where(eq(schema.scheduleRequests.id, params.scheduleRequestId));
+    if (params.live) await (await import('@/services/live-scheduling')).transitionLiveReservations(executor, {
+      prepared: params.live.prepared, reservationToken: request.reservation_token!,
+      expectedFingerprint: await this.expectedLiveFingerprint(params.live, request.reservation_token!, executor),
+      nextState: 'PUBLISHED', publishId: params.publishId,
+    });
+    });
   }
 
   private async markPublishesTakenDown(
@@ -665,6 +793,8 @@ export class ScheduleReservationService {
     },
     db: DBLike = getDatabase()
   ) {
+    return this.mutation(db, async executor => {
+    db = executor;
     await this.expireStaleHolds(db);
 
     const [request] = await db
@@ -691,6 +821,9 @@ export class ScheduleReservationService {
     ) as string[];
 
     if (request.status === 'TAKEN_DOWN') {
+      await (await import('@/services/live-scheduling')).releaseLiveReservations(executor, {
+        scheduleRequestId: params.scheduleRequestId, nextState: 'RELEASED', reason: 'request-already-taken-down',
+      });
       return {
         request,
         screenIds: reservedScreenIds,
@@ -707,6 +840,10 @@ export class ScheduleReservationService {
       'request-taken-down-by-admin',
       db
     );
+
+    await (await import('@/services/live-scheduling')).releaseLiveReservations(executor, {
+      scheduleRequestId: params.scheduleRequestId, nextState: 'RELEASED', reason: 'request-taken-down-by-admin',
+    });
 
     await this.markPublishesTakenDown(publishIds, params.takenDownBy, params.takedownReason, db);
 
@@ -734,6 +871,7 @@ export class ScheduleReservationService {
       ),
       alreadyTakenDown: false,
     };
+    });
   }
 
   async takeDownPublish(
@@ -744,6 +882,8 @@ export class ScheduleReservationService {
     },
     db: DBLike = getDatabase()
   ) {
+    return this.mutation(db, async executor => {
+    db = executor;
     await this.expireStaleHolds(db);
 
     const [publish] = await db
@@ -805,6 +945,9 @@ export class ScheduleReservationService {
     }
 
     if (publish.status === 'TAKEN_DOWN') {
+      await (await import('@/services/live-scheduling')).releaseLiveReservations(executor, {
+        publishId: params.publishId, nextState: 'RELEASED', reason: 'publish-already-taken-down',
+      });
       return {
         publish,
         screenIds,
@@ -818,6 +961,9 @@ export class ScheduleReservationService {
       'publish-taken-down-by-admin',
       db
     );
+    await (await import('@/services/live-scheduling')).releaseLiveReservations(executor, {
+      publishId: params.publishId, nextState: 'RELEASED', reason: 'publish-taken-down-by-admin',
+    });
     const [updatedPublish] = await this.markPublishesTakenDown(
       [params.publishId],
       params.takenDownBy,
@@ -836,6 +982,7 @@ export class ScheduleReservationService {
       alreadyTakenDown: false,
       scheduleRequestId: null,
     };
+    });
   }
 
   async acquireDirectPublishedReservations(
@@ -845,9 +992,13 @@ export class ScheduleReservationService {
       publishId: string;
       explicitScreenIds?: string[];
       explicitScreenGroupIds?: string[];
+      live?: LiveReservationContext;
     },
     db: DBLike = getDatabase()
   ) {
+    return this.mutation(db, async executor => {
+    db = executor;
+    await this.requireLiveContext(params.scheduleId, params.live, executor);
     await this.expireStaleHolds(db);
     const resolved = await this.resolveScheduleWindows(
       {
@@ -892,7 +1043,7 @@ export class ScheduleReservationService {
     }));
 
     try {
-      await this.repo.createPublishedRows(rows, db);
+      await this.insertRows(rows, executor, true);
     } catch (error) {
       const normalized = normalizePgConstraintError(error);
       if (normalized?.code === '23P01') {
@@ -911,6 +1062,11 @@ export class ScheduleReservationService {
       }
       throw error;
     }
+    if (params.live) await (await import('@/services/live-scheduling')).reserveLiveSchedule(params.live.context, {
+      prepared: params.live.prepared, reservationToken, state: 'PUBLISHED', publishId: params.publishId,
+    });
+    return { reservation_token: reservationToken, reservation_version: resolved.schedule.revision, resolved_screen_ids: resolved.resolvedScreenIds };
+    });
   }
 }
 

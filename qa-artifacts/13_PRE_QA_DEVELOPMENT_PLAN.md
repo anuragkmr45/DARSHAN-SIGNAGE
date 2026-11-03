@@ -380,10 +380,10 @@ This new delta uses [live implementation loops](../docs/plans/live-broadcast-imp
 | Loop | Current state | Closure gate |
 | --- | --- | --- |
 | 0 baseline | In progress | Current CMS/real-player ordinary playback/emergency/offline baseline and isolated inventory |
-| 1 capture/enforcement | Being built | Real capture→SFU→packaged Electron plus replay/removal/watchdog technical gate |
-| 2 reservations | Not executed | Frozen audience/fingerprint and 10/25 concurrent DB plus CMS journeys |
+| 1 capture/enforcement | Prototype evidence recorded; gate open | Real capture/SFU/Electron evidence and tmpfs watchdog checks exist; native capture/audio matrix, current packaged receiver runtime and production host actuation still need closure |
+| 2 reservations | API/database/fallback foundations in progress | Source authoring, frozen policy/capacity and immutable preparation have focused developer checks; full request/direct publication wiring and CMS journeys remain |
 | 3 authority | Not executed | Idempotency/generations/current permissions/epoch/reconciliation with actual media faults |
-| 4 player | Not executed | Same ordinary installed DARSHAN player scheduled live source and normal pairing/cache/emergency integration; deadline/fallback/precedence/cleanup journeys |
+| 4 player | Verified cache-pin primitive; integration not executed | Same ordinary installed DARSHAN player scheduled live source and normal pairing/cache/emergency integration; deadline/fallback/precedence/cleanup journeys |
 | 5 CMS | Not executed | Every real visible control and denied/stale/multiple-session path |
 | 6 deployment | Not executed | Offline sixth role, TLS/transports, disable/update/restore/rollback |
 | 7 handoff | Not executed | Stable-packet regression, dated artifacts and concrete independent human checks |

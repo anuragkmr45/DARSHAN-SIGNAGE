@@ -44,6 +44,8 @@ import {
   type PlaybackRefreshCommandBatch,
 } from '@/services/playback-refresh-commands';
 import { reconcileEmergencyTransitions } from '@/services/emergency-transition-outbox';
+import { processLiveFallbackPreparation, scavengeLiveFallbackStaging } from '@/services/live-fallback-preparation';
+import { prepareLiveHlsFallback } from '@/services/live-fallback-hls';
 
 const logger = createLogger('jobs');
 
@@ -721,8 +723,10 @@ type PgBossError = Error & {
   code?: string;
 };
 
-const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'emergency:reconcile', 'webpage:refresh-due'] as const;
+const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'emergency:reconcile', 'webpage:refresh-due', 'live:fallback-reconcile'] as const;
 const WORK_QUEUE_NAMES = [
+  'live:fallback-prepare',
+  'live:fallback-reconcile',
   'playback:refresh-dispatch',
   'telemetry:heartbeat',
   'telemetry:proof-of-play',
@@ -911,6 +915,33 @@ export interface PlaybackRefreshDispatchJob extends PlaybackRefreshCommandBatch 
 
 export interface EmergencyReconcileJob {
   transitionId?: string;
+}
+
+export interface LiveFallbackPreparationJob { preparationId: string; retryFailed?: boolean }
+
+export async function queueLiveFallbackPreparation(job: LiveFallbackPreparationJob) {
+  const jobs = getJobs(), queue = 'live:fallback-prepare';
+  try {
+    await ensureQueueExists(jobs, queue);
+    // Null means an identical dispatch is already queued in this slot. The
+    // durable preparation claim remains the cross-worker concurrency guard.
+    const id = await jobs.send(queue, job, { singletonKey: job.preparationId, singletonSeconds: 30,
+      retryLimit: 3, retryDelay: 30, expireInSeconds: 60 * 60 });
+    recordJobEnqueue(queue, 'success');
+    return id;
+  } catch (error) { recordJobEnqueue(queue, 'error'); throw error; }
+}
+
+export async function reconcileLiveFallbackPreparations() {
+  const db = getDatabase();
+  const staging = await scavengeLiveFallbackStaging();
+  const rows = await db.select({ id: schema.liveFallbackPreparations.id }).from(schema.liveFallbackPreparations)
+    .where(or(eq(schema.liveFallbackPreparations.state, 'PENDING'), and(
+      eq(schema.liveFallbackPreparations.state, 'PROCESSING'),
+      lte(schema.liveFallbackPreparations.lease_expires_at, new Date())
+    ))).orderBy(schema.liveFallbackPreparations.updated_at).limit(20);
+  for (const row of rows) await queueLiveFallbackPreparation({ preparationId: row.id });
+  return { dispatched: rows.length, staging };
 }
 
 export async function queuePlaybackRefreshDispatch(job: PlaybackRefreshDispatchJob, options?: any) {
@@ -1140,6 +1171,13 @@ export async function cleanupOrphanedStorageObjects(options: {
       SELECT id, bucket, object_key
       FROM storage_objects so
       WHERE so.created_at <= ${cutoff}
+        -- Content-addressed approved fallbacks are retained even after their
+        -- source library entry changes or disappears. Excluding the namespace
+        -- also fences the query-to-object-delete race with a retrying preparer;
+        -- JSON-only manifest references are insufficient for orphan discovery.
+        AND so.object_key NOT LIKE 'live-fallbacks/v1/sha256/%'
+        AND NOT EXISTS (SELECT 1 FROM live_fallback_preparation_assets lfpa WHERE lfpa.storage_object_id = so.id)
+        AND NOT EXISTS (SELECT 1 FROM live_occurrence_assets loa WHERE loa.storage_object_id = so.id)
         AND NOT EXISTS (SELECT 1 FROM media m WHERE m.source_object_id = so.id OR m.ready_object_id = so.id OR m.thumbnail_object_id = so.id)
         AND NOT EXISTS (SELECT 1 FROM schedule_snapshots ss WHERE ss.storage_object_id = so.id)
         AND NOT EXISTS (SELECT 1 FROM heartbeats h WHERE h.storage_object_id = so.id)
@@ -1203,6 +1241,15 @@ export async function registerJobHandlers() {
       });
     });
   };
+
+  // One claim at a time per process. Other workers coordinate through the
+  // durable UUID lease and cannot finalize a replaced claim.
+  await jobs.work<LiveFallbackPreparationJob>('live:fallback-prepare', { batchSize: 1 }, async batch => {
+    await observeJobProcessing('live:fallback-prepare', async () => {
+      for (const job of batch) await processLiveFallbackPreparation(job.data.preparationId, { retryFailed: job.data.retryFailed }, { prepareHls: prepareLiveHlsFallback });
+    });
+  });
+  await registerObservedWorker('live:fallback-reconcile', async () => { await reconcileLiveFallbackPreparations(); });
 
   await registerObservedWorker<HeartbeatTelemetryJob>('telemetry:heartbeat', async (batch) => {
     for (const job of batch) {
@@ -1924,6 +1971,7 @@ export async function scheduleRecurringJobs() {
     await jobs.unschedule('backup:check').catch(() => { });
     await jobs.unschedule('emergency:reconcile').catch(() => { });
     await jobs.unschedule('webpage:refresh-due').catch(() => { });
+    await jobs.unschedule('live:fallback-reconcile').catch(() => { });
 
     // Now schedule safely (queues exist)
     await jobs.schedule('cleanup', '15 * * * *', { type: 'expired_sessions' });      // hourly upload/session expiry cleanup
@@ -1933,6 +1981,7 @@ export async function scheduleRecurringJobs() {
     }
     await jobs.schedule('emergency:reconcile', '* * * * *', {}); // every minute
     await jobs.schedule('webpage:refresh-due', '20 * * * *', { trigger: 'scheduled-scan' }); // hourly
+    await jobs.schedule('live:fallback-reconcile', '* * * * *', {}); // durable dispatch/recovery every minute
 
     logger.info('Recurring jobs scheduled successfully');
   } catch (error) {

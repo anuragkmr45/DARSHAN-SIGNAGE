@@ -60,6 +60,17 @@ export const apiEndpoints = {
     slotItems: withBase('/presentations/:id/slots'),
     slotItem: withBase('/presentations/:id/slots/:slotItemId'),
   },
+  liveSessions: {
+    create: withBase('/live-sessions'),
+    list: withBase('/live-sessions'),
+    get: withBase('/live-sessions/:id'),
+    update: withBase('/live-sessions/:id'),
+    delete: withBase('/live-sessions/:id'),
+  },
+  liveFallbacks: {
+    create: withBase('/live-fallback-preparations'),
+    get: withBase('/live-fallback-preparations/:id'),
+  },
   schedules: {
     create: withBase('/schedules'),
     list: withBase('/schedules'),

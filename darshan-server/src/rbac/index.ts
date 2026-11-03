@@ -25,7 +25,8 @@ const resolveConditions = (conditions: Record<string, string> | undefined, user:
   for (const [key, value] of Object.entries(conditions)) {
     const resolvedValue = resolveConditionValue(value, user);
     if (resolvedValue === undefined || resolvedValue === null) {
-      return undefined;
+      // Missing actor context must remove this grant, never its restrictions.
+      return null;
     }
     resolved[key] = resolvedValue;
   }
@@ -87,6 +88,7 @@ export async function defineAbilityFor(roleId: string, userId: string, departmen
   grants.forEach((grant: any) => {
     if (!grant || !grant.action || !grant.subject) return;
     const conditions = resolveConditions(grant.conditions, userContext);
+    if (conditions === null) return;
     if (grant.action === 'manage') {
       can('manage', grant.subject, conditions as any);
       return;

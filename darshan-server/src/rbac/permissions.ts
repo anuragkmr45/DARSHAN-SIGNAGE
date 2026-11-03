@@ -9,6 +9,7 @@ export const PERMISSION_SUBJECTS = [
   'Schedule',
   'ScheduleItem',
   'ScheduleRequest',
+  'LiveBroadcast',
   'Screen',
   'ScreenGroup',
   'Notification',

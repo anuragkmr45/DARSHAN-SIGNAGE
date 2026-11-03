@@ -16,6 +16,7 @@ import { respondWithError } from '@/utils/errors';
 import { getDatabase, schema } from '@/db';
 import { eq, inArray } from 'drizzle-orm';
 import { publishScheduleSnapshot } from '@/routes/schedule-publish-helper';
+import { lockScreenTargetReferences } from '@/services/screen-deletion-guard';
 import { AppError } from '@/utils/app-error';
 import { type ActorContext } from '@/rbac/policy';
 import {
@@ -673,6 +674,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
       if (!context.ability.can(action, 'ScheduleRequest')) {
         throw AppError.forbidden('Forbidden');
       }
+      await lockScreenTargetReferences(context.executor);
 
       const [requestReference] = await context.executor
         .select()
@@ -729,6 +731,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const include = parseInclude(query.include);
         const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
           if (!ability.can('create', 'ScheduleRequest')) throw AppError.forbidden('Forbidden');
+          await lockScreenTargetReferences(executor);
           const [schedule] = await executor
             .select()
             .from(schema.schedules)

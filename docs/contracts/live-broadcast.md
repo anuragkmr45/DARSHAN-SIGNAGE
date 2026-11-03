@@ -50,6 +50,34 @@ fingerprint, including same-size group-member replacement. A relevant change
 requires renewed approval; published live audience cannot expand with later
 group edits. Device snapshots, now-playing and reporting use that frozen set.
 
+Reusable live-source edits apply to future approvals. General `revision`
+changes for all edits; `policy_revision` changes only for presenter, audio or
+availability changes. Pending/unpublished approvals must recheck that policy.
+Published occurrences keep their approved settings. Disabling a source prevents
+new approvals/publications; stopping an already published occurrence uses its
+separate stop/takedown controls.
+
+Fallback preparation copies the final approved playback bytes into a separate
+content-addressed namespace before approval. Referencing a storage-object ID
+alone is insufficient: existing processing jobs can replace bytes at their
+ordinary delivery keys. Image and native PDF fallback may use verified source
+bytes; converted PDF/video use the verified final representation. Webpage
+fallback freezes the approved screenshot as an offline image, without cookies
+or a live URL. Internal VOD HLS is prepared as an explicit local MP4 rendition
+before approval; FFmpeg receives private local segments and no network access.
+The resulting MP4 revision, rather than mutable HLS segments, is approved.
+
+Preparation is durable asynchronous work. Repeated requests coalesce by creator
+and exact source fingerprint; a queue outage preserves PENDING work for retry.
+Current account, authoring and record-bound library access are checked before
+copying and before READY. UUID-fenced leases prevent a replaced worker from
+finalizing or failing its successor. Explicit failed-work retry is persisted
+before dispatch. Temporary files use private claim markers; bounded cleanup
+may remove only known inactive claims after its grace period. Unknown or
+unmarked directories require separate review. Complete immutable CAS copies
+are retained, including unreferenced copies; automatic permanent CAS cleanup is
+outside this packet and storage growth must be monitored.
+
 Apply current effective permissions, stable ownership and target checks to
 request publication and direct administrator publication. Additional department
 membership is not global screen control. Assigned presenter, current account,
@@ -69,6 +97,22 @@ schedule compatibility. Add durable start/end boundary notifications plus REST
 reconciliation so a current earlier publish cannot hide the next live window.
 
 ## Authority, interfaces and failure behavior
+
+Current foundation routes use the `/api/v1` prefix:
+
+| Route | Current purpose |
+| --- | --- |
+| `POST /live-sessions`, `GET /live-sessions`, `GET /live-sessions/:id` | Create/list/read reusable source policies with current permissions and ownership |
+| `PATCH /live-sessions/:id`, `DELETE /live-sessions/:id` | Require `expected_revision`; return a conflict for stale writes or blocking references |
+| `POST /live-fallback-preparations` | Accept `presentation_id` and optional explicit `retry_failed`; durably prepare the exact current fallback graph |
+| `GET /live-fallback-preparations/:id` | Recheck current access/fingerprint and return preparation state; READY includes its immutable manifest |
+| Existing schedule-item create/list | Preserve `source_kind`, `live_session_id` and required fallback `presentation_id`; legacy source defaults to PRESENTATION |
+
+These foundations do not yet enable live publication. Until the complete
+publication serializer and route authorization are connected, request/direct
+publication rejects LIVE items with `409 LIVE_APPROVAL_REQUIRED`. Production
+run/start/admission APIs and normal-player live playback remain implementation
+work; no capability is advertised prematurely.
 
 API families add live-session CRUD/preflight, run start/status/stop/targets,
 authenticated device live-state/admission, and admission renewal. A start

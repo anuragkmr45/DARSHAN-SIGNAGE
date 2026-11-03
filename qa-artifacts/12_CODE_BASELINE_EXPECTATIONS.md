@@ -79,8 +79,18 @@ A temporary developer prototype establishes only the media gate; its first-frame
 event does not establish completed production lifecycle integration.
 
 The implementation target is `BR-109..116` and [live contract](../docs/contracts/live-broadcast.md).
-Loop 0 is in progress; loop 1 is being built. Update this checkpoint with actual
-implemented routes/types and source commit after each verified loop. Until then,
-do not describe target behavior as code-derived or mark human cases Pass.
+Loop 0 baseline application evidence and loop 1 prototype evidence are recorded;
+their remaining gates stay open. Commit `e634150` adds a private tmpfs watchdog
+requirement and verified occurrence cache pins. Player regression passed 428
+unit / 5 integration / 21 fault checks; those pins are not yet integrated into
+normal-player live playback. Direct host pidfd signalling remains unverified in
+the production service context. The current scheduling foundation adds
+migrations 0057/0058, live-source CRUD, LIVE draft fields, immutable asynchronous
+fallback preparation and shared screen/live reservation services. Its 39-case
+database/API packet and 68-case focused unit packet pass, as do the server build
+and real local queued image/PDF/video preparation checks. LIVE publication
+remains guarded until complete route/snapshot integration lands. These
+foundations do not establish the complete CMS-to-player journey.
+Update this checkpoint with each verified packet. Do not mark human cases Pass.
 
 Current delta ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md); cases `LIVE-01..20`.

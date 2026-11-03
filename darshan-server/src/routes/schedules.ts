@@ -1,11 +1,13 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { desc, eq, inArray, and } from 'drizzle-orm';
+import { subject } from '@casl/ability';
 import {
   createScheduleSchema,
   updateScheduleSchema,
   listSchedulesQuerySchema,
   publishScheduleSchema,
   displayPreflightSchema,
+  createScheduleItemSchema,
 } from '@/schemas/schedule';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { createScheduleRepository } from '@/db/repositories/schedule';
@@ -41,18 +43,12 @@ import {
 } from '@/rbac/content-ownership';
 import { createScheduleReservationService } from '@/services/scheduling/reservation-service';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
+import { lockScreenTargetReferences } from '@/services/screen-deletion-guard';
 
 const logger = createLogger('schedule-routes');
 const { CREATED } = HTTP_STATUS;
 
-const scheduleItemSchema = z.object({
-  presentation_id: z.string().uuid(),
-  start_at: z.string().datetime(),
-  end_at: z.string().datetime(),
-  priority: z.number().int().default(0),
-  screen_ids: z.array(z.string().uuid()).default([]),
-  screen_group_ids: z.array(z.string().uuid()).default([]),
-});
+const scheduleItemSchema = createScheduleItemSchema;
 
 const takeDownPublishSchema = z.object({
   reason: z.string().optional(),
@@ -200,6 +196,10 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         !context.ability.can(permission.action, permission.subject) &&
         !context.ability.can('manage', 'Schedule')
       ) throw AppError.forbidden('Forbidden');
+      // Membership/deletion writers acquire this before target or schedule
+      // tuple locks. Taking it only in the later SQL write trigger can invert
+      // that order after SELECT FOR UPDATE has already locked this schedule.
+      await lockScreenTargetReferences(context.executor);
       const [schedule] = await context.executor
         .select()
         .from(schema.schedules)
@@ -511,6 +511,12 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         const items = await scheduleItemRepo.listBySchedule(schedule.id);
         const presMap = await resolvePresentations(items.map((i: any) => i.presentation_id));
         const actor = actorFor(payload);
+        const liveIds = [...new Set(items.filter(item => item.source_kind === 'LIVE').map(item => item.live_session_id!))];
+        const liveSources = liveIds.length ? await db.select().from(schema.liveSessions)
+          .where(inArray(schema.liveSessions.id, liveIds)) : [];
+        if (liveSources.length !== liveIds.length || liveSources.some(source => !canReadContentResource(
+          actor, source, { can: action => ability.can(action as never, subject('LiveBroadcast', source) as never) }, 'LiveBroadcast'
+        ))) throw AppError.forbidden('Schedule contains a live source outside your ownership scope.');
         for (const presentation of presMap.values()) {
           if (!canReadContentResource(actor, presentation, ability, 'Presentation')) {
             throw AppError.forbidden('Schedule contains a presentation outside your ownership scope.');
@@ -544,6 +550,8 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
             return {
               id: i.id,
               presentation_id: i.presentation_id,
+              source_kind: i.source_kind ?? 'PRESENTATION',
+              live_session_id: i.live_session_id ?? null,
               start_at: i.start_at.toISOString?.() ?? i.start_at,
               end_at: i.end_at.toISOString?.() ?? i.end_at,
               priority: i.priority,
@@ -641,6 +649,23 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           (request.params as any).id,
           { action: 'create', subject: 'ScheduleItem' },
           async ({ schedule, actor, ability, executor }) => {
+            if (data.source_kind === 'LIVE') {
+              // Match the deletion guard's source-row lock. The database trigger
+              // independently fences writers that bypass this HTTP handler.
+              const [source] = await executor.select().from(schema.liveSessions)
+                .where(eq(schema.liveSessions.id, data.live_session_id!)).for('share');
+              if (!source || source.deleted_at || !source.is_active) throw new AppError({
+                statusCode: 409, code: 'LIVE_SESSION_UNAVAILABLE',
+                message: 'Select an active live source before adding this schedule item.',
+              });
+              if (!canReadContentResource(actor, source,
+                { can: action => ability.can(action as never, subject('LiveBroadcast', source) as never) }, 'LiveBroadcast')) {
+                throw AppError.forbidden('The live source is outside your ownership scope.');
+              }
+              if (!canReferenceContentResource(schedule, source)) {
+                throw AppError.badRequest('The selected live source has narrower ownership than the schedule.');
+              }
+            }
             const pres = await presentationRepo.findById(data.presentation_id, executor);
             if (!pres) throw AppError.notFound('Presentation not found');
             if (!canReadContentResource(actor, pres, ability, 'Presentation')) {
@@ -695,6 +720,8 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
             const item = await scheduleItemRepo.create({
               schedule_id: schedule.id,
               presentation_id: data.presentation_id,
+              source_kind: data.source_kind,
+              live_session_id: data.live_session_id ?? null,
               start_at: startAt,
               end_at: endAt,
               priority: data.priority ?? 0,
@@ -709,6 +736,8 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           id: authorized.item.id,
           schedule_id: authorized.scheduleId,
           presentation_id: authorized.item.presentation_id,
+          source_kind: authorized.item.source_kind ?? 'PRESENTATION',
+          live_session_id: authorized.item.live_session_id ?? null,
           start_at: authorized.item.start_at.toISOString?.() ?? authorized.item.start_at,
           end_at: authorized.item.end_at.toISOString?.() ?? authorized.item.end_at,
           priority: authorized.item.priority,
@@ -1024,6 +1053,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           if (!ability.can('publish', 'ScheduleRequest') && !ability.can('manage', 'Schedule')) {
             throw AppError.forbidden('Forbidden');
           }
+          await lockScreenTargetReferences(executor);
           const [publish] = await executor
             .select()
             .from(schema.publishes)

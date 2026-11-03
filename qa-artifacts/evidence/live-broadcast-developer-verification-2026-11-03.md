@@ -701,3 +701,79 @@ The verified immutable-asset pin primitive and its limitations are recorded in
 The unchanged cache source passed the player build and **428 unit / 5 integration
 / 21 fault** checks. The normal player's live coordinator does not yet consume
 these pins; no live player capability or integrated completion is claimed.
+
+### Live scheduling and immutable fallback foundation packet
+
+This packet follows `e634150`; exact source and compiled-module hashes are in
+[live-scheduling-foundation-results.json](runtime-live-2026-11-03/live-scheduling-foundation-results.json),
+SHA-256 `bc068a178cebef306ae03eb3e628231e22a995beb28a4ff245123383d7fa0a1f`. It is **not completion of loop2 or the feature**.
+
+Implemented foundations:
+
+- Migration0057 live-source CRUD, record-bound permissions/ownership, separate
+  metadata/policy revisions, shared sorted actor/presenter locks and soft deletion.
+  Missing department condition values now deny rather than remove the condition.
+- LIVE draft source/fallback fields round-trip through the existing schedule
+  routes. Legacy items default to PRESENTATION. Live publication still rejects
+  with `LIVE_APPROVAL_REQUIRED` until complete frozen-publication wiring lands;
+  it cannot silently publish fallback as ordinary content.
+- Migration0058 frozen preparations/assets and live scheduled occurrences,
+  exact frozen audience/fingerprint checks, half-open10-slot capacity exclusion,
+  optimal recoloring and shared screen/live reservation transactions. Explicit
+  selected empty groups reject instead of broadening live targets. Expiry and
+  takedown change scheduled metadata only, never free a transmitting room.
+- The adopted local test database lacked the physical0021 screen exclusion
+  despite its ledger.0058 repairs it; conflicting legacy rows abort migration
+  without deleting or rewriting records. Only the isolated feature DB was changed.
+- Durable preparation API/queue reconciliation, current authorization before
+  copy and READY, streaming SHA/size checks, conditional CAS publication and
+  read-back checks. UUID leases fence late owners. Explicit retries survive
+  dispatch failure. A30-second progress-idle bound preserves large progressing
+  transfers; a hung renewal cannot retain the claim indefinitely.
+- Private claim-marked staging and bounded inactive-claim cleanup; active,
+  unknown, unsafe and unmarked directories remain protected. Complete CAS
+  copies and normalized references are excluded from automatic orphan cleanup.
+
+Validation after fixes:
+
+| Check | Result |
+| --- | --- |
+| Server build, Node20.20.2 / heap768MiB | PASS |
+| Six focused authorization/ownership/manifest/preparation/HLS unit files |68/68 PASS |
+| Real PostgreSQL/Fastify live-source suite |13/13 PASS |
+| Real PostgreSQL service/DDL/reservation/retention suite |24/24 PASS |
+| Real PostgreSQL/Fastify preparation API suite |8/8 PASS |
+| Real PostgreSQL/Fastify schedule-authoring suite |7/7 PASS |
+| New focused source/test lint and diff checks |PASS; existing any warnings remain in reservation service |
+
+The three latter DB files reran together: **39/39 PASS**. Isolated temporary
+test databases were removed only after their pools closed. The preparation API
+suite replaces JWT decoding and queue dispatch only; authorization, source
+collection and writes use PostgreSQL. The source API also passed actual HTTP
+cookie/CSRF login, CRUD, stale409, forged422, unauthorized401 and tombstone404.
+
+Fresh actual API→pg-boss worker→PostgreSQL→MinIO preparations both reached READY
+(1685ms / 1814ms). Each copied/verified image, native PDF(page2) and final
+processed video: **273399 bytes**, three normalized assets, exact SHA/MIME/size,
+a separate immutable storage ID and released claim. Duplicate requests
+coalesced; a second presentation reused exact CAS bytes. A separate actual
+worker-image FFmpeg check generated internal HLS, used the restricted local-only
+remux helper and decoded its approved MP4 output. That HLS check uses a local
+segment adapter; it is not S3-HLS or player-rendering acceptance.
+
+Runtime is source-mounted developer API/worker on the existing local image, not
+a newly packaged release artifact. PostgreSQL session TimeZone was UTC. The new
+media-image node remained running without OOM/restarts during this checkpoint.
+
+Still required: production live occurrence snapshots/reference guards and
+request/direct publish routes, run/admission/epoch authority, same-player
+coordinator/renderer and fallback lifecycle, complete CMS options, new release
+bundles and integrated browser/Electron faults. Native capture input remains a
+human/tooling gate. Screens lifecycle dry-run and broader impacted regression
+remain at the completed feature packet boundary. No QA-owned status, Actual
+Result, defect or sign-off field was changed.
+
+The final equivalent HLS control-character lint correction reran20/20 focused
+checks and the complete server build. Fresh API/worker processes then reran the
+real three-asset preparation checks. The artifact distinguishes the earlier
+actual FFmpeg helper checksum from the final compiled modules.

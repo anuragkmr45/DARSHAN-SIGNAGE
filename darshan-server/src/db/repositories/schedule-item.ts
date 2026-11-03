@@ -14,6 +14,8 @@ export class ScheduleItemRepository {
   async create(data: {
     schedule_id: string;
     presentation_id: string;
+    source_kind?: 'PRESENTATION' | 'LIVE';
+    live_session_id?: string | null;
     start_at: Date;
     end_at: Date;
     priority?: number;

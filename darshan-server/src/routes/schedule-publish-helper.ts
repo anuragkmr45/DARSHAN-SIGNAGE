@@ -317,6 +317,13 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
   if (scheduleItems.length === 0) {
     throw AppError.badRequest('Cannot publish a schedule without schedule items');
   }
+  // A live item must never silently become an ordinary fallback-only publish.
+  // The live scheduling transaction will supply its frozen approval before the
+  // full live publication path is enabled.
+  if (scheduleItems.some(item => item.source_kind === 'LIVE')) {
+    throw new AppError({ statusCode: 409, code: 'LIVE_APPROVAL_REQUIRED',
+      message: 'Live publication requires a verified fallback and frozen live approval.' });
+  }
   const presMap = await resolvePresentations(scheduleItems.map((i: any) => i.presentation_id), db);
 
   const missingPresentationIds = Array.from(
