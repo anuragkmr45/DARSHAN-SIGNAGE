@@ -24,7 +24,13 @@ describe('bounded presenter LiveKit adapter', () => {
     await connection.publish(grant, { display: stream([video, captured]), microphone: stream([microphone]) }, () => true);
     expect(room.options).toMatchObject({ stopLocalTrackOnUnpublish: false, reconnectPolicy: { nextRetryDelayInMs: expect.any(Function) } });
     expect(room.options.reconnectPolicy.nextRetryDelayInMs({ retryCount: 1 })).toBeNull();
-    expect(room.connect).toHaveBeenCalledWith(grant.signaling.url, grant.signaling.ticket, { autoSubscribe: false, maxRetries: 0, rtcConfig: { iceServers: [] } });
+    expect(room.connect).toHaveBeenCalledWith(grant.signaling.url, grant.signaling.ticket, {
+      autoSubscribe: false,
+      maxRetries: 0,
+      websocketTimeout: 3000,
+      peerConnectionTimeout: 3000,
+      rtcConfig: { iceServers: [] },
+    });
     expect(room.localParticipant.publishTrack.mock.calls.map(call => call[1].source)).toEqual(['screen_share', 'screen_share_audio', 'microphone']);
     expect(sdk.wrappers.every(wrapper => wrapper.provided === true)).toBe(true); expect(events.published).toHaveBeenCalledOnce();
     const publication = { setSubscribed: vi.fn() }, remote = { detach: vi.fn() }; room.events.get('trackPublished')(publication); room.events.get('trackSubscribed')(remote, publication);

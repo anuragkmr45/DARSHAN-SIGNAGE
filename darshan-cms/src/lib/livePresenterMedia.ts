@@ -2,6 +2,7 @@ import { LocalAudioTrack, LocalVideoTrack, LogLevel, Room, RoomEvent, Track, set
 import type { LiveAdmissionGrant } from '@/api/liveRuntimeTypes';
 
 setLogLevel(LogLevel.silent); // SDK diagnostics can contain transient signaling credentials.
+const PRESENTER_CONNECTION_STAGE_TIMEOUT_MS = 3000;
 export interface PresenterCapture { display: MediaStream; microphone?: MediaStream }
 export interface PresenterConnection {
   publish(grant: LiveAdmissionGrant, capture: PresenterCapture, authorized: () => boolean): Promise<void>;
@@ -34,7 +35,16 @@ export const browserPresenterMedia: PresenterMedia = {
       publish: async (grant, capture, authorized) => {
         if (closed || !grant.signaling || !authorized()) throw new Error('PRESENTER_CONNECTION_CANCELLED');
         const signaling = grant.signaling;
-        await room.connect(signaling.url, signaling.ticket, { autoSubscribe: false, maxRetries: 0, rtcConfig: { iceServers: [] } });
+        // The controller owns retry and obtains a new single-use ticket for every
+        // attempt. Keep both SDK stages below the ten-second authority lease so a
+        // stalled stage cannot consume the whole thirty-second recovery window.
+        await room.connect(signaling.url, signaling.ticket, {
+          autoSubscribe: false,
+          maxRetries: 0,
+          websocketTimeout: PRESENTER_CONNECTION_STAGE_TIMEOUT_MS,
+          peerConnectionTimeout: PRESENTER_CONNECTION_STAGE_TIMEOUT_MS,
+          rtcConfig: { iceServers: [] },
+        });
         const current = () => !closed && authorized();
         if (!current()) { await close(); return; }
         events.connected();
