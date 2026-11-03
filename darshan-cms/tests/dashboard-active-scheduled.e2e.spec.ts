@@ -321,6 +321,22 @@ const installApiMocks = async (page: Page, overrides?: { emptyTimeline?: boolean
 };
 
 test.describe("Dashboard active scheduled modal", () => {
+  test("keeps the fleet summary and publishing action usable at desktop, tablet and phone widths", async ({ page }, testInfo) => {
+    await installApiMocks(page);
+    await login(page);
+    await expect(page.getByText("Login successful", { exact: true })).toBeHidden({ timeout: 10_000 });
+
+    for (const width of [1440, 820, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /New Request/i })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Fleet summary" }).getByRole("button")).toHaveCount(4);
+      const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+      expect(horizontalOverflow, `dashboard horizontal overflow at ${width}px`).toBe(false);
+      await page.screenshot({ path: testInfo.outputPath(`dashboard-${width}.png`), fullPage: true });
+    }
+  });
+
   test("explains explicit group targets and untaken-down publishes in the schedule report", async ({ page }) => {
     await installApiMocks(page);
     await login(page);

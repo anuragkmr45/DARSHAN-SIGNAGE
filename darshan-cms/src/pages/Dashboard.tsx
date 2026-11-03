@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, Calendar, Eye, HardDrive, Monitor, Plus, Server, Trash2 } from "lucide-react";
-import { KPICard } from "@/components/dashboard/KPICard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -518,83 +517,44 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-2xl border border-primary/10 bg-primary text-primary-foreground shadow-lg">
-        <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-          <div className="max-w-3xl">
-            <Badge className="mb-4 border-white/20 bg-white/10 text-white hover:bg-white/20">
-              Live operations
-            </Badge>
-            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-              DARSHAN command center
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/75">
-              Monitor player health, scheduled playback, media readiness, and operational notices from the current backend data.
-            </p>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row lg:justify-end">
-            <Button
-              variant="outline"
-              className="border-white/25 bg-white/10 text-white hover:bg-white/20 hover:text-white"
-              onClick={() => setScheduleReportOpen(true)}
-            >
-              <Calendar className="mr-2 h-4 w-4" />
-              Schedule Report
-            </Button>
-            <Button
-              className="bg-accent text-accent-foreground hover:bg-accent/90"
-              onClick={() => navigate("/schedule/new")}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              New Request
-            </Button>
-          </div>
+      <header className="flex flex-col gap-4 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{commandPosture}</p>
         </div>
-        <div className="grid border-t border-white/10 bg-white/[0.04] sm:grid-cols-2 xl:grid-cols-5">
-          <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
-            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Posture</p>
-            <p className="mt-1 text-sm font-semibold">{commandPosture}</p>
-          </div>
-          <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
-            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Screens</p>
-            <p className="mt-1 text-sm font-semibold">
-              {isMetricsLoading ? "Loading…" : isMetricsError ? "Unavailable" : `${onlineScreens} online / ${totalScreens} total`}
-            </p>
-          </div>
-          <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
-            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Long offline</p>
-            <p className="mt-1 text-sm font-semibold">{isOfflineLoading ? "Loading…" : isOfflineError ? "Unavailable" : `${longOfflineCount} screens`}</p>
-          </div>
-          <div className="border-b border-white/10 p-4 sm:border-r xl:border-b-0">
-            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Active schedule assignments</p>
-            <p className="mt-1 text-sm font-semibold">{isMetricsLoading ? "Loading…" : isMetricsError || !hasMetricNumber(activeScheduledScreens) ? "Unavailable" : `${activeScheduledScreens} screens now`}</p>
-            {!isMetricsLoading && !isMetricsError && hasMetricNumber(activeScheduledScreens) ? (
-              <p className="mt-1 text-xs text-white/70">
-                {appliedScheduledScreens ?? 0} applied · {reportingPlaybackScreens ?? 0} reporting playback · {proofObservedScreens ?? 0} with proof
-              </p>
-            ) : null}
-          </div>
-          <div className="p-4">
-            <p className="text-xs uppercase tracking-[0.14em] text-white/60">Last publish</p>
-            <p className="mt-1 text-sm font-semibold">{isSystemHealthLoading ? "Loading…" : isSystemHealthError ? "Unavailable" : hasPublishData ? formatRelativeTime(lastPublishAt) : "No publish yet"}</p>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setScheduleReportOpen(true)}>
+            <Calendar className="mr-2 h-4 w-4" /> Schedule Report
+          </Button>
+          <Button onClick={() => navigate("/schedule/new")}>
+            <Plus className="mr-2 h-4 w-4" /> New Request
+          </Button>
         </div>
+      </header>
+
+      <section aria-label="Fleet summary" className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border xl:grid-cols-4">
+        {kpiData.map((kpi) => (
+          <button
+            key={kpi.id}
+            type="button"
+            className="min-w-0 bg-card p-3 text-left transition-colors hover:bg-muted/50 focus-visible:z-10 sm:p-4"
+            onClick={() => setSelectedKPI(kpi.id)}
+          >
+            <span className="flex items-center gap-2 text-sm text-muted-foreground"><kpi.icon className="h-4 w-4" />{kpi.title}</span>
+            <span className="mt-2 block text-2xl font-semibold tabular-nums">{kpi.value}</span>
+            <span className="mt-1 block text-xs text-muted-foreground">{kpi.subtitle}</span>
+          </button>
+        ))}
       </section>
 
-      {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {kpiData.map((kpi) => (
-          <KPICard
-            key={kpi.id}
-            title={kpi.title}
-            value={kpi.value}
-            subtitle={kpi.subtitle}
-            icon={kpi.icon}
-            trend={kpi.trend}
-            variant={kpi.variant}
-            onClick={() => setSelectedKPI(kpi.id)}
-          />
-        ))}
-      </div>
+      <p className="text-xs text-muted-foreground">
+        {isOfflineLoading ? "Checking long offline screens" : isOfflineError ? "Long offline count unavailable" : `${longOfflineCount} long offline`}
+        {" · "}Last publish: {isSystemHealthLoading ? "Loading…" : isSystemHealthError ? "Unavailable" : hasPublishData ? formatRelativeTime(lastPublishAt) : "No publish yet"}
+        {" · "}Active assignments: {isMetricsLoading ? "Loading…" : isMetricsError || !hasMetricNumber(activeScheduledScreens) ? "Unavailable" : activeScheduledScreens}
+        {!isMetricsLoading && !isMetricsError && hasMetricNumber(activeScheduledScreens)
+          ? ` · ${appliedScheduledScreens ?? 0} applied · ${reportingPlaybackScreens ?? 0} reporting playback · ${proofObservedScreens ?? 0} with proof`
+          : null}
+      </p>
 
       {/* Alerts */}
       {(alerts.length > 0 || isOfflineLoading || isStorageLoading) && (
@@ -634,8 +594,8 @@ export default function Dashboard() {
             <CardDescription>Current-state fleet and alert posture from backend summaries</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg border p-3">
+            <div className="divide-y divide-border">
+              <div className="py-3 first:pt-0">
                 <p className="text-xs text-muted-foreground">Fleet totals</p>
                 <p className="mt-1 text-lg font-semibold">
                   {isObservabilityLoading
@@ -658,7 +618,7 @@ export default function Dashboard() {
                         : "Fleet data unavailable"}
                 </p>
               </div>
-              <div className="rounded-lg border p-3">
+              <div className="py-3">
                 <p className="text-xs text-muted-foreground">Direct player scrapes (optional)</p>
                 <p className="mt-1 text-lg font-semibold">
                   {isObservabilityLoading
@@ -679,7 +639,7 @@ export default function Dashboard() {
                       : "Prometheus player scrape state is unavailable"}
                 </p>
               </div>
-              <div className="rounded-lg border p-3">
+              <div className="py-3">
                 <p className="text-xs text-muted-foreground">Alert state</p>
                 <div className="mt-1 flex items-center gap-2">
                   <Badge variant="outline" className={observabilityOverview?.alerts ? getMachineStatusTone(observabilityOverview.alerts.status) : "border-slate-400 text-slate-700"}>
@@ -688,7 +648,7 @@ export default function Dashboard() {
                   <span className="text-sm font-medium">{observabilityAvailable ? `${observabilityOverview?.alerts?.firing ?? 0} firing` : "Alert count unavailable"}</span>
                 </div>
               </div>
-              <div className="rounded-lg border p-3">
+              <div className="py-3 last:pb-0">
                 <p className="text-xs text-muted-foreground">Historical drill-down</p>
                 <div className="mt-2 flex gap-2">
                   {grafanaAvailable && observabilityGrafanaLinks?.backend_service ? (
@@ -797,19 +757,18 @@ export default function Dashboard() {
             <Server className="h-5 w-5" />
             Machine Health
           </CardTitle>
-          <CardDescription>VM summaries are native CMS cards. Use Grafana for history and full drill-down.</CardDescription>
+          <CardDescription>Current machine capacity and services</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-3">
             {machineTelemetryUnavailable ? (
               <div className="col-span-full rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                Machine metrics are unavailable because Prometheus is not configured or reachable from the backend.
-                Check the observability stack, backend Prometheus URL, and exporters.
+                Machine health is unavailable. Ask an administrator to check monitoring services.
               </div>
             ) : null}
 
             {!machineTelemetryUnavailable && machineSummaries.map((machine) => (
-              <Card key={machine.id} className="p-4">
+              <div key={machine.id} className="border-t border-border py-4 first:border-t-0 first:pt-0">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold">{machine.name}</p>
@@ -857,12 +816,12 @@ export default function Dashboard() {
                     </Button>
                   </div>
                 ) : null}
-              </Card>
+              </div>
             ))}
 
             {!isObservabilityLoading && !machineTelemetryUnavailable && machineSummaries.length === 0 ? (
               <div className="col-span-full rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                Machine summaries are unavailable. Check backend observability configuration.
+                Machine health is unavailable. Ask an administrator to check monitoring services.
               </div>
             ) : null}
           </div>

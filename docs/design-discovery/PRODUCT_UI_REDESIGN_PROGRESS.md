@@ -18,3 +18,9 @@ Developer verification on this branch: CMS production build and bundle budget pa
 ## Pending
 
 The foundation needs rendered review across themes, accents and widths. Dashboard, Screens, content, schedules, live, chat, administration, player surfaces, full coverage register, real-application regression, final artifacts, and human release gates remain open. No existing screenshot or mocked browser result is being counted as full workflow sign-off.
+
+## Dashboard prototype in progress
+
+Task: identify fleet problems and continue to content publishing. Priority: current posture, active alerts, then fleet summary and drill-down. The four summary actions retain their existing detail dialogs. The decorative hero and duplicate figures are replaced by a compact toolbar and one summary strip. Required alerts stay in the main page flow; deeper observability and machine details remain below. The existing server APIs still supply all values, including the separate assignment, applied, player-reporting, and proof counts.
+
+The dashboard was rendered with fixture data at 1440, 820, and 390 CSS pixels. The two-column phone summary is legible and the page has no horizontal overflow. The observability panel now uses separated rows rather than four nested cards, and machine rows avoid an additional card wrapper. The generated screenshots are local Playwright outputs, not real-service evidence. A dashboard visual-approval checkpoint and the real-service journey remain pending.
