@@ -21,8 +21,9 @@ type ApiKeyRecord = {
   name: string;
   scopes?: string[];
   secret?: string;
+  token_prefix?: string;
+  is_revoked?: boolean;
   created_at?: string;
-  revoked_at?: string | null;
 };
 
 type WebhookRecord = {
@@ -215,8 +216,9 @@ const installCommonMocks = async (
         name: payload.name,
         scopes: payload.scopes ?? [],
         secret: "sk_live_new_key",
+        token_prefix: "sk_live_new_",
+        is_revoked: false,
         created_at: "2026-04-15T10:00:00.000Z",
-        revoked_at: null,
       };
       state.apiKeys.unshift(created);
       return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(created) });
@@ -236,7 +238,7 @@ const installCommonMocks = async (
     if (/^\/api\/v1\/api-keys\/[^/]+\/revoke$/.test(pathname) && method === "POST") {
       const id = pathname.split("/")[4]!;
       state.apiKeys = state.apiKeys.map((item) =>
-        item.id === id ? { ...item, revoked_at: "2026-04-15T10:05:00.000Z" } : item,
+        item.id === id ? { ...item, is_revoked: true } : item,
       );
       const revoked = state.apiKeys.find((item) => item.id === id);
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(revoked) });
@@ -467,9 +469,9 @@ test.describe("admin stabilization surfaces", () => {
           id: "key-1",
           name: "Primary key",
           scopes: ["read", "write"],
-          secret: "sk_live_primary",
+          token_prefix: "sk_live_prim",
+          is_revoked: false,
           created_at: "2026-04-15T09:00:00.000Z",
-          revoked_at: null,
         },
       ],
       webhooks: [
@@ -507,7 +509,8 @@ test.describe("admin stabilization surfaces", () => {
     await page.locator("#key-name").fill("Rotations key");
     await page.getByLabel("Read").click();
     await page.getByRole("button", { name: /generate key/i }).click();
-    await expect(page.getByText("Rotations key")).toBeVisible();
+    await expect(page.getByText("Rotations key", { exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Save this API key secret" })).toBeVisible();
 
     await page.goto("/webhooks");
     await expect(page.getByText("Publishing Alerts")).toBeVisible();

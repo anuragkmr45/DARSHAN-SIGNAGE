@@ -23,6 +23,7 @@ describe("admin ops domain clients", () => {
 
     const { apiKeysApi } = await import("@/api/domains/apiKeys");
     await expect(apiKeysApi.list()).resolves.toEqual([{ id: "key-1", name: "Primary key" }]);
+    expect(requestMock).toHaveBeenCalledWith({ path: "/api-keys", method: "GET" });
   });
 
   it("unwraps webhook list responses into an array", async () => {

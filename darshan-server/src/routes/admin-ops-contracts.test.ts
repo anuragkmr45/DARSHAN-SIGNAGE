@@ -64,6 +64,7 @@ describe('Admin ops route contracts', () => {
     createdApiKeyIds.push(created.id);
     expect(created.secret).toBeTruthy();
     expect(created.is_revoked).toBe(false);
+    expect(created).not.toHaveProperty('secret_hash');
 
     const listResponse = await server.inject({
       method: 'GET',
@@ -82,6 +83,8 @@ describe('Admin ops route contracts', () => {
     };
     expect(Array.isArray(listed.items)).toBe(true);
     expect(listed.items.some((item) => item.id === created.id)).toBe(true);
+    expect(listed.items.find((item) => item.id === created.id)).not.toHaveProperty('secret_hash');
+    expect(listed.items.find((item) => item.id === created.id)).not.toHaveProperty('secret');
     expect(listed.total).toBeGreaterThan(0);
     expect(listed.page).toBe(1);
     expect(listed.limit).toBe(100);
@@ -104,6 +107,7 @@ describe('Admin ops route contracts', () => {
     expect(rotated.secret).toBeTruthy();
     expect(rotated.secret).not.toBe(created.secret);
     expect(rotated.is_revoked).toBe(false);
+    expect(rotated).not.toHaveProperty('secret_hash');
 
     const revokeResponse = await server.inject({
       method: 'POST',
@@ -117,6 +121,7 @@ describe('Admin ops route contracts', () => {
     const revoked = JSON.parse(revokeResponse.body) as { id: string; is_revoked: boolean };
     expect(revoked.id).toBe(created.id);
     expect(revoked.is_revoked).toBe(true);
+    expect(revoked).not.toHaveProperty('secret_hash');
   });
 
   it('does not expose SSO management routes in the air-gapped release', async () => {

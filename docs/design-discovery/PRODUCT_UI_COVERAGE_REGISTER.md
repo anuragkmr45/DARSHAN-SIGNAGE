@@ -32,7 +32,7 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | R22 | `/media` — MediaLibrary | `read Media` | Media API; upload, preview, delete and restore when authorized. | 390/820/1440 fixture browser and dark phone; 6 new UI cases plus 9 affected regressions; real upload/restore service pending. |
 | R23 | `/reports` — Reports | `read Report` or `read AuditLog` | Report, audit, emergency, notification and PoP APIs; filter, inspect and export evidence. | Redesign and real-service evidence pending. |
 | R24 | `/settings` — Settings | `read OrgSettings` | Settings hooks and media API; update site categories according to action permissions. | Redesign and real-service evidence pending. |
-| R25 | `/api-keys` — ApiKeys | `read ApiKey` | API key API; create, rotate/revoke and inspect permitted keys. | Redesign and real-service evidence pending. |
+| R25 | `/api-keys` — ApiKeys | `read ApiKey` | API key API; list stored prefixes/status, create, rotate or revoke under effective action grants; one-time secret only on create/rotate. | 390/820/1440 fixture browser and dark phone; 4 new UI cases, 3 admin regressions and focused server route suite; real-service and key-auth decision pending. |
 | R26 | `/webhooks` — Webhooks | `read Webhook` | Webhook API; configure and explicitly test permitted endpoints. | Redesign and real-service evidence pending. |
 | R27 | `/proof-of-play` — ProofOfPlay | `read ProofOfPlay` **or** `read Report` in current route guard | PoP API; inspect recorded render-start reports. | Gate semantics and real evidence review pending. |
 | R28 | authenticated `*` — NotFound | Signed-in user | No data; explain unknown path and provide navigation. | Redesign and browser review pending. |
@@ -118,6 +118,19 @@ The route requires `read Layout`. Creation requires current effective `create La
 | L06 | Refresh, loading, failed, retry, empty, stale list | No success toast before refresh completes; initial failure has Retry, no results distinguish empty library from filters, stale loaded results remain labeled if refresh fails. | Initial failure/retry and empty fixture browser; stale refresh and network loss pending. |
 | L07 | Pagination | Server total and nine records per page; out-of-range page correction waits for current query data. | Second-page and filter-reset fixture browser; real concurrent edits pending. |
 
+## API Keys controls and states
+
+The page is gated by `read ApiKey`; creation, rotation and revocation use their respective effective action grants. The server stores a hash and token prefix. Only create and rotate return a raw secret, and the CMS keeps it in component memory until its one-time dialog closes. The server currently has no inbound `X-API-Key` authentication path, so these stored records do not yet grant API access.
+
+| ID | Control or state | Source and expected result | Evidence and open review |
+| --- | --- | --- | --- |
+| K01 | List and Refresh | REST list returns metadata and prefix, never the stored hash or raw secret; refresh reports pending/stale failure. | Server contract test and fixture browser; real 100+ key pagination pending. |
+| K02 | Create API Key | Effective `create ApiKey`; name plus at least one scope. No fixed `ADMIN` role is attached. | Fixture browser one-time secret case and server create test; actual API-key access policy pending. |
+| K03 | One-time secret and Copy | Raw secret only from create/rotate response, in memory until dialog closes; copy handles clipboard rejection. | Fixture browser close/reload/session-storage case; clipboard denial and physical operator review pending. |
+| K04 | Rotate | Effective `update ApiKey`, active key only, explicit consequence confirmation; no automatic mutation retry. | Fixture browser and server rotation response; interrupted response/consumer migration pending. |
+| K05 | Revoke | Effective `delete ApiKey`, non-revoked key including expired; explicit confirmation, visible failure and manual retry. | Failure/retry fixture browser and server revoke test; real consumer cutoff pending. |
+| K06 | Read-only, loading, failure, empty and responsive list | Denied actions absent; initial failed request has Retry, no keys has a true empty state; no horizontal overflow at 390/820/1440. | Four new UI cases and dark phone capture; screen reader, zoom, five accents, mobile devices pending. |
+
 ## Control ledger: current status
 
 The next pass expands each route into control-level rows. The following rows identify prototype workflows already traced; they are **grouped summaries**, not an exhaustive control list. They will be replaced with individual control entries before completion.
@@ -129,6 +142,7 @@ The next pass expands each route into control-level rows. The following rows ide
 | Schedule review | Layout/media/target/timing steps, reservation recheck, review and submit. | Presentation/Schedule/Reservation APIs; server validates conflict and publication. | Scheduling/emergency browser 2/2; 390/820/1440 review captures. | Queue, approval, publish/take-down, all failure states, real service. |
 | Layout editor | Add/Draw/Select, move/resize, numeric inspector, layers, undo/redo, save. | Layout API and normalized geometry. | Fixture-backed editor browser and 390/1440 captures. | Every tool/field/state, real save/reopen, player geometry. |
 | Layouts list | Search, ratio, page, preview, create, edit, exact-name delete, refresh and failure/retry. | Layout REST list/delete, current create grant, server record flags. | Five new fixture cases, editor and ownership regressions, 390/820/1440 plus dark phone captures. | Real-service blockers and save/reopen, long text, zoom, accessibility and network loss. |
+| API Keys | List, create, one-time secret, copy, rotate, revoke, refresh and failure/retry. | CMS bearer-authenticated REST, effective action grants, prefix/status and one-time secret; no inbound API-key auth exists yet. | Four fixture UI cases, three admin browser regressions, focused database route suite; 390/820/1440 plus dark phone. | Decide key-auth release contract, real consumer cutoff, 100+ list, clipboard denial, accessibility. |
 | Conversations | List, conversation, thread, drafts, message More and navigation. | Chat/media APIs and REST-authoritative state. | Fixture-backed chat browser; desktop and phone captures. | Invitations, membership, attachments, moderation and concurrent actors. |
 | Player pairing/recovery | Hostname, OTP, expiry, waiting/provisioning, diagnostics and lock/recovery states. | Main-process identity and server expiry authority. | Built renderer prototype at full, compact, minimal and short sizes. | Packaged player lifecycle and remaining owned surfaces. |
 

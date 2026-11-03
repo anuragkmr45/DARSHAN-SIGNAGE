@@ -78,8 +78,10 @@ export interface ApiKey {
   scopes?: string[];
   expires_at?: string | null;
   secret?: string;
+  token_prefix?: string;
+  is_revoked?: boolean;
+  last_used_at?: string | null;
   created_at?: string;
-  revoked_at?: string | null;
 }
 
 export interface LayoutSlot {

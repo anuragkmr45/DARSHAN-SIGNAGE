@@ -34,7 +34,7 @@ The CMS contract is defined by `darshan-cms/src/App.tsx`, API domain modules und
 | `/media` | `MediaLibrary` | module `media` | media domain, presign/complete flow | none | Upload/manage media. |
 | `/reports` | `Reports` | module `reports` | reports, metrics, observability, proof-of-play | none or dashboard-specific | Reports and operational summaries. |
 | `/settings` | `Settings` | module `settings` | settings, default media, backups/logs, roles/permissions as used | none | Site settings and default media assignment. |
-| `/api-keys` | `ApiKeys` | permission `read ApiKey` | api keys domain | none | Integration credential management; secrets must not be logged in docs/screenshots. |
+| `/api-keys` | `ApiKeys` | permission `read ApiKey`; create/update/delete actions use their effective grants | api keys domain | none | Stored key management. Create/rotate return a one-time secret; the list shows only token prefix, status and metadata. Do not log or capture secrets. Backend request authentication by these keys is not implemented in this release. |
 | `/webhooks` | `Webhooks` | permission `read Webhook` | webhooks domain | none | Webhook configuration/testing. |
 | `/sso-config` | `SsoConfig` | permission `read SsoConfig` | SSO config domain | none | SSO configuration. |
 | `/proof-of-play` | `ProofOfPlay` | permissions `read ProofOfPlay` and `read Report` | proof-of-play domain | none | PoP list/export UI. |

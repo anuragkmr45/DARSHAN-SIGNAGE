@@ -1,35 +1,20 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Key, Copy, Trash2, Plus, Eye, EyeOff, RefreshCw } from "lucide-react";
+import { Copy, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { EmptyState } from "@/components/common/EmptyState";
+import { LoadingIndicator } from "@/components/common/LoadingIndicator";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthorization } from "@/hooks/useAuthorization";
 import { apiKeysApi } from "@/api/domains/apiKeys";
 import { ApiError } from "@/api/apiClient";
-import type { ApiKey as ApiKeyModel } from "@/api/types";
-import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { setApiKey } from "@/store/authSlice";
+import type { ApiKey } from "@/api/types";
 
 const availableScopes = [
   { id: "read", label: "Read" },
@@ -37,319 +22,162 @@ const availableScopes = [
   { id: "admin", label: "Admin" },
 ];
 
-const maskKey = (key?: string) => {
-  if (!key) return "********";
-  if (key.length <= 8) return `${key.slice(0, 2)}****`;
-  return `${key.slice(0, 6)}******${key.slice(-4)}`;
-};
+function dateLabel(value?: string | null): string {
+  if (!value) return "Never";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
+}
+
+function keyStatus(key: ApiKey): "Revoked" | "Expired" | "Active" {
+  if (key.is_revoked) return "Revoked";
+  if (key.expires_at && new Date(key.expires_at).getTime() <= Date.now()) return "Expired";
+  return "Active";
+}
 
 const ApiKeys = () => {
   const { toast } = useToast();
-  const dispatch = useAppDispatch();
+  const { can } = useAuthorization();
   const queryClient = useQueryClient();
-  const authToken = useAppSelector((state) => state.auth.token);
-  const user = useAppSelector((state) => state.auth.user);
-  const isAuthenticated = Boolean(authToken || user);
-
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const canCreate = can("create", "ApiKey");
+  const canRotate = can("update", "ApiKey");
+  const canRevoke = can("delete", "ApiKey");
+  const [createOpen, setCreateOpen] = useState(false);
   const [keyName, setKeyName] = useState("");
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
-  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
-  const [secrets, setSecrets] = useState<Record<string, string>>({});
+  const [oneTimeSecret, setOneTimeSecret] = useState<{ name: string; value: string } | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<ApiKey | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
 
-  const { data: apiKeys, isLoading, isFetching } = useQuery({
+  const { data: keys, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ["api-keys"],
     queryFn: apiKeysApi.list,
-    enabled: isAuthenticated,
     staleTime: 30_000,
   });
-
-  const handleApiError = (error: unknown, title = "Request failed") => {
-    const description =
-      error instanceof ApiError ? error.message : "Unable to complete the request.";
-    toast({ title, description, variant: "destructive" });
-  };
-
-  const createMutation = useMutation({
-    mutationFn: apiKeysApi.create,
-    onSuccess: (created) => {
-      setKeyName("");
-      setSelectedScopes([]);
-      setIsCreateDialogOpen(false);
-      if (created.secret) {
-        setSecrets((prev) => ({ ...prev, [created.id]: created.secret! }));
-        dispatch(setApiKey(created.secret));
-      }
-      queryClient.invalidateQueries({ queryKey: ["api-keys"] });
-      toast({
-        title: "API key created",
-        description: "Copy and store the secret securely; it is shown once.",
-      });
-    },
-    onError: (error) => handleApiError(error, "Could not create API key"),
+  const showError = (failure: unknown, title: string) => toast({
+    title,
+    description: failure instanceof ApiError ? failure.message : "Please try again.",
+    variant: "destructive",
   });
-
-  const rotateMutation = useMutation({
-    mutationFn: apiKeysApi.rotate,
-    onSuccess: (rotated) => {
-      if (rotated.secret) {
-        setSecrets((prev) => ({ ...prev, [rotated.id]: rotated.secret! }));
-        dispatch(setApiKey(rotated.secret));
-      }
-      queryClient.invalidateQueries({ queryKey: ["api-keys"] });
-      toast({
-        title: "API key rotated",
-        description: "New secret generated. Update any consumers.",
-      });
-    },
-    onError: (error) => handleApiError(error, "Could not rotate key"),
-  });
-
-  const revokeMutation = useMutation({
-    mutationFn: apiKeysApi.revoke,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["api-keys"] });
-      toast({ title: "Key revoked", description: "The key is inactive now." });
-    },
-    onError: (error) => handleApiError(error, "Could not revoke key"),
-  });
-
-  const handleCreateKey = () => {
-    if (!keyName.trim() || selectedScopes.length === 0) {
-      toast({
-        title: "Validation error",
-        description: "Provide a name and select at least one scope.",
-        variant: "destructive",
-      });
-      return;
-    }
-    createMutation.mutate({ name: keyName, scopes: selectedScopes, roles: ["ADMIN"] });
-  };
-
-  const toggleKeyVisibility = (id: string) => {
-    setVisibleKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
+  const revealNewSecret = (result: ApiKey, action: "created" | "rotated") => {
+    void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+    if (result.secret) setOneTimeSecret({ name: result.name, value: result.secret });
+    else toast({
+      title: `Key ${action}, but its secret was not returned`,
+      description: "Do not use this key. Rotate it to generate a new secret.",
+      variant: "destructive",
     });
   };
-
-  const handleCopyKey = async (key?: string) => {
-    if (!key) return;
-    await navigator.clipboard.writeText(key);
-    toast({ title: "Copied", description: "API key copied to clipboard." });
+  const createMutation = useMutation({
+    retry: false,
+    mutationFn: apiKeysApi.create,
+    onSuccess: (result) => {
+      setCreateOpen(false);
+      setKeyName("");
+      setSelectedScopes([]);
+      revealNewSecret(result, "created");
+    },
+    onError: (failure) => showError(failure, "Could not create API key"),
+  });
+  const rotateMutation = useMutation({
+    retry: false,
+    mutationFn: apiKeysApi.rotate,
+    onSuccess: (result) => {
+      setRotateTarget(null);
+      revealNewSecret(result, "rotated");
+    },
+    onError: (failure) => showError(failure, "Could not rotate API key"),
+  });
+  const revokeMutation = useMutation({
+    retry: false,
+    mutationFn: apiKeysApi.revoke,
+    onSuccess: () => {
+      setRevokeTarget(null);
+      void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+      toast({ title: "API key revoked", description: "Requests using this key will no longer be accepted." });
+    },
+    onError: (failure) => showError(failure, "Could not revoke API key"),
+  });
+  const createKey = () => {
+    const name = keyName.trim();
+    if (!name || selectedScopes.length === 0) {
+      toast({ title: "Name and access required", description: "Name the key and select at least one scope.", variant: "destructive" });
+      return;
+    }
+    createMutation.mutate({ name, scopes: selectedScopes });
+  };
+  const copySecret = async () => {
+    if (!oneTimeSecret) return;
+    try {
+      await navigator.clipboard.writeText(oneTimeSecret.value);
+      toast({ title: "Secret copied", description: "Store it securely before closing this window." });
+    } catch {
+      toast({ title: "Could not copy secret", description: "Select and copy it manually before closing.", variant: "destructive" });
+    }
   };
 
-  const resolvedKeys: ApiKeyModel[] = useMemo(
-    () => apiKeys ?? [],
-    [apiKeys],
-  );
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-3xl font-bold tracking-tight">API Key Management</h1>
-          <p className="text-muted-foreground">
-            Generate and manage API keys for programmatic access
-          </p>
-        </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button disabled={!isAuthenticated}>
-              <Plus className="mr-2 h-4 w-4" />
-              Create API Key
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Create New API Key</DialogTitle>
-              <DialogDescription>
-                Generate a new API key with specific permissions
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="key-name">Key Name</Label>
-                <Input
-                  id="key-name"
-                  placeholder="Production API Key"
-                  value={keyName}
-                  onChange={(e) => setKeyName(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <Label>Permissions & Scopes</Label>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {availableScopes.map((scope) => (
-                    <div key={scope.id} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={scope.id}
-                        checked={selectedScopes.includes(scope.id)}
-                        onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedScopes((prev) => [...prev, scope.id]);
-                          } else {
-                            setSelectedScopes((prev) => prev.filter((s) => s !== scope.id));
-                          }
-                        }}
-                      />
-                      <Label htmlFor={scope.id} className="text-sm font-normal cursor-pointer">
-                        {scope.label}
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateKey} disabled={createMutation.isPending}>
-                {createMutation.isPending ? "Creating..." : "Generate Key"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="h-5 w-5" />
-            Active API Keys
-          </CardTitle>
-          <CardDescription>
-            {isAuthenticated
-              ? "Manage your API keys and their permissions"
-              : "Sign in to view and manage API keys."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table className="min-w-[900px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>API Key</TableHead>
-                <TableHead>Scopes</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Last Used</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading || isFetching ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
-                    Loading keys...
-                  </TableCell>
-                </TableRow>
-              ) : resolvedKeys.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
-                    No keys yet. Create one to get started.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                resolvedKeys.map((apiKey) => {
-                  const status = apiKey.revoked_at ? "revoked" : "active";
-                  const secret = secrets[apiKey.id];
-                  const displayKey = secret ?? apiKey.secret ?? apiKey.id;
-
-                  return (
-                    <TableRow key={apiKey.id}>
-                      <TableCell className="font-medium">{apiKey.name}</TableCell>
-                      <TableCell>
-                        <div className="flex min-w-0 items-center gap-2">
-                          <code className="max-w-[14rem] truncate rounded bg-muted px-2 py-1 text-xs sm:max-w-none">
-                            {visibleKeys.has(apiKey.id) ? displayKey : maskKey(displayKey)}
-                          </code>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => toggleKeyVisibility(apiKey.id)}
-                          >
-                            {visibleKeys.has(apiKey.id) ? (
-                              <EyeOff className="h-3 w-3" />
-                            ) : (
-                              <Eye className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {(apiKey.scopes ?? []).slice(0, 2).map((scope) => (
-                            <Badge key={scope} variant="secondary" className="text-xs">
-                              {scope}
-                            </Badge>
-                          ))}
-                          {(apiKey.scopes?.length ?? 0) > 2 && (
-                            <Badge variant="secondary" className="text-xs">
-                              +{(apiKey.scopes?.length ?? 0) - 2} more
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {apiKey.created_at ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {apiKey.last_used_at ?? "Never"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={status === "active" ? "default" : "destructive"}>
-                          {status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleCopyKey(displayKey)}
-                            disabled={status === "revoked"}
-                          >
-                            <Copy className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => rotateMutation.mutate(apiKey.id)}
-                            disabled={status === "revoked"}
-                          >
-                            <RefreshCw className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => revokeMutation.mutate(apiKey.id)}
-                            disabled={status === "revoked"}
-                          >
-                            <Trash2 className="h-3 w-3 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+  return <div className="mx-auto w-full max-w-5xl space-y-5">
+    <header className="flex flex-col gap-3 border-b border-border/70 pb-4 sm:flex-row sm:items-end sm:justify-between">
+      <div><h1 className="text-2xl font-semibold tracking-tight">API Keys</h1><p className="mt-1 text-sm text-muted-foreground">Manage stored API key records.</p></div>
+      {canCreate && <Button onClick={() => setCreateOpen(true)}><Plus aria-hidden="true" className="mr-2 h-4 w-4" />Create API Key</Button>}
+    </header>
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-sm text-muted-foreground">{isLoading ? "Loading keys…" : `${keys?.length ?? 0} keys`}{isFetching && !isLoading ? " · Updating" : ""}</p>
+      <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}><RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" />Refresh</Button>
     </div>
-  );
+    <p className="text-sm text-muted-foreground">Only identifier prefixes are listed. A secret is shown once, when generated.</p>
+    {isLoading ? <LoadingIndicator label="Loading API keys…" /> : isError && !keys ? (
+      <EmptyState title="Unable to load API keys" description={error instanceof Error ? error.message : "Please try again."} actionLabel="Retry" onAction={() => void refetch()} />
+    ) : !keys?.length ? (
+      <EmptyState title="No API keys yet" description="Keys created for approved integrations will appear here." actionLabel={canCreate ? "Create API Key" : undefined} onAction={canCreate ? () => setCreateOpen(true) : undefined} />
+    ) : <div className="divide-y rounded-xl border bg-background">
+      {keys.map((key) => {
+        const status = keyStatus(key);
+        return <section key={key.id} aria-label={key.name} className="space-y-3 p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0"><h2 className="break-words font-semibold">{key.name}</h2><p className="mt-1 text-sm text-muted-foreground">Identifier: {key.token_prefix ?? "Unavailable"}…</p></div>
+            <Badge variant={status === "Active" ? "secondary" : "outline"}>{status}</Badge>
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-muted-foreground">
+            <span>Created {dateLabel(key.created_at)}</span><span>Last used {dateLabel(key.last_used_at)}</span>
+            {key.expires_at && <span>Expires {dateLabel(key.expires_at)}</span>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {(key.scopes ?? []).map((scope) => <Badge key={scope} variant="outline">{scope}</Badge>)}
+            {status !== "Revoked" && (canRotate || canRevoke) && <div className="flex flex-wrap gap-2 sm:ml-auto">
+              {canRotate && status === "Active" && <Button variant="outline" size="sm" onClick={() => setRotateTarget(key)}>Rotate</Button>}
+              {canRevoke && <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setRevokeTarget(key)}>Revoke</Button>}
+            </div>}
+          </div>
+        </section>;
+      })}
+    </div>}
+    {isError && keys && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive"><span>Could not refresh keys. Showing the last loaded list.</span><Button variant="outline" size="sm" onClick={() => void refetch()}>Retry</Button></div>}
+
+    <Dialog open={createOpen} onOpenChange={(open) => !createMutation.isPending && setCreateOpen(open)}>
+      <DialogContent className="max-h-[90dvh] max-w-lg overflow-y-auto">
+        <DialogHeader><DialogTitle>Create API Key</DialogTitle><DialogDescription>The secret appears once after creation. Store it before closing.</DialogDescription></DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2"><Label htmlFor="key-name">Key name</Label><Input id="key-name" value={keyName} onChange={(event) => setKeyName(event.target.value)} placeholder="Integration name" autoComplete="off" /></div>
+          <fieldset className="space-y-2"><legend className="text-sm font-medium">Access scopes</legend>
+            {availableScopes.map((scope) => <div key={scope.id} className="flex items-center gap-2">
+              <Checkbox id={`key-scope-${scope.id}`} checked={selectedScopes.includes(scope.id)} onCheckedChange={(checked) => setSelectedScopes((previous) => checked ? [...previous, scope.id] : previous.filter((item) => item !== scope.id))} />
+              <Label htmlFor={`key-scope-${scope.id}`}>{scope.label}</Label>
+            </div>)}
+          </fieldset>
+        </div>
+        <DialogFooter><Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button><Button onClick={createKey} disabled={createMutation.isPending}>{createMutation.isPending ? "Creating…" : "Generate Key"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={!!oneTimeSecret} onOpenChange={(open) => !open && setOneTimeSecret(null)}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Save this API key secret</DialogTitle><DialogDescription>{oneTimeSecret?.name}: this is the only time the secret can be viewed. Closing clears it from the page.</DialogDescription></DialogHeader>
+        <div className="rounded-lg border bg-muted/50 p-3"><code className="block select-all break-all text-sm" aria-label="One-time API key secret">{oneTimeSecret?.value}</code></div>
+        <DialogFooter><Button variant="outline" onClick={() => setOneTimeSecret(null)}>Done</Button><Button onClick={() => void copySecret()}><Copy aria-hidden="true" className="mr-2 h-4 w-4" />Copy secret</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <ConfirmDialog open={!!rotateTarget} title="Rotate API key?" description={`The current secret for ${rotateTarget?.name ?? "this key"} will stop working immediately. Update its consumers with the new secret.`} confirmLabel="Rotate key" onConfirm={() => rotateTarget && rotateMutation.mutate(rotateTarget.id)} onCancel={() => setRotateTarget(null)} isLoading={rotateMutation.isPending} />
+    <ConfirmDialog open={!!revokeTarget} title="Revoke API key?" description={`Requests using ${revokeTarget?.name ?? "this key"} will stop working immediately.`} confirmLabel="Revoke key" onConfirm={() => revokeTarget && revokeMutation.mutate(revokeTarget.id)} onCancel={() => setRevokeTarget(null)} isLoading={revokeMutation.isPending} />
+  </div>;
 };
 
 export default ApiKeys;

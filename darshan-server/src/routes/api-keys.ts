@@ -11,6 +11,10 @@ import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('api-keys-routes');
 const { CREATED } = HTTP_STATUS;
+const publicRecord = <T extends { secret_hash: string }>(record: T): Omit<T, 'secret_hash'> => {
+  const { secret_hash: _secretHash, ...safeRecord } = record;
+  return safeRecord;
+};
 
 const createApiKeySchema = z.object({
   name: z.string().min(1),
@@ -49,7 +53,7 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
           expires_at: data.expires_at ? new Date(data.expires_at) : undefined,
         });
 
-        return reply.status(CREATED).send({ ...record, secret });
+        return reply.status(CREATED).send({ ...publicRecord(record), secret });
       } catch (error) {
         logger.error(error, 'Create API key error');
         return respondWithError(reply, error);
@@ -76,7 +80,7 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
         if (!ability.can('read', 'ApiKey')) throw AppError.forbidden('Forbidden');
 
         const result = await repo.list({ page: 1, limit: 100, includeRevoked: true });
-        return reply.send(result);
+        return reply.send({ ...result, items: result.items.map(publicRecord) });
       } catch (error) {
         logger.error(error, 'List API keys error');
         return respondWithError(reply, error);
@@ -104,7 +108,7 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
 
         const { record, secret } = await repo.rotate((request.params as any).id);
         if (!record) throw AppError.notFound('API key not found');
-        return reply.send({ ...record, secret });
+        return reply.send({ ...publicRecord(record), secret });
       } catch (error) {
         logger.error(error, 'Rotate API key error');
         return respondWithError(reply, error);
@@ -132,7 +136,7 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
 
         const record = await repo.revoke((request.params as any).id);
         if (!record) throw AppError.notFound('API key not found');
-        return reply.send(record);
+        return reply.send(publicRecord(record));
       } catch (error) {
         logger.error(error, 'Revoke API key error');
         return respondWithError(reply, error);
