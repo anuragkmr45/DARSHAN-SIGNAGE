@@ -35,7 +35,7 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | R25 | `/api-keys` — ApiKeys | `read ApiKey` | API key API; list stored prefixes/status, create, rotate or revoke under effective action grants; one-time secret only on create/rotate. | 390/820/1440 fixture browser and dark phone; 4 new UI cases, 3 admin regressions and focused server route suite; real-service and key-auth decision pending. |
 | R26 | `/webhooks` — Webhooks | `read Webhook` | Webhook API; configure and explicitly test permitted endpoints. | Redesign and real-service evidence pending. |
 | R27 | `/proof-of-play` — ProofOfPlay | `read ProofOfPlay` **or** `read Report` in current route guard | PoP API; inspect recorded render-start reports. | Gate semantics and real evidence review pending. |
-| R28 | authenticated `*` — NotFound | Signed-in user | No data; explain unknown path and provide navigation. | Redesign and browser review pending. |
+| R28 | authenticated `*` — NotFound | Signed-in user | No data; explain unknown path inside the workspace and offer Dashboard only if authorized. | 390/820/1440 fixture browser and return-navigation case; real deep-link fallback pending. |
 
 ## Public entry controls and states
 
@@ -143,6 +143,7 @@ The next pass expands each route into control-level rows. The following rows ide
 | Layout editor | Add/Draw/Select, move/resize, numeric inspector, layers, undo/redo, save. | Layout API and normalized geometry. | Fixture-backed editor browser and 390/1440 captures. | Every tool/field/state, real save/reopen, player geometry. |
 | Layouts list | Search, ratio, page, preview, create, edit, exact-name delete, refresh and failure/retry. | Layout REST list/delete, current create grant, server record flags. | Five new fixture cases, editor and ownership regressions, 390/820/1440 plus dark phone captures. | Real-service blockers and save/reopen, long text, zoom, accessibility and network loss. |
 | API Keys | List, create, one-time secret, copy, rotate, revoke, refresh and failure/retry. | CMS bearer-authenticated REST, effective action grants, prefix/status and one-time secret; no inbound API-key auth exists yet. | Four fixture UI cases, three admin browser regressions, focused database route suite; 390/820/1440 plus dark phone. | Decide key-auth release contract, real consumer cutoff, 100+ list, clipboard denial, accessibility. |
+| Unknown route | Explanation and authorized Dashboard return. | No API request; Dashboard link follows current effective `read Dashboard`. | Admin browser 4/4 and 390/820/1440 captures. | Direct URL reload through deployment proxy, keyboard and screen-reader review. |
 | Conversations | List, conversation, thread, drafts, message More and navigation. | Chat/media APIs and REST-authoritative state. | Fixture-backed chat browser; desktop and phone captures. | Invitations, membership, attachments, moderation and concurrent actors. |
 | Player pairing/recovery | Hostname, OTP, expiry, waiting/provisioning, diagnostics and lock/recovery states. | Main-process identity and server expiry authority. | Built renderer prototype at full, compact, minimal and short sizes. | Packaged player lifecycle and remaining owned surfaces. |
 

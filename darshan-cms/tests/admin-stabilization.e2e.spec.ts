@@ -459,7 +459,7 @@ test.describe("admin stabilization surfaces", () => {
       await page.waitForURL(/\/dashboard/);
     }
     await page.goto("/sso-config");
-    await expect(page.getByText("Oops! Page not found")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "This page could not be found" })).toBeVisible();
   });
 
   test("renders live admin surfaces from API-backed state instead of local placeholders", async ({ page }) => {
@@ -524,9 +524,28 @@ test.describe("admin stabilization surfaces", () => {
     await expect(page.getByText("Healthy")).toBeVisible();
 
     await page.goto("/sso-config");
-    await expect(page.getByText("Oops! Page not found")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "This page could not be found" })).toBeVisible();
 
     await page.goto("/requests");
-    await expect(page.getByText("Oops! Page not found")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "This page could not be found" })).toBeVisible();
+  });
+
+  test("unknown routes stay inside the workspace and offer an authorized return path", async ({ page }, testInfo) => {
+    await bootstrapSession(page, limitedUser);
+    await installCommonMocks(page, {
+      user: limitedUser,
+      rolesPayload: limitedRolesPayload,
+      state: { apiKeys: [], webhooks: [], requests: [] },
+    });
+    await page.goto("/unrecognized-page");
+    await expect(page.getByRole("heading", { name: "This page could not be found" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open Dashboard" })).toHaveAttribute("href", "/dashboard");
+    for (const width of [390, 820, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`not-found-${width}.png`) });
+    }
+    await page.getByRole("link", { name: "Open Dashboard" }).click();
+    await page.waitForURL(/\/dashboard/);
   });
 });
