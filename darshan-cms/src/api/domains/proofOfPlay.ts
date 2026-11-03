@@ -5,16 +5,20 @@ import type { ProofOfPlay, ProofOfPlayFilters, ProofOfPlayListResponse } from ".
 const normalizeProofOfPlay = (item: Record<string, unknown>): ProofOfPlay => {
   const startedAt = typeof item.started_at === "string" ? item.started_at : null;
   const endedAt = typeof item.ended_at === "string" ? item.ended_at : null;
+  const completed = typeof item.completed === "boolean" ? item.completed : null;
   const createdAt = typeof item.created_at === "string" ? item.created_at : undefined;
 
   return {
     id: String(item.id ?? ""),
     screen_id: String(item.screen_id ?? ""),
+    screen_name: typeof item.screen_name === "string" ? item.screen_name : null,
     media_id: String(item.media_id ?? ""),
+    media_name: typeof item.media_name === "string" ? item.media_name : null,
     schedule_id: typeof item.schedule_id === "string" ? item.schedule_id : undefined,
     presentation_id: typeof item.presentation_id === "string" ? item.presentation_id : undefined,
     page_number: typeof item.page_number === "number" ? item.page_number : null,
-    status: endedAt ? "COMPLETED" : "INCOMPLETE",
+    status: completed === null ? "UNKNOWN" : completed ? "COMPLETED" : "INCOMPLETE",
+    completed,
     played_at: startedAt || createdAt || new Date(0).toISOString(),
     started_at: startedAt,
     ended_at: endedAt,

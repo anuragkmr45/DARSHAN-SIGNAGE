@@ -37,7 +37,7 @@ The CMS contract is defined by `darshan-cms/src/App.tsx`, API domain modules und
 | `/api-keys` | `ApiKeys` | permission `read ApiKey`; create/update/delete actions use their effective grants | api keys domain | none | Stored key management. Create/rotate return a one-time secret; the list shows only token prefix, status and metadata. Do not log or capture secrets. Backend request authentication by these keys is not implemented in this release. |
 | `/webhooks` | `Webhooks` | permission `read Webhook`; create/update/delete actions use their effective grants | webhooks domain | none | Saved endpoint configuration and explicit Test delivery only. Automatic event dispatch is absent. List/update responses omit stored secret and custom headers; create returns its secret once. |
 | `/sso-config` | `SsoConfig` | permission `read SsoConfig` | SSO config domain | none | SSO configuration. |
-| `/proof-of-play` | `ProofOfPlay` | permissions `read ProofOfPlay` and `read Report` | proof-of-play domain | none | PoP list/export UI. |
+| `/proof-of-play` | `ProofOfPlay` | permission `read ProofOfPlay` | proof-of-play domain | none | Player-reported playback list/export with completed, incomplete and legacy unknown outcomes. |
 | `*` | `NotFound` | authenticated shell catch-all | none | none | Vite/nginx SPA fallback must serve route before app-level NotFound. |
 
 ## API Domain Coverage

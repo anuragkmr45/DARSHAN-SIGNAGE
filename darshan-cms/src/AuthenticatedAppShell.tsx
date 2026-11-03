@@ -71,7 +71,7 @@ export default function AuthenticatedAppShell() {
                   <Route path="/settings" element={<ProtectedRoute moduleKey="settings"><Settings /></ProtectedRoute>} />
                   <Route path="/api-keys" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "ApiKey" }]}><ApiKeys /></ProtectedRoute>} />
                   <Route path="/webhooks" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "Webhook" }]}><Webhooks /></ProtectedRoute>} />
-                  <Route path="/proof-of-play" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "ProofOfPlay" }, { action: "read", subject: "Report" }]}><ProofOfPlay /></ProtectedRoute>} />
+                  <Route path="/proof-of-play" element={<ProtectedRoute requirePermissions={[{ action: "read", subject: "ProofOfPlay" }]}><ProofOfPlay /></ProtectedRoute>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>

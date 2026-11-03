@@ -170,6 +170,7 @@ describe('device telemetry proof-of-play idempotency', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.page_number).toBe(4);
+    expect(rows[0]?.completed).toBe(true);
     expect(rows[0]?.publish_id).toBe(publishId);
     expect(putObjectMock).toHaveBeenCalledOnce();
   });

@@ -1227,6 +1227,7 @@ export const proofOfPlay = pgTable(
     playback_instance_id: uuid('playback_instance_id'),
     started_at: timestamp('started_at').notNull(),
     ended_at: timestamp('ended_at'),
+    completed: boolean('completed'),
     storage_object_id: uuid('storage_object_id'),
     idempotency_key: varchar('idempotency_key', { length: 64 }).notNull(),
     created_at: timestamp('created_at').notNull().defaultNow(),

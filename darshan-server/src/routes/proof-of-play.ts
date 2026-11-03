@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { and, desc, gte, lte, eq, isNull, isNotNull, sql, inArray } from 'drizzle-orm';
+import { and, desc, gte, lte, eq, isNull, sql, inArray } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
@@ -21,7 +21,7 @@ const listSchema = z.object({
   schedule_id: z.string().uuid().optional(),
   start: z.string().datetime().optional(),
   end: z.string().datetime().optional(),
-  status: z.enum(['COMPLETED', 'INCOMPLETE']).optional(),
+  status: z.enum(['COMPLETED', 'INCOMPLETE', 'UNKNOWN']).optional(),
   include_url: z.enum(['true', 'false']).optional(),
   group_by: z.enum(['day', 'screen', 'media']).optional(),
 });
@@ -36,6 +36,7 @@ export async function proofOfPlayRoutes(fastify: FastifyInstance) {
     'page_number',
     'started_at',
     'ended_at',
+    'completed',
     'created_at',
   ] as const;
   const buildConditions = (query: typeof listSchema._type) => {
@@ -45,8 +46,9 @@ export async function proofOfPlayRoutes(fastify: FastifyInstance) {
     if (query.schedule_id) conditions.push(eq(schema.proofOfPlay.presentation_id, query.schedule_id));
     if (query.start) conditions.push(gte(schema.proofOfPlay.created_at, new Date(query.start)));
     if (query.end) conditions.push(lte(schema.proofOfPlay.created_at, new Date(query.end)));
-    if (query.status === 'COMPLETED') conditions.push(isNotNull(schema.proofOfPlay.ended_at));
-    if (query.status === 'INCOMPLETE') conditions.push(isNull(schema.proofOfPlay.ended_at));
+    if (query.status === 'COMPLETED') conditions.push(eq(schema.proofOfPlay.completed, true));
+    if (query.status === 'INCOMPLETE') conditions.push(eq(schema.proofOfPlay.completed, false));
+    if (query.status === 'UNKNOWN') conditions.push(isNull(schema.proofOfPlay.completed));
     return conditions;
   };
 
@@ -126,7 +128,25 @@ export async function proofOfPlayRoutes(fastify: FastifyInstance) {
           .from(schema.proofOfPlay)
           .where(where as any);
 
-        let enriched = items;
+        const screenIds = [...new Set(items.map((item) => item.screen_id))];
+        const mediaIds = [...new Set(items.map((item) => item.media_id).filter((id): id is string => Boolean(id)))];
+        const [screenRows, mediaRows] = await Promise.all([
+          screenIds.length
+            ? db.select({ id: schema.screens.id, name: schema.screens.name }).from(schema.screens)
+              .where(inArray(schema.screens.id, screenIds))
+            : Promise.resolve([]),
+          mediaIds.length
+            ? db.select({ id: schema.media.id, name: schema.media.name }).from(schema.media)
+              .where(inArray(schema.media.id, mediaIds))
+            : Promise.resolve([]),
+        ]);
+        const screenNames = new Map(screenRows.map((screen) => [screen.id, screen.name]));
+        const mediaNames = new Map(mediaRows.map((item) => [item.id, item.name]));
+        let enriched = items.map((item) => ({
+          ...item,
+          screen_name: screenNames.get(item.screen_id) ?? null,
+          media_name: item.media_id ? mediaNames.get(item.media_id) ?? null : null,
+        }));
         if (query.include_url === 'true') {
           const storageIds = items.map((i) => i.storage_object_id).filter(Boolean) as string[];
           const storageRows = storageIds.length
@@ -137,7 +157,7 @@ export async function proofOfPlayRoutes(fastify: FastifyInstance) {
             : [];
           const storageMap = new Map(storageRows.map((s) => [s.id, s]));
           enriched = await Promise.all(
-            items.map(async (i) => {
+            enriched.map(async (i) => {
               const storage = i.storage_object_id ? storageMap.get(i.storage_object_id) : null;
               const url = storage ? await getPresignedUrl(storage.bucket, storage.object_key, 3600) : null;
               return { ...i, url };
@@ -191,6 +211,7 @@ export async function proofOfPlayRoutes(fastify: FastifyInstance) {
             page_number: i.page_number,
             started_at: i.started_at?.toISOString?.() ?? i.started_at,
             ended_at: i.ended_at?.toISOString?.() ?? i.ended_at,
+            completed: i.completed,
             created_at: i.created_at?.toISOString?.() ?? i.created_at,
           })),
           {

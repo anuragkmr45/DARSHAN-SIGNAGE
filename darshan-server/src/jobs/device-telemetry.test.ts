@@ -142,7 +142,7 @@ describe('device telemetry persistence workers', () => {
       startTime,
       endTime,
       duration: 15,
-      completed: true,
+      completed: false,
     });
 
     await db.insert(schema.screens).values({
@@ -158,7 +158,7 @@ describe('device telemetry persistence workers', () => {
       startTime,
       endTime,
       duration: 15,
-      completed: true,
+      completed: false,
       receivedAt: new Date().toISOString(),
       idempotencyKey,
       objectKey: buildProofOfPlayObjectKey(deviceId, idempotencyKey),
@@ -173,6 +173,7 @@ describe('device telemetry persistence workers', () => {
       .where(eq(schema.proofOfPlay.idempotency_key, idempotencyKey));
 
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.completed).toBe(false);
     expect(putObjectMock).toHaveBeenCalledOnce();
   });
 

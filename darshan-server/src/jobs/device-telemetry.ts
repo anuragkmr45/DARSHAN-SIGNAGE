@@ -302,6 +302,7 @@ export async function processProofOfPlayTelemetry(job: ProofOfPlayTelemetryJob) 
           playback_instance_id: job.playbackInstanceId,
           started_at: new Date(job.startTime),
           ended_at: new Date(job.endTime),
+          completed: job.completed,
           storage_object_id: storageObjectId,
           created_at: new Date(job.receivedAt),
           idempotency_key: job.idempotencyKey,

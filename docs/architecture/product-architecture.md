@@ -97,7 +97,7 @@ Production deployment currently uses Docker role deployments across normal Ubunt
 | `/api-keys` | `ApiKeys` | permission `read ApiKey` | api keys | CMS + Backend |
 | `/webhooks` | `Webhooks` | permission `read Webhook` | webhook subscriptions | CMS + Backend |
 | `/sso-config` | `SsoConfig` | permission `read SsoConfig` | SSO config | CMS + Backend |
-| `/proof-of-play` | `ProofOfPlay` | permissions `read ProofOfPlay` and `read Report` | proof-of-play list/export | CMS + Backend |
+| `/proof-of-play` | `ProofOfPlay` | permission `read ProofOfPlay` | proof-of-play list/export | CMS + Backend |
 
 CMS code source of truth:
 

@@ -34,7 +34,7 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | R24 | `/settings` — Settings | `read OrgSettings` | Settings hooks and media API; update site categories according to action permissions. | Redesign and real-service evidence pending. |
 | R25 | `/api-keys` — ApiKeys | `read ApiKey` | API key API; list stored prefixes/status, create, rotate or revoke under effective action grants; one-time secret only on create/rotate. | 390/820/1440 fixture browser and dark phone; 4 new UI cases, 3 admin regressions and focused server route suite; real-service and key-auth decision pending. |
 | R26 | `/webhooks` — Webhooks | `read Webhook` | Webhook API; configure endpoints, enable/pause, delete and explicitly test permitted destinations. Automatic event delivery is absent. | 390/820/1440 fixture browser and dark phone; four new cases, admin regression, focused route test; real endpoint and dispatcher decision pending. |
-| R27 | `/proof-of-play` — ProofOfPlay | `read ProofOfPlay` **or** `read Report` in current route guard | PoP API; inspect recorded render-start reports. | Gate semantics and real evidence review pending. |
+| R27 | `/proof-of-play` — ProofOfPlay | `read ProofOfPlay` | PoP API; inspect player-reported playback starts and completion outcomes, filter and export evidence. | 390/820/1440 fixture browser and dark phone; 4 browser cases and focused DB routes passed. Real player/service journey pending. |
 | R28 | authenticated `*` — NotFound | Signed-in user | No data; explain unknown path inside the workspace and offer Dashboard only if authorized. | 390/820/1440 fixture browser and return-navigation case; real deep-link fallback pending. |
 
 ## Public entry controls and states
@@ -144,6 +144,19 @@ The route requires `read Webhook`; create/update/delete and manual Test use thei
 | W05 | Delete | `delete Webhook`; confirmation before DELETE, server response authoritative. | Cancel/confirm fixture browser; failure and concurrent use pending. |
 | W06 | Loading, failed, retry, empty and responsive list | Initial failure offers Retry; loaded data stays labeled stale after refresh failure; read-only actors see no mutation controls. | Four fixture cases and 390/820/1440 plus dark phone captures; zoom, accents, mobile devices and accessibility pending. |
 
+## Proof of Play controls and states
+
+The route and API require `read ProofOfPlay`. Rows are player reports, not proof of visible display pixels. Server receipt time drives the date filter. Current Screen and Media names are conveniences and can differ from names at playback; IDs remain visible for traceability.
+
+| ID | Control or state | Source and expected result | Evidence and open review |
+| --- | --- | --- | --- |
+| P01 | Received date range | PoP API `created_at` filter; browser-local day boundaries are converted to UTC. Reversed ranges block requests. | Fixture browser invalid range; timezone boundaries in real-service QA pending. |
+| P02 | Playback outcome | Stored player `completed`: true, false or null. Legacy null is Unknown, never inferred from end time. Changing outcome returns to page 1. | Focused DB route and 52-row browser page/filter tests; packaged-player confirmation pending. |
+| P03 | Screen and Media ID filters | Optional full UUIDs; invalid IDs block requests and CSV export. Current names are displayed when rows still exist. | Fixture browser invalid ID; deleted/renamed identity and permission review pending. |
+| P04 | Records and pagination | Server total, 50 rows/page, explicit page navigation; missing current Screen/Media uses unavailable label and original ID. | 52-row fixture browser and 390/820/1440 plus dark phone captures; large real dataset pending. |
+| P05 | Export CSV | Same filters as list; includes stored `completed` outcome and selected page. Failure is shown for retry by the operator. | Empty/nonempty DB route and browser action; large export/memory boundary pending. |
+| P06 | Loading, failure, retry, empty, stale refresh and access | Initial failure has Retry; a refresh failure keeps the last loaded page labeled stale; Report-only actors cannot enter. | Four fixture browser cases; real network drop and permission withdrawal pending. |
+
 ## Control ledger: current status
 
 The next pass expands each route into control-level rows. The following rows identify prototype workflows already traced; they are **grouped summaries**, not an exhaustive control list. They will be replaced with individual control entries before completion.
@@ -157,6 +170,7 @@ The next pass expands each route into control-level rows. The following rows ide
 | Layouts list | Search, ratio, page, preview, create, edit, exact-name delete, refresh and failure/retry. | Layout REST list/delete, current create grant, server record flags. | Five new fixture cases, editor and ownership regressions, 390/820/1440 plus dark phone captures. | Real-service blockers and save/reopen, long text, zoom, accessibility and network loss. |
 | API Keys | List, create, one-time secret, copy, rotate, revoke, refresh and failure/retry. | CMS bearer-authenticated REST, effective action grants, prefix/status and one-time secret; no inbound API-key auth exists yet. | Four fixture UI cases, three admin browser regressions, focused database route suite; 390/820/1440 plus dark phone. | Decide key-auth release contract, real consumer cutoff, 100+ list, clipboard denial, accessibility. |
 | Webhooks | List, add, explicit Test, enable/pause, delete, refresh and error/retry. | CMS bearer-authenticated REST, effective action grants, stored test status; no automatic dispatcher. | Four fixture UI cases, admin browser regression, database route suite; 390/820/1440 plus dark phone. | Decide automatic-delivery release contract, real receiver policy/TLS, one-time secret, zoom and accessibility. |
+| Proof of Play | Date/outcome and advanced ID filters, page, refresh, export, error/retry. | `read ProofOfPlay` only; server-received time and nullable player completion; current names plus stable IDs. | Four fixture UI cases, 10 focused DB/ingest tests, 390/820/1440 plus dark phone. | Real packaged-player ingest/spool/replay, large CSV, timezone boundary and permission withdrawal. |
 | Unknown route | Explanation and authorized Dashboard return. | No API request; Dashboard link follows current effective `read Dashboard`. | Admin browser 4/4 and 390/820/1440 captures. | Direct URL reload through deployment proxy, keyboard and screen-reader review. |
 | Conversations | List, conversation, thread, drafts, message More and navigation. | Chat/media APIs and REST-authoritative state. | Fixture-backed chat browser; desktop and phone captures. | Invitations, membership, attachments, moderation and concurrent actors. |
 | Player pairing/recovery | Hostname, OTP, expiry, waiting/provisioning, diagnostics and lock/recovery states. | Main-process identity and server expiry authority. | Built renderer prototype at full, compact, minimal and short sizes. | Packaged player lifecycle and remaining owned surfaces. |

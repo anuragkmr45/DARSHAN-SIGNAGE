@@ -359,11 +359,14 @@ export interface ConversationMessage {
 export interface ProofOfPlay {
   id: string;
   screen_id: string;
+  screen_name?: string | null;
   media_id: string;
+  media_name?: string | null;
   schedule_id?: string;
   presentation_id?: string;
   page_number?: number | null;
-  status: "COMPLETED" | "INCOMPLETE";
+  status: "COMPLETED" | "INCOMPLETE" | "UNKNOWN";
+  completed?: boolean | null;
   played_at: string;
   started_at?: string | null;
   ended_at?: string | null;
@@ -388,7 +391,7 @@ export interface ProofOfPlayFilters extends PaginationParams {
   schedule_id?: string;
   start?: string;
   end?: string;
-  status?: "COMPLETED" | "INCOMPLETE";
+  status?: "COMPLETED" | "INCOMPLETE" | "UNKNOWN";
   include_url?: boolean;
   group_by?: "day" | "screen" | "media";
 }

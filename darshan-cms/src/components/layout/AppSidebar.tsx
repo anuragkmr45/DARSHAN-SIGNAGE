@@ -134,7 +134,7 @@ const navSections: NavSection[] = [
       },
       { title: "API Keys", url: "/api-keys", icon: Settings, permissions: [{ action: "read", subject: "ApiKey" }] },
       { title: "Webhooks", url: "/webhooks", icon: Settings, permissions: [{ action: "read", subject: "Webhook" }] },
-      { title: "Proof of Play", url: "/proof-of-play", icon: FileBarChart, permissions: [{ action: "read", subject: "ProofOfPlay" }, { action: "read", subject: "Report" }] },
+      { title: "Proof of Play", url: "/proof-of-play", icon: FileBarChart, permissions: [{ action: "read", subject: "ProofOfPlay" }] },
     ],
   },
 ];

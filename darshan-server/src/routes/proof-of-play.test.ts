@@ -46,7 +46,7 @@ describe('Proof of play export', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/csv');
-    expect(response.body.trim()).toBe('id,screen_id,media_id,presentation_id,page_number,started_at,ended_at,created_at');
+    expect(response.body.trim()).toBe('id,screen_id,media_id,presentation_id,page_number,started_at,ended_at,completed,created_at');
   });
 
   it('returns the selected page in list and CSV export contracts', async () => {
@@ -56,14 +56,40 @@ describe('Proof of play export', () => {
     const now = new Date();
     // Telemetry must reference a real screen under the deletion-safety trigger.
     await db.insert(schema.screens).values({ id: screenId, name: 'Proof of play export fixture' });
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: 'Training video',
+      type: 'VIDEO',
+      status: 'READY',
+      created_by: testUser.id,
+    });
     const [record] = await db.insert(schema.proofOfPlay).values({
       screen_id: screenId,
       media_id: mediaId,
       page_number: 4,
       started_at: new Date(now.getTime() - 10_000),
       ended_at: now,
+      completed: true,
       idempotency_key: randomUUID().replace(/-/g, ''),
     }).returning();
+    await db.insert(schema.proofOfPlay).values([
+      {
+        screen_id: screenId,
+        media_id: mediaId,
+        started_at: new Date(now.getTime() - 20_000),
+        ended_at: now,
+        completed: false,
+        idempotency_key: randomUUID().replace(/-/g, ''),
+      },
+      {
+        screen_id: screenId,
+        media_id: mediaId,
+        started_at: new Date(now.getTime() - 30_000),
+        ended_at: now,
+        completed: null,
+        idempotency_key: randomUUID().replace(/-/g, ''),
+      },
+    ]);
 
     const list = await server.inject({
       method: 'GET',
@@ -71,9 +97,24 @@ describe('Proof of play export', () => {
       headers: { authorization: `Bearer ${adminToken}` },
     });
     expect(list.statusCode).toBe(200);
-    expect(JSON.parse(list.body).items).toEqual([
-      expect.objectContaining({ id: record.id, page_number: 4 }),
-    ]);
+    expect(JSON.parse(list.body).items).toContainEqual(expect.objectContaining({
+      id: record.id,
+      page_number: 4,
+      completed: true,
+      screen_name: 'Proof of play export fixture',
+      media_name: 'Training video',
+    }));
+    expect(JSON.parse(list.body).pagination.total).toBe(3);
+    for (const [status, expected] of [['COMPLETED', true], ['INCOMPLETE', false], ['UNKNOWN', null]] as const) {
+      const filtered = await server.inject({
+        method: 'GET',
+        url: `/api/v1/proof-of-play?screen_id=${screenId}&status=${status}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(filtered.statusCode).toBe(200);
+      expect(JSON.parse(filtered.body).pagination.total).toBe(1);
+      expect(JSON.parse(filtered.body).items[0].completed).toBe(expected);
+    }
 
     const exported = await server.inject({
       method: 'GET',
@@ -82,6 +123,7 @@ describe('Proof of play export', () => {
     });
     expect(exported.statusCode).toBe(200);
     expect(exported.body).toContain('presentation_id,page_number,started_at');
+    expect(exported.body).toContain('ended_at,completed,created_at');
     expect(exported.body).toContain(`,${mediaId},,4,`);
   });
 });

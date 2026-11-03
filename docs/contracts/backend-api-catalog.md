@@ -342,8 +342,8 @@ Port note (verify): config defines `PORT` (3000) + `DEVICE_PORT` (8443), but the
 
 | METHOD | PATH | AUTH | PURPOSE | REQUEST | RESPONSE | ERRORS |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET | /api/v1/proof-of-play | JWT (CMS) | List PoP records (optional grouping; optional URLs). Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/proof-of-play.ts fastify.get(apiEndpoints.proofOfPlay.list) | query: page, limit, screen_id, media_id, schedule_id, start, end, status, include_url, group_by | `{ items, pagination }` or grouped items | 401 UNAUTHORIZED; 403 FORBIDDEN; 422 VALIDATION_ERROR; 500 INTERNAL_ERROR |
-| GET | /api/v1/proof-of-play/export | JWT (CMS) | Export PoP CSV. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/proof-of-play.ts fastify.get(apiEndpoints.proofOfPlay.export) | query: same as list | CSV file | 401 UNAUTHORIZED; 403 FORBIDDEN; 422 VALIDATION_ERROR; 500 INTERNAL_ERROR |
+| GET | /api/v1/proof-of-play | JWT with `read ProofOfPlay` | List player reports; ordinary rows include nullable `completed`, current `screen_name`/`media_name`, stable IDs and pagination; optional grouping or URLs. | page, limit, screen_id, media_id, schedule_id, start/end (server receipt time), status (`COMPLETED`, `INCOMPLETE`, `UNKNOWN`), include_url, group_by | `{ items, pagination }` or grouped items | 401 UNAUTHORIZED; 403 FORBIDDEN; 422 VALIDATION_ERROR; 500 INTERNAL_ERROR |
+| GET | /api/v1/proof-of-play/export | JWT with `read ProofOfPlay` | Export matching player reports. | same filters as list | CSV with `completed` and selected `page_number`; null completion denotes legacy unknown | 401 UNAUTHORIZED; 403 FORBIDDEN; 422 VALIDATION_ERROR; 500 INTERNAL_ERROR |
 
 ---
 
