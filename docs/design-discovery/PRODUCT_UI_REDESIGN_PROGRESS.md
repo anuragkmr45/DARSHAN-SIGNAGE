@@ -64,3 +64,9 @@ Task: connect a screen without an input device, identify the correct host, and u
 The recovery state now occupies the whole player window instead of a small corner panel. It shows the authoritative reason, network guidance, and available timing information. The security-lock surface uses the same restrained visual language, while its existing lock reason and resume condition remain visible.
 
 The built renderer was inspected at 1440×900, 820×768, 390×844, and 640×360 CSS pixels. Each keeps hostname, code, expiry, and status inside the viewport; production controls stay hidden. Rendered mock-state captures are under `qa-artifacts/evidence/product-ui-player-prototype/`. The browser pairing regression verifies OTP replacement, monotonic countdown despite a skewed wall clock, surface priority, production control hiding, and the new viewport checks. These are prototype checks; a packaged Ubuntu player, physical displays, Windows, actual backend pairing/recovery, and security-lock transition remain to be exercised in the later real-application regression.
+
+## Current visual review
+
+Fresh fixture-backed captures for Dashboard, Screens, and Schedule review at 1440, 820, and 390 CSS pixels are in `qa-artifacts/evidence/product-ui-core-prototypes/`. The three focused browser journeys passed. The images are current-branch references, not real-service acceptance.
+
+Review of these captures found additional design work before the approval checkpoint: Dashboard and Screens still have prominent card boundaries, Screens repeats the Pair Device action and stacks administration sections below a long phone list, and the full-page Schedule capture shows a detached Create Schedule heading above the application. These should be resolved or explicitly accepted in the running interface before the visual system is applied throughout the CMS.
