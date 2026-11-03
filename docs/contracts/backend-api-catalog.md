@@ -279,6 +279,7 @@ Port note (verify): config defines `PORT` (3000) + `DEVICE_PORT` (8443), but the
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | /api/v1/audit-logs | JWT (CMS) | List audit logs. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/audit-logs.ts fastify.get(apiEndpoints.auditLogs.list) | query: page, limit, user_id, resource_type, action, start_date, end_date | `{ items, pagination }` | 401 UNAUTHORIZED; 403 FORBIDDEN; 422 VALIDATION_ERROR; 500 INTERNAL_ERROR |
 | GET | /api/v1/audit-logs/:id | JWT (CMS) | Get audit log by id. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/audit-logs.ts fastify.get(apiEndpoints.auditLogs.get) | path: id | audit log object | 401 UNAUTHORIZED; 403 FORBIDDEN; 404 NOT_FOUND; 500 INTERNAL_ERROR |
+| GET | /api/v1/audit-logs/export | JWT with `read AuditLog` | Export filtered audit log PDF. | resource_type, action, user_id, start_date, end_date | PDF | 401 UNAUTHORIZED; 403 FORBIDDEN; 422 VALIDATION_ERROR; 500 INTERNAL_ERROR |
 
 ---
 
@@ -360,6 +361,8 @@ Port note (verify): config defines `PORT` (3000) + `DEVICE_PORT` (8443), but the
 | METHOD | PATH | AUTH | PURPOSE | REQUEST | RESPONSE | ERRORS |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET | /api/v1/reports/summary | JWT (CMS) | KPI summary. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/reports.ts fastify.get(apiEndpoints.reports.summary) | none | summary object | 401 UNAUTHORIZED; 403 FORBIDDEN; 500 INTERNAL_ERROR |
+| GET | /api/v1/reports/availability | JWT with `read Report` or `read Dashboard` | Player availability from server-received heartbeats; estimated outage after 90 seconds and unknown backend/pre-first-heartbeat time. | days (1–365) | range, fleet summary, Screen rows and daily buckets | 401 UNAUTHORIZED; 403 FORBIDDEN; 500 INTERNAL_ERROR |
+| GET | /api/v1/reports/export | JWT with `read Report` or `read Dashboard` | Current snapshot PDF, independent of availability period. Emergency section requires `manage Emergency`; recent PoP section requires `read ProofOfPlay`. | none | PDF | 401 UNAUTHORIZED; 403 FORBIDDEN; 500 INTERNAL_ERROR |
 | GET | /api/v1/reports/trends | JWT (CMS) | Trends for dashboards. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/reports.ts fastify.get(apiEndpoints.reports.trends) | none | `{ proof_of_play_daily, media_by_type, requests_by_status }` | 401 UNAUTHORIZED; 403 FORBIDDEN; 500 INTERNAL_ERROR |
 | GET | /api/v1/reports/requests-by-department | JWT (CMS) | Pending requests grouped by department. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/reports.ts fastify.get(apiEndpoints.reports.requestsByDepartment) | none | `{ departments: [...] }` | 401 UNAUTHORIZED; 403 FORBIDDEN; 500 INTERNAL_ERROR |
 | GET | /api/v1/reports/offline-screens | JWT (CMS) | Screens offline > 24h. Ref: /Users/anuragkumar/Desktop/darshan/darshan-server/src/routes/reports.ts fastify.get(apiEndpoints.reports.offlineScreens) | none | `{ count, screens }` | 401 UNAUTHORIZED; 403 FORBIDDEN; 500 INTERNAL_ERROR |

@@ -443,7 +443,9 @@ export async function reportsRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Dashboard')) throw AppError.forbidden('Forbidden');
+        if (!ability.can('read', 'Dashboard') && !ability.can('read', 'Report')) {
+          throw AppError.forbidden('Forbidden');
+        }
 
         const [mediaCount] = await db.select({ count: sql<number>`count(*)` }).from(schema.media);
         const [screensActive] = await db
@@ -466,12 +468,13 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           .where(eq(schema.notifications.user_id, payload.sub))
           .orderBy(desc(schema.notifications.created_at))
           .limit(5);
-        const recentProofOfPlay = await db
+        const recentProofOfPlay = ability.can('read', 'ProofOfPlay') ? await db
           .select({
             id: schema.proofOfPlay.id,
             created_at: schema.proofOfPlay.created_at,
             started_at: schema.proofOfPlay.started_at,
             ended_at: schema.proofOfPlay.ended_at,
+            completed: schema.proofOfPlay.completed,
             screen_id: schema.proofOfPlay.screen_id,
             media_id: schema.proofOfPlay.media_id,
             screen_name: schema.screens.name,
@@ -481,9 +484,11 @@ export async function reportsRoutes(fastify: FastifyInstance) {
           .leftJoin(schema.screens, eq(schema.screens.id, schema.proofOfPlay.screen_id))
           .leftJoin(schema.media, eq(schema.media.id, schema.proofOfPlay.media_id))
           .orderBy(desc(schema.proofOfPlay.created_at))
-          .limit(10);
+          .limit(10) : [];
 
-        const activeEmergencies = await emergencyRepo.listActive();
+        const activeEmergencies = ability.can('manage', 'Emergency')
+          ? await emergencyRepo.listActive()
+          : [];
         const primaryEmergency = activeEmergencies[0] ?? null;
         const generatedAt = new Date();
         const html = buildPdfHtml(
@@ -497,14 +502,14 @@ export async function reportsRoutes(fastify: FastifyInstance) {
               <h2>Summary</h2>
               <table>
                 <tbody>
-                  <tr><th>Total Media</th><td>${escapeHtml(formatCount(Number(mediaCount?.count || 0)))}</td></tr>
-                  <tr><th>Active Screens</th><td>${escapeHtml(formatCount(Number(screensActive?.count || 0)))}</td></tr>
-                  <tr><th>Offline Screens</th><td>${escapeHtml(formatCount(Number(screensOffline?.count || 0)))}</td></tr>
+                  <tr><th>Media records</th><td>${escapeHtml(formatCount(Number(mediaCount?.count || 0)))}</td></tr>
+                  <tr><th>Screens marked active</th><td>${escapeHtml(formatCount(Number(screensActive?.count || 0)))}</td></tr>
+                  <tr><th>Screens marked offline</th><td>${escapeHtml(formatCount(Number(screensOffline?.count || 0)))}</td></tr>
                   <tr><th>Report Owner</th><td>${escapeHtml(payload.email)}</td></tr>
                 </tbody>
               </table>
             </div>
-            <div class="section">
+            ${ability.can('manage', 'Emergency') ? `<div class="section">
               <h2>Emergency Status</h2>
               ${
                 primaryEmergency
@@ -515,7 +520,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
                   `
                   : `<p class="empty">No active emergency.</p>`
               }
-            </div>
+            </div>` : ''}
             <div class="section">
               <h2>Latest Notifications</h2>
               ${
@@ -549,7 +554,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
                   : `<p class="empty">No notifications available.</p>`
               }
             </div>
-            <div class="section">
+            ${ability.can('read', 'ProofOfPlay') ? `<div class="section">
               <h2>Recent Proof of Play</h2>
               ${
                 recentProofOfPlay.length
@@ -561,6 +566,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
                           <th>Media</th>
                           <th>Started</th>
                           <th>Ended</th>
+                          <th>Outcome</th>
                           <th>Reported</th>
                         </tr>
                       </thead>
@@ -573,6 +579,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
                                 <td>${escapeHtml(item.media_name || item.media_id)}</td>
                                 <td>${escapeHtml(formatDateTime(item.started_at))}</td>
                                 <td>${escapeHtml(formatDateTime(item.ended_at))}</td>
+                                <td>${item.completed === true ? 'Completed' : item.completed === false ? 'Incomplete' : 'Outcome unknown'}</td>
                                 <td>${escapeHtml(formatDateTime(item.created_at))}</td>
                               </tr>
                             `
@@ -583,7 +590,7 @@ export async function reportsRoutes(fastify: FastifyInstance) {
                   `
                   : `<p class="empty">No proof-of-play events recorded yet.</p>`
               }
-            </div>
+            </div>` : ''}
           `
         );
 

@@ -92,7 +92,7 @@ Production deployment currently uses Docker role deployments across normal Ubunt
 | `/notifications` | `Notifications` | module `notifications` | notifications API/socket | CMS + Backend realtime |
 | `/screens` | `Screens` | module `screens` | screens, screen groups, pairing, telemetry, screenshots, delivery status | CMS + Backend + Player |
 | `/media` | `MediaLibrary` | module `media` | media presign/upload/finalize/list/delete | CMS + Backend + object storage |
-| `/reports` | `Reports` | module `reports` | reports, audit, proof-of-play, observability | CMS + Backend |
+| `/reports` | `Reports` | `read Report` or `read AuditLog`; PoP preview requires `read ProofOfPlay` | availability, audit, conditional proof-of-play, PDF export | CMS + Backend |
 | `/settings` | `Settings` | module `settings` | settings, backups, default media, roles/permissions | CMS + Backend |
 | `/api-keys` | `ApiKeys` | permission `read ApiKey` | api keys | CMS + Backend |
 | `/webhooks` | `Webhooks` | permission `read Webhook` | webhook subscriptions | CMS + Backend |

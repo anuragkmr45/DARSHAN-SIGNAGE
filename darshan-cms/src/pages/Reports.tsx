@@ -1,29 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Download, Activity, Monitor, AlertTriangle, Bell, Shield } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reportsApi } from "@/api/domains/reports";
 import { proofOfPlayApi } from "@/api/domains/proofOfPlay";
 import { auditLogsApi } from "@/api/domains/auditLogs";
-import { notificationsApi } from "@/api/domains/notifications";
-import { emergencyApi } from "@/api/domains/emergency";
 import { ApiError } from "@/api/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useAuthorization } from "@/hooks/useAuthorization";
-import type { AuditLog, ProofOfPlayListResponse } from "@/api/types";
+import type { AuditLog } from "@/api/types";
 import { PageNavigation } from "@/components/common/PageNavigation";
+import { EmptyState } from "@/components/common/EmptyState";
+import { LoadingIndicator } from "@/components/common/LoadingIndicator";
 
 const AUDIT_LOGS_PAGE_SIZE = 5;
 
 const formatDuration = (seconds?: number | null) => {
   if (seconds === null || seconds === undefined) return "—";
+  if (seconds > 0 && seconds < 30) return "<1m";
   const wholeMinutes = Math.round(seconds / 60);
   const days = Math.floor(wholeMinutes / 1440);
   const hours = Math.floor((wholeMinutes % 1440) / 60);
@@ -57,6 +59,7 @@ const formatAuditTimestamp = (value?: string) => {
     timeStyle: "medium",
   }).format(date);
 };
+const errorMessage = (failure: unknown) => failure instanceof ApiError ? failure.message : "Please try again.";
 
 function AuditLogCard({ log }: { log: AuditLog }) {
   const actorName = [log.user?.first_name, log.user?.last_name].filter(Boolean).join(" ").trim();
@@ -84,12 +87,12 @@ function AuditLogCard({ log }: { log: AuditLog }) {
   ];
 
   return (
-    <AccordionItem value={log.id} className="rounded-lg border bg-card px-4">
+    <AccordionItem value={log.id} className="border-b px-1">
       <AccordionTrigger className="py-4 hover:no-underline">
         <div className="flex flex-1 flex-wrap items-start justify-between gap-3 pr-4 text-left">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge>{log.action ?? "ACTION"}</Badge>
+              <Badge variant="outline">{log.action ?? "ACTION"}</Badge>
               <Badge variant="outline">{formatAuditField(log.resource_type)}</Badge>
             </div>
             <div>
@@ -111,8 +114,8 @@ function AuditLogCard({ log }: { log: AuditLog }) {
         <div className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {detailFields.map((field) => (
-              <div key={field.label} className="rounded-md border bg-muted/20 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{field.label}</p>
+              <div key={field.label} className="min-w-0">
+                <p className="text-xs text-muted-foreground">{field.label}</p>
                 <p className={field.mono ? "mt-1 break-all font-mono text-xs" : "mt-1 text-sm"}>
                   {formatAuditField(field.value)}
                 </p>
@@ -120,12 +123,12 @@ function AuditLogCard({ log }: { log: AuditLog }) {
             ))}
           </div>
 
-          <div className="rounded-md border bg-muted/20 p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">User details</p>
+          <div className="border-t pt-4">
+            <p className="text-sm font-medium">User details</p>
             <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
               {actorFields.map((field) => (
                 <div key={field.label}>
-                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{field.label}</p>
+                  <p className="text-xs text-muted-foreground">{field.label}</p>
                   <p className={field.mono ? "mt-1 break-all font-mono text-xs" : "mt-1 text-sm"}>
                     {formatAuditField(field.value)}
                   </p>
@@ -134,9 +137,9 @@ function AuditLogCard({ log }: { log: AuditLog }) {
             </div>
           </div>
 
-          <div className="rounded-md border bg-muted/20 p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Changes</p>
-            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background px-3 py-2 font-mono text-xs">
+          <div className="border-t pt-4">
+            <p className="text-sm font-medium">Recorded changes</p>
+            <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 px-3 py-2 font-mono text-xs">
               {changesValue}
             </pre>
           </div>
@@ -147,8 +150,8 @@ function AuditLogCard({ log }: { log: AuditLog }) {
 }
 
 export default function Reports() {
-  const navigate = useNavigate();
   const { toast } = useToast();
+  const [view, setView] = useState<"availability" | "audit">("availability");
   const [resourceFilter, setResourceFilter] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [auditLogsPage, setAuditLogsPage] = useState(1);
@@ -162,12 +165,8 @@ export default function Reports() {
 
   const canReadReports = can("read", "Report");
   const canReadAuditLogs = can("read", "AuditLog");
-
-  const summaryQuery = useQuery({
-    queryKey: ["reports-summary"],
-    queryFn: reportsApi.getSummary,
-    enabled: canReadReports,
-  });
+  const canReadProofOfPlay = can("read", "ProofOfPlay");
+  const activeView = view === "availability" && !canReadReports ? "audit" : view === "audit" && !canReadAuditLogs ? "availability" : view;
 
   const availabilityQuery = useQuery({
     queryKey: ["reports-availability", availabilityDays],
@@ -176,9 +175,9 @@ export default function Reports() {
   });
 
   const popQuery = useQuery({
-    queryKey: ["pop-list"],
-    queryFn: () => proofOfPlayApi.list({ limit: 10, page: 1 }),
-    enabled: canReadReports,
+    queryKey: ["reports-recent-proof-of-play"],
+    queryFn: () => proofOfPlayApi.list({ limit: 5, page: 1 }),
+    enabled: canReadReports && canReadProofOfPlay,
   });
 
   const auditLogsQuery = useQuery({
@@ -194,42 +193,8 @@ export default function Reports() {
     enabled: canReadAuditLogs,
   });
 
-  const notificationsQuery = useQuery({
-    queryKey: ["notifications", "latest"],
-    queryFn: () => notificationsApi.list({ page: 1, limit: 5 }),
-    enabled: canReadReports,
-  });
-
-  const emergencyQuery = useQuery({
-    queryKey: ["emergency-status"],
-    queryFn: emergencyApi.status,
-    refetchInterval: 30_000,
-    enabled: canReadReports,
-  });
-
-  useEffect(() => {
-    const err =
-      (canReadReports && (summaryQuery.error || availabilityQuery.error || popQuery.error || notificationsQuery.error || emergencyQuery.error)) ||
-      (canReadAuditLogs && auditLogsQuery.error);
-    if (err) {
-      const message = err instanceof ApiError ? err.message : "Unable to load reports.";
-      toast({ title: "Load failed", description: message, variant: "destructive" });
-    }
-  }, [
-    canReadReports,
-    canReadAuditLogs,
-    summaryQuery.error,
-    availabilityQuery.error,
-    popQuery.error,
-    auditLogsQuery.error,
-    notificationsQuery.error,
-    emergencyQuery.error,
-    toast,
-  ]);
-
-  const summary = summaryQuery.data;
   const availability = availabilityQuery.data;
-  const popItems = (popQuery.data as ProofOfPlayListResponse | undefined)?.items ?? [];
+  const popItems = popQuery.data?.items ?? [];
   const auditLogs = auditLogsQuery.data?.items ?? [];
   const auditLogsTotal = auditLogsQuery.data?.total ?? 0;
   const auditLogsTotalPages = Math.max(
@@ -238,29 +203,14 @@ export default function Reports() {
   );
   const auditLogsRangeStart = auditLogs.length === 0 ? 0 : (auditLogsPage - 1) * AUDIT_LOGS_PAGE_SIZE + 1;
   const auditLogsRangeEnd = auditLogs.length === 0 ? 0 : auditLogsRangeStart + auditLogs.length - 1;
-  const notifications = notificationsQuery.data?.items ?? [];
-  const emergencyStatus = emergencyQuery.data;
-
   const showAccessDenied = !isAuthzLoading && !canReadReports && !canReadAuditLogs;
 
   const auditPlaceholder = useMemo(
     () =>
       Array.from({ length: 5 }).map((_, idx) => (
-        <div key={idx} className="rounded-lg border bg-card p-4 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <Skeleton className="h-5 w-28 rounded-full" />
-                <Skeleton className="h-5 w-20 rounded-full" />
-              </div>
-              <Skeleton className="h-4 w-36" />
-              <Skeleton className="h-3 w-44" />
-            </div>
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-3 w-20" />
-            </div>
-          </div>
+        <div key={idx} className="space-y-2 border-b py-3">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-3 w-52" />
         </div>
       )),
     [],
@@ -308,8 +258,8 @@ export default function Reports() {
     try {
       setIsExportingLogsPdf(true);
       const blob = await auditLogsApi.exportPdf({
-        resource_type: debouncedResource || undefined,
-        action: debouncedAction || undefined,
+        resource_type: resourceFilter.trim() || undefined,
+        action: actionFilter.trim() || undefined,
       });
       downloadBlobFile(blob, `audit-logs-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (error) {
@@ -320,329 +270,67 @@ export default function Reports() {
     }
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Reports & Logs</h1>
-          <p className="text-muted-foreground">View KPIs and recent proof-of-play records.</p>
-        </div>
-        {canReadReports && (
-          <div className="flex gap-2">
-            <Button onClick={handleExportReportPdf} disabled={isExportingReportPdf}>
-              <Download className="mr-2 h-4 w-4" />
-              {isExportingReportPdf ? "Exporting..." : "Report PDF"}
-            </Button>
+  if (isAuthzLoading) return <LoadingIndicator label="Checking report access…" />;
+  if (showAccessDenied) return <EmptyState title="Access restricted" description="You do not have permission to view reports or audit logs." />;
+
+  return <div className="mx-auto w-full max-w-7xl space-y-5">
+    <header className="flex flex-col gap-3 border-b border-border/70 pb-4 sm:flex-row sm:items-end sm:justify-between">
+      <div><h1 className="text-2xl font-semibold tracking-tight">Reports & Logs</h1><p className="mt-1 text-sm text-muted-foreground">Review player availability and recorded activity.</p></div>
+      {canReadReports && <div><Button variant="outline" size="sm" onClick={() => void handleExportReportPdf()} disabled={isExportingReportPdf}><Download aria-hidden="true" className="mr-2 h-4 w-4" />{isExportingReportPdf ? "Exporting…" : "Export snapshot PDF"}</Button><p className="mt-1 text-xs text-muted-foreground">Current snapshot; independent of the period below.</p></div>}
+    </header>
+    <Tabs value={activeView} onValueChange={(value) => setView(value as "availability" | "audit")}>
+      <TabsList aria-label="Reports sections" className="h-auto w-full justify-start sm:w-auto">
+        {canReadReports && <TabsTrigger value="availability">Availability</TabsTrigger>}
+        {canReadAuditLogs && <TabsTrigger value="audit">Audit Logs</TabsTrigger>}
+      </TabsList>
+
+      {canReadReports && <TabsContent value="availability" className="mt-5 space-y-8">
+        <section aria-labelledby="availability-heading" className="space-y-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 id="availability-heading" className="text-lg font-semibold">Player availability</h2>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Estimated from server-received heartbeats. A gap after 90 seconds counts as offline; time when the server could not receive heartbeats stays unknown.</p>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1"><Label htmlFor="availability-period">Period</Label><select id="availability-period" className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={availabilityDays} onChange={(event) => setAvailabilityDays(Number(event.target.value))}>
+                <option value={1}>Last 24 hours</option><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option>
+              </select></div>
+              <Button variant="outline" size="sm" onClick={() => { void availabilityQuery.refetch(); if (canReadProofOfPlay) void popQuery.refetch(); }} disabled={availabilityQuery.isFetching}><RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" />Refresh</Button>
+            </div>
           </div>
-        )}
-      </div>
-
-      {showAccessDenied && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Access restricted</CardTitle>
-            <CardDescription>You do not have permission to view reports or audit logs.</CardDescription>
-          </CardHeader>
-        </Card>
-      )}
-
-      {canReadAuditLogs && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5" />
-                  Audit Logs
-                </CardTitle>
-                <CardDescription>Filter by resource or action to reduce noise.</CardDescription>
-              </div>
-              <Button variant="outline" onClick={handleExportLogsPdf} disabled={isExportingLogsPdf}>
-                <Download className="mr-2 h-4 w-4" />
-                {isExportingLogsPdf ? "Exporting..." : "Logs PDF"}
-              </Button>
+          {availabilityQuery.isLoading ? <LoadingIndicator label="Loading availability…" /> : availabilityQuery.isError && !availability ? <EmptyState title="Could not load availability" description={errorMessage(availabilityQuery.error)} actionLabel="Retry" onAction={() => void availabilityQuery.refetch()} /> : availability && <>
+            <div className="grid gap-4 border-y border-border/70 py-4 sm:grid-cols-3">
+              <div><p className="text-xs text-muted-foreground">Uptime of known time</p><p className="mt-1 text-2xl font-semibold">{availability.summary.uptime_percent === null ? "No known time" : `${availability.summary.uptime_percent}%`}</p></div>
+              <div><p className="text-xs text-muted-foreground">Estimated outage</p><p className="mt-1 text-2xl font-semibold">{formatDuration(availability.summary.estimated_offline_seconds)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Unknown time</p><p className="mt-1 text-2xl font-semibold">{formatDuration(availability.summary.unknown_seconds)}</p></div>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-wrap gap-3">
-              <Input
-                placeholder="Filter by resource type (e.g., screen, schedule)"
-                className="max-w-xs"
-                value={resourceFilter}
-                onChange={(e) => setResourceFilter(e.target.value)}
-              />
-              <Input
-                placeholder="Filter by action (e.g., UPDATE, DELETE)"
-                className="max-w-xs"
-                value={actionFilter}
-                onChange={(e) => setActionFilter(e.target.value)}
-              />
-            </div>
-            <div className="space-y-3">
-              {auditLogsQuery.isLoading
-                ? auditPlaceholder
-                : (
-                    <Accordion type="single" collapsible className="space-y-3">
-                      {auditLogs.map((log) => (
-                        <AuditLogCard key={log.id} log={log} />
-                      ))}
-                    </Accordion>
-                  )}
-              {!auditLogsQuery.isLoading && auditLogs.length === 0 && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground">No logs found.</div>
-              )}
-            </div>
-            {!auditLogsQuery.isLoading && auditLogs.length > 0 && (
-              <div className="space-y-2 pt-2">
-                <p className="text-sm text-muted-foreground">
-                  Showing {auditLogsRangeStart}-{auditLogsRangeEnd} of {auditLogsTotal} logs
-                </p>
-                <PageNavigation
-                  currentPage={auditLogsPage}
-                  totalPages={auditLogsTotalPages}
-                  onPageChange={setAuditLogsPage}
-                  showPageNumbers
-                />
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            <p className="text-xs text-muted-foreground">Fleet totals add time across screens. Unknown time is excluded from uptime percentage. Reporting timezone: {availability.range.timezone}.</p>
+            {availabilityQuery.isError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh availability. Showing the last loaded result. <Button variant="outline" size="sm" onClick={() => void availabilityQuery.refetch()}>Retry</Button></div>}
+            {availabilityQuery.isFetching && !availabilityQuery.isLoading && <p className="text-xs text-muted-foreground" aria-live="polite">Updating availability…</p>}
+            {availability.screens.length === 0 ? <EmptyState title="No registered screens" description="Availability will appear after screens are registered and begin reporting." /> : <>
+              <div className="hidden overflow-x-auto border-y lg:block"><table className="w-full min-w-[780px] text-sm"><thead><tr className="text-left text-muted-foreground"><th className="px-3 py-3 font-medium">Screen</th><th className="px-3 py-3 font-medium">Uptime</th><th className="px-3 py-3 font-medium">Estimated outage</th><th className="px-3 py-3 font-medium">Unknown</th><th className="px-3 py-3 font-medium">Last heartbeat</th></tr></thead><tbody>{availability.screens.map((screen) => <tr key={screen.screen_id} className="border-t"><td className="px-3 py-3 font-medium">{screen.screen_name}</td><td className="px-3 py-3">{screen.never_seen ? "Never seen" : screen.uptime_percent === null ? "No known time" : `${screen.uptime_percent}%`}</td><td className="px-3 py-3">{screen.never_seen ? "—" : formatDuration(screen.estimated_offline_seconds)}</td><td className="px-3 py-3">{formatDuration(screen.unknown_seconds)}</td><td className="px-3 py-3">{screen.last_heartbeat_at ? formatAuditTimestamp(screen.last_heartbeat_at) : "Never seen"}</td></tr>)}</tbody></table></div>
+              <div className="space-y-0 border-y lg:hidden">{availability.screens.map((screen) => <article key={screen.screen_id} className="space-y-2 border-b py-4 last:border-0"><h3 className="font-medium">{screen.screen_name}</h3><dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm"><dt className="text-muted-foreground">Uptime</dt><dd>{screen.never_seen ? "Never seen" : screen.uptime_percent === null ? "No known time" : `${screen.uptime_percent}%`}</dd><dt className="text-muted-foreground">Outage</dt><dd>{screen.never_seen ? "—" : formatDuration(screen.estimated_offline_seconds)}</dd><dt className="text-muted-foreground">Unknown</dt><dd>{formatDuration(screen.unknown_seconds)}</dd><dt className="text-muted-foreground">Last heartbeat</dt><dd>{screen.last_heartbeat_at ? formatAuditTimestamp(screen.last_heartbeat_at) : "Never seen"}</dd></dl></article>)}</div>
+            </>}
+          </>}
+        </section>
 
-      {canReadReports && (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Bell className="h-4 w-4" />
-                Latest Notifications
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {notificationsQuery.isLoading && (
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-48" />
-                  <Skeleton className="h-4 w-40" />
-                  <Skeleton className="h-4 w-32" />
-                </div>
-              )}
-              {!notificationsQuery.isLoading && notifications.length === 0 && (
-                <p className="text-sm text-muted-foreground">No notifications yet.</p>
-              )}
-              {notifications.map((n) => (
-                <div key={n.id} className="flex items-start justify-between rounded-md border p-3">
-                  <div>
-                    <p className="font-medium text-sm">{n.title ?? "Notification"}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{n.body ?? ""}</p>
-                  </div>
-                  {!n.read && <Badge variant="secondary">New</Badge>}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+        {canReadProofOfPlay && <section aria-labelledby="recent-playback-heading" className="space-y-3 border-t border-border/70 pt-6">
+          <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 id="recent-playback-heading" className="text-lg font-semibold">Recent playback reports</h2><p className="mt-1 text-sm text-muted-foreground">Player reports do not prove what appeared on the physical display.</p></div><div className="flex flex-wrap gap-2"><Button asChild variant="outline" size="sm"><Link to="/proof-of-play">View all</Link></Button><Button variant="outline" size="sm" onClick={() => void handleExportCsv()} disabled={isExportingCsv}><Download aria-hidden="true" className="mr-2 h-4 w-4" />{isExportingCsv ? "Exporting…" : "Export CSV"}</Button></div></div>
+          {popQuery.isLoading ? <LoadingIndicator label="Loading playback reports…" /> : popQuery.isError && !popQuery.data ? <EmptyState title="Could not load playback reports" description={errorMessage(popQuery.error)} actionLabel="Retry" onAction={() => void popQuery.refetch()} /> : popItems.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No playback reports recorded yet.</p> : <div className="divide-y border-y">{popItems.map((item) => <div key={item.id} className="flex flex-wrap items-start justify-between gap-2 py-3 text-sm"><div><p className="font-medium">{item.media_name || (item.media_id ? "Media unavailable" : "Media unspecified")} <span className="font-normal text-muted-foreground">on {item.screen_name || "Screen unavailable"}</span></p><p className="mt-1 text-xs text-muted-foreground">{formatAuditTimestamp(item.started_at || item.played_at)}{item.page_number ? ` · Page ${item.page_number}` : ""}</p></div><Badge variant={item.status === "INCOMPLETE" ? "destructive" : "outline"}>{item.status === "COMPLETED" ? "Completed" : item.status === "INCOMPLETE" ? "Incomplete" : "Outcome unknown"}</Badge></div>)}</div>}
+          {popQuery.isError && popQuery.data && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh playback reports. Showing the last loaded records. <Button variant="outline" size="sm" onClick={() => void popQuery.refetch()}>Retry</Button></div>}
+        </section>}
+      </TabsContent>}
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                Emergency Status
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {emergencyQuery.isLoading ? (
-                <Skeleton className="h-6 w-24" />
-              ) : (
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <p className="text-lg font-semibold">
-                      {emergencyStatus?.active ? "ACTIVE" : "CLEAR"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {emergencyStatus?.active
-                        ? `${emergencyStatus.active_count ?? emergencyStatus.active_emergencies?.length ?? 1} active emergency${(emergencyStatus.active_count ?? emergencyStatus.active_emergencies?.length ?? 1) > 1 ? "ies" : ""}`
-                        : "No active incident"}
-                    </p>
-                    {emergencyStatus?.emergency?.message && (
-                      <p className="text-xs text-muted-foreground">
-                        {emergencyStatus.emergency.severity}: {emergencyStatus.emergency.message}
-                      </p>
-                    )}
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => navigate("/schedule")}
-                  >
-                    Manage
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {canReadReports && (
-        <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Media</CardTitle>
-                <Activity className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                {summaryQuery.isLoading ? (
-                  <Skeleton className="h-7 w-16" />
-                ) : (
-                  <div className="text-2xl font-bold">{summary?.media_total ?? 0}</div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Active Screens</CardTitle>
-                <Monitor className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                {summaryQuery.isLoading ? (
-                  <Skeleton className="h-7 w-16" />
-                ) : (
-                  <div className="text-2xl font-bold">{summary?.screens_active ?? 0}</div>
-                )}
-              </CardContent>
-            </Card>
-
-          </div>
-
-          <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <CardTitle>Player Availability</CardTitle>
-                  <CardDescription>
-                    Server-received heartbeats; a gap beyond 90 seconds is estimated offline. Backend gaps stay unknown.
-                  </CardDescription>
-                </div>
-                <label className="flex items-center gap-2 text-sm">
-                  Period
-                  <select
-                    aria-label="Availability period"
-                    className="rounded-md border bg-background px-3 py-2"
-                    value={availabilityDays}
-                    onChange={(event) => setAvailabilityDays(Number(event.target.value))}
-                  >
-                    <option value={1}>Last 24 hours</option>
-                    <option value={7}>Last 7 days</option>
-                    <option value={30}>Last 30 days</option>
-                  </select>
-                </label>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {availabilityQuery.isLoading ? (
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Skeleton className="h-20" />
-                  <Skeleton className="h-20" />
-                  <Skeleton className="h-20" />
-                </div>
-              ) : (
-                <>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="rounded-md border p-3">
-                      <p className="text-xs text-muted-foreground">Uptime of known time</p>
-                      <p className="mt-1 text-2xl font-bold">
-                        {availability?.summary.uptime_percent === null || availability?.summary.uptime_percent === undefined
-                          ? "No known time"
-                          : `${availability.summary.uptime_percent}%`}
-                      </p>
-                    </div>
-                    <div className="rounded-md border p-3">
-                      <p className="text-xs text-muted-foreground">Estimated outage</p>
-                      <p className="mt-1 text-2xl font-bold">{formatDuration(availability?.summary.estimated_offline_seconds)}</p>
-                    </div>
-                    <div className="rounded-md border p-3">
-                      <p className="text-xs text-muted-foreground">Unknown time</p>
-                      <p className="mt-1 text-2xl font-bold">{formatDuration(availability?.summary.unknown_seconds)}</p>
-                    </div>
-                  </div>
-                  <div className="overflow-x-auto rounded-md border">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/40 text-left">
-                        <tr>
-                          <th className="px-3 py-2 font-medium">Screen</th>
-                          <th className="px-3 py-2 font-medium">Uptime</th>
-                          <th className="px-3 py-2 font-medium">Estimated outage</th>
-                          <th className="px-3 py-2 font-medium">Unknown</th>
-                          <th className="px-3 py-2 font-medium">Last heartbeat</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(availability?.screens ?? []).map((screen) => (
-                          <tr key={screen.screen_id} className="border-t">
-                            <td className="px-3 py-2 font-medium">{screen.screen_name}</td>
-                            <td className="px-3 py-2">
-                              {screen.never_seen ? "Never seen" : screen.uptime_percent === null ? "No known time" : `${screen.uptime_percent}%`}
-                            </td>
-                            <td className="px-3 py-2">{screen.never_seen ? "—" : formatDuration(screen.estimated_offline_seconds)}</td>
-                            <td className="px-3 py-2">{formatDuration(screen.unknown_seconds)}</td>
-                            <td className="px-3 py-2">
-                              {screen.last_heartbeat_at ? formatAuditTimestamp(screen.last_heartbeat_at) : "Never seen"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {(availability?.screens.length ?? 0) === 0 && (
-                      <p className="px-3 py-6 text-center text-muted-foreground">No registered screens in this period.</p>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Reporting timezone: {availability?.range.timezone ?? "Asia/Kolkata"}. Unknown time is excluded from uptime percentage.
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <CardTitle>Recent Proof-of-Play</CardTitle>
-                  <CardDescription>Latest playbacks reported by devices.</CardDescription>
-                </div>
-                <Button variant="outline" onClick={handleExportCsv} disabled={isExportingCsv}>
-                  <Download className="mr-2 h-4 w-4" />
-                  {isExportingCsv ? "Exporting..." : "Export CSV"}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {popQuery.isLoading ? (
-                Array.from({ length: 6 }).map((_, idx) => <Skeleton key={idx} className="h-10" />)
-              ) : popItems.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No proof-of-play events recorded yet.</p>
-              ) : (
-                popItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0 text-sm"
-                  >
-                    <div>
-                      <div className="font-semibold">Media: {item.media_id}</div>
-                      <div className="text-muted-foreground text-xs">
-                        Screen: {item.screen_id} · {new Date(item.played_at || item.created_at || "").toLocaleString()}
-                      </div>
-                    </div>
-                    <Badge variant="outline">Played</Badge>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
-    </div>
-  );
+      {canReadAuditLogs && <TabsContent value="audit" className="mt-5 space-y-5">
+        <section aria-labelledby="audit-heading" className="space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 id="audit-heading" className="text-lg font-semibold">Audit Logs</h2><p className="mt-1 text-sm text-muted-foreground">Review who changed a resource and when.</p></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => void auditLogsQuery.refetch()} disabled={auditLogsQuery.isFetching}><RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" />Refresh</Button><Button variant="outline" size="sm" onClick={() => void handleExportLogsPdf()} disabled={isExportingLogsPdf}><Download aria-hidden="true" className="mr-2 h-4 w-4" />{isExportingLogsPdf ? "Exporting…" : "Logs PDF"}</Button></div></div>
+          <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1"><Label htmlFor="audit-resource">Resource type</Label><Input id="audit-resource" placeholder="e.g. Screen" value={resourceFilter} onChange={(event) => setResourceFilter(event.target.value)} /></div><div className="space-y-1"><Label htmlFor="audit-action">Action</Label><Input id="audit-action" placeholder="e.g. UPDATE" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)} /></div></div>
+          <p className="text-sm text-muted-foreground" aria-live="polite">{auditLogsQuery.isLoading ? "Loading logs…" : `${auditLogsTotal} ${auditLogsTotal === 1 ? "log" : "logs"}`}{auditLogsQuery.isFetching && !auditLogsQuery.isLoading ? " · Updating" : ""}</p>
+          {auditLogsQuery.isLoading ? <div className="space-y-3">{auditPlaceholder}</div> : auditLogsQuery.isError && !auditLogsQuery.data ? <EmptyState title="Could not load audit logs" description={errorMessage(auditLogsQuery.error)} actionLabel="Retry" onAction={() => void auditLogsQuery.refetch()} /> : auditLogs.length === 0 ? <EmptyState title="No logs match these filters" description="Try another resource or action." /> : <Accordion type="single" collapsible className="border-t">{auditLogs.map((log) => <AuditLogCard key={log.id} log={log} />)}</Accordion>}
+          {auditLogsQuery.isError && auditLogsQuery.data && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh audit logs. Showing the last loaded page. <Button variant="outline" size="sm" onClick={() => void auditLogsQuery.refetch()}>Retry</Button></div>}
+          {auditLogs.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-muted-foreground">Showing {auditLogsRangeStart}–{auditLogsRangeEnd} of {auditLogsTotal}</p><PageNavigation currentPage={auditLogsPage} totalPages={auditLogsTotalPages} onPageChange={setAuditLogsPage} showPageNumbers /></div>}
+        </section>
+      </TabsContent>}
+    </Tabs>
+  </div>;
 }
