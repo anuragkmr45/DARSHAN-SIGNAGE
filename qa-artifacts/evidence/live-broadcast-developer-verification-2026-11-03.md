@@ -1,6 +1,6 @@
 # Live broadcast developer verification — 2026-11-03
 
-Status: **IN PROGRESS — LOOP 0 IN PROGRESS; LOOP 1 UNDER DEVELOPMENT.**
+Status: **IN PROGRESS — PARTIAL SOURCE/PUBLICATION IMPLEMENTATION VERIFIED; RUN/PLAYER/CMS INTEGRATION OPEN.**
 This is a developer work record, not a completed feature or independent-QA pass.
 
 ## Recorded baseline
@@ -32,21 +32,22 @@ Six initial VM roles, ten concurrent broadcasts, one presenter, 25 approved
 screens/run; fullscreen video and browser-supported optional audio; approved
 window/frozen audience; verified pinned fallback; missing/corrupt fallback is
 Content unavailable; renew every 3 seconds, live cutoff within 10 seconds,
-local schedule end within 1 second. These are acceptance targets, not measured
-results. LiveKit remains conditional on actual enforcement evidence.
+local schedule end within 1 second. These are final feature acceptance targets;
+scoped prototype measurements below do not establish integrated completion.
+The full media-engine enforcement/browser/audio matrix remains open.
 
 ## Loop ledger
 
 | Loop | Status | Evidence |
 | --- | --- | --- |
-| 0 baseline | In progress — ordinary/emergency pixels observed | Root observed CMS login/pair/approve/publish/emergency/clear; own screenshot command confirmed ordinary NORMAL CONTENT pixels after clear. Security/offline baseline still pending; no transition timing pass. |
-| 1 capture/enforcement | In progress — partial technical runtime | Root reported real getDisplayMedia capture/first-frame event; a later separate transport prototype PNG shows decoded counter pixels. No physical audio/security-cutoff evidence or completed loop pass. |
-| 2 scheduling/reservations | Not executed | Pending |
-| 3 authority/recovery | Not executed | Pending |
-| 4 player behavior | Not executed | Pending |
-| 5 CMS options | Not executed | Pending |
-| 6 deployment/faults | Not executed | Pending |
-| 7 integrated handoff | Not executed | Pending |
+| 0 baseline | In progress; ordinary/emergency/security recovery evidence recorded | Actual baseline CMS/player pixels and later security-lock recovery appear below; no complete independent baseline sign-off. |
+| 1 capture/enforcement | Technical evidence recorded; gate open | Actual capture/decoded frames, measured prototype cutoff/controller faults and tmpfs watchdog evidence appear below; browser/audio/host matrix and final integrated receiver remain open. |
+| 2 scheduling/reservations | Partial implementation verified | Source/fallback/capacity foundation plus current frozen request/direct publication, ACL/read-model/reference guards and 55-check running-service evidence; full CMS workflow remains open. |
+| 3 authority/recovery | Production integration not executed | Prototype enforcement does not implement scheduled run/admission/epoch/reconciliation authority. |
+| 4 player behavior | Cache-pin foundation verified; integration open | Normal-player live coordinator/renderer and fallback lifecycle do not consume the final feature; normal live capability remains withheld. |
+| 5 CMS options | Source page implemented and browser exercised | Create/view/audio edits/retry and same-admin stale-tab recovery observed; presenter/capture/publishing wizard and independent accounts remain open. |
+| 6 deployment/faults | Production role integration not executed | Prototype TLS/media faults do not establish six-VM offline deployment/restore. |
+| 7 integrated handoff | Evidence updated; completion open | Full ordinary-player CMS journey, stable broader regression, frozen artifacts and human handoff remain. |
 
 ## Runtime evidence to append as executed
 
@@ -59,8 +60,8 @@ private keys or generated runtime folders here.
 
 At the initial documentation checkpoint no live automated/runtime execution was
 claimed. The partial root-reported technical run below supersedes that initial
-absence for its stated scope only. No completed SFU enforcement or integrated
-scheduled feature journey is claimed; root execution must add outcomes and
+absence for its stated scope only. No completion of the full SFU acceptance
+matrix or integrated scheduled feature journey is claimed; root execution must add outcomes and
 defects before closing any loop.
 
 ## Remaining independent/release gates
@@ -777,3 +778,40 @@ The final equivalent HLS control-character lint correction reran20/20 focused
 checks and the complete server build. Fresh API/worker processes then reran the
 real three-asset preparation checks. The artifact distinguishes the earlier
 actual FFmpeg helper checksum from the final compiled modules.
+
+
+### Publication, read authorization and source UI packet
+
+The [dated publication/authorization report](live-publication-authorization-developer-verification-2026-11-03.md) supersedes the earlier foundation-only publication status for its explicit scope.
+Capability-gated direct and request publication now persist frozen per-item
+policy/audience and authored group provenance; current row-bound reads, URL
+signing, normalized reference guards and source UI have focused evidence.
+The real service verifier passed55 supporting checks and15 immutable SHA
+checks; all three own publications were taken down with history retained.
+
+The final source packet is not a completed broadcast feature: production run
+admission/epoch authority, the normal installed player's live lifecycle,
+presenter controls, full CMS publishing wizard and offline artifacts remain
+open. See the new report for final CMS build/artifact-binding slots. All human
+LIVE cases and QA-owned fields remain unchanged.
+
+
+Final current-source packet:62/62 focused checks across4 files under Node20/
+TZ Asia/Kolkata; the earlier25/20/17 subsets are superseded, not additional
+unique cases. Broader affected server regression passed52/52 across8 files on
+an owned disposable database. Final CMS units passed182/182 across29 files;
+production build/budget passed in22.61s (219.3KiB /69.4KiB gzip). Root observed
+same-admin stale-tab409/reload, readable proxy failure/retry after API restart,
+and disabled-source filter/soft-delete behavior. The dated report preserves the
+scope and reviewed pixel artifact. These close bounded packet checks only;
+the final normal-player/presenter journey and all independent LIVE QA remain open.
+
+
+Source binding for this packet:
+`8041a509fea6af5421c9f6d150eee8975585b354`. The
+[developer build manifest](runtime-live-2026-11-03/live-publication-build-binding.json)
+records all338 server JavaScript and91 CMS HTML/CSS/JavaScript files with
+per-file hashes and an explicit path/size/SHA tree algorithm. Those are compiled
+developer outputs, not TGZ/release artifacts; private configuration and ongoing
+player work are excluded. The publication report records exact tree hashes and
+preserves the incomplete feature/human QA boundary.

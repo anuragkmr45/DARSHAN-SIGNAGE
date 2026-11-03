@@ -136,3 +136,11 @@ developer evidence, not an independent QA or release pass.
   (`LIVE-19..20`). Existing unrelated blockers remain open.
 
 Current status is in progress; no new item above is a pass. See [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).
+
+
+Capability-gated publication and its supporting API/DB/MinIO checks now exist.
+The normal player still withholds live capability; run authority, complete
+same-player/CMS journeys and sixth-role artifacts are unfinished. This packet
+cannot be released as the completed live feature, and no checkbox above is
+closed by developer source/fixture evidence.
+See [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).

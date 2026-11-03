@@ -96,7 +96,7 @@ and boundedly verified several of them, as recorded in the current checkpoint.
 
 ### Current scheduling/publication checkpoint
 
-On baseline `339954b` plus the publication/authorization working-tree packet,
+Committed packet `8041a50` follows foundation `339954b`. In that checkpoint,
 source CRUD/authoring and asynchronous immutable fallback preparation feed
 live preflight, direct publication and stored request approval. Actual isolated
 HTTP services passed 55 supporting checks, including 15 SHA-verified image/PDF/

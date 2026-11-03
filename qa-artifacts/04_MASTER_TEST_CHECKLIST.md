@@ -113,3 +113,10 @@ separate receiver application cannot close those integrated cases.
 For every fault record trigger, visible display, audio, allowed recovery and
 cleanup. [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md) is an in-progress developer ledger;
 all new human cases remain Not Tested.
+
+
+Current developer coverage for LIVE-02..05/08/19 includes the final62-check/4-file packet (25 publishing/read/authoring,20
+source/reference ACL and17 pure delivery/read-model checks) plus55 supporting running-service checks with15 verified downloads.
+Source-page browser observations are separate. Repeat through the actual CMS
+publishing and ordinary-player workflow; all checkboxes above remain open.
+See [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).

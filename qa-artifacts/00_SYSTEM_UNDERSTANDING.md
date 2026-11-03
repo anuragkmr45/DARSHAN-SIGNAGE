@@ -250,10 +250,10 @@ The detailed cases, traceability, security/performance/reliability plans, data r
 
 ## Live broadcast implementation delta — 2026-11-03
 
-Status: **live implementation in progress, not runtime verified or release-approved**.
+Status: **partial live source/publication implementation verified; complete feature and release approval remain open**.
 Starting feature baseline is `499bcdf` on
-`codex/live-screen-broadcast-planning-20261103`; loop 0 is in progress and loop 1
-is being built. Historical source counts/checkpoints above are not a refreshed
+`codex/live-screen-broadcast-planning-20261103`; current source extends committed
+foundation `339954b` with verified publication/authorization/CMS packet `8041a50`. Historical source counts/checkpoints above are not a refreshed
 live implementation inventory. See [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).
 
 The final feature is a scheduled live event/media source inside the same
@@ -276,3 +276,10 @@ not media tickets. Additional departments do not grant global display control.
 
 Human cases `LIVE-01..20` remain Not Tested. Local developer verification and
 external Windows/browser/physical/cross-VM/restore/capacity evidence are separate.
+
+The current backend supports frozen request/direct publication, scoped snapshot
+reads and immutable download delivery; 55 actual-service checks and15 SHA
+verifications are recorded in [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+The CMS source page has real-browser evidence. Run/admission authority, same
+ordinary-player live integration, complete CMS controls and six-VM artifacts
+are unfinished; server publication fixtures are unpaired synthetic screens.

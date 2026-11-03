@@ -381,10 +381,10 @@ This new delta uses [live implementation loops](../docs/plans/live-broadcast-imp
 | --- | --- | --- |
 | 0 baseline | In progress | Current CMS/real-player ordinary playback/emergency/offline baseline and isolated inventory |
 | 1 capture/enforcement | Prototype evidence recorded; gate open | Real capture/SFU/Electron evidence and tmpfs watchdog checks exist; native capture/audio matrix, current packaged receiver runtime and production host actuation still need closure |
-| 2 reservations | API/database/fallback foundations in progress | Source authoring, frozen policy/capacity and immutable preparation have focused developer checks; full request/direct publication wiring and CMS journeys remain |
+| 2 reservations | Frozen source/preparation/publication and ACL packet partially verified | Actual-service request/direct publication and SHA downloads passed; complete real CMS publishing workflow and normal-player integration remain |
 | 3 authority | Not executed | Idempotency/generations/current permissions/epoch/reconciliation with actual media faults |
 | 4 player | Verified cache-pin primitive; integration not executed | Same ordinary installed DARSHAN player scheduled live source and normal pairing/cache/emergency integration; deadline/fallback/precedence/cleanup journeys |
-| 5 CMS | Not executed | Every real visible control and denied/stale/multiple-session path |
+| 5 CMS | Source authoring implemented; partial actual browser evidence | Create/view/audio edits/retry and same-admin stale409/reload observed; full wizard, presenter controls and independent accounts remain |
 | 6 deployment | Not executed | Offline sixth role, TLS/transports, disable/update/restore/rollback |
 | 7 handoff | Not executed | Stable-packet regression, dated artifacts and concrete independent human checks |
 
@@ -392,3 +392,8 @@ Each loop is inspect→implement→focused checks→actual application→fault�
 repeat affected paths→evidence→commit. A failure blocks that loop. Resource-
 bounded local verification is not 250-player/Windows/physical/network approval.
 Developer ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md); human cases remain Not Tested.
+
+Current packet detail: [publication/authorization developer verification](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+Backend publication is capability-gated and its fixtures do not advertise a
+capability on a deployed player. The new evidence does not close these loops
+or alter independent human QA status.

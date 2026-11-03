@@ -96,3 +96,18 @@ whole-machine sleep with separate Backend and cross-VM partitions remain
 external. Never commit generated credentials/keys/certificates/profiles.
 
 [Execution plan](../docs/plans/live-broadcast-implementation-loops.md); [in-progress ledger](evidence/live-broadcast-developer-verification-2026-11-03.md).
+
+
+### Publication/authorization fixture checkpoint — 2026-11-03
+
+The current [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md)
+records two newly inserted, unpaired OFFLINE fixture screens with explicit test
+capabilities, three own schedules/publications, one request and one own source/
+group. The existing real paired player is excluded. Actual source/group/
+schedule/request/publish/takedown actions use REST; SQL writes insert only the
+two fixture screens. Every own publication was taken down, logical/screen
+reservations released and history retained. Draft/source/screens remain named
+fixtures; this is not whole-environment cleanup or normal-player acceptance.
+The committed sanitized JSON contains IDs/statuses/hashes, never configuration,
+passwords, cookies, signed URLs or private keys. Existing environment and
+production safety rules remain unchanged.

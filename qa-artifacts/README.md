@@ -1,12 +1,12 @@
 # DARSHAN Human QA Planning Package
 
-> **Live broadcast delta — 2026-11-03:** implementation is in progress on
-> `codex/live-screen-broadcast-planning-20261103` from `499bcdf`. Loop 0 is in
-> progress and loop 1 is being built. Accepted behavior is in
-> `../docs/contracts/live-broadcast.md`; ordered execution is in
-> `../docs/plans/live-broadcast-implementation-loops.md`. The in-progress ledger
-> `evidence/live-broadcast-developer-verification-2026-11-03.md` claims no completed
-> live runtime pass. `LIVE-01..20` remain **Not Tested**.
+> **Live broadcast delta — 2026-11-03:** partial source/fallback/publication
+> implementation is verified on `codex/live-screen-broadcast-planning-20261103`.
+> The 55-check real-service packet, source UI observations and precise remaining
+> gates are in [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+> Run/admission authority, normal-player live integration and complete CMS
+> presenter/publishing controls remain open. `LIVE-01..20` stay **Not Tested**;
+> no full-feature, beta or release pass is claimed.
 
 Status: **PRE-QA DEVELOPMENT VERIFICATION IN PROGRESS; not release-approved.**
 The document/video/boundary/security-recovery upgrade has passed focused and
@@ -87,6 +87,7 @@ must not be read as runtime completion or independent QA approval.
 19. [Playback/recovery developer verification](evidence/playback-recovery-developer-verification-2026-10-21.md): requirements 19-24 implementation, automated results, two Linux Electron runs, selected screenshots and remaining independent-QA gates.
 20. [Player delivery, availability and observability developer verification](evidence/dashboard-observability-report-developer-verification-2026-11-02.md): beta6 automated, source-free and packaged-player evidence plus the exact five-VM and physical-player gates still open.
 21. [Chat and notification developer verification](evidence/chat-notifications-developer-verification-2026-11-03.md): local three-session behavior, corrected defects, automated checks and remaining independent QA gates. Execute `CHAT-01..08` for the human matrix.
+22. [Live publication/authorization developer verification](evidence/live-publication-authorization-developer-verification-2026-11-03.md): capability-gated frozen request/direct publication, scoped reads, real-service immutable downloads and source UI observations; the normal-player broadcast workflow and independent `LIVE-01..20` execution remain open.
 
 The inventory is supporting evidence, not a completed authorization audit. Source references are repository-relative. Only results explicitly linked to the dated runtime report are current execution evidence; test-file presence and historical QA reports do not mean tests currently pass.
 
@@ -140,7 +141,7 @@ Priority distribution: 114 P0, 35 P1 and 1 P2. Thirty cases are `Partially Teste
 
 The tracked-file index was obtained with Git. TypeScript syntax trees were read without executing application modules to enumerate explicit `fastify` route declarations, resolve their `apiEndpoints` strings, and enumerate CMS routes and Drizzle tables/enums. Existing tests were inventoried by tracked filename. Detailed analysis used targeted reads across handlers, policy helpers, repositories, services, schemas, migrations, renderer/main-process code, configuration loaders, release scripts, representative tests, and contracts.
 
-The inventory excludes generated framework routes from its route count, and excludes SQL-only and pg-boss tables from its Drizzle-table count. The semantic QA documents were refreshed for the document/video and beta6 delivery/availability/observability deltas, but this is not a new audit of every unrelated route. Vendored dependencies, generated builds, binary installers, local output/log directories, private configuration and credentials were not audited.
+The inventory excludes generated framework routes from its route count, and excludes SQL-only and pg-boss tables from its Drizzle-table count. The semantic QA documents were refreshed for the document/video, beta6 delivery/availability/observability and scoped live-publication deltas, but this is not a new audit of every unrelated route. The original repository-inventory JSON is a historical source snapshot; current live module/API details and evidence are in the live contract and dated publication report. Vendored dependencies, generated builds, binary installers, local output/log directories, private configuration and credentials were not audited.
 
 ## Live broadcast implementation delta — 2026-11-03
 
@@ -151,10 +152,14 @@ New scope is `UC-030..032`, `BR-109..116`, `BQ-027`, `R-44..51`, `LIVE-01..20`.
 
 The finished feature is a scheduled live event/media source in the same ordinary
 installed DARSHAN desktop player and normal pairing/lifecycle/cache/emergency.
-The temporary prototype is a technical gate. Root reported a real capture and
-receiver first-frame event during loop 1, with interrupted disconnect/fallback;
-no pixel artifact, physical sound, measured cutoff or completed loop-1 pass is
-claimed. See the dated ledger for the exact partial observation.
+The temporary prototype is a technical gate. Current code additionally implements
+source authoring, immutable fallback preparation and capability-gated frozen
+request/direct publication. The actual running-service verifier passed55
+supporting checks and15 SHA-verified image/PDF/video downloads. Root observed
+source UI create/view/audio edits/retry and same-admin stale-tab recovery.
+None establishes run admission, normal-player live rendering, complete CMS
+presenter controls or independent human acceptance. See the dated publication
+report and ledger for exact evidence and remaining gates.
 
 Use [contract](../docs/contracts/live-broadcast.md), [execution loops](../docs/plans/live-broadcast-implementation-loops.md) and
 [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md). The expected behavior is accepted; code and

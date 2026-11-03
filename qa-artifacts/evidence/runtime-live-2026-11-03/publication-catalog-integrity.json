@@ -1,0 +1,28 @@
+{
+  "scope": "Documentation/catalog integrity only; no human execution or product acceptance.",
+  "counts": {
+    "risks": 51,
+    "cases": 150,
+    "traceability_rows": 152
+  },
+  "case_statuses": {
+    "Not Tested": 120,
+    "Partially Tested": 30
+  },
+  "priorities": {
+    "P0": 114,
+    "P1": 35,
+    "P2": 1
+  },
+  "live_cases_not_tested": 20,
+  "qa_owned_fields_unchanged_from_HEAD": true,
+  "trace_coverage_status_unchanged_from_HEAD": true,
+  "only_selected_developer_note_fields_changed": true,
+  "ids_unique_and_references_resolved": true,
+  "all_expected_results_populated": true,
+  "csv_sha256": {
+    "03_RISK_REGISTER.csv": "095c79114beda1c27ceb9a29c89649aca7dc31d0e5439ce214f40cd1c30eb5b1",
+    "05_TEST_CASES.csv": "07fb1e0bd09a2aff6a8a4dcd5793ee8f8f9053418f6b4f859d273fb06ad4de17",
+    "06_TRACEABILITY_MATRIX.csv": "d251c22f01dd02e1ddb19b6b266ee4ad97ec2fe90cdb3120471524d1f2efda91"
+  }
+}

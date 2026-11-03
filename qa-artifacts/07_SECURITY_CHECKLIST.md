@@ -47,3 +47,12 @@ Security cases are planned assessments, not penetration-test results. Record evi
 
 Security cases are planned, not assessed/passed. See [contract](../docs/contracts/live-broadcast.md) and
 [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md); retain existing human security/release controls.
+
+
+The current publication packet corrects conditional Schedule/Request read
+leaks (including list/summary totals), cross-account pending CMS GET reuse,
+CMS Screen/Group authorization before URL signing, and frozen group/reference
+guards. Genuine device-signed access has a positive test; foreign conditional
+CMS bearer reads deny. These are bounded developer results, not completion of
+presenter revocation, media admission or independent browser security testing.
+See [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).

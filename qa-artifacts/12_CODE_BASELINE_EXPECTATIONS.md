@@ -88,9 +88,16 @@ the production service context. The current scheduling foundation adds
 migrations 0057/0058, live-source CRUD, LIVE draft fields, immutable asynchronous
 fallback preparation and shared screen/live reservation services. Its 39-case
 database/API packet and 68-case focused unit packet pass, as do the server build
-and real local queued image/PDF/video preparation checks. LIVE publication
-remains guarded until complete route/snapshot integration lands. These
-foundations do not establish the complete CMS-to-player journey.
+and real local queued image/PDF/video preparation checks. Publication packet
+`8041a50` connects frozen request/direct snapshots, current read ACL before URL
+signing, group provenance and normalized reference guards. The actual service
+verifier passed55 supporting checks/15 SHA downloads; publishing/read+authoring
+passed the final62-check/4-file packet (25 publication/authoring,20 ACL and17
+pure frozen-reader checks). Source
+UI observations and final build details are in [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+Normal-player live capability remains withheld: production run/admission
+control, complete CMS workflow and the same-player coordinator are unfinished.
+These foundations do not establish the complete CMS-to-player journey.
 Update this checkpoint with each verified packet. Do not mark human cases Pass.
 
 Current delta ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md); cases `LIVE-01..20`.
