@@ -2,6 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { closeTestServer, createTestServer, generateTestToken, testUser } from '@/test/helpers';
 import { HTTP_STATUS } from '@/http-status-codes';
+import { randomUUID } from 'crypto';
+import { eq } from 'drizzle-orm';
+import { getDatabase, schema } from '@/db';
+import { generateAccessToken } from '@/auth/jwt';
+import { createSessionRepository } from '@/db/repositories/session';
 
 describe('Department routes', () => {
   let server: FastifyInstance;
@@ -83,5 +88,51 @@ describe('Department routes', () => {
       message: 'Department deleted successfully',
       id: created.id,
     });
+  });
+
+  it('searches operator names only for actors allowed to read Users', async () => {
+    const db = getDatabase();
+    const departmentId = randomUUID();
+    const marker = randomUUID().replace(/-/g, '');
+    await db.insert(schema.departments).values({ id: departmentId, name: `Operations ${marker}` });
+    const [operatorRole] = await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.name, 'OPERATOR')).limit(1);
+    if (!operatorRole) throw new Error('OPERATOR role fixture missing');
+    await db.insert(schema.users).values({
+      email: `${marker}@example.invalid`,
+      password_hash: 'not-used-for-login',
+      first_name: `Unique${marker}`,
+      role_id: operatorRole.id,
+      department_id: departmentId,
+    });
+    const issueToken = async (includeUsers: boolean) => {
+      const roleId = randomUUID();
+      const name = `Department search fixture ${roleId}`;
+      await db.insert(schema.roles).values({
+        id: roleId,
+        name,
+        permissions: { grants: [
+          { action: 'read', subject: 'Department' },
+          ...(includeUsers ? [{ action: 'read' as const, subject: 'User' as const }] : []),
+        ] },
+      });
+      const issued = await generateAccessToken(testUser.id, testUser.email, roleId, name);
+      await createSessionRepository().create({ user_id: testUser.id, access_jti: issued.jti, expires_at: issued.expiresAt });
+      return issued.token;
+    };
+    const departmentOnly = await issueToken(false);
+    const hidden = await server.inject({
+      method: 'GET', url: `/api/v1/departments?search=Unique${marker}`,
+      headers: { authorization: `Bearer ${departmentOnly}` },
+    });
+    expect(hidden.statusCode).toBe(200);
+    expect(JSON.parse(hidden.body).pagination.total).toBe(0);
+
+    const userReader = await issueToken(true);
+    const visible = await server.inject({
+      method: 'GET', url: `/api/v1/departments?search=Unique${marker}`,
+      headers: { authorization: `Bearer ${userReader}` },
+    });
+    expect(visible.statusCode).toBe(200);
+    expect(JSON.parse(visible.body).items).toContainEqual(expect.objectContaining({ id: departmentId }));
   });
 });

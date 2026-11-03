@@ -84,7 +84,7 @@ Production deployment currently uses Docker role deployments across normal Ubunt
 | `/schedule`, `/schedule/new` | `ScheduleQueue`, `ScheduleCreator` | module `schedule` | schedules, schedule requests/reservations, screens, layouts, media | CMS + Backend |
 | `/layouts`, `/layouts/new`, `/layouts/:id` | `Layouts`, `LayoutEditor` | module `layouts` | layouts, presentations/media | CMS + Backend |
 | `/requests` | `Requests` | permission `read Request` | requests, emergency controls | CMS + Backend |
-| `/departments` | `Departments` | module `departments` | departments, screen transfer | CMS + Backend |
+| `/departments` | `Departments` | `read Department`; mutation grants and `read User` separately | department list/mutations and lazy operator roster | CMS + Backend |
 | `/operators` | `Operators` | module `operators` | users/operators, departments/roles | CMS + Backend |
 | `/users` | `Users` | module `users` | users, invites, roles | CMS + Backend |
 | `/chat`, `/chat/:conversationId`, `/chat/:conversationId/thread/:threadRootId` | `Conversations` | module `conversations` | chat API, chat socket | CMS + Backend realtime |

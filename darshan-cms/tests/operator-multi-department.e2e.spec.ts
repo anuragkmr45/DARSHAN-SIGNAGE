@@ -67,7 +67,9 @@ async function prepare(
       return respond({ items: departments, total: departments.length, page: 1, limit: 100 });
     }
     if (url.pathname === "/api/v1/users" && method === "GET") {
-      return respond({ items: [operator], total: 1, page: 1, limit: 100 });
+      const requestedDepartment = url.searchParams.get("department_id");
+      const members = !requestedDepartment || operator.department_ids.includes(requestedDepartment) ? [operator] : [];
+      return respond({ items: members, total: members.length, page: 1, limit: 100 });
     }
     if (url.pathname === `/api/v1/users/${operator.id}` && method === "PATCH") {
       const payload = route.request().postDataJSON() as Record<string, unknown>;

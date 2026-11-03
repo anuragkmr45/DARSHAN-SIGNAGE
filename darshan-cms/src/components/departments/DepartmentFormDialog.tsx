@@ -38,10 +38,14 @@ export const DepartmentFormDialog = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSubmit(
-      { name: formData.name.trim(), description: formData.description.trim() || "" },
-      department?.id
-    );
+    try {
+      await onSubmit(
+        { name: formData.name.trim(), description: formData.description.trim() || "" },
+        department?.id
+      );
+    } catch {
+      // The page reports the request failure; keep the edited values in place.
+    }
   };
 
   return (
@@ -86,7 +90,7 @@ export const DepartmentFormDialog = ({
         </form>
         {department?.id && onDelete && (
           <div className="flex items-center justify-between pt-2">
-            <div className="text-sm text-muted-foreground">Deleting will remove this department permanently.</div>
+            <div className="text-sm text-muted-foreground">Move users and content before deleting this department.</div>
             <Button
               variant="destructive"
               type="button"

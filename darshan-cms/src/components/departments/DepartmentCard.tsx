@@ -1,191 +1,63 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { useQuery } from "@tanstack/react-query";
+import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { usersApi } from "@/api/domains/users";
+import type { Department } from "@/api/types";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Monitor, MoreVertical, Edit, MapPin, Trash2, Users, Mail, CircleDot } from "lucide-react";
-import type { Department } from "@/api/types";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/common/EmptyState";
+import { LoadingIndicator } from "@/components/common/LoadingIndicator";
+import { PageNavigation } from "@/components/common/PageNavigation";
+
+const OPERATORS_PAGE_SIZE = 10;
 
 interface DepartmentCardProps {
   department: Department;
-  onEdit: (dept: Department) => void;
-  onDelete?: (dept: Department) => void;
+  canReadOperators: boolean;
+  onEdit?: (department: Department) => void;
+  onDelete?: (department: Department) => void;
 }
 
-export const DepartmentCard = ({ department, onEdit, onDelete }: DepartmentCardProps) => {
-  const operators = department.operators ?? [];
-  const [isOperatorsOpen, setIsOperatorsOpen] = useState(false);
+export const DepartmentCard = ({ department, canReadOperators, onEdit, onDelete }: DepartmentCardProps) => {
+  const [operatorsOpen, setOperatorsOpen] = useState(false);
+  const [operatorsPage, setOperatorsPage] = useState(1);
+  const operatorsQuery = useQuery({
+    queryKey: ["department-operators", department.id, operatorsPage],
+    queryFn: () => usersApi.list({ department_id: department.id, role: "OPERATOR", page: operatorsPage, limit: OPERATORS_PAGE_SIZE }),
+    enabled: canReadOperators && operatorsOpen,
+  });
+  const operators = operatorsQuery.data?.items ?? [];
+  const total = operatorsQuery.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / OPERATORS_PAGE_SIZE));
 
-  return (
-    <>
-      <Card className="transition-shadow hover:shadow-lg">
-        <CardHeader className="flex flex-row items-start justify-between pb-3">
-          <div className="space-y-1 flex-1">
-            <h3 className="font-semibold text-lg text-foreground">{department.name}</h3>
-            <p className="text-sm text-muted-foreground line-clamp-3">
-              {department.description || "No description provided."}
-            </p>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 -mt-1">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onClick={() => onEdit(department)} className="gap-2">
-                <Edit className="h-4 w-4" />
-                Edit
-              </DropdownMenuItem>
-              {onDelete && (
-                <DropdownMenuItem
-                  onClick={() => onDelete(department)}
-                  className="gap-2 text-destructive focus:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Monitor className="h-4 w-4" />
-            <span>Department ID</span>
-            <Badge variant="outline">{department.id}</Badge>
-          </div>
-          {department.description && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <MapPin className="h-3 w-3" />
-              <span>Managed content & screens</span>
-            </div>
-          )}
+  return <article className="border-b border-border/70 py-4 first:pt-0 last:border-0">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 flex-1">
+        <h3 className="break-words text-base font-semibold">{department.name}</h3>
+        {department.description && <p className="mt-1 text-sm text-muted-foreground">{department.description}</p>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {canReadOperators && <Button variant="outline" size="sm" onClick={() => { setOperatorsPage(1); setOperatorsOpen(true); }}>View Operators</Button>}
+        {(onEdit || onDelete) && <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Actions for ${department.name}`}><MoreHorizontal aria-hidden="true" className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">
+          {onEdit && <DropdownMenuItem onClick={() => onEdit(department)}><Pencil aria-hidden="true" className="mr-2 h-4 w-4" />Edit</DropdownMenuItem>}
+          {onDelete && <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onDelete(department)}><Trash2 aria-hidden="true" className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>}
+        </DropdownMenuContent></DropdownMenu>}
+      </div>
+    </div>
+    <details className="mt-2 text-xs text-muted-foreground"><summary className="w-fit cursor-pointer">Technical ID</summary><code className="mt-1 block break-all">{department.id}</code></details>
 
-          <div className="rounded-lg border bg-muted/30 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                  <span>Operators</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  See all operators for this department in one place.
-                </p>
-              </div>
-              <Badge variant="secondary" className="shrink-0">
-                {operators.length}
-              </Badge>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-4 w-full"
-              onClick={() => setIsOperatorsOpen(true)}
-            >
-              View Operators
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Dialog open={isOperatorsOpen} onOpenChange={setIsOperatorsOpen}>
-        <DialogContent className="max-h-[88vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{department.name} Operators</DialogTitle>
-            <DialogDescription>
-              Review all operators assigned to this department. Expand a row to inspect full details.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="rounded-lg border bg-muted/20 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{operators.length} operators</Badge>
-              <Badge variant="outline">Department: {department.name}</Badge>
-            </div>
-          </div>
-
-          {operators.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-              No operators are assigned to this department yet.
-            </div>
-          ) : (
-            <Accordion type="multiple" className="rounded-lg border px-4">
-              {operators.map((operator) => {
-                const name = `${operator.first_name ?? ""} ${operator.last_name ?? ""}`.trim() || operator.email;
-                return (
-                  <AccordionItem key={operator.id} value={operator.id}>
-                    <AccordionTrigger className="hover:no-underline">
-                      <div className="flex min-w-0 flex-1 items-center justify-between gap-3 pr-4 text-left">
-                        <div className="min-w-0">
-                          <p className="truncate font-medium">{name}</p>
-                          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                            <Mail className="h-3.5 w-3.5" />
-                            <span className="truncate">{operator.email}</span>
-                          </div>
-                        </div>
-                        <Badge variant={operator.is_active ? "secondary" : "outline"} className="shrink-0">
-                          {operator.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                        <Badge variant="outline" className="shrink-0">
-                          {operator.department_id === department.id ? "Primary" : "Additional"}
-                        </Badge>
-                      </div>
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <div className="grid gap-3 rounded-md bg-muted/30 p-4 text-sm md:grid-cols-2">
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Full Name</p>
-                          <p className="mt-1 font-medium">{name}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Email</p>
-                          <p className="mt-1 break-all font-medium">{operator.email}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Role</p>
-                          <div className="mt-1 flex items-center gap-2">
-                            <CircleDot className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="font-medium">{operator.role ?? "OPERATOR"}</span>
-                          </div>
-                        </div>
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Status</p>
-                          <p className="mt-1 font-medium">{operator.is_active ? "Active" : "Inactive"}</p>
-                        </div>
-                        <div className="md:col-span-2">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">User ID</p>
-                          <p className="mt-1 break-all font-mono text-xs">{operator.id}</p>
-                        </div>
-                        {operator.created_at && (
-                          <div>
-                            <p className="text-xs uppercase tracking-wide text-muted-foreground">Created</p>
-                            <p className="mt-1 font-medium">{new Date(operator.created_at).toLocaleString()}</p>
-                          </div>
-                        )}
-                        {operator.updated_at && (
-                          <div>
-                            <p className="text-xs uppercase tracking-wide text-muted-foreground">Last Updated</p>
-                            <p className="mt-1 font-medium">{new Date(operator.updated_at).toLocaleString()}</p>
-                          </div>
-                        )}
-                      </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                );
-              })}
-            </Accordion>
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
-  );
+    {canReadOperators && <Dialog open={operatorsOpen} onOpenChange={setOperatorsOpen}><DialogContent className="max-h-[88vh] max-w-2xl overflow-y-auto"><DialogHeader><DialogTitle>Operators in {department.name}</DialogTitle><DialogDescription>Includes primary and additional department memberships.</DialogDescription></DialogHeader>
+      {operatorsQuery.isLoading ? <LoadingIndicator label="Loading operators…" /> : operatorsQuery.isError && !operatorsQuery.data ? <EmptyState title="Could not load operators" description="Your changes are safe. Try again." actionLabel="Retry" onAction={() => void operatorsQuery.refetch()} /> : <>
+        <p className="text-sm text-muted-foreground">{total} {total === 1 ? "operator" : "operators"}{operatorsQuery.isFetching ? " · Updating" : ""}</p>
+        {operators.length === 0 ? <p className="py-5 text-sm text-muted-foreground">No operators are assigned to this department yet.</p> : <div className="divide-y border-y">{operators.map((operator) => {
+          const name = `${operator.first_name ?? ""} ${operator.last_name ?? ""}`.trim() || operator.email;
+          return <div key={operator.id} className="flex flex-wrap items-start justify-between gap-2 py-3 text-sm"><div className="min-w-0"><p className="font-medium">{name}</p><p className="break-all text-xs text-muted-foreground">{operator.email}</p></div><div className="flex gap-2"><Badge variant="outline">{operator.department_id === department.id ? "Primary" : "Additional"}</Badge><Badge variant="outline">{operator.is_active ? "Active" : "Inactive"}</Badge></div></div>;
+        })}</div>}
+        {operatorsQuery.isError && operatorsQuery.data && <div role="alert" className="flex items-center gap-2 text-sm text-destructive">Could not refresh operators. Showing the last loaded page. <Button variant="outline" size="sm" onClick={() => void operatorsQuery.refetch()}>Retry</Button></div>}
+        {total > OPERATORS_PAGE_SIZE && <PageNavigation currentPage={operatorsPage} totalPages={totalPages} onPageChange={setOperatorsPage} />}
+      </>}
+    </DialogContent></Dialog>}
+  </article>;
 };

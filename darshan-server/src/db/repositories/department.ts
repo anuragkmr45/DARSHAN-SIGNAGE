@@ -25,6 +25,7 @@ export class DepartmentRepository {
     page?: number;
     limit?: number;
     search?: string;
+    includeOperatorSearch?: boolean;
   }) {
     const db = getDatabase();
     const page = options.page || 1;
@@ -37,7 +38,7 @@ export class DepartmentRepository {
       sql`${schema.departments.name} ILIKE ${pattern} ESCAPE '!'`,
       sql`${schema.departments.description} ILIKE ${pattern} ESCAPE '!'`,
       sql`CAST(${schema.departments.id} AS text) ILIKE ${pattern} ESCAPE '!'`,
-      sql`EXISTS (
+      ...(options.includeOperatorSearch ? [sql`EXISTS (
         SELECT 1 FROM ${schema.users}
         JOIN ${schema.roles} ON ${schema.users.role_id} = ${schema.roles.id}
         WHERE ${schema.roles.name} = 'OPERATOR'
@@ -49,7 +50,7 @@ export class DepartmentRepository {
           AND (${schema.users.email} ILIKE ${pattern} ESCAPE '!'
             OR ${schema.users.first_name} ILIKE ${pattern} ESCAPE '!'
             OR ${schema.users.last_name} ILIKE ${pattern} ESCAPE '!')
-      )`
+      )`] : [])
     ) : undefined;
 
     const [totalRow] = await db

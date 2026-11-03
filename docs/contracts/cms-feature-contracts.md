@@ -24,7 +24,7 @@ The CMS contract is defined by `darshan-cms/src/App.tsx`, API domain modules und
 | `/layouts/new` | `LayoutEditor` | module `layouts` | layouts, media/presentations | none | New layout editor route. |
 | `/layouts/:id` | `LayoutEditor` | module `layouts` | layouts, media/presentations | none | Existing layout editor route. |
 | `/requests` | `Requests` | permission `read Request` | `api/domains/requests.ts`, emergency/request APIs | notifications where used | Request and emergency/takeover workflow surface. |
-| `/departments` | `Departments` | module `departments` | departments, users/screens where used | none | Department management. |
+| `/departments` | `Departments` | `read Department`; create/update/delete use their own grants; operator roster needs `read User` | departments and on-demand filtered users | none | Search, manage and delete with server blockers; operators include primary and additional members. |
 | `/operators` | `Operators` | module `operators` | users/operators, departments, roles | none | Operator management. |
 | `/users` | `Users` | module `users` | users, invites, roles/permissions | none | User/admin management. |
 | `/chat`, `/chat/:conversationId`, `/chat/:conversationId/thread/:threadRootId` | `Conversations` | module `conversations` | `api/domains/chat.ts`, conversations compatibility domains | `src/hooks/chat/useChatRealtime.ts`, `src/lib/chatSocket.ts` | Chat route set. |

@@ -95,6 +95,7 @@ export async function departmentRoutes(fastify: FastifyInstance) {
           page: query.page,
           limit: query.limit,
           search: query.search,
+          includeOperatorSearch: ability.can('read', 'User'),
         });
 
         return reply.send({
