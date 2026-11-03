@@ -119,7 +119,9 @@ describe('Log Shipper', () => {
     expect(serialized).not.to.contain('user')
     expect(serialized).not.to.contain('password')
     expect(serialized).not.to.contain('token')
-    expect(serialized).not.to.contain('abc')
+    // The bundle's random hex ID may legitimately contain "abc". Check the
+    // sanitized log body, where that token value originated.
+    expect(bundle.logs['player.log']).not.to.contain('abc')
     expect(serialized).not.to.contain('standalone')
     expect(serialized).not.to.contain('secret')
   })
