@@ -6,9 +6,15 @@ const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils')
 const { liveFixture, LIVE_IDS } = require('../../helpers/live-fixtures')
 function clearModules() { for (const key of Object.keys(require.cache)) if (key.includes('/src/main/services/') || key.includes('/src/common/')) delete require.cache[key] }
 describe('Ordinary PlayerFlow LIVE integration fences', () => {
-  let dir, sandbox, flow, owner, engine, window, clock
+  let dir, sandbox, flow, owner, engine, window, clock, originalConfigPaths
   beforeEach(() => {
     clearModules(); sandbox = sinon.createSandbox(); dir = createTempDir('normal-live-flow-')
+    originalConfigPaths = Object.fromEntries(
+      ['DARSHAN_PLAYER_CONFIG_FILE', 'SIGNHEX_PLAYER_CONFIG_FILE', 'HEXMON_CONFIG_PATH']
+        .map(key => [key, process.env[key]])
+    )
+    delete process.env.DARSHAN_PLAYER_CONFIG_FILE
+    delete process.env.SIGNHEX_PLAYER_CONFIG_FILE
     process.env.HEXMON_CONFIG_PATH = path.join(dir, 'config.json')
     fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify({ deviceId: LIVE_IDS.device, apiBase: 'https://backend.example.test',
       cache: { path: path.join(dir, 'cache'), maxBytes: 10485760 }, mtls: { enabled: false, certPath: path.join(dir, 'certs/client.crt'), keyPath: path.join(dir, 'certs/client.key'), caPath: path.join(dir, 'certs/ca.crt') }, livePlayback: { enabled: false } }))
@@ -28,7 +34,12 @@ describe('Ordinary PlayerFlow LIVE integration fences', () => {
   afterEach(async () => {
     flow.stop(); clock?.restore(); clock = undefined
     await Promise.resolve()
-    sandbox.restore(); delete process.env.HEXMON_CONFIG_PATH; cleanupTempDir(dir); clearModules()
+    sandbox.restore()
+    for (const [key, value] of Object.entries(originalConfigPaths)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    cleanupTempDir(dir); clearModules()
   })
   it('keeps unavailable emergency authority visible and never resolves it as ordinary default', () => {
     flow.handlePlaylistUpdate({ mode: 'emergency', items: [], unavailableReason: 'EMERGENCY_CONTENT_UNAVAILABLE' })
