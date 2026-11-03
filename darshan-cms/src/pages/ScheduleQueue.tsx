@@ -684,7 +684,7 @@ export default function ScheduleQueue() {
       {/* Right Panel - Detail Drawer */}
       {selectedRequest && (
         <div className="min-w-0 xl:sticky xl:top-20">
-          <RequestDetailDrawer request={selectedRequest} onClose={() => setSelectedRequest(null)} />
+          <RequestDetailDrawer key={selectedRequest.id} request={selectedRequest} onClose={() => setSelectedRequest(null)} />
         </div>
       )}
     </div>

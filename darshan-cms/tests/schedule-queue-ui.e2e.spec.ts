@@ -17,10 +17,15 @@ const requestItem = {
   screens: [{ id: "00000000-0000-4000-8000-000000000503", name: "Lobby screen" }],
 };
 
-async function setup(page: Page, grants: TestCapability[], options: { listFails?: boolean; summaryFailsAfterSearch?: boolean; snapshotFails?: boolean; published?: boolean; targetMode?: "group" | "mixed"; groupFails?: boolean } = {}) {
+async function setup(page: Page, grants: TestCapability[], options: { listFails?: boolean; summaryFailsAfterSearch?: boolean; snapshotFails?: boolean; published?: boolean; initialStatus?: "APPROVED"; secondRequest?: boolean; holdPreflight?: boolean; targetMode?: "group" | "mixed"; groupFails?: boolean; approveFails?: boolean; approveCommitsBeforeFailure?: boolean; publishFails?: boolean; takeDownFails?: boolean } = {}) {
   let listFails = Boolean(options.listFails);
   let snapshotFails = Boolean(options.snapshotFails);
   let groupFails = Boolean(options.groupFails);
+  let approveFails = Boolean(options.approveFails);
+  let publishFails = Boolean(options.publishFails);
+  let takeDownFails = Boolean(options.takeDownFails);
+  let currentStatus = options.initialStatus ?? (options.published ? "PUBLISHED" : "PENDING");
+  let releasePreflight: (() => void) | undefined;
   const requests: string[] = [];
   await page.context().addCookies([
     { name: "access_token", value: "queue-qa-session", url: origin, httpOnly: true, sameSite: "Lax" },
@@ -31,7 +36,7 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
     api: { baseUrl: new URL(route.request().url()).origin },
     realtime: { socketBaseUrl: new URL(route.request().url()).origin, socketTransports: ["websocket"] },
   } }) }));
-  await page.route("**/api/v1/**", (route) => {
+  await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
@@ -43,20 +48,46 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
     if (path === "/api/v1/settings/branding") return json({ app_name: "DARSHAN CMS" });
     if (path === "/api/v1/schedule-requests/status-summary") {
       if (options.summaryFailsAfterSearch && url.searchParams.get("q")) return json({ error: { message: "Unavailable" } }, 503);
-      return json({ counts: { pending: options.published ? 0 : 1, approved: 0, rejected: 0, published: options.published ? 1 : 0, taken_down: 0, expired: 0 } });
+      const first = (status: string) => Number(currentStatus === status);
+      const second = (status: string) => Number(Boolean(options.secondRequest && status === "APPROVED"));
+      return json({ counts: { pending: first("PENDING"), approved: first("APPROVED") + second("APPROVED"), rejected: 0, published: first("PUBLISHED"), taken_down: first("TAKEN_DOWN"), expired: 0 } });
     }
     if (path === "/api/v1/schedule-requests" && method === "GET") {
       if (listFails) return json({ error: { message: "Unavailable" } }, 503);
       const status = url.searchParams.get("status");
       const q = url.searchParams.get("q");
       const group = { id: "00000000-0000-4000-8000-000000000504", name: "East wing" };
-      const items = status === (options.published ? "PUBLISHED" : "PENDING") && !q
-        ? [{ ...requestItem, status: options.published ? "PUBLISHED" : "PENDING",
+      const items: Record<string, unknown>[] = status === currentStatus && !q
+        ? [{ ...requestItem, status: currentStatus,
           screens: options.targetMode === "group" ? [] : options.targetMode === "mixed"
             ? [...requestItem.screens, { id: "00000000-0000-4000-8000-000000000505", name: "Reception screen" }] : requestItem.screens,
           screen_groups: options.targetMode ? [group] : [],
         }] : [];
+      if (options.secondRequest && status === "APPROVED" && !q) items.push({ ...requestItem, id: "00000000-0000-4000-8000-000000000508", status: "APPROVED", schedule: { ...requestItem.schedule, name: "Evening briefing" } });
       return json({ items, pagination: { page: 1, limit: 10, total: items.length } });
+    }
+    if (path === `/api/v1/schedule-requests/${requestItem.id}` && method === "GET") return json({ ...requestItem, status: currentStatus });
+    if (path === "/api/v1/schedules/display-preflight" && method === "POST") {
+      if (options.holdPreflight) await new Promise<void>((resolve) => { releasePreflight = resolve; });
+      return json({ compatible: true, issues: [] });
+    }
+    if (path === `/api/v1/schedule-requests/${requestItem.id}/approve` && method === "POST") {
+      if (approveFails) {
+        if (options.approveCommitsBeforeFailure) currentStatus = "APPROVED";
+        return json({ error: { message: "Service unavailable" } }, 503);
+      }
+      currentStatus = "APPROVED";
+      return json({ id: requestItem.id, status: currentStatus });
+    }
+    if (path === `/api/v1/schedule-requests/${requestItem.id}/publish` && method === "POST") {
+      if (publishFails) return json({ error: { message: "Service unavailable" } }, 503);
+      currentStatus = "PUBLISHED";
+      return json({ id: requestItem.id, status: currentStatus });
+    }
+    if (path === `/api/v1/schedule-requests/${requestItem.id}/take-down` && method === "POST") {
+      if (takeDownFails) return json({ error: { message: "Service unavailable" } }, 503);
+      currentStatus = "TAKEN_DOWN";
+      return json({ id: requestItem.id, status: currentStatus });
     }
     if (path === "/api/v1/screen-groups/00000000-0000-4000-8000-000000000504" && method === "GET") return groupFails
       ? json({ error: { message: "Unavailable" } }, 503)
@@ -68,7 +99,7 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
       : json({ snapshot: { schedule: { id: requestItem.schedule.id, items: [] } }, publish: null, media_urls: {}, media_assets: {} });
     return json({});
   });
-  return { requests, restoreList: () => { listFails = false; }, restoreSnapshot: () => { snapshotFails = false; }, restoreGroup: () => { groupFails = false; } };
+  return { requests, restoreList: () => { listFails = false; }, restoreSnapshot: () => { snapshotFails = false; }, restoreGroup: () => { groupFails = false; }, restoreApproval: () => { approveFails = false; }, restorePublish: () => { publishFails = false; }, restoreTakeDown: () => { takeDownFails = false; }, releasePreflight: () => releasePreflight?.() };
 }
 
 test("read-only queue hides the incomplete creator action and direct URL explains access", async ({ page }) => {
@@ -160,6 +191,91 @@ test("a request reader without Screen Group access sees no group membership", as
   await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
   await expect(page.getByText("Screen Group access is needed to inspect its current members.")).toBeVisible();
   expect(state.requests.some((request) => request.includes("/screen-groups/") || request.includes("/device/"))).toBe(false);
+});
+
+test("failed approval is sent once and keeps its note until the operator reloads", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "approve", subject: "ScheduleRequest" }], { approveFails: true });
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByPlaceholder("Add a note for this action").fill("Reviewed with facilities");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByText("The server may have completed the action.", { exact: false })).toBeVisible();
+  await expect(page.getByPlaceholder("Add a note for this action")).toHaveValue("Reviewed with facilities");
+  await expect(page.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  await page.waitForTimeout(1300);
+  expect(state.requests.filter((request) => request.endsWith("/approve") && request.startsWith("POST "))).toHaveLength(1);
+  state.restoreApproval();
+  await page.getByRole("button", { name: "Reload request" }).last().click();
+  await expect(page.getByRole("dialog", { name: "Approve request" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => state.requests.filter((request) => request.endsWith("/approve") && request.startsWith("POST ")).length).toBe(2);
+});
+
+test("lost approval response after commit resolves to Approved without repeating the write", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "approve", subject: "ScheduleRequest" }], { approveFails: true, approveCommitsBeforeFailure: true });
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByText("The server may have completed the action.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Reload request" }).last().click();
+  await page.getByRole("tab", { name: "Approved 1" }).click();
+  await expect(page.getByRole("button", { name: "Open Morning briefing request details" })).toBeVisible();
+  expect(state.requests.filter((request) => request.endsWith("/approve") && request.startsWith("POST "))).toHaveLength(1);
+});
+
+test("approve then publish failure does not repeat approval and can publish from Approved", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "approve", subject: "ScheduleRequest" }, { action: "publish", subject: "ScheduleRequest" }], { publishFails: true });
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("button", { name: "Approve & Publish" }).click();
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByText("Approval was saved, but publishing failed.", { exact: false })).toBeVisible();
+  await page.waitForTimeout(1300);
+  expect(state.requests.filter((request) => request.endsWith("/approve") && request.startsWith("POST "))).toHaveLength(1);
+  expect(state.requests.filter((request) => request.endsWith("/publish") && request.startsWith("POST "))).toHaveLength(1);
+  state.restorePublish();
+  await page.getByRole("tab", { name: "Approved 1" }).click();
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect.poll(() => state.requests.filter((request) => request.endsWith("/publish") && request.startsWith("POST ")).length).toBe(2);
+  expect(state.requests.filter((request) => request.endsWith("/approve") && request.startsWith("POST "))).toHaveLength(1);
+});
+
+test("take-down failure is sent once and requires reload before retry", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "publish", subject: "ScheduleRequest" }], { published: true, takeDownFails: true });
+  await page.goto("/schedule");
+  await page.getByRole("tab", { name: "Published 1" }).click();
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("button", { name: "Take Down Schedule" }).click();
+  await page.getByPlaceholder("Add an optional takedown note").fill("Window cancelled");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(page.getByText("The server may have completed the action.", { exact: false })).toBeVisible();
+  await expect(page.getByPlaceholder("Add an optional takedown note")).toHaveValue("Window cancelled");
+  await page.waitForTimeout(1300);
+  expect(state.requests.filter((request) => request.endsWith("/take-down") && request.startsWith("POST "))).toHaveLength(1);
+  state.restoreTakeDown();
+  await page.getByRole("button", { name: "Reload request" }).last().click();
+  await page.getByRole("button", { name: "Take Down Schedule" }).click();
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect.poll(() => state.requests.filter((request) => request.endsWith("/take-down") && request.startsWith("POST ")).length).toBe(2);
+});
+
+test("a late display preflight cannot publish a request after the operator selects another", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "publish", subject: "ScheduleRequest" }], { initialStatus: "APPROVED", secondRequest: true, holdPreflight: true });
+  await page.goto("/schedule");
+  await page.getByRole("tab", { name: "Approved 2" }).click();
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect.poll(() => state.requests.some((request) => request === "POST /api/v1/schedules/display-preflight")).toBe(true);
+  await page.getByRole("button", { name: "Open Evening briefing request details" }).click();
+  await expect(page.getByRole("heading", { name: "Evening briefing", level: 2 })).toBeVisible();
+  state.releasePreflight();
+  await page.waitForTimeout(300);
+  expect(state.requests.some((request) => request.endsWith("/publish") && request.startsWith("POST "))).toBe(false);
+  await expect(page.getByRole("dialog", { name: "Confirm letterboxing" })).toHaveCount(0);
 });
 
 test("queue controls and detail remain within phone, tablet and desktop widths", async ({ page }) => {

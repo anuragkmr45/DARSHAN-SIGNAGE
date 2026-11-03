@@ -17,6 +17,13 @@ Branch: `codex/darshan-product-ui-redesign-20261103`. The approved visual direct
 - One combined run of the new Queue suite and existing schedule creator/emergency browser suite passed 8/8 with one worker. CMS production build and bundle budget, CMS unit suite 272/272, focused lint and `git diff --check` passed.
 - The snapshot choice extension passed nine Queue browser cases, including group-only failed-membership recovery, explicit multi-target selection and denied Screen Group membership. CMS production build/bundle budget and all 272 CMS unit tests passed. These are fixture-backed browser checks, not a deployed player or real-service confirmation.
 
+## Review-action safety extension
+
+- The app's QueryClient retries mutations once by default. Request approval, rejection, publication, combined approval/publication and take-down now set `retry: false` so an uncertain response cannot cause an automatic second write.
+- Confirm dialogs keep the operator's note on failure, disable another confirmation, and offer a fresh server read before retry. Display preflight blocks additional actions while it runs. Successful actions close the dialog only after the response. If approval commits but publication fails, the UI preserves Approved and directs the operator to publish separately.
+- Five added fixture browser cases passed for one-write failure/reload/retry, lost response after committed approval, partial combined publication, take-down failure/reload/retry, and selection during a held preflight. The previous twelve-case Queue/creator/emergency browser run passed 14/14; the lost-response and held-preflight cases ran separately. The real two-operator journey remains a separate validation gate.
+- Final CMS production build and bundle budget, 272/272 CMS unit tests, focused lint and `git diff --check` passed after the request-selection guard.
+
 ## Remaining release QA
 
 These browser cases use fixture REST responses. Run real actor and two-operator request creation, approval, publication and take-down through the CMS and installed player. Check stale dialog, permission withdrawal, group and multi-screen snapshots including changed membership, player acknowledgement and proof-of-play separately. Confirm browser-local date interpretation for remote operators and site policy; current UI uses the operator's local day because request timestamps are also rendered locally. Complete keyboard/screen-reader, zoom, touch, and production-size queue checks. Human QA sign-off is separate.

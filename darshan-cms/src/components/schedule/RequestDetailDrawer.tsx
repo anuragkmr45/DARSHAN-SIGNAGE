@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   X,
@@ -114,11 +114,22 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   const [displayPreflight, setDisplayPreflight] = useState<DisplayPreflightResponse | null>(null);
   const [actionFailure, setActionFailure] = useState<ReturnType<typeof requestActionFailure> | null>(null);
   const [reloading, setReloading] = useState(false);
+  const [preflightPending, setPreflightPending] = useState(false);
+  const approvalCommitted = useRef(false);
+  const activeRequestId = useRef<string | null>(request.id);
+
+  useEffect(() => {
+    activeRequestId.current = request.id;
+    return () => { activeRequestId.current = null; };
+  }, [request.id]);
 
   useEffect(() => {
     setCurrentRequest(request);
   }, [request]);
-  useEffect(() => { setActionFailure(null); setDisplayPreflight(null); setPreviewMedia(null); }, [request.id]);
+  useEffect(() => {
+    setActionFailure(null); setDisplayPreflight(null); setPreviewMedia(null);
+    setActionDialog(null); setActionComment("");
+  }, [request.id]);
 
   const canApprove = can("approve", "ScheduleRequest") || can("manage", "ScheduleRequest");
   const canPublish = can("publish", "ScheduleRequest") || can("manage", "Schedule");
@@ -179,6 +190,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   const invalidateList = () =>
     queryClient.invalidateQueries({ queryKey: ["schedule-requests"] });
   const reportActionFailure = (error: unknown) => { setActionFailure(requestActionFailure(error, hasLive)); };
+  const closeActionDialog = () => { setActionDialog(null); setActionComment(""); };
   const reloadRequest = async () => {
     if (reloading) return; const id = currentRequest.id; setReloading(true);
     try {
@@ -187,11 +199,13 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
       setDisplayPreflight(null); void invalidateList();
       await recheckRequestLivePolicy(updated);
       setActionFailure(null);
+      closeActionDialog();
     } catch (error) { reportActionFailure(error); }
     finally { setReloading(false); }
   };
 
   const approveMutation = useMutation({
+    retry: false,
     mutationFn: ({ id, comment }: { id: string; comment?: string }) =>
       scheduleRequestsApi.approve(id, comment ? { comment } : undefined),
     onSuccess: (data, variables) => {
@@ -203,6 +217,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
         reviewed_at: data.reviewed_at ?? prev.reviewed_at,
       }));
       void invalidateList();
+      closeActionDialog();
       toast({ title: "Approved", description: "Schedule request approved." });
     },
     onError: (error) => {
@@ -213,6 +228,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   });
 
   const rejectMutation = useMutation({
+    retry: false,
     mutationFn: ({ id, comment }: { id: string; comment?: string }) =>
       scheduleRequestsApi.reject(id, comment ? { comment } : undefined),
     onSuccess: (data, variables) => {
@@ -224,15 +240,18 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
         reviewed_at: data.reviewed_at ?? prev.reviewed_at,
       }));
       void invalidateList();
+      closeActionDialog();
       toast({ title: "Rejected", description: "Schedule request rejected." });
     },
     onError: (error) => {
+      reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to reject request.";
       toast({ title: "Reject failed", description: message, variant: "destructive" });
     },
   });
 
   const publishMutation = useMutation({
+    retry: false,
     mutationFn: ({ id, issueHash, reason }: { id: string; issueHash?: string; reason?: string }) => scheduleRequestsApi.publish(
       id,
       issueHash ? { aspect_override: { acknowledged: true, issue_hash: issueHash, reason } } : undefined,
@@ -244,6 +263,8 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
         status: "PUBLISHED",
       }));
       void invalidateList();
+      closeActionDialog();
+      setDisplayPreflight(null);
       toast({ title: "Published", description: "Schedule request published." });
     },
     onError: (error) => {
@@ -254,12 +275,19 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   });
 
   const approvePublishMutation = useMutation({
+    retry: false,
     mutationFn: async ({ id, comment, issueHash }: { id: string; comment?: string; issueHash?: string }) => {
+      approvalCommitted.current = false;
       return approveThenPublish(() => scheduleRequestsApi.approve(id, comment ? { comment } : undefined), () => scheduleRequestsApi.publish(
         id,
         issueHash ? { aspect_override: { acknowledged: true, issue_hash: issueHash, reason: comment } } : undefined,
-      ), approved => setCurrentRequest(previous => previous.id === id ? { ...previous, status: approved.status ?? "APPROVED",
-        review_notes: approved.review_notes ?? previous.review_notes, reviewed_at: approved.reviewed_at ?? previous.reviewed_at } : previous));
+      ), approved => {
+        approvalCommitted.current = true;
+        setCurrentRequest(previous => previous.id === id ? { ...previous, status: approved.status ?? "APPROVED",
+          review_notes: approved.review_notes ?? previous.review_notes, reviewed_at: approved.reviewed_at ?? previous.reviewed_at } : previous);
+        void invalidateList();
+        closeActionDialog();
+      });
     },
     onSuccess: (_data, variables) => {
       setActionFailure(null);
@@ -268,16 +296,23 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
         status: "PUBLISHED",
       }));
       void invalidateList();
+      closeActionDialog();
+      setDisplayPreflight(null);
       toast({ title: "Published", description: "Approved and published." });
     },
     onError: (error) => {
-      reportActionFailure(error);
-      const message = error instanceof Error ? error.message : "Unable to approve and publish.";
+      if (approvalCommitted.current) {
+        setActionFailure({ ...requestActionFailure(error, hasLive), message: "Approval was saved, but publishing failed. Reload the request, then publish it from Approved." });
+      } else reportActionFailure(error);
+      const message = approvalCommitted.current
+        ? "Approval was saved, but publishing failed. Reload the request, then publish it from Approved."
+        : error instanceof Error ? error.message : "Unable to approve and publish.";
       toast({ title: "Publish failed", description: message, variant: "destructive" });
     },
   });
 
   const takeDownMutation = useMutation({
+    retry: false,
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
       scheduleRequestsApi.takeDown(id, reason ? { reason } : undefined),
     onSuccess: (data, variables) => {
@@ -291,12 +326,14 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
         reservation_summary: data.reservation_summary ?? prev.reservation_summary ?? null,
       }));
       void invalidateList();
+      closeActionDialog();
       toast({
         title: "Schedule taken down",
         description: data.message ?? "Published schedule removed from targeted screens.",
       });
     },
     onError: (error) => {
+      reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to take down schedule.";
       toast({ title: "Take down failed", description: message, variant: "destructive" });
     },
@@ -310,15 +347,17 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   const showTakeDownAction = statusUpper === "PUBLISHED";
 
   const isMutating =
+    preflightPending ||
     approveMutation.isPending ||
     rejectMutation.isPending ||
     publishMutation.isPending ||
     approvePublishMutation.isPending ||
     takeDownMutation.isPending;
   const cannotReviewLive = hasLive && !liveApproval;
+  const actionsBlocked = isMutating || reloading || Boolean(actionFailure);
 
   const handleActionConfirm = () => {
-    if (!actionDialog) return;
+    if (!actionDialog || isMutating || actionFailure) return;
     const comment = actionComment.trim() || undefined;
     if (actionDialog === "approve") {
       approveMutation.mutate({ id: currentRequest.id, comment });
@@ -334,58 +373,64 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
     }
     if (actionDialog === "aspect_override" && displayPreflight?.issue_hash) {
       publishMutation.mutate({ id: currentRequest.id, issueHash: displayPreflight.issue_hash, reason: comment });
-      setDisplayPreflight(null);
     }
     if (actionDialog === "approve_publish_aspect_override" && displayPreflight?.issue_hash) {
       approvePublishMutation.mutate({ id: currentRequest.id, comment, issueHash: displayPreflight.issue_hash });
-      setDisplayPreflight(null);
     }
-    setActionDialog(null);
-    setActionComment("");
   };
 
   const handlePublish = async () => {
+    if (isMutating || actionFailure) return;
+    const requestId = currentRequest.id;
     const scheduleId = currentRequest.schedule?.id;
     if (!scheduleId) {
       publishMutation.mutate({ id: currentRequest.id });
       return;
     }
     try {
+      setPreflightPending(true);
       const preflight = await schedulesApi.displayPreflight({ schedule_id: scheduleId });
+      if (activeRequestId.current !== requestId) return;
       if (preflight.compatible || !preflight.issue_hash) {
-        publishMutation.mutate({ id: currentRequest.id });
+        publishMutation.mutate({ id: requestId });
         return;
       }
       setDisplayPreflight(preflight);
       setActionComment("");
       setActionDialog("aspect_override");
     } catch (error) {
+      if (activeRequestId.current !== requestId) return;
       reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to run display preflight.";
       toast({ title: "Display preflight failed", description: message, variant: "destructive" });
-    }
+    } finally { if (activeRequestId.current === requestId) setPreflightPending(false); }
   };
 
   const handleApproveAndPublish = async (comment?: string) => {
+    if (isMutating || actionFailure) return;
+    const requestId = currentRequest.id;
     const scheduleId = currentRequest.schedule?.id;
     if (!scheduleId) {
       approvePublishMutation.mutate({ id: currentRequest.id, comment });
       return;
     }
     try {
+      setPreflightPending(true);
       const preflight = await schedulesApi.displayPreflight({ schedule_id: scheduleId });
+      if (activeRequestId.current !== requestId) return;
       if (preflight.compatible || !preflight.issue_hash) {
-        approvePublishMutation.mutate({ id: currentRequest.id, comment });
+        approvePublishMutation.mutate({ id: requestId, comment });
         return;
       }
       setDisplayPreflight(preflight);
       setActionComment(comment || "");
       setActionDialog("approve_publish_aspect_override");
     } catch (error) {
+      if (activeRequestId.current !== requestId) return;
       reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to run display preflight.";
       toast({ title: "Display preflight failed", description: message, variant: "destructive" });
-    }
+    } finally { if (activeRequestId.current === requestId) setPreflightPending(false); }
   };
 
   const showScheduleOverview = Boolean(currentRequest.schedule);
@@ -429,7 +474,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
         {showActions && (
           <div className="flex flex-wrap gap-2">
             {showPublishOnly ? (
-              <Button size="sm" variant="default" onClick={handlePublish} disabled={!allowPublish || isMutating || cannotReviewLive || reloading}>
+              <Button size="sm" variant="default" onClick={handlePublish} disabled={!allowPublish || actionsBlocked || cannotReviewLive}>
                 <Upload className="h-4 w-4 mr-2" />
                 Publish
               </Button>
@@ -439,7 +484,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   size="sm"
                   variant="destructive"
                   onClick={() => setActionDialog("reject")}
-                  disabled={!allowApprove || isMutating || reloading}
+                  disabled={!allowApprove || actionsBlocked}
                 >
                   <XCircle className="h-4 w-4 mr-2" />
                   Reject
@@ -448,7 +493,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   size="sm"
                   variant="outline"
                   onClick={() => setActionDialog("approve")}
-                  disabled={!allowApprove || isMutating || cannotReviewLive || reloading}
+                  disabled={!allowApprove || actionsBlocked || cannotReviewLive}
                 >
                   <CheckCircle2 className="h-4 w-4 mr-2" />
                   Approve
@@ -457,7 +502,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   size="sm"
                   variant="default"
                   onClick={() => setActionDialog("approve_publish")}
-                  disabled={!allowApprove || !allowPublish || isMutating || cannotReviewLive || reloading}
+                  disabled={!allowApprove || !allowPublish || actionsBlocked || cannotReviewLive}
                 >
                   <CheckCircle2 className="h-4 w-4 mr-2" />
                   Approve & Publish
@@ -472,7 +517,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
               size="sm"
               variant="destructive"
               onClick={() => setActionDialog("take_down")}
-              disabled={!allowTakeDown || isMutating}
+              disabled={!allowTakeDown || actionsBlocked}
             >
               <AlertTriangle className="h-4 w-4 mr-2" />
               Take Down Schedule
@@ -963,7 +1008,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
         </ScrollArea>
       </Tabs>
 
-      <Dialog open={!!actionDialog} onOpenChange={(open) => (open ? null : setActionDialog(null))}>
+      <Dialog open={!!actionDialog} onOpenChange={(open) => { if (!open && !isMutating) closeActionDialog(); }}>
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
             <DialogTitle>
@@ -992,10 +1037,11 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                 ))}
               </div>
             ) : null}
-            <label className="text-sm text-muted-foreground">
+            <label htmlFor="schedule-review-comment" className="text-sm text-muted-foreground">
               {actionDialog === "take_down" ? "Reason (optional)" : actionDialog === "aspect_override" || actionDialog === "approve_publish_aspect_override" ? "Confirmation reason (optional)" : "Comment (optional)"}
             </label>
             <Textarea
+              id="schedule-review-comment"
               value={actionComment}
               onChange={(event) => setActionComment(event.target.value)}
               placeholder={
@@ -1007,12 +1053,17 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
               }
               rows={4}
             />
+            {actionFailure ? <div role="alert" className="space-y-2 text-sm text-destructive">
+              <p>{actionFailure.message}</p>
+              <p>The server may have completed the action. Reload the request before trying again.</p>
+              <Button variant="outline" size="sm" onClick={() => void reloadRequest()} disabled={reloading}>Reload request</Button>
+            </div> : null}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setActionDialog(null)} disabled={isMutating}>
+            <Button variant="outline" onClick={closeActionDialog} disabled={isMutating}>
               Cancel
             </Button>
-            <Button onClick={handleActionConfirm} disabled={isMutating}>
+            <Button onClick={handleActionConfirm} disabled={isMutating || Boolean(actionFailure)}>
               {isMutating ? "Processing..." : "Confirm"}
             </Button>
           </DialogFooter>
