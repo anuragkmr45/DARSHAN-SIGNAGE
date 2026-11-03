@@ -558,14 +558,12 @@ export default function Dashboard() {
 
       {/* Alerts */}
       {(alerts.length > 0 || isOfflineLoading || isStorageLoading) && (
-        <Card className="border-warning/20 bg-warning/5">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+        <section aria-label="Alerts and notices" className="border-l-2 border-warning bg-warning/5 px-4 py-3">
+            <h2 className="flex items-center gap-2 text-base font-semibold">
               <AlertTriangle className="h-5 w-5 text-warning" />
               Alerts & Notices
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
+            </h2>
+          <div className="mt-3 space-y-2">
             {(isOfflineLoading || isStorageLoading) && alerts.length === 0 ? (
               <div className="flex items-center justify-between p-3 bg-background rounded-lg">
                 <span className="text-sm text-muted-foreground">Checking for alerts...</span>
@@ -583,17 +581,17 @@ export default function Dashboard() {
                 </div>
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Observability Overview</CardTitle>
-            <CardDescription>Current-state fleet and alert posture from backend summaries</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <div className="grid gap-8 lg:grid-cols-2">
+        <section aria-labelledby="observability-heading" className="border-t border-border pt-4">
+          <header className="mb-4">
+            <h2 id="observability-heading" className="text-lg font-semibold">Observability Overview</h2>
+            <p className="text-sm text-muted-foreground">Current-state fleet and alert posture from backend summaries</p>
+          </header>
+          <div className="space-y-4">
             <div className="divide-y divide-border">
               <div className="py-3 first:pt-0">
                 <p className="text-xs text-muted-foreground">Fleet totals</p>
@@ -665,16 +663,16 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
         {/* Running Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle>System Health</CardTitle>
-            <CardDescription>Current backend and job summaries</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <section aria-labelledby="system-health-heading" className="border-t border-border pt-4">
+          <header className="mb-4">
+            <h2 id="system-health-heading" className="text-lg font-semibold">System Health</h2>
+            <p className="text-sm text-muted-foreground">Current backend and job summaries</p>
+          </header>
+          <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Transcode Queue</span>
               <Badge
@@ -747,19 +745,17 @@ export default function Dashboard() {
                       : "No heartbeat yet"}
               </span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+      <section aria-labelledby="machine-health-heading" className="border-t border-border pt-4">
+          <h2 id="machine-health-heading" className="flex items-center gap-2 text-lg font-semibold">
             <Server className="h-5 w-5" />
             Machine Health
-          </CardTitle>
-          <CardDescription>Current machine capacity and services</CardDescription>
-        </CardHeader>
-        <CardContent>
+          </h2>
+          <p className="text-sm text-muted-foreground">Current machine capacity and services</p>
+        <div className="mt-4">
           <div className="grid gap-4 md:grid-cols-3">
             {machineTelemetryUnavailable ? (
               <div className="col-span-full rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
@@ -825,8 +821,8 @@ export default function Dashboard() {
               </div>
             ) : null}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
       <OnlineScreensDetailsModal
         open={selectedKPI === "online-screens"}

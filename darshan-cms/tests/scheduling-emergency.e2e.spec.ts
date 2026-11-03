@@ -305,6 +305,7 @@ test.describe("Scheduling and emergency operator flow", () => {
     await expect(page.getByText("Page 2 of 5", { exact: true })).toBeVisible();
     await expect(page.getByText("Page 5 of 5", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
+    await expect.poll(() => capturedSlotPayload?.items?.length).toBe(3);
     expect(capturedSlotPayload?.items?.find((item) => item.media_id === "media-1")?.loop_enabled).toBe(true);
     expect(
       capturedSlotPayload?.items
@@ -349,6 +350,7 @@ test.describe("Scheduling and emergency operator flow", () => {
     for (const width of [1440, 820, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await page.locator("main").evaluate((main) => { main.scrollTop = 0; });
+      await page.evaluate(() => window.scrollTo(0, 0));
       await expect(summary).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
       await page.screenshot({ path: testInfo.outputPath(`schedule-review-${width}.png`), fullPage: true });
