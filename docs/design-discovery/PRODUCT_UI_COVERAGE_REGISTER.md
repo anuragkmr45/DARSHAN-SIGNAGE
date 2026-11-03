@@ -29,7 +29,7 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | R19 | `/conversations/:conversationId/thread/:threadRootId` — Conversations alias | Same conversation gate | Same selected-thread path. | Alias regression pending. |
 | R20 | `/notifications` — Notifications | `read Notification` | Notification API/realtime hints; filter, mark one/all read, and navigate from supported chat notifications. | 390/820/1440 fixture browser, dark phone, 6 behavior/error cases; real multi-actor service pending. |
 | R21 | `/screens` — Screens | `read Screen` or `read ScreenGroup` | Screen, Group and Pairing APIs; inspect, pair, recover, manage and delete with server blockers. | 390/820/1440 prototype; 17 fixture-backed browser cases; real player pending. |
-| R22 | `/media` — MediaLibrary | `read Media` | Media API; upload, preview, delete and restore when authorized. | Redesign and real-service evidence pending. |
+| R22 | `/media` — MediaLibrary | `read Media` | Media API; upload, preview, delete and restore when authorized. | 390/820/1440 fixture browser and dark phone; 6 new UI cases plus 9 affected regressions; real upload/restore service pending. |
 | R23 | `/reports` — Reports | `read Report` or `read AuditLog` | Report, audit, emergency, notification and PoP APIs; filter, inspect and export evidence. | Redesign and real-service evidence pending. |
 | R24 | `/settings` — Settings | `read OrgSettings` | Settings hooks and media API; update site categories according to action permissions. | Redesign and real-service evidence pending. |
 | R25 | `/api-keys` — ApiKeys | `read ApiKey` | API key API; create, rotate/revoke and inspect permitted keys. | Redesign and real-service evidence pending. |
@@ -88,6 +88,21 @@ The route requires `read Notification` in the CMS. The current server allows an 
 | N04 | Mark all read | Owner-scoped POST; disabled when known count is zero; show pending and failed state. | Failure/retry and unread page reset fixture browser; real service pending. |
 | N05 | Loading, failed, retry, empty, stale refresh | REST list stays authoritative; a failed initial request is never presented as an empty inbox. | Initial failure/retry fixture browser; stale refresh and disconnected service pending. |
 | N06 | Pagination and layout | 50 records per page, explicit Previous/Next and server total; readable compact list at 390/820/1440 and dark phone. | Fixture browser/screenshots; text zoom, five accents, mobile device, keyboard and screen reader pending. |
+
+## Media Library controls and states
+
+The page requires `read Media`; the server remains authoritative for record-level delete permissions and upload processing status. The upload action requires `create Media`; Deleted Media and restore require current effective `manage Media`, including custom roles.
+
+| ID | Control or state | Source and expected result | Evidence and open review |
+| --- | --- | --- | --- |
+| M01 | All, Images, Videos, Documents | Media list REST filter and server total. Each type keeps its own page; changing type does not reuse another type's placeholder page. | Filter/page fixture browser; real large-library pagination pending. |
+| M02 | Asset gallery and status | Current Media list fields; show name, original format, ownership/creator, size, preparation state and reason where supplied. | Populated 390/820/1440 and dark phone captures; long text and all accents pending. |
+| M03 | Preview | Explicit keyboard-operable action; fetch fresh Media detail and show image/video/document or unavailable state. | PDF page navigation, retired webpage, and keyboard fixture browser; real Media URLs pending. |
+| M04 | Upload Media | `create Media` UI gate; file picker, type validation, display name, progress, presigned upload and preparation workflow. | Invalid/valid selection fixture browser and existing upload helper tests; real large-file upload pending. |
+| M05 | Copy URL | Uses current list URL and browser clipboard, with success/failure feedback. | Code traced; browser clipboard and expiring URL QA pending. |
+| M06 | Delete | Server-provided per-record permission; confirmation and reference blockers; hides record while retaining bytes. | Existing ownership fixture browser; real referenced/unreferenced deletion pending. |
+| M07 | Deleted Media and restore | `manage Media` UI gate; deleted list REST, paging, retry, restore action and feedback. | Custom-role server route and CMS fixture tests; real object restore pending. |
+| M08 | Loading, failed, retry, empty, stale refresh | Distinct list and deleted-sheet states; a failed request is never shown as an empty library. | Failure/retry fixture browser; disconnected/stale real service pending. |
 
 ## Control ledger: current status
 

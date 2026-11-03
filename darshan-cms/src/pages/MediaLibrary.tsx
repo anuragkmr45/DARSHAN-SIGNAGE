@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload, Image as ImageIcon, Video, FileText, Copy, Trash2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Upload, FileText, Copy, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -61,7 +61,14 @@ const resolvePrimaryMediaUrl = (media: MediaAsset) =>
 const resolveCopyTargetUrl = (media: MediaAsset) =>
   resolveLibraryMediaType(media) === "WEBPAGE" ? null : media.media_url ?? null;
 
-const resolveStatusLabel = (media: MediaAsset) => media.status ?? "PENDING";
+const resolveStatusLabel = (media: MediaAsset) => {
+  switch (media.status) {
+    case "READY": return "Ready";
+    case "PROCESSING": return "Preparing";
+    case "FAILED": return "Needs attention";
+    default: return "Waiting";
+  }
+};
 const resolvePlayableMimeType = (media: MediaAsset) => media.content_type || media.source_content_type || null;
 const resolveFormatBadge = (media: MediaAsset) =>
   resolveLibraryMediaType(media) === "DOCUMENT" ? resolveMediaSourceFormat(media).badge : resolveLibraryMediaType(media);
@@ -132,6 +139,7 @@ export default function MediaLibrary() {
   const locationState = location.state as MediaLibraryLocationState | null;
   const currentUser = useAppSelector((state) => state.auth.user);
   const { can } = useAuthorization();
+  const canUpload = can('create', 'Media');
   const [activeTab, setActiveTab] = useState<MediaTab>("all");
   const [pageByTab, setPageByTab] = useState<Record<MediaTab, number>>({
     all: 1,
@@ -273,7 +281,7 @@ export default function MediaLibrary() {
   const activePage = pageByTab[activeTab];
   const typeFilter = (activeTab === "all" ? undefined : activeTab.toUpperCase()) as MediaType | undefined;
 
-  const { data, isLoading, isFetching, isError, error } = useQuery({
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ["media", "library", typeFilter, activePage, MEDIA_PAGE_SIZE],
     queryFn: () =>
       mediaApi.list({
@@ -281,29 +289,7 @@ export default function MediaLibrary() {
         page: activePage,
         type: typeFilter,
       }),
-    placeholderData: (previousData) => previousData,
     refetchInterval: 45 * 60 * 1000,
-  });
-
-  const statsQueries = useQueries({
-    queries: [
-      {
-        queryKey: ["media", "stats", "all"],
-        queryFn: () => mediaApi.list({ page: 1, limit: 1 }),
-      },
-      {
-        queryKey: ["media", "stats", "image"],
-        queryFn: () => mediaApi.list({ page: 1, limit: 1, type: "IMAGE" }),
-      },
-      {
-        queryKey: ["media", "stats", "video"],
-        queryFn: () => mediaApi.list({ page: 1, limit: 1, type: "VIDEO" }),
-      },
-      {
-        queryKey: ["media", "stats", "document"],
-        queryFn: () => mediaApi.list({ page: 1, limit: 1, type: "DOCUMENT" }),
-      },
-    ],
   });
 
   const isUploading = uploadMutation.isPending;
@@ -341,7 +327,7 @@ export default function MediaLibrary() {
   };
 
   const handleUpload = () => {
-    if (!selectedFile || isUploading) return;
+    if (!canUpload || !selectedFile || isUploading) return;
     setUploadResult(null);
     setUploadProgress(0);
     uploadMutation.mutate(selectedFile);
@@ -379,17 +365,10 @@ export default function MediaLibrary() {
   }, [isUploadOpen]);
 
   useEffect(() => {
-    if (locationState?.openUpload) {
+    if (locationState?.openUpload && canUpload) {
       setIsUploadOpen(true);
     }
-  }, [locationState?.openUpload]);
-
-  useEffect(() => {
-    if (isError) {
-      const message = error instanceof ApiError ? error.message : "Unable to load media.";
-      toast({ title: "Load failed", description: message, variant: "destructive" });
-    }
-  }, [isError, error, toast]);
+  }, [canUpload, locationState?.openUpload]);
 
   const pagination = data ?? { items: [], page: activePage, limit: MEDIA_PAGE_SIZE, total: 0 };
   const totalPages = pagination.limit > 0 ? Math.max(1, Math.ceil(pagination.total / pagination.limit)) : 1;
@@ -409,67 +388,48 @@ export default function MediaLibrary() {
     [media, activeTab]
   );
 
-  const stats = useMemo(() => {
-    const total = statsQueries[0]?.data?.total ?? 0;
-    const images = statsQueries[1]?.data?.total ?? 0;
-    const videos = statsQueries[2]?.data?.total ?? 0;
-    const documents = statsQueries[3]?.data?.total ?? 0;
-    return { total, images, videos, documents };
-  }, [statsQueries]);
-
   useEffect(() => {
-    if (activePage > totalPages) {
+    if (data && activePage > totalPages) {
       setPageByTab((prev) => ({
         ...prev,
         [activeTab]: totalPages,
       }));
     }
-  }, [activePage, activeTab, totalPages]);
+  }, [activePage, activeTab, data, totalPages]);
 
   const resolveMediaLabel = (media: MediaAsset) => resolveMediaDisplayName(media);
   const resolveMediaUpdatedLabel = (media: MediaAsset) =>
     formatRelativeMediaTime(media.updated_at ?? media.created_at);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="mx-auto w-full max-w-7xl space-y-5">
+      <header className="flex flex-col gap-3 border-b border-border/70 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-3xl font-bold text-foreground">Media Library</h1>
-          <p className="text-muted-foreground mt-1">
-            Browse uploaded assets and conversion jobs.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">Media Library</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Uploaded files and their playback readiness.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canRestore && <Button variant="outline" onClick={() => setShowDeleted(true)}>Deleted Media</Button>}
-          <Button variant="outline" onClick={() => setIsUploadOpen(true)}>
-            <Upload className="h-4 w-4 mr-2" />
-            Upload Media
-          </Button>
+          {canUpload && <Button onClick={() => setIsUploadOpen(true)}>
+            <Upload aria-hidden="true" className="mr-2 h-4 w-4" />Upload Media
+          </Button>}
         </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Total Files" value={stats.total} icon={<FileText className="h-5 w-5 text-primary" />} />
-        <StatCard title="Images" value={stats.images} icon={<ImageIcon className="h-5 w-5 text-blue-600" />} />
-        <StatCard title="Videos" value={stats.videos} icon={<Video className="h-5 w-5 text-purple-600" />} />
-        <StatCard title="Documents" value={stats.documents} icon={<FileText className="h-5 w-5 text-orange-600" />} />
-      </div>
-
-      <Card className="p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="h-auto w-full justify-start gap-2 overflow-x-auto p-1">
+            <TabsList className="h-auto max-w-full justify-start gap-1 overflow-x-auto p-1">
               <TabsTrigger value="all" className="shrink-0">All</TabsTrigger>
               <TabsTrigger value="image" className="shrink-0">Images</TabsTrigger>
               <TabsTrigger value="video" className="shrink-0">Videos</TabsTrigger>
               <TabsTrigger value="document" className="shrink-0">Documents</TabsTrigger>
             </TabsList>
           </Tabs>
-          <div className="text-sm text-muted-foreground">
-            {isFetching ? "Refreshing..." : `${pagination.total} items`}
+          <div role="status" className="text-sm text-muted-foreground">
+            {isLoading ? "Loading files…" : `${pagination.total} ${pagination.total === 1 ? "file" : "files"}`}
+            {isFetching && !isLoading ? " · Updating" : ""}
           </div>
-        </div>
-      </Card>
+      </div>
 
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -477,14 +437,22 @@ export default function MediaLibrary() {
             <Skeleton key={idx} className="h-40" />
           ))}
         </div>
+      ) : isError && !data ? (
+        <div role="alert" className="rounded-xl border border-border px-5 py-10 text-center">
+          <p className="font-medium">Could not load Media Library</p>
+          <p className="mt-1 text-sm text-muted-foreground">{error instanceof ApiError ? error.message : "Check your connection and try again."}</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => void refetch()}>Retry</Button>
+        </div>
+      ) : filteredMedia.length === 0 ? (
+        <div className="rounded-xl border border-border px-5 py-10 text-center">
+          <p className="font-medium">{activeTab === "all" ? "No media yet" : `No ${activeTab === "document" ? "documents" : `${activeTab}s`} found`}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{activeTab === "all" ? "Uploaded files will appear here." : "Choose another file type or upload a new file."}</p>
+          {canUpload && activeTab === "all" && <Button size="sm" className="mt-4" onClick={() => setIsUploadOpen(true)}>Upload Media</Button>}
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredMedia.map((item: MediaAsset) => (
-            <Card
-              key={item.id}
-              className="hover:shadow-lg transition-shadow cursor-pointer"
-              onClick={() => handlePreview(item)}
-            >
+            <Card key={item.id} role="group" aria-label={resolveMediaLabel(item)} className="flex h-full flex-col overflow-hidden shadow-none">
               <CardHeader>
                 <div className="space-y-2">
                   <CardTitle className="text-base flex items-center justify-between gap-2">
@@ -501,7 +469,7 @@ export default function MediaLibrary() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm text-muted-foreground">
+              <CardContent className="flex flex-1 flex-col gap-2 text-sm text-muted-foreground">
                 {resolvePrimaryMediaUrl(item) ? (
                   <div className="overflow-hidden rounded-md border bg-muted/30">
                     {resolveLibraryMediaType(item) === "IMAGE" || (item.content_type || "").startsWith("image/") ? (
@@ -538,24 +506,6 @@ export default function MediaLibrary() {
                         <p className="text-xs text-muted-foreground">
                           {resolveLibraryMediaType(item) === "DOCUMENT" ? "Document preview" : "Media preview"}
                         </p>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyUrl(resolveCopyTargetUrl(item));
-                            }}
-                          >
-                            <Copy className="h-4 w-4 mr-2" />
-                            Copy URL
-                          </Button>
-                          <Button variant="ghost" size="sm" asChild onClick={(e) => e.stopPropagation()}>
-                            <a href={resolveCopyTargetUrl(item) ?? undefined} target="_blank" rel="noreferrer">
-                              Open
-                            </a>
-                          </Button>
-                        </div>
                       </div>
                     )}
                   </div>
@@ -571,36 +521,9 @@ export default function MediaLibrary() {
                     </p>
                   </div>
                 )}
-                <div className="flex justify-end gap-2">
-                    {resolveCopyTargetUrl(item) ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleCopyUrl(resolveCopyTargetUrl(item));
-                        }}
-                      >
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy URL
-                      </Button>
-                    ) : null}
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      disabled={!canDeleteMediaRecord(currentUser, item)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        confirmDelete(item);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Delete
-                    </Button>
-                </div>
                 {item.size && <div>Size: {(item.size / 1024 / 1024).toFixed(2)} MB</div>}
                 {item.status && (
-                  <Badge variant="secondary" className="text-xs">
+                  <Badge variant="secondary" className="self-start text-xs">
                     {resolveStatusLabel(item)}
                   </Badge>
                 )}
@@ -621,8 +544,17 @@ export default function MediaLibrary() {
                     Updated: {resolveMediaUpdatedLabel(item)}
                   </div>
                 )}
-                <div className="text-xs">
-                  Status : {item?.status ?? "PENDING"}
+                <div className="mt-auto flex flex-wrap gap-2 border-t border-border/70 pt-3">
+                  <Button variant="outline" size="sm" onClick={() => handlePreview(item)}>Preview</Button>
+                  {resolveCopyTargetUrl(item) ? (
+                    <Button variant="outline" size="sm" onClick={() => handleCopyUrl(resolveCopyTargetUrl(item))}>
+                      <Copy aria-hidden="true" className="mr-2 h-4 w-4" />Copy URL
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    disabled={!canDeleteMediaRecord(currentUser, item)} onClick={() => confirmDelete(item)}>
+                    <Trash2 aria-hidden="true" className="mr-2 h-4 w-4" />Delete
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -630,7 +562,14 @@ export default function MediaLibrary() {
         </div>
       )}
 
-      <PageNavigation
+      {isError && data && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive">
+          <span>Could not refresh the file list. Showing the last loaded results.</span>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
+        </div>
+      )}
+
+      {data && pagination.total > pagination.limit && <PageNavigation
         currentPage={activePage}
         totalPages={totalPages}
         showPageNumbers
@@ -641,7 +580,7 @@ export default function MediaLibrary() {
           }))
         }
         className="flex justify-end"
-      />
+      />}
 
       <Dialog
         open={isUploadOpen}
@@ -836,8 +775,9 @@ export default function MediaLibrary() {
         <DialogContent>
           <DialogHeader><DialogTitle>Deleted Media</DialogTitle></DialogHeader>
           <div className="max-h-80 space-y-2 overflow-y-auto">
-            {deletedMediaQuery.isError && <p>Unable to load deleted media.</p>}
-            {deletedMediaQuery.data?.items.length === 0 && <p>No deleted media.</p>}
+            {deletedMediaQuery.isLoading && <p role="status" className="text-sm text-muted-foreground">Loading deleted media…</p>}
+            {deletedMediaQuery.isError && <div role="alert" className="space-y-2 text-sm"><p>Unable to load deleted media.</p><Button variant="outline" size="sm" onClick={() => void deletedMediaQuery.refetch()}>Retry</Button></div>}
+            {deletedMediaQuery.data?.items.length === 0 && !deletedMediaQuery.isError && <p>No deleted media.</p>}
             {deletedMediaQuery.data?.items.map((item) => (
               <div key={item.id} className="flex items-center justify-between gap-2 border-b py-2">
                 <span>{item.name}</span>
@@ -845,7 +785,7 @@ export default function MediaLibrary() {
               </div>
             ))}
           </div>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2" aria-label="Deleted media pages">
             <Button variant="outline" disabled={deletedPage === 1 || deletedMediaQuery.isFetching} onClick={() => setDeletedPage((page) => page - 1)}>Previous</Button>
             <span>Page {deletedPage}</span>
             <Button variant="outline" disabled={deletedMediaQuery.isFetching || (deletedMediaQuery.data?.items.length ?? 0) < 100} onClick={() => setDeletedPage((page) => page + 1)}>Next</Button>
@@ -853,19 +793,5 @@ export default function MediaLibrary() {
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-function StatCard({ title, value, icon }: { title: string; value: number; icon: React.ReactNode }) {
-  return (
-    <Card className="p-4">
-      <div className="flex items-center gap-3">
-        <div className="p-2 bg-primary/10 rounded-lg">{icon}</div>
-        <div>
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="text-2xl font-bold">{value}</p>
-        </div>
-      </div>
-    </Card>
   );
 }

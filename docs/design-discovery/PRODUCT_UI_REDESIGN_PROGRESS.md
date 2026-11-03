@@ -86,6 +86,12 @@ The Notifications route now uses one compact heading and a separated activity li
 
 Six fixture-backed browser cases passed, including page 2, non-chat read, thread deep link, failed list/read/all-read requests, retry, unread page reset, and a stale separate count. Captures at 390/820/1440 CSS pixels and dark phone were reviewed without horizontal overflow. CMS build and bundle budget, 271 unit tests, and focused lint passed. The [developer evidence](../../qa-artifacts/evidence/product-ui-notifications-developer-verification-2026-11-04.md) records the limits; real multi-account service and accessibility journeys remain pending.
 
+## Media Library packet
+
+Media Library now uses a compact task heading and a filtered asset gallery without duplicate metric tiles or their four extra list requests. Each card has a keyboard-operable Preview action, plain-language readiness, and contextual Copy URL/Delete controls. Upload and deleted-media actions follow current `create Media` and `manage Media` capabilities. Initial failures, empty results, retry, and deleted-list failures have distinct on-page states. Filter paging waits for the current filter's server response before correcting an out-of-range page.
+
+The server-side deleted-media contract was corrected separately: current effective `manage Media` permission now works for custom roles, matching the existing CMS control. The dedicated database route suite passed 21/21. The [Media Library developer evidence](../../qa-artifacts/evidence/product-ui-media-library-developer-verification-2026-11-04.md) records fixture-backed CMS behavior and open real-service work.
+
 ## Current visual review
 
 Fresh fixture-backed captures for Dashboard, Screens, and Schedule review at 1440, 820, and 390 CSS pixels are in `qa-artifacts/evidence/product-ui-core-prototypes/`. The three focused browser journeys passed. The images are current-branch references, not real-service acceptance.

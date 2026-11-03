@@ -65,12 +65,12 @@ test("document cards and the detail modal show the original format and a navigab
   await page.goto("/media");
   await page.getByRole("tab", { name: /Documents/ }).click();
 
-  const card = page.getByText("Quarterly report", { exact: true }).first().locator('xpath=ancestor::*[contains(@class,"cursor-pointer")][1]');
+  const card = page.getByRole("group", { name: "Quarterly report" });
   await expect(card.getByText("DOCX", { exact: true })).toBeVisible();
   await expect(card.getByText("Original format: Word (.docx)")).toBeVisible();
   await expect(card.locator("canvas")).toHaveCSS("opacity", "1", { timeout: 15_000 });
 
-  await card.click();
+  await card.getByRole("button", { name: "Preview" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("Converted to PDF for screen playback")).toBeVisible();
   await expect(dialog.locator("canvas")).toHaveCSS("opacity", "1", { timeout: 15_000 });

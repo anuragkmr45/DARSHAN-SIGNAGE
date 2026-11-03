@@ -61,7 +61,7 @@ test("retired webpage media stays in history without playback or creation contro
   await page.goto("/media");
   await expect(page.getByRole("button", { name: /add webpage/i })).toHaveCount(0);
   await expect(page.getByText("Retired webpage item")).toBeVisible();
-  await page.getByText("Status Dashboard", { exact: true }).first().click();
+  await page.getByRole("group", { name: "Status Dashboard" }).getByRole("button", { name: "Preview" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("Webpage media is retired and cannot be played.")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Refresh preview" })).toHaveCount(0);
