@@ -1,6 +1,6 @@
 # DARSHAN interface prototype: visual checkpoint
 
-Status: candidate direction for review, not full product approval or real-service QA. Source branch: `codex/darshan-product-ui-redesign-20261103` at `5cdca15`.
+Status: visual direction approved by the user on 2026-11-04 for extension to the remaining CMS pages and player-owned screens. Functional behavior, real-service QA, and production readiness are separate. Source prototype branch: `codex/darshan-product-ui-redesign-20261103` at `5cdca15`.
 
 The six prototypes below cover the agreed checkpoint before applying this visual system to the remaining CMS routes and player states. Each screenshot comes from a running browser or built player renderer with controlled fixture state. Functional checks are recorded in the corresponding `qa-artifacts/evidence/product-ui-*-developer-verification-2026-11-04.md` files.
 
@@ -15,6 +15,6 @@ The six prototypes below cover the agreed checkpoint before applying this visual
 
 ## Review decision
 
-Review the overall hierarchy, density, language, mobile treatment, and player legibility. Approval here authorizes extending the design direction to remaining routes and player-owned screens; it does not approve business behavior or production readiness. Record requested visual changes before extension.
+The user answered “Approve this direction” to the six-prototype visual checkpoint on 2026-11-04. This authorizes extending the visual direction to remaining routes and player-owned screens. It does not approve business behavior or production readiness.
 
-Known work after this checkpoint: complete route/control coverage register, remaining CMS and player surfaces, production-sized Group membership selection, real-service business journeys, packaged-player regression, cross-route review, human QA, and release gates. The current screenshot data is controlled fixture data and may show old dates or unavailable monitoring.
+Known work after this checkpoint: complete route/control coverage register, remaining CMS and player surfaces, real-service Group membership journey, other business journeys, packaged-player regression, cross-route review, human QA, and release gates. The current screenshot data is controlled fixture data and may show old dates or unavailable monitoring.
