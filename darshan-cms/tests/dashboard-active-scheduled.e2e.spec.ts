@@ -121,7 +121,11 @@ const login = async (page: Page) => {
   await page.waitForURL(/\/dashboard/);
 };
 
-const installApiMocks = async (page: Page, overrides?: { emptyTimeline?: boolean }) => {
+const installApiMocks = async (page: Page, overrides?: {
+  emptyTimeline?: boolean;
+  mediaItems?: Array<Record<string, unknown>>;
+  mediaDeleteRequests?: string[];
+}) => {
   const requestCounts = {
     scheduleTimeline: 0,
   };
@@ -157,6 +161,22 @@ const installApiMocks = async (page: Page, overrides?: { emptyTimeline?: boolean
 
     if (pathname === "/api/v1/notifications/unread-count" && method === "GET") {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ unread_total: 0 }) });
+    }
+
+    if (pathname === "/api/v1/media" && method === "GET" && overrides?.mediaItems) {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        items: overrides.mediaItems, page: 1, limit: 100, total: overrides.mediaItems.length,
+      }) });
+    }
+
+    if (/^\/api\/v1\/media\/[^/]+$/.test(pathname) && method === "DELETE" && overrides?.mediaItems) {
+      overrides.mediaDeleteRequests?.push(route.request().url());
+      const itemId = pathname.split("/").pop();
+      const index = overrides.mediaItems.findIndex((item) => item.id === itemId);
+      if (index >= 0) overrides.mediaItems.splice(index, 1);
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        id: itemId, message: "Media deleted and retained for administrator restore",
+      }) });
     }
 
     if (pathname === "/api/v1/metrics/overview" && method === "GET") {
@@ -335,6 +355,29 @@ test.describe("Dashboard active scheduled modal", () => {
       expect(horizontalOverflow, `dashboard horizontal overflow at ${width}px`).toBe(false);
       await page.screenshot({ path: testInfo.outputPath(`dashboard-${width}.png`), fullPage: true });
     }
+  });
+
+  test("deletes only permitted media through the recoverable route", async ({ page }) => {
+    const mediaDeleteRequests: string[] = [];
+    const mediaItems: Array<Record<string, unknown>> = [
+      { id: "media-owned", display_name: "Owned image", filename: "owned.png", type: "IMAGE", status: "READY", source_size: 1024, permissions: { can_delete: true } },
+      { id: "media-other", display_name: "Other image", filename: "other.png", type: "IMAGE", status: "READY", source_size: 2048, permissions: { can_delete: false } },
+    ];
+    await installApiMocks(page, { mediaItems, mediaDeleteRequests });
+    await login(page);
+    await page.getByRole("button", { name: /Media Storage/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Media Storage Details" });
+    await expect(dialog.getByText("Owned image", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Delete Owned image" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Delete Other image" })).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Delete Owned image" }).click();
+    const confirmation = page.getByRole("dialog", { name: "Delete media" });
+    await expect(confirmation.getByText(/objects remain available for an administrator to restore/)).toBeVisible();
+    await confirmation.getByRole("button", { name: "Delete Media" }).click();
+    await expect.poll(() => mediaDeleteRequests.length).toBe(1);
+    expect(new URL(mediaDeleteRequests[0]!).searchParams.has("hard")).toBe(false);
+    await expect(dialog.getByText("Owned image", { exact: true })).toHaveCount(0);
+    await expect(dialog.getByText("Other image", { exact: true })).toBeVisible();
   });
 
   test("explains explicit group targets and untaken-down publishes in the schedule report", async ({ page }) => {

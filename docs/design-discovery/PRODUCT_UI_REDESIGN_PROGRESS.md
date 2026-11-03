@@ -27,6 +27,8 @@ Task: identify fleet problems and continue to content publishing. Priority: curr
 
 The dashboard was rendered with fixture data at 1440, 820, and 390 CSS pixels. The two-column phone summary is legible and the page has no horizontal overflow. Observability, system health, and machine health now use section headings, spacing, and separators rather than large outer cards; the segmented fleet summary remains one compact control. Alerts stay prominent in the main flow. The generated screenshots are local Playwright outputs, not real-service evidence. A dashboard visual-approval checkpoint and the real-service journey remain pending.
 
+The Media Storage detail exposed a misleading “Hard Delete” action even though the server disables permanent deletion and the CMS API sent only the recoverable delete request. It now offers Delete only for records whose server-provided permissions allow it, explains administrator restore, and uses the normal delete route. The Dashboard browser test checks both an allowed and denied row and confirms that no `hard=true` query is sent.
+
 ## Screens list and detail prototype in progress
 
 Task: find an unhealthy screen and understand its current playback before acting. Information priority: fleet status, active pairing findings, searchable Screen rows, then Screen Group and pairing administration. The primary row action opens details; recovery is visible for a Screen that requires it. Revoke and Delete remain in a labeled actions menu and still use their existing confirmations and server blockers.

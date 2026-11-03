@@ -12,4 +12,6 @@ Visible follow-up before design approval:
 
 After these refinements, the Dashboard browser suite passed 7/7 and the Schedule/emergency browser suite passed 2/2 with one Chromium worker. The CMS unit suite passed 271/271, the production build and bundle budget passed, and focused ESLint passed. The first broader Schedule run exposed an immediate assertion on an asynchronous save payload; the test now waits for that request, and the full suite passed on rerun.
 
+A subsequent Dashboard workflow review found that the Media Storage detail said “Hard Delete” while the server forbids permanent deletion and the CMS API sent a normal recoverable delete request. The control now uses per-record `permissions.can_delete`, explains that an administrator can restore the media, and calls the normal DELETE path. A fixture-backed browser case verified a permitted row, a denied row, and no `hard` query parameter. The expanded Dashboard suite passed 8/8; CMS unit tests passed 271/271, production build and bundle budget passed, and focused ESLint passed. Real-service authorization and restore are still pending.
+
 These observations do not override the already recorded functional and real-service regression work.

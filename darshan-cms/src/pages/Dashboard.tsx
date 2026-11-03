@@ -34,6 +34,7 @@ import { MediaPreview } from "@/components/common/MediaPreview";
 import { formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { mapMediaDeleteError } from "@/lib/mediaDeleteErrors";
+import { canDeleteMediaRecord } from "@/lib/access";
 import { OnlineScreensDetailsModal } from "@/components/dashboard/OnlineScreensDetailsModal";
 import { ActiveScheduledTimelineModal } from "@/components/dashboard/ActiveScheduledTimelineModal";
 import { AllScreensDetailsModal } from "@/components/dashboard/AllScreensDetailsModal";
@@ -192,15 +193,15 @@ export default function Dashboard() {
     },
   });
 
-  const hardDeleteMutation = useMutation({
+  const deleteMediaMutation = useMutation({
     mutationFn: async (mediaId: string) => {
-      const response = await mediaApi.remove(mediaId, { hard: true });
+      const response = await mediaApi.remove(mediaId);
       return response as { message?: string } | void;
     },
     onSuccess: (response) => {
       toast({
         title: "Media deleted",
-        description: (response as { message?: string } | undefined)?.message ?? "Media permanently deleted.",
+        description: (response as { message?: string } | undefined)?.message ?? "Media hidden and retained for administrator restore.",
       });
       setDeleteTarget(null);
       void queryClient.invalidateQueries({ queryKey: ["dashboard", "media-storage-modal"] });
@@ -960,7 +961,7 @@ export default function Dashboard() {
                                 >
                                   <Eye className="h-4 w-4" />
                                 </Button>
-                                <Button
+                                {canDeleteMediaRecord(user, item) ? <Button
                                   size="icon"
                                   variant="destructive"
                                   aria-label={`Delete ${resolveMediaDisplayName(item)}`}
@@ -968,7 +969,7 @@ export default function Dashboard() {
                                   onClick={() => setDeleteTarget(item)}
                                 >
                                   <Trash2 className="h-4 w-4" />
-                                </Button>
+                                </Button> : null}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -1015,9 +1016,9 @@ export default function Dashboard() {
         <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
           <DialogContent className="sm:max-w-[480px] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Hard delete media</DialogTitle>
+              <DialogTitle>Delete media</DialogTitle>
               <DialogDescription>
-                This permanently removes the media and sends `?hard=true` to the existing delete API.
+                This media will be hidden from normal use. Its objects remain available for an administrator to restore.
               </DialogDescription>
             </DialogHeader>
             <div className="rounded-md border bg-muted/30 p-3 text-sm">
@@ -1033,16 +1034,16 @@ export default function Dashboard() {
               <Button
                 variant="outline"
                 onClick={() => setDeleteTarget(null)}
-                disabled={hardDeleteMutation.isPending}
+                disabled={deleteMediaMutation.isPending}
               >
                 Cancel
               </Button>
               <Button
                 variant="destructive"
-                onClick={() => deleteTarget && hardDeleteMutation.mutate(deleteTarget.id)}
-                disabled={hardDeleteMutation.isPending}
+                onClick={() => deleteTarget && deleteMediaMutation.mutate(deleteTarget.id)}
+                disabled={deleteMediaMutation.isPending}
               >
-                {hardDeleteMutation.isPending ? "Deleting..." : "Hard Delete"}
+                {deleteMediaMutation.isPending ? "Deleting..." : "Delete Media"}
               </Button>
             </DialogFooter>
           </DialogContent>
