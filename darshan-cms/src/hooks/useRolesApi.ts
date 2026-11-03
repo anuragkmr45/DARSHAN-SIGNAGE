@@ -5,12 +5,11 @@ import { queryKeys } from "@/api/queryKeys";
 import { useToast } from "@/hooks/use-toast";
 import type { RolePayload, RoleListParams } from "@/api/domains/roles";
 
-const DEFAULT_ROLE_LIST: RoleListParams = { page: 1, limit: 100 };
-
 export const useRolesList = (params?: RoleListParams) =>
   useQuery({
-    queryKey: queryKeys.roles(params ?? DEFAULT_ROLE_LIST),
-    queryFn: () => rolesApi.list(params ?? DEFAULT_ROLE_LIST),
+    queryKey: params ? queryKeys.roles(params) : ["roles", "all"],
+    queryFn: ({ signal }) => params ? rolesApi.list(params, signal) : rolesApi.listAll(signal),
+    retry: false,
     staleTime: 60_000,
   });
 
@@ -26,6 +25,7 @@ export const usePermissionsMetadata = () =>
   useQuery({
     queryKey: queryKeys.permissionsMetadata,
     queryFn: permissionsApi.metadata,
+    retry: false,
     staleTime: 300_000,
   });
 

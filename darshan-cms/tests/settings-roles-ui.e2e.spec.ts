@@ -10,12 +10,17 @@ const roleGrants: TestCapability[] = [
   ...["read", "create", "update", "delete"].map((action) => ({ action, subject: "Role" })),
 ];
 
-async function setup(page: Page, grants: TestCapability[], options: { metadataFails?: boolean; deleteFails?: boolean; actorRole?: string } = {}) {
+async function setup(page: Page, grants: TestCapability[], options: { metadataFails?: boolean; deleteFails?: boolean; failPage2?: boolean; actorRole?: string; extraRoles?: number } = {}) {
   const user = { ...actor, role: options.actorRole ?? actor.role };
   let metadataFails = Boolean(options.metadataFails);
   let deleteFails = Boolean(options.deleteFails);
+  let failPage2 = Boolean(options.failPage2);
   const writes: { method: string; path: string; body?: unknown }[] = [];
   const roles = [fixedRole, customRole];
+  const rolePages: number[] = [];
+  for (let index = 0; index < (options.extraRoles ?? 0); index += 1) {
+    roles.push({ ...customRole, id: `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`, name: `ROLE_${index}` });
+  }
 
   await page.context().addCookies([
     { name: "access_token", value: "roles-qa-session", url: origin, httpOnly: true, sameSite: "Lax" },
@@ -40,7 +45,13 @@ async function setup(page: Page, grants: TestCapability[], options: { metadataFa
     if (path === "/api/v1/settings/appearance") return json({ theme_mode: "light", accent_preset: "crimson", sidebar_mode: "expanded" });
     if (path === "/api/v1/settings/backups") return json({ automatic_enabled: true, interval_hours: 24, log_level: "info", external_sidecar: false, manual_run_supported: true });
     if (path === "/api/v1/settings/backups/history" || path === "/api/v1/settings/logs") return json({ items: [] });
-    if (path === "/api/v1/roles" && method === "GET") return json({ items: roles, pagination: { page: 1, limit: 100, total: roles.length } });
+    if (path === "/api/v1/roles" && method === "GET") {
+      const pageNumber = Number(url.searchParams.get("page") ?? 1);
+      const limit = Number(url.searchParams.get("limit") ?? 100);
+      rolePages.push(pageNumber);
+      if (pageNumber === 2 && failPage2) return json({ error: { message: "Unavailable" } }, 503);
+      return json({ items: roles.slice((pageNumber - 1) * limit, pageNumber * limit), pagination: { page: pageNumber, limit, total: roles.length } });
+    }
     if (path === "/api/v1/permissions/metadata") return metadataFails ? json({ error: { message: "Unavailable" } }, 503) : json({ actions: ["read", "create"], subjects: ["Dashboard", "Media"] });
     if (path === "/api/v1/roles" && method === "POST") {
       const body = route.request().postDataJSON();
@@ -59,7 +70,7 @@ async function setup(page: Page, grants: TestCapability[], options: { metadataFa
     }
     return json({});
   });
-  return { writes, restoreMetadata: () => { metadataFails = false; }, restoreDelete: () => { deleteFails = false; } };
+  return { writes, rolePages, restoreMetadata: () => { metadataFails = false; }, restoreDelete: () => { deleteFails = false; }, restorePage2: () => { failPage2 = false; } };
 }
 
 test("built-in roles are fixed; a read-only role sees no mutations", async ({ page }) => {
@@ -136,4 +147,35 @@ test("roles remain usable at phone, tablet and desktop widths", async ({ page })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     if (width !== 820) await page.screenshot({ path: `../qa-artifacts/evidence/product-ui-roles/${width}-dialog.png`, fullPage: true });
   }
+});
+
+test("roles beyond the first API page remain searchable and available for inheritance", async ({ page }) => {
+  const state = await setup(page, roleGrants, { extraRoles: 105 });
+  await page.goto("/settings");
+  await page.getByRole("tab", { name: "Roles" }).click();
+  await expect.poll(() => state.rolePages).toContain(2);
+  await expect(page.getByText("Showing 1–20 of 107 roles")).toBeVisible();
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page.getByText("Showing 21–40 of 107 roles")).toBeVisible();
+  await page.getByLabel("Find a role").fill("ROLE_104");
+  await expect(page.getByText("ROLE_104", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New Role" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create Role" });
+  await dialog.getByLabel("Role name").fill("INHERITS_LAST_PAGE");
+  await dialog.getByText("ROLE_104", { exact: true }).click();
+  await dialog.getByRole("button", { name: "Create Role" }).click();
+  await expect.poll(() => state.writes.length).toBe(1);
+  expect((state.writes[0].body as { permissions: { inherits: string[] } }).permissions.inherits).toContain("00000000-0000-4000-8000-000000000204");
+});
+
+test("a later-page failure does not show a partial role directory", async ({ page }) => {
+  const state = await setup(page, roleGrants, { extraRoles: 105, failPage2: true });
+  await page.goto("/settings");
+  await page.getByRole("tab", { name: "Roles" }).click();
+  await expect(page.getByText("Could not load roles.")).toBeVisible();
+  await expect(page.getByText(customRole.name)).toHaveCount(0);
+  state.restorePage2();
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByLabel("Find a role")).toBeVisible();
+  await expect.poll(() => state.rolePages.filter((value) => value === 2).length).toBe(2);
 });

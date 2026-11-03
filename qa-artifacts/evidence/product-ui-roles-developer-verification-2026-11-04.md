@@ -11,11 +11,12 @@ Branch: `codex/darshan-product-ui-redesign-20261103`. Visual direction approved 
 
 ## Developer evidence
 
-- `darshan-cms/tests/settings-roles-ui.e2e.spec.ts`: 4/4 fixture-backed browser cases passed. A targeted visual rerun passed at 390, 820 and 1440 CSS pixels with no horizontal overflow. [Phone dialog](product-ui-roles/390-dialog.png) and [desktop dialog](product-ui-roles/1440-dialog.png) were inspected.
+- `darshan-cms/tests/settings-roles-ui.e2e.spec.ts`: six fixture-backed browser cases passed across focused runs. The 107-role case loaded a second API page and selected its final role as an inheritance source; a second-page HTTP failure showed Retry and no partial list. A targeted visual rerun passed at 390, 820 and 1440 CSS pixels with no horizontal overflow. [Phone dialog](product-ui-roles/390-dialog.png) and [desktop dialog](product-ui-roles/1440-dialog.png) were inspected.
 - `darshan-server/src/routes/roles-permissions.test.ts`: 7/7 passed against the dedicated `darshan_users_ui_test` PostgreSQL database, including direct built-in update rejection and an unchanged row.
 - CMS production build and bundle budget passed. Server TypeScript build passed. CMS unit suite passed 272/272. Focused CMS lint and `git diff --check` passed.
 - One packet-boundary browser run of Roles, Settings, Default Media and admin stabilization passed 17/17 with one worker.
+- After the complete-directory change, a combined Roles, Users, Operators and admin browser run passed 22/22 with one worker. CMS build/bundle budget, 272/272 units and focused lint passed again.
 
 ## Remaining release QA
 
-These browser tests use fixture API responses, not a two-operator running site. Human QA must verify a real custom-role create/edit/reload, session withdrawal across API and realtime, role assignment, update/delete blockers, restart/upgrade behavior, permission withdrawal while the dialog is open, concurrent edits, inheritance cycles and more than 100 roles. The present Roles list requests only the first 100, and its inheritance choices are drawn from that page; this needs a separate pagination/search packet before claiming large-role-site support. Keyboard, screen-reader and production deployment checks remain open.
+These browser tests use fixture API responses, not a two-operator running site. Human QA must verify a real custom-role create/edit/reload, session withdrawal across API and realtime, role assignment, update/delete blockers, restart/upgrade behavior, permission withdrawal while the dialog is open, concurrent edits, inheritance cycles and a production-sized role directory. The complete-directory request is bounded to 100 server pages and fails visibly if it cannot load all pages. Keyboard, screen-reader and production deployment checks remain open.

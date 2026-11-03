@@ -45,11 +45,21 @@ export function RolesPermissionsTab() {
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [roleSearch, setRoleSearch] = useState("");
+  const [rolePage, setRolePage] = useState(1);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [inherits, setInherits] = useState<string[]>([]);
   const [grants, setGrants] = useState<RolePermissionGrant[]>([]);
+
+  const filteredRoles = useMemo(() => {
+    const query = roleSearch.trim().toLocaleLowerCase();
+    return query ? roles.filter((item) => `${item.name} ${item.description ?? ""}`.toLocaleLowerCase().includes(query)) : roles;
+  }, [roleSearch, roles]);
+  const pageCount = Math.max(1, Math.ceil(filteredRoles.length / 20));
+  const currentPage = Math.min(rolePage, pageCount);
+  const visibleRoles = filteredRoles.slice((currentPage - 1) * 20, currentPage * 20);
 
   const availableInherits = useMemo(
     () => roles.filter((role) => role.id !== editingRole?.id),
@@ -157,6 +167,10 @@ export function RolesPermissionsTab() {
         <span>Could not refresh roles. Showing the last loaded list.</span>
         <Button variant="outline" size="sm" onClick={() => void retryRoles()}>Retry</Button>
       </div> : null}
+      {rolesData ? <div className="max-w-sm space-y-2">
+        <Label htmlFor="role-search">Find a role</Label>
+        <Input id="role-search" value={roleSearch} onChange={(event) => { setRoleSearch(event.target.value); setRolePage(1); }} placeholder="Search name or description" />
+      </div> : null}
       <div className="divide-y rounded-xl border bg-card px-4 sm:px-5">
           {rolesError && !rolesData ? (
             <div className="space-y-3 py-6"><p className="text-sm text-destructive">Could not load roles.</p><Button variant="outline" onClick={() => void retryRoles()}>Retry</Button></div>
@@ -165,9 +179,11 @@ export function RolesPermissionsTab() {
             <div className="py-6 text-sm text-muted-foreground">Loading roles…</div>
           ) : !rolesError && roles.length === 0 ? (
             <div className="py-6 text-sm text-muted-foreground">No roles available.</div>
-          ) : roles.length > 0 ? (
+          ) : filteredRoles.length === 0 ? (
+            <div className="py-6 text-sm text-muted-foreground">No roles match that search.</div>
+          ) : filteredRoles.length > 0 ? (
             <div>
-              {roles.map((role) => (
+              {visibleRoles.map((role) => (
                 <div
                   key={role.id}
                   className="flex flex-wrap items-center justify-between gap-3 border-b py-4 last:border-b-0"
@@ -214,6 +230,13 @@ export function RolesPermissionsTab() {
             </div>
           ) : null}
       </div>
+      {filteredRoles.length > 20 ? <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+        <span>Showing {(currentPage - 1) * 20 + 1}–{Math.min(currentPage * 20, filteredRoles.length)} of {filteredRoles.length} roles</span>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setRolePage(currentPage - 1)} disabled={currentPage === 1}>Previous</Button>
+          <Button variant="outline" size="sm" onClick={() => setRolePage(currentPage + 1)} disabled={currentPage >= pageCount}>Next</Button>
+        </div>
+      </div> : null}
       {rolesFetching && rolesData ? <p className="text-xs text-muted-foreground">Updating roles…</p> : null}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
