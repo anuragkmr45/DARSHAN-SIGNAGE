@@ -80,6 +80,12 @@ The recovery state now occupies the whole player window instead of a small corne
 
 The built renderer was inspected at 1440×900, 820×768, 390×844, and 640×360 CSS pixels. Each keeps hostname, code, expiry, and status inside the viewport; production controls stay hidden. Rendered mock-state captures are under `qa-artifacts/evidence/product-ui-player-prototype/`. The browser pairing regression verifies OTP replacement, monotonic countdown despite a skewed wall clock, surface priority, production control hiding, and the new viewport checks. These are prototype checks; a packaged Ubuntu player, physical displays, Windows, actual backend pairing/recovery, and security-lock transition remain to be exercised in the later real-application regression.
 
+## Notifications packet
+
+The Notifications route now uses one compact heading and a separated activity list. Chat records have a direct conversation action; other records have an explicit read action. Loading, empty, failed, retry, and mutation failure states are distinct. Opening a conversation no longer waits for the read request, so a failed read update cannot trap the operator in the inbox. The server remains authoritative for read status and unread totals.
+
+Six fixture-backed browser cases passed, including page 2, non-chat read, thread deep link, failed list/read/all-read requests, retry, unread page reset, and a stale separate count. Captures at 390/820/1440 CSS pixels and dark phone were reviewed without horizontal overflow. CMS build and bundle budget, 271 unit tests, and focused lint passed. The [developer evidence](../../qa-artifacts/evidence/product-ui-notifications-developer-verification-2026-11-04.md) records the limits; real multi-account service and accessibility journeys remain pending.
+
 ## Current visual review
 
 Fresh fixture-backed captures for Dashboard, Screens, and Schedule review at 1440, 820, and 390 CSS pixels are in `qa-artifacts/evidence/product-ui-core-prototypes/`. The three focused browser journeys passed. The images are current-branch references, not real-service acceptance.

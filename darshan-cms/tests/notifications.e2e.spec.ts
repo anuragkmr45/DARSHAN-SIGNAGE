@@ -1,7 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { OPERATOR_TEST_ROLE_ID, testAuthorization } from "./helpers/selfAuthorization";
 
-test("notification totals, older pages, and non-chat read action use server data", async ({ page, context }) => {
+async function setupNotifications(page: Page, context: BrowserContext) {
   const origin = "http://127.0.0.1:5173";
   const user = {
     id: "fe171dd2-226a-4228-91d8-597e9d4658d4", email: "qa@example.invalid", first_name: "QA", last_name: "Operator",
@@ -75,6 +75,11 @@ test("notification totals, older pages, and non-chat read action use server data
     return json({});
   });
 
+  return { items };
+}
+
+test("notification totals, older pages, and non-chat read action use server data", async ({ page, context }) => {
+  await setupNotifications(page, context);
   await page.goto("/notifications");
   await expect(page.getByRole("tab", { name: "Unread (55)" })).toBeVisible();
   await expect(page.getByText("Page 1 of 2 · 55 notifications")).toBeVisible();
@@ -82,11 +87,97 @@ test("notification totals, older pages, and non-chat read action use server data
   await expect(page.getByText("Page 2 of 2 · 55 notifications")).toBeVisible();
   await expect(page.getByText("Useful event detail 51")).toBeVisible();
   await expect(page.getByText("Hello @you")).toBeVisible();
-  await page.getByRole("button", { name: /System event 51/ }).click();
+  await page.getByRole("article").filter({ hasText: "System event 51" }).getByRole("button", { name: "Mark read" }).click();
   await expect(page.getByRole("tab", { name: "Unread (54)" })).toBeVisible();
   await expect(page).toHaveURL(/\/notifications$/);
   await page.getByRole("button", { name: "Mark all read" }).click();
   await expect(page.getByRole("tab", { name: "Unread (0)" })).toBeVisible();
-  await page.getByRole("button", { name: /New thread reply/ }).click();
+  await page.getByRole("article").filter({ hasText: "New thread reply" }).getByRole("button", { name: "Open conversation" }).click();
   await expect(page).toHaveURL(/\/chat\/conv-thread\/thread\/root-55/);
+});
+
+test("failed list remains an error until Retry succeeds", async ({ page, context }) => {
+  await setupNotifications(page, context);
+  let unavailable = true;
+  await page.route("**/api/v1/notifications?**", (route) => {
+    if (unavailable) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+    return route.fallback();
+  });
+  await page.goto("/notifications");
+  await expect(page.getByText("Could not load notifications")).toBeVisible();
+  await expect(page.getByText("No notifications yet")).toHaveCount(0);
+  unavailable = false;
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByRole("heading", { name: "System event 1", exact: true })).toBeVisible();
+});
+
+test("failed read action remains retryable and a chat link still opens", async ({ page, context }) => {
+  await setupNotifications(page, context);
+  let unavailable = true;
+  await page.route("**/api/v1/notifications/notification-1/read", (route) => {
+    if (unavailable) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+    return route.fallback();
+  });
+  await page.goto("/notifications");
+  const event = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "System event 1", exact: true }) });
+  await event.getByRole("button", { name: "Mark read" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Could not mark this notification read" })).toBeVisible();
+  await expect(event.getByText("Unread")).toBeVisible();
+  unavailable = false;
+  await event.getByRole("button", { name: "Mark read" }).click();
+  await expect(event.getByText("Read", { exact: true })).toBeVisible();
+
+  await page.route("**/api/v1/notifications/notification-55/read", (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) }));
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("article").filter({ hasText: "New thread reply" }).getByRole("button", { name: "Open conversation" }).click();
+  await expect(page).toHaveURL(/\/chat\/conv-thread\/thread\/root-55/);
+  await expect(page.getByText("Notification still unread", { exact: true })).toBeVisible();
+});
+
+test("mark all failure is visible and unread filter recovers to its first page", async ({ page, context }) => {
+  await setupNotifications(page, context);
+  let unavailable = true;
+  await page.route("**/api/v1/notifications/read-all", (route) => {
+    if (unavailable) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+    return route.fallback();
+  });
+  await page.goto("/notifications");
+  await page.getByRole("tab", { name: "Unread (55)" }).click();
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Mark all read" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Could not mark all notifications read" })).toBeVisible();
+  await expect(page.getByText("Page 2 of 2 · 55 notifications")).toBeVisible();
+  unavailable = false;
+  await page.getByRole("button", { name: "Mark all read" }).click();
+  await expect(page.getByText("You're all caught up")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Unread (0)" })).toBeVisible();
+});
+
+test("row-derived unread count wins when the separate counter is stale", async ({ page, context }) => {
+  await setupNotifications(page, context);
+  await page.route("**/api/v1/notifications/unread-count", (route) => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({ unread_total: 0 }),
+  }));
+  await page.goto("/notifications");
+  await expect(page.getByRole("tab", { name: "Unread (55)" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mark all read" })).toBeEnabled();
+});
+
+test("notification list stays usable at phone, tablet, and desktop widths", async ({ page, context }, testInfo) => {
+  await setupNotifications(page, context);
+  await page.goto("/notifications");
+  await expect(page.getByRole("heading", { name: "System event 1", exact: true })).toBeVisible();
+  for (const width of [390, 820, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+    await expect(page.getByRole("article").first().getByRole("button", { name: "Mark read" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`notifications-${width}.png`) });
+  }
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.evaluate(() => window.localStorage.setItem("theme", "dark"));
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("notifications-dark-390.png") });
 });

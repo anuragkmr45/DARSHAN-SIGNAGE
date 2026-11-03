@@ -27,7 +27,7 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | R17 | `/conversations` — Conversations alias | Same conversation gate | Same component and data as `/chat`. | Alias regression pending. |
 | R18 | `/conversations/:conversationId` — Conversations alias | Same conversation gate | Same selected-conversation path. | Alias regression pending. |
 | R19 | `/conversations/:conversationId/thread/:threadRootId` — Conversations alias | Same conversation gate | Same selected-thread path. | Alias regression pending. |
-| R20 | `/notifications` — Notifications | `read Notification` | Notification API/realtime hints; filter, mark one/all read, and navigate from supported chat notifications. | Redesign and real-service evidence pending. |
+| R20 | `/notifications` — Notifications | `read Notification` | Notification API/realtime hints; filter, mark one/all read, and navigate from supported chat notifications. | 390/820/1440 fixture browser, dark phone, 6 behavior/error cases; real multi-actor service pending. |
 | R21 | `/screens` — Screens | `read Screen` or `read ScreenGroup` | Screen, Group and Pairing APIs; inspect, pair, recover, manage and delete with server blockers. | 390/820/1440 prototype; 17 fixture-backed browser cases; real player pending. |
 | R22 | `/media` — MediaLibrary | `read Media` | Media API; upload, preview, delete and restore when authorized. | Redesign and real-service evidence pending. |
 | R23 | `/reports` — Reports | `read Report` or `read AuditLog` | Report, audit, emergency, notification and PoP APIs; filter, inspect and export evidence. | Redesign and real-service evidence pending. |
@@ -75,6 +75,19 @@ This is the first individual-control pass. It follows `Dashboard.tsx` into its f
 | D17 | Media Delete and confirmation | Server-provided `permissions.can_delete`; Media DELETE API. | Hide an unreferenced asset while retaining objects for administrator restore; blocked references stay blocked. | Delete action hidden for denied record; permitted request fixture browser, real restore pending. |
 | D18 | Media list loading, denied, failed, retry, empty | `read Media`; Media list API. | Distinguish missing access, unavailable service, and genuine empty list; Retry refetches. | Storage dialog; fixture browser cases, real denial/recovery pending. |
 | D19 | Detail/dialog close | Dashboard route; local state. | Return to Dashboard without changing server data. | Escape/close behavior uses Radix; keyboard/focus and nested-dialog review pending. |
+
+## Notifications controls and states
+
+The route requires `read Notification` in the CMS. The current server allows an authenticated owner to mark their notifications read without a separate `update Notification` grant. Chat destinations are generated only for notification data with a conversation ID; other records have an explicit read action.
+
+| ID | Control or state | Source and expected result | Evidence and open review |
+| --- | --- | --- | --- |
+| N01 | All, Unread, Read filters | Notification list REST query; changing filter returns to page 1. The unread badge prefers the list's row-derived unread total over the separate counter; a missing count is not shown as zero. | Fixture browser; real count/realtime reconcile pending. |
+| N02 | Non-chat Mark read | Owner-scoped POST for the selected record; preserve unread state and show an error on failure. | Success/failure/retry fixture browser; real service pending. |
+| N03 | Chat Open conversation | Navigate to the conversation, focused message, or thread. Mark read runs independently; failure leaves unread status and reports it. | Thread success and failed mark fixture browser; real multi-actor deep-link pending. |
+| N04 | Mark all read | Owner-scoped POST; disabled when known count is zero; show pending and failed state. | Failure/retry and unread page reset fixture browser; real service pending. |
+| N05 | Loading, failed, retry, empty, stale refresh | REST list stays authoritative; a failed initial request is never presented as an empty inbox. | Initial failure/retry fixture browser; stale refresh and disconnected service pending. |
+| N06 | Pagination and layout | 50 records per page, explicit Previous/Next and server total; readable compact list at 390/820/1440 and dark phone. | Fixture browser/screenshots; text zoom, five accents, mobile device, keyboard and screen reader pending. |
 
 ## Control ledger: current status
 
