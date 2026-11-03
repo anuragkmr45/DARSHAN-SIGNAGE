@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { ArrowLeft, Copy, Grid3X3, Move, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Copy, Grid3X3, Move, Plus, Save, Trash2, Undo2, Redo2, MousePointer2, Pencil, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +28,7 @@ import { useSafeMutation } from "@/hooks/useSafeMutation";
 import { screensApi } from "@/api/domains/screens";
 import { layoutsApi } from "@/api/domains/layouts";
 import type { LayoutCreatePayload, LayoutItem, LayoutSlot, ScreenAspectRatio } from "@/api/types";
+import { canvasDimensions, drawSlot, moveSlot, nextSlotId, placeNewSlot, resizeSlot, slotsOverlap, updateSlotNumber } from "@/lib/layoutEditorGeometry";
 
 const mergeAspectRatioOptions = (response?: { items?: ScreenAspectRatio[]; defaults?: ScreenAspectRatio[] }) => {
   const combined = [...(response?.items ?? []), ...(response?.defaults ?? [])];
@@ -45,23 +46,6 @@ type LayoutEditorLocationState = {
   returnTo?: string;
 };
 
-function getAspectRatioDimensions(ratio: string, maxWidth: number): { width: number; height: number } {
-  const [w, h] = ratio.split(":").map(Number);
-  const aspectRatio = w / h;
-  const width = maxWidth;
-  const height = maxWidth / aspectRatio;
-  return { width, height };
-}
-
-function checkOverlap(slot1: LayoutSlot, slot2: LayoutSlot): boolean {
-  const x1End = slot1.x + slot1.w;
-  const y1End = slot1.y + slot1.h;
-  const x2End = slot2.x + slot2.w;
-  const y2End = slot2.y + slot2.h;
-
-  return !(slot1.x >= x2End || x1End <= slot2.x || slot1.y >= y2End || y1End <= slot2.y);
-}
-
 const GRID_OPTIONS = [
   { label: "5%", value: 0.05 },
   { label: "10%", value: 0.1 },
@@ -72,7 +56,7 @@ const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
 const snapToStep = (value: number, step: number) => {
   if (!step || step <= 0) return Number(clamp01(value).toFixed(3));
-  return Number(clamp01(Math.round(value / step) * step).toFixed(3));
+  return Number(clamp01(Math.round(value / step + 1e-9) * step).toFixed(3));
 };
 
 const getInputStep = (gridStep: number, snapToGrid: boolean) => (snapToGrid ? gridStep : 0.01);
@@ -83,6 +67,9 @@ const LayoutEditor = () => {
   const location = useLocation();
   const { toast } = useToast();
   const canvasRef = useRef<HTMLDivElement>(null);
+  const canvasViewportRef = useRef<HTMLDivElement>(null);
+  const [canvasViewportWidth, setCanvasViewportWidth] = useState(320);
+  const [zoom, setZoom] = useState(1);
 
   const isEditMode = !!id && id !== "new";
   const locationState = location.state as LayoutEditorLocationState | null;
@@ -96,6 +83,8 @@ const LayoutEditor = () => {
   const [aspectRatioSearch, setAspectRatioSearch] = useState("");
   const debouncedAspectRatioSearch = useDebounce(aspectRatioSearch, 350);
   const [slots, setSlots] = useState<LayoutSlot[]>([]);
+  const slotsRef = useRef<LayoutSlot[]>([]);
+  const [slotHistory, setSlotHistory] = useState<{ past: LayoutSlot[][]; future: LayoutSlot[][] }>({ past: [], future: [] });
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
@@ -103,13 +92,57 @@ const LayoutEditor = () => {
   const [showGrid, setShowGrid] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [gridStep, setGridStep] = useState<number>(0.1);
-  const [isJsonOpen, setIsJsonOpen] = useState(true);
+  const [isJsonOpen, setIsJsonOpen] = useState(false);
+  const [numericDraft, setNumericDraft] = useState({ x: "", y: "", w: "", h: "" });
+  const [slotIdDraft, setSlotIdDraft] = useState("");
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [isDirty]);
+
+  const commitSlots = useCallback((next: LayoutSlot[]) => {
+    const previous = slotsRef.current;
+    if (JSON.stringify(previous) === JSON.stringify(next)) return;
+    setSlotHistory((history) => ({ past: [...history.past, previous].slice(-50), future: [] }));
+    slotsRef.current = next;
+    setSlots(next);
+    setIsDirty(true);
+  }, []);
+
+  const undoSlots = useCallback(() => {
+    const previous = slotHistory.past.at(-1);
+    if (!previous) return;
+    const current = slotsRef.current;
+    setSlotHistory({ past: slotHistory.past.slice(0, -1), future: [current, ...slotHistory.future] });
+    slotsRef.current = previous;
+    setSlots(previous);
+    if (selectedSlotId && !previous.some((slot) => slot.id === selectedSlotId)) setSelectedSlotId(null);
+    setIsDirty(true);
+  }, [selectedSlotId, slotHistory]);
+
+  const redoSlots = useCallback(() => {
+    const next = slotHistory.future[0];
+    if (!next) return;
+    const current = slotsRef.current;
+    setSlotHistory({ past: [...slotHistory.past, current].slice(-50), future: slotHistory.future.slice(1) });
+    slotsRef.current = next;
+    setSlots(next);
+    if (selectedSlotId && !next.some((slot) => slot.id === selectedSlotId)) setSelectedSlotId(null);
+    setIsDirty(true);
+  }, [selectedSlotId, slotHistory]);
 
   const layoutQuery = useQuery({
     enabled: isEditMode && !!id,
     queryKey: ["layout", id],
     queryFn: () => layoutsApi.getById(id!),
     retry: false,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
@@ -118,6 +151,8 @@ const LayoutEditor = () => {
     setDescription(layoutQuery.data.description ?? "");
     setAspectRatio(layoutQuery.data.aspect_ratio);
     setSlots(layoutQuery.data.spec.slots);
+    slotsRef.current = layoutQuery.data.spec.slots;
+    setSlotHistory({ past: [], future: [] });
     setIsDirty(false);
   }, [layoutQuery.data]);
 
@@ -136,9 +171,10 @@ const LayoutEditor = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
   const [drawCurrent, setDrawCurrent] = useState<{ x: number; y: number } | null>(null);
+  const drawStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Dragging/resizing state
-  const [dragState, setDragState] = useState<{
+  const dragStateRef = useRef<{
     type: "move" | "resize";
     slotId: string;
     startX: number;
@@ -146,12 +182,31 @@ const LayoutEditor = () => {
     originalSlot: LayoutSlot;
     handle?: string;
   } | null>(null);
+  const activePointerId = useRef<number | null>(null);
+  const gestureStartSlots = useRef<LayoutSlot[] | null>(null);
+
+  useEffect(() => {
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+    const measure = () => setCanvasViewportWidth(viewport.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   const selectedSlot = slots.find((s) => s.id === selectedSlotId);
 
+  useEffect(() => {
+    setNumericDraft(selectedSlot
+      ? { x: String(selectedSlot.x), y: String(selectedSlot.y), w: String(selectedSlot.w), h: String(selectedSlot.h) }
+      : { x: "", y: "", w: "", h: "" });
+    setSlotIdDraft(selectedSlot?.id ?? "");
+  }, [selectedSlot]);
+
   // Check for overlapping slots
   const hasOverlaps = slots.some((slot, i) =>
-    slots.some((other, j) => i !== j && checkOverlap(slot, other))
+    slots.some((other, j) => i !== j && slotsOverlap(slot, other))
   );
   const [hasShownOverlapToast, setHasShownOverlapToast] = useState(false);
 
@@ -178,8 +233,10 @@ const LayoutEditor = () => {
   );
   const hasDuplicateIds = duplicateIds.length > 0;
 
-  const canvasWidth = 500;
-  const canvasDimensions = getAspectRatioDimensions(aspectRatio, canvasWidth);
+  const showGridMarkers = showGrid && canvasViewportWidth >= 500;
+  const canvasPadding = canvasViewportWidth < 640 ? 24 : 32;
+  const canvasWidth = Math.max(120, Math.min(640, canvasViewportWidth - canvasPadding - (showGridMarkers ? 52 : 8))) * zoom;
+  const fittedCanvas = canvasDimensions(aspectRatio, canvasWidth);
   const inputStep = useMemo(() => getInputStep(gridStep, snapToGrid), [gridStep, snapToGrid]);
   const gridMarkers = useMemo(
     () =>
@@ -292,11 +349,14 @@ const LayoutEditor = () => {
   };
 
   const handleAddSlot = () => {
-    setIsDrawing(true);
-    toast({
-      title: "Draw mode active",
-      description: "Click and drag on the canvas to create a new slot.",
-    });
+    const newSlot = placeNewSlot(slotsRef.current);
+    if (!newSlot) {
+      toast({ title: "No open area", description: "Move or resize an existing slot before adding another.", variant: "destructive" });
+      return;
+    }
+    commitSlots([...slotsRef.current, newSlot]);
+    setSelectedSlotId(newSlot.id);
+    setIsDrawing(false);
   };
 
   const getCanvasCoordinates = useCallback(
@@ -312,134 +372,138 @@ const LayoutEditor = () => {
     [gridStep]
   );
 
-  const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    if (isDrawing) {
-      const coords = getCanvasCoordinates(e.clientX, e.clientY, snapToGrid);
-      setDrawStart(coords);
-      setDrawCurrent(coords);
-    }
+  const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDrawing || activePointerId.current !== null) return;
+    activePointerId.current = event.pointerId;
+    canvasRef.current?.setPointerCapture(event.pointerId);
+    const coords = getCanvasCoordinates(event.clientX, event.clientY, snapToGrid);
+    drawStartRef.current = coords;
+    setDrawStart(coords);
+    setDrawCurrent(coords);
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    if (isDrawing && drawStart) {
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointerId.current !== e.pointerId) return;
+    if (isDrawing && drawStartRef.current) {
       const coords = getCanvasCoordinates(e.clientX, e.clientY, snapToGrid);
       setDrawCurrent(coords);
-    } else if (dragState) {
+    } else if (dragStateRef.current) {
+      const dragState = dragStateRef.current;
       const coords = getCanvasCoordinates(e.clientX, e.clientY, snapToGrid);
       const deltaX = coords.x - dragState.startX;
       const deltaY = coords.y - dragState.startY;
-
-      setSlots((prev) =>
-        prev.map((slot) => {
-          if (slot.id !== dragState.slotId) return slot;
-
-          if (dragState.type === "move") {
-            const unclampedX = Math.max(0, Math.min(1 - dragState.originalSlot.w, dragState.originalSlot.x + deltaX));
-            const unclampedY = Math.max(0, Math.min(1 - dragState.originalSlot.h, dragState.originalSlot.y + deltaY));
-            const newX = snapToGrid ? snapToStep(unclampedX, gridStep) : Number(unclampedX.toFixed(3));
-            const newY = snapToGrid ? snapToStep(unclampedY, gridStep) : Number(unclampedY.toFixed(3));
-            return { ...slot, x: newX, y: newY };
-          } else if (dragState.type === "resize" && dragState.handle === "se") {
-            const minSize = Math.max(snapToGrid ? gridStep : 0.01, 0.05);
-            const unclampedW = Math.max(minSize, Math.min(1 - dragState.originalSlot.x, dragState.originalSlot.w + deltaX));
-            const unclampedH = Math.max(minSize, Math.min(1 - dragState.originalSlot.y, dragState.originalSlot.h + deltaY));
-            const newW = snapToGrid ? snapToStep(unclampedW, gridStep) : Number(unclampedW.toFixed(3));
-            const newH = snapToGrid ? snapToStep(unclampedH, gridStep) : Number(unclampedH.toFixed(3));
-            return { ...slot, w: newW, h: newH };
-          }
-          return slot;
-        })
-      );
-      setIsDirty(true);
+      const next = (gestureStartSlots.current ?? slotsRef.current).map((slot) => {
+        if (slot.id !== dragState.slotId) return slot;
+        const step = snapToGrid ? gridStep : 0;
+        return dragState.type === "move"
+          ? moveSlot(dragState.originalSlot, deltaX, deltaY, step)
+          : resizeSlot(dragState.originalSlot, deltaX, deltaY, step);
+      });
+      slotsRef.current = next;
+      setSlots(next);
     }
   };
 
-  const handleCanvasMouseUp = () => {
-    if (isDrawing && drawStart && drawCurrent) {
-      const x = Math.min(drawStart.x, drawCurrent.x);
-      const y = Math.min(drawStart.y, drawCurrent.y);
-      const w = Math.abs(drawCurrent.x - drawStart.x);
-      const h = Math.abs(drawCurrent.y - drawStart.y);
-      const minDrawSize = Math.max(snapToGrid ? gridStep : 0.02, 0.02);
+  const finishPointerGesture = (event: React.PointerEvent<HTMLDivElement>, cancelled = false) => {
+    if (activePointerId.current !== event.pointerId) return;
+    if (canvasRef.current?.hasPointerCapture(event.pointerId)) canvasRef.current.releasePointerCapture(event.pointerId);
+    activePointerId.current = null;
 
-      if (w >= minDrawSize && h >= minDrawSize) {
-        const newSlotId = `slot-${slots.length + 1}`;
-        const newSlot: LayoutSlot = {
-          id: newSlotId,
-          x: Number(x.toFixed(3)),
-          y: Number(y.toFixed(3)),
-          w: Number(w.toFixed(3)),
-          h: Number(h.toFixed(3)),
-        };
-        setSlots((prev) => [...prev, newSlot]);
-        setSelectedSlotId(newSlotId);
+    if (isDrawing && drawStartRef.current && !cancelled) {
+      const minDrawSize = Math.max(snapToGrid ? gridStep : 0.02, 0.02);
+      const end = getCanvasCoordinates(event.clientX, event.clientY, snapToGrid);
+      const newSlot = drawSlot(nextSlotId(slotsRef.current), drawStartRef.current, end, minDrawSize);
+      if (newSlot && slotsRef.current.every((slot) => !slotsOverlap(newSlot, slot))) {
+        commitSlots([...slotsRef.current, newSlot]);
+        setSelectedSlotId(newSlot.id);
+        setIsDrawing(false);
+      } else {
+        toast({ title: "Could not draw slot", description: newSlot ? "Choose an area that does not overlap another slot." : "Drag to make a larger slot.", variant: "destructive" });
+      }
+    }
+    if (gestureStartSlots.current) {
+      const before = gestureStartSlots.current;
+      if (cancelled) {
+        slotsRef.current = before;
+        setSlots(before);
+      } else if (JSON.stringify(before) !== JSON.stringify(slotsRef.current)) {
+        setSlotHistory((history) => ({ past: [...history.past, before].slice(-50), future: [] }));
         setIsDirty(true);
       }
-
-      setIsDrawing(false);
-      setDrawStart(null);
-      setDrawCurrent(null);
     }
-
-    if (dragState) {
-      setDragState(null);
-    }
+    gestureStartSlots.current = null;
+    dragStateRef.current = null;
+    drawStartRef.current = null;
+    setDrawStart(null);
+    setDrawCurrent(null);
   };
 
-  const handleSlotMouseDown = (e: React.MouseEvent, slot: LayoutSlot, type: "move" | "resize", handle?: string) => {
+  const handleSlotPointerDown = (e: React.PointerEvent<HTMLDivElement>, slot: LayoutSlot, type: "move" | "resize", handle?: string) => {
+    if (isDrawing) return;
     e.stopPropagation();
+    canvasRef.current?.focus();
     setSelectedSlotId(slot.id);
+    if (activePointerId.current !== null) return;
+    activePointerId.current = e.pointerId;
+    canvasRef.current?.setPointerCapture(e.pointerId);
+    gestureStartSlots.current = slotsRef.current;
     const coords = getCanvasCoordinates(e.clientX, e.clientY, snapToGrid);
-    setDragState({
+    dragStateRef.current = {
       type,
       slotId: slot.id,
       startX: coords.x,
       startY: coords.y,
       originalSlot: { ...slot },
       handle,
-    });
+    };
   };
 
   const handleDeleteSlot = (slotId: string) => {
-    setSlots((prev) => prev.filter((s) => s.id !== slotId));
+    commitSlots(slotsRef.current.filter((s) => s.id !== slotId));
     if (selectedSlotId === slotId) {
       setSelectedSlotId(null);
     }
-    setIsDirty(true);
   };
 
-  const updateSlotProperty = (slotId: string, property: keyof LayoutSlot, value: string | number) => {
-    setSlots((prev) =>
-      prev.map((slot) => {
+  const updateSlotProperty = (slotId: string, property: "id" | "x" | "y" | "w" | "h", value: string | number) => {
+    const next = slotsRef.current.map((slot) => {
         if (slot.id !== slotId) return slot;
         if (property === "id") {
           return { ...slot, id: String(value) };
         }
-        const numValue = typeof value === "string" ? parseFloat(value) : value;
-        if (isNaN(numValue)) return slot;
-        const normalizedValue = property === "w" || property === "h"
-          ? Math.max(snapToGrid ? gridStep : 0.01, numValue)
-          : numValue;
-        const maxValue =
-          property === "w"
-            ? 1 - slot.x
-            : property === "h"
-              ? 1 - slot.y
-              : 1;
-        const clampedValue = Math.max(0, Math.min(maxValue, normalizedValue));
-        const nextValue = snapToGrid ? snapToStep(clampedValue, gridStep) : Number(clampedValue.toFixed(3));
-        return { ...slot, [property]: nextValue };
-      })
-    );
+        const numValue = typeof value === "string" ? Number(value) : value;
+        return updateSlotNumber(slot, property, numValue, snapToGrid ? gridStep : 0);
+      });
+    commitSlots(next);
     if (property === "id" && slotId === selectedSlotId) {
       setSelectedSlotId(String(value));
     }
-    setIsDirty(true);
   };
 
-  const handleUpdateSlotProperty = (property: keyof LayoutSlot, value: string | number) => {
+  const handleUpdateSlotProperty = (property: "id" | "x" | "y" | "w" | "h", value: string | number) => {
     if (!selectedSlotId) return;
     updateSlotProperty(selectedSlotId, property, value);
+  };
+
+  const commitNumericDraft = (property: "x" | "y" | "w" | "h") => {
+    if (!selectedSlot) return;
+    const value = Number(numericDraft[property]);
+    if (numericDraft[property].trim() && Number.isFinite(value)) {
+      handleUpdateSlotProperty(property, value);
+    } else {
+      setNumericDraft((current) => ({ ...current, [property]: String(selectedSlot[property]) }));
+    }
+  };
+
+  const commitSlotId = () => {
+    if (!selectedSlot) return;
+    const nextId = slotIdDraft.trim();
+    if (!nextId || slotsRef.current.some((slot) => slot.id === nextId && slot.id !== selectedSlot.id)) {
+      setSlotIdDraft(selectedSlot.id);
+      toast({ title: "Slot name unavailable", description: "Use a unique, nonempty slot name.", variant: "destructive" });
+      return;
+    }
+    handleUpdateSlotProperty("id", nextId);
   };
 
   const handleCopyJson = async () => {
@@ -451,42 +515,32 @@ const LayoutEditor = () => {
     });
   };
 
-  const handleSlotSpecFieldChange = (slotId: string, property: keyof LayoutSlot, value: string) => {
-    updateSlotProperty(slotId, property, value);
-  };
-
   const markDirty = () => setIsDirty(true);
 
   const nudgeSelectedSlot = useCallback((deltaX: number, deltaY: number) => {
     if (!selectedSlotId) return;
-
-    setSlots((prev) =>
-      prev.map((slot) => {
-        if (slot.id !== selectedSlotId) return slot;
-        const nextX = Math.max(0, Math.min(1 - slot.w, slot.x + deltaX));
-        const nextY = Math.max(0, Math.min(1 - slot.h, slot.y + deltaY));
-        return {
-          ...slot,
-          x: snapToGrid ? snapToStep(nextX, gridStep) : Number(nextX.toFixed(3)),
-          y: snapToGrid ? snapToStep(nextY, gridStep) : Number(nextY.toFixed(3)),
-        };
-      }),
-    );
-    setIsDirty(true);
-  }, [gridStep, selectedSlotId, snapToGrid]);
+    const step = snapToGrid ? gridStep : 0;
+    commitSlots(slotsRef.current.map((slot) => slot.id === selectedSlotId
+      ? moveSlot(slot, deltaX, deltaY, step)
+      : slot));
+  }, [commitSlots, gridStep, selectedSlotId, snapToGrid]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!selectedSlotId) return;
-
       const target = event.target as HTMLElement | null;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target?.isContentEditable
-      ) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoSlots();
+        else undoSlots();
         return;
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        redoSlots();
+        return;
+      }
+      if (!selectedSlotId || !target?.closest("[data-layout-editor-keyboard]")) return;
 
       const baseStep = snapToGrid ? gridStep : 0.01;
       const multiplier = event.shiftKey ? 5 : 1;
@@ -516,7 +570,7 @@ const LayoutEditor = () => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [gridStep, nudgeSelectedSlot, selectedSlotId, snapToGrid]);
+  }, [gridStep, nudgeSelectedSlot, redoSlots, selectedSlotId, snapToGrid, undoSlots]);
 
   const debouncedSearchTerm = debouncedAspectRatioSearch.trim();
   const isSearchActive = Boolean(debouncedSearchTerm);
@@ -544,7 +598,7 @@ const LayoutEditor = () => {
       {/* Top Bar */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={handleCancel}>
+          <Button variant="ghost" size="icon" onClick={handleCancel} aria-label="Back to layouts">
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="min-w-0">
@@ -582,14 +636,13 @@ const LayoutEditor = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Left Column: Form + Slots List */}
-        <div className="min-w-0 space-y-6">
-          {/* Form */}
-          <Card>
-            <CardHeader>
+        {/* Required details come before the canvas on a phone. */}
+        <div className="order-1 min-w-0 space-y-6 lg:col-start-1 lg:row-start-1">
+          <Card className="layout-editor-group">
+            <CardHeader className="px-0 sm:px-0">
               <CardTitle>Layout Details</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 px-0 sm:px-0">
               <div className="space-y-2">
                 <Label htmlFor="name">Name *</Label>
                 <Input
@@ -681,31 +734,35 @@ const LayoutEditor = () => {
             </CardContent>
           </Card>
 
+
           {/* Slots List */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <Card className="layout-editor-group">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 px-0 pb-2 sm:px-0">
               <CardTitle className="text-base">Slots ({slots.length})</CardTitle>
               <Button size="sm" variant="outline" onClick={handleAddSlot}>
                 <Plus className="mr-1 h-3 w-3" />
                 Add
               </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-0 sm:px-0">
               {slots.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  No slots yet. Click "Add" to draw one on the canvas.
+                  No slots yet. Add a slot, or choose Draw to place one on the canvas.
                 </p>
               ) : (
                 <div className="space-y-2">
                   {slots.map((slot) => (
-                    <div
+                    <button
+                      type="button"
                       key={slot.id}
-                      className={`flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 transition-colors ${
+                      data-layout-editor-keyboard
+                      className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-left transition-colors ${
                         selectedSlotId === slot.id
                           ? "border-primary bg-primary/5"
                           : "hover:bg-muted/50"
                       }`}
                       onClick={() => setSelectedSlotId(slot.id)}
+                      aria-pressed={selectedSlotId === slot.id}
                     >
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-sm bg-primary/60" />
@@ -714,7 +771,7 @@ const LayoutEditor = () => {
                       <Badge variant="secondary" className="text-xs">
                         {Math.round(slot.w * 100)}% × {Math.round(slot.h * 100)}%
                       </Badge>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -728,14 +785,32 @@ const LayoutEditor = () => {
         </div>
 
         {/* Center Column: Canvas */}
-        <div className="min-w-0 space-y-4 lg:col-span-2">
+        <div className="order-2 min-w-0 space-y-4 lg:col-span-2 lg:col-start-2 lg:row-start-1">
           {/* Canvas Controls */}
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col gap-1">
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
-                  variant={isDrawing ? "default" : "outline"}
+                  variant={!isDrawing ? "secondary" : "outline"}
+                  onClick={() => setIsDrawing(false)}
+                  aria-pressed={!isDrawing}
+                >
+                  <MousePointer2 className="mr-1 h-3 w-3" />
+                  Select
+                </Button>
+                <Button
+                  size="sm"
+                  variant={isDrawing ? "secondary" : "outline"}
+                  onClick={() => setIsDrawing(true)}
+                  aria-pressed={isDrawing}
+                >
+                  <Pencil className="mr-1 h-3 w-3" />
+                  Draw
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={handleAddSlot}
                 >
                   <Plus className="mr-1 h-3 w-3" />
@@ -772,9 +847,26 @@ const LayoutEditor = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                <Button size="sm" variant="outline" onClick={undoSlots} disabled={slotHistory.past.length === 0}>
+                  <Undo2 className="mr-1 h-3 w-3" />
+                  Undo
+                </Button>
+                <Button size="sm" variant="outline" onClick={redoSlots} disabled={slotHistory.future.length === 0}>
+                  <Redo2 className="mr-1 h-3 w-3" />
+                  Redo
+                </Button>
+                <div className="flex items-center gap-1" aria-label="Canvas zoom">
+                  <Button size="sm" variant="outline" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(1, value - 0.5))} disabled={zoom === 1}>
+                    <ZoomOut className="h-3 w-3" />
+                  </Button>
+                  <span className="min-w-9 text-center text-xs">{Math.round(zoom * 100)}%</span>
+                  <Button size="sm" variant="outline" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2, value + 0.5))} disabled={zoom === 2}>
+                    <ZoomIn className="h-3 w-3" />
+                  </Button>
+                </div>
               </div>
               <span className="text-xs text-muted-foreground">
-                Grid shows reference lines. Snap locks draw, move, and resize actions to the selected grid.
+                Add makes a slot in open space. Draw lets you place one. Snap applies to drawing, moving, resizing, and numeric edits.
               </span>
             </div>
             <Badge variant="outline">{aspectRatio}</Badge>
@@ -791,16 +883,16 @@ const LayoutEditor = () => {
                 w {Math.round(selectedSlot.w * 100)}% · h {Math.round(selectedSlot.h * 100)}%
               </Badge>
             )}
-            <span>Arrow keys move the selected slot. Hold Shift for larger nudges.</span>
+            <span>Focus the canvas or a layer, then use arrow keys to move it. Hold Shift for larger steps.</span>
           </div>
 
           {/* Canvas */}
           <Card>
-            <CardContent className="overflow-x-auto p-4">
+            <CardContent ref={canvasViewportRef} className="overflow-x-auto p-3 sm:p-4" data-testid="layout-canvas-viewport">
               <div className="mx-auto min-w-max w-fit">
-                {showGrid && (
-                  <div className="mb-2 ml-10 relative" style={{ width: canvasDimensions.width }}>
-                    {gridMarkers.map((marker) => (
+                {showGridMarkers && (
+                  <div className="mb-2 ml-10 relative" style={{ width: fittedCanvas.width }}>
+                    {gridMarkers.filter((marker) => marker.position > 0 && marker.position < 100 && Math.round(marker.position) % 10 === 0).map((marker) => (
                       <span
                         key={`top-${marker.key}`}
                         className="absolute -translate-x-1/2 rounded bg-background/95 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground shadow-sm"
@@ -813,9 +905,9 @@ const LayoutEditor = () => {
                 )}
 
                 <div className="flex items-start gap-2">
-                  {showGrid && (
-                    <div className="relative shrink-0" style={{ width: 36, height: canvasDimensions.height }}>
-                      {gridMarkers.map((marker) => (
+                  {showGridMarkers && (
+                    <div className="relative shrink-0" style={{ width: 36, height: fittedCanvas.height }}>
+                      {gridMarkers.filter((marker) => marker.position > 0 && marker.position < 100 && Math.round(marker.position) % 10 === 0).map((marker) => (
                         <span
                           key={`side-${marker.key}`}
                           className="absolute right-0 -translate-y-1/2 rounded bg-background/95 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground shadow-sm"
@@ -829,18 +921,24 @@ const LayoutEditor = () => {
 
                   <div
                     ref={canvasRef}
-                    className={`relative border-2 border-dashed rounded-lg overflow-hidden ${
+                    data-testid="layout-canvas"
+                    data-layout-editor-keyboard
+                    tabIndex={0}
+                    role="group"
+                    aria-label="Layout canvas"
+                    className={`relative border-2 border-dashed rounded-lg overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                       isDrawing ? "cursor-crosshair" : "cursor-default"
                     }`}
                     style={{
-                      width: canvasDimensions.width,
-                      height: canvasDimensions.height,
+                      width: fittedCanvas.width,
+                      height: fittedCanvas.height,
                       backgroundColor: "hsl(var(--muted))",
+                      touchAction: "none",
                     }}
-                    onMouseDown={handleCanvasMouseDown}
-                    onMouseMove={handleCanvasMouseMove}
-                    onMouseUp={handleCanvasMouseUp}
-                    onMouseLeave={handleCanvasMouseUp}
+                    onPointerDown={handleCanvasPointerDown}
+                    onPointerMove={handleCanvasPointerMove}
+                    onPointerUp={finishPointerGesture}
+                    onPointerCancel={(event) => finishPointerGesture(event, true)}
                   >
                     {showGrid && (
                       <div
@@ -856,6 +954,7 @@ const LayoutEditor = () => {
                     {slots.map((slot) => (
                       <div
                         key={slot.id}
+                        data-testid={`layout-slot-${slot.id}`}
                         className={`absolute border-2 rounded transition-shadow ${
                           selectedSlotId === slot.id
                             ? "border-primary shadow-lg z-10"
@@ -868,7 +967,7 @@ const LayoutEditor = () => {
                           height: `${slot.h * 100}%`,
                           backgroundColor: "hsl(var(--primary) / 0.15)",
                         }}
-                        onMouseDown={(e) => handleSlotMouseDown(e, slot, "move")}
+                        onPointerDown={(e) => handleSlotPointerDown(e, slot, "move")}
                       >
                         <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-background/90 rounded text-xs font-medium">
                           {slot.id}
@@ -876,8 +975,11 @@ const LayoutEditor = () => {
 
                         {selectedSlotId === slot.id && (
                           <div
-                            className="absolute bottom-0 right-0 w-3 h-3 bg-primary rounded-tl cursor-se-resize"
-                            onMouseDown={(e) => handleSlotMouseDown(e, slot, "resize", "se")}
+                            data-testid={`resize-slot-${slot.id}`}
+                            className="absolute bottom-0 right-0 h-6 w-6 bg-primary rounded-tl cursor-se-resize sm:h-4 sm:w-4"
+                            role="button"
+                            aria-label={`Resize ${slot.id}`}
+                            onPointerDown={(e) => handleSlotPointerDown(e, slot, "resize", "se")}
                           />
                         )}
                       </div>
@@ -906,8 +1008,8 @@ const LayoutEditor = () => {
 
           {/* Slot Inspector */}
           {selectedSlot && (
-            <Card>
-              <CardHeader className="pb-3">
+            <Card className="layout-editor-group">
+              <CardHeader className="px-0 pb-3 sm:px-0">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">Slot Properties</CardTitle>
                   <Button
@@ -920,20 +1022,22 @@ const LayoutEditor = () => {
                   </Button>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-4 px-0 sm:px-0">
                 <div className="space-y-2">
                   <Label htmlFor="slot-id">Slot ID</Label>
                   <Input
                     id="slot-id"
-                    value={selectedSlot.id}
-                    onChange={(e) => handleUpdateSlotProperty("id", e.target.value)}
+                    value={slotIdDraft}
+                    onChange={(e) => setSlotIdDraft(e.target.value)}
+                    onBlur={commitSlotId}
+                    onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                   />
                   {hasDuplicateIds && duplicateIds.some((d) => d.id === selectedSlot.id) && (
                     <p className="text-sm text-destructive">Duplicate ID detected.</p>
                   )}
                 </div>
                 <Separator />
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="slot-x">X ({Math.round(selectedSlot.x * 100)}%)</Label>
                     <Input
@@ -941,9 +1045,11 @@ const LayoutEditor = () => {
                       type="number"
                       step={inputStep}
                       min="0"
-                      max="1"
-                      value={selectedSlot.x}
-                      onChange={(e) => handleUpdateSlotProperty("x", e.target.value)}
+                      max={1 - selectedSlot.w}
+                      value={numericDraft.x}
+                      onChange={(e) => setNumericDraft((current) => ({ ...current, x: e.target.value }))}
+                      onBlur={() => commitNumericDraft("x")}
+                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                     />
                   </div>
                   <div className="space-y-2">
@@ -953,9 +1059,11 @@ const LayoutEditor = () => {
                       type="number"
                       step={inputStep}
                       min="0"
-                      max="1"
-                      value={selectedSlot.y}
-                      onChange={(e) => handleUpdateSlotProperty("y", e.target.value)}
+                      max={1 - selectedSlot.h}
+                      value={numericDraft.y}
+                      onChange={(e) => setNumericDraft((current) => ({ ...current, y: e.target.value }))}
+                      onBlur={() => commitNumericDraft("y")}
+                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                     />
                   </div>
                   <div className="space-y-2">
@@ -964,10 +1072,12 @@ const LayoutEditor = () => {
                       id="slot-w"
                       type="number"
                       step={inputStep}
-                      min="0"
-                      max="1"
-                      value={selectedSlot.w}
-                      onChange={(e) => handleUpdateSlotProperty("w", e.target.value)}
+                      min="0.01"
+                      max={1 - selectedSlot.x}
+                      value={numericDraft.w}
+                      onChange={(e) => setNumericDraft((current) => ({ ...current, w: e.target.value }))}
+                      onBlur={() => commitNumericDraft("w")}
+                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                     />
                   </div>
                   <div className="space-y-2">
@@ -976,10 +1086,12 @@ const LayoutEditor = () => {
                       id="slot-h"
                       type="number"
                       step={inputStep}
-                      min="0"
-                      max="1"
-                      value={selectedSlot.h}
-                      onChange={(e) => handleUpdateSlotProperty("h", e.target.value)}
+                      min="0.01"
+                      max={1 - selectedSlot.y}
+                      value={numericDraft.h}
+                      onChange={(e) => setNumericDraft((current) => ({ ...current, h: e.target.value }))}
+                      onBlur={() => commitNumericDraft("h")}
+                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                     />
                   </div>
                 </div>
@@ -989,98 +1101,28 @@ const LayoutEditor = () => {
 
           {/* JSON Preview */}
           <Collapsible open={isJsonOpen} onOpenChange={setIsJsonOpen}>
-            <Card>
-              <CollapsibleTrigger asChild>
-                <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">JSON Specification</CardTitle>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleCopyJson(); }}>
-                        <Copy className="mr-1 h-3 w-3" />
-                        Copy JSON
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsJsonOpen((prev) => !prev);
-                        }}
-                      >
-                        {isJsonOpen ? "Close" : "Open"}
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-              </CollapsibleTrigger>
+            <Card className="layout-editor-group">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 px-0 sm:px-0">
+                <CardTitle className="text-base">Layout data</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={handleCopyJson}>
+                    <Copy className="mr-1 h-3 w-3" />
+                    Copy JSON
+                  </Button>
+                  <CollapsibleTrigger asChild>
+                    <Button size="sm" variant="ghost">{isJsonOpen ? "Hide details" : "Show details"}</Button>
+                  </CollapsibleTrigger>
+                </div>
+              </CardHeader>
               <CollapsibleContent>
-                <CardContent>
-                  <div className="space-y-4">
-                    {slots.map((slot) => (
-                      <div key={slot.id} className="space-y-3 rounded border border-muted/40 bg-muted/20 p-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium text-foreground">{slot.id}</p>
-                          <Badge variant="outline" className="text-xs">
-                            {Math.round(slot.w * 100)}% × {Math.round(slot.h * 100)}%
-                          </Badge>
-                        </div>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">X ({(slot.x * 100).toFixed(0)}%)</Label>
-                            <Input
-                              type="number"
-                              step={inputStep}
-                              min="0"
-                              max="1"
-                              value={slot.x}
-                              onChange={(event) => handleSlotSpecFieldChange(slot.id, "x", event.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Y ({(slot.y * 100).toFixed(0)}%)</Label>
-                            <Input
-                              type="number"
-                              step={inputStep}
-                              min="0"
-                              max="1"
-                              value={slot.y}
-                              onChange={(event) => handleSlotSpecFieldChange(slot.id, "y", event.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Width ({(slot.w * 100).toFixed(0)}%)</Label>
-                            <Input
-                              type="number"
-                              step={inputStep}
-                              min="0"
-                              max="1"
-                              value={slot.w}
-                              onChange={(event) => handleSlotSpecFieldChange(slot.id, "w", event.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">Height ({(slot.h * 100).toFixed(0)}%)</Label>
-                            <Input
-                              type="number"
-                              step={inputStep}
-                              min="0"
-                              max="1"
-                              value={slot.h}
-                              onChange={(event) => handleSlotSpecFieldChange(slot.id, "h", event.target.value)}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {slots.length === 0 && (
-                      <p className="text-sm text-muted-foreground">No slots defined yet. Draw or add one to get started.</p>
-                    )}
-                  </div>
+                <CardContent className="px-0 sm:px-0">
+                  <pre className="max-h-72 overflow-auto rounded-md bg-muted/40 p-3 text-xs">{JSON.stringify({ slots }, null, 2)}</pre>
                 </CardContent>
               </CollapsibleContent>
             </Card>
           </Collapsible>
         </div>
+
       </div>
 
       {/* Unsaved Changes Dialog */}

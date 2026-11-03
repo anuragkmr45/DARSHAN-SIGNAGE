@@ -19,7 +19,7 @@ The eight selected upstream design skills and their required references are vend
 
 ## Pending
 
-The foundation needs rendered review across themes, accents and widths. Dashboard, Screens, content, schedules, live, chat, administration, player surfaces, full coverage register, real-application regression, final artifacts, and human release gates remain open. No existing screenshot or mocked browser result is being counted as full workflow sign-off.
+The foundation needs rendered review across themes, accents and widths. Dashboard, Screens, schedules, and the phone Layout editor have prototypes; content beyond Layout editing, live, chat, administration, player surfaces, full coverage register, real-application regression, final artifacts, and human release gates remain open. No existing screenshot or mocked browser result is being counted as full workflow sign-off.
 
 ## Dashboard prototype in progress
 
@@ -42,3 +42,9 @@ Task: review a Schedule request before asking for approval. Priority: selected c
 The review now distinguishes the browser timezone used for the entered date/time from the separately recorded audit timezone. It refreshes reservation availability on entry, periodically while open, and when the operator chooses “Check availability again.” A newly reported conflict disables submission and remains visible until a successful recheck. The backend remains the final authority when the request is submitted. Cancel, prior-step editing, browser-session draft retention, and approval notes remain available.
 
 A fixture-backed browser journey created a presentation and Schedule through the CMS, checked the serialized PDF page and loop choices, reviewed named targets at 390, 820, and 1440 CSS pixels without horizontal overflow, and exercised conflict → blocked submit → clear conflict. A malformed availability response also blocks submission until a valid recheck. The scheduling and emergency browser suite passed both cases. Generated screenshots are local Playwright outputs. Real-service scheduling, concurrent reservations, approval and publication, restored drafts, and cross-timezone acceptance remain open.
+
+## Phone Layout editor prototype in progress
+
+Task: create and adjust a Layout while keeping its stored normalized geometry. Priority: name and aspect ratio, slot creation and canvas, selected-slot dimensions, then optional JSON. Add places a non-overlapping slot; Draw creates one by touch or mouse. Select supports moving and resizing. The canvas fits the available width at 100% zoom; larger zoom scrolls within its own viewport. A slot list provides an alternative to touching the canvas. The inspector accepts complete decimal input on blur and clamps geometry to valid bounds. Local geometry undo/redo, keyboard nudges, and a before-unload warning cover common corrections.
+
+The rendered 390 and 1440 CSS pixel prototypes are saved under `qa-artifacts/evidence/product-ui-layout-editor/`. A fixture-backed browser run covered 390, 820, and 1440 pixel canvas fit, real browser touch drawing, mouse move/resize, keyboard nudge, numeric snapping, undo/redo, deletion and ID reuse, and the save payload. Geometry unit tests cover malformed aspect ratios, placement, boundaries, and draw thresholds. These fixtures prove UI behavior only. Real-service save/reopen, interrupt/recovery, internal navigation protection, portrait layouts, permissions, and player rendering remain to verify.

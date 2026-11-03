@@ -173,6 +173,12 @@
     box-shadow: var(--shadow-sm);
   }
 
+  .operational-card.layout-editor-group {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
   .operational-card-strong {
     border: 1px solid hsl(var(--border));
     background: var(--gradient-card);
