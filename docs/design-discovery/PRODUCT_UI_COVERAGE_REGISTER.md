@@ -15,7 +15,7 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | R05 | `/schedule` — ScheduleQueue | `read Schedule` or `read ScheduleRequest` | Schedule requests/device schedule; inspect, approve, publish, or take down according to action permissions. | Redesign and real-service evidence pending. |
 | R06 | `/schedule/new` — ScheduleCreator | Same schedule gate | Layout/media/target selection and presentation, reservation, Schedule APIs; draft and submit for approval. | 390/820/1440 review prototype; real-service evidence pending. |
 | R07 | `/live-broadcasts` — LiveBroadcasts | `read/create/publish LiveBroadcast` | Live session/source APIs; create source, schedule, capture, start/stop. | Redesign and real-media evidence pending. |
-| R08 | `/layouts` — Layouts | `read Layout` | Layout APIs; list, create, edit, and delete permitted records. | Redesign and real-service evidence pending. |
+| R08 | `/layouts` — Layouts | `read Layout` | Layout APIs; list/search/filter/page, create if granted, preview, edit and delete permitted records. | 390/820/1440 fixture browser and dark phone; list, ownership, and editor cases passed; real-service evidence pending. |
 | R09 | `/layouts/new` — LayoutEditor | `read Layout` | Layout API; create normalized geometry. | 390/1440 prototype; real-service save/reopen pending. |
 | R10 | `/layouts/:id` — LayoutEditor | `read Layout` | Layout API; edit authorized record and preserve geometry. | 390/1440 prototype; real-service save/reopen pending. |
 | R11 | `/departments` — Departments | `read Department` | Department/user APIs; manage organization and transfers when authorized. | Redesign and real-service evidence pending. |
@@ -104,6 +104,20 @@ The page requires `read Media`; the server remains authoritative for record-leve
 | M07 | Deleted Media and restore | `manage Media` UI gate; deleted list REST, paging, retry, restore action and feedback. | Custom-role server route and CMS fixture tests; real object restore pending. |
 | M08 | Loading, failed, retry, empty, stale refresh | Distinct list and deleted-sheet states; a failed request is never shown as an empty library. | Failure/retry fixture browser; disconnected/stale real service pending. |
 
+## Layouts list controls and states
+
+The route requires `read Layout`. Creation requires current effective `create Layout`; edit and delete remain controlled by each record's server permissions. Search, aspect ratio, and page are REST list parameters. Preview is read-only; delete requires the exact layout name before its request.
+
+| ID | Control or state | Source and expected result | Evidence and open review |
+| --- | --- | --- | --- |
+| L01 | Search and aspect ratio | Layout list REST query; search uses name/description and a selected ratio; both restart at page 1. | Fixture browser search/filter; large real list and rapid query changes pending. |
+| L02 | Layout rows/cards and ownership | Server list, slot count, dates, ownership/creator and per-record action flags; table on desktop, cards on phone/tablet. | 390/820/1440 and dark phone captures; long names, 200% zoom and all accents pending. |
+| L03 | Preview | Read-only slot geometry in a bounded dialog; portrait ratios fit the phone viewport. | Phone portrait fixture browser; real layout geometry and focus review pending. |
+| L04 | Create and Edit | Effective `create Layout` gates New Layout; record permission gates Edit. Editor owns save behavior. | Read-only list fixture browser and existing editor/ownership suites; real save/reopen pending. |
+| L05 | Delete and confirmation | Server-provided per-record delete permission; exact-name confirmation then delete API; server remains final authority. | Phone delete fixture and desktop ownership browser; real referenced-layout blocker pending. |
+| L06 | Refresh, loading, failed, retry, empty, stale list | No success toast before refresh completes; initial failure has Retry, no results distinguish empty library from filters, stale loaded results remain labeled if refresh fails. | Initial failure/retry and empty fixture browser; stale refresh and network loss pending. |
+| L07 | Pagination | Server total and nine records per page; out-of-range page correction waits for current query data. | Second-page and filter-reset fixture browser; real concurrent edits pending. |
+
 ## Control ledger: current status
 
 The next pass expands each route into control-level rows. The following rows identify prototype workflows already traced; they are **grouped summaries**, not an exhaustive control list. They will be replaced with individual control entries before completion.
@@ -114,6 +128,7 @@ The next pass expands each route into control-level rows. The following rows ide
 | Screens | Pair Device, details, recovery/revoke/delete, Group management, pairing history, health, deletion blockers, paginated member search/selection and retry. | Exact Screen/ScreenGroup/DevicePairing capabilities; Screen/Group/Pairing APIs; server final authority. Create-only Group role can save an empty Group. | Screens browser 17/17; route DB test 2/2; 390/820/1440 captures. | Every detail tab, frame/display controls, real-service large-fleet Group journey, real player. |
 | Schedule review | Layout/media/target/timing steps, reservation recheck, review and submit. | Presentation/Schedule/Reservation APIs; server validates conflict and publication. | Scheduling/emergency browser 2/2; 390/820/1440 review captures. | Queue, approval, publish/take-down, all failure states, real service. |
 | Layout editor | Add/Draw/Select, move/resize, numeric inspector, layers, undo/redo, save. | Layout API and normalized geometry. | Fixture-backed editor browser and 390/1440 captures. | Every tool/field/state, real save/reopen, player geometry. |
+| Layouts list | Search, ratio, page, preview, create, edit, exact-name delete, refresh and failure/retry. | Layout REST list/delete, current create grant, server record flags. | Five new fixture cases, editor and ownership regressions, 390/820/1440 plus dark phone captures. | Real-service blockers and save/reopen, long text, zoom, accessibility and network loss. |
 | Conversations | List, conversation, thread, drafts, message More and navigation. | Chat/media APIs and REST-authoritative state. | Fixture-backed chat browser; desktop and phone captures. | Invitations, membership, attachments, moderation and concurrent actors. |
 | Player pairing/recovery | Hostname, OTP, expiry, waiting/provisioning, diagnostics and lock/recovery states. | Main-process identity and server expiry authority. | Built renderer prototype at full, compact, minimal and short sizes. | Packaged player lifecycle and remaining owned surfaces. |
 

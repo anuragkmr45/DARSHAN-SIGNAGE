@@ -362,9 +362,10 @@ test.describe("Owned content response contract", () => {
     await login(page);
     await page.goto("/layouts");
     await expect(page.getByRole("main").getByRole("heading", { name: "Layouts", exact: true })).toBeVisible();
-    await expect(page.getByText("Operations owned", { exact: true })).toBeVisible();
-    await expect(page.getByText("Created by Former User (Deleted)", { exact: true })).toBeVisible();
-    await expect(page.getByText("Organization owned", { exact: true })).toBeVisible();
+    const layoutsTable = page.getByRole("table");
+    await expect(layoutsTable.getByText("Operations owned", { exact: true })).toBeVisible();
+    await expect(layoutsTable.getByText("Created by Former User (Deleted)", { exact: true })).toBeVisible();
+    await expect(layoutsTable.getByText("Organization owned", { exact: true })).toBeVisible();
 
     const readOnlyRow = page.getByRole("row").filter({ hasText: "Read-only Operations Layout" });
     await expect(readOnlyRow.getByText("Read-only for your account", { exact: true })).toBeVisible();

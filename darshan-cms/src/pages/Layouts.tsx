@@ -43,6 +43,7 @@ import { queryKeys } from "@/api/queryKeys";
 import type { LayoutItem, LayoutListParams } from "@/api/types";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { useAppSelector } from "@/store/hooks";
+import { useAuthorization } from "@/hooks/useAuthorization";
 import {
   canDeleteLayoutRecord,
   canManageLayoutRecord,
@@ -79,21 +80,11 @@ function formatRelativeTime(dateString: string): string {
 
 export type Layout = LayoutItem;
 
-function getPreviewDimensions(ratio: string, maxWidth: number): { width: number; height: number } {
-  const [widthRatio, heightRatio] = ratio.split(":").map(Number);
-  if (!widthRatio || !heightRatio) {
-    return { width: maxWidth, height: maxWidth * 0.5625 };
-  }
-
-  return {
-    width: maxWidth,
-    height: maxWidth * (heightRatio / widthRatio),
-  };
-}
-
 const Layouts = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { can } = useAuthorization();
+  const canCreate = can("create", "Layout");
   const currentUser = useAppSelector((state) => state.auth.user);
   const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
@@ -141,7 +132,6 @@ const Layouts = () => {
   const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: () => layoutsApi.list(filters),
-    placeholderData: (previousData) => previousData,
   });
 
   const deleteLayoutMutation = useSafeMutation({
@@ -159,10 +149,10 @@ const Layouts = () => {
     Boolean(deleteTarget && confirmationInput.trim() === deleteTarget.name);
 
   useEffect(() => {
-    if (page > totalPages) {
+    if (data && page > totalPages) {
       setPage(totalPages);
     }
-  }, [page, totalPages]);
+  }, [data, page, totalPages]);
 
   const handleDelete = async () => {
     if (!deleteTarget || !canConfirmDelete) return;
@@ -181,23 +171,20 @@ const Layouts = () => {
   };
 
   const handleRefresh = () => {
-    refetch();
-    toast({
-      title: "Layouts refreshed",
-      description: "Layout list has been updated.",
-    });
+    void refetch();
   };
 
   const errorMessage =
     error instanceof Error ? error.message : "Unable to load layouts right now.";
 
-  const renderLayoutPreview = (layout: LayoutItem, maxWidth = 420) => {
-    const dimensions = getPreviewDimensions(layout.aspect_ratio, maxWidth);
+  const renderLayoutPreview = (layout: LayoutItem) => {
+    const [widthRatio, heightRatio] = layout.aspect_ratio.split(":").map(Number);
+    const previewRatio = widthRatio > 0 && heightRatio > 0 ? `${widthRatio} / ${heightRatio}` : "16 / 9";
 
     return (
       <div
         className="relative rounded-lg border bg-muted/30"
-        style={{ width: dimensions.width, height: dimensions.height }}
+        style={{ width: "min(100%, 420px)", aspectRatio: previewRatio }}
       >
         {layout.spec.slots.map((slot) => (
           <div
@@ -218,31 +205,26 @@ const Layouts = () => {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="mx-auto w-full max-w-7xl space-y-5">
+      <header className="flex flex-col gap-3 border-b border-border/70 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-3xl font-bold tracking-tight">Layouts</h1>
-          <p className="text-muted-foreground">
-            Manage mosaic templates used to place content on screens.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">Layouts</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Reusable arrangements for screen content.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="icon" onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4" />
+          <Button variant="outline" size="sm" aria-label="Refresh layouts" onClick={handleRefresh} disabled={isFetching}>
+            <RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" />Refresh
           </Button>
-          <Button onClick={() => navigate("/layouts/new")}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Layout
-          </Button>
+          {canCreate && <Button onClick={() => navigate("/layouts/new")}>
+            <Plus aria-hidden="true" className="mr-2 h-4 w-4" />New Layout
+          </Button>}
         </div>
-      </div>
+      </header>
 
-      {/* Filters */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="w-full lg:max-w-sm">
           <SearchBar
-            placeholder="Search by name or description..."
+            placeholder="Search layouts"
             onSearch={setSearchQuery}
           />
         </div>
@@ -261,17 +243,17 @@ const Layouts = () => {
             </SelectContent>
           </Select>
           <p className="text-sm text-muted-foreground">
-            {isFetching ? "Refreshing..." : `${pagination.total} layouts`}
+            {isLoading ? "Loading layouts…" : `${pagination.total} ${pagination.total === 1 ? "layout" : "layouts"}`}
+            {isFetching && !isLoading ? " · Updating" : ""}
           </p>
         </div>
       </div>
 
-      {/* Table or Empty/Error States */}
       {isLoading ? (
         <div className="rounded-md border p-6">
           <LoadingIndicator label="Loading layouts..." />
         </div>
-      ) : isError ? (
+      ) : isError && !data ? (
         <EmptyState
           title="Unable to load layouts"
           description={errorMessage}
@@ -280,13 +262,14 @@ const Layouts = () => {
         />
       ) : layouts.length === 0 ? (
         <EmptyState
-          title="No layouts found"
-          description="Try a different search term or create a new layout."
-          actionLabel="Create layout"
-          onAction={() => navigate("/layouts/new")}
+          title={trimmedSearchQuery || aspectRatioQuery ? "No layouts match these filters" : "No layouts yet"}
+          description={trimmedSearchQuery || aspectRatioQuery ? "Try another name or aspect ratio." : "Layouts you can access will appear here."}
+          actionLabel={canCreate && !trimmedSearchQuery && !aspectRatioQuery ? "Create layout" : undefined}
+          onAction={canCreate ? () => navigate("/layouts/new") : undefined}
         />
       ) : (
-        <div className="rounded-md border">
+        <>
+        <div className="hidden overflow-x-auto rounded-xl border lg:block">
           <Table className="min-w-[720px]">
             <TableHeader>
               <TableRow>
@@ -331,7 +314,7 @@ const Layouts = () => {
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" aria-label={`Actions for ${layout.name}`}>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -371,9 +354,53 @@ const Layouts = () => {
             </TableBody>
           </Table>
         </div>
+        <div className="space-y-3 lg:hidden" aria-label="Layouts">
+          {layouts.map((layout) => {
+            const canManageLayout = canManageLayoutRecord(currentUser, layout);
+            const canDeleteLayout = canDeleteLayoutRecord(currentUser, layout);
+            return (
+              <article key={layout.id} className="rounded-xl border border-border bg-background p-4" aria-label={layout.name}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <h2 className="break-words text-base font-semibold">{layout.name}</h2>
+                    {layout.description && <p className="line-clamp-2 break-words text-sm text-muted-foreground">{layout.description}</p>}
+                  </div>
+                  <Badge variant="secondary" className="shrink-0">{layout.aspect_ratio}</Badge>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>{layout.spec.slots.length} {layout.spec.slots.length === 1 ? "slot" : "slots"}</span>
+                  <span>Updated {formatRelativeTime(layout.updated_at)}</span>
+                  {getContentOwnershipLabel(layout) && <span>{getContentOwnershipLabel(layout)}</span>}
+                  {getContentCreatorLabel(layout) && <span>{getContentCreatorLabel(layout)}</span>}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+                  <Button variant="outline" size="sm" onClick={() => setPreviewTarget(layout)}>View</Button>
+                  {canManageLayout && <Button variant="outline" size="sm" onClick={() => navigate(`/layouts/${layout.id}`)}>Edit</Button>}
+                  {canDeleteLayout && <DropdownMenu>
+                    <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" aria-label={`More actions for ${layout.name}`}>More</Button></DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget(layout)}>
+                        <Trash2 aria-hidden="true" className="mr-2 h-4 w-4" />Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>}
+                  {!canManageLayout && !canDeleteLayout && <span className="text-xs text-muted-foreground">Read-only for your account</span>}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        </>
       )}
 
-      <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} className="justify-end" />
+      {isError && data && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive">
+          <span>Could not refresh layouts. Showing the last loaded list.</span>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
+        </div>
+      )}
+
+      {data && pagination.total > pagination.limit && <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} className="justify-end" />}
 
       <ConfirmDialog
         open={!!deleteTarget}
@@ -402,7 +429,7 @@ const Layouts = () => {
       </ConfirmDialog>
 
       <Dialog open={!!previewTarget} onOpenChange={(open) => !open && setPreviewTarget(null)}>
-        <DialogContent className="max-w-3xl overflow-y-auto">
+        <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{previewTarget?.name || "Layout preview"}</DialogTitle>
           </DialogHeader>
@@ -412,7 +439,7 @@ const Layouts = () => {
                 <Badge variant="secondary">{previewTarget.aspect_ratio}</Badge>
                 <Badge variant="outline">{previewTarget.spec.slots.length} slots</Badge>
               </div>
-              <div className="overflow-x-auto rounded-lg border bg-muted/20 p-4 sm:p-6">
+              <div className="rounded-lg border bg-muted/20 p-4 sm:p-6">
                 {renderLayoutPreview(previewTarget)}
               </div>
             </div>
