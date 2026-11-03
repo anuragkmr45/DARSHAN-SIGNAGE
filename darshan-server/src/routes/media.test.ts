@@ -23,6 +23,7 @@ describe('Media Routes - delete ownership and usage protection', () => {
   let adminToken: string;
   let superAdminToken: string;
   let operatorToken: string;
+  let customManagerToken: string;
   let ownerUserId: string;
   let otherUserId: string;
   let adminUserId: string;
@@ -91,6 +92,9 @@ describe('Media Routes - delete ownership and usage protection', () => {
         { action: 'read', subject: 'Media' },
       ],
     });
+    const customManagerRole = await ensureRole(`MEDIA_RESTORE_MANAGER_${randomUUID()}`, {
+      grants: [{ action: 'manage', subject: 'Media' }],
+    });
     const superAdminRole = await ensureRole('SUPER_ADMIN', { grants: [] });
 
     departmentId = randomUUID();
@@ -153,6 +157,13 @@ describe('Media Routes - delete ownership and usage protection', () => {
       roleId: operatorRole.id,
       departmentId,
     });
+    const customManagerUserId = await createUser({
+      email: `media-restore-manager-${randomUUID()}@example.com`,
+      firstName: 'Media',
+      lastName: 'Manager',
+      roleId: customManagerRole.id,
+      departmentId,
+    });
 
     const issueToken = async (
       userId: string,
@@ -201,6 +212,13 @@ describe('Media Routes - delete ownership and usage protection', () => {
       `operator-${operatorUserId}@example.com`,
       operatorRole.id,
       operatorRole.name,
+      departmentId
+    );
+    customManagerToken = await issueToken(
+      customManagerUserId,
+      `manager-${customManagerUserId}@example.com`,
+      customManagerRole.id,
+      customManagerRole.name,
       departmentId
     );
   });
@@ -267,6 +285,26 @@ describe('Media Routes - delete ownership and usage protection', () => {
     const restored = await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: { authorization: `Bearer ${adminToken}` } });
     expect(restored.statusCode).toBe(HTTP_STATUS.OK);
     const [visible] = await db.select().from(schema.media).where(eq(schema.media.id, media.id));
+    expect(visible?.deleted_at).toBeNull();
+  });
+
+  it('allows a custom role with current Manage Media permission to list and restore deleted media', async () => {
+    const media = await insertMedia(ownerUserId);
+    const ownerHeaders = { authorization: `Bearer ${ownerToken}` };
+    const managerHeaders = { authorization: `Bearer ${customManagerToken}` };
+    const operatorHeaders = { authorization: `Bearer ${operatorToken}` };
+
+    expect((await server.inject({ method: 'DELETE', url: `/api/v1/media/${media.id}`, headers: ownerHeaders })).statusCode).toBe(200);
+    expect((await server.inject({ method: 'GET', url: '/api/v1/media/deleted', headers: operatorHeaders })).statusCode).toBe(403);
+    expect((await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: operatorHeaders })).statusCode).toBe(403);
+
+    const list = await server.inject({ method: 'GET', url: '/api/v1/media/deleted', headers: managerHeaders });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().items).toEqual(expect.arrayContaining([expect.objectContaining({ id: media.id })]));
+    const restored = await server.inject({ method: 'POST', url: `/api/v1/media/${media.id}/restore`, headers: managerHeaders });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().id).toBe(media.id);
+    const [visible] = await getDatabase().select().from(schema.media).where(eq(schema.media.id, media.id));
     expect(visible?.deleted_at).toBeNull();
   });
 

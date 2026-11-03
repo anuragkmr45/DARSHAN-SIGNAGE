@@ -89,9 +89,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     departmentId: payload.department_id,
     departmentIds: payload.department_ids,
   });
-  const assertRestoreAdmin = (actor: ActorContext, ability: ContentAbility) => {
-    if (!['SUPER_ADMIN', 'ADMIN'].includes(actor.roleName) || !ability.can('manage', 'Media')) {
-      throw AppError.forbidden('Administrator media restore permission required');
+  const assertRestorePermission = (ability: ContentAbility) => {
+    if (!ability.can('manage', 'Media')) {
+      throw AppError.forbidden('Manage Media permission required');
     }
   };
   const deletedListOffset = (query: unknown): number => {
@@ -1498,8 +1498,8 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       const token = extractTokenFromHeader(request.headers.authorization);
       if (!token) throw AppError.unauthorized();
       const payload = await verifyAccessToken(token);
-      const result = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
-        assertRestoreAdmin(actor, ability);
+      const result = await withCurrentMutationAuthorization(payload, async ({ ability, executor }) => {
+        assertRestorePermission(ability);
         const items = await executor.select().from(schema.media)
           .where(isNotNull(schema.media.deleted_at)).orderBy(desc(schema.media.deleted_at)).limit(100).offset(deletedListOffset(request.query));
         await auditRepo.create({
@@ -1520,8 +1520,8 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       const token = extractTokenFromHeader(request.headers.authorization);
       if (!token) throw AppError.unauthorized();
       const payload = await verifyAccessToken(token);
-      const restored = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
-        assertRestoreAdmin(actor, ability);
+      const restored = await withCurrentMutationAuthorization(payload, async ({ ability, executor }) => {
+        assertRestorePermission(ability);
         const [media] = await executor.select().from(schema.media)
           .where(eq(schema.media.id, (request.params as { id: string }).id)).for('update');
         if (!media) throw AppError.notFound('Media not found');
