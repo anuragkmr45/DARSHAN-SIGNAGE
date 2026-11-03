@@ -115,6 +115,10 @@ describe('Heartbeat Service', () => {
     expect(second.applied_publish_id).to.equal('publish-1')
     expect(second.applied_snapshot_id).to.equal('snapshot-1')
     expect(second.current_schedule_id).to.equal(undefined)
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    expect(first.runtime_session_id).to.equal(getPairingService().getRuntimeSessionId())
+    expect(first.player_capabilities.features).to.deep.equal(['message_emergency_v1', 'webcontents_view_v1', 'pdf_page_selection_v1'])
+    expect(second.player_capabilities).to.deep.equal(first.player_capabilities)
   })
 
   it('sends expanded system resource metrics in the heartbeat payload', async () => {

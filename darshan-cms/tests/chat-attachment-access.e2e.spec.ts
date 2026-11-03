@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { OPERATOR_TEST_ROLE_ID, testAuthorization } from "./helpers/selfAuthorization";
 
 test("chat readers load shared media through the conversation authority", async ({ page, context }) => {
   const origin = "http://127.0.0.1:5173";
@@ -7,7 +8,7 @@ test("chat readers load shared media through the conversation authority", async 
   const user = {
     id: "33333333-3333-4333-8333-333333333333",
     email: "reader@example.invalid", first_name: "Reader", last_name: "QA",
-    role_id: "qa-role", role: "OPERATOR", department_id: "44444444-4444-4444-8444-444444444444",
+    role_id: OPERATOR_TEST_ROLE_ID, role: "OPERATOR", department_id: "44444444-4444-4444-8444-444444444444",
   };
   const conversation = {
     id: conversationId, type: "FORUM_OPEN", state: "ACTIVE", title: "Shared files",
@@ -33,6 +34,10 @@ test("chat readers load shared media through the conversation authority", async 
     const pathname = url.pathname;
     const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (pathname === "/api/v1/auth/me") return json(user);
+    if (pathname === "/api/v1/auth/authorization") return json(testAuthorization(user, [
+      { action: "read", subject: "Conversation" },
+      { action: "read", subject: "Media" },
+    ], { roleId: OPERATOR_TEST_ROLE_ID, departmentId: user.department_id }));
     if (pathname === "/api/v1/roles") return json({ items: [{ id: "qa-role", name: "OPERATOR", permissions: { inherits: [], grants: [{ action: "read", subject: "Conversation" }, { action: "read", subject: "Media" }] } }], page: 1, limit: 100, total: 1 });
     if (pathname === "/api/v1/users") return json({ items: [user], page: 1, limit: 100, total: 1 });
     if (pathname === "/api/v1/notifications/unread-count") return json({ unread_total: 0 });

@@ -8,6 +8,8 @@ import { type ProcessRole } from '@/runtime/process-role';
 import { clearQueuedScreenStateRefreshes } from '@/services/screen-state-refresh';
 import { startWorkerHeartbeat, stopWorkerHeartbeat } from '@/runtime/worker-heartbeat';
 import { ensureProductionStorage } from '@/deployment/production-storage';
+import { initializeLiveAuthorityEpoch } from '@/services/live-authority-epoch';
+import { startLiveRuntimeWorker, stopLiveRuntimeWorker } from '@/services/live-runtime-worker';
 
 const logger = createLogger('runtime-bootstrap');
 
@@ -26,6 +28,7 @@ async function ensureBuckets() {
 }
 
 async function initializeSharedRuntime(role: ProcessRole) {
+  initializeLiveAuthorityEpoch();
   logger.info({ role }, 'Validating runtime dependencies');
   await validateRuntimeDependencies(role);
 
@@ -46,6 +49,7 @@ export async function startRuntime(role: ProcessRole): Promise<RuntimeContext> {
     await registerJobHandlers();
     await scheduleRecurringJobs();
     startWorkerHeartbeat();
+    startLiveRuntimeWorker();
   }
 
   if (role === 'api' || role === 'all') {
@@ -63,6 +67,7 @@ export async function startRuntime(role: ProcessRole): Promise<RuntimeContext> {
 export async function stopRuntime(context: RuntimeContext): Promise<void> {
   clearQueuedScreenStateRefreshes();
   stopWorkerHeartbeat();
+  await stopLiveRuntimeWorker();
   if (context.fastify) {
     await context.fastify.close();
   }

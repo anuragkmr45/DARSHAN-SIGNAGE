@@ -21,7 +21,7 @@ function fixture() {
   assert.ok(existsSync('/.dockerenv'), 'Only an explicitly owned Docker fixture is allowed');
   assert.match(readFileSync('/proc/1/cmdline', 'utf8'), /test\/fixtures\/protocol-node\.mjs/);
   const source = createHash('sha256');
-  for (const file of ['controller.js', 'gateway.js', 'index.js', 'livekit-adapter.js', 'supervisor.js', 'sfu-listener-ownership.js']) {
+  for (const file of ['controller.js', 'gateway.js', 'index.js', 'livekit-adapter.js', 'supervisor.js', 'sfu-listener-ownership.js', 'authority-file.js', 'backend-authority.js', 'runtime-config.js', 'tls-config.js']) {
     source.update(file); source.update(readFileSync(fileURLToPath(new URL(`../src/${file}`, import.meta.url))));
   }
   const digest = source.digest('hex');

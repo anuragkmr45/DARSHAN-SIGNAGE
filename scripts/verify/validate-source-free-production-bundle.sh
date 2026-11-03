@@ -318,6 +318,47 @@ grep -Eq '  install-signed-role\.sh$' "$INTERNAL_BUNDLE/transfer/TRANSFER_MANIFE
   exit 1
 }
 rg -qx 'REALTIME_SOCKET_TRANSPORT=websocket' "$INTERNAL_BUNDLE/production/backend/.env.production"
+
+# Additive sixth-VM bundle: signed transfer/role coverage and source-free host
+# files are verified without starting services or pretending dummy images run.
+mkdir -p "$WORK_DIR/packages/r1/media/images"
+printf 'synthetic media archive; skip-docker only\n' > "$WORK_DIR/packages/r1/media/images/media.tar"
+write_artifact_manifest "$WORK_DIR/packages/r1/media" media linux amd64
+cp "$WORK_DIR/internal.env" "$WORK_DIR/live.env"
+cat >> "$WORK_DIR/live.env" <<EOF
+INCLUDE_LIVE_MEDIA=true
+EXPORT_MEDIA=false
+MEDIA_PRIVATE_HOST=media.acceptance.test
+MEDIA_BIND_ADDRESS=$TEST_BIND_ADDRESS
+MEDIA_CPU_LIMIT=4
+MEDIA_MEMORY_LIMIT=4g
+MEDIA_PIDS_LIMIT=512
+MEDIA_MIN_FREE_DISK_BYTES=10737418240
+EOF
+sed -i "s|BUNDLE_OUTPUT_BASE=$WORK_DIR/internal-output|BUNDLE_OUTPUT_BASE=$WORK_DIR/live-output|" "$WORK_DIR/live.env"
+bash "$ROOT_DIR/scripts/bundle/build-production-bundle.sh" --skip-docker "$WORK_DIR/live.env"
+LIVE_BUNDLE="$WORK_DIR/live-output/acceptance-internal/r1"
+[[ "$(find "$LIVE_BUNDLE/transfer" -maxdepth 1 -name '*.tgz' | wc -l)" == 7 ]] || { echo "Live transfer media role missing." >&2; exit 1; }
+verify_generated_shell_syntax "$LIVE_BUNDLE"
+for role in media backend; do
+  (cd "$LIVE_BUNDLE/production/$role" && openssl dgst -sha256 -verify "$WORK_DIR/release-signing.pem" -signature ROLE_MANIFEST.sig ROLE_MANIFEST.sha256 >/dev/null && sha256sum --quiet -c ROLE_MANIFEST.sha256)
+done
+[[ -f "$LIVE_BUNDLE/production/media/host-witness.py" && -f "$LIVE_BUNDLE/production/media/host-watchdog.py" &&
+   -f "$LIVE_BUNDLE/production/media/watchdog-health.py" ]]
+node - "$LIVE_BUNDLE/production/media/OPERATIONS_POLICY.json" <<'NODE'
+const p = JSON.parse(require('node:fs').readFileSync(process.argv[2], 'utf8')).liveMedia;
+if (p?.included !== true || p.backendRuntimeEnabledByDefault !== false || p.maximumRuns !== 10 ||
+    p.maximumReceiversPerRun !== 25 || p.separateMeasuredLiveCapacityEvidenceRequired !== true ||
+    p.cpuLimit !== '4' || p.memoryLimit !== '4g' || p.pidsLimit !== 512) process.exit(1);
+NODE
+[[ ! -e "$LIVE_BUNDLE/production/media/host-witness.test.py" &&
+   ! -e "$LIVE_BUNDLE/production/media/watchdog-health.test.py" ]]
+grep -q 'watchdog-health.py' "$LIVE_BUNDLE/production/media/health-check.sh"
+grep -q 'DARSHAN_LIVE_RUNTIME_ENABLED: "true"' "$LIVE_BUNDLE/production/backend/docker-compose.live.yml"
+grep -q 'DARSHAN_MEDIA_HOST_LEASE_FILE' "$LIVE_BUNDLE/production/media/docker-compose.yml"
+if find "$LIVE_BUNDLE/production/media" -type f \( -name '*.key' -o -name 'authority.json' -o -name 'witness-secret' -o -name 'signing.env' \) | grep -q .; then
+  echo "Target-only live secret leaked into a bundle." >&2; exit 1
+fi
 rg -qx 'REALTIME_SOCKET_ALLOW_POLLING=false' "$INTERNAL_BUNDLE/production/backend/.env.production"
 rg -qx 'REALTIME_SOCKET_REQUIRE_STICKY_SESSIONS=false' "$INTERNAL_BUNDLE/production/backend/.env.production"
 rg -q 'CMS public Socket.IO WebSocket upgrade failed' "$INTERNAL_BUNDLE/production/cms/health-check.sh"
@@ -780,5 +821,5 @@ EOF
   )
 fi
 
-node --test "$ROOT_DIR/scripts/bundle/production-bundle-config.test.mjs"
+node --test "$ROOT_DIR/scripts/bundle/production-bundle-config.test.mjs" "$ROOT_DIR/scripts/bundle/live-media-role.test.mjs"
 echo "Source-free production bundle acceptance passed for internal-ca and provided TLS modes."

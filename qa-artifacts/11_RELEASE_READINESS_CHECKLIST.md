@@ -139,8 +139,16 @@ Current status is in progress; no new item above is a pass. See [evidence/live-b
 
 
 Capability-gated publication and its supporting API/DB/MinIO checks now exist.
-The normal player still withholds live capability; run authority, complete
-same-player/CMS journeys and sixth-role artifacts are unfinished. This packet
-cannot be released as the completed live feature, and no checkbox above is
-closed by developer source/fixture evidence.
+Live runtime is default OFF. Source now includes the normal-player coordinator,
+Backend authority, CMS controls/reports and optional signed sixth-role bundle
+path. Actual integrated capture/frame/audio, native host actuation, production
+artifact installation and external acceptance are unfinished verification gates.
+This packet cannot be released as the completed live feature, and no checkbox
+above is closed by developer source/fixture evidence.
 See [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+Source presence no longer blocks describing runtime/authoring/player/packaging implementation, but actual current-source integration and release verification do. The future synthetic-screen CMS success, route/component automation and signed fixtures do not close any item above. Final CMS/player full gates were pending at this documentation refresh; use the root-owned dated ledger/build binding for their exact final disposition. Do not ship this packet as completed LIVE until native capture/ordinary-player frame+audio, current Backend/media/host-readiness/death witness, production artifacts, supported platforms, cross-VM/10×25/restore and independent acceptance are evidenced or explicitly dispositioned by responsible humans.

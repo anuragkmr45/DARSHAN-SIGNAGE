@@ -1,53 +1,29 @@
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { rolesApi } from "@/api/domains/roles";
+import { apiClient } from "@/api/apiClient";
+import { canWithCapabilities, getSelfAuthorization } from "@/api/domains/selfAuthorization";
 import { queryKeys } from "@/api/queryKeys";
 import { useAppSelector } from "@/store/hooks";
-import { canWithGrants, resolveEffectiveGrants } from "@/lib/authorization";
-
-const DEFAULT_ROLE_LIST = { page: 1, limit: 100 };
 
 export const useAuthorization = () => {
   const authState = useAppSelector((state) => state.auth);
-  const roleId = authState.user?.role_id;
-  const roleName = authState.user?.role;
-  const isAuthed = Boolean(authState.token || authState.user);
-
-  const rolesQuery = useQuery({
-    queryKey: queryKeys.roles(DEFAULT_ROLE_LIST),
-    queryFn: () => rolesApi.list(DEFAULT_ROLE_LIST),
-    enabled: isAuthed,
-    staleTime: 60_000,
+  const userId = authState.user?.id, generation = apiClient.getSessionGeneration();
+  const isAuthed = Boolean(userId && (authState.token || authState.user));
+  const authorization = useQuery({
+    queryKey: queryKeys.selfAuthorization(userId, generation),
+    queryFn: ({ signal }) => getSelfAuthorization(userId!, signal),
+    enabled: isAuthed, retry: false, staleTime: 30_000, refetchOnWindowFocus: true,
   });
-
-  const roles = useMemo(() => rolesQuery.data?.items ?? [], [rolesQuery.data?.items]);
-  const resolvedRoleId = useMemo(() => {
-    if (roleId) return roleId;
-    if (!roleName) return undefined;
-    return roles.find((role) => role.name === roleName)?.id;
-  }, [roleId, roleName, roles]);
-
-  const effectiveGrants = useMemo(
-    () => resolveEffectiveGrants(resolvedRoleId, roles),
-    [resolvedRoleId, roles],
-  );
-
+  const current = isAuthed && !authorization.isError && authorization.data?.user_id === userId ? authorization.data : undefined;
+  const capabilities = useMemo(() => current?.capabilities ?? [], [current]);
   const can = useCallback(
-    (action: string, subject: string) => canWithGrants(effectiveGrants, action, subject),
-    [effectiveGrants],
+    (action: string, subject: string) => canWithCapabilities(capabilities, action, subject),
+    [capabilities],
   );
-
-  const currentRole = useMemo(
-    () => roles.find((role) => role.id === resolvedRoleId),
-    [roles, resolvedRoleId],
-  );
-
   return {
-    can,
-    grants: effectiveGrants,
-    role: currentRole,
-    isLoading: rolesQuery.isLoading,
-    isFetching: rolesQuery.isFetching,
-    isError: rolesQuery.isError,
+    can, capabilities, role: current?.role,
+    isLoading: authorization.isLoading,
+    isFetching: authorization.isFetching,
+    isError: authorization.isError,
   };
 };

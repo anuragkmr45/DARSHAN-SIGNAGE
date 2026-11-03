@@ -5,9 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { supervise } from '../src/supervisor.js';
 import { fork } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import { mkdtemp, lstat, rm } from 'node:fs/promises';
+import { mkdtemp, lstat, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { temporaryTmpfs } from './fixtures/tmpfs-directory.mjs';
 
 async function fixture(t, overrides = {}) {
   const portServer = net.createServer();
@@ -133,4 +135,21 @@ test('a foreign listener cannot make an unrelated spawned child admission-ready 
   const socket = net.connect(port, '127.0.0.1');
   await bounded(new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); }));
   socket.destroy();
+});
+
+test('each backend supervisor start replaces a stale authority UUID while retaining the managed watchdog identity', async t => {
+  const directory = await temporaryTmpfs('darshan-authority-boot-'); t.after(() => rm(directory, { recursive: true, force: true }));
+  const managed = randomUUID(), stale = randomUUID(), authorityIds = [];
+  for (let index = 0; index < 2; index += 1) {
+    const { runtime } = await fixture(t, { DARSHAN_MEDIA_AUTHORITY_MODE: 'backend', DARSHAN_MEDIA_NODE_INSTANCE_ID: managed,
+      DARSHAN_MEDIA_AUTHORITY_INSTANCE_ID: stale, DARSHAN_MEDIA_SUPERVISOR_STATE_FILE: path.join(directory, 'supervisor.json'),
+      DARSHAN_MEDIA_HOST_LEASE_FILE: path.join(directory, 'untrusted-host-lease.json') });
+    const heartbeat = await bounded(new Promise(resolve => runtime.gateway.once('message', resolve)));
+    const file = JSON.parse(await readFile(path.join(directory, 'supervisor.json'), 'utf8'));
+    assert.equal(heartbeat.authority_node_instance_id, runtime.authorityNodeInstanceId);
+    assert.notEqual(runtime.authorityNodeInstanceId, stale); assert.equal(file.instance_id, managed);
+    assert.equal(file.authority_node_instance_id, runtime.authorityNodeInstanceId); authorityIds.push(runtime.authorityNodeInstanceId);
+    await runtime.stop('TEST_CLEANUP');
+  }
+  assert.notEqual(authorityIds[0], authorityIds[1]);
 });

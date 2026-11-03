@@ -1,5 +1,6 @@
 import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
+import type { LivePreflight } from "../liveTypes";
 import type {
   PaginatedResponse,
   PaginationParams,
@@ -49,7 +50,8 @@ export const schedulesApi = {
 
   publish: (
     scheduleId: string,
-    payload: { screen_ids?: string[]; screen_group_ids?: string[]; aspect_override?: { acknowledged: true; issue_hash: string; reason?: string } },
+    payload: { screen_ids?: string[]; screen_group_ids?: string[]; fallback_preparation_ids?: Record<string, string>;
+      expected_live_fingerprint?: string; aspect_override?: { acknowledged: true; issue_hash: string; reason?: string } },
   ) =>
     apiClient.request<Publish>({
       path: endpoints.schedules.publish(scheduleId),
@@ -63,6 +65,9 @@ export const schedulesApi = {
       method: "POST",
       body: payload,
     }),
+
+  livePreflight: (payload: { schedule_id: string; fallback_preparation_ids: Record<string, string>; screen_ids?: string[]; screen_group_ids?: string[] }) =>
+    apiClient.request<LivePreflight>({ path: endpoints.schedules.livePreflight, method: "POST", body: payload }),
 
   getPublish: (publishId: string) =>
     apiClient.request<Publish>({

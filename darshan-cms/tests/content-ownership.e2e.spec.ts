@@ -1,18 +1,24 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import {
+  ADMIN_TEST_ROLE_ID,
+  ADMIN_TEST_USER_ID,
+  adminCapabilities,
+  testAuthorization,
+} from "./helpers/selfAuthorization";
 
 const adminUser = {
-  id: "admin-user-id",
+  id: ADMIN_TEST_USER_ID,
   email: "admin@darshan.local",
   first_name: "Admin",
   last_name: "User",
-  role_id: "role-admin",
+  role_id: ADMIN_TEST_ROLE_ID,
   role: "ADMIN",
 };
 
 const rolesPayload = {
   items: [
     {
-      id: "role-admin",
+      id: ADMIN_TEST_ROLE_ID,
       name: "ADMIN",
       description: "Administrator",
       permissions: { inherits: [], grants: [{ action: "manage", subject: "all" }] },
@@ -53,6 +59,17 @@ async function installCommonRoutes(
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({ token: "cms-token", csrf_token: "csrf-token", user: identity.user }),
+      });
+      return;
+    }
+    if (pathname === "/api/v1/auth/authorization" && method === "GET") {
+      const capabilities = identity.user.role === "MEDIA_CURATOR"
+        ? ["create", "read", "update", "delete", "manage"].map((action) => ({ action, subject: "Media" }))
+        : adminCapabilities;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(testAuthorization(identity.user, capabilities, { roleId: identity.user.role_id })),
       });
       return;
     }
@@ -212,15 +229,15 @@ test.describe("Owned content response contract", () => {
   test('custom role with Manage Media permission restores retained media', async ({ page }) => {
     const customUser = {
       ...adminUser,
-      id: 'media-curator-user-id',
+      id: '00000000-0000-4000-8000-000000000005',
       email: 'curator@darshan.local',
-      role_id: 'role-media-curator',
+      role_id: '00000000-0000-4000-8000-000000000006',
       role: 'MEDIA_CURATOR',
     };
     const customRoles = {
       ...rolesPayload,
       items: [{
-        id: 'role-media-curator',
+        id: '00000000-0000-4000-8000-000000000006',
         name: 'MEDIA_CURATOR',
         description: 'Custom retained-media administrator',
         permissions: { inherits: [], grants: [{ action: 'manage', subject: 'Media' }] },

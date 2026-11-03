@@ -22,7 +22,7 @@ const monotonic = () => Number(process.hrtime.bigint()) / 1e6;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function coreDigest() {
   const digest = createHash('sha256');
-  for (const file of ['controller.js', 'gateway.js', 'index.js', 'livekit-adapter.js', 'supervisor.js', 'sfu-listener-ownership.js']) {
+  for (const file of ['controller.js', 'gateway.js', 'index.js', 'livekit-adapter.js', 'supervisor.js', 'sfu-listener-ownership.js', 'authority-file.js', 'backend-authority.js', 'runtime-config.js', 'tls-config.js', 'host-readiness.js']) {
     digest.update(file);
     digest.update(await readFile(path.join(repo, 'darshan-media/src', file)));
   }
@@ -167,7 +167,7 @@ async function fixture(t, { hostWatchdog = false } = {}) {
     process.stdout.write(`${JSON.stringify(data)}\n`);
   };
   return { pids, signal, awaitStopped, control, id, evidence, unconfirmedEvidence, containerId, instance,
-    heartbeatFile: path.join(stateDir, 'supervisor.json'), privateDir };
+    heartbeatFile: stateDir ? path.join(stateDir, 'supervisor.json') : undefined, privateDir };
 }
 
 test('actual Docker: independent supervisor kills SFU after controller SIGSTOP', { skip: !enabled, timeout: 25_000 }, async (t) => {
@@ -266,4 +266,41 @@ test('actual Docker: pre-pinned pidfd enforces supervisor stall when only watchd
   assert.equal(watchdog.exitCode, 0);
   assert.ok(events.some((event) => event.event === 'watchdog_pidfd_enforced'));
   await f.evidence('supervisor-stall-pidfd-docker-unavailable', ended - began, 3000);
+});
+
+test('actual Docker: Docker inspection outage does not kill a healthy pinned media namespace', { skip: !enabled, timeout: 25_000 }, async (t) => {
+  const f = await fixture(t, { hostWatchdog: true });
+  const script = path.join(repo, 'darshan-media/host-watchdog.py');
+  const binary = (await runFile('which', ['docker'], { timeout: 1000 })).stdout.trim();
+  const wrapperDir = path.join(f.privateDir, 'healthy-bin');
+  const denyFlag = path.join(f.privateDir, 'deny-healthy-docker');
+  await mkdir(wrapperDir, { mode: 0o700 });
+  await writeFile(path.join(wrapperDir, 'docker'), `#!/usr/bin/python3\nimport os,sys\nif os.path.exists(${JSON.stringify(denyFlag)}): sys.exit(1)\nos.execv(${JSON.stringify(binary)},[${JSON.stringify(binary)}]+sys.argv[1:])\n`, { mode: 0o700 });
+  const watchdog = spawn('python3', [script, '--container-id', f.containerId, '--instance-id', f.instance,
+    '--heartbeat', f.heartbeatFile, '--heartbeat-uid', String(process.getuid())], {
+    stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, PATH: `${wrapperDir}:${process.env.PATH}` },
+  });
+  t.after(() => { if (watchdog.exitCode === null) watchdog.kill('SIGKILL'); });
+  const events = [];
+  let buffer = '';
+  watchdog.stdout.on('data', (chunk) => {
+    buffer += chunk.toString();
+    let boundary;
+    while ((boundary = buffer.indexOf('\n')) >= 0) {
+      try { events.push(JSON.parse(buffer.slice(0, boundary))); } catch {}
+      buffer = buffer.slice(boundary + 1);
+    }
+  });
+  await waitUntil(() => events.some((event) => event.event === 'watchdog_ready'), 2500,
+    'Host watchdog did not pin the healthy media namespace');
+  await writeFile(denyFlag, '', { mode: 0o600 });
+  await waitUntil(() => events.some((event) => event.event === 'watchdog_docker_inspection_degraded'), 2500,
+    'Docker inspection outage was not reported');
+  await sleep(1800); // Exceeds the superseded one-second Docker-management cutoff.
+  assert.equal(await docker('inspect', f.containerId, '--format', '{{.State.Running}}'), 'true');
+  assert.equal(await reachable(19781), true, 'Healthy SFU must remain available during Docker management outage');
+  await rm(denyFlag);
+  await waitUntil(() => events.some((event) => event.event === 'watchdog_docker_inspection_recovered'), 2500,
+    'Recovered Docker identity was not revalidated');
+  assert.equal(watchdog.exitCode, null, 'Healthy watchdog must continue after recovery');
 });

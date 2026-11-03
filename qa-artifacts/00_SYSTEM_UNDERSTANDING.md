@@ -280,6 +280,15 @@ external Windows/browser/physical/cross-VM/restore/capacity evidence are separat
 The current backend supports frozen request/direct publication, scoped snapshot
 reads and immutable download delivery; 55 actual-service checks and15 SHA
 verifications are recorded in [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
-The CMS source page has real-browser evidence. Run/admission authority, same
-ordinary-player live integration, complete CMS controls and six-VM artifacts
-are unfinished; server publication fixtures are unpaired synthetic screens.
+That historical publication packet used unpaired synthetic screens and source-page
+browser checks. The current runtime/authoring source below supersedes its
+implementation inventory; integrated normal-player frames/audio and production
+artifact/host execution still require evidence.
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+Current source extends the historical0057/0058 publication foundation with runtime authority migration0060 and resumable authoring journal0061. Backend `services/live-runtime.ts`, `live-runtime-discovery.ts`, `live-target-reports.ts` and their routes retain PostgreSQL/frozen-policy authority. CMS `LiveScheduleWizard`, `LivePresenterPanel` and `LiveTargetReports` provide distinct authoring, native capture and player-report surfaces. Normal PlayerFlow uses the new authority client/coordinator/view and content-owner/fallback-pin paths. Media backend mode uses verified HTTPS/WSS, fresh boot identity and the required independently host-owned readiness pulse. These paths now exist; the original route/table/test inventory totals above remain historical.
+
+The live shared media VM is optional sixth-role packaging, not evidence of deployed capacity. Source implementations and component tests do not substitute for the current integrated media/player or native host-service journey.

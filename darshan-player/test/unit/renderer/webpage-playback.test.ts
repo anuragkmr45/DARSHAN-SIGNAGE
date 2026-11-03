@@ -1,7 +1,7 @@
 const { expect } = require('chai')
 
 describe('Webpage playback helpers', () => {
-  const loadModule = () => require('../../../dist/renderer/renderer/webpage-playback.js')
+  const loadModule = () => require('../../../src/renderer/webpage-playback.ts')
 
   class FakeElement {
     tagName
@@ -66,13 +66,13 @@ describe('Webpage playback helpers', () => {
   it('mounts a main-process webpage view, reveals it only after health, and destroys it idempotently', async () => {
     const { createWebpagePlaybackElement } = loadModule()
     const healthy = []
-    const container = createWebpagePlaybackElement({ liveUrl: 'https://display.example.test/page', onHealthy: () => healthy.push(true) })
+    const container = createWebpagePlaybackElement({ liveUrl: 'https://display.example.test/page', contentEpoch: 'reviewed-content-owner', onHealthy: () => healthy.push(true) })
     await Promise.resolve()
     await Promise.resolve()
 
     expect(container.children).to.have.length(1)
     expect(mountedRequests).to.have.length(1)
-    expect(mountedRequests[0]).to.include({ url: 'https://display.example.test/page' })
+    expect(mountedRequests[0]).to.include({ url: 'https://display.example.test/page', contentEpoch: 'reviewed-content-owner' })
     expect(mountedRequests[0].bounds).to.deep.equal({ x: 20, y: 30, width: 640, height: 360 })
 
     statusListener({ id: mountedRequests[0].id, generation: mountedRequests[0].generation, state: 'healthy' })

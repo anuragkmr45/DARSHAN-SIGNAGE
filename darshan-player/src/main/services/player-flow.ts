@@ -14,6 +14,7 @@ import {
   PlayerState,
   PlayerStatus,
   TimelineItem,
+  AppConfig,
   isDeviceApiError,
 } from '../../common/types'
 import { getLogger } from '../../common/logger'
@@ -36,6 +37,11 @@ import { getRealtimeService } from './realtime-service'
 import { getSecurePlaybackGuard, type SecurePlaybackGuardStatus } from './secure-playback-guard'
 import { clearMediaCacheTargets } from './media-cache-purge'
 import { getCacheManager } from './cache/cache-manager'
+import { getContentOwner } from './playback/content-owner'
+import { LiveAuthorityClient } from './live-authority-client'
+import { LivePlaybackCoordinator } from './live-playback-coordinator'
+import { LiveViewManager } from './live-view-manager'
+import type { LivePlaybackStatus } from '../../common/live-playback'
 
 const logger = getLogger('player-flow')
 const PAIRING_POLL_INTERVAL_MS = 5000
@@ -83,6 +89,13 @@ export class PlayerFlow extends EventEmitter {
   private bootstrapRetryTimer?: NodeJS.Timeout
   private secureRecoveryRetryTimer?: NodeJS.Timeout
   private secureRecoveryPromise?: Promise<void>
+  private liveCoordinator?: LivePlaybackCoordinator
+  private liveView?: LiveViewManager
+  private liveTransportRecoveryRequired = false
+  private rendererDisposalFailed = false
+  private stopping = false
+  private fallbackTransition?: Promise<void>
+  private fallbackRevision = 0
   private readonly bootstrapBackoff = new ExponentialBackoff(2000, 30000, 10, 0.2)
   private readonly pairingPollBackoff = new ExponentialBackoff(2000, 30000, 10, 0.2)
   private readonly store = getDeviceStateStore()
@@ -135,12 +148,19 @@ export class PlayerFlow extends EventEmitter {
 
   /** Rebind long-lived services after the renderer window is recreated. */
   attachWindow(mainWindow: BrowserWindow): void {
+    this.liveCoordinator?.suspend('RENDERER_REATTACHED')
     this.mainWindow = mainWindow
+    this.rendererDisposalFailed = false
+    getContentOwner().attach(mainWindow)
+    getContentOwner().advance(['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(this.state) ? 'ordinary' : 'blocked')
+    this.initializeLivePlayback()
 
     const playbackEngine = getPlaybackEngine()
     playbackEngine.initialize(mainWindow)
     getScreenshotService().initialize(mainWindow)
     getDefaultMediaService().initialize(mainWindow)
+    mainWindow.webContents.setAudioMuted(false)
+    this.updateStatus({})
 
     // `loadFile()` has completed before reattachment, so renderer listeners
     // are registered. Restore the in-flight timeline item immediately rather
@@ -150,6 +170,145 @@ export class PlayerFlow extends EventEmitter {
       ['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(this.status.state)
     ) {
       playbackEngine.restoreCurrentItemInRenderer()
+    }
+    this.refreshPlaybackStatusFromCurrentState()
+  }
+
+  private initializeLivePlayback(): void {
+    if (this.liveCoordinator) return
+    this.liveView = new LiveViewManager(() => this.mainWindow)
+    getScreenshotService().setContentCaptureProvider(() => this.liveView!.captureVisible())
+    this.liveCoordinator = new LivePlaybackCoordinator({
+      enabled: () => getConfigManager().getConfig().livePlayback?.enabled === true,
+      createAuthority: () => {
+        const deviceId = this.pairingService.getDeviceId()
+        if (!deviceId) throw new Error('Paired device identity required')
+        return new LiveAuthorityClient(deviceId, { development: getConfigManager().getConfig().runtime.mode === 'dev',
+          runtimeSessionId: this.pairingService.getRuntimeSessionId() })
+      }, cache: getSnapshotManager(), view: this.liveView,
+      refreshControl: async () => {
+        const snapshots = getSnapshotManager()
+        const playlist = await snapshots.refreshSnapshot({ force: true })
+        return { fresh: snapshots.didLastRefreshSucceed() && snapshots.getCurrentPlaylist() === playlist, playlist }
+      },
+      output: {
+        fallback: (playlist, live) => this.applyLiveFallback(playlist, live),
+        status: live => this.updateStatus({ mode: 'live', live, currentMediaId: live.phase === 'LIVE' ? undefined : this.status.currentMediaId }),
+        disposeOrdinary: async isCurrent => {
+          await this.fallbackTransition
+          if (!isCurrent()) return false
+          const window = this.mainWindow
+          if (!window || window.isDestroyed()) return false
+          const acknowledged = getContentOwner().disposeRenderer(window)
+          getPlaybackEngine().stop()
+          this.playbackReady = false
+          this.updateStatus({ currentMediaId: undefined })
+          const completed = await acknowledged
+          if (!completed && isCurrent() && this.mainWindow === window && !window.isDestroyed()) {
+            this.rendererDisposalFailed = true
+            this.interruptLive('RENDERER_DISPOSAL_FAILED')
+            window.webContents.reload()
+          }
+          return completed
+        },
+        released: () => {
+          this.fallbackRevision += 1
+          getPlaybackEngine().setExternalOwnership(false)
+          getContentOwner().advance('ordinary')
+          if (!this.rendererDisposalFailed && !this.stopping) this.mainWindow?.webContents.setAudioMuted(false)
+          this.playbackReady = false
+          this.updateStatus({ live: undefined, currentMediaId: undefined })
+          queueMicrotask(() => { if (!this.stopping) this.refreshPlaybackStatusFromCurrentState() })
+        },
+        identityFailure: failure => {
+          this.lifecycleEvents.emitRuntimeAuthFailure({ source: 'live', error: new DeviceApiError({
+            status: failure.status ?? 401, code: failure.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED', message: 'Live device identity requires verification', transient: false,
+          }) })
+        },
+      },
+    })
+  }
+
+  private applyLiveFallback(playlist: PlaybackPlaylist, live: LivePlaybackStatus): void {
+    const window = this.mainWindow
+    if (!window || window.isDestroyed()) return
+    if (this.rendererDisposalFailed) {
+      window.webContents.setAudioMuted(true)
+      getPlaybackEngine().stop()
+      this.updateStatus({ mode: 'live', live: { ...live, phase: 'UNAVAILABLE', fallbackReady: false, reason: 'RENDERER_RECOVERY' }, currentMediaId: undefined })
+      return
+    }
+    const owner = getContentOwner()
+    getPlaybackEngine().setExternalOwnership(true)
+    const display = (): void => {
+      this.playbackReady = playlist.items.length > 0
+      this.updateStatus({ mode: 'live', live, scheduleId: playlist.scheduleId, currentMediaId: owner.getOwner() === 'live-fallback' ? this.status.currentMediaId : undefined, contentUnavailableReason: playlist.unavailableReason, lastSnapshotAt: playlist.lastSnapshotAt ?? this.status.lastSnapshotAt })
+      const contentEpoch = owner.getEpoch()
+      if (playlist.items.length) void getPlaybackEngine().playOwnedFallback(playlist).catch(() => {
+        if (owner.getEpoch() === contentEpoch && !this.stopping && this.liveCoordinator?.isOwningContent()) this.updateStatus({ live: { ...live, phase: 'UNAVAILABLE', fallbackReady: false, reason: 'FALLBACK_RENDER_FAILED' } })
+      })
+      else getPlaybackEngine().stop()
+    }
+    if (!playlist.items.length) {
+      this.fallbackRevision += 1
+      window.webContents.setAudioMuted(true)
+      if (owner.getOwner() !== 'blocked') owner.advance('blocked')
+      display()
+      return
+    }
+    if (owner.getOwner() === 'live-fallback') { display(); return }
+    const revision = ++this.fallbackRevision
+    window.webContents.setAudioMuted(true)
+    this.playbackReady = false
+    this.updateStatus({ mode: 'live', live: { ...live, phase: 'PREPARING_FALLBACK', fallbackReady: false }, currentMediaId: undefined })
+    const transition = (async (): Promise<void> => {
+      const acknowledged = owner.disposeRenderer(window)
+      getPlaybackEngine().stop()
+      const completed = await acknowledged
+      if (revision !== this.fallbackRevision || this.stopping || this.mainWindow !== window || window.isDestroyed() || !this.liveCoordinator?.isOwningContent()) return
+      if (!completed) {
+        this.rendererDisposalFailed = true
+        this.interruptLive('RENDERER_DISPOSAL_FAILED')
+        window.webContents.reload()
+        return
+      }
+      owner.advance('live-fallback')
+      window.webContents.setAudioMuted(false)
+      display()
+    })()
+    this.fallbackTransition = transition
+    void transition.finally(() => { if (this.fallbackTransition === transition) this.fallbackTransition = undefined }).catch(() => undefined)
+  }
+
+  getLiveReceiverGrant(senderId: number): import('../../common/live-runtime').LiveReceiverGrant | null { return this.liveView?.getGrant(senderId) ?? null }
+  getLiveReceiverLease(senderId: number): import('../../common/live-runtime').LiveReceiverLease | null { return this.liveView?.getLease(senderId) ?? null }
+  reportLiveReceiver(senderId: number, value: unknown): boolean { return this.liveView?.report(senderId, value) ?? false }
+  /** Call synchronously before window/display/power lifecycle changes. */
+  interruptLive(reason: string): void {
+    this.fallbackRevision += 1
+    this.liveCoordinator?.suspend(reason)
+    if (this.liveCoordinator?.isOwningContent()) {
+      this.mainWindow?.webContents.setAudioMuted(true)
+      getContentOwner().advance('blocked')
+      getPlaybackEngine().stop()
+      this.playbackReady = false
+      this.updateStatus({ currentMediaId: undefined })
+    }
+  }
+  resumeLive(): void { this.refreshPlaybackStatusFromCurrentState(); this.liveCoordinator?.wake() }
+  /** Called before HTTP/WS clients switch endpoints or trust configuration. */
+  reconfigureLive(previous: AppConfig, next: AppConfig): void {
+    const changedAuthority = previous.apiBase !== next.apiBase || previous.deviceId !== next.deviceId ||
+      JSON.stringify(previous.transportTls) !== JSON.stringify(next.transportTls) || JSON.stringify(previous.mtls) !== JSON.stringify(next.mtls) ||
+      JSON.stringify(previous.environment) !== JSON.stringify(next.environment)
+    if (changedAuthority) {
+      this.liveTransportRecoveryRequired = true
+      this.liveCoordinator?.resetIdentity()
+      if (['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(this.state)) {
+        queueMicrotask(() => { void this.retryRecovery() })
+      }
+    } else if (previous.livePlayback?.enabled !== next.livePlayback?.enabled) {
+      this.refreshPlaybackStatusFromCurrentState()
     }
   }
 
@@ -209,6 +368,7 @@ export class PlayerFlow extends EventEmitter {
   getStatus(): PlayerStatus {
     return {
       ...this.status,
+      contentEpoch: getContentOwner().getEpoch(),
       hostname: os.hostname(),
       pairingRemainingMs: this.pairingService.getPairingRemainingMs(),
     }
@@ -267,6 +427,8 @@ export class PlayerFlow extends EventEmitter {
   }
 
   stop(): void {
+    this.stopping = true
+    this.liveCoordinator?.dispose()
     this.stopPairingTimers()
     this.stopBootstrapRetryTimer()
     this.stopSecureRecoveryRetryTimer()
@@ -481,6 +643,8 @@ export class PlayerFlow extends EventEmitter {
   }
 
   private clearIdentityBoundRuntimeState(): void {
+    this.liveCoordinator?.resetIdentity()
+    getContentOwner().advance('blocked')
     getPlaybackEngine().stop()
     this.playbackReady = false
     getSecurePlaybackGuard().reset()
@@ -490,6 +654,7 @@ export class PlayerFlow extends EventEmitter {
   }
 
   private resolveVisiblePlaybackMode(playlist: PlaybackPlaylist): PlaybackMode {
+    if (playlist.mode === 'live' || playlist.mode === 'emergency') return playlist.mode
     if (requiresTimelinePlayback(playlist)) {
       return playlist.mode
     }
@@ -524,8 +689,16 @@ export class PlayerFlow extends EventEmitter {
   }
 
   private handlePlaylistUpdate(playlist: PlaybackPlaylist): void {
+    if (this.liveTransportRecoveryRequired) {
+      this.liveCoordinator?.setContext(false, playlist)
+      getPlaybackEngine().stop()
+      this.playbackReady = false
+      this.updateStatus({ mode: 'live', live: { phase: 'UNAVAILABLE', reason: 'BACKEND_REVALIDATION', fallbackReady: false }, currentMediaId: undefined })
+      return
+    }
     const securePlaybackStatus = getSecurePlaybackGuard().getStatus()
     if (securePlaybackStatus.locked) {
+      this.liveCoordinator?.setContext(false, playlist)
       this.updateStatus({
         mode: 'offline',
         online: false,
@@ -543,6 +716,10 @@ export class PlayerFlow extends EventEmitter {
       return
     }
 
+    const liveAllowed = !this.liveTransportRecoveryRequired && ['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(this.state)
+    this.liveCoordinator?.setContext(liveAllowed, playlist)
+    if (this.liveCoordinator?.isOwningContent()) return
+
     const timelineRequired = requiresTimelinePlayback(playlist)
     const shouldStartTimeline = timelineRequired && !this.playbackReady
     const shouldStopTimeline = !timelineRequired && this.playbackReady
@@ -551,6 +728,7 @@ export class PlayerFlow extends EventEmitter {
     // before start()/stop() can synchronously emit media-change/clear-active.
     this.updateStatus({
       mode: this.resolveVisiblePlaybackMode(playlist),
+      contentUnavailableReason: playlist.unavailableReason,
       online: playlist.mode !== 'offline',
       scheduleId: playlist.scheduleId,
       currentMediaId: requiresTimelinePlayback(playlist) ? this.status.currentMediaId : undefined,
@@ -570,6 +748,8 @@ export class PlayerFlow extends EventEmitter {
 
   private async handleSecurePlaybackStatus(status: SecurePlaybackGuardStatus): Promise<void> {
     if (status.locked) {
+      this.liveCoordinator?.setContext(false)
+      getContentOwner().advance('blocked')
       if (!this.securePlaybackLockActive) {
         this.securePlaybackLockActive = true
         getCacheManager().invalidatePendingWrites()
@@ -1330,6 +1510,13 @@ export class PlayerFlow extends EventEmitter {
 
   private async transitionState(next: PlayerState, statusPatch: Partial<PlayerStatus> = {}): Promise<void> {
     this.state = next
+    if (next === 'PAIRED_RUNTIME') this.liveTransportRecoveryRequired = false
+    if (!['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(next)) {
+      this.liveCoordinator?.setContext(false)
+      getContentOwner().advance('blocked')
+    } else if (getContentOwner().getOwner() === 'blocked' && !this.liveCoordinator?.isOwningContent()) {
+      getContentOwner().advance('ordinary')
+    }
     await this.store.setLifecycleState(next)
     getPlayerMetrics().setPlayerState(next)
 

@@ -1,17 +1,18 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, adminAuthorization } from "./helpers/selfAuthorization";
 
 const adminUser = {
-  id: "admin-user-id",
+  id: ADMIN_TEST_USER_ID,
   email: "admin@darshan.local",
   first_name: "Admin",
   last_name: "User",
-  role_id: "role-admin",
+  role_id: ADMIN_TEST_ROLE_ID,
   role: "ADMIN",
 };
 
 const rolesPayload = {
   items: [{
-    id: "role-admin",
+    id: ADMIN_TEST_ROLE_ID,
     name: "ADMIN",
     permissions: { inherits: [], grants: [{ action: "manage", subject: "all" }] },
     is_system: true,
@@ -59,6 +60,9 @@ test("an operator can refresh a webpage preview while the last successful previe
         contentType: "application/json",
         body: JSON.stringify({ token: "cms-token", csrf_token: "csrf-token", user: adminUser }),
       });
+    }
+    if (url.pathname === "/api/v1/auth/authorization" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(adminAuthorization(adminUser)) });
     }
     if (url.pathname === "/api/v1/roles" && method === "GET") {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(rolesPayload) });

@@ -14,6 +14,8 @@ export interface AppConfig {
   deviceId: string
   environment?: PlayerEnvironmentConfig
   runtime: RuntimeConfig
+  /** Controlled rollout; capability stays withheld until normal runtime QA. */
+  livePlayback?: { enabled: boolean }
   realtime?: RealtimeConfig
   transportTls: TransportTLSConfig
   mtls: MTLSConfig
@@ -129,6 +131,7 @@ export interface SecurityConfig {
 export type WebpageViewBounds = { x: number; y: number; width: number; height: number }
 
 export type WebpageViewRequest = {
+  contentEpoch?: string
   id: string
   generation: number
   url: string
@@ -263,7 +266,7 @@ export type PlayerState =
   | 'PAIRING_COMPLETING'
   | 'PAIRED_RUNTIME'
 
-export type PlaybackMode = 'normal' | 'emergency' | 'default' | 'offline' | 'empty'
+export type PlaybackMode = 'normal' | 'emergency' | 'default' | 'offline' | 'empty' | 'live'
 
 export interface PlayerStatus {
   state: PlayerState
@@ -284,6 +287,9 @@ export interface PlayerStatus {
   lastHeartbeatAt?: string
   error?: string
   securityLock?: PlayerSecurityLockStatus
+  contentEpoch?: string
+  contentUnavailableReason?: string
+  live?: import('./live-playback').LivePlaybackStatus
 }
 
 /**
@@ -387,6 +393,13 @@ export interface SnapshotScheduleItem {
   url?: string
   sha256?: string
   presentation?: SnapshotPresentation | null
+  source_kind?: 'PRESENTATION' | 'LIVE'
+  live_session_id?: string | null
+  resolved_screen_ids?: string[]
+  live_policy?: unknown
+  live_fallback_downloads?: unknown[]
+  live_fallback_download_status?: 'AVAILABLE' | 'UNAVAILABLE'
+  live_fallback_policy_status?: 'INVALID'
 }
 
 export interface SnapshotSchedule {
@@ -481,6 +494,7 @@ export interface SnapshotMediaEntry {
 export interface DeviceSnapshot {
   id?: string
   snapshot_id?: string
+  publish_id?: string
   representation_revision?: string
   content_state?: 'scheduled' | 'default' | 'empty'
   server_time?: string
@@ -618,6 +632,15 @@ export interface DisplayTelemetry {
 
 export type PowerSource = 'AC' | 'BATTERY' | 'USB' | 'UNKNOWN'
 
+export interface PlayerCapabilities {
+  commands: string[]
+  features: string[]
+  screenshot: boolean
+  log_upload: boolean
+  offline_startup: boolean
+  background_push: boolean
+}
+
 export interface HeartbeatPayload {
   device_id: string
   status: 'ONLINE' | 'OFFLINE' | 'ERROR'
@@ -654,6 +677,7 @@ export interface HeartbeatPayload {
   player_uptime_seconds?: number
   install_instance_id?: string
   runtime_session_id?: string
+  player_capabilities?: PlayerCapabilities
   display_profile_v1?: import('./display-profile').DisplayProfileV1
   player_version?: string
   battery_percent?: number

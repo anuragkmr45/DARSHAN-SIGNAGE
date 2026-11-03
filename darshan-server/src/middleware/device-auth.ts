@@ -22,6 +22,8 @@ const deviceIdSchema = z.string().uuid();
 
 type DeviceAuthOptions = {
   allowUserToken?: boolean;
+  /** Trusted route policy; never derive this option from request headers. */
+  requireSignature?: boolean;
 };
 
 const getDeviceRequestUrl = (request: FastifyRequest) => request.raw.url || request.url || '/';
@@ -51,16 +53,18 @@ export async function authenticateDeviceOrThrow(
     throw AppError.badRequest('Invalid device id');
   }
 
-  const authMode = resolveDeviceAuthMode();
+  const configuredAuthMode = resolveDeviceAuthMode();
+  const authMode = options.requireSignature ? 'signature' : configuredAuthMode;
   const signatureHeaders = parseDeviceRequestSignatureHeaders(request.headers as Record<string, string | string[] | undefined>);
   const hasSignatureHeaders = hasAnySignatureHeader(signatureHeaders);
-  const bearerToken = options.allowUserToken ? extractTokenFromHeader(request.headers.authorization) : null;
+  const allowUserToken = options.allowUserToken === true && options.requireSignature !== true;
+  const bearerToken = allowUserToken ? extractTokenFromHeader(request.headers.authorization) : null;
   const certSerial = signatureHeaders.serial;
   const recordAuthSuccess = (
     authMethod: 'legacy_serial' | 'signature' | 'user_token' | 'missing_identity'
   ) => {
     recordDeviceAuthAttempt({
-      configuredMode: authMode,
+      configuredMode: configuredAuthMode,
       authMethod,
       result: 'success',
       reason: 'authorized',
@@ -172,7 +176,9 @@ export async function authenticateDeviceOrThrow(
         });
       }
 
-      const authMethod = authMode === 'legacy' || !hasSignatureHeaders ? 'legacy_serial' : 'signature';
+      // Report the method actually verified. A signed request can succeed while
+      // the site's ordinary rollout policy is still legacy/dual.
+      const authMethod = authMode === 'signature' || hasSignatureHeaders ? 'signature' : 'legacy_serial';
 
       request.device = {
         id: deviceId,
@@ -196,10 +202,10 @@ export async function authenticateDeviceOrThrow(
       }
 
       recordAuthSuccess(authMethod);
-      return { type: 'device' as const };
+      return { type: 'device' as const, authMethod };
     }
 
-    if (options.allowUserToken) {
+    if (allowUserToken) {
       if (!bearerToken) {
         throw AppError.unauthorized('Missing device identity header', {
           reason: 'MISSING_DEVICE_IDENTITY_HEADER',
@@ -233,7 +239,7 @@ export async function authenticateDeviceOrThrow(
     });
   } catch (error) {
     recordDeviceAuthAttempt({
-      configuredMode: authMode,
+      configuredMode: configuredAuthMode,
       authMethod: initialAuthMethod,
       result: 'failure',
       reason: normalizeAuthFailureReason(error),

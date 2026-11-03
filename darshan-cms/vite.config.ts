@@ -25,6 +25,10 @@ export default defineConfig(({ mode }) => ({
         manualChunks: {
           react: ["react", "react-dom", "react-router-dom"],
           query: ["@tanstack/react-query", "@reduxjs/toolkit", "react-redux", "redux-persist"],
+          // Keep the optional presenter SDK out of the page's UI chunk and
+          // retain the existing per-chunk size gate for its protocol code.
+          livekit: ["livekit-client"],
+          livekitProtocol: ["@livekit/protocol", "@bufbuild/protobuf"],
         },
       },
     },
@@ -35,6 +39,11 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // The pinned SDK publishes its TS sources. Its prebundled ESM file
+      // inlines protocol code, preventing Rollup from enforcing our chunk
+      // budget through normal dependency splitting. Build those same sources
+      // so the SDK and protocol remain independently bounded chunks.
+      "livekit-client": path.resolve(__dirname, "node_modules/livekit-client/src/index.ts"),
     },
   },
 }));

@@ -56,3 +56,11 @@ guards. Genuine device-signed access has a positive test; foreign conditional
 CMS bearer reads deny. These are bounded developer results, not completion of
 presenter revocation, media admission or independent browser security testing.
 See [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+Current media backend mode additionally requires a separate root-owned read-only tmpfs readiness lease, exact managed/authority-boot identities and two locally observed sequence advances. Controller checks before/after fresh Backend verification; supervisor independently detects loss. Startup health exposes only authenticated boot metadata with503/no grants until armed. Post-arm invalid/stale pulses permanently isolate. Witness credentials/state must never be mounted into media. Node 108 pass/8 opt-in skipped and injected file-policy checks do not prove the native root-owned mount or host service. Direct native pidfd signaling remains an AppArmor/permission gate; do not weaken the profile or turn fixture coverage into a pass.
+
+Also exercise the new epoch-required Start/Stop/Enable, old/proposed conditional Schedule authorization, same-document versus second-tab ownership, late chooser/microphone/SDK callbacks, logout, consumed-ticket reconnect and report-name ACLs on final artifacts.

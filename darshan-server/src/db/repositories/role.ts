@@ -94,8 +94,8 @@ export class RoleRepository {
     return { items, total, page, limit };
   }
 
-  async findById(id: string) {
-    const db = getDatabase();
+  async findById(id: string, executor?: DbExecutor) {
+    const db = executor ?? getDatabase();
     const [role] = await db.select().from(schema.roles).where(eq(schema.roles.id, id));
     return role || null;
   }

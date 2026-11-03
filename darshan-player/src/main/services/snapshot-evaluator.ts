@@ -7,6 +7,7 @@ import {
   TimelineItem,
 } from '../../common/types'
 import { getExtensionFromName, getExtensionFromUrl, normalizeMime } from '../../common/media-compat'
+import { hasValidLiveWindowControls, isLiveScheduleCandidate, readLiveOccurrence, type LiveOccurrence } from '../../common/live-playback'
 
 export interface NormalizedScheduleWindow {
   id: string
@@ -18,6 +19,7 @@ export interface NormalizedScheduleWindow {
   items: TimelineItem[]
   layout?: SnapshotPresentation['layout']
   raw?: SnapshotScheduleItem
+  live?: LiveOccurrence
 }
 
 export interface ScheduleEvaluationResult {
@@ -159,6 +161,7 @@ export function buildWindowItems(
   scheduleItem: SnapshotScheduleItem,
   mediaUrlMap: SnapshotMediaUrlMap,
 ): TimelineItem[] {
+  if (isLiveScheduleCandidate(scheduleItem)) return []
   const presentation = scheduleItem.presentation
   if (!presentation || typeof presentation !== 'object') {
     return []
@@ -235,9 +238,17 @@ export function buildWindowItems(
 export function normalizeScheduleWindows(
   scheduleItems: SnapshotScheduleItem[] | undefined,
   mediaUrlMap: SnapshotMediaUrlMap,
+  context: { publishId?: string; scheduleId?: string; deviceId?: string } = {},
 ): NormalizedScheduleWindow[] {
   return (scheduleItems || [])
-    .map((item, index) => {
+    .map<NormalizedScheduleWindow | null>((item, index) => {
+      if (isLiveScheduleCandidate(item)) {
+        if (!hasValidLiveWindowControls(item)) return null
+        const live = readLiveOccurrence(item, context)
+        return { id: live.itemId, presentationId: live.policy?.fallback.manifest.presentation.id,
+          startAt: live.startAt, endAt: live.endAt, priority: live.priority, items: [], live,
+          layout: live.policy?.fallback.manifest.presentation.layout as NormalizedScheduleWindow['layout'] }
+      }
       const items = buildWindowItems(item, mediaUrlMap)
       return {
         id: item.id || `schedule-window-${index}`,
@@ -251,7 +262,7 @@ export function normalizeScheduleWindows(
         raw: item,
       }
     })
-    .filter((window) => window.items.length > 0)
+    .filter((window): window is NormalizedScheduleWindow => Boolean(window && (window.items.length > 0 || window.live)))
 }
 
 export function evaluateScheduleWindows(

@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { MediaError } from './controller.js';
 
@@ -8,6 +9,11 @@ const send = (response, status, value) => {
   response.end(JSON.stringify(value));
 };
 const errorValue = (error) => ({ error: error instanceof MediaError ? error.code : 'MEDIA_OPERATION_FAILED' });
+const createServer = (tls, listener) => {
+  if (!tls) return http.createServer(listener);
+  if (!tls.cert || !tls.key) throw new Error('TLS certificate and key are required');
+  return https.createServer({ cert: tls.cert, key: tls.key, minVersion: 'TLSv1.2', handshakeTimeout: 5000 }, listener);
+};
 
 async function readBody(request) {
   if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) throw new MediaError('JSON_REQUIRED', 415);
@@ -22,20 +28,20 @@ async function readBody(request) {
   catch { throw new MediaError('INVALID_JSON', 400); }
 }
 
-export function createControlServer({ controller, secret }) {
+export function createControlServer({ controller, secret, tls }) {
   if (typeof secret !== 'string' || secret.length < 32) throw new Error('A control secret of at least 32 characters is required');
   const expected = digest(secret);
-  return http.createServer(async (request, response) => {
+  return createServer(tls, async (request, response) => {
     const supplied = request.headers['x-darshan-media-secret'];
     // A browser must never invoke the private control surface, even on loopback.
-    if (request.headers.origin || typeof supplied !== 'string' || !timingSafeEqual(digest(supplied), expected)) {
+    if (request.headers.origin !== undefined || typeof supplied !== 'string' || !timingSafeEqual(digest(supplied), expected)) {
       send(response, 401, { error: 'UNAUTHORIZED' });
       return;
     }
     try {
       const url = new URL(request.url, 'http://control.invalid');
       if (request.method === 'GET' && url.pathname === '/internal/health') {
-        send(response, controller.isolated ? 503 : 200, controller.health());
+        const health = controller.health(); send(response, health.status === 'ready' ? 200 : 503, health);
         return;
       }
       if (request.method === 'POST' && url.pathname === '/internal/admissions') {
@@ -73,19 +79,19 @@ export function createControlServer({ controller, secret }) {
   });
 }
 
-export function createSignalServer({ controller, adapter, upstreamUrl, allowedOrigins = [], upgradeTimeoutMs = 5000 }) {
+export function createSignalServer({ controller, adapter, upstreamUrl, allowedOrigins = [], upgradeTimeoutMs = 5000, tls }) {
   const upstream = new URL(upstreamUrl);
   if (upstream.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(upstream.hostname) ||
     upstream.username || upstream.password || upstream.pathname !== '/' || upstream.search || upstream.hash) {
     throw new Error('SFU signaling must use an HTTP loopback endpoint');
   }
   const origins = new Set(allowedOrigins);
-  const server = http.createServer((request, response) => {
+  const server = createServer(tls, (request, response) => {
     try {
       const url = new URL(request.url, 'http://signal.invalid');
       if (request.method !== 'GET' || !['/rtc/validate', '/rtc/v1/validate'].includes(url.pathname)) throw new MediaError('NOT_FOUND', 404);
-      if (request.headers.origin && !origins.has(request.headers.origin)) throw new MediaError('ORIGIN_DENIED', 403);
-      if (request.headers.origin) {
+      if (request.headers.origin !== undefined && !origins.has(request.headers.origin)) throw new MediaError('ORIGIN_DENIED', 403);
+      if (request.headers.origin !== undefined) {
         response.setHeader('Access-Control-Allow-Origin', request.headers.origin);
         response.setHeader('Vary', 'Origin');
       }
@@ -130,7 +136,7 @@ export function createSignalServer({ controller, adapter, upstreamUrl, allowedOr
     try {
       const url = new URL(request.url, 'http://signal.invalid');
       if (!['/rtc', '/rtc/v1'].includes(url.pathname)) throw new MediaError('NOT_FOUND', 404);
-      if (request.headers.origin && !origins.has(request.headers.origin)) throw new MediaError('ORIGIN_DENIED', 403);
+      if (request.headers.origin !== undefined && !origins.has(request.headers.origin)) throw new MediaError('ORIGIN_DENIED', 403);
       if (url.searchParams.getAll('access_token').length !== 1 || request.headers.authorization) throw new MediaError('INVALID_TICKET', 401);
       entry = controller.consumeTicket(url.searchParams.get('access_token'));
       const token = await adapter.createToken(entry);

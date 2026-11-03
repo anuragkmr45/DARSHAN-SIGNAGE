@@ -195,3 +195,17 @@ verification are in progress**. Source: accepted live implementation goal,
 | BR-116 | Keep snapshot delivery Success separate from live connection, subscription, first rendered frame, audio, fallback and freshness. Ordered observations use run/generation, player runtime session, sequence and server receipt time; stale becomes unknown. CMS HTTPS/media WSS, trusted browser/Electron certificates, offline artifacts and representative 10x25 measurements are release gates, not proven by the six-VM design or local developer checks. | BQ-027; accepted goal; not implementation evidence | UC-031/UC-032; CMS/Backend/PostgreSQL/media/player | R-49/R-51 |
 
 Developer ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md). `LIVE-01..20` have no independent QA Pass.
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+Implementation characterization (`IMPLEMENTED_RULE`, separate from the accepted BR-109..116 target rows):
+
+| Related target | Current source characterization | Verification boundary |
+| --- | --- | --- |
+| BR-109..111 | Atomic revision/idempotent LIVE draft review/submit; frozen request/direct publication, audience/capacity constraints and immutable fallback preparation are present. | Authoring 22/22, preview 7/7 and the bounded future synthetic-screen CMS approval journey; representative10×25 remains unmeasured. |
+| BR-112..115 | Current-role/session/source/device-bound authority, durable outbox/reconciliation, epoch-fenced intents, one-use media tickets, same-player lifecycle/lease/pin integration and required host-readiness gating are present, runtime default OFF. | Backend/media/component evidence is partial; current native capture→Backend/media→ordinary-player frame/audio and host pidfd/AppArmor/restore remain open. |
+| BR-116 | Current target reports retain separate connection/subscription/frame/audio/fallback declarations, exact current run/frozen audience, server receipt age and Unknown for stale/future/mismatched/revoked reports; CMS initial runtime window uses authenticated server time. | Targets6/6 and focused CMS mapping checks are developer evidence; player reports never prove physical display, sound or PoP. |
+
+Source anchors: `darshan-server/src/routes/live-schedule-drafts.ts`, `services/live-runtime.ts`, `services/live-target-reports.ts`; `darshan-cms/src/components/live`; `darshan-player/src/main/services/live-playback-coordinator.ts`; `darshan-media/src/host-readiness.js`; [target-report contract](../docs/contracts/live-target-reports.md).

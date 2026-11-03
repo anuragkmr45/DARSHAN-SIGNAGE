@@ -7,7 +7,7 @@ console.log('=== DARSHAN Player Starting ===')
 console.log('NODE_ENV:', process.env['NODE_ENV'])
 console.log('__dirname:', __dirname)
 
-import { app, BrowserWindow, Menu } from 'electron'
+import { app, BrowserWindow, Menu, powerMonitor } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -25,18 +25,27 @@ import type { PlaybackProgressIdentity } from '../common/playback-policy'
 import { parseOperatorCommand, runOperatorCommand } from './cli'
 import { getRuntimeMode, getRuntimeWindowPolicy } from './runtime-mode'
 import { ensureAutostartRegistration } from './services/autostart'
+import { registerNormalProfileAutostart } from './live-development-profile'
 import { getDisplayManager } from './services/display-manager'
 import { RendererReadinessGate } from './services/renderer-readiness-gate'
 import { WebpageViewManager } from './services/webpage-view-manager'
 import { getPlaybackEngine } from './services/playback/playback-engine'
+import { getContentOwner } from './services/playback/content-owner'
+import { getPlayerFlow } from './services/player-flow'
+import { getProofOfPlayService } from './services/pop-service'
+import { getCacheManager } from './services/cache/cache-manager'
+import { getTelemetryService } from './services/telemetry/telemetry-service'
 
 console.log('Initializing logger...')
 const logger = getLogger('main')
 console.log('Logger initialized')
 const config = getConfigManager()
 const operatorCommand = parseOperatorCommand(process.argv)
+let previousLiveConfig = config.getConfig()
 
 config.onChange((nextConfig) => {
+  getPlayerFlow().reconfigureLive(previousLiveConfig, nextConfig)
+  previousLiveConfig = nextConfig
   applyConfigToNetworkClients(nextConfig)
   void applyConfigToPowerManager(nextConfig)
   broadcastConfigUpdate(nextConfig)
@@ -75,6 +84,14 @@ const RENDERER_LAYOUT_ACK_TIMEOUT_MS = 5_000
 let lastBlockedInputLogAt = 0
 let startupConfigError: string | null = null
 let lastReportedActiveSlots = new Map<string, ActiveSlotPlayback>()
+getContentOwner().on('invalidated', () => {
+  const slots = lastReportedActiveSlots
+  lastReportedActiveSlots = new Map()
+  for (const id of slots.keys()) getProofOfPlayService().recordEnd(id, false)
+  getCacheManager().replaceNowPlaying([])
+  getTelemetryService().clearCurrentPlayback()
+  webpageViewManager.destroyAll('content-owner-changed')
+})
 let servicesInitialized = false
 let readyToShowWindow: BrowserWindow | null = null
 let rendererLayoutAcknowledgedWindow: BrowserWindow | null = null
@@ -459,6 +476,7 @@ function createWindow(): void {
 
   // Handle window closed
   mainWindow.on('closed', () => {
+    getPlayerFlow().interruptLive('WINDOW_CLOSED')
     webpageViewManager.destroyAll()
     if (readyToShowWindow === mainWindow) {
       readyToShowWindow = null
@@ -473,12 +491,16 @@ function createWindow(): void {
 
   // Handle crashes - use render-process-gone instead of deprecated 'crashed'
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    getPlayerFlow().interruptLive('RENDERER_CRASHED')
     webpageViewManager.destroyAll('renderer-crashed')
     logger.error({ reason: details.reason, exitCode: details.exitCode }, 'Renderer process gone')
     handleCrash()
   })
   mainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
-    if (isMainFrame) webpageViewManager.destroyAll('renderer-navigation')
+    if (isMainFrame) {
+      getPlayerFlow().interruptLive('RENDERER_NAVIGATION')
+      webpageViewManager.destroyAll('renderer-navigation')
+    }
   })
 
   // Prevent navigation away from the app
@@ -632,6 +654,10 @@ function isPrivateIpv4(hostname: string): boolean {
  */
 function setupIPCHandlers(): void {
   const { ipcMain } = require('electron')
+  ipcMain.handle('live-receiver:grant', (event: Electron.IpcMainInvokeEvent) => getPlayerFlow().getLiveReceiverGrant(event.sender.id))
+  ipcMain.handle('live-receiver:lease', (event: Electron.IpcMainInvokeEvent) => getPlayerFlow().getLiveReceiverLease(event.sender.id))
+  ipcMain.on('live-receiver:observation', (event: Electron.IpcMainEvent, value: unknown) => getPlayerFlow().reportLiveReceiver(event.sender.id, value))
+  ipcMain.on('playback-owner:disposed', (event: Electron.IpcMainEvent, value: unknown) => getContentOwner().acknowledge(event.sender.id, value))
 
   ipcMain.handle('config:get', async () => config.getConfig())
 
@@ -736,11 +762,12 @@ function setupIPCHandlers(): void {
 
   ipcMain.handle('webpage-view:mount', async (event: Electron.IpcMainInvokeEvent, request: WebpageViewRequest) => {
     assertPlayerRenderer(event)
-    return webpageViewManager.mount(request)
+    return webpageViewManager.mount(request, () => getContentOwner().getOwner() === 'ordinary' && getContentOwner().accepts(event.sender.id, request?.contentEpoch))
   })
 
   ipcMain.handle('webpage-view:update', async (event: Electron.IpcMainInvokeEvent, request: WebpageViewRequest) => {
     assertPlayerRenderer(event)
+    if (getContentOwner().getOwner() !== 'ordinary' || !getContentOwner().accepts(event.sender.id, request?.contentEpoch)) return { accepted: false, reason: 'content-owner-changed' }
     return webpageViewManager.update(request)
   })
 
@@ -804,11 +831,13 @@ function setupIPCHandlers(): void {
 
   ipcMain.on(
     'player-active-playback',
-    async (_event: any, payload: { sceneId?: string; activeSlots?: ActiveSlotPlayback[] }) => {
+    async (event: any, payload: { contentEpoch?: string; sceneId?: string; activeSlots?: ActiveSlotPlayback[] }) => {
+      if (!getContentOwner().accepts(event.sender.id, payload?.contentEpoch)) return
       try {
         const { getTelemetryService } = await import('./services/telemetry/telemetry-service.js')
         const { getProofOfPlayService } = await import('./services/pop-service.js')
         const { getCacheManager } = await import('./services/cache/cache-manager.js')
+        if (!getContentOwner().accepts(event.sender.id, payload?.contentEpoch)) return
 
         const sceneId = typeof payload?.sceneId === 'string' ? payload.sceneId : undefined
         const activeSlots = Array.isArray(payload?.activeSlots) ? payload.activeSlots : []
@@ -843,7 +872,8 @@ function setupIPCHandlers(): void {
 
   ipcMain.handle(
     'player-media-started',
-    async (_event: any, payload: { itemId?: string; mediaId?: string; renderToken?: string; pageNumber?: number }) => {
+    async (event: any, payload: { contentEpoch?: string; itemId?: string; mediaId?: string; renderToken?: string; pageNumber?: number }) => {
+      if (!getContentOwner().accepts(event.sender.id, payload?.contentEpoch)) return { accepted: false }
       const accepted = getPlaybackEngine().confirmRenderedPlayback({
         itemId: typeof payload?.itemId === 'string' ? payload.itemId : '',
         mediaId: typeof payload?.mediaId === 'string' ? payload.mediaId : '',
@@ -854,16 +884,21 @@ function setupIPCHandlers(): void {
     }
   )
 
-  ipcMain.on('player-playback-progress', async (_event: any, payload: unknown) => {
+  ipcMain.on('player-playback-progress', async (event: any, payload: unknown) => {
+    const input = payload as Record<string, unknown> | null
+    if (!getContentOwner().accepts(event.sender.id, input?.['contentEpoch'])) return
     try {
       const { getPlaybackProgressStore } = await import('./services/playback-progress-store.js')
-      await getPlaybackProgressStore().record(payload)
+      if (!getContentOwner().accepts(event.sender.id, input?.['contentEpoch'])) return
+      const { contentEpoch: _epoch, ...progress } = input!
+      await getPlaybackProgressStore().record(progress)
     } catch (error) {
       logger.warn({ error }, 'Failed to persist playback progress update from renderer')
     }
   })
 
   ipcMain.on('player-viewport', (event: any, payload: unknown) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return
     getDisplayManager().reportViewport((payload || {}) as Record<string, unknown>)
     const senderWindow = BrowserWindow.fromWebContents(event.sender)
     if (senderWindow && senderWindow === mainWindow) {
@@ -872,7 +907,8 @@ function setupIPCHandlers(): void {
     }
   })
 
-  ipcMain.handle('player-playback-resume-state', async (_event: any, expected?: PlaybackProgressIdentity) => {
+  ipcMain.handle('player-playback-resume-state', async (event: any, expected?: PlaybackProgressIdentity) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return null
     try {
       const { getPlaybackProgressStore } = await import('./services/playback-progress-store.js')
       return getPlaybackProgressStore().getLatest(expected)
@@ -902,6 +938,7 @@ function setupIPCHandlers(): void {
  */
 async function cleanup(): Promise<void> {
   logger.info('Cleaning up...')
+  getPlayerFlow().interruptLive('APPLICATION_QUIT')
   webpageViewManager.destroyAll()
 
   try {
@@ -949,7 +986,7 @@ app.on('ready', async () => {
       return
     }
 
-    await ensureAutostartRegistration()
+    await registerNormalProfileAutostart(ensureAutostartRegistration)
     if (shouldHardenDebugSurfaces(config.getConfig())) {
       Menu.setApplicationMenu(null)
     }
@@ -958,6 +995,7 @@ app.on('ready', async () => {
     const displayManager = getDisplayManager()
     displayManager.start()
     displayManager.onChange(() => {
+      getPlayerFlow().interruptLive('DISPLAY_CHANGED')
       webpageViewManager.destroyAll('display-changed')
       if (servicesInitialized) {
         void import('./services/player-flow.js')
@@ -967,7 +1005,10 @@ app.on('ready', async () => {
           .then(({ getHeartbeatService }) => getHeartbeatService().sendImmediate())
           .catch((error) => logger.warn({ error }, 'Failed to send updated display profile heartbeat'))
       }
+      getPlayerFlow().resumeLive()
     })
+    powerMonitor.on('suspend', () => getPlayerFlow().interruptLive('PLAYER_SUSPENDED'))
+    powerMonitor.on('resume', () => getPlayerFlow().resumeLive())
     setupIPCHandlers()
     createWindow()
     await initializeServices()

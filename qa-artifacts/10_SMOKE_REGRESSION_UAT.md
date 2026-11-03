@@ -76,3 +76,9 @@ The general Requests workboard is disabled; `AUTHZ-06` verifies absence and conf
 
 For every fault require trigger→display→audio→recovery→cleanup evidence. Exact
 source/artifact identifiers and remaining gates belong in [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+The bounded CMS authoring sequence has developer evidence through future-window Approve/Publish, including immutable reviewed image and request-bound frozen preview. It proves neither a live presenter connection nor an ordinary-player frame/audio result. New source includes presenter capture, normal-player integration and per-target reports; execute their actual combined journey next, including create-only consent, stale two-tab and lost-response recovery, optional audio, stop/restart/admin disable, emergency/security/window end and Unknown after report expiry. Final build/regression results belong in the dated ledger before human UAT.

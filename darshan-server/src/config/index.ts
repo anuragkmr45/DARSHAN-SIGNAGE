@@ -176,6 +176,12 @@ const envSchema = z.object({
   COMMAND_EMERGENCY_EXPIRES_MS: z.coerce.number().int().positive().default(300_000),
   COMMAND_OUTBOX_WRITE_ENABLED: optionalBooleanString,
   DEVICE_DESIRED_STATE_ENABLED: optionalBooleanString,
+  DARSHAN_LIVE_RUNTIME_ENABLED: optionalBooleanString,
+  DARSHAN_LIVE_AUTHORITY_FILE: optionalTrimmedString,
+  DARSHAN_LIVE_MEDIA_CONTROL_URL: optionalTrimmedString.pipe(z.string().url().optional()),
+  DARSHAN_LIVE_MEDIA_CA_CERT_PATH: optionalTrimmedString,
+  DARSHAN_LIVE_MEDIA_CONTROL_SECRET_FILE: optionalTrimmedString,
+  DARSHAN_LIVE_NODE_WITNESS_SECRET_FILE: optionalTrimmedString,
   DARSHAN_REALTIME_SYNC_ENABLED: optionalBooleanString,
   REALTIME_SYNC_ENABLED: optionalBooleanString,
   REALTIME_DEVICE_NAMESPACE: z.string().default('/device'),
@@ -368,6 +374,7 @@ export const config = Object.freeze({
   OBSERVABILITY_GRAFANA_EMBED_ENABLED: parsed.data.OBSERVABILITY_GRAFANA_EMBED_ENABLED ?? true,
   COMMAND_OUTBOX_WRITE_ENABLED: parsed.data.COMMAND_OUTBOX_WRITE_ENABLED ?? true,
   DEVICE_DESIRED_STATE_ENABLED: parsed.data.DEVICE_DESIRED_STATE_ENABLED ?? true,
+  DARSHAN_LIVE_RUNTIME_ENABLED: parsed.data.DARSHAN_LIVE_RUNTIME_ENABLED ?? false,
   HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:
     parsed.data.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH ??
     parsed.data.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH,

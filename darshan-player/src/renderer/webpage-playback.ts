@@ -6,6 +6,7 @@ export type ManagedWebpageElement = HTMLElement & { __darshanCleanup?: () => voi
 type WebpageLogLevel = 'debug' | 'warn'
 
 export type WebpagePlaybackOptions = {
+  contentEpoch?: string
   liveUrl: string
   fallbackUrl?: string
   fallbackFit?: 'contain' | 'cover' | 'fill'
@@ -109,6 +110,7 @@ export function createWebpagePlaybackElement(options: WebpagePlaybackOptions): M
     const rect = container.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return null
     return {
+      contentEpoch: options.contentEpoch,
       id,
       generation,
       url: options.liveUrl,

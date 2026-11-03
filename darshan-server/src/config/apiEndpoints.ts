@@ -9,6 +9,7 @@ export const apiEndpoints = {
     login: withBase('/auth/login'),
     logout: withBase('/auth/logout'),
     me: withBase('/auth/me'),
+    authorization: withBase('/auth/authorization'),
   },
   users: {
     create: withBase('/users'),
@@ -67,9 +68,31 @@ export const apiEndpoints = {
     update: withBase('/live-sessions/:id'),
     delete: withBase('/live-sessions/:id'),
   },
+  liveRuntime: {
+    cmsEpoch: withBase('/live-authority-epoch'),
+    occurrences: withBase('/live-occurrences'), occurrence: withBase('/live-occurrences/:id'),
+    preflight: withBase('/live-occurrences/:id/preflight'),
+    targets: withBase('/live-occurrences/:id/targets'),
+    start: withBase('/live-occurrences/:id/start'), stop: withBase('/live-occurrences/:id/stop'), enable: withBase('/live-occurrences/:id/enable'),
+    presenterAdmission: withBase('/live-runs/:runId/admissions'),
+    renew: withBase('/live-admissions/:id/renew'), ticket: withBase('/live-admissions/:id/ticket'),
+    observations: withBase('/live-admissions/:id/observations'),
+    deviceState: withBase('/device/:deviceId/live-state'), deviceEpoch: withBase('/device/:deviceId/live-authority-epoch'),
+    deviceOccurrences: withBase('/device/:deviceId/live-occurrences'),
+    deviceAdmission: withBase('/device/:deviceId/live-admissions'),
+    deviceRenew: withBase('/device/:deviceId/live-admissions/:id/renew'), deviceTicket: withBase('/device/:deviceId/live-admissions/:id/ticket'),
+    deviceObservations: withBase('/device/:deviceId/live-admissions/:id/observations'),
+    internalAuthority: withBase('/internal/live-authority'), internalWitness: withBase('/internal/live-media-witness'),
+  },
   liveFallbacks: {
     create: withBase('/live-fallback-preparations'),
     get: withBase('/live-fallback-preparations/:id'),
+    preview: withBase('/live-fallback-preparations/:id/preview'),
+  },
+  liveDrafts: {
+    get: withBase('/live-schedule-drafts/:id'),
+    review: withBase('/live-schedule-drafts/:id/review'),
+    submit: withBase('/live-schedule-drafts/:id/submit'),
   },
   schedules: {
     create: withBase('/schedules'),
@@ -87,6 +110,7 @@ export const apiEndpoints = {
     livePreflight: withBase('/schedules/live-preflight'),
   },
   scheduleRequests: {
+    liveFallbackPreview: withBase('/schedule-requests/:id/live-items/:itemId/fallback-preview'),
     create: withBase('/schedule-requests'),
     list: withBase('/schedule-requests'),
     get: withBase('/schedule-requests/:id'),

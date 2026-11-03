@@ -29,5 +29,9 @@ export function resolvePlayerContentSource(status: PlayerStatus): 'schedule' | '
     return 'default'
   }
 
+  if (status.mode === 'live') {
+    return status.live?.fallbackReady && ['FALLBACK', 'CONNECTING'].includes(status.live.phase) ? 'schedule' : 'none'
+  }
+
   return 'schedule'
 }

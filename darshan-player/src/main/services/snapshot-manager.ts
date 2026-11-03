@@ -6,6 +6,7 @@ import { EventEmitter } from 'events'
 import * as fs from 'fs'
 import * as path from 'path'
 import { pathToFileURL } from 'url'
+import { createHash } from 'crypto'
 import { getLogger } from '../../common/logger'
 import { getConfigManager } from '../../common/config'
 import { CacheError, DeviceApiError, LayoutScene, PlaybackMode, TimelineItem } from '../../common/types'
@@ -18,6 +19,8 @@ import { getLifecycleEvents } from './lifecycle-events'
 import { getSecurePlaybackGuard } from './secure-playback-guard'
 import { getHeartbeatService } from './telemetry/heartbeat'
 import { NormalizedScheduleWindow, evaluateScheduleWindows } from './snapshot-evaluator'
+import type { LiveOccurrence } from '../../common/live-playback'
+import { LiveFallbackCache, type PreparedLiveFallback } from './live-fallback-cache'
 
 const logger = getLogger('snapshot-manager')
 
@@ -28,6 +31,8 @@ export interface PlaybackPlaylist {
   snapshotId?: string
   publishId?: string
   lastSnapshotAt?: string
+  live?: LiveOccurrence
+  unavailableReason?: string
 }
 
 type LayoutSlotSpec = {
@@ -58,6 +63,13 @@ export class SnapshotManager extends EventEmitter {
   // Every refresh captures this generation. A pairing reset or newer refresh
   // invalidates older async work before it can replace visible playback.
   private refreshGeneration = 0
+  private readonly liveCache = new LiveFallbackCache()
+  private liveKnown = new Map<string, LiveOccurrence>()
+  private liveRetained = new Set<string>()
+  private liveReady = new Map<string, { fingerprint: string; result: PreparedLiveFallback }>()
+  private livePreparing = new Map<string, { fingerprint: string; controller: AbortController; promise: Promise<PreparedLiveFallback> }>()
+  private mediaCompletion?: Promise<PlaybackPlaylist | null>
+  private discoveredLive: LiveOccurrence[] = []
 
   constructor() {
     super()
@@ -100,6 +112,7 @@ export class SnapshotManager extends EventEmitter {
       this.evaluationTimer = undefined
     }
     this.isPolling = false
+    for (const preparation of this.livePreparing.values()) preparation.controller.abort()
   }
 
   getCurrentPlaylist(): PlaybackPlaylist | undefined {
@@ -118,6 +131,90 @@ export class SnapshotManager extends EventEmitter {
     return this.lastRefreshSucceeded
   }
 
+  getScheduleNowMs(): number { return this.getServerNowMs() }
+
+  /** Same owner registry for snapshot delivery and independently discovered
+   * published occurrences; one path cannot release the other's active pins. */
+  updateDiscoveredLiveOccurrences(current?: LiveOccurrence, next?: LiveOccurrence): void {
+    this.discoveredLive = [current, next].filter((item): item is LiveOccurrence => Boolean(item))
+    this.reconcileLiveOwners(this.currentSnapshot)
+  }
+
+  getLiveFallbackPlaylist(occurrence: LiveOccurrence): PlaybackPlaylist {
+    const ready = this.getPreparedLiveFallback(occurrence)
+    const window: NormalizedScheduleWindow = { id: occurrence.itemId, startAt: occurrence.startAt, endAt: occurrence.endAt,
+      priority: occurrence.priority, items: [], live: occurrence,
+      layout: occurrence.policy?.fallback.manifest.presentation.layout as NormalizedScheduleWindow['layout'] }
+    return { mode: 'live', live: occurrence, publishId: occurrence.publishId, scheduleId: occurrence.scheduleId,
+      items: ready.ready ? this.buildLayoutSceneItems(window, ready.items, occurrence.scheduleId, undefined, occurrence.publishId) : [],
+      ...(ready.ready ? {} : { unavailableReason: ready.reason ?? 'FALLBACK_NOT_READY' }) }
+  }
+
+  private liveKey(occurrence: LiveOccurrence): string { return `${occurrence.publishId}:${occurrence.itemId}` }
+  private liveFingerprint(occurrence: LiveOccurrence): string {
+    return createHash('sha256').update(JSON.stringify(occurrence.policy ?? null)).digest('hex')
+  }
+
+  private reconcileLiveOwners(snapshot?: NormalizedSnapshot): void {
+    const all = [...(snapshot?.scheduleWindows ?? []).flatMap(window => window.live?.policy && !window.live.invalidReason ? [window.live] : []), ...this.discoveredLive.filter(item => item.policy && !item.invalidReason)]
+    const occurrences = [...new Map(all.map(occurrence => [this.liveKey(occurrence), occurrence])).values()]
+    const now = this.getServerNowMs()
+    const upcoming = occurrences.filter(occurrence => Date.parse(occurrence.endAt) > now)
+      .sort((a, b) => {
+        const activeA = Date.parse(a.startAt) <= now, activeB = Date.parse(b.startAt) <= now
+        if (activeA !== activeB) return activeA ? -1 : 1
+        return activeA ? b.priority - a.priority || Date.parse(b.startAt) - Date.parse(a.startAt)
+          : Date.parse(a.startAt) - Date.parse(b.startAt) || b.priority - a.priority
+      })
+    this.liveRetained = new Set(upcoming.slice(0, 2).map(occurrence => this.liveKey(occurrence)))
+    const current = new Map(occurrences.map(occurrence => [this.liveKey(occurrence), occurrence]))
+    for (const [key, old] of this.liveKnown) {
+      const next = current.get(key)
+      if (!next || this.liveFingerprint(old) !== this.liveFingerprint(next)) {
+        this.livePreparing.get(key)?.controller.abort()
+        this.livePreparing.delete(key); this.liveReady.delete(key)
+        this.liveCache.release(old)
+      } else if (!this.liveRetained.has(key) && !this.livePreparing.has(key)) this.liveCache.release(old)
+    }
+    this.liveKnown = current
+  }
+
+  getPreparedLiveFallback(occurrence: LiveOccurrence): PreparedLiveFallback {
+    if (getConfigManager().getConfig().livePlayback?.enabled !== true) return { ready: false, items: [], reason: 'LIVE_PLAYBACK_DISABLED' }
+    const cached = this.liveReady.get(this.liveKey(occurrence))
+    return cached?.fingerprint === this.liveFingerprint(occurrence) ? cached.result : { ready: false, items: [], reason: occurrence.invalidReason ?? 'FALLBACK_NOT_READY' }
+  }
+
+  async prepareLiveFallback(occurrence: LiveOccurrence, options: { download?: boolean; force?: boolean } = {}): Promise<PreparedLiveFallback> {
+    if (getConfigManager().getConfig().livePlayback?.enabled !== true) return { ready: false, items: [], reason: 'LIVE_PLAYBACK_DISABLED' }
+    if (!occurrence.policy || occurrence.invalidReason) return { ready: false, items: [], reason: 'INVALID_LIVE_POLICY' }
+    const key = this.liveKey(occurrence), fingerprint = this.liveFingerprint(occurrence)
+    const known = this.liveKnown.get(key)
+    if (!known || this.liveFingerprint(known) !== fingerprint) return { ready: false, items: [], reason: 'FALLBACK_CANCELLED' }
+    const pending = this.livePreparing.get(key)
+    if (pending?.fingerprint === fingerprint) return pending.promise
+    const existing = this.liveReady.get(key)
+    if (!options.force && existing?.fingerprint === fingerprint && existing.result.ready) return existing.result
+    pending?.controller.abort()
+    const state = { fingerprint, controller: new AbortController(), promise: Promise.resolve<PreparedLiveFallback>({ ready: false, items: [] }) }
+    this.livePreparing.set(key, state)
+    state.promise = this.liveCache.prepare(occurrence, { signal: state.controller.signal, download: options.download }).then(result => {
+      if (state.controller.signal.aborted || this.livePreparing.get(key) !== state || this.liveKnown.get(key)?.policy === undefined || this.liveFingerprint(this.liveKnown.get(key)!) !== fingerprint) {
+        return { ready: false, items: [], reason: 'FALLBACK_CANCELLED' }
+      }
+      const old = this.liveReady.get(key)
+      this.liveReady.set(key, { fingerprint, result })
+      if (this.currentSnapshot && old?.result.ready !== result.ready) void this.rebuildFromCachedSnapshot(this.currentSnapshot.snapshotId)
+      return result
+    }).finally(() => {
+      if (this.livePreparing.get(key) === state) {
+        this.livePreparing.delete(key)
+        if (!this.liveRetained.has(key)) this.liveCache.release(occurrence)
+      }
+    })
+    return state.promise
+  }
+
   clearIdentityBoundState(): void {
     this.refreshGeneration += 1
     if (this.evaluationTimer) {
@@ -126,6 +223,11 @@ export class SnapshotManager extends EventEmitter {
     }
 
     this.currentSnapshot = undefined
+    for (const preparation of this.livePreparing.values()) preparation.controller.abort()
+    this.livePreparing.clear()
+    for (const occurrence of this.liveKnown.values()) this.liveCache.release(occurrence)
+    this.liveKnown.clear(); this.liveReady.clear(); this.liveRetained.clear()
+    this.discoveredLive = []
     this.clearAppliedSnapshot()
     this.lastError = undefined
     this.lastRefreshSucceeded = false
@@ -185,10 +287,14 @@ export class SnapshotManager extends EventEmitter {
         if (generation !== this.refreshGeneration) return this.currentPlaylist ?? null
         logger.debug({ snapshotId: this.currentSnapshot.snapshotId }, 'Snapshot not modified, reusing cached payload')
         const playlist = await this.buildPlaylist(this.currentSnapshot, 'normal')
+        if (generation !== this.refreshGeneration) return this.currentPlaylist ?? null
         this.currentPlaylist = playlist
         this.lastError = undefined
         this.lastRefreshSucceeded = true
         this.emit('playlist-updated', playlist)
+        if (this.currentSnapshot.invalidLiveControls || this.currentSnapshot.emergencyActive || this.currentSnapshot.scheduleWindows.some(window => window.live)) {
+          this.beginMediaCompletion(this.currentSnapshot, generation)
+        }
         return playlist
       }
 
@@ -197,43 +303,36 @@ export class SnapshotManager extends EventEmitter {
         throw new Error(message)
       }
 
-      const normalized = parseSnapshotResponse(response.data)
+      const normalized = parseSnapshotResponse(response.data, { deviceId })
       const responseEtag = response.headers?.['etag']
       if (generation !== this.refreshGeneration) {
         logger.debug({ generation }, 'Discarding stale snapshot response before cache hydration')
         return this.currentPlaylist ?? null
       }
       options.onSnapshotFetched?.()
-      const mediaReady = await this.cacheSnapshotMedia(normalized)
-      const playlist = await this.buildPlaylist(normalized, 'normal')
-
-      if (generation !== this.refreshGeneration) {
-        logger.debug({ generation }, 'Discarding stale snapshot refresh result')
-        return this.currentPlaylist ?? null
-      }
-
       this.updateServerClock(normalized.serverTime)
       this.representationEtag = typeof responseEtag === 'string' ? responseEtag : undefined
-      await this.persistSnapshot(normalized)
-      this.currentSnapshot = normalized
-      this.currentPlaylist = playlist
-      this.lastError = undefined
-      this.lastRefreshSucceeded = true
-
-      if (mediaReady) {
-        this.recordAppliedSnapshot(normalized, true)
-      } else {
-        this.clearAppliedSnapshot()
-        if (normalized.publishId) {
-          logger.warn(
-            { publishId: normalized.publishId, snapshotId: normalized.snapshotId },
-            'Snapshot persisted but required media is not ready; delivery remains unconfirmed'
-          )
-        }
+      this.reconcileLiveOwners(normalized)
+      // Publish the new control surface before potentially long immutable
+      // downloads. A LIVE/emergency window cannot reveal an ordinary default.
+      const immediateControl = normalized.invalidLiveControls || normalized.emergencyActive || normalized.scheduleWindows.some(window => window.live) || this.currentPlaylist?.mode === 'live'
+      if (immediateControl) {
+        const control = await this.buildPlaylist(normalized, 'normal')
+        if (generation !== this.refreshGeneration) return this.currentPlaylist ?? null
+        this.currentSnapshot = normalized
+        this.currentPlaylist = control
+        this.emit('playlist-updated', control)
       }
-
-      this.emit('playlist-updated', playlist)
-      return playlist
+      if (generation !== this.refreshGeneration) return this.currentPlaylist ?? null
+      await this.persistSnapshot(normalized)
+      if (generation !== this.refreshGeneration) return this.currentPlaylist ?? null
+      if (immediateControl) {
+        this.lastError = undefined
+        this.lastRefreshSucceeded = true
+        this.beginMediaCompletion(normalized, generation)
+        return this.currentPlaylist ?? null
+      }
+      return await this.completeSnapshotMedia(normalized, generation)
     } catch (error: any) {
       if (generation !== this.refreshGeneration) {
         logger.debug({ generation }, 'Discarding stale snapshot refresh failure')
@@ -270,6 +369,36 @@ export class SnapshotManager extends EventEmitter {
     }
   }
 
+  private beginMediaCompletion(snapshot: NormalizedSnapshot, generation: number): void {
+    this.clearAppliedSnapshot()
+    const completion = this.completeSnapshotMedia(snapshot, generation).catch(() => {
+      if (generation === this.refreshGeneration) {
+        this.clearAppliedSnapshot()
+        this.lastError = 'Snapshot content preparation is incomplete'
+      }
+      return this.currentPlaylist ?? null
+    })
+    this.mediaCompletion = completion
+    void completion.finally(() => {
+      if (this.mediaCompletion === completion) this.mediaCompletion = undefined
+    })
+  }
+
+  private async completeSnapshotMedia(snapshot: NormalizedSnapshot, generation: number): Promise<PlaybackPlaylist | null> {
+    const mediaReady = await this.cacheSnapshotMedia(snapshot)
+    if (generation !== this.refreshGeneration) return this.currentPlaylist ?? null
+    const playlist = await this.buildPlaylist(snapshot, 'normal')
+    if (generation !== this.refreshGeneration) return this.currentPlaylist ?? null
+    this.currentSnapshot = snapshot
+    this.currentPlaylist = playlist
+    this.lastError = undefined
+    this.lastRefreshSucceeded = true
+    if (mediaReady) this.recordAppliedSnapshot(snapshot, true)
+    else this.clearAppliedSnapshot()
+    this.emit('playlist-updated', playlist)
+    return playlist
+  }
+
   private loadCachedSnapshot(): void {
     if (!fs.existsSync(this.snapshotPath)) {
       return
@@ -286,14 +415,17 @@ export class SnapshotManager extends EventEmitter {
           this.representationEtag = cacheMetadata.representation_etag
         }
       }
-      const normalized = parseSnapshotResponse(data)
+      const normalized = parseSnapshotResponse(data, { deviceId: getPairingService().getDeviceId() ?? undefined })
+      this.reconcileLiveOwners(normalized)
       this.currentSnapshot = normalized
+      const generation = this.refreshGeneration
       this.buildPlaylist(normalized, 'offline').then((playlist) => {
+        if (generation !== this.refreshGeneration || this.currentSnapshot !== normalized) return
         this.currentPlaylist = playlist
         this.emit('playlist-updated', playlist)
         void this.requiredSnapshotMediaIsReady(normalized)
           .then((mediaReady) => {
-            if (mediaReady) {
+            if (mediaReady && generation === this.refreshGeneration && this.currentSnapshot === normalized) {
               this.recordAppliedSnapshot(normalized, false)
             }
           })
@@ -324,6 +456,11 @@ export class SnapshotManager extends EventEmitter {
 
   private async cacheSnapshotMedia(snapshot: NormalizedSnapshot): Promise<boolean> {
     const cacheManager = getCacheManager()
+    const liveWindows = snapshot.scheduleWindows.filter(window => window.live)
+      .sort((a, b) => (this.liveRetained.has(this.liveKey(a.live!)) ? 0 : 1) - (this.liveRetained.has(this.liveKey(b.live!)) ? 0 : 1) || Date.parse(a.startAt!) - Date.parse(b.startAt!))
+    // Each owner is released after non-current preparation; only the current
+    // and next occurrence retain pins. Every dependency is rechecked for ACK.
+    for (const window of liveWindows) await this.prepareLiveFallback(window.live!)
     const prioritizedItems: TimelineItem[] = []
     const activeWindow = snapshot.scheduleWindows.length > 0
       ? evaluateScheduleWindows(snapshot.scheduleWindows, this.getServerNowMs()).activeWindow
@@ -349,7 +486,7 @@ export class SnapshotManager extends EventEmitter {
       source?: 'SNAPSHOT' | 'DEFAULT_MEDIA' | 'EMERGENCY'
       snapshotId?: string
       scheduleId?: string
-      playbackMode?: PlaybackMode
+      playbackMode?: Exclude<PlaybackMode, 'live'>
     }> = []
     for (const item of prioritizedItems) {
       if (!item.mediaId) {
@@ -406,6 +543,10 @@ export class SnapshotManager extends EventEmitter {
   }
 
   private async requiredSnapshotMediaIsReady(snapshot: NormalizedSnapshot): Promise<boolean> {
+    if (snapshot.invalidLiveControls) return false
+    for (const window of snapshot.scheduleWindows) {
+      if (window.live && !(await this.prepareLiveFallback(window.live, { download: false, force: true })).ready) return false
+    }
     const cacheManager = getCacheManager()
     const scheduledItems = [
       ...snapshot.items,
@@ -442,6 +583,8 @@ export class SnapshotManager extends EventEmitter {
     let mode: PlaybackMode = 'normal'
     let items: TimelineItem[] = []
     let nextTransitionAt: number | undefined
+    let live: LiveOccurrence | undefined
+    let unavailableReason: string | undefined
     const emergencyExpiresAtMs = snapshot.emergencyExpiresAt ? Date.parse(snapshot.emergencyExpiresAt) : Number.NaN
     const emergencyItem =
       snapshot.emergencyItem &&
@@ -449,7 +592,13 @@ export class SnapshotManager extends EventEmitter {
         ? snapshot.emergencyItem
         : undefined
 
-    if (snapshot.contentState === 'empty' && !emergencyItem) {
+    this.reconcileLiveOwners(snapshot)
+    if (snapshot.emergencyActive && (!Number.isFinite(emergencyExpiresAtMs) || emergencyExpiresAtMs > this.getServerNowMs()) && !emergencyItem) {
+      mode = 'emergency'; items = []; unavailableReason = 'EMERGENCY_CONTENT_UNAVAILABLE'
+      nextTransitionAt = Number.isFinite(emergencyExpiresAtMs) ? emergencyExpiresAtMs : undefined
+    } else if (snapshot.invalidLiveControls && !emergencyItem) {
+      mode = 'live'; items = []; unavailableReason = 'INVALID_LIVE_WINDOW'
+    } else if (snapshot.contentState === 'empty' && !emergencyItem) {
       mode = 'empty'
       items = []
     } else if (snapshot.contentState === 'default' && !emergencyItem) {
@@ -471,7 +620,13 @@ export class SnapshotManager extends EventEmitter {
       const evaluation = evaluateScheduleWindows(snapshot.scheduleWindows, this.getServerNowMs())
       nextTransitionAt = evaluation.nextTransitionAt
 
-      if (evaluation.activeWindow && evaluation.items.length > 0) {
+      if (evaluation.activeWindow?.live) {
+        mode = 'live'
+        live = evaluation.activeWindow.live
+        const prepared = this.getPreparedLiveFallback(live)
+        items = prepared.ready ? this.buildLayoutSceneItems(evaluation.activeWindow, prepared.items, snapshot.scheduleId, snapshot.snapshotId, snapshot.publishId) : []
+        unavailableReason = prepared.ready ? undefined : prepared.reason ?? 'FALLBACK_NOT_READY'
+      } else if (evaluation.activeWindow && evaluation.items.length > 0) {
         mode = 'normal'
         const hydratedWindowItems = await this.attachLocalMedia(evaluation.items)
         items = this.buildLayoutSceneItems(
@@ -512,6 +667,8 @@ export class SnapshotManager extends EventEmitter {
       snapshotId: snapshot.snapshotId,
       publishId: snapshot.publishId,
       lastSnapshotAt: snapshot.fetchedAt,
+      ...(live ? { live } : {}),
+      ...(unavailableReason ? { unavailableReason } : {}),
     }
   }
 
@@ -580,6 +737,7 @@ export class SnapshotManager extends EventEmitter {
     }
     snapshot.items.forEach(collect)
     snapshot.scheduleWindows.forEach((window) => window.items.forEach(collect))
+    snapshot.scheduleWindows.forEach(window => window.live?.downloads.forEach(download => urls.add(download.url)))
     collect(snapshot.defaultItem)
     collect(snapshot.emergencyItem)
 
@@ -615,7 +773,9 @@ export class SnapshotManager extends EventEmitter {
       return
     }
 
-    const playlist = await this.buildPlaylist(this.currentSnapshot, 'offline')
+    const snapshot = this.currentSnapshot, generation = this.refreshGeneration
+    const playlist = await this.buildPlaylist(snapshot, 'offline')
+    if (generation !== this.refreshGeneration || this.currentSnapshot !== snapshot) return
     this.currentPlaylist = playlist
     this.emit('playlist-updated', playlist)
   }
@@ -808,9 +968,11 @@ export class SnapshotManager extends EventEmitter {
     this.lastError = reason
 
     if (this.currentSnapshot) {
-      const playlist = await this.buildPlaylist(this.currentSnapshot, 'offline')
+      const snapshot = this.currentSnapshot, generation = this.refreshGeneration
+      const playlist = await this.buildPlaylist(snapshot, 'offline')
+      if (generation !== this.refreshGeneration || this.currentSnapshot !== snapshot) return this.currentPlaylist ?? { mode: 'empty', items: [] }
       const effectivePlaylist =
-        playlist.mode === 'empty' && this.currentSnapshot.contentState === 'scheduled'
+        playlist.mode === 'empty' && snapshot.contentState === 'scheduled'
           ? {
               ...playlist,
               mode: 'offline' as PlaybackMode,
@@ -853,7 +1015,9 @@ export class SnapshotManager extends EventEmitter {
       } as NormalizedSnapshot)
 
     this.currentSnapshot = nextSnapshot
+    const generation = this.refreshGeneration
     const playlist = await this.buildPlaylist(nextSnapshot, 'normal')
+    if (generation !== this.refreshGeneration || this.currentSnapshot !== nextSnapshot) return this.currentPlaylist ?? { mode: 'empty', items: [] }
     this.currentPlaylist = playlist
     this.clearAppliedSnapshot()
     this.emit('playlist-updated', playlist)

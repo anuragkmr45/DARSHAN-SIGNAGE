@@ -2,6 +2,7 @@ import { AbilityBuilder, createMongoAbility, MongoAbility } from '@casl/ability'
 import { createRoleRepository } from '@/db/repositories/role';
 import { RolePermissions, PermissionAction, PermissionSubject, RoleRecord } from '@/rbac/permissions';
 import { AppError } from '@/utils/app-error';
+import type { DbExecutor } from '@/db';
 
 export type Action = PermissionAction;
 export type Subject = PermissionSubject;
@@ -42,7 +43,7 @@ const parsePermissions = (permissions: RolePermissions | null | undefined): Role
   return { grants, inherits };
 };
 
-const resolveRoleGrants = async (role: RoleRecord, visited: Set<string>): Promise<any[]> => {
+const resolveRoleGrants = async (role: RoleRecord, visited: Set<string>, executor?: DbExecutor): Promise<any[]> => {
   if (visited.has(role.id)) return [];
   visited.add(role.id);
 
@@ -52,9 +53,9 @@ const resolveRoleGrants = async (role: RoleRecord, visited: Set<string>): Promis
 
   if (permissions.inherits && permissions.inherits.length > 0) {
     for (const inheritedId of permissions.inherits) {
-      const inheritedRole = await roleRepo.findById(inheritedId);
+      const inheritedRole = await roleRepo.findById(inheritedId, executor);
       if (!inheritedRole) continue;
-      const inheritedGrants = await resolveRoleGrants(inheritedRole as any, visited);
+      const inheritedGrants = await resolveRoleGrants(inheritedRole as any, visited, executor);
       grants.push(...inheritedGrants);
     }
   }
@@ -62,9 +63,9 @@ const resolveRoleGrants = async (role: RoleRecord, visited: Set<string>): Promis
   return grants;
 };
 
-export async function defineAbilityFor(roleId: string, userId: string, departmentId?: string): Promise<AppAbility> {
+export async function defineAbilityFor(roleId: string, userId: string, departmentId?: string, executor?: DbExecutor): Promise<AppAbility> {
   const roleRepo = createRoleRepository();
-  const role = await roleRepo.findById(roleId);
+  const role = await roleRepo.findById(roleId, executor);
   if (!role) {
     throw AppError.unauthorized('Authorization context is stale. Please sign in again.');
   }
@@ -77,7 +78,7 @@ export async function defineAbilityFor(roleId: string, userId: string, departmen
   }
 
   const userContext: UserContext = { id: userId, department_id: departmentId };
-  const grants = await resolveRoleGrants(role as any, new Set<string>());
+  const grants = await resolveRoleGrants(role as any, new Set<string>(), executor);
   const hasExplicitBrandingGrant = grants.some(
     (grant: any) =>
       grant &&

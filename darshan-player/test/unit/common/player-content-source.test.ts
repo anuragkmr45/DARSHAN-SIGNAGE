@@ -1,6 +1,15 @@
 const { expect } = require('chai')
 
 describe('player content source policy', () => {
+  it('never reveals ordinary default underneath a LIVE window or behind its receiver', () => {
+    const { resolvePlayerContentSource } = require('../../../src/common/player-content-source')
+    for (const phase of ['UNAVAILABLE', 'PREPARING_FALLBACK', 'LIVE', 'SUSPENDED']) {
+      expect(resolvePlayerContentSource({ state: 'PAIRED_RUNTIME', mode: 'live', online: true, live: { phase, fallbackReady: false } })).to.equal('none')
+    }
+    for (const phase of ['FALLBACK', 'CONNECTING']) {
+      expect(resolvePlayerContentSource({ state: 'PAIRED_RUNTIME', mode: 'live', online: true, live: { phase, fallbackReady: true } })).to.equal('schedule')
+    }
+  })
   it('switches to default content when player status mode is default', () => {
     const { resolvePlayerContentSource } = require('../../../src/common/player-content-source')
 

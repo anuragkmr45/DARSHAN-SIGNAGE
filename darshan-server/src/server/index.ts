@@ -10,6 +10,7 @@ import fastifyCookie from '@fastify/cookie';
 import { config as appConfig } from '@/config';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { authRoutes } from '@/routes/auth';
+import { selfAuthorizationRoutes } from '@/routes/self-authorization';
 import { userRoutes } from '@/routes/users';
 import { mediaRoutes } from '@/routes/media';
 import { scheduleRoutes } from '@/routes/schedules';
@@ -20,7 +21,11 @@ import { emergencyRoutes } from '@/routes/emergency';
 import { notificationRoutes } from '@/routes/notifications';
 import { presentationRoutes } from '@/routes/presentations';
 import { liveSessionRoutes } from '@/routes/live-sessions';
+import { liveRuntimeRoutes } from '@/routes/live-runtime';
 import { liveFallbackRoutes } from '@/routes/live-fallbacks';
+import { liveRequestPreviewRoutes } from '@/routes/live-request-previews';
+import { liveScheduleDraftRoutes } from '@/routes/live-schedule-drafts';
+import { liveTargetReportRoutes } from '@/routes/live-target-reports';
 import { devicePairingRoutes } from '@/routes/device-pairing';
 import { deviceTelemetryRoutes } from '@/routes/device-telemetry';
 import { apiKeyRoutes } from '@/routes/api-keys';
@@ -433,6 +438,7 @@ export async function createServer(options: CreateServerOptions = {}) {
 
   // Register routes
   await fastify.register(authRoutes);
+  await fastify.register(selfAuthorizationRoutes);
   await fastify.register(userRoutes);
   await fastify.register(departmentRoutes);
   await fastify.register(mediaRoutes);
@@ -443,7 +449,11 @@ export async function createServer(options: CreateServerOptions = {}) {
   await fastify.register(notificationRoutes);
   await fastify.register(presentationRoutes);
   await fastify.register(liveSessionRoutes);
+  await fastify.register(liveRuntimeRoutes);
   await fastify.register(liveFallbackRoutes);
+  await fastify.register(liveRequestPreviewRoutes);
+  await fastify.register(liveScheduleDraftRoutes);
+  await fastify.register(liveTargetReportRoutes);
   await fastify.register(devicePairingRoutes);
   await fastify.register(deviceTelemetryRoutes);
   await fastify.register(apiKeyRoutes);

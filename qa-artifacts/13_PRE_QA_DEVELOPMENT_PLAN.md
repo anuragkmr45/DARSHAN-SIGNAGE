@@ -379,14 +379,14 @@ This new delta uses [live implementation loops](../docs/plans/live-broadcast-imp
 
 | Loop | Current state | Closure gate |
 | --- | --- | --- |
-| 0 baseline | In progress | Current CMS/real-player ordinary playback/emergency/offline baseline and isolated inventory |
-| 1 capture/enforcement | Prototype and injected strict-authority/SFU checks recorded; gate open | Real capture/SFU/Electron and Docker-watchdog checks exist; native capture/audio matrix, current packaged receiver runtime, production Backend verifier and host pidfd/AppArmor still need closure |
-| 2 reservations | Frozen source/preparation/publication and ACL packet partially verified | Actual-service request/direct publication and SHA downloads passed; complete real CMS publishing workflow and normal-player integration remain |
-| 3 authority | Internal live-version and injectable media fencing prerequisites verified at `e546630`; production run authority unimplemented | Durable Backend run/admission/epoch/outbox/reconciliation and actual revocation/restore journeys |
-| 4 player | Exact-asset prepare/repair and pin primitives verified; normal-player live integration unimplemented | Same ordinary installed player live source, owner/pin consumption and pairing/cache/emergency lifecycle; deadline/fallback/precedence/cleanup journeys |
-| 5 CMS | Source authoring implemented; partial actual browser evidence | Create/view/audio edits/retry and same-admin stale409/reload observed; full wizard, presenter controls and independent accounts remain |
-| 6 deployment | Not executed | Offline sixth role, TLS/transports, disable/update/restore/rollback |
-| 7 handoff | Supporting packet regressions/bindings recorded; final feature handoff open | Complete integrated CMS/presenter/player journey, final artifacts and independent human checks |
+| 0 baseline | Existing ordinary Linux playback/emergency/security evidence preserved; baseline remains separate | Reconfirm on the final current build without disturbing the paired baseline screen; Windows/physical/offline matrix remains open |
+| 1 capture/enforcement | Media strict protocol source plus new required root-owned RO tmpfs host-readiness gate; partial checks | Node 108 passed/8 opt-in skipped. Older core `376028...` fixture-SFU/healthy-Docker watchdog1830 ms does not prove new gate; current native capture/audio, host pidfd/AppArmor and integrated Backend authority execution remain open |
+| 2 reservations | Frozen source/preparation/request/direct publication and constraints implemented; bounded DB/REST/browser evidence | Historical55-check/15-download packet retained; actual future-window CMS approve/publish journey exists. Re-run concurrency, direct/request parity and final normal-player journey on frozen artifacts |
+| 3 authority | Durable Backend run/admission/epoch, idempotent intents, media outbox/reconciliation and observations implemented; default OFF | Runtime 43 tests/4 files plus neighboring79/7 passed; current configured media fresh-verifier integration, already-flowing revocation, host death proof and restore reconciliation still require runtime evidence |
+| 4 player | Normal PlayerFlow/coordinator/client/view, content ownership, fallback pins/repair, deadlines and renderer lease pulse implemented; default OFF | Current full player gates are recorded by the player owner/dated ledger. Actual newly built ordinary LIVE frame/audio, native suspend/emergency/security/reconnect and physical/Windows/cross-VM journeys remain open |
+| 5 CMS | Source CRUD, atomic resumable LIVE draft review/submit, historical frozen preview, presenter capture controls and per-target diagnostics implemented | Actual source→READY fallback→save/reopen→reviewed image→submit→queue frozen preview→Approve/Publish succeeded for one future synthetic screen. Authoring 22/22, request preview 7/7, targets 6/6 pass; latest final CMS full/build and native presenter/receiver journeys are separate gates |
+| 6 deployment | Optional signed sixth-role TGZ/config/Compose/host-witness packaging implemented; fixture verification only | 18 combined configuration/Compose checks (17 configuration + 1 Compose), 11 host-witness and 16 watchdog checks plus signed source-free fixtures passed with Docker deliberately skipped. Actual native root-owned RO readiness lease, host service/pidfd/AppArmor, production artifact install/update/restore/TLS/firewall remain open |
+| 7 handoff | Current source packet partially verified; all loops and human acceptance remain open | Bind final source/build/artifact results, complete current CMS/native capture/Backend/media/normal-player path, full regressions and independent `LIVE-01..20`; no beta/release declaration from supporting fixtures |
 
 Each loop is inspect→implement→focused checks→actual application→fault→fix→
 repeat affected paths→evidence→commit. A failure blocks that loop. Resource-
@@ -402,6 +402,13 @@ Recovery prerequisite checkpoint: [source-bound verification](evidence/live-reco
 It includes current presenter eligibility, omitted-state preservation, exact
 fallback repair and injected media enforcement. The final actual-service repeat
 passed 55 checks/15 SHA downloads, without updating the paired Electron app or
-enabling its live capability. The production Backend authority, same-player
-live workflow and direct host actuation gates remain open. Human cases and
+enabling its live capability. At that prerequisite checkpoint Backend/same-player runtime integration had not
+yet landed. Those source paths now exist; their actual integrated frame/audio
+and direct host actuation verification gates remain open. Human cases and
 QA-owned fields were not changed.
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+Next closure order: bind final current-source builds/suites; prove native root-owned host-readiness/witness service on an isolated node without profile weakening; run real CMS native capture through actual Backend/media into the newly built ordinary player with frame/audio/fallback and fault evidence; repeat the affected lifecycle paths; then execute signed six-role/restore/platform/capacity gates and independent human acceptance. The old376028/1830ms fixture proof, source-free fixtures and future-window CMS publish are supporting evidence only, not a closed loop.

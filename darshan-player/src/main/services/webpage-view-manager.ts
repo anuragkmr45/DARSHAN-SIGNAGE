@@ -65,11 +65,13 @@ type Entry = {
 type WebpageViewManagerDependencies = {
   createView: () => WebContentsView
   getSession: () => Session
+  validateNavigation: (url: string) => Promise<void>
 }
 
 export class WebpageViewManager {
   private entries = new Map<string, Entry>()
   private configuredSession = false
+  private lifecycleGeneration = 0
 
   constructor(
     private readonly getWindow: () => BrowserWindow | null,
@@ -100,18 +102,25 @@ export class WebpageViewManager {
     })
   }
 
-  async mount(request: WebpageViewRequest): Promise<{ accepted: boolean; reason?: string }> {
+  async mount(request: WebpageViewRequest, isCurrent: () => boolean = () => true): Promise<{ accepted: boolean; reason?: string }> {
     const window = this.getWindow()
+    const lifecycle = this.lifecycleGeneration
+    if (!isCurrent()) return { accepted: false, reason: 'content-owner-changed' }
     if (!window || window.isDestroyed()) return { accepted: false, reason: 'window-unavailable' }
     if (!this.validRequest(request)) return { accepted: false, reason: 'invalid-request' }
     try {
-      await assertPlayerWebpageUrlAllowed(request.url, 'navigation', this.getSecurity())
+      if (this.dependencies.validateNavigation) await this.dependencies.validateNavigation(request.url)
+      else await assertPlayerWebpageUrlAllowed(request.url, 'navigation', this.getSecurity())
     } catch (error) {
       const reason = typeof (error as { code?: unknown })?.code === 'string'
         ? String((error as { code: string }).code)
         : 'WEBPAGE_POLICY_BLOCKED'
       this.sendStatus({ id: request.id, generation: request.generation, state: 'blocked', reason })
       return { accepted: false, reason }
+    }
+
+    if (!isCurrent() || lifecycle !== this.lifecycleGeneration || this.getWindow() !== window || window.isDestroyed()) {
+      return { accepted: false, reason: 'content-owner-changed' }
     }
 
     const existing = this.entries.get(request.id)
@@ -194,6 +203,7 @@ export class WebpageViewManager {
   }
 
   destroyAll(reason?: string): void {
+    this.lifecycleGeneration += 1
     for (const entry of [...this.entries.values()]) {
       if (reason) {
         this.sendStatus({

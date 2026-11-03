@@ -1,0 +1,26 @@
+# Non-secret inventory template; replace with the signed package's exact values.
+# The sixth always-running VM is optional. Recovery remains a stateless utility.
+live_media:
+  include: false
+  runtime_enabled_by_default: false
+  image_ref: darshan-media:RELEASE_ID
+  image_archive: out/RELEASE_ID/media/images/darshan-media-RELEASE_ID.tar
+  provenance: out/RELEASE_ID/media/ARTIFACT_MANIFEST.json
+  source_commit: SAME_CLEAN_COMMIT_AS_BACKEND
+  control_origin: https://media.site.example:18784
+  signaling_origin: wss://media.site.example:18780
+  rtc_tcp_port: 18782
+  rtc_udp_port: 18783
+  public_stun: false
+  public_turn: false
+  target_private_root: /etc/darshan/sites/SITE_NAME/live
+  authority_epoch_in_database: false
+  credentials_in_artifact: false
+  host_witness_key_mounted_in_node: false
+  host_readiness_mount_read_only: true
+  release_gates:
+    native_host_pidfd_lsm: OPEN
+    measured_10_runs_250_receivers: OPEN
+    cross_vm_firewall_tls: OPEN
+    windows_display_audio: OPEN
+    restore_rehearsal: OPEN

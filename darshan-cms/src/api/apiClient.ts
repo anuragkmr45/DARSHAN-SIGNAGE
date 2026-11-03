@@ -119,6 +119,9 @@ export class ApiClient {
     this.activeRequests.clear();
   }
 
+  /** Non-secret cache namespace; changes before Redux publishes a new session. */
+  getSessionGeneration(): number { return this.sessionGeneration; }
+
   async request<TResponse, TBody = unknown>(options: ApiRequestOptions<TBody>): Promise<TResponse> {
     const generation = this.sessionGeneration;
     const pathWithParams = fillPathParams(options.path, options.pathParams);

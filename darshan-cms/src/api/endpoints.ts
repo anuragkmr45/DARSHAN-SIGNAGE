@@ -1,6 +1,15 @@
 export const API_BASE_PATH = "/api/v1";
 
 export const endpoints = {
+  liveRuntime: {
+    epoch: '/live-authority-epoch', occurrences: '/live-occurrences',
+    occurrence: (id: string) => `/live-occurrences/${id}`,
+    preflight: (id: string) => `/live-occurrences/${id}/preflight`,
+    targets: (id: string) => `/live-occurrences/${id}/targets`,
+    start: (id: string) => `/live-occurrences/${id}/start`, stop: (id: string) => `/live-occurrences/${id}/stop`, enable: (id: string) => `/live-occurrences/${id}/enable`,
+    presenterAdmission: (runId: string) => `/live-runs/${runId}/admissions`,
+    ticket: (id: string) => `/live-admissions/${id}/ticket`, renew: (id: string) => `/live-admissions/${id}/renew`, observations: (id: string) => `/live-admissions/${id}/observations`,
+  },
   apiKeys: {
     base: "/api-keys",
     rotate: (apiKeyId: string) => `/api-keys/${apiKeyId}/rotate`,
@@ -14,6 +23,7 @@ export const endpoints = {
   auth: {
     login: "/auth/login",
     me: "/auth/me",
+    authorization: "/auth/authorization",
     logout: "/auth/logout",
   },
   conversations: {
@@ -121,6 +131,16 @@ export const endpoints = {
     base: "/live-sessions",
     byId: (id: string) => `/live-sessions/${encodeURIComponent(id)}`,
   },
+  liveFallbacks: {
+    base: "/live-fallback-preparations",
+    byId: (id: string) => `/live-fallback-preparations/${encodeURIComponent(id)}`,
+    preview: (id: string) => `/live-fallback-preparations/${encodeURIComponent(id)}/preview`,
+  },
+  liveDrafts: {
+    byId: (id: string) => `/live-schedule-drafts/${encodeURIComponent(id)}`,
+    review: (id: string) => `/live-schedule-drafts/${encodeURIComponent(id)}/review`,
+    submit: (id: string) => `/live-schedule-drafts/${encodeURIComponent(id)}/submit`,
+  },
   presentations: {
     base: "/presentations",
     byId: (presentationId: string) => `/presentations/${presentationId}`,
@@ -154,6 +174,7 @@ export const endpoints = {
     publishesForSchedule: (scheduleId: string) => `/schedules/${scheduleId}/publishes`,
     publishTarget: (publishId: string, targetId: string) => `/publishes/${publishId}/targets/${targetId}`,
     displayPreflight: "/schedules/display-preflight",
+    livePreflight: "/schedules/live-preflight",
   },
   scheduleRequests: {
     base: "/schedule-requests",

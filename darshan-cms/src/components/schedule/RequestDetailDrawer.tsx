@@ -28,13 +28,14 @@ import { useAuthorization } from "@/hooks/useAuthorization";
 import { useToast } from "@/hooks/use-toast";
 import { scheduleRequestsApi } from "@/api/domains/scheduleRequests";
 import { schedulesApi } from "@/api/domains/schedules";
-import { queryKeys } from "@/api/queryKeys";
 import type { DisplayPreflightResponse, MediaAsset, PresentationSlot, ScheduleRequestListItem } from "@/api/types";
 import { MediaPreview } from "@/components/common/MediaPreview";
 import { AspectFrame } from "@/components/common/AspectFrame";
 import { resolveMediaDisplayName } from "@/lib/media";
 import { resolveVideoLoopLabel } from "@/lib/scheduleCreatorState";
 import { getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
+import { LiveRequestReview } from "@/components/live/LiveRequestReview";
+import { approveThenPublish, recheckRequestLivePolicy, reloadScheduleRequest, requestActionFailure } from "@/lib/liveRequestReview";
 
 interface RequestDetailDrawerProps {
   request: ScheduleRequestListItem;
@@ -111,10 +112,13 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   const [actionComment, setActionComment] = useState("");
   const [previewMedia, setPreviewMedia] = useState<MediaAsset | null>(null);
   const [displayPreflight, setDisplayPreflight] = useState<DisplayPreflightResponse | null>(null);
+  const [actionFailure, setActionFailure] = useState<ReturnType<typeof requestActionFailure> | null>(null);
+  const [reloading, setReloading] = useState(false);
 
   useEffect(() => {
     setCurrentRequest(request);
   }, [request]);
+  useEffect(() => { setActionFailure(null); setDisplayPreflight(null); setPreviewMedia(null); }, [request.id]);
 
   const canApprove = can("approve", "ScheduleRequest") || can("manage", "ScheduleRequest");
   const canPublish = can("publish", "ScheduleRequest") || can("manage", "Schedule");
@@ -129,6 +133,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
     [currentRequest.presentation_slots],
   );
   const scheduleItems = useMemo(() => currentRequest.schedule_items ?? [], [currentRequest.schedule_items]);
+  const liveApproval = currentRequest.live_approval;
+  const hasLive = Boolean(liveApproval?.items.length || scheduleItems.some(item => item.source_kind === "LIVE"));
+  const onlyLive = hasLive && scheduleItems.every(item => item.source_kind === "LIVE");
   const screens = useMemo(() => currentRequest.screens ?? [], [currentRequest.screens]);
   const screenGroups = useMemo(() => currentRequest.screen_groups ?? [], [currentRequest.screen_groups]);
 
@@ -171,12 +178,25 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
 
   const invalidateList = () =>
     queryClient.invalidateQueries({ queryKey: ["schedule-requests"] });
+  const reportActionFailure = (error: unknown) => { setActionFailure(requestActionFailure(error, hasLive)); };
+  const reloadRequest = async () => {
+    if (reloading) return; const id = currentRequest.id; setReloading(true);
+    try {
+      const updated = await reloadScheduleRequest(id);
+      setCurrentRequest(previous => previous.id === id ? updated : previous);
+      setDisplayPreflight(null); void invalidateList();
+      await recheckRequestLivePolicy(updated);
+      setActionFailure(null);
+    } catch (error) { reportActionFailure(error); }
+    finally { setReloading(false); }
+  };
 
   const approveMutation = useMutation({
     mutationFn: ({ id, comment }: { id: string; comment?: string }) =>
       scheduleRequestsApi.approve(id, comment ? { comment } : undefined),
-    onSuccess: (data) => {
-      setCurrentRequest((prev) => ({
+    onSuccess: (data, variables) => {
+      setActionFailure(null);
+      setCurrentRequest((prev) => prev.id !== variables.id ? prev : ({
         ...prev,
         status: data.status ?? "APPROVED",
         review_notes: data.review_notes ?? prev.review_notes,
@@ -186,6 +206,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
       toast({ title: "Approved", description: "Schedule request approved." });
     },
     onError: (error) => {
+      reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to approve request.";
       toast({ title: "Approve failed", description: message, variant: "destructive" });
     },
@@ -194,8 +215,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   const rejectMutation = useMutation({
     mutationFn: ({ id, comment }: { id: string; comment?: string }) =>
       scheduleRequestsApi.reject(id, comment ? { comment } : undefined),
-    onSuccess: (data) => {
-      setCurrentRequest((prev) => ({
+    onSuccess: (data, variables) => {
+      setActionFailure(null);
+      setCurrentRequest((prev) => prev.id !== variables.id ? prev : ({
         ...prev,
         status: data.status ?? "REJECTED",
         review_notes: data.review_notes ?? prev.review_notes,
@@ -215,8 +237,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
       id,
       issueHash ? { aspect_override: { acknowledged: true, issue_hash: issueHash, reason } } : undefined,
     ),
-    onSuccess: () => {
-      setCurrentRequest((prev) => ({
+    onSuccess: (_data, variables) => {
+      setActionFailure(null);
+      setCurrentRequest((prev) => prev.id !== variables.id ? prev : ({
         ...prev,
         status: "PUBLISHED",
       }));
@@ -224,6 +247,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
       toast({ title: "Published", description: "Schedule request published." });
     },
     onError: (error) => {
+      reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to publish request.";
       toast({ title: "Publish failed", description: message, variant: "destructive" });
     },
@@ -231,14 +255,15 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
 
   const approvePublishMutation = useMutation({
     mutationFn: async ({ id, comment, issueHash }: { id: string; comment?: string; issueHash?: string }) => {
-      await scheduleRequestsApi.approve(id, comment ? { comment } : undefined);
-      return scheduleRequestsApi.publish(
+      return approveThenPublish(() => scheduleRequestsApi.approve(id, comment ? { comment } : undefined), () => scheduleRequestsApi.publish(
         id,
         issueHash ? { aspect_override: { acknowledged: true, issue_hash: issueHash, reason: comment } } : undefined,
-      );
+      ), approved => setCurrentRequest(previous => previous.id === id ? { ...previous, status: approved.status ?? "APPROVED",
+        review_notes: approved.review_notes ?? previous.review_notes, reviewed_at: approved.reviewed_at ?? previous.reviewed_at } : previous));
     },
-    onSuccess: () => {
-      setCurrentRequest((prev) => ({
+    onSuccess: (_data, variables) => {
+      setActionFailure(null);
+      setCurrentRequest((prev) => prev.id !== variables.id ? prev : ({
         ...prev,
         status: "PUBLISHED",
       }));
@@ -246,6 +271,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
       toast({ title: "Published", description: "Approved and published." });
     },
     onError: (error) => {
+      reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to approve and publish.";
       toast({ title: "Publish failed", description: message, variant: "destructive" });
     },
@@ -254,8 +280,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   const takeDownMutation = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
       scheduleRequestsApi.takeDown(id, reason ? { reason } : undefined),
-    onSuccess: (data) => {
-      setCurrentRequest((prev) => ({
+    onSuccess: (data, variables) => {
+      setActionFailure(null);
+      setCurrentRequest((prev) => prev.id !== variables.id ? prev : ({
         ...prev,
         status: data.status ?? "TAKEN_DOWN",
         taken_down_at: data.taken_down_at ?? prev.taken_down_at ?? new Date().toISOString(),
@@ -288,6 +315,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
     publishMutation.isPending ||
     approvePublishMutation.isPending ||
     takeDownMutation.isPending;
+  const cannotReviewLive = hasLive && !liveApproval;
 
   const handleActionConfirm = () => {
     if (!actionDialog) return;
@@ -317,7 +345,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
   };
 
   const handlePublish = async () => {
-    const scheduleId = currentRequest.schedule_id || currentRequest.schedule?.id;
+    const scheduleId = currentRequest.schedule?.id;
     if (!scheduleId) {
       publishMutation.mutate({ id: currentRequest.id });
       return;
@@ -332,13 +360,14 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
       setActionComment("");
       setActionDialog("aspect_override");
     } catch (error) {
+      reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to run display preflight.";
       toast({ title: "Display preflight failed", description: message, variant: "destructive" });
     }
   };
 
   const handleApproveAndPublish = async (comment?: string) => {
-    const scheduleId = currentRequest.schedule_id || currentRequest.schedule?.id;
+    const scheduleId = currentRequest.schedule?.id;
     if (!scheduleId) {
       approvePublishMutation.mutate({ id: currentRequest.id, comment });
       return;
@@ -353,6 +382,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
       setActionComment(comment || "");
       setActionDialog("approve_publish_aspect_override");
     } catch (error) {
+      reportActionFailure(error);
       const message = error instanceof Error ? error.message : "Unable to run display preflight.";
       toast({ title: "Display preflight failed", description: message, variant: "destructive" });
     }
@@ -399,7 +429,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
         {showActions && (
           <div className="flex flex-wrap gap-2">
             {showPublishOnly ? (
-              <Button size="sm" variant="default" onClick={handlePublish} disabled={!allowPublish || isMutating}>
+              <Button size="sm" variant="default" onClick={handlePublish} disabled={!allowPublish || isMutating || cannotReviewLive || reloading}>
                 <Upload className="h-4 w-4 mr-2" />
                 Publish
               </Button>
@@ -409,7 +439,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   size="sm"
                   variant="destructive"
                   onClick={() => setActionDialog("reject")}
-                  disabled={!allowApprove || isMutating}
+                  disabled={!allowApprove || isMutating || reloading}
                 >
                   <XCircle className="h-4 w-4 mr-2" />
                   Reject
@@ -418,7 +448,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   size="sm"
                   variant="outline"
                   onClick={() => setActionDialog("approve")}
-                  disabled={!allowApprove || isMutating}
+                  disabled={!allowApprove || isMutating || cannotReviewLive || reloading}
                 >
                   <CheckCircle2 className="h-4 w-4 mr-2" />
                   Approve
@@ -427,7 +457,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   size="sm"
                   variant="default"
                   onClick={() => setActionDialog("approve_publish")}
-                  disabled={!allowApprove || !allowPublish || isMutating}
+                  disabled={!allowApprove || !allowPublish || isMutating || cannotReviewLive || reloading}
                 >
                   <CheckCircle2 className="h-4 w-4 mr-2" />
                   Approve & Publish
@@ -449,7 +479,17 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
             </Button>
           </div>
         )}
+        {hasLive && <Button className="mt-3" variant="outline" size="sm" onClick={() => void reloadRequest()} disabled={reloading || isMutating}>
+          {reloading ? "Reloading request…" : statusUpper === "PENDING" || statusUpper === "APPROVED" ? "Reload request and live eligibility" : "Reload historical request"}
+        </Button>}
       </div>
+
+      {(actionFailure || cannotReviewLive) && <div role="alert" className="space-y-2 border-b p-4 text-sm">
+        <p className="text-destructive">{actionFailure?.message ?? "This LIVE request has no valid frozen approval. Cancel and resubmit it for a fresh review."}</p>
+        {actionFailure?.stale && <p>Current live eligibility differs from the stored review. Reload to inspect it; cancel and resubmit for fresh approval if the source, fallback, audience or window changed.</p>}
+        {actionFailure?.code && <p className="font-mono text-xs">{actionFailure.code}</p>}
+        {!hasLive && <Button variant="outline" size="sm" onClick={() => void reloadRequest()} disabled={reloading || isMutating}>{reloading ? "Reloading request…" : "Reload request"}</Button>}
+      </div>}
 
       {/* Tabs */}
       <Tabs defaultValue="summary" className="flex-1 flex flex-col">
@@ -552,6 +592,8 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
               </Card>
             )}
 
+            {liveApproval && <LiveRequestReview requestId={currentRequest.id} approval={liveApproval} />}
+
             {showScheduleOverview && (
               <Card>
                 <CardHeader>
@@ -608,6 +650,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
 
           {/* Media Tab */}
           <TabsContent value="media" className="space-y-4 p-4 sm:p-6">
+            {onlyLive && liveApproval && <LiveRequestReview requestId={currentRequest.id} approval={liveApproval} />}
+            {hasLive && !onlyLive && <p className="rounded border p-3 text-sm">Library references below are current. They do not replace the frozen LIVE fallback reviewed in Summary.</p>}
+            {!onlyLive && <>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold">Media Items ({mediaItems.length})</h3>
             </div>
@@ -734,6 +779,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                 </CardContent>
               </Card>
             )}
+            </>}
           </TabsContent>
 
           {/* Schedule Tab */}
@@ -764,7 +810,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                         {scheduleItems.map((item) => (
                           <div key={item.id} className="rounded-md border p-3 text-sm">
                             <div className="flex items-center justify-between">
-                              <span className="font-medium">Priority {item.priority}</span>
+                              <span className="font-medium">{item.source_kind === "LIVE" ? "LIVE broadcast · fallback presentation" : "Scheduled presentation"} · Priority {item.priority}</span>
                               <Badge variant="outline">{item.id}</Badge>
                             </div>
                             {(item.start_at || item.end_at) && (
@@ -789,7 +835,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
 
           {/* Screens Tab */}
           <TabsContent value="screens" className="space-y-4 p-4 sm:p-6">
-            {layoutSlots.length > 0 && (
+            {!onlyLive && layoutSlots.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Layout Preview</CardTitle>

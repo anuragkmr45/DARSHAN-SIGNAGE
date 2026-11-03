@@ -5,6 +5,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFileSync, lstatSync, statfsSync, openSync, writeFileSync, closeSync, renameSync, unlinkSync, constants } from 'node:fs';
 import path from 'node:path';
 import { ownsSfuListener, readSfuProcessStartTicks } from './sfu-listener-ownership.js';
+import { randomUUID } from 'node:crypto';
+import { createHostReadiness } from './host-readiness.js';
+
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 async function waitExit(child, timeoutMs = 1000) {
@@ -25,9 +29,10 @@ async function tcpReady(host, port) {
 }
 
 /** Supervisor-owned host-watchdog evidence. Never substitute a controller heartbeat. */
-export function createSupervisorHeartbeat(file, instance, { boottimeNow = () => Math.floor(Number(readFileSync('/proc/uptime', 'utf8').split(' ')[0]) * 1000) } = {}) {
+export function createSupervisorHeartbeat(file, instance, { boottimeNow = () => Math.floor(Number(readFileSync('/proc/uptime', 'utf8').split(' ')[0]) * 1000), authorityNodeInstanceId } = {}) {
   if (!file && !instance) return undefined;
   if (!file || !path.isAbsolute(file) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(instance ?? '')) throw new Error('Invalid supervisor watchdog configuration');
+  if (authorityNodeInstanceId !== undefined && !uuid.test(authorityNodeInstanceId)) throw new Error('Invalid authority boot identity');
   let component = path.parse(file).root;
   const parts = file.slice(component.length).split(path.sep);
   for (const part of parts.slice(0, -1)) {
@@ -59,7 +64,8 @@ export function createSupervisorHeartbeat(file, instance, { boottimeNow = () => 
       if (lastBoottime !== undefined && (boottime < lastBoottime || boottime - lastBoottime > 1500)) throw new Error('Supervisor boot-clock gap requires isolation');
       const value = { schema_version: 1, instance_id: instance, supervisor_pid: process.pid,
         process_start_ticks: processStartTicks, sequence: ++sequence,
-        boottime_ms: boottime, boot_id: bootId, phase };
+        boottime_ms: boottime, boot_id: bootId, phase,
+        ...(authorityNodeInstanceId ? { authority_node_instance_id: authorityNodeInstanceId } : {}) };
       const temporary = path.join(directory, `.heartbeat-${instance}-${sequence}.tmp`);
       const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
       try { writeFileSync(fd, JSON.stringify(value)); } finally { closeSync(fd); }
@@ -80,9 +86,15 @@ export async function supervise({
   if (process.platform !== 'linux') throw Object.assign(new Error('SFU_LISTENER_OWNERSHIP_UNAVAILABLE'), { code: 'SFU_LISTENER_OWNERSHIP_UNAVAILABLE' });
   const upstream = new URL(env.DARSHAN_MEDIA_SFU_URL ?? 'http://127.0.0.1:18781');
   if (upstream.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(upstream.hostname)) throw new Error('SFU must bind numeric loopback');
-  const heartbeat = createSupervisorHeartbeat(env.DARSHAN_MEDIA_SUPERVISOR_STATE_FILE, env.DARSHAN_MEDIA_NODE_INSTANCE_ID);
+  const backend = env.DARSHAN_MEDIA_AUTHORITY_MODE === 'backend';
+  if (backend && (!env.DARSHAN_MEDIA_SUPERVISOR_STATE_FILE || !uuid.test(env.DARSHAN_MEDIA_NODE_INSTANCE_ID ?? '') || !path.isAbsolute(env.DARSHAN_MEDIA_HOST_LEASE_FILE ?? ''))) throw new Error('Backend supervision configuration required');
+  // Authority identity is fresh per supervisor invocation even if a host
+  // mistakenly restarts a container with its previous managed label/config.
+  const authorityNodeInstanceId = backend ? randomUUID() : undefined;
+  const childEnv = backend ? { ...env, DARSHAN_MEDIA_AUTHORITY_INSTANCE_ID: authorityNodeInstanceId } : env;
+  const heartbeat = createSupervisorHeartbeat(env.DARSHAN_MEDIA_SUPERVISOR_STATE_FILE, env.DARSHAN_MEDIA_NODE_INSTANCE_ID, { authorityNodeInstanceId });
   heartbeat?.write('STARTING'); // Must succeed before either media child can run.
-  const sfu = spawn(sfuCommand[0], sfuCommand.slice(1), { env, stdio: 'ignore' });
+  const sfu = spawn(sfuCommand[0], sfuCommand.slice(1), { env: childEnv, stdio: 'ignore' });
   let gateway;
   let timer;
   let lastHeartbeat = performance.now();
@@ -115,10 +127,12 @@ export async function supervise({
     })();
     return stopPromise;
   };
+  const hostReadiness = backend ? createHostReadiness({ file: env.DARSHAN_MEDIA_HOST_LEASE_FILE, nodeInstanceId: authorityNodeInstanceId,
+    managedInstanceId: env.DARSHAN_MEDIA_NODE_INSTANCE_ID, onInvalid: () => { void stop('HOST_READINESS_LOST'); } }) : undefined;
   sfu.once('error', () => { fault = 'SFU_START_FAILED'; void stop(fault); });
   sfu.once('exit', () => { if (!stopped) { fault = 'SFU_EXIT'; void stop(fault); } });
   if (heartbeat) hostHeartbeatTimer = setInterval(() => {
-    try { heartbeat.write(phase); } catch { void stop('SUPERVISOR_HEARTBEAT_WRITE_FAILED'); }
+    try { hostReadiness?.check(); if (!stopped) heartbeat.write(phase); } catch { void stop('SUPERVISOR_HEARTBEAT_WRITE_FAILED'); }
   }, 100);
   signal?.addEventListener('abort', () => { void stop('SUPERVISOR_SHUTDOWN'); }, { once: true });
   if (signal?.aborted) await stop('SUPERVISOR_SHUTDOWN');
@@ -136,7 +150,7 @@ export async function supervise({
     else await delay(50);
   }
   if (stopped) throw Object.assign(new Error(fault ?? 'SUPERVISOR_STOPPED'), { code: fault ?? 'SUPERVISOR_STOPPED' });
-  gateway = fork(gatewayEntry, [], { env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  gateway = fork(gatewayEntry, [], { env: childEnv, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   lastHeartbeat = performance.now();
   gateway.on('message', (message) => {
     if (message?.type === 'ready' && !admissionsReady) {
@@ -156,7 +170,7 @@ export async function supervise({
   timer = setInterval(() => {
     if (performance.now() - lastHeartbeat > (lastSequence || admissionsReady ? heartbeatMs : startupMs)) void stop('CONTROLLER_HEARTBEAT_EXPIRED');
   }, checkMs);
-  return { sfu, gateway, stop };
+  return { sfu, gateway, stop, authorityNodeInstanceId };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

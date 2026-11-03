@@ -1,13 +1,22 @@
 # Linux media-node runtime preparation
 
-This is preparation for the sixth VM's media prototype. It does not install or
-enable a production service, implement the production artifact bundle, or close
-the deployment acceptance gates.
+This prepares the sixth VM's media runtime. It does not install or enable a
+production service, implement the production artifact bundle, or close the
+deployment acceptance gates. Explicit Backend TLS/authority settings are in
+[Backend authority transport](BACKEND_AUTHORITY.md); the default remains prototype.
 
 Use native Linux Docker Engine, the pinned media image, and a fresh node instance
 UUID. The host and container must share the native PID/boot clock domain. Keep
 API credentials and SFU configuration in private persistent files; keep
 supervision evidence on a separate **tmpfs** runtime directory.
+
+Backend authority additionally requires a separate host-root-owned tmpfs lease
+directory mounted read-only into media at `DARSHAN_MEDIA_HOST_LEASE_FILE`'s
+parent. It is distinct from the media-owned RW heartbeat mount. No grants become
+ready until two host sequence advances bind the fresh authority boot UUID and
+managed label. Its one-second local freshness gate is independently enforced by
+controller and supervisor. The host death-witness key/state is never mounted
+into media; see the exact pulse/file policy in [Backend authority](BACKEND_AUTHORITY.md).
 
 Use private container PID and network namespaces. The SFU control listener must
 bind only loopback inside that namespace; only the gateway/media ports may be
@@ -61,8 +70,18 @@ admissions from heartbeat files. Stop the pinned media node before stopping its
 watchdog. Remove only that retired instance's directory after verifying the node
 is stopped. Do not remove the shared parent while other instances exist.
 
-Trusted HTTPS/WSS, firewall/media ports, local-only SFU signaling, exact origin
-allowlists, offline image packaging, root/systemd/LSM pidfd permissions, watchdog
+Backend mode generates an additional authority boot UUID inside every supervisor
+process before launching children, even when a container's old environment is
+accidentally reused. The managed label/heartbeat `instance_id` remains unchanged
+for watchdog compatibility; heartbeat `authority_node_instance_id` and HTTPS
+health `managed_instance_id` bind these two identities. The host watchdog accepts
+the optional field only when valid and unchanged for that pinned process. A new
+boot identity never proves an old occupied run stopped. Host installers must
+still use fresh managed labels/state/watchdogs and reconcile old-node teardown.
+
+Backend HTTPS/WSS is implemented but deployment trust, firewall/media ports,
+local-only SFU signaling, exact origin allowlists, offline image packaging,
+root/systemd/LSM pidfd permissions, watchdog
 restart, and representative load/fault measurements remain deployment work.
 The local diagnostic directly observed disk I/O wait on a disk-backed heartbeat
 path; tmpfs removes that known path without relaxing fail-closed deadlines or

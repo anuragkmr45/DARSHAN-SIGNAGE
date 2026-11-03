@@ -1,15 +1,16 @@
 import { expect, test, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, adminAuthorization } from "./helpers/selfAuthorization";
 
 const pdfBytes = readFileSync(resolve(process.cwd(), "tests/fixtures/preview-two-pages.pdf"));
 const origin = process.env.E2E_BASE_URL || "http://127.0.0.1:5173";
 const adminUser = {
-  id: "admin-user-id",
+  id: ADMIN_TEST_USER_ID,
   email: "admin@darshan.local",
   first_name: "Admin",
   last_name: "User",
-  role_id: "role-admin",
+  role_id: ADMIN_TEST_ROLE_ID,
   role: "ADMIN",
 };
 const document = (fresh: boolean) => ({
@@ -36,8 +37,11 @@ test("document cards and the detail modal show the original format and a navigab
     if (url.pathname === "/api/v1/auth/login" && method === "POST") {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: "cms-token", csrf_token: "csrf-token", user: adminUser }) });
     }
+    if (url.pathname === "/api/v1/auth/authorization" && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(adminAuthorization(adminUser)) });
+    }
     if (url.pathname === "/api/v1/roles" && method === "GET") {
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ id: "role-admin", name: "ADMIN", permissions: { inherits: [], grants: [{ action: "manage", subject: "all" }] }, is_system: true }], page: 1, limit: 100, total: 1 }) });
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ id: ADMIN_TEST_ROLE_ID, name: "ADMIN", permissions: { inherits: [], grants: [{ action: "manage", subject: "all" }] }, is_system: true }], page: 1, limit: 100, total: 1 }) });
     }
     if (url.pathname === "/api/v1/notifications/unread-count" && method === "GET") {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ unread_total: 0 }) });

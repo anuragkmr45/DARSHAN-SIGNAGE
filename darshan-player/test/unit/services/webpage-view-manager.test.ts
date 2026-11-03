@@ -102,6 +102,29 @@ describe('WebpageViewManager', () => {
     sinon.restore()
   })
 
+  it('cannot create an old webpage after ownership changed during pending host validation', async () => {
+    let release
+    manager['dependencies'].validateNavigation = () => new Promise(resolve => { release = resolve })
+    let current = true
+    const pending = manager.mount(request('old-owner', 1, 1), () => current)
+    current = false
+    manager.destroyAll('content-owner-changed')
+    release()
+    expect(await pending).to.deep.equal({ accepted: false, reason: 'content-owner-changed' })
+    expect(views).to.have.length(0)
+    expect(childViews).to.have.length(0)
+  })
+
+  it('fences pending mounts across destroyAll even if a caller omitted an explicit owner predicate', async () => {
+    let release
+    manager['dependencies'].validateNavigation = () => new Promise(resolve => { release = resolve })
+    const pending = manager.mount(request('old-window', 1, 1))
+    manager.destroyAll('window-closed')
+    release()
+    expect(await pending).to.deep.equal({ accepted: false, reason: 'content-owner-changed' })
+    expect(views).to.have.length(0)
+  })
+
   it('denies permissions, downloads, and disallowed subresources in its isolated session', async () => {
     manager.configureSession()
     expect(permissionCheckHandler?.()).to.equal(false)

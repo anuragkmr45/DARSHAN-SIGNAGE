@@ -13,6 +13,7 @@ import { getPairingService } from './pairing-service'
 import { getDefaultMediaService } from './settings/default-media-service'
 import { createTransportHttpsAgent } from './network/transport-tls'
 import { getSnapshotManager } from './snapshot-manager'
+import { buildPlayerCapabilities } from './player-capabilities'
 import { getDisplayManager } from './display-manager'
 import { getLifecycleEvents } from './lifecycle-events'
 
@@ -661,6 +662,7 @@ export class RealtimeService extends EventEmitter {
       protocol_version: '1.0',
       device_id: pairingService.getDeviceId(),
       session_id: `electron-${process.pid}`,
+      runtime_session_id: pairingService.getRuntimeSessionId(),
       app: {
         name: 'darshan-electron',
         version: pairingService.getDeviceInfo().appVersion,
@@ -670,23 +672,7 @@ export class RealtimeService extends EventEmitter {
         os: process.platform,
         arch: process.arch,
       },
-      capabilities: {
-        commands: [
-          'REFRESH',
-          'REFRESH_SCHEDULE',
-          'RESYNC',
-          'REBOOT',
-          'SCREENSHOT',
-          'TAKE_SCREENSHOT',
-          'CLEAR_CACHE',
-          'PING',
-        ],
-        screenshot: true,
-        log_upload: true,
-        offline_startup: true,
-        background_push: false,
-        features: ['message_emergency_v1', 'webcontents_view_v1', 'pdf_page_selection_v1'],
-      },
+      capabilities: buildPlayerCapabilities(getConfigManager().getConfig()),
       local_state: {
         snapshot_id: getSnapshotManager().getCurrentPlaylist()?.snapshotId ?? storeState.lastDesiredSnapshotId ?? null,
         default_media_version: storeState.lastDesiredDefaultMediaVersion ?? null,

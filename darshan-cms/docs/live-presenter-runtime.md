@@ -1,0 +1,28 @@
+# Scheduled live presenter controls
+
+The Live broadcasts occurrence list opens controls only for the assigned presenter with current effective `publish LiveBroadcast` access. Backend record-level authorization remains final. Administrative stop and re-enable remain separate occurrence actions; opening presenter controls never joins as a viewer.
+
+## Operator journey
+
+1. Open the approved, published occurrence during its eligible window. The controls fetch a fresh nonce-bound authority epoch, current occurrence and a separate read-only media preflight. Business eligibility, media readiness and capacity are displayed separately. A missing/preparing media node, insufficient participant capacity or ten occupied runtime slots disables capture before the native chooser.
+2. When preflight is ready, choose a screen or window for a muted local preview. The browser chooser opens directly from that button gesture. Screen sharing requires a supported browser and a secure context (HTTPS, or browser-permitted localhost). The preview can remain open within the approved window and is not a ten-second broadcast attempt. Preflight is advisory; Start repeats every authoritative check so a later node/capacity race fails safely.
+3. Optional microphone and captured audio start off. A source can be requested only when its frozen policy allows it. Browser/OS support determines whether captured audio is provided. Denied microphone access stops the selected screen; **Retry without microphone** is an explicit new chooser action.
+4. **Start broadcast explicitly** begins a ten-second startup budget, submits an epoch/revision/fingerprint-bound idempotent command, waits for the same admission intent, then requests a fresh single-use signaling ticket. Backend RUNNING is separate from media connection and SDK publication.
+5. **Stop sharing now**, closing the controls, page lifecycle exit, or logout/account replacement stops all locally owned tracks before asynchronous SDK/API cleanup. Server-side teardown and capacity release can remain pending.
+
+Local preview frames, SDK video publication acknowledgement and backend run state are displayed separately. None claims that a player displayed a frame or that proof-of-play was received. Optional audio loss is shown as degradation; video can continue.
+
+## Retries, leases and isolation
+
+- Lost Start/Stop responses retain the exact request ID, expected epoch, revision and run scope in memory. Retry is explicit. A Start retry does not extend its original startup budget. An unresolved Start cannot be attached to replacement capture after local disposal. Current confirmed teardown and a new explicit review are required.
+- Reload accepts status ordering only after a fresh nonce-bound epoch check. Restored/different authority requires closing and reopening a fresh review; old intents are never silently rebased. Mutable status reload does not replace a pending command.
+- Runtime document identity is shared by controls within one document and differs across tabs. Login session changes dispose capture synchronously through Redux subscription. Ordinary JWT refresh keeps the same server session and user identity.
+- Fresh epoch/ticket/renew authorization has a 1,500 ms total client deadline, including response parsing/auth refresh. The advisory media preflight has a 2,500 ms client bound because its server-side trusted-media probe is itself bounded to 1,500 ms. Lease deadlines are anchored before the request, capped by the approved window, and renewed after three seconds. Failed requests do not extend authority. The local watchdog runs every 200 ms and fail-closes detected suspension/clock gaps; browser timer throttling is covered independently by SFU enforcement, not by a browser real-time guarantee.
+- A media-only disconnect can request new single-use tickets for at most thirty seconds while fresh authority remains valid. SDK automatic reconnect is disabled, no consumed ticket is replayed, and an expired/revoked attempt cannot restart itself. A stale connection or Stop response cannot alter a newer attempt.
+- Tickets and capture streams are memory-only. They are not put in React Query, local/session storage, logs, diagnostic messages or URLs. The SDK log level is silent. Remote subscription, camera/data publishing and public ICE/STUN discovery are disabled. Captured tracks are explicitly user-provided; only the controller owns their lifetime.
+
+## Verification scope
+
+Focused controller tests exercise preflight-denied chooser suppression, stale preflight binding, the ready-to-Start race, chooser timing, late display/microphone results, startup retries, fresh identity/audio binding, consumed request time, stopped receipts, delayed Start/Stop responses, stale connection completion, clock gaps, window end and bounded reconnect. Database-backed route coverage verifies the read-only response, authorization, redaction and each capacity state. Adapter tests assert SDK connection/source options, disabled remote subscription/reconnect, late-authority fences, optional-audio failure and track cleanup. Server-rendered panel tests cover permission-based controls and truthful evidence labels.
+
+These checks do not prove native chooser behavior, WebRTC frames/audio, player display, or production VM networking. Actual HTTPS CMS/bundle loading, native chooser, two-tab presenter contention, normal Electron receiver/fallback, browser/process suspension, cross-VM TLS/firewall and measured SFU cutoff remain runtime/release verification. The current environment's independent host-watchdog pidfd/AppArmor gate remains open in its media evidence; this document does not change it.

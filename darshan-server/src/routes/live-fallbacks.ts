@@ -6,8 +6,9 @@ import { withCurrentMutationAuthorization } from '@/auth/mutation-authorization'
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { schema } from '@/db';
 import { queueLiveFallbackPreparation } from '@/jobs';
-import { collectLiveFallbackSource } from '@/services/live-scheduling';
+import { collectLiveFallbackSource, readCurrentPreparedLiveFallback } from '@/services/live-scheduling';
 import { assertCanPrepareLiveFallback } from '@/services/live-fallback-authorization';
+import { getPresignedUrl } from '@/s3';
 import { AppError } from '@/utils/app-error';
 import { respondWithError } from '@/utils/errors';
 import { createLogger } from '@/utils/logger';
@@ -91,6 +92,42 @@ export async function liveFallbackRoutes(fastify: FastifyInstance) {
         return preparation;
       }, { userLock: 'share' });
       return reply.send(serialize(row));
+    } catch (error) { return respondWithError(reply, error); }
+  });
+
+  fastify.get(apiEndpoints.liveFallbacks.preview, routeSchema, async (request, reply) => {
+    // This response contains short-lived media credentials. Never allow a
+    // shared browser/proxy cache to serve it after an account change.
+    reply.header('Cache-Control', 'private, no-store');
+    try {
+      const payload = await currentPayload(request), { id } = paramsSchema.parse(request.params);
+      const { preparation, manifest } = await withCurrentMutationAuthorization(payload, async context => {
+        assertCanPrepareLiveFallback(context);
+        const [row] = await context.executor.select().from(schema.liveFallbackPreparations)
+          .where(eq(schema.liveFallbackPreparations.id, id));
+        if (!row) throw AppError.notFound('Live fallback preparation not found');
+        return readCurrentPreparedLiveFallback(context, row.presentation_id, id);
+      }, { userLock: 'share' });
+      // No storage/network operation runs under identity or graph locks. These
+      // URLs are response-only; final approval still rechecks the current graph.
+      const checkedAt = new Date(), expiresAt = new Date(checkedAt.getTime() + 15 * 60_000).toISOString();
+      const downloads = [];
+      try {
+        for (const asset of manifest.assets) downloads.push({
+          asset_id: asset.id, cache_key: asset.cache_key, sha256: asset.sha256,
+          size: asset.size, content_type: asset.content_type, expires_at: expiresAt,
+          url: await getPresignedUrl(asset.bucket, asset.object_key, {
+            expiresIn: 900, responseContentType: asset.content_type, responseContentDisposition: 'inline', audience: 'cms',
+          }),
+        });
+      } catch {
+        // SDK failures may contain a signed URL. Log only the preparation ID.
+        logger.warn({ preparationId: id }, 'Prepared fallback preview signing is unavailable');
+        throw new AppError({ statusCode: 503, code: 'LIVE_FALLBACK_PREVIEW_UNAVAILABLE',
+          message: 'The prepared fallback preview is unavailable. Please try again.' });
+      }
+      return reply.send({ preparation_id: preparation.id, presentation_id: preparation.presentation_id,
+        source_fingerprint: preparation.source_fingerprint, checked_at: checkedAt.toISOString(), manifest, downloads });
     } catch (error) { return respondWithError(reply, error); }
   });
 }

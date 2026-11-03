@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { type ScheduleQuickPresetId } from "@/lib/scheduleQuickPresets";
 
 interface StepScheduleDetailsProps {
+  fixedInputTimezone?: string;
   scheduleName: string;
   scheduleDescription: string;
   timezone: string;
@@ -40,6 +41,7 @@ const priorityOptions = [
 ];
 
 export function StepScheduleDetails({
+  fixedInputTimezone,
   scheduleName,
   scheduleDescription,
   timezone,
@@ -149,7 +151,7 @@ export function StepScheduleDetails({
 
             <div className="space-y-2">
               <Label>Audit Timezone</Label>
-              <Select value={timezone} onValueChange={(value) => onUpdate({ timezone: value })}>
+              <Select value={fixedInputTimezone || timezone} disabled={Boolean(fixedInputTimezone)} onValueChange={(value) => onUpdate({ timezone: value })}>
                 <SelectTrigger aria-label="Schedule timezone">
                   <SelectValue placeholder="Select timezone" />
                 </SelectTrigger>
@@ -162,7 +164,7 @@ export function StepScheduleDetails({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Stored for audit and operator visibility. Playback still executes against UTC timestamps.
+                {fixedInputTimezone ? `Enter dates in ${fixedInputTimezone}, the current browser timezone. Times are stored as UTC instants.` : "Stored for audit and operator visibility. Playback still executes against UTC timestamps."}
               </p>
             </div>
           </Card>
@@ -177,7 +179,7 @@ export function StepScheduleDetails({
             </h3>
 
             <div className="space-y-2">
-              <Label htmlFor="start-at">Start Date & Time *</Label>
+              <Label htmlFor="start-at">Start Date &amp; Time *{fixedInputTimezone ? ` (${fixedInputTimezone})` : ""}</Label>
               <Input
                 id="start-at"
                 type="datetime-local"
@@ -188,7 +190,7 @@ export function StepScheduleDetails({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="end-at">End Date & Time *</Label>
+              <Label htmlFor="end-at">End Date &amp; Time *{fixedInputTimezone ? ` (${fixedInputTimezone})` : ""}</Label>
               <Input
                 id="end-at"
                 type="datetime-local"
@@ -242,7 +244,7 @@ export function StepScheduleDetails({
           </Card>
 
           {/* Quick presets */}
-          <Card className="p-4 space-y-3">
+          {onApplyQuickPreset && <Card className="p-4 space-y-3">
             <h3 className="font-medium text-sm">Quick Presets</h3>
             <p className="text-xs text-muted-foreground">
               Fills the first free slot available on the selected screens/groups inside the chosen range.
@@ -265,7 +267,7 @@ export function StepScheduleDetails({
                 Select at least one screen or group to use quick presets.
               </p>
             )}
-          </Card>
+          </Card>}
         </div>
       </div>
     </div>

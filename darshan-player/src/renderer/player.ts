@@ -65,12 +65,14 @@ type PendingTransition = {
 type PlaybackResumeInstruction = Pick<PlaybackResumeDecision, 'seekMs' | 'autoplay' | 'completed' | 'source'>
 
 type PlaybackProgressContext = PlaybackProgressIdentity & {
+  contentEpoch?: string
   scheduleStartsAt?: string | null
   scheduleEndsAt?: string | null
   itemDisplayMs?: number
 }
 
 type ScheduledMediaOptions = {
+  contentEpoch?: string
   scheduleId?: string
   renderToken?: string
   singleItemFrame?: boolean
@@ -93,6 +95,8 @@ class Player {
   private securityLockOverlay: HTMLElement | null = null
   private currentCleanup?: () => void
   private playbackSession = 0
+  private activeContentEpoch?: string
+  private contentUnavailableOverlay?: HTMLElement
   private ignoreFallbackStatusUntil = 0
   private pendingTransition?: PendingTransition
   private activeSceneId?: string
@@ -142,6 +146,7 @@ class Player {
     }
 
     this.defaultMediaPlayer = new DefaultMediaPlayer(this.defaultMediaContainer, {
+      getContentEpoch: () => this.latestStatus?.contentEpoch,
       onRefreshRequested: (reason) => {
         this.refreshDefaultMedia(reason).catch((error) => {
           this.log('warn', 'Default media refresh failed', { reason, error: error.message })
@@ -182,9 +187,17 @@ class Player {
    * Setup IPC listeners
    */
   private setupIPC(): void {
+    window.darshan?.onContentDisposal?.(request => {
+      this.deferredPlayback.clear()
+      this.clearScheduledPlayback('content-owner-disposal')
+      this.setActiveSource('none')
+      this.activeContentEpoch = undefined
+      window.darshan.acknowledgeContentDisposal(request)
+    })
     // Listen for media playback events
     if (window.darshan && window.darshan.onMediaChange) {
       window.darshan.onMediaChange((data: any) => {
+        if (typeof data?.contentEpoch !== 'string' || data.contentEpoch !== this.latestStatus?.contentEpoch) return
         this.log('debug', 'Received play-media event', data)
         if (!this.canRenderScheduledContent()) {
           const currentSource = this.latestStatus ? resolvePlayerContentSource(this.latestStatus) : 'none'
@@ -192,6 +205,7 @@ class Player {
             this.deferredPlayback.defer(
               {
                 item: data.item,
+                contentEpoch: data.contentEpoch,
                 scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
                 renderToken: typeof data.renderToken === 'string' ? data.renderToken : undefined,
                 singleItemFrame: data.singleItemFrame === true,
@@ -209,6 +223,7 @@ class Player {
         this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
         this.setActiveSource('schedule')
         this.playMedia(data.item, {
+          contentEpoch: data.contentEpoch,
           scheduleId: typeof data.scheduleId === 'string' ? data.scheduleId : undefined,
           renderToken: typeof data.renderToken === 'string' ? data.renderToken : undefined,
           singleItemFrame: data.singleItemFrame === true,
@@ -222,6 +237,7 @@ class Player {
     // Listen for transition events
     if (window.darshan && window.darshan.onPlaybackUpdate) {
       window.darshan.onPlaybackUpdate((data: any) => {
+        if (typeof data?.contentEpoch !== 'string' || data.contentEpoch !== this.latestStatus?.contentEpoch) return
         if (data.type === 'transition-start') {
           if (!this.canRenderScheduledContent()) {
             return
@@ -265,6 +281,11 @@ class Player {
       return
     }
 
+    if (this.latestStatus?.contentEpoch !== presentation.status.contentEpoch) {
+      this.deferredPlayback.clear()
+      this.clearScheduledPlayback('content-epoch-changed')
+      this.activeContentEpoch = undefined
+    }
     this.latestPresentationRevision = presentation.revision
     this.latestStatus = presentation.status
     this.updateStatusOverlay(presentation.status)
@@ -275,6 +296,7 @@ class Player {
       this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
       this.setActiveSource('schedule')
       void this.playMedia(deferred.item, {
+        contentEpoch: deferred.contentEpoch,
         scheduleId: deferred.scheduleId,
         renderToken: deferred.renderToken,
         singleItemFrame: deferred.singleItemFrame,
@@ -308,6 +330,10 @@ class Player {
   }
 
   private updateContentSource(status: PlayerStatus): void {
+    const runtime = ['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(status.state)
+    const unavailable = runtime && !shouldDisplaySecurityLock(status) && (Boolean(status.contentUnavailableReason) ||
+      (status.mode === 'live' && status.live?.phase !== 'LIVE' && !(status.live?.fallbackReady && ['FALLBACK', 'CONNECTING'].includes(status.live.phase))))
+    this.showContentUnavailable(unavailable)
     if (shouldDisplaySecurityLock(status)) {
       this.clearScheduledPlayback('security-lock')
       this.setActiveSource('none')
@@ -340,6 +366,18 @@ class Player {
     this.setActiveSource('default')
   }
 
+  private showContentUnavailable(visible: boolean): void {
+    if (!this.contentUnavailableOverlay && visible) {
+      const element = document.createElement('div')
+      element.id = 'content-unavailable-overlay'
+      element.textContent = 'Content unavailable'
+      Object.assign(element.style, { position: 'absolute', inset: '0', display: 'grid', placeItems: 'center', background: '#101010', color: '#fff', fontSize: '28px', zIndex: '2500' })
+      document.body.appendChild(element)
+      this.contentUnavailableOverlay = element
+    }
+    if (this.contentUnavailableOverlay) this.contentUnavailableOverlay.style.display = visible ? 'grid' : 'none'
+  }
+
   private canRenderScheduledContent(): boolean {
     return this.latestStatus ? resolvePlayerContentSource(this.latestStatus) === 'schedule' : false
   }
@@ -359,6 +397,8 @@ class Player {
    * Play media item
    */
   private async playMedia(item: TimelineItem, options: ScheduledMediaOptions = {}): Promise<void> {
+    if (!options.contentEpoch || options.contentEpoch !== this.latestStatus?.contentEpoch) return
+    this.activeContentEpoch = options.contentEpoch
     this.clearTopLevelRecoveryTimer()
     this.abortTopLevelRender()
     const sessionId = ++this.playbackSession
@@ -422,6 +462,7 @@ class Player {
           })
         : normalResumeDecision
       const progressContext = this.buildPlaybackProgressContext(item, {
+        contentEpoch: options.contentEpoch,
         scheduleId: options.scheduleId,
       })
 
@@ -454,7 +495,7 @@ class Player {
               : this.renderEmergencyMessage(item)
             if (typeof fallbackUrl !== 'string') shouldWrapEmergencyMedia = false
           } else {
-            element = await this.renderURL(item)
+            element = await this.renderURL(item, options.contentEpoch)
           }
           break
         case 'message':
@@ -481,6 +522,7 @@ class Player {
       this.currentElement = element
       const mediaId = item.mediaId || item.objectKey || item.id
       const result = await window.darshan?.reportMediaStarted?.({
+        contentEpoch: options.contentEpoch,
         itemId: item.id,
         mediaId,
         renderToken: options.renderToken || '',
@@ -732,6 +774,7 @@ class Player {
     overrides: Partial<PlaybackProgressContext> = {}
   ): PlaybackProgressContext {
     return {
+      contentEpoch: overrides.contentEpoch ?? this.activeContentEpoch,
       scheduleId:
         overrides.scheduleId ??
         this.getStringMeta(item, 'scheduleId') ??
@@ -783,6 +826,7 @@ class Player {
     const video = element
     const sendProgress = (completed: boolean = false) => {
       window.darshan.reportPlaybackProgress({
+        contentEpoch: context.contentEpoch,
         scheduleId: context.scheduleId ?? null,
         snapshotId: context.snapshotId ?? null,
         sceneId: context.sceneId ?? null,
@@ -839,7 +883,7 @@ class Player {
   /**
    * Render URL
    */
-  private async renderURL(item: TimelineItem): Promise<HTMLElement> {
+  private async renderURL(item: TimelineItem, contentEpoch?: string): Promise<HTMLElement> {
     const sourceUrl = this.getMediaSource(item)
     const fallbackUrl =
       item.localUrl ||
@@ -847,6 +891,7 @@ class Player {
       (typeof item.meta?.['fallback_url'] === 'string' ? String(item.meta?.['fallback_url']) : undefined)
 
     return createWebpagePlaybackElement({
+      contentEpoch,
       liveUrl: sourceUrl,
       fallbackUrl,
       fallbackFit: item.fit === 'stretch' ? 'fill' : item.fit,
@@ -1319,6 +1364,7 @@ class Player {
     scheduleId?: string,
     serverTimeOffsetMs: number = 0
   ): () => void {
+    const contentEpoch = this.activeContentEpoch
     const timers = new Set<number>()
     const pendingRenderControllers = new Set<AbortController>()
     let disposed = false
@@ -1367,7 +1413,7 @@ class Player {
         case 'office':
           return this.renderDocumentPlaceholder(item, compat)
         case 'url':
-          return await this.renderURL(item)
+          return await this.renderURL(item, contentEpoch)
         case 'message':
           return this.renderEmergencyMessage(item)
         default:
@@ -1426,7 +1472,7 @@ class Player {
             this.disposeScheduledElement(activeElement)
             activeElement = undefined
           }
-          this.clearActiveSlotPlayback(slot.id)
+          this.clearActiveSlotPlayback(slot.id, contentEpoch)
           if (sceneStartsAt) {
             void resolveScenePosition().then((nextPosition) => {
               void showSlotItem(nextPosition.index, nextPosition.remainingMs, nextPosition)
@@ -1458,7 +1504,7 @@ class Player {
         placeholder.style.opacity = '1'
         container.appendChild(placeholder)
         activeElement = placeholder
-        this.clearActiveSlotPlayback(slot.id)
+        this.clearActiveSlotPlayback(slot.id, contentEpoch)
 
         if (!shouldAdvanceSceneSlot(slot.items.length)) {
           const retryDelayMs = resolveSceneSlotRecoveryDelayMs(item.displayMs)
@@ -1502,6 +1548,7 @@ class Player {
             renderedElement,
             item,
             this.buildPlaybackProgressContext(item, {
+              contentEpoch,
               scheduleId: scheduleId || null,
               sceneId,
               slotId: slot.id,
@@ -1538,9 +1585,9 @@ class Player {
         const compatibility = this.getItemCompatibility(item)
         const playable = item.type === 'message' || compatibility.status === 'PLAYABLE_NOW'
         if (!shouldReportSceneSlotPlayback(item.type, resumeDecision.completed, playable)) {
-          this.clearActiveSlotPlayback(slot.id)
+          this.clearActiveSlotPlayback(slot.id, contentEpoch)
         } else {
-          this.setActiveSlotPlayback(slot.id, {
+          this.setActiveSlotPlayback(contentEpoch, slot.id, {
             scene_id: sceneId,
             slot_id: slot.id,
             item_id: item.id,
@@ -1577,7 +1624,7 @@ class Player {
         }
         container.appendChild(placeholder)
         activeElement = placeholder
-        this.clearActiveSlotPlayback(slot.id)
+        this.clearActiveSlotPlayback(slot.id, contentEpoch)
         if (!shouldAdvance) {
           const delayMs = resolveSceneSlotRecoveryDelayMs(item.displayMs)
           const timer = window.setTimeout(() => {
@@ -1601,7 +1648,7 @@ class Player {
     return () => {
       disposed = true
       renderGeneration += 1
-      this.clearActiveSlotPlayback(slot.id)
+      this.clearActiveSlotPlayback(slot.id, contentEpoch)
       pendingRenderControllers.forEach((controller) => controller.abort())
       pendingRenderControllers.clear()
       timers.forEach((timer) => window.clearTimeout(timer))
@@ -1644,17 +1691,20 @@ class Player {
 
   private reportActivePlayback(): void {
     window.darshan?.reportActivePlayback?.({
+      contentEpoch: this.activeContentEpoch,
       sceneId: this.activeSceneId,
       activeSlots: Array.from(this.activeSlotPlaybacks.values()),
     })
   }
 
-  private setActiveSlotPlayback(slotId: string, playback: ActiveSlotPlayback): void {
+  private setActiveSlotPlayback(contentEpoch: string | undefined, slotId: string, playback: ActiveSlotPlayback): void {
+    if (!contentEpoch || contentEpoch !== this.activeContentEpoch) return
     this.activeSlotPlaybacks.set(slotId, playback)
     this.reportActivePlayback()
   }
 
-  private clearActiveSlotPlayback(slotId: string): void {
+  private clearActiveSlotPlayback(slotId: string, contentEpoch: string | undefined): void {
+    if (!contentEpoch || contentEpoch !== this.activeContentEpoch) return
     if (!this.activeSlotPlaybacks.has(slotId)) {
       return
     }

@@ -33,6 +33,19 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.check_value(value), value)
         self.assertEqual(self.check_value(value, value), value)
 
+    def test_optional_authority_boot_identity_is_validated_and_cannot_change_mid_process(self):
+        boot = 'de8362cd-909e-4923-b0ec-077eb3f1ea53'
+        value = heartbeat(authority_node_instance_id=boot)
+        self.assertEqual(self.check_value(value, value), value)
+        for change in ('invalid', True):
+            with self.assertRaises(watchdog.WatchdogError):
+                self.check_value(heartbeat(authority_node_instance_id=change))
+        for following in (heartbeat(), heartbeat(authority_node_instance_id=INSTANCE)):
+            with self.assertRaisesRegex(watchdog.WatchdogError, 'AUTHORITY_INSTANCE_CHANGED'):
+                self.check_value(following, value)
+        with self.assertRaisesRegex(watchdog.WatchdogError, 'AUTHORITY_INSTANCE_CHANGED'):
+            self.check_value(value, heartbeat())
+
     def test_mount_prefix_and_escaped_components_select_the_actual_filesystem(self):
         mounts = ('1 0 8:2 / / rw - ext4 /dev/test rw\n'
                   '2 1 0:28 / /run rw - tmpfs tmpfs rw\n'
@@ -185,6 +198,96 @@ class WatchdogTests(unittest.TestCase):
         self.check_value(heartbeat())
         with self.assertRaises(watchdog.WatchdogError):
             watchdog.validate_monitor_gap(8000, 10_000)
+
+    def test_monitor_keeps_checking_pins_heartbeat_and_lease_during_docker_outage(self):
+        args = SimpleNamespace(
+            docker_context='default', container_id=ID, instance_id=INSTANCE,
+            heartbeat='/run/private/supervisor.json', heartbeat_uid=os.getuid(),
+            host_lease_file='/run/private/lease.json', witness_ready_file='/run/private/witness.json',
+            pidfd=42)
+        fence = {'pid': 123, 'started_at': 'fixed', 'start_ticks': '123'}
+        pulse = mock.Mock()
+        output = io.StringIO()
+        monotonic = iter([0.0, 0.6, 0.61, 1.2, 1.21, 1.8, 1.81, 2.4])
+        boottime = iter([1000, 1100, 1101, 1200, 1201, 1300, 1301, 1400])
+        with mock.patch.object(watchdog, 'boottime_ms', side_effect=lambda: next(boottime)), \
+                mock.patch.object(watchdog.time, 'monotonic', side_effect=lambda: next(monotonic)), \
+                mock.patch.object(watchdog.time, 'sleep'), \
+                mock.patch.object(watchdog, 'inspect_container', side_effect=[
+                    watchdog.WatchdogError('DOCKER_OPERATION_UNAVAILABLE'),
+                    watchdog.WatchdogError('DOCKER_OPERATION_UNAVAILABLE'),
+                    watchdog.WatchdogError('DOCKER_OPERATION_UNAVAILABLE'),
+                    {'State': {'Running': False}}]), \
+                mock.patch.object(watchdog, 'validate_target', return_value=None), \
+                mock.patch.object(watchdog, 'pidfd_dead', return_value=False) as pinned, \
+                mock.patch.object(watchdog, 'read_heartbeat', return_value=heartbeat(boottime_ms=1301)), \
+                mock.patch.object(watchdog, 'validate_heartbeat', return_value=heartbeat(boottime_ms=1301)), \
+                mock.patch.object(watchdog, 'HostReadinessLease', return_value=SimpleNamespace(pulse=pulse)), \
+                mock.patch.object(watchdog, 'enforce') as enforce, contextlib.redirect_stdout(output):
+            self.assertEqual(watchdog.monitor_pinned(args, fence, 'test-boot'), 0)
+        enforce.assert_not_called()
+        self.assertEqual(pinned.call_count, 4)
+        self.assertEqual(pulse.call_count, 3)
+        self.assertIn('watchdog_docker_inspection_degraded', output.getvalue())
+        self.assertIn('watchdog_target_stopped', output.getvalue())
+
+    def test_docker_inspection_recovery_revalidates_full_target_fence(self):
+        args = SimpleNamespace(
+            docker_context='default', container_id=ID, instance_id=INSTANCE,
+            heartbeat='/run/private/supervisor.json', heartbeat_uid=os.getuid(),
+            host_lease_file=None, witness_ready_file=None, pidfd=42)
+        fence = {'pid': 123, 'started_at': 'fixed', 'start_ticks': '123'}
+        output = io.StringIO()
+        monotonic = iter([0.0, 0.6, 0.61, 1.2, 1.21, 1.8])
+        boottime = iter([1000, 1100, 1101, 1200, 1201, 1300])
+        running = {'State': {'Running': True}}
+        stopped = {'State': {'Running': False}}
+        with mock.patch.object(watchdog, 'boottime_ms', side_effect=lambda: next(boottime)), \
+                mock.patch.object(watchdog.time, 'monotonic', side_effect=lambda: next(monotonic)), \
+                mock.patch.object(watchdog.time, 'sleep'), \
+                mock.patch.object(watchdog, 'pidfd_dead', return_value=False), \
+                mock.patch.object(watchdog, 'inspect_container', side_effect=[
+                    watchdog.WatchdogError('DOCKER_OPERATION_UNAVAILABLE'), running, stopped]), \
+                mock.patch.object(watchdog, 'validate_target', side_effect=[fence, None]) as validate, \
+                mock.patch.object(watchdog, 'read_heartbeat', return_value=heartbeat(boottime_ms=1201)), \
+                mock.patch.object(watchdog, 'validate_heartbeat', return_value=heartbeat(boottime_ms=1201)), \
+                mock.patch.object(watchdog, 'enforce') as enforce, contextlib.redirect_stdout(output):
+            self.assertEqual(watchdog.monitor_pinned(args, fence, 'test-boot'), 0)
+        enforce.assert_not_called()
+        self.assertEqual(validate.call_count, 2)
+        self.assertIn('watchdog_docker_inspection_recovered', output.getvalue())
+
+    def test_dead_pinned_namespace_exits_without_docker_or_heartbeat_access(self):
+        args = SimpleNamespace(
+            docker_context='default', container_id=ID, instance_id=INSTANCE,
+            heartbeat='/run/private/supervisor.json', heartbeat_uid=os.getuid(),
+            host_lease_file=None, witness_ready_file=None, pidfd=42)
+        fence = {'pid': 123, 'started_at': 'fixed', 'start_ticks': '123'}
+        output = io.StringIO()
+        with mock.patch.object(watchdog, 'boottime_ms', return_value=1000), \
+                mock.patch.object(watchdog.time, 'monotonic', return_value=0.0), \
+                mock.patch.object(watchdog, 'pidfd_dead', return_value=True), \
+                mock.patch.object(watchdog, 'inspect_container') as inspect, \
+                mock.patch.object(watchdog, 'read_heartbeat') as read, contextlib.redirect_stdout(output):
+            self.assertEqual(watchdog.monitor_pinned(args, fence, 'test-boot'), 0)
+        inspect.assert_not_called()
+        read.assert_not_called()
+        self.assertIn('watchdog_pinned_namespace_exited', output.getvalue())
+
+    def test_invalid_docker_response_is_not_treated_as_management_outage(self):
+        args = SimpleNamespace(
+            docker_context='default', container_id=ID, instance_id=INSTANCE,
+            heartbeat='/run/private/supervisor.json', heartbeat_uid=os.getuid(),
+            host_lease_file=None, witness_ready_file=None, pidfd=42)
+        fence = {'pid': 123, 'started_at': 'fixed', 'start_ticks': '123'}
+        with mock.patch.object(watchdog, 'boottime_ms', side_effect=[1000, 1100]), \
+                mock.patch.object(watchdog.time, 'monotonic', side_effect=[0.0, 0.6]), \
+                mock.patch.object(watchdog, 'pidfd_dead', return_value=False), \
+                mock.patch.object(watchdog, 'inspect_container',
+                                  side_effect=watchdog.WatchdogError('INVALID_DOCKER_RESPONSE')), \
+                mock.patch.object(watchdog, 'enforce', return_value=3) as enforce:
+            self.assertEqual(watchdog.monitor_pinned(args, fence, 'test-boot'), 3)
+        enforce.assert_called_once_with(args, 'INVALID_DOCKER_RESPONSE')
 
     def test_pidfd_fallback_does_not_signal_when_host_fence_is_wrong(self):
         fd = os.pidfd_open(os.getpid())

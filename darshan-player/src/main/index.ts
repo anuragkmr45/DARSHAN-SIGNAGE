@@ -1,6 +1,7 @@
 /** Dispatch before loading ordinary player configuration, identity or services. */
 import { app } from 'electron'
 import { assertLivePrototypeMode, parseLivePrototypeArgument } from './live-prototype/config'
+import { developmentLiveTestRoot } from './live-development-profile'
 
 try {
   const prototypePath = parseLivePrototypeArgument(process.argv)
@@ -13,10 +14,12 @@ try {
         app.exit(1)
       })
   } else {
+    const testRoot = developmentLiveTestRoot()
+    if (testRoot) app.setPath('userData', testRoot)
     // Synchronous load preserves registration of the ordinary ready handler.
     require('./application')
   }
 } catch {
-  console.error('Invalid live prototype launch; explicit dev mode and a private config are required.')
+  console.error('Invalid live launch; development overrides require their explicit private configuration.')
   app.exit(1)
 }

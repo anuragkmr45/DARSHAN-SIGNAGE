@@ -93,6 +93,10 @@ Business source and code answer can disagree. Mark observed behavior separately 
 - [ ] `LIVE-01..06`: real CMS author/hold/approve/request/direct-publish and
   presenter start/stop flows; current custom roles/departments, frozen audience,
   same-size member change, 25/26 targets, 10/11 overlaps, duplicate starts/tabs.
+  With no trusted/accepting media node or safe capacity, confirm the panel shows
+  the exact preflight state and cannot open the native capture chooser. After a
+  ready preflight, make media unavailable before Start and confirm Start still
+  rejects without publishing.
 - [ ] `LIVE-07..10`: real packaged receiver frame/audio truth, verified pinned
   fallback, missing/corrupt Content unavailable, start/end boundaries,
   three-second renewal/ten-second cutoff, emergency/security and resume cleanup.
@@ -120,3 +124,9 @@ source/reference ACL and17 pure delivery/read-model checks) plus55 supporting ru
 Source-page browser observations are separate. Repeat through the actual CMS
 publishing and ordinary-player workflow; all checkboxes above remain open.
 See [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. The current presenter-preflight increment passed 37/37 PostgreSQL/Fastify runtime cases and 31/31 focused CMS API/controller/panel cases; visible rebuilt-app repetition is still required. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+For LIVE-01..06 include the actual create-only operator review consent, required library permissions, conditional old/proposed Schedule and Item checks, exact response-loss retries, stale two-tab drafts and same-account/new-session capture disposal. For LIVE-19 distinguish server-current receiver observations from retained last reports and physical output; preserve Unknown for stale/future timestamps, pending/revoked or replaced runtime, missing reports, inactive publication and changed authority. Current source and automation exist; retain every unchecked human execution item above.

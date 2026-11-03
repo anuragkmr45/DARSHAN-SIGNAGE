@@ -1,4 +1,11 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import {
+  ADMIN_TEST_ROLE_ID,
+  ADMIN_TEST_USER_ID,
+  OPERATOR_TEST_ROLE_ID,
+  adminCapabilities,
+  testAuthorization,
+} from "./helpers/selfAuthorization";
 
 type MockUser = {
   id: string;
@@ -43,27 +50,27 @@ type MockState = {
 };
 
 const adminUser: MockUser = {
-  id: "admin-user-id",
+  id: ADMIN_TEST_USER_ID,
   email: "admin@darshan.local",
   first_name: "Admin",
   last_name: "User",
-  role_id: "role-admin",
+  role_id: ADMIN_TEST_ROLE_ID,
   role: "ADMIN",
 };
 
 const limitedUser: MockUser = {
-  id: "operator-user-id",
+  id: "00000000-0000-4000-8000-000000000004",
   email: "operator@darshan.local",
   first_name: "Operator",
   last_name: "User",
-  role_id: "role-operator",
+  role_id: OPERATOR_TEST_ROLE_ID,
   role: "OPERATOR",
 };
 
 const adminRolesPayload = {
   items: [
     {
-      id: "role-admin",
+      id: ADMIN_TEST_ROLE_ID,
       name: "ADMIN",
       description: "Administrator",
       permissions: {
@@ -83,7 +90,7 @@ const adminRolesPayload = {
 const limitedRolesPayload = {
   items: [
     {
-      id: "role-operator",
+      id: OPERATOR_TEST_ROLE_ID,
       name: "OPERATOR",
       description: "Operator",
       permissions: {
@@ -139,6 +146,17 @@ const installCommonMocks = async (
 
     if (pathname === "/api/v1/auth/logout" && method === "POST") {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true }) });
+    }
+
+    if (pathname === "/api/v1/auth/authorization" && method === "GET") {
+      const capabilities = user.role === "ADMIN"
+        ? adminCapabilities
+        : [{ action: "read", subject: "Dashboard" }];
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(testAuthorization(user, capabilities, { roleId: user.role_id })),
+      });
     }
 
     if (pathname === "/api/v1/roles" && method === "GET") {

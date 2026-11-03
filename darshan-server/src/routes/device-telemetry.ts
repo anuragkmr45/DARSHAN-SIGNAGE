@@ -68,6 +68,8 @@ import { recordDisplayProfile } from '@/services/screen-display-state-service';
 import { getScreenDisplayState, serializeDisplayState } from '@/services/screen-display-state-service';
 import { acknowledgeAppliedPublish } from '@/services/publish-delivery-service';
 import { displayProfileV1Schema } from '@/utils/display-profile';
+import { playerCapabilitiesSchema } from '@/schemas/player-capabilities';
+import { recordPlayerCapabilityReport } from '@/services/player-capabilities';
 
 const logger = createLogger('device-telemetry-routes');
 const { CREATED } = HTTP_STATUS;
@@ -156,6 +158,10 @@ const heartbeatSchema = z.object({
   player_version: z.string().optional(),
   install_instance_id: z.string().optional(),
   runtime_session_id: z.string().optional(),
+  // Legacy serial-only clients retain ordinary heartbeat behavior. Parse this
+  // new document only after genuine signature verification; never persist an
+  // unauthenticated capability claim or its arbitrary contents as telemetry.
+  player_capabilities: z.unknown().optional(),
   os_version: z.string().optional(),
   hostname: z.string().optional(),
   device_model: z.string().optional(),
@@ -928,15 +934,17 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const data = heartbeatSchema.parse(request.body);
-        await authenticateDeviceOrThrow(request, data.device_id);
+        const identity = await authenticateDeviceOrThrow(request, data.device_id);
+        const capabilities = identity.type === 'device' && identity.authMethod === 'signature' && data.player_capabilities !== undefined
+          ? playerCapabilitiesSchema.parse(data.player_capabilities) : undefined;
+        if (capabilities) {
+          z.string().uuid().parse(data.runtime_session_id);
+          const runtimeHeader = request.headers['x-darshan-runtime-session-id'] ?? request.headers['x-signhex-runtime-session-id'];
+          if (runtimeHeader !== undefined && runtimeHeader !== data.runtime_session_id) throw AppError.badRequest('Runtime session header does not match the signed heartbeat.');
+        }
+        if (capabilities) data.player_capabilities = capabilities;
+        else delete data.player_capabilities;
         const receivedAt = new Date();
-        const duplicateIdentity = await recordDeviceIdentitySession(
-          extractDeviceIdentitySessionInput(request, {
-            deviceId: data.device_id,
-            source: 'heartbeat',
-            body: data as unknown as Record<string, unknown>,
-          })
-        );
         const receivedAtIso = receivedAt.toISOString();
         const storageObjectId = randomUUID();
         const objectKey = buildHeartbeatObjectKey(data.device_id, receivedAtIso, data as unknown as Record<string, unknown>);
@@ -952,13 +960,21 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const screenStatus =
           data.status === 'ONLINE' ? 'ACTIVE' : data.status === 'OFFLINE' ? 'OFFLINE' : 'INACTIVE';
 
-        await db.transaction(async (tx) => {
+        const duplicateIdentity = await db.transaction(async (tx) => {
           const [screen] = await tx
             .select({ id: schema.screens.id, lastHeartbeatAt: schema.screens.last_heartbeat_at })
             .from(schema.screens)
             .where(eq(schema.screens.id, data.device_id))
             .for('update');
           if (!screen) throw AppError.notFound('Device not registered');
+
+          const duplicateIdentity = await recordDeviceIdentitySession(
+            extractDeviceIdentitySessionInput(request, {
+              deviceId: data.device_id, source: 'heartbeat', body: data as unknown as Record<string, unknown>,
+            }), tx
+          );
+          if (capabilities) await recordPlayerCapabilityReport({ deviceId: data.device_id, capabilities,
+            authMethod: 'signature', source: 'REST', runtimeSessionId: data.runtime_session_id, receivedAt }, tx);
 
           await recordScreenAvailabilityHeartbeat(tx, {
             screenId: data.device_id,
@@ -979,6 +995,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
               updated_at: receivedAt,
             })
             .where(eq(schema.screens.id, data.device_id));
+          return duplicateIdentity;
         });
 
         const publishDeliveryAck = data.applied_publish_id && data.applied_snapshot_id

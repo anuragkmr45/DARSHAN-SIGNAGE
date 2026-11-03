@@ -22,10 +22,11 @@ export const JOIN_SETTLE_BUDGET_MS = 500;
 
 /** In-memory enforcement authority for one SFU node. PostgreSQL remains upstream authority. */
 export class AdmissionController {
-  constructor({ adapter, isolate, signalUrl, now = () => performance.now(), maxRuns = 10, maxReceivers = 25, maxTrackedEntries = 10_000, maxPendingAuthorityChecks = 512, strictAuthority }) {
+  constructor({ adapter, isolate, signalUrl, now = () => performance.now(), maxRuns = 10, maxReceivers = 25, maxTrackedEntries = 10_000, maxPendingAuthorityChecks = 512, startHeadroom = maxRuns * (maxReceivers + 2), managedInstanceId, ready = true, strictAuthority, hostReadiness }) {
     if (typeof isolate !== 'function') throw new Error('An SFU isolation hook is required');
     if (!Number.isSafeInteger(maxTrackedEntries) || maxTrackedEntries < 1) throw new Error('Invalid tracked-state limit');
     if (!Number.isSafeInteger(maxPendingAuthorityChecks) || maxPendingAuthorityChecks < 1) throw new Error('Invalid pending authority limit');
+    if (!Number.isSafeInteger(startHeadroom) || startHeadroom < 1) throw new Error('Invalid admission maintenance headroom');
     this.adapter = adapter;
     this.isolate = isolate;
     this.signalUrl = signalUrl;
@@ -42,11 +43,16 @@ export class AdmissionController {
     this.maxTrackedEntries = maxTrackedEntries;
     if (strictAuthority && (!opaqueId(strictAuthority.nodeInstanceId) || !opaqueId(strictAuthority.authorityEpoch)
       || typeof strictAuthority.verifyAuthority !== 'function'
-      || !duration(strictAuthority.verificationTimeoutMs ?? 1500, 1500))) throw new Error('Invalid strict authority configuration');
+      || !duration(strictAuthority.verificationTimeoutMs ?? 1500, 1500)
+      || (strictAuthority.mode !== undefined && !['backend', 'strict-injected'].includes(strictAuthority.mode)))) throw new Error('Invalid strict authority configuration');
     this.strictAuthority = strictAuthority ? Object.freeze({ ...strictAuthority }) : undefined;
     this.authorityOperations = new Map();
     this.pendingAuthorityChecks = new Set();
     this.maxPendingAuthorityChecks = maxPendingAuthorityChecks;
+    this.startHeadroom = startHeadroom;
+    this.managedInstanceId = managedInstanceId;
+    this.hostReadiness = hostReadiness;
+    this.ready = ready;
     this.isolated = false;
     this.isolationComplete = false;
     this.isolationPromise = undefined;
@@ -60,6 +66,8 @@ export class AdmissionController {
 
   assertAvailable() {
     if (this.isolated) throw new MediaError('MEDIA_NODE_ISOLATED', 503);
+    if (this.strictAuthority?.mode === 'backend' && !this.hostReadiness?.check()) throw new MediaError('MEDIA_HOST_NOT_READY', 503);
+    if (!this.ready) throw new MediaError('MEDIA_NODE_NOT_READY', 503);
   }
 
   trackState(keys) {
@@ -82,8 +90,9 @@ export class AdmissionController {
   }
 
   identityView() {
-    return this.strictAuthority ? { node_instance_id: this.strictAuthority.nodeInstanceId,
-      authority_epoch: this.strictAuthority.authorityEpoch } : {};
+    return this.strictAuthority ? { protocol_version: 1, node_instance_id: this.strictAuthority.nodeInstanceId,
+      authority_epoch: this.strictAuthority.authorityEpoch,
+      ...(this.managedInstanceId ? { managed_instance_id: this.managedInstanceId } : {}) } : {};
   }
 
   validateFence(input) {
@@ -121,6 +130,12 @@ export class AdmissionController {
     const target = this.admissionTarget(id, input);
     this.assertNotRevoked(id, target.run_id, target.generation);
     if (action !== 'CREATE') this.assertCurrent(this.get(id), target.generation);
+    if (action === 'CREATE' && this.strictAuthority.mode === 'backend'
+      && !this.occupiedAdmissions().some(entry => entry.runId === target.run_id && entry.generation === target.generation)
+      && ![...this.pendingAuthorityChecks].some(entry => entry.runId === target.run_id && entry.generation === target.generation)
+      && this.maxTrackedEntries - this.trackedStateKeys.size < this.startHeadroom) {
+      throw new MediaError('MEDIA_NODE_MAINTENANCE_REQUIRED', 503);
+    }
     if (this.pendingAuthorityChecks.size >= this.maxPendingAuthorityChecks) {
       void this.isolateNode('AUTHORITY_CHECK_CAPACITY_EXHAUSTED');
       throw new MediaError('AUTHORITY_CHECK_CAPACITY_EXHAUSTED', 503);
@@ -154,7 +169,7 @@ export class AdmissionController {
         || grant.authority_epoch !== this.strictAuthority.authorityEpoch || grant.operation_revision !== operation.revision
         || grant.id !== id || grant.run_id !== target.run_id || grant.generation !== target.generation) throw new MediaError('AUTHORITY_RESPONSE_MISMATCH', 403);
       if (grant.allowed === false) {
-        await this.revoke(id, 'AUTHORITY_DENIED');
+        await this.revoke(id, 'AUTHORITY_DENIED', target);
         throw new MediaError('AUTHORITY_DENIED', 403);
       }
       requireValue(grant.allowed === true, 'AUTHORITY_RESPONSE_INVALID', 403);
@@ -220,12 +235,13 @@ export class AdmissionController {
   }
 
   async revokeAuthorized(id, input) {
+    let target;
     if (this.strictAuthority) {
       this.validateFence(input);
-      const target = this.admissionTarget(id, input);
+      target = this.admissionTarget(id, input);
       this.claimAuthorityOperation(`admission:${id}`, input, target, 'REVOKE');
     }
-    return this.revoke(id);
+    return this.revoke(id, 'REVOKED', target);
   }
 
   async revokeRunAuthorized(runId, input) {
@@ -395,12 +411,14 @@ export class AdmissionController {
     await this.remove(entry, false);
   }
 
-  async revoke(id, reason = 'REVOKED') {
+  async revoke(id, reason = 'REVOKED', target) {
     requireValue(opaqueId(id), 'INVALID_ID');
     this.trackState([`admission:${id}`]);
     // Retain unknown IDs too: a delayed create cannot resurrect an earlier stop.
-    this.admissionTombstones.set(id, reason);
     const entry = this.admissions.get(id);
+    const previous = this.admissionTombstones.get(id);
+    this.admissionTombstones.set(id, { reason, runId: entry?.runId ?? target?.run_id ?? previous?.runId,
+      generation: entry?.generation ?? target?.generation ?? previous?.generation });
     if (!entry) return this.revokedAdmissionView(id);
     entry.revokeReason = reason;
     this.invalidateTicket(entry);
@@ -409,7 +427,9 @@ export class AdmissionController {
   }
 
   revokedAdmissionView(id) {
+    const target = this.admissionTombstones.get(id);
     return { admission_id: id, state: 'REVOKED', lease_ms: 0, window_remaining_ms: 0,
+      ...(target?.runId ? { run_id: target.runId, generation: target.generation } : {}),
       teardown_confirmed: true, teardown_reason: 'ADMISSION_NEVER_CREATED', ...this.identityView() };
   }
 
@@ -502,6 +522,7 @@ export class AdmissionController {
   }
 
   async sweep() {
+    if (this.strictAuthority?.mode === 'backend') this.hostReadiness?.check();
     const now = this.now();
     await Promise.all([...this.admissions.values()]
       .filter((entry) => entry.state !== 'REVOKED' && now >= entry.deadline - CLEANUP_BUDGET_MS)
@@ -509,10 +530,16 @@ export class AdmissionController {
   }
 
   health() {
-    return { status: this.isolated ? 'isolated' : 'ready', isolation_complete: this.isolationComplete,
+    const hostReady = this.strictAuthority?.mode !== 'backend' || this.hostReadiness?.check() === true;
+    const remaining = this.maxTrackedEntries - this.trackedStateKeys.size;
+    const maintenance = this.strictAuthority?.mode === 'backend' && remaining < this.startHeadroom;
+    return { status: this.isolated ? 'isolated' : this.ready && hostReady ? 'ready' : 'starting', isolation_complete: this.isolationComplete,
       active_admissions: this.occupiedAdmissions().length,
       occupied_runs: new Set(this.occupiedAdmissions().map(entry => entry.room)).size,
       tracked_entries: this.trackedStateKeys.size, tracked_entry_limit: this.maxTrackedEntries,
-      authority_mode: this.strictAuthority ? 'strict-injected' : 'prototype', ...this.identityView() };
+      tracked_remaining: remaining, required_start_headroom: this.startHeadroom,
+      accepting_new_runs: !this.isolated && this.ready && hostReady && !maintenance, maintenance_reason: maintenance ? 'TRACKED_STATE_HEADROOM_LOW' : null,
+      pending_authority_checks: this.pendingAuthorityChecks.size, pending_check_limit: this.maxPendingAuthorityChecks,
+      authority_mode: this.strictAuthority ? this.strictAuthority.mode ?? 'strict-injected' : 'prototype', ...this.identityView() };
   }
 }

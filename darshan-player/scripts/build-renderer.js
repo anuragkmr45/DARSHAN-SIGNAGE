@@ -25,7 +25,7 @@ async function build() {
       external: ['electron'], // Don't bundle electron
     })
 
-    for (const name of ['live-prototype', 'live-prototype-shell']) {
+    for (const name of ['live-prototype', 'live-prototype-shell', 'live-receiver']) {
       await esbuild.build({
         entryPoints: [path.join(__dirname, `../src/renderer/${name}.ts`)], bundle: true,
         outfile: path.join(__dirname, `../dist/renderer/${name}.bundle.js`), platform: 'browser',

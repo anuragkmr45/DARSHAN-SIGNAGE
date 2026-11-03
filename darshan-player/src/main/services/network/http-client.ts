@@ -23,6 +23,7 @@ declare module 'axios' {
     mtls?: boolean
     retry?: boolean
     retryPolicy?: RetryPolicy
+    darshanTransportGeneration?: number
   }
 }
 
@@ -36,12 +37,16 @@ export class HttpClient {
   private client: AxiosInstance
   private mtlsEnabled: boolean
   private transportTls: AppConfig['transportTls']
+  private transportGeneration = 0
+  private transportUnavailable = false
+  private transportConfigKey: string
 
   constructor() {
     const config = getConfigManager().getConfig()
     this.mtlsEnabled = config.mtls.enabled
     this.transportTls = config.transportTls
     const transportAgent = createTransportHttpsAgent(this.transportTls)
+    this.transportConfigKey = this.configurationKey(config, transportAgent)
 
     this.client = axios.create({
       baseURL: config.apiBase,
@@ -63,9 +68,13 @@ export class HttpClient {
   private setupInterceptors(): void {
     this.client.interceptors.request.use(
       async (config) => {
+        const generation = config.darshanTransportGeneration ?? this.transportGeneration
+        if (this.transportUnavailable || generation !== this.transportGeneration) throw this.configurationError()
+        config.darshanTransportGeneration = generation
         const shouldUseMtls = this.mtlsEnabled && config.mtls !== false && this.isHttpsRequest(config)
         if (shouldUseMtls) {
-          config.httpsAgent = await this.createMTLSAgent()
+          try { config.httpsAgent = await this.createMTLSAgent() }
+          catch (error) { if (this.transportUnavailable || generation !== this.transportGeneration) throw this.configurationError(); throw error }
         }
 
         if (this.isDeviceEndpoint(config.url || '')) {
@@ -107,21 +116,29 @@ export class HttpClient {
           config.headers = headers
         }
 
+        if (this.transportUnavailable || generation !== this.transportGeneration) throw this.configurationError()
         return config
       },
       (error) => Promise.reject(error)
     )
 
     this.client.interceptors.response.use(
-      (response) => response,
-      (error) => Promise.reject(this.normalizeError(error))
+      (response) => {
+        if (this.transportUnavailable || response.config.darshanTransportGeneration !== this.transportGeneration) throw this.configurationError()
+        return response
+      },
+      (error) => {
+        const generation = (error as AxiosError)?.config?.darshanTransportGeneration
+        return Promise.reject(this.transportUnavailable || (generation !== undefined && generation !== this.transportGeneration)
+          ? this.configurationError() : this.normalizeError(error))
+      }
     )
   }
 
   async get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
     return await this.executeWithRetry(
       async () => {
-        const response = await this.client.get<T>(url, config)
+        const response = await this.client.get<T>(url, this.boundConfiguration(config))
         return response.data
       },
       url,
@@ -131,13 +148,13 @@ export class HttpClient {
   }
 
   async getResponse<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
-    return await this.executeWithRetry(async () => await this.client.get<T>(url, config), url, 'GET', config)
+    return await this.executeWithRetry(async () => await this.client.get<T>(url, this.boundConfiguration(config)), url, 'GET', config)
   }
 
   async post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return await this.executeWithRetry(
       async () => {
-        const response = await this.client.post<T>(url, data, config)
+        const response = await this.client.post<T>(url, data, this.boundConfiguration(config))
         return response.data
       },
       url,
@@ -149,7 +166,7 @@ export class HttpClient {
   async put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return await this.executeWithRetry(
       async () => {
-        const response = await this.client.put<T>(url, data, config)
+        const response = await this.client.put<T>(url, data, this.boundConfiguration(config))
         return response.data
       },
       url,
@@ -161,7 +178,7 @@ export class HttpClient {
   async delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T> {
     return await this.executeWithRetry(
       async () => {
-        const response = await this.client.delete<T>(url, config)
+        const response = await this.client.delete<T>(url, this.boundConfiguration(config))
         return response.data
       },
       url,
@@ -171,7 +188,7 @@ export class HttpClient {
   }
 
   async head(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse> {
-    return await this.client.head(url, config)
+    return await this.client.head(url, this.boundConfiguration(config))
   }
 
   async checkConnectivity(): Promise<boolean> {
@@ -193,12 +210,12 @@ export class HttpClient {
 
     for (const endpoint of endpoints) {
       try {
-        const response = await this.client.get(endpoint, {
+        const response = await this.client.get(endpoint, this.boundConfiguration({
           timeout: 5000,
           validateStatus: () => true,
           mtls: false,
           retry: false,
-        })
+        }))
 
         if (response.status >= 200 && response.status < 300) {
           return { ok: true, baseURL: diagnosticBaseURL, endpoint, status: response.status }
@@ -241,8 +258,33 @@ export class HttpClient {
   }
 
   applyConfig(config: AppConfig): void {
+    let agent: https.Agent | undefined
+    try { agent = createTransportHttpsAgent(config.transportTls) }
+    catch {
+      this.transportUnavailable = true
+      this.transportGeneration += 1
+      throw this.configurationError()
+    }
+    const key = this.configurationKey(config, agent)
+    if (this.transportUnavailable || key !== this.transportConfigKey) this.transportGeneration += 1
     this.mtlsEnabled = config.mtls.enabled
+    this.transportTls = config.transportTls
+    this.client.defaults.httpsAgent = agent
     this.setBaseURL(config.apiBase)
+    this.transportConfigKey = key
+    this.transportUnavailable = false
+  }
+
+  private configurationKey(config: AppConfig, agent?: https.Agent): string {
+    return JSON.stringify([config.apiBase, config.deviceId, config.environment, config.mtls, config.transportTls, agent?.options.ca])
+  }
+
+  private configurationError(): DeviceApiError {
+    return new DeviceApiError({ code: 'NETWORK_ERROR', message: 'HTTP transport configuration changed or is unavailable', transient: false })
+  }
+
+  private boundConfiguration(config?: AxiosRequestConfig): AxiosRequestConfig {
+    return { ...config, darshanTransportGeneration: this.transportGeneration }
   }
 
   getAxiosInstance(): AxiosInstance {
@@ -255,12 +297,17 @@ export class HttpClient {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     config?: AxiosRequestConfig
   ): Promise<T> {
+    const generation = this.transportGeneration
+    const current = (): Promise<T> => {
+      if (this.transportUnavailable || generation !== this.transportGeneration) throw this.configurationError()
+      return fn()
+    }
     if (config?.retry === false) {
-      return await fn()
+      return await current()
     }
 
     const policy = config?.retryPolicy || DEFAULT_RETRY_POLICY
-    return await retryWithBackoff(fn, {
+    return await retryWithBackoff(current, {
       maxAttempts: policy.maxAttempts,
       baseDelayMs: policy.baseDelayMs,
       maxDelayMs: policy.maxDelayMs,

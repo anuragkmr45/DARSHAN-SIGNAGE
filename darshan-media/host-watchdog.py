@@ -195,8 +195,14 @@ def read_heartbeat(filename, expected_uid):
 def validate_heartbeat(value, instance, start_ticks, boot_id, now_ms, previous=None):
     fields = {'schema_version', 'instance_id', 'supervisor_pid', 'process_start_ticks',
               'sequence', 'boottime_ms', 'boot_id', 'phase'}
-    if set(value) != fields or value.get('schema_version') != 1:
+    optional = {'authority_node_instance_id'}
+    if set(value) not in (fields, fields | optional) or value.get('schema_version') != 1:
         raise WatchdogError('HEARTBEAT_SCHEMA_REJECTED')
+    if 'authority_node_instance_id' in value and (not isinstance(value['authority_node_instance_id'], str)
+                                                or not UUID.fullmatch(value['authority_node_instance_id'])):
+        raise WatchdogError('HEARTBEAT_AUTHORITY_INSTANCE_REJECTED')
+    if previous and value.get('authority_node_instance_id') != previous.get('authority_node_instance_id'):
+        raise WatchdogError('HEARTBEAT_AUTHORITY_INSTANCE_CHANGED')
     if value.get('instance_id') != instance or value.get('supervisor_pid') != 1 or value.get('process_start_ticks') != start_ticks:
         raise WatchdogError('HEARTBEAT_INSTANCE_REJECTED')
     if value.get('boot_id') != boot_id:
@@ -221,6 +227,79 @@ def validate_monitor_gap(previous_boottime, now_ms):
 
 def event(name, **values):
     print(json.dumps({'event': name, **values}, separators=(',', ':')), flush=True)
+
+
+class HostReadinessLease:
+    """Optional production gate: only the independently pinned host can pulse.
+
+    The witness marker is another root-owned, advancing host loop. Neither
+    marker nor this lease is writable inside the media namespace.
+    """
+    def __init__(self, lease_file, witness_file, instance):
+        self.lease = pathlib.Path(lease_file)
+        self.witness = pathlib.Path(witness_file)
+        self.instance = instance
+        self.sequence = 0
+        self.last_witness_sequence = None
+        self.last_progress = None
+        if os.geteuid() != 0 or not self.lease.is_absolute() or not self.witness.is_absolute():
+            raise WatchdogError('HOST_LEASE_CONFIGURATION_REJECTED')
+        for parent in (self.lease.parent, self.witness.parent):
+            metadata = os.lstat(parent)
+            if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022):
+                raise WatchdogError('HOST_LEASE_DIRECTORY_REJECTED')
+            require_tmpfs(parent)
+
+    def pulse(self, heartbeat, now=None):
+        now = time.monotonic() if now is None else now
+        authority = heartbeat.get('authority_node_instance_id')
+        if not isinstance(authority, str) or not UUID.fullmatch(authority):
+            raise WatchdogError('HOST_LEASE_AUTHORITY_REQUIRED')
+        try:
+            fd = os.open(self.witness, os.O_RDONLY | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            if self.last_progress is None:
+                return False  # Boot metadata is visible; admissions remain closed.
+            raise WatchdogError('HOST_WITNESS_LEASE_MISSING') from None
+        try:
+            metadata = os.fstat(fd)
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022
+                    or metadata.st_nlink not in (0, 1)):
+                raise WatchdogError('HOST_WITNESS_LEASE_OWNERSHIP')
+            raw = os.read(fd, 4097)
+            if len(raw) > 4096:
+                raise WatchdogError('HOST_WITNESS_LEASE_INVALID')
+            value = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise WatchdogError('HOST_WITNESS_LEASE_INVALID') from None
+        finally:
+            os.close(fd)
+        expected = {'version', 'node_instance_id', 'managed_instance_id', 'sequence', 'pid', 'start_ticks'}
+        if (not isinstance(value, dict) or set(value) != expected or type(value.get('version')) is not int or value.get('version') != 1 or value.get('node_instance_id') != authority
+                or value.get('managed_instance_id') != self.instance or type(value.get('sequence')) is not int
+                or not 1 <= value['sequence'] <= 2**53 - 1 or type(value.get('pid')) is not int or value['pid'] <= 1
+                or not isinstance(value.get('start_ticks'), str) or not value['start_ticks'].isdigit()):
+            raise WatchdogError('HOST_WITNESS_LEASE_BINDING')
+        if process_start_ticks(value['pid']) != value['start_ticks']:
+            raise WatchdogError('HOST_WITNESS_PROCESS_CHANGED')
+        if self.last_witness_sequence is not None and value['sequence'] < self.last_witness_sequence:
+            raise WatchdogError('HOST_WITNESS_LEASE_REPLAY')
+        if self.last_witness_sequence != value['sequence']:
+            self.last_witness_sequence, self.last_progress = value['sequence'], now
+        if now - self.last_progress > 1.0:
+            raise WatchdogError('HOST_WITNESS_LEASE_STALE')
+        self.sequence += 1
+        payload = {'version': 1, 'node_instance_id': authority, 'managed_instance_id': self.instance,
+                   'sequence': self.sequence, 'ready': True}
+        temporary = self.lease.with_name('.pulse-%s-%s' % (os.getpid(), self.sequence))
+        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o644)
+        try:
+            os.fchmod(fd, 0o644)
+            os.write(fd, json.dumps(payload, separators=(',', ':')).encode())
+        finally:
+            os.close(fd)
+        os.replace(temporary, self.lease)
+        return True
 
 
 def pin_pidfd(args, fence, boot_id):
@@ -354,22 +433,46 @@ def monitor_pinned(args, fence, boot_id):
     previous = None
     ready = False
     last_inspect = time.monotonic()
+    docker_unavailable_since = None
     last_boottime = began
+    try:
+        lease = HostReadinessLease(args.host_lease_file, args.witness_ready_file, args.instance_id) if getattr(args, 'host_lease_file', None) else None
+    except (WatchdogError, OSError):
+        event('watchdog_configuration_rejected', code='HOST_LEASE_CONFIGURATION_REJECTED')
+        return 2
     while True:
         tick = time.monotonic()
         try:
+            # The pidfd is the immutable process-lifetime fence established
+            # while the local Docker endpoint and full container identity were
+            # available. Docker daemon availability is not media authority.
+            if pidfd_dead(args.pidfd):
+                event('watchdog_pinned_namespace_exited', container_id=args.container_id[:12])
+                return 0
             # A fresh post-resume heartbeat must not hide suspended/stalled monitoring.
             now = boottime_ms()
             validate_monitor_gap(last_boottime, now)
             last_boottime = now
             if tick - last_inspect >= 0.5:
-                info = inspect_container(args.docker_context, args.container_id)
-                current = validate_target(info, args.container_id, args.instance_id, args.heartbeat)
-                if current is None:
-                    event('watchdog_target_stopped')
-                    return 0
-                if current != fence:
-                    return enforce(args, 'CONTAINER_START_FENCE_CHANGED')
+                try:
+                    info = inspect_container(args.docker_context, args.container_id)
+                except WatchdogError as error:
+                    if str(error) != 'DOCKER_OPERATION_UNAVAILABLE':
+                        raise
+                    if docker_unavailable_since is None:
+                        docker_unavailable_since = tick
+                        event('watchdog_docker_inspection_degraded')
+                else:
+                    current = validate_target(info, args.container_id, args.instance_id, args.heartbeat)
+                    if current is None:
+                        event('watchdog_target_stopped')
+                        return 0
+                    if current != fence:
+                        return enforce(args, 'CONTAINER_START_FENCE_CHANGED')
+                    if docker_unavailable_since is not None:
+                        event('watchdog_docker_inspection_recovered',
+                              degraded_ms=max(0, int((tick - docker_unavailable_since) * 1000)))
+                    docker_unavailable_since = None
                 last_inspect = tick
             now = boottime_ms()
             try:
@@ -386,6 +489,8 @@ def monitor_pinned(args, fence, boot_id):
             if now - heartbeat['boottime_ms'] > 1500:
                 return enforce(args, 'SUPERVISOR_HEARTBEAT_STALE')
             previous = heartbeat
+            if lease:
+                lease.pulse(heartbeat)
             if not ready:
                 ready = True
                 event('watchdog_ready', container_id=args.container_id[:12], instance_id=args.instance_id,
@@ -407,10 +512,13 @@ def main():
     parser.add_argument('--heartbeat', required=True)
     parser.add_argument('--heartbeat-uid', type=int, default=os.getuid())
     parser.add_argument('--docker-context', default='default')
+    parser.add_argument('--host-lease-file')
+    parser.add_argument('--witness-ready-file')
     args = parser.parse_args()
     if (not re.fullmatch(r'[0-9a-f]{64}', args.container_id) or not UUID.fullmatch(args.instance_id)
             or args.heartbeat_uid < 0 or not re.fullmatch(r'[A-Za-z0-9_.-]+', args.docker_context)
-            or not os.path.isabs(args.heartbeat) or os.path.abspath(args.heartbeat) != args.heartbeat):
+            or not os.path.isabs(args.heartbeat) or os.path.abspath(args.heartbeat) != args.heartbeat
+            or bool(args.host_lease_file) != bool(args.witness_ready_file)):
         event('watchdog_configuration_rejected')
         return 2
     return monitor(args)

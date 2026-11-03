@@ -22,6 +22,8 @@ import type { PlaybackProgressEntry, PlaybackProgressIdentity } from '../common/
 
 // Define the API that will be exposed to the renderer
 export interface DarshanAPI {
+  onContentDisposal: (listener: (request: { contentEpoch: string; requestId: string }) => void) => () => void
+  acknowledgeContentDisposal: (request: { contentEpoch: string; requestId: string }) => void
   // Playback
   onPlaybackUpdate: (callback: (data: unknown) => void) => void
   onMediaChange: (callback: (data: unknown) => void) => void
@@ -55,14 +57,15 @@ export interface DarshanAPI {
 
   // Commands
   executeCommand: (command: string, payload?: unknown) => Promise<unknown>
-  reportActivePlayback: (payload: { sceneId?: string; activeSlots: ActiveSlotPlayback[] }) => void
+  reportActivePlayback: (payload: { contentEpoch?: string; sceneId?: string; activeSlots: ActiveSlotPlayback[] }) => void
   reportMediaStarted: (payload: {
     itemId: string
     mediaId: string
     renderToken: string
+    contentEpoch?: string
     pageNumber?: number
   }) => Promise<{ accepted: boolean }>
-  reportPlaybackProgress: (payload: PlaybackProgressEntry) => void
+  reportPlaybackProgress: (payload: PlaybackProgressEntry & { contentEpoch?: string }) => void
   reportViewport: (payload: {
     width_css_px: number
     height_css_px: number
@@ -91,6 +94,12 @@ export interface DarshanAPI {
 }
 
 const darshanApi: DarshanAPI = {
+  onContentDisposal: listener => {
+    const receive = (_event: Electron.IpcRendererEvent, request: { contentEpoch: string; requestId: string }): void => listener(request)
+    ipcRenderer.on('playback-owner:dispose', receive)
+    return () => ipcRenderer.removeListener('playback-owner:dispose', receive)
+  },
+  acknowledgeContentDisposal: request => ipcRenderer.send('playback-owner:disposed', request),
   // Playback events
   onPlaybackUpdate: (callback: (data: unknown) => void) => {
     ipcRenderer.on('playback-update', (_event, data) => callback(data))

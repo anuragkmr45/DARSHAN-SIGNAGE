@@ -111,3 +111,11 @@ fixtures; this is not whole-environment cleanup or normal-player acceptance.
 The committed sanitized JSON contains IDs/statuses/hashes, never configuration,
 passwords, cookies, signed URLs or private keys. Existing environment and
 production safety rules remain unchanged.
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+The new observed CMS journey used a future scheduled window and one synthetic screen with explicit test capability; it did not alter the existing paired baseline. Backend route tests create uniquely named owned *_test databases/schemas, read the source catalog read-only and drop only their own database after pool closure. Signed six-role fixtures/config/Compose validation deliberately skipped Docker runtime; no production artifact installation is claimed.
+
+For the next native gate prepare actual root-owned0755 volatile host lease parent and root-owned0644 pulse, bound read-only under /run inside UID1000 media, separate media-owned RW supervisor heartbeat, host-only death-witness credentials, trusted HTTPS/WSS and explicit VM/hostname inputs. No IP address or PKI trust is inferred. Current native root-owned mount/host actuation was not performed where sudo authentication was unavailable. Keep Windows, browser chooser/audio, physical displays, cross-VM faults and restore/capacity as separate environments/evidence.

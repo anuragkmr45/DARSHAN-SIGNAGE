@@ -1,14 +1,13 @@
 # DARSHAN Human QA Planning Package
 
-> **Live broadcast delta — 2026-11-03:** source/fallback/publication and recovery
-> prerequisites are partially verified on `codex/live-screen-broadcast-planning-20261103`.
-> Source checkpoint `e546630` adds current presenter eligibility, preserved live
-> desired-state versions, exact fallback repair and injectable media fencing.
-> See [prerequisite evidence](evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md)
-> and the earlier [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
-> Production Backend run/admission authority, normal-player live integration,
-> complete CMS presenter/publishing controls and host pidfd/AppArmor remain open.
-> `LIVE-01..20` stay **Not Tested**; no feature, beta or release pass is claimed.
+> **Live runtime/authoring delta — 2026-11-03:** Backend run/admission/epoch/
+> outbox authority, normal-player integration, CMS authoring/presenter/target
+> reports and sixth-role packaging now have source implementations on
+> `codex/live-screen-broadcast-planning-20261103`. Live runtime remains default
+> **OFF**. Verification is partial; the actual native capture → current Backend/
+> media → normal-player frame/audio journey and production host enforcement are
+> still open. See [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) for final source/build bindings and bounded results.
+> All `LIVE-01..20` remain **Not Tested**. No loop, beta or release approval is claimed.
 
 Status: **PRE-QA DEVELOPMENT VERIFICATION IN PROGRESS; not release-approved.**
 The document/video/boundary/security-recovery upgrade has passed focused and
@@ -90,7 +89,8 @@ must not be read as runtime completion or independent QA approval.
 20. [Player delivery, availability and observability developer verification](evidence/dashboard-observability-report-developer-verification-2026-11-02.md): beta6 automated, source-free and packaged-player evidence plus the exact five-VM and physical-player gates still open.
 21. [Chat and notification developer verification](evidence/chat-notifications-developer-verification-2026-11-03.md): local three-session behavior, corrected defects, automated checks and remaining independent QA gates. Execute `CHAT-01..08` for the human matrix.
 22. [Live publication/authorization developer verification](evidence/live-publication-authorization-developer-verification-2026-11-03.md): capability-gated frozen request/direct publication, scoped reads, real-service immutable downloads and source UI observations; the normal-player broadcast workflow and independent `LIVE-01..20` execution remain open.
-23. [Live recovery prerequisite developer verification](evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md): source-bound desired-state preservation, actual publication repeat, exact fallback repair and fixture-authority/SFU enforcement; production authority, same-player integration and host pidfd/AppArmor remain open.
+23. [Live recovery prerequisite developer verification](evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md): historical `e546630` desired-state, publication, cache and fixture-SFU checkpoint; it predates the current runtime integration.
+24. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md): current default-OFF runtime/authoring/media/deployment source packet, actual bounded CMS approval journey, source/build bindings and remaining integrated/release gates.
 
 The inventory is supporting evidence, not a completed authorization audit. Source references are repository-relative. Only results explicitly linked to the dated runtime report are current execution evidence; test-file presence and historical QA reports do not mean tests currently pass.
 
@@ -153,7 +153,7 @@ risks**, **152 traceability rows**; 120 Not Tested,
 30 Partially Tested and no independent QA Pass.
 New scope is `UC-030..032`, `BR-109..116`, `BQ-027`, `R-44..51`, `LIVE-01..20`.
 
-The finished feature is a scheduled live event/media source in the same ordinary
+The accepted final feature is a scheduled live event/media source in the same ordinary
 installed DARSHAN desktop player and normal pairing/lifecycle/cache/emergency.
 The temporary prototype is a technical gate. Current code additionally implements
 source authoring, immutable fallback preparation and capability-gated frozen
@@ -165,14 +165,26 @@ nullable live-version preservation across writers and callers, strict injected
 media fencing and exact-asset fallback repair. Its final source-bound publication
 repeat passed 55 checks/15 SHA downloads; cache units passed 464 plus 5 integration/
 21 fault checks, and media protocol evidence used an isolated fixture authority.
-These are prerequisite/component results. Production Backend run admission,
-normal-player live rendering, complete CMS controls, direct host pidfd/AppArmor
-and independent human acceptance remain open. See the dated prerequisite and
+These are prerequisite/component results. At those historical publication/prerequisite checkpoints, production run authority
+and normal-player/CMS integration were still pending. They now have source
+implementations as described in the current checkpoint below; actual integrated
+frame/audio, production host pidfd/AppArmor and independent acceptance remain open. See the dated prerequisite and
 publication reports for exact sources, developer build hashes and remaining gates.
 
 Use [contract](../docs/contracts/live-broadcast.md), [execution loops](../docs/plans/live-broadcast-implementation-loops.md) and
 [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md). The expected behavior is accepted; code and
 runtime verification remain in progress. Add runtime results only with exact
 source/artifact/environment identifiers. Keep QA-owned fields independent and
-all existing release blockers visible. No installed `qa-master-checklist` skill
-was found; this packet follows the existing Acceptance Controls above.
+all existing release blockers visible. The repository-local
+[qa-master-checklist skill](../.codex/skills/qa-master-checklist/SKILL.md) separates
+developer evidence from independent human results and governs this refresh.
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+Actual CMS developer observation: source creation → fallback READY → saved draft/reopen → revision1 review with rendered image → one submitted request → frozen request preview → Approve/Publish success for a future window and one synthetic screen. The existing paired baseline was untouched. This does not demonstrate native capture, a receiver connection/frame/audio or physical display/PoP.
+
+Bounded automated results: Backend runtime 43/4 and neighbors 79/7; authoring 22/22 (after a21-pass/1-fail conditional-Schedule repro and fix); request preview 7/7; targets 6/6; media Node 108 pass/8 opt-in skipped. CMS 248/39 passed before the final create-only consent/page-gate corrections; later final full/build results must be read from the dated ledger. Normal-player source integration is present, with final gates recorded by its owner. Deployment fixtures passed 18 combined configuration/Compose checks (17 configuration + 1 Compose), 11 host-witness and 16 watchdog checks, including signed optional-role fixture validation with Docker deliberately skipped; they are not an installed production artifact.
+
+Open gates include current native CMS capture/audio → configured Backend/media → newly built ordinary player, root-owned RO tmpfs host-readiness/death witness, native host pidfd/AppArmor, Windows/physical/cross-VM TLS/firewall, 10×25 capacity/soak, restore and independent human acceptance. No sudo authentication or safe native root-owned mount proof was available in this checkpoint.

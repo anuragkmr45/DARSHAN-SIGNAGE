@@ -102,7 +102,7 @@ export async function collectLiveFallbackPreparationSource(createdBy: string, pr
   const membership = await getUserDepartments(user.id, executor);
   const actor = { userId: user.id, roleName: role.name, departmentId: user.department_id,
     departmentIds: membership?.departmentIds ?? [] };
-  const ability = await defineAbilityFor(role.id, user.id, user.department_id ?? undefined);
+  const ability = await defineAbilityFor(role.id, user.id, user.department_id ?? undefined, executor);
   assertCanPrepareLiveFallback({ ability });
   return collectLiveFallbackSource({ actor, ability, executor }, presentationId);
 }
@@ -238,6 +238,10 @@ async function preparedFallback(context: MutationAuthorizationContext, presentat
   catch (error) { if (error instanceof LiveFallbackManifestError) fail(error.code, 'The prepared fallback graph is invalid.', 422, { reason: error.reason }); throw error; }
 }
 
+// Authoring previews must use the same normalized immutable graph checks as
+// approval, rather than presenting mutable library URLs as the prepared bytes.
+export { preparedFallback as readCurrentPreparedLiveFallback };
+
 /** Caller order: current sorted shared identity locks → global target lock →
  * schedule row lock → this function. Hints authorize no data: any changed
  * presenter/policy identity returns409 before a late user lock could deadlock. */
@@ -277,7 +281,7 @@ export async function prepareLiveSchedule(context: MutationAuthorizationContext,
     // Approval must not reserve an occurrence that its assigned presenter is
     // already forbidden to start. The role graph and presenter identity are
     // locked by the caller; bind conditional/inherited grants to this source.
-    const presenterAbility = await defineAbilityFor(presenter.role_id, presenter.id, presenter.department_id ?? undefined);
+    const presenterAbility = await defineAbilityFor(presenter.role_id, presenter.id, presenter.department_id ?? undefined, context.executor);
     if (!presenterAbility.can('publish', subject('LiveBroadcast', session) as never)) {
       fail('LIVE_PRESENTER_UNAVAILABLE', 'The assigned presenter does not currently have permission to broadcast this source.', 422);
     }

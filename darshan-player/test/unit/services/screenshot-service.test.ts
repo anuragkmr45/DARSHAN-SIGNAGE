@@ -63,6 +63,28 @@ describe('Screenshot Service', () => {
     })
   })
 
+  it('captures the visible authorized content provider instead of the hidden ordinary renderer', async () => {
+    const { getScreenshotService } = require('../../../src/main/services/screenshot-service')
+    const service = getScreenshotService()
+    const live = { toPNG: () => Buffer.from('actual-live-view') }
+    const ordinary = sandbox.stub().resolves({ toPNG: () => Buffer.from('ordinary-renderer') })
+    service.initialize({ webContents: { capturePage: ordinary } })
+    service.setContentCaptureProvider(async () => live)
+    expect(await service.capture()).to.equal(live)
+    expect(ordinary.called).to.equal(false)
+  })
+
+  it('uses ordinary content when the managed view is hidden or its lease expired during capture', async () => {
+    const { getScreenshotService } = require('../../../src/main/services/screenshot-service')
+    const service = getScreenshotService()
+    const image = { toPNG: () => Buffer.from('current-ordinary') }
+    const ordinary = sandbox.stub().resolves(image)
+    service.initialize({ webContents: { capturePage: ordinary } })
+    service.setContentCaptureProvider(async () => undefined)
+    expect(await service.capture()).to.equal(image)
+    expect(ordinary.calledOnce).to.equal(true)
+  })
+
   it('queues screenshot uploads for retry on non-auth failures and removes the local file', async () => {
     const { getScreenshotService } = require('../../../src/main/services/screenshot-service')
     const { getPairingService } = require('../../../src/main/services/pairing-service')

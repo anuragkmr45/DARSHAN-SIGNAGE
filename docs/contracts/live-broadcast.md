@@ -99,6 +99,21 @@ reconciliation so a current earlier publish cannot hide the next live window.
 
 ## Authority, interfaces and failure behavior
 
+Every LIVE device REST path requires a cryptographically verified device
+signature, independently of the site's legacy/dual rollout setting. The trusted
+route sets `requireSignature: true`; CMS bearer and serial-only identities cannot
+fall back into this path. Certificate revocation/expiry still deny access.
+Authentication metrics retain the configured site mode and separately report
+the method actually verified. Ordinary serial-only legacy routes remain
+compatible; supplying signature headers still requires valid RSA verification.
+
+The player runtime UUID is a REST request/admission binding. LIVE routes compare
+an advertised runtime header with the body/query when the header is supplied;
+they do not require a WebSocket HELLO connection or infer authority from it.
+Current certificate, frozen audience, capability and fallback readiness remain
+authoritative checks. Capability advertisement and current-process fencing are
+separate from proving media playback.
+
 Current foundation routes use the `/api/v1` prefix:
 
 | Route | Current purpose |
@@ -112,6 +127,8 @@ Current foundation routes use the `/api/v1` prefix:
 | `POST /schedules/:id/publish` | LIVE direct publication requires the reviewed `expected_live_fingerprint` and fallback preparation IDs; snapshot, screen reservations and logical live reservations commit together |
 | Existing Schedule Request create/approve/publish | Creation stores versioned `schedule_payload.live_approval`; approval/publication rebuild policy using those preparation IDs and reject changed review with `409`; responses expose `live_approval` |
 | Existing Screen/Screen Group snapshots | Return only the frozen approved live audience; refresh immutable fallback download URLs outside the persisted policy, after current CMS-record or genuine device-identity authorization |
+| `GET /live-occurrences/:id/preflight` | Read-only presenter advisory bound to current authority epoch, control revision and item fingerprint. Separately reports business eligibility, trusted media readiness and runtime/audience capacity without node identity or credentials. It performs no durable write and does not replace Start checks. |
+| `POST /live-occurrences/:id/start` | Final authority: repeats presenter, publication/window, revision/fingerprint, media epoch/readiness, audience capacity and ten-slot checks before committing a run/admission/media operation atomically. A ready preflight never guarantees Start across a later race. |
 
 The November 3 publication/authorization packet connects capability-gated
 request and direct publication. A LIVE direct publish without review still
@@ -149,10 +166,12 @@ entrypoint remains prototype-only, with no production Backend verifier.
 See [prerequisite evidence](../../qa-artifacts/evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md)
 for bounded verification and source/build identities.
 
-Production run/start/admission APIs, complete CMS publishing/presenter controls,
-and normal-player live playback remain implementation work. See the
-[publication checkpoint](../../qa-artifacts/evidence/live-publication-authorization-developer-verification-2026-11-03.md)
-for the exact bounded developer results and open gates.
+The current branch packet adds production-shaped run/start/admission APIs,
+presenter controls and normal-player live playback behind the default-OFF live
+runtime gate. These interfaces have focused and bounded local runtime evidence;
+they are not a production acceptance result. See the
+[runtime/authoring checkpoint](../../qa-artifacts/evidence/live-runtime-authoring-developer-verification-2026-11-03.md)
+for the exact executable identities, results and open gates.
 
 API families add live-session CRUD/preflight, run start/status/stop/targets,
 authenticated device live-state/admission, and admission renewal. A start
@@ -198,6 +217,17 @@ webhooks are observations only. Controller/supervisor own current participant
 expiry; a host watchdog stops media service if supervision fails. If removal
 cannot be enforced, isolate the affected node and retain its runtime capacity
 until isolation is observed.
+
+Every verified media health sample is a durable boot observation, including
+idle discovery before the first run. The Backend binds the node UUID to the
+current authority epoch, managed-instance UUID and configured endpoint
+fingerprint. Health observation and host death-witness acceptance serialize on
+the same node-scoped transaction lock. If an authenticated current-epoch death
+witness reaches the Backend before the first health sample, it creates an
+already-dead node record; later health cannot revive or reuse that identity.
+An existing node UUID cannot be rebound to a different managed instance,
+endpoint, epoch or previously observed-dead process. A witness from an old
+epoch or for mismatched recorded boot metadata fails closed.
 
 Restore stops live, invalidates admissions, rotates external authority
 epoch/signing material and reconciles old rooms before new starts. Authenticate

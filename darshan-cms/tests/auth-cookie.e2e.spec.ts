@@ -1,13 +1,14 @@
 import { expect, test } from "@playwright/test";
+import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, adminAuthorization } from "./helpers/selfAuthorization";
 
 test.use({ ignoreHTTPSErrors: process.env.E2E_LOCAL_HTTPS === "true" });
 
 const user = {
-  id: "user-1",
+  id: ADMIN_TEST_USER_ID,
   email: "admin@cms.test",
   first_name: "CMS",
   last_name: "Admin",
-  role_id: "role-1",
+  role_id: ADMIN_TEST_ROLE_ID,
   role: "Super Admin",
   department_id: null,
 };
@@ -61,10 +62,13 @@ test("cookie-only login restores the session, redirects, and logs out", async ({
       await page.context().clearCookies();
       return json({ message: "Logged out successfully" });
     }
+    if (pathname === "/api/v1/auth/authorization") {
+      return json(adminAuthorization(user));
+    }
     if (pathname === "/api/v1/roles") {
       return json({
         items: [{
-          id: "role-1",
+          id: ADMIN_TEST_ROLE_ID,
           name: "Super Admin",
           description: null,
           permissions: { inherits: [], grants: [{ action: "manage", subject: "all" }] },

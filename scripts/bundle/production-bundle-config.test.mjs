@@ -187,6 +187,18 @@ EXPORTER_PIDS_LIMIT=128
   assert.deepEqual(loaded.outputs.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE, ['production/backend/.env.production'])
   assert.equal(loaded.config.SITE_PKI_DIR, secure)
 	  const validText = fs.readFileSync(envFile, 'utf8')
+  assert.equal(loaded.config.INCLUDE_LIVE_MEDIA, 'false')
+  assert.equal(loaded.config.MEDIA_PACKAGE_DIR, path.join(packages, 'r1', 'media'))
+  const liveInputs = '\nINCLUDE_LIVE_MEDIA=true\nMEDIA_PRIVATE_HOST=media.example.test\nMEDIA_BIND_ADDRESS=10.20.0.60\nMEDIA_CPU_LIMIT=4\nMEDIA_MEMORY_LIMIT=4g\nMEDIA_PIDS_LIMIT=512\nMEDIA_MIN_FREE_DISK_BYTES=10737418240\n'
+  fs.writeFileSync(envFile, validText + liveInputs)
+  assert.equal(loadProductionBundleConfig(envFile, root).config.MEDIA_IMAGE, 'darshan-media:r1')
+  fs.writeFileSync(envFile, validText + '\nINCLUDE_LIVE_MEDIA=true\n')
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /MEDIA_PRIVATE_HOST is required/)
+  fs.writeFileSync(envFile, validText + liveInputs.replace('MEDIA_BIND_ADDRESS=10.20.0.60', 'MEDIA_BIND_ADDRESS=0.0.0.0'))
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /MEDIA_BIND_ADDRESS must not publish/)
+  fs.writeFileSync(envFile, validText + liveInputs + 'MEDIA_CONTROL_PORT=18780\n')
+  assert.throws(() => loadProductionBundleConfig(envFile, root), /Media TCP ports must be distinct/)
+  fs.writeFileSync(envFile, validText)
 	  const validCapacityEvidence = fs.readFileSync(capacityEvidence, 'utf8')
 	  const maxLengthReleaseId = `r${'a'.repeat(127)}`
 	  for (const role of ['server', 'cms', 'electron']) fs.mkdirSync(path.join(packages, maxLengthReleaseId, role), { recursive: true })
@@ -472,6 +484,11 @@ test('production web media runtime settings are emitted by generated artifacts',
     assert.match(grafanaLocation, /proxy_hide_header X-Frame-Options;/)
     assert.match(grafanaLocation, /add_header X-Frame-Options "SAMEORIGIN" always;/)
     assert.match(cmsLocation, /add_header X-Frame-Options "DENY" always;/)
+    // The assembler escapes the trailing $ for its unquoted heredoc, while
+    // checked-in Nginx templates contain the final directive text directly.
+    assert.match(template, /location ~ \^\/assets\/\.\*\\\.mjs\\?\$/)
+    assert.match(template, /types \{ application\/javascript mjs; \}/)
+    assert.doesNotMatch(template, /location \^~ \/assets\//)
   }
   assert.match(productionCmsTemplate, /client_max_body_size 1000M;/)
   assert.match(bundleConfig, /MAX_UPLOAD_MB must be exactly 500/)
@@ -675,11 +692,19 @@ test('source-free validator forbids runtime admin password leakage', () => {
 test('production realtime documentation does not recommend always-open legacy socket auth', () => {
   const productionRealtimeExample = fs.readFileSync(repoPath('docs/environments/production/realtime-sync.env.example'), 'utf8')
   const productionReadiness = fs.readFileSync(repoPath('docs/implementation/realtime-sync-production-readiness-checklist.md'), 'utf8')
+  const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
+  const standaloneServer = fs.readFileSync(repoPath('scripts/export/package-server.sh'), 'utf8')
 
   assert.match(productionRealtimeExample, /^DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=false$/m)
   assert.doesNotMatch(productionRealtimeExample, /legacy socket auth stays available/)
   assert.doesNotMatch(productionRealtimeExample, /Keep DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true/)
   assert.doesNotMatch(productionReadiness, /DEVICE_SOCKET_LEGACY_AUTH_ALLOWED=true` remains the compatibility posture/)
+  assert.match(assembler, /REALTIME_SYNC_ENABLED="\$\{REALTIME_SYNC_ENABLED:-true\}"/)
+  assert.match(assembler, /DARSHAN_REALTIME_SYNC_ENABLED="\$\{DARSHAN_REALTIME_SYNC_ENABLED:-\$REALTIME_SYNC_ENABLED\}"/)
+  assert.match(assembler, /^DARSHAN_REALTIME_SYNC_ENABLED=\$DARSHAN_REALTIME_SYNC_ENABLED$/m)
+  assert.match(assembler, /^REALTIME_SYNC_ENABLED=\$REALTIME_SYNC_ENABLED$/m)
+  assert.ok([...standaloneServer.matchAll(/DARSHAN_REALTIME_SYNC_ENABLED: "true"/g)].length >= 2)
+  assert.ok([...standaloneServer.matchAll(/REALTIME_SYNC_ENABLED: "true"/g)].length >= 2)
 })
 
 test('authoritative backend role keeps restart separate from install, upgrade, and adoption', () => {

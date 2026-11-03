@@ -2,6 +2,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiClient } from "@/api/apiClient";
 import type { User } from "@/api/types";
+import { getSelfAuthorization } from "@/api/domains/selfAuthorization";
+import { queryKeys } from "@/api/queryKeys";
 import { resetCmsRuntimeConfigForTests, setCmsRuntimeConfigForTests } from "@/config/runtimeConfig";
 import { clearAuth, setApiKey, setCredentials } from "./authSlice";
 import { persistor, store } from "./store";
@@ -100,5 +102,32 @@ describe("API reads across the actual SPA auth lifecycle", () => {
     expect(signals[1].aborted).toBe(false);
     pending[1](Response.json({ sources: [] }));
     expect(await concurrentRead).toEqual({ sources: [] });
+  });
+
+  it("never caches a pending self-permissions response into a new login by the same account", async () => {
+    setCmsRuntimeConfigForTests(runtimeConfig);
+    const accountId = "00000000-0000-4000-8000-000000000001";
+    const roleId = "00000000-0000-4000-8000-000000000002";
+    const pending: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => pending.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    store.dispatch(setCredentials({ user: user(accountId) }));
+    const oldKey = queryKeys.selfAuthorization(accountId, apiClient.getSessionGeneration());
+    const oldRead = queryClient.fetchQuery({ queryKey: oldKey, queryFn: ({ signal }) => getSelfAuthorization(accountId, signal) }).catch(error => error);
+    store.dispatch(clearAuth());
+    store.dispatch(setCredentials({ user: user(accountId) }));
+    const newKey = queryKeys.selfAuthorization(accountId, apiClient.getSessionGeneration());
+    const newRead = queryClient.fetchQuery({ queryKey: newKey, queryFn: ({ signal }) => getSelfAuthorization(accountId, signal) });
+    const body = { version: 1, user_id: accountId, role: { id: roleId, name: "CUSTOM" }, department_id: null, department_ids: [] };
+    pending[0](Response.json({ ...body, capabilities: [{ action: "manage", subject: "Role" }] }));
+    pending[1]?.(Response.json({ ...body, capabilities: [{ action: "create", subject: "ScheduleItem" }] }));
+
+    expect(await oldRead).toMatchObject({ code: "AUTH_SESSION_CHANGED" });
+    expect((await newRead).capabilities).toEqual([{ action: "create", subject: "ScheduleItem" }]);
+    expect(queryClient.getQueryData(oldKey)).toBeUndefined();
+    expect(queryClient.getQueryData(newKey)).toMatchObject({ capabilities: [{ action: "create", subject: "ScheduleItem" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    queryClient.clear();
   });
 });

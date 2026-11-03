@@ -1,10 +1,12 @@
 # Strict media authority prerequisite
 
-Status: implemented injectable protocol and focused developer checks only.
-The ordinary entrypoint still runs the existing prototype mode. Setting
-`DARSHAN_MEDIA_AUTHORITY_MODE` to anything except `prototype` refuses startup
-before opening listeners. No production Backend verifier, cross-VM transport,
-durable server run/outbox, or normal-player integration is supplied here.
+Status: implemented injectable protocol and an explicitly configured Backend
+HTTPS transport, with focused developer checks. The default remains the
+existing loopback prototype. `DARSHAN_MEDIA_AUTHORITY_MODE=backend` requires
+the combined supervisor, a private pinned external authority file and verified
+HTTPS/WSS configuration; any other mode refuses startup. This package alone
+does not establish integrated Backend/player authorization, deployment readiness
+or production acceptance. See [Backend configuration](deploy/BACKEND_AUTHORITY.md).
 
 ## Injection and trusted boundary
 
@@ -12,7 +14,7 @@ durable server run/outbox, or normal-player integration is supplied here.
 
 ```js
 strictAuthority: {
-  nodeInstanceId,       // fresh externally configured media-instance identity
+  nodeInstanceId,       // fresh supervisor-generated authority boot identity
   authorityEpoch,       // external restore authority, never inferred from an operation
   verifyAuthority,      // async fresh Backend check; not a cached/durable grant
   verificationTimeoutMs: 1500 // positive integer, at most 1500
@@ -25,10 +27,12 @@ are rejected in strict mode. The gateway uses the authorized paths in both
 modes. Existing prototype bodies and synchronous controller methods remain
 compatible when no strict configuration is supplied.
 
-Control remains loopback-only, requires the existing private secret and rejects
-browser Origin headers. Public `/rtc` paths do not expose control APIs. Adding
-strict configuration is not permission to bind management publicly. Production
-still needs an authenticated private cross-VM path and current database policy.
+Default prototype control remains loopback-only. Explicit Backend mode may bind
+configured numeric interfaces only with validated TLS; it requires a distinct
+control secret and rejects every browser Origin header. Public `/rtc` paths do
+not expose control APIs. Firewall control to the Backend VM. Backend mode sends
+every fresh check to the configured, certificate-verified HTTPS authority route;
+the current database policy remains that route's responsibility.
 
 ## Commands and fresh checks
 
@@ -81,6 +85,18 @@ Clients must still subtract their own request time. Whole-machine suspension
 and physical media enforcement retain their independent supervisor/watchdog and
 runtime verification requirements.
 
+The network verifier accepts only a fixed HTTPS authority endpoint without URL
+credentials/query/fragment. Its 1500 ms total timeout includes receiving the
+bounded response body. Redirects, invalid certificates, malformed/nonboolean
+decisions and mismatched echoes fail closed. A configured private CA is validated;
+omitting it uses Node's ordinary verified trust. There is no TLS bypass.
+
+Both processes pin the external restore epoch; the media verifier additionally
+pins its authority file's inode/device, permissions and exact bytes. A changed
+or unreadable file isolates the current node. Atomic replacement with identical
+contents is also a change. No hot epoch/secret reset is supported. Responses do
+not contain credentials, and transport errors use static diagnostic codes.
+
 ## Stops, evidence and bounded memory
 
 `DELETE /internal/admissions/:id` installs a permanent admission tombstone,
@@ -111,3 +127,20 @@ and rejects new authority. Existing in-flight cleanup remains required. Rotate
 to a new instance only after old media teardown/isolation is observed; fresh
 instance/epoch fences reject delayed old commands. These are bounded-memory
 safety limits, not measured production throughput or retention guarantees.
+
+Backend health exposes `tracked_remaining`, `required_start_headroom` (270 by
+default), `accepting_new_runs` and `maintenance_reason`. Before exhaustion, a
+new run is refused while an existing occupied or pending run may still admit
+members and renew. Backend scheduling must check this headroom before a start;
+the hard bound still isolates if any operation exceeds it. An orderly idle node
+rotation requires observed old teardown and a new boot identity, never eviction.
+
+Strict health and evidence include `protocol_version: 1`, `node_instance_id`
+and `authority_epoch`; admission/run evidence also includes `run_id` and
+`generation`. The authority boot UUID is generated on every supervisor start,
+even if Docker accidentally reuses a managed label/environment. The existing
+host-watchdog `instance_id` remains the managed deployment UUID. An optional
+`authority_node_instance_id` heartbeat field binds these identities; it is
+immutable within that supervisor process. A new node's local absence is never
+evidence that the old node stopped. Host death witnesses remain an independent
+trusted host responsibility and must not share media-container credentials.

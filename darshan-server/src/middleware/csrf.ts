@@ -1,6 +1,9 @@
 import { FastifyPluginAsync } from 'fastify';
 import { config as appConfig } from '@/config';
 import { AppError } from '@/utils/app-error';
+declare module 'fastify' {
+  interface FastifyContextConfig { liveRuntimeDeviceOrInternal?: boolean }
+}
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const CSRF_HEADER_NAMES = ['x-csrf-token', 'x-xsrf-token'];
@@ -13,6 +16,9 @@ export const csrfProtectionPlugin: FastifyPluginAsync = async (fastify) => {
 
   fastify.addHook('preHandler', async (request, _reply) => {
     if (SAFE_METHODS.has(request.method)) return;
+    // These explicitly marked endpoints require signed device identity or a
+    // private service secret themselves; a CMS cookie never authenticates them.
+    if (request.routeOptions.config.liveRuntimeDeviceOrInternal === true) return;
 
     if (request.routerPath && CSRF_EXEMPT_PATHS.has(request.routerPath)) return;
 

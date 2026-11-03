@@ -14,6 +14,7 @@ import { getTelemetryService } from '../telemetry/telemetry-service'
 import { TimelineScheduler, ScheduledItem } from './timeline-scheduler'
 import { getSnapshotManager, PlaybackPlaylist } from '../snapshot-manager'
 import { getSecurePlaybackGuard } from '../secure-playback-guard'
+import { getContentOwner } from './content-owner'
 
 const logger = getLogger('playback-engine')
 
@@ -36,6 +37,7 @@ export class PlaybackEngine extends EventEmitter {
   private currentPlaylistItemCount = 0
   private errorCount = 0
   private maxErrors = 5
+  private externallyOwned = false
 
   constructor() {
     super()
@@ -56,6 +58,7 @@ export class PlaybackEngine extends EventEmitter {
    * Start playback
    */
   async start(): Promise<void> {
+    if (this.externallyOwned) return
     if (this.state === 'playing') {
       logger.warn('Playback already started')
       return
@@ -95,6 +98,21 @@ export class PlaybackEngine extends EventEmitter {
     }
   }
 
+  setExternalOwnership(owned: boolean): void {
+    if (this.externallyOwned === owned) return
+    this.externallyOwned = owned
+    this.stop()
+  }
+
+  /** Only the main LIVE coordinator calls this after exact local readiness. */
+  async playOwnedFallback(playlist: PlaybackPlaylist): Promise<void> {
+    if (!this.externallyOwned || playlist.mode !== 'live' || getSecurePlaybackGuard().isPlaybackLocked()) return
+    const fingerprint = this.fingerprintPlaylist(playlist)
+    if (this.state === 'playing' && this.currentTimelineFingerprint === fingerprint) return
+    this.stop()
+    if (playlist.items.length) await this.startPlaylist(playlist)
+  }
+
   /**
    * Stop playback
    */
@@ -120,6 +138,7 @@ export class PlaybackEngine extends EventEmitter {
 
     if (this.mainWindow) {
       this.mainWindow.webContents.send('playback-update', {
+        contentEpoch: getContentOwner().getEpoch(),
         type: 'clear-active',
         reason: 'timeline-stopped',
       })
@@ -206,6 +225,7 @@ export class PlaybackEngine extends EventEmitter {
       logger.debug({ itemType: this.currentItem?.type }, 'Timeline completed')
       if ((this.currentItem?.type === 'scene' || completion?.authorityEnded === true) && this.mainWindow) {
         this.mainWindow.webContents.send('playback-update', {
+          contentEpoch: getContentOwner().getEpoch(),
           type: 'clear-active',
           reason: completion?.authorityEnded === true ? 'timeline-authority-ended' : 'scene-window-complete',
         })
@@ -220,6 +240,7 @@ export class PlaybackEngine extends EventEmitter {
     const snapshotManager = getSnapshotManager()
 
     snapshotManager.on('playlist-updated', (playlist: PlaybackPlaylist) => {
+      if (this.externallyOwned) return
       if (getSecurePlaybackGuard().isPlaybackLocked()) {
         logger.warn(
           { mode: playlist.mode },
@@ -288,6 +309,7 @@ export class PlaybackEngine extends EventEmitter {
     // Send to renderer
     if (this.mainWindow) {
       this.mainWindow.webContents.send('media-change', {
+        contentEpoch: getContentOwner().getEpoch(),
         item,
         scheduledItem,
         scheduleId: this.currentScheduleId,
@@ -403,6 +425,7 @@ export class PlaybackEngine extends EventEmitter {
 
     if (this.mainWindow && next) {
       this.mainWindow.webContents.send('playback-update', {
+        contentEpoch: getContentOwner().getEpoch(),
         type: 'transition-start',
         current: current.item,
         next: next.item,
@@ -434,6 +457,7 @@ export class PlaybackEngine extends EventEmitter {
       // Show fallback slide
       if (this.mainWindow) {
         this.mainWindow.webContents.send('playback-update', {
+          contentEpoch: getContentOwner().getEpoch(),
           type: 'show-fallback',
           message: error.message,
         })
@@ -467,6 +491,7 @@ export class PlaybackEngine extends EventEmitter {
     }
 
     this.mainWindow.webContents.send('media-change', {
+      contentEpoch: getContentOwner().getEpoch(),
       item: this.currentItem,
       scheduleId: this.currentScheduleId,
       restored: true,

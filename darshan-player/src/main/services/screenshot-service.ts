@@ -25,6 +25,9 @@ export class ScreenshotService {
   private mainWindow?: BrowserWindow
   private screenshotDir: string
   private captureEnabled = false
+  private contentCapture?: () => Promise<NativeImage | undefined>
+
+  setContentCaptureProvider(provider?: () => Promise<NativeImage | undefined>): void { this.contentCapture = provider }
 
   constructor() {
     const config = getConfigManager().getConfig()
@@ -99,7 +102,7 @@ export class ScreenshotService {
 
     try {
       // Capture screenshot using Electron's native capture
-      const image = await this.mainWindow.webContents.capturePage()
+      const image = await this.contentCapture?.() ?? await this.mainWindow.webContents.capturePage()
 
       logger.info({ size: image.toPNG().length }, 'Screenshot captured')
 

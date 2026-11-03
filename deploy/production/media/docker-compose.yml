@@ -1,0 +1,55 @@
+name: ${COMPOSE_PROJECT_NAME}
+services:
+  media:
+    image: ${MEDIA_IMAGE}
+    pull_policy: never
+    restart: "no"
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cpus: ${MEDIA_CPU_LIMIT}
+    mem_limit: ${MEDIA_MEMORY_LIMIT}
+    pids_limit: ${MEDIA_PIDS_LIMIT}
+    logging:
+      driver: local
+      options:
+        max-size: ${CONTAINER_LOG_MAX_SIZE}
+        max-file: ${CONTAINER_LOG_MAX_FILES}
+    labels:
+      com.darshan.media.managed: "1"
+      com.darshan.media.role: media-node
+      com.darshan.media.instance: ${DARSHAN_MEDIA_NODE_INSTANCE_ID:-unprepared}
+    environment:
+      NODE_ENV: production
+      DARSHAN_MEDIA_AUTHORITY_MODE: backend
+      DARSHAN_MEDIA_AUTHORITY_FILE: /private/authority.json
+      DARSHAN_MEDIA_CONTROL_SECRET_FILE: /private/control-secret
+      DARSHAN_MEDIA_BACKEND_AUTHORITY_URL: https://${BACKEND_PRIVATE_HOST}:${API_HOST_PORT}/api/v1/internal/live-authority
+      DARSHAN_MEDIA_BACKEND_CA_FILE: /private/site-ca.crt
+      DARSHAN_MEDIA_TLS_CERT_FILE: /private/media.crt
+      DARSHAN_MEDIA_TLS_KEY_FILE: /private/media.key
+      DARSHAN_MEDIA_SIGNAL_URL: wss://${MEDIA_PRIVATE_HOST}:${MEDIA_SIGNAL_PORT}
+      DARSHAN_MEDIA_ALLOWED_ORIGINS: https://${CMS_PUBLIC_HOST}:${CMS_HTTPS_PORT},null,file://
+      DARSHAN_MEDIA_CONTROL_HOST: 0.0.0.0
+      DARSHAN_MEDIA_CONTROL_PORT: ${MEDIA_CONTROL_PORT}
+      DARSHAN_MEDIA_SIGNAL_HOST: 0.0.0.0
+      DARSHAN_MEDIA_SIGNAL_PORT: ${MEDIA_SIGNAL_PORT}
+      DARSHAN_MEDIA_SFU_URL: http://127.0.0.1:18781
+      DARSHAN_MEDIA_SFU_CONFIG_FILE: /private/livekit.yaml
+      DARSHAN_MEDIA_NODE_INSTANCE_ID: ${DARSHAN_MEDIA_NODE_INSTANCE_ID:-unprepared}
+      DARSHAN_MEDIA_SUPERVISOR_STATE_FILE: /run/darshan-media-watchdog/supervisor.json
+      DARSHAN_MEDIA_HOST_LEASE_FILE: /run/darshan-media-host-lease/lease.json
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+    ports:
+      - "${MEDIA_BIND_ADDRESS}:${MEDIA_CONTROL_PORT}:${MEDIA_CONTROL_PORT}/tcp"
+      - "${MEDIA_BIND_ADDRESS}:${MEDIA_SIGNAL_PORT}:${MEDIA_SIGNAL_PORT}/tcp"
+      - "${MEDIA_BIND_ADDRESS}:${MEDIA_RTC_TCP_PORT}:${MEDIA_RTC_TCP_PORT}/tcp"
+      - "${MEDIA_BIND_ADDRESS}:${MEDIA_RTC_UDP_PORT}:${MEDIA_RTC_UDP_PORT}/udp"
+    volumes:
+      - ${PRIVATE_ROOT}/media:/private:ro
+      - ${MEDIA_HEARTBEAT_DIRECTORY:-/run/darshan-media-watchdog/unprepared}:/run/darshan-media-watchdog
+      - ${MEDIA_HOST_LEASE_DIRECTORY:-/run/darshan-media-host-lease/unprepared}:/run/darshan-media-host-lease:ro
+    tmpfs:
+      - /tmp:mode=1777,size=32m

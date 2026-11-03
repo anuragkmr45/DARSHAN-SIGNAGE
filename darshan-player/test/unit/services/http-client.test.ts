@@ -53,6 +53,85 @@ describe('HTTP Client', () => {
     })
   })
 
+  it('replaces configured transport CA and restores system trust when runtime config changes', () => {
+    const { getConfigManager } = require('../../../src/common/config')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const client = getHttpClient()
+    const config = getConfigManager().getConfig()
+    const caPath = path.join(tempDir, 'site-ca.pem')
+    fs.writeFileSync(caPath, 'test-site-ca')
+    client.applyConfig({ ...config, apiBase: 'https://new-backend.example.test', transportTls: { enabled: true, caPath, strictCertificateValidation: true } })
+    expect(client.getAxiosInstance().defaults.baseURL).to.equal('https://new-backend.example.test')
+    expect(client.getAxiosInstance().defaults.httpsAgent.options.ca.toString()).to.equal('test-site-ca')
+    expect(client.getAxiosInstance().defaults.httpsAgent.options.rejectUnauthorized).to.equal(true)
+    expect(client.transportTls.caPath).to.equal(caPath)
+    client.applyConfig({ ...config, transportTls: { enabled: false, caPath: '', strictCertificateValidation: true } })
+    expect(client.getAxiosInstance().defaults.httpsAgent).to.equal(undefined)
+    expect(client.transportTls.enabled).to.equal(false)
+  })
+
+  it('fails closed after a bad CA reconfiguration and contacts only the new endpoint after valid repair', async () => {
+    const { getConfigManager } = require('../../../src/common/config')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const config = getConfigManager().getConfig(), client = getHttpClient()
+    let requests = 0
+    client.getAxiosInstance().defaults.adapter = async config => {
+      requests += 1
+      return { data: { source: config.baseURL }, status: 200, statusText: 'OK', headers: {}, config }
+    }
+    expect(() => client.applyConfig({ ...config, apiBase: 'https://new-backend.example.test', transportTls: {
+      enabled: true, caPath: path.join(tempDir, 'missing-ca.pem'), strictCertificateValidation: true,
+    } })).to.throw('HTTP transport configuration changed or is unavailable')
+    let failure
+    try { await client.get('/api/v1/health', { retry: false }) } catch (error) { failure = error }
+    expect(failure.code).to.equal('NETWORK_ERROR')
+    expect(failure.transient).to.equal(false)
+    expect(requests).to.equal(0)
+    client.applyConfig({ ...config, apiBase: 'https://new-backend.example.test', transportTls: { enabled: false, caPath: '', strictCertificateValidation: true } })
+    expect((await client.get('/api/v1/health', { retry: false })).source).to.equal('https://new-backend.example.test')
+    expect(requests).to.equal(1)
+  })
+
+  it('rejects a deferred old-backend response after transport context changes', async () => {
+    const { getConfigManager } = require('../../../src/common/config')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const client = getHttpClient(), config = getConfigManager().getConfig()
+    let finish, entered
+    const called = new Promise(resolve => { entered = resolve })
+    client.getAxiosInstance().defaults.adapter = async config => {
+      entered()
+      await new Promise(resolve => { finish = resolve })
+      return { data: { stale: true }, status: 200, statusText: 'OK', headers: {}, config }
+    }
+    const pending = client.get('/api/v1/health', { retry: false }).catch(error => error)
+    await called
+    client.applyConfig({ ...config, apiBase: 'https://new-backend.example.test' })
+    finish()
+    const failure = await pending
+    expect(failure.code).to.equal('NETWORK_ERROR')
+    expect(failure.transient).to.equal(false)
+    expect(failure.stale).to.equal(undefined)
+  })
+
+  it('does not retry an old operation body against a newly configured backend', async () => {
+    const sinon = require('sinon'), axios = require('axios')
+    const { getConfigManager } = require('../../../src/common/config')
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    const client = getHttpClient(), config = getConfigManager().getConfig()
+    const clock = sinon.useFakeTimers()
+    let calls = 0
+    client.getAxiosInstance().defaults.adapter = async config => { calls += 1; throw new axios.AxiosError('network reset', 'ECONNRESET', config) }
+    try {
+      const pending = client.post('/api/v1/health', { original: true }, { retryPolicy: { maxAttempts: 2, baseDelayMs: 1000, maxDelayMs: 1000 } }).catch(error => error)
+      await clock.tickAsync(0)
+      expect(calls).to.equal(1)
+      client.applyConfig({ ...config, apiBase: 'https://new-backend.example.test' })
+      await clock.tickAsync(2000)
+      expect((await pending).code).to.equal('NETWORK_ERROR')
+      expect(calls).to.equal(1)
+    } finally { clock.restore() }
+  })
+
   it('should send device identity headers on device endpoints', async () => {
     const { getHttpClient } = require('../../../src/main/services/network/http-client')
     const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')

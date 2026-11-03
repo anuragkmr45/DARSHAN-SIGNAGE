@@ -11,6 +11,9 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { LoadingIndicator } from "@/components/common/LoadingIndicator";
 import { LiveSourceCard } from "@/components/live/LiveSourceCard";
 import { LiveSourceErrorNotice, LiveSourceForm } from "@/components/live/LiveSourceForm";
+import { LiveScheduleWizard } from "@/components/live/LiveScheduleWizard";
+import { LiveRuntimeOccurrences } from "@/components/live/LiveRuntimeOccurrences";
+import { LivePresenterPanel } from "@/components/live/LivePresenterPanel";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -48,6 +51,10 @@ export default function LiveBroadcasts() {
   const canReadDirectory = can("read", "User");
   const [search, setSearch] = useState(""), [page, setPage] = useState(1), [activeOnly, setActiveOnly] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null), [formVersion, setFormVersion] = useState(0);
+  const [scheduling, setScheduling] = useState(false);
+  const [presenterOccurrenceId, setPresenterOccurrenceId] = useState<string | null>(null);
+  const canSchedule = can("create", "Schedule") && can("create", "ScheduleItem") && can("create", "ScheduleRequest") &&
+    canRead && can("read", "Schedule") && can("read", "Presentation") && can("read", "Media") && can("read", "Screen");
   const params = { actorId: actor?.id, page, limit: PAGE_SIZE, search, activeOnly };
   const list = useQuery({ queryKey: queryKeys.liveSessionsList(params),
     queryFn: () => liveSessionsApi.list({ page, limit: PAGE_SIZE, search: search || undefined, active_only: activeOnly || undefined }),
@@ -84,9 +91,11 @@ export default function LiveBroadcasts() {
   const reload = async () => { const result = await detail.refetch(); if (result.isError) throw result.error; setFormVersion(value => value + 1); };
   const source = detail.data;
   const editable = selection?.mode === "create" ? canCreate : selection?.mode === "edit" && canUpdate && source?.permissions?.can_update === true;
-  return <div className="space-y-6"><PageHeader title="Live broadcasts" description="Prepare reusable live sources, presenters and audio permissions for scheduled broadcasts."
+  return <div className="space-y-6"><PageHeader title="Live broadcasts" description="Schedule live events, manage reusable sources and control approved broadcasts."
     actionLabel={canCreate ? "New live source" : undefined} actionIcon={<Plus className="h-4 w-4" />} onAction={canCreate ? () => open({ mode: "create" }) : undefined}
-    trailingContent={canRead ? <Button variant="outline" onClick={refresh} disabled={list.isFetching} aria-label="Refresh live sources"><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button> : undefined} />
+    trailingContent={<>{canSchedule && actor?.id && <Button variant="outline" onClick={() => setScheduling(true)}>Schedule live event</Button>}
+      {canRead && <Button variant="outline" onClick={refresh} disabled={list.isFetching} aria-label="Refresh live sources"><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>}</>} />
+    {actor?.id && <LiveRuntimeOccurrences actorId={actor.id} onPresent={setPresenterOccurrenceId} />}
     {canRead ? <><div className="flex flex-wrap items-center gap-4"><div className="w-full sm:max-w-sm"><SearchBar placeholder="Search live sources…" initialValue={search} onSearch={handleSearch} /></div>
       <Label className="flex items-center gap-2"><input type="checkbox" checked={activeOnly} onChange={event => { setActiveOnly(event.target.checked); setPage(1); }} />Enabled sources only</Label>
       <span className="text-sm text-muted-foreground" role="status">{list.isFetching ? "Refreshing…" : `${list.data?.pagination.total ?? 0} sources`}</span></div>
@@ -96,7 +105,7 @@ export default function LiveBroadcasts() {
           onView={() => open({ id: item.id, mode: "view" })} onEdit={() => open({ id: item.id, mode: "edit" })} onDelete={() => open({ id: item.id, mode: "delete" })} />)}</div>
         <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} /></>
         : !list.isError && <EmptyState title="No live sources found" description={canCreate ? "Create a source or adjust your filters." : "Adjust your filters or ask an authorized author to create a source."} />}
-    </> : <p className="rounded-lg border p-4 text-sm text-muted-foreground">Your access allows creating a source but does not allow listing existing sources.</p>}
+    </> : <p className="rounded-lg border p-4 text-sm text-muted-foreground">Your current access does not allow listing existing sources.</p>}
     <Dialog open={Boolean(selection)} onOpenChange={value => { if (!value && !pending) close(); }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl"><DialogHeader>
         <DialogTitle>{selection?.mode === "create" ? "Create live source" : selection?.mode === "delete" ? "Delete live source" : selection?.mode === "edit" ? "Edit live source" : "Live source details"}</DialogTitle>
@@ -113,5 +122,9 @@ export default function LiveBroadcasts() {
             onSubmit={async (values, baseline) => { await save.mutateAsync({ values, baseline }); }} onClose={close} onReload={reload} />}
       </DialogContent>
     </Dialog>
+    {scheduling && actor?.id && canSchedule && <LiveScheduleWizard key={actor.id} actorId={actor.id} canReadGroups={can("read", "ScreenGroup")}
+      onClose={() => setScheduling(false)} onSubmitted={requestId => { setScheduling(false); toast({ title: "Live event submitted", description: `Open Schedule Queue to review request ***${requestId.slice(-8)}.` }); }} />}
+    {presenterOccurrenceId && actor?.id && <LivePresenterPanel key={`${actor.id}:${presenterOccurrenceId}`} actorId={actor.id} occurrenceId={presenterOccurrenceId}
+      onClose={() => setPresenterOccurrenceId(null)} />}
   </div>;
 }

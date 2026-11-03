@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, adminAuthorization } from "./helpers/selfAuthorization";
 
 const departments = [
   { id: "department-a", name: "Department A", description: "" },
@@ -24,11 +25,11 @@ const operator = {
 };
 
 const administrator = {
-  id: "administrator-1",
+  id: ADMIN_TEST_USER_ID,
   email: "administrator@example.test",
   first_name: "Test",
   last_name: "Administrator",
-  role_id: "role-admin",
+  role_id: ADMIN_TEST_ROLE_ID,
   role: "ADMIN",
   department_id: null,
 };
@@ -52,6 +53,9 @@ async function prepare(
     const respond = (body: unknown) => route.fulfill({
       status: 200, contentType: "application/json", body: JSON.stringify(body),
     });
+    if (url.pathname === "/api/v1/auth/authorization") {
+      return respond(adminAuthorization(administrator));
+    }
     if (url.pathname === "/api/v1/roles") {
       return respond({ items: [
         { id: "role-admin", name: "ADMIN", is_system: true, permissions: { inherits: [], grants: [{ action: "manage", subject: "all" }] } },

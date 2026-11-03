@@ -16,11 +16,12 @@ const nextTurn = () => new Promise(resolve => setImmediate(resolve));
 function fixture(options = {}) {
   let now = 0;
   const checked = [], removed = [], isolated = [];
-  const { verifyAuthority = async request => grantFor(request), verificationTimeoutMs, ...rest } = options;
+  const { verifyAuthority = async request => grantFor(request), verificationTimeoutMs, authorityMode, ...rest } = options;
   const controller = new AdmissionController({ adapter: { removeParticipant: async (...args) => { removed.push(args); } },
     isolate: async reason => { isolated.push(reason); }, signalUrl: 'wss://media.example.test', now: () => now,
+    ...(authorityMode === 'backend' ? { hostReadiness: { check: () => true } } : {}), // Explicit fixture; real backend uses its protected RO host lease.
     ...rest,
-    strictAuthority: { nodeInstanceId: 'node-instance-1', authorityEpoch: 'external-epoch-1', verificationTimeoutMs,
+    strictAuthority: { mode: authorityMode, nodeInstanceId: 'node-instance-1', authorityEpoch: 'external-epoch-1', verificationTimeoutMs,
       verifyAuthority: async request => { checked.push(request); return verifyAuthority(request); } },
   });
   return { controller, checked, removed, isolated, advance: ms => { now += ms; } };
@@ -63,6 +64,7 @@ test('unknown admission revocation is permanent, observable and idempotent witho
   assert.equal(stopped.teardown_confirmed, true);
   assert.equal(stopped.teardown_reason, 'ADMISSION_NEVER_CREATED');
   assert.equal(stopped.ticket, undefined);
+  assert.equal(stopped.protocol_version, 1); assert.equal(stopped.run_id, 'run-1'); assert.equal(stopped.generation, 1);
   assert.deepEqual(await controller.revokeAuthorized('admission-1', command(2)), stopped);
   assert.equal(controller.admissionView('admission-1').teardown_confirmed, true);
   await assert.rejects(controller.createAuthorized(command(3)), code('ADMISSION_REVOKED'));
@@ -292,13 +294,27 @@ test('pending-check overload isolates and cancels prior verification instead of 
   assert.equal(controller.pendingAuthorityChecks.size, 0);
 });
 
-test('requesting production mode refuses startup before opening listeners or constructing prototype authority', async () => {
+test('unknown authority modes refuse startup before opening listeners or constructing prototype authority', async () => {
   const previous = process.env.DARSHAN_MEDIA_AUTHORITY_MODE;
   try {
     process.env.DARSHAN_MEDIA_AUTHORITY_MODE = 'production';
-    await assert.rejects(start(), /Production media authority adapter is not configured/);
+    await assert.rejects(start(), code('MEDIA_AUTHORITY_MODE_INVALID'));
   } finally {
     if (previous === undefined) delete process.env.DARSHAN_MEDIA_AUTHORITY_MODE;
     else process.env.DARSHAN_MEDIA_AUTHORITY_MODE = previous;
   }
+});
+
+test('backend headroom defers new runs while current run admissions and renewals remain authorized', async () => {
+  const { controller, checked } = fixture({ authorityMode: 'backend', maxTrackedEntries: 5, startHeadroom: 4,
+    verifyAuthority: request => grantFor(request, { participant_id: request.id }) });
+  await controller.createAuthorized(command());
+  assert.equal(controller.health().authority_mode, 'backend');
+  assert.equal(controller.health().tracked_remaining, 3);
+  assert.equal(controller.health().accepting_new_runs, false);
+  await controller.createAuthorized(command(1, { id: 'second' }));
+  await controller.renewAuthorized('admission-1', command(2));
+  await assert.rejects(controller.createAuthorized(command(1, { id: 'next-run', run_id: 'next-run' })), code('MEDIA_NODE_MAINTENANCE_REQUIRED'));
+  assert.equal(controller.health().status, 'ready'); assert.equal(controller.isolated, false);
+  assert.equal(checked.length, 3);
 });

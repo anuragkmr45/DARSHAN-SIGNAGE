@@ -3,6 +3,7 @@ import { Socket } from 'socket.io';
 import { config } from '@/config';
 import { recordRealtimeSocketReject } from '@/observability/metrics';
 import { createLogger } from '@/utils/logger';
+import { playerCapabilitiesSchema } from '@/schemas/player-capabilities';
 
 const logger = createLogger('realtime-socket-hardening');
 
@@ -69,6 +70,7 @@ export const deviceHelloPayloadSchema = z.object({
   protocol_version: z.string().trim().min(1).max(32).optional(),
   device_id: uuidSchema.optional(),
   session_id: shortStringSchema.optional(),
+  runtime_session_id: uuidSchema.optional(),
   app: z
     .object({
       version: z.string().trim().min(1).max(64).optional(),
@@ -79,16 +81,7 @@ export const deviceHelloPayloadSchema = z.object({
       family: z.string().trim().min(1).max(64).optional(),
     })
     .optional(),
-  capabilities: z
-    .object({
-      commands: z.array(shortStringSchema).max(64).optional(),
-      features: z.array(shortStringSchema).max(64).optional(),
-      screenshot: z.boolean().optional(),
-      log_upload: z.boolean().optional(),
-      offline_startup: z.boolean().optional(),
-      background_push: z.boolean().optional(),
-    })
-    .optional(),
+  capabilities: playerCapabilitiesSchema.optional(),
   local_state: z.record(z.unknown()).optional(),
   sent_at: z.string().datetime().optional(),
 });

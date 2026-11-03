@@ -35,8 +35,7 @@ import {
 import { authenticateDeviceSocketHandshake, type DeviceSocketAuthFailure } from '@/realtime/device-socket-auth';
 import { recordDeviceAuthRolloutObservation } from '@/deployment/device-auth-rollout';
 import { createLogger } from '@/utils/logger';
-import { getDatabase, schema } from '@/db';
-import { eq, sql } from 'drizzle-orm';
+import { recordPlayerCapabilityReport } from '@/services/player-capabilities';
 
 const logger = createLogger('device-realtime-gateway');
 let deviceNodeRefreshTimer: NodeJS.Timeout | null = null;
@@ -58,6 +57,7 @@ type DeviceHelloPayload = {
   protocol_version?: string;
   device_id?: string;
   session_id?: string;
+  runtime_session_id?: string;
   app?: { version?: string };
   platform?: { family?: string };
   capabilities?: {
@@ -188,7 +188,7 @@ export async function setupDeviceRealtimeGateway(fastify: FastifyInstance, optio
   });
 
   nsp.on('connection', (socket: Socket) => {
-    socket.on('HELLO', (payloadOrAck: unknown, maybeAck?: SocketAck) => {
+    socket.on('HELLO', async (payloadOrAck: unknown, maybeAck?: SocketAck) => {
       recordRealtimeSocketClientEvent(config.REALTIME_DEVICE_NAMESPACE, 'HELLO');
       const { payload: rawPayload, ack } = normalizePayloadAndAck(payloadOrAck, maybeAck);
       try {
@@ -232,20 +232,13 @@ export async function setupDeviceRealtimeGateway(fastify: FastifyInstance, optio
           platformFamily: typeof payload?.platform?.family === 'string' ? payload.platform.family : null,
         });
         if (payload.capabilities) {
-          const capabilityDocument = JSON.stringify({
-            player_capabilities: payload.capabilities,
-            player_capabilities_observed_at: new Date().toISOString(),
-          });
-          void getDatabase()
-            .update(schema.screens)
-            .set({
-              device_info: sql`COALESCE(${schema.screens.device_info}, '{}'::jsonb) || ${capabilityDocument}::jsonb`,
-              updated_at: new Date(),
-            })
-            .where(eq(schema.screens.id, deviceId))
-            .catch((error) => {
-              logger.warn({ err: error, device_id: deviceId }, 'Failed to persist player capability report');
-            });
+          try {
+            await recordPlayerCapabilityReport({ deviceId, capabilities: payload.capabilities, source: 'HELLO',
+              authMethod: (socket.data as any).deviceAuthMode === 'signed' ? 'signature' : 'legacy_serial',
+              runtimeSessionId: payload.runtime_session_id });
+          } catch (error) {
+            logger.warn({ err: error, device_id: deviceId }, 'Failed to persist player capability report');
+          }
         }
         void registerDeviceForFanout(deviceId);
 

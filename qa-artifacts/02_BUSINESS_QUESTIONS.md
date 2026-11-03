@@ -434,13 +434,22 @@ emergency override live. Presenter stop permits explicit retry in the remaining
 window; administrative stop disables until authorized re-enable. V1 excludes
 recording, remote input, extra administrator viewers and multiple live slots.
 
-**Technical gates still unmeasured:** media-engine replay/removal enforcement,
-actual sixth-VM sizing/network capacity, Windows/real Chrome/Edge capture/audio,
-physical display/audio, cross-VM TLS/firewall/TURN and production-sized restore.
-A single local test host cannot close those gates or reduce the agreed limits.
-No further product decision is inferred from the current presentation-only code.
+**Technical gates still open:** current-source integrated Backend/media/normal-player
+frame/audio and host-readiness/death-witness enforcement; actual sixth-VM sizing,
+Windows/real Chrome/Edge capture/audio, physical display/audio, cross-VM TLS/
+firewall/TURN and production-sized restore. An older fixture-authority SFU
+protocol run measured an 1830 ms healthy-Docker watchdog cutoff; it does not
+validate the new host-readiness source. A single local host cannot close the
+external gates or reduce agreed limits. Current live implementation is evidence
+of behavior under development, not a new inferred product decision.
 
 Affected rules/use cases: `BR-109..116`, `UC-030..032`; cases `LIVE-01..20`;
 risks `R-44..51`. [Contract](../docs/contracts/live-broadcast.md); [execution plan](../docs/plans/live-broadcast-implementation-loops.md);
 [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md). Resolved behavior does not mean implemented or
 QA-approved behavior.
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+BQ-027 remains resolved as a product requirement; current implementation work does not reopen or reduce its10×25/3s/10s/1s boundaries. The current-source gaps are verification/environment gates, not requests for the user to rediscover code behavior. The sixth VM has packaging/configuration source and signed fixtures; actual site hardware, native host actuation, cross-VM trust/firewall and measured restore/capacity evidence remain required.

@@ -161,6 +161,7 @@ export class ConfigManager {
       runtime: {
         mode: runtimeMode,
       },
+      livePlayback: { enabled: envFlag(false, 'DARSHAN_LIVE_PLAYBACK_ENABLED') },
       realtime: {
         enabled: envFlag(false, 'DARSHAN_REALTIME_PLAYER_ENABLED', 'HEXMON_REALTIME_SYNC_ENABLED'),
         signedAuthEnabled: envFlag(
@@ -449,6 +450,7 @@ export class ConfigManager {
       deviceId: overrides.deviceId ?? defaults.deviceId,
       environment: { ...defaults.environment, ...overrides.environment },
       runtime: { ...defaults.runtime, ...overrides.runtime },
+      livePlayback: { enabled: overrides.livePlayback?.enabled ?? defaults.livePlayback?.enabled ?? false },
       realtime: {
         enabled: overrides.realtime?.enabled ?? defaults.realtime?.enabled ?? false,
         signedAuthEnabled: overrides.realtime?.signedAuthEnabled ?? defaults.realtime?.signedAuthEnabled ?? false,
@@ -480,6 +482,7 @@ export class ConfigManager {
 
   private buildExplicitEnvOverrides(): Partial<AppConfig> {
     const overrides: Partial<AppConfig> = {}
+    if (envPresent('DARSHAN_LIVE_PLAYBACK_ENABLED')) overrides.livePlayback = { enabled: envFlag(false, 'DARSHAN_LIVE_PLAYBACK_ENABLED') }
     const apiBase = this.normalizeUrl(
       envValue('DARSHAN_API_BASE_URL', 'DARSHAN_API_BASE', 'SIGNAGE_API_BASE_URL', 'HEXMON_API_BASE', 'API_BASE_URL')
     )
@@ -759,6 +762,7 @@ export class ConfigManager {
         ...config.runtime,
         mode: runtimeMode,
       },
+      livePlayback: { enabled: config.livePlayback?.enabled === true },
       realtime: {
         ...config.realtime,
         enabled: config.realtime?.enabled === true,
@@ -845,6 +849,7 @@ export class ConfigManager {
       ...config,
       environment: config.environment ? { ...config.environment } : undefined,
       runtime: { ...config.runtime },
+      livePlayback: { enabled: config.livePlayback?.enabled === true },
       realtime: config.realtime ? { ...config.realtime } : undefined,
       transportTls: { ...config.transportTls },
       mtls: { ...config.mtls },

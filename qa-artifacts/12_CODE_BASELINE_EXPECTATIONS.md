@@ -82,8 +82,8 @@ The implementation target is `BR-109..116` and [live contract](../docs/contracts
 Loop 0 baseline application evidence and loop 1 prototype evidence are recorded;
 their remaining gates stay open. Commit `e634150` adds a private tmpfs watchdog
 requirement and verified occurrence cache pins. Player regression passed 428
-unit / 5 integration / 21 fault checks; those pins are not yet integrated into
-normal-player live playback. Direct host pidfd signalling remains unverified in
+unit / 5 integration / 21 fault checks; at that historical checkpoint the pins
+were not yet connected to normal-player live playback. Direct host pidfd signalling remains unverified in
 the production service context. The current scheduling foundation adds
 migrations 0057/0058, live-source CRUD, LIVE draft fields, immutable asynchronous
 fallback preparation and shared screen/live reservation services. Its 39-case
@@ -107,10 +107,25 @@ upper bound. These are bounded prerequisites, not production Backend authority
 or a new normal-player live run. [Prerequisite evidence](evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md)
 binds the source/developer outputs and preserves failed-attempt provenance.
 
-Normal-player live capability remains withheld: production run/admission
-control, complete CMS workflow and the same-player coordinator are unfinished.
-Direct host pidfd/AppArmor enforcement also remains an open deployment gate.
-These foundations do not establish the complete CMS-to-player journey.
+The current source now integrates Backend run/admission control, the same-player
+coordinator and CMS authoring/presenter/reporting; runtime stays default OFF.
+Earlier prerequisite results do not establish the new CMS-to-player journey.
+Direct host pidfd/AppArmor enforcement and the integrated current-source native
+frame/audio/host-readiness path remain open verification/deployment gates.
 Update this checkpoint with each verified packet. Do not mark human cases Pass.
 
 Current delta ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md); cases `LIVE-01..20`.
+
+## Runtime and authoring developer checkpoint — 2026-11-03
+
+The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+
+| Source surface | Current characterization | Evidence/gap |
+| --- | --- | --- |
+| Backend authority | Durable run/control/admission/receipt/outbox/observations with external epoch, current auth and exact run/media fences; runtime default OFF. | Runtime 43/4 plus neighbors 79/7 passed; actual current media callback, native revocation and restore remain. |
+| CMS authoring | Atomic review/submit journal, immutable preview, current/read-only consent and bound old/proposed edit authorization; source CRUD/presenter controls/target reports exist. | Authoring 22/22 after reproduced/fixed conditional Schedule defect, request preview 7/7, targets 6/6; bounded real future-window approval success. Final full/build and native chooser/player journey remain separately evidenced. |
+| Ordinary player | PlayerFlow coordinator/client/view/content-owner/pins and renderer lease pulse integrate LIVE with existing identity/cache/emergency/security; default OFF. | Full current gates belong to player owner/dated ledger; no newly built ordinary LIVE frame/audio claim yet. |
+| Media/host | Backend verified HTTPS/WSS, fresh supervisor boot UUID, permanent fences/tombstones, owned SFU process proof and required root-owned RO readiness pulse. | Node 108 pass/8 opt-in skipped; older core376028 runtime1830ms only. Current root-owned native gate and pidfd/AppArmor remain open. |
+| Sixth role | Config/render/Compose, optional signed TGZ and host witness/watchdog packaging exist. | 18 combined configuration/Compose checks (17 configuration + 1 Compose), 11 witness and 16 watchdog checks and signed fixtures with Docker deliberately skipped; not a real production artifact deployment. |
+
+CMS target reports use frozen IDs/current run, ordered server receipt age and explicit Unknown; they do not infer frame, success or PoP from connection. See [contract](../docs/contracts/live-target-reports.md).

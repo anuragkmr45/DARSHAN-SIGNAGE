@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { OPERATOR_TEST_ROLE_ID, testAuthorization } from "./helpers/selfAuthorization";
 
 test("notification totals, older pages, and non-chat read action use server data", async ({ page, context }) => {
   const origin = "http://127.0.0.1:5173";
   const user = {
     id: "fe171dd2-226a-4228-91d8-597e9d4658d4", email: "qa@example.invalid", first_name: "QA", last_name: "Operator",
-    role_id: "qa-role", role: "OPERATOR", department_id: null,
+    role_id: OPERATOR_TEST_ROLE_ID, role: "OPERATOR", department_id: null,
   };
   const items = Array.from({ length: 55 }, (_value, index) => ({
     id: `notification-${index + 1}`,
@@ -46,6 +47,10 @@ test("notification totals, older pages, and non-chat read action use server data
     const method = route.request().method();
     const json = (body: unknown) => route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/api/v1/auth/me") return json(user);
+    if (path === "/api/v1/auth/authorization") return json(testAuthorization(user, [
+      { action: "read", subject: "Notification" },
+      { action: "read", subject: "Conversation" },
+    ], { roleId: OPERATOR_TEST_ROLE_ID }));
     if (path === "/api/v1/roles") return json({ items: [{ id: "qa-role", name: "OPERATOR", permissions: { inherits: [], grants: [{ action: "read", subject: "Notification" }, { action: "read", subject: "Conversation" }] } }], page: 1, limit: 100, total: 1 });
     if (path === "/api/v1/notifications/unread-count") return json({ unread_total: items.filter((item) => !item.read).length });
     if (path === "/api/v1/notifications" && method === "GET") {

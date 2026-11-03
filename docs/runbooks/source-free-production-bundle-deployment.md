@@ -303,7 +303,8 @@ rmdir "$transfer_dir"
 ```
 
 Repeat with `ROLE=valkey`, `backend`, `cms`, `observability`, or `recovery` on
-the corresponding VM. The installer:
+the corresponding VM, and `ROLE=media` when the optional LIVE role is included.
+The installer:
 
 1. copies the signed inputs into protected `/var/tmp` storage after a capacity
    preflight;
@@ -318,6 +319,12 @@ the corresponding VM. The installer:
 It never overwrites an existing role directory.
 
 ## 7. Fresh Five-VM Installation
+
+Scheduled LIVE adds an optional sixth Media VM through `INCLUDE_LIVE_MEDIA=true`.
+It receives a signed `media.tgz` with the pinned offline media image; all live
+private inputs are generated/provisioned on target. Follow
+[Sixth Media VM deployment](live-media-vm-deployment.md) after the existing roles.
+Runtime remains OFF until explicit activation and integrated release QA.
 
 The required order is:
 

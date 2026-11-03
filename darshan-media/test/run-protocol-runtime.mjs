@@ -31,7 +31,7 @@ const baseTag = `darshan-live-media-protocol-base:${instance}`;
 const imageTag = `darshan-live-media:protocol-test-${instance}`;
 const name = `darshan-media-protocol-${instance}`;
 const resultFile = path.join(local, `protocol-result-${instance}.json`);
-const sourceFiles = ['controller.js', 'gateway.js', 'index.js', 'livekit-adapter.js', 'supervisor.js', 'sfu-listener-ownership.js'];
+const sourceFiles = ['controller.js', 'gateway.js', 'index.js', 'livekit-adapter.js', 'supervisor.js', 'sfu-listener-ownership.js', 'authority-file.js', 'backend-authority.js', 'runtime-config.js', 'tls-config.js', 'host-readiness.js'];
 const digest = createHash('sha256');
 for (const file of sourceFiles) { digest.update(file); digest.update(await readFile(path.join(media, 'src', file))); }
 const sourceHash = digest.digest('hex');

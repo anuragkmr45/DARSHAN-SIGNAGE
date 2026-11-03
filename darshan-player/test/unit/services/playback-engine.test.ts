@@ -51,7 +51,8 @@ describe('Playback Engine', () => {
 
     engine.stop()
 
-    expect(send.calledWith('playback-update', {
+    expect(send.calledWithExactly('playback-update', {
+      contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
       type: 'clear-active',
       reason: 'timeline-stopped',
     })).to.equal(true)
@@ -75,7 +76,8 @@ describe('Playback Engine', () => {
 
     engine.scheduler.emit('timeline-complete')
 
-    expect(send.calledWith('playback-update', {
+    expect(send.calledWithExactly('playback-update', {
+      contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
       type: 'clear-active',
       reason: 'scene-window-complete',
     })).to.equal(true)
@@ -98,7 +100,8 @@ describe('Playback Engine', () => {
 
     engine.scheduler.emit('timeline-complete', { willRepeat: false, authorityEnded: true })
 
-    expect(send.calledWith('playback-update', {
+    expect(send.calledWithExactly('playback-update', {
+      contentEpoch: require('../../../src/main/services/playback/content-owner').getContentOwner().getEpoch(),
       type: 'clear-active',
       reason: 'timeline-authority-ended',
     })).to.equal(true)

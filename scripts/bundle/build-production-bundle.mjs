@@ -85,6 +85,7 @@ function assertPlayerArtifacts(directory) {
 }
 
 if (config.EXPORT_SERVER === 'false') assertDirectory('SERVER_PACKAGE_DIR', config.SERVER_PACKAGE_DIR)
+if (config.INCLUDE_LIVE_MEDIA === 'true' && config.EXPORT_MEDIA === 'false') assertDirectory('MEDIA_PACKAGE_DIR', config.MEDIA_PACKAGE_DIR)
 if (config.EXPORT_CMS === 'false') assertDirectory('CMS_PACKAGE_DIR', config.CMS_PACKAGE_DIR)
 if (config.EXPORT_ELECTRON === 'false') {
   assertDirectory('PLAYER_ARTIFACTS_DIR', config.PLAYER_ARTIFACTS_DIR)
@@ -132,6 +133,9 @@ process.on('exit', () => {
 if (config.EXPORT_SERVER === 'true') {
   run('bash', ['scripts/export/package-server.sh', '--release', config.RELEASE_ID, '--deployment-layout', 'production-split'], commonExportEnv)
 }
+if (config.INCLUDE_LIVE_MEDIA === 'true' && config.EXPORT_MEDIA === 'true') {
+  run('bash', ['scripts/export/package-media.sh', '--release', config.RELEASE_ID], { ...commonExportEnv, MEDIA_IMAGE: config.MEDIA_IMAGE })
+}
 if (config.EXPORT_CMS === 'true') {
   run('bash', ['scripts/export/package-cms.sh', '--release', config.RELEASE_ID], {
     ...commonExportEnv,
@@ -169,7 +173,7 @@ const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex'
 function createTransferArchives() {
   const transferDir = path.join(bundleRoot, 'transfer')
   fs.mkdirSync(transferDir, { mode: 0o700 })
-  const roles = ['data', 'valkey', 'backend', 'cms', 'observability', 'recovery']
+  const roles = ['data', 'valkey', 'backend', 'cms', 'observability', 'media', 'recovery']
   for (const role of roles) {
     const roleDirectory = path.join(bundleRoot, 'production', role)
     if (!fs.existsSync(roleDirectory)) continue
@@ -220,6 +224,7 @@ const componentProvenance = {
   cms: readArtifactManifest(config.CMS_PACKAGE_DIR),
   players: findArtifactManifestDirectories(config.PLAYER_ARTIFACTS_DIR).map(readArtifactManifest),
 }
+if (config.INCLUDE_LIVE_MEDIA === 'true') componentProvenance.media = readArtifactManifest(config.MEDIA_PACKAGE_DIR)
 
 function walk(directory, prefix = '') {
   const results = []

@@ -10,14 +10,14 @@ export const PRODUCTION_COMPATIBILITY_GENERATION = 1
 const BOOLEAN_FIELDS = new Set([
   'EXPORT_SERVER', 'EXPORT_CMS', 'EXPORT_ELECTRON', 'INSTALL_PLAYWRIGHT_CHROMIUM',
   'VITE_ENABLE_PRODUCTION_LOCKDOWN', 'VITE_REALTIME_DELIVERY_STATUS_UI', 'VITE_MEDIA_CACHE_STATUS_UI',
-  'WEBPAGE_ALLOW_HTTP',
+  'WEBPAGE_ALLOW_HTTP', 'INCLUDE_LIVE_MEDIA', 'EXPORT_MEDIA',
 ])
 
 const PORT_FIELDS = new Set([
   'CMS_HTTPS_PORT', 'CMS_HTTP_PORT', 'API_HOST_PORT', 'POSTGRES_HOST_PORT', 'MINIO_HOST_PORT',
   'MINIO_CONSOLE_PORT', 'VALKEY_HOST_PORT', 'PROMETHEUS_HOST_PORT', 'ALERTMANAGER_HOST_PORT', 'GRAFANA_HOST_PORT',
   'NODE_EXPORTER_HOST_PORT', 'POSTGRES_EXPORTER_HOST_PORT', 'NGINX_EXPORTER_HOST_PORT',
-  'METRICS_GATEWAY_HOST_PORT',
+  'METRICS_GATEWAY_HOST_PORT', 'MEDIA_CONTROL_PORT', 'MEDIA_SIGNAL_PORT', 'MEDIA_RTC_TCP_PORT', 'MEDIA_RTC_UDP_PORT',
 ])
 
 const HOST_FIELDS = new Set([
@@ -42,7 +42,7 @@ const PATH_FIELDS = new Set([
   'OBSERVABILITY_TLS_CERT_FILE', 'OBSERVABILITY_TLS_KEY_FILE',
   'DEVICE_CA_CERT_FILE', 'DEVICE_CA_KEY_FILE',
   'RELEASE_SIGNING_PRIVATE_KEY',
-  'CAPACITY_EVIDENCE_FILE',
+  'CAPACITY_EVIDENCE_FILE', 'MEDIA_PACKAGE_DIR',
 ])
 
 const SECRET_FIELDS = new Set([
@@ -103,6 +103,11 @@ const REQUIRED_OPERATIONS_POLICY_FIELDS = [
 ]
 
 const OUTPUTS = {
+  INCLUDE_LIVE_MEDIA: ['production/media/', 'transfer/*-media.tgz', 'production/backend/docker-compose.live.yml'],
+  MEDIA_PRIVATE_HOST: ['production/media/.env.production', 'production/backend/docker-compose.live.yml'],
+  MEDIA_BIND_ADDRESS: ['production/media/.env.production'],
+  MEDIA_IMAGE: ['production/media/.env.production', 'production/media/images/IMAGE_MANIFEST.tsv'],
+  MEDIA_PACKAGE_DIR: ['production/media/images/', 'CONFIGURATION_MANIFEST.json'],
   RELEASE_ID: ['BUNDLE_OVERVIEW.md', 'CONFIGURATION_MANIFEST.json'],
   SITE_NAME: ['BUNDLE_OVERVIEW.md', 'CONFIGURATION_MANIFEST.json'],
   PLAYER_TARGET_PLATFORMS: ['BUNDLE_OVERVIEW.md', 'CONFIGURATION_MANIFEST.json', 'production/electron/'],
@@ -187,6 +192,9 @@ const OUTPUTS = {
 }
 
 const ALLOWED_FIELDS = new Set([
+  'INCLUDE_LIVE_MEDIA', 'EXPORT_MEDIA', 'MEDIA_PACKAGE_DIR', 'MEDIA_IMAGE', 'MEDIA_PRIVATE_HOST', 'MEDIA_BIND_ADDRESS',
+  'MEDIA_CONTROL_PORT', 'MEDIA_SIGNAL_PORT', 'MEDIA_RTC_TCP_PORT', 'MEDIA_RTC_UDP_PORT',
+  'MEDIA_CPU_LIMIT', 'MEDIA_MEMORY_LIMIT', 'MEDIA_PIDS_LIMIT', 'MEDIA_MIN_FREE_DISK_BYTES',
   'RELEASE_ID', 'SITE_NAME', 'EXPORT_SERVER', 'EXPORT_CMS', 'EXPORT_ELECTRON', 'ELECTRON_PLATFORM', 'PLAYER_TARGET_PLATFORMS',
   'INSTALL_PLAYWRIGHT_CHROMIUM', 'PACKAGE_OUTPUT_BASE', 'BUNDLE_OUTPUT_BASE', 'SERVER_PACKAGE_DIR', 'PKI_ROOT_DIR', 'SITE_PKI_DIR',
   'CMS_PACKAGE_DIR', 'PLAYER_ARTIFACTS_DIR', 'CMS_PUBLIC_HOST', 'BACKEND_PRIVATE_HOST', 'BACKEND_DEVICE_HOST',
@@ -235,6 +243,8 @@ const REQUIRED_FIELDS = [
 ]
 
 const DEFAULTS = {
+  INCLUDE_LIVE_MEDIA: 'false', EXPORT_MEDIA: 'true',
+  MEDIA_CONTROL_PORT: '18784', MEDIA_SIGNAL_PORT: '18780', MEDIA_RTC_TCP_PORT: '18782', MEDIA_RTC_UDP_PORT: '18783',
   EXPORT_SERVER: 'true', EXPORT_CMS: 'true', EXPORT_ELECTRON: 'false', ELECTRON_PLATFORM: 'linux',
   PLAYER_TARGET_PLATFORMS: 'windows,linux',
   INSTALL_PLAYWRIGHT_CHROMIUM: 'true', PACKAGE_OUTPUT_BASE: 'out', BUNDLE_OUTPUT_BASE: 'dist/onprem',
@@ -688,6 +698,7 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
     config.SERVER_PACKAGE_DIR ||= path.join(config.PACKAGE_OUTPUT_BASE, config.RELEASE_ID, 'server')
     config.CMS_PACKAGE_DIR ||= path.join(config.PACKAGE_OUTPUT_BASE, config.RELEASE_ID, 'cms')
     config.PLAYER_ARTIFACTS_DIR ||= path.join(config.PACKAGE_OUTPUT_BASE, config.RELEASE_ID, 'electron')
+    config.MEDIA_PACKAGE_DIR ||= path.join(config.PACKAGE_OUTPUT_BASE, config.RELEASE_ID, 'media')
   }
   config.BACKEND_DEVICE_HOST ||= config.BACKEND_PRIVATE_HOST
   config.VALKEY_PRIVATE_HOST ||= config.BACKEND_PRIVATE_HOST
@@ -704,6 +715,7 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   config.ALERTMANAGER_VOLUME_NAME ||= `${defaultVolumePrefix}-alertmanager-data`
   config.GRAFANA_VOLUME_NAME ||= `${defaultVolumePrefix}-grafana-data`
   config.BACKUP_IMAGE ||= `darshan-simple-backup:${config.RELEASE_ID}`
+  config.MEDIA_IMAGE ||= `darshan-media:${config.RELEASE_ID}`
   for (const name of REQUIRED_FIELDS) {
     if (!config[name] && !parsed.invalidKeys.has(name)) addError(`${name} is required`)
   }
@@ -746,6 +758,20 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   }
   for (const name of HOST_FIELDS) validateHost(name, config[name], addError)
   for (const name of BIND_ADDRESS_FIELDS) validateBindAddress(name, config[name], addError)
+  if (config.INCLUDE_LIVE_MEDIA === 'true') {
+    for (const name of ['MEDIA_PRIVATE_HOST', 'MEDIA_BIND_ADDRESS']) if (!config[name]) addError(`${name} is required when INCLUDE_LIVE_MEDIA=true`)
+    validateHost('MEDIA_PRIVATE_HOST', config.MEDIA_PRIVATE_HOST, addError)
+    validateBindAddress('MEDIA_BIND_ADDRESS', config.MEDIA_BIND_ADDRESS, addError)
+    for (const name of ['MEDIA_CPU_LIMIT', 'MEDIA_MEMORY_LIMIT', 'MEDIA_PIDS_LIMIT', 'MEDIA_MIN_FREE_DISK_BYTES']) {
+      if (!config[name]) addError(`${name} is required when INCLUDE_LIVE_MEDIA=true`)
+    }
+    if (config.MEDIA_CPU_LIMIT) validateCpuLimit('MEDIA_CPU_LIMIT', config.MEDIA_CPU_LIMIT, addError)
+    if (config.MEDIA_MEMORY_LIMIT) validateMemoryLimit('MEDIA_MEMORY_LIMIT', config.MEDIA_MEMORY_LIMIT, addError)
+    if (config.MEDIA_PIDS_LIMIT) validatePositiveInteger('MEDIA_PIDS_LIMIT', config.MEDIA_PIDS_LIMIT, 16, 32768, addError)
+    if (config.MEDIA_MIN_FREE_DISK_BYTES) validatePositiveInteger('MEDIA_MIN_FREE_DISK_BYTES', config.MEDIA_MIN_FREE_DISK_BYTES, 1_073_741_824, Number.MAX_SAFE_INTEGER, addError)
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$/.test(config.MEDIA_IMAGE)) addError('MEDIA_IMAGE must be a Docker image reference')
+    if (new Set([config.MEDIA_CONTROL_PORT, config.MEDIA_SIGNAL_PORT, config.MEDIA_RTC_TCP_PORT]).size !== 3) addError('Media TCP ports must be distinct')
+  }
   if (config.TRANSPORT_TLS_MODE && !['internal-ca', 'provided'].includes(config.TRANSPORT_TLS_MODE)) {
     addError('TRANSPORT_TLS_MODE must be internal-ca or provided')
   }

@@ -37,18 +37,18 @@ type MockState = {
 };
 
 const adminUser = {
-  id: "admin-user-id",
+  id: "00000000-0000-4000-8000-000000000001",
   email: "admin@darshan.local",
   first_name: "Admin",
   last_name: "User",
-  role_id: "role-admin",
+  role_id: "00000000-0000-4000-8000-000000000002",
   role: "ADMIN",
 };
 
 const rolesPayload = {
   items: [
     {
-      id: "role-admin",
+      id: "00000000-0000-4000-8000-000000000002",
       name: "ADMIN",
       description: "Administrator",
       permissions: {
@@ -63,6 +63,22 @@ const rolesPayload = {
   page: 1,
   limit: 100,
   total: 1,
+};
+
+const permissionActions = ["create", "read", "update", "delete", "manage", "approve", "publish"];
+const permissionSubjects = [
+  "User", "Department", "Media", "Layout", "Presentation", "Schedule", "ScheduleItem",
+  "ScheduleRequest", "LiveBroadcast", "Screen", "ScreenGroup", "Notification", "AuditLog",
+  "DevicePairing", "Emergency", "EmergencyType", "ApiKey", "Webhook", "SsoConfig",
+  "OrgSettings", "Conversation", "ProofOfPlay", "Dashboard", "Report", "Role", "all",
+];
+const authorizationPayload = {
+  version: 1,
+  user_id: adminUser.id,
+  role: { id: adminUser.role_id, name: adminUser.role },
+  department_id: null,
+  department_ids: [],
+  capabilities: permissionActions.flatMap((action) => permissionSubjects.map((subject) => ({ action, subject }))),
 };
 
 const login = async (page: Page) => {
@@ -122,6 +138,14 @@ const installApiMocks = async (page: Page, state: MockState) => {
 
     if (pathname === "/api/v1/auth/logout" && method === "POST") {
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true }) });
+    }
+
+    if (pathname === "/api/v1/auth/authorization" && method === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(authorizationPayload),
+      });
     }
 
     if (pathname === "/api/v1/roles" && method === "GET") {

@@ -15,6 +15,7 @@ import {
 export { resolveDefaultMediaSource, teardownDefaultMediaElementTree } from './default-media-helpers'
 
 export interface DefaultMediaPlayerOptions {
+  getContentEpoch?: () => string | undefined
   debugOverlay?: boolean
   onRefreshRequested?: (reason: string) => void
   onLog?: WebpagePlaybackOptions['onLog']
@@ -32,12 +33,14 @@ export class DefaultMediaPlayer {
   private debugEnabled = false
   private onRefreshRequested?: (reason: string) => void
   private onLog?: WebpagePlaybackOptions['onLog']
+  private getContentEpoch?: () => string | undefined
   private lastMediaKey?: string
 
   constructor(container: HTMLElement, options: DefaultMediaPlayerOptions = {}) {
     this.container = container
     this.onRefreshRequested = options.onRefreshRequested
     this.onLog = options.onLog
+    this.getContentEpoch = options.getContentEpoch
     this.debugEnabled = options.debugOverlay === true
 
     this.content = document.createElement('div')
@@ -228,6 +231,7 @@ export class DefaultMediaPlayer {
     }
 
     return createWebpagePlaybackElement({
+      contentEpoch: this.getContentEpoch?.(),
       liveUrl,
       fallbackUrl,
       fallbackFit: 'contain',

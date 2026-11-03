@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { asc, inArray } from 'drizzle-orm';
 import type { JWTPayload } from '@/auth/jwt';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import { defineAbilityFor, type AppAbility } from '@/rbac';
@@ -28,6 +28,8 @@ export async function withCurrentMutationAuthorization<T>(
     additionalUserIdsToLock?: string[];
     /** Only for callbacks that read, and never update, the locked user records. */
     userLock?: 'share' | 'update';
+    additionalSessionJtisToLock?: string[];
+    sessionLock?: 'share' | 'update';
   } = {}
 ): Promise<T> {
   return getDatabase().transaction(async (tx) => {
@@ -65,19 +67,19 @@ export async function withCurrentMutationAuthorization<T>(
     }
 
     const memberships = await getUserDepartments(user.id, tx);
-    const [session] = await tx
+    const sessionJtis = [...new Set([payload.jti, ...(options.additionalSessionJtisToLock ?? [])])];
+    const lockedSessions = await tx
       .select({
-        user_id: schema.sessions.user_id,
+        access_jti: schema.sessions.access_jti, user_id: schema.sessions.user_id,
         expires_at: schema.sessions.expires_at,
       })
       .from(schema.sessions)
       .where(
-        and(
-          eq(schema.sessions.access_jti, payload.jti),
-          eq(schema.sessions.user_id, user.id)
-        )
+        inArray(schema.sessions.access_jti, sessionJtis)
       )
-      .for('update');
+      .orderBy(asc(schema.sessions.access_jti))
+      .for(options.sessionLock ?? 'update');
+    const session = lockedSessions.find(row => row.access_jti === payload.jti && row.user_id === user.id);
 
     if (!session || session.expires_at.getTime() <= Date.now()) {
       throw AppError.unauthorized('Token has been revoked');
@@ -94,7 +96,7 @@ export async function withCurrentMutationAuthorization<T>(
       departmentId: user.department_id,
       departmentIds: memberships?.departmentIds ?? (user.department_id ? [user.department_id] : []),
     };
-    const ability = await defineAbilityFor(role.id, user.id, user.department_id ?? undefined);
+    const ability = await defineAbilityFor(role.id, user.id, user.department_id ?? undefined, tx);
     return execute({ actor, ability, executor: tx });
   });
 }

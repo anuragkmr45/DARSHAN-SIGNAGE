@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: sudo $0 --archive <role.tgz> --role <data|valkey|backend|cms|observability|recovery> --release-root /opt/darshan/<release-id>" >&2
+  echo "Usage: sudo $0 --archive <role.tgz> --role <data|valkey|backend|cms|observability|media|recovery> --release-root /opt/darshan/<release-id>" >&2
 }
 
 archive=""
@@ -18,7 +18,7 @@ while (( $# > 0 )); do
 done
 
 [[ "$(id -u)" == "0" ]] || { echo "Role installation must run as root." >&2; exit 1; }
-[[ "$role" =~ ^(data|valkey|backend|cms|observability|recovery)$ ]] || { usage; exit 2; }
+[[ "$role" =~ ^(data|valkey|backend|cms|observability|media|recovery)$ ]] || { usage; exit 2; }
 [[ -f "$archive" && ! -L "$archive" ]] || { echo "Archive must be a regular non-symlink file: $archive" >&2; exit 1; }
 release_id="$(basename "$release_root")"
 [[ "$release_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ && "$release_root" == "/opt/darshan/$release_id" ]] || {

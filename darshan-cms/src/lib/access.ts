@@ -34,7 +34,7 @@ export const canAccessModule = (moduleKey: ModuleKey, _user: User | null | undef
     case "schedule":
       return can("read", "Schedule") || can("read", "ScheduleRequest");
     case "live":
-      return can("read", "LiveBroadcast") || can("create", "LiveBroadcast");
+      return can("read", "LiveBroadcast") || can("create", "LiveBroadcast") || can("publish", "LiveBroadcast");
     case "conversations":
       return can("read", "Conversation");
     case "notifications":
@@ -55,20 +55,12 @@ export const canAccessModule = (moduleKey: ModuleKey, _user: User | null | undef
 };
 
 export const canManageBrandingSettings = (
-  user: User | null | undefined,
-  role: Role | undefined,
+  _user: User | null | undefined,
+  _role: Pick<Role, 'id' | 'name'> | undefined,
   can: CanFn,
 ) => {
-  if (user?.role === "SUPER_ADMIN") return true;
-  if (user?.role === "ADMIN") {
-    return Boolean(
-      role?.permissions?.grants?.some(
-        (grant) =>
-          grant.subject === "BrandingSettings" &&
-          (grant.action === "manage" || grant.action === "update" || grant.action === "read"),
-      ),
-    );
-  }
+  // The self-authorization endpoint already applies the server's ADMIN
+  // exception and inverted rules. Role names or directory data cannot bypass it.
   return can("manage", "BrandingSettings") || can("update", "BrandingSettings");
 };
 

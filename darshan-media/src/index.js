@@ -1,9 +1,11 @@
-import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { writeFileSync, renameSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { AdmissionController } from './controller.js';
 import { LiveKitAdapter } from './livekit-adapter.js';
 import { createControlServer, createSignalServer } from './gateway.js';
+import { loadMediaRuntimeConfig } from './runtime-config.js';
+import { createHostReadiness } from './host-readiness.js';
 
 const executeFile = promisify(execFile);
 const required = (name) => {
@@ -11,24 +13,11 @@ const required = (name) => {
   if (!value) throw new Error(`Missing ${name}`);
   return value;
 };
-const port = (name, fallback) => {
-  const value = Number(process.env[name] ?? fallback);
-  if (!Number.isSafeInteger(value) || value < 1 || value > 65535) throw new Error(`Invalid ${name}`);
-  return value;
-};
-
 export async function start() {
-  // Strict authority is an injected prerequisite only. Do not expose a partially
-  // wired production path by accepting prototype grants under a production flag.
-  if ((process.env.DARSHAN_MEDIA_AUTHORITY_MODE ?? 'prototype') !== 'prototype') {
-    throw new Error('Production media authority adapter is not configured');
-  }
-  const upstreamUrl = process.env.DARSHAN_MEDIA_SFU_URL ?? 'http://127.0.0.1:18781';
-  const controlSecret = process.env.DARSHAN_MEDIA_CONTROL_SECRET_FILE
-    ? readFileSync(process.env.DARSHAN_MEDIA_CONTROL_SECRET_FILE, 'utf8').trim()
-    : required('DARSHAN_MEDIA_CONTROL_SECRET');
-  const controlHost = process.env.DARSHAN_MEDIA_CONTROL_HOST ?? '127.0.0.1';
-  if (!['127.0.0.1', '::1'].includes(controlHost)) throw new Error('Control API must bind loopback');
+  let controller;
+  const runtime = loadMediaRuntimeConfig(process.env, { supervised: Boolean(process.send),
+    onAuthorityInvalid: () => { void controller?.isolateNode('AUTHORITY_CONFIGURATION_CHANGED'); } });
+  const { upstreamUrl } = runtime;
   let isolate;
   if (process.send) {
     isolate = (reason) => new Promise((resolve, reject) => {
@@ -57,15 +46,19 @@ export async function start() {
   const adapter = new LiveKitAdapter({
     url: upstreamUrl, apiKey: required('LIVEKIT_API_KEY'), apiSecret: required('LIVEKIT_API_SECRET'),
   });
-  const controller = new AdmissionController({
+  const hostReadiness = runtime.backendAuthority ? createHostReadiness({ file: runtime.hostLeaseFile,
+    nodeInstanceId: runtime.nodeInstanceId, managedInstanceId: runtime.managedInstanceId,
+    onInvalid: () => { void controller?.isolateNode('HOST_READINESS_LOST'); } }) : undefined;
+  controller = new AdmissionController({
     adapter,
-    signalUrl: process.env.DARSHAN_MEDIA_SIGNAL_URL ?? 'ws://127.0.0.1:18780',
-    isolate,
+    signalUrl: runtime.signalUrl, isolate, ready: false, managedInstanceId: runtime.managedInstanceId, hostReadiness,
+    strictAuthority: runtime.backendAuthority ? { mode: 'backend', nodeInstanceId: runtime.nodeInstanceId,
+      authorityEpoch: runtime.backendAuthority.epochId, verifyAuthority: runtime.backendAuthority.verifyAuthority } : undefined,
   });
   const signalServer = createSignalServer({ controller, adapter, upstreamUrl,
-    allowedOrigins: (process.env.DARSHAN_MEDIA_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean),
+    allowedOrigins: runtime.allowedOrigins, tls: runtime.tlsOptions,
   });
-  const controlServer = createControlServer({ controller, secret: controlSecret });
+  const controlServer = createControlServer({ controller, secret: runtime.controlSecret, tls: runtime.tlsOptions });
   let heartbeatSequence = 0;
   // The supervisor's short runtime deadline must exist before any admission can
   // be created. Its cold-start grace is only valid while both listeners are closed.
@@ -75,12 +68,21 @@ export async function start() {
       else resolve();
     });
   });
-  await Promise.all([
-    new Promise((resolve, reject) => signalServer.once('error', reject).listen(port('DARSHAN_MEDIA_SIGNAL_PORT', 18780), process.env.DARSHAN_MEDIA_SIGNAL_HOST ?? '127.0.0.1', resolve)),
-    new Promise((resolve, reject) => controlServer.once('error', reject).listen(port('DARSHAN_MEDIA_CONTROL_PORT', 18784), controlHost, resolve)),
-  ]);
+  try {
+    runtime.backendAuthority?.assertCurrent();
+    await Promise.all([
+      new Promise((resolve, reject) => signalServer.once('error', reject).listen(runtime.signalPort, runtime.signalHost, resolve)),
+      new Promise((resolve, reject) => controlServer.once('error', reject).listen(runtime.controlPort, runtime.controlHost, resolve)),
+    ]);
+    controller.ready = true;
+  } catch {
+    signalServer.closeConnections(); signalServer.close(); controlServer.close();
+    await controller.isolateNode('GATEWAY_STARTUP_FAILED'); throw new Error('GATEWAY_STARTUP_FAILED');
+  }
   const heartbeatFile = process.env.DARSHAN_MEDIA_SUPERVISOR_HEARTBEAT_FILE;
   const timer = setInterval(() => {
+    hostReadiness?.check();
+    try { runtime.backendAuthority?.assertCurrent(); } catch { void controller.isolateNode('AUTHORITY_CONFIGURATION_CHANGED'); }
     void controller.sweep();
     if (process.send && !controller.isolated) {
       process.send({ type: 'heartbeat', sequence: ++heartbeatSequence }, (error) => {
@@ -100,7 +102,7 @@ export async function start() {
     await controller.isolateNode('GATEWAY_SHUTDOWN');
     signalServer.closeConnections();
     signalServer.close();
-    controlServer.close();
+    controlServer.closeAllConnections(); controlServer.close();
   };
   process.once('SIGTERM', () => { void shutdown(); });
   process.once('SIGINT', () => { void shutdown(); });

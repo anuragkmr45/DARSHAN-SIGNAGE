@@ -4985,7 +4985,21 @@ server {
     try_files \$uri =404;
   }
 
-  location ^~ /assets/ {
+  location /assets/ {
+    try_files \$uri =404;
+    access_log off;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+  }
+
+  # pdf.js uses an ES-module worker. Some stock Nginx mime.types files omit
+  # .mjs, which makes browsers reject the worker as application/octet-stream.
+  # Keep this as a regex location and do not mark /assets/ as ^~; otherwise
+  # Nginx skips the MIME-specific location below.
+  location ~ ^/assets/.*\.mjs\$ {
+    types { application/javascript mjs; }
     try_files \$uri =404;
     access_log off;
     add_header Cache-Control "public, max-age=31536000, immutable";
@@ -5413,6 +5427,8 @@ EOF
 
   stage_player_bundle "$PROD_ELECTRON_DIR" "production" "$BACKEND_DEVICE_HOST" "PRODUCTION_SETUP_GUIDE.md"
   cp "$RUNBOOKS_DIR/source-free-production-bundle-deployment.md" "$PRODUCTION_ROOT/PRODUCTION_SETUP_GUIDE.md"
+  source "$PLATFORM_ROOT/scripts/bundle/live-media-role.sh"
+  stage_live_media_role
 fi
 
 cat > "$BUNDLE_ROOT/BUNDLE_OVERVIEW.md" <<EOF
@@ -5777,6 +5793,21 @@ if profile_enabled production; then
   }
 }
 EOF
+  if [[ -n "${PROD_MEDIA_DIR:-}" ]]; then
+    node - "$BUNDLE_ROOT/OPERATIONS_POLICY.json" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2], policy = JSON.parse(fs.readFileSync(file, 'utf8'));
+policy.liveMedia = {
+  included: true, backendRuntimeEnabledByDefault: false,
+  maximumRuns: 10, maximumReceiversPerRun: 25,
+  separateMeasuredLiveCapacityEvidenceRequired: true,
+  privateHostReadinessLeaseRequired: true, physicalDeathWitnessRequiredForSlotRelease: true,
+  cpuLimit: process.env.MEDIA_CPU_LIMIT, memoryLimit: process.env.MEDIA_MEMORY_LIMIT,
+  pidsLimit: Number(process.env.MEDIA_PIDS_LIMIT), minimumFreeDiskBytes: Number(process.env.MEDIA_MIN_FREE_DISK_BYTES),
+};
+fs.writeFileSync(file, `${JSON.stringify(policy, null, 2)}\n`);
+NODE
+  fi
   # Role folders are transferred independently. Copy the same non-secret,
   # signed policy into each role before role manifests are created so no VM has
   # to trust a detached root-bundle file that was never transferred to it.
@@ -5785,6 +5816,9 @@ EOF
   done
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     cp "$BUNDLE_ROOT/OPERATIONS_POLICY.json" "$PROD_OBSERVABILITY_DIR/OPERATIONS_POLICY.json"
+  fi
+  if [[ -n "${PROD_MEDIA_DIR:-}" ]]; then
+    cp "$BUNDLE_ROOT/OPERATIONS_POLICY.json" "$PROD_MEDIA_DIR/OPERATIONS_POLICY.json"
   fi
 
   for role in data valkey backend cms observability recovery; do
@@ -5829,6 +5863,9 @@ if profile_enabled production; then
     sign_role_manifest "$PROD_RECOVERY_DIR"
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
     sign_role_manifest "$PROD_OBSERVABILITY_DIR"
+  fi
+  if [[ -n "${PROD_MEDIA_DIR:-}" ]]; then
+    sign_role_manifest "$PROD_MEDIA_DIR"
   fi
 fi
 

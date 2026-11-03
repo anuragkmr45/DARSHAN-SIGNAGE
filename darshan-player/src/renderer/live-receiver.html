@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src wss: https: ws: http:; media-src blob:; img-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'">
+<title>DARSHAN live receiver</title><style>html,body{margin:0;background:#101010;color:white;width:100%;height:100%;overflow:hidden;font-family:sans-serif;cursor:none}video{width:100%;height:100%;object-fit:contain}#live-unavailable{position:absolute;inset:0;display:none;place-items:center;font-size:28px;background:#101010}</style></head>
+<body><video id="live-video" autoplay muted playsinline></video><div id="live-unavailable" role="status">Content unavailable</div><script src="live-receiver.bundle.js"></script></body></html>

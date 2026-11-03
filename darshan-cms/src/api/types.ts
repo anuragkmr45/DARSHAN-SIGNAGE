@@ -1688,6 +1688,8 @@ export interface Schedule {
 
 export interface ScheduleItemPayload {
   presentation_id: string;
+  source_kind?: "PRESENTATION" | "LIVE";
+  live_session_id?: string | null;
   start_at: string;
   end_at: string;
   priority: number;
@@ -1699,6 +1701,8 @@ export interface ScheduleItem {
   id: string;
   schedule_id: string;
   presentation_id: string;
+  source_kind?: "PRESENTATION" | "LIVE";
+  live_session_id?: string | null;
   start_at: string;
   end_at: string;
   priority: number;
@@ -1710,6 +1714,7 @@ export interface ScheduleItem {
 export interface ScheduleRequestPayload {
   schedule_id: string;
   notes?: string;
+  fallback_preparation_ids?: Record<string, string>;
 }
 
 export interface ReservationSummary {
@@ -1757,6 +1762,7 @@ export interface ScheduleRequest {
   taken_down_at?: string | null;
   taken_down_by?: string | null;
   takedown_reason?: string | null;
+  live_approval?: import("./liveTypes").LiveApproval | null;
   created_at?: string;
 }
 
@@ -1809,6 +1815,7 @@ export interface ScheduleRequestListItem {
   taken_down_at?: string | null;
   taken_down_by?: string | null;
   takedown_reason?: string | null;
+  live_approval?: import("./liveTypes").LiveApproval | null;
 }
 
 export interface ScheduleRequestPagination {

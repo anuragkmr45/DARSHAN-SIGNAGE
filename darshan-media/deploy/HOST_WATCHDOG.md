@@ -111,6 +111,17 @@ is unavailable, it revalidates the original boot ID, cgroup, start ticks and PID
 namespace, then signals only the held pidfd. It never reopens a numeric PID or
 looks up a replacement by name. Linux private-namespace PID1 death terminates
 that namespace's children. A dead pinned handle cannot signal a reused PID.
+The periodic Docker identity check reports `DOCKER_OPERATION_UNAVAILABLE` as a
+degraded management-plane condition. During that condition the watchdog keeps
+checking the immutable pidfd, supervisor heartbeat, its own monitor cadence and
+the independent host-witness lease. A dead pidfd ends monitoring immediately;
+stale heartbeat, stalled witness or monitor suspension still enforces through
+the pinned path. When Docker recovers, the full target identity/start fence is
+revalidated before a recovery event is emitted. Invalid identity, response or
+fence data is never classified as an outage. This prevents a Docker daemon
+restart from terminating healthy media without treating an unpinned process as
+trusted. Backend admission renewals remain the media-authorization cutoff and
+do not depend on Docker management-plane availability.
 If the pidfd signal is denied after a Docker kill request, the watchdog still
 observes the held handle until the same original enforcement deadline. A
 concurrent confirmed exit is reported as `watchdog_pinned_exit_observed`, not as
@@ -126,6 +137,14 @@ privileged capability.
 
 ## Evidence and limits
 
+Backend-mode schema-1 heartbeats may additionally include
+`authority_node_instance_id`, a valid UUID generated fresh by the supervisor for
+that process start. Old heartbeats without it remain supported. If present it
+must remain identical on every sample; the managed `instance_id` still matches
+the pinned Docker label/environment. The optional field does not itself prove
+Backend authorization or release old-node capacity and is not a host death
+witness. Host witness credentials must remain outside the media container.
+
 Python units cover wrong labels/instance/mounts, local versus remote endpoint,
 cgroup/namespace checks, ownership/mode, symlink/hardlink, future/foreign clocks,
 sequence replay, long own-monitor gaps, rejected pidfd fences and dead-handle
@@ -135,10 +154,14 @@ resume gap refusal and first controller heartbeat/readiness ordering.
 
 The opt-in Docker suite uses only uniquely named test nodes on ports 19780–19784
 with 256 MiB and 0.5 CPU. It verifies actual PID1 STOP state, then actual SFU host
-process death/listener closure and full namespace termination. A second case
-fails only that watchdog's private Docker CLI wrapper after verified pinning;
-it never stops the host Docker daemon. Wrong instance input first proves that
-an unrelated/falsely identified target is not killed.
+process death/listener closure and full namespace termination. One case fails
+only that watchdog's private Docker CLI wrapper after verified pinning and then
+stalls PID1, proving stale-heartbeat enforcement still uses the pinned path.
+Another leaves PID1 healthy during the same isolated Docker-inspection outage,
+proves the SFU remains available beyond the former one-second cutoff, restores
+inspection, and requires a recovered full-fence event. These tests never stop
+the host Docker daemon. Wrong instance input first proves that an
+unrelated/falsely identified target is not killed.
 
 Successful Docker-mediated host-stall enforcement has been observed locally.
 The initial direct-pidfd experiment from the Codex application's `chatgpt` LSM

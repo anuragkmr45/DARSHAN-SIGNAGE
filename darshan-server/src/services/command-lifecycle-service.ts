@@ -482,7 +482,19 @@ export async function createDeviceCommands(
     return [];
   }
 
-  return await db.transaction(async (tx) => {
+  return await db.transaction(tx => createDeviceCommandsInTransaction(tx, inputs, options));
+}
+
+/** The caller owns the transaction, including any live state/media intent. */
+export async function createDeviceCommandsInTransaction(
+  tx: CommandLifecycleTx,
+  inputs: CreateDeviceCommandInput[],
+  options: { ignoreIdempotencyConflicts?: boolean } = {}
+) {
+    if (!inputs.length) return [];
+    // Refuse an accidentally supplied autocommit database before any write.
+    await tx.execute(sql`SAVEPOINT live_command_transaction_guard`);
+    await tx.execute(sql`RELEASE SAVEPOINT live_command_transaction_guard`);
     const commandValues = inputs.map(buildCreateCommandValues);
     const insertOrder = commandValues.map((value, index) => ({ value, index })).sort((left, right) =>
       compareOpaque(left.value.screen_id, right.value.screen_id) ||
@@ -512,7 +524,6 @@ export async function createDeviceCommands(
     await insertCommandOutboxEvents(tx, commands, insertedInputs, desiredStates);
 
     return commands;
-  });
 }
 
 export async function createDeviceCommand(input: CreateDeviceCommandInput) {

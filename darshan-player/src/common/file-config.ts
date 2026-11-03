@@ -188,6 +188,7 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
       'cache',
       'diagnostics',
       'runtime',
+      'livePlayback',
       'security',
       'transportTls',
       'observability',
@@ -197,6 +198,14 @@ function mapPlayerConfig(rawPlayer: JsonObject): { config: Partial<AppConfig>; m
 
   const config: any = {}
   const mappedConfigKeys: string[] = []
+
+  const livePlayback = rawPlayer['livePlayback']
+  if (livePlayback !== undefined) {
+    assertPlainObject(livePlayback, 'player.livePlayback')
+    assertKnownKeys(livePlayback, ['enabled'], 'player.livePlayback')
+    config.livePlayback = { enabled: booleanValue(livePlayback['enabled'], 'player.livePlayback.enabled') ?? false }
+    mappedConfigKeys.push('livePlayback')
+  }
 
   const environment = rawPlayer['environment']
   if (environment !== undefined) {
@@ -664,6 +673,7 @@ export function buildRedactedPlayerConfigSummary(config: AppConfig, diagnostics:
       strictCertificateValidation: config.transportTls.strictCertificateValidation,
     },
     runtime: config.runtime,
+    livePlayback: { enabled: config.livePlayback?.enabled === true },
     pairing: config.pairing ?? null,
     duplicateIdentity: config.duplicateIdentity ?? null,
     security: {

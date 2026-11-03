@@ -16,6 +16,7 @@ import { getCommandProcessor } from '../command-processor'
 import { getPlayerMetrics } from './player-metrics'
 import { getSecurePlaybackGuard } from '../secure-playback-guard'
 import { getRealtimeService } from '../realtime-service'
+import { buildPlayerCapabilities } from '../player-capabilities'
 
 const logger = getLogger('heartbeat')
 
@@ -221,6 +222,7 @@ export class HeartbeatService {
       power_source: stats.powerSource,
       install_instance_id: identitySession?.installInstanceId ?? getDeviceStateStore().getState().installInstanceId,
       runtime_session_id: getPairingService().getRuntimeSessionId(),
+      player_capabilities: buildPlayerCapabilities(getConfigManager().getConfig()),
       player_version: getPairingService().getDeviceInfo().appVersion,
       display_profile_v1: getDisplayManager().getProfile(),
       realtime_diagnostics: getRealtimeService().getDiagnostics(),

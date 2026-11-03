@@ -49,6 +49,11 @@ const backendFileConfigSchema = z
       })
       .strict()
       .optional(),
+    liveRuntime: z.object({
+      enabled: z.boolean().optional(), authorityFilePath: z.string().trim().min(1).optional(),
+      mediaControlUrl: urlWithoutCredentials.optional(), mediaCaCertPath: z.string().trim().min(1).optional(),
+      mediaControlFilePath: z.string().trim().min(1).optional(), witnessFilePath: z.string().trim().min(1).optional(),
+    }).strict().optional(),
     realtime: z
       .object({
         enabled: z.boolean().optional(),
@@ -381,6 +386,12 @@ export function mapBackendFileConfigToEnv(config: BackendFileConfig): Record<str
   putIfDefined(env, 'SIGNHEX_SERVER_ID', config.environment?.serverId);
 
   putIfDefined(env, 'APP_PUBLIC_BASE_URL', config.http?.appPublicBaseUrl);
+  putIfDefined(env, 'DARSHAN_LIVE_RUNTIME_ENABLED', config.liveRuntime?.enabled);
+  putIfDefined(env, 'DARSHAN_LIVE_AUTHORITY_FILE', config.liveRuntime?.authorityFilePath);
+  putIfDefined(env, 'DARSHAN_LIVE_MEDIA_CONTROL_URL', config.liveRuntime?.mediaControlUrl);
+  putIfDefined(env, 'DARSHAN_LIVE_MEDIA_CA_CERT_PATH', config.liveRuntime?.mediaCaCertPath);
+  putIfDefined(env, 'DARSHAN_LIVE_MEDIA_CONTROL_SECRET_FILE', config.liveRuntime?.mediaControlFilePath);
+  putIfDefined(env, 'DARSHAN_LIVE_NODE_WITNESS_SECRET_FILE', config.liveRuntime?.witnessFilePath);
   if (config.http?.corsOrigins) putIfDefined(env, 'CORS_ORIGINS', config.http.corsOrigins.join(','));
   if (config.http?.socketAllowedOrigins) {
     putIfDefined(env, 'SOCKET_ALLOWED_ORIGINS', config.http.socketAllowedOrigins.join(','));
@@ -552,6 +563,13 @@ export function buildRedactedRuntimeConfigSummary(
       enforcement: runtimeConfig.DUPLICATE_IDENTITY_ENFORCEMENT ?? null,
       sessionLeaseMs: runtimeConfig.DEVICE_SESSION_LEASE_MS ?? null,
       restartGraceMs: runtimeConfig.DEVICE_SESSION_RESTART_GRACE_MS ?? null,
+    },
+    liveRuntime: {
+      enabled: runtimeConfig.DARSHAN_LIVE_RUNTIME_ENABLED ?? false,
+      authorityFileConfigured: Boolean(runtimeConfig.DARSHAN_LIVE_AUTHORITY_FILE),
+      mediaControlConfigured: Boolean(runtimeConfig.DARSHAN_LIVE_MEDIA_CONTROL_URL && runtimeConfig.DARSHAN_LIVE_MEDIA_CONTROL_SECRET_FILE),
+      mediaCaConfigured: Boolean(runtimeConfig.DARSHAN_LIVE_MEDIA_CA_CERT_PATH),
+      hostWitnessConfigured: Boolean(runtimeConfig.DARSHAN_LIVE_NODE_WITNESS_SECRET_FILE),
     },
     realtime: {
       busProvider: runtimeConfig.REALTIME_BUS_PROVIDER ?? null,

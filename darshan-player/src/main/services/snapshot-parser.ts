@@ -5,6 +5,7 @@
 import { DeviceSnapshot, FitMode, MediaType, SnapshotMediaUrlMap, TimelineItem } from '../../common/types'
 import { getLogger } from '../../common/logger'
 import { NormalizedScheduleWindow, normalizeScheduleWindows } from './snapshot-evaluator'
+import { hasValidLiveWindowControls, isLiveScheduleCandidate } from '../../common/live-playback'
 
 const logger = getLogger('snapshot-parser')
 
@@ -23,6 +24,8 @@ export interface NormalizedSnapshot {
   mediaUrlMap: SnapshotMediaUrlMap
   fetchedAt: string
   raw?: unknown
+  invalidLiveControls?: boolean
+  emergencyActive?: boolean
 }
 
 function inferTypeFromUrl(url?: string): MediaType {
@@ -202,7 +205,36 @@ function extractMediaUrlMap(payload: DeviceSnapshot): SnapshotMediaUrlMap {
   return map
 }
 
-export function parseSnapshotResponse(raw: unknown): NormalizedSnapshot {
+/** Persist only immutable validated LIVE fields, never signed downloads or
+ * unexpected credential-bearing policy fields. Ordinary snapshot data stays compatible. */
+function sanitizeLiveSnapshot(raw: unknown, windows: NormalizedScheduleWindow[]): unknown {
+  if (!raw || typeof raw !== 'object') return raw
+  const wrapper = raw as Record<string, unknown>
+  const nested = wrapper['snapshot'] && typeof wrapper['snapshot'] === 'object' ? 'snapshot'
+    : wrapper['data'] && typeof wrapper['data'] === 'object' ? 'data' : undefined
+  const payload = (nested ? wrapper[nested] : wrapper) as Record<string, unknown>
+  const schedule = payload['schedule'] && typeof payload['schedule'] === 'object' ? payload['schedule'] as Record<string, unknown> : undefined
+  const byId = new Map(windows.filter(window => window.live).map(window => [window.id, window.live!]))
+  const cleanItem = (input: unknown): unknown => {
+    if (!isLiveScheduleCandidate(input)) return input
+    const row = input as Record<string, unknown>
+    const live = typeof row['id'] === 'string' ? byId.get(row['id'].toLowerCase()) : undefined
+    if (!live) return { source_kind: 'LIVE' }
+    if (!live.policy) return { id: live.itemId, source_kind: 'LIVE', start_at: live.startAt, end_at: live.endAt,
+      priority: live.priority, presentation: null, live_fallback_policy_status: 'INVALID' }
+    const policy = live.policy
+    return { id: live.itemId, presentation_id: policy.fallback.manifest.presentation.id, source_kind: 'LIVE', live_session_id: policy.live_session_id,
+      start_at: live.startAt, end_at: live.endAt, priority: live.priority, screen_ids: policy.screen_ids,
+      screen_group_ids: policy.screen_group_ids, resolved_screen_ids: policy.screen_ids, live_policy: policy, presentation: null }
+  }
+  const clean = { ...payload,
+    ...(schedule ? { schedule: { ...schedule, items: Array.isArray(schedule['items']) ? schedule['items'].map(cleanItem) : schedule['items'] } } : {}),
+    ...(Array.isArray(payload['items']) ? { items: payload['items'].map(cleanItem) } : {}),
+  }
+  return nested ? { ...wrapper, [nested]: clean } : clean
+}
+
+export function parseSnapshotResponse(raw: unknown, context: { deviceId?: string } = {}): NormalizedSnapshot {
   const wrapper = raw as any
   const payloadCandidate = wrapper?.snapshot || wrapper?.data || raw
   const payload =
@@ -236,6 +268,9 @@ export function parseSnapshotResponse(raw: unknown): NormalizedSnapshot {
 
   const schedule = snapshot.schedule
   const scheduleItems = Array.isArray(schedule?.items) ? schedule.items : []
+  const publishId = typeof wrapper?.publish?.publish_id === 'string' ? wrapper.publish.publish_id
+    : typeof wrapper?.publish_id === 'string' ? wrapper.publish_id : snapshot.publish_id
+  const expectedDeviceId = typeof wrapper?.device_id === 'string' && context.deviceId && wrapper.device_id.toLowerCase() !== context.deviceId.toLowerCase() ? undefined : context.deviceId
   const hasTimedWindowPayload = scheduleItems.some((item) => {
     if (!item || typeof item !== 'object') {
       return false
@@ -246,9 +281,12 @@ export function parseSnapshotResponse(raw: unknown): NormalizedSnapshot {
 
   const itemsSource = hasTimedWindowPayload ? snapshot.items : scheduleItems.length > 0 ? scheduleItems : snapshot.items
   const items = (itemsSource || [])
+    .filter((item) => !isLiveScheduleCandidate(item))
     .map((item) => normalizeItem(item, mediaUrlMap))
     .filter(Boolean) as TimelineItem[]
-  const scheduleWindows = normalizeScheduleWindows(scheduleItems, mediaUrlMap)
+  const scheduleWindows = normalizeScheduleWindows(scheduleItems, mediaUrlMap, { publishId, scheduleId: schedule?.id, deviceId: expectedDeviceId })
+  const invalidLiveControls = scheduleItems.some(item => isLiveScheduleCandidate(item) && !hasValidLiveWindowControls(item)) ||
+    (Array.isArray(snapshot.items) && snapshot.items.some(isLiveScheduleCandidate))
 
   const emergencyInput = rootEmergency
   const responseServerTime = typeof wrapper?.server_time === 'string' ? Date.parse(wrapper.server_time) : Number.NaN
@@ -261,20 +299,18 @@ export function parseSnapshotResponse(raw: unknown): NormalizedSnapshot {
     !emergencyExpired &&
     emergencyInput &&
     (emergencyInput.active === true || emergencyInput.is_active === true || Boolean(emergencyInput.media_url || emergencyInput.url))
-  const emergencyItem = emergencyActive
+  const emergencyCandidate = emergencyActive
     ? normalizeItem(emergencyInput, mediaUrlMap, { emergency: true }) || undefined
     : undefined
+  const emergencyItem = emergencyCandidate && (emergencyCandidate.remoteUrl ||
+    (emergencyCandidate.type === 'message' && typeof emergencyCandidate.meta?.['emergency_message'] === 'string'))
+    ? emergencyCandidate : undefined
 
   const defaultInput = rootDefaultMedia
   const defaultItem = defaultInput ? normalizeItem(defaultInput, mediaUrlMap) || undefined : undefined
 
   const normalized: NormalizedSnapshot = {
-    publishId:
-      typeof wrapper?.publish?.publish_id === 'string'
-        ? wrapper.publish.publish_id
-        : typeof wrapper?.publish_id === 'string'
-          ? wrapper.publish_id
-          : undefined,
+    publishId,
     snapshotId: snapshot.id || snapshot.snapshot_id || wrapper?.publish?.snapshot_id,
     scheduleId: schedule?.id,
     scheduleTimezone: schedule?.timezone ?? null,
@@ -290,11 +326,13 @@ export function parseSnapshotResponse(raw: unknown): NormalizedSnapshot {
     items,
     scheduleWindows,
     emergencyItem,
+    emergencyActive: Boolean(emergencyActive),
+    invalidLiveControls,
     emergencyExpiresAt: emergencyExpired ? null : emergencyInput?.expires_at ?? null,
     defaultItem,
     mediaUrlMap,
     fetchedAt: snapshot.fetched_at || snapshot.generated_at || new Date().toISOString(),
-    raw,
+    raw: sanitizeLiveSnapshot(raw, scheduleWindows),
   }
 
   logger.debug(

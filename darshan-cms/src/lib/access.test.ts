@@ -27,6 +27,7 @@ describe("access helpers", () => {
     const custom = makeUser({ role: "CUSTOM_AUTHOR" });
     expect(canAccessModule("live", custom, (action, subject) => action === "create" && subject === "LiveBroadcast")).toBe(true);
     expect(canAccessModule("live", custom, (action, subject) => action === "read" && subject === "LiveBroadcast")).toBe(true);
+    expect(canAccessModule("live", custom, (action, subject) => action === "publish" && subject === "LiveBroadcast")).toBe(true);
     expect(canAccessModule("live", custom, (action, subject) => action === "approve" && subject === "ScheduleRequest")).toBe(false);
     expect(canAccessModule("live", makeUser({ role: "SUPER_ADMIN" }), () => false)).toBe(false);
   });

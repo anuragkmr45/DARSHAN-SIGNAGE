@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'crypto';
 import { eq, sql } from 'drizzle-orm';
 import { FastifyRequest } from 'fastify';
 import { config as appConfig } from '@/config';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DatabaseTransaction } from '@/db';
 
 export type DeviceIdentitySessionSource = 'heartbeat' | 'pairing_status' | 'websocket' | 'command_poll';
 export type DeviceIdentityEnforcement = 'warn' | 'block';
@@ -286,9 +286,11 @@ export function extractDeviceIdentitySessionInput(
 }
 
 export async function recordDeviceIdentitySession(
-  input: DeviceIdentitySessionInput
+  input: DeviceIdentitySessionInput,
+  executor?: DatabaseTransaction
 ): Promise<DuplicateIdentitySummary> {
-  const db = getDatabase();
+  if (!executor) return getDatabase().transaction(tx => recordDeviceIdentitySession(input, tx));
+  const db = executor;
   const now = input.now ?? new Date();
   const runtimeSessionHash = hashValue(input.runtimeSessionId);
   const [screen] = await db
@@ -298,7 +300,8 @@ export async function recordDeviceIdentitySession(
     })
     .from(schema.screens)
     .where(eq(schema.screens.id, input.deviceId))
-    .limit(1);
+    .limit(1)
+    .for('update');
 
   if (!screen) {
     return summarize({ schemaVersion: 1, sessions: [], conflict: null });
@@ -377,10 +380,7 @@ export async function recordDeviceIdentitySession(
   await db
     .update(schema.screens)
     .set({
-      device_info: {
-        ...deviceInfo,
-        identity_sessions: nextState,
-      },
+      device_info: sql`COALESCE(${schema.screens.device_info}, '{}'::jsonb) || ${JSON.stringify({ identity_sessions: nextState })}::jsonb`,
       updated_at: now,
     })
     .where(eq(schema.screens.id, input.deviceId));

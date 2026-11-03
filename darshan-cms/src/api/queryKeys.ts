@@ -1,4 +1,5 @@
 export const queryKeys = {
+  selfAuthorization: (userId: string | undefined, sessionGeneration: number) => ["self-authorization", userId ?? null, sessionGeneration] as const,
   departments: ["departments"] as const,
   screens: ["screens"] as const,
   screensList: (filters?: {

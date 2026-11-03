@@ -559,6 +559,85 @@ export const liveOccurrenceAssets = pgTable('live_occurrence_assets', {
   validCheck: check('live_occurrence_assets_valid_check', sql`${table.status} = 'READY' AND ${table.sha256} ~ '^[0-9a-f]{64}$' AND ${table.size} > 0 AND ${table.render_type} IN ('image','video','pdf','hls') AND ${table.source_type} IN ('IMAGE','VIDEO','DOCUMENT','WEBPAGE')`),
 }));
 
+// Runtime occupancy is deliberately separate from scheduled reservations. No
+// transient signaling credential or reusable fresh-authority grant is durable.
+export const liveOccurrenceControls = pgTable('live_occurrence_controls', {
+  occurrence_id: uuid('occurrence_id').primaryKey().references(() => liveScheduleOccurrences.id, { onDelete: 'restrict' }),
+  enabled: boolean('enabled').notNull().default(true), revision: integer('revision').notNull().default(1),
+  generation: integer('generation').notNull().default(0), current_run_id: uuid('current_run_id'),
+  disabled_by: uuid('disabled_by'), disable_reason: text('disable_reason'),
+  start_notified_at: timestamp('start_notified_at'), end_notified_at: timestamp('end_notified_at'),
+  updated_at: timestamp('updated_at').notNull().defaultNow(),
+});
+export const liveMediaNodes = pgTable('live_media_nodes', {
+  id: uuid('id').primaryKey(), managed_instance_id: uuid('managed_instance_id').notNull(),
+  authority_epoch: uuid('authority_epoch').notNull(), endpoint_fingerprint: varchar('endpoint_fingerprint', { length: 64 }).notNull(),
+  accepting_new_runs: boolean('accepting_new_runs').notNull().default(false),
+  last_seen_at: timestamp('last_seen_at').notNull().defaultNow(), observed_dead_at: timestamp('observed_dead_at'),
+  death_witness_id: uuid('death_witness_id'),
+});
+export const liveRuns = pgTable('live_runs', {
+  id: uuid('id').primaryKey(), occurrence_id: uuid('occurrence_id').notNull().references(() => liveScheduleOccurrences.id, { onDelete: 'restrict' }),
+  generation: integer('generation').notNull(), authority_epoch: uuid('authority_epoch').notNull(),
+  node_instance_id: uuid('node_instance_id').notNull().references(() => liveMediaNodes.id, { onDelete: 'restrict' }),
+  runtime_slot: integer('runtime_slot').notNull(),
+  state: varchar('state', { length: 16 }).$type<'PREPARING' | 'RUNNING' | 'STOPPING' | 'STOPPED'>().notNull().default('PREPARING'),
+  presenter_user_id: uuid('presenter_user_id').notNull(), presenter_session_jti: varchar('presenter_session_jti', { length: 255 }).notNull(),
+  presenter_runtime_session_id: uuid('presenter_runtime_session_id').notNull(),
+  operation_revision: bigint('operation_revision', { mode: 'number' }).notNull().default(1),
+  revision: integer('revision').notNull().default(1), stop_reason: varchar('stop_reason', { length: 160 }),
+  created_at: timestamp('created_at').notNull().defaultNow(), started_at: timestamp('started_at'), stopped_at: timestamp('stopped_at'),
+  teardown_confirmed_at: timestamp('teardown_confirmed_at'), updated_at: timestamp('updated_at').notNull().defaultNow(),
+}, table => ({
+  occupiedSlot: uniqueIndex('live_runs_occupied_slot_idx').on(table.runtime_slot).where(sql`${table.teardown_confirmed_at} IS NULL`),
+  activeOccurrence: uniqueIndex('live_runs_active_occurrence_idx').on(table.occurrence_id).where(sql`${table.teardown_confirmed_at} IS NULL`),
+}));
+export const liveAdmissions = pgTable('live_admissions', {
+  id: uuid('id').primaryKey(), run_id: uuid('run_id').notNull().references(() => liveRuns.id, { onDelete: 'restrict' }),
+  generation: integer('generation').notNull(), role: varchar('role', { length: 16 }).$type<'presenter' | 'receiver'>().notNull(),
+  participant_id: varchar('participant_id', { length: 255 }).notNull(), user_id: uuid('user_id'), session_jti: varchar('session_jti', { length: 255 }),
+  screen_id: uuid('screen_id'), certificate_serial: varchar('certificate_serial', { length: 255 }), runtime_session_id: uuid('runtime_session_id').notNull(),
+  readiness: jsonb('readiness'), operation_revision: bigint('operation_revision', { mode: 'number' }).notNull().default(1),
+  state: varchar('state', { length: 16 }).$type<'PENDING' | 'ACTIVE' | 'REVOKING' | 'REVOKED'>().notNull().default('PENDING'),
+  last_authorized_at: timestamp('last_authorized_at'), created_at: timestamp('created_at').notNull().defaultNow(), revoked_at: timestamp('revoked_at'),
+  teardown_confirmed_at: timestamp('teardown_confirmed_at'), updated_at: timestamp('updated_at').notNull().defaultNow(),
+}, table => ({
+  presenter: uniqueIndex('live_admissions_presenter_idx').on(table.run_id).where(sql`${table.role}='presenter' AND ${table.teardown_confirmed_at} IS NULL`),
+  receiver: uniqueIndex('live_admissions_receiver_idx').on(table.run_id, table.screen_id).where(sql`${table.role}='receiver' AND ${table.teardown_confirmed_at} IS NULL`),
+}));
+export const liveMediaOperations = pgTable('live_media_operations', {
+  id: uuid('id').primaryKey(), run_id: uuid('run_id').notNull().references(() => liveRuns.id, { onDelete: 'restrict' }),
+  admission_id: uuid('admission_id').references(() => liveAdmissions.id, { onDelete: 'restrict' }),
+  kind: varchar('kind', { length: 24 }).$type<'CREATE' | 'REVOKE_ADMISSION' | 'REVOKE_RUN'>().notNull(),
+  operation_revision: bigint('operation_revision', { mode: 'number' }).notNull(), dedupe_key: varchar('dedupe_key', { length: 255 }).notNull().unique(),
+  state: varchar('state', { length: 16 }).$type<'PENDING' | 'PROCESSING' | 'ACKED'>().notNull().default('PENDING'),
+  claim_token: uuid('claim_token'), lease_expires_at: timestamp('lease_expires_at'), attempts: integer('attempts').notNull().default(0),
+  available_at: timestamp('available_at').notNull().defaultNow(), last_error_code: varchar('last_error_code', { length: 100 }),
+  created_at: timestamp('created_at').notNull().defaultNow(), updated_at: timestamp('updated_at').notNull().defaultNow(),
+});
+export const liveRuntimeReceipts = pgTable('live_runtime_receipts', {
+  scope_hash: varchar('scope_hash', { length: 64 }).notNull(), action: varchar('action', { length: 64 }).notNull(), request_id: uuid('request_id').notNull(),
+  body_sha256: varchar('body_sha256', { length: 64 }).notNull(),
+  occurrence_id: uuid('occurrence_id').notNull().references(() => liveScheduleOccurrences.id, { onDelete: 'restrict' }),
+  run_id: uuid('run_id').references(() => liveRuns.id, { onDelete: 'restrict' }),
+  admission_id: uuid('admission_id').references(() => liveAdmissions.id, { onDelete: 'restrict' }),
+  created_at: timestamp('created_at').notNull().defaultNow(),
+}, table => ({ pk: primaryKey({ columns: [table.scope_hash, table.action, table.request_id] }) }));
+export const liveAdmissionObservations = pgTable('live_admission_observations', {
+  admission_id: uuid('admission_id').primaryKey().references(() => liveAdmissions.id, { onDelete: 'restrict' }),
+  runtime_session_id: uuid('runtime_session_id').notNull(), sequence: bigint('sequence', { mode: 'number' }).notNull(),
+  connection: varchar('connection', { length: 16 }).notNull(), subscription: varchar('subscription', { length: 16 }).notNull(),
+  frame: varchar('frame', { length: 16 }).notNull(), audio: varchar('audio', { length: 16 }).notNull(),
+  fallback_ready: boolean('fallback_ready').notNull(), fallback_reason: varchar('fallback_reason', { length: 160 }),
+  received_at: timestamp('received_at').notNull().defaultNow(),
+});
+export const liveMediaDeathWitnesses = pgTable('live_media_death_witnesses', {
+  id: uuid('id').primaryKey(), node_instance_id: uuid('node_instance_id').notNull().references(() => liveMediaNodes.id, { onDelete: 'restrict' }),
+  authority_epoch: uuid('authority_epoch').notNull(), managed_instance_id: uuid('managed_instance_id').notNull(),
+  process_start_ticks: varchar('process_start_ticks', { length: 32 }).notNull(), body_sha256: varchar('body_sha256', { length: 64 }).notNull(),
+  received_at: timestamp('received_at').notNull().defaultNow(),
+});
+
 // Schedule items table
 export const scheduleItems = pgTable(
   'schedule_items',
