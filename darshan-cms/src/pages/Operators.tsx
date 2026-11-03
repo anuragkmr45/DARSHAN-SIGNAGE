@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail, Shield, User, MoreVertical, Edit, Trash2, RefreshCw, CheckCircle, Plus, Loader2 } from "lucide-react";
+import { Mail, MoreVertical, Edit, Trash2, RefreshCw, CheckCircle, Plus, Loader2, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { usersApi } from "@/api/domains/users";
 import type { User as ApiUser } from "@/api/types";
@@ -30,7 +29,6 @@ import { getRoleBadgeClass } from "@/lib/roleBadges";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { useAppSelector } from "@/store/hooks";
 import { departmentsApi } from "@/api/domains/departments";
-import { canManageOperatorsModule } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
 import { AdditionalDepartmentsPicker } from "@/components/users/AdditionalDepartmentsPicker";
 
@@ -59,9 +57,10 @@ export default function Operators() {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isActivateConfirmOpen, setIsActivateConfirmOpen] = useState(false);
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
   const operatorsQueryKey = ["users", "operators", page, PAGE_SIZE, searchQuery] as const;
 
-  const { data, isLoading, isFetching, isError, error } = useQuery({
+  const { data, isLoading, isFetching, isError, error, isPlaceholderData, refetch } = useQuery({
     queryKey: operatorsQueryKey,
     queryFn: () => usersApi.list({ page, limit: PAGE_SIZE, role: "OPERATOR", search: searchQuery || undefined }),
     placeholderData: (previousData) => previousData,
@@ -70,7 +69,9 @@ export default function Operators() {
   const { data: rolesData, isLoading: isRolesLoading } = useRolesList();
   const roles = useMemo(() => rolesData?.items ?? [], [rolesData?.items]);
   const operatorRole = useMemo(() => roles.find((role) => role.name === "OPERATOR") ?? null, [roles]);
-  const canManageOperators = canManageOperatorsModule(can);
+  const canCreate = can("create", "User");
+  const canUpdate = can("update", "User");
+  const canDelete = can("delete", "User");
   const canPickDepartment = can("manage", "User") && can("read", "Department");
   const { data: departmentsData, isLoading: isDepartmentsLoading } = useQuery({
     queryKey: [...queryKeys.departments, "all"],
@@ -80,13 +81,6 @@ export default function Operators() {
   const departments = useMemo(() => departmentsData ?? [], [departmentsData]);
   const departmentMap = useMemo(() => new Map(departments.map((department) => [department.id, department.name])), [departments]);
   const passwordMismatch = !selectedUser && Boolean(formData.confirm_password) && formData.password !== formData.confirm_password;
-
-  useEffect(() => {
-    if (isError) {
-      const message = error instanceof ApiError ? error.message : "Unable to load operators.";
-      toast({ title: "Load failed", description: message, variant: "destructive" });
-    }
-  }, [isError, error, toast]);
 
   const users = useMemo(() => data?.items ?? [], [data]);
 
@@ -98,10 +92,10 @@ export default function Operators() {
   }, [searchQuery]);
 
   useEffect(() => {
-    if (page > totalPages) {
+    if (data && !isPlaceholderData && page > totalPages) {
       setPage(totalPages);
     }
-  }, [page, totalPages]);
+  }, [data, isPlaceholderData, page, totalPages]);
 
   useEffect(() => {
     if (selectedUser) {
@@ -191,11 +185,7 @@ export default function Operators() {
     onSuccess: (data) => {
       setPendingActionUser(null);
       setIsResetConfirmOpen(false);
-      toast({
-        title: "Password reset",
-        description: `Temporary password: ${data.temp_password}`,
-        duration: 10000,
-      });
+      setTemporaryPassword(data.temp_password);
     },
   }, "Unable to reset password.");
 
@@ -210,14 +200,14 @@ export default function Operators() {
   }, "Unable to activate operator.");
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-6xl space-y-5">
       <PageHeader
         title="Operators"
-        description="Manage system operators and their permissions."
-        actionLabel={canManageOperators ? "Add Operator" : undefined}
-        actionIcon={canManageOperators ? <Plus className="h-4 w-4" /> : undefined}
+        description="Manage operator access and department membership."
+        actionLabel={canCreate ? "New Operator" : undefined}
+        actionIcon={canCreate ? <Plus className="h-4 w-4" /> : undefined}
         onAction={
-          canManageOperators
+          canCreate
             ? () => {
                 setSelectedUser(null);
                 setIsFormOpen(true);
@@ -226,41 +216,43 @@ export default function Operators() {
         }
       />
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="w-full lg:max-w-md">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="w-full sm:max-w-sm">
           <SearchBar placeholder="Search operators..." onSearch={setSearchQuery} initialValue={searchQuery} />
         </div>
-        <div className="text-sm text-muted-foreground">
-          {isFetching ? "Refreshing..." : `${data?.total ?? filtered.length} operators`}
-        </div>
+        <div className="flex items-center gap-2"><span className="text-sm text-muted-foreground" aria-live="polite">{data?.total ?? 0} {(data?.total ?? 0) === 1 ? "operator" : "operators"}{isFetching && !isLoading ? " · Updating" : ""}</span><Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}><RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" />Refresh</Button></div>
       </div>
 
       {isLoading ? (
-        <div className="rounded-md border p-6">
-          <LoadingIndicator label="Loading operators..." />
-        </div>
+        <LoadingIndicator label="Loading operators..." />
+      ) : isError && !data ? (
+        <EmptyState title="Could not load operators" description={error instanceof ApiError ? error.message : "Please try again."} actionLabel="Retry" onAction={() => void refetch()} />
       ) : filtered.length === 0 ? (
-        <EmptyState title="No operators found" description="Try adjusting your search or add a new operator." />
+        <EmptyState title={searchQuery ? "No matching operators" : "No operators yet"} description={searchQuery ? "Try another search." : "Create an operator to assign access."} />
       ) : (
-        <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-4">
+          <div className="divide-y border-y">
             {filtered.map((operator: ApiUser) => (
-              <Card key={operator.id} className="transition-shadow hover:shadow-md">
-              <CardHeader className="flex flex-row items-start justify-between p-5 pb-3">
-                <div className="flex min-w-0 items-start gap-3">
-                  <div className="p-2 rounded-full bg-primary/10">
-                    <User className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="break-words font-semibold">
+              <div key={operator.id} className="flex flex-wrap items-start justify-between gap-3 px-1 py-4 sm:flex-nowrap sm:px-3">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="break-words font-medium">
                       {operator.first_name || operator.last_name
                         ? `${operator.first_name ?? ""} ${operator.last_name ?? ""}`.trim()
                         : operator.email}
-                    </div>
-                    <div className="break-all text-xs text-muted-foreground">{operator.id}</div>
+                    </span>
+                    {!operator.is_active && <Badge variant="outline" className="text-xs text-destructive border-destructive/40">Inactive</Badge>}
                   </div>
+                  <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground"><Mail aria-hidden="true" className="h-4 w-4 shrink-0" /><span className="truncate">{operator.email}</span></div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge className={getRoleBadgeClass(operator.role)}>{operator.role}</Badge>
+                    {Array.from(new Set(operator.department_ids ?? (operator.department_id ? [operator.department_id] : []))).map((id) => (
+                      <Badge key={id} variant="outline" className="max-w-full text-xs"><span className="truncate">{id === operator.department_id ? "Primary" : "Additional"}: {departmentMap.get(id) ?? operator.departments?.find((item) => item.id === id)?.name ?? id}</span></Badge>
+                    ))}
+                  </div>
+                  <details className="text-xs text-muted-foreground"><summary className="w-fit cursor-pointer">Technical ID</summary><code className="mt-1 block break-all">{operator.id}</code></details>
                 </div>
-                {canManageOperators ? (
+                {(canUpdate || canDelete) ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Actions for ${operator.email}`}>
@@ -269,7 +261,7 @@ export default function Operators() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem
+                    {canUpdate && <DropdownMenuItem
                       onClick={() => {
                         setSelectedUser(operator);
                         setIsFormOpen(true);
@@ -278,8 +270,8 @@ export default function Operators() {
                     >
                       <Edit className="h-4 w-4" />
                       Edit
-                    </DropdownMenuItem>
-                    {!operator.is_active && (
+                    </DropdownMenuItem>}
+                    {canUpdate && !operator.is_active && (
                       <DropdownMenuItem
                         onClick={() => {
                           setPendingActionUser(operator);
@@ -291,7 +283,7 @@ export default function Operators() {
                         Activate
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem
+                    {canUpdate && <DropdownMenuItem
                       onClick={() => {
                         setPendingActionUser(operator);
                         setIsResetConfirmOpen(true);
@@ -300,8 +292,8 @@ export default function Operators() {
                     >
                       <RefreshCw className="h-4 w-4" />
                       Reset Password
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
+                    </DropdownMenuItem>}
+                    {canDelete && <DropdownMenuItem
                       onClick={() => {
                         setPendingActionUser(operator);
                         setIsDeleteConfirmOpen(true);
@@ -310,42 +302,18 @@ export default function Operators() {
                     >
                       <Trash2 className="h-4 w-4" />
                       Delete
-                    </DropdownMenuItem>
+                    </DropdownMenuItem>}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 ) : null}
-              </CardHeader>
-              <CardContent className="pt-0 space-y-3">
-                <div className="flex items-center justify-between">
-                  <Badge className={getRoleBadgeClass(operator.role)}>
-                    <Shield className="h-3 w-3 mr-1" />
-                    {operator.role}
-                  </Badge>
-                  {!operator.is_active && (
-                    <Badge variant="outline" className="text-xs text-destructive border-destructive/40">
-                      Inactive
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Mail className="h-4 w-4" />
-                  <span className="truncate">{operator.email}</span>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {Array.from(new Set(operator.department_ids ?? (operator.department_id ? [operator.department_id] : []))).map((id) => (
-                    <Badge key={id} variant="outline" className="text-xs">
-                      {id === operator.department_id ? "Primary" : "Additional"}: {departmentMap.get(id) ?? operator.departments?.find((item) => item.id === id)?.name ?? id}
-                    </Badge>
-                  ))}
-                </div>
-              </CardContent>
-              </Card>
+              </div>
             ))}
           </div>
-          <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} />
+          {data && data.total > PAGE_SIZE && <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} />}
         </div>
       )}
-      <Dialog open={canManageOperators && isFormOpen} onOpenChange={setIsFormOpen}>
+      {isError && data && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh operators. Showing the last loaded page. <Button variant="outline" size="sm" onClick={() => void refetch()}>Retry</Button></div>}
+      <Dialog open={(canCreate || canUpdate) && isFormOpen} onOpenChange={setIsFormOpen}>
         <DialogContent className="sm:max-w-[520px] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{selectedUser ? "Edit Operator" : "Add Operator"}</DialogTitle>
@@ -409,7 +377,7 @@ export default function Operators() {
                   />
                 </div>
                 <p className="col-span-2 text-xs text-muted-foreground">
-                  Set an initial password for the new operator with atleast 8 characters with special character, number, and uppercase letter.
+                  Use at least eight characters, including an uppercase letter, a number, and a special character.
                 </p>
                 {passwordMismatch ? (
                   <p className="col-span-2 text-xs text-destructive">Password and confirm password must match.</p>
@@ -498,7 +466,7 @@ export default function Operators() {
                 !formData.email.trim() ||
                 (!selectedUser && (!formData.password.trim() || !formData.confirm_password.trim() || passwordMismatch)) ||
                 !formData.role_id ||
-                !canManageOperators
+                !(selectedUser ? canUpdate : canCreate)
               }
             >
               {createOrUpdate.isPending ? "Saving..." : selectedUser ? "Update" : "Create"}
@@ -521,6 +489,13 @@ export default function Operators() {
         }}
         isLoading={deleteUser.isPending}
       />
+      <Dialog open={Boolean(temporaryPassword)} onOpenChange={(open) => { if (!open) setTemporaryPassword(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Temporary password</DialogTitle><p className="text-sm text-muted-foreground">Copy this password now and give it to the operator through your approved channel. It will not be shown again. Their previous sessions were ended.</p></DialogHeader>
+          <div className="space-y-3"><code className="block break-all rounded-md border bg-muted/40 p-3 text-sm" aria-label="Temporary password">{temporaryPassword}</code><Button variant="outline" onClick={async () => { try { if (temporaryPassword) { await navigator.clipboard.writeText(temporaryPassword); toast({ title: "Password copied" }); } } catch { toast({ title: "Copy failed", description: "Select and copy the password manually.", variant: "destructive" }); } }}><Copy aria-hidden="true" className="mr-2 h-4 w-4" />Copy password</Button></div>
+          <DialogFooter><Button onClick={() => setTemporaryPassword(null)}>Done</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={isResetConfirmOpen}

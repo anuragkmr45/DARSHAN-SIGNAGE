@@ -137,3 +137,9 @@ Audit Logs has labeled filters, expandable technical details, server paging, PDF
 Departments now has a compact list, permission-aware New/Edit/Delete controls, Search/Refresh with clear failures, and exact-name deletion confirmation. A `DEPARTMENT_IN_USE` response keeps the target and shows server blocker counts. The prior page eagerly fetched every operator across the site and showed zero when that request failed or was forbidden. Operator rows now load only when the selected department opens, ten at a time, with primary/additional labels. A Department-only reader does not receive a User request, and the backend no longer searches operator names or email for that reader.
 
 Four new fixture browser cases and six existing multi-department cases passed; two focused DB route tests passed, including the search permission boundary. CMS/server builds, 271 CMS unit tests, focused lint and bundle budget passed. [Developer evidence](../../qa-artifacts/evidence/product-ui-departments-developer-verification-2026-11-04.md) records captures and remaining real-service checks.
+
+## Operators packet
+
+Operators now uses a compact roster with Search/Refresh, clear initial and stale-refresh failures, and a technical-ID disclosure. New, Edit/Activate/Reset, and Delete each follow their respective User grant. A reset password is shown once in a focused dialog until dismissed, with Copy and manual selection available; it no longer disappears in a short-lived toast. Existing primary/additional membership behavior and rejected-edit retention remain intact.
+
+Six new fixture browser cases and six affected multi-department cases passed. CMS build/bundle budget, 271 CMS unit tests, and focused lint passed. [Developer evidence](../../qa-artifacts/evidence/product-ui-operators-developer-verification-2026-11-04.md) records captures and remaining real-service checks.
