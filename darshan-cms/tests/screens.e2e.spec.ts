@@ -30,11 +30,15 @@ type MockState = {
   confirmModeByCode: Record<string, "PAIRING" | "RECOVERY">;
   screenDeleteBlocked?: boolean;
   groupDeleteBlocked?: boolean;
+  groupReadUnavailable?: boolean;
+  groupUpdateBodies?: Array<{ screen_ids?: string[] }>;
   observabilityScrapeStatus?: "up" | "unconfigured" | "unavailable";
   observabilityMetricsSource?: "prometheus" | "backend_heartbeat";
   grafanaEmbed?: boolean;
   grafanaAuthenticated?: boolean;
   pairingHealthUnavailable?: boolean;
+  orphanPairingDeviceId?: string;
+  capabilities?: Array<{ action: string; subject: string }>;
 };
 
 const adminUser = {
@@ -145,7 +149,10 @@ const installApiMocks = async (page: Page, state: MockState) => {
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(authorizationPayload),
+        body: JSON.stringify({
+          ...authorizationPayload,
+          capabilities: state.capabilities ?? authorizationPayload.capabilities,
+        }),
       });
     }
 
@@ -206,13 +213,15 @@ const installApiMocks = async (page: Page, state: MockState) => {
     if (pathname === "/api/v1/screens" && method === "GET") {
       const pageNum = Number(searchParams.get("page") || 1);
       const limit = Number(searchParams.get("limit") || 100);
+      const search = (searchParams.get("q") || "").toLowerCase();
+      const matchingScreens = state.screens.filter((screen) => !search || screen.name.toLowerCase().includes(search));
       return route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
           server_time: "2026-03-12T12:00:00.000Z",
-          items: state.screens,
-          pagination: { page: pageNum, limit, total: state.screens.length },
+          items: matchingScreens.slice((pageNum - 1) * limit, pageNum * limit),
+          pagination: { page: pageNum, limit, total: matchingScreens.length },
         }),
       });
     }
@@ -220,20 +229,36 @@ const installApiMocks = async (page: Page, state: MockState) => {
     if (pathname === "/api/v1/screen-groups" && method === "GET") {
       const pageNum = Number(searchParams.get("page") || 1);
       const limit = Number(searchParams.get("limit") || 100);
+      const search = (searchParams.get("q") || "").toLowerCase();
+      const matchingGroups = state.groups.filter((group) => !search || group.name.toLowerCase().includes(search));
       return route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
           server_time: "2026-03-12T12:00:00.000Z",
-          items: state.groups,
-          pagination: { page: pageNum, limit, total: state.groups.length },
+          items: matchingGroups.slice((pageNum - 1) * limit, pageNum * limit),
+          pagination: { page: pageNum, limit, total: matchingGroups.length },
         }),
       });
     }
 
     if (/^\/api\/v1\/screen-groups\/[^/]+$/.test(pathname) && method === "GET") {
+      if (state.groupReadUnavailable) {
+        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+      }
       const group = state.groups.find((entry) => entry.id === pathname.split("/").pop());
       return route.fulfill({ status: group ? 200 : 404, contentType: "application/json", body: JSON.stringify(group ?? { error: { code: "NOT_FOUND", message: "Group not found" } }) });
+    }
+
+    if (/^\/api\/v1\/screen-groups\/[^/]+$/.test(pathname) && method === "PATCH") {
+      const body = route.request().postDataJSON() as { name?: string; screen_ids?: string[] };
+      state.groupUpdateBodies?.push(body);
+      const group = state.groups.find((entry) => entry.id === pathname.split("/").pop());
+      if (group) {
+        group.name = body.name ?? group.name;
+        if (body.screen_ids) group.screen_ids = body.screen_ids;
+      }
+      return route.fulfill({ status: group ? 200 : 404, contentType: "application/json", body: JSON.stringify(group ?? {}) });
     }
 
     if (/^\/api\/v1\/screens\/[^/]+$/.test(pathname) && method === "GET") {
@@ -392,13 +417,17 @@ const installApiMocks = async (page: Page, state: MockState) => {
       if (state.pairingHealthUnavailable) {
         return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
       }
+      const orphanDeviceId = state.orphanPairingDeviceId;
       return route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
           generated_at: "2026-03-12T12:00:00.000Z", limit: 50,
-          counts: { device_certificates: 0, device_pairings: 0, heartbeats: 0, device_commands: 0, duplicate_identity_conflicts: 0 },
-          orphans: { device_certificates: [], device_pairings: [], heartbeats: [], device_commands: [] },
+          counts: { device_certificates: 0, device_pairings: orphanDeviceId ? 1 : 0, heartbeats: 0, device_commands: 0, duplicate_identity_conflicts: 0 },
+          orphans: { device_certificates: [], device_pairings: orphanDeviceId ? [{
+            id: "orphan-pairing-1", device_id: orphanDeviceId, reason: "SCREEN_MISSING", used: false,
+            created_at: "2026-03-12T11:00:00.000Z",
+          }] : [], heartbeats: [], device_commands: [] },
           duplicate_identity: { conflicts: [] },
         }),
       });
@@ -549,6 +578,9 @@ test.describe("Screens operator flow", () => {
     await installApiMocks(page, state);
     await login(page);
     await openScreensPage(page);
+    await expect(page.getByRole("button", { name: "Pair Device" })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /Screen Groups/ })).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("button", { name: /Pairing codes/ })).toHaveAttribute("aria-expanded", "false");
     const pairingHealth = page.getByRole("region", { name: "Pairing health" });
     await expect(pairingHealth.getByText("unavailable", { exact: true })).toBeVisible();
     await expect(pairingHealth.getByText("Pairing health is unavailable. Refresh to try again.")).toBeVisible();
@@ -590,6 +622,133 @@ test.describe("Screens operator flow", () => {
       }).toBeLessThan(3);
       await inspector.getByRole("button", { name: "Close" }).click();
     }
+  });
+
+  test("keeps secondary management compact and pages through every Screen Group", async ({ page }) => {
+    const state: MockState = {
+      screens: [],
+      groups: Array.from({ length: 11 }, (_, index) => ({
+        id: "group-" + String(index + 1),
+        name: "Group " + String(index + 1).padStart(2, "0"),
+        screen_ids: [],
+      })),
+      pairings: [{
+        id: "pairing-1", device_id: "device-1", pairing_code: "654321",
+        status: "PENDING", used: false, expires_at: "2099-01-01T00:00:00.000Z",
+      }],
+      recoveryByDeviceId: {},
+      confirmModeByCode: {},
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+
+    await expect(page.getByRole("button", { name: "Pair Device" })).toHaveCount(1);
+    const groupsToggle = page.getByRole("button", { name: /Screen Groups/ });
+    const pairingsToggle = page.getByRole("button", { name: /Pairing codes/ });
+    await expect(groupsToggle).toContainText("11 groups");
+    await expect(pairingsToggle).toContainText("1 active");
+    await expect(groupsToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(pairingsToggle).toHaveAttribute("aria-expanded", "false");
+
+    await groupsToggle.click();
+    await expect(page.getByText("Group 01")).toBeVisible();
+    await expect(page.getByText("Group 10")).toHaveCount(0);
+    await page.getByRole("button", { name: "Go to next page" }).last().click();
+    await expect(page.getByText("Group 10")).toBeVisible();
+    await expect(page.getByText("Group 01")).toHaveCount(0);
+    await expect(page.getByText("Page 2 of 2")).toBeVisible();
+
+    await pairingsToggle.click();
+    await expect(page.getByText("654321")).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+  });
+
+  test("keeps Screen paging stable while the next server page loads", async ({ page }) => {
+    const state: MockState = {
+      screens: Array.from({ length: 11 }, (_, index) => ({
+        id: "screen-" + String(index + 1),
+        name: "Screen " + String(index + 1).padStart(2, "0"),
+        status: "ACTIVE",
+        health_state: "ONLINE",
+        active_items: [],
+        upcoming_items: [],
+      })),
+      groups: [],
+      pairings: [],
+      recoveryByDeviceId: {},
+      confirmModeByCode: {},
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await expect(page.getByText("Screen 01", { exact: true })).toBeVisible();
+    await expect(page.getByText("Screen 10", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Go to next page" }).click();
+    await expect(page.getByText("Screen 10", { exact: true })).toBeVisible();
+    await expect(page.getByText("Screen 01", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Page 2 of 2")).toBeVisible();
+  });
+
+  test("shows only actions granted to a restricted Screen Group operator", async ({ page }) => {
+    const state: MockState = {
+      screens: [{ id: "screen-1", name: "Lobby Screen", status: "ACTIVE", active_items: [], upcoming_items: [] }],
+      groups: [{ id: "group-1", name: "Lobby Group", screen_ids: ["screen-1"] }],
+      pairings: [],
+      recoveryByDeviceId: {},
+      confirmModeByCode: {},
+      orphanPairingDeviceId: "missing-device-1",
+      capabilities: [
+        { action: "read", subject: "Screen" },
+        { action: "read", subject: "ScreenGroup" },
+        { action: "update", subject: "ScreenGroup" },
+        { action: "read", subject: "DevicePairing" },
+      ],
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await expect(page.getByRole("button", { name: "Pair Device" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "More actions for Lobby Screen" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Pairing health" })).toBeVisible();
+    await expect(page.getByText("SCREEN_MISSING")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
+
+    await page.getByRole("button", { name: /Screen Groups/ }).click();
+    await expect(page.getByRole("button", { name: "Create Group" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit Group Lobby Group" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete Group Lobby Group" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Edit Group Lobby Group" }).click();
+    await expect(page.getByLabel("Group Name")).toHaveValue("Lobby Group");
+    await expect(page.getByRole("button", { name: "Delete Group", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save Changes" })).toBeVisible();
+  });
+
+  test("removes the final Screen Group member and guards a failed detail load", async ({ page }) => {
+    const state: MockState = {
+      screens: [{ id: "screen-1", name: "Lobby Screen", status: "ACTIVE" }],
+      groups: [{ id: "group-1", name: "Lobby Group", screen_ids: ["screen-1"] }],
+      pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {}, groupUpdateBodies: [],
+      groupReadUnavailable: true,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await page.getByRole("button", { name: /Screen Groups/ }).click();
+    await page.getByRole("button", { name: "Edit Group Lobby Group" }).click();
+    await expect(page.getByRole("alert").getByText("Screen Group details are unavailable.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    state.groupReadUnavailable = false;
+    await page.getByRole("button", { name: "Retry" }).click();
+    await expect(page.getByLabel("Group Name")).toHaveValue("Lobby Group");
+    await page.getByRole("checkbox").click();
+    await expect(page.getByText("0 selected")).toBeVisible();
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect.poll(() => state.groupUpdateBodies?.length).toBe(1);
+    expect(state.groupUpdateBodies?.[0]?.screen_ids).toEqual([]);
+    await expect(page.getByRole("button", { name: "Edit Group Lobby Group" })).toBeVisible();
+    expect(state.groups[0]?.screen_ids).toEqual([]);
   });
 
   test("renders screen health and recovery info and handles delete refresh", async ({ page }) => {
@@ -704,6 +863,7 @@ test.describe("Screens operator flow", () => {
     await page.getByRole("button", { name: "Delete Screen", exact: true }).click();
     await expect(page.getByRole("button", { name: "More actions for Lobby Screen" })).toHaveCount(0);
 
+    await page.getByRole("button", { name: /Screen Groups/ }).click();
     await page.getByRole("button", { name: "Delete Group Lobby Group" }).click();
     await page.getByRole("button", { name: "Delete Group", exact: true }).click();
     await expect(page.getByRole("alert").getByText("Active emergencies: 1")).toBeVisible();
@@ -722,6 +882,7 @@ test.describe("Screens operator flow", () => {
     await login(page);
     await openScreensPage(page);
 
+    await page.getByRole("button", { name: /Screen Groups/ }).click();
     await page.getByRole("button", { name: "Edit Group Lobby Group" }).click();
     await page.getByRole("button", { name: "Delete Group", exact: true }).click();
     await page.getByRole("button", { name: "Delete Group", exact: true }).last().click();
@@ -776,6 +937,7 @@ test.describe("Screens operator flow", () => {
     await installApiMocks(page, state);
     await login(page);
     await openScreensPage(page);
+    await page.getByRole("button", { name: /Pairing codes/ }).click();
     await expect(page.getByText("654321")).toBeVisible();
     await expect(page.getByText("123456")).toHaveCount(0);
     await page.getByRole("button", { name: "History", exact: true }).click();

@@ -209,6 +209,12 @@ export const screensApi = {
       },
     }),
 
+  getGroupById: (groupId: string) =>
+    apiClient.request<ScreenGroup>({
+      path: endpoints.screens.groupById(groupId),
+      method: "GET",
+    }),
+
   updateGroup: (groupId: string, payload: Partial<{ name?: string; description?: string; screen_ids?: string[] }>) =>
     apiClient.request<ScreenGroup>({
       path: endpoints.screens.groupById(groupId),

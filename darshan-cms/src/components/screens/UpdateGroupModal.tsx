@@ -28,9 +28,10 @@ interface UpdateGroupModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     groupId: string;
+    canDelete: boolean;
 }
 
-export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupModalProps) {
+export function UpdateGroupModal({ open, onOpenChange, groupId, canDelete }: UpdateGroupModalProps) {
     const queryClient = useQueryClient();
     const [formState, setFormState] = useState({
         name: "",
@@ -40,7 +41,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
     const [confirmGroupDelete, setConfirmGroupDelete] = useState(false);
     const [deleteBlockers, setDeleteBlockers] = useState<string[]>([]);
 
-    const { data: groupData, isLoading: isLoadingGroup } = useQuery({
+    const { data: groupData, isLoading: isLoadingGroup, isError: isGroupError, refetch: refetchGroup } = useQuery({
         queryKey: ["screen-group", groupId],
         queryFn: () => screensApi.getGroupById(groupId),
         enabled: open && !!groupId,
@@ -141,7 +142,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
         const payload = {
             name: formState.name.trim(),
             description: formState.description.trim() || undefined,
-            screen_ids: selectedScreenIds.length > 0 ? selectedScreenIds : undefined,
+            screen_ids: selectedScreenIds,
         };
         updateGroup.mutate(payload);
     };
@@ -169,6 +170,11 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
                         <Skeleton className="h-10 w-full" />
                         <Skeleton className="h-10 w-full" />
                         <Skeleton className="h-32 w-full" />
+                    </div>
+                ) : isGroupError || !groupData ? (
+                    <div role="alert" className="flex items-center gap-3 py-4 text-sm text-destructive">
+                        Screen Group details are unavailable.
+                        <Button variant="outline" size="sm" onClick={() => void refetchGroup()}>Retry</Button>
                     </div>
                 ) : (
                     <div className="space-y-4 py-4">
@@ -257,7 +263,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
                 )}
 
                 <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-                    <Button
+                    {canDelete ? <Button
                         variant="destructive"
                         onClick={handleDelete}
                         disabled={deleteGroup.isPending || updateGroup.isPending}
@@ -265,7 +271,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
                     >
                         <Trash2 className="h-4 w-4 mr-2" />
                         {deleteGroup.isPending ? "Deleting..." : "Delete Group"}
-                    </Button>
+                    </Button> : null}
                     <Button
                         variant="outline"
                         onClick={handleClose}
@@ -275,7 +281,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
                     </Button>
                     <Button
                         onClick={handleSubmit}
-                        disabled={updateGroup.isPending || deleteGroup.isPending || !formState.name.trim()}
+                        disabled={updateGroup.isPending || deleteGroup.isPending || !groupData || !formState.name.trim()}
                     >
                         <Save className="h-4 w-4 mr-2" />
                         {updateGroup.isPending ? "Saving..." : "Save Changes"}
@@ -284,7 +290,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId }: UpdateGroupMod
             </DialogContent>
         </Dialog>
         <ConfirmDialog
-          open={confirmGroupDelete}
+          open={canDelete && confirmGroupDelete}
           title={`Delete ${groupData?.name ?? "group"}?`}
           description="Delete is allowed only after current and future references are removed. The server checks again when you confirm."
           confirmLabel="Delete Group"

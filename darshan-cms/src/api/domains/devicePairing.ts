@@ -5,7 +5,7 @@ import type {
   DevicePairingOrphanReport,
   DevicePairingRequest,
   DevicePairingRevokeResponse,
-  PaginatedResponse,
+  PaginatedApiResponse,
   PaginationParams,
   PairingStatusResponse,
 } from "../types";
@@ -29,7 +29,7 @@ export const devicePairingApi = {
 
   // List all pairing records (for reviewing pending/used/expired codes)
   list: (params?: PaginationParams & { status?: "all" | "active" | "history" }) =>
-    apiClient.request<PaginatedResponse<DevicePairing>>({
+    apiClient.request<PaginatedApiResponse<DevicePairing>>({
       path: endpoints.devicePairing.base,
       method: "GET",
       query: params,

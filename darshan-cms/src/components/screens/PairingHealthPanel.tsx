@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Copy, RefreshCcw, RotateCcw, Server, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Copy, RefreshCcw, Server, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,10 +89,12 @@ function buildRows(report?: DevicePairingOrphanReport): OrphanRow[] {
 }
 
 export function PairingHealthPanel({
-  canManage,
+  canView,
+  canRevoke,
   visibleScreenCount,
 }: {
-  canManage: boolean;
+  canView: boolean;
+  canRevoke: boolean;
   visibleScreenCount: number;
 }) {
   const queryClient = useQueryClient();
@@ -103,7 +105,7 @@ export function PairingHealthPanel({
   const orphanQuery = useQuery({
     queryKey: queryKeys.devicePairingOrphans(ORPHAN_REPORT_LIMIT),
     queryFn: () => devicePairingApi.orphans({ limit: ORPHAN_REPORT_LIMIT }),
-    enabled: canManage,
+    enabled: canView,
   });
 
   const report = orphanQuery.data;
@@ -118,6 +120,12 @@ export function PairingHealthPanel({
   useEffect(() => {
     if (totalFindings > 0 || pairingStatusUnavailable) setDetailsOpen(true);
   }, [totalFindings, pairingStatusUnavailable]);
+  useEffect(() => {
+    if (!canRevoke) {
+      setRevokeTarget(null);
+      setRevokeNote("");
+    }
+  }, [canRevoke]);
 
   const revokePairing = useSafeMutation({
     mutationFn: (payload: { deviceId: string; note?: string }) =>
@@ -139,7 +147,7 @@ export function PairingHealthPanel({
     },
   }, "Unable to revoke pairing.");
 
-  if (!canManage) {
+  if (!canView) {
     return null;
   }
 
@@ -194,8 +202,8 @@ export function PairingHealthPanel({
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" />
             <p>
-              No screens are visible in this list, but orphan device state exists. Revoke stale pairing state or pair the
-              player again.
+              No screens are visible in this list, but orphan device state exists. Ask an administrator to review stale
+              pairing state or pair the player again.
             </p>
           </div>
         </div>
@@ -248,7 +256,7 @@ export function PairingHealthPanel({
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <Button
+                    {canRevoke ? <Button
                       size="sm"
                       variant="outline"
                       onClick={() =>
@@ -264,11 +272,7 @@ export function PairingHealthPanel({
                     >
                       <ShieldAlert className="mr-1 h-3.5 w-3.5" />
                       Revoke
-                    </Button>
-                    <Button size="sm" variant="outline" disabled title="Requires a future fresh-pairing reclaim flow">
-                      <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                      Reclaim
-                    </Button>
+                    </Button> : null}
                   </div>
                 </div>
                 <div className="grid gap-2 md:grid-cols-2">
@@ -331,14 +335,10 @@ export function PairingHealthPanel({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 lg:justify-end">
-                <Button size="sm" variant="outline" onClick={() => setRevokeTarget(row)}>
+                {canRevoke ? <Button size="sm" variant="outline" onClick={() => setRevokeTarget(row)}>
                   <ShieldAlert className="mr-1 h-3.5 w-3.5" />
                   Revoke
-                </Button>
-                <Button size="sm" variant="outline" disabled title="Requires a future fresh-pairing reclaim flow">
-                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                  Reclaim
-                </Button>
+                </Button> : null}
               </div>
             </div>
           ))}
@@ -346,7 +346,7 @@ export function PairingHealthPanel({
       )}
 
       <ConfirmDialog
-        open={Boolean(revokeTarget)}
+        open={canRevoke && Boolean(revokeTarget)}
         title="Revoke pairing?"
         description="The player will need to pair again. This does not delete the screen."
         confirmLabel="Revoke Pairing"

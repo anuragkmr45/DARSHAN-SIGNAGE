@@ -6,8 +6,8 @@ At branch `codex/darshan-product-ui-redesign-20261103`, three focused Chromium j
 
 Visible follow-up before design approval:
 
-- Dashboard and Screens still rely on several prominent card boundaries.
-- Screens has two Pair Device entry points and a long phone page with group and pairing administration below the Screen list.
+- Dashboard still relies on several prominent card boundaries. Screens retains one bordered working list.
+- Screens now has one Pair Device action and compact Screen Group/pairing-code disclosures. The updated Screens captures replace the earlier long phone page.
 - The full-page Schedule capture displays a Create Schedule header above the main application; verify whether this is a capture artifact or a layout issue in the running dialog.
 
 These observations do not override the already recorded functional and real-service regression work.

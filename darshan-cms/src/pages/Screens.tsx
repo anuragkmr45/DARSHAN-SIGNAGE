@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ChevronDown,
   Eye,
   Flame,
   HeartPulse,
@@ -78,11 +79,23 @@ const formatDateTime = (value?: string | null) => {
 export default function Screens() {
   const queryClient = useQueryClient();
   const { can } = useAuthorization();
-  const canManageScreens = can("manage", "Screen") || can("update", "Screen");
+  const canCreateScreen = can("create", "Screen");
+  const canDeleteScreen = can("delete", "Screen");
+  const canReadGroups = can("read", "ScreenGroup");
+  const canCreateGroup = can("create", "ScreenGroup");
+  const canUpdateGroup = can("update", "ScreenGroup");
+  const canDeleteGroup = can("delete", "ScreenGroup");
+  const canReadPairings = can("read", "DevicePairing");
+  const canGenerateRecovery = can("create", "DevicePairing");
+  const canRecoverScreen = canCreateScreen && canGenerateRecovery;
+  const canRevokePairing = can("manage", "DevicePairing") || canDeleteScreen || can("manage", "all");
   const [search, setSearch] = useState("");
   const [isPairModalOpen, setIsPairModalOpen] = useState(false);
   const [pairingView, setPairingView] = useState<"active" | "history">("active");
   const [pairingPage, setPairingPage] = useState(1);
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [pairingsOpen, setPairingsOpen] = useState(false);
+  const [groupPage, setGroupPage] = useState(1);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -96,6 +109,15 @@ export default function Screens() {
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    if (!canCreateScreen) setIsPairModalOpen(false);
+    if (!canCreateGroup) setIsGroupModalOpen(false);
+    if (!canUpdateGroup) setSelectedGroupId(null);
+    if (!canDeleteScreen) { setDeleteTarget(null); setDeleteBlockers([]); }
+    if (!canDeleteGroup) { setGroupDeleteTarget(null); setGroupDeleteBlockers([]); }
+    if (!canRevokePairing) { setRevokeTarget(null); setRevokeNote(""); }
+  }, [canCreateScreen, canCreateGroup, canUpdateGroup, canDeleteScreen, canDeleteGroup, canRevokePairing]);
   const normalizedSearch = search.trim() || undefined;
   const screensListQueryKey = useMemo(
     () =>
@@ -111,12 +133,12 @@ export default function Screens() {
   const screenGroupsListQueryKey = useMemo(
     () =>
       queryKeys.screenGroupsList({
-        page: 1,
-        limit: 100,
+        page: groupPage,
+        limit: PAGE_SIZE,
         q: normalizedSearch,
         includeSummary: true,
       }),
-    [normalizedSearch],
+    [groupPage, normalizedSearch],
   );
 
   const screensQuery = useQuery({
@@ -134,10 +156,11 @@ export default function Screens() {
     queryKey: screenGroupsListQueryKey,
     queryFn: () =>
       screensApi.listGroupSummaries({
-        page: 1,
-        limit: 100,
+        page: groupPage,
+        limit: PAGE_SIZE,
         q: normalizedSearch,
       }),
+    enabled: canReadGroups,
   });
 
   const screensSummaryQuery = useQuery({
@@ -145,12 +168,13 @@ export default function Screens() {
     queryFn: () => screensApi.getSummary(),
   });
 
-  const { data: pairingsData } = useQuery({
+  const pairingsQuery = useQuery({
     queryKey: ["device-pairings", pairingView, pairingPage],
     queryFn: () => devicePairingApi.list({ page: pairingPage, limit: 10, status: pairingView }),
-    enabled: canManageScreens,
+    enabled: canReadPairings,
     refetchInterval: pairingView === "active" ? 3000 : false,
   });
+  const pairingsData = pairingsQuery.data;
 
   const screens = useMemo(() => screensQuery.data?.items ?? [], [screensQuery.data?.items]);
   const screenGroups = useMemo(() => screenGroupsQuery.data?.items ?? [], [screenGroupsQuery.data?.items]);
@@ -229,6 +253,7 @@ export default function Screens() {
 
   useEffect(() => {
     setPage(1);
+    setGroupPage(1);
   }, [search]);
 
   const stats = useMemo(() => {
@@ -275,12 +300,19 @@ export default function Screens() {
     1,
     Math.ceil((screensQuery.data?.pagination?.total ?? 0) / (screensQuery.data?.pagination?.limit ?? PAGE_SIZE)),
   );
+  const groupTotalPages = Math.max(
+    1,
+    Math.ceil((screenGroupsQuery.data?.pagination?.total ?? 0) / (screenGroupsQuery.data?.pagination?.limit ?? PAGE_SIZE)),
+  );
 
   useEffect(() => {
-    if (page > totalPages) {
+    if (screensQuery.data && page > totalPages) {
       setPage(totalPages);
     }
-  }, [page, totalPages]);
+  }, [page, screensQuery.data, totalPages]);
+  useEffect(() => {
+    if (screenGroupsQuery.data && groupPage > groupTotalPages) setGroupPage(groupTotalPages);
+  }, [groupPage, groupTotalPages, screenGroupsQuery.data]);
 
   const screensErrorMessage =
     screensQuery.error instanceof Error
@@ -294,10 +326,10 @@ export default function Screens() {
       <PageHeader
         title="Screens"
         description="Manage and monitor all display screens across locations"
-        actionLabel={canManageScreens ? "Pair Device" : undefined}
-        actionIcon={canManageScreens ? <QrCode className="h-4 w-4" /> : undefined}
+        actionLabel={canCreateScreen ? "Pair Device" : undefined}
+        actionIcon={canCreateScreen ? <QrCode className="h-4 w-4" /> : undefined}
         onAction={
-          canManageScreens
+          canCreateScreen
             ? () => {
                 setRecoveryScreenId(null);
                 setIsPairModalOpen(true);
@@ -320,9 +352,10 @@ export default function Screens() {
         )}
       </section>
 
-      {canManageScreens ? (
+      {canReadPairings ? (
         <PairingHealthPanel
-          canManage={canManageScreens}
+          canView={canReadPairings}
+          canRevoke={canRevokePairing}
           visibleScreenCount={screensQuery.data?.pagination?.total ?? screens.length}
         />
       ) : null}
@@ -330,7 +363,7 @@ export default function Screens() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="w-full lg:max-w-lg">
             <SearchBar
-              placeholder="Search screens and groups"
+              placeholder={canReadGroups ? "Search screens and groups" : "Search screens"}
               onSearch={setSearch}
               initialValue={search}
             />
@@ -338,7 +371,9 @@ export default function Screens() {
           <div className="text-sm text-muted-foreground">
             {screensQuery.isFetching || screenGroupsQuery.isFetching
               ? "Refreshing screens…"
-              : `${screensQuery.data?.pagination?.total ?? screens.length} screens, ${screenGroupsQuery.data?.pagination?.total ?? screenGroups.length} groups`}
+              : canReadGroups
+                ? `${screensQuery.data?.pagination?.total ?? screens.length} screens, ${screenGroupsQuery.data?.pagination?.total ?? screenGroups.length} groups`
+                : `${screensQuery.data?.pagination?.total ?? screens.length} screens`}
           </div>
       </div>
 
@@ -513,9 +548,9 @@ export default function Screens() {
                           <Eye className="h-3 w-3 mr-1" />
                           Details
                         </Button>
-                        {canManageScreens ? (
+                        {(canRecoverScreen || canRevokePairing || canDeleteScreen) ? (
                           <>
-                            {health_state === "RECOVERY_REQUIRED" ? (
+                            {canRecoverScreen && health_state === "RECOVERY_REQUIRED" ? (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -528,26 +563,26 @@ export default function Screens() {
                                 <QrCode className="mr-1 h-3.5 w-3.5" /> Recover
                               </Button>
                             ) : null}
-                            <DropdownMenu>
+                            {((canRecoverScreen && health_state !== "RECOVERY_REQUIRED") || canRevokePairing || canDeleteScreen) ? <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button size="sm" variant="outline" aria-label={`More actions for ${name}`}>
                                   <MoreHorizontal className="mr-1 h-4 w-4" /> More actions
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="start">
-                                {health_state !== "RECOVERY_REQUIRED" ? (
+                                {canRecoverScreen && health_state !== "RECOVERY_REQUIRED" ? (
                                   <DropdownMenuItem onSelect={() => { setRecoveryScreenId(id); setIsPairModalOpen(true); }}>
                                     <QrCode className="mr-2 h-4 w-4" /> Recover pairing
                                   </DropdownMenuItem>
                                 ) : null}
-                                <DropdownMenuItem disabled={revokePairing.isPending} onSelect={() => handleRevokeScreenPairing(screen)}>
+                                {canRevokePairing ? <DropdownMenuItem disabled={revokePairing.isPending} onSelect={() => handleRevokeScreenPairing(screen)}>
                                   <ShieldAlert className="mr-2 h-4 w-4" /> Revoke pairing
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="text-destructive focus:text-destructive" disabled={deleteScreen.isPending} onSelect={() => handleDeleteScreen(screen)}>
+                                </DropdownMenuItem> : null}
+                                {canDeleteScreen ? <DropdownMenuItem className="text-destructive focus:text-destructive" disabled={deleteScreen.isPending} onSelect={() => handleDeleteScreen(screen)}>
                                   <Trash2 className="mr-2 h-4 w-4" /> Delete screen
-                                </DropdownMenuItem>
+                                </DropdownMenuItem> : null}
                               </DropdownMenuContent>
-                            </DropdownMenu>
+                            </DropdownMenu> : null}
                           </>
                         ) : null}
                       </div>
@@ -561,14 +596,29 @@ export default function Screens() {
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="p-4 space-y-3">
+      <div className="divide-y border-y border-border">
+        {(canReadGroups || canCreateGroup) ? (
+        <section aria-label="Screen group management" className="py-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Users className="h-4 w-4 text-primary" />
-              <h2 className="font-semibold">Screen Groups</h2>
-            </div>
-            {canManageScreens ? (
+            <h2>
+              <Button
+                variant="ghost"
+                onClick={() => setGroupsOpen((open) => !open)}
+                aria-expanded={groupsOpen}
+                aria-controls="screen-groups-list"
+                className="min-h-11 gap-2 px-1 text-left font-semibold"
+              >
+                <Users className="h-4 w-4 text-primary" />
+                Screen Groups
+                <span className="text-xs font-normal text-muted-foreground">
+                  {!canReadGroups ? "List unavailable" : screenGroupsQuery.isError ? "Unavailable" : screenGroupsQuery.data
+                    ? String(screenGroupsQuery.data.pagination.total) + " groups"
+                    : "Checking…"}
+                </span>
+                <ChevronDown className={groupsOpen ? "h-4 w-4 rotate-180 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
+              </Button>
+            </h2>
+            {groupsOpen && canCreateGroup ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -580,8 +630,19 @@ export default function Screens() {
             ) : null}
           </div>
 
-          <div className="divide-y rounded-md border max-h-72 overflow-auto">
-            {screenGroups.length === 0 ? (
+          <div id="screen-groups-list" hidden={!groupsOpen} className="space-y-2">
+          {!canReadGroups ? (
+            <p className="px-2 py-3 text-sm text-muted-foreground">Your role cannot view Screen Groups.</p>
+          ) : screenGroupsQuery.isError ? (
+            <div role="alert" className="flex flex-wrap items-center gap-2 px-2 py-3 text-sm text-destructive">
+              Screen Groups are unavailable.
+              <Button size="sm" variant="outline" onClick={() => void screenGroupsQuery.refetch()}>Retry groups</Button>
+            </div>
+          ) : (
+          <div className="max-h-72 divide-y overflow-auto">
+            {screenGroupsQuery.isLoading ? (
+              <div className="px-2 py-3 text-sm text-muted-foreground">Loading Screen Groups…</div>
+            ) : screenGroups.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground text-center">
                 {search
                   ? "No screen groups match the current search."
@@ -613,9 +674,9 @@ export default function Screens() {
                           </p>
                         )}
                       </div>
-                      {canManageScreens ? (
+                      {(canUpdateGroup || canDeleteGroup) ? (
                         <div className="flex items-center gap-2 ml-2">
-                          <Button
+                          {canUpdateGroup ? <Button
                             size="sm"
                             variant="ghost"
                             onClick={(event) => handleEditGroup(id, event)}
@@ -623,8 +684,8 @@ export default function Screens() {
                             className="h-8 w-8 p-0"
                           >
                             <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
+                          </Button> : null}
+                          {canDeleteGroup ? <Button
                             size="sm"
                             variant="ghost"
                             onClick={(event) => handleDeleteGroup(id, event)}
@@ -632,7 +693,7 @@ export default function Screens() {
                             className="h-8 w-8 p-0 text-destructive hover:text-destructive"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
+                          </Button> : null}
                         </div>
                       ) : null}
                     </div>
@@ -641,21 +702,40 @@ export default function Screens() {
               </>
             )}
           </div>
-        </Card>
+          )}
+          {groupTotalPages > 1 && (
+            <PageNavigation currentPage={groupPage} totalPages={groupTotalPages} onPageChange={setGroupPage} />
+          )}
+          </div>
+        </section>
+        ) : null}
 
-        {canManageScreens ? (
-        <Card className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <QrCode className="h-4 w-4 text-primary" />
-              <h2 className="font-semibold">Device Pairings</h2>
-            </div>
-            <Button size="sm" onClick={() => setIsPairModalOpen(true)}>
-              <Plus className="h-3 w-3 mr-1" />
-              Pair Device
-            </Button>
+        {canReadPairings ? (
+        <section aria-label="Pairing code history" className="py-2">
+          <div className="flex items-center">
+            <h2>
+              <Button
+                variant="ghost"
+                onClick={() => setPairingsOpen((open) => !open)}
+                aria-expanded={pairingsOpen}
+                aria-controls="screen-pairing-codes"
+                className="min-h-11 gap-2 px-1 text-left font-semibold"
+              >
+                <QrCode className="h-4 w-4 text-primary" />
+                Pairing codes
+                <span className="text-xs font-normal text-muted-foreground">
+                  {pairingsQuery.isError ? "Unavailable" : pairingsData
+                    ? pairingView === "active"
+                      ? String(pairingsData.pagination.total) + " active"
+                      : "History"
+                    : "Checking…"}
+                </span>
+                <ChevronDown className={pairingsOpen ? "h-4 w-4 rotate-180 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
+              </Button>
+            </h2>
           </div>
 
+          <div id="screen-pairing-codes" hidden={!pairingsOpen} className="space-y-3 px-1 pb-3">
           <div className="flex gap-2" role="group" aria-label="Pairing record view">
             <Button size="sm" variant={pairingView === "active" ? "default" : "outline"}
               onClick={() => { setPairingView("active"); setPairingPage(1); }}>Active codes</Button>
@@ -663,8 +743,16 @@ export default function Screens() {
               onClick={() => { setPairingView("history"); setPairingPage(1); }}>History</Button>
           </div>
 
-          <div className="divide-y rounded-md border max-h-72 overflow-auto">
-            {pairings.length === 0 ? (
+          {pairingsQuery.isError ? (
+            <div role="alert" className="flex flex-wrap items-center gap-2 py-3 text-sm text-destructive">
+              Pairing codes are unavailable.
+              <Button size="sm" variant="outline" onClick={() => void pairingsQuery.refetch()}>Retry pairing codes</Button>
+            </div>
+          ) : (
+          <div className="max-h-72 divide-y overflow-auto">
+            {pairingsQuery.isLoading ? (
+              <div className="px-2 py-3 text-sm text-muted-foreground">Loading pairing codes…</div>
+            ) : pairings.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground text-center">
                 {pairingView === "active" ? "No active pairing codes." : "No pairing history yet."}
               </div>
@@ -709,6 +797,7 @@ export default function Screens() {
               </>
             )}
           </div>
+          )}
           {(pairingsData?.pagination?.total ?? 0) > 10 && (
             <div className="flex items-center justify-end gap-2">
               <Button size="sm" variant="outline" disabled={pairingPage <= 1}
@@ -719,7 +808,8 @@ export default function Screens() {
                 onClick={() => setPairingPage((current) => current + 1)}>Next</Button>
             </div>
           )}
-        </Card>
+          </div>
+        </section>
         ) : null}
       </div>
 
@@ -739,6 +829,7 @@ export default function Screens() {
       {selectedGroupId && (
         <UpdateGroupModal
           groupId={selectedGroupId}
+          canDelete={canDeleteGroup}
           open={Boolean(selectedGroupId)}
           onOpenChange={(open) => !open && setSelectedGroupId(null)}
         />
