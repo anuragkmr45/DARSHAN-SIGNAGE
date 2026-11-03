@@ -815,3 +815,21 @@ per-file hashes and an explicit path/size/SHA tree algorithm. Those are compiled
 developer outputs, not TGZ/release artifacts; private configuration and ongoing
 player work are excluded. The publication report records exact tree hashes and
 preserves the incomplete feature/human QA boundary.
+
+
+### Recovery prerequisite source checkpoint
+
+Source `e54663079dc20668266769bd7f1c2455aedb348a` and the
+[separate prerequisite report](live-recovery-prerequisites-developer-verification-2026-11-03.md)
+record current presenter eligibility, live desired-state preservation, ordered
+bulk correlation, exact immutable cache repair and injected media fencing.
+The final source-bound actual-service repeat passed 55 supporting checks/15 SHA
+verified downloads; the report binds component checks, developer compiled
+outputs, isolated media image/core and failed-attempt provenance. It preserves
+the earlier `8041a50` report/build evidence unchanged.
+
+Production Backend run/admission/epoch authority, same-player scheduled live
+integration, complete presenter/wizard, direct host pidfd/AppArmor and final
+release artifacts remain open. These supporting prerequisites close no full
+implementation loop or independent human LIVE QA case. Catalog recheck remains
+150 cases/51 risks/152 traces; all 20 LIVE cases and QA-owned fields are unchanged.

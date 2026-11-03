@@ -380,13 +380,13 @@ This new delta uses [live implementation loops](../docs/plans/live-broadcast-imp
 | Loop | Current state | Closure gate |
 | --- | --- | --- |
 | 0 baseline | In progress | Current CMS/real-player ordinary playback/emergency/offline baseline and isolated inventory |
-| 1 capture/enforcement | Prototype evidence recorded; gate open | Real capture/SFU/Electron evidence and tmpfs watchdog checks exist; native capture/audio matrix, current packaged receiver runtime and production host actuation still need closure |
+| 1 capture/enforcement | Prototype and injected strict-authority/SFU checks recorded; gate open | Real capture/SFU/Electron and Docker-watchdog checks exist; native capture/audio matrix, current packaged receiver runtime, production Backend verifier and host pidfd/AppArmor still need closure |
 | 2 reservations | Frozen source/preparation/publication and ACL packet partially verified | Actual-service request/direct publication and SHA downloads passed; complete real CMS publishing workflow and normal-player integration remain |
-| 3 authority | Not executed | Idempotency/generations/current permissions/epoch/reconciliation with actual media faults |
-| 4 player | Verified cache-pin primitive; integration not executed | Same ordinary installed DARSHAN player scheduled live source and normal pairing/cache/emergency integration; deadline/fallback/precedence/cleanup journeys |
+| 3 authority | Internal live-version and injectable media fencing prerequisites verified at `e546630`; production run authority unimplemented | Durable Backend run/admission/epoch/outbox/reconciliation and actual revocation/restore journeys |
+| 4 player | Exact-asset prepare/repair and pin primitives verified; normal-player live integration unimplemented | Same ordinary installed player live source, owner/pin consumption and pairing/cache/emergency lifecycle; deadline/fallback/precedence/cleanup journeys |
 | 5 CMS | Source authoring implemented; partial actual browser evidence | Create/view/audio edits/retry and same-admin stale409/reload observed; full wizard, presenter controls and independent accounts remain |
 | 6 deployment | Not executed | Offline sixth role, TLS/transports, disable/update/restore/rollback |
-| 7 handoff | Not executed | Stable-packet regression, dated artifacts and concrete independent human checks |
+| 7 handoff | Supporting packet regressions/bindings recorded; final feature handoff open | Complete integrated CMS/presenter/player journey, final artifacts and independent human checks |
 
 Each loop is inspect→implement→focused checks→actual application→fault→fix→
 repeat affected paths→evidence→commit. A failure blocks that loop. Resource-
@@ -397,3 +397,11 @@ Current packet detail: [publication/authorization developer verification](eviden
 Backend publication is capability-gated and its fixtures do not advertise a
 capability on a deployed player. The new evidence does not close these loops
 or alter independent human QA status.
+
+Recovery prerequisite checkpoint: [source-bound verification](evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md), source `e546630`.
+It includes current presenter eligibility, omitted-state preservation, exact
+fallback repair and injected media enforcement. The final actual-service repeat
+passed 55 checks/15 SHA downloads, without updating the paired Electron app or
+enabling its live capability. The production Backend authority, same-player
+live workflow and direct host actuation gates remain open. Human cases and
+QA-owned fields were not changed.

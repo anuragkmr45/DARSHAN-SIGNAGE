@@ -1,0 +1,98 @@
+{
+  "scope": "Approved immutable fallback cache prerequisite only; no normal-player live lifecycle integration or capability advertisement",
+  "node": "20.20.2",
+  "heap_mb": 768,
+  "platform": "linux",
+  "api": "ensureApprovedAsset(owner:{publishId,scheduleItemId}, asset:{cache_key,sha256,size,content_type}, url?:string, options?:{signal?:AbortSignal,totalTimeoutMs?:number,idleTimeoutMs?:number}):Promise<{cacheKey,localPath}>",
+  "focused_tests": {
+    "passed": 65,
+    "new_real_http_tempdir_cases": 36,
+    "existing_cache_regressions": 29,
+    "command": "mocha --config .mocharc.json --spec test/unit/services/approved-cache-asset.test.ts --spec test/unit/services/cache-manager.test.ts --reporter dot"
+  },
+  "main_no_emit": "passed",
+  "changed_files_lint": "passed, no errors",
+  "diff_check": "passed",
+  "atomic_stage_initialization": "fsynced marked UUID directory then exclusive hard-link canonical marker pointer; internal metadata excluded from media lookup/index/eviction; unknown existing pointer preserved and unsupported filesystem fails closed",
+  "crash_recovery": "Known owned marked inactive stages only; 5 minute grace, max100 scan/max20 removals; preserves active process/operation, unknown/unmarked/symlink/recent/wrong-mode/user contents; init candidates do not block fresh initialization",
+  "resources": "Existing prefetchConcurrency capped10 active validation/transfer streams;64KiB chunks; separate bounded total+network-idle deadlines; logical committed-size delta reservation and outstanding physical staging bytes sampled before statfs",
+  "runtime": {
+    "scope": "Real dedicated MinIO transfer and isolated CacheManager; not Electron lifecycle verification",
+    "node": "v20.20.2",
+    "bytes": 104,
+    "sha256": "76cd2c2c40b45c0d5f5f145c286c20a8a541133d419034b2a3dad827a46b40b9",
+    "object_key": "live-fallbacks/v1/sha256/76cd2c2c40b45c0d5f5f145c286c20a8a541133d419034b2a3dad827a46b40b9.png",
+    "checks": {
+      "exact_download": true,
+      "corrupt_metadata_same_sha_repair": true,
+      "verified_local_without_url": true,
+      "independent_owner_protection": true,
+      "release_allows_eviction": true
+    },
+    "fixture_object_retained": true,
+    "real_player_profile_touched": false,
+    "source_sha256": "5b873c7694e245440afa848b71c3abc0c6409a1d888f94c153723a2d7a2f92fd"
+  },
+  "hashes": {
+    "darshan-player/src/main/services/cache/cache-manager.ts": "5b873c7694e245440afa848b71c3abc0c6409a1d888f94c153723a2d7a2f92fd",
+    "darshan-player/test/unit/services/approved-cache-asset.test.ts": "83e1f61c35bc9bc27c6ffacc7042229337f23eb66b868de1abe09d35d4337836",
+    "darshan-player/test/unit/services/player-flow.test.ts": "1e5e38a7203a950e90c0226084bf602d8f5e015f037bb4b686dd03b8f6b39862",
+    "darshan-player/CACHE_PINS.md": "2017aa1975aefa31c449ae01f02008e384fa771fe7c2ec8a65009cee921ea9d7"
+  },
+  "pending": [
+    "normal-player live lifecycle, ownership IPC and authority integration",
+    "actual normal-player cache-full fallback journey",
+    "actual Windows/NTFS runtime confirmation",
+    "human QA and deployed multi-machine validation"
+  ],
+  "human_qa_status": "Not Tested",
+  "real_player_profile_touched": false,
+  "committed": false,
+  "full_unit": {
+    "exit_code": 0,
+    "passed": 464,
+    "failed": 0,
+    "source_version": "final separate progress-idle/total source",
+    "log": "player-approved-cache-full-unit-20261103.log",
+    "fixture_umask": "022 with log precreated0600"
+  },
+  "integration": {
+    "exit_code": 0,
+    "passed": 5,
+    "failed": 0,
+    "log": "player-approved-cache-integration-20261103.log"
+  },
+  "initial_full_unit_attempt": {
+    "exit_code": 3,
+    "passed": 457,
+    "failed": 3,
+    "log": "player-approved-cache-full-unit-initial-failure-20261103.log",
+    "resolution": "Two fixture mode assumptions corrected by normal022 test umask; PlayerFlow assertion strengthened to require first invalidation before first forced purge while permitting redundant purge invalidation",
+    "failed_neighbors_rerun": {
+      "passed": 3,
+      "exit_code": 0
+    }
+  },
+  "timing": "Monotonic total default600000ms/max1800000ms includes queue+hash+transfer+publication; network idle default/max30000ms resets only completed headers/nonempty chunks, cleared after pipeline; owner/window cancellation unchanged; no admission lease extension",
+  "fault": {
+    "exit_code": 0,
+    "passed": 21,
+    "failed": 0,
+    "source_version": "current separate timeout source",
+    "log": "player-approved-cache-fault-20261103.log"
+  },
+  "build": {
+    "exit_code": 0,
+    "source_version": "current separate timeout source",
+    "log": "player-approved-cache-build-20261103.log"
+  },
+  "full_unit_intermediate": {
+    "exit_code": 0,
+    "passed": 460,
+    "failed": 0,
+    "log": "player-approved-cache-full-unit-intermediate-460-20261103.log",
+    "fixture_umask": "022 with log precreated0600",
+    "source_version": "Intermediate source before separate progress-idle/total timing fix; final current-source full unit pending"
+  },
+  "source_frozen": true
+}

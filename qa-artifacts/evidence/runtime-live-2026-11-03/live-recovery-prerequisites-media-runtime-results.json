@@ -1,0 +1,52 @@
+{
+  "status": "PASS",
+  "instance_id": "356f7d3f-f611-44b2-9510-3397a2952adf",
+  "container_id": "e3f6b88d51be3c83a82e195c5d0e0c3c074ada7fe96d5501894ef882d9dcf5a9",
+  "image_id": "sha256:5e3128017bca2f98f6b72ad72834166da448df72cfff0d66efa590e9c0c98f63",
+  "image_tag": "darshan-live-media:protocol-test-356f7d3f-f611-44b2-9510-3397a2952adf",
+  "base_image_id": "sha256:bb7764897b65e3aacb98f0d8e5d79b42b54c8c5a1118b22f845c6ed859aaa090",
+  "build_scope": "Offline developer source/test overlay; not canonical production deployment image",
+  "core_source_sha256": "46ade1876845fc3cf2c7c39f863b0a5db44b876d51505c1fd56be76a3589f6d2",
+  "packages": {
+    "node": "20.20.2",
+    "sdk": "2.19.2",
+    "files": {
+      "package.json": "97f7fad63569ba176ba983830a241f8e2e5857e108ac5d6a824c5fcd9eb8fd03",
+      "package-lock.json": "221a7a03cecddc2e65fd4cc338ae3e95ea12d8a2e137ce362a649972254bca36"
+    }
+  },
+  "actual_sfu_termination_upper_ms": 1933,
+  "cutoff_bound_ms": 3000,
+  "actuation": "Healthy local Docker daemon watchdog kill; direct pidfd permission gate remains open",
+  "protocol_assertions": {
+    "event": "protocol_sfu_checks_passed",
+    "image_sha256": "sha256:5e3128017bca2f98f6b72ad72834166da448df72cfff0d66efa590e9c0c98f63",
+    "core_source_sha256": "46ade1876845fc3cf2c7c39f863b0a5db44b876d51505c1fd56be76a3589f6d2",
+    "instance_id": "356f7d3f-f611-44b2-9510-3397a2952adf",
+    "scope": "Isolated actual SFU/RPC/signaling with injected loopback HTTP fixture authority; no production Backend, frame, audio or display claim",
+    "unknown_admission_stop": true,
+    "unknown_run_stop": true,
+    "actual_presenter_receiver_permissions": true,
+    "actual_run_teardown": true,
+    "replacement_survives_old_stop": true,
+    "stopped_pending_check": true,
+    "delayed_check_elapsed_ms": 609,
+    "delayed_remaining_lease_ms": 9395
+  },
+  "watchdog_events": [
+    {
+      "event": "watchdog_ready",
+      "container_id": "e3f6b88d51be",
+      "instance_id": "356f7d3f-f611-44b2-9510-3397a2952adf",
+      "stale_ms": 1500,
+      "poll_ms": 100,
+      "enforcement_budget_ms": 1000
+    },
+    {
+      "event": "watchdog_killed_pinned_container",
+      "reason": "SUPERVISOR_HEARTBEAT_STALE",
+      "container_id": "e3f6b88d51be"
+    }
+  ],
+  "scope": "Actual isolated SFU/RPC/signaling and process death only; no production Backend, frame, physical audio or display claim"
+}

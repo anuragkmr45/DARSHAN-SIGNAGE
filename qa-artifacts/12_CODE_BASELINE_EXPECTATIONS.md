@@ -91,12 +91,25 @@ database/API packet and 68-case focused unit packet pass, as do the server build
 and real local queued image/PDF/video preparation checks. Publication packet
 `8041a50` connects frozen request/direct snapshots, current read ACL before URL
 signing, group provenance and normalized reference guards. The actual service
-verifier passed55 supporting checks/15 SHA downloads; publishing/read+authoring
+verifier passed 55 supporting checks/15 SHA downloads; publishing/read+authoring
 passed the final62-check/4-file packet (25 publication/authoring,20 ACL and17
 pure frozen-reader checks). Source
 UI observations and final build details are in [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+Recovery prerequisite checkpoint `e546630` adds current record-bound presenter
+publish eligibility, nullable `live_version` with omitted-field preservation in
+sequential/bulk writers and public command callers, input-correlated ordered
+bulk writes, exact frozen-asset repair and injectable media authority fencing.
+Current-source desired-state/neighbor checks passed 32/32; the rebuilt service
+repeat passed 55/55 with 15 SHA downloads. Cache checks passed 65 focused and 464
+full units / 5 integration / 21 fault cases; media recorded 96 pass/1 opt-in skipped,
+then a separate enabled actual-SFU protocol pass with a 1933ms Docker-watchdog
+upper bound. These are bounded prerequisites, not production Backend authority
+or a new normal-player live run. [Prerequisite evidence](evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md)
+binds the source/developer outputs and preserves failed-attempt provenance.
+
 Normal-player live capability remains withheld: production run/admission
 control, complete CMS workflow and the same-player coordinator are unfinished.
+Direct host pidfd/AppArmor enforcement also remains an open deployment gate.
 These foundations do not establish the complete CMS-to-player journey.
 Update this checkpoint with each verified packet. Do not mark human cases Pass.
 

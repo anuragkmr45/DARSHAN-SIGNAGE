@@ -1,0 +1,57 @@
+{
+  "scope": "Server desired-state prerequisite supporting developer checks; not live run/player acceptance.",
+  "source_status": "Source committed and bound; developer checks only, not live feature acceptance.",
+  "migration_0059_sha256": "234026913c111001383406f93f827a81a2f927b0491f1db6565e69bd607fbd77",
+  "owned_schema_only_clone": true,
+  "owned_database": "darshan_desired_regression_806e2c7d7195_test",
+  "owned_database_dropped": true,
+  "exit_code": 0,
+  "wrapper_duration_ms": 12674,
+  "vitest_duration_ms": 12020,
+  "node_version": "20.20.2",
+  "timezone": "Asia/Kolkata",
+  "max_workers": 1,
+  "heap_limit_mib": 768,
+  "suites": [
+    {
+      "file": "src/services/device-desired-state-live.test.ts",
+      "passed": 14
+    },
+    {
+      "file": "src/routes/device-telemetry-commands.test.ts",
+      "passed": 13
+    },
+    {
+      "file": "src/services/playback-refresh-dispatch.test.ts",
+      "passed": 5
+    }
+  ],
+  "passed": 32,
+  "failures": 0,
+  "new_live_capability_or_public_setter": false,
+  "feature_data_written_by_regression": false,
+  "failed_before_regressions": {
+    "swapped_same_screen_unique_keys": "40P01",
+    "equivalent_uuid_case_bulk_upsert": "21000"
+  },
+  "final_clean_server_build": {
+    "status": "PASS",
+    "reported_by": "root agent after final 14 desired-state and 20 publishing checks",
+    "own_api_worker_stop_build_start_ms": 75500,
+    "compiled_backup_restored": false,
+    "readiness_checks_passed": 6,
+    "production_services_restarted": false
+  },
+  "final_actual_publication_repeat": {
+    "run_id": "b1c6053e-519f-4659-9f23-88dd8bfe11f8",
+    "status": "PASS",
+    "checks": 55,
+    "verified_downloads": 15,
+    "started_at": "2026-11-03T02:14:34.383Z",
+    "finished_at": "2026-11-03T02:14:48.472Z",
+    "duration_ms": 14089,
+    "sha256": "38038a13cdf92a70efc5f8754eb30169507f322c4d6a8e0bd4299747b69ac050",
+    "result_file": "live-recovery-prerequisites-publication-runtime-results.json"
+  },
+  "source_commit": "e54663079dc20668266769bd7f1c2455aedb348a"
+}

@@ -137,6 +137,18 @@ also protect sources, screens, groups, fallback media and storage dependencies
 when mutable drafts or group membership change. Ended/released history alone
 does not create a permanent active blocker.
 
+Implemented recovery prerequisite checkpoint `e546630` adds current record-bound
+presenter publish permission at preflight/approval/publication, nullable desired
+`live_version` with omission preservation, exact approved-asset preparation/
+repair in the cache, and injectable nonce/fence media checks with confirmed
+teardown semantics. Desired-state REST/CMS projections expose the optional
+nullable field; there is no public live-version setter. Cache primitives do
+not enable player capability or consume scheduled live manifests yet. The
+strict media protocol was tested against fixture authority; the ordinary media
+entrypoint remains prototype-only, with no production Backend verifier.
+See [prerequisite evidence](../../qa-artifacts/evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md)
+for bounded verification and source/build identities.
+
 Production run/start/admission APIs, complete CMS publishing/presenter controls,
 and normal-player live playback remain implementation work. See the
 [publication checkpoint](../../qa-artifacts/evidence/live-publication-authorization-developer-verification-2026-11-03.md)

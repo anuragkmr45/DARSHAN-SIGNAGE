@@ -1,0 +1,550 @@
+{
+  "version": 1,
+  "fixture_owner": "Owned by scripts/qa/live-publication-evidence.mjs; isolated synthetic publication only.",
+  "run_id": "b1c6053e-519f-4659-9f23-88dd8bfe11f8",
+  "started_at": "2026-11-03T02:14:34.383Z",
+  "status": "PASS",
+  "scope": "Actual isolated REST + PostgreSQL + immutable MinIO downloads. Supporting developer evidence; no CMS, admission, live run, player display or human acceptance claim.",
+  "protected_player_excluded": true,
+  "ids": {
+    "screens": [
+      "aa9be280-4d9c-4639-a8e7-7dd001dd3df3",
+      "04d2f37b-2331-431b-95a5-551da93401c5"
+    ],
+    "schedules": [
+      "4c7f59df-a1d3-4647-a631-def445863fd1",
+      "fbea2de6-6dd8-4d91-aaf6-a9a2844dd6db",
+      "facbdef3-bfd4-4ffa-aa0b-a3766adf1d99"
+    ],
+    "publications": [
+      {
+        "schedule_id": "4c7f59df-a1d3-4647-a631-def445863fd1",
+        "publish_id": "421a4f09-207e-4648-8c9d-dc68c886ba44",
+        "snapshot_id": "abc9a828-792a-4f35-a51c-7efb7979c235"
+      },
+      {
+        "schedule_id": "fbea2de6-6dd8-4d91-aaf6-a9a2844dd6db",
+        "publish_id": "11c6a867-d1af-40fe-bb67-31c18f94d78a",
+        "snapshot_id": "8a83a22b-db7b-4eac-9c78-7417b13e4818"
+      },
+      {
+        "schedule_id": "facbdef3-bfd4-4ffa-aa0b-a3766adf1d99",
+        "publish_id": "b6f47d66-6135-4f8d-93a1-63c61aed7856",
+        "snapshot_id": "f26e9caa-2e09-4c66-856d-2335bf7fd9bb"
+      }
+    ],
+    "requests": [
+      "4b23799e-1d56-414b-94c7-963387fb125c"
+    ],
+    "source": "2287d70a-652c-4bca-97b9-4dc4fc2893ac",
+    "group": "df4f262d-aa2d-4bd2-875e-5cf949034179"
+  },
+  "checks": [
+    {
+      "name": "fixed isolated runtime verified",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "resolve current isolated actor",
+      "result": "PASS",
+      "elapsed_ms": 54,
+      "method": "GET",
+      "status_code": 200
+    },
+    {
+      "name": "read existing owned READY preparation",
+      "result": "PASS",
+      "elapsed_ms": 152,
+      "method": "GET",
+      "status_code": 200
+    },
+    {
+      "name": "created two own offline screens without pairing",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "create own reusable live source",
+      "result": "PASS",
+      "elapsed_ms": 84,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "create own GroupA with X",
+      "result": "PASS",
+      "elapsed_ms": 119,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "create Grouped A schedule",
+      "result": "PASS",
+      "elapsed_ms": 204,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "create Grouped A LIVE item",
+      "result": "PASS",
+      "elapsed_ms": 129,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "review direct live policy",
+      "result": "PASS",
+      "elapsed_ms": 203,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "publish reviewed live schedule",
+      "result": "PASS",
+      "elapsed_ms": 2086,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "immutable snapshot equals reviewed policy",
+      "result": "PASS",
+      "elapsed_ms": 0,
+      "snapshot_sha256": "b17ac995fe28869cd8149deac3c8ef85a081200660d33af62d31ae379728a7b1",
+      "approval_fingerprint": "dca2cd2996e128dc7448d60900a9007a6ce83f4e3c154dac26dcdbf96ba5c43e"
+    },
+    {
+      "name": "read authored-group publication",
+      "result": "PASS",
+      "elapsed_ms": 213,
+      "method": "GET",
+      "status_code": 200
+    },
+    {
+      "name": "group before membership replacement immutable downloads verified",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "replace own group member X with Y",
+      "result": "PASS",
+      "elapsed_ms": 175,
+      "method": "PATCH",
+      "status_code": 200
+    },
+    {
+      "name": "create Direct Y schedule",
+      "result": "PASS",
+      "elapsed_ms": 864,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "create Direct Y LIVE item",
+      "result": "PASS",
+      "elapsed_ms": 218,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "review direct live policy",
+      "result": "PASS",
+      "elapsed_ms": 161,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "publish reviewed live schedule",
+      "result": "PASS",
+      "elapsed_ms": 298,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "immutable snapshot equals reviewed policy",
+      "result": "PASS",
+      "elapsed_ms": 0,
+      "snapshot_sha256": "d74684283f2781ca508b98343b2ed1e2f80e28c5f7d33f18603a5a2769a44b18",
+      "approval_fingerprint": "8302818a5f64781f7ac65557b74ec9d34c9302e5ce65fafe881ca7eeef50324b"
+    },
+    {
+      "name": "read historical group after replacement",
+      "result": "PASS",
+      "elapsed_ms": 123,
+      "method": "GET",
+      "status_code": 200
+    },
+    {
+      "name": "group after membership replacement immutable downloads verified",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "removed X retains frozen A",
+      "result": "PASS",
+      "elapsed_ms": 92,
+      "method": "GET",
+      "status_code": 200
+    },
+    {
+      "name": "removed X retains frozen A immutable downloads verified",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "Y receives only direct B",
+      "result": "PASS",
+      "elapsed_ms": 694,
+      "method": "GET",
+      "status_code": 200
+    },
+    {
+      "name": "Y receives only direct B immutable downloads verified",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "group history and concrete screen delivery remain independently frozen",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "reject referenced source deletion",
+      "result": "PASS",
+      "elapsed_ms": 81,
+      "method": "DELETE",
+      "status_code": 409,
+      "error_code": "LIVE_SESSION_IN_USE"
+    },
+    {
+      "name": "reject referenced source deletion left owned records unchanged",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "reject immutable-audience X deletion",
+      "result": "PASS",
+      "elapsed_ms": 94,
+      "method": "DELETE",
+      "status_code": 409,
+      "error_code": "SCREEN_IN_USE"
+    },
+    {
+      "name": "reject immutable-audience X deletion left owned records unchanged",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "reject referenced group deletion",
+      "result": "PASS",
+      "elapsed_ms": 64,
+      "method": "DELETE",
+      "status_code": 409,
+      "error_code": "SCREEN_GROUP_IN_USE"
+    },
+    {
+      "name": "reject referenced group deletion left owned records unchanged",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "take down own direct publication",
+      "result": "PASS",
+      "elapsed_ms": 117,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "takedown released screen and logical live reservations",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "take down own direct publication",
+      "result": "PASS",
+      "elapsed_ms": 168,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "takedown released screen and logical live reservations",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "create Request X schedule",
+      "result": "PASS",
+      "elapsed_ms": 123,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "create Request X LIVE item",
+      "result": "PASS",
+      "elapsed_ms": 83,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "create own live approval request",
+      "result": "PASS",
+      "elapsed_ms": 188,
+      "method": "POST",
+      "status_code": 201
+    },
+    {
+      "name": "request screen and live reservation phases match",
+      "result": "PASS",
+      "elapsed_ms": 0,
+      "request_status": "PENDING",
+      "reservation_state": "HELD"
+    },
+    {
+      "name": "approve own live request",
+      "result": "PASS",
+      "elapsed_ms": 675,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "request screen and live reservation phases match",
+      "result": "PASS",
+      "elapsed_ms": 0,
+      "request_status": "APPROVED",
+      "reservation_state": "RESERVED"
+    },
+    {
+      "name": "publish own approved request",
+      "result": "PASS",
+      "elapsed_ms": 1573,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "request screen and live reservation phases match",
+      "result": "PASS",
+      "elapsed_ms": 0,
+      "request_status": "PUBLISHED",
+      "reservation_state": "PUBLISHED"
+    },
+    {
+      "name": "edit own future source policy",
+      "result": "PASS",
+      "elapsed_ms": 103,
+      "method": "PATCH",
+      "status_code": 200
+    },
+    {
+      "name": "retry existing publication after source policy edit",
+      "result": "PASS",
+      "elapsed_ms": 141,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "retry existing publication after source policy edit",
+      "result": "PASS",
+      "elapsed_ms": 102,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "read request snapshot after future source edit",
+      "result": "PASS",
+      "elapsed_ms": 184,
+      "method": "GET",
+      "status_code": 200
+    },
+    {
+      "name": "request delivery after source policy edit immutable downloads verified",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "both retry endpoints preserve exact publication and approved policy",
+      "result": "PASS",
+      "elapsed_ms": 0,
+      "snapshot_sha256": "54ca9d674974e0df47d90f9eb222dd0f86fa3fd0b43358059957d3be03e3dd10"
+    },
+    {
+      "name": "take down own published request",
+      "result": "PASS",
+      "elapsed_ms": 636,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "takedown released screen and logical live reservations",
+      "result": "PASS",
+      "elapsed_ms": 0
+    },
+    {
+      "name": "read own final request status",
+      "result": "PASS",
+      "elapsed_ms": 66,
+      "method": "GET",
+      "status_code": 200
+    },
+    {
+      "name": "logout only this probe session",
+      "result": "PASS",
+      "elapsed_ms": 38,
+      "method": "POST",
+      "status_code": 200
+    },
+    {
+      "name": "confirm own session revoked",
+      "result": "PASS",
+      "elapsed_ms": 22,
+      "method": "GET",
+      "status_code": 401,
+      "error_code": "UNAUTHORIZED"
+    }
+  ],
+  "downloads": [
+    {
+      "journey": "group before membership replacement",
+      "asset_id": "11cb9b9d-44b1-4374-8d47-3e2ba6a76488",
+      "render_type": "video",
+      "size": 257651,
+      "sha256": "5206198e93aa4a8b1fe7e5eb65b7f3b8292009dd844e6fc8c8f3c90bc6ff8b1c",
+      "elapsed_ms": 35,
+      "verified": true
+    },
+    {
+      "journey": "group before membership replacement",
+      "asset_id": "4d09b722-c012-4b47-aeb2-ad7cc4deb0ce",
+      "render_type": "image",
+      "size": 8022,
+      "sha256": "15835776e7f1bc6be660a3e03d2d8f8f604ea1166a7ff46b157271c492912cf4",
+      "elapsed_ms": 62,
+      "verified": true
+    },
+    {
+      "journey": "group before membership replacement",
+      "asset_id": "8122f538-e6d1-40a3-9656-135319a795f8",
+      "render_type": "pdf",
+      "size": 7726,
+      "sha256": "8362c191e2e483d4582d6c6b41b0ef463a9100ae915096962202bb991ccf4477",
+      "elapsed_ms": 121,
+      "verified": true
+    },
+    {
+      "journey": "group after membership replacement",
+      "asset_id": "11cb9b9d-44b1-4374-8d47-3e2ba6a76488",
+      "render_type": "video",
+      "size": 257651,
+      "sha256": "5206198e93aa4a8b1fe7e5eb65b7f3b8292009dd844e6fc8c8f3c90bc6ff8b1c",
+      "elapsed_ms": 79,
+      "verified": true
+    },
+    {
+      "journey": "group after membership replacement",
+      "asset_id": "4d09b722-c012-4b47-aeb2-ad7cc4deb0ce",
+      "render_type": "image",
+      "size": 8022,
+      "sha256": "15835776e7f1bc6be660a3e03d2d8f8f604ea1166a7ff46b157271c492912cf4",
+      "elapsed_ms": 101,
+      "verified": true
+    },
+    {
+      "journey": "group after membership replacement",
+      "asset_id": "8122f538-e6d1-40a3-9656-135319a795f8",
+      "render_type": "pdf",
+      "size": 7726,
+      "sha256": "8362c191e2e483d4582d6c6b41b0ef463a9100ae915096962202bb991ccf4477",
+      "elapsed_ms": 106,
+      "verified": true
+    },
+    {
+      "journey": "removed X retains frozen A",
+      "asset_id": "11cb9b9d-44b1-4374-8d47-3e2ba6a76488",
+      "render_type": "video",
+      "size": 257651,
+      "sha256": "5206198e93aa4a8b1fe7e5eb65b7f3b8292009dd844e6fc8c8f3c90bc6ff8b1c",
+      "elapsed_ms": 99,
+      "verified": true
+    },
+    {
+      "journey": "removed X retains frozen A",
+      "asset_id": "4d09b722-c012-4b47-aeb2-ad7cc4deb0ce",
+      "render_type": "image",
+      "size": 8022,
+      "sha256": "15835776e7f1bc6be660a3e03d2d8f8f604ea1166a7ff46b157271c492912cf4",
+      "elapsed_ms": 109,
+      "verified": true
+    },
+    {
+      "journey": "removed X retains frozen A",
+      "asset_id": "8122f538-e6d1-40a3-9656-135319a795f8",
+      "render_type": "pdf",
+      "size": 7726,
+      "sha256": "8362c191e2e483d4582d6c6b41b0ef463a9100ae915096962202bb991ccf4477",
+      "elapsed_ms": 98,
+      "verified": true
+    },
+    {
+      "journey": "Y receives only direct B",
+      "asset_id": "11cb9b9d-44b1-4374-8d47-3e2ba6a76488",
+      "render_type": "video",
+      "size": 257651,
+      "sha256": "5206198e93aa4a8b1fe7e5eb65b7f3b8292009dd844e6fc8c8f3c90bc6ff8b1c",
+      "elapsed_ms": 102,
+      "verified": true
+    },
+    {
+      "journey": "Y receives only direct B",
+      "asset_id": "4d09b722-c012-4b47-aeb2-ad7cc4deb0ce",
+      "render_type": "image",
+      "size": 8022,
+      "sha256": "15835776e7f1bc6be660a3e03d2d8f8f604ea1166a7ff46b157271c492912cf4",
+      "elapsed_ms": 186,
+      "verified": true
+    },
+    {
+      "journey": "Y receives only direct B",
+      "asset_id": "8122f538-e6d1-40a3-9656-135319a795f8",
+      "render_type": "pdf",
+      "size": 7726,
+      "sha256": "8362c191e2e483d4582d6c6b41b0ef463a9100ae915096962202bb991ccf4477",
+      "elapsed_ms": 98,
+      "verified": true
+    },
+    {
+      "journey": "request delivery after source policy edit",
+      "asset_id": "11cb9b9d-44b1-4374-8d47-3e2ba6a76488",
+      "render_type": "video",
+      "size": 257651,
+      "sha256": "5206198e93aa4a8b1fe7e5eb65b7f3b8292009dd844e6fc8c8f3c90bc6ff8b1c",
+      "elapsed_ms": 44,
+      "verified": true
+    },
+    {
+      "journey": "request delivery after source policy edit",
+      "asset_id": "4d09b722-c012-4b47-aeb2-ad7cc4deb0ce",
+      "render_type": "image",
+      "size": 8022,
+      "sha256": "15835776e7f1bc6be660a3e03d2d8f8f604ea1166a7ff46b157271c492912cf4",
+      "elapsed_ms": 119,
+      "verified": true
+    },
+    {
+      "journey": "request delivery after source policy edit",
+      "asset_id": "8122f538-e6d1-40a3-9656-135319a795f8",
+      "render_type": "pdf",
+      "size": 7726,
+      "sha256": "8362c191e2e483d4582d6c6b41b0ef463a9100ae915096962202bb991ccf4477",
+      "elapsed_ms": 23,
+      "verified": true
+    }
+  ],
+  "preparation": {
+    "preparation_id": "755fe99a-0290-406d-b97f-f6569439e3b0",
+    "presentation_id": "485eb527-156d-4b28-ae92-e2afbdb27cd8",
+    "source_fingerprint": "c474136a5ba236bab7fa96dbe0289a9101b954e5896bc5e7bdbb4f521b6763e7",
+    "manifest_sha256": "8446a543da6764d564b6f36adcbe4034da04eb760e0f53d1a9ef93bf40b298e2"
+  },
+  "finished_at": "2026-11-03T02:14:48.472Z",
+  "own_authority_cleanup": "COMPLETE_HISTORY_PRESERVED",
+  "own_session_logout": "REVOKED"
+}

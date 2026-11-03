@@ -1,6 +1,6 @@
 # Live broadcast implementation and verification loops
 
-Status: **IN PROGRESS — partial source/publication implementation verified; not feature-complete or release-approved.**
+Status: **IN PROGRESS — partial publication and recovery prerequisites verified; not feature-complete or release-approved.**
 
 Accepted objective: user-supplied persistent-goal attachment, 2026-11-03.
 Contract: [live broadcasting](../contracts/live-broadcast.md).
@@ -113,6 +113,26 @@ controls and six-VM packaging remain open. No loop is closed by these supporting
 checks, and all human `LIVE-01..20` cases remain Not Tested. See the
 [packet evidence](../../qa-artifacts/evidence/live-publication-authorization-developer-verification-2026-11-03.md)
 for final build/evidence binding and remaining verification.
+
+### Recovery prerequisite checkpoint
+
+Source `e54663079dc20668266769bd7f1c2455aedb348a` follows publication source
+`8041a50` and QA binding `d611bb6`. It checks assigned presenter publish authority
+before review/publication, preserves nullable live desired-state versions in
+all touched writers/projections/callers, fixes input correlation and batch lock
+ordering, and adds exact approved-asset repair plus injectable strict media
+fencing. A repeated rebuilt-service run passed 55 supporting checks and 15 SHA
+verified downloads. Cache current-source units/integration/faults and strict
+fixture-authority/SFU enforcement have separate results and build identities.
+
+This checkpoint is a prerequisite for loops 3/4, not completion of either. No
+production Backend run/admission/epoch verifier, same-player live coordinator,
+complete presenter/wizard, new installed-player build, cross-VM rollout or
+host pidfd/AppArmor pass is supplied. Current media startup remains prototype
+mode; the strict verifier is an injected component tested against fixture
+authority. See [prerequisite evidence](../../qa-artifacts/evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md)
+for current counts, exact-source repair/SFU observations, failed-attempt
+provenance, build hashes and open gates. All human LIVE cases remain Not Tested.
 
 ## Runtime and fault verification
 

@@ -1,12 +1,14 @@
 # DARSHAN Human QA Planning Package
 
-> **Live broadcast delta — 2026-11-03:** partial source/fallback/publication
-> implementation is verified on `codex/live-screen-broadcast-planning-20261103`.
-> The 55-check real-service packet, source UI observations and precise remaining
-> gates are in [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
-> Run/admission authority, normal-player live integration and complete CMS
-> presenter/publishing controls remain open. `LIVE-01..20` stay **Not Tested**;
-> no full-feature, beta or release pass is claimed.
+> **Live broadcast delta — 2026-11-03:** source/fallback/publication and recovery
+> prerequisites are partially verified on `codex/live-screen-broadcast-planning-20261103`.
+> Source checkpoint `e546630` adds current presenter eligibility, preserved live
+> desired-state versions, exact fallback repair and injectable media fencing.
+> See [prerequisite evidence](evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md)
+> and the earlier [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
+> Production Backend run/admission authority, normal-player live integration,
+> complete CMS presenter/publishing controls and host pidfd/AppArmor remain open.
+> `LIVE-01..20` stay **Not Tested**; no feature, beta or release pass is claimed.
 
 Status: **PRE-QA DEVELOPMENT VERIFICATION IN PROGRESS; not release-approved.**
 The document/video/boundary/security-recovery upgrade has passed focused and
@@ -88,6 +90,7 @@ must not be read as runtime completion or independent QA approval.
 20. [Player delivery, availability and observability developer verification](evidence/dashboard-observability-report-developer-verification-2026-11-02.md): beta6 automated, source-free and packaged-player evidence plus the exact five-VM and physical-player gates still open.
 21. [Chat and notification developer verification](evidence/chat-notifications-developer-verification-2026-11-03.md): local three-session behavior, corrected defects, automated checks and remaining independent QA gates. Execute `CHAT-01..08` for the human matrix.
 22. [Live publication/authorization developer verification](evidence/live-publication-authorization-developer-verification-2026-11-03.md): capability-gated frozen request/direct publication, scoped reads, real-service immutable downloads and source UI observations; the normal-player broadcast workflow and independent `LIVE-01..20` execution remain open.
+23. [Live recovery prerequisite developer verification](evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md): source-bound desired-state preservation, actual publication repeat, exact fallback repair and fixture-authority/SFU enforcement; production authority, same-player integration and host pidfd/AppArmor remain open.
 
 The inventory is supporting evidence, not a completed authorization audit. Source references are repository-relative. Only results explicitly linked to the dated runtime report are current execution evidence; test-file presence and historical QA reports do not mean tests currently pass.
 
@@ -154,12 +157,18 @@ The finished feature is a scheduled live event/media source in the same ordinary
 installed DARSHAN desktop player and normal pairing/lifecycle/cache/emergency.
 The temporary prototype is a technical gate. Current code additionally implements
 source authoring, immutable fallback preparation and capability-gated frozen
-request/direct publication. The actual running-service verifier passed55
-supporting checks and15 SHA-verified image/PDF/video downloads. Root observed
+request/direct publication. The actual running-service verifier passed 55
+supporting checks and 15 SHA-verified image/PDF/video downloads. Root observed
 source UI create/view/audio edits/retry and same-admin stale-tab recovery.
-None establishes run admission, normal-player live rendering, complete CMS
-presenter controls or independent human acceptance. See the dated publication
-report and ledger for exact evidence and remaining gates.
+Checkpoint `e546630` additionally verifies current presenter publish permission,
+nullable live-version preservation across writers and callers, strict injected
+media fencing and exact-asset fallback repair. Its final source-bound publication
+repeat passed 55 checks/15 SHA downloads; cache units passed 464 plus 5 integration/
+21 fault checks, and media protocol evidence used an isolated fixture authority.
+These are prerequisite/component results. Production Backend run admission,
+normal-player live rendering, complete CMS controls, direct host pidfd/AppArmor
+and independent human acceptance remain open. See the dated prerequisite and
+publication reports for exact sources, developer build hashes and remaining gates.
 
 Use [contract](../docs/contracts/live-broadcast.md), [execution loops](../docs/plans/live-broadcast-implementation-loops.md) and
 [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md). The expected behavior is accepted; code and
