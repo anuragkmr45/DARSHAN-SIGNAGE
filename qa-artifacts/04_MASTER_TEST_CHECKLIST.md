@@ -116,6 +116,41 @@ separate receiver application cannot close those integrated cases.
 
 ### Independent human execution and site gates
 
+- [ ] `LIVE-09`, `LIVE-12`: while video and optional audio are visibly playing,
+  cut Backend authority renewal without stopping the player or Media VM.
+  Confirm renewal normally occurs about every three seconds, both video and
+  audio stop within ten seconds of lost authority, and a late REST response
+  cannot extend playback. Restore Backend; require fresh current authority
+  before live resumes. Record trigger, last valid renewal, visible/audio stop
+  timestamps, fallback state and recovery.
+- [ ] `LIVE-10`, `LIVE-14`: trigger an emergency on one live receiver and clear
+  it while the window is active; keep another receiver unaffected. The affected
+  display and audio switch to emergency with no live image or sound underneath.
+  After clear, live may return only after fresh admission for the current run;
+  a secure/identity lock or ended window must prevent return. Record both
+  screens, audio, authority and cleanup.
+- [ ] `LIVE-06`, `LIVE-11..13`: revoke the presenter's session or permission
+  during publication, replay original/refreshed admission, race a second tab,
+  and interrupt then restore signaling/media. Revoked or replayed identities
+  cannot reconnect or displace a legitimate peer; already flowing media stops
+  within the authority bound. A media-only interruption may reconnect for up
+  to 30 seconds only while authority and window remain valid. Record room and
+  admission state before/after, with no stale run resurrection.
+- [ ] `LIVE-01`, `LIVE-06`, `LIVE-17`: keep a real presenter capture active while
+  the CMS tab is hidden or browser minimized, using ordinary browser settings.
+  Verify frame/audio continuity when permitted, truthful degraded status when
+  capture stops, and no duplicate publication after foregrounding, reload or
+  a second tab. Test native chooser cancellation and a late picker result after
+  authority expires. Record the selected source, browser/OS, visible player
+  output, audio and capture/room cleanup.
+- [ ] `LIVE-11..13`, `LIVE-15`: on the representative Media VM, fail the
+  controller, supervisor and host witness separately, including a management
+  partition and an SFU removal timeout. Prove already flowing media stops
+  within the authority bound or the node isolates; while removal is uncertain,
+  capacity remains occupied and no new admission is granted. Verify a healthy
+  node is not falsely isolated under the approved sustained load. Record
+  watchdog/host timing, Media process and room state, player display/audio,
+  Backend reconciliation and recovery steps.
 - [ ] Run **each** `LIVE-01..20` row in `05_TEST_CASES.csv` against one frozen
   source commit and CMS/Backend/Media/player artifact set (with signed role
   manifests where required). For each row,
