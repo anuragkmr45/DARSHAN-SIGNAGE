@@ -19,6 +19,8 @@ import type {
 } from "@/api/types";
 import { resolveQuickPresetRange, type ScheduleQuickPresetId } from "@/lib/scheduleQuickPresets";
 import { buildPresentationSlotPayloads, normalizeRestoredSlotMedia } from "@/lib/scheduleCreatorState";
+import { canCreateScheduleFlow } from "@/lib/scheduleAccess";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 import { StepLayoutSelect } from "@/components/schedule-creator/StepLayoutSelect";
 import { StepMediaAssign } from "@/components/schedule-creator/StepMediaAssign";
@@ -135,6 +137,7 @@ export default function ScheduleCreator() {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const authorization = useAuthorization();
   const [currentStep, setCurrentStep] = useState(1);
   const [wizardState, setWizardState] = useState<ScheduleWizardState>(initialState);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -656,6 +659,15 @@ export default function ScheduleCreator() {
     const payload = JSON.stringify({ state: wizardState, step: currentStep });
     sessionStorage.setItem("scheduleCreatorDraft", payload);
   }, [wizardState, currentStep, hasRestored]);
+
+  if (authorization.isLoading) return <p role="status" className="py-10 text-sm text-muted-foreground">Checking schedule access…</p>;
+  if (!canCreateScheduleFlow(authorization.can)) return (
+    <div className="space-y-3 py-10">
+      <h1 className="text-xl font-semibold">Schedule creation unavailable</h1>
+      <p className="text-sm text-muted-foreground">Your current permissions do not cover every step needed to create and submit a schedule.</p>
+      <Button variant="outline" onClick={() => navigate("/schedule")}>Back to Schedule Queue</Button>
+    </div>
+  );
 
   return (
     <div className="space-y-5 pb-4">

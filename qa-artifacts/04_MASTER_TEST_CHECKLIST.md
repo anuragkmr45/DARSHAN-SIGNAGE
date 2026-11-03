@@ -52,6 +52,7 @@ Execute remaining work only on authorized isolated test environments. Each check
 
 ## Scheduling, Screens And Player
 
+- [ ] `FUN-03..05`, `UI-02`: in the real Schedule Queue, verify read-only versus complete creator grants, direct `/schedule/new` denial, search/date/sort/status counts, local-day boundaries, reversed date rejection, pagination, failed/Retry and stale refresh, keyboard row opening, selection refresh after another operator changes a request, and correct explanation that the backend snapshot does not prove player receipt or display. Repeat approve/publish/take-down through the detail view with server permissions and two actors.
 - [ ] `FUN-03..05`, `CONC-01`, `DATA-02`: half-open intervals, concrete-screen group overlap, holds, stale revisions, administrator self-approval, direct publishing, cancellation, takedown, replay and transaction/outbox consistency.
 - [ ] `FUN-06`, `DEF-01..03`: eligible screen > group priority descending > target ID ascending tie-break > aspect > global > none. Priority is integer `0..100`, legacy/missing is `0`, non-priority edits preserve it, and concurrent same-revision writes yield one success plus one `409` without silent overwrite.
 - [ ] `DEF-04`, `PLAYER-05`: with no active Schedule or eligible Screen/Group/aspect/global default, show the approved standard company fallback image online and offline on every supported display. Expected: a visible fitted image, never a blank or text-only idle card. The 2026-10-17 developer runtime failed this expectation.
