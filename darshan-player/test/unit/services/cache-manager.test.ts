@@ -391,4 +391,208 @@ describe('Cache Manager', () => {
       expect(await cacheManager.has('file2.jpg')).to.be.true
     })
   })
+
+  describe('Published occurrence pins', () => {
+    const owner = (index = 1) => ({ publishId: '10000000-0000-4000-8000-000000000001',
+      scheduleItemId: `20000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}` })
+    const asset = (cacheKey: string, data = Buffer.from('data')) => ({ cacheKey, sha256: calculateHash(data) })
+    const fixture = async (keys: string[], bytes = 4) => {
+      const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+      const manager = getCacheManager()
+      const data = Buffer.alloc(bytes, 7)
+      sandbox.stub(manager, 'download').resolves(data)
+      for (const key of keys) await manager.add(key, `https://example.com/${key}.png`, calculateHash(data))
+      return { manager, data }
+    }
+
+    it('protects the union of published pins and now-playing content during eviction', async () => {
+      const { manager, data } = await fixture(['a', 'b', 'c'])
+      manager.maxBytes = 12
+      manager.entries.get('a').lastUsedAt = 1
+      manager.entries.get('b').lastUsedAt = 2
+      manager.entries.get('c').lastUsedAt = 3
+      expect((await manager.pinPublishedOccurrence(owner(), [asset('a', data)])).ready).to.equal(true)
+      manager.markNowPlaying('b')
+      await manager.add('d', 'https://example.com/d.png', calculateHash(data))
+      expect(await manager.has('a')).to.equal(true)
+      expect(await manager.has('b')).to.equal(true)
+      expect(await manager.has('c')).to.equal(false)
+      expect(await manager.has('d')).to.equal(true)
+      manager.replaceNowPlaying([])
+      await manager.clear(false)
+      expect(await manager.has('a')).to.equal(true)
+      expect(await manager.has('b')).to.equal(false)
+    })
+
+    it('releasing one owner preserves other owners and now-playing protection', async () => {
+      const { manager, data } = await fixture(['shared'])
+      await manager.pinPublishedOccurrence(owner(1), [asset('shared', data)])
+      await manager.pinPublishedOccurrence(owner(2), [asset('shared', data)])
+      manager.releasePublishedOccurrence(owner(1))
+      await manager.clear(false)
+      expect(await manager.has('shared')).to.equal(true)
+      manager.markNowPlaying('shared')
+      manager.releasePublishedOccurrence(owner(2))
+      await manager.clear(false)
+      expect(await manager.has('shared')).to.equal(true)
+      manager.unmarkNowPlaying('shared')
+      await manager.clear(false)
+      expect(await manager.has('shared')).to.equal(false)
+    })
+
+    it('claims protection before async verification and ordinary clear can run', async () => {
+      const { manager, data } = await fixture(['fallback'])
+      const pending = manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])
+      await manager.clear(false)
+      const readiness = await pending
+      expect(readiness.ready).to.equal(true)
+      expect(readiness.assets[0].localPath).to.be.a('string')
+      expect(await manager.has('fallback')).to.equal(true)
+    })
+
+    it('rechecks stale eviction candidates after a pin is claimed mid-eviction', async () => {
+      const { manager, data } = await fixture(['a', 'b', 'c'])
+      manager.maxBytes = 12
+      manager.entries.get('a').lastUsedAt = 1
+      manager.entries.get('b').lastUsedAt = 2
+      manager.entries.get('c').lastUsedAt = 3
+      let reached: () => void = () => undefined
+      let release: () => void = () => undefined
+      const removedFirst = new Promise<void>(resolve => { reached = resolve })
+      const continueEviction = new Promise<void>(resolve => { release = resolve })
+      const original = manager.removeEntry.bind(manager)
+      sandbox.stub(manager, 'removeEntry').callsFake(async (entry: any) => {
+        await original(entry)
+        if (entry.mediaId === 'a') { reached(); await continueEviction }
+      })
+      manager.download.resolves(Buffer.alloc(8, 7))
+      const adding = manager.add('d', 'https://example.com/d.png')
+      await removedFirst
+      const pinning = manager.pinPublishedOccurrence(owner(), [asset('b', data)])
+      release()
+      await Promise.all([adding, pinning])
+      expect(await manager.has('b')).to.equal(true)
+      expect(await manager.has('c')).to.equal(false)
+      expect(await manager.has('d')).to.equal(true)
+    })
+
+    it('does not persist missing/corrupt pins or substitute an older cached revision', async () => {
+      const { manager, data } = await fixture(['revision.__revision__.old', 'corrupt'])
+      const corruptPath = await manager.get('corrupt')
+      fs.writeFileSync(corruptPath, Buffer.from('bad!'))
+      const readiness = await manager.pinPublishedOccurrence(owner(), [asset('revision.__revision__.new', data), asset('corrupt', data)])
+      expect(readiness.ready).to.equal(false)
+      expect(readiness.assets.map((result: any) => result.status)).to.deep.equal(['MISSING', 'CORRUPT'])
+      await manager.clear(false)
+      expect(await manager.has('corrupt')).to.equal(false)
+      expect(await manager.has('revision.__revision__.old')).to.equal(false)
+      // Failed owners leave no immutable/empty-owner residue.
+      await manager.add('repaired', 'https://example.com/repaired.png', calculateHash(data))
+      expect((await manager.pinPublishedOccurrence(owner(), [asset('repaired', data)])).ready).to.equal(true)
+    })
+
+    it('release or forced security purge cancels pending validation without resurrecting pins', async () => {
+      const { manager, data } = await fixture(['fallback'])
+      const released = manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])
+      manager.releasePublishedOccurrence(owner())
+      expect((await released).assets[0].status).to.equal('CANCELLED')
+      manager.markNowPlaying('fallback')
+      const purged = manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])
+      await manager.clear(true)
+      expect((await purged).ready).to.equal(false)
+      await manager.add('fallback', 'https://example.com/fallback.png', calculateHash(data))
+      await manager.clear(false)
+      expect(await manager.has('fallback')).to.equal(false)
+    })
+
+    it('ignores a released verification failure after a fresh owner claim succeeds', async () => {
+      const { manager, data } = await fixture(['fallback'])
+      let failOldStat: (error: Error) => void = () => undefined
+      const delayed = new Promise<never>((_resolve, reject) => { failOldStat = reject })
+      sandbox.stub(fs.promises, 'lstat').callThrough().onFirstCall().returns(delayed)
+      const stale = manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])
+      manager.releasePublishedOccurrence(owner())
+      expect((await manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])).ready).to.equal(true)
+      failOldStat(Object.assign(new Error('old file lookup failed'), { code: 'ENOENT' }))
+      expect((await stale).assets[0].status).to.equal('CANCELLED')
+      await manager.clear(false)
+      expect(await manager.has('fallback')).to.equal(true)
+    })
+
+    it('reports insufficient capacity rather than evicting every approved fallback asset', async () => {
+      const { manager, data } = await fixture(['fallback'])
+      manager.maxBytes = data.length
+      expect((await manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])).ready).to.equal(true)
+      let failure: any
+      try { await manager.add('new', 'https://example.com/new.png', calculateHash(data)) }
+      catch (error) { failure = error }
+      expect(failure?.details?.reason).to.equal('INSUFFICIENT_SPACE')
+      expect(await manager.has('new')).to.equal(false)
+      expect(fs.readFileSync(await manager.get('fallback'))).to.deep.equal(data)
+    })
+
+    it('rejects an on-disk symlink even when its target has the approved checksum', async () => {
+      const { manager, data } = await fixture(['fallback'])
+      const localPath = await manager.get('fallback')
+      const outside = path.join(tempDir, 'outside.png')
+      fs.writeFileSync(outside, data)
+      fs.unlinkSync(localPath)
+      fs.symlinkSync(outside, localPath)
+      const readiness = await manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])
+      expect(readiness.ready).to.equal(false)
+      expect(readiness.assets[0].status).to.equal('UNREADABLE')
+      await manager.clear(false)
+      expect(fs.readFileSync(outside)).to.deep.equal(data)
+      expect(fs.existsSync(localPath)).to.equal(false)
+    })
+
+    it('rejects changes to a pinned checksum without evicting or replacing its approved bytes', async () => {
+      const { manager, data } = await fixture(['fallback'])
+      await manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])
+      const localPath = await manager.get('fallback')
+      manager.download.resolves(Buffer.from('replacement'))
+      let failure: any
+      try { await manager.add('fallback', 'https://example.com/replacement.png', calculateHash(Buffer.from('replacement'))) }
+      catch (error) { failure = error }
+      expect(failure?.details?.reason).to.equal('PINNED_REVISION_CONFLICT')
+      expect(fs.readFileSync(localPath)).to.deep.equal(data)
+      expect(() => manager.pinPublishedOccurrence(owner(2), [asset('fallback', Buffer.from('different'))])).to.throw()
+    })
+
+    it('deduplicates identical claims and rejects conflicting or unsafe inputs without truncation', async () => {
+      const { manager, data } = await fixture(['fallback'])
+      const first = manager.pinPublishedOccurrence(owner(), [asset('fallback', data), asset('fallback', data)])
+      expect(manager.pinPublishedOccurrence(owner(), [asset('fallback', data)])).to.equal(first)
+      expect((await first).assets).to.have.length(1)
+      for (const assets of [[], [{ cacheKey: '../escape', sha256: calculateHash(data) }],
+        [{ cacheKey: 'fallback', sha256: 'unknown' }], [asset('fallback', data), asset('fallback', Buffer.from('different'))]]) {
+        expect(() => manager.pinPublishedOccurrence(owner(3), assets)).to.throw()
+      }
+      expect(() => manager.pinPublishedOccurrence({ publishId: 'not-a-publish', scheduleItemId: 'not-an-item' }, [asset('fallback', data)])).to.throw()
+      expect(() => manager.pinPublishedOccurrence(owner(), [asset('different', data)])).to.throw()
+    })
+
+    it('verifies all 257 approved assets instead of imposing a new presentation item cap', async () => {
+      const data = Buffer.from('fixture')
+      const media = path.join(cacheDir, 'media')
+      fs.mkdirSync(media, { recursive: true })
+      const assets = Array.from({ length: 257 }, (_, index) => asset(`asset-${index}`, data))
+      for (const item of assets) fs.writeFileSync(path.join(media, `${item.cacheKey}.png`), data)
+      const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+      const manager = getCacheManager()
+      const readiness = await manager.pinPublishedOccurrence(owner(), assets)
+      expect(readiness.ready).to.equal(true)
+      expect(readiness.assets).to.have.length(257)
+      await manager.clear(false)
+      expect((await manager.getStats()).entryCount).to.equal(257)
+    })
+
+    it('bounds retained owners and clears empty owners after missing-asset verification', async () => {
+      const { manager, data } = await fixture([])
+      const pending = Array.from({ length: 64 }, (_, index) => manager.pinPublishedOccurrence(owner(index + 1), [asset('missing', data)]))
+      expect(() => manager.pinPublishedOccurrence(owner(65), [asset('missing', data)])).to.throw()
+      expect((await Promise.all(pending)).every((result: any) => !result.ready)).to.equal(true)
+      expect((await manager.pinPublishedOccurrence(owner(65), [asset('missing', data)])).ready).to.equal(false)
+    })
+  })
 })

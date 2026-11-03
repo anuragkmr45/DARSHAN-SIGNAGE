@@ -101,3 +101,6 @@ el('start').onclick=async()=>{
 el('stop').onclick=()=>void stop('Presenter stopped the attempt');
 document.addEventListener('visibilitychange',()=>{if(room)void renew(generation);});
 window.addEventListener('pagehide',()=>{++generation;clearCapture();void room?.disconnect(true);});
+// Do not present inert controls as ready while this module is still loading.
+el('choose').disabled=false;el('pattern').disabled=false;
+status('Choose a source to preview.');

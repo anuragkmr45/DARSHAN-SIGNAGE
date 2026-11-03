@@ -33,6 +33,47 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.check_value(value), value)
         self.assertEqual(self.check_value(value, value), value)
 
+    def test_mount_prefix_and_escaped_components_select_the_actual_filesystem(self):
+        mounts = ('1 0 8:2 / / rw - ext4 /dev/test rw\n'
+                  '2 1 0:28 / /run rw - tmpfs tmpfs rw\n'
+                  '3 2 8:3 / /run/disk rw - ext4 /dev/other rw\n'
+                  '4 2 0:29 / /run/space\\040name rw - tmpfs tmpfs rw\n')
+        self.assertEqual(watchdog.mount_filesystem_type('/run/private', mounts), 'tmpfs')
+        self.assertEqual(watchdog.mount_filesystem_type('/run-other/private', mounts), 'ext4')
+        self.assertEqual(watchdog.mount_filesystem_type('/run/disk/private', mounts), 'ext4')
+        self.assertEqual(watchdog.mount_filesystem_type('/run/space name/private', mounts, '0:29'), 'tmpfs')
+        with self.assertRaises(watchdog.WatchdogError):
+            watchdog.mount_filesystem_type('/run/private', mounts, '99:99')
+
+    def test_actual_tmpfs_accepts_and_disk_configuration_rejects_before_docker(self):
+        for base in dict.fromkeys((tempfile.gettempdir(), '/dev/shm', '/run/user/%d' % os.getuid())):
+            try:
+                with tempfile.TemporaryDirectory(dir=base) as temporary:
+                    watchdog.require_tmpfs(pathlib.Path(temporary))
+                    break
+            except (OSError, watchdog.WatchdogError):
+                continue
+        else:
+            self.skipTest('No writable existing Linux tmpfs is available')
+        root = pathlib.Path(__file__).parents[1]
+        with tempfile.TemporaryDirectory(prefix='.heartbeat-disk-test-', dir=root) as temporary:
+            parent = pathlib.Path(temporary)
+            try:
+                watchdog.require_tmpfs(parent)
+            except watchdog.WatchdogError as error:
+                self.assertEqual(str(error), 'HEARTBEAT_DIRECTORY_REQUIRES_TMPFS')
+            else:
+                self.skipTest('No separate disk-backed project filesystem is available')
+            args = SimpleNamespace(heartbeat=str(parent / 'supervisor.json'))
+            output = io.StringIO()
+            with mock.patch.object(watchdog, 'validate_local_endpoint') as endpoint, \
+                    mock.patch.object(watchdog, 'inspect_container') as inspect, \
+                    contextlib.redirect_stdout(output):
+                self.assertEqual(watchdog.monitor(args), 2)
+                endpoint.assert_not_called()
+                inspect.assert_not_called()
+            self.assertIn('HEARTBEAT_DIRECTORY_REQUIRES_TMPFS', output.getvalue())
+
     def test_future_wrong_boot_wrong_instance_pid_and_start_are_denied(self):
         for changes in ({'boottime_ms': 10_051}, {'boot_id': 'different'}, {'instance_id': 'other'},
                         {'supervisor_pid': 42}, {'process_start_ticks': '999'}, {'sequence': True}):

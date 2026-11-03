@@ -158,6 +158,14 @@ DARSHAN_MEDIA_SUPERVISOR_STATE_FILE  supervisor-owned host-watchdog bindmount fi
 DARSHAN_MEDIA_NODE_INSTANCE_ID       fresh UUID matching media container labels
 ```
 
+The supervisor-owned host-watchdog directory must be private mode 0700 on
+**tmpfs** (production: `/run/darshan-media-watchdog/<fresh-instance-UUID>`), bound
+read/write into the container. Both the Node supervisor and independent host
+watchdog reject disk-backed state before media startup/readiness. Do not use a
+repository directory, persistent volume, or ordinary disk-backed `/tmp` for
+this runtime evidence. A container-only tmpfs without the host-readable bind
+does not provide host supervision. See [Linux preparation](deploy/LINUX_MEDIA_NODE.md).
+
 The optional supervisor heartbeat file is atomically replaced every 100 ms while healthy. It
 contains only PID and monotonic elapsed time. The independent supervisor must
 validate process ownership and file freshness; this file alone is not a security

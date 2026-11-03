@@ -11,6 +11,11 @@ Create a fresh instance UUID and a fresh private heartbeat directory for each
 media-node deployment. Run the media container with automatic restart disabled,
 its own private PID namespace, and a media service UID/GID that owns the state
 directory. The directory must be mode 0700; heartbeat files are atomic mode 0600.
+It must be on **tmpfs**, normally
+`/run/darshan-media-watchdog/<fresh-instance-UUID>`. The supervisor checks the
+actual filesystem before starting either child. The host watchdog independently
+checks the host mount before inspecting the target or reporting readiness. A
+disk-backed directory is a configuration rejection, not a longer grace period.
 Do not reuse a previous instance's state directory or resume previous authority.
 
 Required container configuration:
@@ -31,6 +36,13 @@ container therefore needs a root-owned state directory. A container run as a
 dedicated UID needs that UID's private directory. The host watchdog receives the
 expected numeric UID explicitly. The older controller-owned
 `DARSHAN_MEDIA_SUPERVISOR_HEARTBEAT_FILE` is **not** this watchdog's input.
+
+The systemd template creates the shared `/run/darshan-media-watchdog` parent
+(0755) and preserves it across watchdog restarts. Deployment must create a fresh
+0700 child owned by the media UID **before** starting the container. The supplied
+environment path must name that child; the unit does not invent an instance or
+change ownership of an existing media directory. See the
+[Linux media-node preparation](LINUX_MEDIA_NODE.md).
 
 Resolve the full 64-character ID of the just-created media container. Start the
 watchdog with that exact ID and UUID, not a name, name prefix, image search, or
@@ -72,6 +84,15 @@ actual separate-backend rehearsal is performed.
 The initial missing-file grace is at most 1500 ms. Long legitimate SFU startup
 can continue while fresh STARTING heartbeats arrive; a supervisor that cannot
 write its first heartbeat cannot start media children.
+
+The tmpfs rule follows an actual idle-node diagnostic: a disk-backed ext4 run
+stalled with PID1 in `folio_wait_bit_common`/`rq_qos_wait`, increasing cgroup I/O
+pressure, and unchanged CPU-throttling/memory-event counters. A parity tmpfs run
+completed four minutes and deliberate PID1 STOP enforcement. This establishes
+the observed I/O wait, not the exact blocked syscall or underlying disk cause.
+Using volatile state removes that disk-backed heartbeat path; it does not prove
+that every possible host scheduling or I/O fault has been eliminated. The
+watchdog continues to fail closed at the same deadlines.
 
 ## Safe actuation
 

@@ -4,7 +4,7 @@ import * as path from 'path'
 import { getConfigManager } from '../../../common/config'
 import { getLogger } from '../../../common/logger'
 import { CacheEntry, CacheStats, CacheError } from '../../../common/types'
-import { atomicWrite, calculateBufferHash, ensureDir, sanitizeFilename } from '../../../common/utils'
+import { atomicWrite, calculateBufferHash, calculateFileHash, ensureDir, sanitizeFilename } from '../../../common/utils'
 import { reportMediaCacheFailure, type MediaCacheReportSource } from '../media-cache-reporter'
 import { createTransportHttpsAgent } from '../network/transport-tls'
 
@@ -47,12 +47,32 @@ export type ResolvedCacheEntry = {
   localPath: string
 }
 
+export type PublishedCachePinOwner = { publishId: string; scheduleItemId: string }
+export type CachePinAsset = { cacheKey: string; sha256: string }
+export type CachePinAssetReadiness = {
+  cacheKey: string
+  status: 'READY' | 'MISSING' | 'CORRUPT' | 'UNREADABLE' | 'CHANGED' | 'CANCELLED'
+  localPath?: string
+}
+export type CachePinReadiness = { ready: boolean; assets: CachePinAssetReadiness[] }
+type CachePinOwnerState = {
+  assets: CachePinAsset[]
+  fingerprint: string
+  protectedKeys: Set<string>
+  pending?: Promise<CachePinReadiness>
+}
+// Internal leak guard, not a presentation/asset limit. The live coordinator
+// needs only the current and next published occurrence and must release owners.
+const MAX_CACHE_PIN_OWNERS = 64
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
+
 export class CacheManager {
   private cacheDir: string
   private maxBytes: number
   private prefetchConcurrency: number
   private entries = new Map<string, CacheEntry>()
   private nowPlaying = new Set<string>()
+  private publishedPins = new Map<string, CachePinOwnerState>()
   private inFlight = new Map<string, Promise<void>>()
   private writeGeneration = 0
   private httpsAgent: ReturnType<typeof createTransportHttpsAgent>
@@ -151,21 +171,23 @@ export class CacheManager {
     }
 
     const candidates = Array.from(this.entries.values())
-      .filter((entry) => !this.nowPlaying.has(entry.mediaId))
+      .filter((entry) => !this.isProtected(entry.mediaId))
       .sort((a, b) => a.lastUsedAt - b.lastUsedAt)
 
     for (const entry of candidates) {
       if (available >= sizeNeeded) {
         break
       }
-      await this.removeEntry(entry)
+      // A pin can be claimed while an earlier removal's Promise yields. Never
+      // rely only on the candidate list assembled before that claim.
+      if (!this.isProtected(entry.mediaId)) await this.removeEntry(entry)
       available = this.maxBytes - this.getUsedBytes()
     }
 
     if (available < sizeNeeded) {
       logger.warn(
         { sizeNeeded, available, protected: Array.from(this.nowPlaying) },
-        'Not enough space to evict without touching now-playing items'
+        'Not enough space to evict without touching protected content'
       )
       return false
     }
@@ -174,10 +196,12 @@ export class CacheManager {
   }
 
   private async removeEntry(entry: CacheEntry): Promise<void> {
+    if (this.entries.get(entry.mediaId) !== entry || this.isProtected(entry.mediaId)) return
     if (fs.existsSync(entry.localPath)) {
       fs.unlinkSync(entry.localPath)
     }
     this.entries.delete(entry.mediaId)
+    this.prunePinKey(entry.mediaId)
   }
 
   private async download(url: string): Promise<Buffer> {
@@ -248,6 +272,7 @@ export class CacheManager {
       if (sha256 && hash !== sha256) {
         throw new CacheError('Cache item failed integrity validation', { expected: sha256, actual: hash })
       }
+      this.assertPinnedHash(mediaId, hash)
 
       const canStore = await this.evictIfNeeded(data.length)
       if (!canStore) {
@@ -260,6 +285,9 @@ export class CacheManager {
       this.assertWriteGeneration(writeGeneration, mediaId)
 
       const filePath = this.getFilePath(mediaId, url, context.contentType)
+      this.assertPinnedHash(mediaId, hash)
+      // atomicWrite currently writes/renames synchronously before its Promise
+      // yields. The pin/hash check and publication therefore cannot interleave.
       await atomicWrite(filePath, data)
       if (writeGeneration !== this.writeGeneration) {
         if (fs.existsSync(filePath)) {
@@ -336,6 +364,7 @@ export class CacheManager {
     }
 
     this.entries.delete(mediaId)
+    this.prunePinKey(mediaId)
     return false
   }
 
@@ -453,8 +482,138 @@ export class CacheManager {
     this.nowPlaying = new Set(mediaIds.filter(Boolean))
   }
 
+  private pinOwnerKey(owner: PublishedCachePinOwner): string {
+    if (!owner || typeof owner.publishId !== 'string' || typeof owner.scheduleItemId !== 'string' ||
+        !UUID.test(owner.publishId) || !UUID.test(owner.scheduleItemId)) {
+      throw new CacheError('Invalid published cache pin owner', { reason: 'INVALID_PIN_OWNER' })
+    }
+    return `${owner.publishId.toLowerCase()}:${owner.scheduleItemId.toLowerCase()}`
+  }
+
+  private normalizePinAssets(assets: CachePinAsset[]): CachePinAsset[] {
+    if (!Array.isArray(assets) || assets.length === 0) throw new CacheError('Cache pins require exact local assets', { reason: 'INVALID_PIN_ASSET' })
+    const unique = new Map<string, CachePinAsset>()
+    for (const asset of assets) {
+      if (!asset || typeof asset.cacheKey !== 'string' || !asset.cacheKey || asset.cacheKey.length > 255 ||
+          asset.cacheKey === '.' || asset.cacheKey === '..' || sanitizeFilename(asset.cacheKey) !== asset.cacheKey ||
+          typeof asset.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(asset.sha256)) {
+        throw new CacheError('Invalid exact cache pin asset', { reason: 'INVALID_PIN_ASSET' })
+      }
+      const normalized = { cacheKey: asset.cacheKey, sha256: asset.sha256.toLowerCase() }
+      if (unique.has(asset.cacheKey) && unique.get(asset.cacheKey)!.sha256 !== normalized.sha256) {
+        throw new CacheError('Conflicting checksums for one cache key', { reason: 'PIN_ASSET_HASH_CONFLICT' })
+      }
+      unique.set(asset.cacheKey, normalized)
+    }
+    return [...unique.values()]
+  }
+
+  private isPinned(cacheKey: string): boolean {
+    return [...this.publishedPins.values()].some(owner => owner.protectedKeys.has(cacheKey))
+  }
+
+  private isProtected(cacheKey: string): boolean {
+    return this.nowPlaying.has(cacheKey) || this.isPinned(cacheKey)
+  }
+
+  private assertPinnedHash(cacheKey: string, sha256: string): void {
+    for (const owner of this.publishedPins.values()) {
+      if (owner.protectedKeys.has(cacheKey) && owner.assets.find(asset => asset.cacheKey === cacheKey)?.sha256 !== sha256) {
+        throw new CacheError('Pinned content requires its approved checksum', { reason: 'PINNED_REVISION_CONFLICT', cacheKey })
+      }
+    }
+  }
+
+  private prunePinKey(cacheKey: string): void {
+    for (const [key, owner] of this.publishedPins) {
+      owner.protectedKeys.delete(cacheKey)
+      if (!owner.pending && owner.protectedKeys.size === 0) this.publishedPins.delete(key)
+    }
+  }
+
+  /**
+   * Claim protection synchronously, then verify every exact local asset with
+   * streamed SHA-256. The result never substitutes a URL or older revision.
+   */
+  pinPublishedOccurrence(owner: PublishedCachePinOwner, assets: CachePinAsset[]): Promise<CachePinReadiness> {
+    const key = this.pinOwnerKey(owner)
+    const normalized = this.normalizePinAssets(assets)
+    const fingerprint = JSON.stringify([...normalized].sort((a, b) => a.cacheKey.localeCompare(b.cacheKey)))
+    const previous = this.publishedPins.get(key)
+    if (previous && previous.fingerprint !== fingerprint) {
+      throw new CacheError('Published occurrence pin assets are immutable until released', { reason: 'PIN_OWNER_ASSETS_CHANGED' })
+    }
+    if (previous?.pending) return previous.pending
+    if (!previous && this.publishedPins.size >= MAX_CACHE_PIN_OWNERS) {
+      throw new CacheError('Release inactive published cache pin owners before adding another', { reason: 'PIN_OWNER_LIMIT' })
+    }
+    for (const asset of normalized) this.assertPinnedHash(asset.cacheKey, asset.sha256)
+    const state: CachePinOwnerState = previous ?? { assets: normalized, fingerprint, protectedKeys: new Set<string>() }
+    state.protectedKeys = new Set(normalized.map(asset => asset.cacheKey))
+    this.publishedPins.set(key, state)
+    const operation = this.verifyPinOwner(key, state).finally(() => {
+      if (state.pending === operation) state.pending = undefined
+      if (this.publishedPins.get(key) === state && state.protectedKeys.size === 0) this.publishedPins.delete(key)
+    })
+    state.pending = operation
+    return operation
+  }
+
+  releasePublishedOccurrence(owner: PublishedCachePinOwner): void {
+    this.publishedPins.delete(this.pinOwnerKey(owner))
+  }
+
+  private async verifyPinOwner(key: string, state: CachePinOwnerState): Promise<CachePinReadiness> {
+    const assets: CachePinAssetReadiness[] = new Array(state.assets.length)
+    let index = 0
+    const worker = async (): Promise<void> => {
+      while (index < state.assets.length) {
+        const current = index++
+        const asset = state.assets[current]!
+        assets[current] = this.publishedPins.get(key) === state
+          ? await this.verifyPinAsset(key, state, asset)
+          : { cacheKey: asset.cacheKey, status: 'CANCELLED' }
+      }
+    }
+    // Follow the existing prefetch concurrency policy; never impose a smaller
+    // asset-count limit than valid presentations, or open one stream per item.
+    await Promise.all(Array.from({ length: Math.min(state.assets.length, this.prefetchConcurrency, 10) }, () => worker()))
+    if (this.publishedPins.get(key) !== state) {
+      return { ready: false, assets: state.assets.map(asset => ({ cacheKey: asset.cacheKey, status: 'CANCELLED' })) }
+    }
+    state.protectedKeys = new Set(assets.filter(asset => asset.status === 'READY').map(asset => asset.cacheKey))
+    return { ready: assets.every(asset => asset.status === 'READY'), assets }
+  }
+
+  private async verifyPinAsset(key: string, owner: CachePinOwnerState, asset: CachePinAsset): Promise<CachePinAssetReadiness> {
+    const result = (status: CachePinAssetReadiness['status']): CachePinAssetReadiness => ({ cacheKey: asset.cacheKey, status })
+    const entry = this.entries.get(asset.cacheKey)
+    if (!entry) return result('MISSING')
+    try {
+      const before = await fs.promises.lstat(entry.localPath)
+      const relative = path.relative(await fs.promises.realpath(this.cacheDir), await fs.promises.realpath(entry.localPath))
+      if (!before.isFile() || before.isSymbolicLink() || !relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return result('UNREADABLE')
+      const checksum = await calculateFileHash(entry.localPath)
+      const after = await fs.promises.lstat(entry.localPath)
+      if (this.publishedPins.get(key) !== owner) return result('CANCELLED')
+      if (this.entries.get(asset.cacheKey) !== entry || before.dev !== after.dev || before.ino !== after.ino ||
+          before.size !== after.size || before.mtimeMs !== after.mtimeMs || after.isSymbolicLink()) return result('CHANGED')
+      if (checksum !== asset.sha256) { this.prunePinKey(asset.cacheKey); return result('CORRUPT') }
+      entry.lastUsedAt = Date.now()
+      return { cacheKey: asset.cacheKey, status: 'READY', localPath: entry.localPath }
+    } catch (error) {
+      // A released/cleared owner's late I/O error must not unpin a new claim
+      // for the same occurrence or a newly downloaded replacement entry.
+      if (this.publishedPins.get(key) === owner && this.entries.get(asset.cacheKey) === entry) {
+        this.prunePinKey(asset.cacheKey)
+      }
+      return result((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'MISSING' : 'UNREADABLE')
+    }
+  }
+
   async clear(force: boolean = false): Promise<void> {
     if (force) {
+      this.publishedPins.clear()
       if (fs.existsSync(this.cacheDir)) {
         fs.rmSync(this.cacheDir, { recursive: true, force: true })
       }
@@ -465,7 +624,7 @@ export class CacheManager {
     }
 
     for (const [mediaId, entry] of this.entries) {
-      if (this.nowPlaying.has(mediaId)) {
+      if (this.isProtected(mediaId)) {
         continue
       }
 

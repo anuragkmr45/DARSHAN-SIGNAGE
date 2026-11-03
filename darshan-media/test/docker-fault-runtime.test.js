@@ -8,6 +8,7 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import net from 'node:net';
+import { temporaryTmpfs } from './fixtures/tmpfs-directory.mjs';
 import { RoomServiceClient } from 'livekit-server-sdk';
 
 const enabled = process.env.DARSHAN_MEDIA_DOCKER_FAULT_TESTS === '1';
@@ -63,8 +64,8 @@ async function fixture(t, { hostWatchdog = false } = {}) {
   const signingSecret = randomBytes(32).toString('hex');
   const controlSecret = randomBytes(32).toString('hex');
   const instance = randomUUID();
-  const stateDir = path.join(privateDir, 'state');
-  if (hostWatchdog) await mkdir(stateDir, { mode: 0o700 });
+  const stateDir = hostWatchdog ? await temporaryTmpfs('darshan-media-fault-state-') : undefined;
+  if (stateDir) t.after(() => rm(stateDir, { recursive: true, force: true }));
   await writeFile(path.join(privateDir, 'sfu.yaml'), `port: 19781\nbind_addresses: [127.0.0.1]\nrtc:\n  tcp_port: 19782\n  udp_port: 19783\n  node_ip: 127.0.0.1\n  use_external_ip: false\n  enable_loopback_candidate: true\n  stun_servers: []\nkeys:\n  ${key}: ${signingSecret}\nlogging:\n  level: error\n`, { mode: 0o600 });
   await writeFile(path.join(privateDir, 'node.env'), [
     `LIVEKIT_API_KEY=${key}`, `LIVEKIT_API_SECRET=${signingSecret}`, `DARSHAN_MEDIA_CONTROL_SECRET=${controlSecret}`,

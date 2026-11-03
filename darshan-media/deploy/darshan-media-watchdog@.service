@@ -7,6 +7,9 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 EnvironmentFile=/etc/darshan/media-watchdog/%i.env
+RuntimeDirectory=darshan-media-watchdog
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 ExecStart=/usr/bin/python3 /opt/darshan/media/host-watchdog.py --docker-context default --container-id ${DARSHAN_MEDIA_CONTAINER_ID} --instance-id ${DARSHAN_MEDIA_NODE_INSTANCE_ID} --heartbeat ${DARSHAN_MEDIA_HOST_HEARTBEAT_FILE} --heartbeat-uid ${DARSHAN_MEDIA_HOST_HEARTBEAT_UID}
 Restart=on-failure
 RestartPreventExitStatus=2

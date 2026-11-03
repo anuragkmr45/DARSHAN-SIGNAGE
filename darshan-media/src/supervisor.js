@@ -2,7 +2,7 @@ import { spawn, fork } from 'node:child_process';
 import net from 'node:net';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readFileSync, lstatSync, openSync, writeFileSync, closeSync, renameSync, unlinkSync, constants } from 'node:fs';
+import { readFileSync, lstatSync, statfsSync, openSync, writeFileSync, closeSync, renameSync, unlinkSync, constants } from 'node:fs';
 import path from 'node:path';
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -36,6 +36,12 @@ export function createSupervisorHeartbeat(file, instance, { boottimeNow = () => 
   const directory = path.dirname(file);
   const parent = lstatSync(directory);
   if (!parent.isDirectory() || parent.uid !== process.getuid() || (parent.mode & 0o077) !== 0) throw new Error('Watchdog directory must be privately owned by the media UID');
+  // Linux TMPFS_MAGIC: volatile runtime evidence must not block behind disk writeback.
+  if (statfsSync(directory).type !== 0x01021994) {
+    const error = new Error('Supervisor heartbeat directory must use tmpfs (a private volatile /run directory)');
+    error.code = 'SUPERVISOR_HEARTBEAT_REQUIRES_TMPFS';
+    throw error;
+  }
   const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
   const ownStat = readFileSync('/proc/self/stat', 'utf8');
   const processStartTicks = ownStat.slice(ownStat.lastIndexOf(')') + 2).split(' ')[19];
@@ -153,8 +159,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(reason === 'SUPERVISOR_SHUTDOWN' ? 0 : 1);
   } }).then(() => {
     process.stdout.write('DARSHAN media supervisor running\n');
-  }).catch(() => {
-    process.stderr.write('DARSHAN media supervisor startup failed\n');
+  }).catch((error) => {
+    process.stderr.write(error?.code === 'SUPERVISOR_HEARTBEAT_REQUIRES_TMPFS'
+      ? 'DARSHAN media supervisor startup refused: heartbeat directory must use private tmpfs under /run\n'
+      : 'DARSHAN media supervisor startup failed\n');
     process.exitCode = 1;
   });
 }

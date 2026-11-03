@@ -1,0 +1,181 @@
+{
+  "scope": "Sanitized developer-only media filesystem/runtime evidence. No physical media/audio, load, production service or independent QA pass claim.",
+  "captured_at": "2026-11-03T00:23:29.456Z",
+  "disk_wait": {
+    "case": "idle-ext4-heartbeat-stall-diagnostic",
+    "source_commit": "1971437",
+    "status": "FAILED_STEADY_WATCHDOG_EXIT",
+    "container_id": "c792539620ac4771c3bd6bec84c93669b100f3d56da08472fa5d9af973cf3148",
+    "heartbeat_filesystem": "ext4",
+    "target_seconds": 240,
+    "observed_seconds": 203.74404331699952,
+    "first_folio_wait_seconds": 196.222214,
+    "first_stale_sample_seconds": 201.727511,
+    "first_stale_age_ms": 1501.7769610006362,
+    "last_alive_seconds": 202.328096,
+    "first_dead_sample_seconds": 202.428193,
+    "d_state_clusters": [
+      {
+        "start_seconds": 196.222214,
+        "end_seconds": 197.723625,
+        "samples": 16,
+        "wchan": "folio_wait_bit_common"
+      },
+      {
+        "start_seconds": 198.724601,
+        "end_seconds": 198.924785,
+        "samples": 3,
+        "wchan": "folio_wait_bit_common"
+      },
+      {
+        "start_seconds": 199.425255,
+        "end_seconds": 200.025796,
+        "samples": 7,
+        "wchan": "folio_wait_bit_common"
+      },
+      {
+        "start_seconds": 200.326111,
+        "end_seconds": 202.328096,
+        "samples": 21,
+        "wchan": "folio_wait_bit_common"
+      }
+    ],
+    "pre_wait_max_heartbeat_age_ms": 107.90814599953592,
+    "maximum_sampler_gap_ms": 103.043663,
+    "maximum_sampler_work_ms": 8.787969,
+    "pid1_schedstat_before_wait": "2144241608 45837309 5133",
+    "pid1_schedstat_last_alive": "2162540006 48074525 5168",
+    "cgroup_io_pressure_before_wait": {
+      "some": 19673,
+      "full": 19654
+    },
+    "cgroup_io_pressure_last_alive": {
+      "some": 4699661,
+      "full": 4698523
+    },
+    "cgroup_cpu_before_wait": {
+      "usage_usec": "3684081",
+      "user_usec": "2246908",
+      "system_usec": "1437173",
+      "nice_usec": "0",
+      "core_sched.force_idle_usec": "0",
+      "nr_periods": "1962",
+      "nr_throttled": "3",
+      "throttled_usec": "88242",
+      "nr_bursts": "0",
+      "burst_usec": "0"
+    },
+    "cgroup_cpu_last_alive": {
+      "usage_usec": "3730061",
+      "user_usec": "2270749",
+      "system_usec": "1459312",
+      "nice_usec": "0",
+      "core_sched.force_idle_usec": "0",
+      "nr_periods": "2009",
+      "nr_throttled": "3",
+      "throttled_usec": "88242",
+      "nr_bursts": "0",
+      "burst_usec": "0"
+    },
+    "memory_events_before_wait": {
+      "low": "0",
+      "high": "0",
+      "max": "0",
+      "oom": "0",
+      "oom_kill": "0",
+      "oom_group_kill": "0",
+      "sock_throttled": "0"
+    },
+    "memory_events_last_alive": {
+      "low": "0",
+      "high": "0",
+      "max": "0",
+      "oom": "0",
+      "oom_kill": "0",
+      "oom_group_kill": "0",
+      "sock_throttled": "0"
+    },
+    "memory_current_max_bytes": 45608960,
+    "memory_swap_current_max_bytes": 0,
+    "watchdog_exit_code": 0,
+    "final_exit": 137,
+    "oom_killed": false,
+    "restart_count": 0,
+    "scope": "IO wait directly observed on supervisor main process during ext4 heartbeat stall; no underlying disk/journal/root-cause attribution beyond the observed wait, no rendered-media claim"
+  },
+  "tmpfs_steady_and_stop": {
+    "case": "updated-tmpfs-guards-steady-240s-and-PID1-stop",
+    "status": "STEADY_PASSED",
+    "steady_seconds": 240.06166219599982,
+    "heartbeat_filesystem": "tmpfs",
+    "maximum_steady_age_ms": 108.0399350002408,
+    "max_sampler_gap_ms": 103.389686,
+    "max_sampler_work_ms": 9.471314,
+    "pid1_states": {
+      "R": 35,
+      "S": 2363
+    },
+    "cgroup_cpu_first": {
+      "usage_usec": "88432",
+      "user_usec": "53470",
+      "system_usec": "34961",
+      "nice_usec": "0",
+      "core_sched.force_idle_usec": "0",
+      "nr_periods": "1",
+      "nr_throttled": "0",
+      "throttled_usec": "0",
+      "nr_bursts": "0",
+      "burst_usec": "0"
+    },
+    "cgroup_cpu_last": {
+      "usage_usec": "3776970",
+      "user_usec": "2654407",
+      "system_usec": "1122563",
+      "nice_usec": "0",
+      "core_sched.force_idle_usec": "0",
+      "nr_periods": "2369",
+      "nr_throttled": "3",
+      "throttled_usec": "83822",
+      "nr_bursts": "0",
+      "burst_usec": "0"
+    },
+    "cgroup_memory_events_last": {
+      "low": "0",
+      "high": "0",
+      "max": "0",
+      "oom": "0",
+      "oom_kill": "0",
+      "oom_group_kill": "0",
+      "sock_throttled": "0"
+    },
+    "cgroup_memory_max_bytes": 46292992,
+    "cgroup_swap_max_bytes": 0,
+    "cgroup_io_pressure_last": "some avg10=0.00 avg60=0.00 avg300=0.00 total=50968\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=50873",
+    "pid1_schedstat_last": "2044747024 110812487 6878",
+    "actual_stop_state": "T",
+    "actual_stop_enforcement_upper_ms": 1818.786976,
+    "within_3000ms": true,
+    "final_oom_killed": false,
+    "final_exit": 137,
+    "restart_count": 0,
+    "supervisor_sha256": "0a13bd34f4c95dce57aa5b7a97db9adc39ca1b777ed437f48bc6201a361f5eb8",
+    "watchdog_sha256": "870b9ed65b346f389c3ebb9a468e479e719b46a37704346863485cf0cf558112",
+    "image_id": "sha256:702c71b504c8673747809191195e3c8248c56947ddaa3f36486369f14346475f",
+    "scope": "Idle actual media node heartbeat stability/process enforcement; no media rendering or load claim"
+  },
+  "disk_startup_rejection": {
+    "case": "actual-docker-disk-state-rejected-before-child-spawn",
+    "status": "PASS",
+    "exit_code": 42,
+    "safe_error": {
+      "code": "SUPERVISOR_HEARTBEAT_REQUIRES_TMPFS",
+      "message": "Supervisor heartbeat directory must use tmpfs (a private volatile /run directory)"
+    },
+    "child_marker_exists": false,
+    "heartbeat_exists": false,
+    "oom_killed": false,
+    "image_id": "sha256:702c71b504c8673747809191195e3c8248c56947ddaa3f36486369f14346475f",
+    "supervisor_sha256": "0a13bd34f4c95dce57aa5b7a97db9adc39ca1b777ed437f48bc6201a361f5eb8",
+    "scope": "Actual Docker Node20 supervisor with actual child-start marker command; tmpfs rejection precedes spawn, no actual SFU media claim"
+  }
+}

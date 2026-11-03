@@ -39,6 +39,34 @@ def process_start_ticks(pid):
     return value[value.rfind(')') + 2:].split()[19]
 
 
+def mount_filesystem_type(path, mountinfo, device=None):
+    """Resolve the longest mount component prefix, including escaped mount names."""
+    selected = None
+    longest = -1
+    for line in mountinfo.splitlines():
+        left, separator, right = line.partition(' - ')
+        fields, details = left.split(), right.split()
+        if not separator or len(fields) < 6 or len(details) < 3:
+            raise WatchdogError('HEARTBEAT_FILESYSTEM_UNVERIFIABLE')
+        mount = re.sub(r'\\([0-7]{3})', lambda match: chr(int(match.group(1), 8)), fields[4])
+        if device is not None and fields[2] != device:
+            continue
+        if (path == mount or path.startswith(mount.rstrip('/') + '/')) and len(mount) >= longest:
+            selected, longest = details[0], len(mount)
+    if selected is None:
+        raise WatchdogError('HEARTBEAT_FILESYSTEM_UNVERIFIABLE')
+    return selected
+
+
+def require_tmpfs(parent):
+    metadata = os.stat(parent)
+    device = '%d:%d' % (os.major(metadata.st_dev), os.minor(metadata.st_dev))
+    with open('/proc/self/mountinfo', encoding='utf8') as stream:
+        filesystem = mount_filesystem_type(str(parent), stream.read(), device)
+    if filesystem != 'tmpfs':
+        raise WatchdogError('HEARTBEAT_DIRECTORY_REQUIRES_TMPFS')
+
+
 def docker_call(context, arguments, timeout):
     try:
         result = subprocess.run(['docker', '--context', context] + arguments, stdout=subprocess.PIPE,
@@ -297,6 +325,8 @@ def enforce(args, reason):
 
 def monitor(args):
     try:
+        # Configuration fence before inspecting/pinning or declaring readiness.
+        require_tmpfs(pathlib.Path(args.heartbeat).parent)
         args.endpoint_fence = validate_local_endpoint(args.docker_context)
         initial = inspect_container(args.docker_context, args.container_id)
         fence = validate_target(initial, args.container_id, args.instance_id, args.heartbeat)

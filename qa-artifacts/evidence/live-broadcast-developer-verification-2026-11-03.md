@@ -655,3 +655,49 @@ observed, while a denied child that stays alive remains unconfirmed at the
 same 180 ms test deadline. Current Python tests passed **13/13**. No deadline
 was extended, PID reopened or production pidfd gate declared passed. Further
 instrumented steady-runtime diagnosis is still required.
+
+### Instrumented disk wait and private tmpfs correction
+
+Further parity diagnostics now directly observed the supervisor in Linux D state
+with `folio_wait_bit_common` while its ext4 heartbeat stopped advancing. The
+203.744-second run failed; I/O pressure rose while CPU throttling did not advance
+and OOM/swap counters stayed zero. This identifies observed I/O wait, without
+claiming the underlying disk/journal cause or blaming CPU/RAM generally.
+
+The supervisor now rejects a disk-backed heartbeat directory **before spawning
+children**, and the independent host watchdog checks the real mount filesystem
+before monitoring. Both require private tmpfs state. Production preparation is
+documented in `darshan-media/deploy/LINUX_MEDIA_NODE.md`; no service was installed.
+Timeouts, certificate checks and the host security profile were not relaxed.
+
+With the current guards mounted into the test image, the actual idle media node
+remained healthy for **240.062 seconds**, maximum heartbeat age **108.040 ms**.
+Intentional PID1 stop was followed by actual process/listener termination within
+**1818.787 ms**, below the 3000 ms test bound, without OOM or restart. Actual
+disk-backed startup was rejected with `SUPERVISOR_HEARTBEAT_REQUIRES_TMPFS` and
+no child-start marker. Node tests: **41 passed / 7 opt-in skipped**; Python tests:
+**15 passed**. Syntax and systemd unit validation passed.
+
+[Sanitized measurements](runtime-live-2026-11-03/prototype-watchdog-tmpfs-results.json)
+SHA-256: `a08087468bbe228e972ca60be891d49db7b904a2c4c56a6abdd6b5a159b6bed1`. The artifact records image IDs and mounted source hashes;
+these are not all fault reruns against the subsequently rebuilt image.
+
+The current Docker image build passed: `sha256:bb7764897b65e3aacb98f0d8e5d79b42b54c8c5a1118b22f845c6ed859aaa090`.
+The normal network-enabled source build was used; an attempted network-disabled
+source build could not populate its uncached dependency layer. This is not
+evidence for offline artifact deployment. A fresh feature-owned node from the
+new image started with private tmpfs state and reported `watchdog_ready`.
+
+The short steady check addresses the reproduced disk-backed heartbeat failure;
+it is **not a soak/load acceptance pass**. Direct pidfd signalling still returns
+EACCES under this agent's host security profile. Production root/systemd/LSM
+actuation, Docker-unavailable isolation, native capture options/audio, and the
+full same-player CMS live journey remain open. No human QA case was marked Pass.
+
+### Player fallback cache foundation
+
+The verified immutable-asset pin primitive and its limitations are recorded in
+[live-fallback-cache-pins-developer-verification-2026-11-03.md](live-fallback-cache-pins-developer-verification-2026-11-03.md).
+The unchanged cache source passed the player build and **428 unit / 5 integration
+/ 21 fault** checks. The normal player's live coordinator does not yet consume
+these pins; no live player capability or integrated completion is claimed.
