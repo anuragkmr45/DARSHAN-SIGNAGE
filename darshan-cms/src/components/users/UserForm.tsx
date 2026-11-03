@@ -13,7 +13,7 @@ import type { UserFormData } from "@/types/user";
 import { useRolesList } from "@/hooks/useRolesApi";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { useAppSelector } from "@/store/hooks";
-import { canManageUserTarget } from "@/lib/access";
+import { canAssignUserRole } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
 import { AdditionalDepartmentsPicker } from "@/components/users/AdditionalDepartmentsPicker";
 
@@ -51,10 +51,9 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
     const roles = useMemo(
         () =>
             (rolesData?.items ?? []).filter((role) =>
-                canManageUserTarget(currentUser, role.name, currentUser?.department_id) ||
-                (canManageUsersGlobally && !role.is_system),
+                canAssignUserRole(currentUser, role, canManageUsersGlobally, user ? user.department_id : formData.department_id),
             ),
-        [canManageUsersGlobally, currentUser, rolesData?.items],
+        [canManageUsersGlobally, currentUser, formData.department_id, rolesData?.items, user],
     );
     const rolesErrorMessage = rolesError ? mapUsersErrorToUx(rolesError, "Failed to load roles") : null;
 

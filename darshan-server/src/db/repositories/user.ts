@@ -15,6 +15,7 @@ type UserDirectoryVisibility = {
   actorDepartmentId?: string | null;
   actorDepartmentIds?: string[];
   global: boolean;
+  includePendingInvites?: boolean;
 };
 
 export class UserRepository {
@@ -38,6 +39,8 @@ export class UserRepository {
     last_name?: string;
     role_id: string;
     department_id?: string;
+    is_active?: boolean;
+    ext?: Record<string, unknown>;
     additional_department_ids?: string[];
     assigned_by?: string;
   }) {
@@ -76,6 +79,22 @@ export class UserRepository {
     return (result as any)[0] || null;
   }
 
+  async activateInvite(id: string, token: string, passwordHash: string, ext: Record<string, unknown>) {
+    const db = getDatabase();
+    const [user] = await db.update(schema.users).set({
+      password_hash: passwordHash,
+      ext: { ...ext, invite_token: null, invite_expires_at: null, invite_status: 'ACTIVATED', activated_at: new Date().toISOString() },
+      is_active: true,
+      updated_at: new Date(),
+    }).where(and(
+      eq(schema.users.id, id),
+      isNull(schema.users.deleted_at),
+      sql`LOWER(${schema.users.ext}->>'invite_token') = ${token}`,
+      sql`(${schema.users.ext}->>'invite_expires_at')::timestamptz > NOW()`,
+    )).returning();
+    return user ?? null;
+  }
+
   async listInvites(options: {
     page?: number;
     limit?: number;
@@ -110,7 +129,9 @@ export class UserRepository {
       conditions.push(userInDepartmentCondition(options.department_id));
     }
     if (options.visibility && !options.visibility.global) {
-      conditions.push(eq(schema.users.is_active, true));
+      conditions.push(options.visibility.includePendingInvites
+        ? sql`(${schema.users.is_active} = true OR (${schema.users.ext}->>'invite_status') = 'PENDING')`
+        : eq(schema.users.is_active, true));
       conditions.push(
         (options.visibility.actorDepartmentIds?.length || options.visibility.actorDepartmentId)
           ? userInAnyDepartmentCondition(

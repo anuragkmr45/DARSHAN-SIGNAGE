@@ -10,6 +10,7 @@ import { ProductionSecurityBoundary } from "@/components/security/ProductionSecu
 import { AuthSessionBootstrap } from "@/components/auth/AuthSessionBootstrap";
 import Home from "./pages/Home";
 import Auth from "./pages/Auth";
+import ActivateInvitation from "./pages/ActivateInvitation";
 
 const AuthenticatedAppShell = lazy(() => import("./AuthenticatedAppShell"));
 
@@ -26,6 +27,7 @@ const AppRoutes = () => (
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Auth />} />
+      <Route path="/activate" element={<ActivateInvitation />} />
       <Route
         path="/*"
         element={

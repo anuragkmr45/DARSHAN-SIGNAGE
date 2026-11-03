@@ -17,6 +17,8 @@ export interface UserInvitation {
   invited_at?: string;
   expires_at?: string;
   status?: string;
+  invite_status?: string;
+  invite_expires_at?: string;
 }
 
 export interface CreateUserPayload {
@@ -57,11 +59,15 @@ export const usersApi = {
     }),
 
   invite: (payload: InviteUserPayload) =>
-    apiClient.request<{ invite_token: string; invite_expires_at?: string; temp_password: string }>({
+    apiClient.request<{ id: string; email: string; invite_token: string; invite_expires_at?: string }>({
       path: endpoints.users.invite,
       method: "POST",
       body: payload,
     }),
+
+  reissueInvite: (userId: string) => apiClient.request<{ id: string; email: string; invite_token: string; invite_expires_at?: string }>({
+    path: endpoints.users.reissueInvite(userId), method: "POST",
+  }),
 
   listInvitations: (
     params?: PaginationParams & { status?: string; email?: string; invited_after?: string; role_id?: string },

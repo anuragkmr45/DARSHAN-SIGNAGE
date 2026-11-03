@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, Mail, Clock, UserPlus } from "lucide-react";
+import { Plus, Search, Mail, UserPlus, RefreshCw, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { EmptyState } from "@/components/common/EmptyState";
+import { LoadingIndicator } from "@/components/common/LoadingIndicator";
 import { UserForm } from "@/components/users/UserForm";
 import { InviteUserForm } from "@/components/users/InviteUserForm";
 import { InvitationCard } from "@/components/users/InvitationCard";
@@ -17,21 +17,29 @@ import { UserCard } from "@/components/users/UserCard";
 import { DeleteUserDialog } from "@/components/users/DeleteUserDialog";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { PageNavigation } from "@/components/common/PageNavigation";
-import { useAppSelector } from "@/store/hooks";
-import { canDeleteUserTarget, canManageUserTarget } from "@/lib/access";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { usersApi, type UserInvitation } from "@/api/domains/users";
+import { useSafeMutation } from "@/hooks/useSafeMutation";
+import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuthorization } from "@/hooks/useAuthorization";
 
 const PAGE_SIZE = 9;
 
 export default function Users() {
-    const currentUser = useAppSelector((state) => state.auth.user);
     const { can } = useAuthorization();
-    const canManageUsers = can("create", "User") || can("update", "User") || can("delete", "User") || can("manage", "User");
+    const { toast } = useToast();
+    const queryClient = useQueryClient();
+    const canCreate = can("create", "User");
+    const canUpdate = can("update", "User");
+    const canDelete = can("delete", "User");
     const [searchQuery, setSearchQuery] = useState("");
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [isInviteOpen, setIsInviteOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<User | null>(null);
     const [deletingUser, setDeletingUser] = useState<User | null>(null);
+    const [reissueTarget, setReissueTarget] = useState<UserInvitation | null>(null);
+    const [invitationHandoff, setInvitationHandoff] = useState<{ email: string; code: string; expires?: string } | null>(null);
     const [activeTab, setActiveTab] = useState("users");
     const [usersPage, setUsersPage] = useState(1);
     const [invitationsPage, setInvitationsPage] = useState(1);
@@ -42,10 +50,11 @@ export default function Users() {
         usersSearch: activeTab === "users" ? searchQuery : "",
         invitationsPage,
         invitationsLimit: PAGE_SIZE,
-        enableInvitations: canManageUsers,
+        invitationsSearch: activeTab === "invitations" ? searchQuery : "",
+        enableInvitations: activeTab === "invitations",
     });
-    const { data, isLoading, error: usersError } = listUsers;
-    const { data: invitationsData, isLoading: isLoadingInvitations, error: invitationsError } = listInvitations;
+    const { data, isLoading, isFetching: isFetchingUsers, isPlaceholderData: usersPlaceholder, error: usersError, refetch: refetchUsers } = listUsers;
+    const { data: invitationsData, isLoading: isLoadingInvitations, isFetching: isFetchingInvitations, isPlaceholderData: invitationsPlaceholder, error: invitationsError, refetch: refetchInvitations } = listInvitations;
     const users = useMemo(() => data?.items ?? [], [data?.items]);
     const invitations = useMemo(() => invitationsData?.items ?? [], [invitationsData?.items]);
     const usersErrorMessage = usersError ? mapUsersErrorToUx(usersError, "Failed to load users") : null;
@@ -53,34 +62,28 @@ export default function Users() {
         ? mapUsersErrorToUx(invitationsError, "Failed to load invitations")
         : null;
 
-    const filteredUsers = users;
-
-    const filteredInvitations = useMemo(
-        () =>
-            invitations.filter((invitation) => {
-                const query = searchQuery.toLowerCase();
-                const { email, role } = invitation;
-
-                return (
-                    query === "" ||
-                    (email || "").toLowerCase().includes(query) ||
-                    (role || "").toLowerCase().includes(query)
-                );
-            }),
-        [invitations, searchQuery],
-    );
     const visibleUsers = useMemo(
         () =>
-            filteredUsers.map((user) => ({
+            users.map((user) => ({
                 user,
-                canManageTarget: canManageUserTarget(currentUser, user.role, user.department_id),
-                canDeleteTarget: canDeleteUserTarget(currentUser, user.role, user.department_id),
+                canManageTarget: canUpdate,
+                canDeleteTarget: canDelete,
             })),
-        [currentUser, filteredUsers],
+        [canUpdate, canDelete, users],
     );
 
     const usersTotalPages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
     const invitationsTotalPages = Math.max(1, Math.ceil((invitationsData?.total ?? 0) / PAGE_SIZE));
+
+    const reissueInvitation = useSafeMutation({
+        retry: false,
+        mutationFn: usersApi.reissueInvite,
+        onSuccess: (result) => {
+            setReissueTarget(null);
+            setInvitationHandoff({ email: result.email, code: result.invite_token, expires: result.invite_expires_at });
+            void queryClient.invalidateQueries({ queryKey: ["invitations"] });
+        },
+    }, "Could not renew the invitation code.");
 
     useEffect(() => {
         setUsersPage(1);
@@ -88,16 +91,16 @@ export default function Users() {
     }, [searchQuery]);
 
     useEffect(() => {
-        if (usersPage > usersTotalPages) {
+        if (data && !usersPlaceholder && usersPage > usersTotalPages) {
             setUsersPage(usersTotalPages);
         }
-    }, [usersPage, usersTotalPages]);
+    }, [data, usersPlaceholder, usersPage, usersTotalPages]);
 
     useEffect(() => {
-        if (invitationsPage > invitationsTotalPages) {
+        if (invitationsData && !invitationsPlaceholder && invitationsPage > invitationsTotalPages) {
             setInvitationsPage(invitationsTotalPages);
         }
-    }, [invitationsPage, invitationsTotalPages]);
+    }, [invitationsData, invitationsPlaceholder, invitationsPage, invitationsTotalPages]);
 
     const handleCreateUser = (formData: UserFormData) => {
         createUser.mutate(
@@ -127,8 +130,9 @@ export default function Users() {
                 additional_department_ids: formData.additional_department_ids,
             },
             {
-                onSuccess: () => {
+                onSuccess: (result) => {
                     setIsInviteOpen(false);
+                    setInvitationHandoff({ email: result.email, code: result.invite_token, expires: result.invite_expires_at });
                 },
             }
         );
@@ -168,20 +172,20 @@ export default function Users() {
     };
 
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
+        <div className="mx-auto w-full max-w-6xl space-y-5">
+            <div className="flex flex-col gap-3 border-b border-border/70 pb-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold text-foreground">Users Management</h1>
-                    <p className="text-muted-foreground mt-1">
-                        Manage user accounts, roles, and permissions
+                    <h1 className="text-2xl font-semibold tracking-tight text-foreground">Users</h1>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Manage accounts, roles and invitations.
                     </p>
                 </div>
-                {canManageUsers ? (
+                {canCreate ? (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button>
-                                <Plus className="mr-2 h-4 w-4" />
-                                Add User
+                                <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+                                New User
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
@@ -191,64 +195,46 @@ export default function Users() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setIsInviteOpen(true)}>
                                 <Mail className="mr-2 h-4 w-4" />
-                                Send Invitation
+                                Create Invitation
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ) : null}
             </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList>
+            <Tabs value={activeTab} onValueChange={(tab) => { setActiveTab(tab); setSearchQuery(""); }}>
+                <TabsList className="max-w-full justify-start overflow-x-auto">
                     <TabsTrigger value="users">
-                        Active Users ({users.length})
+                        Users ({data?.total ?? 0})
                     </TabsTrigger>
-                    {canManageUsers ? (
-                        <TabsTrigger value="invitations">
+                    <TabsTrigger value="invitations">
                             <Mail className="mr-2 h-4 w-4" />
-                            Pending Invitations ({invitations.length})
-                        </TabsTrigger>
-                    ) : null}
+                            Invitations{invitationsData ? ` (${invitationsData.total})` : ""}
+                    </TabsTrigger>
                 </TabsList>
 
-                <div className="mt-6 flex items-center gap-4">
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="relative w-full sm:max-w-sm">
+                        <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
-                            placeholder={activeTab === "users" ? "Search users by name, email, or role..." : "Search invitations by email or role..."}
+                            aria-label={activeTab === "users" ? "Search users" : "Search invitations by email"}
+                            placeholder={activeTab === "users" ? "Search users by name, email, or role..." : "Search invitations by email..."}
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="pl-9"
                         />
                     </div>
-                    <div className="text-sm text-muted-foreground">
-                        {activeTab === "users" || !canManageUsers
-                            ? `${data?.total ?? filteredUsers.length} ${(data?.total ?? filteredUsers.length) === 1 ? "user" : "users"}`
-                            : `${invitationsData?.total ?? filteredInvitations.length} ${(invitationsData?.total ?? filteredInvitations.length) === 1 ? "invitation" : "invitations"}`
-                        }
-                    </div>
+                    <div className="flex items-center gap-2"><span className="text-sm text-muted-foreground" aria-live="polite">{activeTab === "users" ? `${data?.total ?? 0} ${(data?.total ?? 0) === 1 ? "user" : "users"}${isFetchingUsers && !isLoading ? " · Updating" : ""}` : `${invitationsData?.total ?? 0} ${(invitationsData?.total ?? 0) === 1 ? "invitation" : "invitations"}${isFetchingInvitations && !isLoadingInvitations ? " · Updating" : ""}`}</span><Button variant="outline" size="sm" onClick={() => void (activeTab === "users" ? refetchUsers() : refetchInvitations())}><RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" />Refresh</Button></div>
                 </div>
 
-                <TabsContent value="users" className="mt-6">
-                    {usersErrorMessage ? (
-                        <Alert variant="destructive">
-                            <AlertDescription>
-                                {usersErrorMessage.message}
-                            </AlertDescription>
-                        </Alert>
-                    ) : isLoading ? (
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                            {Array.from({ length: 6 }).map((_, idx) => (
-                                <Skeleton key={idx} className="h-40" />
-                            ))}
-                        </div>
-                    ) : filteredUsers.length === 0 ? (
-                        <div className="text-center py-12">
-                            <p className="text-muted-foreground">No users found</p>
-                        </div>
+                <TabsContent value="users" className="mt-5">
+                    {isLoading ? <LoadingIndicator label="Loading users…" /> : usersErrorMessage && !data ? (
+                        <EmptyState title="Could not load users" description={usersErrorMessage.message} actionLabel="Retry" onAction={() => void refetchUsers()} />
+                    ) : users.length === 0 ? (
+                        <EmptyState title={searchQuery ? "No matching users" : "No users found"} description={searchQuery ? "Try another search." : "No accounts are available in your scope."} />
                     ) : (
-                        <div className="space-y-6">
-                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        <div className="space-y-4">
+                            <div className="divide-y border-y">
                                 {visibleUsers.map(({ user, canManageTarget, canDeleteTarget }) => (
                                     <UserCard
                                         key={user.id}
@@ -260,61 +246,45 @@ export default function Users() {
                                     />
                                 ))}
                             </div>
-                            <PageNavigation
+                            {data && data.total > PAGE_SIZE && <PageNavigation
                                 currentPage={usersPage}
                                 totalPages={usersTotalPages}
                                 onPageChange={setUsersPage}
-                            />
+                            />}
                         </div>
                     )}
+                    {usersErrorMessage && data && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh users. Showing the last loaded page. <Button variant="outline" size="sm" onClick={() => void refetchUsers()}>Retry</Button></div>}
                 </TabsContent>
 
-                {canManageUsers ? (
-                <TabsContent value="invitations" className="mt-6">
-                    {invitationsErrorMessage ? (
-                        <Alert variant="destructive">
-                            <AlertDescription>
-                                {invitationsErrorMessage.message}
-                            </AlertDescription>
-                        </Alert>
-                    ) : isLoadingInvitations ? (
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                            {Array.from({ length: 3 }).map((_, idx) => (
-                                <Skeleton key={idx} className="h-32" />
-                            ))}
-                        </div>
-                    ) : filteredInvitations.length === 0 ? (
-                        <div className="text-center py-12">
-                            <Clock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                            <p className="text-muted-foreground">No pending invitations</p>
-                            <Button variant="outline" className="mt-4" onClick={() => setIsInviteOpen(true)}>
-                                <Mail className="mr-2 h-4 w-4" />
-                                Send First Invitation
-                            </Button>
-                        </div>
+                <TabsContent value="invitations" className="mt-5">
+                    {isLoadingInvitations ? <LoadingIndicator label="Loading invitations…" /> : invitationsErrorMessage && !invitationsData ? (
+                        <EmptyState title="Could not load invitations" description={invitationsErrorMessage.message} actionLabel="Retry" onAction={() => void refetchInvitations()} />
+                    ) : invitations.length === 0 ? (
+                        <EmptyState title={searchQuery ? "No matching invitations" : "No open invitations"} description={searchQuery ? "Try another email address." : "No pending or expired invitations need attention."} actionLabel={canCreate && !searchQuery ? "Create Invitation" : undefined} onAction={canCreate && !searchQuery ? () => setIsInviteOpen(true) : undefined} />
                     ) : (
-                        <div className="space-y-6">
-                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                {filteredInvitations.map((invitation) => (
+                        <div className="space-y-4">
+                            <div className="divide-y border-y">
+                                {invitations.map((invitation) => (
                                     <InvitationCard
                                         key={invitation.id}
                                         invitation={invitation}
+                                        onReissue={canCreate ? setReissueTarget : undefined}
                                     />
                                 ))}
                             </div>
-                            <PageNavigation
+                            {invitationsData && invitationsData.total > PAGE_SIZE && <PageNavigation
                                 currentPage={invitationsPage}
                                 totalPages={invitationsTotalPages}
                                 onPageChange={setInvitationsPage}
-                            />
+                            />}
                         </div>
                     )}
+                    {invitationsErrorMessage && invitationsData && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh invitations. Showing the last loaded page. <Button variant="outline" size="sm" onClick={() => void refetchInvitations()}>Retry</Button></div>}
                 </TabsContent>
-                ) : null}
             </Tabs>
 
             {/* Create User Dialog */}
-            <Dialog open={canManageUsers && isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <Dialog open={canCreate && isCreateOpen} onOpenChange={setIsCreateOpen}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Create New User</DialogTitle>
@@ -331,12 +301,12 @@ export default function Users() {
             </Dialog>
 
             {/* Invite User Dialog */}
-            <Dialog open={canManageUsers && isInviteOpen} onOpenChange={setIsInviteOpen}>
+            <Dialog open={canCreate && isInviteOpen} onOpenChange={setIsInviteOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Invite User</DialogTitle>
+                        <DialogTitle>Create Invitation</DialogTitle>
                         <DialogDescription>
-                            Send an invitation email to a new user. They will receive a link to set up their account.
+                            Create a code for this person to activate their account. No email is sent by DARSHAN.
                         </DialogDescription>
                     </DialogHeader>
                     <InviteUserForm
@@ -347,8 +317,18 @@ export default function Users() {
                 </DialogContent>
             </Dialog>
 
+            <ConfirmDialog open={Boolean(reissueTarget)} title="Renew invitation code?" description={`The previous code for ${reissueTarget?.email ?? "this user"} will stop working. Share the replacement code before closing it.`} confirmLabel="Renew Code" onCancel={() => setReissueTarget(null)} onConfirm={() => { if (reissueTarget) reissueInvitation.mutate(reissueTarget.id); }} isLoading={reissueInvitation.isPending} />
+
+            <Dialog open={Boolean(invitationHandoff)} onOpenChange={(open) => { if (!open) setInvitationHandoff(null); }}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader><DialogTitle>Invitation code ready</DialogTitle><DialogDescription>Give this code to {invitationHandoff?.email} through your approved channel. It is shown only until you close this window. The recipient enters it at your DARSHAN `/activate` page. No email was sent.</DialogDescription></DialogHeader>
+                    <div className="space-y-3"><p className="text-sm text-muted-foreground">Activation page: <code className="break-all">{window.location.origin}/activate</code></p><code className="block break-all rounded-md border bg-muted/40 p-3 text-sm" aria-label="Invitation code">{invitationHandoff?.code}</code>{invitationHandoff?.expires && <p className="text-xs text-muted-foreground">Expires {new Date(invitationHandoff.expires).toLocaleString()}</p>}<Button variant="outline" onClick={async () => { try { if (invitationHandoff) { await navigator.clipboard.writeText(invitationHandoff.code); toast({ title: "Code copied" }); } } catch { toast({ title: "Copy failed", description: "Select and copy the code manually.", variant: "destructive" }); } }}><Copy aria-hidden="true" className="mr-2 h-4 w-4" />Copy code</Button></div>
+                    <DialogFooter><Button onClick={() => setInvitationHandoff(null)}>Done</Button></DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* Edit User Dialog */}
-            <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
+            <Dialog open={canUpdate && !!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Edit User</DialogTitle>
@@ -368,7 +348,7 @@ export default function Users() {
             {/* Delete User Dialog */}
             <DeleteUserDialog
                 user={deletingUser}
-                open={!!deletingUser}
+                open={canDelete && !!deletingUser}
                 onOpenChange={(open) => !open && setDeletingUser(null)}
                 onConfirm={handleDeleteUser}
             />

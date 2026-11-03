@@ -137,6 +137,15 @@ export const canDeleteUserTarget = (
   targetDepartmentId?: string | null,
 ) => canManageUserTarget(actor, targetRoleName, targetDepartmentId);
 
+export const canAssignUserRole = (
+  actor: User | null | undefined,
+  targetRole: Pick<Role, "name" | "is_system">,
+  globalUserManagement: boolean,
+  targetDepartmentId?: string | null,
+) => canManageUserTarget(actor, targetRole.name, targetDepartmentId) ||
+  ((!targetRole.is_system || targetRole.name === "OPERATOR") &&
+    (globalUserManagement || Boolean(actor && actor.department_id === targetDepartmentId)));
+
 export const canReadUserTarget = (
   actor: User | null | undefined,
   targetRoleName: string | null | undefined,

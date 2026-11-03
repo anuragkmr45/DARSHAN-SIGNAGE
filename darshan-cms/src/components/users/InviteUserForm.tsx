@@ -12,7 +12,7 @@ import type { InviteFormData } from "@/types/user";
 import { useRolesList } from "@/hooks/useRolesApi";
 import { mapUsersErrorToUx } from "@/lib/usersErrors";
 import { useAppSelector } from "@/store/hooks";
-import { canManageUserTarget } from "@/lib/access";
+import { canAssignUserRole } from "@/lib/access";
 import { useAuthorization } from "@/hooks/useAuthorization";
 import { AdditionalDepartmentsPicker } from "@/components/users/AdditionalDepartmentsPicker";
 
@@ -44,10 +44,9 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
     const roles = useMemo(
         () =>
             (rolesData?.items ?? []).filter((role) =>
-                canManageUserTarget(currentUser, role.name, currentUser?.department_id) ||
-                (canManageUsersGlobally && !role.is_system),
+                canAssignUserRole(currentUser, role, canManageUsersGlobally, formData.department_id),
             ),
-        [canManageUsersGlobally, currentUser, rolesData?.items],
+        [canManageUsersGlobally, currentUser, formData.department_id, rolesData?.items],
     );
     const rolesErrorMessage = rolesError ? mapUsersErrorToUx(rolesError, "Failed to load roles") : null;
     const currentDepartmentLabel = currentUser?.department_id ? "Assigned to your department" : "No department assigned";
@@ -80,7 +79,7 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
             <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription className="text-xs">
-                    An invitation email will be sent to the user with instructions to activate their account.
+                    DARSHAN will create a one-time activation code. Copy it after saving and share it through your approved channel. No email is sent.
                 </AlertDescription>
             </Alert>
 
@@ -189,7 +188,7 @@ export function InviteUserForm({ onSubmit, onCancel, isLoading }: InviteUserForm
                     Cancel
                 </Button>
                 <Button onClick={handleSubmit} disabled={isLoading || !isValid}>
-                    {isLoading ? "Sending..." : "Send Invitation"}
+                    {isLoading ? "Creating..." : "Create Invitation"}
                 </Button>
             </DialogFooter>
         </div>

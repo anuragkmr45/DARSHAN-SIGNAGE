@@ -23,6 +23,7 @@ export const apiEndpoints = {
     list: withBase('/users/invite'),
     resetPassword: withBase('/users/:id/reset-password'),
     pending: withBase('/users/invite/pending'),
+    reissue: withBase('/users/invite/:id/reissue'),
   },
   userActivate: {
     activate: withBase('/users/activate'),

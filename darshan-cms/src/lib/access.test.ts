@@ -6,6 +6,7 @@ import {
   canManageLayoutRecord,
   canManageOperatorsModule,
   canManageUserTarget,
+  canAssignUserRole,
   canReadUserTarget,
   canAccessModule,
   getContentCreatorLabel,
@@ -48,6 +49,16 @@ describe("access helpers", () => {
 
     expect(canManageUserTarget(departmentUser, "OPERATOR", "dept-a")).toBe(true);
     expect(canManageUserTarget(departmentUser, "OPERATOR", "dept-b")).toBe(false);
+  });
+
+  it("offers custom and operator role targets where the server permits a scoped manager", () => {
+    const actor = makeUser({ role: "CUSTOM_MANAGER", department_id: "dept-a" });
+    expect(canAssignUserRole(actor, { name: "CUSTOM_EDITOR", is_system: false }, false, "dept-a")).toBe(true);
+    expect(canAssignUserRole(actor, { name: "OPERATOR", is_system: true }, false, "dept-a")).toBe(true);
+    expect(canAssignUserRole(actor, { name: "CUSTOM_EDITOR", is_system: false }, false, "dept-b")).toBe(false);
+    expect(canAssignUserRole(actor, { name: "ADMIN", is_system: true }, true, "dept-a")).toBe(false);
+    expect(canAssignUserRole(actor, { name: "CUSTOM_EDITOR", is_system: false }, true, "dept-b")).toBe(true);
+    expect(canAssignUserRole(makeUser({ role: "CUSTOM_MANAGER", department_id: null }), { name: "CUSTOM_EDITOR", is_system: false }, false, null)).toBe(true);
   });
 
   it("limits directory records to the current department", () => {

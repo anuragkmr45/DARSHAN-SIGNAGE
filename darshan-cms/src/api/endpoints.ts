@@ -236,6 +236,7 @@ export const endpoints = {
   users: {
     base: "/users",
     invite: "/users/invite",
+    reissueInvite: (userId: string) => `/users/invite/${userId}/reissue`,
     activate: "/users/activate",
     resetPassword: (userId: string) => `/users/${userId}/reset-password`,
     byId: (userId: string) => `/users/${userId}`,

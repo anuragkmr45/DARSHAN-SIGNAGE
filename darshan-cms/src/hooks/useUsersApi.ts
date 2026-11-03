@@ -11,6 +11,7 @@ type UseUsersApiOptions = {
     usersSearch?: string;
     invitationsPage?: number;
     invitationsLimit?: number;
+    invitationsSearch?: string;
     enableInvitations?: boolean;
 };
 
@@ -20,6 +21,7 @@ export const useUsersApi = ({
     usersSearch = "",
     invitationsPage = 1,
     invitationsLimit = 100,
+    invitationsSearch = "",
     enableInvitations = true,
 }: UseUsersApiOptions = {}) => {
     const queryClient = useQueryClient();
@@ -39,12 +41,13 @@ export const useUsersApi = ({
     });
 
     const listInvitations = useQuery({
-        queryKey: ["invitations", invitationsPage, invitationsLimit],
+        queryKey: ["invitations", invitationsPage, invitationsLimit, invitationsSearch],
         queryFn: () =>
             usersApi.listInvitations({
-                status: "pending",
+                status: "pending,expired",
                 page: invitationsPage,
                 limit: invitationsLimit,
+                email: invitationsSearch || undefined,
             }),
         enabled: enableInvitations,
         retry: false,
@@ -98,12 +101,12 @@ export const useUsersApi = ({
             await queryClient.invalidateQueries({ queryKey: ["invitations"] });
 
             toast({
-                title: "Invitation sent",
-                description: "The user has been invited successfully.",
+                title: "Invitation created",
+                description: "Share the activation code shown in the next window.",
             });
         },
         onError: (error: Error | ApiError) => {
-            const ux = mapUsersErrorToUx(error, "Failed to send invitation");
+            const ux = mapUsersErrorToUx(error, "Failed to create invitation");
             toast({
                 title: ux.title,
                 description: ux.message,

@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
 import { defineAbilityFor } from '@/rbac';
 import { createUserRepository } from '@/db/repositories/user';
@@ -52,7 +52,9 @@ const createInviteSerializer =
       const ext = user.ext || {};
       const expiresAt = ext.invite_expires_at ? new Date(ext.invite_expires_at) : null;
       let derivedStatus: string | null = null;
-      if (ext.invite_status) {
+      if (ext.invite_status === 'PENDING' && expiresAt && expiresAt <= referenceDate) {
+        derivedStatus = 'EXPIRED';
+      } else if (ext.invite_status) {
         derivedStatus = ext.invite_status;
       } else if (ext.invite_token) {
         derivedStatus = expiresAt && expiresAt < referenceDate ? 'EXPIRED' : 'PENDING';
@@ -64,7 +66,6 @@ const createInviteSerializer =
         role: user.role,
         department_id: user.department_id,
         ...membership,
-        invite_token: ext.invite_token ?? null,
         invite_expires_at: ext.invite_expires_at ?? null,
         invite_status: derivedStatus,
         invited_at: ext.invited_at ?? null,
@@ -119,11 +120,10 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           throw AppError.forbidden('Department users can only manage operators in their own department.');
         }
 
-        const tempPassword = randomBytes(6).toString('hex');
         const inviteToken = randomBytes(16).toString('hex');
         const now = new Date();
         const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const passwordHash = await hashPassword(tempPassword);
+        const passwordHash = await hashPassword(`${randomBytes(32).toString('hex')}A!`);
         const user = await userRepo.create({
           email: data.email,
           password_hash: passwordHash,
@@ -131,23 +131,16 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           department_id: data.department_id,
           additional_department_ids: data.additional_department_ids,
           assigned_by: payload.sub,
+          is_active: false,
+          ext: {
+            invite_token: inviteToken,
+            invite_expires_at: expires.toISOString(),
+            invite_status: 'PENDING',
+            invited_at: now.toISOString(),
+          },
         });
 
         const membership = (await getUserDepartmentMetadataBatch([user.id])).get(user.id);
-
-        // Update with invite metadata using SQL
-        await db
-          .update(schema.users)
-          .set({
-            ext: {
-              ...((user as any).ext || {}),
-              invite_token: inviteToken,
-              invite_expires_at: expires.toISOString(),
-              invite_status: 'PENDING',
-              invited_at: now.toISOString(),
-            },
-          })
-          .where(eq(schema.users.id, user.id));
 
         return reply.status(CREATED).send({
           id: user.id,
@@ -159,10 +152,53 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
           invite_expires_at: expires.toISOString(),
           invite_status: 'PENDING',
           invited_at: now.toISOString(),
-          temp_password: tempPassword,
         });
       } catch (error) {
         logger.error(error, 'Invite user error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.post<{ Params: { id: string } }>(
+    apiEndpoints.userInvite.reissue,
+    { schema: { description: 'Replace a pending invitation code', tags: ['Users'], security: [{ bearerAuth: [] }] } },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const token = extractTokenFromHeader(request.headers.authorization);
+        if (!token) throw AppError.unauthorized('Missing authorization header');
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('create', 'User')) throw AppError.forbidden('Forbidden');
+
+        const id = (request.params as { id: string }).id;
+        const current = await userRepo.findById(id);
+        const ext = current?.ext && typeof current.ext === 'object' && !Array.isArray(current.ext)
+          ? current.ext as Record<string, unknown> : null;
+        if (!current || current.deleted_at || current.is_active || ext?.invite_status !== 'PENDING' || typeof ext.invite_token !== 'string') {
+          throw AppError.notFound('Pending invitation not found');
+        }
+        const [role] = await db.select().from(schema.roles).where(eq(schema.roles.id, current.role_id));
+        const global = ability.can('manage', 'User');
+        if (!role || (!global && current.department_id !== payload.department_id) || !(
+          canManageUserRoleTarget(payload.role, role.name) ||
+          ((!role.is_system || role.name === 'OPERATOR') && (global || current.department_id === payload.department_id))
+        )) throw AppError.notFound('Pending invitation not found');
+
+        const previousToken = ext.invite_token;
+        const inviteToken = randomBytes(16).toString('hex');
+        const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        const [updated] = await db.update(schema.users).set({
+          ext: { ...ext, invite_token: inviteToken, invite_expires_at: expires.toISOString(), invited_at: new Date().toISOString() },
+          updated_at: new Date(),
+        }).where(and(
+          eq(schema.users.id, id), eq(schema.users.is_active, false), isNull(schema.users.deleted_at),
+          sql`${schema.users.ext}->>'invite_token' = ${previousToken}`,
+        )).returning({ id: schema.users.id, email: schema.users.email });
+        if (!updated) throw AppError.conflict('Invitation changed. Refresh and try again.');
+        return reply.send({ id: updated.id, email: updated.email, invite_token: inviteToken, invite_expires_at: expires.toISOString() });
+      } catch (error) {
+        logger.error(error, 'Reissue invitation error');
         return respondWithError(reply, error);
       }
     }
@@ -242,6 +278,7 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
             actorDepartmentId: payload.department_id,
             actorDepartmentIds: payload.department_ids,
             global: ability.can('manage', 'User'),
+            includePendingInvites: ability.can('create', 'User'),
           },
         });
 
@@ -297,6 +334,7 @@ export async function userInviteRoutes(fastify: FastifyInstance) {
             actorDepartmentId: payload.department_id,
             actorDepartmentIds: payload.department_ids,
             global: ability.can('manage', 'User'),
+            includePendingInvites: ability.can('create', 'User'),
           },
         });
         const serializeInvite = createInviteSerializer(new Date());
