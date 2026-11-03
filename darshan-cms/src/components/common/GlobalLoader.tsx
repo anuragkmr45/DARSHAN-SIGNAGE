@@ -1,20 +1,24 @@
-import { useIsFetching, useIsMutating } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
+import { useEffect, useState } from "react";
+import { useIsMutating } from "@tanstack/react-query";
 
 export function GlobalLoader() {
-  const isFetching = useIsFetching();
   const isMutating = useIsMutating();
-  const isBusy = isFetching + isMutating > 0;
+  const [visible, setVisible] = useState(false);
 
-  if (!isBusy) return null;
+  useEffect(() => {
+    if (!isMutating) {
+      setVisible(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setVisible(true), 300);
+    return () => window.clearTimeout(timer);
+  }, [isMutating]);
+
+  if (!visible) return null;
 
   return (
-    <div className="fixed inset-x-0 top-0 z-50 h-1">
-      <div
-        className={cn(
-          "h-full w-full animate-pulse bg-gradient-to-r from-primary/40 via-primary to-primary/40",
-        )}
-      />
+    <div role="status" className="fixed inset-x-0 top-0 z-50 h-0.5 bg-primary/70">
+      <span className="sr-only">Working…</span>
     </div>
   );
 }

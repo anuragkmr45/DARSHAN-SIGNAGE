@@ -12,6 +12,7 @@ This is a work-in-progress implementation record, not a release acceptance repor
 - Notifications in the account menu now opens the real route. API Keys, Webhooks, and Proof of Play have permission-aware navigation entries.
 - Protected routes show a loading status while access is checked.
 - Original local SVG mark added as the default CMS favicon; customer favicon settings still take precedence when supplied.
+- Shared request feedback no longer pulses on routine background-query refreshes. The global indicator waits 300 ms and then shows a quiet static line only for pending mutations; route-level loading and error states remain responsible for query feedback.
 
 Developer verification on this branch: CMS production build and bundle budget passed; all 267 unit tests passed; the focused access-navigation browser case passed; the Screens browser suite passed; project skill validation passed. These browser cases use test fixtures and do not establish the required real-service regression.
 
