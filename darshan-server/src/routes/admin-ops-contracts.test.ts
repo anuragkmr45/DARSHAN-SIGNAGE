@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { inArray } from 'drizzle-orm';
 import { closeTestServer, createTestServer, generateTestToken, testUser } from '@/test/helpers';
 import { getDatabase, schema } from '@/db';
+import { createApiKeyRepository } from '@/db/repositories/api-key';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { createServer as createHttpServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
@@ -40,7 +41,7 @@ describe('Admin ops route contracts', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns the paginated API key envelope and one-time secrets for create, rotate, and revoke', async () => {
+  it('blocks API key creation and rotation while allowing retained records to be listed and revoked', async () => {
     const createResponse = await server.inject({
       method: 'POST',
       url: '/api/v1/api-keys',
@@ -54,17 +55,17 @@ describe('Admin ops route contracts', () => {
       },
     });
 
-    expect(createResponse.statusCode).toBe(HTTP_STATUS.CREATED);
-    const created = JSON.parse(createResponse.body) as {
-      id: string;
-      name: string;
-      secret?: string;
-      is_revoked: boolean;
-    };
+    expect(createResponse.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(createResponse.body).error.details.reason).toBe('API_KEY_AUTH_UNAVAILABLE');
+
+    // Existing records can be retained by an upgrade even though this release
+    // never authenticates API-key requests. Seed one below the HTTP boundary.
+    const { record: created } = await createApiKeyRepository().create({
+      name: `Retained key ${Date.now()}`,
+      scopes: ['read'],
+      created_by: testUser.id,
+    });
     createdApiKeyIds.push(created.id);
-    expect(created.secret).toBeTruthy();
-    expect(created.is_revoked).toBe(false);
-    expect(created).not.toHaveProperty('secret_hash');
 
     const listResponse = await server.inject({
       method: 'GET',
@@ -97,17 +98,10 @@ describe('Admin ops route contracts', () => {
       },
     });
 
-    expect(rotateResponse.statusCode).toBe(HTTP_STATUS.OK);
-    const rotated = JSON.parse(rotateResponse.body) as {
-      id: string;
-      secret?: string;
-      is_revoked: boolean;
-    };
-    expect(rotated.id).toBe(created.id);
-    expect(rotated.secret).toBeTruthy();
-    expect(rotated.secret).not.toBe(created.secret);
-    expect(rotated.is_revoked).toBe(false);
-    expect(rotated).not.toHaveProperty('secret_hash');
+    expect(rotateResponse.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(JSON.parse(rotateResponse.body).error.details.reason).toBe('API_KEY_AUTH_UNAVAILABLE');
+    const retainedAfterRotate = await createApiKeyRepository().findById(created.id);
+    expect(retainedAfterRotate?.token_prefix).toBe(created.token_prefix);
 
     const revokeResponse = await server.inject({
       method: 'POST',

@@ -18,6 +18,7 @@ const initialKeys: Key[] = [
 
 async function setup(page: Page, actions: Array<"create" | "update" | "delete"> = ["create", "update", "delete"], seed = initialKeys) {
   const keys = seed.map((item) => ({ ...item }));
+  const requests: string[] = [];
   let listFails = false;
   let revokeFails = false;
   await page.context().addCookies([
@@ -31,6 +32,7 @@ async function setup(page: Page, actions: Array<"create" | "update" | "delete"> 
   } }) }));
   await page.route("**/api/v1/**", (route) => {
     const url = new URL(route.request().url());
+    requests.push(`${route.request().method()} ${url.pathname}`);
     const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (url.pathname === "/api/v1/auth/me") return json(user);
     if (url.pathname === "/api/v1/auth/authorization") return json(testAuthorization(user, [
@@ -63,30 +65,20 @@ async function setup(page: Page, actions: Array<"create" | "update" | "delete"> 
     }
     return json({});
   });
-  return { keys, setListFails: (value: boolean) => { listFails = value; }, setRevokeFails: (value: boolean) => { revokeFails = value; } };
+  return { keys, requests, setListFails: (value: boolean) => { listFails = value; }, setRevokeFails: (value: boolean) => { revokeFails = value; } };
 }
 
-test("one-time secret is available only immediately after creation or rotation", async ({ page }) => {
-  await setup(page);
+test("stored keys are visible while creation and rotation remain unavailable even with grants", async ({ page }) => {
+  const state = await setup(page);
   await page.goto("/api-keys");
   await expect(page.getByText("siteprefix12…", { exact: false })).toBeVisible();
-  await expect(page.getByText("one-time-created-secret")).toHaveCount(0);
+  await expect(page.getByText("API keys cannot authenticate requests in this release.", { exact: false })).toBeVisible();
   await expect(page.getByRole("region", { name: "Retired integration" }).getByText("Revoked")).toBeVisible();
   await expect(page.getByRole("region", { name: "Expired integration" }).getByText("Expired", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Create API Key" }).click();
-  await page.getByLabel("Key name").fill("New integration");
-  await page.getByLabel("Read", { exact: true }).click();
-  await page.getByRole("button", { name: "Generate Key" }).click();
-  const secretDialog = page.getByRole("dialog", { name: "Save this API key secret" });
-  await expect(secretDialog.getByText("one-time-created-secret")).toBeVisible();
-  await secretDialog.getByRole("button", { name: "Done" }).click();
-  await expect(page.getByText("one-time-created-secret")).toHaveCount(0);
-  expect(await page.evaluate(() => window.sessionStorage.getItem("persist:darshan"))).not.toContain("one-time-created-secret");
-  await page.getByRole("region", { name: "Site integration" }).getByRole("button", { name: "Rotate" }).click();
-  await page.getByRole("dialog", { name: "Rotate API key?" }).getByRole("button", { name: "Rotate key" }).click();
-  await expect(secretDialog.getByText("one-time-rotated-secret")).toBeVisible();
-  await page.reload();
-  await expect(page.getByText("one-time-rotated-secret")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Site integration" }).getByText("Stored", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create API Key" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Rotate" })).toHaveCount(0);
+  expect(state.requests.some((request) => request === "POST /api/v1/api-keys" || request.endsWith("/rotate"))).toBe(false);
 });
 
 test("revocation requires confirmation, reports failure, and preserves the key until success", async ({ page }) => {
@@ -95,7 +87,7 @@ test("revocation requires confirmation, reports failure, and preserves the key u
   const row = page.getByRole("region", { name: "Site integration" });
   await row.getByRole("button", { name: "Revoke" }).click();
   await page.getByRole("dialog", { name: "Revoke API key?" }).getByRole("button", { name: "Cancel" }).click();
-  await expect(row.getByText("Active")).toBeVisible();
+  await expect(row.getByText("Stored")).toBeVisible();
   state.setRevokeFails(true);
   await row.getByRole("button", { name: "Revoke" }).click();
   const dialog = page.getByRole("dialog", { name: "Revoke API key?" });
@@ -116,17 +108,17 @@ test("read-only and failed-list states do not offer misleading management action
   await expect(page.getByRole("button", { name: "Create API Key" })).toHaveCount(0);
   state.setListFails(false);
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByText("No API keys yet")).toBeVisible();
+  await expect(page.getByText("No API keys", { exact: true })).toBeVisible();
 });
 
-test("API key list fits phone, tablet, desktop, and dark phone", async ({ page }, testInfo) => {
+test("API key list fits phone, tablet, desktop, and dark phone", async ({ page }) => {
   await setup(page);
   await page.goto("/api-keys");
   await expect(page.getByRole("region", { name: "Site integration" })).toBeVisible();
   for (const width of [390, 820, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath(`api-keys-${width}.png`) });
+    await page.screenshot({ path: `../qa-artifacts/evidence/product-ui-api-keys-policy/api-keys-${width}.png` });
   }
   await page.setViewportSize({ width: 390, height: 900 });
   await page.evaluate(() => window.localStorage.setItem("theme", "dark"));
@@ -134,5 +126,5 @@ test("API key list fits phone, tablet, desktop, and dark phone", async ({ page }
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByRole("region", { name: "Site integration" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh" })).toBeEnabled();
-  await page.screenshot({ path: testInfo.outputPath("api-keys-dark-390.png") });
+  await page.screenshot({ path: "../qa-artifacts/evidence/product-ui-api-keys-policy/api-keys-dark-390.png" });
 });

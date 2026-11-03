@@ -5,15 +5,12 @@ import { defineAbilityFor } from '@/rbac';
 import { createApiKeyRepository } from '@/db/repositories/api-key';
 import { createLogger } from '@/utils/logger';
 import { apiEndpoints } from '@/config/apiEndpoints';
-import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { AppError } from '@/utils/app-error';
 
 const logger = createLogger('api-keys-routes');
-const { CREATED } = HTTP_STATUS;
 const publicRecord = <T extends { secret_hash: string }>(record: T): Omit<T, 'secret_hash'> => {
-  const { secret_hash: _secretHash, ...safeRecord } = record;
-  return safeRecord;
+  return Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'secret_hash')) as Omit<T, 'secret_hash'>;
 };
 
 const createApiKeySchema = z.object({
@@ -31,7 +28,7 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
     apiEndpoints.apiKeys.create,
     {
       schema: {
-        description: 'Create API key (admin only)',
+        description: 'API key creation is disabled until API-key request authentication is designed',
         tags: ['API Keys'],
         security: [{ bearerAuth: [] }],
       },
@@ -44,16 +41,9 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         if (!ability.can('create', 'ApiKey')) throw AppError.forbidden('Forbidden');
 
-        const data = createApiKeySchema.parse(request.body);
-        const { record, secret } = await repo.create({
-          name: data.name,
-          scopes: data.scopes,
-          roles: data.roles,
-          created_by: payload.sub,
-          expires_at: data.expires_at ? new Date(data.expires_at) : undefined,
+        throw AppError.conflict('API key creation is unavailable until API-key request authentication is designed.', {
+          reason: 'API_KEY_AUTH_UNAVAILABLE',
         });
-
-        return reply.status(CREATED).send({ ...publicRecord(record), secret });
       } catch (error) {
         logger.error(error, 'Create API key error');
         return respondWithError(reply, error);
@@ -93,7 +83,7 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
     apiEndpoints.apiKeys.rotate,
     {
       schema: {
-        description: 'Rotate API key secret (admin only)',
+        description: 'API key rotation is disabled until API-key request authentication is designed',
         tags: ['API Keys'],
         security: [{ bearerAuth: [] }],
       },
@@ -106,9 +96,9 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         if (!ability.can('update', 'ApiKey')) throw AppError.forbidden('Forbidden');
 
-        const { record, secret } = await repo.rotate((request.params as any).id);
-        if (!record) throw AppError.notFound('API key not found');
-        return reply.send({ ...publicRecord(record), secret });
+        throw AppError.conflict('API key rotation is unavailable until API-key request authentication is designed.', {
+          reason: 'API_KEY_AUTH_UNAVAILABLE',
+        });
       } catch (error) {
         logger.error(error, 'Rotate API key error');
         return respondWithError(reply, error);
@@ -126,7 +116,7 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
         security: [{ bearerAuth: [] }],
       },
     },
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       try {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
@@ -134,7 +124,7 @@ export async function apiKeyRoutes(fastify: FastifyInstance) {
         const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
         if (!ability.can('delete', 'ApiKey')) throw AppError.forbidden('Forbidden');
 
-        const record = await repo.revoke((request.params as any).id);
+        const record = await repo.revoke(request.params.id);
         if (!record) throw AppError.notFound('API key not found');
         return reply.send(publicRecord(record));
       } catch (error) {

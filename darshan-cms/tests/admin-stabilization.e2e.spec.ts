@@ -505,12 +505,8 @@ test.describe("admin stabilization surfaces", () => {
 
     await page.goto("/api-keys");
     await expect(page.getByText("Primary key")).toBeVisible();
-    await page.getByRole("button", { name: /create api key/i }).click();
-    await page.locator("#key-name").fill("Rotations key");
-    await page.getByLabel("Read").click();
-    await page.getByRole("button", { name: /generate key/i }).click();
-    await expect(page.getByText("Rotations key", { exact: true })).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "Save this API key secret" })).toBeVisible();
+    await expect(page.getByText("API keys cannot authenticate requests in this release.", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: /create api key/i })).toHaveCount(0);
 
     await page.goto("/webhooks");
     await expect(page.getByText("Publishing Alerts")).toBeVisible();

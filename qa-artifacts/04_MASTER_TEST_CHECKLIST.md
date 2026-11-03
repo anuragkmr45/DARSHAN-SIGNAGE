@@ -48,7 +48,7 @@ Execute remaining work only on authorized isolated test environments. Each check
 - [ ] `FILE-05`: delete permission, reference conflict, soft/hard object removal, partial S3 failure, chat cleanup and no accidental recycle promise; BQ-020 recoverability is TBD.
 - [ ] `FUN-01..02`, `UI-01`: layout bounds/slots, presentation timing/order/fit/audio, CMS form validation and error recovery.
 - [ ] `FUN-08`, `PLAYER-09`, `WEB-01..06`: policy-controlled HTTP/HTTPS, every redirect/navigation hop, resource hosts, DNS/CIDR rebinding, invalid trust, unsupported login mechanisms, manual/24-hour refresh, latest-success preservation, revision propagation/cache fallback, corrupt preview and crash recovery. Expected: no unapproved destination or credentials are used, and refresh failure never replaces the last successful preview.
-- [ ] `FUN-12`, `API-04`: API key, SSO and webhook **management** only. Validate admin permissions, persistence and explicit outbound Test action. Actual SSO login, API-key business authentication and automatic webhook event delivery are outside this release.
+- [ ] `FUN-12`, `API-04`: SSO routes remain disabled. API-key creation/rotation are absent in CMS and return `409 API_KEY_AUTH_UNAVAILABLE` without mutation; retained keys can be listed/revoked under effective grants. Validate webhook administration and explicit outbound Test action. Actual SSO login, API-key business authentication and automatic webhook event delivery are outside this release.
 
 ## Scheduling, Screens And Player
 

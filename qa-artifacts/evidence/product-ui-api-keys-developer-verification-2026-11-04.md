@@ -1,5 +1,7 @@
 # API Keys interface: developer verification
 
+Historical packet: creation and rotation described below were superseded by the user's 2026-11-04 decision. See [the current policy verification](product-ui-api-keys-policy-developer-verification-2026-11-04.md).
+
 Branch: `codex/darshan-product-ui-redesign-20261103`, based on `release-01` at `1697249`.
 
 Status: fixture-backed running-CMS and focused database-route developer verification. This is not proof that a generated key can authenticate a backend request: no such inbound path exists in the current server.
