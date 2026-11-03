@@ -113,3 +113,9 @@ Four new fixture-backed browser cases and the three existing admin browser cases
 ## Unknown-route packet
 
 The authenticated 404 page now stays within the application shell, uses the approved neutral layout and current theme, and explains the missing address without logging its path to the browser console. A Dashboard return link appears only when the actor has current `read Dashboard` permission; otherwise the navigation remains available. The admin browser suite passed 4/4, including an unknown-route journey at 390/820/1440 CSS pixels with no document overflow. [Developer evidence](../../qa-artifacts/evidence/product-ui-not-found-developer-verification-2026-11-04.md) records the captures and deployment-proxy limit.
+
+## Webhooks packet
+
+The Webhooks page now presents a compact endpoint list and plainly states that only the explicit Test action sends a request in this build. Selected event subscriptions are saved, but no automatic dispatcher exists. Latest manual test status is labeled as such rather than “Healthy.” Create/update/delete actions follow effective grants, Test and other mutations avoid automatic retries, and delete requires confirmation. Initial loading, failed/Retry, empty, and stale refresh states are distinct.
+
+The server omits stored webhook secrets and custom headers from list/update responses while preserving the one-time create secret. A failed HTTP Test now retains `FAILED_HTTP_<status>` instead of being overwritten by generic `FAILED`. Four new fixture-backed browser cases and the four-case admin browser suite passed at one worker. The focused database route suite passed 3/3, including success and HTTP 503 persistence. CMS/server builds passed. [Developer evidence](../../qa-artifacts/evidence/product-ui-webhooks-developer-verification-2026-11-04.md) lists remaining real-service and product gaps.

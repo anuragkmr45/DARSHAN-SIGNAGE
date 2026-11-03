@@ -12,6 +12,10 @@ import { deliverWebhookTest } from '@/services/webhook-test-delivery';
 
 const logger = createLogger('webhook-routes');
 const { CREATED, NO_CONTENT } = HTTP_STATUS;
+const publicWebhook = <T extends { secret: string; headers: Record<string, string> | null }>(record: T): Omit<T, 'secret' | 'headers'> => {
+  const { secret: _secret, headers: _headers, ...safeRecord } = record;
+  return safeRecord;
+};
 
 const webhookSchema = z.object({
   name: z.string().min(1),
@@ -43,7 +47,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
         const data = webhookSchema.parse(request.body);
         const { record, secret } = await repo.create({ ...data, created_by: payload.sub });
-        return reply.status(CREATED).send({ ...record, secret });
+        return reply.status(CREATED).send({ ...publicWebhook(record), secret });
       } catch (error) {
         logger.error(error, 'Create webhook error');
         return respondWithError(reply, error);
@@ -69,7 +73,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         if (!ability.can('read', 'Webhook')) throw AppError.forbidden('Forbidden');
 
         const items = await repo.list();
-        return reply.send({ items });
+        return reply.send({ items: items.map(publicWebhook) });
       } catch (error) {
         logger.error(error, 'List webhooks error');
         return respondWithError(reply, error);
@@ -96,7 +100,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
         const record = await repo.update((request.params as any).id, webhookSchema.partial().parse(request.body));
         if (!record) throw AppError.notFound('Webhook not found');
-        return reply.send(record);
+        return reply.send(publicWebhook(record));
       } catch (error) {
         logger.error(error, 'Update webhook error');
         return respondWithError(reply, error);
@@ -153,35 +157,9 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
         const attemptedAt = new Date();
 
+        let delivery: Awaited<ReturnType<typeof deliverWebhookTest>>;
         try {
-          const { response, sentAt } = await deliverWebhookTest(record);
-          const lastStatusAt = new Date();
-          const lastStatus = response.ok ? 'SUCCESS' : `FAILED_HTTP_${response.status}`;
-
-          await repo.update(record.id, {
-            last_status: lastStatus,
-            last_status_at: lastStatusAt,
-          });
-
-          if (!response.ok) {
-            throw new AppError({
-              statusCode: 502,
-              code: 'WEBHOOK_TEST_FAILED',
-              message: `Webhook test delivery failed with status ${response.status}.`,
-              details: {
-                attempted: record.target_url,
-                status_code: response.status,
-                sent_at: sentAt,
-              },
-            });
-          }
-
-          return reply.send({
-            success: true,
-            attempted: record.target_url,
-            status_code: response.status,
-            sent_at: sentAt,
-          });
+          delivery = await deliverWebhookTest(record);
         } catch (deliveryError) {
           const lastStatusAt = new Date();
           await repo.update(record.id, {
@@ -203,6 +181,21 @@ export async function webhookRoutes(fastify: FastifyInstance) {
             },
           });
         }
+
+        const { response, sentAt } = delivery;
+        await repo.update(record.id, {
+          last_status: response.ok ? 'SUCCESS' : `FAILED_HTTP_${response.status}`,
+          last_status_at: new Date(),
+        });
+        if (!response.ok) {
+          throw new AppError({
+            statusCode: 502,
+            code: 'WEBHOOK_TEST_FAILED',
+            message: `Webhook test delivery failed with status ${response.status}.`,
+            details: { attempted: record.target_url, status_code: response.status, sent_at: sentAt },
+          });
+        }
+        return reply.send({ success: true, attempted: record.target_url, status_code: response.status, sent_at: sentAt });
       } catch (error) {
         logger.error(error, 'Test webhook error');
         return respondWithError(reply, error);

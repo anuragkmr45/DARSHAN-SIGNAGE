@@ -140,12 +140,13 @@ describe('Admin ops route contracts', () => {
       entry?.family === 'IPv4' && !entry.internal && isPrivateAddress(entry.address))?.address;
     if (!siteAddress) throw new Error('A private network interface is required for the webhook fixture');
     const received: Array<{ event: string | undefined; body: string }> = [];
+    let fixtureStatus = 202;
     const fixture = createHttpServer((request, response) => {
       let body = '';
       request.on('data', (chunk) => { body += chunk.toString(); });
       request.on('end', () => {
         received.push({ event: request.headers['x-darshan-event'] as string | undefined, body });
-        response.writeHead(202, { 'content-type': 'application/json' });
+        response.writeHead(fixtureStatus, { 'content-type': 'application/json' });
         response.end('{"ok":true}');
       });
     });
@@ -186,6 +187,7 @@ describe('Admin ops route contracts', () => {
     };
     createdWebhookIds.push(created.id);
     expect(created.secret).toBeTruthy();
+    expect(created).not.toHaveProperty('headers');
 
     const listResponse = await server.inject({
       method: 'GET',
@@ -200,6 +202,20 @@ describe('Admin ops route contracts', () => {
       items: Array<{ id: string; target_url: string }>;
     };
     expect(listed.items.some((item) => item.id === created.id)).toBe(true);
+    expect(listed.items.find((item) => item.id === created.id)).not.toHaveProperty('secret');
+    expect(listed.items.find((item) => item.id === created.id)).not.toHaveProperty('headers');
+
+    const updateResponse = await server.inject({
+      method: 'PATCH',
+      url: `/api/v1/webhooks/${created.id}`,
+      headers: { authorization: `Bearer ${superAdminToken}` },
+      payload: { is_active: true },
+    });
+    expect(updateResponse.statusCode).toBe(HTTP_STATUS.OK);
+    const updated = JSON.parse(updateResponse.body) as { id: string; is_active: boolean };
+    expect(updated.id).toBe(created.id);
+    expect(updated).not.toHaveProperty('secret');
+    expect(updated).not.toHaveProperty('headers');
 
     const testResponse = await server.inject({
       method: 'POST',
@@ -237,6 +253,19 @@ describe('Admin ops route contracts', () => {
     expect(stored?.id).toBe(created.id);
     expect(stored?.last_status).toBe('SUCCESS');
     expect(stored?.last_status_at).toBeTruthy();
+
+    fixtureStatus = 503;
+    const failedTest = await server.inject({
+      method: 'POST',
+      url: `/api/v1/webhooks/${created.id}/test`,
+      headers: { authorization: `Bearer ${superAdminToken}` },
+    });
+    expect(failedTest.statusCode).toBe(502);
+    const [failedStored] = await db
+      .select({ last_status: schema.webhookSubscriptions.last_status })
+      .from(schema.webhookSubscriptions)
+      .where(inArray(schema.webhookSubscriptions.id, [created.id]));
+    expect(failedStored?.last_status).toBe('FAILED_HTTP_503');
     } finally {
       if (previousPolicy.hosts === undefined) delete process.env.WEBHOOK_TEST_ALLOWED_HOSTS;
       else process.env.WEBHOOK_TEST_ALLOWED_HOSTS = previousPolicy.hosts;

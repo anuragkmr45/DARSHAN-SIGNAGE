@@ -33,7 +33,7 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | R23 | `/reports` — Reports | `read Report` or `read AuditLog` | Report, audit, emergency, notification and PoP APIs; filter, inspect and export evidence. | Redesign and real-service evidence pending. |
 | R24 | `/settings` — Settings | `read OrgSettings` | Settings hooks and media API; update site categories according to action permissions. | Redesign and real-service evidence pending. |
 | R25 | `/api-keys` — ApiKeys | `read ApiKey` | API key API; list stored prefixes/status, create, rotate or revoke under effective action grants; one-time secret only on create/rotate. | 390/820/1440 fixture browser and dark phone; 4 new UI cases, 3 admin regressions and focused server route suite; real-service and key-auth decision pending. |
-| R26 | `/webhooks` — Webhooks | `read Webhook` | Webhook API; configure and explicitly test permitted endpoints. | Redesign and real-service evidence pending. |
+| R26 | `/webhooks` — Webhooks | `read Webhook` | Webhook API; configure endpoints, enable/pause, delete and explicitly test permitted destinations. Automatic event delivery is absent. | 390/820/1440 fixture browser and dark phone; four new cases, admin regression, focused route test; real endpoint and dispatcher decision pending. |
 | R27 | `/proof-of-play` — ProofOfPlay | `read ProofOfPlay` **or** `read Report` in current route guard | PoP API; inspect recorded render-start reports. | Gate semantics and real evidence review pending. |
 | R28 | authenticated `*` — NotFound | Signed-in user | No data; explain unknown path inside the workspace and offer Dashboard only if authorized. | 390/820/1440 fixture browser and return-navigation case; real deep-link fallback pending. |
 
@@ -131,6 +131,19 @@ The page is gated by `read ApiKey`; creation, rotation and revocation use their 
 | K05 | Revoke | Effective `delete ApiKey`, non-revoked key including expired; explicit confirmation, visible failure and manual retry. | Failure/retry fixture browser and server revoke test; real consumer cutoff pending. |
 | K06 | Read-only, loading, failure, empty and responsive list | Denied actions absent; initial failed request has Retry, no keys has a true empty state; no horizontal overflow at 390/820/1440. | Four new UI cases and dark phone capture; screen reader, zoom, five accents, mobile devices pending. |
 
+## Webhooks controls and states
+
+The route requires `read Webhook`; create/update/delete and manual Test use their respective effective grants. The server currently stores selected event types but has no automatic event dispatcher. Only explicit Test sends an HTTP request, and its destination follows the backend's approved private-network policy. The list and update API hide stored secrets and custom headers; create still returns a one-time secret that the current CMS does not surface because signing is not implemented.
+
+| ID | Control or state | Source and expected result | Evidence and open review |
+| --- | --- | --- | --- |
+| W01 | List and Refresh | REST list shows name, target URL, event choices, enabled/paused and latest **manual test** result; no continuous-health claim. | Four fixture browser cases; real live endpoint state pending. |
+| W02 | Add Webhook | `create Webhook`; name, HTTP/HTTPS URL without embedded credentials, and at least one event. Server remains final authority for destination policy when Test runs. | Invalid/valid URL fixture browser; local/private network and DNS cases pending. |
+| W03 | Manual Test | `update Webhook`; explicit POST, latest response status and time; mutation has no automatic retry to avoid duplicate external requests. | Success/failure/no-retry fixture browser and route test; real receiver and TLS pending. |
+| W04 | Enable/Pause | `update Webhook`; PATCH server flag, then refetch. The flag does not imply automatic delivery in this build. | Existing admin browser and code trace; success/failure browser journey pending. |
+| W05 | Delete | `delete Webhook`; confirmation before DELETE, server response authoritative. | Cancel/confirm fixture browser; failure and concurrent use pending. |
+| W06 | Loading, failed, retry, empty and responsive list | Initial failure offers Retry; loaded data stays labeled stale after refresh failure; read-only actors see no mutation controls. | Four fixture cases and 390/820/1440 plus dark phone captures; zoom, accents, mobile devices and accessibility pending. |
+
 ## Control ledger: current status
 
 The next pass expands each route into control-level rows. The following rows identify prototype workflows already traced; they are **grouped summaries**, not an exhaustive control list. They will be replaced with individual control entries before completion.
@@ -143,6 +156,7 @@ The next pass expands each route into control-level rows. The following rows ide
 | Layout editor | Add/Draw/Select, move/resize, numeric inspector, layers, undo/redo, save. | Layout API and normalized geometry. | Fixture-backed editor browser and 390/1440 captures. | Every tool/field/state, real save/reopen, player geometry. |
 | Layouts list | Search, ratio, page, preview, create, edit, exact-name delete, refresh and failure/retry. | Layout REST list/delete, current create grant, server record flags. | Five new fixture cases, editor and ownership regressions, 390/820/1440 plus dark phone captures. | Real-service blockers and save/reopen, long text, zoom, accessibility and network loss. |
 | API Keys | List, create, one-time secret, copy, rotate, revoke, refresh and failure/retry. | CMS bearer-authenticated REST, effective action grants, prefix/status and one-time secret; no inbound API-key auth exists yet. | Four fixture UI cases, three admin browser regressions, focused database route suite; 390/820/1440 plus dark phone. | Decide key-auth release contract, real consumer cutoff, 100+ list, clipboard denial, accessibility. |
+| Webhooks | List, add, explicit Test, enable/pause, delete, refresh and error/retry. | CMS bearer-authenticated REST, effective action grants, stored test status; no automatic dispatcher. | Four fixture UI cases, admin browser regression, database route suite; 390/820/1440 plus dark phone. | Decide automatic-delivery release contract, real receiver policy/TLS, one-time secret, zoom and accessibility. |
 | Unknown route | Explanation and authorized Dashboard return. | No API request; Dashboard link follows current effective `read Dashboard`. | Admin browser 4/4 and 390/820/1440 captures. | Direct URL reload through deployment proxy, keyboard and screen-reader review. |
 | Conversations | List, conversation, thread, drafts, message More and navigation. | Chat/media APIs and REST-authoritative state. | Fixture-backed chat browser; desktop and phone captures. | Invitations, membership, attachments, moderation and concurrent actors. |
 | Player pairing/recovery | Hostname, OTP, expiry, waiting/provisioning, diagnostics and lock/recovery states. | Main-process identity and server expiry authority. | Built renderer prototype at full, compact, minimal and short sizes. | Packaged player lifecycle and remaining owned surfaces. |

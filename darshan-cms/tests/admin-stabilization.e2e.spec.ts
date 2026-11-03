@@ -520,8 +520,8 @@ test.describe("admin stabilization surfaces", () => {
     await page.getByLabel("Screen Comes Online").click();
     await page.getByRole("button", { name: /create webhook/i }).click();
     await expect(page.getByText("Ops hook")).toBeVisible();
-    await page.getByRole("row", { name: /publishing alerts/i }).getByRole("button", { name: /test/i }).click();
-    await expect(page.getByText("Healthy")).toBeVisible();
+    await page.getByRole("region", { name: "Publishing Alerts" }).getByRole("button", { name: "Test" }).click();
+    await expect(page.getByText("Last test succeeded")).toBeVisible();
 
     await page.goto("/sso-config");
     await expect(page.getByRole("heading", { name: "This page could not be found" })).toBeVisible();
