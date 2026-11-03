@@ -40,6 +40,7 @@ const routeLabels: Array<{ match: RegExp; title: string; eyebrow: string }> = [
   { match: /^\/layouts/, title: "Layouts", eyebrow: "Screen compositions" },
   { match: /^\/screens/, title: "Screens", eyebrow: "Player health and pairing" },
   { match: /^\/schedule/, title: "Schedule queue", eyebrow: "Publishing operations" },
+  { match: /^\/live-broadcasts/, title: "Live broadcasts", eyebrow: "Sources and presenters" },
   { match: /^\/chat|^\/conversations/, title: "Conversations", eyebrow: "Team communication" },
   { match: /^\/notifications/, title: "Notifications", eyebrow: "Attention queue" },
   { match: /^\/operators/, title: "Operators", eyebrow: "Operational access" },

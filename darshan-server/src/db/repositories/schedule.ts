@@ -1,7 +1,8 @@
 import { eq, and, desc, inArray, sql } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import type { ActorContext } from '@/rbac/policy';
-import { contentReadCondition, type ContentAbility, type ContentOwnerScope } from '@/rbac/content-ownership';
+import { type ContentAbility, type ContentOwnerScope } from '@/rbac/content-ownership';
+import { scheduleReadCondition } from '@/rbac/schedule-read-authorization';
 
 export class ScheduleRepository {
   async create(data: {
@@ -49,8 +50,7 @@ export class ScheduleRepository {
       conditions.push(inArray(schema.schedules.created_by, options.created_by_ids as any));
     }
     if (options.actor) {
-      const accessCondition = contentReadCondition(options.actor, schema.schedules, options.ability, 'Schedule');
-      if (accessCondition) conditions.push(accessCondition);
+      conditions.push(scheduleReadCondition(options.actor, options.ability));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

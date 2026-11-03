@@ -39,11 +39,15 @@ export const createScheduleItemSchema = z.object({
 
 export type CreateScheduleItemRequest = z.infer<typeof createScheduleItemSchema>;
 
+export const liveFallbackPreparationIdsSchema = z.record(z.string().uuid(), z.string().uuid());
+
 export const publishScheduleSchema = z.object({
   screen_ids: z.array(z.string().uuid()).optional(),
   screen_group_ids: z.array(z.string().uuid()).optional(),
   notes: z.string().optional(),
   schedule_request_id: z.string().uuid().optional(),
+  fallback_preparation_ids: liveFallbackPreparationIdsSchema.default({}),
+  expected_live_fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   aspect_override: z
     .object({
       acknowledged: z.literal(true),
@@ -54,6 +58,13 @@ export const publishScheduleSchema = z.object({
 });
 
 export type PublishScheduleRequest = z.infer<typeof publishScheduleSchema>;
+
+export const livePreflightSchema = z.object({
+  schedule_id: z.string().uuid(),
+  screen_ids: z.array(z.string().uuid()).optional(),
+  screen_group_ids: z.array(z.string().uuid()).optional(),
+  fallback_preparation_ids: liveFallbackPreparationIdsSchema.default({}),
+}).strict();
 
 export const displayPreflightSchema = z.object({
   schedule_id: z.string().uuid(),

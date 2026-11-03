@@ -111,6 +111,41 @@ export interface ContentPermissions {
   can_delete: boolean;
 }
 
+/** Reusable source policy; active playback/run state is a separate contract. */
+export interface LiveSession {
+  id: string;
+  name: string;
+  description: string | null;
+  presenter_user_id: string;
+  microphone: boolean;
+  screen_share_audio: boolean;
+  is_active: boolean;
+  revision: number;
+  policy_revision: number;
+  created_by: string;
+  owner_scope: ContentOwnership["scope"];
+  owner_department_id: string | null;
+  ownership: ContentOwnership | null;
+  permissions: ContentPermissions;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateLiveSessionPayload {
+  name: string;
+  description?: string | null;
+  presenter_user_id: string;
+  microphone?: boolean;
+  screen_share_audio?: boolean;
+  is_active?: boolean;
+}
+
+export type UpdateLiveSessionPayload = Partial<CreateLiveSessionPayload> & { expected_revision: number };
+export interface LiveSessionListResponse {
+  items: LiveSession[];
+  pagination: { page: number; limit: number; total: number; pages: number };
+}
+
 export interface LayoutItem {
   id: string;
   name: string;

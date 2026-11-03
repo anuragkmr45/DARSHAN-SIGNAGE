@@ -1,7 +1,8 @@
 # Live broadcast behavior contract
 
-Status: **ACCEPTED TARGET; IMPLEMENTATION IN PROGRESS.** This document defines
-intended behavior, not evidence that it is implemented. The starting code at
+Status: **ACCEPTED TARGET; PARTIAL IMPLEMENTATION VERIFIED.** Product requirements
+below are acceptance targets except where the implemented-interface checkpoint
+explicitly records current code. The starting code at
 `499bcdf` supports presentation schedules and has no live broadcast receiver.
 See [execution loops](../plans/live-broadcast-implementation-loops.md) and the
 [developer evidence](../../qa-artifacts/evidence/live-broadcast-developer-verification-2026-11-03.md).
@@ -44,7 +45,7 @@ Keep `presentation_id` required. Add `source_kind: PRESENTATION | LIVE` and
 `live_session_id`; on LIVE items the presentation is the fallback. Snapshots
 contain policy/identifiers, never transient tickets/tokens, SDP or private keys.
 
-Freeze concrete **per-item** screen targets, presenter, time window, fallback
+Freeze authored/explicit group provenance and concrete **per-item** screen targets, presenter, time window, fallback
 asset revisions and audio policy with the hold. Approval/publication compare a
 fingerprint, including same-size group-member replacement. A relevant change
 requires renewed approval; published live audience cannot expand with later
@@ -107,12 +108,39 @@ Current foundation routes use the `/api/v1` prefix:
 | `POST /live-fallback-preparations` | Accept `presentation_id` and optional explicit `retry_failed`; durably prepare the exact current fallback graph |
 | `GET /live-fallback-preparations/:id` | Recheck current access/fingerprint and return preparation state; READY includes its immutable manifest |
 | Existing schedule-item create/list | Preserve `source_kind`, `live_session_id` and required fallback `presentation_id`; legacy source defaults to PRESENTATION |
+| `POST /schedules/live-preflight` | Accept `schedule_id`, optional explicit screen/group scope and `fallback_preparation_ids`; return current schedule revision, `approval_fingerprint` and frozen item policies, without admission credentials |
+| `POST /schedules/:id/publish` | LIVE direct publication requires the reviewed `expected_live_fingerprint` and fallback preparation IDs; snapshot, screen reservations and logical live reservations commit together |
+| Existing Schedule Request create/approve/publish | Creation stores versioned `schedule_payload.live_approval`; approval/publication rebuild policy using those preparation IDs and reject changed review with `409`; responses expose `live_approval` |
+| Existing Screen/Screen Group snapshots | Return only the frozen approved live audience; refresh immutable fallback download URLs outside the persisted policy, after current CMS-record or genuine device-identity authorization |
 
-These foundations do not yet enable live publication. Until the complete
-publication serializer and route authorization are connected, request/direct
-publication rejects LIVE items with `409 LIVE_APPROVAL_REQUIRED`. Production
-run/start/admission APIs and normal-player live playback remain implementation
-work; no capability is advertised prematurely.
+The November 3 publication/authorization packet connects capability-gated
+request and direct publication. A LIVE direct publish without review still
+returns `409 LIVE_APPROVAL_REQUIRED`; changed approval returns a safe conflict.
+The current normal player does **not** advertise `live_broadcast_v1`, because
+scheduled live rendering is unfinished. The supporting runtime verifier uses
+two explicitly synthetic, unpaired OFFLINE screens carrying that capability;
+it is not evidence that a deployed player supports this feature.
+
+Published retry endpoints return the existing publication without reapproving
+the mutable draft/source. Source policy edits affect future approvals and do
+not rewrite the published policy. Authored live groups receive frozen publish
+targets even when the publish request omits explicit groups. Current group
+membership can change independently: an original member retains its frozen
+publication, and a replacement does not inherit that live audience.
+
+Schedule and Schedule Request reads apply current record conditions to GET,
+list rows, totals and summaries. Conditional management cannot become global
+department access. Unsupported stored condition shapes fail closed. CMS
+Screen/Group reads are authorized before signing artifact URLs; authenticated
+device access retains its own identity path. Active normalized live references
+also protect sources, screens, groups, fallback media and storage dependencies
+when mutable drafts or group membership change. Ended/released history alone
+does not create a permanent active blocker.
+
+Production run/start/admission APIs, complete CMS publishing/presenter controls,
+and normal-player live playback remain implementation work. See the
+[publication checkpoint](../../qa-artifacts/evidence/live-publication-authorization-developer-verification-2026-11-03.md)
+for the exact bounded developer results and open gates.
 
 API families add live-session CRUD/preflight, run start/status/stop/targets,
 authenticated device live-state/admission, and admission renewal. A start

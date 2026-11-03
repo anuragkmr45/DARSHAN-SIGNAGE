@@ -8,6 +8,7 @@ export type ModuleKey =
   | "layouts"
   | "screens"
   | "schedule"
+  | "live"
   | "conversations"
   | "notifications"
   | "operators"
@@ -32,6 +33,8 @@ export const canAccessModule = (moduleKey: ModuleKey, _user: User | null | undef
       return can("read", "Screen") || can("read", "ScreenGroup");
     case "schedule":
       return can("read", "Schedule") || can("read", "ScheduleRequest");
+    case "live":
+      return can("read", "LiveBroadcast") || can("create", "LiveBroadcast");
     case "conversations":
       return can("read", "Conversation");
     case "notifications":

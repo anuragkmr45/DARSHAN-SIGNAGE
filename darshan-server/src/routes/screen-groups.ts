@@ -1,3 +1,6 @@
+import { readAuthorizedScreenGroup } from '@/services/screen-read-authorization';
+import { hydrateLiveFallbackItems } from '@/services/live-fallback-delivery';
+import { filterFrozenAudienceItemsForGroup } from '@/screens/live-snapshot-audience';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { createScreenGroupRepository } from '@/db/repositories/screen-group';
@@ -21,6 +24,7 @@ import { assertTargetCanBeDeleted, lockScreenTargetReferences } from '@/services
 import { createDeviceCommand } from '@/services/command-lifecycle-service';
 import {
   buildScreenPlaybackState,
+  filterItemsForScreen as filterPublishedItemsForScreen,
   buildScreenRecoveryStateMap,
   getLastProofOfPlayMap,
   summarizeGroupPlayback,
@@ -73,27 +77,10 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
     return rows.map((r) => r.group_id);
   };
 
-  const filterItemsForScreen = (items: any[], screenId: string, groupIds: string[]) => {
-    return items.filter((i) => {
-      const itemScreens = (i.screen_ids || []) as string[];
-      const itemGroups = (i.screen_group_ids || []) as string[];
-      const hasTargets = (itemScreens && itemScreens.length > 0) || (itemGroups && itemGroups.length > 0);
-      if (!hasTargets) return true;
-      if (itemScreens.includes(screenId)) return true;
-      return itemGroups.some((gid) => groupIds.includes(gid));
-    });
-  };
+  const filterItemsForScreen = filterPublishedItemsForScreen;
 
-  const filterItemsForGroup = (items: any[], groupId: string, memberIds: string[]) => {
-    return items.filter((i) => {
-      const itemScreens = (i.screen_ids || []) as string[];
-      const itemGroups = (i.screen_group_ids || []) as string[];
-      const hasTargets = (itemScreens && itemScreens.length > 0) || (itemGroups && itemGroups.length > 0);
-      if (!hasTargets) return true;
-      if (itemGroups.includes(groupId)) return true;
-      return itemScreens.some((sid) => memberIds.includes(sid));
-    });
-  };
+  const filterItemsForGroup = (items: any[], groupId: string, memberIds: string[], targetGroupIds: string[] = [], scheduleId?: string) =>
+    filterFrozenAudienceItemsForGroup(items, groupId, memberIds, { groupIds: targetGroupIds, scheduleId });
 
   const buildTimeline = (items: any[]) => {
     const now = new Date();
@@ -170,14 +157,9 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) throw AppError.unauthorized('Missing authorization header');
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
 
-        const group = await repo.findById((request.params as any).id);
-        if (!group) throw AppError.notFound('Screen group not found');
+
+        const group = await readAuthorizedScreenGroup(request, (request.params as any).id);
         const members = await repo.members(group.id);
 
         const merged: Map<string, any> = new Map();
@@ -275,15 +257,10 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) throw AppError.unauthorized('Missing authorization header');
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
+
 
         const groupId = (request.params as any).id;
-        const group = await repo.findById(groupId);
-        if (!group) throw AppError.notFound('Screen group not found');
+        const group = await readAuthorizedScreenGroup(request, groupId);
         const members = await repo.members(group.id);
         const screenIds = members.map((m: any) => m.screen_id);
         const query = snapshotQuerySchema.parse(request.query);
@@ -330,7 +307,11 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
 
         const rawPayload = (latest.payload as any) || {};
         const schedule = rawPayload.schedule || {};
-        const filteredItems = filterItemsForGroup(schedule.items || [], group.id, screenIds);
+        const targetGroupIds = Array.isArray(rawPayload.targets?.screen_group_ids) ? rawPayload.targets.screen_group_ids : [];
+        const filteredItems = await hydrateLiveFallbackItems(
+          filterItemsForGroup(schedule.items || [], group.id, screenIds, targetGroupIds, schedule.id),
+          { publishId: latest.publish_id, scheduleId: schedule.id, groupId: group.id, targetGroupIds, includeUrls, db }
+        );
         let filteredSnapshot = {
           ...rawPayload,
           schedule: { ...schedule, items: filteredItems },
@@ -674,14 +655,9 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) throw AppError.unauthorized('Missing authorization header');
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
 
-        const group = await repo.findById((request.params as any).id);
-        if (!group) throw AppError.notFound('Screen group not found');
+
+        const group = await readAuthorizedScreenGroup(request, (request.params as any).id);
         const members = await repo.members(group.id);
 
         return reply.send({
@@ -758,14 +734,9 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) throw AppError.unauthorized('Missing authorization header');
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'ScreenGroup')) throw AppError.forbidden('Forbidden');
 
-        const group = await repo.findById((request.params as any).id);
-        if (!group) throw AppError.notFound('Screen group not found');
+
+        const group = await readAuthorizedScreenGroup(request, (request.params as any).id);
         const members = await repo.members(group.id);
 
         const screens = await Promise.all(

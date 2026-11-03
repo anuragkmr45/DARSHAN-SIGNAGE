@@ -16,6 +16,7 @@ import { createLiveSessionSchema, deleteLiveSessionSchema, listLiveSessionsSchem
   liveSessionParamsSchema, updateLiveSessionSchema } from '@/schemas/live-broadcast';
 import { AppError } from '@/utils/app-error';
 import { respondWithError } from '@/utils/errors';
+import { activeLiveOccurrenceReference } from '@/services/live-reference-guards';
 
 const sourceSubject: ContentSubject = 'LiveBroadcast';
 const routeSchema = (description: string) => ({ schema: { description, tags: ['Live broadcasts'], security: [{ bearerAuth: [] }] } });
@@ -105,7 +106,7 @@ async function assertNoReferences(executor: DbExecutor, id: string) {
   // the immutable current/future item windows too; historical-only items don't block.
   const published = await executor.select({ count: sql<number>`count(*)::int` }).from(schema.publishes)
     .innerJoin(schema.scheduleSnapshots, eq(schema.publishes.snapshot_id, schema.scheduleSnapshots.id))
-    .where(and(eq(schema.publishes.status, 'ACTIVE'), sql`EXISTS (
+    .where(and(eq(schema.publishes.status, 'ACTIVE'), isNull(schema.publishes.taken_down_at), sql`EXISTS (
       SELECT 1 FROM jsonb_array_elements(CASE
         WHEN jsonb_typeof(${schema.scheduleSnapshots.payload}->'schedule'->'items') = 'array'
         THEN ${schema.scheduleSnapshots.payload}->'schedule'->'items' ELSE '[]'::jsonb END) item
@@ -113,7 +114,9 @@ async function assertNoReferences(executor: DbExecutor, id: string) {
         AND item->>'source_kind' = 'LIVE'
         AND (item->>'end_at')::timestamptz > now()
     )`));
-  const blockers = { schedule_items: Number(drafts[0]?.count ?? 0), active_publishes: Number(published[0]?.count ?? 0) };
+  const occurrences = await executor.select({ count: sql<number>`count(*)::int` }).from(schema.liveScheduleOccurrences)
+    .where(and(eq(schema.liveScheduleOccurrences.live_session_id, id), activeLiveOccurrenceReference()));
+  const blockers = { schedule_items: Number(drafts[0]?.count ?? 0), active_publishes: Number(published[0]?.count ?? 0), live_occurrences: Number(occurrences[0]?.count ?? 0) };
   if (Object.values(blockers).some(count => count > 0)) throw liveError(409, 'LIVE_SESSION_IN_USE',
     'Remove editable and current/future schedule references before deleting this live session.', { blockers });
 }

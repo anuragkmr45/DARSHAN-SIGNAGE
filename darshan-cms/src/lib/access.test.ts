@@ -7,6 +7,7 @@ import {
   canManageOperatorsModule,
   canManageUserTarget,
   canReadUserTarget,
+  canAccessModule,
   getContentCreatorLabel,
   getContentOwnershipLabel,
 } from "@/lib/access";
@@ -22,6 +23,13 @@ const makeUser = (overrides: Partial<User>): User => ({
 });
 
 describe("access helpers", () => {
+  it("gates live authoring by effective grants instead of a custom role name or schedule approval", () => {
+    const custom = makeUser({ role: "CUSTOM_AUTHOR" });
+    expect(canAccessModule("live", custom, (action, subject) => action === "create" && subject === "LiveBroadcast")).toBe(true);
+    expect(canAccessModule("live", custom, (action, subject) => action === "read" && subject === "LiveBroadcast")).toBe(true);
+    expect(canAccessModule("live", custom, (action, subject) => action === "approve" && subject === "ScheduleRequest")).toBe(false);
+    expect(canAccessModule("live", makeUser({ role: "SUPER_ADMIN" }), () => false)).toBe(false);
+  });
   it("allows super admin to manage every role while protecting super-admin deletion", () => {
     expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "ADMIN")).toBe(true);
     expect(canManageUserTarget(makeUser({ role: "SUPER_ADMIN" }), "DEPARTMENT")).toBe(true);

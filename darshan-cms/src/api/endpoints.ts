@@ -117,6 +117,10 @@ export const endpoints = {
     base: "/layouts",
     byId: (layoutId: string) => `/layouts/${layoutId}`,
   },
+  liveSessions: {
+    base: "/live-sessions",
+    byId: (id: string) => `/live-sessions/${encodeURIComponent(id)}`,
+  },
   presentations: {
     base: "/presentations",
     byId: (presentationId: string) => `/presentations/${presentationId}`,

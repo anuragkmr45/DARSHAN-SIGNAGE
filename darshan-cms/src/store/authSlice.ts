@@ -33,6 +33,12 @@ const authSlice = createSlice({
     setApiKey: (state, action: PayloadAction<string | undefined>) => {
       state.apiKey = action.payload;
     },
+    refreshAuthToken: (state, action: PayloadAction<{ token: string; csrfToken?: string }>) => {
+      // Token rotation belongs to the current session, unlike installing
+      // credentials after login or restoring a session.
+      state.token = action.payload.token;
+      state.csrfToken = action.payload.csrfToken;
+    },
     clearAuth: (state) => {
       state.token = undefined;
       state.apiKey = undefined;
@@ -42,5 +48,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { setCredentials, clearAuth, setApiKey } = authSlice.actions;
+export const { setCredentials, clearAuth, setApiKey, refreshAuthToken } = authSlice.actions;
 export default authSlice.reducer;

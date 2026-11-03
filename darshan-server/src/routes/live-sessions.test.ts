@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { Pool } from 'pg';
@@ -11,9 +11,17 @@ import { assertDedicatedTestDatabase } from '@/db/test-database-safety';
 import { AppError, formatErrorResponse } from '@/utils/app-error';
 import { toAppError } from '@/utils/errors';
 import { liveSessionRoutes } from './live-sessions';
+import { assertTargetCanBeDeleted } from '@/services/screen-deletion-guard';
+import { MediaRepository } from '@/db/repositories/media';
+import { hydrateLiveFallbackItems } from '@/services/live-fallback-delivery';
+import { screenRoutes } from './screens';
+import { screenGroupRoutes } from './screen-groups';
+import { deviceTelemetryRoutes } from './device-telemetry';
+import { buildDeviceRequestSignaturePayload } from '@/utils/device-request-auth';
 
 const fixture = vi.hoisted(() => ({ db: undefined as Database | undefined,
-  tokens: new Map<string, { sub: string; jti: string; role_id: string; role: string; department_id: string | null }>() }));
+  tokens: new Map<string, { sub: string; jti: string; role_id: string; role: string; department_id: string | null }>(),
+  sign: vi.fn(async (_bucket: string, objectKey: string) => `https://configured-gateway.example.test/${encodeURIComponent(objectKey)}?signature=synthetic`) }));
 vi.mock('@/db', async () => ({
   schema: await vi.importActual('@/db/schema'),
   getDatabase: () => fixture.db,
@@ -28,6 +36,11 @@ vi.mock('@/auth/jwt', () => ({
     return payload;
   },
 }));
+// HTTP read authorization and signing remain real handler decisions. Socket
+// startup is unrelated to these injected HTTP requests and opens no listener.
+vi.mock('@/realtime/screens-namespace', () => ({ setupScreensNamespace: vi.fn(async () => undefined), emitScreensRefreshRequired: vi.fn() }));
+vi.mock('@/s3', async () => ({ ...await vi.importActual('@/s3'),
+  getPresignedUrl: (bucket: string, objectKey: string) => fixture.sign(bucket, objectKey) }));
 
 describe('live-session routes on an isolated PostgreSQL schema', () => {
   const namespace = `live_sessions_test_${randomUUID().replace(/-/g, '')}`;
@@ -76,6 +89,62 @@ describe('live-session routes on an isolated PostgreSQL schema', () => {
       VALUES($1,$2,$3,$4,'TAKEN_DOWN')`, [randomUUID(), scheduleId, randomUUID(), owner.id]);
     return { scheduleId, itemId };
   }
+  let occurrenceIndex = 0;
+  async function frozenReference(sourceId: string, state: 'HELD' | 'RESERVED' | 'PUBLISHED' | 'RELEASED', options: { ended?: boolean; expiredHold?: boolean } = {}) {
+    const preparation = randomUUID(), object = randomUUID(), media = randomUUID(), screen = randomUUID(), group = randomUUID(), occurrence = randomUUID();
+    const start = new Date(Date.now() + (options.ended ? -86_400_000 : 3_600_000) + occurrenceIndex++ * 600_000);
+    const end = new Date(start.getTime() + 300_000);
+    const checksum = media.replace(/-/g, '').repeat(2), scheduleId = randomUUID(), itemId = randomUUID(), requestId = randomUUID(), token = randomUUID(), publishId = randomUUID();
+    const presentationId = randomUUID();
+    const manifest = { version: 1, presentation: { id: presentationId, layout: null,
+      items: [{ id: randomUUID(), order: 0, asset_id: media }] }, assets: [{ id: media, media_id: media, storage_object_id: object,
+      bucket: 'synthetic-ready', object_key: `live-fallbacks/v1/sha256/${checksum}.png`, sha256: checksum, size: 4, content_type: 'image/png',
+      render_type: 'image', representation: 'SOURCE', dependencies: [], cache_key: `live_${checksum}_image` }] };
+    const policy = { version: 1, source_kind: 'LIVE', schedule_id: scheduleId, schedule_item_id: itemId, schedule_revision: 1,
+      live_session_id: sourceId, presenter_user_id: presenter.id, policy_revision: 1, microphone: false, screen_share_audio: false,
+      start_at: start.toISOString(), end_at: end.toISOString(), priority: 0, screen_ids: [screen], screen_group_ids: [group],
+      fallback: { preparation_id: preparation, source_fingerprint: 'a'.repeat(64), manifest } };
+    const item = { id: itemId, presentation_id: presentationId, source_kind: 'LIVE', live_session_id: sourceId, start_at: start.toISOString(),
+      end_at: end.toISOString(), priority: 0, screen_ids: [], screen_group_ids: [group], resolved_screen_ids: [screen], live_policy: policy, presentation: null };
+    await pool.query('INSERT INTO screens(id,name) VALUES($1,$2)', [screen, 'Synthetic frozen screen']);
+    await pool.query('INSERT INTO screen_groups(id,name) VALUES($1,$2)', [group, 'Synthetic former group']);
+    await pool.query(`INSERT INTO media(id,name,type,status,created_by) VALUES($1,'Frozen fallback','IMAGE','READY',$2)`, [media, owner.id]);
+    await pool.query(`INSERT INTO storage_objects(id,bucket,object_key,sha256,size,content_type) VALUES($1,'synthetic-ready',$2,$3,4,'image/png')`, [object, `live-fallbacks/v1/sha256/${checksum}.png`, checksum]);
+    await pool.query(`INSERT INTO live_fallback_preparations(id,presentation_id,created_by,source_fingerprint,source_graph) VALUES($1,$2,$3,$4,'{}')`, [preparation, presentationId, owner.id, 'a'.repeat(64)]);
+    await pool.query(`INSERT INTO live_fallback_preparation_assets(preparation_id,asset_id,media_id,storage_object_id,sha256,size,content_type,render_type,source_type,representation)
+      VALUES($1,$2,$2,$3,$4,4,'image/png','image','IMAGE','SOURCE')`, [preparation, media, object, checksum]);
+    await pool.query(`UPDATE live_fallback_preparations SET state='READY',manifest=$2 WHERE id=$1`, [preparation, manifest]);
+    if (state === 'HELD' || state === 'RESERVED') await pool.query(`INSERT INTO schedule_requests(id,schedule_id,schedule_payload,status,requested_by,reservation_token,reservation_version)
+      VALUES($1,$2,'{}',$3,$4,$5,1)`, [requestId, scheduleId, state === 'HELD' ? 'PENDING' : 'APPROVED', owner.id, token]);
+    if (state === 'PUBLISHED') {
+      const snapshot = randomUUID();
+      await pool.query(`INSERT INTO schedule_snapshots(id,schedule_id,payload) VALUES($1,$2,$3)`, [snapshot, scheduleId, { schedule: { id: scheduleId, items: [item] } }]);
+      await pool.query(`INSERT INTO publishes(id,schedule_id,snapshot_id,published_by) VALUES($1,$2,$3,$4)`, [publishId, scheduleId, snapshot, owner.id]);
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`INSERT INTO schedule_reservations(screen_id,schedule_id,schedule_item_id,owner_user_id,state,start_at,end_at,
+        hold_expires_at,reservation_token,publish_id,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [screen, scheduleId, itemId, owner.id, state, start.toISOString(), end.toISOString(), state === 'HELD' ?
+        new Date(Date.now() + (options.expiredHold ? -60_000 : 60_000)).toISOString() : null, token, state === 'PUBLISHED' ? publishId : null,
+        state === 'PUBLISHED' ? new Date().toISOString() : null]);
+      await client.query(`INSERT INTO live_schedule_occurrences(id,schedule_id,schedule_item_id,schedule_request_id,reservation_token,schedule_revision,
+        owner_user_id,live_session_id,presenter_user_id,policy_revision,preparation_id,approval_fingerprint,item_fingerprint,frozen_policy,
+        screen_ids,capacity_slot,start_at,end_at,state,hold_expires_at,publish_id)
+        VALUES($1,$2,$3,$4,$5,1,$6,$7,$8,1,$9,$10,$10,$11,$12,1,$13,$14,$15,$16,$17)`,
+      [occurrence, scheduleId, itemId, state === 'HELD' || state === 'RESERVED' ? requestId : null,
+        token, owner.id, sourceId, presenter.id, preparation, 'b'.repeat(64), policy,
+        [screen], start.toISOString(), end.toISOString(), state, state === 'HELD' ? new Date(Date.now() + (options.expiredHold ? -60_000 : 60_000)).toISOString() : null,
+        state === 'PUBLISHED' ? publishId : null]);
+      await client.query(`INSERT INTO live_occurrence_assets(occurrence_id,asset_id,media_id,storage_object_id,sha256,size,content_type,render_type,source_type,status,representation,dependencies,source_object_id,source_sha256,source_content_type)
+        SELECT $1,asset_id,media_id,storage_object_id,sha256,size,content_type,render_type,source_type,status,representation,dependencies,source_object_id,source_sha256,source_content_type
+        FROM live_fallback_preparation_assets WHERE preparation_id=$2`, [occurrence, preparation]);
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+    return { occurrence, media, screen, group, requestId, publishId, item };
+  }
 
   beforeAll(async () => {
     assertDedicatedTestDatabase(config.DATABASE_URL, 'Live session schema tests');
@@ -90,13 +159,21 @@ describe('live-session routes on an isolated PostgreSQL schema', () => {
       options: `-c search_path=${namespace} -c timezone=UTC -c statement_timeout=5000 -c lock_timeout=4000` });
     expect((await pool.query('SHOW search_path')).rows[0].search_path).toBe(namespace);
     for (const table of ['roles', 'departments', 'users', 'sessions', 'user_additional_departments',
-      'schedules', 'schedule_items', 'schedule_snapshots', 'publishes', 'audit_logs']) {
+      'schedules', 'schedule_items', 'schedule_snapshots', 'publishes', 'publish_targets', 'schedule_requests', 'schedule_reservations', 'audit_logs',
+      'storage_objects', 'media', 'screens', 'screen_groups', 'screen_group_members', 'settings', 'emergencies', 'emergency_types',
+      'chat_attachments', 'chat_bookmarks', 'presentation_items', 'presentation_slot_items', 'proof_of_play',
+      'screenshots', 'heartbeats', 'device_pairings', 'device_certificates', 'device_auth_rollout_observations']) {
       await pool.query(`CREATE TABLE "${namespace}"."${table}" (LIKE public."${table}" INCLUDING ALL)`);
     }
+    // The read-only catalog source may already run0057. Reconstruct the legacy
+    // shape in this empty owned table before testing that migration itself.
+    await pool.query('ALTER TABLE schedule_items DROP COLUMN IF EXISTS live_session_id, DROP COLUMN IF EXISTS source_kind');
     await pool.query(`INSERT INTO schedule_items(id,schedule_id,presentation_id,start_at,end_at)
       VALUES($1,$2,$3,now(),now()+interval '1 hour')`, [legacyItemId, randomUUID(), legacyPresentationId]);
     const migration = await readFile(new URL('../../drizzle/migrations/0057_live_broadcast_sessions.sql', import.meta.url), 'utf8');
     await pool.query(migration);
+    const schedulingMigration = await readFile(new URL('../../drizzle/migrations/0058_live_scheduling.sql', import.meta.url), 'utf8');
+    await pool.query(schedulingMigration);
     fixture.db = drizzle(pool, { schema: tables });
     await pool.query('INSERT INTO departments(id,name) VALUES($1,$2),($3,$4)', [deptA, 'Synthetic A', deptB, 'Synthetic B']);
     admin = await makeUser('ADMIN', [{ action: 'manage', subject: 'LiveBroadcast' }], null);
@@ -111,6 +188,9 @@ describe('live-session routes on an isolated PostgreSQL schema', () => {
       const safe = toAppError(error); reply.code(safe.statusCode).send(formatErrorResponse(safe));
     });
     await server.register(liveSessionRoutes);
+    await server.register(screenRoutes);
+    await server.register(screenGroupRoutes);
+    await server.register(deviceTelemetryRoutes);
     await server.ready();
   });
   afterAll(async () => {
@@ -210,6 +290,115 @@ describe('live-session routes on an isolated PostgreSQL schema', () => {
     expect((await pool.query('SELECT id FROM schedule_items WHERE id=$1', [reference.itemId])).rowCount).toBe(1);
     expect((await invoke(owner, 'GET', `${route}/${row.id}`)).statusCode).toBe(404);
     await expect(addReference(row.id)).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('protects frozen live source, former group, concrete screen and fallback media after authoring references disappear', async () => {
+    for (const state of ['HELD', 'RESERVED', 'PUBLISHED'] as const) {
+      const source = await create(), frozen = await frozenReference(source.id, state);
+      const denied = await invoke(owner, 'DELETE', `${route}/${source.id}`, { expected_revision: 1 });
+      expect(denied.statusCode, denied.body).toBe(409);
+      expect(denied.json().error.details.blockers.live_occurrences).toBe(1);
+      await expect(assertTargetCanBeDeleted(fixture.db!, { kind: 'SCREEN', id: frozen.screen, groupIds: [] })).rejects.toMatchObject({ code: 'SCREEN_IN_USE' });
+      await expect(assertTargetCanBeDeleted(fixture.db!, { kind: 'GROUP', id: frozen.group, memberScreenIds: [] })).rejects.toMatchObject({ code: 'SCREEN_GROUP_IN_USE' });
+      expect(await new MediaRepository().getUsageSummary(frozen.media, fixture.db!)).toMatchObject({ inUse: true, references: ['live_fallbacks'] });
+      const unrelated = randomUUID();
+      await pool.query('INSERT INTO screen_groups(id,name) VALUES($1,$2)', [unrelated, 'Unreferenced current group']);
+      await pool.query('INSERT INTO screen_group_members(group_id,screen_id) VALUES($1,$2)', [unrelated, frozen.screen]);
+      await expect(assertTargetCanBeDeleted(fixture.db!, { kind: 'GROUP', id: unrelated, memberScreenIds: [frozen.screen] })).resolves.toBeUndefined();
+      await pool.query(`UPDATE live_schedule_occurrences SET state='RELEASED',released_at=now() WHERE id=$1`, [frozen.occurrence]);
+    }
+  });
+
+  it('does not let ended, released or expired-held normalized history block deletion', async () => {
+    for (const [state, options, stale] of [['PUBLISHED', { ended: true }, null], ['RELEASED', {}, null], ['HELD', { expiredHold: true }, null],
+      ['PUBLISHED', {}, 'takenDown'], ['RESERVED', {}, 'cancelledRequest']] as const) {
+      const source = await create(), frozen = await frozenReference(source.id, state, options);
+      if (stale === 'takenDown') await pool.query('UPDATE publishes SET taken_down_at=now() WHERE id=$1', [frozen.publishId]);
+      if (stale === 'cancelledRequest') await pool.query(`UPDATE schedule_requests SET status='CANCELLED' WHERE id=$1`, [frozen.requestId]);
+      await expect(assertTargetCanBeDeleted(fixture.db!, { kind: 'SCREEN', id: frozen.screen })).resolves.toBeUndefined();
+      await expect(assertTargetCanBeDeleted(fixture.db!, { kind: 'GROUP', id: frozen.group, memberScreenIds: [] })).resolves.toBeUndefined();
+      expect((await new MediaRepository().getUsageSummary(frozen.media, fixture.db!)).inUse).toBe(false);
+      const deleted = await invoke(owner, 'DELETE', `${route}/${source.id}`, { expected_revision: 1 });
+      expect(deleted.statusCode, deleted.body).toBe(200);
+      expect((await pool.query('SELECT id FROM live_schedule_occurrences WHERE id=$1', [frozen.occurrence])).rowCount).toBe(1);
+    }
+  });
+
+  it('delivers only the frozen approved artifact from real normalized rows despite mutable library changes', async () => {
+    const source = await create(), frozen = await frozenReference(source.id, 'PUBLISHED');
+    const sign = vi.fn(async () => 'https://configured-gateway.example.test/frozen?signature=synthetic');
+    const options = { publishId: frozen.publishId, screenId: frozen.screen, scheduleId: frozen.item.live_policy.schedule_id,
+      includeUrls: true, db: fixture.db! };
+    await pool.query(`UPDATE media SET deleted_at=now(),ready_object_id=NULL,name='Changed library record' WHERE id=$1`, [frozen.media]);
+    const output = await hydrateLiveFallbackItems([frozen.item], options, { sign });
+    expect(output).toMatchObject([{ source_kind: 'LIVE', live_fallback_download_status: 'AVAILABLE', live_fallback_downloads: [
+      { asset_id: frozen.media, cache_key: frozen.item.live_policy.fallback.manifest.assets[0].cache_key,
+        sha256: frozen.item.live_policy.fallback.manifest.assets[0].sha256 } ] }]);
+    expect(sign).toHaveBeenCalledWith('synthetic-ready', frozen.item.live_policy.fallback.manifest.assets[0].object_key,
+      expect.objectContaining({ audience: 'device' }));
+    expect(await hydrateLiveFallbackItems([frozen.item], { ...options, screenId: randomUUID() }, { sign })).toEqual([]);
+    await pool.query(`UPDATE publishes SET status='TAKEN_DOWN',taken_down_at=now() WHERE id=$1`, [frozen.publishId]);
+    expect(await hydrateLiveFallbackItems([frozen.item], options, { sign })).toEqual([]);
+  });
+
+  it('denies every touched CMS target read before media signing when the current user has no read grants', async () => {
+    const source = await create(), frozen = await frozenReference(source.id, 'PUBLISHED');
+    const reader = await makeUser('NO_DISPLAY_READ', [], null);
+    const paths = ['', '/status', '/now-playing?include_urls=true&include_preview=true', '/availability', '/snapshot?include_urls=true']
+      .map(suffix => `/api/v1/screens/${frozen.screen}${suffix}`)
+      .concat(['', '/now-playing', '/availability', '/snapshot?include_urls=true'].map(suffix => `/api/v1/screen-groups/${frozen.group}${suffix}`));
+    for (const path of paths) {
+      fixture.sign.mockClear();
+      const response = await invoke(reader, 'GET', path);
+      expect(response.statusCode, `${path}: ${response.body}`).toBe(403);
+      expect(fixture.sign).not.toHaveBeenCalled(); expect(response.body).not.toContain(frozen.item.live_policy.fallback.manifest.assets[0].object_key);
+    }
+  });
+
+  it('binds conditional CMS Screen/ScreenGroup reads to the actual record before signing or preview', async () => {
+    const source = await create(), own = await frozenReference(source.id, 'PUBLISHED'), foreign = await frozenReference(source.id, 'PUBLISHED');
+    await pool.query(`INSERT INTO publish_targets(publish_id,screen_group_id) VALUES($1,$2),($3,$4)`, [own.publishId, own.group, foreign.publishId, foreign.group]);
+    const reader = await makeUser('OWN_DISPLAY_READ', [{ action: 'read', subject: 'Screen', conditions: { id: own.screen } },
+      { action: 'read', subject: 'ScreenGroup', conditions: { id: own.group } }], null);
+    const screenSuffixes = ['', '/status', '/now-playing?include_urls=true&include_preview=true', '/availability', '/snapshot?include_urls=true'];
+    const groupSuffixes = ['', '/now-playing', '/availability', '/snapshot?include_urls=true'];
+    for (const path of screenSuffixes.map(suffix => `/api/v1/screens/${foreign.screen}${suffix}`)
+      .concat(groupSuffixes.map(suffix => `/api/v1/screen-groups/${foreign.group}${suffix}`))) {
+      fixture.sign.mockClear(); const response = await invoke(reader, 'GET', path);
+      expect(response.statusCode, `${path}: ${response.body}`).toBe(403); expect(fixture.sign).not.toHaveBeenCalled();
+    }
+    for (const path of screenSuffixes.map(suffix => `/api/v1/screens/${own.screen}${suffix}`)
+      .concat(groupSuffixes.map(suffix => `/api/v1/screen-groups/${own.group}${suffix}`))) {
+      fixture.sign.mockClear(); const response = await invoke(reader, 'GET', path);
+      expect(response.statusCode, `${path}: ${response.body}`).toBe(200);
+      expect(response.body).not.toContain(foreign.item.live_policy.fallback.manifest.assets[0].sha256);
+      for (const call of fixture.sign.mock.calls) expect(call[1]).toBe(own.item.live_policy.fallback.manifest.assets[0].object_key);
+    }
+  });
+
+  it('rejects a foreign conditional CMS token through the device snapshot bearer fallback', async () => {
+    const source = await create(), own = await frozenReference(source.id, 'PUBLISHED'), foreign = await frozenReference(source.id, 'PUBLISHED');
+    const reader = await makeUser('DEVICE_BEARER_SCOPED_READER', [{ action: 'read', subject: 'Screen', conditions: { id: own.screen } }], null);
+    fixture.sign.mockClear();
+    const denied = await invoke(reader, 'GET', `/api/v1/device/${foreign.screen}/snapshot?include_urls=true`);
+    expect(denied.statusCode, denied.body).toBe(403); expect(fixture.sign).not.toHaveBeenCalled();
+    const allowed = await invoke(reader, 'GET', `/api/v1/device/${own.screen}/snapshot?include_urls=true`);
+    expect(allowed.statusCode, allowed.body).toBe(200);
+    expect(allowed.json().snapshot.schedule.items[0]).toMatchObject({ id: own.item.id, live_fallback_download_status: 'AVAILABLE' });
+  });
+
+  it('keeps genuine signed device snapshot access independent of CMS Screen permissions', async () => {
+    const source = await create(), frozen = await frozenReference(source.id, 'PUBLISHED');
+    const pair = generateKeyPairSync('rsa', { modulusLength: 2048 }), serial = randomUUID();
+    await pool.query(`INSERT INTO device_certificates(screen_id,serial,certificate_pem,public_key_pem,auth_version,expires_at)
+      VALUES($1,$2,'Synthetic approved device fixture',$3,'v1',now()+interval '1 day')`,
+    [frozen.screen, serial, pair.publicKey.export({ type: 'spki', format: 'pem' }).toString()]);
+    const url = `/api/v1/device/${frozen.screen}/snapshot?include_urls=true`, timestamp = String(Date.now());
+    const signer = createSign('RSA-SHA256'); signer.update(buildDeviceRequestSignaturePayload({ method: 'GET', url, deviceId: frozen.screen, timestamp })); signer.end();
+    const response = await server.inject({ method: 'GET', url, headers: { 'x-device-serial': serial, 'x-device-auth-version': 'v1',
+      'x-device-timestamp': timestamp, 'x-device-signature': signer.sign(pair.privateKey, 'base64') } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().snapshot.schedule.items[0]).toMatchObject({ id: frozen.item.id, live_fallback_download_status: 'AVAILABLE' });
   });
 
   it('uses current account/session/department/permissions rather than stale claims', async () => {

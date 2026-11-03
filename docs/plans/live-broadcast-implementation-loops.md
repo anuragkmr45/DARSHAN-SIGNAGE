@@ -1,6 +1,6 @@
 # Live broadcast implementation and verification loops
 
-Status: **IN PROGRESS — not implemented or release-approved.**
+Status: **IN PROGRESS — partial source/publication implementation verified; not feature-complete or release-approved.**
 
 Accepted objective: user-supplied persistent-goal attachment, 2026-11-03.
 Contract: [live broadcasting](../contracts/live-broadcast.md).
@@ -44,7 +44,7 @@ message. Do not push or merge a partially verified feature packet as complete.
 | --- | --- | --- |
 | 0 — Establish baseline | Record source/dependency/runtime versions, ports, health, baseline failures, resources and isolated profiles; prepare image/PDF/video fallback fixtures. | Open current CMS, pair real player, publish ordinary content, trigger/clear emergency and characterize the existing security/offline policy. Preserve existing users, pairings, DBs and runtime folders. |
 | 1 — Prove capture and enforcement | Developer-only presenter/receiver prototype to prove the media gate; candidate self-hosted LiveKit adapter; single-use signaling admission; media controller, supervisor and host watchdog; trusted local CMS HTTPS. | Real screen/window/tab capture, preview, cancellation/denial, optional audio, Stop sharing, background/minimized presenter, late picker return, duplicate tab/ticket replay, revocation and already flowing media removal. |
-| 2 — Schedule and reserve | Live source with required fallback; session/run records; frozen per-item concrete audience; approval fingerprint; ten logical capacity slots; reference/deletion guards; request/direct-publish parity. | CMS submission/approval/publication, same-size group member replacement, 25/26 targets, 10/11 overlapping runs, deduplicated targets, stale approval, unsupported players and concurrent reservations. |
+| 2 — Schedule and reserve | Live source with required fallback; reusable source/scheduled occurrence records; frozen per-item concrete audience and authored groups; approval fingerprint; ten logical capacity slots; reference/deletion guards; request/direct-publish parity. | CMS submission/approval/publication, same-size group member replacement, 25/26 targets, 10/11 overlapping runs, deduplicated targets, stale approval, unsupported players and concurrent reservations. |
 | 3 — Authority and recovery | Idempotent start/stop; admission/run generations; ordered observations; durable operations and reconciliation; current permission locking; live desired-state version everywhere; authenticated external authority epoch. | Lost responses/retries, presenter membership/permission revocation, old cleanup, API/controller/SFU restart, missed notifications, isolated older-state restore and replacement-run fencing. |
 | 4 — Player lifecycle | Integrate the scheduled live event/media source into the same ordinary installed DARSHAN player and its normal pairing/snapshot/cache/emergency lifecycle; main-owned live state/deadlines; restricted IPC; deterministic renderer/audio disposal; fallback prefetch/checksum/pinning; conservative monotonic lease; suspend/resume invalidation; credentials excluded from cache. | Live/fallback/recovery, emergency clear, end boundary, backend loss, revoked identity, missing/corrupt fallback, full cache, renderer crash/hang, static slide, display changes and late callbacks. |
 | 5 — CMS options | Live authoring, presenter/fallback selection, preflight/review, capture/audio controls, start/stop/restart/admin disable/re-enable; separate connection/frame/audio/readiness/freshness states. | Every visible control in independent administrator/presenter sessions: stale dialogs, double click, second tab, reload/logout, custom roles/multiple departments, denied controls and audio failures. |
@@ -59,8 +59,9 @@ building the complete workflow, not weakening the accepted cutoff.
 
 ### Source checkpoints for the scheduling/authority loops
 
-The November 3 source audit found these integration constraints. These are
-implementation checkpoints, not completed behavior:
+The initial November 3 source audit found the integration constraints below.
+They remain the review checklist; the later publication packet has implemented
+and boundedly verified several of them, as recorded in the current checkpoint.
 
 - Schedule-item input is validated independently in `routes/schedules.ts` and
   `schemas/schedule.ts`; align both and repository create/list serialization.
@@ -92,6 +93,26 @@ implementation checkpoints, not completed behavior:
 - Keep admission tickets outside persisted snapshots. Extend the ordinary
   main-process state machine and snapshot evaluator; the development dispatcher
   and receiver alone do not implement scheduled playback in the installed app.
+
+### Current scheduling/publication checkpoint
+
+On baseline `339954b` plus the publication/authorization working-tree packet,
+source CRUD/authoring and asynchronous immutable fallback preparation feed
+live preflight, direct publication and stored request approval. Actual isolated
+HTTP services passed 55 supporting checks, including 15 SHA-verified image/PDF/
+video downloads, frozen group history after membership replacement, deletion
+rejection without changes, request phase parity, retry identity and takedown.
+Database/Fastify checks cover current conditional/inherited read permissions,
+stale policy and capacity; the normal-player live capability is still withheld.
+
+Actual browser source create/view/audio-policy edit, service-restart Retry and
+same-admin two-tab stale-revision recovery are recorded separately. The CMS
+source page is not the scheduled-live publishing wizard or presenter workflow.
+Run/admission/epoch authority, same-player coordination/rendering, complete CMS
+controls and six-VM packaging remain open. No loop is closed by these supporting
+checks, and all human `LIVE-01..20` cases remain Not Tested. See the
+[packet evidence](../../qa-artifacts/evidence/live-publication-authorization-developer-verification-2026-11-03.md)
+for final build/evidence binding and remaining verification.
 
 ## Runtime and fault verification
 

@@ -4,7 +4,7 @@ import { desc, eq } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import { AppError } from '@/utils/app-error';
 import { extractTokenFromHeader, verifyAccessToken } from '@/auth/jwt';
-import { defineAbilityFor } from '@/rbac';
+import { readAuthorizedScreenForIdentity } from '@/services/screen-read-authorization';
 import { createLogger } from '@/utils/logger';
 import { recordDeviceAuthAttempt } from '@/observability/metrics';
 import { recordDeviceAuthRolloutObservation } from '@/deployment/device-auth-rollout';
@@ -207,10 +207,7 @@ export async function authenticateDeviceOrThrow(
       }
       try {
         const payload = await verifyAccessToken(bearerToken);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) {
-          throw AppError.forbidden('Forbidden');
-        }
+        await readAuthorizedScreenForIdentity(payload, deviceId);
         request.device = {
           id: deviceId,
           authType: 'user',

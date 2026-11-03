@@ -1,4 +1,4 @@
-import { configureStore } from "@reduxjs/toolkit";
+import { configureStore, type Middleware } from "@reduxjs/toolkit";
 import {
   persistReducer,
   persistStore,
@@ -13,7 +13,7 @@ import storageSession from "redux-persist/lib/storage/session";
 import { rootReducer } from "./rootReducer";
 import { apiClient } from "@/api/apiClient";
 import { getCookie } from "@/lib/cookies";
-import { clearAuth, setCredentials } from "./authSlice";
+import { clearAuth, refreshAuthToken, setApiKey, setCredentials } from "./authSlice";
 
 const createNoopStorage = () => ({
   getItem: async () => null,
@@ -42,6 +42,18 @@ const persistConfig = {
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
 
+const isolateApiSession: Middleware = () => (next) => (action) => {
+  if (
+    setCredentials.match(action) || clearAuth.match(action) || setApiKey.match(action) ||
+    (typeof action === "object" && action !== null && "type" in action && action.type === REHYDRATE)
+  ) {
+    // Invalidate before Redux subscribers can issue requests for the new
+    // identity. TanStack cache clearing cannot fence this client's own GETs.
+    apiClient.invalidateSession();
+  }
+  return next(action);
+};
+
 export const store = configureStore({
   reducer: persistedReducer,
   middleware: (getDefaultMiddleware) =>
@@ -49,7 +61,7 @@ export const store = configureStore({
       serializableCheck: {
         ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
       },
-    }),
+    }).prepend(isolateApiSession),
 });
 
 export const persistor = persistStore(store);
@@ -62,10 +74,8 @@ apiClient.setCsrfTokenProvider(
 apiClient.setRefreshedAuthHandler(({ token }) => {
   const current = store.getState().auth;
   store.dispatch(
-    setCredentials({
+    refreshAuthToken({
       token,
-      user: current.user ?? undefined,
-      apiKey: current.apiKey,
       csrfToken: current.csrfToken ?? getCookie("csrf_token") ?? undefined,
     }),
   );

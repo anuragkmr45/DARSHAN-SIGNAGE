@@ -1,3 +1,5 @@
+import { hydrateLiveFallbackItems, liveFallbackDeliveryRevision } from '@/services/live-fallback-delivery';
+import { isLiveSnapshotCandidate } from '@/screens/live-snapshot-audience';
 import { createHash, randomUUID } from 'crypto';
 import { eq, inArray } from 'drizzle-orm';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -24,6 +26,7 @@ import {
 import {
   getActiveEmergencyForScreen as getActiveEmergencyForRuntime,
   getLatestPublishForScreen,
+  filterItemsForScreen as filterPublishedItemsForScreen,
 } from '@/screens/playback';
 import { queueHeartbeatTelemetry, queueProofOfPlayTelemetry, queueScreenshotTelemetry } from '@/jobs';
 import {
@@ -481,16 +484,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
     return rows.map((r) => r.group_id);
   };
 
-  const filterItemsForScreen = (items: any[], screenId: string, groupIds: string[]) => {
-    return items.filter((i) => {
-      const itemScreens = (i.screen_ids || []) as string[];
-      const itemGroups = (i.screen_group_ids || []) as string[];
-      const hasTargets = (itemScreens && itemScreens.length > 0) || (itemGroups && itemGroups.length > 0);
-      if (!hasTargets) return true;
-      if (itemScreens.includes(screenId)) return true;
-      return itemGroups.some((gid) => groupIds.includes(gid));
-    });
-  };
+  const filterItemsForScreen = filterPublishedItemsForScreen;
 
   const serializeResolvedDefaultMedia = async (
     resolvedDefaultMedia: Awaited<ReturnType<typeof resolveDefaultMediaForScreen>>,
@@ -746,7 +740,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
               .from(schema.media)
               .where(inArray(schema.media.id, Array.from(representationMediaIds) as any))
           : [];
-        const representationRevision = createHash('sha256')
+        let representationRevision = createHash('sha256')
           .update(JSON.stringify({
             snapshot_id: latest?.snapshot_id ?? null,
             reservation_version: (latest as any)?.reservation_version ?? null,
@@ -767,6 +761,14 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
             include_urls: includeUrls,
           }))
           .digest('hex');
+        const schedule = rawPayload.schedule || {};
+        const filteredItems = latest ? await hydrateLiveFallbackItems(
+          filterItemsForScreen(schedule.items || [], deviceId, groupIds, { scheduleId: schedule.id }),
+          { publishId: latest.publish_id, scheduleId: schedule.id, screenId: deviceId, includeUrls, db }
+        ) : [];
+        if (Array.isArray(schedule.items) && schedule.items.some(isLiveSnapshotCandidate)) {
+          representationRevision = liveFallbackDeliveryRevision(representationRevision, filteredItems);
+        }
         reply.header('ETag', `W/"${representationRevision}"`);
         if (ifNoneMatchValues.includes('*') || ifNoneMatchValues.includes(representationRevision)) {
           return reply.status(304).send();
@@ -787,8 +789,6 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           });
         }
 
-        const schedule = rawPayload.schedule || {};
-        const filteredItems = filterItemsForScreen(schedule.items || [], deviceId, groupIds);
         let filteredSnapshot = {
           ...rawPayload,
           schedule: { ...schedule, items: filteredItems },

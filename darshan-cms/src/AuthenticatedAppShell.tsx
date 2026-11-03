@@ -25,6 +25,7 @@ const Users = lazy(() => import("./pages/Users"));
 const Layouts = lazy(() => import("./pages/Layouts"));
 const LayoutEditor = lazy(() => import("./pages/LayoutEditor"));
 const Notifications = lazy(() => import("./pages/Notifications"));
+const LiveBroadcasts = lazy(() => import("./pages/LiveBroadcasts"));
 
 const RouteLoadingFallback = () => (
   <div aria-busy="true" aria-live="polite" className="flex min-h-[12rem] items-center justify-center text-sm text-muted-foreground" role="status">
@@ -50,6 +51,7 @@ export default function AuthenticatedAppShell() {
                   <Route path="/dashboard" element={<ProtectedRoute moduleKey="dashboard"><Dashboard /></ProtectedRoute>} />
                   <Route path="/schedule" element={<ProtectedRoute moduleKey="schedule"><ScheduleQueue /></ProtectedRoute>} />
                   <Route path="/schedule/new" element={<ProtectedRoute moduleKey="schedule"><ScheduleCreator /></ProtectedRoute>} />
+                  <Route path="/live-broadcasts" element={<ProtectedRoute moduleKey="live"><LiveBroadcasts /></ProtectedRoute>} />
                   <Route path="/layouts" element={<ProtectedRoute moduleKey="layouts"><Layouts /></ProtectedRoute>} />
                   <Route path="/layouts/new" element={<ProtectedRoute moduleKey="layouts"><LayoutEditor /></ProtectedRoute>} />
                   <Route path="/layouts/:id" element={<ProtectedRoute moduleKey="layouts"><LayoutEditor /></ProtectedRoute>} />

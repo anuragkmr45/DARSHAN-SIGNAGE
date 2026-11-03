@@ -192,6 +192,8 @@ export type FrozenLivePolicy = {
   live_session_id: string; presenter_user_id: string; policy_revision: number;
   microphone: boolean; screen_share_audio: boolean; start_at: string; end_at: string; priority: number;
   screen_ids: string[];
+  /** Frozen authored group references, including an explicit publication scope. */
+  screen_group_ids: string[];
   fallback: { preparation_id: string; source_fingerprint: string; manifest: FrozenFallbackManifest };
 };
 export type PreparedLiveItem = { policy: FrozenLivePolicy; item_fingerprint: string };
@@ -282,6 +284,12 @@ export async function prepareLiveSchedule(context: MutationAuthorizationContext,
     windows.set(item.id, new Set([...(windows.get(item.id) ?? [])].filter(id => explicitScope.has(id))));
   }
   const targetIds = [...new Set(items.flatMap(item => [...(windows.get(item.id) ?? [])]))].sort();
+  const groupIds = [...new Set(items.flatMap(item => [...(item.screen_group_ids ?? []) as string[], ...(params.explicitScreenGroupIds ?? [])]))].sort();
+  const groups = groupIds.length ? await context.executor.select().from(schema.screenGroups)
+    .where(inArray(schema.screenGroups.id, groupIds)).orderBy(asc(schema.screenGroups.id)).for('share') : [];
+  if (groups.length !== groupIds.length) fail('LIVE_TARGET_UNAVAILABLE', 'A selected screen group is no longer available.', 422,
+    { missing_group_count: groupIds.length - groups.length });
+  if (groups.some(group => !context.ability.can('read', subject('ScreenGroup', group) as never))) throw AppError.forbidden();
   const screens = targetIds.length ? await context.executor.select().from(schema.screens).where(inArray(schema.screens.id, targetIds)).orderBy(asc(schema.screens.id)).for('share') : [];
   if (screens.length !== targetIds.length) fail('LIVE_TARGET_UNAVAILABLE', 'A selected target screen is no longer available.', 422, { missing_count: targetIds.length - screens.length });
   const screenMap = new Map(screens.map(row => [row.id, row]));
@@ -304,6 +312,7 @@ export async function prepareLiveSchedule(context: MutationAuthorizationContext,
       schedule_revision: resolved.schedule.revision, live_session_id: session.id, presenter_user_id: session.presenter_user_id,
       policy_revision: session.policy_revision, microphone: session.microphone, screen_share_audio: session.screen_share_audio,
       start_at: item.start_at.toISOString(), end_at: item.end_at.toISOString(), priority: item.priority, screen_ids: audience,
+      screen_group_ids: [...new Set([...(item.screen_group_ids ?? []) as string[], ...(params.explicitScreenGroupIds ?? [])])].sort(),
       fallback: { preparation_id: fallback.preparation.id, source_fingerprint: fallback.preparation.source_fingerprint, manifest: fallback.manifest } };
     prepared.items.push({ policy, item_fingerprint: liveSchedulingFingerprint(policy) });
   }

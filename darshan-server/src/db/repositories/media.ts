@@ -2,6 +2,7 @@ import { eq, and, desc, inArray, isNull, sql } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import type { ActorContext } from '@/rbac/policy';
 import { contentReadCondition, type ContentAbility, type ContentOwnerScope } from '@/rbac/content-ownership';
+import { activeLiveOccurrenceReference } from '@/services/live-reference-guards';
 import {
   DEFAULT_MEDIA_SETTING_KEY,
   DEFAULT_MEDIA_TARGETS_SETTING_KEY,
@@ -15,6 +16,7 @@ export type MediaUsageReference =
   | 'screens'
   | 'emergencies'
   | 'settings'
+  | 'live_fallbacks'
   | 'proof_of_play';
 
 export type MediaUsageSummary = {
@@ -137,12 +139,16 @@ export class MediaRepository {
     const emergency = await db.select({ id: schema.emergencies.id }).from(schema.emergencies).where(eq(schema.emergencies.media_id, id)).limit(1);
     const emergencyType = await db.select({ id: schema.emergencyTypes.id }).from(schema.emergencyTypes).where(eq(schema.emergencyTypes.media_id, id)).limit(1);
     const proofOfPlay = await db.select({ id: schema.proofOfPlay.id }).from(schema.proofOfPlay).where(eq(schema.proofOfPlay.media_id, id)).limit(1);
+    const liveFallback = await db.select({ id: schema.liveScheduleOccurrences.id }).from(schema.liveOccurrenceAssets)
+      .innerJoin(schema.liveScheduleOccurrences, eq(schema.liveOccurrenceAssets.occurrence_id, schema.liveScheduleOccurrences.id))
+      .where(and(eq(schema.liveOccurrenceAssets.media_id, id), activeLiveOccurrenceReference())).limit(1);
     const defaultMediaSetting = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_SETTING_KEY)).limit(1);
     const defaultMediaVariantsSetting = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_VARIANTS_SETTING_KEY)).limit(1);
     const defaultMediaTargetsSetting = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, DEFAULT_MEDIA_TARGETS_SETTING_KEY)).limit(1);
     const brandingSetting = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, 'org.branding')).limit(1);
 
     const references: MediaUsageReference[] = [];
+    if (liveFallback.length) references.push('live_fallbacks');
 
     if (chatAttachment.length > 0) {
       references.push('chat_attachments');

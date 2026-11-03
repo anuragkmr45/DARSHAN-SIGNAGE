@@ -11,6 +11,7 @@ import {
   HelpCircle,
   PanelsTopLeft,
   BellRing,
+  Radio,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -84,6 +85,7 @@ const navSections: NavSection[] = [
         icon: PanelsTopLeft,
         moduleKey: "layouts",
       },
+      { title: "Live broadcasts", url: "/live-broadcasts", icon: Radio, moduleKey: "live" },
     ],
   },
   {

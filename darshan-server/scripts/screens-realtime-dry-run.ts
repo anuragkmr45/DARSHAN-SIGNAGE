@@ -208,6 +208,9 @@ async function run() {
     const adminRole = await ensureRole('ADMIN', [
       { action: 'read', subject: 'Screen' },
       { action: 'delete', subject: 'Screen' },
+      // This fixture triggers/clears an emergency using restricted media.
+      { action: 'manage', subject: 'Emergency' },
+      { action: 'manage', subject: 'Media' },
     ]);
     const adminUser = await createUser(`screens-dry-run-${Date.now()}@example.com`, adminRole.id);
     const adminToken = await issueToken(adminUser, adminRole);

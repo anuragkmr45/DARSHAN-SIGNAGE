@@ -203,6 +203,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     emergencies: 'Media cannot be deleted because it is used by emergency content.',
     settings: 'Media cannot be deleted because it is configured as the default media.',
     proof_of_play: 'Media cannot be deleted because it is referenced by playback history.',
+    live_fallbacks: 'Media cannot be deleted because an approved current or future live occurrence uses it as fallback content.',
   };
 
   const resolveApiStatus = (

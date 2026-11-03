@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDatabase, schema } from '@/db';
 import type { ActorContext } from '@/rbac/policy';
-import { contentReadCondition, type ContentAbility } from '@/rbac/content-ownership';
+import { type ContentAbility } from '@/rbac/content-ownership';
+import { scheduleRequestReadCondition } from '@/rbac/schedule-read-authorization';
 
 type ScheduleRequestStatus = (typeof schema.scheduleRequestStatusEnum.enumValues)[number];
 type ScheduleRequestStatusFilter = ScheduleRequestStatus;
@@ -158,15 +159,7 @@ export class ScheduleRequestRepository {
       conditions.push(inArray(schema.scheduleRequests.requested_by, options.requested_by_ids as any));
     }
     if (options.actor) {
-      const scheduleAccess = contentReadCondition(options.actor, schema.schedules, options.ability, 'Schedule');
-      if (scheduleAccess) {
-        conditions.push(sql`EXISTS (
-          SELECT 1
-          FROM ${schema.schedules}
-          WHERE ${schema.schedules.id} = ${schema.scheduleRequests.schedule_id}
-            AND ${scheduleAccess}
-        )`);
-      }
+      conditions.push(scheduleRequestReadCondition(options.actor, options.ability));
     }
 
     const query = options.q?.trim();

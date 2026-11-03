@@ -84,6 +84,7 @@ export const apiEndpoints = {
     items: withBase('/schedules/:id/items'),
     item: withBase('/schedules/:id/items/:itemId'),
     displayPreflight: withBase('/schedules/display-preflight'),
+    livePreflight: withBase('/schedules/live-preflight'),
   },
   scheduleRequests: {
     create: withBase('/schedule-requests'),

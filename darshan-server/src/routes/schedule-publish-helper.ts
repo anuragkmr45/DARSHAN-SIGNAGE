@@ -1,5 +1,5 @@
-import { createHash } from 'crypto';
-import { inArray } from 'drizzle-orm';
+import { createHash, randomUUID } from 'crypto';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { getDatabase, schema, type DbExecutor } from '@/db';
 import { createScheduleRepository, ScheduleRepository } from '@/db/repositories/schedule';
 import { createScheduleItemRepository, ScheduleItemRepository } from '@/db/repositories/schedule-item';
@@ -8,8 +8,11 @@ import { serializeMediaRecord } from '@/utils/media';
 import { areAspectsCompatible, parseAspectRatio } from '@/utils/display-profile';
 import { normalizeVideoLoopEnabled } from '@/utils/video-loop';
 import { canReferenceContentResource, type ContentOwnedResource } from '@/rbac/content-ownership';
+import { assertPreparedLiveSchedule, type PreparedLiveSchedule } from '@/services/live-scheduling';
+import { readFrozenLiveSnapshotItem } from '@/screens/live-snapshot-audience';
 
 type DB = DbExecutor;
+let liveSnapshotSavepoint = 0;
 
 function normalizeCodecList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -206,6 +209,8 @@ export interface PublishScheduleParams {
   db?: DB;
   scheduleRepo?: ScheduleRepository;
   scheduleItemRepo?: ScheduleItemRepository;
+  /** Internal, transaction-bound approval. Never accepted from the HTTP body. */
+  preparedLive?: PreparedLiveSchedule;
   onPublished?: (context: {
     tx: DB;
     publish: typeof schema.publishes.$inferSelect;
@@ -245,11 +250,25 @@ export async function getScheduleDisplayPreflight(params: {
   };
   const targets = new Set<string>(params.screenIds || []);
   expandGroups(params.screenGroupIds || []).forEach((screenId) => targets.add(screenId));
+  const explicitScope = new Set(targets);
+  const hasExplicitScope = Boolean(params.screenIds?.length || params.screenGroupIds?.length);
   if (targets.size === 0) {
     scheduleItems.forEach((item: any) => {
       (item.screen_ids || []).forEach((screenId: string) => targets.add(screenId));
       expandGroups(item.screen_group_ids || []).forEach((screenId) => targets.add(screenId));
     });
+  }
+  const itemTargets = new Map<string, Set<string>>();
+  for (const item of scheduleItems) {
+    let concrete = new Set<string>((item.screen_ids ?? []) as string[]);
+    expandGroups((item.screen_group_ids ?? []) as string[]).forEach(id => concrete.add(id));
+    if (!concrete.size) concrete = new Set(targets);
+    if (item.source_kind === 'LIVE' && hasExplicitScope) concrete = new Set([...concrete].filter(id => explicitScope.has(id)));
+    itemTargets.set(item.id, concrete);
+  }
+  if (scheduleItems.length && scheduleItems.every(item => item.source_kind === 'LIVE')) {
+    targets.clear();
+    for (const concrete of itemTargets.values()) concrete.forEach(id => targets.add(id));
   }
   const targetIds = Array.from(targets);
   if (targetIds.length === 0) return { target_screen_ids: [], issues: [], issue_hash: null, compatible: true };
@@ -280,11 +299,7 @@ export async function getScheduleDisplayPreflight(params: {
     const presentation = presentations.get(item.presentation_id);
     const layoutRatio = parseAspectRatio(presentation?.layout?.aspect_ratio);
     if (!layoutRatio) return;
-    const itemTargets = new Set<string>();
-    (item.screen_ids || []).forEach((screenId: string) => itemTargets.add(screenId));
-    expandGroups(item.screen_group_ids || []).forEach((screenId) => itemTargets.add(screenId));
-    if (itemTargets.size === 0) targetIds.forEach((screenId) => itemTargets.add(screenId));
-    itemTargets.forEach((screenId) => {
+    itemTargets.get(item.id)!.forEach((screenId) => {
       const actual = aspectForScreen(screenId);
       if (actual !== null && !areAspectsCompatible(layoutRatio, actual)) {
         issues.push({
@@ -317,13 +332,24 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
   if (scheduleItems.length === 0) {
     throw AppError.badRequest('Cannot publish a schedule without schedule items');
   }
-  // A live item must never silently become an ordinary fallback-only publish.
-  // The live scheduling transaction will supply its frozen approval before the
-  // full live publication path is enabled.
-  if (scheduleItems.some(item => item.source_kind === 'LIVE')) {
+  const liveItems = scheduleItems.filter(item => item.source_kind === 'LIVE');
+  if (liveItems.length && (!params.preparedLive || !params.onPublished)) {
     throw new AppError({ statusCode: 409, code: 'LIVE_APPROVAL_REQUIRED',
       message: 'Live publication requires a verified fallback and frozen live approval.' });
   }
+  if (params.preparedLive) {
+    assertPreparedLiveSchedule(db, params.preparedLive);
+    if (params.preparedLive.schedule_id !== schedule.id || params.preparedLive.schedule_revision !== schedule.revision ||
+        params.preparedLive.items.length !== liveItems.length || liveItems.some(item =>
+          !params.preparedLive!.items.some(prepared => prepared.policy.schedule_item_id === item.id &&
+            prepared.policy.live_session_id === item.live_session_id && prepared.policy.fallback.manifest.presentation.id === item.presentation_id))) {
+      throw new AppError({ statusCode: 409, code: 'LIVE_APPROVAL_STALE', message: 'The approved live items no longer match this schedule.' });
+    }
+  }
+  // Own the serialization copy; a late internal callback cannot mutate the
+  // approved snapshot through a reference held by a caller.
+  const livePolicies = new Map((params.preparedLive?.items ?? []).map(item =>
+    [item.policy.schedule_item_id, structuredClone(item.policy)]));
   const presMap = await resolvePresentations(scheduleItems.map((i: any) => i.presentation_id), db);
 
   const missingPresentationIds = Array.from(
@@ -502,6 +528,21 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
     itemDerivedScreens.forEach((sid) => resolvedScreenIds.add(sid));
   }
 
+  if (liveItems.length === scheduleItems.length) {
+    // A broad explicit scope may contain screens outside all approved item
+    // audiences. Do not deliver an empty replacement publish to those screens.
+    resolvedScreenIds.clear();
+    for (const policy of livePolicies.values()) for (const screenId of policy.screen_ids) resolvedScreenIds.add(screenId);
+  }
+
+  const targetsForItem = (item: typeof schema.scheduleItems.$inferSelect) => {
+    if (item.source_kind === 'LIVE') return new Set(livePolicies.get(item.id)!.screen_ids);
+    const targets = new Set<string>((item.screen_ids ?? []) as string[]);
+    resolveGroupScreens((item.screen_group_ids ?? []) as string[]).forEach(id => targets.add(id));
+    if (!targets.size) resolvedScreenIds.forEach(id => targets.add(id));
+    return targets;
+  };
+
   if (resolvedScreenIds.size === 0) {
     throw AppError.badRequest('No target screens found for publish');
   }
@@ -539,15 +580,13 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
   }> = [];
 
   scheduleItems.forEach((item: any) => {
-    const targetedScreens = new Set<string>();
-    (item.screen_ids || []).forEach((screenId: string) => targetedScreens.add(screenId));
-    resolveGroupScreens(item.screen_group_ids || []).forEach((screenId) => targetedScreens.add(screenId));
-    if (targetedScreens.size === 0) {
-      resolvedScreenIds.forEach((screenId) => targetedScreens.add(screenId));
-    }
+    const targetedScreens = targetsForItem(item);
 
     const presentation = presMap.get(item.presentation_id);
-    const presentationMedia = [
+    const presentationMedia = item.source_kind === 'LIVE'
+      ? livePolicies.get(item.id)!.fallback.manifest.assets.map(asset => ({ id: asset.media_id,
+        name: `Approved ${asset.render_type} fallback`, source_content_type: asset.content_type }))
+      : [
       ...((presentation?.items || []) as any[]),
       ...((presentation?.slots || []) as any[]),
     ]
@@ -593,12 +632,14 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
     requested_page: number;
   }> = [];
   scheduleItems.forEach((item: any) => {
-    const targetedScreens = new Set<string>();
-    (item.screen_ids || []).forEach((screenId: string) => targetedScreens.add(screenId));
-    resolveGroupScreens(item.screen_group_ids || []).forEach((screenId) => targetedScreens.add(screenId));
-    if (targetedScreens.size === 0) resolvedScreenIds.forEach((screenId) => targetedScreens.add(screenId));
+    const targetedScreens = targetsForItem(item);
     const presentation = presMap.get(item.presentation_id);
-    const pageItems = [
+    const fallback = livePolicies.get(item.id)?.fallback.manifest;
+    const fallbackAssets = new Map(fallback?.assets.map(asset => [asset.id, asset]));
+    const pageItems = fallback
+      ? fallback.presentation.items.filter(entry => fallbackAssets.get(entry.asset_id)?.render_type === 'pdf' && (entry.page_number ?? 1) > 1)
+        .map(entry => ({ page_number: entry.page_number!, media_id: fallbackAssets.get(entry.asset_id)!.media_id }))
+      : [
       ...((presentation?.items || []) as any[]),
       ...((presentation?.slots || []) as any[]),
     ].filter((entry) => entry?.media?.type === 'DOCUMENT' && (entry.page_number ?? 1) > 1);
@@ -659,19 +700,17 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
   }> = [];
   scheduleItems.forEach((item: any) => {
     const presentation = presMap.get(item.presentation_id);
-    const layoutRatio = parseAspectRatio(presentation?.layout?.aspect_ratio);
+    const approvedLayout = livePolicies.get(item.id)?.fallback.manifest.presentation.layout;
+    const layoutRatio = parseAspectRatio(item.source_kind === 'LIVE' ? approvedLayout?.aspect_ratio : presentation?.layout?.aspect_ratio);
     if (!layoutRatio) return;
-    const targets = new Set<string>();
-    (item.screen_ids || []).forEach((screenId: string) => targets.add(screenId));
-    resolveGroupScreens(item.screen_group_ids || []).forEach((screenId) => targets.add(screenId));
-    if (targets.size === 0) resolvedScreenIds.forEach((screenId) => targets.add(screenId));
+    const targets = targetsForItem(item);
     targets.forEach((screenId) => {
       const actual = screenAspect(screenId);
       if (actual !== null && !areAspectsCompatible(layoutRatio, actual)) {
         aspectIssues.push({
           screen_id: screenId,
           presentation_id: presentation.id,
-          layout_aspect_ratio: presentation.layout.aspect_ratio,
+          layout_aspect_ratio: (item.source_kind === 'LIVE' ? approvedLayout!.aspect_ratio : presentation.layout.aspect_ratio),
           screen_aspect_ratio: actual,
           usable_area_fraction: Math.min(layoutRatio / actual, actual / layoutRatio),
           profile_revision: displayByScreenId.get(screenId)?.profile_revision ?? null,
@@ -694,7 +733,9 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
   }
 
   const publishedAt = new Date().toISOString();
+  const publishId = randomUUID();
   const snapshotPayload = {
+    publish_id: publishId,
     schedule: {
       id: schedule.id,
       name: schedule.name,
@@ -705,9 +746,22 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
       is_active: schedule.is_active,
       items: scheduleItems.map((i: any) => {
         const pres = presMap.get(i.presentation_id);
+        const live = livePolicies.get(i.id);
+        if (live) {
+          const frozen = readFrozenLiveSnapshotItem({
+            id: i.id, presentation_id: i.presentation_id, source_kind: 'LIVE', live_session_id: i.live_session_id,
+            start_at: live.start_at, end_at: live.end_at, priority: live.priority,
+            screen_ids: i.screen_ids || [], screen_group_ids: [...live.screen_group_ids],
+            resolved_screen_ids: [...live.screen_ids], live_policy: live, presentation: null,
+          }, { scheduleId: schedule.id });
+          if (!frozen) throw new AppError({ statusCode: 422, code: 'LIVE_APPROVAL_INVALID',
+            message: 'The approved live policy cannot form a valid immutable snapshot.' });
+          return frozen;
+        }
         return {
           id: i.id,
           presentation_id: i.presentation_id,
+          source_kind: 'PRESENTATION',
           start_at: i.start_at.toISOString?.() ?? i.start_at,
           end_at: i.end_at.toISOString?.() ?? i.end_at,
           priority: i.priority,
@@ -753,15 +807,22 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
   const targetRows: { screen_id?: string; screen_group_id?: string; resolved_screen_ids?: string[] }[] = [];
   const seenScreens = new Set<string>();
 
-  (params.screenGroupIds || []).forEach((gid) =>
-    targetRows.push({
-      screen_group_id: gid,
-      resolved_screen_ids: [...(groupMemberMap.get(gid) || [])],
-    })
-  );
+  const targetGroupIds = new Set(params.screenGroupIds ?? []);
+  for (const policy of livePolicies.values()) policy.screen_group_ids.forEach(id => targetGroupIds.add(id));
+  for (const gid of targetGroupIds) {
+    const members = new Set(groupMemberMap.get(gid) ?? []);
+    const concrete = new Set<string>();
+    const ordinaryGroupUse = scheduleItems.some(item => item.source_kind !== 'LIVE' &&
+      ((params.screenGroupIds ?? []).includes(gid) || ((item.screen_group_ids ?? []) as string[]).includes(gid)));
+    if (ordinaryGroupUse) members.forEach(id => { if (resolvedScreenIds.has(id)) concrete.add(id); });
+    for (const policy of livePolicies.values()) if (policy.screen_group_ids.includes(gid)) {
+      policy.screen_ids.forEach(id => { if (members.has(id)) concrete.add(id); });
+    }
+    targetRows.push({ screen_group_id: gid, resolved_screen_ids: [...concrete].sort() });
+  }
 
   resolveGroupScreens(params.screenGroupIds || []).forEach((sid) => {
-    if (!seenScreens.has(sid)) {
+    if (resolvedScreenIds.has(sid) && !seenScreens.has(sid)) {
       targetRows.push({ screen_id: sid });
       seenScreens.add(sid);
     }
@@ -774,7 +835,7 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
     }
   });
 
-  const transactionalResult = await db.transaction(async (tx) => {
+  const writeSnapshot = async (tx: DB) => {
     const [snapshot] = await tx
       .insert(schema.scheduleSnapshots)
       .values({
@@ -786,6 +847,7 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
     const [publish] = await tx
       .insert(schema.publishes)
       .values({
+        id: publishId,
         schedule_id: schedule.id,
         snapshot_id: snapshot.id,
         published_by: params.publishedBy,
@@ -815,9 +877,40 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
         resolvedScreenIds: Array.from(resolvedScreenIds),
       });
     }
+    if (liveItems.length) {
+      const occurrences = await tx.select().from(schema.liveScheduleOccurrences)
+        .where(eq(schema.liveScheduleOccurrences.publish_id, publish.id));
+      if (occurrences.length !== liveItems.length || occurrences.some(row => row.state !== 'PUBLISHED' ||
+          row.approval_fingerprint !== params.preparedLive!.fingerprint || !params.preparedLive!.items.some(item =>
+            item.policy.schedule_item_id === row.schedule_item_id && item.item_fingerprint === row.item_fingerprint &&
+            JSON.stringify(item.policy.screen_ids) === JSON.stringify(row.screen_ids)))) {
+        throw new AppError({ statusCode: 409, code: 'LIVE_RESERVATION_MISMATCH',
+          message: 'Live publication must own the exact approved screen and broadcast reservations.' });
+      }
+    }
 
     return { snapshot, publish };
-  });
+  };
+
+  let transactionalResult: Awaited<ReturnType<typeof writeSnapshot>>;
+  if (params.preparedLive) {
+    // Its authorization seal belongs to the caller's exact transaction, not a
+    // nested Drizzle savepoint object. A real SQL savepoint rejects accidental
+    // autocommit use and rolls back all snapshot/reservation writes together.
+    assertPreparedLiveSchedule(db, params.preparedLive);
+    const savepoint = `darshan_live_snapshot_${++liveSnapshotSavepoint}`;
+    await db.execute(sql.raw(`SAVEPOINT ${savepoint}`));
+    try {
+      transactionalResult = await writeSnapshot(db);
+      await db.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+    } catch (error) {
+      await db.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepoint}`));
+      await db.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+      throw error;
+    }
+  } else {
+    transactionalResult = await db.transaction(tx => writeSnapshot(tx as DB));
+  }
 
   return {
     publish: transactionalResult.publish,

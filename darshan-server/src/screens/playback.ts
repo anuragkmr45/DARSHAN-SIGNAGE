@@ -23,11 +23,15 @@ type ResolvedMediaRecord = Awaited<ReturnType<typeof buildResolvedMediaRecord>>;
 type ScreenshotPreview = Awaited<ReturnType<typeof getLatestScreenshotPreview>>;
 
 type PlaybackSource = 'HEARTBEAT' | 'SCHEDULE' | 'EMERGENCY' | 'DEFAULT' | 'UNKNOWN';
+import { filterFrozenAudienceItemsForScreen, readFrozenLiveAudienceItem, readFrozenLiveSnapshotItem } from './live-snapshot-audience';
+
 export type ScreenHealthState = 'ONLINE' | 'OFFLINE' | 'STALE' | 'ERROR' | 'RECOVERY_REQUIRED';
 export type EmergencyScopeMatch = 'GLOBAL' | 'GROUP' | 'SCREEN';
 
 export type ScreenScheduleTimelineItem = {
   id: string;
+  source_kind?: 'PRESENTATION' | 'LIVE';
+  live_session_id?: string | null;
   presentation_id: string | null;
   presentation_name: string | null;
   start_at: string;
@@ -45,6 +49,8 @@ export type ScreenPlaybackItemMediaSummary = {
 
 export type ScreenPlaybackItemSummary = {
   item_id: string;
+  source_kind?: 'PRESENTATION' | 'LIVE';
+  live_session_id?: string | null;
   start_at: string | null;
   end_at: string | null;
   presentation_id: string | null;
@@ -278,17 +284,22 @@ function normalizeActiveSlots(value: unknown): ActiveSlotPlaybackState[] {
 }
 
 export function buildScheduleItemSummary(item: any): ScreenPlaybackItemSummary {
+  const live = readFrozenLiveAudienceItem(item);
+  const prepared = live ? readFrozenLiveSnapshotItem(item)?.live_policy.fallback.manifest : null;
   const presentation = item?.presentation ?? null;
-  const layout = presentation?.layout ?? null;
+  const layout = prepared?.presentation.layout ?? presentation?.layout ?? null;
   const itemMedia = Array.isArray(presentation?.items) ? presentation.items : [];
   const slotMedia = Array.isArray(presentation?.slots) ? presentation.slots : [];
-  const media = dedupeScheduleItemMedia(
+  const media = prepared ? dedupeScheduleItemMedia(prepared.assets.map(asset => ({ id: asset.media_id, name: null,
+    type: asset.render_type === 'pdf' ? 'DOCUMENT' : asset.render_type === 'image' ? 'IMAGE' : 'VIDEO', thumbnail_url: null }))) : dedupeScheduleItemMedia(
     [...itemMedia, ...slotMedia]
       .map((entry) => buildScheduleItemMediaSummary(entry))
       .filter((entry): entry is ScreenPlaybackItemMediaSummary => Boolean(entry))
   );
 
   return {
+    source_kind: live ? 'LIVE' : 'PRESENTATION',
+    live_session_id: live?.live_session_id ?? null,
     item_id:
       typeof item?.id === 'string' && item.id
         ? item.id
@@ -297,7 +308,7 @@ export function buildScheduleItemSummary(item: any): ScreenPlaybackItemSummary {
     end_at: toIso(item?.end_at),
     presentation_id: typeof item?.presentation_id === 'string' && item.presentation_id ? item.presentation_id : null,
     presentation_name:
-      typeof presentation?.name === 'string' && presentation.name.trim().length > 0
+      live ? 'Live broadcast' : typeof presentation?.name === 'string' && presentation.name.trim().length > 0
         ? presentation.name.trim()
         : null,
     layout_id: typeof layout?.id === 'string' && layout.id ? layout.id : null,
@@ -579,16 +590,8 @@ async function getLatestPublishByScreenId(
   return result;
 }
 
-export function filterItemsForScreen(items: any[], screenId: string, groupIds: string[]) {
-  return items.filter((item) => {
-    const itemScreens = Array.isArray(item?.screen_ids) ? (item.screen_ids as string[]) : [];
-    const itemGroups = Array.isArray(item?.screen_group_ids) ? (item.screen_group_ids as string[]) : [];
-    const hasTargets = itemScreens.length > 0 || itemGroups.length > 0;
-
-    if (!hasTargets) return true;
-    if (itemScreens.includes(screenId)) return true;
-    return itemGroups.some((groupId) => groupIds.includes(groupId));
-  });
+export function filterItemsForScreen(items: any[], screenId: string, groupIds: string[], context: { scheduleId?: string } = {}) {
+  return filterFrozenAudienceItemsForScreen(items, screenId, groupIds, context);
 }
 
 export function buildTimeline(items: any[], now = new Date()) {
@@ -1176,13 +1179,14 @@ function derivePlaybackState(params: {
   const fallbackMediaIdFromItem = fallbackItem
     ? pickPrimaryMediaIdFromPresentation(fallbackItem.presentation)
     : null;
+  const scheduledLive = readFrozenLiveAudienceItem(fallbackItem);
 
   const resolvedCurrentMediaId =
     params.emergency?.media_id ??
     params.activeSlots[0]?.media_id ??
     params.reportedHeartbeatMediaId ??
     fallbackMediaIdFromItem ??
-    params.defaultMedia?.media_id ??
+    (scheduledLive ? null : params.defaultMedia?.media_id) ??
     null;
 
   const reportedHeartbeatScheduleId = params.screen.current_schedule_id ?? null;
@@ -1206,6 +1210,9 @@ function derivePlaybackState(params: {
 
   const playback: Record<string, unknown> = {
     source,
+    scheduled_source_kind: scheduledLive ? 'LIVE' : fallbackItem ? 'PRESENTATION' : null,
+    live_session_id: scheduledLive?.live_session_id ?? null,
+    live_playback_confirmed: null,
     is_live: Boolean(resolvedCurrentMediaId || fallbackItem || params.emergency || params.defaultMedia?.media_id),
     current_media_id: resolvedCurrentMediaId,
     current_schedule_id: playbackScheduleId,
@@ -1255,7 +1262,7 @@ export async function buildScreenPlaybackState(
     activeSlots[0]?.media_id ??
     screen.current_media_id ??
     pickPrimaryMediaIdFromPresentation(activeItems[0]?.presentation) ??
-    defaultMedia?.media_id ??
+    (readFrozenLiveAudienceItem(activeItems[0]) ? null : defaultMedia?.media_id) ??
     null;
   const reportedHeartbeatMediaId = emergency?.media_id ?? activeSlots[0]?.media_id ?? screen.current_media_id ?? null;
   const currentMedia =
@@ -1578,9 +1585,11 @@ function clipItemToWindow(
 
   return {
     id: typeof item?.id === 'string' ? item.id : `${item?.presentation_id || 'item'}:${clippedStart}`,
+    source_kind: readFrozenLiveAudienceItem(item) ? 'LIVE' : 'PRESENTATION',
+    live_session_id: readFrozenLiveAudienceItem(item)?.live_session_id ?? null,
     presentation_id: typeof item?.presentation_id === 'string' ? item.presentation_id : null,
     presentation_name:
-      typeof item?.presentation?.name === 'string' && item.presentation.name.trim().length > 0
+      readFrozenLiveAudienceItem(item) ? 'Live broadcast' : typeof item?.presentation?.name === 'string' && item.presentation.name.trim().length > 0
         ? item.presentation.name.trim()
         : null,
     start_at: new Date(clippedStart).toISOString(),

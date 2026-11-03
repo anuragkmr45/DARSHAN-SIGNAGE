@@ -78,6 +78,12 @@ export const queryKeys = {
   mediaById: (mediaId?: string) => ["media", "by-id", mediaId] as const,
   presentations: ["presentations"] as const,
   users: ["users"] as const,
+  liveSessions: ["live-sessions"] as const,
+  liveSessionsList: (filters: { actorId?: string; page?: number; limit?: number; search?: string; activeOnly?: boolean }) =>
+    ["live-sessions", "list", filters.actorId ?? null, filters.page ?? 1, filters.limit ?? 20,
+      filters.search ?? "", Boolean(filters.activeOnly)] as const,
+  liveSession: (id?: string, actorId?: string) => ["live-sessions", "detail", actorId ?? null, id ?? null] as const,
+  livePresenters: (actorId?: string) => ["users", "live-presenters", actorId ?? null] as const,
   settings: ["settings"] as const,
   observabilityOverview: ["observability", "overview"] as const,
   observabilityScreen: (screenId?: string) => ["observability", "screen", screenId] as const,

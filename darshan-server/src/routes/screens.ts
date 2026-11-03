@@ -1,3 +1,5 @@
+import { readAuthorizedScreen } from '@/services/screen-read-authorization';
+import { hydrateLiveFallbackItems } from '@/services/live-fallback-delivery';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { createScreenRepository } from '@/db/repositories/screen';
@@ -27,7 +29,6 @@ import {
   buildScreenRecoveryStateMap,
   buildScheduleItemSummaries,
   buildScreenPlaybackState,
-  buildScreenPlaybackStateById,
   buildScreensFleetSummary,
   buildScreenScheduleTimelinePayload,
   buildScreensOverviewPayload,
@@ -174,16 +175,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
     }
   };
 
-  const filterItemsForScreen = (items: any[], screenId: string, groupIds: string[]) => {
-    return items.filter((i) => {
-      const itemScreens = (i.screen_ids || []) as string[];
-      const itemGroups = (i.screen_group_ids || []) as string[];
-      const hasTargets = (itemScreens && itemScreens.length > 0) || (itemGroups && itemGroups.length > 0);
-      if (!hasTargets) return true;
-      if (itemScreens.includes(screenId)) return true;
-      return itemGroups.some((gid) => groupIds.includes(gid));
-    });
-  };
+  const filterItemsForScreen = filterPublishedItemsForScreen;
 
   const buildTimeline = (items: any[]) => {
     const now = new Date();
@@ -969,14 +961,10 @@ export async function screenRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) {
-          throw AppError.unauthorized('Missing authorization header');
-        }
 
-        await verifyAccessToken(token);
 
-        const summary = await buildScreenPlaybackStateById((request.params as any).id, { db });
+        const screen = await readAuthorizedScreen(request, (request.params as any).id);
+        const summary = await buildScreenPlaybackState(screen, { db });
         if (!summary) {
           throw AppError.notFound('Screen not found');
         }
@@ -1065,17 +1053,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) {
-          throw AppError.unauthorized('Missing authorization header');
-        }
 
-        await verifyAccessToken(token);
 
-        const screen = await screenRepo.findById((request.params as any).id);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        const screen = await readAuthorizedScreen(request, (request.params as any).id);
 
         const [latestHeartbeat] = await db
           .select({
@@ -1096,7 +1076,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
           (latestHeartbeat as any)?.object_key
         );
 
-        const summary = await buildScreenPlaybackStateById(screen.id, { db });
+        const summary = await buildScreenPlaybackState(screen, { db });
 
         return reply.send({
           id: screen.id,
@@ -1335,19 +1315,15 @@ export async function screenRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) {
-          throw AppError.unauthorized('Missing authorization header');
-        }
 
-        await verifyAccessToken(token);
         const screenId = (request.params as any).id;
+        const authorizedScreen = await readAuthorizedScreen(request, screenId);
         const query = nowPlayingQuerySchema.parse(request.query);
         const includeUrls = query.include_urls?.toLowerCase() === 'true';
         const includeMedia = query.include_media?.toLowerCase() === 'true';
         const includePreview = query.include_preview?.toLowerCase() === 'true';
 
-        const summary = await buildScreenPlaybackStateById(screenId, {
+        const summary = await buildScreenPlaybackState(authorizedScreen, {
           db,
           includeMedia,
           includePreview,
@@ -1401,13 +1377,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) {
-          throw AppError.unauthorized('Missing authorization header');
-        }
 
-        await verifyAccessToken(token);
         const screenId = (request.params as any).id;
+        await readAuthorizedScreen(request, screenId);
         const latest = await getLatestPublishForScreen(screenId, db);
 
         if (!latest) {
@@ -1475,19 +1447,12 @@ export async function screenRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const token = extractTokenFromHeader(request.headers.authorization);
-        if (!token) {
-          throw AppError.unauthorized('Missing authorization header');
-        }
 
-        await verifyAccessToken(token);
         const screenId = (request.params as any).id;
+        const authorizedScreen = await readAuthorizedScreen(request, screenId);
         const query = snapshotQuerySchema.parse(request.query);
         const includeUrls = query.include_urls?.toLowerCase() === 'true';
-        const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        const screen = authorizedScreen;
 
         const serverTime = new Date().toISOString();
         const preview = await getLatestScreenshotPreview(screenId, { db });
@@ -1513,7 +1478,10 @@ export async function screenRoutes(fastify: FastifyInstance) {
         const rawPayload = (latest.payload as any) || {};
         const schedule = rawPayload.schedule || {};
         const groupIds = await getGroupIdsForScreen(screenId);
-        const filteredItems = filterPublishedItemsForScreen(schedule.items || [], screenId, groupIds);
+        const filteredItems = await hydrateLiveFallbackItems(
+          filterPublishedItemsForScreen(schedule.items || [], screenId, groupIds, { scheduleId: schedule.id }),
+          { publishId: latest.publish_id, scheduleId: schedule.id, screenId, includeUrls, db }
+        );
         let filteredSnapshot = {
           ...rawPayload,
           schedule: { ...schedule, items: filteredItems },

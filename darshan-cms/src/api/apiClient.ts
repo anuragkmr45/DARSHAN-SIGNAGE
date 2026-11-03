@@ -50,6 +50,17 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const sanitizeMessage = (message: unknown) =>
   typeof message === "string" ? message : "Request failed. Please try again.";
 
+const httpErrorMessage = (status: number) => {
+  if (status === 401) return "Your session has expired. Please sign in again.";
+  if (status === 403) return "Your current access does not allow this action.";
+  if (status === 404) return "The requested resource is unavailable. Refresh and try again.";
+  if (status === 408 || status === 504) return "The server took too long to respond. Please retry.";
+  if (status === 413) return "The file or request is too large.";
+  if (status === 429) return "Too many requests. Please wait and retry.";
+  if (status >= 500) return "The service is temporarily unavailable. Please retry.";
+  return "The request could not be completed. Check the entered information and retry.";
+};
+
 type ErrorEnvelope = {
   success?: boolean;
   error?: {
@@ -80,6 +91,8 @@ export class ApiClient {
   private refreshedAuthHandler?: RefreshedAuthHandler;
   private unauthorizedHandler?: UnauthorizedHandler;
   private inflightGetRequests = new Map<string, Promise<unknown>>();
+  private sessionGeneration = 0;
+  private activeRequests = new Set<AbortController>();
 
   setAuthTokenProvider(getToken: TokenProvider) {
     this.authTokenProvider = getToken;
@@ -97,10 +110,17 @@ export class ApiClient {
     this.unauthorizedHandler = handler;
   }
 
-  async request<TResponse, TBody = unknown>(options: ApiRequestOptions<TBody>): Promise<TResponse> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  invalidateSession() {
+    // Cookie sessions have no JavaScript token to use as an identity key.
+    // Fence every login/logout, including a fresh login by the same user.
+    this.sessionGeneration += 1;
+    this.inflightGetRequests.clear();
+    for (const controller of this.activeRequests) controller.abort();
+    this.activeRequests.clear();
+  }
 
+  async request<TResponse, TBody = unknown>(options: ApiRequestOptions<TBody>): Promise<TResponse> {
+    const generation = this.sessionGeneration;
     const pathWithParams = fillPathParams(options.path, options.pathParams);
     const queryString = this.buildQuery(options.query);
     const baseURL = getCmsApiBaseUrl();
@@ -122,10 +142,22 @@ export class ApiClient {
 
     headers["Cache-Control"] = "no-store";
 
-    const requestKey = method === "GET" ? `${method}:${url}` : undefined;
+    const requestKey = method === "GET" ? `${generation}:${method}:${url}` : undefined;
     if (requestKey && this.inflightGetRequests.has(requestKey)) {
       return this.inflightGetRequests.get(requestKey) as Promise<TResponse>;
     }
+
+    const controller = new AbortController();
+    this.activeRequests.add(controller);
+    const abortFromCaller = () => controller.abort();
+    if (options.signal?.aborted) controller.abort();
+    else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const assertCurrentSession = () => {
+      if (generation !== this.sessionGeneration) {
+        throw new ApiError({ status: 499, code: "AUTH_SESSION_CHANGED", message: "Your session changed. Please retry." });
+      }
+    };
 
     const executeRequest = async () => {
       try {
@@ -142,9 +174,10 @@ export class ApiClient {
           method,
           headers,
           body,
-          signal: options.signal ?? controller.signal,
+          signal: controller.signal,
           credentials: "include",
         });
+        assertCurrentSession();
 
         const contentType = response.headers.get("content-type");
         const isJson = contentType?.includes("application/json");
@@ -161,27 +194,35 @@ export class ApiClient {
         }
 
         if (!response.ok) {
-          const payload = isJson ? await response.json() : await response.text();
+          // Reverse proxies often return HTML (or plain text) on failure.
+          // Only structured API errors are suitable for displaying verbatim.
+          const payload = isJson ? await response.json() : undefined;
+          assertCurrentSession();
           const envelope = isJson ? parseErrorEnvelope(payload) : undefined;
           const envelopeMessage = envelope?.error?.message;
           throw new ApiError({
             status: response.status,
             code: envelope?.error?.code,
             traceId: envelope?.error?.traceId,
-            message: envelopeMessage || sanitizeMessage(payload),
+            message: envelopeMessage || (isJson ? sanitizeMessage(payload) : httpErrorMessage(response.status)),
             details: envelope?.error?.details ?? (isJson ? payload : undefined),
           });
         }
 
         if (options.responseType === "blob") {
-          return (await response.blob()) as TResponse;
+          const payload = await response.blob();
+          assertCurrentSession();
+          return payload as TResponse;
         }
 
         const payload =
           options.responseType === "text" || !isJson ? await response.text() : await response.json();
-
+        assertCurrentSession();
         return payload as TResponse;
       } catch (error) {
+        // Abort is best effort: already-buffered responses and transports that
+        // ignore AbortSignal must still never publish data or auth callbacks.
+        assertCurrentSession();
         if (error instanceof ApiError) {
           if (typeof window !== "undefined" && error.status === 401 && !["/auth/login", "/auth/me"].includes(options.path)) {
             try {
@@ -200,6 +241,8 @@ export class ApiClient {
         throw new ApiError({ status: 500, message: sanitizeMessage(message) });
       } finally {
         clearTimeout(timeout);
+        options.signal?.removeEventListener("abort", abortFromCaller);
+        this.activeRequests.delete(controller);
       }
     };
 
@@ -209,7 +252,9 @@ export class ApiClient {
     try {
       return await requestPromise;
     } finally {
-      if (requestKey) this.inflightGetRequests.delete(requestKey);
+      if (requestKey && this.inflightGetRequests.get(requestKey) === requestPromise) {
+        this.inflightGetRequests.delete(requestKey);
+      }
     }
   }
 

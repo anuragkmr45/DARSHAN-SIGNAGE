@@ -8,6 +8,7 @@ import {
   publishScheduleSchema,
   displayPreflightSchema,
   createScheduleItemSchema,
+  livePreflightSchema,
 } from '@/schemas/schedule';
 import { apiEndpoints } from '@/config/apiEndpoints';
 import { createScheduleRepository } from '@/db/repositories/schedule';
@@ -44,6 +45,9 @@ import {
 import { createScheduleReservationService } from '@/services/scheduling/reservation-service';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
 import { lockScreenTargetReferences } from '@/services/screen-deletion-guard';
+import { preloadLiveSchedulingHints, prepareLiveSchedule, type LiveSchedulingHints } from '@/services/live-scheduling';
+import { assertLiveApprovalFingerprint, existingRequestPublish, liveApprovalMetadata, prepareReviewedLiveSchedule, prepareStoredLiveApproval } from './live-publishing-helpers';
+import { canReadScheduleRecord } from '@/rbac/schedule-read-authorization';
 
 const logger = createLogger('schedule-routes');
 const { CREATED } = HTTP_STATUS;
@@ -75,7 +79,8 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
       start_at: schedule.start_at?.toISOString?.() ?? schedule.start_at,
       end_at: schedule.end_at?.toISOString?.() ?? schedule.end_at,
       is_active: schedule.is_active,
-      ...contentResponseMetadata(schedule, ownership, actor, ability, 'Schedule', false),
+      ...contentResponseMetadata(schedule, ownership, actor,
+        { can: action => ability.can(action, subject('Schedule', schedule)) }, 'Schedule', false),
       created_at: schedule.created_at.toISOString?.() ?? schedule.created_at,
       updated_at: schedule.updated_at.toISOString?.() ?? schedule.updated_at,
     };
@@ -176,8 +181,9 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     const actor = actorFor(payload);
     const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
     const canAccessSchedule = manage
-      ? canManageContentResource(actor, schedule, ability, 'Schedule', 'update')
-      : canReadContentResource(actor, schedule, ability, 'Schedule');
+      ? canManageContentResource(actor, schedule,
+        { can: action => ability.can(action as never, subject('Schedule', schedule) as never) }, 'Schedule', 'update')
+      : canReadScheduleRecord(actor, schedule, ability);
     if (!canAccessSchedule) throw AppError.forbidden('Forbidden');
     return schedule;
   };
@@ -188,10 +194,14 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
     execute: (
       context: MutationAuthorizationContext & {
         schedule: typeof schema.schedules.$inferSelect;
+        liveHints?: LiveSchedulingHints;
       }
     ) => Promise<T>
-  ) =>
-    withCurrentMutationAuthorization(payload, async (context) => {
+  ) => {
+    // Identity hints are read before user/target/schedule locks. They grant no
+    // authority; prepareLiveSchedule rechecks them under the authorized locks.
+    const liveHints = permission.action === 'publish' ? await preloadLiveSchedulingHints(scheduleId) : undefined;
+    return withCurrentMutationAuthorization(payload, async (context) => {
       if (
         !context.ability.can(permission.action, permission.subject) &&
         !context.ability.can('manage', 'Schedule')
@@ -206,11 +216,34 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
         .where(eq(schema.schedules.id, scheduleId))
         .for('update');
       if (!schedule) throw AppError.notFound('Schedule not found');
-      if (!canAccessContentMutationScope(context.actor, schedule, context.ability, 'Schedule')) {
+      const scopedAbility = { can: (action: string) => context.ability.can(action as never, subject('Schedule', schedule) as never) };
+      if (!canAccessContentMutationScope(context.actor, schedule, scopedAbility, 'Schedule')) {
         throw AppError.forbidden('Forbidden');
       }
-      return execute({ ...context, schedule });
-    });
+      return execute({ ...context, schedule, liveHints });
+    }, liveHints?.sessions.length ? { userLock: 'share', additionalUserIdsToLock: liveHints.presenter_user_ids } : {});
+  };
+
+  fastify.post(apiEndpoints.schedules.livePreflight, {
+    schema: { description: 'Review current live policy and immutable fallback before approval', tags: ['Schedules'], security: [{ bearerAuth: [] }] },
+  }, async (request, reply) => {
+    try {
+      const token = extractTokenFromHeader(request.headers.authorization);
+      if (!token) throw AppError.unauthorized('Missing authorization header');
+      const payload = await verifyAccessToken(token), data = livePreflightSchema.parse(request.body);
+      const hints = await preloadLiveSchedulingHints(data.schedule_id);
+      const prepared = await withCurrentMutationAuthorization(payload, async context => {
+        await lockScreenTargetReferences(context.executor);
+        const [schedule] = await context.executor.select().from(schema.schedules).where(eq(schema.schedules.id, data.schedule_id)).for('update');
+        if (!schedule) throw AppError.notFound('Schedule not found');
+        if (!canReadScheduleRecord(context.actor, schedule, context.ability)) throw AppError.forbidden();
+        return prepareLiveSchedule(context, { scheduleId: schedule.id, identityHints: hints,
+          fallbackPreparationIds: data.fallback_preparation_ids, explicitScreenIds: data.screen_ids, explicitScreenGroupIds: data.screen_group_ids });
+      }, { userLock: 'share', additionalUserIdsToLock: hints.presenter_user_ids });
+      return reply.send({ schedule_id: prepared.schedule_id, schedule_revision: prepared.schedule_revision,
+        approval_fingerprint: prepared.fingerprint, items: prepared.items.map(item => item.policy) });
+    } catch (error) { return respondWithError(reply, error); }
+  });
 
   fastify.post<{ Body: typeof displayPreflightSchema._type }>(
     apiEndpoints.schedules.displayPreflight,
@@ -369,20 +402,26 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           if (!ability.can('update', 'Schedule')) {
             throw AppError.forbidden('Forbidden');
           }
-          const [publish] = await executor
+          await lockScreenTargetReferences(executor);
+          const [publishReference] = await executor
             .select()
             .from(schema.publishes)
-            .where(eq(schema.publishes.id, (request.params as any).publishId))
-            .for('update');
-          if (!publish) throw AppError.notFound('Publish not found');
+            .where(eq(schema.publishes.id, (request.params as any).publishId));
+          if (!publishReference) throw AppError.notFound('Publish not found');
           const [schedule] = await executor
             .select()
             .from(schema.schedules)
-            .where(eq(schema.schedules.id, publish.schedule_id))
+            .where(eq(schema.schedules.id, publishReference.schedule_id))
             .for('update');
-          if (!schedule || !canManageContentResource(actor, schedule, ability, 'Schedule', 'update')) {
+          if (!schedule || !canManageContentResource(actor, schedule,
+            { can: action => ability.can(action as never, subject('Schedule', schedule) as never) }, 'Schedule', 'update')) {
             throw AppError.forbidden('Forbidden');
           }
+          // Takedown/publication writers lock Schedule before Publish. Recheck
+          // the identity in that same order rather than inverting those locks.
+          const [publish] = await executor.select().from(schema.publishes)
+            .where(eq(schema.publishes.id, publishReference.id)).for('update');
+          if (!publish || publish.schedule_id !== schedule.id) throw AppError.conflict('Publish changed while it was being authorized. Please retry.');
           const [updatedTarget] = await executor
             .update(schema.publishTargets)
             .set({ status: body.status, error: body.error, updated_at: new Date() })
@@ -896,7 +935,32 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
           payload,
           (request.params as any).id,
           { action: 'publish', subject: 'ScheduleRequest' },
-          async ({ schedule, actor, executor }) => {
+          async (context) => {
+            const { schedule, actor, executor, ability, liveHints } = context;
+            let scheduleRequest: typeof schema.scheduleRequests.$inferSelect | null = null;
+            if (data.schedule_request_id) {
+              const [req] = await executor
+                .select()
+                .from(schema.scheduleRequests)
+                .where(eq(schema.scheduleRequests.id, data.schedule_request_id))
+                .for('update');
+              if (!req) throw AppError.notFound('Schedule request not found');
+              if (req.schedule_id && req.schedule_id !== schedule.id) {
+                throw AppError.badRequest('Schedule request does not match this schedule');
+              }
+              if (!ability.can('publish', subject('ScheduleRequest', req) as never)) throw AppError.forbidden();
+              const existingPublish = await existingRequestPublish(executor, req);
+              if (existingPublish) {
+                return {
+                  kind: 'existing' as const,
+                  scheduleId: schedule.id,
+                  publishId: existingPublish.id,
+                  snapshotId: existingPublish.snapshot_id,
+                };
+              }
+              scheduleRequest = req;
+            }
+
             if (uniqueScreens.length) {
               const screens = await executor
                 .select({ id: schema.screens.id })
@@ -916,35 +980,23 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
               }
             }
 
-            let scheduleRequest: typeof schema.scheduleRequests.$inferSelect | null = null;
-            if (data.schedule_request_id) {
-              const [req] = await executor
-                .select()
-                .from(schema.scheduleRequests)
-                .where(eq(schema.scheduleRequests.id, data.schedule_request_id))
-                .for('update');
-              if (!req) throw AppError.notFound('Schedule request not found');
-              if (req.schedule_id && req.schedule_id !== schedule.id) {
-                throw AppError.badRequest('Schedule request does not match this schedule');
-              }
-              const validation = await reservationService.validateApprovedRequestForPublish(req.id, executor);
-              if (validation.alreadyPublished && validation.publishId) {
-                const [existingPublish] = await executor
-                  .select()
-                  .from(schema.publishes)
-                  .where(eq(schema.publishes.id, validation.publishId));
-                if (!existingPublish) {
-                  throw AppError.conflict('The request is marked as published but the publish record could not be found.');
-                }
-                return {
-                  kind: 'existing' as const,
-                  scheduleId: schedule.id,
-                  publishId: existingPublish.id,
-                  snapshotId: existingPublish.snapshot_id,
-                };
-              }
-              scheduleRequest = req;
+            if (!scheduleRequest && !ability.can('publish', subject('ScheduleRequest', {
+              schedule_id: schedule.id, created_by: schedule.created_by,
+              owner_scope: schedule.owner_scope, owner_department_id: schedule.owner_department_id,
+            }) as never) && !ability.can('manage', subject('Schedule', schedule) as never)) throw AppError.forbidden();
+            const scope = { explicitScreenIds: uniqueScreens, explicitScreenGroupIds: uniqueGroups };
+            if (!scheduleRequest && liveHints!.sessions.length && !data.expected_live_fingerprint) {
+              throw new AppError({ statusCode: 409, code: 'LIVE_APPROVAL_REQUIRED', message: 'Review the live preflight before publishing.' });
             }
+            const preparedLive = scheduleRequest
+              ? await prepareStoredLiveApproval(context, schedule.id, liveHints!, scheduleRequest.schedule_payload, scope)
+              : liveHints!.sessions.length || data.expected_live_fingerprint
+                ? await prepareReviewedLiveSchedule(context, { scheduleId: schedule.id, identityHints: liveHints!,
+                  fallbackPreparationIds: data.fallback_preparation_ids, ...scope }) : undefined;
+            if (!scheduleRequest && preparedLive) assertLiveApprovalFingerprint(preparedLive, data.expected_live_fingerprint);
+            const live = preparedLive ? { context, prepared: preparedLive,
+              expectedFingerprint: scheduleRequest ? liveApprovalMetadata(scheduleRequest.schedule_payload)!.approval_fingerprint : data.expected_live_fingerprint } : undefined;
+            if (scheduleRequest) await reservationService.validateApprovedRequestForPublish(scheduleRequest.id, executor, live);
 
             const publishResult = await publishScheduleSnapshot({
               scheduleId: schedule.id,
@@ -956,12 +1008,14 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
               db: executor,
               scheduleRepo,
               scheduleItemRepo,
+              preparedLive,
               onPublished: async ({ tx, publish }) => {
                 if (scheduleRequest) {
                   await reservationService.finalizeRequestPublish(
                     {
                       scheduleRequestId: scheduleRequest.id,
                       publishId: publish.id,
+                      live,
                     },
                     tx
                   );
@@ -975,6 +1029,7 @@ export async function scheduleRoutes(fastify: FastifyInstance) {
                     publishId: publish.id,
                     explicitScreenIds: uniqueScreens,
                     explicitScreenGroupIds: uniqueGroups,
+                    live,
                   },
                   tx
                 );

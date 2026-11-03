@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { subject } from '@casl/ability';
 import { createScheduleRequestRepository } from '@/db/repositories/schedule-request';
 import { createScheduleRepository } from '@/db/repositories/schedule';
 import { createScheduleItemRepository } from '@/db/repositories/schedule-item';
@@ -30,6 +31,10 @@ import {
 import { createScheduleReservationService } from '@/services/scheduling/reservation-service';
 import { dispatchPlaybackRefresh } from '@/services/playback-refresh-dispatch';
 import { emitScheduleRequestsChanged } from '@/realtime/screens-namespace';
+import { liveFallbackPreparationIdsSchema } from '@/schemas/schedule';
+import { preloadLiveSchedulingHints, prepareLiveSchedule, type LiveSchedulingHints } from '@/services/live-scheduling';
+import { existingRequestPublish, freezeLiveApproval, liveApprovalMetadata, prepareStoredLiveApproval } from './live-publishing-helpers';
+import { canReadScheduleRecord, canReadScheduleRequestRecord } from '@/rbac/schedule-read-authorization';
 
 const logger = createLogger('schedule-request-routes');
 const { CREATED } = HTTP_STATUS;
@@ -37,6 +42,7 @@ const { CREATED } = HTTP_STATUS;
 const createRequestSchema = z.object({
   schedule_id: z.string().uuid(),
   notes: z.string().optional(),
+  fallback_preparation_ids: liveFallbackPreparationIdsSchema.default({}),
 });
 
 const createRequestQuerySchema = z.object({
@@ -153,7 +159,8 @@ function mapSchedule(
     is_active: s.is_active,
     owner_scope: s.owner_scope,
     owner_department_id: s.owner_department_id ?? null,
-    ...contentResponseMetadata(s, ownership, actor, ability, 'Schedule', false),
+    ...contentResponseMetadata(s, ownership, actor,
+      { can: action => ability.can(action, subject('Schedule', s) as never) }, 'Schedule', false),
     created_at: toIso(s.created_at),
     updated_at: toIso(s.updated_at),
   };
@@ -179,6 +186,8 @@ function mapScheduleItem(i: any) {
     id: i.id,
     schedule_id: i.schedule_id,
     presentation_id: i.presentation_id,
+    source_kind: i.source_kind ?? 'PRESENTATION',
+    live_session_id: i.live_session_id ?? null,
     start_at: toIso(i.start_at),
     end_at: toIso(i.end_at),
     priority: i.priority,
@@ -541,6 +550,7 @@ async function expandScheduleRequests(
 
     return {
       id: r.id,
+      live_approval: liveApprovalMetadata(r.schedule_payload),
       status: r.status,
       notes: r.notes ?? null,
       review_notes: r.review_notes ?? null,
@@ -644,8 +654,9 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
     const actor = actorFor(payload);
     const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
     const canAccess = manage
-      ? canManageContentResource(actor, schedule, ability, 'Schedule', 'update')
-      : canReadContentResource(actor, schedule, ability, 'Schedule');
+      ? canManageContentResource(actor, schedule,
+        { can: action => ability.can(action as never, subject('Schedule', schedule) as never) }, 'Schedule', 'update')
+      : canReadScheduleRecord(actor, schedule, ability);
     if (!canAccess) throw AppError.forbidden('Forbidden');
     return schedule;
   };
@@ -655,6 +666,8 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
     req: any,
     manage = false
   ) => {
+    const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+    if (!canReadScheduleRequestRecord(req, ability)) throw AppError.forbidden('Forbidden');
     return assertScheduleAccess(payload, req.schedule_id, manage);
   };
 
@@ -665,11 +678,16 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
       context: MutationAuthorizationContext & {
         scheduleRequest: typeof schema.scheduleRequests.$inferSelect;
         schedule: typeof schema.schedules.$inferSelect;
+        liveHints?: LiveSchedulingHints;
       }
     ) => Promise<T>,
     options: { action?: 'update' | 'approve' | 'publish' } = {}
-  ) =>
-    withCurrentMutationAuthorization(payload, async (context) => {
+  ) => {
+    const action = options.action ?? 'update';
+    const [reference] = action === 'approve' || action === 'publish'
+      ? await db.select({ schedule_id: schema.scheduleRequests.schedule_id }).from(schema.scheduleRequests).where(eq(schema.scheduleRequests.id, requestId)) : [];
+    const liveHints = reference ? await preloadLiveSchedulingHints(reference.schedule_id) : undefined;
+    return withCurrentMutationAuthorization(payload, async (context) => {
       const action = options.action ?? 'update';
       if (!context.ability.can(action, 'ScheduleRequest')) {
         throw AppError.forbidden('Forbidden');
@@ -701,15 +719,21 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
       if (scheduleRequest.schedule_id !== schedule.id) {
         throw AppError.conflict('Schedule request changed while it was being authorized. Please retry.');
       }
+      if (reference && scheduleRequest.schedule_id !== reference.schedule_id) {
+        throw new AppError({ statusCode: 409, code: 'LIVE_AUTHORIZATION_RETRY', message: 'Schedule identity changed. Refresh and retry.' });
+      }
+      if (!context.ability.can(action, subject('ScheduleRequest', scheduleRequest) as never)) throw AppError.forbidden();
       if (
-        !context.ability.can('manage', 'ScheduleRequest') &&
-        !canAccessContentMutationScope(context.actor, schedule, context.ability, 'Schedule')
+        !context.ability.can('manage', subject('ScheduleRequest', scheduleRequest) as never) &&
+        !canAccessContentMutationScope(context.actor, schedule,
+          { can: action => context.ability.can(action as never, subject('Schedule', schedule) as never) }, 'Schedule')
       ) {
         throw AppError.forbidden('Forbidden');
       }
 
-      return execute({ ...context, scheduleRequest, schedule });
-    });
+      return execute({ ...context, scheduleRequest, schedule, liveHints });
+    }, liveHints?.sessions.length ? { userLock: 'share', additionalUserIdsToLock: liveHints.presenter_user_ids } : {});
+  };
 
   // Create schedule request (draft)
   fastify.post<{ Body: typeof createRequestSchema._type; Querystring: typeof createRequestQuerySchema._type }>(
@@ -729,7 +753,9 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const data = createRequestSchema.parse(request.body);
         const query = createRequestQuerySchema.parse(request.query);
         const include = parseInclude(query.include);
-        const authorized = await withCurrentMutationAuthorization(payload, async ({ actor, ability, executor }) => {
+        const liveHints = await preloadLiveSchedulingHints(data.schedule_id);
+        const authorized = await withCurrentMutationAuthorization(payload, async context => {
+          const { actor, ability, executor } = context;
           if (!ability.can('create', 'ScheduleRequest')) throw AppError.forbidden('Forbidden');
           await lockScreenTargetReferences(executor);
           const [schedule] = await executor
@@ -738,18 +764,26 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             .where(eq(schema.schedules.id, data.schedule_id))
             .for('update');
           if (!schedule) throw AppError.notFound('Schedule not found');
+          const prospective = { schedule_id: schedule.id, requested_by: actor.userId };
+          if (!ability.can('create', subject('ScheduleRequest', prospective) as never)) throw AppError.forbidden();
           if (
-            !ability.can('manage', 'ScheduleRequest') &&
-            !canAccessContentMutationScope(actor, schedule, ability, 'Schedule')
+            !ability.can('manage', subject('ScheduleRequest', prospective) as never) &&
+            !canAccessContentMutationScope(actor, schedule,
+              { can: action => ability.can(action as never, subject('Schedule', schedule) as never) }, 'Schedule')
           ) {
             throw AppError.forbidden('Forbidden');
           }
+
+          const prepared = liveHints.sessions.length ? await prepareLiveSchedule(context, {
+            scheduleId: schedule.id, identityHints: liveHints, fallbackPreparationIds: data.fallback_preparation_ids,
+          }) : undefined;
+          const liveApproval = prepared ? freezeLiveApproval(prepared) : undefined;
 
           const [createdRequest] = await executor
             .insert(schema.scheduleRequests)
             .values({
               schedule_id: data.schedule_id,
-              schedule_payload: {},
+              schedule_payload: liveApproval ? { live_approval: liveApproval } : {},
               notes: data.notes,
               requested_by: actor.userId,
             })
@@ -761,6 +795,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               scheduleId: data.schedule_id,
               ownerUserId: actor.userId,
               allowPrivateRefs: ability.can('manage', 'Schedule'),
+              live: prepared ? { context, prepared, expectedFingerprint: prepared.fingerprint } : undefined,
             },
             executor
           );
@@ -775,7 +810,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             actor,
             ability,
           };
-        });
+        }, liveHints.sessions.length ? { userLock: 'share', additionalUserIdsToLock: liveHints.presenter_user_ids } : {});
         const { created } = authorized;
 
         emitScheduleRequestsChanged(fastify);
@@ -785,6 +820,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             id: created.id,
             schedule_id: created.schedule_id,
             payload: (created as any).schedule_payload,
+            live_approval: liveApprovalMetadata(created.schedule_payload),
             status: created.status,
             notes: created.notes,
             requested_by: created.requested_by,
@@ -885,6 +921,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               id: r.id,
               schedule_id: r.schedule_id,
               payload: r.schedule_payload,
+              live_approval: liveApprovalMetadata(r.schedule_payload),
               status: r.status,
               notes: r.notes,
               requested_by: r.requested_by,
@@ -980,6 +1017,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
           id: updated.id,
           schedule_id: updated.schedule_id,
           payload: (updated as any).schedule_payload,
+          live_approval: liveApprovalMetadata(updated.schedule_payload),
           status: updated.status,
           notes: updated.notes,
           requested_by: updated.requested_by,
@@ -1028,6 +1066,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
             id: req.id,
             schedule_id: req.schedule_id,
             payload: (req as any).schedule_payload,
+            live_approval: liveApprovalMetadata(req.schedule_payload),
             status: req.status,
             notes: req.notes,
             requested_by: req.requested_by,
@@ -1074,12 +1113,15 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const updated = await withScheduleRequestMutation(
           payload,
           (request.params as any).id,
-          async ({ scheduleRequest, actor, ability, executor }) => {
+          async (context) => {
+          const { scheduleRequest, actor, executor, liveHints } = context;
+          const prepared = await prepareStoredLiveApproval(context, scheduleRequest.schedule_id, liveHints!, scheduleRequest.schedule_payload);
           await reservationService.promoteRequestHold(
             {
               scheduleRequestId: scheduleRequest.id,
               reviewerId: actor.userId,
               reviewNotes: (request.body as any)?.comment ?? null,
+              live: prepared ? { context, prepared, expectedFingerprint: liveApprovalMetadata(scheduleRequest.schedule_payload)!.approval_fingerprint } : undefined,
             },
             executor
           );
@@ -1095,6 +1137,7 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         emitScheduleRequestsChanged(fastify);
         return reply.send({
           id: updated!.id,
+          live_approval: liveApprovalMetadata(updated!.schedule_payload),
           status: updated!.status,
           reviewed_by: updated!.reviewed_by,
           reviewed_at: updated!.reviewed_at?.toISOString?.() ?? updated!.reviewed_at,
@@ -1128,25 +1171,21 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
         const authorized = await withScheduleRequestMutation(
           payload,
           (request.params as any).id,
-          async ({ scheduleRequest, actor, executor }) => {
-            const validation = await reservationService.validateApprovedRequestForPublish(
-              scheduleRequest.id,
-              executor
-            );
-            if (validation.alreadyPublished && validation.publishId) {
-              const [existingPublish] = await executor
-                .select()
-                .from(schema.publishes)
-                .where(eq(schema.publishes.id, validation.publishId));
-              if (!existingPublish) {
-                throw AppError.conflict('The request is marked as published but the publish record could not be found.');
-              }
+          async (context) => {
+            const { scheduleRequest, actor, executor, liveHints } = context;
+            const existingPublish = await existingRequestPublish(executor, scheduleRequest);
+            if (existingPublish) {
               return {
                 kind: 'existing' as const,
                 scheduleRequest,
                 existingPublish,
               };
             }
+
+            const preparedLive = await prepareStoredLiveApproval(context, scheduleRequest.schedule_id, liveHints!, scheduleRequest.schedule_payload);
+            const live = preparedLive ? { context, prepared: preparedLive,
+              expectedFingerprint: liveApprovalMetadata(scheduleRequest.schedule_payload)!.approval_fingerprint } : undefined;
+            await reservationService.validateApprovedRequestForPublish(scheduleRequest.id, executor, live);
 
             const publishResult = await publishScheduleSnapshot({
               scheduleId: scheduleRequest.schedule_id,
@@ -1158,11 +1197,13 @@ export async function scheduleRequestRoutes(fastify: FastifyInstance) {
               db: executor,
               scheduleRepo,
               scheduleItemRepo,
+              preparedLive,
               onPublished: async ({ tx, publish }) => {
                 await reservationService.finalizeRequestPublish(
                   {
                     scheduleRequestId: scheduleRequest.id,
                     publishId: publish.id,
+                    live,
                   },
                   tx
                 );
