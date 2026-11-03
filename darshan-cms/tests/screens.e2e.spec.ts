@@ -34,6 +34,7 @@ type MockState = {
   observabilityMetricsSource?: "prometheus" | "backend_heartbeat";
   grafanaEmbed?: boolean;
   grafanaAuthenticated?: boolean;
+  pairingHealthUnavailable?: boolean;
 };
 
 const adminUser = {
@@ -387,6 +388,22 @@ const installApiMocks = async (page: Page, state: MockState) => {
       });
     }
 
+    if (pathname === "/api/v1/device-pairing/orphans" && method === "GET") {
+      if (state.pairingHealthUnavailable) {
+        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          generated_at: "2026-03-12T12:00:00.000Z", limit: 50,
+          counts: { device_certificates: 0, device_pairings: 0, heartbeats: 0, device_commands: 0, duplicate_identity_conflicts: 0 },
+          orphans: { device_certificates: [], device_pairings: [], heartbeats: [], device_commands: [] },
+          duplicate_identity: { conflicts: [] },
+        }),
+      });
+    }
+
     if (pathname === "/api/v1/device-pairing" && method === "GET") {
       const pageNum = Number(searchParams.get("page") || 1);
       const limit = Number(searchParams.get("limit") || 10);
@@ -524,6 +541,57 @@ const installApiMocks = async (page: Page, state: MockState) => {
 };
 
 test.describe("Screens operator flow", () => {
+  test("shows unavailable pairing health instead of a false healthy state", async ({ page }) => {
+    const state: MockState = {
+      screens: [], groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+      pairingHealthUnavailable: true,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    const pairingHealth = page.getByRole("region", { name: "Pairing health" });
+    await expect(pairingHealth.getByText("unavailable", { exact: true })).toBeVisible();
+    await expect(pairingHealth.getByText("Pairing health is unavailable. Refresh to try again.")).toBeVisible();
+    await expect(pairingHealth.getByText("No orphan device state was reported by the backend.")).toHaveCount(0);
+  });
+
+  test("keeps the screen list and detail inspector usable across viewport sizes", async ({ page }, testInfo) => {
+    const state: MockState = {
+      screens: [{
+        id: "screen-1", name: "Lobby Screen", location: "Reception", status: "ACTIVE",
+        health_state: "ONLINE", last_heartbeat_at: "2026-03-12T11:59:00.000Z",
+        active_items: [], upcoming_items: [],
+      }],
+      groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await expect(page.getByRole("button", { name: "Show pairing diagnostics" })).toBeVisible();
+    await expect(page.getByText("Certificates", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Show pairing diagnostics" }).click();
+    await expect(page.getByText("Certificates", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Hide pairing diagnostics" }).click();
+
+    for (const width of [1440, 820, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.locator("main").evaluate((main) => { main.scrollTop = 0; });
+      await expect(page.getByRole("region", { name: "Screen status summary" })).toBeVisible();
+      await expect(page.getByRole("list", { name: "Screens" }).getByRole("listitem")).toHaveCount(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+      await page.screenshot({ path: testInfo.outputPath(`screens-${width}.png`), fullPage: true });
+      await page.getByRole("button", { name: "Details" }).click();
+      const inspector = page.getByRole("dialog", { name: /Lobby Screen/i });
+      await expect(inspector).toBeVisible();
+      await expect(inspector.getByRole("tab", { name: "Now Playing" })).toBeVisible();
+      await expect.poll(async () => {
+        const bounds = await inspector.boundingBox();
+        return bounds ? Math.abs(bounds.x + bounds.width - width) : Infinity;
+      }).toBeLessThan(3);
+      await inspector.getByRole("button", { name: "Close" }).click();
+    }
+  });
+
   test("renders screen health and recovery info and handles delete refresh", async ({ page }) => {
     const state: MockState = {
       screens: [
@@ -572,9 +640,10 @@ test.describe("Screens operator flow", () => {
     await expect(page.getByRole("link", { name: /Open player fleet dashboard/i })).toBeVisible();
     await page.getByRole("button", { name: /Close/i }).click();
 
-    await page.getByRole("button", { name: "Delete Screen Lobby Screen" }).click();
+    await page.getByRole("button", { name: "More actions for Lobby Screen" }).click();
+    await page.getByRole("menuitem", { name: "Delete screen" }).click();
     await page.getByRole("button", { name: "Delete Screen" }).click();
-    await expect(page.getByRole("button", { name: "Delete Screen Lobby Screen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "More actions for Lobby Screen" })).toHaveCount(0);
   });
 
   test("explains heartbeat fallback and shows readable details and Grafana trends", async ({ page }) => {
@@ -626,13 +695,14 @@ test.describe("Screens operator flow", () => {
     await login(page);
     await openScreensPage(page);
 
-    await page.getByRole("button", { name: "Delete Screen Lobby Screen" }).click();
+    await page.getByRole("button", { name: "More actions for Lobby Screen" }).click();
+    await page.getByRole("menuitem", { name: "Delete screen" }).click();
     await page.getByRole("button", { name: "Delete Screen", exact: true }).click();
     await expect(page.getByRole("alert").getByText("Schedule items: 1")).toBeVisible();
     await expect(page.getByRole("button", { name: "Delete Screen", exact: true })).toBeVisible();
     state.screenDeleteBlocked = false;
     await page.getByRole("button", { name: "Delete Screen", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Delete Screen Lobby Screen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "More actions for Lobby Screen" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Delete Group Lobby Group" }).click();
     await page.getByRole("button", { name: "Delete Group", exact: true }).click();

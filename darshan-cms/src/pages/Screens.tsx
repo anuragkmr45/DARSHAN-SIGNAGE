@@ -6,10 +6,10 @@ import {
   Flame,
   HeartPulse,
   MapPin,
+  MoreHorizontal,
   Monitor,
   Pencil,
   Plus,
-  Power,
   QrCode,
   RadioTower,
   ShieldAlert,
@@ -18,6 +18,7 @@ import {
   Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -28,7 +29,6 @@ import type { DevicePairing, ScreenGroup, ScreenOverviewItem } from "@/api/types
 import { PageHeader } from "@/components/common/PageHeader";
 import { SearchBar } from "@/components/common/SearchBar";
 import { EmptyState } from "@/components/common/EmptyState";
-import { StatCard } from "@/components/common/StatCard";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { queryKeys } from "@/api/queryKeys";
@@ -306,33 +306,19 @@ export default function Screens() {
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Screens"
-          value={stats.total}
-          icon={<Monitor className="h-5 w-5 text-primary" />}
-        />
-        <StatCard
-          title="Online"
-          value={stats.online}
-          icon={<Power className="h-5 w-5 text-green-600" />}
-        />
-        <StatCard
-          title="Offline"
-          value={stats.offline}
-          icon={<Power className="h-5 w-5 text-red-600" />}
-        />
-        <StatCard
-          title="Recovery"
-          value={stats.recovery}
-          icon={<AlertTriangle className="h-5 w-5 text-amber-600" />}
-        />
-        <StatCard
-          title="Stale"
-          value={stats.stale}
-          icon={<HeartPulse className="h-5 w-5 text-yellow-600" />}
-        />
-      </div>
+      <section aria-label="Screen status summary" className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border pb-4 text-sm">
+        {!screensSummaryQuery.data ? (
+          <span role="status" className="text-muted-foreground">{screensSummaryQuery.isError ? "Fleet status unavailable" : "Checking fleet status…"}</span>
+        ) : (
+          <>
+            <span><strong className="font-semibold tabular-nums">{stats.total}</strong> total</span>
+            <span className="text-success"><strong className="font-semibold tabular-nums">{stats.online}</strong> online</span>
+            <span className={stats.offline > 0 ? "text-destructive" : "text-muted-foreground"}><strong className="font-semibold tabular-nums">{stats.offline}</strong> offline</span>
+            <span className={stats.recovery > 0 ? "text-warning" : "text-muted-foreground"}><strong className="font-semibold tabular-nums">{stats.recovery}</strong> need recovery</span>
+            <span className={stats.stale > 0 ? "text-warning" : "text-muted-foreground"}><strong className="font-semibold tabular-nums">{stats.stale}</strong> stale</span>
+          </>
+        )}
+      </section>
 
       {canManageScreens ? (
         <PairingHealthPanel
@@ -341,22 +327,20 @@ export default function Screens() {
         />
       ) : null}
 
-      <Card className="p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="w-full lg:max-w-2xl">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="w-full lg:max-w-lg">
             <SearchBar
-              placeholder="Search screens and groups by name, location, description, or ID..."
+              placeholder="Search screens and groups"
               onSearch={setSearch}
               initialValue={search}
             />
           </div>
           <div className="text-sm text-muted-foreground">
             {screensQuery.isFetching || screenGroupsQuery.isFetching
-              ? "Refreshing live playback..."
+              ? "Refreshing screens…"
               : `${screensQuery.data?.pagination?.total ?? screens.length} screens, ${screenGroupsQuery.data?.pagination?.total ?? screenGroups.length} groups`}
           </div>
-        </div>
-      </Card>
+      </div>
 
       {screensQuery.isLoading && !screensQuery.data ? (
         <div className="rounded-md border p-6">
@@ -395,7 +379,7 @@ export default function Screens() {
             />
           ) : (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card" role="list" aria-label="Screens">
                 {screens.map((screen) => {
                   const {
                     id,
@@ -441,11 +425,11 @@ export default function Screens() {
                   const healthRank = HEALTH_PRIORITY[health_state || ""] ?? 99;
 
                   return (
-                    <Card key={id} className="p-5 hover:shadow-lg transition-shadow space-y-4">
+                    <article key={id} role="listitem" className="space-y-3 p-4 hover:bg-muted/40">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-3 min-w-0">
                           <div
-                            className={`p-2 rounded-lg ${
+                            className={`rounded-md p-2 ${
                               isEmergency
                                 ? "bg-red-500/10 text-red-600"
                                 : healthRank === 0 || healthRank === 1
@@ -501,7 +485,7 @@ export default function Screens() {
                         ) : null}
                       </div>
 
-                      <div className="space-y-2 text-sm text-muted-foreground">
+                      <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 lg:grid-cols-[minmax(12rem,1fr)_minmax(16rem,2fr)_auto] lg:items-start">
                         <div className="flex items-center gap-2">
                           <MapPin className="h-4 w-4 flex-shrink-0" />
                           <span className="truncate">{location || "Unassigned"}</span>
@@ -513,60 +497,61 @@ export default function Screens() {
                             <p className="text-xs">{playbackSubLabel}</p>
                           </div>
                         </div>
-                        <div className="text-xs">
-                          Last heartbeat: {formatDateTime(last_heartbeat_at)}
-                        </div>
-                        <div className="flex items-center gap-3 text-xs">
-                          <span>Active items: {active_items?.length ?? 0}</span>
-                          <span>Upcoming: {upcoming_items?.length ?? 0}</span>
+                        <div className="text-xs sm:text-right">
+                          <span className="block">Last heartbeat: {formatDateTime(last_heartbeat_at)}</span>
+                          <span className="block">{active_items?.length ?? 0} active · {upcoming_items?.length ?? 0} upcoming</span>
                         </div>
                       </div>
 
-                      <div className="flex gap-2 pt-1">
+                      <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3">
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => setSelectedScreenId(id)}
-                          className="flex-1"
+                          className="min-w-24"
                         >
                           <Eye className="h-3 w-3 mr-1" />
                           Details
                         </Button>
                         {canManageScreens ? (
                           <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setRecoveryScreenId(id);
-                                setIsPairModalOpen(true);
-                              }}
-                              aria-label={`Recover Screen ${name}`}
-                            >
-                              <QrCode className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRevokeScreenPairing(screen)}
-                              disabled={revokePairing.isPending}
-                              aria-label={`Revoke pairing for ${name}`}
-                            >
-                              <ShieldAlert className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDeleteScreen(screen)}
-                              disabled={deleteScreen.isPending}
-                              aria-label={`Delete Screen ${name}`}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                            {health_state === "RECOVERY_REQUIRED" ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setRecoveryScreenId(id);
+                                  setIsPairModalOpen(true);
+                                }}
+                                aria-label={`Recover Screen ${name}`}
+                              >
+                                <QrCode className="mr-1 h-3.5 w-3.5" /> Recover
+                              </Button>
+                            ) : null}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button size="sm" variant="outline" aria-label={`More actions for ${name}`}>
+                                  <MoreHorizontal className="mr-1 h-4 w-4" /> More actions
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                {health_state !== "RECOVERY_REQUIRED" ? (
+                                  <DropdownMenuItem onSelect={() => { setRecoveryScreenId(id); setIsPairModalOpen(true); }}>
+                                    <QrCode className="mr-2 h-4 w-4" /> Recover pairing
+                                  </DropdownMenuItem>
+                                ) : null}
+                                <DropdownMenuItem disabled={revokePairing.isPending} onSelect={() => handleRevokeScreenPairing(screen)}>
+                                  <ShieldAlert className="mr-2 h-4 w-4" /> Revoke pairing
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="text-destructive focus:text-destructive" disabled={deleteScreen.isPending} onSelect={() => handleDeleteScreen(screen)}>
+                                  <Trash2 className="mr-2 h-4 w-4" /> Delete screen
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </>
                         ) : null}
                       </div>
-                    </Card>
+                    </article>
                   );
                 })}
               </div>

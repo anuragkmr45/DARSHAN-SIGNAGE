@@ -23,12 +23,12 @@ import {
   X,
 } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet as Dialog,
+  SheetContent as DialogContent,
+  SheetDescription as DialogDescription,
+  SheetHeader as DialogHeader,
+  SheetTitle as DialogTitle,
+} from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -403,7 +403,7 @@ export function ScreenDetailsModal({
   if (initialLoading) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="h-dvh w-full max-w-none overflow-y-auto border-l border-border p-4 data-[state=open]:duration-200 data-[state=closed]:duration-150 sm:max-w-4xl sm:p-6">
           <DialogHeader>
             <Skeleton className="h-6 w-48" />
             <Skeleton className="h-4 w-64" />
@@ -447,7 +447,7 @@ export function ScreenDetailsModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl overflow-y-auto">
+      <DialogContent className="h-dvh w-full max-w-none overflow-y-auto border-l border-border p-4 data-[state=open]:duration-200 data-[state=closed]:duration-150 sm:max-w-4xl sm:p-6">
         <DialogHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-1">
@@ -517,19 +517,19 @@ export function ScreenDetailsModal({
               <TabsTrigger value="overview" className="shrink-0">
                 Overview
               </TabsTrigger>
+              <TabsTrigger value="playing" className="shrink-0">
+                Now Playing
+              </TabsTrigger>
               <TabsTrigger value="status" className="shrink-0">
                 Status
-              </TabsTrigger>
-              <TabsTrigger value="observability" className="shrink-0">
-                Observability
               </TabsTrigger>
               {deliveryStatusUiEnabled ? (
                 <TabsTrigger value="delivery" className="shrink-0">
                   Delivery
                 </TabsTrigger>
               ) : null}
-              <TabsTrigger value="playing" className="shrink-0">
-                Now Playing
+              <TabsTrigger value="observability" className="shrink-0">
+                Observability
               </TabsTrigger>
               <TabsTrigger value="snapshot" className="shrink-0">
                 Snapshot

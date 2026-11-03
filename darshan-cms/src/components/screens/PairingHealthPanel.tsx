@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Copy, RefreshCcw, RotateCcw, Server, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { devicePairingApi } from "@/api/domains/devicePairing";
@@ -99,6 +98,7 @@ export function PairingHealthPanel({
   const queryClient = useQueryClient();
   const [revokeTarget, setRevokeTarget] = useState<OrphanRow | null>(null);
   const [revokeNote, setRevokeNote] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const orphanQuery = useQuery({
     queryKey: queryKeys.devicePairingOrphans(ORPHAN_REPORT_LIMIT),
@@ -107,12 +107,17 @@ export function PairingHealthPanel({
   });
 
   const report = orphanQuery.data;
+  const pairingStatusUnavailable = orphanQuery.isError || (!orphanQuery.isLoading && !report?.counts);
   const totalOrphans = getTotalOrphans(report);
   const duplicateConflictCount = getDuplicateConflictCount(report);
   const totalFindings = getTotalFindings(report);
   const rows = useMemo(() => buildRows(report), [report]);
   const serverIdentity = report?.server_identity;
   const duplicateConflicts = report?.duplicate_identity?.conflicts ?? [];
+
+  useEffect(() => {
+    if (totalFindings > 0 || pairingStatusUnavailable) setDetailsOpen(true);
+  }, [totalFindings, pairingStatusUnavailable]);
 
   const revokePairing = useSafeMutation({
     mutationFn: (payload: { deviceId: string; note?: string }) =>
@@ -139,25 +144,28 @@ export function PairingHealthPanel({
   }
 
   return (
-    <Card className="p-4 space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            {totalFindings > 0 ? (
+    <section aria-label="Pairing health" className="border-b border-border pb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+            {totalFindings > 0 || pairingStatusUnavailable ? (
               <ShieldAlert className="h-4 w-4 text-amber-600" />
+            ) : orphanQuery.isLoading ? (
+              <RefreshCcw className="h-4 w-4 text-muted-foreground" />
             ) : (
               <ShieldCheck className="h-4 w-4 text-emerald-600" />
             )}
-            <h2 className="font-semibold">Pairing Health</h2>
-            <Badge variant={totalFindings > 0 ? "destructive" : "secondary"}>
-              {totalFindings > 0 ? `${totalFindings} pairing findings` : "healthy"}
+            <h2 className="text-sm font-medium">Pairing health</h2>
+            <Badge variant={totalFindings > 0 || pairingStatusUnavailable ? "destructive" : "secondary"}>
+              {orphanQuery.isLoading ? "checking" : pairingStatusUnavailable ? "unavailable" : totalFindings > 0 ? `${totalFindings} findings` : "healthy"}
             </Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Pairing diagnostics show orphan records and copied/cloned identity conflicts without exposing secrets.
-          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="ghost" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
+          {detailsOpen ? "Hide pairing diagnostics" : "Show pairing diagnostics"}
+        </Button>
+      </div>
+
+      {detailsOpen ? <div className="mt-4 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           {serverIdentity ? (
             <div className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-xs">
               <Server className="h-3.5 w-3.5 text-muted-foreground" />
@@ -180,7 +188,6 @@ export function PairingHealthPanel({
             Refresh
           </Button>
         </div>
-      </div>
 
       {visibleScreenCount === 0 && totalOrphans > 0 ? (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
@@ -292,9 +299,13 @@ export function PairingHealthPanel({
         </div>
       ) : null}
 
-      {orphanQuery.isError ? (
+      {pairingStatusUnavailable ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-          Unable to load pairing health diagnostics.
+          Pairing health is unavailable. Refresh to try again.
+        </div>
+      ) : orphanQuery.isLoading ? (
+        <div role="status" className="rounded-md border p-4 text-sm text-muted-foreground">
+          Checking pairing health…
         </div>
       ) : rows.length === 0 ? (
         <div className="rounded-md border p-4 text-sm text-muted-foreground">
@@ -374,6 +385,7 @@ export function PairingHealthPanel({
           </div>
         ) : null}
       </ConfirmDialog>
-    </Card>
+      </div> : null}
+    </section>
   );
 }
