@@ -30,6 +30,7 @@ describe("observability helpers", () => {
   it("maps machine roles to operator labels", () => {
     expect(getMachineRoleLabel("backend")).toBe("Server VM");
     expect(getMachineRoleLabel("cms")).toBe("CMS VM");
+    expect(getMachineRoleLabel("media")).toBe("Media VM");
     expect(getMachineRoleLabel("development")).toBe("Development Host");
   });
 });

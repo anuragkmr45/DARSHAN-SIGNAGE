@@ -22,6 +22,26 @@ groups:
           summary: "Backend metrics are unavailable"
           description: "darshan-server on {{ $labels.instance }} has been unreachable for 5 minutes."
 
+      - alert: DARSHANMediaHostMetricsUnavailable
+        expr: up{job="vm-media-node"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Media VM host metrics are unavailable"
+          description: "The Media VM host exporter on {{ $labels.instance }} has been unreachable for 5 minutes."
+
+      - alert: DARSHANLiveMediaRuntimeUnavailable
+        expr: darshan_server_live_media_runtime_enabled == 1 and darshan_server_live_media_runtime_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Live media runtime is unavailable"
+          description: "The backend has not observed a current authenticated Media node accepting live runs for 2 minutes."
+
       - alert: DARSHANVm1DataMetricsUnavailable
         expr: up{job=~"vm1-node|vm1-postgres|vm1-minio"} == 0
         for: 5m

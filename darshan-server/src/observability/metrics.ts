@@ -2,6 +2,7 @@ import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config as appConfig } from '@/config';
 import { getDatabasePool } from '@/db';
+import { requireLiveAuthorityEpoch } from '@/services/live-authority-epoch';
 
 const registry = new Registry();
 
@@ -23,6 +24,7 @@ const OBSERVED_QUEUE_NAMES = [
 
 const OBSERVED_QUEUE_STATES = ['created', 'retry', 'active'] as const;
 const FLEET_STATES = ['ACTIVE', 'INACTIVE', 'OFFLINE'] as const;
+const LIVE_RUN_STATES = ['PREPARING', 'RUNNING', 'STOPPING', 'STOPPED'] as const;
 const DEVICE_COMMAND_STATUSES = [
   'PENDING',
   'SENT',
@@ -803,6 +805,122 @@ const recentHeartbeatsGauge = new Gauge({
   registers: [registry],
 });
 
+const liveMediaRuntimeEnabledGauge = new Gauge({
+  name: 'darshan_server_live_media_runtime_enabled',
+  help: 'Whether the backend live runtime is enabled for this deployment.',
+  registers: [registry],
+  collect: collectLiveRuntimeState,
+});
+
+const liveMediaRuntimeObservedGauge = new Gauge({
+  name: 'darshan_server_live_media_runtime_observed',
+  help: 'Whether the backend has an authenticated non-dead Media node observation for the current authority epoch.',
+  registers: [registry],
+  collect: collectLiveRuntimeState,
+});
+
+const liveMediaRuntimeLastSeenAgeGauge = new Gauge({
+  name: 'darshan_server_live_media_runtime_last_seen_age_seconds',
+  help: 'Age of the latest authenticated non-dead Media node observation in the current authority epoch; zero when never observed.',
+  registers: [registry],
+  collect: collectLiveRuntimeState,
+});
+
+const liveRuntimeOccupiedSlotsGauge = new Gauge({
+  name: 'darshan_server_live_runtime_occupied_slots',
+  help: 'Live runtime slots retained until matching media teardown or authenticated host-death evidence.',
+  registers: [registry],
+  collect: collectLiveRuntimeState,
+});
+
+const liveRuntimeRunsGauge = new Gauge({
+  name: 'darshan_server_live_runtime_runs',
+  help: 'Persisted live runs by lifecycle state.',
+  labelNames: ['state'],
+  registers: [registry],
+  collect: collectLiveRuntimeState,
+});
+
+const liveMediaRuntimeReadyGauge = new Gauge({
+  name: 'darshan_server_live_media_runtime_ready',
+  help: 'Whether a Media node in the current authority epoch was authenticated within five seconds and accepts new runs.',
+  registers: [registry],
+  collect: collectLiveRuntimeState,
+});
+
+let liveRuntimeCollectionInFlight: Promise<void> | undefined;
+let liveRuntimeCollectionCompletedAt = 0;
+
+function collectLiveRuntimeState() {
+  if (liveRuntimeCollectionInFlight) return liveRuntimeCollectionInFlight;
+  if (Date.now() - liveRuntimeCollectionCompletedAt < 250) return;
+  liveRuntimeCollectionInFlight = performLiveRuntimeCollection().finally(() => {
+    liveRuntimeCollectionCompletedAt = Date.now();
+    liveRuntimeCollectionInFlight = undefined;
+  });
+  return liveRuntimeCollectionInFlight;
+}
+
+async function performLiveRuntimeCollection() {
+  liveMediaRuntimeEnabledGauge.set(appConfig.DARSHAN_LIVE_RUNTIME_ENABLED ? 1 : 0);
+  liveMediaRuntimeObservedGauge.set(0);
+  liveMediaRuntimeLastSeenAgeGauge.set(0);
+  liveRuntimeOccupiedSlotsGauge.set(0);
+  liveMediaRuntimeReadyGauge.set(0);
+  for (const state of LIVE_RUN_STATES) liveRuntimeRunsGauge.set({ state }, 0);
+
+  if (!appConfig.DARSHAN_LIVE_RUNTIME_ENABLED) return;
+  const pool = getDatabasePool();
+  if (!pool) return;
+
+  try {
+    const epoch = requireLiveAuthorityEpoch().epoch_id;
+    const [nodeState, runState] = await Promise.all([
+      pool.query<{ ready_nodes: string; observed_nodes: string; age_seconds: number | null }>(
+        `
+          SELECT
+            COUNT(*) FILTER (
+              WHERE observed_dead_at IS NULL
+                AND accepting_new_runs
+                AND last_seen_at >= NOW() - INTERVAL '5 seconds'
+            )::bigint AS ready_nodes,
+            COUNT(*) FILTER (WHERE observed_dead_at IS NULL)::bigint AS observed_nodes,
+            EXTRACT(EPOCH FROM (NOW() - MAX(last_seen_at) FILTER (WHERE observed_dead_at IS NULL)))::double precision AS age_seconds
+          FROM live_media_nodes
+          WHERE authority_epoch = $1
+        `,
+        [epoch]
+      ),
+      pool.query<{ state: string; count: string; occupied: string }>(
+        `
+          SELECT state, COUNT(*)::bigint AS count,
+            COUNT(*) FILTER (WHERE teardown_confirmed_at IS NULL)::bigint AS occupied
+          FROM live_runs
+          GROUP BY state
+        `
+      ),
+    ]);
+
+    const node = nodeState.rows[0];
+    liveMediaRuntimeReadyGauge.set(Number(node?.ready_nodes ?? 0) > 0 ? 1 : 0);
+    liveMediaRuntimeObservedGauge.set(Number(node?.observed_nodes ?? 0) > 0 ? 1 : 0);
+    if (node?.age_seconds !== null && Number.isFinite(Number(node?.age_seconds))) {
+      liveMediaRuntimeLastSeenAgeGauge.set(Math.max(Number(node.age_seconds), 0));
+    }
+    let occupied = 0;
+    for (const row of runState.rows) {
+      if (LIVE_RUN_STATES.includes(row.state as (typeof LIVE_RUN_STATES)[number])) {
+        liveRuntimeRunsGauge.set({ state: row.state }, Number(row.count));
+      }
+      occupied += Number(row.occupied);
+    }
+    liveRuntimeOccupiedSlotsGauge.set(occupied);
+  } catch (error) {
+    recordCollectionError('live_runtime');
+    void error;
+  }
+}
+
 const collectionErrorsCounter = new Counter({
   name: 'darshan_server_observability_collection_errors_total',
   help: 'Observability collector errors encountered while gathering scrape-time gauges.',
@@ -819,6 +937,7 @@ const registeredCollectors = [
   commandOutboxOldestPendingAgeGauge,
   unresolvedMediaCacheReportsGauge,
   fleetPlayersGauge,
+  liveMediaRuntimeReadyGauge,
 ];
 void registeredCollectors;
 
@@ -838,7 +957,7 @@ function quoteIdentifier(identifier: string) {
 }
 
 function recordCollectionError(
-  collector: 'pg_boss' | 'fleet_rollups' | 'device_commands' | 'command_outbox' | 'media_cache_reports'
+  collector: 'pg_boss' | 'fleet_rollups' | 'device_commands' | 'command_outbox' | 'media_cache_reports' | 'live_runtime'
 ) {
   try {
     collectionErrorsCounter.inc({ collector });
@@ -1319,9 +1438,16 @@ export function setWebsocketConnections(count: number) {
 
 export function resetObservabilityMetricsForTests() {
   registry.resetMetrics();
+  liveRuntimeCollectionCompletedAt = 0;
   realtimeSocketConnectionCounts.clear();
   setWebsocketConnections(0);
   pgBossAvailableGauge.set(0);
   latestHeartbeatAgeGauge.set(0);
   recentHeartbeatsGauge.set(0);
+  liveMediaRuntimeEnabledGauge.set(0);
+  liveMediaRuntimeObservedGauge.set(0);
+  liveMediaRuntimeLastSeenAgeGauge.set(0);
+  liveMediaRuntimeReadyGauge.set(0);
+  liveRuntimeOccupiedSlotsGauge.set(0);
+  for (const state of LIVE_RUN_STATES) liveRuntimeRunsGauge.set({ state }, 0);
 }

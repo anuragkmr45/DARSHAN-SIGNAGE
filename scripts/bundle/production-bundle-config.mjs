@@ -103,8 +103,8 @@ const REQUIRED_OPERATIONS_POLICY_FIELDS = [
 ]
 
 const OUTPUTS = {
-  INCLUDE_LIVE_MEDIA: ['production/media/', 'transfer/*-media.tgz', 'production/backend/docker-compose.live.yml'],
-  MEDIA_PRIVATE_HOST: ['production/media/.env.production', 'production/backend/docker-compose.live.yml'],
+  INCLUDE_LIVE_MEDIA: ['production/media/', 'transfer/*-media.tgz', 'production/backend/docker-compose.live.yml', 'production/observability/prometheus/prometheus.yml'],
+  MEDIA_PRIVATE_HOST: ['production/media/.env.production', 'production/backend/docker-compose.live.yml', 'production/observability/.env.production', 'production/observability/prometheus/prometheus.yml'],
   MEDIA_BIND_ADDRESS: ['production/media/.env.production'],
   MEDIA_IMAGE: ['production/media/.env.production', 'production/media/images/IMAGE_MANIFEST.tsv'],
   MEDIA_PACKAGE_DIR: ['production/media/images/', 'CONFIGURATION_MANIFEST.json'],
@@ -770,7 +770,9 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
     if (config.MEDIA_PIDS_LIMIT) validatePositiveInteger('MEDIA_PIDS_LIMIT', config.MEDIA_PIDS_LIMIT, 16, 32768, addError)
     if (config.MEDIA_MIN_FREE_DISK_BYTES) validatePositiveInteger('MEDIA_MIN_FREE_DISK_BYTES', config.MEDIA_MIN_FREE_DISK_BYTES, 1_073_741_824, Number.MAX_SAFE_INTEGER, addError)
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$/.test(config.MEDIA_IMAGE)) addError('MEDIA_IMAGE must be a Docker image reference')
-    if (new Set([config.MEDIA_CONTROL_PORT, config.MEDIA_SIGNAL_PORT, config.MEDIA_RTC_TCP_PORT]).size !== 3) addError('Media TCP ports must be distinct')
+    if (new Set([config.MEDIA_CONTROL_PORT, config.MEDIA_SIGNAL_PORT, config.MEDIA_RTC_TCP_PORT, config.METRICS_GATEWAY_HOST_PORT]).size !== 4) {
+      addError('Media control, signal, RTC TCP and metrics gateway ports must be distinct')
+    }
   }
   if (config.TRANSPORT_TLS_MODE && !['internal-ca', 'provided'].includes(config.TRANSPORT_TLS_MODE)) {
     addError('TRANSPORT_TLS_MODE must be internal-ca or provided')

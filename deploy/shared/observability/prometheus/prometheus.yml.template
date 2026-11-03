@@ -126,6 +126,8 @@ __REMOTE_EXPORTER_TLS_CONFIG__
           role: cms
           machine: vm3
 
+__MEDIA_NODE_JOB__
+
   - job_name: vm4-node
     static_configs:
       - targets:

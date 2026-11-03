@@ -66,6 +66,8 @@ export const getMachineRoleLabel = (
       return "Valkey VM";
     case "observability":
       return "Observability VM";
+    case "media":
+      return "Media VM";
     case "development":
       return "Development Host";
     default:

@@ -22,7 +22,7 @@ type PrometheusResponse = {
 type MachineDefinition = {
   id: string;
   name: string;
-  role: 'data' | 'valkey' | 'backend' | 'cms' | 'observability' | 'development';
+  role: 'data' | 'valkey' | 'backend' | 'cms' | 'observability' | 'media' | 'development';
   dashboardUid: string;
   expectedJobs: string[];
   services: Array<{
@@ -140,7 +140,7 @@ export type ScreenObservabilitySummary = {
 };
 
 const PROMETHEUS_API_PATH = '/api/v1/query';
-const PROMETHEUS_MACHINE_REGEX = 'vm1|valkey|vm2|vm3|vm4|dev-local';
+const PROMETHEUS_MACHINE_REGEX = 'vm1|valkey|vm2|vm3|vm4|media|dev-local';
 const SCREEN_METRICS_FRESH_MS = 90_000;
 
 function normalizeGrafanaBasePath(basePath: string) {
@@ -194,6 +194,17 @@ function classifyMachineStatus(params: {
   return 'healthy' as const;
 }
 
+export function applyMediaRuntimeStatus(
+  role: MachineDefinition['role'],
+  baseStatus: ObservabilityStatus,
+  liveMediaReady: number | null
+): ObservabilityStatus {
+  if (role !== 'media' || baseStatus === 'unconfigured' || baseStatus === 'unknown') return baseStatus;
+  if (liveMediaReady === 0) return 'critical';
+  if (liveMediaReady === null && baseStatus === 'healthy') return 'degraded';
+  return baseStatus;
+}
+
 function classifyAlertStatus(firing: number, highestSeverity: string) {
   if (firing <= 0) return 'healthy' as const;
   if (highestSeverity === 'critical') return 'critical' as const;
@@ -213,7 +224,8 @@ function buildDashboardUrl(uid: string, queryParams?: Record<string, string | nu
 }
 
 export function getMachineDefinitions(
-  deploymentMode: 'development' | 'qa' | 'production' = appConfig.OBSERVABILITY_DEPLOYMENT_MODE
+  deploymentMode: 'development' | 'qa' | 'production' = appConfig.OBSERVABILITY_DEPLOYMENT_MODE,
+  liveMediaEnabled = appConfig.DARSHAN_LIVE_RUNTIME_ENABLED
 ): MachineDefinition[] {
   if (deploymentMode === 'development') {
     return [
@@ -231,7 +243,7 @@ export function getMachineDefinitions(
     ];
   }
 
-  return [
+  const machines: MachineDefinition[] = [
     {
       id: 'vm1',
       name: 'VM1 Data Machine',
@@ -290,6 +302,20 @@ export function getMachineDefinitions(
       ],
     },
   ];
+  if (liveMediaEnabled) {
+    machines.push({
+      id: 'media',
+      name: 'Media VM',
+      role: 'media',
+      dashboardUid: 'darshan-vm-media',
+      expectedJobs: ['vm-media-node'],
+      services: [
+        { id: 'runtime', label: 'Live Runtime', job: 'darshan-live-media-runtime' },
+        { id: 'node', label: 'Host Exporter', job: 'vm-media-node' },
+      ],
+    });
+  }
+  return machines;
 }
 
 class PrometheusSummaryClient {
@@ -374,7 +400,7 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
   const machineDefinitions = getMachineDefinitions();
   const grafanaBasePath = normalizeGrafanaBasePath(appConfig.OBSERVABILITY_GRAFANA_BASE_PATH);
 
-  const [playerTargetResults, alertResults, hostUpResults, cpuResults, memoryResults, diskResults] =
+  const [playerTargetResults, alertResults, hostUpResults, cpuResults, memoryResults, diskResults, liveMediaReadyResults] =
     await Promise.all([
       prometheus.query('up{job="players"}'),
       prometheus.query('count by (severity) (ALERTS{alertstate="firing"})'),
@@ -388,6 +414,7 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
       prometheus.query(
         `max by(machine) (100 * (1 - (node_filesystem_avail_bytes{machine=~"${PROMETHEUS_MACHINE_REGEX}",fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{machine=~"${PROMETHEUS_MACHINE_REGEX}",fstype!~"tmpfs|overlay|squashfs"})))`
       ),
+      prometheus.query('max(darshan_server_live_media_runtime_ready)'),
     ]);
 
   // PostgreSQL is authoritative for registered screens. The Prometheus fleet gauge
@@ -405,6 +432,8 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
   const memoryByMachine = mapInstantValuesByMachine(memoryResults);
   const diskByMachine = mapInstantValuesByMachine(diskResults);
   const serviceStatuses = buildServiceStatusMap(hostUpResults);
+  const liveMediaReady = toScalar(liveMediaReadyResults[0]);
+  if (liveMediaReady !== null) serviceStatuses.set('media:darshan-live-media-runtime', liveMediaReady);
   const hostTargetsByMachine = new Map<string, { expected: number; reachable: number }>();
 
   for (const machine of machineDefinitions) {
@@ -426,21 +455,24 @@ export async function buildObservabilityOverviewSummary(): Promise<Observability
     const memoryPercent = memoryByMachine.get(machine.id) ?? null;
     const diskPercent = diskByMachine.get(machine.id) ?? null;
 
+    const baseStatus = !prometheus.configured
+      ? 'unconfigured'
+      : !prometheus.available
+        ? 'unknown'
+        : classifyMachineStatus({
+            expectedTargets: targetState.expected,
+            reachableTargets: targetState.reachable,
+            cpuPercent,
+            memoryPercent,
+            diskPercent,
+          });
+    const status = applyMediaRuntimeStatus(machine.role, baseStatus, liveMediaReady);
+
     return {
       id: machine.id,
       name: machine.name,
       role: machine.role,
-      status: !prometheus.configured
-        ? 'unconfigured'
-        : !prometheus.available
-          ? 'unknown'
-          : classifyMachineStatus({
-              expectedTargets: targetState.expected,
-              reachableTargets: targetState.reachable,
-              cpuPercent,
-              memoryPercent,
-              diskPercent,
-            }),
+      status,
       scrape_status: {
         reachable_targets: targetState.reachable,
         expected_targets: targetState.expected,

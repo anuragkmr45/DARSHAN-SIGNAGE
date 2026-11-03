@@ -6,7 +6,8 @@ the installed player. Media is transported by the on-prem SFU; PostgreSQL and
 immutable approved schedule policy remain authoritative. No Internet/CDN,
 public STUN or public TURN service is configured.
 
-The artifact contains a signed Docker image archive and host scripts. It does
+The artifact contains signed Media, node-exporter and Nginx image archives plus
+host scripts. It does
 not contain authority epochs, live signing/control/witness credentials, TLS
 private keys or runtime state. Successful packaging does not close load,
 cross-VM, physical display/audio, Windows, restore or host LSM acceptance gates.
@@ -103,6 +104,25 @@ sudo ./start.sh
 sudo ./health-check.sh
 ```
 
+Startup also runs the signed node-exporter behind an HTTPS-only Nginx metrics
+gateway on `METRICS_GATEWAY_HOST_PORT`. The gateway reuses the issued Media
+certificate and exposes only `/healthz`, `/darshan/compatibility` and
+`/node/metrics`; neither the Media control endpoint nor any authority secret is
+proxied. The role health check requires the gateway and exporter before it
+accepts Media readiness. When the sixth role is included, the generated
+Prometheus configuration contains a required `vm-media-node` target, so the
+Observability health check fails if Media VM CPU, memory, disk or reachability
+metrics are unavailable.
+
+Host scrape health is deliberately separate from live-service readiness. The
+Backend exports an authenticated current-epoch readiness value, last-observation
+age and occupied-slot count from its normal Media reconciliation. CMS Machine
+Health and the Media Grafana dashboard use that readiness value, so a reachable
+Linux host with a stopped, fenced or non-accepting Media runtime is not shown as
+healthy. Prometheus raises separate alerts for a lost Media host scrape and for
+a live runtime that remains unavailable. No Media control credential is copied
+to Prometheus or the metrics gateway.
+
 Preparation installs the updated watchdog parser **before** backend-mode
 heartbeats are used. Startup creates a fresh managed UUID, private UID1000
 tmpfs heartbeat child and a separate root-owned tmpfs readiness child. The
@@ -173,6 +193,7 @@ Allow only the site networks that actually need each path:
 | Backend→Media | HTTPS TCP18784 | fixed control/health, shared control credential |
 | Media→Backend | HTTPS API port, `/api/v1/internal/live-authority` | fresh nonce grant checks |
 | Media host→Backend | HTTPS API port, `/api/v1/internal/live-media-witness` | host-only proof upload |
+| Observability→Media | HTTPS TCP9443 (or configured metrics gateway port), `/node/metrics` | Media VM CPU, memory, disk and reachability |
 | CMS browsers/players→Media | WSS TCP18780 | signaling |
 | CMS browsers/players↔Media | UDP18783 and TCP18782 | encrypted WebRTC media/ICE fallback |
 
@@ -231,5 +252,5 @@ Host watchdog Docker-mediated death evidence can be verified locally. Direct
 pidfd SIGKILL under the chosen systemd/LSM profile remains an explicit release
 gate until measured; the Codex desktop AppArmor denial is not a passing host
 actuation result. Host suspend/resume, watchdog service death/restart, actual
-frame/audio cutoff, monthly/pre-release restore and10×25 sustained capacity
+frame/audio cutoff, monthly/pre-release restore and 10×25 sustained capacity
 still require integrated QA. Documentation and unit tests do not close them.

@@ -5,6 +5,24 @@ source ./.env.production
 source "$PRIVATE_ROOT/host/active.env"
 [[ "${DARSHAN_ACTIVE_MEDIA_RELEASE:-}" == "$DARSHAN_RELEASE_ID" ]] || { echo "A different Media release is active." >&2; exit 1; }
 [[ "$(docker inspect --format '{{.State.Running}}' "$DARSHAN_MEDIA_CONTAINER_ID")" == true ]] || exit 1
+require_metric() {
+  curl --fail --silent --show-error \
+    --cacert "$PRIVATE_ROOT/media/site-ca.crt" \
+    --resolve "${MEDIA_PRIVATE_HOST}:${METRICS_GATEWAY_HOST_PORT}:${MEDIA_BIND_ADDRESS}" \
+    "https://${MEDIA_PRIVATE_HOST}:${METRICS_GATEWAY_HOST_PORT}/node/metrics" | {
+      grep -Eq '^node_exporter_build_info'
+      matched=$?
+      cat >/dev/null
+      exit "$matched"
+    }
+}
+for service in node-exporter metrics-gateway; do
+  [[ -n "$(docker compose --env-file .env.production -f docker-compose.yml ps -q "$service")" ]] || {
+    echo "Media monitoring service is missing: $service" >&2
+    exit 1
+  }
+done
+require_metric
 for attempt in $(seq 1 40); do
   watchdog="$(journalctl --quiet -u "darshan-media-watchdog@$DARSHAN_MEDIA_NODE_INSTANCE_ID.service" -o cat --no-pager -n 100)"
   witness="$(journalctl --quiet -u "darshan-media-witness-${SITE_NAME}@$DARSHAN_MEDIA_NODE_INSTANCE_ID.service" -o cat --no-pager -n 50)"

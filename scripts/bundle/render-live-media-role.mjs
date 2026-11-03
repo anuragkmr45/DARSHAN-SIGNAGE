@@ -7,7 +7,8 @@ export function renderLiveMediaRole(mediaDir, backendDir, repo, env = process.en
   const values = Object.fromEntries(['SITE_NAME', 'DARSHAN_RELEASE_ID', 'MEDIA_IMAGE', 'MEDIA_PRIVATE_HOST', 'MEDIA_BIND_ADDRESS',
     'MEDIA_CONTROL_PORT', 'MEDIA_SIGNAL_PORT', 'MEDIA_RTC_TCP_PORT', 'MEDIA_RTC_UDP_PORT', 'MEDIA_CPU_LIMIT', 'MEDIA_MEMORY_LIMIT',
     'MEDIA_PIDS_LIMIT', 'MEDIA_MIN_FREE_DISK_BYTES', 'BACKEND_PRIVATE_HOST', 'API_HOST_PORT', 'CMS_PUBLIC_HOST', 'CMS_HTTPS_PORT',
-    'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES'].map(key => [key, required(key)]))
+    'CONTAINER_LOG_MAX_SIZE', 'CONTAINER_LOG_MAX_FILES', 'NGINX_IMAGE', 'NODE_EXPORTER_IMAGE', 'METRICS_GATEWAY_HOST_PORT',
+    'EXPORTER_CPU_LIMIT', 'EXPORTER_MEMORY_LIMIT', 'EXPORTER_PIDS_LIMIT'].map(key => [key, required(key)]))
   values.PRIVATE_ROOT = `/etc/darshan/sites/${values.SITE_NAME}/live`
   const put = (name, content, mode = 0o750) => fs.writeFileSync(path.join(mediaDir, name), content, { mode })
   fs.mkdirSync(mediaDir, { recursive: true })
@@ -31,6 +32,25 @@ export function renderLiveMediaRole(mediaDir, backendDir, repo, env = process.en
   put('COMPATIBILITY.json', JSON.stringify({ schemaVersion: 1, siteName: values.SITE_NAME, role: 'media', releaseId: values.DARSHAN_RELEASE_ID,
     sourceCommit: env.PLAYER_SOURCE_COMMIT, compatibilityGeneration: Number(env.DARSHAN_COMPATIBILITY_GENERATION),
     requires: { backend: Number(env.DARSHAN_COMPATIBILITY_GENERATION), player: Number(env.DARSHAN_COMPATIBILITY_GENERATION) } }, null, 2) + '\n', 0o640)
+  put('metrics-gateway.conf', `pid /tmp/nginx.pid;
+events {}
+http {
+  access_log off;
+  server {
+    listen 9443 ssl;
+    ssl_certificate /etc/darshan/tls/server.crt;
+    ssl_certificate_key /etc/darshan/tls/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location = /healthz { return 200 "ok\\n"; }
+    location = /darshan/compatibility {
+      default_type application/json;
+      return 200 '{"site":"${values.SITE_NAME}","role":"media","release_id":"${values.DARSHAN_RELEASE_ID}","source_commit":"${env.PLAYER_SOURCE_COMMIT}","compatibility_generation":${Number(env.DARSHAN_COMPATIBILITY_GENERATION)}}';
+    }
+    location = /node/metrics { proxy_pass http://node-exporter:9100/metrics; }
+    location / { return 404; }
+  }
+}
+`, 0o640)
   fs.copyFileSync(path.join(repo, 'docs/runbooks/live-media-vm-deployment.md'), path.join(mediaDir, 'README.md'))
   const privateRoot = values.PRIVATE_ROOT
   fs.copyFileSync(path.join(repo, 'deploy/production/media/provision-private.py'), path.join(backendDir, 'provision-live-private.py'))

@@ -23,8 +23,15 @@ stage_live_media_role() {
   write_load_images_script "$PROD_MEDIA_DIR/load-images.sh"
   if [[ "$SKIP_DOCKER" == true ]]; then
     write_skip_placeholder "$PROD_MEDIA_DIR/images" "$(basename "$archive")" "$MEDIA_IMAGE"
+    write_skip_placeholder "$PROD_MEDIA_DIR/images" "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE"
+    write_skip_placeholder "$PROD_MEDIA_DIR/images" "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
   else
-    write_image_metadata_manifest "$PROD_MEDIA_DIR/images" "$(basename "$archive")" "$MEDIA_IMAGE"
+    cp "$PROD_BACKEND_DIR/images/$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$PROD_MEDIA_DIR/images/"
+    cp "$PROD_BACKEND_DIR/images/$NGINX_IMAGE_ARCHIVE_NAME" "$PROD_MEDIA_DIR/images/"
+    write_image_metadata_manifest "$PROD_MEDIA_DIR/images" \
+      "$(basename "$archive")" "$MEDIA_IMAGE" \
+      "$NODE_EXPORTER_IMAGE_ARCHIVE_NAME" "$NODE_EXPORTER_IMAGE" \
+      "$NGINX_IMAGE_ARCHIVE_NAME" "$NGINX_IMAGE"
   fi
   chmod 750 "$PROD_MEDIA_DIR"/*.sh "$PROD_MEDIA_DIR"/*.py
 }

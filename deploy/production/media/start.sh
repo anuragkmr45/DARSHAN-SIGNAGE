@@ -6,6 +6,7 @@ source ./.env.production
 exec 9>"$PRIVATE_ROOT/host/lifecycle.lock"
 flock -n 9 || { echo "Another media lifecycle operation is running." >&2; exit 1; }
 ./preflight.sh
+docker compose --env-file .env.production -f docker-compose.yml up -d --no-build --pull never --force-recreate node-exporter metrics-gateway
 if [[ -f "$PRIVATE_ROOT/host/active.env" ]]; then
   source "$PRIVATE_ROOT/host/active.env"
   if [[ "$(docker inspect --format '{{.State.Running}}' "$DARSHAN_MEDIA_CONTAINER_ID")" == true ]]; then

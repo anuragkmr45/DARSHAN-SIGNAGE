@@ -1,0 +1,104 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(up{job=\"vm-media-node\"}) or vector(0)", "refId": "A" }],
+      "title": "Media Host Exporter Up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(darshan:host_memory_utilization:ratio{job=\"vm-media-node\"}) or vector(0)", "refId": "A" }],
+      "title": "Media Host Memory",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(darshan:host_filesystem_utilization:ratio{job=\"vm-media-node\"}) or vector(0)", "refId": "A" }],
+      "title": "Media Host Filesystem",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(darshan_server_live_media_runtime_ready) or vector(0)", "refId": "A" }],
+      "title": "Authenticated Live Runtime Ready",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "darshan:host_cpu_utilization:ratio{job=\"vm-media-node\"}", "legendFormat": "{{ instance }} cpu", "refId": "A" },
+        { "expr": "darshan:host_memory_utilization:ratio{job=\"vm-media-node\"}", "legendFormat": "{{ instance }} memory", "refId": "B" },
+        { "expr": "darshan:host_filesystem_utilization:ratio{job=\"vm-media-node\"}", "legendFormat": "{{ instance }} filesystem", "refId": "C" }
+      ],
+      "title": "Media Host Utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (instance) (rate(node_network_receive_bytes_total{job=\"vm-media-node\",device!~\"lo|docker.*|veth.*|br-.*\"}[5m]))", "legendFormat": "{{ instance }} rx", "refId": "A" },
+        { "expr": "sum by (instance) (rate(node_network_transmit_bytes_total{job=\"vm-media-node\",device!~\"lo|docker.*|veth.*|br-.*\"}[5m]))", "legendFormat": "{{ instance }} tx", "refId": "B" }
+      ],
+      "title": "Media Host Network",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "max": 10 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 13 },
+      "id": 7,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(darshan_server_live_runtime_occupied_slots) or vector(0)", "refId": "A" }],
+      "title": "Occupied Live Slots",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "darshan-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 13 },
+      "id": 8,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [{ "expr": "max(darshan_server_live_media_runtime_last_seen_age_seconds) or vector(0)", "refId": "A" }],
+      "title": "Authenticated Runtime Observation Age",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["darshan", "media", "machine"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "DARSHAN Media Machine",
+  "uid": "darshan-vm-media",
+  "version": 1
+}

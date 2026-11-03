@@ -533,7 +533,7 @@ export interface ObservabilityGrafanaLink {
 export interface ObservabilityMachineSummary {
   id: string;
   name: string;
-  role: "data" | "valkey" | "backend" | "cms" | "observability" | "development";
+  role: "data" | "valkey" | "backend" | "cms" | "observability" | "media" | "development";
   status: "healthy" | "degraded" | "critical" | "unknown" | "unconfigured";
   scrape_status: {
     reachable_targets: number;

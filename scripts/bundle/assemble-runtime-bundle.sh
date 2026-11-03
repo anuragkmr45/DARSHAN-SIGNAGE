@@ -1741,6 +1741,7 @@ render_prometheus_config() {
   local player_metrics_scheme="${32:-http}"
   local player_metrics_target_file="${33:-/etc/darshan/prometheus/file-sd/players.targets.json}"
   local player_metrics_tls_dir="${34:-}"
+  local media_node_host="${35:-}"
   local remote_node_port="$node_exporter_port"
   local remote_postgres_port="$postgres_exporter_port"
   local remote_nginx_port="$nginx_exporter_port"
@@ -1816,6 +1817,16 @@ render_prometheus_config() {
         if [[ "$player_metrics_scheme" == "https" && -n "$player_metrics_tls_dir" ]]; then
           printf '    tls_config:\n      ca_file: %s/ca.crt\n      cert_file: %s/client.crt\n      key_file: %s/client.key\n' \
             "$player_metrics_tls_dir" "$player_metrics_tls_dir" "$player_metrics_tls_dir"
+        fi
+        ;;
+      *__MEDIA_NODE_JOB__*)
+        if [[ -n "$media_node_host" ]]; then
+          printf '  - job_name: vm-media-node\n    scheme: %s\n    metrics_path: %s\n' "$remote_exporter_scheme" "$node_metrics_path"
+          if [[ -n "$transport_ca_path" ]]; then
+            printf '    tls_config:\n      ca_file: %s\n' "$transport_ca_path"
+          fi
+          printf '    static_configs:\n      - targets:\n          - "%s:%s"\n        labels:\n          role: media\n          machine: media\n' \
+            "$media_node_host" "$remote_node_port"
         fi
         ;;
       *__BACKEND_METRICS_AUTHORIZATION__*)
@@ -4009,6 +4020,8 @@ VM2_BACKEND_HOST=$BACKEND_PRIVATE_HOST
 VM3_CMS_HOST=$CMS_PUBLIC_HOST
 VM4_OBSERVABILITY_HOST=$OBSERVABILITY_PRIVATE_HOST
 OBSERVABILITY_PRIVATE_HOST=$OBSERVABILITY_PRIVATE_HOST
+INCLUDE_LIVE_MEDIA=$INCLUDE_LIVE_MEDIA
+MEDIA_PRIVATE_HOST=${MEDIA_PRIVATE_HOST:-}
 PLAYER_METRICS_CONFIG_DIR=/etc/darshan/sites/$SITE_NAME/player-metrics
 DATA_PRIVATE_HOST=$DATA_PRIVATE_HOST
 BACKEND_PRIVATE_HOST=$BACKEND_PRIVATE_HOST
@@ -4057,6 +4070,10 @@ EOF
 
     write_runtime_secret "$PROD_OBSERVABILITY_DIR/secrets/backend-metrics-bearer-token" "$OBSERVABILITY_METRICS_BEARER_TOKEN"
     write_runtime_secret "$PROD_OBSERVABILITY_DIR/secrets/grafana-admin-password" "$GRAFANA_ADMIN_PASSWORD"
+    PROD_MEDIA_METRICS_HOST=""
+    if [[ "$INCLUDE_LIVE_MEDIA" == true ]]; then
+      PROD_MEDIA_METRICS_HOST="$MEDIA_PRIVATE_HOST"
+    fi
 
     render_prometheus_config \
       "$PROD_OBSERVABILITY_DIR/prometheus/prometheus.yml" \
@@ -4092,7 +4109,8 @@ EOF
       "node-exporter:9100" \
       "http" \
       "/etc/darshan/player-metrics/players.targets.json" \
-      "/etc/darshan/player-metrics"
+      "/etc/darshan/player-metrics" \
+      "$PROD_MEDIA_METRICS_HOST"
 
     render_alert_rules "$PROD_OBSERVABILITY_DIR/prometheus/rules/alerts.yml"
 
@@ -5251,7 +5269,11 @@ tls_curl() {
 tls_curl "$PROMETHEUS_HOST_PORT" /-/ready >/dev/null
 tls_curl "$ALERTMANAGER_HOST_PORT" /-/ready >/dev/null
 tls_curl "$GRAFANA_HOST_PORT" /api/health >/dev/null
-for job in prometheus vm4-alertmanager darshan-server vm1-node vm1-postgres vm1-minio vm-valkey-node vm2-node vm3-node vm3-nginx vm4-node vm4-grafana; do
+jobs=(prometheus vm4-alertmanager darshan-server vm1-node vm1-postgres vm1-minio vm-valkey-node vm2-node vm3-node vm3-nginx vm4-node vm4-grafana)
+if [[ "${INCLUDE_LIVE_MEDIA:-false}" == true ]]; then
+  jobs+=(vm-media-node)
+fi
+for job in "${jobs[@]}"; do
   targets_json="$(tls_curl "$PROMETHEUS_HOST_PORT" "/api/v1/query?query=up%7Bjob%3D%22${job}%22%7D")"
   jq -e '.status == "success" and (.data.result | length > 0) and ([.data.result[].value[1] | tonumber] | all(. == 1))' \
     <<<"$targets_json" >/dev/null || { echo "Prometheus target is not healthy: ${job}" >&2; exit 1; }
@@ -5391,6 +5413,10 @@ not published on the VM.
 EOF
 
   if [[ -n "$OBSERVABILITY_PRIVATE_HOST" ]]; then
+    media_metrics_description="- Optional Media VM node target: not included in this bundle"
+    if [[ "$INCLUDE_LIVE_MEDIA" == true ]]; then
+      media_metrics_description="- Media VM node target: https://$MEDIA_PRIVATE_HOST:$METRICS_GATEWAY_HOST_PORT/node/metrics"
+    fi
     cat > "$PROD_OBSERVABILITY_DIR/README.md" <<EOF
 # Production Observability Bundle
 
@@ -5413,6 +5439,7 @@ This folder runs Prometheus, Alertmanager, and Grafana on the dedicated observab
 - Backend scrape target: https://$BACKEND_PRIVATE_HOST:$API_HOST_PORT/metrics
 - MinIO scrape target: https://$DATA_PRIVATE_HOST:$MINIO_HOST_PORT/minio/v2/metrics/cluster
 - Static TLS metrics-gateway targets: Data, Valkey, Backend, and CMS
+$media_metrics_description
 - Local node exporter is private to the Observability Compose network
 - Optional player targets: HTTPS mutual TLS from the persistent \`\$PLAYER_METRICS_CONFIG_DIR\` inventory
 

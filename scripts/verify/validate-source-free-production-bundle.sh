@@ -356,6 +356,12 @@ NODE
 grep -q 'watchdog-health.py' "$LIVE_BUNDLE/production/media/health-check.sh"
 grep -q 'DARSHAN_LIVE_RUNTIME_ENABLED: "true"' "$LIVE_BUNDLE/production/backend/docker-compose.live.yml"
 grep -q 'DARSHAN_MEDIA_HOST_LEASE_FILE' "$LIVE_BUNDLE/production/media/docker-compose.yml"
+grep -q '^  node-exporter:$' "$LIVE_BUNDLE/production/media/docker-compose.yml"
+grep -q '^  metrics-gateway:$' "$LIVE_BUNDLE/production/media/docker-compose.yml"
+grep -q 'location = /node/metrics' "$LIVE_BUNDLE/production/media/metrics-gateway.conf"
+grep -q 'job_name: vm-media-node' "$LIVE_BUNDLE/production/observability/prometheus/prometheus.yml"
+grep -q 'jobs+=(vm-media-node)' "$LIVE_BUNDLE/production/observability/health-check.sh"
+[[ -f "$LIVE_BUNDLE/production/observability/grafana/dashboards/vm-media.json" ]]
 if find "$LIVE_BUNDLE/production/media" -type f \( -name '*.key' -o -name 'authority.json' -o -name 'witness-secret' -o -name 'signing.env' \) | grep -q .; then
   echo "Target-only live secret leaked into a bundle." >&2; exit 1
 fi

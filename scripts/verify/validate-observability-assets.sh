@@ -85,6 +85,7 @@ sed -i \
   -e '/__OBSERVABILITY_ALERTING_TLS_CONFIG__/d' \
   -e '/__OBSERVABILITY_SCRAPE_TLS_CONFIG__/d' \
   -e '/__REMOTE_EXPORTER_TLS_CONFIG__/d' \
+  -e '/__MEDIA_NODE_JOB__/d' \
   "$RENDERED_PROMETHEUS"
 
 cp -R "$PLATFORM_ROOT/deploy/shared/observability/prometheus" "$RENDERED_PROMETHEUS_ASSETS"

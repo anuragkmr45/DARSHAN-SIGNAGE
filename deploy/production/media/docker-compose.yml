@@ -1,4 +1,17 @@
 name: ${COMPOSE_PROJECT_NAME}
+
+x-darshan-log: &darshan-log
+  logging:
+    driver: local
+    options:
+      max-size: ${CONTAINER_LOG_MAX_SIZE}
+      max-file: ${CONTAINER_LOG_MAX_FILES}
+
+x-exporter-resources: &exporter-resources
+  cpus: ${EXPORTER_CPU_LIMIT}
+  mem_limit: ${EXPORTER_MEMORY_LIMIT}
+  pids_limit: ${EXPORTER_PIDS_LIMIT}
+
 services:
   media:
     image: ${MEDIA_IMAGE}
@@ -8,14 +21,10 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    <<: *darshan-log
     cpus: ${MEDIA_CPU_LIMIT}
     mem_limit: ${MEDIA_MEMORY_LIMIT}
     pids_limit: ${MEDIA_PIDS_LIMIT}
-    logging:
-      driver: local
-      options:
-        max-size: ${CONTAINER_LOG_MAX_SIZE}
-        max-file: ${CONTAINER_LOG_MAX_FILES}
     labels:
       com.darshan.media.managed: "1"
       com.darshan.media.role: media-node
@@ -53,3 +62,41 @@ services:
       - ${MEDIA_HOST_LEASE_DIRECTORY:-/run/darshan-media-host-lease/unprepared}:/run/darshan-media-host-lease:ro
     tmpfs:
       - /tmp:mode=1777,size=32m
+
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE}
+    pull_policy: never
+    restart: unless-stopped
+    <<: [*darshan-log, *exporter-resources]
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    pid: host
+    volumes:
+      - /:/host:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  metrics-gateway:
+    image: ${NGINX_IMAGE}
+    pull_policy: never
+    restart: unless-stopped
+    <<: [*darshan-log, *exporter-resources]
+    depends_on:
+      - node-exporter
+    ports:
+      - "${MEDIA_BIND_ADDRESS}:${METRICS_GATEWAY_HOST_PORT}:9443"
+    volumes:
+      - ./metrics-gateway.conf:/etc/nginx/nginx.conf:ro
+      - ${PRIVATE_ROOT}/media/media.crt:/etc/darshan/tls/server.crt:ro
+      - ${PRIVATE_ROOT}/media/media.key:/etc/darshan/tls/server.key:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:mode=0755
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN]
+    security_opt: ["no-new-privileges:true"]

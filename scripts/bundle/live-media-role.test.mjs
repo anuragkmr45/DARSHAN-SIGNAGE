@@ -17,7 +17,9 @@ test('generated media and Backend overlay are parsed by real Compose without sta
       MEDIA_BIND_ADDRESS: '10.20.0.60', MEDIA_CONTROL_PORT: '18784', MEDIA_SIGNAL_PORT: '18780', MEDIA_RTC_TCP_PORT: '18782',
       MEDIA_RTC_UDP_PORT: '18783', MEDIA_CPU_LIMIT: '4', MEDIA_MEMORY_LIMIT: '4g', MEDIA_PIDS_LIMIT: '512', MEDIA_MIN_FREE_DISK_BYTES: '10737418240',
       BACKEND_PRIVATE_HOST: 'backend.test', API_HOST_PORT: '3000', CMS_PUBLIC_HOST: 'cms.test', CMS_HTTPS_PORT: '443',
-      CONTAINER_LOG_MAX_SIZE: '20m', CONTAINER_LOG_MAX_FILES: '5', PLAYER_SOURCE_COMMIT: 'a'.repeat(40), DARSHAN_COMPATIBILITY_GENERATION: '1' }
+      CONTAINER_LOG_MAX_SIZE: '20m', CONTAINER_LOG_MAX_FILES: '5', NGINX_IMAGE: 'nginx:fixture', NODE_EXPORTER_IMAGE: 'node-exporter:fixture',
+      METRICS_GATEWAY_HOST_PORT: '9443', EXPORTER_CPU_LIMIT: '0.5', EXPORTER_MEMORY_LIMIT: '256m', EXPORTER_PIDS_LIMIT: '128',
+      PLAYER_SOURCE_COMMIT: 'a'.repeat(40), DARSHAN_COMPATIBILITY_GENERATION: '1' }
     renderLiveMediaRole(media, backend, repo, env)
     assert.equal(fs.existsSync(path.join(media, 'host-witness.test.py')), false)
     assert.equal(fs.existsSync(path.join(media, 'watchdog-health.test.py')), false)
@@ -40,6 +42,15 @@ test('generated media and Backend overlay are parsed by real Compose without sta
     assert.equal(service.volumes.some(v => String(v.source).includes('/host')), false)
     assert.equal(service.ports.some(p => p.target === 18781), false)
     assert.equal(service.environment.DARSHAN_MEDIA_SFU_URL, 'http://127.0.0.1:18781')
+    const nodeExporter = JSON.parse(result.stdout).services['node-exporter']
+    const metricsGateway = JSON.parse(result.stdout).services['metrics-gateway']
+    assert.equal(nodeExporter.image, 'node-exporter:fixture')
+    assert.equal(nodeExporter.pid, 'host')
+    assert.equal(nodeExporter.volumes.find(v => v.target === '/host').read_only, true)
+    assert.equal(metricsGateway.image, 'nginx:fixture')
+    assert.equal(metricsGateway.ports[0].published, '9443')
+    assert.equal(metricsGateway.volumes.find(v => v.target === '/etc/darshan/tls/server.key').read_only, true)
+    assert.match(fs.readFileSync(path.join(media, 'metrics-gateway.conf'), 'utf8'), /location = \/node\/metrics/)
     fs.writeFileSync(path.join(backend, 'base.yml'), 'services:\n  api:\n    image: fixture:1\n    environment:\n      DARSHAN_CONTAINER_ROLE: api\n  worker:\n    image: fixture:1\n    environment:\n      DARSHAN_CONTAINER_ROLE: worker\n')
     const overlay = spawnSync('docker', ['compose', '-f', 'base.yml', '-f', 'docker-compose.live.yml', 'config', '--format', 'json'], { cwd: backend, encoding: 'utf8' })
     assert.equal(overlay.status, 0, overlay.stderr)

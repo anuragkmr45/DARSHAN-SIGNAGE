@@ -71,6 +71,8 @@ describe('backend observability instrumentation', () => {
     expect(output).toContain('darshan_server_device_heartbeats_received_total{status="ONLINE",result="success",persist_mode="queue"} 1');
     expect(output).toContain('darshan_server_job_processing_total{queue="telemetry:heartbeat",result="success"} 1');
     expect(output).toContain('darshan_server_s3_operations_total{operation="put_object",result="success"} 1');
+    expect(output).toContain('# HELP darshan_server_live_media_runtime_ready');
+    expect(output).toContain('# HELP darshan_server_live_runtime_occupied_slots');
   });
 
   it('records runtime hardening metrics for pairing, auth, and command claim paths', async () => {
