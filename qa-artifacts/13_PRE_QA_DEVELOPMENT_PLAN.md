@@ -412,3 +412,19 @@ QA-owned fields were not changed.
 The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
 
 Next closure order: bind final current-source builds/suites; prove native root-owned host-readiness/witness service on an isolated node without profile weakening; run real CMS native capture through actual Backend/media into the newly built ordinary player with frame/audio/fallback and fault evidence; repeat the affected lifecycle paths; then execute signed six-role/restore/platform/capacity gates and independent human acceptance. The old376028/1830ms fixture proof, source-free fixtures and future-window CMS publish are supporting evidence only, not a closed loop.
+
+### Superseding local developer disposition — 2026-11-03
+
+The later [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md)
+records current-source CMS native tab capture through Media into a decoded frame
+on the ordinary packaged Linux player, explicit Stop/fallback/restart, a separate
+end-of-window run and final bounded regressions. These results supersede the
+earlier *local integrated frame absent* tasks in the table and closure order
+above. The attempted Firefox continuation produced no stream when the
+resource-limited host's Media watchdog isolated before the test window. The
+separate local Firefox retry is dropped from this developer plan; it is not a
+Firefox pass or a support claim. BQ-027 makes actual Chrome/Edge and Windows,
+not Firefox, the independent `LIVE-17` release browser matrix.
+The remaining work is independent `LIVE-01..20` human execution and the site
+TLS/media, Windows, physical display/audio, 10×25 and restore gates listed in
+`04_MASTER_TEST_CHECKLIST.md` and `11_RELEASE_READINESS_CHECKLIST.md`.

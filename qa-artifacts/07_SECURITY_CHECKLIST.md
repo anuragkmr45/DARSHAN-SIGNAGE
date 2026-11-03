@@ -44,6 +44,12 @@ Security cases are planned assessments, not penetration-test results. Record evi
   certificate stores, wrong-host/expired cert rejection, private media addresses,
   firewall bypass attempts, offline dependency audit, redacted logs and external
   authority epoch/signing rotation after restore.
+- [ ] `LIVE-15`: use separate CMS, Backend, Media and player VMs to verify
+  approved DNS/certificate chains, HTTPS/WSS signaling and the selected WebRTC
+  ICE candidate over the intended UDP/TCP/TURN route. Block each route in turn;
+  verify the UI reports failure or safe fallback, with no insecure HTTP/WSS
+  downgrade, public relay, Docker-bridge dependency or unauthorized media path.
+  Record firewall source/destination/port and sanitized transport evidence.
 
 Security cases are planned, not assessed/passed. See [contract](../docs/contracts/live-broadcast.md) and
 [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md); retain existing human security/release controls.

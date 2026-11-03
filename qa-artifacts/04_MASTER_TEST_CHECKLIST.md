@@ -114,6 +114,33 @@ inside the same ordinary installed DARSHAN player, including normal pairing,
 lifecycle, cache and emergency transitions. A developer-only prototype or
 separate receiver application cannot close those integrated cases.
 
+### Independent human execution and site gates
+
+- [ ] Run **each** `LIVE-01..20` row in `05_TEST_CASES.csv` against one frozen
+  source commit and CMS/Backend/Media/player artifact set (with signed role
+  manifests where required). For each row,
+  record tester, UTC time, environment, artifact hashes, expected versus actual
+  result, screenshots/video/logs and defect ID or explicit N/A reason. Only the
+  independent tester may change its `Not Tested` result.
+- [ ] `LIVE-15`: from the actual CMS and player machines on different VMs,
+  prove trusted HTTPS/WSS and WebRTC ICE media reachability through the approved
+  firewall/UDP/TCP/TURN routes. Record DNS names, certificate trust outcomes,
+  selected candidate/transport and denied wrong-host/expired certificates or
+  blocked paths. A same-host Docker bridge success does not satisfy this gate.
+- [ ] `LIVE-17`: on installed Ubuntu and Windows players and actual Chrome/Edge
+  presenter browsers, verify real screen/window/tab selection, permission
+  cancellation, video, optional audio and visible physical-display output.
+  Record each supported or unsupported source/track combination; do not infer
+  a Chrome/Edge result from Chromium or a human-visible result from telemetry.
+- [ ] `LIVE-18`: on the approved six-VM topology, measure 1×25, 5×25 and
+  10 concurrent broadcasts × 25 receivers (250 total), then 26th receiver and
+  11th overlap rejection. Capture source-to-display delay, readability/audio,
+  CPU/RAM/GPU/NIC, bandwidth, errors, reconnect bursts and soak/cleanup.
+- [ ] `LIVE-16`: install/update/feature-disable and restore a production-sized
+  copy into an isolated target; rotate the external authority epoch, prove old
+  rooms/tickets cannot resume, verify new player authority and compare DB/object
+  counts, hashes and RPO/RTO evidence. Never rehearse against production data.
+
 For every fault record trigger, visible display, audio, allowed recovery and
 cleanup. [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md) is an in-progress developer ledger;
 all new human cases remain Not Tested.

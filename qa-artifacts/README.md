@@ -188,3 +188,15 @@ Actual CMS developer observation: source creation → fallback READY → saved d
 Bounded automated results: Backend runtime 43/4 and neighbors 79/7; authoring 22/22 (after a21-pass/1-fail conditional-Schedule repro and fix); request preview 7/7; targets 6/6; media Node 108 pass/8 opt-in skipped. CMS 248/39 passed before the final create-only consent/page-gate corrections; later final full/build results must be read from the dated ledger. Normal-player source integration is present, with final gates recorded by its owner. Deployment fixtures passed 18 combined configuration/Compose checks (17 configuration + 1 Compose), 11 host-witness and 16 watchdog checks, including signed optional-role fixture validation with Docker deliberately skipped; they are not an installed production artifact.
 
 Open gates include current native CMS capture/audio → configured Backend/media → newly built ordinary player, root-owned RO tmpfs host-readiness/death witness, native host pidfd/AppArmor, Windows/physical/cross-VM TLS/firewall, 10×25 capacity/soak, restore and independent human acceptance. No sudo authentication or safe native root-owned mount proof was available in this checkpoint.
+
+### Current LIVE QA handoff — 2026-11-03
+
+The later [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md)
+records a local current-source CMS capture through Media to a decoded frame on
+the ordinary packaged Linux player, Stop/fallback/restart, schedule-end timing
+and bounded regression. This supersedes the older partial checkpoint above.
+The [master checklist](04_MASTER_TEST_CHECKLIST.md) now spells out independent
+`LIVE-01..20` execution plus cross-VM TLS/media, actual Chrome/Edge and Windows,
+physical display/audio, measured 10×25 and isolated restore gates. All 20 CSV
+results remain `Not Tested`. The separate local Firefox retry was dropped;
+Firefox was not verified or added to the BQ-027 release support matrix.

@@ -124,7 +124,7 @@ developer evidence, not an independent QA or release pass.
 - [ ] Sixth role signed/offline artifacts, trusted CMS HTTPS and player Chromium
   trust, firewall/UDP/TURN, feature disable, update/rollback and rotated external
   restore epoch are rehearsed (`LIVE-15..16`).
-- [ ] Windows/actual Chrome/Edge/Firefox matrix, physical display/audio,
+- [ ] Windows/actual Chrome/Edge matrix, physical display/audio,
   whole-machine sleep with separate Backend and cross-VM fault evidence are
   complete (`LIVE-15..17`).
 - [ ] Representative 1x25,5x25,10x25, simultaneous transitions/reconnect and soak
@@ -134,6 +134,14 @@ developer evidence, not an independent QA or release pass.
 - [ ] Fresh truthful diagnostics, sanitized audit, stable-packet regression and
   independent human `LIVE-01..20` results bind to frozen commits/artifact hashes
   (`LIVE-19..20`). Existing unrelated blockers remain open.
+- [ ] QA has independently executed and signed **all 20** `LIVE-01..20` case
+  rows on the frozen candidate, with per-case actual results and linked
+  evidence. Developer screenshots and automation remain supporting evidence.
+- [ ] Cross-VM CMS/Backend/Media/player TLS trust and signaling/media ICE paths,
+  Windows and Ubuntu installed players, physical display and optional audio,
+  measured 10 broadcasts × 25 receivers, and isolated production-sized restore
+  each have passing, artifact-bound QA records. An unrun item is a release
+  blocker, not an implicit pass from the local live-frame result.
 
 Current status is in progress; no new item above is a pass. See [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).
 
@@ -141,8 +149,10 @@ Current status is in progress; no new item above is a pass. See [evidence/live-b
 Capability-gated publication and its supporting API/DB/MinIO checks now exist.
 Live runtime is default OFF. Source now includes the normal-player coordinator,
 Backend authority, CMS controls/reports and optional signed sixth-role bundle
-path. Actual integrated capture/frame/audio, native host actuation, production
-artifact installation and external acceptance are unfinished verification gates.
+path. This paragraph is the earlier publication-only checkpoint; the later
+dated developer ledger records local integrated capture and a packaged-player
+frame. Native host/platform/site acceptance, production artifact installation
+and independent acceptance remain unfinished verification gates.
 This packet cannot be released as the completed live feature, and no checkbox
 above is closed by developer source/fixture evidence.
 See [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).

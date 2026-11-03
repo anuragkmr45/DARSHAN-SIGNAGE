@@ -82,3 +82,17 @@ source/artifact identifiers and remaining gates belong in [evidence/live-broadca
 The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
 
 The bounded CMS authoring sequence has developer evidence through future-window Approve/Publish, including immutable reviewed image and request-bound frozen preview. It proves neither a live presenter connection nor an ordinary-player frame/audio result. New source includes presenter capture, normal-player integration and per-target reports; execute their actual combined journey next, including create-only consent, stale two-tab and lost-response recovery, optional audio, stop/restart/admin disable, emergency/security/window end and Unknown after report expiry. Final build/regression results belong in the dated ledger before human UAT.
+
+### Current LIVE handoff
+
+The later [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md)
+records the local current-source CMS → native capture → Media → ordinary
+packaged Linux player frame, Stop/fallback/restart, a separate schedule-end
+run and bounded regression. Independent testers must still run **every**
+`LIVE-01..20` CSV case on frozen artifacts. Record actual display and optional
+audio alongside Backend/player observations; execute cross-VM TLS/media,
+Windows/browser, physical display/audio, 10×25 capacity and isolated restore
+as explicit site gates. The local Firefox retry has been dropped from the
+developer plan because the host isolated before its test window. The BQ-027
+release browser matrix remains independent QA for real Chrome/Edge; no Firefox
+support or pass is claimed.

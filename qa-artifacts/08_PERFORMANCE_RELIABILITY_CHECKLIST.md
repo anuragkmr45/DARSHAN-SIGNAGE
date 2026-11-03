@@ -74,10 +74,25 @@ accepted topology; actual hardware/network suitability remains a release gate.
 Keep existing BQ-017 fleet/API workload gates as well. A local one/two-player
 run only proves the exercised functional/fault scope. Ledger: [evidence/live-broadcast-developer-verification-2026-11-03.md](evidence/live-broadcast-developer-verification-2026-11-03.md).
 
+Independent `LIVE-18` execution must identify the frozen artifacts, six VM
+sizes and network limits, actual versus representative receiver count, stage
+duration and stop criteria before the run. At each 1×25, 5×25 and 10×25 stage,
+record end-to-end source-to-physical-display timing, frame/audio quality,
+failure/reconnect counts, per-VM CPU/RAM/GPU/NIC and Media egress. Include
+simultaneous starts, end/replacement races, 26th/11th rejection and a soak with
+post-stop room/track/memory cleanup. A logical-capacity unit pass or local
+single-player frame is not throughput evidence; retain the release gate as
+`Not Tested` until QA attaches measurements and approves them.
+
 ## Runtime and authoring developer checkpoint — 2026-11-03
 
 The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
 
 Logical10/11 and25/26 limits and durable occupancy checks have developer DB evidence; no new physical media throughput, packet-loss, end-to-end latency, audio cutoff or250-player result is claimed. Media host readiness uses1000ms local sequence freshness,100ms polls and a separately bounded witness/watchdog path; the composed runtime cutoff still needs native measured evidence. An older core376028 fixture-authority/healthy-Docker cutoff of1830ms is historical and does not validate current readiness source, Docker-unavailable pidfd enforcement or whole-machine suspension.
 
-Run current-source authority/DB/media/worker partitions, response-loss/idempotent command retries, capture cancellation, normal-player lifecycle and fallback repair before representative1×25/5×25/10×25 load/soak. All existing workload and recovery release gates stay open.
+This earlier authoring checkpoint is superseded for local player-frame and
+fallback evidence by the [dated developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md).
+Run the remaining authority/DB/media/worker partitions, response-loss and
+idempotent retries, capture cancellation and normal-player fault paths on the
+frozen candidate before representative 1×25/5×25/10×25 load/soak. All
+workload and recovery release gates stay open.

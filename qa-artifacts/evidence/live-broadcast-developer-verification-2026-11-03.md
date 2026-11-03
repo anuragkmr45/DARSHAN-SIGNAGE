@@ -1069,8 +1069,12 @@ one-second host lease deliberately fails closed on a delayed or missing host
 witness; this observation does not identify whether the delay came from host
 scheduling or the witness process. The exact cause was not instrumented in this
 attempt. We did not weaken the lease or claim Firefox acceptance on this
-resource-limited host. Re-run the Firefox capture and sustained-media test on
-the representative Media VM with resource and watchdog timing evidence.
+resource-limited host. Per the 2026-11-03 developer-plan disposition, no
+separate retry on this host is planned: the current-source Chromium CMS to
+ordinary packaged Linux player live-frame, fallback/restart and schedule-end
+journeys have local developer evidence above. BQ-027 requires independent
+actual Chrome/Edge and Windows coverage on representative resources. Firefox
+was not verified or accepted as a release support claim.
 
 These are developer checks on one local Linux host. They do not replace
 independent `LIVE-01..20` human execution, physical display/audio, actual

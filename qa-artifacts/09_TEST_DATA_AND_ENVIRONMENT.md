@@ -90,12 +90,29 @@ replay, late picker/callback/cleanup; expired/wrong-host trust fixture.
 
 Log exact commit/worktree delta, package SHA-256, Node/dependency versions,
 CMS/Backend/media URLs without credentials, profile aliases, time source,
-resource use, transport and fault boundaries. Available Firefox/Chromium do not
+resource use, transport and fault boundaries. The local Chromium CMS-to-packaged
+Linux player journey is developer evidence; the attempted Firefox continuation
+produced no Firefox capture or frame. No further local Firefox retry is planned
+for that developer checkpoint. BQ-027 names real Chrome/Edge and Windows as
+release gates, so Firefox is not a required release-matrix run or a claimed
+verified browser. Local Chromium does not
 establish actual Chrome/Edge or Windows coverage. Physical audio/display,
 whole-machine sleep with separate Backend and cross-VM partitions remain
 external. Never commit generated credentials/keys/certificates/profiles.
 
-[Execution plan](../docs/plans/live-broadcast-implementation-loops.md); [in-progress ledger](evidence/live-broadcast-developer-verification-2026-11-03.md).
+For `LIVE-15..18`, reserve an isolated six-VM site topology (the existing five
+roles plus Media), installed Ubuntu and Windows players, actual presenter
+browsers, physical displays and audio outputs, approved test PKI/DNS and
+firewall/UDP/TCP/TURN rules. Record routed Media VM address and negotiated ICE
+transport separately from a Docker bridge address. Size the receiver cohort
+and monitoring to measure 1×25, 5×25 and 10×25 without using a single small
+developer workstation as capacity evidence. Prepare a production-sized,
+nonproduction DB/object backup and a separate empty restore target; retain
+before/after object hashes, authority epoch and recovery timing. See
+`04_MASTER_TEST_CHECKLIST.md` and `05_TEST_CASES.csv` for independent result
+ownership.
+
+[Execution plan](../docs/plans/live-broadcast-implementation-loops.md); [dated developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md).
 
 
 ### Publication/authorization fixture checkpoint — 2026-11-03
