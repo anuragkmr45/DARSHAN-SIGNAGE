@@ -8,8 +8,8 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 
 | ID | Mounted route and page | Route gate | Main data source and expected effect | Responsive and evidence state |
 | --- | --- | --- | --- | --- |
-| R01 | `/` — Home | Public | Static introduction; Sign In/Get Started/Request Demo all navigate to login. The Request Demo label currently promises a separate action that does not exist. | Redesign and browser review pending. |
-| R02 | `/login` — Auth | Public | Auth API; establish session or show a sign-in error. | Redesign and real sign-in review pending. |
+| R01 | `/` — Home | Public | One Sign In action, or Open Workspace for an already restored user; no trial/demo promises. | 390/820/1440 fixture browser and rendered captures; real cookie-restoration review pending. |
+| R02 | `/login` — Auth | Public | Auth API; keep credentials on failure, show a plain-language error, establish cookie session, and honor the safe return path. | 390/820/1440 fixture browser, dark phone capture, cookie-session browser; real sign-in review pending. |
 | R03 | `/*` — authenticated shell | Signed-in user, then child gate | Settings/branding bootstrap, sidebar, toolbar, notifications, logout; mounts child route. | Shell prototype; cross-route keyboard, theme, phone review pending. |
 | R04 | `/dashboard` — Dashboard | `read Dashboard` | Metrics, observability, health and reports; open detail dialogs, Schedule Report, or new request. Media Storage detail requires `read Media` for a file list and per-record permission for delete; denied/error/empty remain distinct. | 390/820/1440 prototype; real-service evidence pending. |
 | R05 | `/schedule` — ScheduleQueue | `read Schedule` or `read ScheduleRequest` | Schedule requests/device schedule; inspect, approve, publish, or take down according to action permissions. | Redesign and real-service evidence pending. |
@@ -36,6 +36,19 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | R26 | `/webhooks` — Webhooks | `read Webhook` | Webhook API; configure and explicitly test permitted endpoints. | Redesign and real-service evidence pending. |
 | R27 | `/proof-of-play` — ProofOfPlay | `read ProofOfPlay` **or** `read Report` in current route guard | PoP API; inspect recorded render-start reports. | Gate semantics and real evidence review pending. |
 | R28 | authenticated `*` — NotFound | Signed-in user | No data; explain unknown path and provide navigation. | Redesign and browser review pending. |
+
+## Public entry controls and states
+
+| ID | Control or state | Permission and data source | Expected side effect | Responsive treatment and evidence |
+| --- | --- | --- | --- | --- |
+| E01 | Home Sign In / Open Workspace | Public; restored auth user when available. | Navigate to `/login` or `/dashboard`; protected route checks the session. | One labeled primary action at 390/820/1440; entry browser case. |
+| E02 | Home introduction | Public; static product copy. | Explain content, screen and event tasks without promising unavailable signup, trials or demos. | Single heading and separated capability rows; rendered captures. |
+| E03 | Email and password | Public; Auth login API and server schema. | Submit credentials through normal cookie-aware client; preserve field values after failure. | Full-width fields, browser autofill attributes; entry and cookie browser cases. |
+| E04 | Show/Hide password | Public; local state only. | Change input visibility without changing its value. | 44px target; entry browser case. |
+| E05 | Sign In submit | Public; Auth login API. | Disable while pending, install returned identity, and navigate to a sanitized return path or Dashboard. | Full-width primary action; cookie browser case; real-service sign-in pending. |
+| E06 | Validation, rejection and rate-limit feedback | Public; local email/password checks and Auth API status/retry time. | Explain failure inline, retain credentials, show the server's lockout duration when supplied, and allow retry. | Alert remains beside form at phone and desktop widths; entry browser cases. |
+| E07 | Account help and Back | Public; static text and `/` route. | Point to site administrator for access help or return to introduction. | Secondary text/link below form; rendered captures. |
+| E08 | Invalid runtime configuration | Public; production security boundary. | Block login before any API request and explain configuration failure. | Existing auth-cookie browser case; real deployment review pending. |
 
 ## Dashboard controls and states
 
@@ -69,7 +82,7 @@ The next pass expands each route into control-level rows. The following rows ide
 
 | Packet | Traced controls so far | Authorization/data/side effect | Responsive and test evidence | Open control work |
 | --- | --- | --- | --- | --- |
-| Foundation | Sidebar sections, account/logout, notifications, Dashboard summary actions, report, Media Storage preview and recoverable delete. | Effective authorization for navigation; Metrics/Observability/Reports APIs for Dashboard; `read Media` gates the list, record permission gates delete, failure offers Retry. | Dashboard browser 10/10; 390/820/1440 captures. | Home, login, every shared toolbar/feedback state, permission withdrawal. |
+| Foundation | Public introduction/sign-in, sidebar sections, account/logout, notifications, Dashboard summary actions, report, Media Storage preview and recoverable delete. | Auth cookie/session and safe redirect; effective authorization for navigation; Metrics/Observability/Reports APIs for Dashboard; `read Media` gates the list, record permission gates delete, failure offers Retry. | Entry/auth browser 4/4 and Dashboard browser 10/10; 390/820/1440 captures. | Real-service sign-in, every shared toolbar/feedback state, permission withdrawal. |
 | Screens | Pair Device, details, recovery/revoke/delete, Group management, pairing history, health, deletion blockers, paginated member search/selection and retry. | Exact Screen/ScreenGroup/DevicePairing capabilities; Screen/Group/Pairing APIs; server final authority. Create-only Group role can save an empty Group. | Screens browser 17/17; route DB test 2/2; 390/820/1440 captures. | Every detail tab, frame/display controls, real-service large-fleet Group journey, real player. |
 | Schedule review | Layout/media/target/timing steps, reservation recheck, review and submit. | Presentation/Schedule/Reservation APIs; server validates conflict and publication. | Scheduling/emergency browser 2/2; 390/820/1440 review captures. | Queue, approval, publish/take-down, all failure states, real service. |
 | Layout editor | Add/Draw/Select, move/resize, numeric inspector, layers, undo/redo, save. | Layout API and normalized geometry. | Fixture-backed editor browser and 390/1440 captures. | Every tool/field/state, real save/reopen, player geometry. |

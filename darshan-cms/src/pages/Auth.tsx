@@ -1,11 +1,9 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { ArrowLeft, Eye, EyeOff, Monitor, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useLocation, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Monitor } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { authApi } from "@/api/domains/auth";
 import { ApiError } from "@/api/apiClient";
@@ -15,281 +13,131 @@ import { getCookie } from "@/lib/cookies";
 import { isValidEmail } from "@/lib/validation";
 import { clearPostLoginRedirect, resolvePostLoginRedirect } from "@/lib/authRedirect";
 
+const signInError = (error: unknown) => {
+  if (!(error instanceof ApiError)) return "Sign-in is unavailable. Check your connection and try again.";
+  if (error.status === 401) return "Email or password is incorrect. Check both and try again.";
+  if (error.status === 403) return "This account cannot sign in. Contact your site administrator.";
+  if (error.status === 429) {
+    const details = error.details && typeof error.details === "object" ? error.details as { retry_after_seconds?: unknown } : null;
+    const seconds = details?.retry_after_seconds;
+    if (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0) {
+      const minutes = Math.ceil(seconds / 60);
+      return minutes > 1
+        ? `Too many sign-in attempts. Try again in about ${minutes} minutes.`
+        : `Too many sign-in attempts. Try again in about ${Math.ceil(seconds)} seconds.`;
+    }
+    return "Too many sign-in attempts. Please wait before trying again.";
+  }
+  if (error.status === 408 || error.status >= 500) return "Sign-in is temporarily unavailable. Please try again.";
+  return error.message;
+};
+
 const Auth = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
   const dispatch = useAppDispatch();
   const [isLoading, setIsLoading] = useState(false);
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
-  const [showSignupPassword, setShowSignupPassword] = useState(false);
-  const [showSignupConfirm, setShowSignupConfirm] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    const formData = new FormData(e.currentTarget);
-    const email = String(formData.get("login-email") ?? "");
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isLoading) return;
+    const formData = new FormData(event.currentTarget);
+    const email = String(formData.get("login-email") ?? "").trim();
     const password = String(formData.get("login-password") ?? "");
 
     if (!isValidEmail(email)) {
-      toast({
-        title: "Invalid email",
-        description: "Enter a valid email address.",
-        variant: "destructive",
-      });
-      setIsLoading(false);
+      setFormError("Enter a valid email address.");
       return;
     }
-
     if (password.length < 8) {
-      toast({
-        title: "Weak password",
-        description: "Password must be at least 8 characters.",
-        variant: "destructive",
-      });
-      setIsLoading(false);
+      setFormError("Enter your password. It must contain at least 8 characters.");
       return;
     }
 
+    setFormError(null);
+    setIsLoading(true);
     try {
       const auth = await authApi.login({ email, password });
       const csrfToken = auth.csrf_token ?? getCookie("csrf_token");
-
       dispatch(setCredentials({ token: auth.token, user: auth.user, csrfToken }));
-
-      toast({
-        title: "Login successful",
-        description: "Welcome back to DARSHAN CMS",
-      });
+      toast({ title: "Signed in", description: "Your DARSHAN workspace is ready." });
       const redirectPath = resolvePostLoginRedirect(location.search, location.state);
       clearPostLoginRedirect();
       navigate(redirectPath || "/dashboard", { replace: true });
     } catch (error) {
-      const message =
-        error instanceof ApiError ? error.message : "Unable to login right now.";
-      toast({
-        title: "Login failed",
-        description: message,
-        variant: "destructive",
-      });
+      setFormError(signInError(error));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    toast({
-      title: "Signup request",
-      description: "Self-service signup is disabled. Please ask an admin to invite you.",
-    });
-    setIsLoading(false);
-  };
-
   return (
-    <div className="operational-shell flex min-h-screen items-center justify-center px-4 py-6 sm:px-6">
-      <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[0.92fr_1fr]">
-        <section className="hidden overflow-hidden rounded-2xl border border-primary/20 bg-primary p-8 text-primary-foreground shadow-lg lg:flex lg:flex-col lg:justify-between">
-          <div>
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-accent-foreground shadow-sm">
-              <Monitor className="h-8 w-8" />
-            </div>
-            <h2 className="mt-8 text-4xl font-bold tracking-tight">DARSHAN</h2>
-            <p className="mt-4 max-w-sm text-sm leading-6 text-white/75">
-              Operational signage control for screens, media, schedules, player health, and emergency response.
-            </p>
-          </div>
-          <div className="grid gap-3 text-sm text-white/70">
-            <div className="rounded-xl border border-white/10 bg-white/[0.08] p-4">
-              Backend remains the source of truth. Realtime is used for notification and refresh signals.
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/[0.08] p-4">
-              Designed for on-prem teams managing live display fleets.
-            </div>
+    <div className="min-h-svh bg-background text-foreground">
+      <header className="border-b border-border/70">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-4 sm:px-8">
+          <img src="/darshan-mark.svg" alt="" className="h-9 w-9" />
+          <span className="text-sm font-semibold tracking-wide">DARSHAN</span>
+          <span className="ml-auto text-xs text-muted-foreground">Display operations</span>
+        </div>
+      </header>
+
+      <main className="mx-auto grid max-w-5xl gap-12 px-5 py-12 sm:px-8 sm:py-20 lg:min-h-[calc(100svh-74px)] lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)] lg:items-center lg:gap-20">
+        <section className="max-w-md" aria-label="DARSHAN workspace">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Secure site access</p>
+          <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">Sign in to DARSHAN</h1>
+          <p className="mt-4 text-base leading-7 text-muted-foreground">
+            Your workspace for publishing content and checking the screens that play it.
+          </p>
+          <div className="mt-8 hidden space-y-4 border-t border-border/70 pt-6 text-sm text-muted-foreground lg:block">
+            <p className="flex items-center gap-3"><Monitor aria-hidden="true" className="h-4 w-4 text-primary" /> Monitor screens and current content</p>
+            <p className="flex items-center gap-3"><Radio aria-hidden="true" className="h-4 w-4 text-primary" /> Respond to live and urgent events</p>
           </div>
         </section>
 
-        <div className="mx-auto w-full max-w-md space-y-5 sm:space-y-6 lg:mx-0">
-        {/* Logo */}
-        <div className="text-center space-y-2">
-          <div className="flex justify-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary shadow-lg sm:h-16 sm:w-16 lg:hidden">
-              <Monitor className="h-8 w-8 text-primary-foreground sm:h-10 sm:w-10" />
+        <div className="space-y-5">
+        <section aria-label="Sign-in form" className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-8">
+          <h2 className="text-lg font-semibold">Welcome back</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Use the account provided by your site administrator.</p>
+
+          <form className="mt-7 space-y-5" onSubmit={handleLogin} onChange={() => setFormError(null)}>
+            <div className="space-y-2">
+              <Label htmlFor="login-email">Email</Label>
+              <Input id="login-email" name="login-email" type="email" autoComplete="username"
+                autoCapitalize="none" spellCheck={false} placeholder="name@company.com"
+                required disabled={isLoading} />
             </div>
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">DARSHAN CMS</h1>
-          <p className="text-sm text-muted-foreground sm:text-base">Sign in to the operations console</p>
+            <div className="space-y-2">
+              <Label htmlFor="login-password">Password</Label>
+              <div className="relative">
+                <Input id="login-password" name="login-password" type={showPassword ? "text" : "password"}
+                  autoComplete="current-password" required disabled={isLoading} className="pr-12" />
+                <button type="button" aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)}
+                  className="absolute inset-y-0 right-0 flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  {showPassword ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {formError && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{formError}</p>}
+
+            <Button type="submit" className="min-h-11 w-full" disabled={isLoading}>
+              {isLoading ? "Signing in…" : "Sign In"}
+            </Button>
+          </form>
+
+          <p className="mt-6 border-t border-border/70 pt-5 text-sm text-muted-foreground">
+            Need an account or password help? Contact your site administrator.
+          </p>
+        </section>
+        <Link to="/" className="inline-flex w-fit items-center gap-2 text-sm text-muted-foreground hover:text-foreground focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <ArrowLeft aria-hidden="true" className="h-4 w-4" /> Back to introduction
+        </Link>
         </div>
-
-        {/* Auth Card */}
-        <Card className="operational-card-strong rounded-2xl">
-          <Tabs defaultValue="login" className="w-full">
-            <CardHeader className="space-y-1">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="login">Login</TabsTrigger>
-                <TabsTrigger value="signup">Sign Up</TabsTrigger>
-              </TabsList>
-            </CardHeader>
-
-            {/* Login Tab */}
-            <TabsContent value="login">
-              <form onSubmit={handleLogin}>
-                <CardContent className="space-y-4">
-                  <CardTitle className="text-xl sm:text-2xl">Welcome back</CardTitle>
-                  <CardDescription>
-                    Enter your credentials to access your dashboard
-                  </CardDescription>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="login-email">Email</Label>
-                    <Input
-                      id="login-email"
-                      name="login-email"
-                      type="email"
-                      placeholder="name@company.com"
-                      required
-                      disabled={isLoading}
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="login-password">Password</Label>
-                      <Button variant="link" size="sm" className="px-0 h-auto">
-                        Forgot password?
-                      </Button>
-                    </div>
-                    <div className="relative">
-                      <Input
-                        id="login-password"
-                        name="login-password"
-                        type={showLoginPassword ? "text" : "password"}
-                        required
-                        disabled={isLoading}
-                        className="pr-10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowLoginPassword((prev) => !prev)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
-                        aria-label={showLoginPassword ? "Hide password" : "Show password"}
-                      >
-                        {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </CardContent>
-                
-                <CardFooter>
-                  <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? "Signing in..." : "Sign In"}
-                  </Button>
-                </CardFooter>
-              </form>
-            </TabsContent>
-
-            {/* Signup Tab */}
-            <TabsContent value="signup">
-              <form onSubmit={handleSignup}>
-                <CardContent className="space-y-4">
-                  <CardTitle className="text-xl sm:text-2xl">Create account</CardTitle>
-                  <CardDescription>
-                    Get started with DARSHAN CMS today
-                  </CardDescription>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-name">Full Name</Label>
-                    <Input
-                      id="signup-name"
-                      name="signup-name"
-                      type="text"
-                      placeholder="John Doe"
-                      required
-                      disabled={isLoading}
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-email">Email</Label>
-                    <Input
-                      id="signup-email"
-                      name="signup-email"
-                      type="email"
-                      placeholder="name@company.com"
-                      required
-                      disabled={isLoading}
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-password">Password</Label>
-                    <div className="relative">
-                      <Input
-                        id="signup-password"
-                        name="signup-password"
-                        type={showSignupPassword ? "text" : "password"}
-                        placeholder="Create a strong password"
-                        required
-                        disabled={isLoading}
-                        className="pr-10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSignupPassword((prev) => !prev)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
-                        aria-label={showSignupPassword ? "Hide password" : "Show password"}
-                      >
-                        {showSignupPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-confirm">Confirm Password</Label>
-                    <div className="relative">
-                      <Input
-                        id="signup-confirm"
-                        name="signup-confirm"
-                        type={showSignupConfirm ? "text" : "password"}
-                        placeholder="Confirm your password"
-                        required
-                        disabled={isLoading}
-                        className="pr-10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSignupConfirm((prev) => !prev)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
-                        aria-label={showSignupConfirm ? "Hide password" : "Show password"}
-                      >
-                        {showSignupConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </CardContent>
-                
-                <CardFooter>
-                  <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? "Creating account..." : "Create Account"}
-                  </Button>
-                </CardFooter>
-              </form>
-            </TabsContent>
-          </Tabs>
-        </Card>
-
-        {/* Back to Home */}
-        <div className="text-center">
-          <Button variant="ghost" onClick={() => navigate("/")}>
-            Back to Home
-          </Button>
-        </div>
-        </div>
-      </div>
+      </main>
     </div>
   );
 };

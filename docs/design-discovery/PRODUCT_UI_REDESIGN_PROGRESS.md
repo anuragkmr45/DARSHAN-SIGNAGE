@@ -21,6 +21,12 @@ The eight selected upstream design skills and their required references are vend
 
 The six-prototype visual direction is approved. Broader rendered review across themes, accents and widths remains. Dashboard, Screens, schedules, the phone Layout editor, chat navigation, and player pairing/recovery have prototypes; content beyond Layout editing, live, communication beyond navigation, administration, other player surfaces, full coverage register, real-application regression, final artifacts, and human release gates remain open. No existing screenshot or mocked browser result is being counted as full workflow sign-off.
 
+## Public entry and sign-in
+
+Task: reach the on-premises workspace and recover clearly from a failed sign-in. Priority: one honest entry action, email and password, inline failure, then administrator help. The public Home route no longer advertises Request Demo or Start Free Trial actions that only led to login, or unverified fleet-scale claims. The login route no longer exposes disabled self-service signup or a nonfunctional Forgot password button. It retains the cookie-aware auth request, CSRF handling, safe post-login redirect, password visibility control, and site-administrator help.
+
+The entry browser cases cover 390/820/1440 widths, retained values after a rejected login, rate-limit explanation, password visibility, cookie-only session restore, logout, and invalid runtime configuration. The captures are under `qa-artifacts/evidence/product-ui-entry/`. The tests use controlled API fixtures; real on-prem login, lockout, and role-withdrawal checks remain part of the integrated regression.
+
 ## Dashboard prototype in progress
 
 Task: identify fleet problems and continue to content publishing. Priority: current posture, active alerts, then fleet summary and drill-down. The four summary actions retain their existing detail dialogs. The decorative hero and duplicate figures are replaced by a compact toolbar and one summary strip. Required alerts stay in the main page flow; deeper observability and machine details remain below. The existing server APIs still supply all values, including the separate assignment, applied, player-reporting, and proof counts.

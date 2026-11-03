@@ -101,6 +101,11 @@ test("cookie-only login restores the session, redirects, and logs out", async ({
   await expect(page).toHaveURL(/\/dashboard\?from=cookie$/);
   await expect.poll(() => restoredRequests).toBeGreaterThan(0);
 
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Open workspace" })).toBeVisible();
+  await page.getByRole("link", { name: "Open workspace" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+
   await page.getByRole("button", { name: /CMS Admin|admin@cms.test/i }).first().click();
   await page.getByRole("menuitem", { name: /log out|sign out/i }).click();
   await expect(page).toHaveURL(/\/login$/);
