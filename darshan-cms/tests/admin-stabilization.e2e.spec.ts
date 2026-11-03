@@ -437,7 +437,7 @@ test.describe("admin stabilization surfaces", () => {
     await expect(page.getByText(/Unknown time is excluded from uptime percentage/)).toBeVisible();
   });
 
-  test("guards sensitive admin routes and disables the global header search affordance", async ({ page }) => {
+  test("guards sensitive admin routes and omits unavailable global search", async ({ page }) => {
     await bootstrapSession(page, limitedUser);
     await installCommonMocks(page, {
       user: limitedUser,
@@ -450,7 +450,7 @@ test.describe("admin stabilization surfaces", () => {
     });
 
     await page.goto("/dashboard");
-    await expect(page.getByLabel("Global search unavailable")).toBeDisabled();
+    await expect(page.getByLabel("Global search unavailable")).toHaveCount(0);
 
     for (const path of ["/api-keys", "/webhooks", "/proof-of-play"]) {
       await page.goto(path);

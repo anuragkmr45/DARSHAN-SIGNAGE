@@ -8,7 +8,6 @@ import {
   FolderOpen,
   FileBarChart,
   Settings,
-  HelpCircle,
   PanelsTopLeft,
   BellRing,
   Radio,
@@ -133,6 +132,9 @@ const navSections: NavSection[] = [
         icon: Settings,
         moduleKey: "settings",
       },
+      { title: "API Keys", url: "/api-keys", icon: Settings, permissions: [{ action: "read", subject: "ApiKey" }] },
+      { title: "Webhooks", url: "/webhooks", icon: Settings, permissions: [{ action: "read", subject: "Webhook" }] },
+      { title: "Proof of Play", url: "/proof-of-play", icon: FileBarChart, permissions: [{ action: "read", subject: "ProofOfPlay" }, { action: "read", subject: "Report" }] },
     ],
   },
 ];
@@ -171,34 +173,23 @@ export function AppSidebar() {
     >
       <SidebarContent>
         <div
-          className={`mx-2 mt-2 flex items-center rounded-xl px-3 py-4 sm:px-4 ${isCollapsed ? "justify-center" : "gap-3"}`}
+          className={`mx-2 mt-2 flex items-center border-b border-sidebar-border px-2 py-3 sm:px-3 ${isCollapsed ? "justify-center" : "gap-3"}`}
         >
           {branding?.logo_url ? (
             <img
               src={branding.logo_url}
               alt={branding.app_name}
-              className={`${isCollapsed ? "h-8 w-8" : "h-10 w-10"} object-contain`}
+              className="h-8 w-8 object-contain"
             />
           ) : (
-            <div
-              className={`${isCollapsed ? "h-8 w-8" : "h-10 w-10"} flex items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-sm`}
-            >
-              <span className="text-sm font-black tracking-wide">
-                {(branding?.app_name ?? "D").slice(0, 1)}
-              </span>
-            </div>
+            <img src="/darshan-mark.svg" alt="" className="h-8 w-8" />
           )}
           {!isCollapsed && (
             <div className="flex min-w-0 flex-col">
-              <span
-                className="truncate text-lg font-black tracking-[0.08em]"
-                style={{ color: "hsl(var(--sidebar-primary))" }}
-              >
+              <span className="truncate text-sm font-semibold text-sidebar-foreground">
                 {branding?.app_name ?? "DARSHAN"}
               </span>
-              <span className="truncate text-xs text-sidebar-foreground/70">
-                Operations console · {user?.role ?? "User"}
-              </span>
+              <span className="truncate text-xs text-sidebar-foreground/60">{user?.role ?? "User"}</span>
             </div>
           )}
         </div>
@@ -206,7 +197,7 @@ export function AppSidebar() {
         {visibleNavSections.map((section) => (
           <SidebarGroup key={section.label} className={cn(isCollapsed && "px-2")}>
             {!isCollapsed ? (
-              <SidebarGroupLabel className="text-[0.68rem] font-bold uppercase tracking-[0.16em] text-sidebar-foreground/50">
+              <SidebarGroupLabel className="text-[0.68rem] font-medium text-sidebar-foreground/60">
                 {section.label}
               </SidebarGroupLabel>
             ) : null}
@@ -220,21 +211,15 @@ export function AppSidebar() {
                         end={item.url === "/"}
                         className={({ isActive }) =>
                           cn(
-                            "group relative flex min-w-0 items-center gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors duration-200",
+                            "group relative flex min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150",
                             isActive
-                              ? "bg-sidebar-accent text-sidebar-foreground font-semibold shadow-sm"
+                              ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                               : "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
                           )
                         }
                       >
                         {({ isActive }) => (
                           <>
-                            <span
-                              className={cn(
-                                "absolute left-1 h-5 w-1 rounded-full bg-sidebar-primary transition-all duration-200",
-                                isActive ? "opacity-100" : "opacity-0",
-                              )}
-                            />
                             <item.icon
                               className={cn(
                                 "h-4 w-4 shrink-0 transition-colors",
@@ -254,24 +239,6 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
-
-        <SidebarGroup className="mt-auto">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip="Help & Documentation">
-                  <a
-                    href="#"
-                    className="mx-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-                  >
-                    <HelpCircle className="h-4 w-4" />
-                    <span>Help & Docs</span>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
     </Sidebar>
   );

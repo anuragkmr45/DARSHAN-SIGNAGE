@@ -29,14 +29,14 @@ export function ProtectedRoute({
   }
 
   if (moduleKey) {
-    if (isAuthzLoading) return null;
+    if (isAuthzLoading) return <div role="status" aria-live="polite" className="p-6 text-sm text-muted-foreground">Checking access…</div>;
     if (!canAccessModule(moduleKey, user ?? undefined, can)) {
       return <Navigate to="/dashboard" replace />;
     }
   }
 
   if (requirePermissions?.length) {
-    if (isAuthzLoading) return null;
+    if (isAuthzLoading) return <div role="status" aria-live="polite" className="p-6 text-sm text-muted-foreground">Checking access…</div>;
     const allowed = requireAny
       ? requirePermissions.some((perm) => can(perm.action, perm.subject))
       : requirePermissions.every((perm) => can(perm.action, perm.subject));

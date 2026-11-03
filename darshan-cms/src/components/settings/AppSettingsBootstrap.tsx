@@ -2,56 +2,7 @@ import { useEffect } from "react";
 import { useTheme } from "next-themes";
 import { useAppearanceSettings, useBrandingSettings } from "@/hooks/useSettingsApi";
 
-const ACCENT_PRESETS: Record<
-  "crimson" | "blue" | "emerald" | "amber" | "slate",
-  Record<string, string>
-> = {
-  crimson: {
-    "--primary": "356 72% 28%",
-    "--primary-foreground": "0 0% 100%",
-    "--accent": "356 45% 92%",
-    "--accent-foreground": "356 72% 28%",
-    "--ring": "356 72% 45%",
-    "--sidebar-primary": "0 34% 75%",
-    "--sidebar-accent": "356 60% 28%",
-  },
-  blue: {
-    "--primary": "217 91% 46%",
-    "--primary-foreground": "0 0% 100%",
-    "--accent": "214 95% 93%",
-    "--accent-foreground": "217 91% 32%",
-    "--ring": "217 91% 52%",
-    "--sidebar-primary": "214 90% 74%",
-    "--sidebar-accent": "217 72% 34%",
-  },
-  emerald: {
-    "--primary": "160 84% 30%",
-    "--primary-foreground": "0 0% 100%",
-    "--accent": "151 55% 92%",
-    "--accent-foreground": "160 84% 22%",
-    "--ring": "160 70% 42%",
-    "--sidebar-primary": "155 70% 78%",
-    "--sidebar-accent": "160 65% 28%",
-  },
-  amber: {
-    "--primary": "32 95% 44%",
-    "--primary-foreground": "0 0% 100%",
-    "--accent": "42 100% 92%",
-    "--accent-foreground": "28 86% 28%",
-    "--ring": "32 95% 48%",
-    "--sidebar-primary": "42 88% 78%",
-    "--sidebar-accent": "28 74% 34%",
-  },
-  slate: {
-    "--primary": "215 19% 35%",
-    "--primary-foreground": "0 0% 100%",
-    "--accent": "210 22% 92%",
-    "--accent-foreground": "215 19% 28%",
-    "--ring": "215 19% 42%",
-    "--sidebar-primary": "214 20% 74%",
-    "--sidebar-accent": "215 24% 30%",
-  },
-};
+const accentPresets = ["crimson", "blue", "emerald", "amber", "slate"] as const;
 
 export function AppSettingsBootstrap() {
   const { data: branding } = useBrandingSettings();
@@ -87,10 +38,9 @@ export function AppSettingsBootstrap() {
     const root = document.documentElement;
     // Appearance is operational configuration and can be absent or partial
     // during an upgrade. It must never blank the authenticated application.
-    const preset = ACCENT_PRESETS[appearance.accent_preset] ?? ACCENT_PRESETS.crimson;
-    Object.entries(preset).forEach(([key, value]) => {
-      root.style.setProperty(key, value);
-    });
+    root.dataset.accent = accentPresets.includes(appearance.accent_preset)
+      ? appearance.accent_preset
+      : "crimson";
     if (appearance.sidebar_mode) {
       root.dataset.sidebarMode = appearance.sidebar_mode;
     }
