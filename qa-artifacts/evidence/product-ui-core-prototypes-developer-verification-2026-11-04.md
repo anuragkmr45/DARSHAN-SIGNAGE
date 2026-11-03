@@ -14,4 +14,6 @@ After these refinements, the Dashboard browser suite passed 7/7 and the Schedule
 
 A subsequent Dashboard workflow review found that the Media Storage detail said “Hard Delete” while the server forbids permanent deletion and the CMS API sent a normal recoverable delete request. The control now uses per-record `permissions.can_delete`, explains that an administrator can restore the media, and calls the normal DELETE path. A fixture-backed browser case verified a permitted row, a denied row, and no `hard` query parameter. The expanded Dashboard suite passed 8/8; CMS unit tests passed 271/271, production build and bundle budget passed, and focused ESLint passed. Real-service authorization and restore are still pending.
 
+The next focused pass checked media-list access and failure states. A Dashboard-only role sees aggregate usage without a false empty file list and makes no Media list request. A failed list shows an inline retry, which returns to a genuine empty state after the fixture recovers. The expanded Dashboard browser suite passed **10/10**; the CMS unit suite passed **271/271**, production build and bundle budget passed, and focused ESLint passed. Real-service denial and recovery remain pending.
+
 These observations do not override the already recorded functional and real-service regression work.

@@ -125,6 +125,9 @@ const installApiMocks = async (page: Page, overrides?: {
   emptyTimeline?: boolean;
   mediaItems?: Array<Record<string, unknown>>;
   mediaDeleteRequests?: string[];
+  mediaListRequests?: string[];
+  mediaListError?: boolean;
+  capabilities?: Array<{ action: string; subject: string }>;
 }) => {
   const requestCounts = {
     scheduleTimeline: 0,
@@ -152,7 +155,10 @@ const installApiMocks = async (page: Page, overrides?: {
     }
 
     if (pathname === "/api/v1/auth/authorization" && method === "GET") {
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(adminAuthorization(adminUser)) });
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        ...adminAuthorization(adminUser),
+        capabilities: overrides?.capabilities ?? adminAuthorization(adminUser).capabilities,
+      }) });
     }
 
     if (pathname === "/api/v1/roles" && method === "GET") {
@@ -164,6 +170,10 @@ const installApiMocks = async (page: Page, overrides?: {
     }
 
     if (pathname === "/api/v1/media" && method === "GET" && overrides?.mediaItems) {
+      overrides.mediaListRequests?.push(route.request().url());
+      if (overrides.mediaListError) {
+        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { message: "Media unavailable" } }) });
+      }
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         items: overrides.mediaItems, page: 1, limit: 100, total: overrides.mediaItems.length,
       }) });
@@ -378,6 +388,40 @@ test.describe("Dashboard active scheduled modal", () => {
     expect(new URL(mediaDeleteRequests[0]!).searchParams.has("hard")).toBe(false);
     await expect(dialog.getByText("Owned image", { exact: true })).toHaveCount(0);
     await expect(dialog.getByText("Other image", { exact: true })).toBeVisible();
+  });
+
+  test("distinguishes denied media access from a truly empty media list", async ({ page }) => {
+    const mediaListRequests: string[] = [];
+    const mediaItems: Array<Record<string, unknown>> = [];
+    const options = {
+      mediaItems, mediaListRequests,
+      capabilities: [{ action: "read", subject: "Dashboard" }],
+    };
+    await installApiMocks(page, options);
+    await login(page);
+    await page.getByRole("button", { name: /Media Storage/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Media Storage Details" });
+    await expect(dialog.getByText(/your role cannot list media files/)).toBeVisible();
+    expect(mediaListRequests).toHaveLength(0);
+    await page.keyboard.press("Escape");
+
+    options.capabilities.push({ action: "read", subject: "Media" });
+    await page.reload();
+    await page.getByRole("button", { name: /Media Storage/ }).click();
+    await expect(dialog.getByText("No media found.")).toBeVisible();
+  });
+
+  test("offers an inline retry instead of a false empty media result", async ({ page }) => {
+    const options = { mediaItems: [] as Array<Record<string, unknown>>, mediaListError: true };
+    await installApiMocks(page, options);
+    await login(page);
+    await page.getByRole("button", { name: /Media Storage/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Media Storage Details" });
+    await expect(dialog.getByText("Media details are unavailable.")).toBeVisible();
+    await expect(dialog.getByText("No media found.")).toHaveCount(0);
+    options.mediaListError = false;
+    await dialog.getByRole("button", { name: "Retry media list" }).click();
+    await expect(dialog.getByText("No media found.")).toBeVisible();
   });
 
   test("explains explicit group targets and untaken-down publishes in the schedule report", async ({ page }) => {

@@ -42,6 +42,7 @@ import { ScheduleReportModal } from "@/components/dashboard/ScheduleReportModal"
 import { getMachineStatusTone, getServiceStatusTone } from "@/lib/observability";
 import { resolveMediaDisplayName } from "@/lib/media";
 import { useGrafanaAvailability } from "@/hooks/useGrafanaAvailability";
+import { useAuthorization } from "@/hooks/useAuthorization";
 
 const formatBytes = (bytes?: number | null) => {
   if (bytes === undefined || bytes === null) return "—";
@@ -88,6 +89,8 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const authToken = useAppSelector((state) => state.auth.token);
   const user = useAppSelector((state) => state.auth.user);
+  const { can } = useAuthorization();
+  const canReadMedia = can("read", "Media");
   const isAuthenticated = Boolean(authToken || user);
 
   const {
@@ -172,9 +175,10 @@ export default function Dashboard() {
     isLoading: isMediaLoading,
     isError: isMediaError,
     error: mediaError,
+    refetch: refetchMedia,
   } = useQuery({
     queryKey: ["dashboard", "media-storage-modal"],
-    enabled: isAuthenticated && selectedKPI === "storage",
+    enabled: isAuthenticated && canReadMedia && selectedKPI === "storage",
     staleTime: 60_000,
     queryFn: async () => {
       const limit = 100;
@@ -877,7 +881,11 @@ export default function Dashboard() {
               Detailed breakdown and metrics
             </DialogDescription>
           </DialogHeader>
-          {selectedKPI === "storage" ? (
+          {selectedKPI === "storage" && !canReadMedia ? (
+            <p role="status" className="py-4 text-sm text-muted-foreground">
+              You can view storage usage, but your role cannot list media files.
+            </p>
+          ) : selectedKPI === "storage" ? (
             <div className="space-y-4 py-2">
               <div className="grid gap-4 md:grid-cols-2">
                 <Card>
@@ -886,7 +894,7 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-semibold">
-                      {isMediaLoading ? "Loading..." : String(readyMedia.length)}
+                      {isMediaLoading ? "Loading..." : isMediaError ? "Unavailable" : String(readyMedia.length)}
                     </div>
                   </CardContent>
                 </Card>
@@ -896,7 +904,7 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-semibold">
-                      {isMediaLoading ? "Loading..." : formatMegabytes(totalMediaSizeBytes)}
+                      {isMediaLoading ? "Loading..." : isMediaError ? "Unavailable" : formatMegabytes(totalMediaSizeBytes)}
                     </div>
                   </CardContent>
                 </Card>
@@ -918,7 +926,14 @@ export default function Dashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {isMediaLoading ? (
+                      {isMediaError ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="h-20 text-center text-sm text-muted-foreground">
+                            <span className="block">Media details are unavailable.</span>
+                            <Button size="sm" variant="outline" className="mt-2" onClick={() => void refetchMedia()}>Retry media list</Button>
+                          </TableCell>
+                        </TableRow>
+                      ) : isMediaLoading ? (
                         <TableRow>
                           <TableCell colSpan={8} className="h-10 text-center text-xs text-muted-foreground">
                             Loading media...
