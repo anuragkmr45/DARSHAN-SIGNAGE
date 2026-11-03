@@ -776,6 +776,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
                 snapshot_id: desiredState.snapshot_id,
                 default_media_version: desiredState.default_media_version,
                 emergency_version: desiredState.emergency_version,
+                live_version: desiredState.live_version ?? null,
                 last_command_id: desiredState.last_command_id,
                 last_command_type: desiredState.last_command_type,
                 last_command_reason: desiredState.last_command_reason,

@@ -1,6 +1,6 @@
 # Realtime And Command Contracts
 
-Last code-truth audit: 2026-06-28.
+Last full code-truth audit: 2026-06-28. Desired-state prerequisite update: 2026-11-03.
 
 Realtime in DARSHAN is notification-only. PostgreSQL plus REST APIs remain authoritative for commands, desired state, schedules, default media, emergency state, telemetry, and evidence.
 
@@ -32,6 +32,47 @@ Realtime in DARSHAN is notification-only. PostgreSQL plus REST APIs remain autho
 | Dispatch outbox | `outbox-dispatcher.ts`, device gateway, realtime bus | Socket.IO, optional Valkey Pub/Sub | Dispatch failure does not remove durable command truth. |
 | Player fetch | `darshan-player/src/main/services/command-processor.ts` | `GET /api/v1/device/:deviceId/commands` | Polling and realtime wake both converge on REST fetch. |
 | Player ACK | player command processor/request queue, backend `routes/device-telemetry.ts` | `POST /api/v1/device/:deviceId/commands/:commandId/ack` | ACK failure is retryable through player queue paths where supported. |
+
+## Desired-State Version Semantics
+
+Migration `0059_device_desired_live_version.sql` adds nullable, opaque
+`live_version` to `device_desired_state` and its history. Existing records remain
+null. This field is a prerequisite for later live reconciliation; it does not
+enable a live run, player capability or public live-version setter.
+
+- The sequential desired-state writer and the command lifecycle bulk writer
+  preserve `live_version` when the internal input is omitted/undefined. An
+  explicit internal null clears it; a supplied string replaces it. Preservation
+  happens in the SQL upsert, so an ordinary concurrent command cannot overwrite
+  a newer live version with a value read before the transaction.
+- Each history row records the resulting current versions. Only explicit live
+  writes add a `desired_live_version` metadata/outbox hint; ordinary command
+  payloads retain their existing shape. Idempotency conflicts do not reapply the
+  skipped command's desired versions.
+- The public Screen command route checks `update Screen` against the loaded
+  record before writing commands, history, outbox or desired state. Omitted
+  snapshot/default/emergency fields stay omitted when forwarded internally,
+  including on PING; they do not become implicit clears. Explicit ordinary
+  version fields retain their existing behavior.
+- Bulk command rows are correlated to inputs by generated command UUID,
+  preserving each input's desired values and the returned order even when a
+  screen appears more than once. Physical INSERT order is canonical screen UUID
+  then binary idempotency key order; state writes use canonical screen order,
+  while commands within one screen retain their logical input order. UUID letter
+  case is normalized before duplicate-screen detection.
+- Device desired-state REST and CMS screen delivery-state responses include
+  nullable `live_version`. The CMS field is optional for older servers; the
+  current ordinary-player decoder tolerates this added response field.
+
+Code sources: `services/device-desired-state-service.ts`,
+`services/command-lifecycle-service.ts`, `routes/device-telemetry.ts`,
+`routes/screens.ts`, and the current/history definitions in `db/schema.ts`.
+Focused owned-database and HTTP coverage is in
+`services/device-desired-state-live.test.ts`; supporting developer results are
+recorded in the
+[live recovery prerequisite report](../../qa-artifacts/evidence/live-recovery-prerequisites-developer-verification-2026-11-03.md).
+The production run/admission/epoch authority and ordinary-player live consumption
+remain separate implementation and acceptance work.
 
 ## Refresh Reasons And Consumers
 

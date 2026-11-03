@@ -9,6 +9,24 @@ UUID. The host and container must share the native PID/boot clock domain. Keep
 API credentials and SFU configuration in private persistent files; keep
 supervision evidence on a separate **tmpfs** runtime directory.
 
+Use private container PID and network namespaces. The SFU control listener must
+bind only loopback inside that namespace; only the gateway/media ports may be
+mapped for clients. Before admitting anything, the supervisor proves the LISTEN
+socket inode belongs to the spawned SFU PID, matching its start identity and
+network namespace through `/proc`. The Linux `/proc` TCP/IPv6 tables, process
+stat, namespace link and child FD links must be readable by the media UID.
+Non-Linux, missing required-family tables or permission-denied proof fails closed. Validate the
+chosen host/container security profile; do not weaken it to make a test pass.
+
+An absent `tcp6` table (`ENOENT` only) is accepted for an IPv4 target when its
+IPv4 socket ownership and stable process/namespace identity are proved. A
+missing IPv6 target table, denied read or malformed existing table still fails
+closed. IPv6 module initialization can return before registering its network
+operations; `tcp6_proc_init` creates the table. See the pinned Linux v6.8
+[IPv6 initialization](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/af_inet6.c#L1019)
+and [TCP IPv6 proc registration](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/tcp_ipv6.c#L2154).
+Per-interface IPv6 disablement alone does not imply that this table disappears.
+
 Before starting the media container:
 
 1. Verify `/run` is mounted as tmpfs. A path name alone is insufficient; both

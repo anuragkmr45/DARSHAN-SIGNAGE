@@ -222,3 +222,87 @@ test('an inflight join that cannot be settled never frees its slot without node 
   assert.equal(entry.state, 'REVOKED');
   assert.equal(controller.health().status, 'isolated');
 });
+
+test('actual control HTTP preserves unknown admission and run stops before delayed creates', async (t) => {
+  const controller = new AdmissionController({ adapter: { removeParticipant: async () => {} }, isolate: async () => {}, signalUrl: 'ws://127.0.0.1' });
+  const server = createControlServer({ controller, secret });
+  const port = await listen(server);
+  t.after(() => close(server));
+  const request = (path, method = 'GET', body) => fetch(`http://127.0.0.1:${port}${path}`, {
+    method, headers: { 'x-darshan-media-secret': secret, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+  });
+  const revoked = await request('/internal/admissions/admission-1', 'DELETE');
+  assert.equal(revoked.status, 200);
+  assert.equal((await revoked.json()).teardown_confirmed, true);
+  assert.equal((await (await request('/internal/admissions/admission-1')).json()).teardown_confirmed, true);
+  assert.equal((await request('/internal/admissions', 'POST', input())).status, 410);
+  assert.equal((await request('/internal/runs/run-2/revoke', 'POST', { generation: 1 })).status, 200);
+  assert.equal((await request('/internal/admissions', 'POST', input({ id: 'a2', run_id: 'run-2' }))).status, 410);
+  assert.equal((await request('/internal/runs/run-2')).status, 400);
+  assert.equal((await (await request('/internal/runs/run-2?generation=1')).json()).teardown_confirmed, true);
+});
+
+test('actual strict control HTTP requires fences, fetches fresh canonical grants and never emits late tickets after run stop', async (t) => {
+  let release, checking;
+  const sawCheck = new Promise(resolve => { checking = resolve; });
+  const delayedGrant = new Promise(resolve => { release = resolve; });
+  const controller = new AdmissionController({ adapter: { removeParticipant: async () => {} }, isolate: async () => {}, signalUrl: 'wss://media.example.test',
+    strictAuthority: { nodeInstanceId: 'node-1', authorityEpoch: 'epoch-1', verifyAuthority: async request => {
+      checking(request);
+      await delayedGrant;
+      return { ...request, allowed: true, participant_id: 'canonical-receiver', role: 'receiver', audio: { microphone: false, screen_share_audio: false },
+        lease_ms: 10_000, window_remaining_ms: 60_000 };
+    } },
+  });
+  const server = createControlServer({ controller, secret });
+  const port = await listen(server);
+  t.after(() => close(server));
+  const request = (path, method = 'GET', body) => fetch(`http://127.0.0.1:${port}${path}`, {
+    method, headers: { 'x-darshan-media-secret': secret, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+  });
+  const fenced = { id: 'strict-a', run_id: 'strict-run', generation: 1, operation_revision: 1, node_instance_id: 'node-1', authority_epoch: 'epoch-1' };
+  assert.equal((await request('/internal/admissions/strict-a', 'DELETE', { ...fenced, node_instance_id: 'old-node' })).status, 409);
+  assert.equal(controller.health().tracked_entries, 0);
+  const creating = request('/internal/admissions', 'POST', fenced);
+  await sawCheck;
+  const stopped = await request('/internal/runs/strict-run/revoke', 'POST', { ...fenced, operation_revision: 2 });
+  assert.equal(stopped.status, 200);
+  assert.equal((await stopped.json()).teardown_confirmed, true);
+  const denied = await creating;
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error, 'AUTHORITY_CHECK_CANCELLED');
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(controller.admissions.size, 0);
+  assert.equal(controller.tickets.size, 0);
+});
+
+test('actual strict control HTTP uses fresh checks for create, renew and reconnect without prototype fallback', async (t) => {
+  const actions = [];
+  const controller = new AdmissionController({ adapter: { removeParticipant: async () => {} }, isolate: async () => {}, signalUrl: 'wss://media.example.test',
+    strictAuthority: { nodeInstanceId: 'node-1', authorityEpoch: 'epoch-1', verifyAuthority: async request => {
+      actions.push(request.action);
+      return { ...request, allowed: true, participant_id: 'canonical-receiver', role: 'receiver', audio: { microphone: false, screen_share_audio: false },
+        lease_ms: 10_000, window_remaining_ms: 60_000 };
+    } },
+  });
+  const server = createControlServer({ controller, secret });
+  const port = await listen(server);
+  t.after(() => close(server));
+  const request = (path, method, body) => fetch(`http://127.0.0.1:${port}${path}`, {
+    method, headers: { 'x-darshan-media-secret': secret, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const fenced = { id: 'strict-a', run_id: 'strict-run', generation: 1, node_instance_id: 'node-1', authority_epoch: 'epoch-1' };
+  assert.equal((await request('/internal/admissions', 'POST', input())).status, 409);
+  const created = await request('/internal/admissions', 'POST', { ...fenced, operation_revision: 1, role: 'presenter' });
+  assert.equal(created.status, 201);
+  const first = await created.json();
+  assert.equal(controller.get('strict-a').role, 'receiver');
+  assert.equal((await request('/internal/admissions/strict-a/renew', 'POST', { ...fenced, operation_revision: 2 })).status, 200);
+  const second = await request('/internal/admissions/strict-a/ticket', 'POST', { ...fenced, operation_revision: 3 });
+  assert.equal(second.status, 200);
+  assert.deepEqual(actions, ['CREATE', 'RENEW', 'TICKET']);
+  assert.throws(() => controller.consumeTicket(first.ticket), /INVALID_TICKET/);
+  assert.equal((await request('/internal/admissions/strict-a/ticket', 'POST', { ...fenced, operation_revision: 3 })).status, 409);
+  assert.equal((await request('/internal/admissions/strict-a', 'DELETE', { ...fenced, operation_revision: 4 })).status, 200);
+});

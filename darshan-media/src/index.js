@@ -18,6 +18,11 @@ const port = (name, fallback) => {
 };
 
 export async function start() {
+  // Strict authority is an injected prerequisite only. Do not expose a partially
+  // wired production path by accepting prototype grants under a production flag.
+  if ((process.env.DARSHAN_MEDIA_AUTHORITY_MODE ?? 'prototype') !== 'prototype') {
+    throw new Error('Production media authority adapter is not configured');
+  }
   const upstreamUrl = process.env.DARSHAN_MEDIA_SFU_URL ?? 'http://127.0.0.1:18781';
   const controlSecret = process.env.DARSHAN_MEDIA_CONTROL_SECRET_FILE
     ? readFileSync(process.env.DARSHAN_MEDIA_CONTROL_SECRET_FILE, 'utf8').trim()

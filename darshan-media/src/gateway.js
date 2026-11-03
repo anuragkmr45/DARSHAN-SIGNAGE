@@ -39,21 +39,33 @@ export function createControlServer({ controller, secret }) {
         return;
       }
       if (request.method === 'POST' && url.pathname === '/internal/admissions') {
-        send(response, 201, controller.create(await readBody(request)));
+        send(response, 201, await controller.createAuthorized(await readBody(request)));
+        return;
+      }
+      const run = /^\/internal\/runs\/([A-Za-z0-9_.:-]+)(?:\/(revoke))?$/.exec(url.pathname);
+      if (run) {
+        if (request.method === 'POST' && run[2] === 'revoke') {
+          send(response, 200, await controller.revokeRunAuthorized(run[1], await readBody(request)));
+        } else if (request.method === 'GET' && !run[2]) {
+          const generation = Number(url.searchParams.get('generation'));
+          if (!Number.isSafeInteger(generation) || generation <= 0) throw new MediaError('INVALID_GENERATION', 400);
+          send(response, 200, controller.runView(run[1], generation));
+        } else throw new MediaError('NOT_FOUND', 404);
         return;
       }
       const match = /^\/internal\/admissions\/([A-Za-z0-9_.:-]+)(?:\/(renew|ticket))?$/.exec(url.pathname);
       if (!match) throw new MediaError('NOT_FOUND', 404);
       const [, id, action] = match;
       if (request.method === 'GET' && !action) {
-        send(response, 200, controller.view(controller.get(id)));
+        send(response, 200, controller.admissionView(id));
       } else if (request.method === 'DELETE' && !action) {
-        send(response, 200, await controller.revoke(id));
+        const body = controller.strictAuthority ? await readBody(request) : undefined;
+        send(response, 200, await controller.revokeAuthorized(id, body));
       } else if (request.method === 'POST' && action === 'renew') {
-        send(response, 200, controller.renew(id, await readBody(request)));
+        send(response, 200, await controller.renewAuthorized(id, await readBody(request)));
       } else if (request.method === 'POST' && action === 'ticket') {
         const body = await readBody(request);
-        send(response, 200, controller.issueTicket(id, body.generation));
+        send(response, 200, await controller.issueTicketAuthorized(id, body));
       } else throw new MediaError('NOT_FOUND', 404);
     } catch (error) {
       send(response, error instanceof MediaError ? error.status : 500, errorValue(error));

@@ -274,6 +274,13 @@ export async function prepareLiveSchedule(context: MutationAuthorizationContext,
     const presenter = userMap.get(session.presenter_user_id);
     if (!session.is_active || session.deleted_at || !presenter || !presenter.is_active || presenter.deleted_at || !presenterRoleSet.has(presenter.role_id)) fail('LIVE_SESSION_UNAVAILABLE', 'The source or assigned presenter is unavailable.', 422);
     if (session.owner_scope === 'DEPARTMENT' && !(await getUserDepartments(presenter.id, context.executor))?.departmentIds.includes(session.owner_department_id!)) fail('LIVE_PRESENTER_UNAVAILABLE', 'The assigned presenter no longer belongs to the source department.', 422);
+    // Approval must not reserve an occurrence that its assigned presenter is
+    // already forbidden to start. The role graph and presenter identity are
+    // locked by the caller; bind conditional/inherited grants to this source.
+    const presenterAbility = await defineAbilityFor(presenter.role_id, presenter.id, presenter.department_id ?? undefined);
+    if (!presenterAbility.can('publish', subject('LiveBroadcast', session) as never)) {
+      fail('LIVE_PRESENTER_UNAVAILABLE', 'The assigned presenter does not currently have permission to broadcast this source.', 422);
+    }
   }
   const windows = new Map<string, Set<string>>();
   for (const window of resolved.windows) { const set = windows.get(window.schedule_item_id) ?? new Set<string>(); set.add(window.screen_id); windows.set(window.schedule_item_id, set); }

@@ -9,6 +9,12 @@ enforcement state in memory and never stores video or recording data.
 The candidate SFU is `livekit/livekit-server:v1.13.11`; the server SDK is pinned
 to `2.19.2`. The browser prototype uses client `2.23.0` separately.
 
+The [strict authority prerequisite](STRICT_AUTHORITY.md) adds injected fresh
+authorization, node/epoch/revision fences, revocation tombstones and explicit
+teardown evidence. It has no production network verifier yet. Requesting a
+non-prototype `DARSHAN_MEDIA_AUTHORITY_MODE` refuses startup before listeners
+open; this packet does not enable production admissions.
+
 ## Private interfaces
 
 The control HTTP server binds **loopback only**, default `127.0.0.1:18784`.
@@ -38,6 +44,8 @@ POST /internal/admissions/:id/ticket
 
 GET    /internal/admissions/:id
 DELETE /internal/admissions/:id
+GET    /internal/runs/:id?generation=positive-integer
+POST   /internal/runs/:id/revoke { generation }
 GET    /internal/health
 ```
 
@@ -53,6 +61,16 @@ a replacement ticket. Disconnect cleanup must confirm SFU removal first.
 Revocation is permanent for an admission; participant identities are never
 reused. A newer run generation cannot be admitted until the old generation's
 participants have been removed. Earlier generations remain rejected afterward.
+Deleting an unknown admission now records a permanent tombstone and returns
+200 with `teardown_confirmed: true` and `ADMISSION_NEVER_CREATED`. A later create
+cannot resurrect it. Run revocation tombstones the exact run/generation even
+when no admission exists yet. Older cleanup cannot stop a replacement generation.
+
+`teardown_confirmed` is separate from logical `REVOKED`. It remains false during
+pending SFU removal or incomplete/failed node isolation; those entries retain
+their occupied run count. An unknown tombstone proves no admission was created
+in this controller, assuming the required fresh SFU startup. Never infer that
+another node/process is dead from this local result.
 
 The original approved window is a hard monotonic deadline. Renewal can shorten
 it but cannot extend it. A **3000 ms cleanup reserve is inside** the shorter of
@@ -137,6 +155,16 @@ cannot enforce anything while its own process is dead. The independent Python
 stalls. Its deployment/service/LSM permissions and restart rehearsal remain
 explicit production gates.
 
+The Linux supervisor keeps the gateway closed until the configured SFU TCP
+listener's socket inode belongs to its actual spawned child, with the same
+process start identity and network namespace. A foreign endpoint merely
+answering TCP cannot establish readiness or become isolation evidence. Wildcard
+and non-loopback listeners on the SFU service port are rejected. Missing required,
+unreadable or unsupported `/proc` ownership proof refuses startup; do not relax
+container security profiles to bypass that failure. Private network/PID
+namespaces are preferred over host networking. Permission handling and alternate
+Linux security profiles still require deployment verification.
+
 ## Runtime configuration
 
 ```text
@@ -182,6 +210,10 @@ npm test
 # DARSHAN_MEDIA_REAL_SFU_ENV_FILE=/private/path/node.env node --test test/sfu-runtime.test.js
 # Opt-in independent Docker fault nodes, sequential, alternate ports, no application fixtures:
 # DARSHAN_MEDIA_DOCKER_FAULT_TESTS=1 node --test test/docker-fault-runtime.test.js
+# Separately approved, bounded new-image protocol/SFU fixture (Linux media UID1000):
+# DARSHAN_MEDIA_PROTOCOL_DOCKER_TESTS=1 \
+# DARSHAN_MEDIA_PROTOCOL_BASE_IMAGE_ID=sha256:<verified-local-media-image-ID> \
+# node test/run-protocol-runtime.mjs
 # Combined container entrypoint; all credentials/configuration must be supplied privately:
 npm run supervise
 ```
@@ -193,6 +225,11 @@ participant limits, exact SDK grants, management timeout, isolation failure,
 private control authorization and real local HTTP/WebSocket forwarding. Separate
 process tests kill and suspend the controller and verify that the supervisor
 kills the actual SFU child, including its explicit isolation IPC path.
+Additional strict tests cover stop-before-create/check completion, stale
+node/epoch/operation commands, canonical backend policy, delayed and hung fresh
+checks, ticket reauthorization, explicit denial and retained teardown capacity.
+Actual local HTTP tests exercise the same private control routes and late-grant
+race. These do not establish cross-VM authorization or rendered cutoff timing.
 
 The optional `sfu-runtime.test.js` suite uses unique temporary rooms on an
 already-running loopback SFU. It delays actual upstream joining, cancels the
@@ -224,3 +261,19 @@ The package is not a production service yet: admissions and tombstones live in
 memory, scheduler authorization is delegated to its private caller, and durable
 outbox/reconciliation, production artifact deployment, and node admission
 rotation are later implementation loops.
+
+`run-protocol-runtime.mjs` is an opt-in developer verification runner. It checks
+the local UNIX Docker endpoint and a supplied existing base image ID, builds an
+offline source/test overlay (not a canonical production image), and starts only
+its uniquely labelled 256 MiB/1 CPU node. The container uses private network/PID
+namespaces, UID1000, a read-only root and a private tmpfs watchdog bind; it maps
+no host ports. Image/package/source hashes and container identity are checked
+before probes or fault injection. Its test-only strict verifier performs a real
+loopback HTTP nonce exchange; it does not authenticate production database policy.
+Actual SFU participant/permission/removal and replacement checks precede a
+healthy-Docker host-watchdog PID1 STOP measurement. Sanitized evidence lives
+under ignored `.local/live-broadcast`; private fixture credentials/state and only
+the owned container/base alias are cleaned. The new developer image is retained
+for inspection. Direct pidfd actuation permissions, rendered frames/audio and
+physical displays remain separate gates. Do not run it without coordinating
+the machine's build/test resource window.

@@ -10,6 +10,8 @@ export type DesiredStateCommandInput = {
   snapshotId?: string | null;
   defaultMediaVersion?: string | null;
   emergencyVersion?: string | null;
+  /** Opaque authority revision. Omission preserves; null explicitly clears. */
+  liveVersion?: string | null;
   metadata?: unknown;
 };
 
@@ -26,6 +28,7 @@ export async function recordDesiredStateForCommand(tx: any, input: DesiredStateC
       snapshot_id: input.snapshotId ?? null,
       default_media_version: input.defaultMediaVersion ?? null,
       emergency_version: input.emergencyVersion ?? null,
+      live_version: input.liveVersion ?? null,
       command_version: 1,
       state_version: 1,
       last_command_id: input.commandId,
@@ -51,6 +54,7 @@ export async function recordDesiredStateForCommand(tx: any, input: DesiredStateC
           input.emergencyVersion === undefined
             ? sql`COALESCE(${schema.deviceDesiredState.emergency_version}, excluded.emergency_version)`
             : input.emergencyVersion,
+        live_version: input.liveVersion === undefined ? sql`${schema.deviceDesiredState.live_version}` : input.liveVersion,
         command_version: sql`${schema.deviceDesiredState.command_version} + 1`,
         state_version: sql`${schema.deviceDesiredState.state_version} + 1`,
         last_command_id: input.commandId,
@@ -71,6 +75,7 @@ export async function recordDesiredStateForCommand(tx: any, input: DesiredStateC
       snapshot_id: state.snapshot_id,
       default_media_version: state.default_media_version,
       emergency_version: state.emergency_version,
+      live_version: state.live_version,
       command_id: input.commandId,
       reason: input.commandReason ?? 'COMMAND_AVAILABLE',
       metadata: input.metadata ?? null,

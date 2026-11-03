@@ -3,6 +3,7 @@ import { isLiveSnapshotCandidate } from '@/screens/live-snapshot-audience';
 import { createHash, randomUUID } from 'crypto';
 import { eq, inArray } from 'drizzle-orm';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { subject } from '@casl/ability';
 import { z } from 'zod';
 import { config as appConfig } from '@/config';
 import { getDatabase, schema } from '@/db';
@@ -874,6 +875,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
         const [screen] = await db.select().from(schema.screens).where(eq(schema.screens.id, screenId));
         if (!screen) throw AppError.notFound('Screen not found');
 
+        if (!ability.can('update', subject('Screen', screen) as never)) throw AppError.forbidden('Forbidden');
         const command = await createDeviceCommand({
           screenId,
           type: data.type,
@@ -888,9 +890,9 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
           maxAttempts: data.max_attempts,
           correlationId: data.correlation_id ?? null,
           idempotencyKey: data.idempotency_key ?? null,
-          desiredSnapshotId: data.desired_snapshot_id ?? null,
-          desiredDefaultMediaVersion: data.desired_default_media_version ?? null,
-          desiredEmergencyVersion: data.desired_emergency_version ?? null,
+          desiredSnapshotId: data.desired_snapshot_id,
+          desiredDefaultMediaVersion: data.desired_default_media_version,
+          desiredEmergencyVersion: data.desired_emergency_version,
           createdBy: payload.sub,
         });
 
@@ -1315,6 +1317,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
                 snapshot_id: state.snapshot_id ?? null,
                 default_media_version: state.default_media_version ?? null,
                 emergency_version: state.emergency_version ?? null,
+                live_version: state.live_version ?? null,
                 last_command_id: state.last_command_id ?? null,
                 last_command_type: state.last_command_type ?? null,
                 last_command_reason: state.last_command_reason ?? null,
@@ -1327,6 +1330,7 @@ export async function deviceTelemetryRoutes(fastify: FastifyInstance) {
                 snapshot_id: null,
                 default_media_version: null,
                 emergency_version: null,
+                live_version: null,
                 last_command_id: null,
                 last_command_type: null,
                 last_command_reason: null,

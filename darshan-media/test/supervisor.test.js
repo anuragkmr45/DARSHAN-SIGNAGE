@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { supervise } from '../src/supervisor.js';
 import { fork } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
+import { mkdtemp, lstat, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 async function fixture(t, overrides = {}) {
   const portServer = net.createServer();
@@ -101,4 +104,33 @@ test('actual controller publishes initial supervisor heartbeat before admitting 
   assert.equal(messages[0].sequence, 1);
   const response = await fetch(`http://127.0.0.1:${controlPort}/internal/health`, { headers: { 'x-darshan-media-secret': secret } });
   assert.equal(response.status, 200);
+});
+
+test('a foreign listener cannot make an unrelated spawned child admission-ready or become its isolation proof', async (t) => {
+  const foreign = net.createServer(socket => socket.end());
+  await new Promise(resolve => foreign.listen(0, '127.0.0.1', resolve));
+  const port = foreign.address().port;
+  const directory = await mkdtemp(path.join(tmpdir(), 'darshan-supervisor-owner-'));
+  const marker = path.join(directory, 'gateway-started');
+  let runtime;
+  t.after(async () => {
+    await runtime?.stop('TEST_CLEANUP');
+    await new Promise(resolve => foreign.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  });
+  const stopped = [];
+  const attempt = supervise({
+    sfuCommand: [process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+    gatewayEntry: fileURLToPath(new URL('./fixtures/controller-child.mjs', import.meta.url)),
+    env: { ...process.env, DARSHAN_MEDIA_SFU_URL: `http://127.0.0.1:${port}`, TEST_START_MARKER: marker },
+    startupMs: 1000, onStop: reason => stopped.push(reason),
+  }).then(value => { runtime = value; return value; });
+  await assert.rejects(attempt, error => error.code === 'SFU_LISTENER_NOT_OWNED');
+  assert.deepEqual(stopped, ['SFU_LISTENER_NOT_OWNED']);
+  await assert.rejects(lstat(marker), error => error.code === 'ENOENT');
+  // The refused endpoint belongs to this test, not the stopped child. It must
+  // survive cleanup, and must never be acknowledged as isolated by that child.
+  const socket = net.connect(port, '127.0.0.1');
+  await bounded(new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); }));
+  socket.destroy();
 });

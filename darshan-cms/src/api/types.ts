@@ -1024,6 +1024,7 @@ export interface ScreenDeliveryStatus {
     snapshot_id?: string | null;
     default_media_version?: string | null;
     emergency_version?: string | null;
+    live_version?: string | null;
     last_command_id?: string | null;
     last_command_type?: string | null;
     last_command_reason?: string | null;

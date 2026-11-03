@@ -4,6 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readFileSync, lstatSync, statfsSync, openSync, writeFileSync, closeSync, renameSync, unlinkSync, constants } from 'node:fs';
 import path from 'node:path';
+import { ownsSfuListener, readSfuProcessStartTicks } from './sfu-listener-ownership.js';
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 async function waitExit(child, timeoutMs = 1000) {
@@ -76,6 +77,7 @@ export async function supervise({
   env = process.env, startupMs = 10_000, heartbeatMs = 1800, checkMs = 100,
   onStop = () => {}, signal,
 } = {}) {
+  if (process.platform !== 'linux') throw Object.assign(new Error('SFU_LISTENER_OWNERSHIP_UNAVAILABLE'), { code: 'SFU_LISTENER_OWNERSHIP_UNAVAILABLE' });
   const upstream = new URL(env.DARSHAN_MEDIA_SFU_URL ?? 'http://127.0.0.1:18781');
   if (upstream.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(upstream.hostname)) throw new Error('SFU must bind numeric loopback');
   const heartbeat = createSupervisorHeartbeat(env.DARSHAN_MEDIA_SUPERVISOR_STATE_FILE, env.DARSHAN_MEDIA_NODE_INSTANCE_ID);
@@ -121,11 +123,19 @@ export async function supervise({
   signal?.addEventListener('abort', () => { void stop('SUPERVISOR_SHUTDOWN'); }, { once: true });
   if (signal?.aborted) await stop('SUPERVISOR_SHUTDOWN');
   const started = performance.now();
-  while (!stopped && !await tcpReady(upstream.hostname.replace(/^\[|\]$/g, ''), Number(upstream.port || 80))) {
+  let sfuStartTicks;
+  try { sfuStartTicks = readSfuProcessStartTicks(sfu.pid); }
+  catch (error) { fault = error.code; await stop(fault); }
+  while (!stopped) {
+    try {
+      const target = { pid: sfu.pid, host: upstream.hostname, port: Number(upstream.port || 80), startTicks: sfuStartTicks };
+      if (ownsSfuListener(target) && await tcpReady(upstream.hostname.replace(/^\[|\]$/g, ''), target.port)
+        && ownsSfuListener(target)) break;
+    } catch (error) { fault = error.code; await stop(fault); break; }
     if (performance.now() - started > startupMs) { fault = 'SFU_START_TIMEOUT'; await stop(fault); }
     else await delay(50);
   }
-  if (stopped) throw new Error(fault ?? 'SUPERVISOR_STOPPED');
+  if (stopped) throw Object.assign(new Error(fault ?? 'SUPERVISOR_STOPPED'), { code: fault ?? 'SUPERVISOR_STOPPED' });
   gateway = fork(gatewayEntry, [], { env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   lastHeartbeat = performance.now();
   gateway.on('message', (message) => {

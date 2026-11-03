@@ -182,8 +182,8 @@ describe('LIVE publishing and approval against an independently owned PostgreSQL
     admin = await makeUser('SUPER_ADMIN', [], departmentA);
     const grants = [{ action: 'create', subject: 'ScheduleRequest' }, { action: 'read', subject: 'ScheduleRequest' }, { action: 'read', subject: 'Schedule' }, { action: 'update', subject: 'Schedule' },
       ...['Presentation', 'Media', 'Layout', 'Screen', 'ScreenGroup'].map(subject => ({ action: 'read', subject }))];
-    author = await makeUser('SYNTHETIC_LIVE_AUTHOR', [...grants, { action: 'read', subject: 'LiveBroadcast' }], departmentA);
-    conditional = await makeUser('SYNTHETIC_BOUND_READER', [...grants, { action: 'read', subject: 'LiveBroadcast' }, { action: 'publish', subject: 'ScheduleRequest', conditions: { requested_by: '$user.id' } }], departmentA);
+    author = await makeUser('SYNTHETIC_LIVE_AUTHOR', [...grants, { action: 'read', subject: 'LiveBroadcast' }, { action: 'publish', subject: 'LiveBroadcast' }], departmentA);
+    conditional = await makeUser('SYNTHETIC_BOUND_READER', [...grants, { action: 'read', subject: 'LiveBroadcast' }, { action: 'publish', subject: 'LiveBroadcast' }, { action: 'publish', subject: 'ScheduleRequest', conditions: { requested_by: '$user.id' } }], departmentA);
     server = Fastify({ logger: false });
     server.setErrorHandler((error, _request, reply) => { const safe = toAppError(error); reply.code(safe.statusCode).send(formatErrorResponse(safe)); });
     await server.register(scheduleRoutes); await server.register(scheduleRequestRoutes); await server.ready();
@@ -202,6 +202,48 @@ describe('LIVE publishing and approval against an independently owned PostgreSQL
       presenter_user_id:admin.id,screen_ids:[d.screen],fallback:{preparation_id:d.preparation,manifest:d.manifest}}]});
     expect(data.approval_fingerprint).toMatch(/^[a-f0-9]{64}$/); expect(r.body).not.toMatch(/access_token|ticket|wss:|https:/);
     expect(await counts()).toEqual(before);
+  });
+  it('binds presenter permission to the actual source and rechecks withdrawal before reserving or publishing',async()=>{
+    const presenter=await makeUser('SYNTHETIC_CONDITIONAL_PRESENTER', [{action:'publish',subject:'LiveBroadcast',
+      conditions:{presenter_user_id:'$user.id',owner_department_id:'$user.department_id'}}], departmentA);
+    const d=await seed({presenter:presenter.id}), before=await counts();
+    const reviewed=await preflight(d);expect(reviewed.statusCode,reviewed.body).toBe(200);
+    const request=await createRequest(d),held=await counts();
+    await pool.query('UPDATE roles SET permissions=$2 WHERE id=$1',[presenter.roleId,{grants:[]}]);
+    for(const [path,body] of [
+      ['/api/v1/schedules/live-preflight',{schedule_id:d.schedule,fallback_preparation_ids:prepIds(d)}],
+      [reqPath(request.id,'/approve'),{}],
+      [publishPath(d),{fallback_preparation_ids:prepIds(d),expected_live_fingerprint:reviewed.json().approval_fingerprint}],
+    ] as const){
+      const denied=await invoke(admin,'POST',path,body),isReview=path.endsWith('/live-preflight');
+      expect(denied.statusCode,denied.body).toBe(isReview?422:409);
+      expect(denied.json().error.code).toBe(isReview?'LIVE_PRESENTER_UNAVAILABLE':'LIVE_APPROVAL_STALE');
+      if(!isReview)expect(denied.json().error.details.reason).toBe('LIVE_PRESENTER_UNAVAILABLE');
+      expect(await counts()).toEqual(held);
+    }
+    expect(held.occurrences).toBe(before.occurrences+1);
+    expect((await pool.query('SELECT status FROM schedule_requests WHERE id=$1',[request.id])).rows[0].status).toBe('PENDING');
+    await pool.query('UPDATE roles SET permissions=$2 WHERE id=$1',[presenter.roleId,{grants:[{action:'publish',subject:'LiveBroadcast',
+      conditions:{presenter_user_id:'$user.id',owner_department_id:'$user.department_id'}}]}]);
+    await approve(request.id);const reserved=await counts();
+    await pool.query('UPDATE roles SET permissions=$2 WHERE id=$1',[presenter.roleId,{grants:[]}]);
+    const deniedPublish=await invoke(admin,'POST',reqPath(request.id,'/publish'),{});
+    expect(deniedPublish.statusCode,deniedPublish.body).toBe(409);
+    expect(deniedPublish.json().error).toMatchObject({code:'LIVE_APPROVAL_STALE',details:{reason:'LIVE_PRESENTER_UNAVAILABLE'}});
+    expect(await counts()).toEqual(reserved);
+    expect((await pool.query('SELECT status FROM schedule_requests WHERE id=$1',[request.id])).rows[0].status).toBe('APPROVED');
+    expect((await pool.query('SELECT state FROM live_schedule_occurrences WHERE schedule_id=$1',[d.schedule])).rows).toEqual([{state:'RESERVED'}]);
+  });
+  it('rejects a foreign conditional presenter grant and permits inherited current source permission',async()=>{
+    const presenter=await makeUser('SYNTHETIC_WRONG_SOURCE_PRESENTER',[{action:'publish',subject:'LiveBroadcast',
+      conditions:{created_by:'$user.id'}}],departmentA);
+    const d=await seed({presenter:presenter.id}),before=await counts();
+    const denied=await preflight(d);expect(denied.statusCode,denied.body).toBe(422);
+    expect(denied.json().error.code).toBe('LIVE_PRESENTER_UNAVAILABLE');expect(await counts()).toEqual(before);
+    const inherited=await makeUser('SYNTHETIC_INHERITED_PRESENTER_PERMISSION',[{action:'publish',subject:'LiveBroadcast',
+      conditions:{presenter_user_id:'$user.id',owner_department_id:'$user.department_id'}}],departmentA);
+    await pool.query('UPDATE roles SET permissions=$2 WHERE id=$1',[presenter.roleId,{grants:[],inherits:[inherited.roleId]}]);
+    const allowed=await preflight(d);expect(allowed.statusCode,allowed.body).toBe(200);expect(await counts()).toEqual(before);
   });
   it('requires fresh direct review and commits frozen snapshot, screen reservations and capacity together',async()=>{
     const d=await seed(),before=await counts();

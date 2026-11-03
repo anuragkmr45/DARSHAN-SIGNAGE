@@ -63,6 +63,8 @@ export type CreateDeviceCommandInput = {
   desiredSnapshotId?: string | null;
   desiredDefaultMediaVersion?: string | null;
   desiredEmergencyVersion?: string | null;
+  /** Internal authority input only; omitted values preserve current state. */
+  desiredLiveVersion?: string | null;
 };
 
 export type ClaimedDeviceCommand = {
@@ -117,11 +119,22 @@ function hasOwnValue<T extends object>(input: T, key: keyof T) {
   return Object.prototype.hasOwnProperty.call(input, key) && input[key] !== undefined;
 }
 
+// Opaque idempotency keys may contain Unicode. Locale comparison can consider
+// distinct strings equal, so use a strict binary order for physical row locks.
+function compareOpaque(left: string, right: string) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function compareIdempotencyKeys(left: string | null, right: string | null) {
+  return left === right ? 0 : left === null ? 1 : right === null ? -1 : compareOpaque(left, right);
+}
+
 function hasDuplicateScreenIds(inputs: CreateDeviceCommandInput[]) {
   const screenIds = new Set<string>();
   for (const input of inputs) {
-    if (screenIds.has(input.screenId)) return true;
-    screenIds.add(input.screenId);
+    const id = input.screenId.toLowerCase();
+    if (screenIds.has(id)) return true;
+    screenIds.add(id);
   }
   return false;
 }
@@ -193,14 +206,16 @@ type DesiredStateMode = {
   snapshotId: 'set' | 'preserve';
   defaultMediaVersion: 'set' | 'preserve';
   emergencyVersion: 'set' | 'preserve';
+  liveVersion: 'set' | 'preserve';
 };
 
 function getUniformDesiredStateMode(inputs: CreateDeviceCommandInput[]): DesiredStateMode | null {
   const snapshotModes = new Set(inputs.map((input) => hasOwnValue(input, 'desiredSnapshotId')));
   const defaultMediaModes = new Set(inputs.map((input) => hasOwnValue(input, 'desiredDefaultMediaVersion')));
   const emergencyModes = new Set(inputs.map((input) => hasOwnValue(input, 'desiredEmergencyVersion')));
+  const liveModes = new Set(inputs.map((input) => hasOwnValue(input, 'desiredLiveVersion')));
 
-  if (snapshotModes.size > 1 || defaultMediaModes.size > 1 || emergencyModes.size > 1) {
+  if (snapshotModes.size > 1 || defaultMediaModes.size > 1 || emergencyModes.size > 1 || liveModes.size > 1) {
     return null;
   }
 
@@ -208,6 +223,7 @@ function getUniformDesiredStateMode(inputs: CreateDeviceCommandInput[]): Desired
     snapshotId: snapshotModes.has(true) ? 'set' : 'preserve',
     defaultMediaVersion: defaultMediaModes.has(true) ? 'set' : 'preserve',
     emergencyVersion: emergencyModes.has(true) ? 'set' : 'preserve',
+    liveVersion: liveModes.has(true) ? 'set' : 'preserve',
   };
 }
 
@@ -216,6 +232,7 @@ function buildDesiredStateMetadata(params: {
   desiredSnapshotId?: string | null;
   desiredDefaultMediaVersion?: string | null;
   desiredEmergencyVersion?: string | null;
+  desiredLiveVersion?: string | null;
 }) {
   return {
     command_id: params.command.id,
@@ -224,6 +241,7 @@ function buildDesiredStateMetadata(params: {
     desired_snapshot_id: params.desiredSnapshotId ?? null,
     desired_default_media_version: params.desiredDefaultMediaVersion ?? null,
     desired_emergency_version: params.desiredEmergencyVersion ?? null,
+    ...(params.desiredLiveVersion === undefined ? {} : { desired_live_version: params.desiredLiveVersion }),
   };
 }
 
@@ -232,8 +250,12 @@ async function recordDesiredStatesSequentially(
   commands: DeviceCommandRecord[],
   inputs: CreateDeviceCommandInput[]
 ) {
-  const states = [];
-  for (let index = 0; index < commands.length; index += 1) {
+  const states: Array<DeviceDesiredStateRecord | null> = commands.map(() => null);
+  // Keep each screen's input order while acquiring distinct screen rows in one
+  // stable order, including the mixed-mode/duplicate-screen fallback path.
+  const indexes = commands.map((_, index) => index).sort((left, right) =>
+    compareOpaque(commands[left].screen_id, commands[right].screen_id) || left - right);
+  for (const index of indexes) {
     const command = commands[index];
     const input = inputs[index];
     const reason = resolveReason(command.payload);
@@ -242,24 +264,25 @@ async function recordDesiredStatesSequentially(
       ? input.desiredDefaultMediaVersion ?? null
       : undefined;
     const desiredEmergencyVersion = hasOwnValue(input, 'desiredEmergencyVersion') ? input.desiredEmergencyVersion ?? null : undefined;
+    const desiredLiveVersion = hasOwnValue(input, 'desiredLiveVersion') ? input.desiredLiveVersion ?? null : undefined;
 
-    states.push(
-      await recordDesiredStateForCommand(tx, {
-        screenId: command.screen_id,
-        commandId: command.id,
-        commandType: command.type,
-        commandReason: reason,
-        snapshotId: desiredSnapshotId,
-        defaultMediaVersion: desiredDefaultMediaVersion,
-        emergencyVersion: desiredEmergencyVersion,
-        metadata: buildDesiredStateMetadata({
-          command,
-          desiredSnapshotId,
-          desiredDefaultMediaVersion,
-          desiredEmergencyVersion,
-        }),
-      })
-    );
+    states[index] = await recordDesiredStateForCommand(tx, {
+      screenId: command.screen_id,
+      commandId: command.id,
+      commandType: command.type,
+      commandReason: reason,
+      snapshotId: desiredSnapshotId,
+      defaultMediaVersion: desiredDefaultMediaVersion,
+      emergencyVersion: desiredEmergencyVersion,
+      liveVersion: desiredLiveVersion,
+      metadata: buildDesiredStateMetadata({
+        command,
+        desiredSnapshotId,
+        desiredDefaultMediaVersion,
+        desiredEmergencyVersion,
+        desiredLiveVersion,
+      }),
+    });
   }
 
   return states;
@@ -288,12 +311,14 @@ async function recordDesiredStatesForCommands(
       ? input.desiredDefaultMediaVersion ?? null
       : null;
     const desiredEmergencyVersion = hasOwnValue(input, 'desiredEmergencyVersion') ? input.desiredEmergencyVersion ?? null : null;
+    const desiredLiveVersion = hasOwnValue(input, 'desiredLiveVersion') ? input.desiredLiveVersion ?? null : null;
 
     return {
       screen_id: command.screen_id,
       snapshot_id: desiredSnapshotId,
       default_media_version: desiredDefaultMediaVersion,
       emergency_version: desiredEmergencyVersion,
+      live_version: desiredLiveVersion,
       command_version: 1,
       state_version: 1,
       last_command_id: command.id,
@@ -305,11 +330,12 @@ async function recordDesiredStatesForCommands(
         desiredSnapshotId,
         desiredDefaultMediaVersion,
         desiredEmergencyVersion,
+        desiredLiveVersion: hasOwnValue(input, 'desiredLiveVersion') ? desiredLiveVersion : undefined,
       }),
       created_at: now,
       updated_at: now,
     };
-  });
+  }).sort((left, right) => compareOpaque(left.screen_id, right.screen_id));
 
   const states = (await tx
     .insert(schema.deviceDesiredState)
@@ -329,6 +355,7 @@ async function recordDesiredStatesForCommands(
           mode.emergencyVersion === 'preserve'
             ? sql`COALESCE(${schema.deviceDesiredState.emergency_version}, excluded.emergency_version)`
             : sql`excluded.emergency_version`,
+        live_version: mode.liveVersion === 'preserve' ? sql`${schema.deviceDesiredState.live_version}` : sql`excluded.live_version`,
         command_version: sql`${schema.deviceDesiredState.command_version} + 1`,
         state_version: sql`${schema.deviceDesiredState.state_version} + 1`,
         last_command_id: sql`excluded.last_command_id`,
@@ -355,6 +382,7 @@ async function recordDesiredStatesForCommands(
         snapshot_id: state.snapshot_id,
         default_media_version: state.default_media_version,
         emergency_version: state.emergency_version,
+        live_version: state.live_version,
         command_id: command.id,
         reason: resolveReason(command.payload) ?? 'COMMAND_AVAILABLE',
         metadata: buildDesiredStateMetadata({
@@ -364,6 +392,7 @@ async function recordDesiredStatesForCommands(
             ? input.desiredDefaultMediaVersion ?? null
             : undefined,
           desiredEmergencyVersion: hasOwnValue(input, 'desiredEmergencyVersion') ? input.desiredEmergencyVersion ?? null : undefined,
+          desiredLiveVersion: hasOwnValue(input, 'desiredLiveVersion') ? input.desiredLiveVersion ?? null : undefined,
         }),
         created_at: now,
       },
@@ -411,6 +440,7 @@ async function insertCommandOutboxEvents(
           desired_snapshot_id: desiredSnapshotId ?? null,
           desired_default_media_version: desiredDefaultMediaVersion ?? null,
           desired_emergency_version: desiredEmergencyVersion ?? null,
+          ...(hasOwnValue(input, 'desiredLiveVersion') ? { desired_live_version: input.desiredLiveVersion ?? null } : {}),
         },
         priority: command.priority,
         max_attempts: config.COMMAND_MAX_ATTEMPTS,
@@ -426,7 +456,8 @@ function buildCreateCommandValues(input: CreateDeviceCommandInput) {
   const priority = resolveCommandPriority(reason, input.priority);
 
   return {
-    screen_id: input.screenId,
+    id: randomUUID(),
+    screen_id: input.screenId.toLowerCase(),
     type: normalizeCommandType(input.type),
     payload: input.payload ?? null,
     status: 'PENDING' as const,
@@ -453,18 +484,23 @@ export async function createDeviceCommands(
 
   return await db.transaction(async (tx) => {
     const commandValues = inputs.map(buildCreateCommandValues);
-    const insert = tx.insert(schema.deviceCommands).values(commandValues);
-    const commands = await (options.ignoreIdempotencyConflicts
+    const insertOrder = commandValues.map((value, index) => ({ value, index })).sort((left, right) =>
+      compareOpaque(left.value.screen_id, right.value.screen_id) ||
+      compareIdempotencyKeys(left.value.idempotency_key, right.value.idempotency_key) || left.index - right.index);
+    const insert = tx.insert(schema.deviceCommands).values(insertOrder.map(({ value }) => value));
+    const inserted = await (options.ignoreIdempotencyConflicts
       ? insert.onConflictDoNothing().returning()
       : insert.returning());
+    const insertedById = new Map(inserted.map(command => [command.id, command]));
+    const commands = commandValues.flatMap(value => { const command = insertedById.get(value.id); return command ? [command] : []; });
 
     if (commands.length === 0) {
       return [];
     }
 
-    const inputByScreenId = new Map(inputs.map((input) => [input.screenId, input]));
+    const inputByCommandId = new Map<string, CreateDeviceCommandInput>(commandValues.map((value, index) => [value.id, inputs[index]]));
     const insertedInputs = commands.map((command) => {
-      const input = inputByScreenId.get(command.screen_id);
+      const input = inputByCommandId.get(command.id);
       if (!input) {
         throw new Error(`Unable to match inserted command to input for screen ${command.screen_id}`);
       }

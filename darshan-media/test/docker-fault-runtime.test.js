@@ -22,7 +22,7 @@ const monotonic = () => Number(process.hrtime.bigint()) / 1e6;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function coreDigest() {
   const digest = createHash('sha256');
-  for (const file of ['controller.js', 'gateway.js', 'index.js', 'livekit-adapter.js', 'supervisor.js']) {
+  for (const file of ['controller.js', 'gateway.js', 'index.js', 'livekit-adapter.js', 'supervisor.js', 'sfu-listener-ownership.js']) {
     digest.update(file);
     digest.update(await readFile(path.join(repo, 'darshan-media/src', file)));
   }

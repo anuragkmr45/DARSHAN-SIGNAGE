@@ -328,6 +328,7 @@ describe('Player Flow', () => {
     stubs.snapshotManager.refreshSnapshot.resetHistory()
     const playbackStop = sandbox.spy(stubs.playbackEngine, 'stop')
     const cacheWriteInvalidation = sandbox.spy(getCacheManager(), 'invalidatePendingWrites')
+    const cachePurge = sandbox.spy(getCacheManager(), 'clear')
 
     ;(guard as any).lastBackendSuccessAtMs = Date.now() - 120001
     ;(guard as any).refresh('unit-expiry')
@@ -359,7 +360,10 @@ describe('Player Flow', () => {
     ])
     expect(guard.getStatus().locked).to.equal(false)
     expect(guard.getStatus().recoveryPhase).to.equal('READY')
-    expect(cacheWriteInvalidation.calledOnce).to.equal(true)
+    expect(cacheWriteInvalidation.called).to.equal(true)
+    const firstForcedPurge = cachePurge.getCalls().find((call: sinon.SinonSpyCall) => call.args[0] === true)
+    expect(firstForcedPurge).to.exist
+    expect(cacheWriteInvalidation.firstCall.calledBefore(firstForcedPurge!)).to.equal(true)
 
     await playerFlow.stop()
   })
