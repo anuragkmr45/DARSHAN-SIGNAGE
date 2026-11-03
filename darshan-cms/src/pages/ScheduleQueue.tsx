@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Plus, Calendar, Clock, Zap, Copy } from "lucide-react";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { scheduleRequestsApi } from "@/api/domains/scheduleRequests";
 import { deviceScheduleApi } from "@/api/domains/deviceSchedule";
+import { screensApi } from "@/api/domains/screens";
 import { queryKeys } from "@/api/queryKeys";
 import { useToast } from "@/hooks/use-toast";
 import type { ScheduleRequestListItem } from "@/api/types";
@@ -99,6 +100,9 @@ export default function ScheduleQueue() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [activeTab, setActiveTab] = useState<TabKey>("pending");
   const [selectedRequest, setSelectedRequest] = useState<ScheduleRequestListItem | null>(null);
+  const [snapshotSource, setSnapshotSource] = useState("");
+  const [groupMemberId, setGroupMemberId] = useState("");
+  const lastSnapshotRequestId = useRef<string | null>(null);
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [pageByStatus, setPageByStatus] = useState<Record<TabKey, number>>({
     pending: 1,
@@ -129,6 +133,7 @@ export default function ScheduleQueue() {
     void Promise.all([
       queryClient.invalidateQueries({ queryKey: ["schedule-requests"] }),
       queryClient.invalidateQueries({ queryKey: ["device-schedule"] }),
+      queryClient.invalidateQueries({ queryKey: ["schedule-snapshot-group-members"] }),
     ]);
   }, [queryClient]);
 
@@ -209,10 +214,33 @@ export default function ScheduleQueue() {
     else if (current !== selectedRequest) setSelectedRequest(current);
   }, [data?.items, isFetching, selectedRequest]);
 
-  const selectedDeviceId =
-    typeof selectedRequest?.screens?.[0]?.id === "string" && selectedRequest.screens[0].id.trim()
-      ? selectedRequest.screens[0].id
-      : undefined;
+  const directScreens = selectedRequest?.screens ?? [];
+  const targetGroups = selectedRequest?.screen_groups ?? [];
+  const canReadGroups = can("read", "ScreenGroup");
+  useEffect(() => {
+    if (lastSnapshotRequestId.current === (selectedRequest?.id ?? null)) return;
+    lastSnapshotRequestId.current = selectedRequest?.id ?? null;
+    const screens = selectedRequest?.screens ?? [];
+    const groups = selectedRequest?.screen_groups ?? [];
+    setSnapshotSource(screens.length === 1 && groups.length === 0
+      ? `screen:${screens[0].id}`
+      : screens.length === 0 && groups.length === 1 ? `group:${groups[0].id}` : "");
+    setGroupMemberId("");
+  }, [selectedRequest?.id, selectedRequest?.screens, selectedRequest?.screen_groups]);
+  const selectedGroupId = snapshotSource.startsWith("group:") && targetGroups.some((group) => group.id === snapshotSource.slice(6))
+    ? snapshotSource.slice(6) : undefined;
+  const groupMembersQuery = useQuery({
+    queryKey: ["schedule-snapshot-group-members", selectedGroupId],
+    queryFn: () => screensApi.getGroupById(selectedGroupId!),
+    enabled: activeTab === "published" && Boolean(selectedGroupId) && canReadGroups,
+    staleTime: 0,
+  });
+  const groupScreenIds = groupMembersQuery.data?.screen_ids ?? [];
+  const selectedDeviceId = snapshotSource.startsWith("screen:") && directScreens.some((screen) => screen.id === snapshotSource.slice(7))
+    ? snapshotSource.slice(7)
+    : selectedGroupId && groupScreenIds.length === 1
+      ? groupScreenIds[0]
+      : selectedGroupId && groupScreenIds.includes(groupMemberId) ? groupMemberId : undefined;
   const deviceScheduleQuery = useQuery({
     queryKey: ["device-schedule", selectedDeviceId ?? null],
     queryFn: async () => {
@@ -222,7 +250,7 @@ export default function ScheduleQueue() {
       return deviceScheduleApi.getSchedule(selectedDeviceId);
     },
     enabled: activeTab === "published" && Boolean(selectedDeviceId),
-    staleTime: 30_000,
+    staleTime: 0,
   });
 
   const total = data?.pagination?.total ?? 0;
@@ -354,14 +382,43 @@ export default function ScheduleQueue() {
                   <CardTitle className="text-base">Backend Screen Schedule</CardTitle>
                   <CardDescription className="text-sm text-muted-foreground">
                     {selectedRequest
-                      ? `Backend snapshot for screen ${selectedDeviceId || "unknown"}. This does not confirm the player received or displayed it.`
-                      : "Select a published request to inspect the backend schedule for its first screen."}
+                      ? "Select a target Screen to inspect its current backend snapshot. This does not confirm the player received or displayed it."
+                      : "Select a published request to inspect a Screen's current backend snapshot."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {selectedRequest && (directScreens.length > 0 || targetGroups.length > 0) ? <div className="space-y-2">
+                    <Label htmlFor="schedule-snapshot-target">Target</Label>
+                    <Select value={snapshotSource} onValueChange={(value) => { setSnapshotSource(value); setGroupMemberId(""); }}>
+                      <SelectTrigger id="schedule-snapshot-target" aria-label="Choose snapshot target"><SelectValue placeholder="Choose a Screen or Screen Group" /></SelectTrigger>
+                      <SelectContent>
+                        {directScreens.map((screen) => <SelectItem key={`screen:${screen.id}`} value={`screen:${screen.id}`}>Screen: {screen.name}</SelectItem>)}
+                        {targetGroups.map((group) => <SelectItem key={`group:${group.id}`} value={`group:${group.id}`}>Group: {group.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {selectedGroupId && !canReadGroups ? <p role="alert" className="text-sm text-muted-foreground">Screen Group access is needed to inspect its current members.</p> : null}
+                    {selectedGroupId && canReadGroups && groupMembersQuery.isLoading ? <LoadingIndicator label="Loading current group members..." /> : null}
+                    {selectedGroupId && canReadGroups && groupMembersQuery.isError ? <div role="alert" className="space-y-2 text-sm text-destructive">
+                      <p>Could not load the group's current members.</p>
+                      <Button variant="outline" size="sm" onClick={() => void groupMembersQuery.refetch()}>Retry group members</Button>
+                    </div> : null}
+                    {selectedGroupId && groupMembersQuery.isSuccess && groupScreenIds.length === 0 ? <p className="text-sm text-muted-foreground">This group currently has no Screens.</p> : null}
+                    {selectedGroupId && groupScreenIds.length > 0 ? <>
+                      <p className="text-xs text-muted-foreground">Group membership is current and may differ from its membership when published.</p>
+                      <Button variant="ghost" size="sm" onClick={() => void groupMembersQuery.refetch()} disabled={groupMembersQuery.isFetching}>Refresh group members</Button>
+                      {groupScreenIds.length > 1 ? <Select value={groupMemberId} onValueChange={setGroupMemberId}>
+                        <SelectTrigger aria-label="Choose group Screen"><SelectValue placeholder="Choose a group Screen" /></SelectTrigger>
+                        <SelectContent>{groupScreenIds.map((id) => <SelectItem key={id} value={id}>Screen ···{id.slice(-8)}</SelectItem>)}</SelectContent>
+                      </Select> : null}
+                    </> : null}
+                  </div> : null}
+                  {selectedDeviceId ? <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>Current backend snapshot for Screen ···{selectedDeviceId.slice(-8)}. Check Delivery and Proof of Play for player evidence.</span>
+                    <Button variant="ghost" size="sm" onClick={() => void deviceScheduleQuery.refetch()} disabled={deviceScheduleQuery.isFetching}>Refresh snapshot</Button>
+                  </div> : null}
                   {!selectedRequest || !selectedDeviceId ? (
                     <p className="text-sm text-muted-foreground">
-                      Select a published request with a direct screen to inspect the backend's current snapshot. Check Delivery and Proof of Play for player evidence.
+                      {selectedRequest ? "Choose a Screen above to inspect its current backend snapshot." : "Select a published request to inspect a Screen's current backend snapshot."}
                     </p>
                   ) : deviceScheduleQuery.isLoading ? (
                     <div className="flex justify-center py-6">

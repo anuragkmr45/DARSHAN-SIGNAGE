@@ -17,9 +17,10 @@ const requestItem = {
   screens: [{ id: "00000000-0000-4000-8000-000000000503", name: "Lobby screen" }],
 };
 
-async function setup(page: Page, grants: TestCapability[], options: { listFails?: boolean; summaryFailsAfterSearch?: boolean; snapshotFails?: boolean; published?: boolean } = {}) {
+async function setup(page: Page, grants: TestCapability[], options: { listFails?: boolean; summaryFailsAfterSearch?: boolean; snapshotFails?: boolean; published?: boolean; targetMode?: "group" | "mixed"; groupFails?: boolean } = {}) {
   let listFails = Boolean(options.listFails);
   let snapshotFails = Boolean(options.snapshotFails);
+  let groupFails = Boolean(options.groupFails);
   const requests: string[] = [];
   await page.context().addCookies([
     { name: "access_token", value: "queue-qa-session", url: origin, httpOnly: true, sameSite: "Lax" },
@@ -48,16 +49,26 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
       if (listFails) return json({ error: { message: "Unavailable" } }, 503);
       const status = url.searchParams.get("status");
       const q = url.searchParams.get("q");
+      const group = { id: "00000000-0000-4000-8000-000000000504", name: "East wing" };
       const items = status === (options.published ? "PUBLISHED" : "PENDING") && !q
-        ? [{ ...requestItem, status: options.published ? "PUBLISHED" : "PENDING" }] : [];
+        ? [{ ...requestItem, status: options.published ? "PUBLISHED" : "PENDING",
+          screens: options.targetMode === "group" ? [] : options.targetMode === "mixed"
+            ? [...requestItem.screens, { id: "00000000-0000-4000-8000-000000000505", name: "Reception screen" }] : requestItem.screens,
+          screen_groups: options.targetMode ? [group] : [],
+        }] : [];
       return json({ items, pagination: { page: 1, limit: 10, total: items.length } });
     }
+    if (path === "/api/v1/screen-groups/00000000-0000-4000-8000-000000000504" && method === "GET") return groupFails
+      ? json({ error: { message: "Unavailable" } }, 503)
+      : json({ id: "00000000-0000-4000-8000-000000000504", name: "East wing", screen_ids: [
+        "00000000-0000-4000-8000-000000000506", "00000000-0000-4000-8000-000000000507",
+      ] });
     if (path.includes("/snapshot") && method === "GET") return snapshotFails
       ? json({ error: { message: "Unavailable" } }, 503)
       : json({ snapshot: { schedule: { id: requestItem.schedule.id, items: [] } }, publish: null, media_urls: {}, media_assets: {} });
     return json({});
   });
-  return { requests, restoreList: () => { listFails = false; }, restoreSnapshot: () => { snapshotFails = false; } };
+  return { requests, restoreList: () => { listFails = false; }, restoreSnapshot: () => { snapshotFails = false; }, restoreGroup: () => { groupFails = false; } };
 }
 
 test("read-only queue hides the incomplete creator action and direct URL explains access", async ({ page }) => {
@@ -105,6 +116,50 @@ test("published snapshot wording does not claim player receipt", async ({ page }
   state.restoreSnapshot();
   await page.getByRole("button", { name: "Retry snapshot" }).click();
   await expect(page.getByText("No schedule items were returned for this device.")).toBeVisible();
+});
+
+test("group-only publish chooses a current member and recovers from a failed membership request", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "read", subject: "ScreenGroup" }], { published: true, targetMode: "group", groupFails: true });
+  await page.goto("/schedule");
+  await page.getByRole("tab", { name: "Published 1" }).click();
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await expect(page.getByText("Could not load the group's current members.")).toBeVisible();
+  expect(state.requests.some((request) => request.includes("/device/") && request.includes("/snapshot"))).toBe(false);
+  state.restoreGroup();
+  await page.getByRole("button", { name: "Retry group members" }).click();
+  await expect(page.getByText("Group membership is current", { exact: false })).toBeVisible();
+  expect(state.requests.some((request) => request.includes("/device/") && request.includes("/snapshot"))).toBe(false);
+  await page.getByRole("combobox", { name: "Choose group Screen" }).click();
+  await page.getByRole("option", { name: "Screen ···00000507" }).click();
+  await expect.poll(() => state.requests.some((request) => request.includes("/device/00000000-0000-4000-8000-000000000507/snapshot"))).toBe(true);
+});
+
+test("multi-target publish requires a target and never silently chooses the first Screen", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "read", subject: "ScreenGroup" }], { published: true, targetMode: "mixed" });
+  await page.goto("/schedule");
+  await page.getByRole("tab", { name: "Published 1" }).click();
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await expect(page.getByText("Choose a Screen above to inspect its current backend snapshot.")).toBeVisible();
+  expect(state.requests.some((request) => request.includes("/device/") && request.includes("/snapshot"))).toBe(false);
+  await page.getByRole("combobox", { name: "Choose snapshot target" }).click();
+  await page.getByRole("option", { name: "Screen: Reception screen" }).click();
+  await expect.poll(() => state.requests.some((request) => request.includes("/device/00000000-0000-4000-8000-000000000505/snapshot"))).toBe(true);
+  await page.getByRole("combobox", { name: "Choose snapshot target" }).click();
+  await page.getByRole("option", { name: "Group: East wing" }).click();
+  await expect(page.getByText("Group membership is current", { exact: false })).toBeVisible();
+  await expect(page.getByText("Choose a Screen above to inspect its current backend snapshot.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Choose group Screen" }).click();
+  await page.getByRole("option", { name: "Screen ···00000506" }).click();
+  await expect.poll(() => state.requests.some((request) => request.includes("/device/00000000-0000-4000-8000-000000000506/snapshot"))).toBe(true);
+});
+
+test("a request reader without Screen Group access sees no group membership", async ({ page }) => {
+  const state = await setup(page, reader, { published: true, targetMode: "group" });
+  await page.goto("/schedule");
+  await page.getByRole("tab", { name: "Published 1" }).click();
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await expect(page.getByText("Screen Group access is needed to inspect its current members.")).toBeVisible();
+  expect(state.requests.some((request) => request.includes("/screen-groups/") || request.includes("/device/"))).toBe(false);
 });
 
 test("queue controls and detail remain within phone, tablet and desktop widths", async ({ page }) => {
