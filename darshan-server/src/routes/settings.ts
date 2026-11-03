@@ -125,17 +125,24 @@ async function requireAccess(
   return payload;
 }
 
-async function ensureMediaIdsExist(ids: Array<string | null | undefined>) {
+async function ensureBrandingMediaReady(ids: Array<string | null | undefined>) {
   const requestedIds = Array.from(new Set(ids.filter((value): value is string => Boolean(value))));
   if (requestedIds.length === 0) return;
 
   const db = getDatabase();
   const rows = await db
-    .select({ id: schema.media.id })
+    .select({ id: schema.media.id, type: schema.media.type, status: schema.media.status })
     .from(schema.media)
     .where(and(inArray(schema.media.id, requestedIds as string[]), isNull(schema.media.deleted_at)));
   if (rows.length !== requestedIds.length) {
     throw AppError.notFound('Media not found');
+  }
+  const invalidIds = rows.filter((media) => media.type !== 'IMAGE' || media.status !== 'READY').map((media) => media.id);
+  if (invalidIds.length > 0) {
+    throw AppError.badRequest('Branding assets must be ready images.', {
+      reason: 'BRANDING_IMAGE_NOT_READY',
+      media_ids: invalidIds,
+    });
   }
 }
 
@@ -386,8 +393,9 @@ export async function settingsRoutes(fastify: FastifyInstance) {
 
         let value = data.value;
         if (data.key === BRANDING_SETTINGS_KEY) {
+          await requireAccess(request, 'update', 'BrandingSettings');
           value = brandingSettingsSchema.parse(data.value);
-          await ensureMediaIdsExist([value.logo_media_id, value.icon_media_id, value.favicon_media_id]);
+          await ensureBrandingMediaReady([value.logo_media_id, value.icon_media_id, value.favicon_media_id]);
         } else if (data.key in knownSections) {
           value = (knownSections as any)[data.key].parse(data.value);
           if (data.key === BACKUPS_SETTINGS_KEY) {
@@ -490,7 +498,7 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       try {
         await requireAccess(request, 'update', 'BrandingSettings');
         const data = brandingSettingsSchema.parse(request.body);
-        await ensureMediaIdsExist([data.logo_media_id, data.icon_media_id, data.favicon_media_id]);
+        await ensureBrandingMediaReady([data.logo_media_id, data.icon_media_id, data.favicon_media_id]);
         const saved = await saveSettingsSection(BRANDING_SETTINGS_KEY, data);
         return reply.status(OK).send(await serializeBranding(saved));
       } catch (error) {

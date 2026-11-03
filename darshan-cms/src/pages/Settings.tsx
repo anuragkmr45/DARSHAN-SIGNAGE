@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Brush,
@@ -60,7 +60,7 @@ import {
 import { canManageBrandingSettings } from "@/lib/access";
 import { mediaApi } from "@/api/domains/media";
 import type { BackupRun, BackupSettings, MediaAsset } from "@/api/types";
-import { uploadMediaWithPresign, validateUploadFile, getFriendlyUploadError } from "@/lib/mediaUploadFlow";
+import { uploadMediaWithPresign, validateUploadFile, resolveUploadContentType, getFriendlyUploadError } from "@/lib/mediaUploadFlow";
 import { useToast } from "@/hooks/use-toast";
 
 const BRANDING_FIELDS = [
@@ -88,17 +88,38 @@ function formatBackupError(message: string | null | undefined) {
   return message.replace(/\s+/g, " ").trim();
 }
 
+function SettingsQueryGuard({
+  query,
+  children,
+}: {
+  query: { isPending: boolean; isError: boolean; refetch: () => Promise<unknown> };
+  children: ReactNode;
+}) {
+  if (query.isPending) return <p className="py-8 text-sm text-muted-foreground">Loading settings…</p>;
+  if (query.isError) {
+    return <div className="space-y-3 py-8">
+      <p className="text-sm text-destructive">Could not load these settings. No changes have been made.</p>
+      <Button variant="outline" onClick={() => void query.refetch()}>Retry</Button>
+    </div>;
+  }
+  return <>{children}</>;
+}
+
 function BrandingAssetField({
   label,
   hint,
   mediaId,
   mediaUrl,
+  canChoose,
+  canUpload,
   onChange,
 }: {
   label: string;
   hint: string;
   mediaId: string | null;
   mediaUrl: string | null;
+  canChoose: boolean;
+  canUpload: boolean;
   onChange: (nextId: string | null, nextUrl?: string | null) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -115,9 +136,10 @@ function BrandingAssetField({
 
   const handleUpload = async (fileList: FileList | null) => {
     const file = fileList?.[0];
-    if (!file) return;
+    if (!file || !canUpload) return;
 
-    const validationError = validateUploadFile(file);
+    const contentType = resolveUploadContentType(file);
+    const validationError = validateUploadFile(file) || (!contentType?.startsWith("image/") ? "Branding assets must be JPEG, PNG, or WEBP images." : null);
     if (validationError) {
       toast({ title: "Upload failed", description: validationError, variant: "destructive" });
       return;
@@ -126,8 +148,12 @@ function BrandingAssetField({
     setUploading(true);
     try {
       const result = await uploadMediaWithPresign(file, { displayName: `${label} ${file.name}` });
+      if (result.media.status !== "READY" || result.media.type !== "IMAGE") {
+        toast({ title: "Image is processing", description: "Choose the image from the library once it is ready." });
+        return;
+      }
       onChange(result.media.id, result.media.media_url ?? result.media.fallback_media_url ?? null);
-      toast({ title: `${label} updated`, description: "Uploaded media is now assigned." });
+      toast({ title: `${label} selected`, description: "Save Branding to apply it." });
     } catch (error) {
       toast({
         title: "Upload failed",
@@ -140,14 +166,14 @@ function BrandingAssetField({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{label}</CardTitle>
-        <CardDescription>{hint}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="border-b py-4 last:border-b-0">
+      <div className="mb-3">
+        <p className="font-medium">{label}</p>
+        <p className="text-sm text-muted-foreground">{hint}</p>
+      </div>
+      <div className="space-y-4">
         <div className="flex items-center gap-4">
-          <div className="h-16 w-16 rounded-lg border bg-muted/30 flex items-center justify-center overflow-hidden">
+          <div className="h-16 w-16 shrink-0 rounded-lg border bg-muted/30 flex items-center justify-center overflow-hidden">
             {mediaUrl ? (
               <MediaPreview
                 url={mediaUrl}
@@ -160,20 +186,24 @@ function BrandingAssetField({
               <ImageUp className="h-6 w-6 text-muted-foreground" />
             )}
           </div>
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <div className="text-sm text-muted-foreground">
               {mediaId ? "Assigned from media library" : "No media assigned"}
             </div>
             <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => setPickerOpen(true)}>
+              {canChoose ? <Button variant="outline" onClick={() => setPickerOpen(true)}>
                 <Brush className="mr-2 h-4 w-4" />
                 Choose existing
-              </Button>
-              <Label className="inline-flex">
+              </Button> : null}
+              {canUpload ? <Label className="inline-flex">
                 <Input
                   type="file"
                   className="hidden"
-                  onChange={(event) => void handleUpload(event.target.files)}
+                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                  onChange={(event) => {
+                    void handleUpload(event.target.files);
+                    event.target.value = "";
+                  }}
                   disabled={uploading}
                 />
                 <Button type="button" variant="outline" disabled={uploading} asChild>
@@ -182,8 +212,8 @@ function BrandingAssetField({
                     {uploading ? "Uploading..." : "Upload new"}
                   </span>
                 </Button>
-              </Label>
-              {mediaId ? (
+              </Label> : null}
+              {mediaId && (canChoose || canUpload) ? (
                 <Button variant="ghost" onClick={() => onChange(null, null)}>
                   Clear
                 </Button>
@@ -198,6 +228,9 @@ function BrandingAssetField({
               <DialogTitle>Select {label}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-3 md:grid-cols-2">
+              {mediaQuery.isPending ? <p className="text-sm text-muted-foreground">Loading ready images…</p> : null}
+              {mediaQuery.isError ? <div className="space-y-2"><p className="text-sm text-destructive">Could not load images.</p><Button variant="outline" onClick={() => void mediaQuery.refetch()}>Retry</Button></div> : null}
+              {mediaQuery.isSuccess && mediaItems.length === 0 ? <p className="text-sm text-muted-foreground">No ready images in the media library.</p> : null}
               {mediaItems.map((media) => (
                 <button
                   key={media.id}
@@ -232,8 +265,8 @@ function BrandingAssetField({
             </div>
           </DialogContent>
         </Dialog>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -242,6 +275,10 @@ const Settings = () => {
   const { can, role } = useAuthorization();
   const currentUser = useAppSelector((state) => state.auth.user);
   const canEditBranding = canManageBrandingSettings(currentUser ?? undefined, role, can);
+  const canReadBranding = can("read", "BrandingSettings");
+  const canEditOrg = can("update", "OrgSettings");
+  const canChooseBrandingMedia = canEditBranding && can("read", "Media");
+  const canUploadBrandingMedia = canEditBranding && can("create", "Media");
 
   const generalQuery = useGeneralSettings();
   const brandingQuery = useBrandingSettings();
@@ -332,7 +369,7 @@ const Settings = () => {
     setBranding((current) => ({
       ...current,
       [key]: nextId,
-      [urlKey]: nextUrl ?? current[urlKey],
+      [urlKey]: nextUrl === undefined ? current[urlKey] : nextUrl,
     }));
   };
 
@@ -356,29 +393,32 @@ const Settings = () => {
         </p>
       </div>
 
-      <Tabs defaultValue="general" className="space-y-4">
-        <TabsList className="flex flex-wrap h-auto">
+      <Tabs defaultValue="general" className="space-y-4 min-w-0">
+        <TabsList className="flex h-auto w-full max-w-full justify-start overflow-x-auto overflow-y-hidden">
           <TabsTrigger value="general"><Globe className="mr-2 h-4 w-4" />General</TabsTrigger>
-          <TabsTrigger value="branding"><ImageUp className="mr-2 h-4 w-4" />Branding</TabsTrigger>
+          {canReadBranding ? <TabsTrigger value="branding"><ImageUp className="mr-2 h-4 w-4" />Branding</TabsTrigger> : null}
           <TabsTrigger value="security"><Lock className="mr-2 h-4 w-4" />Security</TabsTrigger>
           <TabsTrigger value="appearance"><Palette className="mr-2 h-4 w-4" />Appearance</TabsTrigger>
           <TabsTrigger value="default-media"><Shield className="mr-2 h-4 w-4" />Default Media</TabsTrigger>
           <TabsTrigger value="advanced"><Database className="mr-2 h-4 w-4" />Advanced</TabsTrigger>
-          <TabsTrigger value="roles"><Users className="mr-2 h-4 w-4" />Roles</TabsTrigger>
+          {can("read", "Role") ? <TabsTrigger value="roles"><Users className="mr-2 h-4 w-4" />Roles</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
+          <SettingsQueryGuard query={generalQuery}>
           <Card>
             <CardHeader>
               <CardTitle>General</CardTitle>
               <CardDescription>Default locale and organization details for the CMS.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {!canEditOrg ? <p className="text-sm text-muted-foreground">You can view these settings. Editing requires Manage Site Settings.</p> : null}
               <div className="space-y-2">
                 <Label htmlFor="company-name">Company name</Label>
                 <Input
                   id="company-name"
                   value={general.company_name}
+                  disabled={!canEditOrg}
                   onChange={(event) => setGeneral((current) => ({ ...current, company_name: event.target.value }))}
                 />
               </div>
@@ -388,6 +428,7 @@ const Settings = () => {
                   <Input
                     id="timezone"
                     value={general.timezone}
+                    disabled={!canEditOrg}
                     onChange={(event) => setGeneral((current) => ({ ...current, timezone: event.target.value }))}
                   />
                 </div>
@@ -396,19 +437,22 @@ const Settings = () => {
                   <Input
                     id="language"
                     value={general.language}
+                    disabled={!canEditOrg}
                     onChange={(event) => setGeneral((current) => ({ ...current, language: event.target.value }))}
                   />
                 </div>
               </div>
-              <Button onClick={() => updateGeneral.mutate(general)} disabled={updateGeneral.isPending}>
+              <Button onClick={() => updateGeneral.mutate(general)} disabled={!canEditOrg || updateGeneral.isPending}>
                 <Save className="mr-2 h-4 w-4" />
                 Save General
               </Button>
             </CardContent>
           </Card>
+          </SettingsQueryGuard>
         </TabsContent>
 
         <TabsContent value="branding" className="space-y-4">
+          <SettingsQueryGuard query={brandingQuery}>
           <Card>
             <CardHeader>
               <CardTitle>Branding</CardTitle>
@@ -419,11 +463,13 @@ const Settings = () => {
             <CardContent className="space-y-4">
               {!canEditBranding ? (
                 <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                  Branding is restricted. By default only Super Admin can edit it unless the role is explicitly granted
-                  the branding permission.
+                  You can view branding. Editing requires Manage Branding permission.
                 </div>
               ) : null}
-              <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+              {canEditBranding && !canChooseBrandingMedia && !canUploadBrandingMedia ? (
+                <p className="text-sm text-muted-foreground">Media library access is required to choose or upload an image.</p>
+              ) : null}
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="app-name">Application name</Label>
@@ -435,7 +481,7 @@ const Settings = () => {
                     />
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-3">
+                  <div>
                     {BRANDING_FIELDS.map((field) => (
                       <BrandingAssetField
                         key={field.key}
@@ -443,6 +489,8 @@ const Settings = () => {
                         hint={field.hint}
                         mediaId={branding[field.key]}
                         mediaUrl={branding[field.key === "logo_media_id" ? "logo_url" : field.key === "icon_media_id" ? "icon_url" : "favicon_url"]}
+                        canChoose={canChooseBrandingMedia}
+                        canUpload={canUploadBrandingMedia}
                         onChange={(nextId, nextUrl) => handleBrandingAssetChange(field.key, nextId, nextUrl)}
                       />
                     ))}
@@ -464,7 +512,7 @@ const Settings = () => {
                   </Button>
                 </div>
 
-                <Card className="bg-muted/20">
+                <Card className="self-start bg-muted/20">
                   <CardHeader>
                     <CardTitle className="text-base">Preview</CardTitle>
                     <CardDescription>How the CMS identity will appear in the shell.</CardDescription>
@@ -492,15 +540,18 @@ const Settings = () => {
               </div>
             </CardContent>
           </Card>
+          </SettingsQueryGuard>
         </TabsContent>
 
         <TabsContent value="security" className="space-y-4">
+          <SettingsQueryGuard query={securityQuery}>
           <Card>
             <CardHeader>
               <CardTitle>Security</CardTitle>
               <CardDescription>Working session timeout and password requirement controls.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {!canEditOrg ? <p className="text-sm text-muted-foreground">You can view these settings. Editing requires Manage Site Settings.</p> : null}
               <div className="space-y-2">
                 <Label htmlFor="session-timeout">Idle session timeout (minutes)</Label>
                 <Input
@@ -509,6 +560,7 @@ const Settings = () => {
                   min={5}
                   max={1440}
                   value={security.idle_timeout_minutes}
+                  disabled={!canEditOrg}
                   onChange={(event) =>
                     setSecurity((current) => ({
                       ...current,
@@ -536,6 +588,7 @@ const Settings = () => {
                       min={8}
                       max={128}
                       value={security.password_policy.min_length}
+                      disabled={!canEditOrg}
                       onChange={(event) =>
                         setSecurity((current) => ({
                           ...current,
@@ -557,6 +610,7 @@ const Settings = () => {
                       <span className="text-sm">{label}</span>
                       <Switch
                         checked={security.password_policy[key as keyof typeof security.password_policy] as boolean}
+                        disabled={!canEditOrg}
                         onCheckedChange={(checked) =>
                           setSecurity((current) => ({
                             ...current,
@@ -572,26 +626,30 @@ const Settings = () => {
                 </div>
               </div>
 
-              <Button onClick={() => updateSecurity.mutate(security)} disabled={updateSecurity.isPending}>
+              <Button onClick={() => updateSecurity.mutate(security)} disabled={!canEditOrg || updateSecurity.isPending}>
                 <Save className="mr-2 h-4 w-4" />
                 Save Security
               </Button>
             </CardContent>
           </Card>
+          </SettingsQueryGuard>
         </TabsContent>
 
         <TabsContent value="appearance" className="space-y-4">
+          <SettingsQueryGuard query={appearanceQuery}>
           <Card>
             <CardHeader>
               <CardTitle>Appearance</CardTitle>
               <CardDescription>Theme, accent, and sidebar behavior for the entire CMS.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {!canEditOrg ? <p className="text-sm text-muted-foreground">You can view these settings. Editing requires Manage Site Settings.</p> : null}
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label>Theme mode</Label>
                   <Select
                     value={appearance.theme_mode}
+                    disabled={!canEditOrg}
                     onValueChange={(value: "light" | "dark" | "system") =>
                       setAppearance((current) => ({ ...current, theme_mode: value }))
                     }
@@ -608,6 +666,7 @@ const Settings = () => {
                   <Label>Accent preset</Label>
                   <Select
                     value={appearance.accent_preset}
+                    disabled={!canEditOrg}
                     onValueChange={(value: typeof appearance.accent_preset) =>
                       setAppearance((current) => ({ ...current, accent_preset: value }))
                     }
@@ -626,6 +685,7 @@ const Settings = () => {
                   <Label>Sidebar mode</Label>
                   <Select
                     value={appearance.sidebar_mode}
+                    disabled={!canEditOrg}
                     onValueChange={(value: typeof appearance.sidebar_mode) =>
                       setAppearance((current) => ({ ...current, sidebar_mode: value }))
                     }
@@ -641,12 +701,13 @@ const Settings = () => {
                   </Select>
                 </div>
               </div>
-              <Button onClick={() => updateAppearance.mutate(appearance)} disabled={updateAppearance.isPending}>
+              <Button onClick={() => updateAppearance.mutate(appearance)} disabled={!canEditOrg || updateAppearance.isPending}>
                 <Save className="mr-2 h-4 w-4" />
                 Save Appearance
               </Button>
             </CardContent>
           </Card>
+          </SettingsQueryGuard>
         </TabsContent>
 
         <TabsContent value="default-media" className="space-y-4">
@@ -654,12 +715,14 @@ const Settings = () => {
         </TabsContent>
 
         <TabsContent value="advanced" className="space-y-4">
+          <SettingsQueryGuard query={backupSettingsQuery}>
           <Card>
             <CardHeader>
               <CardTitle>Backups</CardTitle>
               <CardDescription>Automatic full backups for PostgreSQL and MinIO archives.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {!canEditOrg ? <p className="text-sm text-muted-foreground">You can view backup settings. Editing requires Manage Site Settings.</p> : null}
               <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-4 py-3 text-sm">
                 <Badge variant={automaticBackupsEnabled ? "default" : "outline"}>
                   {automaticBackupsEnabled ? "Automatic backups on" : "Automatic backups off"}
@@ -685,7 +748,7 @@ const Settings = () => {
                 <Switch
                   checked={backups.automatic_enabled}
                   onCheckedChange={(checked) => setBackups((current) => ({ ...current, automatic_enabled: checked }))}
-                  disabled={backupScheduleManaged}
+                  disabled={!canEditOrg || backupScheduleManaged}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
@@ -697,7 +760,7 @@ const Settings = () => {
                     min={1}
                     max={168}
                     value={backups.interval_hours}
-                    disabled={backupScheduleManaged}
+                    disabled={!canEditOrg || backupScheduleManaged}
                     onChange={(event) =>
                       setBackups((current) => ({ ...current, interval_hours: Number(event.target.value || 24) }))
                     }
@@ -707,6 +770,7 @@ const Settings = () => {
                   <Label>Log level</Label>
                   <Select
                     value={backups.log_level}
+                    disabled={!canEditOrg}
                     onValueChange={(value: typeof backups.log_level) =>
                       setBackups((current) => ({ ...current, log_level: value }))
                     }
@@ -723,11 +787,11 @@ const Settings = () => {
                 </div>
               </div>
               <div className="flex flex-wrap gap-3">
-                <Button onClick={() => updateBackups.mutate(backups)} disabled={updateBackups.isPending}>
+                <Button onClick={() => updateBackups.mutate(backups)} disabled={!canEditOrg || updateBackups.isPending}>
                   <Save className="mr-2 h-4 w-4" />
                   Save Advanced
                 </Button>
-                {backups.manual_run_supported !== false ? (
+                {canEditOrg && backups.manual_run_supported !== false ? (
                   <Button variant="outline" onClick={() => runBackupNow.mutate()} disabled={runBackupNow.isPending}>
                     <Database className="mr-2 h-4 w-4" />
                     {runBackupNow.isPending ? "Queueing..." : "Run Backup Now"}
@@ -743,6 +807,8 @@ const Settings = () => {
               <CardDescription>Recent manual and automatic backup runs.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {backupRunsQuery.isPending ? <p className="text-sm text-muted-foreground">Loading backup history…</p> : null}
+              {backupRunsQuery.isError ? <div className="space-y-2"><p className="text-sm text-destructive">Could not load backup history.</p><Button variant="outline" onClick={() => void backupRunsQuery.refetch()}>Retry</Button></div> : null}
               {backupRuns.map((run) => (
                 <div key={run.id} className="rounded-lg border p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -757,7 +823,7 @@ const Settings = () => {
                           <a href={download.url} target="_blank" rel="noreferrer">{download.name}</a>
                         </Button>
                       ))}
-                      <Button
+                      {canEditOrg ? <Button
                         size="sm"
                         variant="destructive"
                         disabled={!canDeleteBackup(run) || deleteBackupRun.isPending}
@@ -765,7 +831,7 @@ const Settings = () => {
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
                         Delete
-                      </Button>
+                      </Button> : null}
                     </div>
                   </div>
                   {run.error_message ? (
@@ -773,7 +839,7 @@ const Settings = () => {
                   ) : null}
                 </div>
               ))}
-              {backupRuns.length === 0 ? <p className="text-sm text-muted-foreground">No backup history yet.</p> : null}
+              {backupRunsQuery.isSuccess && backupRuns.length === 0 ? <p className="text-sm text-muted-foreground">No backup history yet.</p> : null}
             </CardContent>
           </Card> : null}
 
@@ -801,6 +867,7 @@ const Settings = () => {
               });
             }}
           />
+          </SettingsQueryGuard>
 
           <Card>
             <CardHeader>
@@ -808,6 +875,8 @@ const Settings = () => {
               <CardDescription>Recent backend application logs filtered by runtime log level.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {recentLogsQuery.isPending ? <p className="text-sm text-muted-foreground">Loading recent logs…</p> : null}
+              {recentLogsQuery.isError ? <div className="space-y-2"><p className="text-sm text-destructive">Could not load recent logs.</p><Button variant="outline" onClick={() => void recentLogsQuery.refetch()}>Retry</Button></div> : null}
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-2">
                   <Clock3 className="h-4 w-4 text-muted-foreground" />
@@ -834,7 +903,7 @@ const Settings = () => {
                     <p className="mt-1 text-sm text-slate-50">{log.message}</p>
                   </div>
                 ))}
-                {recentLogs.length === 0 ? <p className="text-sm text-slate-400">No logs available.</p> : null}
+                {recentLogsQuery.isSuccess && recentLogs.length === 0 ? <p className="text-sm text-slate-400">No logs available.</p> : null}
               </div>
             </CardContent>
           </Card>

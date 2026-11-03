@@ -13,7 +13,7 @@ import {
   DEFAULT_MEDIA_VARIANTS_SETTING_KEY,
   resolveDefaultMediaForScreen,
 } from '@/utils/default-media';
-import { BRANDING_SETTINGS_KEY } from '@/utils/settings';
+import { BRANDING_SETTINGS_KEY, resolveBrandingMediaMap } from '@/utils/settings';
 
 async function issueSuperAdminToken() {
   const db = getDatabase();
@@ -231,6 +231,50 @@ describe('Settings routes - dimension-wise default media', () => {
     });
     expect(readResponse.statusCode).toBe(HTTP_STATUS.OK);
     expect(JSON.parse(readResponse.body).logo_url).toBeNull();
+  });
+
+  it('accepts only ready images for branding through both settings write paths', async () => {
+    const db = getDatabase();
+    const readyImageId = randomUUID();
+    const pendingImageId = randomUUID();
+    const documentId = randomUUID();
+    await db.insert(schema.media).values([
+      { id: readyImageId, name: 'Ready logo', type: 'IMAGE', status: 'READY', created_by: testUser.id },
+      { id: pendingImageId, name: 'Pending logo', type: 'IMAGE', status: 'PROCESSING', created_by: testUser.id },
+      { id: documentId, name: 'Document', type: 'DOCUMENT', status: 'READY', created_by: testUser.id },
+    ]);
+
+    const validPayload = {
+      app_name: 'DARSHAN QA',
+      logo_media_id: readyImageId,
+      icon_media_id: null,
+      favicon_media_id: null,
+    };
+    const valid = await server.inject({
+      method: 'PUT', url: '/api/v1/settings/branding',
+      headers: { authorization: `Bearer ${adminToken}` }, payload: validPayload,
+    });
+    expect(valid.statusCode).toBe(HTTP_STATUS.OK);
+
+    for (const invalidId of [pendingImageId, documentId]) {
+      const invalidPayload = { ...validPayload, logo_media_id: invalidId };
+      for (const [method, url, payload] of [
+        ['PUT', '/api/v1/settings/branding', invalidPayload],
+        ['POST', '/api/v1/settings', { key: BRANDING_SETTINGS_KEY, value: invalidPayload }],
+      ] as const) {
+        const response = await server.inject({
+          method, url, headers: { authorization: `Bearer ${adminToken}` }, payload,
+        });
+        expect(response.statusCode).toBe(HTTP_STATUS.BAD_REQUEST);
+        expect(JSON.parse(response.body).error.details.reason).toBe('BRANDING_IMAGE_NOT_READY');
+      }
+    }
+
+    const saved = await server.inject({
+      method: 'GET', url: '/api/v1/settings/branding', headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(JSON.parse(saved.body).logo_media_id).toBe(readyImageId);
+    expect((await resolveBrandingMediaMap([pendingImageId, documentId])).size).toBe(0);
   });
 
   it('rejects non-ready defaults and ignores legacy non-ready assignments at playback time', async () => {

@@ -192,6 +192,8 @@ export async function resolveBrandingMediaMap(ids: Array<string | null | undefin
   const rows = await db
     .select({
       id: schema.media.id,
+      type: schema.media.type,
+      status: schema.media.status,
       ready_object_id: schema.media.ready_object_id,
       source_bucket: schema.media.source_bucket,
       source_object_key: schema.media.source_object_key,
@@ -202,6 +204,7 @@ export async function resolveBrandingMediaMap(ids: Array<string | null | undefin
   const map = new Map<string, { id: string; url: string | null }>();
 
   for (const row of rows) {
+    if (row.type !== 'IMAGE' || row.status !== 'READY') continue;
     let url: string | null = null;
     if (row.source_bucket && row.source_object_key) {
       url = await getPresignedUrl(row.source_bucket, row.source_object_key);

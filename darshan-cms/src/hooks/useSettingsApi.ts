@@ -311,6 +311,9 @@ export const useUpdateDefaultMediaTargets = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // A 409 is a deliberate stale-revision result. Retrying can submit the
+    // same draft against a freshly fetched revision without operator review.
+    retry: false,
     mutationFn: (assignments: DefaultMediaTargetsSetting["assignments"]) => {
       const current = queryClient.getQueryData<DefaultMediaTargetsSetting>(queryKeys.defaultMediaTargets);
       return settingsApi.updateDefaultMediaTargets(assignments, current?.revision);
