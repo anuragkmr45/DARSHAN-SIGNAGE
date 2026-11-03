@@ -2,6 +2,7 @@ import { apiClient } from "../apiClient";
 import { endpoints } from "../endpoints";
 import type {
   PaginatedResponse,
+  PaginatedApiResponse,
   PaginationParams,
   Screen,
   ScreenGroup,
@@ -191,6 +192,13 @@ export const screensApi = {
   listGroups: (params?: PaginationParams) =>
     apiClient.request<PaginatedResponse<ScreenGroup>>({
       path: endpoints.screens.groups,
+      method: "GET",
+      query: params,
+    }),
+
+  listAvailableGroupScreens: (params: PaginationParams & { group_id?: string; q?: string }) =>
+    apiClient.request<PaginatedApiResponse<Screen>>({
+      path: endpoints.screens.availableGroupScreens,
       method: "GET",
       query: params,
     }),

@@ -101,4 +101,55 @@ describe('Screen group list summaries', () => {
     expect(Array.isArray(body.items[0].active_items)).toBe(true);
     expect(Array.isArray(body.items[0].upcoming_items)).toBe(true);
   });
+
+  it('pages and searches available Screens while retaining current members', async () => {
+    const db = getDatabase();
+    const token = `picker-${randomUUID().slice(0, 8)}`;
+    const currentGroupId = randomUUID();
+    const otherGroupId = randomUUID();
+    const screenIds = Array.from({ length: 105 }, () => randomUUID());
+    await db.insert(schema.screenGroups).values([
+      { id: currentGroupId, name: `${token} current` },
+      { id: otherGroupId, name: `${token} other` },
+    ]);
+    await db.insert(schema.screens).values(screenIds.map((id, index) => ({
+      id,
+      name: `${token} Screen ${String(index).padStart(3, '0')}`,
+      location: index === 104 ? `${token} last location` : null,
+      status: 'ACTIVE' as const,
+    })));
+    await db.insert(schema.screenGroupMembers).values([
+      { group_id: currentGroupId, screen_id: screenIds[0] },
+      { group_id: currentGroupId, screen_id: screenIds[1] },
+      { group_id: otherGroupId, screen_id: screenIds[1] },
+    ]);
+
+    const getAvailable = async (query: string) => {
+      const response = await server.inject({
+        method: 'GET',
+        url: `/api/v1/screen-groups/available-screens?${query}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      return response.json() as { items: Array<{ id: string }>; pagination: { page: number; total: number } };
+    };
+    const search = `q=${encodeURIComponent(token)}`;
+    const firstPage = await getAvailable(`${search}&page=1&limit=100`);
+    const secondPage = await getAvailable(`${search}&page=2&limit=100`);
+    expect(firstPage.pagination.total).toBe(103);
+    expect(firstPage.items).toHaveLength(100);
+    expect(secondPage.pagination.total).toBe(103);
+    expect(secondPage.items).toHaveLength(3);
+    expect(new Set([...firstPage.items, ...secondPage.items].map((item) => item.id)).size).toBe(103);
+    expect(firstPage.items.concat(secondPage.items).some((item) => item.id === screenIds[0] || item.id === screenIds[1])).toBe(false);
+
+    const editing = await getAvailable(`${search}&group_id=${currentGroupId}&limit=100`);
+    expect(editing.pagination.total).toBe(105);
+    expect(editing.items.concat((await getAvailable(`${search}&group_id=${currentGroupId}&page=2&limit=100`)).items)
+      .map((item) => item.id)).toEqual(expect.arrayContaining([screenIds[0], screenIds[1]]));
+    const searchedLocation = await getAvailable(`q=${encodeURIComponent('last location')}&group_id=${currentGroupId}`);
+    expect(searchedLocation.items.map((item) => item.id)).toEqual([screenIds[104]]);
+    const literalWildcard = await getAvailable('q=%25');
+    expect(literalWildcard.items).toHaveLength(0);
+  });
 });

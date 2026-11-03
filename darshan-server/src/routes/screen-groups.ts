@@ -11,7 +11,7 @@ import { apiEndpoints } from '@/config/apiEndpoints';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { respondWithError } from '@/utils/errors';
 import { getDatabase, schema } from '@/db';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, exists, ilike, inArray, notExists, or, sql } from 'drizzle-orm';
 import { AppError } from '@/utils/app-error';
 import {
   attachResolvedMediaToScheduleSnapshot,
@@ -59,6 +59,7 @@ const availableScreensQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(50),
   group_id: z.string().uuid().optional(),
+  q: z.string().trim().max(100).optional(),
 });
 
 const snapshotQuerySchema = z.object({
@@ -483,12 +484,12 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // List screens that are not members of any group (optionally allow existing members of a group)
+  // List unassigned screens and, when editing, all current members of that group.
   fastify.get<{ Querystring: typeof availableScreensQuerySchema._type }>(
     apiEndpoints.screenGroups.availableScreens,
     {
       schema: {
-        description: 'List screens that are not assigned to a group (includes current group members if group_id is provided)',
+        description: 'Search paginated unassigned screens and current group members',
         tags: ['Screens'],
         security: [{ bearerAuth: [] }],
       },
@@ -503,33 +504,47 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
 
         const query = availableScreensQuerySchema.parse(request.query);
 
-        const [screens, memberships] = await Promise.all([
-          db.select().from(schema.screens).orderBy(desc(schema.screens.created_at)),
-          db.select().from(schema.screenGroupMembers),
+        const anyMembership = db.select({ id: schema.screenGroupMembers.id })
+          .from(schema.screenGroupMembers)
+          .where(eq(schema.screenGroupMembers.screen_id, schema.screens.id));
+        const currentMembership = query.group_id
+          ? db.select({ id: schema.screenGroupMembers.id })
+              .from(schema.screenGroupMembers)
+              .where(and(
+                eq(schema.screenGroupMembers.screen_id, schema.screens.id),
+                eq(schema.screenGroupMembers.group_id, query.group_id),
+              ))
+          : null;
+        const membershipFilter = currentMembership
+          ? or(notExists(anyMembership), exists(currentMembership))
+          : notExists(anyMembership);
+        const search = query.q?.trim();
+        const pattern = search ? `%${search.replace(/[\\%_]/g, '\\$&')}%` : null;
+        const where = and(
+          membershipFilter,
+          pattern ? or(
+            ilike(schema.screens.name, pattern),
+            ilike(schema.screens.location, pattern),
+            sql`${schema.screens.id}::text ILIKE ${pattern}`,
+          ) : undefined,
+        );
+        const [countRows, paged] = await Promise.all([
+          db.select({ count: sql<number>`count(*)` }).from(schema.screens).where(where),
+          db.select({
+            id: schema.screens.id,
+            name: schema.screens.name,
+            location: schema.screens.location,
+            status: schema.screens.status,
+            last_heartbeat_at: schema.screens.last_heartbeat_at,
+            created_at: schema.screens.created_at,
+            updated_at: schema.screens.updated_at,
+          }).from(schema.screens).where(where)
+            .orderBy(desc(schema.screens.created_at), desc(schema.screens.id))
+            .limit(query.limit).offset((query.page - 1) * query.limit),
         ]);
 
-        const memberMap = memberships.reduce((acc: Map<string, Set<string>>, row: any) => {
-          const list = acc.get(row.screen_id) || new Set<string>();
-          list.add(row.group_id);
-          acc.set(row.screen_id, list);
-          return acc;
-        }, new Map());
-
-        const available = screens.filter((s: any) => {
-          const groups = memberMap.get(s.id);
-          if (!groups || groups.size === 0) return true;
-          if (query.group_id) {
-            // Allow screens already in this group (useful when editing)
-            return [...groups].every((gid) => gid === query.group_id);
-          }
-          return false;
-        });
-
-        const start = (query.page - 1) * query.limit;
-        const paged = available.slice(start, start + query.limit);
-
         return reply.send({
-          items: paged.map((s: any) => ({
+          items: paged.map((s) => ({
             id: s.id,
             name: s.name,
             location: (s as any).location ?? null,
@@ -541,7 +556,7 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
           pagination: {
             page: query.page,
             limit: query.limit,
-            total: available.length,
+            total: Number(countRows[0]?.count ?? 0),
           },
         });
       } catch (error) {

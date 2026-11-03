@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Save, Check, Trash2 } from "lucide-react";
+import { Save, Trash2 } from "lucide-react";
 import {
     Dialog,
     DialogContent,
@@ -12,17 +12,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { screensApi } from "@/api/domains/screens";
 import { queryKeys } from "@/api/queryKeys";
 import { useSafeMutation } from "@/hooks/useSafeMutation";
 import { toast } from "sonner";
-import type { ScreenGroup } from "@/api/types";
 import { screenDeletionBlockers } from "./screenDeletionBlockers";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { GroupScreenPicker } from "./GroupScreenPicker";
 
 interface UpdateGroupModalProps {
     open: boolean;
@@ -38,58 +35,27 @@ export function UpdateGroupModal({ open, onOpenChange, groupId, canDelete }: Upd
         description: "",
     });
     const [selectedScreenIds, setSelectedScreenIds] = useState<string[]>([]);
+    const [pickerReady, setPickerReady] = useState(false);
+    const initializedGroupId = useRef<string | null>(null);
     const [confirmGroupDelete, setConfirmGroupDelete] = useState(false);
     const [deleteBlockers, setDeleteBlockers] = useState<string[]>([]);
 
-    const { data: groupData, isLoading: isLoadingGroup, isError: isGroupError, refetch: refetchGroup } = useQuery({
+    const { data: groupData, isLoading: isLoadingGroup, isFetching: isFetchingGroup, isError: isGroupError, refetch: refetchGroup } = useQuery({
         queryKey: ["screen-group", groupId],
         queryFn: () => screensApi.getGroupById(groupId),
         enabled: open && !!groupId,
     });
 
-    const { data: allScreensData, isLoading: isLoadingScreens } = useQuery({
-        queryKey: queryKeys.screens,
-        queryFn: () => screensApi.list({ page: 1, limit: 100 }),
-        enabled: open,
-    });
-
-    const { data: screenGroupsData, isLoading: isLoadingGroups } = useQuery({
-        queryKey: queryKeys.screenGroups,
-        queryFn: () => screensApi.listGroups({ page: 1, limit: 100 }),
-        enabled: open,
-    });
-
     useEffect(() => {
-        if (groupData) {
+        if (open && groupData && !isFetchingGroup && initializedGroupId.current !== groupId) {
             setFormState({
                 name: groupData.name || "",
                 description: groupData.description || "",
             });
             setSelectedScreenIds(groupData.screen_ids || []);
+            initializedGroupId.current = groupId;
         }
-    }, [groupData]);
-
-    const availableScreens = useMemo(() => {
-        const allScreens = allScreensData?.items ?? [];
-        const groups = screenGroupsData?.items ?? [];
-        const currentScreenIds = groupData?.screen_ids || [];
-
-        // Collect all screen IDs that are in OTHER groups (not this one)
-        const assignedScreenIds = new Set<string>();
-        groups.forEach(group => {
-            // Skip the current group being edited
-            if (group.id !== groupId) {
-                (group.screen_ids || []).forEach(screenId => {
-                    assignedScreenIds.add(screenId);
-                });
-            }
-        });
-
-        // Filter screens: show those not in other groups OR currently in this group
-        return allScreens.filter(screen =>
-            !assignedScreenIds.has(screen.id) || currentScreenIds.includes(screen.id)
-        );
-    }, [allScreensData, screenGroupsData, groupData, groupId]);
+    }, [groupData, groupId, isFetchingGroup, open]);
 
     const updateGroup = useSafeMutation({
         mutationFn: (payload: {
@@ -123,19 +89,12 @@ export function UpdateGroupModal({ open, onOpenChange, groupId, canDelete }: Upd
     }, "Unable to delete group.");
 
     const handleClose = () => {
+        initializedGroupId.current = null;
         setConfirmGroupDelete(false);
         setDeleteBlockers([]);
         setFormState({ name: "", description: "" });
         setSelectedScreenIds([]);
         onOpenChange(false);
-    };
-
-    const handleToggleScreen = (screenId: string) => {
-        setSelectedScreenIds((prev) =>
-            prev.includes(screenId)
-                ? prev.filter((id) => id !== screenId)
-                : [...prev, screenId]
-        );
     };
 
     const handleSubmit = () => {
@@ -152,7 +111,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId, canDelete }: Upd
         setConfirmGroupDelete(true);
     };
 
-    const isLoading = isLoadingGroup || isLoadingScreens || isLoadingGroups;
+    const isLoading = isLoadingGroup || (!isGroupError && initializedGroupId.current !== groupId);
 
     return (
       <>
@@ -202,63 +161,9 @@ export function UpdateGroupModal({ open, onOpenChange, groupId, canDelete }: Upd
                             />
                         </div>
 
-                        <div className="space-y-2">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <Label>Manage Screens</Label>
-                                <Badge variant="secondary">
-                                    {selectedScreenIds.length} selected
-                                </Badge>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                                Select screens to include in this group
-                            </p>
-
-                            {availableScreens.length === 0 ? (
-                                <Card className="p-8 text-center">
-                                    <p className="text-muted-foreground">No screens available</p>
-                                </Card>
-                            ) : (
-                                <div className="border rounded-lg divide-y max-h-64 overflow-y-auto">
-                                    {availableScreens.map((screen) => {
-                                        const { id, name, location, status } = screen;
-                                        const isSelected = selectedScreenIds.includes(id);
-
-                                        return (
-                                            <div
-                                                key={id}
-                                                className="flex cursor-pointer flex-col gap-3 p-3 transition-colors hover:bg-accent sm:flex-row sm:items-center"
-                                                onClick={() => handleToggleScreen(id)}
-                                            >
-                                                <Checkbox
-                                                    checked={isSelected}
-                                                    onCheckedChange={() => handleToggleScreen(id)}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                />
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="font-medium truncate">{name}</p>
-                                                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                                        <span className="truncate">{location || "No location"}</span>
-                                                        <span>•</span>
-                                                        <Badge
-                                                            variant={status === "ACTIVE" ? "default" : "secondary"}
-                                                            className="text-[10px] px-1 py-0"
-                                                        >
-                                                            {status || "Unknown"}
-                                                        </Badge>
-                                                    </div>
-                                                    <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                                                        {id}
-                                                    </p>
-                                                </div>
-                                                {isSelected && (
-                                                    <Check className="h-4 w-4 text-primary flex-shrink-0" />
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
+                        <GroupScreenPicker open={open && Boolean(groupData)} groupId={groupId}
+                            enabled={Boolean(groupData)} selectedScreenIds={selectedScreenIds}
+                            onChange={setSelectedScreenIds} onReadyChange={setPickerReady} />
                     </div>
                 )}
 
@@ -281,7 +186,7 @@ export function UpdateGroupModal({ open, onOpenChange, groupId, canDelete }: Upd
                     </Button>
                     <Button
                         onClick={handleSubmit}
-                        disabled={updateGroup.isPending || deleteGroup.isPending || !groupData || !formState.name.trim()}
+                        disabled={updateGroup.isPending || deleteGroup.isPending || isGroupError || !groupData || !formState.name.trim() || !pickerReady}
                     >
                         <Save className="h-4 w-4 mr-2" />
                         {updateGroup.isPending ? "Saving..." : "Save Changes"}

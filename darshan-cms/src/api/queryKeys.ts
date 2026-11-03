@@ -56,6 +56,8 @@ export const queryKeys = {
       Boolean(filters?.includePreview),
     ] as const,
   screenGroups: ["screen-groups"] as const,
+  availableGroupScreens: (filters: { page: number; limit: number; groupId?: string; q?: string }) =>
+    ["screen-groups", "available-screens", filters.groupId ?? null, filters.q ?? null, filters.page, filters.limit] as const,
   screenGroupsList: (filters?: {
     page?: number;
     limit?: number;

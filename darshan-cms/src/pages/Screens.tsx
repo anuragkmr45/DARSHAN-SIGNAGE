@@ -824,7 +824,7 @@ export default function Screens() {
         recoveryScreen={recoveryScreen}
       />
 
-      <CreateGroupModal open={isGroupModalOpen} onOpenChange={setIsGroupModalOpen} />
+      <CreateGroupModal open={isGroupModalOpen} onOpenChange={setIsGroupModalOpen} canReadGroups={canReadGroups} />
 
       {selectedGroupId && (
         <UpdateGroupModal

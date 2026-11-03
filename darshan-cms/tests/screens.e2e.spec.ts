@@ -31,6 +31,8 @@ type MockState = {
   screenDeleteBlocked?: boolean;
   groupDeleteBlocked?: boolean;
   groupReadUnavailable?: boolean;
+  availableReadUnavailable?: boolean;
+  groupCreateBodies?: Array<{ name: string; screen_ids?: string[] }>;
   groupUpdateBodies?: Array<{ screen_ids?: string[] }>;
   observabilityScrapeStatus?: "up" | "unconfigured" | "unavailable";
   observabilityMetricsSource?: "prometheus" | "backend_heartbeat";
@@ -224,6 +226,36 @@ const installApiMocks = async (page: Page, state: MockState) => {
           pagination: { page: pageNum, limit, total: matchingScreens.length },
         }),
       });
+    }
+
+    if (pathname === "/api/v1/screen-groups/available-screens" && method === "GET") {
+      if (state.availableReadUnavailable) {
+        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+      }
+      const pageNum = Number(searchParams.get("page") || 1);
+      const limit = Number(searchParams.get("limit") || 20);
+      const groupId = searchParams.get("group_id");
+      const search = (searchParams.get("q") || "").toLowerCase();
+      const matchingScreens = state.screens.filter((screen) => {
+        const memberships = state.groups.filter((group) => group.screen_ids?.includes(screen.id));
+        return (memberships.length === 0 || memberships.some((group) => group.id === groupId))
+          && (!search || [screen.name, screen.location, screen.id].some((part) => part?.toLowerCase().includes(search)));
+      });
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({
+          items: matchingScreens.slice((pageNum - 1) * limit, pageNum * limit),
+          pagination: { page: pageNum, limit, total: matchingScreens.length },
+        }),
+      });
+    }
+
+    if (pathname === "/api/v1/screen-groups" && method === "POST") {
+      const body = route.request().postDataJSON() as { name: string; screen_ids?: string[] };
+      state.groupCreateBodies?.push(body);
+      const group = { id: `group-${state.groups.length + 1}`, name: body.name, screen_ids: body.screen_ids ?? [] };
+      state.groups.push(group);
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(group) });
     }
 
     if (pathname === "/api/v1/screen-groups" && method === "GET") {
@@ -743,12 +775,102 @@ test.describe("Screens operator flow", () => {
     await page.getByRole("button", { name: "Retry" }).click();
     await expect(page.getByLabel("Group Name")).toHaveValue("Lobby Group");
     await page.getByRole("checkbox").click();
-    await expect(page.getByText("0 selected")).toBeVisible();
+    await expect(page.getByText("0 selected across pages")).toBeVisible();
     await page.getByRole("button", { name: "Save Changes" }).click();
     await expect.poll(() => state.groupUpdateBodies?.length).toBe(1);
     expect(state.groupUpdateBodies?.[0]?.screen_ids).toEqual([]);
     await expect(page.getByRole("button", { name: "Edit Group Lobby Group" })).toBeVisible();
     expect(state.groups[0]?.screen_ids).toEqual([]);
+  });
+
+  test("creates a group with selections across pages and search beyond the first 100 screens", async ({ page }) => {
+    const state: MockState = {
+      screens: Array.from({ length: 125 }, (_, index) => ({
+        id: `screen-${index + 1}`, name: `Picker Screen ${String(index + 1).padStart(3, "0")}`,
+        status: "ACTIVE", location: index === 124 ? "Remote Annex" : null,
+      })),
+      groups: [{ id: "existing", name: "Existing", screen_ids: ["screen-1"] }],
+      pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {}, groupCreateBodies: [],
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await page.getByRole("button", { name: /Screen Groups/ }).click();
+    await page.getByRole("button", { name: "Create Group" }).click();
+    const dialog = page.getByRole("dialog", { name: "Create Screen Group" });
+    await expect(dialog.getByText("Picker Screen 001")).toHaveCount(0);
+    await dialog.getByRole("checkbox", { name: "Select Picker Screen 002" }).click();
+    await dialog.getByRole("button", { name: "Go to next page" }).click();
+    await dialog.getByRole("checkbox", { name: "Select Picker Screen 022" }).click();
+    await dialog.getByLabel("Search available screens").fill("Remote Annex");
+    await dialog.getByRole("button", { name: "Search" }).click();
+    await dialog.getByRole("checkbox", { name: "Select Picker Screen 125" }).click();
+    await expect(dialog.getByText("3 selected across pages")).toBeVisible();
+    await dialog.getByLabel("Group Name").fill("Annex Screens");
+    await dialog.getByRole("button", { name: "Create Group", exact: true }).click();
+    await expect.poll(() => state.groupCreateBodies?.length).toBe(1);
+    expect(state.groupCreateBodies?.[0]?.screen_ids).toEqual(["screen-2", "screen-22", "screen-125"]);
+  });
+
+  test("allows a create-only operator to make an empty group without requesting the member list", async ({ page }) => {
+    const state: MockState = {
+      screens: [{ id: "screen-1", name: "Lobby", status: "ACTIVE" }],
+      groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {}, groupCreateBodies: [],
+      capabilities: [
+        { action: "read", subject: "Screen" },
+        { action: "create", subject: "ScreenGroup" },
+      ],
+    };
+    let availableRequests = 0;
+    await installApiMocks(page, state);
+    await page.route("**/api/v1/screen-groups/available-screens**", (route) => {
+      availableRequests += 1;
+      return route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Forbidden" }) });
+    });
+    await login(page);
+    await openScreensPage(page);
+    await page.getByRole("button", { name: /Screen Groups/ }).click();
+    await page.getByRole("button", { name: "Create Group" }).click();
+    const dialog = page.getByRole("dialog", { name: "Create Screen Group" });
+    await expect(dialog.getByText("You can create an empty group.", { exact: false })).toBeVisible();
+    await dialog.getByLabel("Group Name").fill("Empty Group");
+    await dialog.getByRole("button", { name: "Create Group", exact: true }).click();
+    await expect.poll(() => state.groupCreateBodies?.length).toBe(1);
+    expect(state.groupCreateBodies?.[0]?.screen_ids).toBeUndefined();
+    expect(availableRequests).toBe(0);
+  });
+
+  test("keeps member edits safe when available-screen loading fails and retries", async ({ page }) => {
+    const state: MockState = {
+      screens: Array.from({ length: 105 }, (_, index) => ({
+        id: `screen-${index + 1}`, name: `Edit Screen ${String(index + 1).padStart(3, "0")}`,
+        status: "ACTIVE",
+      })),
+      groups: [
+        { id: "current", name: "Current Group", screen_ids: ["screen-1", "screen-105"] },
+        { id: "other", name: "Other Group", screen_ids: ["screen-105"] },
+      ],
+      pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {}, groupUpdateBodies: [],
+      availableReadUnavailable: true,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await page.getByRole("button", { name: /Screen Groups/ }).click();
+    await page.getByRole("button", { name: "Edit Group Current Group" }).click();
+    const dialog = page.getByRole("dialog", { name: "Edit Screen Group" });
+    await expect(dialog.getByText("Available screens could not be loaded.")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    state.availableReadUnavailable = false;
+    await dialog.getByRole("button", { name: "Retry" }).click();
+    await dialog.getByLabel("Search available screens").fill("Edit Screen 105");
+    await dialog.getByRole("button", { name: "Search" }).click();
+    await expect(dialog.getByRole("checkbox", { name: "Select Edit Screen 105" })).toBeChecked();
+    await dialog.getByRole("checkbox", { name: "Select Edit Screen 105" }).click();
+    await expect(dialog.getByText("1 selected across pages")).toBeVisible();
+    await dialog.getByRole("button", { name: "Save Changes" }).click();
+    await expect.poll(() => state.groupUpdateBodies?.length).toBe(1);
+    expect(state.groupUpdateBodies?.[0]?.screen_ids).toEqual(["screen-1"]);
   });
 
   test("renders screen health and recovery info and handles delete refresh", async ({ page }) => {

@@ -204,6 +204,7 @@ export const endpoints = {
     displayState: (screenId: string) => `/screens/${screenId}/display-state`,
     displaySelection: (screenId: string) => `/screens/${screenId}/display-selection`,
     groups: "/screen-groups",
+    availableGroupScreens: "/screen-groups/available-screens",
     groupById: (groupId: string) => `/screen-groups/${groupId}`,
     aspectRatios: "/screens/aspect-ratios",
   },

@@ -911,6 +911,7 @@ export const screenGroupMembers = pgTable(
   },
   (table) => ({
     groupIdIdx: index('screen_group_members_group_id_idx').on(table.group_id),
+    screenIdIdx: index('screen_group_members_screen_id_idx').on(table.screen_id),
   })
 );
 
