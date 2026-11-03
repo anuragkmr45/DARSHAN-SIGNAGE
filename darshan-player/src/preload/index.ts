@@ -15,8 +15,6 @@ import type {
   PairingResponse,
   PairingStatusResponse,
   PlayerPresentationSnapshot,
-  WebpageViewRequest,
-  WebpageViewStatus,
 } from '../common/types'
 import type { PlaybackProgressEntry, PlaybackProgressIdentity } from '../common/playback-policy'
 
@@ -87,10 +85,6 @@ export interface DarshanAPI {
 
   // Media
   readPdfData: (source: string) => Promise<ArrayBuffer>
-  mountWebpageView: (request: WebpageViewRequest) => Promise<{ accepted: boolean; reason?: string }>
-  updateWebpageView: (request: WebpageViewRequest) => Promise<{ accepted: boolean; reason?: string }>
-  destroyWebpageView: (id: string, generation: number) => void
-  onWebpageViewStatus: (callback: (status: WebpageViewStatus) => void) => () => void
 }
 
 const darshanApi: DarshanAPI = {
@@ -241,14 +235,6 @@ const darshanApi: DarshanAPI = {
     return await ipcRenderer.invoke('media:read-pdf', source)
   },
 
-  mountWebpageView: async (request) => await ipcRenderer.invoke('webpage-view:mount', request),
-  updateWebpageView: async (request) => await ipcRenderer.invoke('webpage-view:update', request),
-  destroyWebpageView: (id, generation) => ipcRenderer.send('webpage-view:destroy', id, generation),
-  onWebpageViewStatus: (callback) => {
-    const listener = (_event: Electron.IpcRendererEvent, status: WebpageViewStatus) => callback(status)
-    ipcRenderer.on('webpage-view:status', listener)
-    return () => ipcRenderer.removeListener('webpage-view:status', listener)
-  },
 }
 
 // Expose the API to the renderer process. Keep `hexmon` as a one-release

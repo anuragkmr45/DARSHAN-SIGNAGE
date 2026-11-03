@@ -225,7 +225,7 @@ describe('Default Media Service', () => {
     expect(service.didLastRefreshSucceed()).to.equal(false)
   })
 
-  it('caches webpage fallback previews without trying to cache the live source url', async () => {
+  it('rejects a retired webpage default without fetching or caching its URLs', async () => {
     const { DefaultMediaService } = require('../../../src/main/services/settings/default-media-service.ts')
     const { getPairingService } = require('../../../src/main/services/pairing-service')
     const { getSettingsClient } = require('../../../src/main/services/settings/settings-client')
@@ -234,12 +234,11 @@ describe('Default Media Service', () => {
     const pairingService = getPairingService()
     const settingsClient = getSettingsClient()
     const cacheManager = getCacheManager()
-    const cachedPath = path.join(tempDir, 'cache', 'media', 'media-webpage.svg')
 
     sandbox.stub(pairingService, 'isPairedDevice').returns(true)
     sandbox.stub(pairingService, 'getDeviceId').returns('device-123')
     const addStub = sandbox.stub(cacheManager, 'add').resolves()
-    const getStub = sandbox.stub(cacheManager, 'get').resolves(cachedPath)
+    const getStub = sandbox.stub(cacheManager, 'get')
     sandbox.stub(settingsClient, 'getDefaultMedia').resolves({
       source: 'GLOBAL',
       aspect_ratio: null,
@@ -260,12 +259,10 @@ describe('Default Media Service', () => {
     const service = new DefaultMediaService()
     const result = await service.refreshNow('manual')
 
-    expect(addStub.calledOnce).to.equal(true)
-    expect(addStub.firstCall.args[0]).to.equal('media-webpage.__revision__.preview-revision-1')
-    expect(addStub.firstCall.args[1]).to.equal('https://cdn.example.com/webpage-fallback.svg')
-    expect(getStub.calledWith('media-webpage.__revision__.preview-revision-1')).to.equal(true)
-    expect(result.media?.local_path).to.equal(cachedPath)
-    expect(result.media?.source_url).to.equal('https://status.example.com')
+    expect(addStub.called).to.equal(false)
+    expect(getStub.called).to.equal(false)
+    expect(result.media_id).to.equal(null)
+    expect(result.media).to.equal(null)
   })
 
   it('does not emit a change when the same default media only gets fresh presigned asset urls', async () => {

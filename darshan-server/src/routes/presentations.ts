@@ -431,6 +431,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             if (!canReferenceContentResource(presentation, media)) {
               throw AppError.badRequest('The selected media has narrower ownership than the presentation.');
             }
+            if (media.type === 'WEBPAGE') throw AppError.validation({ reason: 'WEBPAGE_RETIRED', media_id: media.id });
             if (media.status !== 'READY') {
               throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
             }
@@ -617,6 +618,7 @@ export async function presentationRoutes(fastify: FastifyInstance) {
             if (!canReferenceContentResource(presentation, media)) {
               throw AppError.badRequest('The selected media has narrower ownership than the presentation.');
             }
+            if (media.type === 'WEBPAGE') throw AppError.validation({ reason: 'WEBPAGE_RETIRED', media_id: media.id });
             if (media.status !== 'READY') {
               throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
             }
@@ -728,7 +730,8 @@ export async function presentationRoutes(fastify: FastifyInstance) {
               if (!canReferenceContentResource(presentation, media)) {
                 throw AppError.badRequest('Selected media has narrower ownership than the presentation.');
               }
-              if (media.status !== 'READY') {
+              if (media.type === 'WEBPAGE') throw AppError.validation({ reason: 'WEBPAGE_RETIRED', media_id: media.id });
+            if (media.status !== 'READY') {
                 throw AppError.validation({ reason: 'MEDIA_NOT_READY', media_id: media.id });
               }
 

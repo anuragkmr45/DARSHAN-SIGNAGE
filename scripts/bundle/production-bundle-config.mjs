@@ -8,9 +8,9 @@ import path from 'node:path'
 export const PRODUCTION_COMPATIBILITY_GENERATION = 1
 
 const BOOLEAN_FIELDS = new Set([
-  'EXPORT_SERVER', 'EXPORT_CMS', 'EXPORT_ELECTRON', 'INSTALL_PLAYWRIGHT_CHROMIUM',
+  'EXPORT_SERVER', 'EXPORT_CMS', 'EXPORT_ELECTRON',
   'VITE_ENABLE_PRODUCTION_LOCKDOWN', 'VITE_REALTIME_DELIVERY_STATUS_UI', 'VITE_MEDIA_CACHE_STATUS_UI',
-  'WEBPAGE_ALLOW_HTTP', 'INCLUDE_LIVE_MEDIA', 'EXPORT_MEDIA',
+  'INCLUDE_LIVE_MEDIA', 'EXPORT_MEDIA',
 ])
 
 const PORT_FIELDS = new Set([
@@ -179,13 +179,6 @@ const OUTPUTS = {
   OBSERVABILITY_MIN_FREE_DISK_BYTES: ['OPERATIONS_POLICY.json', 'production/observability/.env.production'],
   INITIAL_ADMIN_EMAIL: ['production/backend/.env.production'],
   MAX_UPLOAD_MB: ['production/backend/.env.production'],
-  WEBPAGE_NAVIGATION_ALLOWLIST: ['production/backend/.env.production', 'production/electron/config.json'],
-  WEBPAGE_RESOURCE_ALLOWLIST: ['production/backend/.env.production', 'production/electron/config.json'],
-  WEBPAGE_ALLOWED_CIDRS: ['production/backend/.env.production', 'production/electron/config.json'],
-  WEBPAGE_ALLOWED_PORTS: ['production/backend/.env.production', 'production/electron/config.json'],
-  WEBPAGE_ALLOW_HTTP: ['production/backend/.env.production', 'production/electron/config.json'],
-  WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS: ['production/backend/.env.production'],
-  WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE: ['production/backend/.env.production'],
   VITE_ENABLE_PRODUCTION_LOCKDOWN: ['CMS build artifact'],
   VITE_REALTIME_DELIVERY_STATUS_UI: ['CMS build artifact'],
   VITE_MEDIA_CACHE_STATUS_UI: ['CMS build artifact'],
@@ -196,7 +189,7 @@ const ALLOWED_FIELDS = new Set([
   'MEDIA_CONTROL_PORT', 'MEDIA_SIGNAL_PORT', 'MEDIA_RTC_TCP_PORT', 'MEDIA_RTC_UDP_PORT',
   'MEDIA_CPU_LIMIT', 'MEDIA_MEMORY_LIMIT', 'MEDIA_PIDS_LIMIT', 'MEDIA_MIN_FREE_DISK_BYTES',
   'RELEASE_ID', 'SITE_NAME', 'EXPORT_SERVER', 'EXPORT_CMS', 'EXPORT_ELECTRON', 'ELECTRON_PLATFORM', 'PLAYER_TARGET_PLATFORMS',
-  'INSTALL_PLAYWRIGHT_CHROMIUM', 'PACKAGE_OUTPUT_BASE', 'BUNDLE_OUTPUT_BASE', 'SERVER_PACKAGE_DIR', 'PKI_ROOT_DIR', 'SITE_PKI_DIR',
+  'PACKAGE_OUTPUT_BASE', 'BUNDLE_OUTPUT_BASE', 'SERVER_PACKAGE_DIR', 'PKI_ROOT_DIR', 'SITE_PKI_DIR',
   'CMS_PACKAGE_DIR', 'PLAYER_ARTIFACTS_DIR', 'CMS_PUBLIC_HOST', 'BACKEND_PRIVATE_HOST', 'BACKEND_DEVICE_HOST',
   'DATA_PRIVATE_HOST', 'VALKEY_PRIVATE_HOST', 'OBSERVABILITY_PRIVATE_HOST',
   'CMS_BIND_ADDRESS', 'BACKEND_BIND_ADDRESS', 'DATA_BIND_ADDRESS', 'VALKEY_BIND_ADDRESS', 'OBSERVABILITY_BIND_ADDRESS',
@@ -220,8 +213,6 @@ const ALLOWED_FIELDS = new Set([
   'VOLUME_PROVISIONING_MODE', ...VOLUME_FIELDS,
   'DEVICE_AUTH_MODE', 'DEVICE_AUTH_LEGACY_COMPATIBILITY_EXPIRES_AT',
   'MAX_UPLOAD_MB',
-  'WEBPAGE_NAVIGATION_ALLOWLIST', 'WEBPAGE_RESOURCE_ALLOWLIST', 'WEBPAGE_ALLOWED_CIDRS', 'WEBPAGE_ALLOWED_PORTS', 'WEBPAGE_ALLOW_HTTP',
-  'WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS', 'WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE',
   'LOG_LEVEL', 'POSTGRES_IMAGE', 'MINIO_IMAGE', 'VALKEY_IMAGE', 'NGINX_IMAGE',
   'NODE_EXPORTER_IMAGE', 'POSTGRES_EXPORTER_IMAGE', 'NGINX_PROMETHEUS_EXPORTER_IMAGE',
   'PROMETHEUS_IMAGE', 'ALERTMANAGER_IMAGE', 'GRAFANA_IMAGE', 'PROMETHEUS_SCRAPE_INTERVAL',
@@ -238,7 +229,6 @@ const REQUIRED_FIELDS = [
   'RELEASE_SIGNING_PRIVATE_KEY',
   'POSTGRES_PASSWORD', 'POSTGRES_MONITORING_PASSWORD', 'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'JWT_SECRET', 'VALKEY_PASSWORD', 'OBSERVABILITY_METRICS_BEARER_TOKEN', 'GRAFANA_ADMIN_USER', 'GRAFANA_ADMIN_PASSWORD', 'INITIAL_ADMIN_EMAIL',
   'VOLUME_PROVISIONING_MODE',
-  'WEBPAGE_NAVIGATION_ALLOWLIST',
   ...REQUIRED_OPERATIONS_POLICY_FIELDS,
 ]
 
@@ -247,13 +237,13 @@ const DEFAULTS = {
   MEDIA_CONTROL_PORT: '18784', MEDIA_SIGNAL_PORT: '18780', MEDIA_RTC_TCP_PORT: '18782', MEDIA_RTC_UDP_PORT: '18783',
   EXPORT_SERVER: 'true', EXPORT_CMS: 'true', EXPORT_ELECTRON: 'false', ELECTRON_PLATFORM: 'linux',
   PLAYER_TARGET_PLATFORMS: 'windows,linux',
-  INSTALL_PLAYWRIGHT_CHROMIUM: 'true', PACKAGE_OUTPUT_BASE: 'out', BUNDLE_OUTPUT_BASE: 'dist/onprem',
+  PACKAGE_OUTPUT_BASE: 'out', BUNDLE_OUTPUT_BASE: 'dist/onprem',
   CMS_HTTPS_PORT: '443', CMS_HTTP_PORT: '80', API_HOST_PORT: '3000', POSTGRES_HOST_PORT: '5432',
   MINIO_HOST_PORT: '9000', MINIO_CONSOLE_PORT: '9001', VALKEY_HOST_PORT: '6379',
   PROMETHEUS_HOST_PORT: '9090', ALERTMANAGER_HOST_PORT: '9093', GRAFANA_HOST_PORT: '3001',
   NODE_EXPORTER_HOST_PORT: '9100', POSTGRES_EXPORTER_HOST_PORT: '9187', NGINX_EXPORTER_HOST_PORT: '9113',
   METRICS_GATEWAY_HOST_PORT: '9443',
-  POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', BACKUP_OFFHOST_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info', MAX_UPLOAD_MB: '500', WEBPAGE_RESOURCE_ALLOWLIST: '', WEBPAGE_ALLOWED_CIDRS: '', WEBPAGE_ALLOWED_PORTS: '443', WEBPAGE_ALLOW_HTTP: 'false', WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS: '24', WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE: '100',
+  POSTGRES_USER: 'postgres', POSTGRES_MONITORING_USER: 'darshan_monitoring', POSTGRES_DB: 'darshan', MINIO_REGION: 'us-east-1', BACKUP_OFFHOST_REGION: 'us-east-1', JWT_EXPIRY: '900', LOG_LEVEL: 'info', MAX_UPLOAD_MB: '500',
   POSTGRES_IMAGE: 'postgres:15-alpine', MINIO_IMAGE: 'darshan-minio:RELEASE.2025-10-15T17-29-55Z', VALKEY_IMAGE: 'valkey/valkey:7-alpine',
   NGINX_IMAGE: 'nginx:1.27-alpine', PROMETHEUS_IMAGE: 'prom/prometheus:v3.3.1',
   ALERTMANAGER_IMAGE: 'prom/alertmanager:v0.28.1', GRAFANA_IMAGE: 'grafana/grafana:12.0.2',
@@ -426,56 +416,6 @@ function validatePositiveInteger(name, value, minimum, maximum, addError) {
   const numeric = Number(value)
   if (!Number.isSafeInteger(numeric) || numeric < minimum || numeric > maximum) {
     addError(`${name} must be an integer from ${minimum} to ${maximum}`)
-  }
-}
-
-function validateWebpageHostList(name, value, addError) {
-  const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
-  for (const entry of entries) {
-    if (entry === '*') continue
-    const wildcard = entry.startsWith('*.')
-    const host = wildcard ? entry.slice(2) : entry
-    if (
-      entry !== entry.toLowerCase()
-      || entry.includes('://')
-      || entry.includes('/')
-      || entry.includes('@')
-      || (wildcard && net.isIP(host) !== 0)
-      || (net.isIP(host) === 0 && !isValidHostname(host))
-    ) {
-      addError(`${name} contains invalid host pattern ${entry}; use *, lowercase exact hosts, or *.example.com wildcards`)
-    }
-  }
-}
-
-function validateWebpageCidrs(value, addError) {
-  const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
-  for (const entry of entries) {
-    const [address, prefixText, extra] = entry.split('/')
-    const version = net.isIP(address)
-    const prefix = Number(prefixText)
-    const maximum = version === 4 ? 32 : 128
-    if (extra !== undefined || version === 0 || !/^\d+$/.test(prefixText ?? '') || prefix < 0 || prefix > maximum) {
-      addError(`WEBPAGE_ALLOWED_CIDRS contains invalid CIDR ${entry}`)
-    }
-  }
-}
-
-function validateWebpagePorts(value, addError) {
-  const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean)
-  if (entries.length === 0) {
-    addError('WEBPAGE_ALLOWED_PORTS must contain at least one port')
-    return
-  }
-  const seen = new Set()
-  for (const entry of entries) {
-    const port = Number(entry)
-    if (!/^\d+$/.test(entry) || !Number.isInteger(port) || port < 1 || port > 65535) {
-      addError(`WEBPAGE_ALLOWED_PORTS contains invalid port ${entry}`)
-    } else if (seen.has(port)) {
-      addError(`WEBPAGE_ALLOWED_PORTS contains duplicate port ${entry}`)
-    }
-    seen.add(port)
   }
 }
 
@@ -749,9 +689,6 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   for (const name of BOOLEAN_FIELDS) {
     if (!['true', 'false'].includes(config[name])) addError(`${name} must be true or false`)
   }
-  if (config.INSTALL_PLAYWRIGHT_CHROMIUM === 'false') {
-    addError('INSTALL_PLAYWRIGHT_CHROMIUM must be true because production exposes PDF export endpoints')
-  }
   for (const name of PORT_FIELDS) {
     const port = Number(config[name])
     if (!Number.isInteger(port) || port < 1 || port > 65535) addError(`${name} must be an integer from 1 to 65535`)
@@ -783,20 +720,6 @@ export function loadProductionBundleConfig(envFile, repoRoot = process.cwd()) {
   if (!/^\d+$/.test(config.MAX_UPLOAD_MB) || Number(config.MAX_UPLOAD_MB) !== 500) {
     addError('MAX_UPLOAD_MB must be exactly 500 so the application policy remains below the 1000M CMS proxy envelope')
   }
-  if (!/^\d+$/.test(config.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS)
-    || Number(config.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS) < 1
-    || Number(config.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS) > 168) {
-    addError('WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS must be an integer from 1 to 168')
-  }
-  if (!/^\d+$/.test(config.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE)
-    || Number(config.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE) < 1
-    || Number(config.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE) > 1000) {
-    addError('WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE must be an integer from 1 to 1000')
-  }
-  validateWebpageHostList('WEBPAGE_NAVIGATION_ALLOWLIST', config.WEBPAGE_NAVIGATION_ALLOWLIST, addError)
-  validateWebpageHostList('WEBPAGE_RESOURCE_ALLOWLIST', config.WEBPAGE_RESOURCE_ALLOWLIST, addError)
-  validateWebpageCidrs(config.WEBPAGE_ALLOWED_CIDRS, addError)
-  validateWebpagePorts(config.WEBPAGE_ALLOWED_PORTS, addError)
   if (config.INITIAL_ADMIN_EMAIL && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.INITIAL_ADMIN_EMAIL)) addError('INITIAL_ADMIN_EMAIL must be valid')
   if (config.MAXIMUM_EXPECTED_PLAYERS) validatePositiveInteger('MAXIMUM_EXPECTED_PLAYERS', config.MAXIMUM_EXPECTED_PLAYERS, 1, 1000, addError)
   if (config.TEMPORARY_SPIKE_PLAYERS) validatePositiveInteger('TEMPORARY_SPIKE_PLAYERS', config.TEMPORARY_SPIKE_PLAYERS, 1, 2000, addError)

@@ -126,14 +126,10 @@ describe('frozen live fallback manifest', () => {
     reason(() => validateLiveFallbackManifest(imagePage, expected(imagePage.assets)), 'PAGE_REQUIRES_PDF');
   });
 
-  it('requires explicitly frozen webpage preview images and compatible source/render types', () => {
-    const screenshot = manifest([asset(2, { representation: 'WEBPAGE_PREVIEW' })]);
-    const approved = expected(screenshot.assets); approved.assets[0]!.source_type = 'WEBPAGE';
-    expect(validateLiveFallbackManifest(screenshot, approved).assets[0]!.render_type).toBe('image');
-    const raw = manifest(); const rawExpected = expected(raw.assets); rawExpected.assets[0]!.source_type = 'WEBPAGE';
-    reason(() => validateLiveFallbackManifest(raw, rawExpected), 'WEBPAGE_REQUIRES_FROZEN_IMAGE');
-    const mismatch = expected(screenshot.assets); mismatch.assets[0]!.source_type = 'VIDEO';
-    reason(() => validateLiveFallbackManifest(screenshot, mismatch), 'SOURCE_RENDER_TYPE_MISMATCH');
+  it('rejects retired webpage fallback media', () => {
+    const input = manifest(); const wanted = expected(input.assets);
+    wanted.assets[0]!.source_type = 'WEBPAGE';
+    reason(() => validateLiveFallbackManifest(input, wanted), 'INVALID_SOURCE_TYPE');
   });
 
   it('represents HLS playlists and all frozen video-segment dependencies explicitly', () => {

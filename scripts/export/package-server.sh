@@ -11,7 +11,6 @@ Optional environment overrides:
   OUTPUT_BASE=/path/to/darshan/out
   BACKEND_IMAGE_REF=darshan-server-export:<release-id>
   BACKUP_IMAGE_REF=darshan-simple-backup:<release-id>
-  INSTALL_PLAYWRIGHT_CHROMIUM=true
   POSTGRES_IMAGE=postgres:15-alpine
   MINIO_IMAGE=darshan-minio:RELEASE.2025-10-15T17-29-55Z
   VALKEY_IMAGE=valkey/valkey:7-alpine
@@ -68,7 +67,6 @@ OUTPUT_BASE="${OUTPUT_BASE:-$PLATFORM_ROOT/out}"
 BACKEND_IMAGE_REF="${BACKEND_IMAGE_REF:-darshan-server-export:$RELEASE_ID}"
 BACKUP_IMAGE_REF="${BACKUP_IMAGE_REF:-darshan-simple-backup:$RELEASE_ID}"
 BACKUP_BUILD_DIR="${BACKUP_BUILD_DIR:-$PLATFORM_ROOT/deploy/production/docker/backup}"
-INSTALL_PLAYWRIGHT_CHROMIUM="${INSTALL_PLAYWRIGHT_CHROMIUM:-true}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:15-alpine}"
 DEFAULT_MINIO_IMAGE="darshan-minio:RELEASE.2025-10-15T17-29-55Z"
 MINIO_IMAGE="${MINIO_IMAGE:-$DEFAULT_MINIO_IMAGE}"
@@ -97,7 +95,7 @@ MINIO_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$MINIO_IMAGE")"
 VALKEY_IMAGE_ARCHIVE_NAME="$(export_image_archive_name "$VALKEY_IMAGE")"
 
 export_common_log "Building backend image $BACKEND_IMAGE_REF"
-docker build --build-arg INSTALL_PLAYWRIGHT_CHROMIUM="$INSTALL_PLAYWRIGHT_CHROMIUM" -t "$BACKEND_IMAGE_REF" "$SERVER_REPO_DIR"
+docker build -t "$BACKEND_IMAGE_REF" "$SERVER_REPO_DIR"
 
 export_common_log "Building backup image $BACKUP_IMAGE_REF"
 docker build -t "$BACKUP_IMAGE_REF" "$BACKUP_BUILD_DIR"
@@ -231,7 +229,6 @@ services:
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       DARSHAN_RUNTIME_CONTAINER: "true"
-      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       TMPDIR: /tmp
       COMMAND_OUTBOX_WRITE_ENABLED: "true"
       DEVICE_DESIRED_STATE_ENABLED: "true"
@@ -286,7 +283,6 @@ services:
       MINIO_PORT: 9000
       DARSHAN_RUNTIME_CONTAINER: "true"
       DARSHAN_PROCESS_ROLE: worker
-      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       HOME: /tmp/darshan-worker-home
       XDG_CONFIG_HOME: /tmp/darshan-worker-home/.config
       XDG_CACHE_HOME: /tmp/darshan-worker-home/.cache

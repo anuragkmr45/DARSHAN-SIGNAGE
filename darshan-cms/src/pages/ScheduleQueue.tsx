@@ -379,8 +379,7 @@ export default function ScheduleQueue() {
                           {deviceScheduleQuery.data.schedule.items.map((item) => (
                             <div key={item.id} className="flex gap-3 rounded-lg border border-border/60 p-3 bg-card">
                               <MediaPreview
-                                url={item.type === "webpage" ? item.preview_url : item.media_url}
-                                webpageUrl={item.type === "webpage" ? item.media_url : undefined}
+                                url={item.media_url}
                                 type={item.type}
                                 alt={item.name ?? "Media preview"}
                                 className="h-20 w-28 flex-shrink-0"

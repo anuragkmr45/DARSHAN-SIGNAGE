@@ -23,17 +23,5 @@ check_tool libreoffice
 check_tool pg_dump
 check_tool tar
 
-node <<'"'"'NODE'"'"'
-const fs = require("fs");
-const root = "/ms-playwright";
-const hasChromium = fs.existsSync(root)
-  && fs.readdirSync(root).some((entry) => entry.startsWith("chromium") || entry.includes("chromium"));
-if (!hasChromium) {
-  console.error("MISSING Playwright Chromium under /ms-playwright");
-  process.exit(2);
-}
-console.log("OK Playwright Chromium: /ms-playwright");
-NODE
-
 exit "$missing"
 '

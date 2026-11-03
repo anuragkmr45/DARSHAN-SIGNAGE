@@ -186,8 +186,7 @@ export function validateLiveFallbackManifest(
       if (actual !== (typeof wanted === 'string' && ['media_id', 'storage_object_id', 'sha256', 'content_type'].includes(field) ? wanted.toLowerCase() : wanted)) reject('EXPECTED_DESCRIPTOR_MISMATCH');
     }
     if (JSON.stringify(normalizedDependencies(asset)) !== JSON.stringify(normalizedDependencies(source))) reject('EXPECTED_DEPENDENCIES_MISMATCH');
-    if (!['IMAGE', 'VIDEO', 'DOCUMENT', 'WEBPAGE'].includes(source.source_type)) reject('INVALID_SOURCE_TYPE');
-    if (source.source_type === 'WEBPAGE' && (asset.render_type !== 'image' || asset.representation !== 'WEBPAGE_PREVIEW')) reject('WEBPAGE_REQUIRES_FROZEN_IMAGE');
+    if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(source.source_type)) reject('INVALID_SOURCE_TYPE');
     if ((source.source_type === 'IMAGE' && asset.render_type !== 'image') ||
         (source.source_type === 'DOCUMENT' && asset.render_type !== 'pdf') ||
         (source.source_type === 'VIDEO' && !['video', 'hls'].includes(asset.render_type))) reject('SOURCE_RENDER_TYPE_MISMATCH');

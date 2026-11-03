@@ -106,6 +106,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
   const requireReadyEmergencyMedia = async (mediaId: string) => {
     const media = await mediaRepo.findById(mediaId);
     if (!media) throw AppError.badRequest('Media not found');
+    if (media.type === 'WEBPAGE') throw AppError.badRequest('Webpage media is retired.', { reason: 'WEBPAGE_RETIRED', media_id: mediaId });
     if (media.status !== 'READY') {
       throw AppError.badRequest('Emergency media must be READY before it can be assigned.', {
         reason: 'MEDIA_NOT_READY',
@@ -588,6 +589,7 @@ export async function emergencyRoutes(fastify: FastifyInstance) {
               if (!canReadContentResource(actor, media, ability, 'Media')) {
                 throw AppError.forbidden('Emergency media is outside your permitted content scope.');
               }
+              if (media.type === 'WEBPAGE') throw AppError.badRequest('Webpage media is retired.', { reason: 'WEBPAGE_RETIRED', media_id: mediaId });
               if (media.status !== 'READY') {
                 throw AppError.badRequest('Emergency media must be READY before it can be assigned.', {
                   reason: 'MEDIA_NOT_READY',

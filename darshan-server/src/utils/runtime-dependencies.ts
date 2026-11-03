@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, readdirSync } from 'fs';
+import { accessSync, constants, existsSync } from 'fs';
 import { delimiter, isAbsolute, join, resolve, sep } from 'path';
 import { createLogger } from '@/utils/logger';
 import { config as appConfig } from '@/config';
@@ -9,7 +9,7 @@ export type RuntimeDependencyStatus = 'available' | 'missing' | 'optional';
 export type RuntimeDependencyRole = 'all' | 'api' | 'worker';
 
 export interface RuntimeDependency {
-  name: 'ffmpeg' | 'libreoffice' | 'chromium' | 'pg_dump' | 'tar';
+  name: 'ffmpeg' | 'libreoffice' | 'pg_dump' | 'tar';
   status: RuntimeDependencyStatus;
   path?: string;
   detail?: string;
@@ -27,10 +27,6 @@ function runningInContainer() {
 
 function dedupeCandidates(candidates: Array<string | undefined>) {
   return Array.from(new Set(candidates.filter((candidate): candidate is string => Boolean(candidate && candidate.trim()))));
-}
-
-function normalizeErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function findExecutableCandidate(candidate: string) {
@@ -62,43 +58,6 @@ function findExecutableCandidate(candidate: string) {
   return null;
 }
 
-function findPlaywrightChromiumExecutable() {
-  const roots = dedupeCandidates([process.env.PLAYWRIGHT_BROWSERS_PATH, '/ms-playwright']);
-  const executableNames =
-    process.platform === 'win32'
-      ? ['chrome.exe', 'msedge.exe']
-      : process.platform === 'darwin'
-        ? ['Chromium.app/Contents/MacOS/Chromium']
-        : ['chrome'];
-
-  for (const root of roots) {
-    let entries: string[];
-    try {
-      entries = readdirSync(root, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && entry.name.toLowerCase().includes('chromium'))
-        .map((entry) => entry.name)
-        .sort();
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const installRoot = join(root, entry);
-      const candidates = [
-        ...executableNames.map((name) => join(installRoot, 'chrome-linux64', name)),
-        ...executableNames.map((name) => join(installRoot, 'chrome-linux', name)),
-        ...executableNames.map((name) => join(installRoot, name)),
-      ];
-      const executable = candidates.map(findExecutableCandidate).find(Boolean);
-      if (executable) {
-        return executable;
-      }
-    }
-  }
-
-  return null;
-}
-
 function resolveFfmpegPath() {
   return dedupeCandidates([appConfig.FFMPEG_PATH, 'ffmpeg']).map(findExecutableCandidate).find(Boolean) || null;
 }
@@ -122,41 +81,6 @@ export function getResolvedFfmpegPath() {
   return resolveFfmpegPath();
 }
 
-async function resolveChromiumPath() {
-  const configured =
-    appConfig.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH?.trim() ||
-    appConfig.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH?.trim();
-  if (configured) {
-    const resolvedConfigured = findExecutableCandidate(configured);
-    if (!resolvedConfigured) {
-      throw new Error(`Configured Chromium executable not found at ${configured}`);
-    }
-
-    return resolvedConfigured;
-  }
-
-  try {
-    const { chromium } = await import('playwright');
-    const candidate = chromium.executablePath();
-    if (candidate && existsSync(candidate)) {
-      return candidate;
-    }
-  } catch (error) {
-    const installedExecutable = findPlaywrightChromiumExecutable();
-    if (installedExecutable) {
-      return installedExecutable;
-    }
-    throw new Error(`Playwright Chromium is not available: ${normalizeErrorMessage(error)}`);
-  }
-
-  const installedExecutable = findPlaywrightChromiumExecutable();
-  if (installedExecutable) {
-    return installedExecutable;
-  }
-
-  throw new Error('Playwright Chromium executable is not installed. Run "npx playwright install chromium" or set DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH.');
-}
-
 function resolvePgDumpPath() {
   return dedupeCandidates([appConfig.PG_DUMP_PATH, 'pg_dump']).map(findExecutableCandidate).find(Boolean) || null;
 }
@@ -173,20 +97,9 @@ export function getResolvedTarPath() {
   return resolveTarPath();
 }
 
-export async function getResolvedChromiumExecutable() {
-  return resolveChromiumPath();
-}
-
-function hasConfiguredChromiumPath() {
-  return Boolean(
-    appConfig.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH?.trim() ||
-      appConfig.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH?.trim()
-  );
-}
-
 function getRequiredDependencyNames(role: RuntimeDependencyRole) {
   if (role === 'api') {
-    return new Set<RuntimeDependency['name']>();
+    return new Set<RuntimeDependency['name']>(['libreoffice']);
   }
 
   return new Set<RuntimeDependency['name']>(['ffmpeg', 'libreoffice', 'pg_dump', 'tar']);
@@ -198,16 +111,6 @@ export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = '
   const pgDumpPath = resolvePgDumpPath();
   const tarPath = resolveTarPath();
   const requiredNames = getRequiredDependencyNames(role);
-  const chromiumRequired = appConfig.NODE_ENV === 'production' || hasConfiguredChromiumPath();
-  let chromiumPath: string | null = null;
-  let chromiumDetail: string | undefined;
-
-  try {
-    chromiumPath = await resolveChromiumPath();
-  } catch (error) {
-    chromiumDetail = normalizeErrorMessage(error);
-  }
-
   return {
     runningInContainer: runningInContainer(),
     role,
@@ -223,16 +126,6 @@ export async function inspectRuntimeDependencies(role: RuntimeDependencyRole = '
         status: libreOfficePath ? 'available' : requiredNames.has('libreoffice') ? 'missing' : 'optional',
         path: libreOfficePath || undefined,
         detail: libreOfficePath ? undefined : 'Install LibreOffice/soffice or set LIBREOFFICE_PATH to the executable.',
-      },
-      {
-        name: 'chromium',
-        status: chromiumPath ? 'available' : chromiumRequired ? 'missing' : 'optional',
-        path: chromiumPath || undefined,
-        detail:
-          chromiumPath
-            ? undefined
-            : chromiumDetail ||
-              'Install Playwright Chromium with "npx playwright install chromium" or set DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH.',
       },
       {
         name: 'pg_dump',
@@ -254,21 +147,11 @@ export async function validateRuntimeDependencies(role: RuntimeDependencyRole = 
   const report = await inspectRuntimeDependencies(role);
   const missingCritical = report.dependencies.filter((dependency) => dependency.status === 'missing');
 
-  if (
-    appConfig.NODE_ENV === 'production' &&
-    role !== 'api' &&
-    report.dependencies.some((dependency) => dependency.name === 'chromium' && dependency.status === 'available') &&
-    typeof process.getuid === 'function' &&
-    process.getuid() === 0
-  ) {
-    throw new Error('Production webpage capture worker must run as a non-root user so Chromium sandboxing remains enabled.');
-  }
-
   if (missingCritical.length > 0) {
     throw new Error(
       `Missing required runtime dependencies: ${missingCritical
         .map((dependency) => dependency.name)
-        .join(', ')}. Install the missing tools on the host or configure FFMPEG_PATH, LIBREOFFICE_PATH, PG_DUMP_PATH, TAR_PATH, and DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH as needed.`
+        .join(', ')}. Install the missing tools on the host or configure FFMPEG_PATH, LIBREOFFICE_PATH, PG_DUMP_PATH, and TAR_PATH as needed.`
     );
   } else {
     logger.info(

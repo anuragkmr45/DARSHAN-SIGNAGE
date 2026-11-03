@@ -154,7 +154,6 @@ PROMETHEUS_PORT=9090
 GRAFANA_PORT=3001
 GRAFANA_ROOT_URL=http://192.168.1.102:8080/grafana/
 
-INSTALL_PLAYWRIGHT_CHROMIUM=true
 
 CMS_RUNTIME_CONFIG_SOURCE=../../../../darshan-cms/public/config/app-config.json
 
@@ -203,7 +202,6 @@ FFMPEG_PATH=ffmpeg
 LIBREOFFICE_PATH=soffice
 PG_DUMP_PATH=pg_dump
 TAR_PATH=tar
-PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ```
 
 Do not set the backend config selector to a host-only `/etc/darshan/server/...` path for Docker production. That path is only for direct-host compatibility installs.
@@ -478,7 +476,7 @@ Backend image should include:
 - LibreOffice
 - pg_dump
 - tar
-- Playwright Chromium when `INSTALL_PLAYWRIGHT_CHROMIUM=true`
+- LibreOffice PDF conversion for Reports and Audit Logs exports
 
 ### 4. CMS VM
 

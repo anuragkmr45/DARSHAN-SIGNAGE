@@ -221,6 +221,8 @@ Resolution: CONFIRMED_BUSINESS_RULE (BR-057). Administrator self-approval and di
 
 ### BQ-011: Supported Webpages And Failure Display
 
+**2026-11-03 candidate scope change:** Webpage Media is retired before first production deployment. The earlier answer and developer evidence below remain historical, but `WEB-01..06` are no longer release acceptance for this candidate. New webpage creation and restore return `WEBPAGE_RETIRED`; new references are rejected; CMS/player do not render historical webpage entries. Use scheduled live broadcasts for real time content. Verify `RET-01..03` in `05_TEST_CASES.csv` and the developer record `evidence/webpage-media-retirement-developer-verification-2026-11-03.md`.
+
 Question: Which webpages and fallback behavior does this release support?
 
 Final answer received 2026-10-17: allow ordinary HTTP as well as HTTPS through an explicit policy; do not support login-required pages; allow redirects only while every hop remains on approved destinations; always use the latest successful preview when live display fails. Capture may be refreshed manually and automatically every 24 hours by default. A failed refresh must not replace the last successful preview.

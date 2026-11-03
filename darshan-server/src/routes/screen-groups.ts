@@ -339,7 +339,7 @@ export async function screenGroupRoutes(fastify: FastifyInstance) {
             mediaAssets = buildResolvedMediaAssets(resolvedMediaMap, { includeSourceUrl: true });
             mediaUrls = {};
             for (const [mediaId, media] of resolvedMediaMap.entries()) {
-              mediaUrls[mediaId] = media.type === 'WEBPAGE' ? media.source_url ?? null : media.media_url ?? null;
+              mediaUrls[mediaId] = media.type === 'WEBPAGE' ? null : media.media_url ?? null;
             }
           }
         }

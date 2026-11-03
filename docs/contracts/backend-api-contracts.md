@@ -44,7 +44,7 @@ The backend contract is registered through `darshan-server/src/server/index.ts` 
 | Runtime behavior | Code source of truth | Data/API dependency | Consumers | Verification status |
 |---|---|---|---|---|
 | Runtime bootstrap and process role | `src/index.ts`, `src/runtime/bootstrap.ts`, `src/runtime/process-role.ts` | `DARSHAN_PROCESS_ROLE`, DB, S3/MinIO, pg-boss, runtime dependency validation | Docker backend API/all role | Code-backed; target container startup needs runtime verification. |
-| Runtime tools | `src/utils/runtime-dependencies.ts`, Docker runtime-tool checks | ffmpeg, LibreOffice, pg_dump, tar, Playwright Chromium | media/document/webpage/backup jobs | Code-backed; actual image must be checked on the Backend VM. |
+| Runtime tools | `src/utils/runtime-dependencies.ts`, Docker runtime-tool checks | ffmpeg, LibreOffice, pg_dump, tar | media/document/PDF export/backup jobs | Code-backed; actual image must be checked on the Backend VM. |
 | Job workers | `src/jobs/index.ts`, `src/jobs/device-telemetry.ts` | pg-boss, telemetry/proof-of-play/storage jobs | backend worker/all role | Code-backed; queue throughput needs runtime verification. |
 | Object storage | `src/s3/index.ts`, media/settings/screenshot/log routes | MinIO/S3 buckets and object keys | backend, CMS, player | Code-backed; bucket health and credentials need deployment verification. |
 | Config loader | `src/config/index.ts`, `src/config/file-config.ts` | env plus optional JSON file | backend process | Code-backed and test-backed by config tests. |

@@ -394,6 +394,9 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
         });
         continue;
       }
+      if (item.media.type === 'WEBPAGE') {
+        invalidPresentationRefs.push({ presentation_id: presentation.id, issue: 'WEBPAGE_RETIRED', media_id: item.media.id });
+      }
       if (item.media.status !== 'READY') {
         invalidPresentationRefs.push({
           presentation_id: presentation.id,
@@ -441,6 +444,9 @@ export async function publishScheduleSnapshot(params: PublishScheduleParams) {
           media_id: slot.media_id,
         });
         continue;
+      }
+      if (slot.media.type === 'WEBPAGE') {
+        invalidPresentationRefs.push({ presentation_id: presentation.id, issue: 'WEBPAGE_RETIRED', media_id: slot.media.id });
       }
       if (slot.media.status !== 'READY') {
         invalidPresentationRefs.push({

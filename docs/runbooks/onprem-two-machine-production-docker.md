@@ -169,7 +169,7 @@ docker compose --env-file .env.production down --remove-orphans
 ./health-check.sh
 ```
 
-The backend image contains Node 20 plus ffmpeg, LibreOffice, pg_dump, tar, and optionally Playwright/Chromium when built with `INSTALL_PLAYWRIGHT_CHROMIUM=true`.
+The backend image contains Node 20 plus ffmpeg, LibreOffice, pg_dump, and tar. LibreOffice also renders Reports and Audit Logs PDF exports.
 
 ### 4. CMS
 

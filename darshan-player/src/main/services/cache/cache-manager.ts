@@ -39,7 +39,7 @@ const CACHE_REVISION_SEPARATOR = '.__revision__.'
 
 /**
  * Keep content revisions as distinct cache entries. This lets a player finish
- * using the selected revision while a newer webpage preview downloads.
+ * using the selected revision while a newer media object downloads.
  */
 export function buildRevisionedCacheKey(mediaId: string, revision?: string | null): string {
   const normalized = revision?.trim()

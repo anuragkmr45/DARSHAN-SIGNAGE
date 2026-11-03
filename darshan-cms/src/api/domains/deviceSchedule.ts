@@ -79,16 +79,18 @@ export const normalizeDeviceItems = (payload: RawDeviceSnapshotResponse): Device
         const mediaId = entry.media_id ?? entry.media?.id ?? "";
         const mediaType = (entry.media?.type ?? "unknown").toLowerCase();
         const asset = mediaAssets[mediaId];
+        const resolvedType = (asset?.type ?? mediaType).toLowerCase();
+        const retiredWebpage = resolvedType === "webpage" || resolvedType === "url";
 
         return {
           id: entry.id ?? `${scheduleItem.id ?? "schedule-item"}-${mediaId}-${index}`,
           media_id: mediaId,
-          type: (asset?.type ?? mediaType).toLowerCase(),
+          type: resolvedType,
           name: asset?.name,
           display_ms: entry.duration_seconds ? entry.duration_seconds * 1000 : undefined,
           fit: entry.fit_mode ?? undefined,
-          media_url: asset?.playback_url ?? mediaUrls[mediaId] ?? entry.media?.media_url ?? undefined,
-          preview_url: asset?.preview_url ?? undefined,
+          media_url: retiredWebpage ? undefined : asset?.playback_url ?? mediaUrls[mediaId] ?? entry.media?.media_url ?? undefined,
+          preview_url: retiredWebpage ? undefined : asset?.preview_url ?? undefined,
           muted: typeof entry.audio_enabled === "boolean" ? !entry.audio_enabled : undefined,
           page_number: typeof entry.page_number === "number" ? entry.page_number : undefined,
         } satisfies DeviceScheduleItem;

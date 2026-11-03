@@ -20,7 +20,7 @@ import {
   sanitizeLogPayloadForDiagnostics,
 } from '../common/redaction'
 import { ExponentialBackoff } from '../common/utils'
-import type { ActiveSlotPlayback, AppConfig, PlayerPresentationSnapshot, PlayerStatus, WebpageViewRequest } from '../common/types'
+import type { ActiveSlotPlayback, AppConfig, PlayerPresentationSnapshot, PlayerStatus } from '../common/types'
 import type { PlaybackProgressIdentity } from '../common/playback-policy'
 import { parseOperatorCommand, runOperatorCommand } from './cli'
 import { getRuntimeMode, getRuntimeWindowPolicy } from './runtime-mode'
@@ -28,7 +28,6 @@ import { ensureAutostartRegistration } from './services/autostart'
 import { registerNormalProfileAutostart } from './live-development-profile'
 import { getDisplayManager } from './services/display-manager'
 import { RendererReadinessGate } from './services/renderer-readiness-gate'
-import { WebpageViewManager } from './services/webpage-view-manager'
 import { getPlaybackEngine } from './services/playback/playback-engine'
 import { getContentOwner } from './services/playback/content-owner'
 import { getPlayerFlow } from './services/player-flow'
@@ -71,12 +70,6 @@ if (!gotTheLock) {
 
 let mainWindow: BrowserWindow | null = null
 const restartBackoff = new ExponentialBackoff(1000, 60000, 10)
-const webpageViewManager = new WebpageViewManager(
-  () => mainWindow,
-  () => config.getConfig().security,
-  () => getRuntimeWindowPolicy(getRuntimeMode(config.getConfig())).disableInput,
-  logger
-)
 // The renderer reports its first measured viewport through the preload bridge.
 // A bounded fallback is required for a crashed/old renderer, but normal kiosk
 // startup must not expose a partially laid out pairing or recovery surface.
@@ -90,7 +83,6 @@ getContentOwner().on('invalidated', () => {
   for (const id of slots.keys()) getProofOfPlayService().recordEnd(id, false)
   getCacheManager().replaceNowPlaying([])
   getTelemetryService().clearCurrentPlayback()
-  webpageViewManager.destroyAll('content-owner-changed')
 })
 let servicesInitialized = false
 let readyToShowWindow: BrowserWindow | null = null
@@ -477,7 +469,6 @@ function createWindow(): void {
   // Handle window closed
   mainWindow.on('closed', () => {
     getPlayerFlow().interruptLive('WINDOW_CLOSED')
-    webpageViewManager.destroyAll()
     if (readyToShowWindow === mainWindow) {
       readyToShowWindow = null
       clearRendererLayoutAckTimer()
@@ -492,14 +483,12 @@ function createWindow(): void {
   // Handle crashes - use render-process-gone instead of deprecated 'crashed'
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     getPlayerFlow().interruptLive('RENDERER_CRASHED')
-    webpageViewManager.destroyAll('renderer-crashed')
     logger.error({ reason: details.reason, exitCode: details.exitCode }, 'Renderer process gone')
     handleCrash()
   })
   mainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
     if (isMainFrame) {
       getPlayerFlow().interruptLive('RENDERER_NAVIGATION')
-      webpageViewManager.destroyAll('renderer-navigation')
     }
   })
 
@@ -754,28 +743,6 @@ function setupIPCHandlers(): void {
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
 
-  const assertPlayerRenderer = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) => {
-    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
-      throw new Error('Webpage view request did not originate from the active player renderer')
-    }
-  }
-
-  ipcMain.handle('webpage-view:mount', async (event: Electron.IpcMainInvokeEvent, request: WebpageViewRequest) => {
-    assertPlayerRenderer(event)
-    return webpageViewManager.mount(request, () => getContentOwner().getOwner() === 'ordinary' && getContentOwner().accepts(event.sender.id, request?.contentEpoch))
-  })
-
-  ipcMain.handle('webpage-view:update', async (event: Electron.IpcMainInvokeEvent, request: WebpageViewRequest) => {
-    assertPlayerRenderer(event)
-    if (getContentOwner().getOwner() !== 'ordinary' || !getContentOwner().accepts(event.sender.id, request?.contentEpoch)) return { accepted: false, reason: 'content-owner-changed' }
-    return webpageViewManager.update(request)
-  })
-
-  ipcMain.on('webpage-view:destroy', (event: Electron.IpcMainEvent, id: string, generation: number) => {
-    assertPlayerRenderer(event)
-    webpageViewManager.destroy(id, generation)
-  })
-
   ipcMain.handle('get-player-state', async () => {
     const { getPlayerFlow } = await import('./services/player-flow.js')
     return getPlayerFlow().getState()
@@ -939,7 +906,6 @@ function setupIPCHandlers(): void {
 async function cleanup(): Promise<void> {
   logger.info('Cleaning up...')
   getPlayerFlow().interruptLive('APPLICATION_QUIT')
-  webpageViewManager.destroyAll()
 
   try {
     const { getPlayerFlow } = await import('./services/player-flow.js')
@@ -991,12 +957,10 @@ app.on('ready', async () => {
       Menu.setApplicationMenu(null)
     }
     await applyConfigToPowerManager(config.getConfig())
-    webpageViewManager.configureSession()
     const displayManager = getDisplayManager()
     displayManager.start()
     displayManager.onChange(() => {
       getPlayerFlow().interruptLive('DISPLAY_CHANGED')
-      webpageViewManager.destroyAll('display-changed')
       if (servicesInitialized) {
         void import('./services/player-flow.js')
           .then(({ getPlayerFlow }) => getPlayerFlow().refreshPresentation())

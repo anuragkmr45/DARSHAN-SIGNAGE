@@ -91,15 +91,6 @@ const envSchema = z.object({
   BACKUP_OFFHOST_REGION: optionalTrimmedString,
   BACKUP_OFFHOST_ACCESS_KEY: optionalTrimmedString,
   BACKUP_OFFHOST_SECRET_KEY: optionalTrimmedString,
-  DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH: optionalTrimmedString,
-  HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH: optionalTrimmedString,
-  WEBPAGE_NAVIGATION_ALLOWLIST: z.string().default(''),
-  WEBPAGE_RESOURCE_ALLOWLIST: z.string().default(''),
-  WEBPAGE_ALLOWED_CIDRS: z.string().default(''),
-  WEBPAGE_ALLOWED_PORTS: z.string().default('443'),
-  WEBPAGE_ALLOW_HTTP: optionalBooleanString,
-  WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS: z.coerce.number().int().min(1).max(168).default(24),
-  WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(100),
   PG_BOSS_SCHEMA: z.string().default('pgboss'),
   RATE_LIMIT_ENABLED: z
     .enum(['true', 'false'])
@@ -375,9 +366,6 @@ export const config = Object.freeze({
   COMMAND_OUTBOX_WRITE_ENABLED: parsed.data.COMMAND_OUTBOX_WRITE_ENABLED ?? true,
   DEVICE_DESIRED_STATE_ENABLED: parsed.data.DEVICE_DESIRED_STATE_ENABLED ?? true,
   DARSHAN_LIVE_RUNTIME_ENABLED: parsed.data.DARSHAN_LIVE_RUNTIME_ENABLED ?? false,
-  HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:
-    parsed.data.DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH ??
-    parsed.data.HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH,
   VALKEY_URL: resolveValkeyUrl(parsed.data),
   LOGIN_THROTTLE_PROVIDER: loginThrottleProvider,
   LOGIN_THROTTLE_FAIL_CLOSED: parsed.data.LOGIN_THROTTLE_FAIL_CLOSED ?? parsed.data.NODE_ENV === 'production',

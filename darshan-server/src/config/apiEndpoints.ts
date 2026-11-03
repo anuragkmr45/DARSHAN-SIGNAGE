@@ -46,7 +46,6 @@ export const apiEndpoints = {
     get: withBase('/media/:id'),
     deleted: withBase('/media/deleted'),
     restore: withBase('/media/:id/restore'),
-    webpagePreviewRefresh: withBase('/media/:id/webpage-preview/refresh'),
     delete: withBase('/media/:id'),
     complete: withBase('/media/:id/complete'),
   },

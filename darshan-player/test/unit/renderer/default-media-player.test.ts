@@ -29,7 +29,7 @@ describe('Default Media Player helpers', () => {
     expect(source).to.equal('https://cdn.example.com/fallback.mp4')
   })
 
-  it('uses fallback_media_url when webpage preview has no direct media_url', async () => {
+  it('does not resolve a retired webpage preview', async () => {
     const { resolveDefaultMediaSource } = require('../../../src/renderer/default-media-helpers.ts')
 
     const source = resolveDefaultMediaSource({
@@ -40,7 +40,7 @@ describe('Default Media Player helpers', () => {
       fallback_media_url: 'https://cdn.example.com/webpage-fallback.svg',
     })
 
-    expect(source).to.equal('https://cdn.example.com/webpage-fallback.svg')
+    expect(source).to.equal(undefined)
   })
 
   it('recursively tears down hidden default-media trees', async () => {

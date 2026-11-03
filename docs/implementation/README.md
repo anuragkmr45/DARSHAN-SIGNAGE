@@ -46,6 +46,6 @@ Documentation and static code review do not mark the product production ready. T
 - Packaged player install, autostart, pair/reset/re-pair, media playback, screenshot, and offline/restart tests on target hardware.
 - Docker role health across the actual VM/LAN topology.
 - Socket.IO/Valkey notification behavior and polling fallback.
-- Media rendering for video, image, PDF, office, and webpage.
+- Media rendering for video, image, PDF, and office; webpage Media is retired.
 - Prometheus/Grafana scrape and alert validity.
 - No-secret review of logs, screenshots, doctor output, browser payloads, and support bundles.

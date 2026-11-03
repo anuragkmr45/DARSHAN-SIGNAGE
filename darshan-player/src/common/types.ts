@@ -111,10 +111,6 @@ export interface PowerConfig {
 export interface SecurityConfig {
   csp: string
   allowedDomains: string[]
-  webpageResourceDomains?: string[]
-  webpageAllowedCidrs?: string[]
-  webpageAllowedPorts?: number[]
-  webpageAllowHttp?: boolean
   disableEval: boolean
   contextIsolation: boolean
   nodeIntegration: boolean
@@ -126,24 +122,6 @@ export interface SecurityConfig {
   lockAfterOfflineMs?: number
   purgeCacheAfterOfflineMs?: number
   showSecurityLockScreen?: boolean
-}
-
-export type WebpageViewBounds = { x: number; y: number; width: number; height: number }
-
-export type WebpageViewRequest = {
-  contentEpoch?: string
-  id: string
-  generation: number
-  url: string
-  bounds: WebpageViewBounds
-  zIndex: number
-}
-
-export type WebpageViewStatus = {
-  id: string
-  generation: number
-  state: 'loading' | 'healthy' | 'fallback' | 'blocked'
-  reason?: string
 }
 
 export type SecureOfflinePlaybackPolicy = 'standard' | 'secure' | 'high_security'

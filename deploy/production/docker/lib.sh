@@ -113,7 +113,6 @@ load_production_env() {
   require_var CMS_HTTP_PORT
   require_var PROMETHEUS_PORT
   require_var GRAFANA_PORT
-  require_var INSTALL_PLAYWRIGHT_CHROMIUM
   require_var BACKEND_IMAGE
   require_var CMS_IMAGE
   require_var POSTGRES_USER

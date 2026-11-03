@@ -495,24 +495,14 @@ export async function reportsRoutes(fastify: FastifyInstance) {
             </div>
             <div class="section">
               <h2>Summary</h2>
-              <div class="grid">
-                <div class="card">
-                  <div class="label">Total Media</div>
-                  <div class="value">${escapeHtml(formatCount(Number(mediaCount?.count || 0)))}</div>
-                </div>
-                <div class="card">
-                  <div class="label">Active Screens</div>
-                  <div class="value">${escapeHtml(formatCount(Number(screensActive?.count || 0)))}</div>
-                </div>
-                <div class="card">
-                  <div class="label">Offline Screens</div>
-                  <div class="value">${escapeHtml(formatCount(Number(screensOffline?.count || 0)))}</div>
-                </div>
-                <div class="card">
-                  <div class="label">Report Owner</div>
-                  <div class="value" style="font-size: 14px;">${escapeHtml(payload.email)}</div>
-                </div>
-              </div>
+              <table>
+                <tbody>
+                  <tr><th>Total Media</th><td>${escapeHtml(formatCount(Number(mediaCount?.count || 0)))}</td></tr>
+                  <tr><th>Active Screens</th><td>${escapeHtml(formatCount(Number(screensActive?.count || 0)))}</td></tr>
+                  <tr><th>Offline Screens</th><td>${escapeHtml(formatCount(Number(screensOffline?.count || 0)))}</td></tr>
+                  <tr><th>Report Owner</th><td>${escapeHtml(payload.email)}</td></tr>
+                </tbody>
+              </table>
             </div>
             <div class="section">
               <h2>Emergency Status</h2>

@@ -11,15 +11,9 @@ const sharedMediaCreateSchema = z.object({
     .optional(),
 });
 
-export const createMediaSchema = z.union([
-  sharedMediaCreateSchema.extend({
-    type: z.enum(['IMAGE', 'VIDEO', 'DOCUMENT']),
-  }),
-  sharedMediaCreateSchema.extend({
-    type: z.literal('WEBPAGE'),
-    source_url: z.string().url('A valid webpage URL is required'),
-  }),
-]);
+export const createMediaSchema = sharedMediaCreateSchema.extend({
+  type: z.enum(['IMAGE', 'VIDEO', 'DOCUMENT']),
+});
 
 export type CreateMediaRequest = z.infer<typeof createMediaSchema>;
 

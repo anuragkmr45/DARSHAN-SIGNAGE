@@ -862,7 +862,7 @@ async function buildCurrentMediaById(
       {
         ...media,
         ...buildResolvedMediaRepresentation(media, { includeSourceUrl: true }),
-        url: media.type === 'WEBPAGE' ? media.source_url ?? null : media.media_url ?? null,
+        url: media.type === 'WEBPAGE' ? null : media.media_url ?? null,
         fallback_url: media.fallback_media_url ?? null,
         media_type: media.type,
       },

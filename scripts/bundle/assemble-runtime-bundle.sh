@@ -282,16 +282,6 @@ stage_player_bundle() {
   local transport_enabled="false"
   local linux_ca_path=""
   local windows_ca_path=""
-  local webpage_navigation_json
-  local webpage_resource_json
-  local webpage_cidrs_json
-  local webpage_ports_json
-
-  webpage_navigation_json="$(node -e 'const value=process.argv[1]||"";process.stdout.write(JSON.stringify(value.split(",").map(v=>v.trim()).filter(Boolean)))' "$WEBPAGE_NAVIGATION_ALLOWLIST")"
-  webpage_resource_json="$(node -e 'const value=process.argv[1]||"";process.stdout.write(JSON.stringify(value.split(",").map(v=>v.trim()).filter(Boolean)))' "$WEBPAGE_RESOURCE_ALLOWLIST")"
-  webpage_cidrs_json="$(node -e 'const value=process.argv[1]||"";process.stdout.write(JSON.stringify(value.split(",").map(v=>v.trim()).filter(Boolean)))' "$WEBPAGE_ALLOWED_CIDRS")"
-  webpage_ports_json="$(node -e 'const value=process.argv[1]||"";process.stdout.write(JSON.stringify(value.split(",").map(v=>Number(v.trim())).filter(Number.isInteger)))' "$WEBPAGE_ALLOWED_PORTS")"
-
   mkdir -p "$bundle_dir/installers"
 
   if [[ -n "$PLAYER_WINDOWS_INSTALLER" ]]; then
@@ -356,11 +346,7 @@ stage_player_bundle() {
       "strictCertificateValidation": true
     },
     "security": {
-      "allowedDomains": $webpage_navigation_json,
-      "webpageResourceDomains": $webpage_resource_json,
-      "webpageAllowedCidrs": $webpage_cidrs_json,
-      "webpageAllowedPorts": $webpage_ports_json,
-      "webpageAllowHttp": $WEBPAGE_ALLOW_HTTP,
+      "allowedDomains": [],
       "offlinePlaybackPolicy": "$offline_playback_policy",
       "backendRequiredForPlayback": $backend_required_for_playback,
       "networkSwitchGraceMs": 30000,
@@ -930,7 +916,7 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 [[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
-  for file in docker-compose.yml load-images.sh start.sh wait-ready.sh wait-dependencies.sh install.sh finalize-install.sh upgrade.sh deploy.sh adopt-existing.sh recover-admin.sh acceptance-check.sh deployment-state.sh chromium-runtime-check.sh; do
+  for file in docker-compose.yml load-images.sh start.sh wait-ready.sh wait-dependencies.sh install.sh finalize-install.sh upgrade.sh deploy.sh adopt-existing.sh recover-admin.sh acceptance-check.sh deployment-state.sh pdf-runtime-check.sh; do
   [[ -f "\$file" ]] || { echo "Required backend role file is missing: \$file" >&2; exit 1; }
 done
 if [[ -f ./COMPATIBILITY.json ]]; then
@@ -1035,12 +1021,12 @@ case "\$action" in
 esac
 EOF
 
-  cat > "$target_dir/chromium-runtime-check.sh" <<EOF
+  cat > "$target_dir/pdf-runtime-check.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 [[ -f "$env_file" ]] || { echo "$env_file is missing." >&2; exit 1; }
-docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps worker \
-  npm run --silent production:verify-chromium-runtime
+docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps api \
+  sh -lc 'command -v soffice && soffice --version'
 EOF
 
   cat > "$target_dir/acceptance-check.sh" <<EOF
@@ -1061,7 +1047,7 @@ done
 source ./$env_file
 : "\${INITIAL_ADMIN_EMAIL:?INITIAL_ADMIN_EMAIL is required}"
 
-./chromium-runtime-check.sh
+./pdf-runtime-check.sh
 
 post_login() {
   local url="\$1"; shift
@@ -2335,8 +2321,6 @@ FFMPEG_PATH="${FFMPEG_PATH:-ffmpeg}"
 LIBREOFFICE_PATH="${LIBREOFFICE_PATH:-soffice}"
 PG_DUMP_PATH="${PG_DUMP_PATH:-pg_dump}"
 TAR_PATH="${TAR_PATH:-tar}"
-DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH="${DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-${HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-}}"
-HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH="${HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH:-$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH}"
 PG_BOSS_SCHEMA="${PG_BOSS_SCHEMA:-pgboss}"
 RATE_LIMIT_ENABLED="${RATE_LIMIT_ENABLED:-true}"
 RATE_LIMIT_MAX="${RATE_LIMIT_MAX:-1000}"
@@ -2349,13 +2333,6 @@ LOGIN_LOCKOUT_WINDOW_SECONDS="${LOGIN_LOCKOUT_WINDOW_SECONDS:-900}"
 LOGIN_THROTTLE_PROVIDER="${LOGIN_THROTTLE_PROVIDER:-valkey}"
 LOGIN_THROTTLE_FAIL_CLOSED="${LOGIN_THROTTLE_FAIL_CLOSED:-true}"
 MAX_UPLOAD_MB="${MAX_UPLOAD_MB:-500}"
-WEBPAGE_NAVIGATION_ALLOWLIST="${WEBPAGE_NAVIGATION_ALLOWLIST:-}"
-WEBPAGE_RESOURCE_ALLOWLIST="${WEBPAGE_RESOURCE_ALLOWLIST:-$WEBPAGE_NAVIGATION_ALLOWLIST}"
-WEBPAGE_ALLOWED_CIDRS="${WEBPAGE_ALLOWED_CIDRS:-}"
-WEBPAGE_ALLOWED_PORTS="${WEBPAGE_ALLOWED_PORTS:-443}"
-WEBPAGE_ALLOW_HTTP="${WEBPAGE_ALLOW_HTTP:-false}"
-WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS="${WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS:-24}"
-WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE="${WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE:-100}"
 STORAGE_QUOTA_BYTES="${STORAGE_QUOTA_BYTES:-0}"
 QA_VALKEY_HOST="${QA_VALKEY_HOST:-${QA_BACKEND_HOST:-}}"
 QA_VALKEY_HOST_PORT="${QA_VALKEY_HOST_PORT:-6379}"
@@ -3173,8 +3150,6 @@ FFMPEG_PATH=$FFMPEG_PATH
 LIBREOFFICE_PATH=$LIBREOFFICE_PATH
 PG_DUMP_PATH=$PG_DUMP_PATH
 TAR_PATH=$TAR_PATH
-DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
-HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
 PG_BOSS_SCHEMA=$PG_BOSS_SCHEMA
 RATE_LIMIT_ENABLED=$RATE_LIMIT_ENABLED
 RATE_LIMIT_MAX=$RATE_LIMIT_MAX
@@ -3191,17 +3166,9 @@ LOGIN_LOCKOUT_WINDOW_SECONDS=$LOGIN_LOCKOUT_WINDOW_SECONDS
 LOGIN_THROTTLE_PROVIDER=$LOGIN_THROTTLE_PROVIDER
 LOGIN_THROTTLE_FAIL_CLOSED=$LOGIN_THROTTLE_FAIL_CLOSED
 MAX_UPLOAD_MB=$MAX_UPLOAD_MB
-WEBPAGE_NAVIGATION_ALLOWLIST=$WEBPAGE_NAVIGATION_ALLOWLIST
-WEBPAGE_RESOURCE_ALLOWLIST=$WEBPAGE_RESOURCE_ALLOWLIST
-WEBPAGE_ALLOWED_CIDRS=$WEBPAGE_ALLOWED_CIDRS
-WEBPAGE_ALLOWED_PORTS=$WEBPAGE_ALLOWED_PORTS
-WEBPAGE_ALLOW_HTTP=$WEBPAGE_ALLOW_HTTP
-WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=$WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS
-WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=$WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE
 STORAGE_QUOTA_BYTES=$STORAGE_QUOTA_BYTES
 DARSHAN_RUNTIME_CONTAINER=true
 HEXMON_RUNTIME_CONTAINER=true
-PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 PROMETHEUS_HOST_PORT=$QA_PROMETHEUS_HOST_PORT
 COMMAND_OUTBOX_WRITE_ENABLED=$COMMAND_OUTBOX_WRITE_ENABLED
 DEVICE_DESIRED_STATE_ENABLED=$DEVICE_DESIRED_STATE_ENABLED
@@ -3709,8 +3676,6 @@ FFMPEG_PATH=$FFMPEG_PATH
 LIBREOFFICE_PATH=$LIBREOFFICE_PATH
 PG_DUMP_PATH=$PG_DUMP_PATH
 TAR_PATH=$TAR_PATH
-DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
-HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH=$DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH
 PG_BOSS_SCHEMA=$PG_BOSS_SCHEMA
 RATE_LIMIT_ENABLED=$RATE_LIMIT_ENABLED
 RATE_LIMIT_MAX=$RATE_LIMIT_MAX
@@ -3730,17 +3695,9 @@ LOGIN_LOCKOUT_WINDOW_SECONDS=$LOGIN_LOCKOUT_WINDOW_SECONDS
 LOGIN_THROTTLE_PROVIDER=$LOGIN_THROTTLE_PROVIDER
 LOGIN_THROTTLE_FAIL_CLOSED=$LOGIN_THROTTLE_FAIL_CLOSED
 MAX_UPLOAD_MB=$MAX_UPLOAD_MB
-WEBPAGE_NAVIGATION_ALLOWLIST=$WEBPAGE_NAVIGATION_ALLOWLIST
-WEBPAGE_RESOURCE_ALLOWLIST=$WEBPAGE_RESOURCE_ALLOWLIST
-WEBPAGE_ALLOWED_CIDRS=$WEBPAGE_ALLOWED_CIDRS
-WEBPAGE_ALLOWED_PORTS=$WEBPAGE_ALLOWED_PORTS
-WEBPAGE_ALLOW_HTTP=$WEBPAGE_ALLOW_HTTP
-WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=$WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS
-WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=$WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE
 STORAGE_QUOTA_BYTES=$STORAGE_QUOTA_BYTES
 DARSHAN_RUNTIME_CONTAINER=true
 HEXMON_RUNTIME_CONTAINER=true
-PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COMMAND_OUTBOX_WRITE_ENABLED=$COMMAND_OUTBOX_WRITE_ENABLED
 DEVICE_DESIRED_STATE_ENABLED=$DEVICE_DESIRED_STATE_ENABLED
 DARSHAN_REALTIME_SYNC_ENABLED=$DARSHAN_REALTIME_SYNC_ENABLED

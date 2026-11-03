@@ -39,58 +39,19 @@ describe('production command contracts', () => {
     expect(bootstrapAdoptCli).toContain(".requiredOption('--release-id <release>'");
   });
 
-  it('prepares and verifies a writable Chromium runtime home for production workers', () => {
-    const packageJson = JSON.parse(readText('package.json')) as PackageJson;
-    const entrypoint = readText('docker/runtime-entrypoint.sh');
-    const chromiumRuntime = readText('src/utils/chromium-runtime.ts');
-    const chromiumSmoke = readText('scripts/verify-chromium-runtime.ts');
-    const webpageCapture = readText('src/utils/webpage-capture.ts');
-
-    expect(packageJson.scripts).toMatchObject({
-      'production:verify-chromium-runtime': 'node dist-cli/scripts/verify-chromium-runtime.js',
-    });
-    expect(entrypoint).toContain('prepare_worker_runtime_dirs()');
-    expect(entrypoint).toContain('HOME=/tmp/darshan-worker-home');
-    expect(entrypoint).toContain('XDG_CONFIG_HOME="$HOME/.config"');
-    expect(entrypoint).toContain('XDG_CACHE_HOME="$HOME/.cache"');
-    expect(entrypoint).toContain('export HOME XDG_CONFIG_HOME XDG_CACHE_HOME TMPDIR');
-    expect(entrypoint).toContain('install -d -m 1777 /tmp');
-    expect(entrypoint).toContain('chmod 1777 /tmp');
-    expect(entrypoint).toContain('install -d -m 0700 -o node -g node "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"');
-    expect(entrypoint).toMatch(/if \[ "\$role" = worker \]; then\n\s+prepare_worker_runtime_dirs/);
-    expect(entrypoint).toContain('--reuid=node');
-    expect(entrypoint).toContain('--regid=node');
-    expect(entrypoint).not.toContain('--reset-env');
-    expect(chromiumRuntime).toContain("CHROMIUM_RUNTIME_HOME = '/tmp/darshan-worker-home'");
-    expect(chromiumRuntime).toContain("'--disable-crash-reporter'");
-    expect(chromiumSmoke).toContain("const SMOKE_URL = 'https://example.com/';");
-    expect(chromiumSmoke).toContain("assertRuntimeEnv('HOME')");
-    expect(chromiumSmoke).toContain("ensureWritableDirectory('XDG_CONFIG_HOME'");
-    expect(chromiumSmoke).toContain('assertWorkerIdentity()');
-    expect(chromiumSmoke).toContain('DARSHAN_EXPECTED_WORKER_UID');
-    expect(chromiumSmoke).toContain('DARSHAN_EXPECTED_WORKER_GID');
-    expect(chromiumSmoke).toContain('chromium.launch');
-    expect(chromiumSmoke).toContain('page.goto(SMOKE_URL');
-    expect(chromiumSmoke).toContain('page.screenshot');
-    expect(chromiumSmoke).toContain('browserClosed: true');
-    expect(webpageCapture).toContain('CHROMIUM_RUNTIME_LAUNCH_ARGS');
-  });
-
-  it('rejects root Chromium smoke checks as worker-runtime validation', () => {
-    const chromiumSmoke = readText('scripts/verify-chromium-runtime.ts');
+  it('uses LibreOffice for report PDFs and omits backend Chromium', () => {
+    const packageJson = JSON.parse(readText('package.json')) as PackageJson & { dependencies?: Record<string, string> };
+    const dockerfile = readText('Dockerfile');
+    const pdfRenderer = readText('src/utils/pdf-render.ts');
     const assembler = readFileSync(path.resolve(process.cwd(), '../scripts/bundle/assemble-runtime-bundle.sh'), 'utf8');
-    const chromiumRuntimeCheck = assembler.slice(
-      assembler.indexOf('cat > "$target_dir/chromium-runtime-check.sh"'),
-      assembler.indexOf('cat > "$target_dir/acceptance-check.sh"')
-    );
 
-    expect(chromiumSmoke).toContain('if (uid === 0)');
-    expect(chromiumSmoke).toContain('must run as the unprivileged worker user, not root');
-    expect(chromiumSmoke).toContain('uid !== expectedWorkerUid || gid !== expectedWorkerGid');
-    expect(chromiumRuntimeCheck).toContain('docker compose --env-file $env_file -f docker-compose.yml run --rm --no-deps worker');
-    expect(chromiumRuntimeCheck).not.toContain('docker exec');
-    expect(chromiumRuntimeCheck).not.toContain('docker compose exec');
-    expect(assembler).toContain('DARSHAN_PROCESS_ROLE: worker');
+    expect(packageJson.dependencies?.playwright).toBeUndefined();
+    expect(dockerfile).toContain('libreoffice');
+    expect(dockerfile).not.toContain('playwright install');
+    expect(pdfRenderer).toContain('buildLibreOfficeConversionArgs');
+    expect(pdfRenderer).not.toContain('playwright');
+    expect(assembler).toContain('pdf-runtime-check.sh');
+    expect(assembler).toContain('soffice --version');
   });
 
   it('keeps compatibility migration commands but makes status a first-class read-only command', () => {

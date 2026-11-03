@@ -24,7 +24,7 @@ describe('resolved media assets', () => {
     });
   });
 
-  it('keeps live webpage playback separate from its captured preview', () => {
+  it('does not expose retired webpage URLs to a player', () => {
     const map = new Map([
       ['web-1', {
         id: 'web-1',
@@ -44,12 +44,12 @@ describe('resolved media assets', () => {
     expect(assets['web-1']).toMatchObject({
       name: 'Operations board',
       type: 'WEBPAGE',
-      playback_url: 'https://dashboard.example.test/live',
-      preview_url: 'https://storage.example.test/fallback.png',
+      playback_url: null,
+      preview_url: null,
     });
     expect(assets['web-1']).not.toHaveProperty('source_url');
     expect(buildResolvedMediaAssets(map, { includeSourceUrl: true })['web-1']).toMatchObject({
-      source_url: 'https://dashboard.example.test/live',
+      source_url: null,
     });
   });
 });

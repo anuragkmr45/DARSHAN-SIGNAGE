@@ -161,7 +161,7 @@ CMS code source of truth:
 | Feature / behavior | Code source of truth | Data/API dependency | Runtime owner | Notes / known gaps |
 |---|---|---|---|---|
 | Five-VM Docker production model | `deploy/production/README.md`, `deploy/production/docker/*`, `docs/runbooks/onprem-production-setup.md` | Docker Compose projects and VM IPs | Deploy/operator | Code docs define model; live VM evidence is separate. |
-| Backend runtime tools in image | `deploy/production/docker/check-backend-runtime-tools.sh`, backend Docker build assets | ffmpeg, LibreOffice, pg_dump, tar, Playwright Chromium | Backend Docker image | Actual image must be checked on target VM. |
+| Backend runtime tools in image | `deploy/production/docker/check-backend-runtime-tools.sh`, backend Docker build assets | ffmpeg, LibreOffice, pg_dump, tar | Backend Docker image | Actual image and PDF export must be checked on target VM. |
 | CMS static nginx runtime | `deploy/production/docker/cms/*`, `darshan-cms/public/config/app-config.example.json` | static assets, runtime config, nginx proxy | CMS Docker role | Browser QA still required after deployment. |
 | Observability role | `deploy/production/docker/observability/*`, `deploy/shared/observability/*` | Prometheus/Grafana configs/rules/dashboards | Observability VM | Alert validity requires runtime scrape evidence. |
 | Player package path | `darshan-player/package.json`, docs runbooks | `.deb`, `/etc/darshan/player/config.json` | Player device | Packaged target hardware QA remains required. |

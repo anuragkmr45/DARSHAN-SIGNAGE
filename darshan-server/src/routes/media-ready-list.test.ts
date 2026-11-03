@@ -14,26 +14,12 @@ const { headObjectMock, getPresignedUrlMock } = vi.hoisted(() => ({
   getPresignedUrlMock: vi.fn(),
 }));
 
-const { queueWebpageVerifyCaptureMock, requestWebpagePreviewRefreshMock } = vi.hoisted(() => ({
-  queueWebpageVerifyCaptureMock: vi.fn(),
-  requestWebpagePreviewRefreshMock: vi.fn(),
-}));
-
 vi.mock('@/s3', async () => {
   const actual = await vi.importActual<typeof import('@/s3')>('@/s3');
   return {
     ...actual,
     headObject: headObjectMock,
     getPresignedUrl: getPresignedUrlMock,
-  };
-});
-
-vi.mock('@/jobs', async () => {
-  const actual = await vi.importActual<typeof import('@/jobs')>('@/jobs');
-  return {
-    ...actual,
-    queueWebpageVerifyCapture: queueWebpageVerifyCaptureMock,
-    requestWebpagePreviewRefresh: requestWebpagePreviewRefreshMock,
   };
 });
 
@@ -110,8 +96,6 @@ describe('Media Routes - READY list pagination', () => {
   beforeEach(() => {
     headObjectMock.mockReset();
     getPresignedUrlMock.mockReset();
-    queueWebpageVerifyCaptureMock.mockReset();
-    requestWebpagePreviewRefreshMock.mockReset();
     getPresignedUrlMock.mockResolvedValue('http://signed.test/valid');
   });
 
@@ -179,94 +163,43 @@ describe('Media Routes - READY list pagination', () => {
     expect(body.pagination.total).toBeGreaterThanOrEqual(1);
   });
 
-  it('returns legacy webpage previews without starting read-triggered background work', async () => {
-    const db = getDatabase();
-    const mediaId = randomUUID();
-    const readyObjectId = randomUUID();
-    const objectKey = `${mediaId}/webpage-fallback.svg`;
-    const sourceUrl = 'https://example.com/dashboard';
-
-    headObjectMock.mockResolvedValue({
-      ContentLength: 4096,
-      ContentType: 'image/svg+xml',
-    });
-    getPresignedUrlMock.mockResolvedValue('http://signed.test/webpage-preview');
-
-    await db.insert(schema.storageObjects).values({
-      id: readyObjectId,
-      bucket: 'media-ready',
-      object_key: objectKey,
-      content_type: 'image/svg+xml',
-      size: 4096,
-    });
-
-    await db.insert(schema.media).values({
-      id: mediaId,
-      name: `legacy-webpage-${Date.now()}`,
-      type: 'WEBPAGE',
-      status: 'READY',
-      created_by: ownerUserId,
-      source_url: sourceUrl,
-      ready_object_id: readyObjectId,
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
-
+  it('rejects webpage creation and keeps the retired refresh route absent', async () => {
     const response = await server.inject({
-      method: 'GET',
-      url: '/api/v1/media?limit=20&page=1&status=READY&type=WEBPAGE',
-      headers: {
-        authorization: `Bearer ${ownerToken}`,
-      },
+      method: 'POST', url: '/api/v1/media',
+      headers: { authorization: `Bearer ${ownerToken}` },
+      payload: { name: 'Retired website', type: 'WEBPAGE', source_url: 'https://example.test/' },
     });
-
-    expect(response.statusCode).toBe(HTTP_STATUS.OK);
-    const body = JSON.parse(response.body);
-    expect(body.items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: mediaId,
-          type: 'WEBPAGE',
-          media_url: 'http://signed.test/webpage-preview',
-          fallback_media_url: 'http://signed.test/webpage-preview',
-        }),
-      ])
-    );
-    expect(queueWebpageVerifyCaptureMock).not.toHaveBeenCalled();
-  });
-
-  it('accepts an authorized manual refresh for READY webpage media', async () => {
-    const db = getDatabase();
-    const mediaId = randomUUID();
-    const requestedAt = new Date('2026-10-17T00:00:00.000Z');
-    await db.insert(schema.media).values({
-      id: mediaId,
-      name: `refreshable-webpage-${Date.now()}`,
-      type: 'WEBPAGE',
-      status: 'READY',
-      created_by: ownerUserId,
-      source_url: 'https://example.com/dashboard',
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
-    requestWebpagePreviewRefreshMock.mockResolvedValue({
-      mediaId,
-      refreshStatus: 'QUEUED',
-      requestedAt,
-    });
-
-    const response = await server.inject({
-      method: 'POST',
-      url: `/api/v1/media/${mediaId}/webpage-preview/refresh`,
+    expect(response.statusCode).toBe(410);
+    expect(JSON.parse(response.body).error.code).toBe('WEBPAGE_RETIRED');
+    const refresh = await server.inject({
+      method: 'POST', url: `/api/v1/media/${randomUUID()}/webpage-preview/refresh`,
       headers: { authorization: `Bearer ${ownerToken}` },
     });
+    expect(refresh.statusCode).toBe(404);
+  });
 
-    expect(response.statusCode).toBe(HTTP_STATUS.ACCEPTED);
-    expect(JSON.parse(response.body)).toEqual({
-      media_id: mediaId,
-      refresh_status: 'QUEUED',
-      requested_at: requestedAt.toISOString(),
+  it('rejects restoring historical webpage media without changing its deleted row', async () => {
+    const db = getDatabase();
+    const id = randomUUID();
+    const deletedAt = new Date('2026-11-03T00:00:00.000Z');
+    await db.insert(schema.media).values({
+      id,
+      name: 'Historical website',
+      type: 'WEBPAGE',
+      status: 'READY',
+      source_url: 'https://legacy.example.test/',
+      created_by: ownerUserId,
+      deleted_at: deletedAt,
     });
-    expect(requestWebpagePreviewRefreshMock).toHaveBeenCalledWith(expect.objectContaining({ mediaId }));
+
+    const response = await server.inject({
+      method: 'POST', url: `/api/v1/media/${id}/restore`,
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(response.statusCode).toBe(410);
+    expect(JSON.parse(response.body).error.code).toBe('WEBPAGE_RETIRED');
+    const [row] = await db.select().from(schema.media).where(eq(schema.media.id, id));
+    expect(row.deleted_at?.toISOString()).toBe(deletedAt.toISOString());
+    expect(row.source_url).toBe('https://legacy.example.test/');
   });
 });

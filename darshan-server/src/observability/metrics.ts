@@ -14,7 +14,6 @@ const OBSERVED_QUEUE_NAMES = [
   'ffmpeg:transcode',
   'ffmpeg:thumbnail',
   'document:convert',
-  'webpage:verify-capture',
   'archive',
   'cleanup',
   'chat:media-cleanup',

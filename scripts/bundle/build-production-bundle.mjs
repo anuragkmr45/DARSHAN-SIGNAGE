@@ -119,7 +119,6 @@ const commonExportEnv = {
   VALKEY_IMAGE: config.VALKEY_IMAGE,
   BACKUP_IMAGE_REF: config.BACKUP_IMAGE,
   NGINX_IMAGE: config.NGINX_IMAGE,
-  INSTALL_PLAYWRIGHT_CHROMIUM: config.INSTALL_PLAYWRIGHT_CHROMIUM,
 }
 
 const finalBundleRoot = path.join(config.BUNDLE_OUTPUT_BASE, config.SITE_NAME, config.RELEASE_ID)

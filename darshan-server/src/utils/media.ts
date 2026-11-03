@@ -21,10 +21,6 @@ type MediaRecord = {
   created_by?: string | null;
   created_at?: Date | string | null;
   updated_at?: Date | string | null;
-  webpage_preview_captured_at?: Date | string | null;
-  webpage_preview_attempted_at?: Date | string | null;
-  webpage_preview_refresh_token?: string | null;
-  webpage_preview_last_error?: string | null;
 };
 
 type SerializeMediaOptions = {
@@ -77,17 +73,7 @@ export const serializeMediaRecord = (
   const sourceContentType = options?.source_content_type ?? media.source_content_type;
   const size = options?.size ?? media.source_size;
   const isWebpage = (media.type ?? '').toUpperCase() === 'WEBPAGE';
-  const sourceUrl = trimToUndefined(media.source_url) ?? undefined;
-  const fallbackMediaUrl = mediaUrl ?? null;
-  const fallbackRevision = options?.ready_object_id ?? media.ready_object_id ?? null;
-  const fallbackCapturedAt = media.webpage_preview_captured_at ?? options?.ready_object_created_at;
-  const previewRefreshStatus = media.webpage_preview_refresh_token
-    ? 'REFRESHING'
-    : media.webpage_preview_last_error
-      ? 'FAILED'
-      : fallbackRevision
-        ? 'READY'
-        : 'MISSING';
+  const playableMediaUrl = isWebpage ? null : mediaUrl ?? null;
 
   return {
     id: media.id,
@@ -102,7 +88,7 @@ export const serializeMediaRecord = (
     source_object_key: media.source_object_key ?? undefined,
     source_content_type: sourceContentType ?? undefined,
     source_size: media.source_size ?? undefined,
-    source_url: sourceUrl ?? null,
+    source_url: null,
     size: size ?? undefined,
     ready_object_id: media.ready_object_id ?? undefined,
     thumbnail_object_id: media.thumbnail_object_id ?? undefined,
@@ -113,12 +99,12 @@ export const serializeMediaRecord = (
     created_by: media.created_by ?? undefined,
     created_at: toIso(media.created_at),
     updated_at: toIso(media.updated_at),
-    media_url: fallbackMediaUrl,
-    fallback_media_url: isWebpage ? fallbackMediaUrl : null,
-    fallback_media_revision: isWebpage ? fallbackRevision : null,
-    fallback_media_sha256: isWebpage ? (options?.ready_object_sha256 ?? null) : null,
-    fallback_media_captured_at: isWebpage ? (toIso(fallbackCapturedAt) ?? null) : null,
-    webpage_preview_refresh_status: isWebpage ? previewRefreshStatus : null,
-    webpage_preview_last_error: isWebpage ? (media.webpage_preview_last_error ?? null) : null,
+    media_url: playableMediaUrl,
+    fallback_media_url: null,
+    fallback_media_revision: null,
+    fallback_media_sha256: null,
+    fallback_media_captured_at: null,
+    webpage_preview_refresh_status: null,
+    webpage_preview_last_error: null,
   };
 };

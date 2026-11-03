@@ -108,13 +108,6 @@ MINIO_ACCESS_KEY=darshan1
 MINIO_SECRET_KEY=strong-minio-secret
 JWT_SECRET=01234567890123456789012345678901
 INITIAL_ADMIN_EMAIL=admin@example.test
-WEBPAGE_NAVIGATION_ALLOWLIST=display-content.example.test
-WEBPAGE_RESOURCE_ALLOWLIST=*.assets.example.test
-WEBPAGE_ALLOWED_CIDRS=10.20.0.0/24,fd00:20::/64
-WEBPAGE_ALLOWED_PORTS=443,8443
-WEBPAGE_ALLOW_HTTP=false
-WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=24
-WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=100
 BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_DAYS=30
 BACKUP_OFFHOST_DESTINATION=s3://offhost-backups.example.test/darshan/site-a
@@ -180,11 +173,6 @@ EXPORTER_PIDS_LIMIT=128
   assert.equal(loaded.config.CAPACITY_EVIDENCE_VALID_UNTIL, '2099-01-01T00:00:00.000Z')
   assert.equal(loaded.config.CAPACITY_EVIDENCE_SHA256, crypto.createHash('sha256').update(fs.readFileSync(capacityEvidence)).digest('hex'))
   assert.equal(loaded.config.PLAYER_TARGET_PLATFORMS, 'linux')
-  assert.deepEqual(loaded.outputs.WEBPAGE_ALLOWED_CIDRS, ['production/backend/.env.production', 'production/electron/config.json'])
-  assert.deepEqual(loaded.outputs.WEBPAGE_ALLOWED_PORTS, ['production/backend/.env.production', 'production/electron/config.json'])
-  assert.deepEqual(loaded.outputs.WEBPAGE_ALLOW_HTTP, ['production/backend/.env.production', 'production/electron/config.json'])
-  assert.deepEqual(loaded.outputs.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS, ['production/backend/.env.production'])
-  assert.deepEqual(loaded.outputs.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE, ['production/backend/.env.production'])
   assert.equal(loaded.config.SITE_PKI_DIR, secure)
 	  const validText = fs.readFileSync(envFile, 'utf8')
   assert.equal(loaded.config.INCLUDE_LIVE_MEDIA, 'false')
@@ -209,36 +197,9 @@ EXPORTER_PIDS_LIMIT=128
 	  assert.equal(loadProductionBundleConfig(envFile, root).config.RELEASE_ID, maxLengthReleaseId)
 	  fs.writeFileSync(capacityEvidence, validCapacityEvidence)
 	  fs.writeFileSync(envFile, validText)
-	  fs.writeFileSync(envFile, `${validText}\nINSTALL_PLAYWRIGHT_CHROMIUM=false\n`)
-	  assert.throws(() => loadProductionBundleConfig(envFile, root), /INSTALL_PLAYWRIGHT_CHROMIUM must be true/)
-  fs.writeFileSync(envFile, validText)
   fs.writeFileSync(envFile, validText.replace('PLAYER_TARGET_PLATFORMS=linux', 'PLAYER_TARGET_PLATFORMS=macos'))
   assert.throws(() => loadProductionBundleConfig(envFile, root), /PLAYER_TARGET_PLATFORMS must be/)
 
-  fs.writeFileSync(envFile, validText.replace('WEBPAGE_NAVIGATION_ALLOWLIST=display-content.example.test\n', ''))
-  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_NAVIGATION_ALLOWLIST is required/)
-
-  fs.writeFileSync(envFile, validText
-    .replace('WEBPAGE_NAVIGATION_ALLOWLIST=display-content.example.test', 'WEBPAGE_NAVIGATION_ALLOWLIST=*')
-    .replace('WEBPAGE_RESOURCE_ALLOWLIST=*.assets.example.test', 'WEBPAGE_RESOURCE_ALLOWLIST=*'))
-  assert.equal(loadProductionBundleConfig(envFile, root).config.WEBPAGE_NAVIGATION_ALLOWLIST, '*')
-
-  fs.writeFileSync(envFile, validText.replace('WEBPAGE_ALLOWED_PORTS=443,8443', 'WEBPAGE_ALLOWED_PORTS=443,70000'))
-  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOWED_PORTS contains invalid port/)
-
-  fs.writeFileSync(envFile, validText.replace('WEBPAGE_ALLOWED_CIDRS=10.20.0.0\/24,fd00:20::\/64', 'WEBPAGE_ALLOWED_CIDRS=10.20.0.0\/99'))
-  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_ALLOWED_CIDRS contains invalid CIDR/)
-
-  fs.writeFileSync(envFile, validText
-    .replace('WEBPAGE_ALLOWED_PORTS=443,8443', 'WEBPAGE_ALLOWED_PORTS=80,443')
-    .replace('WEBPAGE_ALLOW_HTTP=false', 'WEBPAGE_ALLOW_HTTP=true'))
-  assert.equal(loadProductionBundleConfig(envFile, root).config.WEBPAGE_ALLOW_HTTP, 'true')
-
-  fs.writeFileSync(envFile, validText.replace('WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=24', 'WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=0'))
-  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS must be an integer from 1 to 168/)
-
-  fs.writeFileSync(envFile, validText.replace('WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=100', 'WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=1001'))
-  assert.throws(() => loadProductionBundleConfig(envFile, root), /WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE must be an integer from 1 to 1000/)
   fs.writeFileSync(envFile, validText
     .replace('strong-postgres-pass', 'has:a:colon-password')
     .replace('strong-monitoring-password-123', 'has:a:strong-monitoring-password-123')
@@ -424,25 +385,22 @@ test('production state-service artifacts require verified TLS and authenticated 
   assert.match(production, /https:\/\/\$\{host\}:\$\{METRICS_GATEWAY_HOST_PORT\}\$\{path\}/)
 })
 
-test('generated player configs carry the centrally validated webpage policy', () => {
+test('generated player configs omit retired webpage settings', () => {
   const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
   const playerWriter = assembler.slice(
     assembler.indexOf('stage_player_bundle()'),
     assembler.indexOf('write_skip_placeholder()'),
   )
 
-  assert.match(playerWriter, /"allowedDomains": \$webpage_navigation_json/)
-  assert.match(playerWriter, /"webpageResourceDomains": \$webpage_resource_json/)
-  assert.match(playerWriter, /"webpageAllowedCidrs": \$webpage_cidrs_json/)
-  assert.match(playerWriter, /"webpageAllowedPorts": \$webpage_ports_json/)
-  assert.match(playerWriter, /"webpageAllowHttp": \$WEBPAGE_ALLOW_HTTP/)
+  assert.match(playerWriter, /"allowedDomains": \[\]/)
+  assert.doesNotMatch(playerWriter, /webpageResourceDomains|webpageAllowedCidrs|webpageAllowHttp/)
   assert.match(playerWriter, /"releaseId": "\$DARSHAN_RELEASE_ID"/)
   assert.match(playerWriter, /"sourceCommit": "\$PLAYER_SOURCE_COMMIT"/)
   assert.doesNotMatch(playerWriter, /degradedStatePollMs/)
   assert.match(assembler, /Could not derive one verified player source commit/)
 })
 
-test('production web media runtime settings are emitted by generated artifacts', () => {
+test('production PDF runtime and upload settings are emitted by generated artifacts', () => {
   const assembler = fs.readFileSync(repoPath('scripts/bundle/assemble-runtime-bundle.sh'), 'utf8')
   const backendComposeStart = assembler.indexOf('cat > "$PROD_BACKEND_DIR/docker-compose.yml"')
   const cmsNginxStart = assembler.indexOf('cat > "$PROD_CMS_DIR/nginx/default.conf"')
@@ -472,9 +430,9 @@ test('production web media runtime settings are emitted by generated artifacts',
   assert.match(backendCompose, /DARSHAN_EXPECTED_WORKER_UID: "1000"/)
   assert.match(backendCompose, /DARSHAN_EXPECTED_WORKER_GID: "1000"/)
   assert.doesNotMatch(backendCompose, /TMPDIR: \/var\/lib\/darshan-worker\/tmp/)
-  assert.match(assembler, /chromium-runtime-check\.sh/)
-  assert.match(assembler, /production:verify-chromium-runtime/)
-  assert.match(assembler, /run --rm --no-deps worker/)
+  assert.match(assembler, /pdf-runtime-check\.sh/)
+  assert.match(assembler, /soffice --version/)
+  assert.match(assembler, /run --rm --no-deps api/)
   assert.match(cmsNginx, /client_max_body_size 1000M;/)
   assert.match(sharedCmsTemplate, /client_max_body_size 1000M;/)
   for (const template of [cmsNginx, sharedCmsTemplate, productionCmsTemplate]) {

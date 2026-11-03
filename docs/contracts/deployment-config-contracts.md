@@ -22,7 +22,7 @@ This document describes deployment/config contracts visible in the repo. It does
 |---|---|---|---|
 | Data VM | generated bundle `production/data` | Postgres + MinIO | Owns DB and object storage volumes. |
 | Valkey VM | generated bundle `production/valkey` | Valkey | Realtime notification fanout only; not source of truth. |
-| Backend VM | generated bundle `production/backend` | backend API plus worker role containers and runtime tools | Backend image must contain Node 20, ffmpeg, LibreOffice, pg_dump, tar, Playwright Chromium when enabled; `deploy.sh` owns install/upgrade/adoption dispatch. |
+| Backend VM | generated bundle `production/backend` | backend API plus worker role containers and runtime tools | Backend image must contain Node 20, ffmpeg, LibreOffice, pg_dump, tar; `deploy.sh` owns install/upgrade/adoption dispatch. |
 | CMS VM | generated bundle `production/cms` | nginx static CMS image and runtime config | Serves built CMS, SPA fallback, `/api/v1`, `/socket.io`, and `/grafana` proxy paths where configured. |
 | Observability VM | generated bundle `production/observability` | Prometheus + Grafana | Consumes generated rules/dashboards/provisioning and protected credential files. |
 | Player machines | generated bundle `production/electron` plus production runbooks | packaged Electron installer plus `/etc/darshan/player/config.json` | Player is not a Docker server role; runtime identity/certs/cache stay on the player. |
@@ -66,7 +66,7 @@ an unsupported split.
 | LibreOffice | office/document conversion | runtime dependency validation, document processing paths | run backend container tool check and real document render smoke |
 | pg_dump | backups | settings/backup utilities and runtime dependency validation | run backup smoke only on a safe target |
 | tar | archive/backup support | runtime dependency validation | run backend tool check |
-| Playwright Chromium | webpage capture | webpage capture utilities and Docker build options | run webpage capture smoke on target container |
+| LibreOffice PDF export | Reports and Audit Logs | `src/utils/pdf-render.ts` | export and visually inspect representative PDFs in the target container |
 
 ## Runtime Evidence Required
 

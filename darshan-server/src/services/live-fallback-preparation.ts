@@ -435,6 +435,7 @@ export async function processLiveFallbackPreparation(
     const source = claim.row.source_graph as LiveFallbackSourceGraph;
     if (!source || source.version !== 1 || source.presentation?.id !== claim.row.presentation_id ||
         liveSchedulingFingerprint(source) !== claim.row.source_fingerprint) fail('FALLBACK_SOURCE_GRAPH_INVALID');
+    if (source.assets.some((asset) => asset.source_type === 'WEBPAGE')) fail('WEBPAGE_RETIRED');
     await repository.preflight(claim);
     assertActive(abort.signal);
     stage = await createPrivateStage(await privateStagingParent(dependencies.stagingParent), claim);

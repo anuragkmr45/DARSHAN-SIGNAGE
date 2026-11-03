@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, Globe2, Image as ImageIcon, Video as VideoIcon } from "lucide-react";
+import { FileText, Image as ImageIcon, Video as VideoIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MediaAsset } from "@/api/types";
 import { resolveMediaDisplayName } from "@/lib/media";
@@ -8,7 +8,6 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 type MediaPreviewProps = {
   media?: MediaAsset;
   url?: string;
-  webpageUrl?: string;
   type?: string;
   alt?: string;
   className?: string;
@@ -165,23 +164,12 @@ const resolveObjectFit = (fit: MediaPreviewProps["fit"]) => {
 
 export const resolveMediaPreviewSource = (media?: MediaAsset, url?: string, type?: string) => {
   const isWebpage = (media?.type ?? type ?? "").toLowerCase() === "webpage";
-  return isWebpage ? url ?? media?.fallback_media_url : url ?? media?.media_url;
-};
-
-export const resolveWebpageHostname = (media?: MediaAsset, webpageUrl?: string) => {
-  const candidate = webpageUrl ?? media?.source_url;
-  if (!candidate) return "Webpage";
-  try {
-    return new URL(candidate).hostname || "Webpage";
-  } catch {
-    return "Webpage";
-  }
+  return isWebpage ? undefined : url ?? media?.media_url;
 };
 
 export function MediaPreview({
   media,
   url,
-  webpageUrl,
   type,
   alt,
   className,
@@ -192,7 +180,6 @@ export function MediaPreview({
   videoLoop = false,
   pdfPage = 1,
 }: MediaPreviewProps) {
-  const isExplicitWebpage = (media?.type ?? type ?? "").toLowerCase() === "webpage";
   const sourceUrl = resolveMediaPreviewSource(media, url, type);
   const normalizedType = (
     type ??
@@ -220,11 +207,14 @@ export function MediaPreview({
 
   const showImage =
     Boolean(sourceUrl) &&
-    (isWebpage ||
-      normalizedType.startsWith("image/") ||
+    (normalizedType.startsWith("image/") ||
       normalizedType === "image" ||
       mediaType === "image" ||
       ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"].includes(extension));
+
+  if (isWebpage) {
+    return <div className={cn("rounded-md bg-muted p-4 text-sm", className)}>Webpage media is retired and cannot be played.</div>;
+  }
 
   if (showVideo) {
     return (
@@ -272,15 +262,8 @@ export function MediaPreview({
         className,
       )}
     >
-      {isWebpage ? <Globe2 className="h-5 w-5" /> : showVideo ? <VideoIcon className="h-5 w-5" /> : showImage ? <ImageIcon className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
-      <span className="line-clamp-2 max-w-full">
-        {alt ?? resolveMediaDisplayName(media) ?? "No preview available"}
-      </span>
-      {isWebpage && (media?.source_url || webpageUrl) && (
-        <span className="line-clamp-1 max-w-full opacity-75">
-          {resolveWebpageHostname(media, webpageUrl)}
-        </span>
-      )}
+      <FileText className="h-5 w-5" />
+      <span className="line-clamp-2 max-w-full">{alt ?? resolveMediaDisplayName(media) ?? "No preview available"}</span>
     </div>
   );
 }

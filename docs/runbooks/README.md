@@ -64,7 +64,7 @@ The following must be tested on real targets before they are treated as verified
 
 - browser CMS QA,
 - packaged player install/autostart/pair/reset/re-pair,
-- video/image/PDF/office/webpage rendering,
+- video/image/PDF/office rendering,
 - screenshot capture,
 - proof-of-play queue/replay,
 - Socket.IO/Valkey latency and polling fallback,

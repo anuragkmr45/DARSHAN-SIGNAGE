@@ -55,7 +55,7 @@ describe('Settings Client', () => {
     expect(parsed.media).to.equal(null)
   })
 
-  it('should parse webpage default media with fallback preview metadata', () => {
+  it('ignores retired webpage default media even with preview metadata', () => {
     const raw = {
       source: 'GLOBAL',
       media_id: 'media-webpage',
@@ -77,17 +77,11 @@ describe('Settings Client', () => {
     const parsed = normalizeDefaultMediaResponse(raw)
 
     expect(parsed.source).to.equal('GLOBAL')
-    expect(parsed.media_id).to.equal('media-webpage')
-    expect(parsed.media?.type).to.equal('WEBPAGE')
-    expect(parsed.media?.source_url).to.equal('https://status.example.com')
-    expect(parsed.media?.fallback_media_url).to.equal('https://cdn.example.com/webpage-fallback.svg')
-    expect(parsed.media?.media_url).to.equal('https://cdn.example.com/webpage-fallback.svg')
-    expect(parsed.media?.fallback_media_revision).to.equal('ready-object-v2')
-    expect(parsed.media?.fallback_media_sha256).to.equal('a'.repeat(64))
-    expect(parsed.media?.webpage_preview_refresh_status).to.equal('READY')
+    expect(parsed.media_id).to.equal(null)
+    expect(parsed.media).to.equal(null)
   })
 
-  it('should parse webpage default media when only a live source_url is available', () => {
+  it('ignores retired webpage default media with only a source URL', () => {
     const raw = {
       source: 'GLOBAL',
       media_id: 'media-webpage-live',
@@ -105,10 +99,7 @@ describe('Settings Client', () => {
     const parsed = normalizeDefaultMediaResponse(raw)
 
     expect(parsed.source).to.equal('GLOBAL')
-    expect(parsed.media_id).to.equal('media-webpage-live')
-    expect(parsed.media?.type).to.equal('WEBPAGE')
-    expect(parsed.media?.source_url).to.equal('https://status.example.com/live')
-    expect(parsed.media?.media_url).to.equal(undefined)
-    expect(parsed.media?.fallback_media_url).to.equal(undefined)
+    expect(parsed.media_id).to.equal(null)
+    expect(parsed.media).to.equal(null)
   })
 })

@@ -3,7 +3,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { AppError } from '@/utils/app-error';
-import { ipMatchesCidr, isHardDeniedAddress, isPrivateAddress, webpageHostMatches } from '@/utils/webpage-url-policy';
+import { ipMatchesCidr, isHardDeniedAddress, isPrivateAddress, hostMatches } from '@/utils/network-address-policy';
 
 const MAX_REDIRECTS = 2;
 const MAX_RESPONSE_BYTES = 64 * 1024;
@@ -80,7 +80,7 @@ export async function validateWebhookTestDestination(
   const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
   if (!policy.ports.includes(port)) return blocked('Webhook Test port is not approved.');
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (!policy.hosts.some((pattern) => webpageHostMatches(host, pattern))) {
+  if (!policy.hosts.some((pattern) => hostMatches(host, pattern))) {
     return blocked('Webhook Test host is not approved.');
   }
   let addresses: string[];

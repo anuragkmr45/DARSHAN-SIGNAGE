@@ -3,9 +3,7 @@
  */
 
 import type { DefaultMediaResponse, DefaultMediaItem } from '../common/types'
-import type { WebpagePlaybackOptions } from './webpage-playback.js'
 import { createPdfPlaybackElement } from './pdf-playback'
-import { createWebpagePlaybackElement } from './webpage-playback'
 import {
   resolveDefaultMediaSource,
   teardownDefaultMediaElementTree,
@@ -18,7 +16,7 @@ export interface DefaultMediaPlayerOptions {
   getContentEpoch?: () => string | undefined
   debugOverlay?: boolean
   onRefreshRequested?: (reason: string) => void
-  onLog?: WebpagePlaybackOptions['onLog']
+  onLog?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: Record<string, unknown>) => void
 }
 
 export class DefaultMediaPlayer {
@@ -32,15 +30,11 @@ export class DefaultMediaPlayer {
   private retryAttempt = 0
   private debugEnabled = false
   private onRefreshRequested?: (reason: string) => void
-  private onLog?: WebpagePlaybackOptions['onLog']
-  private getContentEpoch?: () => string | undefined
   private lastMediaKey?: string
 
   constructor(container: HTMLElement, options: DefaultMediaPlayerOptions = {}) {
     this.container = container
     this.onRefreshRequested = options.onRefreshRequested
-    this.onLog = options.onLog
-    this.getContentEpoch = options.getContentEpoch
     this.debugEnabled = options.debugOverlay === true
 
     this.content = document.createElement('div')
@@ -144,9 +138,6 @@ export class DefaultMediaPlayer {
       case 'DOCUMENT':
         element = this.renderDocument(media)
         break
-      case 'WEBPAGE':
-        element = this.renderWebpage(media)
-        break
       default:
         element = this.renderUnsupported(media)
         break
@@ -213,48 +204,6 @@ export class DefaultMediaPlayer {
     }
 
     return this.renderUnsupported(media)
-  }
-
-  private renderWebpage(media: DefaultMediaItem): HTMLElement {
-    const liveUrl = typeof media.source_url === 'string' ? media.source_url : undefined
-    const fallbackUrl = media.local_url || media.fallback_media_url || media.media_url
-
-    if (!liveUrl) {
-      if (fallbackUrl) {
-        return this.renderImage({
-          ...media,
-          media_url: fallbackUrl,
-        })
-      }
-
-      return this.renderUnsupported(media)
-    }
-
-    return createWebpagePlaybackElement({
-      contentEpoch: this.getContentEpoch?.(),
-      liveUrl,
-      fallbackUrl,
-      fallbackFit: 'contain',
-      onHealthy: () => {
-        this.markHealthy()
-      },
-      onFallback: (reason) => {
-        if (fallbackUrl) {
-          this.showStatus('Using cached webpage preview')
-          this.scheduleRefresh(reason)
-          return
-        }
-
-        this.handlePlaybackError(reason)
-      },
-      onLog: (level, message, data) => {
-        this.onLog?.(level, message, {
-          mediaId: media.id,
-          mediaType: media.type,
-          ...data,
-        })
-      },
-    })
   }
 
   private renderUnsupported(media: DefaultMediaItem): HTMLElement {

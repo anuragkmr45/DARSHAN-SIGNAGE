@@ -13,7 +13,7 @@ import { CacheError, DeviceApiError, LayoutScene, PlaybackMode, TimelineItem } f
 import { atomicWrite, ensureDir } from '../../common/utils'
 import { getHttpClient } from './network/http-client'
 import { getPairingService } from './pairing-service'
-import { buildRevisionedCacheKey, getCacheManager } from './cache/cache-manager'
+import { getCacheManager } from './cache/cache-manager'
 import { NormalizedSnapshot, parseSnapshotResponse } from './snapshot-parser'
 import { getLifecycleEvents } from './lifecycle-events'
 import { getSecurePlaybackGuard } from './secure-playback-guard'
@@ -489,6 +489,7 @@ export class SnapshotManager extends EventEmitter {
       playbackMode?: Exclude<PlaybackMode, 'live'>
     }> = []
     for (const item of prioritizedItems) {
+      if (item.type === 'url') continue
       if (!item.mediaId) {
         continue
       }
@@ -500,25 +501,14 @@ export class SnapshotManager extends EventEmitter {
             ? 'DEFAULT_MEDIA'
             : 'SNAPSHOT'
 
-      const cacheUrl =
-        item.type === 'url'
-          ? (typeof item.meta?.['fallback_url'] === 'string' ? String(item.meta?.['fallback_url']) : undefined)
-          : item.remoteUrl
+      const cacheUrl = item.remoteUrl
 
       if (!cacheUrl) {
         continue
       }
 
-      const fallbackRevision = item.type === 'url'
-        ? (typeof item.meta?.['fallback_revision'] === 'string'
-            ? String(item.meta?.['fallback_revision'])
-            : typeof item.meta?.['fallback_sha256'] === 'string'
-              ? String(item.meta?.['fallback_sha256'])
-              : undefined)
-        : undefined
-
       prefetchItems.push({
-        mediaId: buildRevisionedCacheKey(item.mediaId, fallbackRevision),
+        mediaId: item.mediaId,
         url: cacheUrl,
         sha256: item.sha256,
         contentType:
@@ -554,26 +544,13 @@ export class SnapshotManager extends EventEmitter {
     ]
     const requiredKeys = new Set<string>()
     for (const item of [...scheduledItems, snapshot.defaultItem, snapshot.emergencyItem].filter(Boolean) as TimelineItem[]) {
-      if (item.type === 'message') {
-        continue
-      }
-      if (item.type === 'url' && typeof item.meta?.['fallback_url'] !== 'string') {
-        if (!item.remoteUrl) {
-          return false
-        }
+      if (item.type === 'message' || item.type === 'url') {
         continue
       }
       if (!item.mediaId) {
         return false
       }
-      const revision = item.type === 'url'
-        ? (typeof item.meta?.['fallback_revision'] === 'string'
-            ? String(item.meta['fallback_revision'])
-            : typeof item.meta?.['fallback_sha256'] === 'string'
-              ? String(item.meta['fallback_sha256'])
-              : undefined)
-        : undefined
-      requiredKeys.add(buildRevisionedCacheKey(item.mediaId, revision))
+      requiredKeys.add(item.mediaId)
     }
     const readiness = await Promise.all([...requiredKeys].map((cacheKey) => cacheManager.has(cacheKey)))
     return readiness.every(Boolean)
@@ -730,7 +707,7 @@ export class SnapshotManager extends EventEmitter {
   private findSignedUrlRefreshAt(snapshot: NormalizedSnapshot): number | undefined {
     const urls = new Set<string>()
     const collect = (item?: TimelineItem) => {
-      if (!item) return
+      if (!item || item.type === 'url') return
       if (item.remoteUrl) urls.add(item.remoteUrl)
       const fallback = item.meta?.['fallback_url']
       if (typeof fallback === 'string') urls.add(fallback)
@@ -785,28 +762,19 @@ export class SnapshotManager extends EventEmitter {
 
     const hydrated: TimelineItem[] = []
     for (const item of items) {
+      if (item.type === 'url') {
+        hydrated.push({ ...item, remoteUrl: undefined, localPath: undefined, localUrl: undefined, meta: { name: item.meta?.['name'] } })
+        continue
+      }
       const mediaId = item.mediaId || item.objectKey
       const contentType =
         typeof item.meta?.['content_type'] === 'string' ? String(item.meta?.['content_type']) : undefined
       let localPath: string | undefined
-      let cacheKey = mediaId
       if (mediaId) {
-        if (item.type === 'url') {
-          const requestedRevision =
-            typeof item.meta?.['fallback_revision'] === 'string'
-              ? String(item.meta?.['fallback_revision'])
-              : typeof item.meta?.['fallback_sha256'] === 'string'
-                ? String(item.meta?.['fallback_sha256'])
-                : undefined
-          const resolved = await cacheManager.resolveRevisioned(mediaId, requestedRevision, contentType)
-          localPath = resolved?.localPath
-          cacheKey = resolved?.cacheKey ?? buildRevisionedCacheKey(mediaId, requestedRevision)
-        } else {
-          localPath = await cacheManager.get(mediaId, contentType)
-        }
+        localPath = await cacheManager.get(mediaId, contentType)
       }
 
-      if (!localPath && item.type !== 'url' && item.type !== 'message') {
+      if (!localPath && item.type !== 'message') {
         logger.warn({ mediaId }, 'Media not cached, keeping remote playback source')
       }
 
@@ -822,13 +790,7 @@ export class SnapshotManager extends EventEmitter {
         ...item,
         localPath,
         localUrl: fallbackLocalUrl,
-        meta: item.type === 'url'
-          ? {
-              ...(item.meta ?? {}),
-              fallback_local_url: fallbackLocalUrl,
-              cache_key: cacheKey,
-            }
-          : item.meta,
+        meta: item.meta,
       })
     }
 

@@ -104,7 +104,6 @@ export const endpoints = {
     byId: (mediaId: string) => `/media/${mediaId}`,
     deleted: '/media/deleted',
     restore: (mediaId: string) => `/media/${mediaId}/restore`,
-    webpagePreviewRefresh: (mediaId: string) => `/media/${mediaId}/webpage-preview/refresh`,
   },
   metrics: {
     overview: "/metrics/overview",

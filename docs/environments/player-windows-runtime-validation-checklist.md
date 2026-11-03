@@ -137,15 +137,14 @@ Validate all supported content types:
 - image
 - video
 - PDF
-- webpage
+- retired webpage item shows Content unavailable without network loading
 - default/fallback media
 
 Checks:
 
 - autoplay and looping work
 - transitions render correctly
-- webpage playback via `webview` loads and obeys lockdown/navigation restrictions
-- renderer recovery works after webpage failure or unresponsive state
+- renderer remains stable when a retired webpage item appears in an old snapshot
 
 Expected result:
 

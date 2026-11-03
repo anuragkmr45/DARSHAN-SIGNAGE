@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload, Image as ImageIcon, Video, FileText, Copy, Trash2, Globe, ExternalLink, RefreshCw } from "lucide-react";
+import { Upload, Image as ImageIcon, Video, FileText, Copy, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +39,7 @@ type MediaLibraryLocationState = {
   openUpload?: boolean;
 };
 
-type MediaTab = "all" | "image" | "video" | "document" | "webpage";
+type MediaTab = "all" | "image" | "video" | "document";
 
 const MEDIA_PAGE_SIZE = 6;
 
@@ -56,14 +56,10 @@ const resolveLibraryMediaType = (media: MediaAsset): MediaType => {
 };
 
 const resolvePrimaryMediaUrl = (media: MediaAsset) =>
-  resolveLibraryMediaType(media) === "WEBPAGE"
-    ? media.fallback_media_url ?? media.media_url ?? null
-    : media.media_url ?? null;
+  resolveLibraryMediaType(media) === "WEBPAGE" ? null : media.media_url ?? null;
 
 const resolveCopyTargetUrl = (media: MediaAsset) =>
-  resolveLibraryMediaType(media) === "WEBPAGE"
-    ? media.source_url ?? media.fallback_media_url ?? media.media_url ?? null
-    : media.media_url ?? null;
+  resolveLibraryMediaType(media) === "WEBPAGE" ? null : media.media_url ?? null;
 
 const resolveStatusLabel = (media: MediaAsset) => media.status ?? "PENDING";
 const resolvePlayableMimeType = (media: MediaAsset) => media.content_type || media.source_content_type || null;
@@ -74,19 +70,6 @@ const isConvertedDocument = (media: MediaAsset) =>
   Boolean(media.source_content_type) &&
   media.source_content_type !== "application/pdf" &&
   resolvePlayableMimeType(media) === "application/pdf";
-
-const getFriendlyWebpagePolicyError = (error: unknown) => {
-  if (!(error instanceof ApiError)) return "Unable to add webpage.";
-  const messages: Record<string, string> = {
-    WEBPAGE_SCHEME_BLOCKED: "This URL scheme is not enabled. Use HTTP or HTTPS allowed by the deployment.",
-    WEBPAGE_HOST_NOT_ALLOWED: "This website host is not on the approved list.",
-    WEBPAGE_PORT_BLOCKED: "This website uses a port that is not approved.",
-    WEBPAGE_CREDENTIALS_BLOCKED: "URLs containing a username or password are not supported.",
-    WEBPAGE_ADDRESS_BLOCKED: "This website resolves to a private or protected address that is not approved.",
-    WEBPAGE_REDIRECT_BLOCKED: "The website redirected to a destination that is not approved.",
-  };
-  return messages[error.code] ?? error.message;
-};
 
 const copyTextToClipboard = async (text: string) => {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText && window.isSecureContext) {
@@ -155,14 +138,10 @@ export default function MediaLibrary() {
     image: 1,
     video: 1,
     document: 1,
-    webpage: 1,
   });
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [isWebpageOpen, setIsWebpageOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [displayName, setDisplayName] = useState("");
-  const [webpageName, setWebpageName] = useState("");
-  const [webpageUrl, setWebpageUrl] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadResult, setUploadResult] = useState<UploadMediaResult | null>(null);
   const [previewMedia, setPreviewMedia] = useState<MediaAsset | null>(null);
@@ -291,103 +270,6 @@ export default function MediaLibrary() {
     },
   });
 
-  const webpageMutation = useMutation({
-    mutationFn: async () => {
-      return await mediaApi.createMetadata({
-        name: webpageName.trim(),
-        type: "WEBPAGE",
-        source_url: webpageUrl.trim(),
-      });
-    },
-    onSuccess: (media) => {
-      toast({
-        title: "Webpage added",
-        description:
-          media.status === "READY"
-            ? "The webpage asset is ready to use."
-            : "The server is verifying the webpage and generating a fallback preview.",
-      });
-      setIsWebpageOpen(false);
-      setWebpageName("");
-      setWebpageUrl("");
-      void queryClient.invalidateQueries({ queryKey: ["media"] });
-
-      if (media.status === "PROCESSING") {
-        void waitForMediaReady(media.id)
-          .then(() => {
-            void queryClient.invalidateQueries({ queryKey: ["media"] });
-            toast({
-              title: "Webpage ready",
-              description: `${resolveMediaDisplayName(media)} is now ready to use.`,
-            });
-          })
-          .catch((error) => {
-            toast({
-              title: "Webpage verification failed",
-              description: getFriendlyUploadError(error),
-              variant: "destructive",
-            });
-          });
-      }
-    },
-    onError: (error) => {
-      const message = getFriendlyWebpagePolicyError(error);
-      toast({ title: "Create failed", description: message, variant: "destructive" });
-    },
-  });
-
-  const previewRefreshMutation = useMutation({
-    mutationFn: async (media: MediaAsset) => {
-      const priorRevision = media.fallback_media_revision ?? null;
-      const request = await mediaApi.refreshWebpagePreview(media.id);
-      const requestedAt = Date.parse(request.requested_at);
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 2000));
-        const refreshed = await mediaApi.getById(media.id);
-        const capturedAt = refreshed.fallback_media_captured_at
-          ? Date.parse(refreshed.fallback_media_captured_at)
-          : Number.NaN;
-        if (
-          refreshed.fallback_media_revision !== priorRevision ||
-          (Number.isFinite(capturedAt) && capturedAt >= requestedAt) ||
-          refreshed.webpage_preview_refresh_status === "FAILED"
-        ) {
-          return refreshed;
-        }
-      }
-      return await mediaApi.getById(media.id);
-    },
-    onMutate: (media) => {
-      setPreviewMedia((current) =>
-        current?.id === media.id
-          ? { ...current, webpage_preview_refresh_status: "REFRESHING" }
-          : current,
-      );
-    },
-    onSuccess: (media) => {
-      setPreviewMedia(media);
-      void queryClient.invalidateQueries({ queryKey: ["media"] });
-      toast({
-        title: media.webpage_preview_refresh_status === "FAILED" ? "Preview refresh failed" : "Preview refreshed",
-        description:
-          media.webpage_preview_refresh_status === "FAILED"
-            ? "The last successful screenshot is still available."
-            : "The latest successful webpage screenshot is now available.",
-        variant: media.webpage_preview_refresh_status === "FAILED" ? "destructive" : "default",
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Preview refresh failed",
-        description: error instanceof ApiError ? error.message : "Unable to request a new preview.",
-        variant: "destructive",
-      });
-      if (previewMedia) {
-        void mediaApi.getById(previewMedia.id).then(setPreviewMedia).catch(() => undefined);
-      }
-    },
-  });
-
   const activePage = pageByTab[activeTab];
   const typeFilter = (activeTab === "all" ? undefined : activeTab.toUpperCase()) as MediaType | undefined;
 
@@ -420,10 +302,6 @@ export default function MediaLibrary() {
       {
         queryKey: ["media", "stats", "document"],
         queryFn: () => mediaApi.list({ page: 1, limit: 1, type: "DOCUMENT" }),
-      },
-      {
-        queryKey: ["media", "stats", "webpage"],
-        queryFn: () => mediaApi.list({ page: 1, limit: 1, type: "WEBPAGE" }),
       },
     ],
   });
@@ -501,13 +379,6 @@ export default function MediaLibrary() {
   }, [isUploadOpen]);
 
   useEffect(() => {
-    if (!isWebpageOpen) {
-      setWebpageName("");
-      setWebpageUrl("");
-    }
-  }, [isWebpageOpen]);
-
-  useEffect(() => {
     if (locationState?.openUpload) {
       setIsUploadOpen(true);
     }
@@ -532,8 +403,7 @@ export default function MediaLibrary() {
           activeTab === "all" ||
           (activeTab === "image" && typeKey === "IMAGE") ||
           (activeTab === "video" && typeKey === "VIDEO") ||
-          (activeTab === "document" && typeKey === "DOCUMENT") ||
-          (activeTab === "webpage" && typeKey === "WEBPAGE");
+          (activeTab === "document" && typeKey === "DOCUMENT");
         return matchesTab;
       }),
     [media, activeTab]
@@ -544,8 +414,7 @@ export default function MediaLibrary() {
     const images = statsQueries[1]?.data?.total ?? 0;
     const videos = statsQueries[2]?.data?.total ?? 0;
     const documents = statsQueries[3]?.data?.total ?? 0;
-    const webpages = statsQueries[4]?.data?.total ?? 0;
-    return { total, images, videos, documents, webpages };
+    return { total, images, videos, documents };
   }, [statsQueries]);
 
   useEffect(() => {
@@ -567,15 +436,11 @@ export default function MediaLibrary() {
         <div className="min-w-0">
           <h1 className="text-3xl font-bold text-foreground">Media Library</h1>
           <p className="text-muted-foreground mt-1">
-            Browse uploaded assets, conversion jobs, and webpage playback items.
+            Browse uploaded assets and conversion jobs.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canRestore && <Button variant="outline" onClick={() => setShowDeleted(true)}>Deleted Media</Button>}
-          <Button variant="outline" onClick={() => setIsWebpageOpen(true)}>
-            <Globe className="h-4 w-4 mr-2" />
-            Add Webpage
-          </Button>
           <Button variant="outline" onClick={() => setIsUploadOpen(true)}>
             <Upload className="h-4 w-4 mr-2" />
             Upload Media
@@ -583,12 +448,11 @@ export default function MediaLibrary() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Total Files" value={stats.total} icon={<FileText className="h-5 w-5 text-primary" />} />
         <StatCard title="Images" value={stats.images} icon={<ImageIcon className="h-5 w-5 text-blue-600" />} />
         <StatCard title="Videos" value={stats.videos} icon={<Video className="h-5 w-5 text-purple-600" />} />
         <StatCard title="Documents" value={stats.documents} icon={<FileText className="h-5 w-5 text-orange-600" />} />
-        <StatCard title="Webpages" value={stats.webpages} icon={<Globe className="h-5 w-5 text-emerald-600" />} />
       </div>
 
       <Card className="p-4">
@@ -599,7 +463,6 @@ export default function MediaLibrary() {
               <TabsTrigger value="image" className="shrink-0">Images</TabsTrigger>
               <TabsTrigger value="video" className="shrink-0">Videos</TabsTrigger>
               <TabsTrigger value="document" className="shrink-0">Documents</TabsTrigger>
-              <TabsTrigger value="webpage" className="shrink-0">Webpages</TabsTrigger>
             </TabsList>
           </Tabs>
           <div className="text-sm text-muted-foreground">
@@ -656,21 +519,6 @@ export default function MediaLibrary() {
                         preload="metadata"
                         onClick={(e) => e.stopPropagation()}
                       />
-                    ) : resolveLibraryMediaType(item) === "WEBPAGE" ? (
-                      <div className="relative h-40 w-full overflow-hidden bg-slate-950">
-                        <img
-                          src={resolvePrimaryMediaUrl(item) ?? undefined}
-                          alt={resolveMediaLabel(item)}
-                          className="h-full w-full object-cover opacity-80"
-                          loading="lazy"
-                        />
-                        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 px-3 py-2 text-white">
-                          <div className="min-w-0">
-                            <p className="truncate text-xs font-medium">{item.source_url ?? "Webpage"}</p>
-                          </div>
-                          <Globe className="h-4 w-4 shrink-0" />
-                        </div>
-                      </div>
                     ) : resolveLibraryMediaType(item) === "DOCUMENT" && isPdfLikeMedia(item) ? (
                       <div className="relative h-40 w-full">
                         <MediaPreview
@@ -713,13 +561,13 @@ export default function MediaLibrary() {
                   </div>
                 ) : (
                   <div className="h-40 w-full flex flex-col items-center justify-center gap-2 rounded-md border bg-muted/30 px-4 text-center">
-                    {resolveLibraryMediaType(item) === "WEBPAGE" ? <Globe className="h-8 w-8 text-primary" /> : <FileText className="h-8 w-8 text-primary" />}
+                    <FileText className="h-8 w-8 text-primary" />
                     <p className="text-xs text-muted-foreground">
                       {item.status === "PROCESSING"
                         ? "Processing on the server"
                         : item.status === "FAILED"
                         ? "Processing failed"
-                        : "No preview available"}
+                        : resolveLibraryMediaType(item) === "WEBPAGE" ? "Retired webpage item" : "No preview available"}
                     </p>
                   </div>
                 )}
@@ -766,17 +614,6 @@ export default function MediaLibrary() {
                     <div>Original format: {resolveMediaSourceFormat(item).label}</div>
                     {isConvertedDocument(item) ? <div>Screen playback: converted PDF</div> : null}
                     {item.page_count ? <div>{item.page_count} page{item.page_count === 1 ? "" : "s"}</div> : null}
-                  </div>
-                ) : null}
-                {resolveLibraryMediaType(item) === "WEBPAGE" && item.source_url ? (
-                  <div className="space-y-1 text-xs">
-                    <div className="break-all">URL: {item.source_url}</div>
-                    <div>Playback is anonymous/public only. CMS login state is not reused.</div>
-                  </div>
-                ) : null}
-                {resolveLibraryMediaType(item) === "WEBPAGE" && item.fallback_media_url ? (
-                  <div className="text-xs">
-                    Fallback preview: server-captured screenshot
                   </div>
                 ) : null}
                 {resolveMediaUpdatedLabel(item) && (
@@ -883,50 +720,6 @@ export default function MediaLibrary() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isWebpageOpen} onOpenChange={setIsWebpageOpen}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>Add Webpage</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="webpage-name">Display name</Label>
-              <Input
-                id="webpage-name"
-                value={webpageName}
-                onChange={(event) => setWebpageName(event.target.value)}
-                placeholder="Marketing site homepage"
-                disabled={webpageMutation.isPending}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="webpage-url">Webpage URL</Label>
-              <Input
-                id="webpage-url"
-                value={webpageUrl}
-                onChange={(event) => setWebpageUrl(event.target.value)}
-                placeholder="https://example.com or http://example.com"
-                disabled={webpageMutation.isPending}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              HTTP and HTTPS are supported when approved by your deployment. HTTP is unencrypted. The server captures a fallback screenshot; authenticated pages and CMS login cookies are not supported on screens.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsWebpageOpen(false)} disabled={webpageMutation.isPending}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => webpageMutation.mutate()}
-              disabled={!webpageName.trim() || !webpageUrl.trim() || webpageMutation.isPending}
-            >
-              {webpageMutation.isPending ? "Saving..." : "Add Webpage"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {previewMedia && (
         <Dialog open={!!previewMedia} onOpenChange={(open) => (open ? null : closePreview())}>
           <DialogContent className="max-h-[95vh] overflow-y-auto sm:max-w-[800px]">
@@ -944,7 +737,9 @@ export default function MediaLibrary() {
                   <p>Could not load a current preview link.</p>
                   <Button variant="outline" onClick={() => void previewDetailQuery.refetch()}>Retry</Button>
                 </div>
-              ) : previewRecord && (resolvePrimaryMediaUrl(previewRecord) || previewRecord.source_url) ? (
+              ) : previewRecord && resolveLibraryMediaType(previewRecord) === "WEBPAGE" ? (
+                <div className="rounded border p-4">Webpage media is retired and cannot be played.</div>
+              ) : previewRecord && resolvePrimaryMediaUrl(previewRecord) ? (
                 resolveLibraryMediaType(previewRecord) === "IMAGE" || (previewRecord.content_type || "").startsWith("image/") ? (
                   <img
                     src={resolvePrimaryMediaUrl(previewRecord) ?? undefined}
@@ -958,56 +753,6 @@ export default function MediaLibrary() {
                     controls
                     preload="metadata"
                   />
-                ) : resolveLibraryMediaType(previewRecord) === "WEBPAGE" ? (
-                  <div className="space-y-3">
-                    {resolvePrimaryMediaUrl(previewMedia) ? (
-                      <img
-                        src={resolvePrimaryMediaUrl(previewMedia) ?? undefined}
-                        alt={resolveMediaLabel(previewMedia)}
-                        className="w-full max-h-[420px] rounded-md border object-contain"
-                      />
-                    ) : null}
-                    <div className="flex items-center justify-between rounded-md border bg-muted/30 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Live URL</p>
-                        <p className="truncate text-sm">{previewMedia.source_url ?? "Unavailable"}</p>
-                      </div>
-                      {previewMedia.source_url ? (
-                        <Button variant="outline" size="sm" asChild>
-                          <a href={previewMedia.source_url} target="_blank" rel="noreferrer">
-                            <ExternalLink className="mr-2 h-4 w-4" />
-                            Open Live
-                          </a>
-                        </Button>
-                      ) : null}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Playback uses the live URL only when it loads anonymously. Screens fall back to the captured preview when the live page is unavailable.
-                    </p>
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <div>
-                        {previewMedia.fallback_media_captured_at
-                          ? `Captured ${new Date(previewMedia.fallback_media_captured_at).toLocaleString()}`
-                          : "No successful capture time available"}
-                        {previewMedia.webpage_preview_last_error
-                          ? ` · Latest refresh failed (${previewMedia.webpage_preview_last_error}); showing the last successful preview.`
-                          : null}
-                      </div>
-                      {previewMedia.permissions?.can_update === true ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={previewRefreshMutation.isPending || previewMedia.webpage_preview_refresh_status === "REFRESHING"}
-                          onClick={() => previewRefreshMutation.mutate(previewMedia)}
-                        >
-                          <RefreshCw className={`mr-2 h-4 w-4 ${previewRefreshMutation.isPending ? "animate-spin" : ""}`} />
-                          {previewRefreshMutation.isPending || previewMedia.webpage_preview_refresh_status === "REFRESHING"
-                            ? "Refreshing..."
-                            : "Refresh preview"}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
                 ) : resolveLibraryMediaType(previewRecord) === "DOCUMENT" && isPdfLikeMedia(previewRecord) ? (
                   <div className="space-y-3">
                     <MediaPreview

@@ -1,8 +1,12 @@
-# Webpage playback contract
+# Webpage Media retirement
 
-- An operator adds an approved HTTP or HTTPS URL as `WEBPAGE` Media. The server validates the URL and every capture request against the configured host, port, and CIDR policy, then captures an anonymous screenshot. `READY` means a valid HTML page was captured; it does not prove that the intended business content appeared.
-- `source_url` remains the URL entered by the operator. A successful redirect may supply the captured image, but its final destination must not replace the entry URL. This lets the player repeat redirects that set first-party cookies. Existing Media whose source URL was rewritten by older workers retain that value; recreate those items from the original URL if the redirect is required.
-- The CMS preview shows the saved screenshot. “Open Live” opens the URL in the operator's own browser. Neither action transfers CMS cookies or credentials into the server capture or player.
-- The player uses an isolated, nonpersistent Chromium session for live playback. It follows only policy-approved requests and redirects, denies permission prompts and downloads, and rejects HTTP authentication challenges. Login-required pages are outside this release's supported webpage scope.
-- The player keeps the saved preview visible while a live page loads, when it fails to load, and when its main document returns HTTP `4xx` or `5xx`. A live page replaces the preview only after its main document succeeds and the content probe passes. An error page or login form can still return HTTP `200`; operators must inspect the CMS preview before publishing it.
-- A failed preview refresh keeps the last successful image and revision. The player caches that image for offline fallback. The backend and player must both approve the same destination hosts, ports, and private address ranges; backend capture success alone does not establish player reachability.
+Webpage Media is retired for the QA candidate. This file records the replacement contract so older links do not imply that webpage capture or player playback still exists.
+
+- CMS cannot create or refresh webpage Media. Historical rows remain visible in the Media library as retired records, without a playable preview.
+- The API returns `410 WEBPAGE_RETIRED` for new webpage Media and restore requests. New presentation, schedule, emergency, default, and live fallback references are rejected. The old preview refresh route is absent.
+- The worker no longer captures or refreshes webpages. The backend image does not install Playwright Chromium.
+- Players reject webpage and URL schedule items and show a controlled unavailable state. They never load the URL or a cached webpage preview.
+- Database enum values and historical columns are retained to avoid destructive migration. Existing history is not proof of a supported media type.
+- Reports and Audit Logs PDF exports use LibreOffice. Site acceptance must inspect representative exported PDFs and check that their contents remain legible.
+
+Use [live broadcasts](live-broadcast.md) for scheduled real time content.

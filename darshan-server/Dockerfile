@@ -1,7 +1,6 @@
 FROM node:20-bookworm AS build
 
 WORKDIR /app
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY package*.json ./
 COPY tsconfig*.json ./
@@ -16,7 +15,6 @@ RUN npm run build:production \
 FROM node:20-bookworm AS production-dependencies
 
 WORKDIR /app
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
@@ -26,10 +24,7 @@ FROM node:20-bookworm
 WORKDIR /app
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV DARSHAN_RUNTIME_CONTAINER=true
-ARG INSTALL_PLAYWRIGHT_CHROMIUM=false
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates \
@@ -43,14 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=production-dependencies /app/node_modules ./node_modules
 
-RUN if [ "$INSTALL_PLAYWRIGHT_CHROMIUM" = "true" ]; then \
-    npx playwright install --with-deps chromium; \
-  else \
-    echo "Skipping Playwright Chromium install. Production bundle validation rejects this setting."; \
-  fi \
-  && find /app/node_modules -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.map' \) -delete \
-  && mkdir -p /ms-playwright \
-  && chown -R node:node /ms-playwright
+RUN find /app/node_modules -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.map' \) -delete
 
 COPY --from=build /app/runtime-package.json ./package.json
 COPY --from=build /app/dist-production ./dist
@@ -62,8 +50,7 @@ RUN chmod 0755 /usr/local/bin/darshan-runtime-entrypoint \
   && mkdir -p /app/logs /app/tmp \
   && chown -R node:node /app
 
-# Chromium must retain its sandbox. API and worker processes therefore run as
-# the unprivileged account supplied by the official Node image.
+# API and worker processes run as the unprivileged account supplied by Node.
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/darshan-runtime-entrypoint"]
 CMD ["npm", "start"]

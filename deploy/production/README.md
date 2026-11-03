@@ -182,7 +182,6 @@ PROMETHEUS_PORT=9090
 GRAFANA_PORT=3001
 GRAFANA_ROOT_URL=http://192.168.1.102:8080/grafana/
 
-INSTALL_PLAYWRIGHT_CHROMIUM=true
 
 CMS_RUNTIME_CONFIG_SOURCE=../../../../darshan-cms/public/config/app-config.json
 
@@ -233,7 +232,6 @@ FFMPEG_PATH=ffmpeg
 LIBREOFFICE_PATH=soffice
 PG_DUMP_PATH=pg_dump
 TAR_PATH=tar
-PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ```
 
 For Docker production, do not set:
@@ -522,8 +520,9 @@ ffmpeg
 LibreOffice
 pg_dump
 tar
-Playwright Chromium when INSTALL_PLAYWRIGHT_CHROMIUM=true
 ```
+
+LibreOffice also renders Reports and Audit Logs PDF exports. The backend image does not include Playwright Chromium.
 
 ### 4. CMS VM
 

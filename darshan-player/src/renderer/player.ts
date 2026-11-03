@@ -17,7 +17,6 @@ import './types'
 import { DefaultMediaPlayer } from './default-media-player'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
 import { createPdfPlaybackElement } from './pdf-playback'
-import { createWebpagePlaybackElement } from './webpage-playback'
 import { DeferredPlaybackGate } from './deferred-playback-gate'
 import {
   resolveFailedSingleItemRetryPosition,
@@ -446,7 +445,7 @@ class Player {
         return
       } else {
         this.log('error', 'Media rejected by compatibility check', { itemId: item.id, compat })
-        this.showFallback(`Unsupported media: ${compat.reason}`)
+        this.showFallback(item.type === 'url' ? 'Content unavailable' : `Unsupported media: ${compat.reason}`)
         return
       }
 
@@ -883,32 +882,18 @@ class Player {
   /**
    * Render URL
    */
-  private async renderURL(item: TimelineItem, contentEpoch?: string): Promise<HTMLElement> {
-    const sourceUrl = this.getMediaSource(item)
-    const fallbackUrl =
-      item.localUrl ||
-      (typeof item.meta?.['fallback_local_url'] === 'string' ? String(item.meta?.['fallback_local_url']) : undefined) ||
-      (typeof item.meta?.['fallback_url'] === 'string' ? String(item.meta?.['fallback_url']) : undefined)
-
-    return createWebpagePlaybackElement({
-      contentEpoch,
-      liveUrl: sourceUrl,
-      fallbackUrl,
-      fallbackFit: item.fit === 'stretch' ? 'fill' : item.fit,
-      onFallback: (reason) => {
-        this.log('warn', 'Scheduled webpage fallback active', {
-          itemId: item.id,
-          reason,
-          sourceUrl,
-        })
-      },
-      onLog: (level, message, data) => {
-        this.log(level, message, {
-          itemId: item.id,
-          ...data,
-        })
-      },
-    })
+  private async renderURL(_item: TimelineItem, _contentEpoch?: string): Promise<HTMLElement> {
+    const element = document.createElement('div')
+    element.className = 'content-unavailable'
+    element.textContent = 'Content unavailable'
+    element.style.display = 'flex'
+    element.style.alignItems = 'center'
+    element.style.justifyContent = 'center'
+    element.style.width = '100%'
+    element.style.height = '100%'
+    element.style.backgroundColor = '#000'
+    element.style.color = '#fff'
+    return element
   }
 
   private renderScene(sceneItem: TimelineItem, scene: LayoutScene): RenderedScene {
@@ -1400,7 +1385,7 @@ class Player {
       }
 
       if (compat.status === 'REJECTED') {
-        return this.createMediaPreviewCard(item, 'Preview unavailable', compat.reason)
+        return this.createMediaPreviewCard(item, item.type === 'url' ? 'Content unavailable' : 'Preview unavailable', compat.reason)
       }
 
       switch (item.type) {

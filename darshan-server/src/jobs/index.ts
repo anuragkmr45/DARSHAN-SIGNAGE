@@ -1,12 +1,12 @@
 import PgBoss from 'pg-boss';
 import ffmpeg from 'fluent-ffmpeg';
-import { createHash, randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 import { execFile as execFileCallback } from 'child_process';
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { and, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
-import { getDatabase, schema, type DbExecutor } from '@/db';
+import { getDatabase, schema } from '@/db';
 import { config as appConfig } from '@/config';
 import { abortMultipartUpload, deleteObject, getObject, putObject } from '@/s3';
 import { createLogger } from '@/utils/logger';
@@ -14,12 +14,6 @@ import { createBackupRun, getLatestBackupRun, runFullBackup } from '@/utils/back
 import { getCachedSettings } from '@/utils/settings';
 import { buildSourceFilename, isPdfDocument, requiresDocumentConversion } from '@/utils/media-processing';
 import { inspectPdfPageCount, PdfInspectionError } from '@/utils/pdf-metadata';
-import { captureWebpagePreview } from '@/utils/webpage-capture';
-import {
-  assertWebpageUrlAllowed,
-  redactWebpageUrlForLogs,
-  WebpageUrlPolicyError,
-} from '@/utils/webpage-url-policy';
 import { getLibreOfficeExecutable, getResolvedFfmpegPath } from '@/utils/runtime-dependencies';
 import {
   buildLibreOfficeConversionArgs,
@@ -58,7 +52,6 @@ const HLS_SEGMENT_CONTENT_TYPE = 'video/mp2t';
 const THUMBNAIL_CONTENT_TYPE = 'image/jpeg';
 const NDJSON_CONTENT_TYPE = 'application/x-ndjson';
 const DOCUMENT_READY_CONTENT_TYPE = 'application/pdf';
-const WEBPAGE_FALLBACK_CONTENT_TYPE = 'image/png';
 
 const QUALITY_OPTIONS: Record<FFmpegTranscodeJob['quality'], string[]> = {
   low: ['-preset', 'veryfast', '-crf', '30', '-b:a', '96k'],
@@ -167,527 +160,6 @@ async function upsertStorageObject(params: {
   return storageObject;
 }
 
-export type WebpageProcessingStage =
-  | 'media-load'
-  | 'webpage-policy'
-  | 'webpage-capture'
-  | 'fallback-upload'
-  | 'storage-object-upsert'
-  | 'media-ready-update';
-
-export class WebpageProcessingStageError extends Error {
-  public readonly cause?: unknown;
-
-  constructor(public readonly stage: WebpageProcessingStage, public readonly originalError: unknown) {
-    const message = originalError instanceof Error ? originalError.message : String(originalError);
-    super(message || `Webpage processing failed during ${stage}`);
-    this.name = 'WebpageProcessingStageError';
-    this.cause = originalError;
-  }
-}
-
-async function runWebpageStage<T>(stage: WebpageProcessingStage, action: () => Promise<T>): Promise<T> {
-  try {
-    return await action();
-  } catch (error) {
-    if (error instanceof WebpageProcessingStageError) {
-      throw error;
-    }
-    throw new WebpageProcessingStageError(stage, error);
-  }
-}
-
-function getWebpageProcessingCause(error: unknown) {
-  return error instanceof WebpageProcessingStageError ? error.originalError : error;
-}
-
-export function getWebpageProcessingStage(error: unknown): WebpageProcessingStage {
-  if (error instanceof WebpageProcessingStageError) {
-    return error.stage;
-  }
-  if (error instanceof WebpageUrlPolicyError) {
-    return 'webpage-policy';
-  }
-  return 'webpage-capture';
-}
-
-function sanitizeWebpageErrorText(value: string, sourceUrl?: string) {
-  const sourceOrigin = sourceUrl ? redactWebpageUrlForLogs(sourceUrl) : undefined;
-  const sanitized = sourceUrl && sourceOrigin ? value.split(sourceUrl).join(sourceOrigin) : value;
-
-  return sanitized.replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (rawMatch) => {
-    let match = rawMatch;
-    let suffix = '';
-    while (/[),.;\]]$/.test(match)) {
-      suffix = `${match.at(-1)}${suffix}`;
-      match = match.slice(0, -1);
-    }
-    return `${redactWebpageUrlForLogs(match)}${suffix}`;
-  });
-}
-
-function getErrorCode(error: unknown) {
-  if (!error || typeof error !== 'object' || !('code' in error)) {
-    return undefined;
-  }
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' || typeof code === 'number' ? String(code) : undefined;
-}
-
-export function serializeWebpageProcessingError(error: unknown, sourceUrl?: string) {
-  const cause = getWebpageProcessingCause(error);
-  const name = cause instanceof Error ? cause.name : typeof cause;
-  const message = cause instanceof Error ? cause.message : String(cause);
-  const stack = cause instanceof Error ? cause.stack : undefined;
-  const code = getErrorCode(cause);
-
-  return {
-    name,
-    message: sanitizeWebpageErrorText(message, sourceUrl),
-    ...(code ? { code } : {}),
-    ...(stack ? { stack: sanitizeWebpageErrorText(stack, sourceUrl) } : {}),
-  };
-}
-
-function getWebpageFailureReason(error: unknown) {
-  const stage = getWebpageProcessingStage(error);
-  if (stage === 'media-load') {
-    return 'WEBPAGE_MEDIA_LOAD_FAILED';
-  }
-  if (stage === 'fallback-upload') {
-    return 'WEBPAGE_FALLBACK_UPLOAD_FAILED';
-  }
-  if (stage === 'storage-object-upsert') {
-    return 'WEBPAGE_STORAGE_OBJECT_UPSERT_FAILED';
-  }
-  if (stage === 'media-ready-update') {
-    return 'WEBPAGE_MEDIA_READY_UPDATE_FAILED';
-  }
-
-  const cause = getWebpageProcessingCause(error);
-  if (cause instanceof WebpageUrlPolicyError) {
-    return cause.code;
-  }
-  if (cause instanceof Error && cause.name === 'AbortError') {
-    return 'WEBPAGE_REQUEST_TIMEOUT';
-  }
-
-  if (cause instanceof Error && cause.name === 'TimeoutError') {
-    return 'WEBPAGE_REQUEST_TIMEOUT';
-  }
-
-  const message = cause instanceof Error ? cause.message : String(cause);
-  const statusMatch = message.match(/status\s+(\d{3})/i);
-  if (statusMatch) {
-    return `WEBPAGE_HTTP_${statusMatch[1]}`;
-  }
-
-  if (message.toLowerCase().includes('did not return html')) {
-    return 'WEBPAGE_NON_HTML_CONTENT';
-  }
-
-  if (message.toLowerCase().includes('response exceeded')) {
-    return 'WEBPAGE_RESPONSE_TOO_LARGE';
-  }
-
-  if (message.toLowerCase().includes('fetch failed')) {
-    return 'WEBPAGE_UNREACHABLE';
-  }
-
-  if (message.toLowerCase().includes('timeout')) {
-    return 'WEBPAGE_REQUEST_TIMEOUT';
-  }
-
-  if (message.toLowerCase().includes('net::')) {
-    return 'WEBPAGE_UNREACHABLE';
-  }
-
-  return 'WEBPAGE_CAPTURE_FAILED';
-}
-
-async function verifyWebpageSource(
-  sourceUrl: string,
-  dependencies: {
-    assertUrlAllowed?: typeof assertWebpageUrlAllowed;
-    capturePreview?: typeof captureWebpagePreview;
-  } = {}
-) {
-  const assertUrlAllowed = dependencies.assertUrlAllowed ?? assertWebpageUrlAllowed;
-  const capturePreview = dependencies.capturePreview ?? captureWebpagePreview;
-  await runWebpageStage('webpage-policy', () => assertUrlAllowed(sourceUrl, 'navigation'));
-  const capture = await runWebpageStage('webpage-capture', () => capturePreview(sourceUrl));
-  return {
-    finalUrl: capture.finalUrl,
-    contentType: capture.contentType,
-    title: capture.title,
-    screenshot: capture.screenshot,
-  };
-}
-
-type WebpageJobLogger = Pick<typeof logger, 'warn' | 'error'>;
-
-export async function processWebpageVerifyCaptureJob(
-  job: WebpageVerifyCaptureJob,
-  dependencies: {
-    db?: ReturnType<typeof getDatabase>;
-    logger?: WebpageJobLogger;
-    verifySource?: typeof verifyWebpageSource;
-    putObject?: typeof putObject;
-    deleteObject?: typeof deleteObject;
-    upsertStorageObject?: typeof upsertStorageObject;
-    now?: () => Date;
-  } = {}
-) {
-  const db = dependencies.db ?? getDatabase();
-  const jobLogger = dependencies.logger ?? logger;
-  const now = dependencies.now ?? (() => new Date());
-  const verifySource = dependencies.verifySource ?? verifyWebpageSource;
-  const putReadyObject = dependencies.putObject ?? putObject;
-  const deleteReadyObject = dependencies.deleteObject ?? deleteObject;
-  const upsertReadyStorageObject = dependencies.upsertStorageObject ?? upsertStorageObject;
-  const { mediaId, sourceUrl } = job;
-  const mode = job.mode ?? 'INITIAL';
-
-  try {
-    const [media] = await runWebpageStage('media-load', async () =>
-      db.select().from(schema.media).where(eq(schema.media.id, mediaId))
-    );
-    if (!media || media.deleted_at) {
-      jobLogger.warn({ mediaId }, 'Media not found for webpage verification');
-      return;
-    }
-    const expectedStatus = mode === 'REFRESH' ? 'READY' : 'PROCESSING';
-    if (media.status !== expectedStatus) {
-      jobLogger.warn({ mediaId, status: media.status }, 'Skipping stale webpage verification job');
-      return;
-    }
-    if (job.refreshToken && media.webpage_preview_refresh_token !== job.refreshToken) {
-      jobLogger.warn({ mediaId }, 'Skipping superseded webpage preview job');
-      return;
-    }
-
-    const verification = await verifySource(sourceUrl);
-    const previewBuffer = verification.screenshot;
-    const contentHash = createHash('sha256').update(previewBuffer).digest('hex');
-    const fallbackKey = `${mediaId}/webpage-previews/${contentHash}.png`;
-    const upload = await runWebpageStage('fallback-upload', () =>
-      putReadyObject(
-        READY_BUCKET,
-        fallbackKey,
-        previewBuffer,
-        WEBPAGE_FALLBACK_CONTENT_TYPE
-      )
-    );
-    const readyObject = await runWebpageStage('storage-object-upsert', () =>
-      upsertReadyStorageObject({
-        bucket: READY_BUCKET,
-        objectKey: fallbackKey,
-        contentType: WEBPAGE_FALLBACK_CONTENT_TYPE,
-        size: previewBuffer.length,
-        sha256: upload.sha256,
-      })
-    );
-
-    let committed = false;
-    await runWebpageStage('media-ready-update', async () => {
-      const completedAt = now();
-      if (mode === 'REFRESH') {
-        const [updated] = await db
-          .update(schema.media)
-          .set({
-            ready_object_id: readyObject.id,
-            webpage_preview_captured_at: completedAt,
-            webpage_preview_attempted_at: completedAt,
-            webpage_preview_refresh_token: null,
-            webpage_preview_last_error: null,
-            status_reason: null,
-            updated_at: completedAt,
-          })
-          .where(
-            and(
-              eq(schema.media.id, mediaId),
-              eq(schema.media.status, 'READY'),
-              isNull(schema.media.deleted_at),
-              job.refreshToken
-                ? eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
-                : undefined
-            )
-          )
-          .returning({ id: schema.media.id });
-        committed = Boolean(updated);
-      } else {
-        const result = await commitReadyMediaIfProcessing({
-          mediaId,
-          readyObjectId: readyObject.id,
-          expectedWebpagePreviewRefreshToken: job.refreshToken,
-          values: {
-            webpage_preview_captured_at: completedAt,
-            webpage_preview_attempted_at: completedAt,
-            webpage_preview_refresh_token: null,
-            webpage_preview_last_error: null,
-            updated_at: completedAt,
-          },
-          executor: db,
-        });
-        committed = result !== 'STALE';
-      }
-
-      if (!committed) {
-        jobLogger.warn({ mediaId }, 'Discarded webpage result after media authority changed');
-        const [current] = await db
-          .select({ readyObjectId: schema.media.ready_object_id })
-          .from(schema.media)
-          .where(eq(schema.media.id, mediaId));
-        if (current?.readyObjectId !== readyObject.id) {
-          await deleteReadyObject(READY_BUCKET, fallbackKey).catch((cleanupError) => {
-            jobLogger.warn({ cleanupError, mediaId, objectKey: fallbackKey }, 'Stale webpage preview cleanup will be retried');
-          });
-        }
-      }
-    });
-
-    if (committed && mode === 'REFRESH') {
-      await queueWebpagePreviewPlaybackRefresh({
-        mediaId,
-        readyObjectId: readyObject.id,
-        createdBy: media.created_by,
-        db,
-      }).catch((refreshError) => {
-        jobLogger.warn({ refreshError, mediaId }, 'Failed to queue player refresh after preview update');
-      });
-    }
-  } catch (error) {
-    const stage = getWebpageProcessingStage(error);
-    jobLogger.error(
-      {
-        stage,
-        error: serializeWebpageProcessingError(error, sourceUrl),
-        mediaId,
-        sourceOrigin: redactWebpageUrlForLogs(sourceUrl),
-      },
-      'Webpage verification/capture failed'
-    );
-    const failureReason = getWebpageFailureReason(error);
-    if (mode === 'REFRESH') {
-      await db
-        .update(schema.media)
-        .set({
-          webpage_preview_refresh_token: null,
-          webpage_preview_last_error: failureReason,
-          webpage_preview_attempted_at: now(),
-        })
-        .where(
-          and(
-            eq(schema.media.id, mediaId),
-            eq(schema.media.status, 'READY'),
-            isNull(schema.media.deleted_at),
-            job.refreshToken
-              ? eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
-              : undefined
-          )
-        );
-    } else {
-      if (job.refreshToken) {
-        await db
-          .update(schema.media)
-          .set({
-            webpage_preview_refresh_token: null,
-            webpage_preview_last_error: failureReason,
-            webpage_preview_attempted_at: now(),
-          })
-          .where(
-            and(
-              eq(schema.media.id, mediaId),
-              isNull(schema.media.deleted_at),
-              eq(schema.media.webpage_preview_refresh_token, job.refreshToken)
-            )
-          );
-      }
-      await failMediaIfProcessing({ mediaId, statusReason: failureReason, executor: db });
-    }
-  }
-}
-
-async function queueWebpagePreviewPlaybackRefresh(input: {
-  mediaId: string;
-  readyObjectId: string;
-  createdBy: string;
-  db?: DbExecutor;
-}) {
-  const db = input.db ?? getDatabase();
-  const screens = await db.select({ id: schema.screens.id }).from(schema.screens);
-  if (screens.length === 0) return;
-
-  await queuePlaybackRefreshDispatch(
-    {
-      reason: 'DEFAULT_MEDIA',
-      screenIds: screens.map((screen) => screen.id),
-      createdBy: input.createdBy,
-      defaultMediaVersion: `${input.mediaId}:${input.readyObjectId}`,
-    },
-    {
-      singletonKey: 'webpage-preview-refresh',
-      singletonSeconds: 60,
-    }
-  );
-}
-
-export type WebpagePreviewRefreshRequestResult = {
-  mediaId: string;
-  refreshStatus: 'QUEUED' | 'ALREADY_QUEUED';
-  requestedAt: Date;
-  refreshToken: string;
-};
-
-export async function requestWebpagePreviewRefresh(input: {
-  mediaId: string;
-  executor?: DbExecutor;
-  requestedAt?: Date;
-}): Promise<WebpagePreviewRefreshRequestResult> {
-  const db = input.executor ?? getDatabase();
-  const requestedAt = input.requestedAt ?? new Date();
-  const [media] = await db.select().from(schema.media).where(eq(schema.media.id, input.mediaId));
-  if (!media || media.deleted_at || media.type !== 'WEBPAGE' || !media.source_url) {
-    throw new Error('WEBPAGE_MEDIA_NOT_FOUND');
-  }
-  if (media.status !== 'READY' && media.status !== 'FAILED') {
-    if (media.webpage_preview_refresh_token) {
-      return {
-        mediaId: media.id,
-        refreshStatus: 'ALREADY_QUEUED',
-        requestedAt: media.webpage_preview_attempted_at ?? requestedAt,
-        refreshToken: media.webpage_preview_refresh_token,
-      };
-    }
-    throw new Error('WEBPAGE_PREVIEW_REFRESH_NOT_AVAILABLE');
-  }
-  if (media.webpage_preview_refresh_token) {
-    return {
-      mediaId: media.id,
-      refreshStatus: 'ALREADY_QUEUED',
-      requestedAt: media.webpage_preview_attempted_at ?? requestedAt,
-      refreshToken: media.webpage_preview_refresh_token,
-    };
-  }
-
-  const refreshToken = randomUUID();
-  const mode: WebpageVerifyCaptureJob['mode'] = media.status === 'READY' ? 'REFRESH' : 'INITIAL';
-  const [claimed] = await db
-    .update(schema.media)
-    .set({
-      status: mode === 'INITIAL' ? 'PROCESSING' : 'READY',
-      status_reason: mode === 'INITIAL' ? null : media.status_reason,
-      webpage_preview_attempted_at: requestedAt,
-      webpage_preview_refresh_token: refreshToken,
-      webpage_preview_last_error: null,
-      updated_at: mode === 'INITIAL' ? requestedAt : media.updated_at,
-    })
-    .where(
-      and(
-        eq(schema.media.id, media.id),
-        eq(schema.media.status, media.status),
-        isNull(schema.media.deleted_at),
-        isNull(schema.media.webpage_preview_refresh_token)
-      )
-    )
-    .returning({ id: schema.media.id });
-
-  if (!claimed) {
-    const [current] = await db
-      .select({
-        token: schema.media.webpage_preview_refresh_token,
-        attemptedAt: schema.media.webpage_preview_attempted_at,
-        deletedAt: schema.media.deleted_at,
-      })
-      .from(schema.media)
-      .where(eq(schema.media.id, media.id));
-    if (!current?.deletedAt && current?.token) {
-      return {
-        mediaId: media.id,
-        refreshStatus: 'ALREADY_QUEUED',
-        requestedAt: current.attemptedAt ?? requestedAt,
-        refreshToken: current.token,
-      };
-    }
-    throw new Error('WEBPAGE_PREVIEW_REFRESH_CONFLICT');
-  }
-
-  try {
-    await queueWebpageVerifyCapture({
-      mediaId: media.id,
-      sourceUrl: media.source_url,
-      mode,
-      refreshToken,
-    });
-  } catch (error) {
-    await db
-      .update(schema.media)
-      .set({
-        status: media.status,
-        status_reason: media.status_reason,
-        webpage_preview_refresh_token: null,
-        webpage_preview_last_error: 'WEBPAGE_CAPTURE_QUEUE_FAILED',
-      })
-      .where(
-        and(
-          eq(schema.media.id, media.id),
-          isNull(schema.media.deleted_at),
-          eq(schema.media.webpage_preview_refresh_token, refreshToken)
-        )
-      );
-    throw error;
-  }
-
-  return { mediaId: media.id, refreshStatus: 'QUEUED', requestedAt, refreshToken };
-}
-
-export async function processWebpageRefreshDueJob(
-  _job: WebpageRefreshDueJob,
-  dependencies: {
-    db?: DbExecutor;
-    now?: () => Date;
-    requestRefresh?: typeof requestWebpagePreviewRefresh;
-  } = {}
-) {
-  const db = dependencies.db ?? getDatabase();
-  const now = dependencies.now?.() ?? new Date();
-  const cutoff = new Date(
-    now.getTime() - appConfig.WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS * 60 * 60 * 1000
-  );
-  const due = await db
-    .select({ id: schema.media.id })
-    .from(schema.media)
-    .where(
-      and(
-        eq(schema.media.type, 'WEBPAGE'),
-        eq(schema.media.status, 'READY'),
-        isNull(schema.media.deleted_at),
-        isNull(schema.media.webpage_preview_refresh_token),
-        or(
-          isNull(schema.media.webpage_preview_attempted_at),
-          lte(schema.media.webpage_preview_attempted_at, cutoff)
-        )
-      )
-    )
-    .limit(appConfig.WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE);
-
-  let queued = 0;
-  const requestRefresh = dependencies.requestRefresh ?? requestWebpagePreviewRefresh;
-  for (const row of due) {
-    try {
-      const result = await requestRefresh({
-        mediaId: row.id,
-        executor: db,
-        requestedAt: now,
-      });
-      if (result.refreshStatus === 'QUEUED') queued += 1;
-    } catch (error) {
-      logger.warn({ error, mediaId: row.id }, 'Failed to queue due webpage preview refresh');
-    }
-  }
-  return { due: due.length, queued };
-}
-
 async function convertDocumentWithLibreOffice(inputPath: string, outputDir: string) {
   const libreOfficeExecutable = getLibreOfficeExecutable();
   if (!libreOfficeExecutable) {
@@ -723,7 +195,7 @@ type PgBossError = Error & {
   code?: string;
 };
 
-const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'emergency:reconcile', 'webpage:refresh-due', 'live:fallback-reconcile'] as const;
+const RECURRING_QUEUE_NAMES = ['cleanup', 'archive', 'chat:media-cleanup', 'backup', 'backup:check', 'emergency:reconcile', 'live:fallback-reconcile'] as const;
 const WORK_QUEUE_NAMES = [
   'live:fallback-prepare',
   'live:fallback-reconcile',
@@ -734,8 +206,6 @@ const WORK_QUEUE_NAMES = [
   'ffmpeg:transcode',
   'ffmpeg:thumbnail',
   'document:convert',
-  'webpage:verify-capture',
-  'webpage:refresh-due',
   'archive',
   'cleanup',
   'chat:media-cleanup',
@@ -870,17 +340,6 @@ export interface FFmpegThumbnailJob {
 export interface DocumentConvertJob {
   mediaId: string;
   sourceObjectId: string;
-}
-
-export interface WebpageVerifyCaptureJob {
-  mediaId: string;
-  sourceUrl: string;
-  mode?: 'INITIAL' | 'REFRESH';
-  refreshToken?: string;
-}
-
-export interface WebpageRefreshDueJob {
-  trigger: 'scheduled-scan';
 }
 
 export interface ArchiveJob {
@@ -1031,22 +490,6 @@ export async function queueDocumentConvert(job: DocumentConvertJob, options?: an
   return sendJob('document:convert', job, {
     retryLimit: 2,
     retryDelay: 30,
-    ...options,
-  });
-}
-
-export async function queueWebpageVerifyCapture(job: WebpageVerifyCaptureJob, options?: any) {
-  return sendJob('webpage:verify-capture', job, {
-    retryLimit: 2,
-    retryDelay: 30,
-    ...options,
-  });
-}
-
-export async function queueWebpageRefreshDue(job: WebpageRefreshDueJob, options?: any) {
-  return sendJob('webpage:refresh-due', job, {
-    retryLimit: 1,
-    retryDelay: 60,
     ...options,
   });
 }
@@ -1659,18 +1102,6 @@ export async function registerJobHandlers() {
     }
   });
 
-  await registerObservedWorker<WebpageVerifyCaptureJob>('webpage:verify-capture', async (batch) => {
-    for (const job of batch) {
-      await processWebpageVerifyCaptureJob(job.data);
-    }
-  });
-
-  await registerObservedWorker<WebpageRefreshDueJob>('webpage:refresh-due', async (batch) => {
-    for (const job of batch) {
-      await processWebpageRefreshDueJob(job.data);
-    }
-  });
-
   // Archive handler
   await registerObservedWorker<ArchiveJob>('archive', async (batch) => {
     const db = getDatabase();
@@ -1970,6 +1401,7 @@ export async function scheduleRecurringJobs() {
     await jobs.unschedule('archive').catch(() => { });
     await jobs.unschedule('backup:check').catch(() => { });
     await jobs.unschedule('emergency:reconcile').catch(() => { });
+    // Stop any recurring capture left by a QA deployment of the retired feature.
     await jobs.unschedule('webpage:refresh-due').catch(() => { });
     await jobs.unschedule('live:fallback-reconcile').catch(() => { });
 
@@ -1980,7 +1412,6 @@ export async function scheduleRecurringJobs() {
       await jobs.schedule('backup:check', '0 * * * *', { trigger: 'scheduled-check' }); // hourly
     }
     await jobs.schedule('emergency:reconcile', '* * * * *', {}); // every minute
-    await jobs.schedule('webpage:refresh-due', '20 * * * *', { trigger: 'scheduled-scan' }); // hourly
     await jobs.schedule('live:fallback-reconcile', '* * * * *', {}); // durable dispatch/recovery every minute
 
     logger.info('Recurring jobs scheduled successfully');

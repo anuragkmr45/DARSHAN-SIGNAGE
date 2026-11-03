@@ -188,8 +188,7 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
 
   const filteredMedia = useMemo(() => {
     const query = mediaSearch.trim().toLowerCase();
-    if (!query) return mediaItems;
-    return mediaItems.filter((item) => resolveMediaDisplayName(item).toLowerCase().includes(query));
+    return mediaItems.filter((item) => item.type !== "WEBPAGE" && (!query || resolveMediaDisplayName(item).toLowerCase().includes(query)));
   }, [mediaItems, mediaSearch]);
 
   const getSlotMedia = (slotId: string) =>
@@ -571,7 +570,6 @@ export function StepMediaAssign({ layout, slotMedia, onUpdateSlotMedia }: StepMe
                   <TabsTrigger value="image">Images</TabsTrigger>
                   <TabsTrigger value="video">Videos</TabsTrigger>
                   <TabsTrigger value="document">Documents</TabsTrigger>
-                  <TabsTrigger value="webpage">Webpages</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>

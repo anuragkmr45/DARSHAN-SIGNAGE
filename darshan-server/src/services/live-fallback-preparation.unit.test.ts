@@ -233,13 +233,12 @@ describe('durable immutable live fallback preparation', () => {
     }
   });
 
-  it('uses an approved webpage screenshot only, without source URLs or live browser access', async () => {
-    const source = graph(); source.assets[0]!.source_type = 'WEBPAGE'; source.assets[0]!.representation = 'WEBPAGE_PREVIEW';
+  it('rejects retired webpage fallback descriptors', async () => {
+    const source = graph(); source.assets[0]!.source_type = 'WEBPAGE';
     const db = repository(source), s3 = storage(source);
     const result = await processLiveFallbackPreparation(db.row.id, {}, { repository: db.repo, storage: s3.adapter, stagingParent: parent });
-    expect(result.status).toBe('READY');
-    if (result.status === 'READY') expect(result.manifest.assets[0]).toMatchObject({ representation: 'WEBPAGE_PREVIEW', render_type: 'image' });
-    expect(JSON.stringify(result)).not.toMatch(/source_url|ticket|token|download_url/);
+    expect(result.status).toBe('FAILED');
+    expect(s3.counts().created).toBe(0);
   });
 
   it('fails closed for HLS until its explicit local preparation adapter is wired, never reading raw source', async () => {

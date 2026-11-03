@@ -62,6 +62,9 @@ const resolveMediaType = (media: MediaAsset): MediaType => {
 };
 
 const MediaPreview = ({ media, mediaType, sizeClass }: { media: MediaAsset; mediaType: MediaType; sizeClass: string }) => {
+  if (mediaType === "WEBPAGE") {
+    return <div className={`${sizeClass} rounded-md bg-muted p-3 text-xs`}>Webpage media retired</div>;
+  }
   if (!media.media_url) {
     return (
       <div className={`${sizeClass} rounded-md bg-muted flex items-center justify-center text-muted-foreground`}>
@@ -90,14 +93,6 @@ const MediaPreview = ({ media, mediaType, sizeClass }: { media: MediaAsset; medi
     return (
       <div className={`${sizeClass} rounded-md overflow-hidden bg-muted`}>
         <video src={media.media_url} className="h-full w-full object-contain" muted preload="metadata" />
-      </div>
-    );
-  }
-
-  if (mediaType === "WEBPAGE") {
-    return (
-      <div className={`${sizeClass} rounded-md overflow-hidden bg-muted`}>
-        <img src={media.media_url} alt={resolveMediaDisplayName(media)} className="h-full w-full object-contain" loading="lazy" />
       </div>
     );
   }
@@ -293,8 +288,7 @@ export function DefaultMediaSection() {
   );
   const filteredMedia = useMemo(() => {
     const query = mediaSearch.trim().toLowerCase();
-    if (!query) return mediaItems;
-    return mediaItems.filter((item) => resolveMediaDisplayName(item).toLowerCase().includes(query));
+    return mediaItems.filter((item) => item.type !== "WEBPAGE" && (!query || resolveMediaDisplayName(item).toLowerCase().includes(query)));
   }, [mediaItems, mediaSearch]);
 
   const assignmentsByKey = useMemo(
@@ -715,7 +709,6 @@ export function DefaultMediaSection() {
                   <TabsTrigger value="image">Images</TabsTrigger>
                   <TabsTrigger value="video">Videos</TabsTrigger>
                   <TabsTrigger value="document">Documents</TabsTrigger>
-                  <TabsTrigger value="webpage">Webpages</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>

@@ -134,6 +134,34 @@ describe('Snapshot Manager', () => {
     expect(immediate.called).to.equal(false)
   })
 
+  it('does not fetch a retired webpage URL or its old preview while applying a snapshot', async () => {
+    const { getHttpClient } = require('../../../src/main/services/network/http-client')
+    sandbox.stub(getHttpClient(), 'getResponse').resolves({
+      status: 200,
+      data: {
+        publish: { publish_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', snapshot_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+        content_state: 'scheduled',
+        snapshot: {
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          schedule: { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', items: [] },
+          items: [{ id: 'old-page', media_id: 'old-page', type: 'url', url: 'https://legacy.example.test/live', fallback_url: 'https://cdn.example.test/preview.png' }],
+        },
+      },
+    })
+    const { getCacheManager } = require('../../../src/main/services/cache/cache-manager')
+    const prefetch = sandbox.stub(getCacheManager(), 'prefetch').resolves()
+    const has = sandbox.stub(getCacheManager(), 'has')
+
+    const { getSnapshotManager } = require('../../../src/main/services/snapshot-manager')
+    const playlist = await getSnapshotManager().refreshSnapshot()
+
+    expect(prefetch.calledOnceWithExactly([])).to.equal(true)
+    expect(has.called).to.equal(false)
+    expect(playlist?.items[0]?.type).to.equal('url')
+    expect(playlist?.items[0]?.remoteUrl).to.equal(undefined)
+    expect(playlist?.items[0]?.localUrl).to.equal(undefined)
+  })
+
   it('should treat a 404 snapshot response as intentional no-content instead of offline fallback', async () => {
     const mediaDir = path.join(cacheDir, 'media')
     fs.mkdirSync(mediaDir, { recursive: true })

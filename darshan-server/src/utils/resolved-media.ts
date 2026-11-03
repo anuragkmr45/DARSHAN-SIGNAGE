@@ -29,16 +29,16 @@ export function buildResolvedMediaRepresentation(
     id: media.id,
     name: media.name || media.filename || 'Untitled media',
     type: media.type ?? 'UNKNOWN',
-    playback_url: isWebpage ? media.source_url ?? null : media.media_url ?? null,
-    preview_url: isWebpage ? media.fallback_media_url ?? null : media.media_url ?? null,
+    playback_url: isWebpage ? null : media.media_url ?? null,
+    preview_url: isWebpage ? null : media.media_url ?? null,
     content_type: media.content_type ?? null,
     source_content_type: media.source_content_type ?? null,
     status: media.status ?? null,
     page_count: media.page_count ?? null,
-    fallback_revision: isWebpage ? media.fallback_media_revision ?? null : null,
-    fallback_sha256: isWebpage ? media.fallback_media_sha256 ?? null : null,
-    fallback_captured_at: isWebpage ? media.fallback_media_captured_at ?? null : null,
-    ...(options.includeSourceUrl ? { source_url: media.source_url ?? null } : {}),
+    fallback_revision: null,
+    fallback_sha256: null,
+    fallback_captured_at: null,
+    ...(options.includeSourceUrl ? { source_url: isWebpage ? null : media.source_url ?? null } : {}),
   };
 }
 
@@ -109,10 +109,8 @@ function hydratePresentationEntry(entry: any, mediaMap: Map<string, ReturnType<t
       ...(entry.media && typeof entry.media === 'object' ? entry.media : {}),
       ...resolvedMedia,
       url:
-        resolvedMedia.type === 'WEBPAGE'
-          ? resolvedMedia.source_url ?? null
-          : resolvedMedia.media_url ?? null,
-      fallback_url: resolvedMedia.fallback_media_url ?? null,
+        resolvedMedia.type === 'WEBPAGE' ? null : resolvedMedia.media_url ?? null,
+      fallback_url: resolvedMedia.type === 'WEBPAGE' ? null : resolvedMedia.fallback_media_url ?? null,
       media_type: resolvedMedia.type,
     },
   };
@@ -166,7 +164,7 @@ export async function buildResolvedMediaUrls(
   const result: Record<string, string> = {};
 
   for (const [mediaId, media] of mediaMap.entries()) {
-    const url = media.type === 'WEBPAGE' ? media.source_url : media.media_url;
+    const url = media.type === 'WEBPAGE' ? null : media.media_url;
     if (typeof url === 'string' && url.length > 0) {
       result[mediaId] = url;
     }

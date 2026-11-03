@@ -11,7 +11,7 @@ This guide describes the current DARSHAN player/device behavior from code. It is
 | Backend player endpoints | `darshan-server/src/config/apiEndpoints.ts`, `darshan-server/src/routes/device-telemetry.ts`, `darshan-server/src/routes/device-pairing.ts` |
 | Device auth | `darshan-server/src/middleware/device-auth.ts`, `darshan-server/src/utils/device-request-auth.ts`, `darshan-server/src/realtime/device-socket-auth.ts` |
 | Player runtime | `darshan-player/src/main/services/player-flow.ts`, `pairing-service.ts`, `command-processor.ts`, `realtime-service.ts`, `snapshot-manager.ts`, `settings/default-media-service.ts` |
-| Renderer playback | `darshan-player/src/renderer/player.ts`, `default-media-player.ts`, `pdf-playback.ts`, `webpage-playback.ts`, `darshan-player/src/common/playback-policy.ts` |
+| Renderer playback | `darshan-player/src/renderer/player.ts`, `default-media-player.ts`, `pdf-playback.ts`, `darshan-player/src/common/playback-policy.ts` |
 | Local runtime state | `darshan-player/src/common/platform-paths.ts`, `darshan-player/src/main/services/device-state-store.ts`, `cert-manager.ts`, `playback-progress-store.ts` |
 
 ## Boot And Pairing Contract
@@ -46,11 +46,11 @@ The backend may also expose CMS-authenticated screen/group snapshot endpoints fo
 
 - Media bytes move through HTTP/object storage/local cache, not Socket.IO.
 - The player cache manager downloads/preloads media from URLs received through snapshot/default-media data.
-- Renderer playback supports image, video, PDF/document/webpage paths according to renderer and helper code.
+- Renderer playback supports image, video, and PDF/document paths according to renderer and helper code. Retired webpage items fail closed.
 - Layout and slot behavior is derived from normalized snapshots and playback policy helpers, not from this document.
 - Emergency content has higher priority than normal schedule/default media when backend state says it is active.
 
-Runtime evidence required: actual target hardware must render video, image, PDF, office/document, and webpage assets.
+Runtime evidence required: actual target hardware must render video, image, PDF, and office/document assets.
 
 ## Realtime Refresh Contract
 

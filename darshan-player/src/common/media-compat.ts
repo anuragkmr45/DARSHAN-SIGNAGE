@@ -227,7 +227,7 @@ export function checkMediaCompatibility(media: MediaInput): CompatResult {
   }
 
   if (kind === 'WEBPAGE') {
-    return buildResult('PLAYABLE_NOW', 'WEBPAGE', 'webpage supported', normalizedExt, normalizedMime)
+    return buildResult('REJECTED', 'WEBPAGE', 'webpage media is retired', normalizedExt, normalizedMime)
   }
 
   return buildResult('REJECTED', 'UNKNOWN', 'unable to infer media type', normalizedExt, normalizedMime)

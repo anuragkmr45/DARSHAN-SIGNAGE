@@ -525,32 +525,6 @@ export const getFriendlyUploadError = (error: unknown): string => {
 
 const getFriendlyProcessingFailure = (media: MediaAsset): string => {
   switch (media.status_reason) {
-    case "WEBPAGE_HTTP_400":
-    case "WEBPAGE_HTTP_401":
-    case "WEBPAGE_HTTP_403":
-    case "WEBPAGE_HTTP_404":
-    case "WEBPAGE_HTTP_500":
-      return `The webpage URL returned ${media.status_reason.replace("WEBPAGE_HTTP_", "HTTP ")} during server verification.`;
-    case "WEBPAGE_NON_HTML_CONTENT":
-      return "The URL did not return an HTML webpage. Use a normal webpage URL, not an API or file endpoint.";
-    case "WEBPAGE_REQUEST_TIMEOUT":
-      return "The webpage took too long to respond during server verification.";
-    case "WEBPAGE_HOST_NOT_ALLOWED":
-    case "WEBPAGE_ADDRESS_BLOCKED":
-    case "WEBPAGE_REDIRECT_BLOCKED":
-    case "WEBPAGE_RESOURCE_BLOCKED":
-    case "WEBPAGE_SCHEME_BLOCKED":
-    case "WEBPAGE_PORT_BLOCKED":
-    case "WEBPAGE_CREDENTIALS_BLOCKED":
-      return "The webpage was blocked by the configured webpage security policy.";
-    case "WEBPAGE_DNS_POLICY_FAILED":
-      return "The webpage hostname could not be resolved safely by the server.";
-    case "WEBPAGE_RESPONSE_TOO_LARGE":
-      return "The webpage document exceeded the server verification size limit.";
-    case "WEBPAGE_UNREACHABLE":
-      return "The server could not reach this webpage URL during verification.";
-    case "WEBPAGE_CAPTURE_FAILED":
-      return "The server could not verify this webpage or generate its fallback preview.";
     case "DOCUMENT_CONVERSION_FAILED":
       return "The server could not convert this document into a displayable PDF.";
     default:

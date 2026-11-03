@@ -6,7 +6,7 @@ import { getDatabase, schema } from '@/db';
 import { HTTP_STATUS } from '@/http-status-codes';
 import { createServer as createHttpServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
-import { isPrivateAddress } from '@/utils/webpage-url-policy';
+import { isPrivateAddress } from '@/utils/network-address-policy';
 
 describe('Admin ops route contracts', () => {
   let server: FastifyInstance;

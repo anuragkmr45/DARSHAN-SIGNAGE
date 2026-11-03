@@ -78,7 +78,7 @@ transport URLs into the preparation, approval or snapshot. The response is
 `private, no-store`. Signing failure returns a safe retriable 503.
 
 The CMS verifies response descriptors against the prepared manifest. It renders
-frozen webpage images, native PDFs at the selected page and prepared videos.
+prepared images, native PDFs at the selected page and prepared videos.
 It recognizes the player's legacy slot aliases and stacking order. As in the
 player, any legacy unslotted entry makes the whole fallback a full-screen
 sequential timeline; those entries are not silently dropped from preview.

@@ -147,42 +147,19 @@ Source-free production player config additionally requires HTTPS/WSS and:
 Current packages automatically discover `/etc/darshan/player/config.json` on
 Linux and `C:\\ProgramData\\DARSHAN\\config.json` on Windows.
 
-For the release webpage policy, `WEBPAGE_NAVIGATION_ALLOWLIST=*` and
-`WEBPAGE_RESOURCE_ALLOWLIST=*` mean any public hostname after the server and
-player still enforce credential blocking, scheme/port allowlists, DNS
-revalidation, and loopback/link-local/private address blocking. Set
-`WEBPAGE_ALLOWED_PORTS=80,443` and `WEBPAGE_ALLOW_HTTP=true` only when ordinary
-HTTP pages are part of the approved site policy; HTTP is unencrypted and the
-source default remains `false`. Redirects are revalidated at every hop and must
-remain on approved hosts. Login-required pages, URL credentials, HTTP Basic
-authentication, cookie/profile import, downloads, and permission prompts are
-not supported. A public login page may be displayed but the player does not log
-in. The generated release player config should contain `allowedDomains: ["*"]`,
-`webpageResourceDomains: ["*"]`, `webpageAllowedCidrs: []`,
-`webpageAllowedPorts: [80, 443]`, and `webpageAllowHttp: true`.
-
-Set `WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS=24` and
-`WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE=100` for the standard refresh policy. A
-manual or scheduled refresh publishes a new content-addressed preview only
-after capture succeeds. A failure records the error and preserves the previous
-successful preview for schedule, default-media, offline, and live-page fallback
-use. The API and worker must be upgraded together before players so the preview
-revision/checksum fields are available before cache switching. Do not add
-`player.realtime.degradedStatePollMs` to the file-config JSON; current players
-derive that value from runtime defaults.
+Webpage Media is retired. Remove obsolete `WEBPAGE_*` and
+`INSTALL_PLAYWRIGHT_CHROMIUM` settings from new site profiles. The generated
+player config uses `allowedDomains: []`. Keep `player.realtime.degradedStatePollMs`
+out of the file-config JSON; players derive it from runtime defaults.
 
 CMS production Nginx permits request bodies up to `1000M` so browser uploads
 can reach the backend consistently. The backend application policy remains
 `MAX_UPLOAD_MB=500`.
 
-The production worker also sets `HOME=/tmp/darshan-worker-home`,
-`XDG_CONFIG_HOME=/tmp/darshan-worker-home/.config`,
-`XDG_CACHE_HOME=/tmp/darshan-worker-home/.cache`, and `TMPDIR=/tmp` so
-Chromium and Crashpad have writable runtime state after the container drops to
-the `node` user. Backend role acceptance runs `./chromium-runtime-check.sh`
-through the worker entrypoint, verifies UID/GID `1000:1000`, rejects root-only
-smoke checks, launches bundled Playwright Chromium, navigates to
-`https://example.com/`, and takes a screenshot.
+The production worker still sets isolated temporary paths for document
+conversion. Backend role acceptance runs `./pdf-runtime-check.sh` to verify
+LibreOffice is available under the nonroot runtime account. Export and inspect
+representative Reports and Audit Logs PDFs before release.
 
 CONFIG-2 player non-secret site config:
 

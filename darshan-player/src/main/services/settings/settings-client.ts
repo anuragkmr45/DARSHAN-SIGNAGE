@@ -8,7 +8,7 @@ import { getHttpClient } from '../network/http-client'
 
 const logger = getLogger('settings-client')
 
-const VALID_MEDIA_TYPES: DefaultMediaType[] = ['IMAGE', 'VIDEO', 'DOCUMENT', 'WEBPAGE']
+const VALID_MEDIA_TYPES: DefaultMediaType[] = ['IMAGE', 'VIDEO', 'DOCUMENT']
 
 function normalizeMediaItem(input: any): DefaultMediaItem | null {
   if (!input || typeof input !== 'object') {
@@ -28,8 +28,7 @@ function normalizeMediaItem(input: any): DefaultMediaItem | null {
   const fallbackRevision = typeof input.fallback_media_revision === 'string' ? input.fallback_media_revision : undefined
   const fallbackSha256 = typeof input.fallback_media_sha256 === 'string' ? input.fallback_media_sha256 : undefined
 
-  const hasPlayableWebpagePayload = type === 'WEBPAGE' && Boolean(sourceUrl || fallbackMediaUrl || mediaUrl)
-  if (!id || !type || (!mediaUrl && !hasPlayableWebpagePayload)) {
+  if (!id || !type || !mediaUrl) {
     return null
   }
 
@@ -46,15 +45,6 @@ function normalizeMediaItem(input: any): DefaultMediaItem | null {
     fallback_media_sha256: fallbackSha256,
     fallback_media_captured_at:
       typeof input.fallback_media_captured_at === 'string' ? input.fallback_media_captured_at : undefined,
-    webpage_preview_refresh_status:
-      input.webpage_preview_refresh_status === 'MISSING' ||
-      input.webpage_preview_refresh_status === 'REFRESHING' ||
-      input.webpage_preview_refresh_status === 'READY' ||
-      input.webpage_preview_refresh_status === 'FAILED'
-        ? input.webpage_preview_refresh_status
-        : undefined,
-    webpage_preview_last_error:
-      typeof input.webpage_preview_last_error === 'string' ? input.webpage_preview_last_error : undefined,
   }
 }
 

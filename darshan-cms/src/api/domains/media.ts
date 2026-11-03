@@ -174,16 +174,6 @@ export const mediaApi = {
       method: "GET",
     }),
 
-  refreshWebpagePreview: (mediaId: string) =>
-    apiClient.request<{
-      media_id: string;
-      refresh_status: "QUEUED" | "ALREADY_QUEUED";
-      requested_at: string;
-    }>({
-      path: endpoints.media.webpagePreviewRefresh(mediaId),
-      method: "POST",
-    }),
-
   deleted: (page = 1) => apiClient.request<{ items: Array<{ id: string; name: string; type: string; deleted_at: string }> }>({ path: `${endpoints.media.deleted}?page=${page}`, method: 'GET' }),
   restore: (mediaId: string) => apiClient.request<{ id: string; already_restored: boolean }>({ path: endpoints.media.restore(mediaId), method: 'POST' }),
   remove: (mediaId: string) =>

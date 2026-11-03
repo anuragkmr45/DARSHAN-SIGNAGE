@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeDeviceItems } from './deviceSchedule';
 
 describe('device schedule media normalization', () => {
-  it('uses live webpage URL for playback and captured URL for CMS preview', () => {
+  it('does not expose retired webpage playback or preview URLs', () => {
     const [item] = normalizeDeviceItems({
       snapshot: { schedule: { items: [{
         id: 'schedule-item',
@@ -20,8 +20,8 @@ describe('device schedule media normalization', () => {
 
     expect(item).toMatchObject({
       media_id: 'web-1', name: 'Marketing dashboard', type: 'webpage',
-      media_url: 'https://dashboard.example.test/live',
-      preview_url: 'https://storage.example.test/preview.png',
+      media_url: undefined,
+      preview_url: undefined,
     });
   });
 

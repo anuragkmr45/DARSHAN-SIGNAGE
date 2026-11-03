@@ -294,7 +294,7 @@ describe('player file config loader', () => {
     expect(() => loadPlayerFileConfig()).to.throw(/offlinePlaybackPolicy must be one of/)
   })
 
-  it('accepts the generated production webpage policy config shape', () => {
+  it('accepts the generated production player config shape', () => {
     const siteConfigPath = path.join(tempDir, 'production-player-config.json')
     writeJson(siteConfigPath, {
       player: {
@@ -324,11 +324,7 @@ describe('player file config loader', () => {
           strictCertificateValidation: true,
         },
         security: {
-          allowedDomains: ['*'],
-          webpageResourceDomains: ['*'],
-          webpageAllowedCidrs: [],
-          webpageAllowedPorts: [443],
-          webpageAllowHttp: false,
+          allowedDomains: [],
         },
       },
     })
@@ -337,10 +333,7 @@ describe('player file config loader', () => {
     const { loadPlayerFileConfig } = require('../../../src/common/file-config')
     const fileConfig = loadPlayerFileConfig()
 
-    expect(fileConfig.config.security.allowedDomains).to.deep.equal(['*'])
-    expect(fileConfig.config.security.webpageResourceDomains).to.deep.equal(['*'])
-    expect(fileConfig.config.security.webpageAllowedPorts).to.deep.equal([443])
-    expect(fileConfig.config.security.webpageAllowHttp).to.equal(false)
+    expect(fileConfig.config.security.allowedDomains).to.deep.equal([])
   })
 
   it('rejects credentialed URLs and YAML in CONFIG-2', () => {

@@ -154,7 +154,7 @@ After every Ubuntu release or player package change, verify:
 1. Fresh install from `.deb`
 2. Fresh launch from `AppImage`
 3. Pairing request/submit
-4. Image, video, PDF, webpage playback
+4. Image, video and PDF playback; retired webpage items show Content unavailable
 5. Screenshot capture/upload
 6. `collect-logs`
 7. `clear-cache`

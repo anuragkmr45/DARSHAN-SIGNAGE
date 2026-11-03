@@ -101,7 +101,7 @@ These behaviors are code-backed but not proven by documentation:
 
 - packaged player startup after OS reboot
 - fullscreen/kiosk behavior on target OS images
-- video/PDF/office/webpage playback on target hardware
+- video/image/PDF/office playback on target hardware
 - screenshot capture on real display driver stack
 - Socket.IO behavior through production nginx and LAN
 - secure offline lock behavior during network switch/theft simulation

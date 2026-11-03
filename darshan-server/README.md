@@ -40,7 +40,7 @@ Supported deployment workflow:
 - MinIO/S3 object storage
 - FFmpeg media processing
 - LibreOffice-backed document conversion
-- Playwright-backed webpage capture
+- LibreOffice-backed Reports and Audit Logs PDF exports
 - Background jobs with pg-boss
 - Device pairing and telemetry APIs on the main backend port
 - Audit logging and report export
@@ -53,7 +53,6 @@ Supported deployment workflow:
 - Host-installed runtime tools on both macOS and Linux:
   - `ffmpeg`
   - `LibreOffice/soffice`
-  - Playwright Chromium
   - `pg_dump`
   - `tar`
 - `.env` configured from `.env.example`
@@ -62,7 +61,6 @@ The optional Docker image also includes:
 
 - `ffmpeg`
 - `LibreOffice/soffice`
-- Playwright Chromium runtime
 - `pg_dump`
 - `tar`
 
@@ -123,7 +121,6 @@ It validates the required host-run toolchain:
 
 - `ffmpeg`
 - `LibreOffice`
-- Playwright Chromium
 - `pg_dump`
 - `tar`
 
@@ -170,14 +167,6 @@ See `.env.example` for the full list. Common variables:
 - `LIBREOFFICE_PATH`
 - `PG_DUMP_PATH`
 - `TAR_PATH`
-- `DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH`
-- `WEBPAGE_NAVIGATION_ALLOWLIST`
-- `WEBPAGE_RESOURCE_ALLOWLIST`
-- `WEBPAGE_ALLOWED_CIDRS`
-- `WEBPAGE_ALLOWED_PORTS`
-- `WEBPAGE_ALLOW_HTTP`
-- `WEBPAGE_PREVIEW_REFRESH_INTERVAL_HOURS`
-- `WEBPAGE_PREVIEW_REFRESH_BATCH_SIZE`
 - `APP_PUBLIC_BASE_URL`
 - `ENABLE_SWAGGER_UI`
 
@@ -188,15 +177,10 @@ All executable overrides resolve through `PATH` by default:
 - `PG_DUMP_PATH=pg_dump`
 - `TAR_PATH=tar`
 
-Set `DARSHAN_WEBPAGE_CAPTURE_EXECUTABLE_PATH` only when Chromium is installed outside the standard Playwright location. `HEXMON_WEBPAGE_CAPTURE_EXECUTABLE_PATH` remains a legacy alias for one release.
-
-Webpage media accepts HTTPS by default. An approved deployment may also enable
-ordinary HTTP with `WEBPAGE_ALLOW_HTTP=true` and port `80` in
-`WEBPAGE_ALLOWED_PORTS`. Every navigation and redirect is rechecked against the
-host, scheme, port, DNS, and CIDR policy; credentialed and login-required pages
-are unsupported. `POST /api/v1/media/:id/webpage-preview/refresh` requests a
-manual refresh. Automatic refresh defaults to every 24 hours, and a failed
-refresh keeps the latest successful preview.
+Webpage Media is retired. Creation and restore return `WEBPAGE_RETIRED`, the
+preview refresh route is absent, and historical rows remain inert. Reports and
+Audit Logs PDF exports use LibreOffice; the backend does not install Playwright
+Chromium.
 
 Targeted default media uses priority `0` through `100` for group assignments.
 Higher priority wins, equal priority uses ascending group target ID, a direct

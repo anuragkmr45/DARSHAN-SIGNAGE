@@ -282,18 +282,17 @@ export class DefaultMediaService extends EventEmitter {
     const media = payload.media
     const mediaId = payload.media_id
 
+    if (media?.type === 'WEBPAGE') {
+      return { ...payload, media_id: null, media: null }
+    }
     if (!media || !mediaId) {
       return payload
     }
 
     const cacheManager = getCacheManager()
-    const cacheRevision = media.type === 'WEBPAGE'
-      ? media.fallback_media_revision || media.fallback_media_sha256
-      : undefined
+    const cacheRevision = undefined
     const cacheKey = buildRevisionedCacheKey(mediaId, cacheRevision)
-    const cacheUrl = media.type === 'WEBPAGE'
-      ? media.fallback_media_url || media.media_url
-      : media.media_url
+    const cacheUrl = media.media_url
 
     try {
       if (cacheUrl) {
@@ -337,9 +336,7 @@ export class DefaultMediaService extends EventEmitter {
 
     try {
       const cacheManager = getCacheManager()
-      const cacheRevision = media.type === 'WEBPAGE'
-        ? media.fallback_media_revision || media.fallback_media_sha256
-        : undefined
+      const cacheRevision = undefined
       const cached = await cacheManager.resolveRevisioned(mediaId, cacheRevision, media.content_type)
       if (!cached) {
         return payload

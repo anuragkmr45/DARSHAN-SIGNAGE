@@ -151,6 +151,7 @@ export async function collectLiveFallbackSource(context: MutationAuthorizationCo
   for (const row of media) {
     requireRead(context, row, 'Media');
     if (!canReferenceContentResource(presentation, row)) throw AppError.forbidden();
+    if (row.type === 'WEBPAGE') fail('WEBPAGE_RETIRED', 'Webpage media cannot be used as live fallback.', 422);
     if (row.status !== 'READY' || row.deleted_at) fail('LIVE_FALLBACK_UNVERIFIED', 'All fallback media must be READY and available.', 422);
     let source = row.source_object_id ? objectMap.get(row.source_object_id) : undefined;
     if (!source && row.source_bucket && row.source_object_key) {
@@ -158,7 +159,6 @@ export async function collectLiveFallbackSource(context: MutationAuthorizationCo
     }
     const delivered = sourceObject(row.ready_object_id ? objectMap.get(row.ready_object_id) : source);
     if ((row.type === 'DOCUMENT' && (delivered.content_type !== 'application/pdf' || !row.page_count || row.page_count < 1)) ||
-      (row.type === 'WEBPAGE' && (!row.ready_object_id || !delivered.content_type.startsWith('image/'))) ||
       (row.type === 'IMAGE' && !delivered.content_type.startsWith('image/')) ||
       (row.type === 'VIDEO' && !row.ready_object_id)) {
       fail('LIVE_FALLBACK_UNVERIFIED', 'The fallback playback representation is not ready.', 422);
@@ -166,7 +166,7 @@ export async function collectLiveFallbackSource(context: MutationAuthorizationCo
     const isHls = row.type === 'VIDEO' && /mpegurl/i.test(delivered.content_type);
     const verifiedSource = source && source.sha256 && /^[a-f0-9]{64}$/i.test(source.sha256) && Number.isSafeInteger(source.size) && source.size! > 0 && source.content_type ? sourceObject(source) : null;
     assets.push({ media_id: row.id, source_type: row.type,
-      representation: row.type === 'WEBPAGE' ? 'WEBPAGE_PREVIEW' : row.ready_object_id ? 'READY' : 'SOURCE',
+      representation: row.ready_object_id ? 'READY' : 'SOURCE',
       object: delivered, source_object: verifiedSource,
       duration_seconds: row.duration_seconds, page_count: row.page_count,
       ...(isHls ? { legacy_hls_revision: row.updated_at.toISOString() } : {}) });

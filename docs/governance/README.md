@@ -62,7 +62,7 @@ The following always require live evidence:
 - Packaged player install/autostart/pair/reset/re-pair tests on target hardware.
 - Docker role health across the actual VM/LAN topology.
 - Socket.IO/Valkey notification behavior and polling fallback.
-- Media rendering for video, image, PDF, office, and webpage content.
+- Media rendering for video, image, PDF, and office content; webpage Media is retired.
 - Screenshot capture and proof-of-play behavior under real device conditions.
 - Prometheus/Grafana scrape and alert validity.
 - No-secret review of logs, support bundles, screenshots, browser network payloads, and doctor output.

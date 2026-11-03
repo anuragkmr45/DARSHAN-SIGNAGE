@@ -59,7 +59,7 @@ The Electron player contract is implemented across main process services, a prel
 
 - packaged player autostart on each target OS image
 - fullscreen/kiosk behavior on Ubuntu/RPi/AXON hardware
-- video/PDF/office/webpage rendering
+- video/image/PDF/office rendering; retired webpage items remain unavailable
 - screenshot capture
 - LAN backend/CMS/Socket.IO connectivity and outage recovery
 - secure offline lock behavior under real network switch/theft scenarios

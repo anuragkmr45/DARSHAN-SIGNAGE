@@ -139,7 +139,8 @@ async function ensureMediaIdsExist(ids: Array<string | null | undefined>) {
   }
 }
 
-function assertDefaultMediaReady(media: { id: string; status?: string | null }) {
+function assertDefaultMediaReady(media: { id: string; status?: string | null; type?: string | null }) {
+  if (media.type === 'WEBPAGE') throw AppError.badRequest('Webpage media is retired.', { reason: 'WEBPAGE_RETIRED', media_ids: [media.id] });
   if (media.status !== 'READY') {
     throw AppError.badRequest('Default media must be READY before it can be assigned.', {
       reason: 'MEDIA_NOT_READY',
@@ -156,13 +157,15 @@ async function ensureReadyDefaultMediaIds(
   if (requestedIds.length === 0) return;
 
   const rows = await executor
-    .select({ id: schema.media.id, status: schema.media.status })
+    .select({ id: schema.media.id, status: schema.media.status, type: schema.media.type })
     .from(schema.media)
     .where(and(inArray(schema.media.id, requestedIds as string[]), isNull(schema.media.deleted_at)));
   if (rows.length !== requestedIds.length) {
     throw AppError.notFound('Media not found');
   }
 
+  const retiredIds = rows.filter((media) => media.type === 'WEBPAGE').map((media) => media.id).sort();
+  if (retiredIds.length > 0) throw AppError.badRequest('Webpage media is retired.', { reason: 'WEBPAGE_RETIRED', media_ids: retiredIds });
   const nonReadyIds = rows.filter((media) => media.status !== 'READY').map((media) => media.id).sort();
   if (nonReadyIds.length > 0) {
     throw AppError.badRequest('Default media must be READY before it can be assigned.', {

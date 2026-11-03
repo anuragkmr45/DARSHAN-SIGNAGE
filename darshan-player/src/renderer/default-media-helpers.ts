@@ -1,6 +1,7 @@
 import type { DefaultMediaItem } from '../common/types'
 
 export function resolveDefaultMediaSource(media: DefaultMediaItem): string | undefined {
+  if (media.type === 'WEBPAGE') return undefined
   return media.local_url || media.fallback_media_url || media.media_url
 }
 
