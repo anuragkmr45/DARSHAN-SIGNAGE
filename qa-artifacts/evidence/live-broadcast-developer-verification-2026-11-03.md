@@ -1050,6 +1050,28 @@ does not demonstrate representative steady-state media reliability. The
 production-size Media VM and load/soak gate remain open. The local node was not
 silently restarted or counted as healthy after that isolation.
 
+### Attempted local Firefox continuation, 2026-11-03 UTC
+
+The first Firefox test request (`REQ-3e7149d79b86`, 11:05–11:15 UTC) was
+published through CMS but had the earlier browser session's presenter identity.
+It was taken down **before** its window, with the reason recorded in CMS, because
+the separately verified Firefox login account was a different user. A new
+enabled test source was created for the verified isolated QA administrator;
+no replacement schedule was published and no Firefox capture or frame was
+claimed.
+
+The operator armed a fresh exact-instance root handoff and the isolated Media
+node `2142848a-ef07-4fe5-bcfd-1a5e754ae87c` passed startup at 10:56 UTC.
+At 11:02:59 UTC, before the intended Firefox window and with no live run, it
+logged `HOST_READINESS_LOST` and isolated permanently. The host was again
+running the CMS, packaged player and browser with its 4 GiB swap full. The
+one-second host lease deliberately fails closed on a delayed or missing host
+witness; this observation does not identify whether the delay came from host
+scheduling or the witness process. The exact cause was not instrumented in this
+attempt. We did not weaken the lease or claim Firefox acceptance on this
+resource-limited host. Re-run the Firefox capture and sustained-media test on
+the representative Media VM with resource and watchdog timing evidence.
+
 These are developer checks on one local Linux host. They do not replace
 independent `LIVE-01..20` human execution, physical display/audio, actual
 Chrome/Edge and Windows, cross-VM TLS/ICE/firewall, 10×25 load/soak, or restore
