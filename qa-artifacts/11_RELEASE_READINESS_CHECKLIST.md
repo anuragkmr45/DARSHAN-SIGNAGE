@@ -149,6 +149,18 @@ See [publication evidence](evidence/live-publication-authorization-developer-ver
 
 ## Runtime and authoring developer checkpoint — 2026-11-03
 
-The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+The packet is **implemented in source, default OFF, and locally developer-verified**. It is not beta acceptance or release approval. The [dated developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md) binds the final real CMS/packaged-player run, screenshots, timings and local regression results. Earlier [runtime/authoring evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) retains its original source/build scope; an older SFU/prototype result cannot validate a later build. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
 
-Source presence no longer blocks describing runtime/authoring/player/packaging implementation, but actual current-source integration and release verification do. The future synthetic-screen CMS success, route/component automation and signed fixtures do not close any item above. Final CMS/player full gates were pending at this documentation refresh; use the root-owned dated ledger/build binding for their exact final disposition. Do not ship this packet as completed LIVE until native capture/ordinary-player frame+audio, current Backend/media/host-readiness/death witness, production artifacts, supported platforms, cross-VM/10×25/restore and independent acceptance are evidenced or explicitly dispositioned by responsible humans.
+The final local current-source integration and regression are recorded in the dated ledger. The earlier synthetic-screen CMS success, route/component automation and signed fixtures alone do not close any item above. Do not ship this packet as completed LIVE until physical frame/audio, current Backend/media/host-readiness/death witness, production artifacts, supported platforms, cross-VM/10×25/restore and independent acceptance are evidenced or explicitly dispositioned by responsible humans.
+
+Later developer verification has now shown native tab capture through the real
+CMS and a decoded live image on the ordinary packaged Linux player, followed by
+Stop, visible fallback and an explicit restart. The [developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md)
+binds the private build and sanitized screenshots. This closes the earlier
+*absence of any local live frame* but does not close the release gate: the
+final observation-refresh packaged build and low-load end timing were then
+verified in a separate one-screen window. Its receiver stayed `READY` six
+seconds before the boundary; it stopped 296 ms early, within the one-second
+tolerance, and the player showed standby after the window. Physical
+audio/display, cross-VM ICE/TLS/firewall, capacity/soak, restore and
+independent QA remain.

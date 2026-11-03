@@ -46,6 +46,8 @@ services:
       DARSHAN_MEDIA_SIGNAL_PORT: ${MEDIA_SIGNAL_PORT}
       DARSHAN_MEDIA_SFU_URL: http://127.0.0.1:18781
       DARSHAN_MEDIA_SFU_CONFIG_FILE: /private/livekit.yaml
+      # LiveKit shares bind_addresses across API and RTC; API port 18781 is not published.
+      DARSHAN_MEDIA_SFU_CONTAINER_WILDCARD_BIND: "true"
       DARSHAN_MEDIA_NODE_INSTANCE_ID: ${DARSHAN_MEDIA_NODE_INSTANCE_ID:-unprepared}
       DARSHAN_MEDIA_SUPERVISOR_STATE_FILE: /run/darshan-media-watchdog/supervisor.json
       DARSHAN_MEDIA_HOST_LEASE_FILE: /run/darshan-media-host-lease/lease.json

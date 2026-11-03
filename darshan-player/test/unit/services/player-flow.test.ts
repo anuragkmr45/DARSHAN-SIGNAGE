@@ -120,6 +120,15 @@ describe('Player Flow', () => {
     }
   }
 
+  it('does not send status to a destroyed window during live shutdown', () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const flow = getPlayerFlow()
+    const send = sandbox.spy()
+    ;(flow as any).mainWindow = { isDestroyed: () => true, webContents: { isDestroyed: () => true, send } }
+    expect(() => flow.refreshPresentation()).not.to.throw()
+    expect(send.called).to.equal(false)
+  })
+
   it('refreshes a pending OTP without resetting the protected device identity', async () => {
     const { getPlayerFlow } = require('../../../src/main/services/player-flow')
     const { getPairingService } = require('../../../src/main/services/pairing-service')
@@ -1018,7 +1027,9 @@ describe('Player Flow', () => {
       }),
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    for (let attempt = 0; attempt < 100 && playerFlow.getState() !== 'HARD_RECOVERY'; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
 
     expect(playerFlow.getState()).to.equal('HARD_RECOVERY')
     expect(playerFlow.getStatus().recoveryReason).to.equal('request failed')

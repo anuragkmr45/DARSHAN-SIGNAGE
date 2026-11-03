@@ -48,7 +48,7 @@ export function LivePresenterPanel({ actorId, occurrenceId, onClose }: { actorId
   const canStop = state.capture || state.pickerPending || Boolean(state.occurrence?.run?.owns_current_attempt) || state.pendingStop;
   return <Dialog open onOpenChange={open => { if (!open) close(); }}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
     <DialogHeader><DialogTitle>Presenter controls</DialogTitle><DialogDescription>Publish your chosen screen into this scheduled occurrence. This panel is a local preview and never subscribes to a live room.</DialogDescription></DialogHeader>
-    <div className="flex flex-wrap items-center gap-2"><Badge>{state.phase}</Badge><Badge variant="outline">Backend run: {state.occurrence?.run?.state ?? 'not started'}</Badge></div>
+    <div className="flex flex-wrap items-center gap-2"><Badge>{state.phase}</Badge><Badge variant="outline">Backend run at last check: {state.occurrence?.run?.state ?? 'not started'}</Badge></div>
     <p role={['ERROR', 'STALE', 'EXPIRED'].includes(state.phase) ? 'alert' : 'status'} className="text-sm">{allowed ? state.message : isLoading ? 'Checking current permissions…' : 'Your current access does not allow presenting live.'}</p>
     {state.occurrence && <div className="rounded border p-3 text-sm"><p>{new Date(state.occurrence.start_at).toISOString()} → {new Date(state.occurrence.end_at).toISOString()} (UTC)</p>
       <p>{state.occurrence.screen_ids.length} approved screens · Business eligibility: {state.occurrence.can_start ? 'eligible' : 'unavailable'}</p>

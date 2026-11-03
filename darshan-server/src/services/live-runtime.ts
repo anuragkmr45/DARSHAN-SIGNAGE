@@ -525,7 +525,7 @@ export async function getDeviceLiveState(device: Device, publishId: string, item
 }
 export async function createLiveAdmission(selector: Selector, payload: Payload | undefined,
   input: { request_id: string; runtime_session_id: string; run_id?: string; generation?: number; fallback?: LiveFallbackReadiness }, device?: Device) {
-  return withLiveOccurrence(selector, payload, true, async context => {
+  const result = await withLiveOccurrence(selector, payload, true, async context => {
     await assertPublished(context);
     const run = assertRun(context, input.run_id, input.generation);
     if (device) {
@@ -542,6 +542,20 @@ export async function createLiveAdmission(selector: Selector, payload: Payload |
       [admission] = await context.tx.select().from(schema.liveAdmissions).where(and(eq(schema.liveAdmissions.run_id, run.id),
         eq(schema.liveAdmissions.role, device ? 'receiver' : 'presenter'), device ? eq(schema.liveAdmissions.screen_id, device.screenId) : undefined,
         isNull(schema.liveAdmissions.teardown_confirmed_at)));
+      if (admission && device && (admission.runtime_session_id !== input.runtime_session_id || admission.certificate_serial !== device.serial)) {
+        // A copied certificate must not let a second player evict a receiver
+        // that is still renewing. Wait until its bounded media authority has
+        // expired before starting the exact-teardown handover.
+        if (admission.state !== 'REVOKING' && admission.state !== 'REVOKED' &&
+            Date.now() - (admission.last_authorized_at ?? admission.created_at).getTime() < 10_000) {
+          return { receiver_active: true as const };
+        }
+        // The old receiver may still occupy the media slot after a player
+        // restart or certificate rotation. Commit its revocation before asking
+        // the new runtime to retry; throwing here would roll it back.
+        await revokeAdmission(context, admission);
+        return { restart_teardown_pending: true as const };
+      }
       if (admission) assertOwnedAdmission(context, admission, input.runtime_session_id, device);
       else {
         if (!device) throw liveError('LIVE_REVOKED', 'The presenter admission ended; explicitly start a new attempt.', 410);
@@ -558,6 +572,13 @@ export async function createLiveAdmission(selector: Selector, payload: Payload |
     return { ...admissionIdentity(context, run, admission, await desiredLiveVersion(context, device?.screenId)),
       status: admission.state === 'ACTIVE' ? 'READY' : 'PREPARING', retry_after_ms: 500 };
   });
+  if ('receiver_active' in result) {
+    throw liveError('LIVE_RECEIVER_ACTIVE', 'This screen still has a recently authorized player connection. Retry shortly.', 409);
+  }
+  if ('restart_teardown_pending' in result) {
+    throw liveError('LIVE_TEARDOWN_PENDING', 'The previous player connection is being removed. Retry shortly.', 503);
+  }
+  return result;
 }
 export async function occurrenceForRun(runId: string) {
   const [run] = await getDatabase().select({ occurrence_id: schema.liveRuns.occurrence_id }).from(schema.liveRuns).where(eq(schema.liveRuns.id, runId));

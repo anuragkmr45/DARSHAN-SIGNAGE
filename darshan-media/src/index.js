@@ -45,6 +45,11 @@ export async function start() {
   }
   const adapter = new LiveKitAdapter({
     url: upstreamUrl, apiKey: required('LIVEKIT_API_KEY'), apiSecret: required('LIVEKIT_API_SECRET'),
+    onDiagnostic: (code) => {
+      if (process.env.DARSHAN_MEDIA_DIAGNOSTICS === '1' && process.send && process.connected) {
+        try { process.send({ type: 'diagnostic', code }, () => {}); } catch { /* Isolation does not depend on diagnostics. */ }
+      }
+    },
   });
   const hostReadiness = runtime.backendAuthority ? createHostReadiness({ file: runtime.hostLeaseFile,
     nodeInstanceId: runtime.nodeInstanceId, managedInstanceId: runtime.managedInstanceId,

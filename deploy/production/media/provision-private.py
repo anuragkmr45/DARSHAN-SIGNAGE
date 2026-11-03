@@ -129,8 +129,14 @@ def main():
     key, signing = secrets.token_hex(12), secrets.token_hex(32)
     write_new(role / 'signing.env', ('LIVEKIT_API_KEY=' + key + '\nLIVEKIT_API_SECRET=' + signing + '\n').encode(), uid)
     values = dict(line.split('=', 1) for line in Path('.env.production').read_text().splitlines() if '=' in line)
-    yaml = ('port: 18781\nbind_addresses: [127.0.0.1]\nrtc:\n'
-            '  tcp_port: %s\n  udp_port: %s\n  node_ip: %s\n  use_external_ip: false\n'
+    # The SFU API port stays unpublished by Compose, while ICE UDP must bind
+    # the container interface reached through the published host port. Keep
+    # the configured private VM address for other hosts, and advertise the
+    # container address as an additional ICE candidate for same-host clients.
+    # Without that candidate, the Docker-hosted local presenter/player can
+    # complete signaling while never establishing an RTC media path.
+    yaml = ('port: 18781\nbind_addresses: [0.0.0.0]\nrtc:\n'
+            '  tcp_port: %s\n  udp_port: %s\n  node_ip: %s\n  advertise_internal_ip: true\n  use_external_ip: false\n'
             '  stun_servers: []\n  turn_servers: []\nkeys:\n  %s: %s\nlogging:\n  level: warn\n') % (
                 values['MEDIA_RTC_TCP_PORT'], values['MEDIA_RTC_UDP_PORT'], values['MEDIA_BIND_ADDRESS'], key, signing)
     write_new(role / 'livekit.yaml', yaml.encode(), uid)

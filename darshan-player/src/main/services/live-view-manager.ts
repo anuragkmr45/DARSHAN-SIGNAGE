@@ -6,8 +6,14 @@ import { fileURLToPath } from 'url'
 import type { LiveAdmissionGrant, LiveReceiverGrant, LiveReceiverLease, LiveReceiverObservation } from '../../common/live-runtime'
 import { getConfigManager } from '../../common/config'
 import { createLiveCertificateVerifier } from './network/live-session-tls'
+import { getLogger } from '../../common/logger'
 
 const KINDS: LiveReceiverObservation['kind'][] = ['connected', 'first-frame', 'audio-ready', 'audio-degraded', 'disconnected', 'failed', 'heartbeat']
+const logger = getLogger('live-view-manager')
+const STAGES = new Set(['RECEIVER_START', 'GRANT_ACCEPTED', 'SIGNAL_JOINED', 'SIGNAL_CONNECTED', 'ROOM_CONNECTED',
+  'SUBSCRIBE_REQUESTED', 'TRACK_PUBLISHED', 'TRACK_SUBSCRIBED', 'FRAME_CALLBACK',
+  'VIDEO_PLAY_STARTED', 'VIDEO_PLAY_FAILED', 'VIDEO_LOADED_DATA', 'VIDEO_METADATA', 'VIDEO_PLAYING',
+  'VIDEO_WAITING', 'TRACK_UNSUBSCRIBED', 'CONNECT_FAILED'])
 type Entry = { view: WebContentsView; grant: LiveReceiverGrant; controller: AbortController; window: BrowserWindow;
   isolated: Session; authorized: () => boolean; remaining: () => number; observation: (value: LiveReceiverObservation) => void; disposed: boolean; delivered: boolean; visible: boolean }
 export function isAllowedLiveViewRequest(raw: string, gatewayOrigin: string, rendererRoot: string): boolean {
@@ -54,13 +60,25 @@ export class LiveViewManager {
     view.webContents.on('will-navigate', event => event.preventDefault())
     view.webContents.on('will-redirect', event => event.preventDefault())
     view.webContents.on('before-input-event', event => event.preventDefault())
-    const failed = (): void => { if (this.entry === entry && !entry.disposed) observation({ view_epoch: viewEpoch, kind: 'failed' }) }
+    const failed = (): void => {
+      if (this.entry === entry && !entry.disposed) {
+        logger.warn('Live receiver view failed before a confirmed frame')
+        observation({ view_epoch: viewEpoch, kind: 'failed' })
+      }
+    }
     view.webContents.on('unresponsive', failed)
     view.webContents.on('render-process-gone', failed)
     view.webContents.on('did-fail-load', failed)
+    view.webContents.on('console-message', (_event, _level, message: string) => {
+      const stage = /^DARSHAN_LIVE_RX_STAGE:([A-Z_]+)$/.exec(message)?.[1]
+      if (stage && STAGES.has(stage) && this.entry === entry && !entry.disposed) logger.info({ stage }, 'Live receiver stage')
+    })
     window.contentView.addChildView(view)
     this.resize()
-    void view.webContents.loadFile(path.join(rendererRoot, 'live-receiver.html')).catch(failed)
+    logger.info('Live receiver view attached')
+    void view.webContents.loadFile(path.join(rendererRoot, 'live-receiver.html'))
+      .then(() => { if (this.entry === entry && !entry.disposed) logger.info('Live receiver renderer loaded') })
+      .catch(failed)
   }
   getGrant(senderId: number): LiveReceiverGrant | null {
     const entry = this.entry

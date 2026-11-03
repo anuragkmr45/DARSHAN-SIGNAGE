@@ -199,6 +199,25 @@ class WatchdogTests(unittest.TestCase):
         with self.assertRaises(watchdog.WatchdogError):
             watchdog.validate_monitor_gap(8000, 10_000)
 
+    def test_heartbeat_updated_during_slow_read_uses_post_read_clock(self):
+        args = SimpleNamespace(
+            docker_context='default', container_id=ID, instance_id=INSTANCE,
+            heartbeat='/run/private/supervisor.json', heartbeat_uid=os.getuid(),
+            host_lease_file=None, witness_ready_file=None, pidfd=42)
+        fence = {'pid': 123, 'started_at': 'fixed', 'start_ticks': '123'}
+        # The heartbeat is newer than the pre-read sample, but valid when the
+        # read finishes. An old sample would falsely classify it as future.
+        samples = iter([1000, 1100, 1101, 1250])
+        ticks = iter([0.0, 0.0, 0.1, 0.2])
+        with mock.patch.object(watchdog, 'boottime_ms', side_effect=lambda: next(samples)), \
+                mock.patch.object(watchdog.time, 'monotonic', side_effect=lambda: next(ticks)), \
+                mock.patch.object(watchdog.time, 'sleep'), \
+                mock.patch.object(watchdog, 'pidfd_dead', side_effect=[False, True]), \
+                mock.patch.object(watchdog, 'read_heartbeat', return_value=heartbeat(boottime_ms=1250)), \
+                mock.patch.object(watchdog, 'enforce') as enforce, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(watchdog.monitor_pinned(args, fence, 'test-boot'), 0)
+        enforce.assert_not_called()
+
     def test_monitor_keeps_checking_pins_heartbeat_and_lease_during_docker_outage(self):
         args = SimpleNamespace(
             docker_context='default', container_id=ID, instance_id=INSTANCE,
@@ -209,7 +228,7 @@ class WatchdogTests(unittest.TestCase):
         pulse = mock.Mock()
         output = io.StringIO()
         monotonic = iter([0.0, 0.6, 0.61, 1.2, 1.21, 1.8, 1.81, 2.4])
-        boottime = iter([1000, 1100, 1101, 1200, 1201, 1300, 1301, 1400])
+        boottime = iter([1000, 1100, 1101, 1102, 1200, 1201, 1202, 1300, 1301, 1302, 1400])
         with mock.patch.object(watchdog, 'boottime_ms', side_effect=lambda: next(boottime)), \
                 mock.patch.object(watchdog.time, 'monotonic', side_effect=lambda: next(monotonic)), \
                 mock.patch.object(watchdog.time, 'sleep'), \
@@ -239,7 +258,7 @@ class WatchdogTests(unittest.TestCase):
         fence = {'pid': 123, 'started_at': 'fixed', 'start_ticks': '123'}
         output = io.StringIO()
         monotonic = iter([0.0, 0.6, 0.61, 1.2, 1.21, 1.8])
-        boottime = iter([1000, 1100, 1101, 1200, 1201, 1300])
+        boottime = iter([1000, 1100, 1101, 1102, 1200, 1201, 1202, 1300])
         running = {'State': {'Running': True}}
         stopped = {'State': {'Running': False}}
         with mock.patch.object(watchdog, 'boottime_ms', side_effect=lambda: next(boottime)), \

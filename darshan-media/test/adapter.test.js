@@ -29,11 +29,18 @@ test('presenter JWT permits only approved source types and no receiving', async 
 });
 
 test('removal of an absent participant is idempotent; other errors fail', async () => {
-  const sdk = adapter();
+  const diagnostics = [];
+  const sdk = new LiveKitAdapter({ url: 'http://127.0.0.1:18781', apiKey: 'test-key', apiSecret: 'test-secret-at-least-32-characters',
+    onDiagnostic: code => diagnostics.push(code) });
   sdk.rooms = { removeParticipant: async () => { throw Object.assign(new Error(), { code: 'not_found' }); } };
   await sdk.removeParticipant('room', 'id');
+  assert.deepEqual(diagnostics, []);
   sdk.rooms = { removeParticipant: async () => { throw Object.assign(new Error(), { code: 'unavailable' }); } };
   await assert.rejects(sdk.removeParticipant('room', 'id'));
+  assert.deepEqual(diagnostics, ['SFU_REMOVE_UNAVAILABLE']);
+  sdk.rooms = { removeParticipant: async () => { throw new TypeError('private-url-secret'); } };
+  await assert.rejects(sdk.removeParticipant('room', 'id'));
+  assert.deepEqual(diagnostics, ['SFU_REMOVE_UNAVAILABLE', 'SFU_REMOVE_TRANSPORT']);
 });
 
 test('hung management request is bounded rather than silently retaining media', async () => {

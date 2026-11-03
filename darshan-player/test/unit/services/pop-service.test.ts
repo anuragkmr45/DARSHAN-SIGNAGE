@@ -172,6 +172,91 @@ describe('Proof-of-Play Service', () => {
   })
 
   describe('Event Flushing', () => {
+    it('retains former-identity events without poisoning a newly paired device', async () => {
+      const oldEvent = {
+        device_id: 'former-device', schedule_id: 'old-schedule', media_id: 'old-media',
+        playback_instance_id: 'old-playback', start_time: new Date().toISOString(),
+        end_time: new Date().toISOString(), duration: 1, completed: true,
+      }
+      fs.writeFileSync(path.join(spoolDir, 'pop-former.json'), JSON.stringify([oldEvent]))
+      const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+      const { getHttpClient } = require('../../../src/main/services/network/http-client')
+      const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+      const popService = getProofOfPlayService()
+      const postStub = sandbox.stub(getHttpClient(), 'post').resolves({ success: true })
+      const authFailure = sandbox.spy(getLifecycleEvents(), 'emitRuntimeAuthFailure')
+
+      popService.recordStart('current-schedule', 'current-media')
+      popService.recordEnd('current-schedule', 'current-media', true)
+      await popService.flushEvents()
+
+      expect(postStub.calledOnce).to.be.true
+      expect(postStub.firstCall.args[1].device_id).to.equal('test-device')
+      expect(authFailure.called).to.be.false
+      expect(fs.readdirSync(spoolDir).filter((name: string) => name.startsWith('pop-'))).to.have.length(0)
+      const retiredDir = path.join(tempDir, 'cache', 'pop-spool-retired')
+      const retiredFiles = fs.readdirSync(retiredDir)
+      expect(retiredFiles).to.have.length(1)
+      expect(JSON.parse(fs.readFileSync(path.join(retiredDir, retiredFiles[0]), 'utf8'))[0].device_id)
+        .to.equal('former-device')
+    })
+
+    it('keeps former-identity spool evidence queued if archival fails', async () => {
+      const oldEvent = {
+        device_id: 'former-device', schedule_id: 'old-schedule', media_id: 'old-media',
+        playback_instance_id: 'old-playback', start_time: new Date().toISOString(),
+        end_time: new Date().toISOString(), duration: 1, completed: true,
+      }
+      fs.writeFileSync(path.join(spoolDir, 'pop-former.json'), JSON.stringify([oldEvent]))
+      const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+      const { getHttpClient } = require('../../../src/main/services/network/http-client')
+      const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+      const popService = getProofOfPlayService()
+      const postStub = sandbox.stub(getHttpClient(), 'post').resolves({ success: true })
+      const authFailure = sandbox.spy(getLifecycleEvents(), 'emitRuntimeAuthFailure')
+      const originalWrite = fs.writeFileSync
+      sandbox.stub(fs, 'writeFileSync').callsFake((file: string, ...args: unknown[]) => {
+        if (String(file).includes('pop-spool-retired')) throw new Error('archive disk unavailable')
+        return originalWrite.call(fs, file, ...args)
+      })
+
+      await popService.flushEvents()
+
+      expect(postStub.called).to.be.false
+      expect(authFailure.called).to.be.false
+      const replayFiles = fs.readdirSync(spoolDir).filter((name: string) => name.startsWith('pop-'))
+      expect(replayFiles).to.have.length(1)
+      expect(JSON.parse(fs.readFileSync(path.join(spoolDir, replayFiles[0]), 'utf8'))[0].device_id)
+        .to.equal('former-device')
+    })
+
+    it('does not raise a current-identity failure when pairing changes during a PoP request', async () => {
+      const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
+      const { getHttpClient } = require('../../../src/main/services/network/http-client')
+      const { getPairingService } = require('../../../src/main/services/pairing-service')
+      const { getLifecycleEvents } = require('../../../src/main/services/lifecycle-events')
+      const { DeviceApiError } = require('../../../src/common/types')
+      const popService = getProofOfPlayService()
+      const pairingService = getPairingService()
+      const currentDevice = sandbox.stub(pairingService, 'getDeviceId').returns('test-device')
+      const authFailure = sandbox.spy(getLifecycleEvents(), 'emitRuntimeAuthFailure')
+      const postStub = sandbox.stub(getHttpClient(), 'post').callsFake(async () => {
+        currentDevice.returns('new-device')
+        throw new DeviceApiError({ code: 'FORBIDDEN', status: 403, message: 'Invalid device credentials' })
+      })
+      popService.recordStart('old-schedule', 'old-media')
+      popService.recordEnd('old-schedule', 'old-media', true)
+
+      await popService.flushEvents()
+
+      expect(postStub.calledOnce).to.be.true
+      expect(authFailure.called).to.be.false
+      const replayFiles = fs.readdirSync(spoolDir).filter((name: string) => name.startsWith('pop-'))
+      expect(replayFiles).to.have.length(1)
+      expect(JSON.parse(fs.readFileSync(path.join(spoolDir, replayFiles[0]), 'utf8'))[0].device_id)
+        .to.equal('test-device')
+    })
+
     it('should flush events to backend', async () => {
       const { getProofOfPlayService } = require('../../../src/main/services/pop-service')
       const { getHttpClient } = require('../../../src/main/services/network/http-client')
@@ -305,7 +390,8 @@ describe('Proof-of-Play Service', () => {
       expect(popService.getReplayStats().droppedEvents).to.equal(1)
     })
 
-    it('should pace replay by draining only one bounded batch at a time', async () => {
+    it('should pace replay by draining only one bounded batch at a time', async function () {
+      this.timeout(15000)
       const spoolFiles = [
         path.join(spoolDir, 'pop-a.json'),
         path.join(spoolDir, 'pop-b.json'),

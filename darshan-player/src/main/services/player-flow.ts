@@ -288,7 +288,9 @@ export class PlayerFlow extends EventEmitter {
     this.fallbackRevision += 1
     this.liveCoordinator?.suspend(reason)
     if (this.liveCoordinator?.isOwningContent()) {
-      this.mainWindow?.webContents.setAudioMuted(true)
+      if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.mainWindow.webContents.isDestroyed()) {
+        this.mainWindow.webContents.setAudioMuted(true)
+      }
       getContentOwner().advance('blocked')
       getPlaybackEngine().stop()
       this.playbackReady = false
@@ -1570,7 +1572,7 @@ export class PlayerFlow extends EventEmitter {
     const presentation = this.getPresentationSnapshot()
     this.emit('status', presentation.status)
     this.emit('presentation-status', presentation)
-    if (this.mainWindow) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.mainWindow.webContents.isDestroyed()) {
       // Retain player-status until all renderer integrations have migrated.
       // New renderer code consumes the revisioned presentation event below.
       this.mainWindow.webContents.send('player-status', presentation.status)

@@ -3,6 +3,8 @@ import type { LiveAdmissionGrant } from '@/api/liveRuntimeTypes';
 
 setLogLevel(LogLevel.silent); // SDK diagnostics can contain transient signaling credentials.
 const PRESENTER_CONNECTION_STAGE_TIMEOUT_MS = 3000;
+const SAFE_CONNECTION_REASONS = ['NOT_ALLOWED', 'SERVER_UNREACHABLE', 'INTERNAL_ERROR', 'CANCELLED',
+  'LEAVE_REQUEST', 'TIMEOUT', 'WEBSOCKET', 'SERVICE_NOT_FOUND'] as const;
 export interface PresenterCapture { display: MediaStream; microphone?: MediaStream }
 export interface PresenterConnection {
   publish(grant: LiveAdmissionGrant, capture: PresenterCapture, authorized: () => boolean): Promise<void>;
@@ -38,13 +40,25 @@ export const browserPresenterMedia: PresenterMedia = {
         // The controller owns retry and obtains a new single-use ticket for every
         // attempt. Keep both SDK stages below the ten-second authority lease so a
         // stalled stage cannot consume the whole thirty-second recovery window.
-        await room.connect(signaling.url, signaling.ticket, {
-          autoSubscribe: false,
-          maxRetries: 0,
-          websocketTimeout: PRESENTER_CONNECTION_STAGE_TIMEOUT_MS,
-          peerConnectionTimeout: PRESENTER_CONNECTION_STAGE_TIMEOUT_MS,
-          rtcConfig: { iceServers: [] },
-        });
+        try {
+          await room.connect(signaling.url, signaling.ticket, {
+            autoSubscribe: false,
+            maxRetries: 0,
+            websocketTimeout: PRESENTER_CONNECTION_STAGE_TIMEOUT_MS,
+            peerConnectionTimeout: PRESENTER_CONNECTION_STAGE_TIMEOUT_MS,
+            rtcConfig: { iceServers: [] },
+          });
+        } catch (error) {
+          const sdk = error && typeof error === 'object' ? error as { name?: unknown; reason?: unknown; message?: unknown; context?: { status?: unknown } } : null;
+          const reason = sdk?.name === 'ConnectionError' && typeof sdk.reason === 'number' && Number.isInteger(sdk.reason)
+            && sdk.reason >= 0 && sdk.reason < SAFE_CONNECTION_REASONS.length ? SAFE_CONNECTION_REASONS[sdk.reason] : 'OTHER';
+          const detail = typeof sdk?.message === 'string' && /could not establish (?:pc|PC) connection/i.test(sdk.message)
+            ? 'RTC_CONNECTION' : typeof sdk?.context?.status === 'number' && sdk.context.status >= 500
+              ? 'UPSTREAM_5XX' : 'UNCLASSIFIED';
+          // The SDK error text/context may contain the single-use ticket.
+          console.warn('DARSHAN_PRESENTER_SIGNAL_FAILED', reason, detail);
+          throw error;
+        }
         const current = () => !closed && authorized();
         if (!current()) { await close(); return; }
         events.connected();
@@ -53,8 +67,13 @@ export const browserPresenterMedia: PresenterMedia = {
         if (!video || video.readyState !== 'live') throw new Error('PRESENTER_CAPTURE_ENDED');
         // SDK 2.23.0 constructors explicitly mark these as user-provided; it
         // may not release/reacquire a device behind the owner's generation.
-        await room.localParticipant.publishTrack(new LocalVideoTrack(video, undefined, true), {
-          source: Track.Source.ScreenShare, name: 'DARSHAN screen', simulcast: false, videoCodec: 'vp8' });
+        try {
+          await room.localParticipant.publishTrack(new LocalVideoTrack(video, undefined, true), {
+            source: Track.Source.ScreenShare, name: 'DARSHAN screen', simulcast: false, videoCodec: 'vp8' });
+        } catch (error) {
+          console.warn('DARSHAN_PRESENTER_VIDEO_PUBLISH_FAILED');
+          throw error;
+        }
         if (!current()) { await close(); return; }
         for (const [tracks, source, allowed] of [
           [capture.display.getAudioTracks(), Track.Source.ScreenShareAudio, grant.screen_share_audio],

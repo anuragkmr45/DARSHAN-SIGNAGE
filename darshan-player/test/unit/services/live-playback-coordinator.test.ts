@@ -57,6 +57,64 @@ describe('Normal player LIVE coordinator ownership and deadlines', () => {
     expect(coordinator.getStatus().phase).to.equal('LIVE')
     expect(JSON.stringify(coordinator.getStatus())).not.to.include('ephemeral-ticket')
   })
+  it('refreshes server-received frame evidence while the authorized receiver stays live', async () => {
+    const receiver = await connected()
+    receiver.observe({ kind: 'connected', view_epoch: 'view' })
+    receiver.observe({ kind: 'first-frame', view_epoch: 'view' })
+    await clock.tickAsync(0)
+    expect(coordinator.getStatus().phase).to.equal('LIVE')
+    const initial = client.observe.callCount
+    for (let second = 1; second <= 5; second++) {
+      await clock.tickAsync(1000)
+      receiver.observe({ kind: 'heartbeat', view_epoch: 'view' })
+      if (second < 5) expect(client.observe.callCount).to.equal(initial)
+    }
+    expect(client.observe.callCount).to.equal(initial + 1)
+    expect(client.observe.lastCall.args[1]).to.include({ connection: 'CONNECTED', subscription: 'SUBSCRIBED', frame: 'READY' })
+  })
+  it('does not shorten a previously selected window by slow discovery processing', async () => {
+    client.discover.callsFake(async () => {
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      return { server_now: new Date(wall + clock.now).toISOString(), authority_epoch: LIVE_IDS.device, live_version: null,
+        current: { occurrence: { ...occurrence }, state: { ...state } }, next: null, blockedWindows: [] }
+    })
+    begin()
+    const originalBoundary = coordinator.boundary
+    await clock.tickAsync(3000)
+    expect(coordinator.boundary).to.equal(originalBoundary)
+  })
+  it('waits for a fresh discovery clock before admitting a newly discovered window', async () => {
+    client.discover.callsFake(async () => {
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      return { server_now: new Date(wall + clock.now).toISOString(), authority_epoch: LIVE_IDS.device, live_version: null,
+        current: { occurrence: { ...occurrence }, state: { ...state } }, next: null, blockedWindows: [] }
+    })
+    coordinator.setContext(true)
+    await clock.tickAsync(3000)
+    expect(client.create.called).to.equal(false)
+    expect(coordinator.getStatus().reason).to.equal('LIVE_TIMING_UNCERTAIN')
+  })
+  it('keeps the verified window through a slow renewal whose server remaining time is stamped at response', async () => {
+    const receiver = await connected()
+    receiver.observe({ kind: 'connected', view_epoch: 'view' })
+    receiver.observe({ kind: 'first-frame', view_epoch: 'view' })
+    for (let second = 0; second < 53; second++) {
+      await clock.tickAsync(1000)
+      receiver.observe({ kind: 'heartbeat', view_epoch: 'view' })
+    }
+    expect(coordinator.getStatus().phase).to.equal('LIVE')
+    client.grant.callsFake(async (_action, _occ, admission) => {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      return { ...admission, status: 'AUTHORIZED', lease_ms: 10000, window_remaining_ms: 60000 - clock.now,
+        renew_after_ms: 3000, signaling: { url: 'wss://media.example.test', ticket: 'ephemeral-ticket' } }
+    })
+    for (let second = 0; second < 6; second++) {
+      await clock.tickAsync(second === 5 ? 500 : 1000)
+      receiver.observe({ kind: 'heartbeat', view_epoch: 'view' })
+    }
+    expect(coordinator.getStatus().phase).to.equal('LIVE')
+    expect(coordinator.boundary).to.equal(60000)
+  })
   it('does not create an admission while exact fallback hashing is unfinished', async () => {
     const hashing = waitingValue()
     cache.prepareLiveFallback.returns(hashing.promise)

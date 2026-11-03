@@ -2,11 +2,12 @@ import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk'
 import { performance } from 'node:perf_hooks';
 
 export class LiveKitAdapter {
-  constructor({ url, apiKey, apiSecret, timeoutMs = 1500, confirmationTimeoutMs = 2000 }) {
+  constructor({ url, apiKey, apiSecret, timeoutMs = 1500, confirmationTimeoutMs = 2000, onDiagnostic = () => {} }) {
     this.apiKey = apiKey;
     this.apiSecret = apiSecret;
     this.timeoutMs = timeoutMs;
     this.confirmationTimeoutMs = confirmationTimeoutMs;
+    this.onDiagnostic = onDiagnostic;
     this.rooms = new RoomServiceClient(url, apiKey, apiSecret, { requestTimeout: timeoutMs / 1000, failover: false });
     this.probes = new RoomServiceClient(url, apiKey, apiSecret, { requestTimeout: 0.5, failover: false });
   }
@@ -39,10 +40,21 @@ export class LiveKitAdapter {
       ]);
     } catch (error) {
       // Removal is idempotent even when a connection never reached the SFU.
-      if (error?.code !== 'not_found') throw error;
+      if (error?.code !== 'not_found') {
+        this.reportRemovalFailure(error);
+        throw error;
+      }
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  reportRemovalFailure(error) {
+    const code = error?.message === 'SFU_TIMEOUT' ? 'SFU_REMOVE_TIMEOUT'
+      : error?.code === 'unavailable' || error?.code === 'deadline_exceeded' ? 'SFU_REMOVE_UNAVAILABLE'
+      : error?.code === 'unauthenticated' || error?.code === 'permission_denied' ? 'SFU_REMOVE_AUTH'
+      : error instanceof TypeError ? 'SFU_REMOVE_TRANSPORT' : 'SFU_REMOVE_OTHER';
+    this.onDiagnostic(code);
   }
 
   async confirmParticipant(entry) {

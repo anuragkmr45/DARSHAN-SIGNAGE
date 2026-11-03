@@ -127,6 +127,20 @@ See [publication evidence](evidence/live-publication-authorization-developer-ver
 
 ## Runtime and authoring developer checkpoint — 2026-11-03
 
-The current packet is **implemented in source, default OFF, partially developer-verified**. It is not a closed implementation loop, beta acceptance or release approval. The current presenter-preflight increment passed 37/37 PostgreSQL/Fastify runtime cases and 31/31 focused CMS API/controller/panel cases; visible rebuilt-app repetition is still required. [runtime/authoring developer evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) owns the exact source/build bindings and final evolving check totals. Historical reports retain their original source scope; an older SFU/prototype result cannot validate the new authority/host-readiness/player source. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
+The packet is **implemented in source, default OFF, and locally developer-verified**. It is not beta acceptance or release approval. The earlier presenter-preflight increment passed 37/37 PostgreSQL/Fastify runtime cases and 31/31 focused CMS API/controller/panel cases; the later rebuilt real CMS → packaged-player repeat and final regression are recorded in the [dated developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md). [Runtime/authoring evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) retains its original source/build scope; an older SFU/prototype result cannot validate a later build. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.
 
 For LIVE-01..06 include the actual create-only operator review consent, required library permissions, conditional old/proposed Schedule and Item checks, exact response-loss retries, stale two-tab drafts and same-account/new-session capture disposal. For LIVE-19 distinguish server-current receiver observations from retained last reports and physical output; preserve Unknown for stale/future timestamps, pending/revoked or replaced runtime, missing reports, inactive publication and changed authority. Current source and automation exist; retain every unchecked human execution item above.
+
+Later local developer evidence now includes a real CMS capture/Start, the ordinary
+packaged Linux player's decoded test-source screenshot, Stop and verified normal
+fallback screenshot, plus an explicit same-window restart. See the [dated
+developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md).
+The final observation-refresh packaged build then completed a separate scheduled
+CMS → native capture → Media → player frame journey. Receiver `READY` receipts
+remained fresh through the last six seconds, and the run ended 296 ms before
+the immutable boundary, within the agreed one-second tolerance. A fresh player
+snapshot showed standby after the window; that test screen has no site default.
+The earlier explicit Stop/fallback evidence remains separate. See the same
+[dated developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md).
+Physical audio/display, supported browser/OS matrix, cross-VM operation,
+capacity and independent QA remain unchecked.

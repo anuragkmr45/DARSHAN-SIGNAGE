@@ -14,7 +14,7 @@ export function readSfuProcessStartTicks(pid, read = readFileSync) {
 }
 
 /** Linux-only startup fence. A TCP response alone cannot identify the spawned SFU. */
-export function ownsSfuListener({ pid, host, port, startTicks }, overrides = {}) {
+export function ownsSfuListener({ pid, host, port, startTicks, allowWildcard = false }, overrides = {}) {
   const io = { ...defaults, ...overrides };
   if (io.platform !== 'linux') throw ownershipError('SFU_LISTENER_OWNERSHIP_UNAVAILABLE');
   if (!['LE', 'BE'].includes(io.byteOrder)) throw ownershipError('SFU_LISTENER_OWNERSHIP_UNAVAILABLE');
@@ -43,7 +43,13 @@ export function ownsSfuListener({ pid, host, port, startTicks }, overrides = {})
         const [address, encodedPort] = (fields[1] ?? '').split(':');
         if (!/^[0-9A-Fa-f]{4}$/.test(encodedPort ?? '')) throw ownershipError('SFU_LISTENER_OWNERSHIP_UNAVAILABLE');
         if (Number.parseInt(encodedPort, 16) !== port) continue;
-        if (address?.toUpperCase() !== loopback) throw ownershipError('SFU_LISTENER_NOT_PRIVATE');
+        // LiveKit applies bind_addresses to its API and UDP mux together. The
+        // container profile may therefore bind both on the bridge interface;
+        // the API port must remain unpublished by the deployment. Keep this
+        // exception explicit and retain exact process/socket ownership checks.
+        const wildcard = table === 'tcp' ? '00000000' : '00000000000000000000000000000000';
+        if (address?.toUpperCase() !== loopback && !(allowWildcard && address === wildcard))
+          throw ownershipError('SFU_LISTENER_NOT_PRIVATE');
         if (!/^\d+$/.test(fields[9] ?? '')) throw ownershipError('SFU_LISTENER_OWNERSHIP_UNAVAILABLE');
         listeners.push({ table, inode: fields[9] });
       }
@@ -59,7 +65,10 @@ export function ownsSfuListener({ pid, host, port, startTicks }, overrides = {})
     }
     if (listeners.some(listener => !sockets.has(listener.inode))) throw ownershipError('SFU_LISTENER_NOT_OWNED');
     if (readSfuProcessStartTicks(pid, io.read) !== startTicks) throw ownershipError('SFU_PROCESS_IDENTITY_CHANGED');
-    return listeners.some(listener => listener.table === (host === '127.0.0.1' ? 'tcp' : 'tcp6'));
+    // Go can expose one dual-stack IPv6 wildcard socket for an IPv4 caller.
+    // The supervisor separately proves an IPv4 loopback connection succeeds.
+    return listeners.some(listener => listener.table === (host === '127.0.0.1' ? 'tcp' : 'tcp6')
+      || (allowWildcard && host === '127.0.0.1' && listener.table === 'tcp6'));
   } catch (error) {
     if (error.code?.startsWith('SFU_')) throw error;
     throw ownershipError('SFU_LISTENER_OWNERSHIP_UNAVAILABLE');

@@ -94,6 +94,7 @@ function stripReplayMetadata(event: BufferedProofOfPlayEvent | ProofOfPlayEvent)
 
 export class ProofOfPlayService {
   private readonly spoolPath: string
+  private readonly retiredSpoolPath: string
   private readonly statePath: string
   private readonly maxSpoolBytes: number
   private activePlaybacks: Map<string, ActivePlayback>
@@ -115,6 +116,7 @@ export class ProofOfPlayService {
   constructor() {
     const config = getConfigManager().getConfig()
     this.spoolPath = path.join(config.cache.path, 'pop-spool')
+    this.retiredSpoolPath = path.join(config.cache.path, 'pop-spool-retired')
     this.statePath = path.join(config.cache.path, 'pop-spool-state.json')
     this.maxSpoolBytes = deriveProofOfPlaySpoolMaxBytes(config.cache.maxBytes)
     ensureDir(this.spoolPath, 0o755)
@@ -454,6 +456,21 @@ export class ProofOfPlayService {
     return spooled
   }
 
+  /** Preserve evidence from a former pairing without sending it under the new identity. */
+  private async retireForeignEvents(events: ProofOfPlayEvent[]): Promise<boolean> {
+    if (events.length === 0) return true
+    try {
+      ensureDir(this.retiredSpoolPath, 0o700)
+      const archivePath = path.join(this.retiredSpoolPath, `retired-${Date.now()}-${generateId(8)}.json`)
+      await atomicWrite(archivePath, JSON.stringify(events.map(stripReplayMetadata), null, 2))
+      logger.warn({ count: events.length, archivePath }, 'Preserved PoP events from a former device identity')
+      return true
+    } catch (error) {
+      logger.error({ error, count: events.length }, 'Could not preserve former-identity PoP events')
+      return false
+    }
+  }
+
   private async enforceSpoolBudget(): Promise<void> {
     const files = this.listSpoolFiles('pop-')
     let totalBytes = files.reduce((total, file) => total + file.sizeBytes, 0)
@@ -563,7 +580,18 @@ export class ProofOfPlayService {
       const httpClient = getHttpClient()
       const failedEvents: BufferedProofOfPlayEvent[] = []
 
+      const foreignEvents = replayBatch.filter((event) => Boolean(event.device_id) && event.device_id !== deviceId)
+      const retired = await this.retireForeignEvents(foreignEvents)
+      if (!retired) failedEvents.push(...foreignEvents)
+
       for (const event of replayBatch) {
+        if (event.device_id && event.device_id !== deviceId) continue
+        // Pairing can change while a bounded batch is in flight. Never use
+        // the new certificate for an event selected under the old identity.
+        if (pairingService.getDeviceId() !== deviceId) {
+          failedEvents.push(event)
+          continue
+        }
         try {
           const payload: ProofOfPlayEvent = {
             ...stripReplayMetadata(event),
@@ -579,7 +607,8 @@ export class ProofOfPlayService {
         } catch (error) {
           if (
             error instanceof DeviceApiError &&
-            (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN' || error.code === 'NOT_FOUND')
+            (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN' || error.code === 'NOT_FOUND') &&
+            pairingService.getDeviceId() === deviceId
           ) {
             getLifecycleEvents().emitRuntimeAuthFailure({
               source: 'proof-of-play',
@@ -593,11 +622,10 @@ export class ProofOfPlayService {
         await sleep(50 + Math.floor(Math.random() * 151))
       }
 
-      if (failedEvents.length > 0) {
-        await this.spoolEvents(failedEvents.map((event) => stripReplayMetadata(event)), 'replay-failure')
-      }
+      const preservedFailures = failedEvents.length === 0 ||
+        (await this.spoolEvents(failedEvents.map((event) => stripReplayMetadata(event)), 'replay-failure')).length === failedEvents.length
 
-      for (const inflightFile of spoolBatch.files) {
+      for (const inflightFile of preservedFailures ? spoolBatch.files : []) {
         try {
           fs.unlinkSync(inflightFile)
         } catch (error) {
@@ -609,8 +637,9 @@ export class ProofOfPlayService {
       await this.persistState()
       logger.info(
         {
-          replayed: replayBatch.length,
+          replayed: replayBatch.length - foreignEvents.length,
           failed: failedEvents.length,
+          retired: retired ? foreignEvents.length : 0,
           remainingBuffer: this.eventBuffer.length,
           remainingSpoolFiles: this.listSpoolFiles('pop-').length,
         },

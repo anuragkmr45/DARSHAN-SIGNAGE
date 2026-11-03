@@ -54,6 +54,27 @@ describe('presenter capture, authority and asynchronous ownership', () => {
     expect(controller.getSnapshot().message).toContain('No trusted media node');await choose();expect(media.display).not.toHaveBeenCalled();
     await controller.load();await choose();expect(media.display).toHaveBeenCalledOnce();
   });
+  it('requires a fresh clock sample before opening capture after a slow epoch response', async () => {
+    api.epoch.mockImplementationOnce(async nonce => {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return { version: 1, nonce, epoch_id: epoch, server_now: new Date(base + Date.now()).toISOString() };
+    });
+    const loading = controller.load(); await vi.advanceTimersByTimeAsync(3000); await loading;
+    expect(controller.getSnapshot().phase).toBe('ERROR');
+    await choose(); expect(media.display).not.toHaveBeenCalled();
+    await controller.load(); expect(controller.getSnapshot().phase).toBe('IDLE');
+    await choose(); expect(media.display).toHaveBeenCalledOnce();
+  });
+  it('does not shorten an established window on a slow eligibility reload while publishing', async () => {
+    await begin();
+    api.epoch.mockImplementationOnce(async nonce => {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return { version: 1, nonce, epoch_id: epoch, server_now: new Date(base + Date.now()).toISOString() };
+    });
+    const loading = controller.load(); await vi.advanceTimersByTimeAsync(3000); await loading;
+    expect(displays[0].readyState).toBe('live');
+    expect(controller.getSnapshot().phase).toBe('PUBLISHING');
+  });
   it('fails closed when occurrence and preflight revision or fingerprint do not bind', async () => {
     api.preflight.mockResolvedValueOnce({ ...preflight(), control_revision: row.control_revision + 1 });
     await controller.load();expect(controller.getSnapshot().phase).toBe('STALE');await choose();expect(media.display).not.toHaveBeenCalled();
@@ -85,6 +106,18 @@ describe('presenter capture, authority and asynchronous ownership', () => {
     await controller.load(); await choose(); const starting = controller.start(); await vi.advanceTimersByTimeAsync(1000);
     ticket.resolve({ ...grant(), lease_ms: 3000 }); await starting; api.renew.mockRejectedValue(new ApiError({ status: 503, message: 'Offline' }));
     await vi.advanceTimersByTimeAsync(2200); expect(displays[0].readyState).toBe('ended');
+  });
+  it('keeps captured video through a slow renewal inside a verified schedule window', async () => {
+    row.end_at = new Date(base + 60000).toISOString();
+    await begin();
+    await vi.advanceTimersByTimeAsync(53000);
+    expect(displays[0].readyState).toBe('live');
+    api.renew.mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return { ...grant(false), window_remaining_ms: 60000 - Date.now() };
+    });
+    await vi.advanceTimersByTimeAsync(5500);
+    expect(displays[0].readyState).toBe('live');
   });
   it('retries a lost Start with exactly the original command', async () => {
     api.start.mockRejectedValueOnce(new ApiError({ status: 503, message: 'Lost response' })); await controller.load(); await choose(); await controller.start();

@@ -254,6 +254,44 @@ describe('durable live runtime with actual PostgreSQL and Fastify authorization'
     const ticket=await deviceInvoke(d,'POST',`/api/v1/device/${d.screen}/live-admissions/${admission.json().admission_id}/ticket`,action);expect(ticket.statusCode,ticket.body).toBe(200);expect(ticket.json()).toMatchObject({role:'receiver',presenter_participant_id:`presenter_${first.result.run.id}`});
     const renew=await deviceInvoke(d,'POST',`/api/v1/device/${d.screen}/live-admissions/${admission.json().admission_id}/renew`,{...action,request_id:randomUUID()});expect(renew.statusCode,renew.body).toBe(200);expect(renew.json()).not.toHaveProperty('signaling');
   });
+  it('retires a restarted receiver before admitting its new runtime and waits for confirmed media removal',async()=>{
+    const d=await seed(),first=await start(d);await pump();
+    const path=`/api/v1/device/${d.screen}/live-admissions`,oldRuntime=randomUUID(),newRuntime=randomUUID();
+    const fallback={preparation_id:d.preparation,source_fingerprint:'b'.repeat(64),asset_set_sha256:hashLiveFallbackAssetSet(d.manifest.assets),ready:true};
+    const body=(runtime_session_id:string)=>({request_id:randomUUID(),runtime_session_id,publish_id:d.publish,schedule_item_id:d.item,
+      run_id:first.result.run.id,generation:1,fallback});
+    const old=await deviceInvoke(d,'POST',path,body(oldRuntime));expect(old.statusCode,old.body).toBe(202);await pump();
+    expect((await scalar('SELECT state FROM live_admissions WHERE id=$1',[old.json().admission_id])).state).toBe('ACTIVE');
+    const retry=body(newRuntime);teardown=false;
+    const active=await deviceInvoke(d,'POST',path,retry);expect(active.statusCode,active.body).toBe(409);
+    expect(active.json().error.code).toBe('LIVE_RECEIVER_ACTIVE');
+    expect((await scalar('SELECT state FROM live_admissions WHERE id=$1',[old.json().admission_id])).state).toBe('ACTIVE');
+    const realNow=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>realNow+11_000);
+    let pending: Awaited<ReturnType<typeof deviceInvoke>>;
+    try { pending=await deviceInvoke(d,'POST',path,retry); } finally { vi.restoreAllMocks(); }
+    expect(pending.statusCode,pending.body).toBe(503);
+    expect(pending.json().error.code).toBe('LIVE_TEARDOWN_PENDING');
+    expect(await scalar(`SELECT state,operation_revision::int,teardown_confirmed_at FROM live_admissions WHERE id=$1`,[old.json().admission_id]))
+      .toMatchObject({state:'REVOKING',operation_revision:2,teardown_confirmed_at:null});
+    expect(await scalar(`SELECT count(*)::int n FROM live_runtime_receipts WHERE admission_id=$1`,[old.json().admission_id])).toEqual({n:1});
+    const oldTicket=await deviceInvoke(d,'POST',`${path}/${old.json().admission_id}/ticket`,
+      {request_id:randomUUID(),runtime_session_id:oldRuntime,run_id:first.result.run.id,generation:1,fallback});
+    expect(oldTicket.statusCode).toBe(410);expect(oldTicket.json()).not.toHaveProperty('signaling');
+    await pump();
+    expect((await scalar('SELECT teardown_confirmed_at FROM live_admissions WHERE id=$1',[old.json().admission_id])).teardown_confirmed_at).toBeNull();
+    const stillPending=await deviceInvoke(d,'POST',path,retry);expect(stillPending.statusCode).toBe(503);
+    expect(await scalar(`SELECT count(*)::int n FROM live_admissions WHERE run_id=$1 AND role='receiver'`,[first.result.run.id])).toEqual({n:1});
+    teardown=true;
+    await pool.query(`UPDATE live_media_operations SET available_at=(now() AT TIME ZONE 'UTC') WHERE kind='REVOKE_ADMISSION'`);
+    await pump();
+    expect((await scalar('SELECT state,teardown_confirmed_at IS NOT NULL AS confirmed FROM live_admissions WHERE id=$1',[old.json().admission_id])))
+      .toEqual({state:'REVOKED',confirmed:true});
+    const replacement=await deviceInvoke(d,'POST',path,retry);expect(replacement.statusCode,replacement.body).toBe(202);
+    expect(replacement.json().admission_id).not.toBe(old.json().admission_id);
+    const duplicate=await deviceInvoke(d,'POST',path,retry);expect(duplicate.statusCode,duplicate.body).toBe(202);
+    expect(duplicate.json().admission_id).toBe(replacement.json().admission_id);
+    await pump();expect((await scalar('SELECT state FROM live_admissions WHERE id=$1',[replacement.json().admission_id])).state).toBe('ACTIVE');
+  });
   it('requires real RSA verification for LIVE under global legacy and preserves ordinary serial compatibility and configured-mode metrics',async()=>{
     const names=['DARSHAN_DEVICE_AUTH_MODE','HEXMON_DEVICE_AUTH_MODE','DEVICE_AUTH_MODE'] as const;
     const previous=names.map(name=>process.env[name]),metric=vi.spyOn(deviceAuthMetrics,'recordDeviceAuthAttempt');

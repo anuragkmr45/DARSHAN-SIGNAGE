@@ -86,6 +86,16 @@ export class LivePresenterController {
     try {
       const epoch = await this.api.epoch(createUuid(), this.task.signal);
       if (!this.current(generation) || request !== this.reviewRequest) return;
+      const sampleAge = this.now() - started;
+      const trustedClock = Number.isFinite(sampleAge) && sampleAge >= 0 && sampleAge <= 1000;
+      // The epoch endpoint stamps server_now just before replying. A slow
+      // request measured from its beginning can shorten the local window by
+      // several seconds. Require a fresh sample for the first review and keep
+      // an already established monotonic boundary on later slow refreshes.
+      if (!trustedClock && this.windowDeadline === Infinity) {
+        this.update({ phase: 'ERROR', message: 'The server time check was delayed. Reload current eligibility before choosing a screen.' });
+        return;
+      }
       if (this.authorityEpoch && epoch.epoch_id !== this.authorityEpoch) { this.terminal('STALE', 'Backend authority changed. Close these controls and review a new attempt.'); return; }
       const row = await this.api.get(this.options.occurrenceId, this.runtimeSessionId, this.task.signal);
       if (!this.current(generation) || request !== this.reviewRequest) return;
@@ -104,7 +114,7 @@ export class LivePresenterController {
       }
       this.authorityEpoch = epoch.epoch_id; this.review = row;
       this.reviewCounter++;
-      this.windowDeadline = Math.min(this.windowDeadline, started + Math.max(0, Date.parse(row.end_at) - Date.parse(epoch.server_now)));
+      if (trustedClock) this.windowDeadline = Math.min(this.windowDeadline, started + Math.max(0, Date.parse(row.end_at) - Date.parse(epoch.server_now)));
       if (this.now() >= this.windowDeadline) { this.terminal('EXPIRED', 'The approved live window ended.'); return; }
       if (this.capture || this.startIntent || this.stopIntent) this.update({ preflight, message: 'Current state reloaded. Pending commands retain their original identity and authority.' });
       else this.update({ phase: 'IDLE', preflight, message: this.preflightMessage(preflight) });
@@ -210,7 +220,10 @@ export class LivePresenterController {
       if (!this.pinAdmission(grant) || grant.admission_id !== admission.admission_id || !Number.isSafeInteger(grant.lease_ms) || grant.lease_ms <= 0 || grant.lease_ms > 10000 ||
           !Number.isSafeInteger(grant.window_remaining_ms) || grant.window_remaining_ms <= 0) throw new Error('INVALID_AUTHORITY');
       if (this.authorityDeadline > 0 && this.authorityDeadline <= this.now()) { this.terminal('EXPIRED', 'Live authority expired. A new explicit attempt is required.'); return null; }
-      const deadline = Math.min(this.windowDeadline, started + grant.lease_ms, started + grant.window_remaining_ms);
+      // The first trusted epoch sample already fixed the monotonic window.
+      // Server window_remaining_ms is stamped after backend work; subtracting
+      // that from request start on every renewal would cut video early.
+      const deadline = Math.min(this.windowDeadline, started + grant.lease_ms);
       if (deadline <= this.now()) throw new Error('INVALID_AUTHORITY');
       this.authorityDeadline = deadline; this.startupDeadline = 0;
       if (this.renewTimer) clearTimeout(this.renewTimer);

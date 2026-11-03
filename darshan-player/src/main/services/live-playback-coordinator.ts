@@ -35,6 +35,7 @@ export class LivePlaybackCoordinator {
   private active?: LiveOccurrence
   private blockedWindows: Array<{ occurrence: LiveOccurrence; deadline: number }> = []
   private boundary = 0
+  private boundaryVerified = false
   private nextOccurrence?: { occurrence: LiveOccurrence; start: number; end: number }
   private authorityDeadline = 0
   private admission?: LiveAdmissionIdentity
@@ -50,6 +51,7 @@ export class LivePlaybackCoordinator {
   private rendererPulse?: number
   private connectingAt = 0
   private sequence = 0
+  private lastObservationAt = 0
   private connected = false
   private audio: 'NONE' | 'READY' | 'DEGRADED' | 'MUTED' = 'NONE'
   private activationPending = false
@@ -123,10 +125,10 @@ export class LivePlaybackCoordinator {
   resetIdentity(): void {
     this.allowed = false
     this.invalidate('DEVICE_IDENTITY_CHANGED')
-    this.authority = undefined; this.sequence = 0; this.active = undefined
+    this.authority = undefined; this.sequence = 0; this.lastObservationAt = 0; this.active = undefined
     this.emergencyHold = false
     this.emergencyRefresh = undefined
-    this.nextOccurrence = undefined; this.blockedWindows = []; this.boundary = 0; this.lastSnapshotSelection = undefined
+    this.nextOccurrence = undefined; this.blockedWindows = []; this.boundary = 0; this.boundaryVerified = false; this.lastSnapshotSelection = undefined
     this.options.cache.updateDiscoveredLiveOccurrences()
     this.release()
   }
@@ -136,7 +138,7 @@ export class LivePlaybackCoordinator {
     if (this.watchdog) clearInterval(this.watchdog)
     this.watchdog = undefined
     this.options.cache.updateDiscoveredLiveOccurrences()
-    this.active = undefined; this.blockedWindows = []; this.release()
+    this.active = undefined; this.blockedWindows = []; this.boundaryVerified = false; this.release()
   }
   private ensureWatchdog(): void {
     if (this.watchdog) return
@@ -179,7 +181,7 @@ export class LivePlaybackCoordinator {
     this.timer = undefined
     // Destroy the context and all audio before reporting fallback ownership.
     this.options.view.destroy()
-    this.admission = undefined; this.authorityDeadline = 0; this.rendererPulse = undefined
+    this.admission = undefined; this.authorityDeadline = 0; this.rendererPulse = undefined; this.lastObservationAt = 0
     this.connected = false; this.audio = 'NONE'; this.activationPending = false; this.reason = reason
   }
   private select(occurrence: LiveOccurrence, deadline: number): void {
@@ -193,14 +195,14 @@ export class LivePlaybackCoordinator {
       return
     }
     this.invalidate(!this.options.enabled() ? 'LIVE_PLAYBACK_DISABLED' : occurrence.invalidReason ?? 'PREPARING_FALLBACK')
-    this.active = occurrence; this.boundary = deadline; this.blockedWindows = []
+    this.active = occurrence; this.boundary = deadline; this.boundaryVerified = false; this.blockedWindows = []
     this.owns = true; this.proof = undefined; this.fallbackReady = false
     this.publishFallback()
     if (this.options.enabled()) this.prepare(false)
   }
   private block(reason: string): void {
     this.invalidate(reason)
-    this.owns = true; this.active = undefined; this.fallbackReady = false; this.proof = undefined
+    this.owns = true; this.active = undefined; this.boundaryVerified = false; this.fallbackReady = false; this.proof = undefined
     this.phase = 'UNAVAILABLE'
     this.options.output.fallback({ mode: 'live', items: [], unavailableReason: reason }, this.getStatus())
   }
@@ -242,19 +244,24 @@ export class LivePlaybackCoordinator {
     return !this.disposed && this.allowed && this.options.enabled() && this.owns && epoch === this.epoch && this.now() < this.boundary && this.now() < this.authorityDeadline &&
       this.admission?.admission_id === admission.admission_id && this.admission.run_id === admission.run_id && this.admission.generation === admission.generation
   }
-  private applyDiscovery(discovery: LiveDiscovery, started: number): LiveRuntimeState | undefined {
+  private applyDiscovery(discovery: LiveDiscovery, started: number, trustedClock: boolean): LiveRuntimeState | undefined {
     this.options.cache.updateDiscoveredLiveOccurrences(discovery.current?.occurrence, discovery.next?.occurrence)
     const next = discovery.next?.occurrence
     if (next) {
       const old = this.nextOccurrence
       const same = old?.occurrence.publishId === next.publishId && old.occurrence.itemId === next.itemId
-      this.nextOccurrence = { occurrence: next,
+      // A slow REST response may spend seconds in backend fallback hydration.
+      // Its server_now is stamped at the end, so measuring from request start
+      // would shorten the local window by all of that processing time.
+      this.nextOccurrence = !trustedClock ? same ? old : undefined : { occurrence: next,
         start: Math.min(same ? old.start : Infinity, started + Math.max(0, Date.parse(next.startAt) - Date.parse(discovery.server_now))),
         end: Math.min(same ? old.end : Infinity, started + Math.max(0, Date.parse(next.endAt) - Date.parse(discovery.server_now))) }
     } else this.nextOccurrence = undefined
     if (discovery.blockedWindows.length) {
       const old = new Map(this.blockedWindows.map(item => [`${item.occurrence.publishId}:${item.occurrence.itemId}`, item.deadline]))
-      this.blockedWindows = discovery.blockedWindows.map(occurrence => ({ occurrence, deadline: Math.min(old.get(`${occurrence.publishId}:${occurrence.itemId}`) ?? Infinity, started + Math.max(0, Date.parse(occurrence.endAt) - Date.parse(discovery.server_now))) }))
+      this.blockedWindows = discovery.blockedWindows.map(occurrence => ({ occurrence, deadline: trustedClock
+        ? Math.min(old.get(`${occurrence.publishId}:${occurrence.itemId}`) ?? Infinity, started + Math.max(0, Date.parse(occurrence.endAt) - Date.parse(discovery.server_now)))
+        : old.get(`${occurrence.publishId}:${occurrence.itemId}`) ?? Infinity }))
       this.block(this.emergencyHold ? 'EMERGENCY_ACTIVE' : 'CONFLICTING_LIVE_WINDOWS')
       if (this.emergencyHold) this.requestEmergencyControl()
       return undefined
@@ -263,7 +270,7 @@ export class LivePlaybackCoordinator {
     const selected = discovery.current
     if (!selected) {
       if (this.emergencyHold) { this.publishFallback(); this.requestEmergencyControl(); return undefined }
-      if (this.active || this.owns) { this.invalidate('LIVE_NOT_SCHEDULED'); this.active = undefined; this.boundary = 0; this.release() }
+      if (this.active || this.owns) { this.invalidate('LIVE_NOT_SCHEDULED'); this.active = undefined; this.boundary = 0; this.boundaryVerified = false; this.release() }
       return undefined
     }
     const wasEmergency = this.emergencyHold
@@ -274,7 +281,12 @@ export class LivePlaybackCoordinator {
     } else if (this.emergencyHold && selected.state) {
       this.emergencyHold = false; this.invalidate('EMERGENCY_CLEARED'); this.fallbackReady = false; this.proof = undefined
     }
-    this.select(selected.occurrence, started + Math.max(0, Date.parse(selected.occurrence.endAt) - Date.parse(discovery.server_now)))
+    const same = this.active && this.active.publishId === selected.occurrence.publishId && this.active.itemId === selected.occurrence.itemId &&
+      this.active.startAt === selected.occurrence.startAt && this.active.endAt === selected.occurrence.endAt && sameLivePolicy(this.active.policy, selected.occurrence.policy)
+    if (!trustedClock && !same) { this.block('LIVE_TIMING_UNCERTAIN'); return selected.state }
+    this.select(selected.occurrence, trustedClock
+      ? started + Math.max(0, Date.parse(selected.occurrence.endAt) - Date.parse(discovery.server_now)) : this.boundary)
+    if (trustedClock) this.boundaryVerified = true
     if (this.emergencyHold) { this.reason = 'EMERGENCY_ACTIVE'; this.publishFallback(); this.requestEmergencyControl(); return selected.state }
     if (wasEmergency) { this.publishFallback(); this.prepare(true) }
     if (discovery.next?.occurrence.policy) void this.options.cache.prepareLiveFallback(discovery.next.occurrence).catch(() => undefined)
@@ -290,10 +302,14 @@ export class LivePlaybackCoordinator {
       const started = this.now()
       const discovery = await this.authority.discover(task.controller.signal)
       if (this.task !== task || !this.allowed || epoch !== this.epoch) return
-      const state = this.applyDiscovery(discovery, started)
+      // Keep an established monotonic boundary when backend processing makes
+      // this clock sample too old for the one-second schedule-end tolerance.
+      // A new window waits for another sample instead of inventing a deadline.
+      const elapsed = this.now() - started
+      const state = this.applyDiscovery(discovery, started, Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= 1000)
       // Selecting a new occurrence intentionally rotates the generation and
       // aborts this task. Its next iteration starts with the selected owner.
-      if (this.task !== task || epoch !== this.epoch || !this.active || !state) { nextDelay = 500; return }
+      if (this.task !== task || epoch !== this.epoch || !this.active || !state || !this.boundaryVerified) { nextDelay = 500; return }
       if (this.emergencyHold) { this.requestEmergencyControl(); return }
       if (!this.proof || !this.fallbackReady) { this.prepare(false); return }
       if (state.policy_status !== 'VALID' || !state.enabled || state.availability !== 'READY' || state.run?.state !== 'RUNNING') {
@@ -320,7 +336,10 @@ export class LivePlaybackCoordinator {
       if (action === 'renew' && this.authorityDeadline <= this.now()) { this.reconnect('LIVE_LEASE_EXPIRED'); return }
       // Measure from request start, never response receipt. A slow response
       // consumes its lease rather than granting extra seconds of playback.
-      const deadline = Math.min(this.boundary, requesting + grant.lease_ms, requesting + grant.window_remaining_ms)
+      // The server stamps window_remaining_ms at the end of its work. The
+      // independently verified monotonic boundary already limits playback;
+      // subtracting slow grant processing again would cut a valid window early.
+      const deadline = Math.min(this.boundary, requesting + grant.lease_ms)
       if (deadline <= this.now()) throw new LiveAuthorityError('LIVE_LEASE_EXPIRED')
       this.authorityDeadline = deadline
       if (action === 'ticket') {
@@ -374,7 +393,10 @@ export class LivePlaybackCoordinator {
   private observe(epoch: number, admission: LiveAdmissionIdentity, observation: LiveReceiverObservation): void {
     if (!this.authorized(epoch, admission)) return
     this.rendererPulse = this.now()
-    if (observation.kind === 'heartbeat') return
+    if (observation.kind === 'heartbeat') {
+      if (this.rendererPulse - this.lastObservationAt >= 5000) this.sendObservation(admission)
+      return
+    }
     if (observation.kind === 'disconnected' || observation.kind === 'failed') { this.reconnect('LIVE_DISCONNECTED'); return }
     if (observation.kind === 'connected') this.connected = true
     if (observation.kind === 'audio-ready') this.audio = 'READY'
@@ -394,6 +416,7 @@ export class LivePlaybackCoordinator {
   }
   private sendObservation(admission: LiveAdmissionIdentity): void {
     if (!this.authority) return
+    this.lastObservationAt = this.now()
     const sequence = ++this.sequence
     void this.authority.observe(admission, { sequence, connection: this.connected ? 'CONNECTED' : 'CONNECTING',
       subscription: this.phase === 'LIVE' ? 'SUBSCRIBED' : 'SUBSCRIBING', frame: this.phase === 'LIVE' ? 'READY' : 'NONE',

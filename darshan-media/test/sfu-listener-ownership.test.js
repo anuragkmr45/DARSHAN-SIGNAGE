@@ -30,6 +30,16 @@ test('wildcard or non-loopback SFU listeners are rejected even when owned by the
   assert.throws(() => ownsSfuListener(target, fixture(table(), table(listener('00000000000000000000000000000000'))).io), failure('SFU_LISTENER_NOT_PRIVATE'));
 });
 
+test('container wildcard exception still requires the pinned SFU socket and rejects specific non-loopback binds', () => {
+  const wildcard = fixture(table(listener('00000000')));
+  assert.equal(ownsSfuListener({ ...target, allowWildcard: true }, wildcard.io), true);
+  assert.equal(ownsSfuListener({ ...target, allowWildcard: true },
+    fixture(table(), table(listener('00000000000000000000000000000000'))).io), true);
+  assert.throws(() => ownsSfuListener({ ...target, allowWildcard: true }, fixture(table(listener('0101A8C0'))).io), failure('SFU_LISTENER_NOT_PRIVATE'));
+  assert.throws(() => ownsSfuListener({ ...target, allowWildcard: true }, { ...wildcard.io,
+    link: file => file.endsWith('/ns/net') ? 'net:[1001]' : 'socket:[9999]' }), failure('SFU_LISTENER_NOT_OWNED'));
+});
+
 test('IPv6 loopback and native byte order are checked without admitting the wrong address family', () => {
   const ipv6 = fixture(table(), table(listener('00000000000000000000000001000000')));
   assert.equal(ownsSfuListener({ ...target, host: '[::1]' }, ipv6.io), true);

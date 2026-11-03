@@ -4,6 +4,7 @@ import type { LiveReceiverBridge, LiveReceiverGrant, LiveReceiverObservation } f
 import { LiveReceiverLeaseClock } from './live-receiver-lease'
 declare global { interface Window { liveReceiver: LiveReceiverBridge } }
 setLogLevel(LogLevel.silent)
+const stage = (code: string): void => { console.info(`DARSHAN_LIVE_RX_STAGE:${code}`) }
 const video = document.getElementById('live-video') as HTMLVideoElement
 let grant: LiveReceiverGrant | null = null
 let room: Room | undefined
@@ -36,7 +37,11 @@ function allowed(publication: RemoteTrackPublication, participant: RemotePartici
     (publication.source === Track.Source.Microphone && grant.microphone) ||
     (publication.source === Track.Source.ScreenShareAudio && grant.screen_share_audio)
 }
-function subscribe(publication: RemoteTrackPublication, participant: RemoteParticipant): void { publication.setSubscribed(!disposed && allowed(publication, participant)) }
+function subscribe(publication: RemoteTrackPublication, participant: RemoteParticipant): void {
+  const permitted = !disposed && allowed(publication, participant)
+  publication.setSubscribed(permitted)
+  if (permitted) stage('SUBSCRIBE_REQUESTED')
+}
 function playAudio(track: RemoteTrack): void {
   if (!firstFrame || !activated || !current() || audio.get(track)) return
   const element = track.attach()
@@ -49,29 +54,46 @@ window.liveReceiver.onActivate(() => {
   for (const track of audio.keys()) playAudio(track)
 })
 async function start(): Promise<void> {
+  stage('RECEIVER_START')
   const started = performance.now()
   grant = await window.liveReceiver.grant()
   if (!grant || disposed) { cleanup(); return }
+  stage('GRANT_ACCEPTED')
   leaseClock = new LiveReceiverLeaseClock({ viewEpoch: grant.view_epoch, request: () => window.liveReceiver.lease(), expired: () => fail('failed') })
   leaseClock.start(started, grant.lease_remaining_ms)
   if (!current()) { cleanup(); return }
   room = new Room({ adaptiveStream: false, dynacast: false, reconnectPolicy: { nextRetryDelayInMs: () => null } })
-  room.on(RoomEvent.TrackPublished, subscribe)
+  room.on(RoomEvent.SignalConnected, () => stage('SIGNAL_JOINED'))
+  room.on(RoomEvent.ConnectionStateChanged, state => { if (state === 'connected') stage('ROOM_CONNECTED') })
+  room.on(RoomEvent.TrackPublished, (publication, participant) => { stage('TRACK_PUBLISHED'); subscribe(publication, participant) })
   room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    stage('TRACK_SUBSCRIBED')
     if (disposed || !allowed(publication, participant)) { publication.setSubscribed(false); track.detach(); return }
     tracks.add(track)
     if (track.kind === Track.Kind.Video && publication.source === Track.Source.ScreenShare) {
       track.attach(video); video.muted = true; video.playsInline = true
-      video.requestVideoFrameCallback(() => {
-        if (!current() || firstFrame || video.videoWidth <= 0 || video.videoHeight <= 0) return
+      const confirmDecodedFrame = (): void => {
+        if (!current() || firstFrame || !tracks.has(track) || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth <= 0 || video.videoHeight <= 0) return
         firstFrame = true; report('first-frame')
+      }
+      // The receiver view stays hidden behind the fallback until a decoded
+      // frame is ready. Chromium need not composite a hidden view, so a video
+      // frame callback alone can leave the fallback on screen indefinitely.
+      video.addEventListener('loadeddata', () => { stage('VIDEO_LOADED_DATA'); confirmDecodedFrame() }, { once: true })
+      video.addEventListener('loadedmetadata', () => stage('VIDEO_METADATA'), { once: true })
+      video.addEventListener('playing', () => stage('VIDEO_PLAYING'), { once: true })
+      video.addEventListener('waiting', () => stage('VIDEO_WAITING'), { once: true })
+      video.requestVideoFrameCallback(() => {
+        stage('FRAME_CALLBACK')
+        confirmDecodedFrame()
       })
-      void video.play().catch(() => fail('failed'))
+      void video.play().then(() => stage('VIDEO_PLAY_STARTED')).catch(() => { stage('VIDEO_PLAY_FAILED'); fail('failed') })
     } else if (track.kind === Track.Kind.Audio && publication.source !== Track.Source.ScreenShare) {
       audio.set(track, undefined); playAudio(track)
     } else { publication.setSubscribed(false); track.detach() }
   })
   room.on(RoomEvent.TrackUnsubscribed, track => {
+    stage('TRACK_UNSUBSCRIBED')
     tracks.delete(track)
     const element = audio.get(track)
     if (element) { element.pause(); element.srcObject = null; element.remove() }
@@ -86,10 +108,11 @@ async function start(): Promise<void> {
   // Initial release uses direct private-LAN ICE. Never fall back to public
   // STUN/TURN; routed/private TURN is an explicit later deployment gate.
   await room.connect(grant.signaling.url, grant.signaling.ticket, { autoSubscribe: false, maxRetries: 0, rtcConfig: { iceServers: [] } })
+  stage('SIGNAL_CONNECTED')
   if (!current()) { cleanup(); await room.disconnect(true); return }
   report('connected')
   heartbeat = setInterval(() => report('heartbeat'), 1000)
   for (const participant of room.remoteParticipants.values()) for (const publication of participant.trackPublications.values()) subscribe(publication, participant)
 }
 window.addEventListener('beforeunload', cleanup)
-void start().catch(() => fail('failed'))
+void start().catch(() => { stage('CONNECT_FAILED'); fail('failed') })

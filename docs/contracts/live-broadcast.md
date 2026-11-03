@@ -114,6 +114,16 @@ Current certificate, frozen audience, capability and fallback readiness remain
 authoritative checks. Capability advertisement and current-process fencing are
 separate from proving media playback.
 
+For one screen and live run, only one receiver admission may remain unconfirmed
+for teardown. A new player runtime with the same screen certificate receives
+`LIVE_RECEIVER_ACTIVE` while the old admission was authorized within the last
+10 seconds; it cannot evict a renewing player. Once that bounded authority is
+stale, the server durably marks the old admission revoking and queues exact
+media removal. The new runtime receives retryable `LIVE_TEARDOWN_PENDING` until
+the media node confirms teardown; only then may it receive a new admission.
+The old ticket and renewal paths stop granting authority as soon as revocation
+commits. Media unavailability leaves the new player on its approved fallback.
+
 Current foundation routes use the `/api/v1` prefix:
 
 | Route | Current purpose |
@@ -199,6 +209,17 @@ outer authority; emergency takes precedence per affected screen. Unavailable
 emergency content cannot expose the live stream underneath. After clear, fresh
 admission is required and the run/window must still be valid.
 
+A discovery or presenter epoch response taking over one second cannot shorten
+an already established monotonic window boundary. A new live window waits for
+a fresh clock sample before joining media. This keeps backend processing delay
+from silently removing seconds of an otherwise valid live window, while stale
+clock information never extends live authority.
+Once that boundary is verified, admission renewal can shorten the independent
+ten-second media lease but cannot subtract backend processing delay from the
+same schedule end a second time. The backend rejects grants after its
+authoritative window ends, and revocation still has the ten-second local
+lease cutoff.
+
 Keep approved cached fallback visible until the authorized generation has a
 decoded frame ready. Pin/checksum fallback dependencies for the window and
 guard published references against deletion or cleanup; security purge still
@@ -243,6 +264,19 @@ fallback readiness/reason and freshness using run/generation, player runtime
 session, sequence and server receipt time. Stale data becomes unknown. A
 reported frame is not proof of physical-display viewing; live observations must
 not invent proof-of-play for media that never rendered.
+While a receiver remains authorized, it refreshes its current observation at
+most once every five seconds on renderer heartbeat; a one-time first-frame
+report must not become stale during healthy continuous playback.
+
+The ordinary player keeps its approved fallback visible until the isolated
+receiver has a current-track decoded frame (`loadeddata` with current media
+data and nonzero video dimensions, or a video frame callback), then disposes
+the fallback renderer and activates the live view. A hidden receiver view may
+not receive compositor frame callbacks, so the decoded-frame event is also
+required. A screenshot or physical-display check remains separate evidence of
+the visible result. The private Media VM advertises its configured VM address
+and its Docker bridge address as ICE candidates; clients on other hosts use
+the routed VM address, while same-host clients can reach the bridge address.
 
 Use trusted CMS HTTPS, media WSS and approved UDP/TCP/TURN paths; test browser
 and Electron Chromium trust separately from Node HTTP trust. Package pinned

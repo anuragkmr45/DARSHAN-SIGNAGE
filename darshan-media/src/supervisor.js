@@ -9,6 +9,23 @@ import { randomUUID } from 'node:crypto';
 import { createHostReadiness } from './host-readiness.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const safeGatewayDiagnostics = new Set([
+  'SIGNAL_VALIDATE_ACCEPTED', 'SIGNAL_VALIDATE_ORIGIN_DENIED', 'SIGNAL_VALIDATE_INVALID_TICKET',
+  'SIGNAL_VALIDATE_OTHER_REJECTED', 'SIGNAL_UPGRADE_TICKET_ACCEPTED', 'SIGNAL_UPSTREAM_UPGRADED',
+  'SIGNAL_PARTICIPANT_CONFIRMED', 'SIGNAL_UPGRADE_ORIGIN_DENIED', 'SIGNAL_UPGRADE_INVALID_TICKET',
+  'SIGNAL_UPGRADE_OTHER_REJECTED',
+  'CLIENT_CLOSED_DURING_JOIN', 'UPSTREAM_REQUEST_TIMEOUT', 'UPSTREAM_CONFIRM_FAILED',
+  'UPSTREAM_CONFIRM_TIMEOUT', 'UPSTREAM_REJECTED_UPGRADE', 'UPSTREAM_REQUEST_ERROR',
+  'UPSTREAM_CLOSED_BEFORE_UPGRADE', 'UPSTREAM_SOCKET_ERROR_BEFORE_CONFIRM',
+  'UPSTREAM_SOCKET_CLOSED_BEFORE_CONFIRM', 'UPSTREAM_SOCKET_ENDED_BEFORE_CONFIRM',
+  'SFU_REMOVE_TIMEOUT', 'SFU_REMOVE_UNAVAILABLE', 'SFU_REMOVE_AUTH', 'SFU_REMOVE_TRANSPORT', 'SFU_REMOVE_OTHER',
+]);
+const safeIsolationReasons = new Set([
+  'UPSTREAM_JOIN_UNCERTAIN', 'PARTICIPANT_REMOVAL_FAILED', 'HOST_READINESS_LOST',
+  'AUTHORITY_CONFIGURATION_CHANGED', 'SUPERVISOR_UNAVAILABLE', 'SUPERVISOR_HEARTBEAT_FAILED',
+  'GATEWAY_STARTUP_FAILED', 'GATEWAY_SHUTDOWN', 'TRACKED_STATE_CAPACITY_EXHAUSTED',
+  'AUTHORITY_CHECK_CAPACITY_EXHAUSTED',
+]);
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 async function waitExit(child, timeoutMs = 1000) {
@@ -87,6 +104,7 @@ export async function supervise({
   const upstream = new URL(env.DARSHAN_MEDIA_SFU_URL ?? 'http://127.0.0.1:18781');
   if (upstream.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(upstream.hostname)) throw new Error('SFU must bind numeric loopback');
   const backend = env.DARSHAN_MEDIA_AUTHORITY_MODE === 'backend';
+  const allowWildcardSfu = backend && env.DARSHAN_MEDIA_SFU_CONTAINER_WILDCARD_BIND === 'true';
   if (backend && (!env.DARSHAN_MEDIA_SUPERVISOR_STATE_FILE || !uuid.test(env.DARSHAN_MEDIA_NODE_INSTANCE_ID ?? '') || !path.isAbsolute(env.DARSHAN_MEDIA_HOST_LEASE_FILE ?? ''))) throw new Error('Backend supervision configuration required');
   // Authority identity is fresh per supervisor invocation even if a host
   // mistakenly restarts a container with its previous managed label/config.
@@ -142,7 +160,8 @@ export async function supervise({
   catch (error) { fault = error.code; await stop(fault); }
   while (!stopped) {
     try {
-      const target = { pid: sfu.pid, host: upstream.hostname, port: Number(upstream.port || 80), startTicks: sfuStartTicks };
+      const target = { pid: sfu.pid, host: upstream.hostname, port: Number(upstream.port || 80), startTicks: sfuStartTicks,
+        allowWildcard: allowWildcardSfu };
       if (ownsSfuListener(target) && await tcpReady(upstream.hostname.replace(/^\[|\]$/g, ''), target.port)
         && ownsSfuListener(target)) break;
     } catch (error) { fault = error.code; await stop(fault); break; }
@@ -160,7 +179,10 @@ export async function supervise({
     } else if (message?.type === 'heartbeat' && Number.isSafeInteger(message.sequence) && message.sequence > lastSequence) {
       lastSequence = message.sequence;
       lastHeartbeat = performance.now();
+    } else if (message?.type === 'diagnostic' && safeGatewayDiagnostics.has(message.code)) {
+      process.stderr.write(`DARSHAN media gateway diagnostic: ${message.code}\n`);
     } else if (message?.type === 'isolate') {
+      process.stderr.write(`DARSHAN media isolation trigger: ${safeIsolationReasons.has(message.reason) ? message.reason : 'UNRECOGNIZED'}\n`);
       void stop('ENFORCEMENT_ISOLATION');
     }
   });

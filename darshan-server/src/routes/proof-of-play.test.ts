@@ -54,6 +54,8 @@ describe('Proof of play export', () => {
     const screenId = randomUUID();
     const mediaId = randomUUID();
     const now = new Date();
+    // Telemetry must reference a real screen under the deletion-safety trigger.
+    await db.insert(schema.screens).values({ id: screenId, name: 'Proof of play export fixture' });
     const [record] = await db.insert(schema.proofOfPlay).values({
       screen_id: screenId,
       media_id: mediaId,

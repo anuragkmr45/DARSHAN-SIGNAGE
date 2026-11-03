@@ -69,10 +69,11 @@ Preserved by default:
 - downloaded media cache: `cache/media`, `cache/objects`, `cache/quarantine`.
 - request queue: `cache/request-queue.json`, `cache/request-queue.state.json`.
 - proof-of-play spool: `cache/pop-spool`.
+- former-identity proof-of-play evidence: `cache/pop-spool-retired`. After a fresh pairing, the player preserves queued events for the previous Screen here and does not submit them using the new Screen credentials. Support must reconcile these events with their original Screen; do not move them back into the active spool.
 - logs: `cache/logs`.
 - screenshots: `cache/screenshots`.
 
-`--clear-cache` additionally clears media cache targets only: `media`, `objects`, `quarantine`, and `cache-index.db`. It still preserves request queues, proof-of-play spool, logs, and screenshots.
+`--clear-cache` additionally clears media cache targets only: `media`, `objects`, `quarantine`, and `cache-index.db`. It still preserves request queues, active and retired proof-of-play spool, logs, and screenshots.
 
 ## Commands
 

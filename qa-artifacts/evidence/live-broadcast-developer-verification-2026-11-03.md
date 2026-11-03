@@ -833,3 +833,224 @@ integration, complete presenter/wizard, direct host pidfd/AppArmor and final
 release artifacts remain open. These supporting prerequisites close no full
 implementation loop or independent human LIVE QA case. Catalog recheck remains
 150 cases/51 risks/152 traces; all 20 LIVE cases and QA-owned fields are unchanged.
+
+## Ordinary packaged player: scheduled real capture, 2026-11-03 UTC
+
+This later developer checkpoint supersedes the earlier statement that the
+scheduled ordinary-player path had no real captured-frame pixel evidence. It
+does **not** close the independent LIVE cases or six-VM release gates. Source
+was the uncommitted feature branch at test time; the private test build is not
+a release artifact. The isolated API/worker build was
+`44ea0852-6ab2-4f3e-97d9-23d0f35e678a`, the packaged Linux player build was
+`6fe8268b-9d7e-48ee-b864-58a0afe9fd9f` (input SHA-256
+`465a75a485d58b3fa4ef66274313b42d917265340457338200dea976a47689ba`),
+and the local CMS build was `acfce6e0-8106-4ff8-a7fb-960038d73cb0`.
+All used the isolated `darshan_live_20261103_test` service and the approved
+`DARSHAN LIVE TEST SOURCE` browser tab; no production VM was reached.
+
+The first attempt reached signaling, RTC connection and SDK publication, and
+the packaged player subscribed to the video track, but its hidden receiver
+never reported a frame. The player had waited only for a compositor frame
+callback while keeping that view hidden behind fallback. The revised player
+accepts the current track's `loadeddata` only when `readyState` has current
+data and dimensions are nonzero; the compositor callback remains a second
+path. The test Media node also advertised its Docker address as well as the
+private host address. This combination was tested, so this run alone does not
+isolate the contribution of each fix. The matching production Media provision
+template now includes `advertise_internal_ip: true`; cross-VM ICE remains QA.
+
+In the real CMS presenter panel, the operator selected the approved test tab,
+saw a decoded local PREVIEW, and explicitly selected Start. At 09:31 UTC,
+generation 5 reached SDK publication; the packaged player connected,
+subscribed, emitted `VIDEO_LOADED_DATA` at 09:34:34.554 UTC after its isolated
+rebuild/restart, and emitted `FRAME_CALLBACK` at 09:34:34.635 UTC. The server's
+receiver observation was `CONNECTED / SUBSCRIBED / READY` at 09:34:34.754 UTC.
+The fresh player screenshot taken at 09:35:55 UTC visibly shows the test
+source, not fallback:
+
+- [normal-packaged-player-live-source-20261103.png](runtime-live-2026-11-03/normal-packaged-player-live-source-20261103.png), SHA-256 `70d83ceff9d4b751052fb8b28400b035c07aa79056362c36b43ae90ab58ae085`.
+
+The operator clicked Stop at 09:37:23 UTC. Run 5 became STOPPED; its exact
+`REVOKE_RUN` media operation was ACKED. The player unsubscribed and resumed its
+approved normal image, verified by its screenshot at 09:37:55 UTC:
+
+- [normal-packaged-player-after-stop-fallback-20261103.png](runtime-live-2026-11-03/normal-packaged-player-after-stop-fallback-20261103.png), SHA-256 `b41594bdae1c5edbc9add8d0f5706b7e3ae9cba495ba6bbf90b135a12c65e17d`.
+
+The operator then reviewed a fresh attempt, reselected the test tab and
+explicitly started generation 6 in the same window. At 09:39:05 UTC the
+presenter and receiver both reported `CONNECTED`; the receiver again reported
+`SUBSCRIBED / READY`. This confirms one real stop-to-fallback-to-live repeat.
+Generation 6 was STOPPED at 09:44:59.671 UTC for a 09:45:00 UTC window end,
+and its `REVOKE_RUN` operation was ACKED. The player logged a track
+unsubscription at 09:44:56.595 UTC, about 3.4 seconds before the boundary,
+while this host was running the affected player tests. That early transition
+is not counted as a passing one-second end-boundary measurement; repeat it
+under low load and inspect its cause.
+The CMS panel's run badge held its last Start response (`PREPARING`) while the
+database run was RUNNING; the badge now says "at last check" until refreshed.
+The Screen Details snapshot modal initially timed out after 20 seconds while
+the player command completed later; the uploaded object was correct but the
+modal continued showing its old preview until a page reload. The polling
+window was increased to 120 seconds. In rebuilt local CMS QA build
+`767b4c07-51f3-4c2d-9332-3d36a3f74e05` (source input SHA-256
+`033da5023835c11060a131dcb4fe9773e17da7fee74951ace9360aa9b90ca27f`),
+an operator requested another screenshot at about 09:56 UTC; the open modal
+showed "Snapshot updated," changed the captured time to 09:56:26 UTC, and
+marked the preview fresh without a page reload. This is a local UI pass for
+the delayed command path, not a full screenshot feature regression.
+
+The live receiver sent its first `READY` observation once, then its server
+receipt aged while playback continued. Source now refreshes the receiver
+observation every five seconds while authorized renderer heartbeats arrive;
+a focused coordinator timing test passed. The later packaged player build
+`b1f47aca-974b-4f4c-89bd-9b71bc2cb577` (input SHA-256
+`fcf3cebc79aa78a081ffeef8df241b9f17564a902f3b60f80a871a9959c8e856`)
+contains that change and built/packaged successfully, but it has not yet been
+exercised in a second live occurrence. Do not attach the earlier pixel evidence
+to that later build.
+
+Focused server live-runtime cases passed 38/38, the focused player-flow
+regression passed 1/1, the focused CMS presenter media cases passed 7/7, and
+the isolated Linux player source build/package succeeded. Full affected-suite
+results, schedule-end behavior, physical display, audio/browser matrix,
+multi-machine ICE/TLS/firewall and capacity/soak are separate gates. Human
+`LIVE-01..20` execution status and QA-owned fields remain unchanged.
+
+### Slow REST clock sample regression, 2026-11-03 UTC
+
+The prior generation-6 player returned to fallback at 09:44:56.595 UTC,
+3.405 seconds before the immutable 09:45:00 UTC window end. Its Media node did
+not stop until 09:53:57 UTC, and its receiver admission was authorized at
+09:44:55.386 UTC. The precise source of that early transition remains under
+runtime investigation. A focused fake-clock reproduction independently showed
+that a three-second device discovery, whose `server_now` was stamped at the end
+of backend work, shortened an existing 60-second player boundary to 57 seconds.
+The regression failed at 57,000 versus 60,000 milliseconds before the fix.
+The player now keeps the prior monotonic boundary on discovery samples older
+than one second; an untrusted new window remains unavailable until a fresh
+sample arrives. A second fake-clock regression showed a two-second slow renewal
+cutting a verified window early because server `window_remaining_ms` was
+subtracted from request start. The verified window now bounds renewal without
+that second subtraction; the server's positive remaining window and ten-second
+lease checks still apply. A newly discovered window with an old clock sample
+cannot create an admission. All 22 coordinator tests passed after these changes.
+The intermediate isolated
+Linux build/package `9ba1aab1-d703-4885-a4df-aaba0bbf57cd` (source SHA-256
+`31bb5784f288f714ce0c4bb6b651c5216bb8fad9e07e2b86668cdebd9dff5d49`)
+passed and restarted as the paired QA player. It predates the renewal fix, so
+the final source requires another package and real live check.
+
+The same delayed clock-sample case failed in the CMS presenter controller before
+the fix (`IDLE` instead of an unavailable first review). It now requires a
+fresh first epoch sample and retains an established monotonic deadline on slow
+reloads. A slow-renewal regression also failed before the CMS renewal fix and
+passed afterward; a slow eligibility reload preserved active capture. The
+focused presenter controller suite now passes 23/23. Intermediate local CMS
+build `8b91c548-42e6-4f3f-97c2-7687ce7e89e9` activated successfully but
+predates the renewal fix. The 10:02–10:12 UTC published test window showed
+disabled capture while the trusted Media node was unavailable; the root
+watchdog handoff had not completed before it ended. These developer checks do not close
+the low-load schedule-end, independent QA or production gates.
+
+### Final packaged-player scheduled-window repeat, 2026-11-03 UTC
+
+The final isolated CMS build `5e882db4-af95-4e70-a90b-590c696c198f`
+(source SHA-256 `24b72daea7b4c623111ad2249b21f5649e00924a9aa22e1a493dab54e60ded21`)
+and packaged Linux player build `cf3a5c87-9f05-40b5-8066-f8c14b043a13`
+(source SHA-256 `a0eb60928f76debcc0692ea3e195a8e669c6e4668c0b2e56a0d1dd0f4635a043`,
+`app.asar` SHA-256 `73a7504afe6b80a76a85f269e91f5d2a9b6e405f045cf01b981df4105cb76fca`)
+were activated in the isolated local services. The corrected Media image
+`beef6fff` was launched as native node instance
+`415b2823-6acc-42e2-a0ff-3e2dda4145b7` under the scoped host watchdog.
+The ignored local handoff generator first produced duplicate
+`advertise_internal_ip` keys, causing the Media node to reject startup; the
+generator was corrected to replace an existing key and its output was checked
+to contain exactly one. This handoff generator is local test material, not a
+production deployment file.
+
+Using the real CMS, the operator submitted, approved and published request
+`REQ-8c00c0b9865f`, schedule `fa7622f6-5a86-4105-a66b-5219cb15a5de`,
+with one frozen screen and the approved fallback. Its immutable live window was
+10:19:00–10:23:00 UTC. At the window start, CMS eligibility became available;
+the operator selected only `DARSHAN LIVE TEST SOURCE` in the native picker and
+pressed **Start broadcast explicitly**. The local preview decoded, the presenter
+reached `PUBLISHING`, the Media connection was connected, and the SDK reported
+video publication acknowledged. Run `2879020a-f017-4c09-9de8-d4cc41526d1a`
+started at 10:19:28.400 UTC.
+
+The CMS **Take Snapshot** action returned a fresh packaged-player screenshot
+captured at 10:20:03 UTC. Visual inspection showed the actual
+`DARSHAN LIVE TEST SOURCE` image on the player. The current receiver admission
+reported `CONNECTED / SUBSCRIBED / READY` at 10:20:01, 10:20:12, 10:20:29,
+10:22:15 and 10:22:54 UTC, proving receipt timestamps continued to advance
+during sustained playback. This is player-reported frame evidence plus an
+actual captured screen image; it does not prove a human saw a physical display.
+The original test-only MinIO screenshot objects were copied into
+[`final-packaged-player-live-102003.png`](runtime-live-2026-11-03/final-packaged-player-live-102003.png)
+(SHA-256 `130e326d596930ad35b958b9fcdf09591092dabdf7910d4d824b72e757dfd18d`)
+and
+[`final-packaged-player-postwindow-102333.png`](runtime-live-2026-11-03/final-packaged-player-postwindow-102333.png)
+(SHA-256 `62904420877f9688251b1613a09b462c29f5d7b8530a478dad85758e4942bf89`).
+Both local copies matched the `storage_objects` SHA-256 values recorded by the
+isolated backend and were visually inspected for test-only content.
+
+At 10:22:56 UTC the run was still `RUNNING`, with a fresh receiver report from
+10:22:54.099 UTC. It stopped at 10:22:59.704 UTC with `PRESENTER_STOP`, 296 ms
+before the scheduled end and within the agreed one-second observation tolerance.
+The Media teardown was confirmed at the same recorded instant. A second fresh
+CMS screenshot at 10:23:33 UTC showed the player in standby with
+`No content assigned yet`; this QA screen has no ordinary default after the
+schedule ends. The approved live fallback applies **inside** the live window
+when the stream is unavailable; the earlier explicit Stop/fallback screenshot
+is separate evidence for that behavior. This run did not exercise audio or a
+physical display. The subsecond early stop should remain visible in timing
+evidence rather than be described as an exact 10:23:00 stop.
+
+### Final local regression packet, 2026-11-03 UTC
+
+After the real window closed, the current source passed:
+
+| Gate | Result |
+| --- | --- |
+| Media Node tests | 109 pass, 9 explicitly skipped; 0 fail |
+| Media host watchdog tests | 21/21 pass |
+| Production Media watchdog-health and host-witness tests | 5/5 and 11/11 pass |
+| CMS unit tests | 268/268 pass across 41 files |
+| Server affected live-runtime, desired-state, screens-realtime tests | 62/62 pass across 3 files, on `darshan_live_vitest_20261103_test` |
+| Server cross-feature screens, schedules, emergency, pairing, delivery, cache telemetry and proof-of-play tests | 64/64 pass across 11 files, on the same disposable database after reset |
+| Server build | `npm run build` passed |
+| Server screen lifecycle dry run | All 12 reported steps passed, including live dashboard/detail, socket updates, emergency refresh and deletion guard |
+| Player integration and fault suites | 6/6 and 22/22 pass |
+| Player unit suite | All 65 files, 567 tests passed in 13 fresh memory-bounded processes |
+| CMS `/screens` Playwright suite | All 8 cases passed; one cold-Vite navigation timeout passed on its warm-cache rerun |
+| Media deployment Python | `provision-private.py` compiled successfully |
+
+The first single-process player unit attempt was stopped deliberately after
+resident memory reached about 780 MiB with the host's 4 GiB swap full. The
+first five-file batch also failed an HTTP-client fixture because this running
+packaged-player environment exports `DARSHAN_PLAYER_CONFIG_FILE`, which takes
+precedence over that test's file fixture. The HTTP-client file passed in
+isolation after excluding that runtime override; the full 65-file run then
+passed with the override excluded from each test process. No product code was
+changed for that environment-only failure. The root-owned Vite dependency cache
+was preserved by renaming it, allowing a user-owned fresh cache for Playwright.
+The first `/screens` browser case timed out on `page.goto` while Vite compiled
+the cold cache; seven other cases passed and the timed-out case passed on its
+targeted warm-cache rerun. The first cross-feature server run had one
+proof-of-play export fixture failure: it inserted telemetry for a nonexistent
+screen, which the database deletion-safety trigger rejected. The fixture now
+creates its screen; its isolated rerun and the complete 11-file repeat passed.
+
+At 10:28:16 UTC, more than five minutes after the scheduled run ended and
+while the broad player unit process loaded this swap-full development host,
+the isolated Media node logged `HOST_READINESS_LOST` and then
+`CONTROLLER_HEARTBEAT_EXPIRED`; its host watchdog stopped the node. No live run
+was active then. This confirms fail-closed cleanup under this host load but
+does not demonstrate representative steady-state media reliability. The
+production-size Media VM and load/soak gate remain open. The local node was not
+silently restarted or counted as healthy after that isolation.
+
+These are developer checks on one local Linux host. They do not replace
+independent `LIVE-01..20` human execution, physical display/audio, actual
+Chrome/Edge and Windows, cross-VM TLS/ICE/firewall, 10×25 load/soak, or restore
+rehearsal. The corresponding human QA result fields remain **Not Tested**.

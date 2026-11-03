@@ -56,6 +56,16 @@ describe('bounded presenter LiveKit adapter', () => {
     expect(forbidden.stop).toHaveBeenCalledOnce(); expect(room.localParticipant.publishTrack.mock.calls.map(call => call[1].source)).toEqual(['screen_share', 'microphone']);
     expect(events.audioDegraded).toHaveBeenCalledOnce(); expect(events.published).toHaveBeenCalledOnce();
   });
+  it('reports only a fixed safe reason when SDK signaling fails', async () => {
+    const { connection, room } = setup();
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const error = Object.assign(new Error('private-ticket-must-not-appear'), { name: 'ConnectionError', reason: 5 });
+      room.connect.mockRejectedValueOnce(error);
+      await expect(connection.publish(grant, { display: stream([track('video')]) }, () => true)).rejects.toBe(error);
+      expect(warning).toHaveBeenCalledWith('DARSHAN_PRESENTER_SIGNAL_FAILED', 'TIMEOUT', 'UNCLASSIFIED');
+    } finally { warning.mockRestore(); }
+  });
   it('turns an SDK reconnect into one owner-controlled disconnect and never preserves a reusable SDK token reconnect', async () => {
     const { events, connection, room } = setup(); room.events.get('reconnecting')(); room.events.get('signalReconnecting')();
     expect(events.disconnected).toHaveBeenCalledOnce(); expect(room.disconnect).toHaveBeenCalledWith(false);

@@ -485,6 +485,12 @@ def monitor_pinned(args, fence, boot_id):
                     time.sleep(0.1)
                     continue
                 return enforce(args, 'SUPERVISOR_HEARTBEAT_MISSING')
+            # The supervisor can replace the heartbeat while this read is
+            # delayed by host I/O. Compare it with a clock sample taken after
+            # the read, while still rejecting a stalled host monitor.
+            now = boottime_ms()
+            validate_monitor_gap(last_boottime, now)
+            last_boottime = now
             heartbeat = validate_heartbeat(heartbeat, args.instance_id, fence['start_ticks'], boot_id, now, previous)
             if now - heartbeat['boottime_ms'] > 1500:
                 return enforce(args, 'SUPERVISOR_HEARTBEAT_STALE')

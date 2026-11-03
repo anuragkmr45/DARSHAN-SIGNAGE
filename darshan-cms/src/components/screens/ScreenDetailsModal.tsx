@@ -368,7 +368,10 @@ export function ScreenDetailsModal({
         return;
       }
 
-      if (Date.now() - pendingSnapshotCapture.startedAt > 20_000 && !cancelled) {
+      // Device command polling and the player's screenshot cooldown can take
+      // longer than 20 seconds even when capture succeeds. Keep looking for
+      // the new server timestamp before declaring the preview delayed.
+      if (Date.now() - pendingSnapshotCapture.startedAt > 120_000 && !cancelled) {
         setPendingSnapshotCapture(null);
         toast.error("Snapshot capture is taking longer than expected.");
       }

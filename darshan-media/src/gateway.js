@@ -86,6 +86,13 @@ export function createSignalServer({ controller, adapter, upstreamUrl, allowedOr
     throw new Error('SFU signaling must use an HTTP loopback endpoint');
   }
   const origins = new Set(allowedOrigins);
+  // Send only fixed stage codes to the supervisor. SDK/network errors can carry
+  // transient credentials, so they must never reach container logs.
+  const diagnostic = (code) => {
+    if (process.env.DARSHAN_MEDIA_DIAGNOSTICS === '1' && process.send && process.connected) {
+      try { process.send({ type: 'diagnostic', code }, () => {}); } catch { /* Enforcement does not depend on diagnostics. */ }
+    }
+  };
   const server = createServer(tls, (request, response) => {
     try {
       const url = new URL(request.url, 'http://signal.invalid');
@@ -97,8 +104,13 @@ export function createSignalServer({ controller, adapter, upstreamUrl, allowedOr
       }
       if (url.searchParams.getAll('access_token').length !== 1 || request.headers.authorization) throw new MediaError('INVALID_TICKET', 401);
       controller.inspectTicket(url.searchParams.get('access_token'));
+      diagnostic('SIGNAL_VALIDATE_ACCEPTED');
       send(response, 200, { status: 'valid' });
-    } catch (error) { send(response, error instanceof MediaError ? error.status : 500, errorValue(error)); }
+    } catch (error) {
+      diagnostic(error instanceof MediaError && error.code === 'ORIGIN_DENIED' ? 'SIGNAL_VALIDATE_ORIGIN_DENIED'
+        : error instanceof MediaError && error.code === 'INVALID_TICKET' ? 'SIGNAL_VALIDATE_INVALID_TICKET' : 'SIGNAL_VALIDATE_OTHER_REJECTED');
+      send(response, error instanceof MediaError ? error.status : 500, errorValue(error));
+    }
   });
   const sockets = new Set();
   server.on('connection', (socket) => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
@@ -121,6 +133,7 @@ export function createSignalServer({ controller, adapter, upstreamUrl, allowedOr
     const cleanup = () => {
       if (closed) return;
       closed = true;
+      if (entry && !joinSettled) diagnostic('CLIENT_CLOSED_DURING_JOIN');
       socket.destroy();
       // Observe an inflight upstream join until its participant is confirmed or node isolation occurs.
       if (joinSettled || !proxyRequest) closeUpstream();
@@ -139,6 +152,7 @@ export function createSignalServer({ controller, adapter, upstreamUrl, allowedOr
       if (request.headers.origin !== undefined && !origins.has(request.headers.origin)) throw new MediaError('ORIGIN_DENIED', 403);
       if (url.searchParams.getAll('access_token').length !== 1 || request.headers.authorization) throw new MediaError('INVALID_TICKET', 401);
       entry = controller.consumeTicket(url.searchParams.get('access_token'));
+      diagnostic('SIGNAL_UPGRADE_TICKET_ACCEPTED');
       const token = await adapter.createToken(entry);
       controller.assertCurrent(entry, entry.generation);
       if (closed) throw new MediaError('CONNECTION_CLOSED', 410);
@@ -153,17 +167,19 @@ export function createSignalServer({ controller, adapter, upstreamUrl, allowedOr
         hostname: upstream.hostname.replace(/^\[|\]$/g, ''), port: upstream.port,
         path: `${url.pathname}${url.search}`, method: 'GET', headers,
       });
-      proxyRequest.setTimeout(upgradeTimeoutMs, () => { settleJoin('UNCERTAIN'); reject(504); });
+      proxyRequest.setTimeout(upgradeTimeoutMs, () => { diagnostic('UPSTREAM_REQUEST_TIMEOUT'); settleJoin('UNCERTAIN'); reject(504); });
       proxyRequest.on('upgrade', async (response, remoteSocket, remoteHead) => {
+        diagnostic('SIGNAL_UPSTREAM_UPGRADED');
         upstreamSocket = remoteSocket;
         proxyRequest.setTimeout(0);
         remoteSocket.setTimeout(0);
         remoteSocket.pause();
-        remoteSocket.on('error', () => { settleJoin('UNCERTAIN'); cleanup(); });
-        remoteSocket.on('close', () => { settleJoin('UNCERTAIN'); cleanup(); });
-        remoteSocket.on('end', () => { settleJoin('UNCERTAIN'); cleanup(); });
+        remoteSocket.on('error', () => { if (!joinSettled) diagnostic('UPSTREAM_SOCKET_ERROR_BEFORE_CONFIRM'); settleJoin('UNCERTAIN'); cleanup(); });
+        remoteSocket.on('close', () => { if (!joinSettled) diagnostic('UPSTREAM_SOCKET_CLOSED_BEFORE_CONFIRM'); settleJoin('UNCERTAIN'); cleanup(); });
+        remoteSocket.on('end', () => { if (!joinSettled) diagnostic('UPSTREAM_SOCKET_ENDED_BEFORE_CONFIRM'); settleJoin('UNCERTAIN'); cleanup(); });
         try {
           await adapter.confirmParticipant(entry);
+          diagnostic('SIGNAL_PARTICIPANT_CONFIRMED');
           settleJoin('CONFIRMED');
           if (closed) { remoteSocket.destroy(); return; }
           controller.setConnection(entry, { destroy: cleanup });
@@ -174,13 +190,18 @@ export function createSignalServer({ controller, adapter, upstreamUrl, allowedOr
           socket.pipe(remoteSocket);
           remoteSocket.pipe(socket);
           remoteSocket.resume();
-        } catch { settleJoin('UNCERTAIN'); reject(410); }
+        } catch (error) {
+          diagnostic(error?.message === 'PARTICIPANT_REGISTRATION_UNCONFIRMED' ? 'UPSTREAM_CONFIRM_TIMEOUT' : 'UPSTREAM_CONFIRM_FAILED');
+          settleJoin('UNCERTAIN'); reject(410);
+        }
       });
-      proxyRequest.on('response', () => { settleJoin('REJECTED'); reject(502); });
-      proxyRequest.on('error', () => { settleJoin('UNCERTAIN'); reject(502); });
-      proxyRequest.on('close', () => { if (!upstreamSocket) settleJoin('UNCERTAIN'); });
+      proxyRequest.on('response', () => { diagnostic('UPSTREAM_REJECTED_UPGRADE'); settleJoin('REJECTED'); reject(502); });
+      proxyRequest.on('error', () => { diagnostic('UPSTREAM_REQUEST_ERROR'); settleJoin('UNCERTAIN'); reject(502); });
+      proxyRequest.on('close', () => { if (!upstreamSocket) { diagnostic('UPSTREAM_CLOSED_BEFORE_UPGRADE'); settleJoin('UNCERTAIN'); } });
       proxyRequest.end();
     } catch (error) {
+      if (!entry) diagnostic(error instanceof MediaError && error.code === 'ORIGIN_DENIED' ? 'SIGNAL_UPGRADE_ORIGIN_DENIED'
+        : error instanceof MediaError && error.code === 'INVALID_TICKET' ? 'SIGNAL_UPGRADE_INVALID_TICKET' : 'SIGNAL_UPGRADE_OTHER_REJECTED');
       settleJoin('UNCERTAIN');
       reject(error instanceof MediaError ? error.status : 502);
     }

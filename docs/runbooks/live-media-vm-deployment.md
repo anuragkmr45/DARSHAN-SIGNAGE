@@ -202,7 +202,11 @@ Docker API, host witness files or its key. Docker-published ports can bypass
 ordinary UFW rules: enforce and verify equivalent upstream/DOCKER-USER rules,
 IPv4/IPv6 and return paths. RTC ports must be preserved end to end. Explicit
 `node_ip` is the real on-prem Media address, `use_external_ip:false`, STUN and
-TURN lists empty. The pinned SFU configuration guidance is derived from its
+TURN lists empty. `advertise_internal_ip:true` adds the Docker bridge address
+for a presenter or player on the Media host without removing the configured
+Media VM address for other machines. Verify the selected ICE candidate and a
+decoded player frame on both same-host and cross-VM paths; a successful WSS
+join alone is insufficient. The pinned SFU configuration guidance is derived from its
 [official sample](https://github.com/livekit/livekit/blob/v1.13.11/config-sample.yaml).
 Validate candidate routing from every player VLAN; no external discovery is
 silently enabled when routing fails.
