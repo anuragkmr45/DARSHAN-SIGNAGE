@@ -136,6 +136,7 @@
 @layer utilities {
   .operational-shell { background: hsl(var(--background)); }
   .operational-card { border: 1px solid hsl(var(--border)); background: hsl(var(--card)); box-shadow: none; }
+  .operational-card.settings-section { border: 0; background: transparent; box-shadow: none; }
   .operational-card.layout-editor-group { border: 0; background: transparent; box-shadow: none; }
   .operational-card-strong { border: 1px solid hsl(var(--border)); background: hsl(var(--card)); box-shadow: none; }
   .status-dot { height: .625rem; width: .625rem; border-radius: 999px; }

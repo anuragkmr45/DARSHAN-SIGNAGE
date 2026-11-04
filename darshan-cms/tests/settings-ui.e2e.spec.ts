@@ -151,6 +151,8 @@ test("recent logs use readable site surfaces in dark and light modes", async ({ 
   const message = page.getByText("Service ready");
   await expect(message).toBeVisible();
   const panel = message.locator("../..");
+  const section = page.locator(".settings-section").filter({ has: page.getByRole("heading", { name: "Recent logs" }) });
+  await expect(section).toHaveCSS("border-top-width", "0px");
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(panel).toHaveCSS("background-color", "rgb(29, 33, 29)");
   await expect(message).toHaveCSS("color", "rgb(242, 245, 238)");

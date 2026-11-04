@@ -457,12 +457,12 @@ const Settings = () => {
 
         <TabsContent value="general" className="space-y-4">
           <SettingsQueryGuard query={generalQuery}>
-          <Card>
-            <CardHeader>
+          <Card className="settings-section">
+            <CardHeader className="px-0 pb-4 pt-0">
               <CardTitle>General</CardTitle>
               <CardDescription>Default locale and organization details for the CMS.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 px-0 pb-0 pt-0">
               {!canEditOrg ? <p className="text-sm text-muted-foreground">You can view these settings. Editing requires Manage Site Settings.</p> : null}
               <div className="space-y-2">
                 <Label htmlFor="company-name">Company name</Label>
@@ -504,14 +504,14 @@ const Settings = () => {
 
         <TabsContent value="branding" className="space-y-4">
           <SettingsQueryGuard query={brandingQuery}>
-          <Card>
-            <CardHeader>
+          <Card className="settings-section">
+            <CardHeader className="px-0 pb-4 pt-0">
               <CardTitle>Branding</CardTitle>
               <CardDescription>
                 Manage the app name, logo, icon, and favicon used throughout the CMS.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 px-0 pb-0 pt-0">
               {!canEditBranding ? (
                 <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                   You can view branding. Editing requires Manage Branding permission.
@@ -596,12 +596,12 @@ const Settings = () => {
 
         <TabsContent value="security" className="space-y-4">
           <SettingsQueryGuard query={securityQuery}>
-          <Card>
-            <CardHeader>
+          <Card className="settings-section">
+            <CardHeader className="px-0 pb-4 pt-0">
               <CardTitle>Security</CardTitle>
               <CardDescription>Working session timeout and password requirement controls.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 px-0 pb-0 pt-0">
               {!canEditOrg ? <p className="text-sm text-muted-foreground">You can view these settings. Editing requires Manage Site Settings.</p> : null}
               <div className="space-y-2">
                 <Label htmlFor="session-timeout">Idle session timeout (minutes)</Label>
@@ -688,12 +688,12 @@ const Settings = () => {
 
         <TabsContent value="appearance" className="space-y-4">
           <SettingsQueryGuard query={appearanceQuery}>
-          <Card>
-            <CardHeader>
+          <Card className="settings-section">
+            <CardHeader className="px-0 pb-4 pt-0">
               <CardTitle>Appearance</CardTitle>
               <CardDescription>Theme, accent, and sidebar behavior for the entire CMS.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 px-0 pb-0 pt-0">
               {!canEditOrg ? <p className="text-sm text-muted-foreground">You can view these settings. Editing requires Manage Site Settings.</p> : null}
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2">
@@ -765,14 +765,14 @@ const Settings = () => {
           <DefaultMediaSection />
         </TabsContent>
 
-        <TabsContent value="advanced" className="space-y-4">
+        <TabsContent value="advanced" className="space-y-8">
           <SettingsQueryGuard query={backupSettingsQuery}>
-          <Card>
-            <CardHeader>
+          <Card className="settings-section">
+            <CardHeader className="px-0 pb-4 pt-0">
               <CardTitle>Backups</CardTitle>
               <CardDescription>Automatic full backups for PostgreSQL and MinIO archives.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 px-0 pb-0 pt-0">
               {!canEditOrg ? <p className="text-sm text-muted-foreground">You can view backup settings. Editing requires Manage Site Settings.</p> : null}
               <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-4 py-3 text-sm">
                 <Badge variant={automaticBackupsEnabled ? "default" : "outline"}>
@@ -852,12 +852,12 @@ const Settings = () => {
             </CardContent>
           </Card>
 
-          {!externalBackupSidecar ? <Card>
-            <CardHeader>
+          {!externalBackupSidecar ? <Card className="settings-section">
+            <CardHeader className="px-0 pb-4 pt-0">
               <CardTitle>Backup history</CardTitle>
               <CardDescription>Recent manual and automatic backup runs.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-3 px-0 pb-0 pt-0">
               {backupRunsQuery.isPending ? <p className="text-sm text-muted-foreground">Loading backup history…</p> : null}
               {backupRunsQuery.isError ? <div className="space-y-2"><p className="text-sm text-destructive">Could not load backup history.</p><Button variant="outline" onClick={() => void backupRunsQuery.refetch()}>Retry</Button></div> : null}
               {backupRuns.map((run) => (
@@ -920,12 +920,12 @@ const Settings = () => {
           />
           </SettingsQueryGuard>
 
-          <Card>
-            <CardHeader>
+          <Card className="settings-section">
+            <CardHeader className="px-0 pb-4 pt-0">
               <CardTitle>Recent logs</CardTitle>
               <CardDescription>Recent backend application logs filtered by runtime log level.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 px-0 pb-0 pt-0">
               {recentLogsQuery.isPending ? <p className="text-sm text-muted-foreground">Loading recent logs…</p> : null}
               {recentLogsQuery.isError ? <div className="space-y-2"><p className="text-sm text-destructive">Could not load recent logs.</p><Button variant="outline" onClick={() => void recentLogsQuery.refetch()}>Retry</Button></div> : null}
               <div className="flex flex-wrap items-center gap-3">
