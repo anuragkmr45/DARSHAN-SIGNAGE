@@ -127,9 +127,44 @@ test("settings tabs and branding remain within phone, tablet and desktop widths"
   for (const width of [390, 820, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/settings");
-    await page.getByRole("tab", { name: "Branding" }).click();
+    if (width < 640) {
+      await expect(page.getByLabel("Company name")).toBeHidden();
+      await page.getByRole("navigation", { name: "Settings categories" }).getByRole("button", { name: /Branding/ }).click();
+      await expect(page.getByRole("button", { name: "Back to all settings" })).toBeVisible();
+    } else {
+      await page.getByRole("tab", { name: "Branding" }).click();
+    }
     await expect(page.getByRole("button", { name: "Save Branding" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     if (width !== 820) await page.screenshot({ path: `../qa-artifacts/evidence/product-ui-settings/${width}-light.png`, fullPage: true });
   }
+});
+
+test("phone settings opens one category, retains a draft, and returns focus to the category list", async ({ page }) => {
+  await setup(page, [
+    { action: "read", subject: "OrgSettings" },
+    { action: "update", subject: "OrgSettings" },
+  ]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/settings");
+  const categories = page.getByRole("navigation", { name: "Settings categories" });
+  await expect(categories.getByRole("button", { name: /General/ })).toBeVisible();
+  await page.screenshot({ path: "../qa-artifacts/evidence/product-ui-settings/390-categories.png", fullPage: true });
+  await expect(categories.getByRole("button", { name: /Branding/ })).toHaveCount(0);
+  await expect(categories.getByRole("button", { name: /Roles/ })).toHaveCount(0);
+  await expect(page.getByLabel("Company name")).toBeHidden();
+
+  await categories.getByRole("button", { name: /General/ }).click();
+  await expect(page.getByLabel("Company name")).toHaveValue("DARSHAN");
+  await page.getByLabel("Company name").fill("DARSHAN draft");
+  await page.getByRole("button", { name: "Back to all settings" }).click();
+  await expect(categories.getByRole("button", { name: /General/ })).toBeFocused();
+  await expect(page.getByLabel("Company name")).toBeHidden();
+
+  await categories.getByRole("button", { name: /General/ }).click();
+  await expect(page.getByLabel("Company name")).toHaveValue("DARSHAN draft");
+  await expect(page.getByRole("tab", { name: "General" })).toBeHidden();
+  await page.setViewportSize({ width: 640, height: 360 });
+  await expect(page.getByRole("tab", { name: "General" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

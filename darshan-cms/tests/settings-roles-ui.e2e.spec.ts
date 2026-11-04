@@ -141,7 +141,11 @@ test("roles remain usable at phone, tablet and desktop widths", async ({ page })
   for (const width of [390, 820, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/settings");
-    await page.getByRole("tab", { name: "Roles" }).click();
+    if (width < 640) {
+      await page.getByRole("navigation", { name: "Settings categories" }).getByRole("button", { name: /Roles/ }).click();
+    } else {
+      await page.getByRole("tab", { name: "Roles" }).click();
+    }
     await page.getByRole("button", { name: "New Role" }).click();
     await expect(page.getByRole("dialog", { name: "Create Role" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

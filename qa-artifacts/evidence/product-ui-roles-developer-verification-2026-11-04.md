@@ -20,3 +20,5 @@ Branch: `codex/darshan-product-ui-redesign-20261103`. Visual direction approved 
 ## Remaining release QA
 
 These browser tests use fixture API responses, not a two-operator running site. Human QA must verify a real custom-role create/edit/reload, session withdrawal across API and realtime, role assignment, update/delete blockers, restart/upgrade behavior, permission withdrawal while the dialog is open, concurrent edits, inheritance cycles and a production-sized role directory. The complete-directory request is bounded to 100 server pages and fails visibly if it cannot load all pages. Keyboard, screen-reader and production deployment checks remain open.
+
+The subsequent Settings category-navigation regression updated the phone Roles test to use category → detail. The combined Settings/Default Media/Roles browser run passed 16/16; the refreshed phone and desktop role dialog captures remain fixture-backed.

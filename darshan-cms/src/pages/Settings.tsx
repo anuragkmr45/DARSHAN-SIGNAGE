@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   Brush,
   Clock3,
   Database,
@@ -276,6 +277,7 @@ const Settings = () => {
   const currentUser = useAppSelector((state) => state.auth.user);
   const canEditBranding = canManageBrandingSettings(currentUser ?? undefined, role, can);
   const canReadBranding = can("read", "BrandingSettings");
+  const canReadRoles = can("read", "Role");
   const canEditOrg = can("update", "OrgSettings");
   const canChooseBrandingMedia = canEditBranding && can("read", "Media");
   const canUploadBrandingMedia = canEditBranding && can("create", "Media");
@@ -332,6 +334,37 @@ const Settings = () => {
     log_level: "info" as const,
   });
   const [backupPendingDelete, setBackupPendingDelete] = useState<BackupRun | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const mobileBackRef = useRef<HTMLButtonElement | null>(null);
+  const mobileCategoryRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const categories = [
+    { value: "general", label: "General", detail: "Organization name, language, and time", icon: Globe },
+    ...(canReadBranding ? [{ value: "branding", label: "Branding", detail: "Name, logo, and app icons", icon: ImageUp }] : []),
+    { value: "security", label: "Security", detail: "Sessions and password rules", icon: Lock },
+    { value: "appearance", label: "Appearance", detail: "Theme, accent, and sidebar", icon: Palette },
+    { value: "default-media", label: "Default Media", detail: "Content when no schedule is active", icon: Shield },
+    { value: "advanced", label: "Advanced", detail: "Backups and diagnostic logs", icon: Database },
+    ...(canReadRoles ? [{ value: "roles", label: "Roles", detail: "Access and permissions", icon: Users }] : []),
+  ];
+  const visibleCategory = categories.some((category) => category.value === activeCategory) ? activeCategory : null;
+
+  useEffect(() => {
+    if (activeCategory === "branding" && !canReadBranding) setActiveCategory(null);
+    if (activeCategory === "roles" && !canReadRoles) setActiveCategory(null);
+  }, [activeCategory, canReadBranding, canReadRoles]);
+
+  const openMobileCategory = (value: string) => {
+    setActiveCategory(value);
+    requestAnimationFrame(() => mobileBackRef.current?.focus());
+  };
+
+  const returnToMobileCategories = () => {
+    const previous = activeCategory;
+    setActiveCategory(null);
+    requestAnimationFrame(() => {
+      if (previous) mobileCategoryRefs.current[previous]?.focus();
+    });
+  };
 
   useEffect(() => {
     if (generalQuery.data) setGeneral(generalQuery.data);
@@ -393,16 +426,34 @@ const Settings = () => {
         </p>
       </div>
 
-      <Tabs defaultValue="general" className="space-y-4 min-w-0">
-        <TabsList className="flex h-auto w-full max-w-full justify-start overflow-x-auto overflow-y-hidden">
-          <TabsTrigger value="general"><Globe className="mr-2 h-4 w-4" />General</TabsTrigger>
-          {canReadBranding ? <TabsTrigger value="branding"><ImageUp className="mr-2 h-4 w-4" />Branding</TabsTrigger> : null}
-          <TabsTrigger value="security"><Lock className="mr-2 h-4 w-4" />Security</TabsTrigger>
-          <TabsTrigger value="appearance"><Palette className="mr-2 h-4 w-4" />Appearance</TabsTrigger>
-          <TabsTrigger value="default-media"><Shield className="mr-2 h-4 w-4" />Default Media</TabsTrigger>
-          <TabsTrigger value="advanced"><Database className="mr-2 h-4 w-4" />Advanced</TabsTrigger>
-          {can("read", "Role") ? <TabsTrigger value="roles"><Users className="mr-2 h-4 w-4" />Roles</TabsTrigger> : null}
-        </TabsList>
+      <Tabs value={visibleCategory ?? "general"} onValueChange={setActiveCategory}
+        className="min-w-0 sm:grid sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-start sm:gap-6">
+        <nav aria-label="Settings categories" className={visibleCategory ? "hidden sm:block" : "block"}>
+          <div className="divide-y divide-border rounded-xl border border-border bg-card sm:hidden">
+            {categories.map(({ value, label, detail, icon: Icon }) => (
+              <button key={value} ref={(element) => { mobileCategoryRefs.current[value] = element; }}
+                type="button" onClick={() => openMobileCategory(value)}
+                className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                <Icon aria-hidden="true" className="h-5 w-5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{label}</span><span className="block text-xs text-muted-foreground">{detail}</span></span>
+                <span aria-hidden="true" className="text-muted-foreground">›</span>
+              </button>
+            ))}
+          </div>
+          <TabsList className="hidden h-auto w-full flex-col items-stretch justify-start gap-1 bg-transparent p-0 sm:flex">
+            {categories.map(({ value, label, icon: Icon }) => (
+              <TabsTrigger key={value} value={value}
+                className="min-h-10 w-full justify-start gap-2 whitespace-normal rounded-lg px-3 text-left data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+                <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />{label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </nav>
+        <div className={`min-w-0 ${visibleCategory ? "block" : "hidden sm:block"}`}>
+          <Button ref={mobileBackRef} type="button" variant="ghost" onClick={returnToMobileCategories}
+            className="mb-3 -ml-2 sm:hidden" aria-label="Back to all settings">
+            <ArrowLeft aria-hidden="true" className="mr-2 h-4 w-4" />All settings
+          </Button>
 
         <TabsContent value="general" className="space-y-4">
           <SettingsQueryGuard query={generalQuery}>
@@ -912,6 +963,7 @@ const Settings = () => {
         <TabsContent value="roles" className="space-y-4">
           <RolesPermissionsTab />
         </TabsContent>
+        </div>
       </Tabs>
     </div>
   );
