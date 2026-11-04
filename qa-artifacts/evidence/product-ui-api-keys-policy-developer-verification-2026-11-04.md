@@ -17,3 +17,5 @@ Rendered fixture captures: [phone](product-ui-api-keys-policy/api-keys-390.png),
 ## Remaining validation
 
 The browser uses fixture data. Confirm the disabled issuance and retained-record Revoke in a real running CMS/API. A future API-key design must specify consumer route scope, credential presentation, storage, audit, expiration, rotation and revocation before enabling issuance. List pagination beyond 100, screen reader and permission withdrawal remain open.
+
+The isolated CMS at `https://localhost:18445` was checked through an administrator browser session on 2026-11-04. Its `/api-keys` page had no Create or Rotate control. This confirms the current CMS presentation only; the paired API container is an older pinned build, so retained-record Revoke and current backend policy still require a matched-build runtime check.

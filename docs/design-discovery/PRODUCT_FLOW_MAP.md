@@ -27,7 +27,7 @@ Route truth comes from `darshan-cms/src/App.tsx`. API truth comes from `darshan-
 | `/media` | `MediaLibrary` | module `media` | Media library | Upload, create webpage, preview, filter, delete | media presign/create/complete/delete | High |
 | `/reports` | `Reports` | module `reports` | Reports/audit/emergency summary | Export reports/audit, inspect health, clear emergency where available | reports, audit, proof-of-play, emergency | Moderate |
 | `/settings` | `Settings` | module `settings` | Site settings/default media/backups/RBAC | Save settings, assign default media, run backup, manage roles | settings, media, backups, roles/permissions | High |
-| `/api-keys` | `ApiKeys` | permission `read ApiKey` | API key management | Create/rotate/revoke | API keys | High |
+| `/api-keys` | `ApiKeys` | permission `read ApiKey` | Review retained API-key records | Refresh/revoke with the matching grant; issuance and rotation disabled | API keys | High |
 | `/webhooks` | `Webhooks` | permission `read Webhook` | Webhook management | Create/test/delete | webhooks | Moderate |
 | `/sso-config` | `SsoConfig` | permission `read SsoConfig` | SSO settings | Create/update/deactivate provider | SSO config | High |
 | `/proof-of-play` | `ProofOfPlay` | permissions `read ProofOfPlay`, `read Report` | PoP records and export | Filter/export | proof-of-play | Moderate |

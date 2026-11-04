@@ -1,6 +1,6 @@
 # Users and invitations: developer verification — 2026-11-04
 
-Branch: `codex/darshan-product-ui-redesign-20261103`. This packet includes CMS and server behavior changes. The repository has no outbound invitation email sender. Manual code handoff is the current on-prem implementation; an automatic-mail product decision remains open.
+Branch: `codex/darshan-product-ui-redesign-20261103`. This packet includes CMS and server behavior changes. The repository has no outbound invitation email sender. The user confirmed manual one-time code handoff for this on-prem release on 2026-11-04.
 
 ## Contract and result
 
@@ -30,3 +30,7 @@ Rendered captures: [Users phone](product-ui-users/phone-light.png), [Users dark 
 - Test expired-code renewal, create-response loss, simultaneous renewal, two activation requests, configurable password policy, account deletion while code is open, scoped managers, permission withdrawal and hidden cross-department invitations.
 - Test clipboard denial/manual selection, closing the code before copying, long emails, 100+ users/roles/invitations, zoom, keyboard, screen reader and all accent presets.
 - No SMTP delivery, bounce tracking, resend email or deliverability claim exists. An automatic email choice would require service configuration, queue/retry and delivery evidence.
+
+## Isolated runtime check and version boundary, 2026-11-04
+
+The current CMS build at `https://localhost:18445` showed the manual-code invitation dialog and removed the code from view after dismissal. A second browser run reached the renewal control, but no replacement-code dialog appeared. Inspection showed the isolated API container is pinned to an older 2026-11-03 server `dist` bundle, while the CMS serves this branch's current `dist`. That older API created the two test invitations as active accounts and did not provide the new renewal behavior. Both test accounts were removed through the CMS after the check. **This is not a pass for the current server's real invitation journey.** Rebuild and run the current API and CMS together before testing inactive creation, renewal, activation, and recipient sign-in end to end. No invitation codes or passwords were saved in this artifact.

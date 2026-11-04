@@ -38,7 +38,7 @@ This journey is based on the repository docs and avoids undocumented product ass
 | Field/support operator | Pairs/re-pairs devices through approved CMS/player flows, checks screen health, captures screenshots, uses player CLI/runbooks where allowed. |
 | Player device | Electron runtime actor. Requests pairing, validates backend pairing status, fetches snapshots/default media, executes commands, sends heartbeat, proof-of-play, screenshots, and cache reports. |
 | Backend/system runtime | Authoritative REST/Postgres/object-storage owner for auth, RBAC, media, layout, schedule reservations, publish snapshots, commands, telemetry, audit, reports, and realtime wake notifications. |
-| External integration admin / API actor | Admin-facing API key, webhook, and SSO configuration flows. Raw secrets are one-time/sensitive and must not appear in showcase screenshots. |
+| External integration admin / API actor | Reviews or revokes retained API-key records and configures permitted webhook actions. API-key creation and rotation are unavailable until request authentication is designed. |
 
 ## Core Product Journey
 
@@ -342,7 +342,7 @@ Important flow content:
 - Emergency branch: authorized admin opens Emergency Takeover -> choose type/severity/message and/or media/expiry/audit note/scope. Exactly one scope: global, screens, or groups. Validations: global confirmation, scope target required, message or media required, audit note required. Backend creates active emergency. Player snapshot resolves precedence by severity, then GLOBAL > GROUP > SCREEN, then newest trigger timestamp, then UUID as a deterministic tie-break. Emergency overrides schedule/default immediately. Clear with reason -> backend durably records the transition and player returns to schedule/default without reboot.
 - Default media branch: settings assign global default, aspect-ratio variants, or target assignments. Backend fallback order: emergency, published schedule, aspect-ratio default, global default, none. Player consumes resolved default media endpoint/snapshot.
 - Monitoring/evidence: dashboard KPIs, active scheduled timeline, live screen mirrors, screen details, now-playing, screenshot capture, delivery/cache status, reports, audit logs, proof-of-play exports, notifications/chat. Mark runtime-dependent evidence with a small "needs runtime verification" badge where appropriate.
-- Admin operations: super admin manages users, invites, roles/permissions, departments, operators, API keys, webhooks, SSO, backups/logs. Show API key raw secrets as "one-time secret, do not screenshot".
+- Admin operations: super admin manages users, manual one-time invitation codes, roles/permissions, departments, operators, retained API-key records, webhooks, SSO, backups/logs. Do not depict API-key issuance or rotation as available.
 
 Include a legend:
 
