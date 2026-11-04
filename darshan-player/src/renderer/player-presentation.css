@@ -1,4 +1,78 @@
 /* Player-owned surfaces only. Authored media keeps its original geometry. */
+/* Keep normal production playback free of operational badges. Startup and
+   security/recovery surfaces remain visible, and emergency stays explicit. */
+body:not([data-runtime-mode='dev']):not([data-runtime-mode='qa']) #status-overlay,
+body:not([data-runtime-mode='dev']):not([data-runtime-mode='qa']) #mode-banner:not(.emergency) {
+  display: none;
+}
+
+body[data-runtime-mode='production'][data-player-state='PAIRED_RUNTIME'] #connectivity-banner,
+body[data-runtime-mode='production'][data-player-state='OFFLINE_USING_LAST_VALID_PAIRING'] #connectivity-banner,
+body[data-runtime-mode='production'][data-player-state='SOFT_RECOVERY'] #connectivity-banner {
+  display: none;
+}
+
+.darshan-standby,
+.darshan-default-unavailable {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(20px, 5vw, 72px);
+  background: radial-gradient(circle at 50% 42%, #15313b 0%, #0d1b26 42%, #080f18 100%);
+  color: #f5f8fa;
+  text-align: center;
+}
+
+.darshan-standby-artwork {
+  display: block;
+  width: min(34vw, 380px);
+  max-width: 58vw;
+  max-height: 42vh;
+  margin-bottom: clamp(8px, 2vh, 24px);
+  object-fit: contain;
+}
+
+.darshan-standby-name {
+  font-size: clamp(25px, 3vw, 42px);
+  font-weight: 700;
+  letter-spacing: 0.17em;
+}
+
+.darshan-standby-message {
+  margin-top: 10px;
+  color: #b5c7cf;
+  font-size: clamp(15px, 1.5vw, 20px);
+}
+
+.darshan-default-unavailable {
+  background: #11151b;
+}
+
+.darshan-default-unavailable h1 {
+  font-size: clamp(28px, 4vw, 52px);
+  font-weight: 680;
+  letter-spacing: -0.03em;
+}
+
+.darshan-default-unavailable p {
+  max-width: 620px;
+  margin-top: 14px;
+  color: #c1cad5;
+  font-size: clamp(16px, 1.6vw, 22px);
+  line-height: 1.45;
+}
+
+@media (max-width: 599px), (max-height: 459px) {
+  .darshan-standby-artwork {
+    width: min(42vw, 240px);
+    max-height: 34vh;
+    margin-bottom: 4px;
+  }
+}
+
 #pairing-screen,
 #security-lock-overlay,
 #recovery-overlay {

@@ -204,6 +204,7 @@ describe('Pairing presentation browser regression', () => {
         (() => {
           const presentationListeners = [];
           const playbackListeners = [];
+          const defaultMediaListeners = [];
           const initialStatus = ${JSON.stringify(initialStatus)};
           const noOp = () => undefined;
           window.darshan = {
@@ -220,7 +221,13 @@ describe('Pairing presentation browser regression', () => {
             onEmergencyOverride: noOp,
             onPlayerStatus: noOp,
             getDefaultMedia: async () => ({ source: 'NONE', aspect_ratio: null, media_id: null, media: null }),
-            onDefaultMediaChanged: () => () => undefined,
+            onDefaultMediaChanged(listener) {
+              defaultMediaListeners.push(listener);
+              return () => {
+                const index = defaultMediaListeners.indexOf(listener);
+                if (index >= 0) defaultMediaListeners.splice(index, 1);
+              };
+            },
             getConfig: async () => ({ runtime: { mode: 'production' }, log: { level: 'info' } }),
             getDeviceInfo: async () => ({ hostname: 'e2e-player', platform: 'linux', arch: 'x64' }),
             getDiagnostics: async () => ({ hostname: 'e2e-player', ipAddresses: ['127.0.0.1'], dnsResolution: true, apiReachable: true, latency: 1 }),
@@ -235,6 +242,7 @@ describe('Pairing presentation browser regression', () => {
           window.__darshanE2E = {
             emitPresentation(value) { presentationListeners.forEach((listener) => listener(value)); },
             emitPlayback(value) { playbackListeners.forEach((listener) => listener(value)); },
+            emitDefaultMedia(value) { defaultMediaListeners.forEach((listener) => listener(value)); },
           };
         })();
       `,
@@ -333,23 +341,31 @@ describe('Pairing presentation browser regression', () => {
             'The backend is temporarily unavailable. Reconnecting and checking whether this pairing code is still active.'
         })()`)
       }
-      const layout = await evaluate(session, `(() => {
-        const ids = ['pairing-hostname', 'pairing-code', 'pairing-expiry', 'pairing-status']
-        const visible = ids.every((id) => {
-          const element = document.getElementById(id)
-          const rect = element?.getBoundingClientRect()
-          return rect && rect.width > 0 && rect.height > 0 &&
-            rect.left >= 0 && rect.top >= 0 &&
+      await waitFor(session, `(() => {
+        return ['pairing-hostname', 'pairing-code', 'pairing-expiry', 'pairing-status'].every((id) => {
+          const rect = document.getElementById(id)?.getBoundingClientRect()
+          return rect && rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.top >= 0 &&
             rect.right <= innerWidth && rect.bottom <= innerHeight
         })
+      })()`, `pairing viewport settlement at ${width}x${height}`)
+      const layout = await evaluate(session, `(() => {
+        const ids = ['pairing-hostname', 'pairing-code', 'pairing-expiry', 'pairing-status']
+        const outOfBounds = ids.filter((id) => {
+          const element = document.getElementById(id)
+          const rect = element?.getBoundingClientRect()
+          return !(rect && rect.width > 0 && rect.height > 0 &&
+            rect.left >= 0 && rect.top >= 0 &&
+            rect.right <= innerWidth && rect.bottom <= innerHeight)
+        })
         return {
-          visible,
+          visible: outOfBounds.length === 0,
+          outOfBounds,
           surface: getComputedStyle(document.getElementById('pairing-screen')).backgroundColor,
           operatorControlHidden: getComputedStyle(document.getElementById('pairing-refresh')).display === 'none',
         }
       })()`)
-      expect(layout, `pairing layout at ${width}x${height}`).to.deep.equal({
-        visible: true,
+      expect(layout.visible, `pairing layout at ${width}x${height}: ${JSON.stringify(layout.outOfBounds)}`).to.equal(true)
+      expect(layout).to.include({
         surface: 'rgb(17, 21, 27)',
         operatorControlHidden: true,
       })
@@ -377,5 +393,114 @@ describe('Pairing presentation browser regression', () => {
       reason: 'Device credentials require administrator attention',
       controlsHidden: true,
     })
+
+    // Operational labels must not cover normal production media, including
+    // cached offline playback. The emergency interruption remains visible.
+    await session.command('Emulation.setDeviceMetricsOverride', {
+      width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+    })
+    for (const [revision, mode, state] of [
+      [5, 'default', 'PAIRED_RUNTIME'],
+      [6, 'offline', 'OFFLINE_USING_LAST_VALID_PAIRING'],
+      [7, 'empty', 'SOFT_RECOVERY'],
+    ] as const) {
+      await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: ${revision}, status: {
+        state: '${state}', mode: '${mode}', online: false, backendAvailable: false
+      } })`)
+      const badges = await evaluate(session, `(() => {
+        const hidden = (id) => getComputedStyle(document.getElementById(id)).display === 'none'
+        return {
+          status: hidden('status-overlay'),
+          mode: hidden('mode-banner'),
+          connectivity: hidden('connectivity-banner'),
+        }
+      })()`)
+      expect(badges, `${state} production overlays`).to.deep.equal({
+        status: true, mode: true, connectivity: true,
+      })
+      if (revision === 5) {
+        await waitFor(session,
+          "document.querySelector('.darshan-standby-artwork')?.naturalWidth > 0",
+          'packaged standby artwork')
+        const standby = await evaluate(session, `(() => ({
+          name: document.querySelector('.darshan-standby-name')?.textContent,
+          message: document.querySelector('.darshan-standby-message')?.textContent,
+          unavailable: Boolean(document.querySelector('.darshan-default-unavailable')),
+        }))()`)
+        expect(standby).to.deep.equal({
+          name: 'DARSHAN', message: 'No content assigned', unavailable: false,
+        })
+        const screenshot = await session.command('Page.captureScreenshot', { format: 'png' })
+        const evidencePath = path.resolve(__dirname,
+          '../../../qa-artifacts/evidence/product-ui-player-prototype/production-playback-no-overlays.png')
+        await fs.promises.writeFile(evidencePath, Buffer.from(screenshot.data as string, 'base64'))
+        for (const [width, height] of [[820, 768], [390, 844]]) {
+          await session.command('Emulation.setDeviceMetricsOverride', {
+            width, height, deviceScaleFactor: 1, mobile: false,
+          })
+          const fitted = await evaluate(session, `(() => {
+            return ['darshan-standby-artwork', 'darshan-standby-name', 'darshan-standby-message']
+              .every((className) => {
+                const rect = document.querySelector('.' + className)?.getBoundingClientRect()
+                return rect && rect.width > 0 && rect.height > 0 && rect.left >= 0 &&
+                  rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
+              })
+          })()`)
+          expect(fitted, `standby content fits at ${width}x${height}`).to.equal(true)
+          if (width === 390) {
+            const phoneScreenshot = await session.command('Page.captureScreenshot', { format: 'png' })
+            const phonePath = path.resolve(__dirname,
+              '../../../qa-artifacts/evidence/product-ui-player-prototype/production-standby-390.png')
+            await fs.promises.writeFile(phonePath, Buffer.from(phoneScreenshot.data as string, 'base64'))
+          }
+        }
+        await session.command('Emulation.setDeviceMetricsOverride', {
+          width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+        })
+      }
+    }
+
+    await evaluate(session,
+      "window.__darshanE2E.emitDefaultMedia({ source: 'GLOBAL', media_id: null, media: null })")
+    const assignedButUnavailable = await evaluate(session, `(() => ({
+      title: document.querySelector('.darshan-default-unavailable h1')?.textContent,
+      standby: Boolean(document.querySelector('.darshan-standby')),
+    }))()`)
+    expect(assignedButUnavailable).to.deep.equal({ title: 'Content unavailable', standby: false })
+    const unavailableScreenshot = await session.command('Page.captureScreenshot', { format: 'png' })
+    const unavailablePath = path.resolve(__dirname,
+      '../../../qa-artifacts/evidence/product-ui-player-prototype/production-default-unavailable.png')
+    await fs.promises.writeFile(unavailablePath, Buffer.from(unavailableScreenshot.data as string, 'base64'))
+    await evaluate(session,
+      "window.__darshanE2E.emitDefaultMedia({ source: 'NONE', media_id: null, media: null })")
+
+    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 8, status: {
+      state: 'PAIRED_RUNTIME', mode: 'emergency', online: true, backendAvailable: true
+    } })`)
+    const emergencyBanner = await evaluate(session,
+      "getComputedStyle(document.getElementById('mode-banner')).display !== 'none' && document.getElementById('mode-banner').textContent === 'EMERGENCY'")
+    expect(emergencyBanner).to.equal(true)
+    const qaDiagnostics = await evaluate(session, `(() => {
+      document.body.dataset.runtimeMode = 'qa'
+      const visible = getComputedStyle(document.getElementById('status-overlay')).display !== 'none'
+      document.body.dataset.runtimeMode = 'production'
+      return visible
+    })()`)
+    expect(qaDiagnostics).to.equal(true)
+
+    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 9, status: {
+      state: 'PAIRED_RUNTIME', mode: 'offline', online: false,
+      securityLock: { locked: true, reason: 'Backend validation expired' }
+    } })`)
+    const lockVisible = await evaluate(session, `(() => {
+      const lock = document.getElementById('security-lock-overlay')
+      return getComputedStyle(lock).display !== 'none' &&
+        lock.textContent.includes('Backend validation expired')
+    })()`)
+    expect(lockVisible).to.equal(true)
+    const lockScreenshot = await session.command('Page.captureScreenshot', { format: 'png' })
+    const lockPath = path.resolve(__dirname,
+      '../../../qa-artifacts/evidence/product-ui-player-prototype/production-security-lock.png')
+    await fs.promises.writeFile(lockPath, Buffer.from(lockScreenshot.data as string, 'base64'))
   })
 })

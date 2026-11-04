@@ -238,28 +238,37 @@ export class DefaultMediaPlayer {
   }
 
   private renderIdle(): void {
+    if (this.current.media_id || (this.current.source && this.current.source !== 'NONE')) {
+      const unavailable = document.createElement('div')
+      unavailable.className = 'darshan-default-unavailable'
+      const title = document.createElement('h1')
+      title.textContent = 'Content unavailable'
+      const guidance = document.createElement('p')
+      guidance.textContent = 'The assigned default content could not be loaded. Contact your DARSHAN administrator.'
+      unavailable.append(title, guidance)
+      this.content.appendChild(unavailable)
+      this.hideStatus()
+      return
+    }
+
     const container = document.createElement('div')
-    container.style.display = 'flex'
-    container.style.flexDirection = 'column'
-    container.style.alignItems = 'center'
-    container.style.justifyContent = 'center'
-    container.style.width = '100%'
-    container.style.height = '100%'
-    container.style.background = '#000'
-    container.style.color = '#fff'
-    container.style.textAlign = 'center'
+    container.className = 'darshan-standby'
+
+    const artwork = document.createElement('img')
+    artwork.className = 'darshan-standby-artwork'
+    artwork.src = './standby-artwork.svg'
+    artwork.alt = ''
+    artwork.draggable = false
 
     const logo = document.createElement('div')
+    logo.className = 'darshan-standby-name'
     logo.textContent = 'DARSHAN'
-    logo.style.fontSize = '32px'
-    logo.style.fontWeight = '700'
-    logo.style.marginBottom = '12px'
 
     const message = document.createElement('div')
-    message.textContent = 'No content assigned yet.'
-    message.style.fontSize = '18px'
-    message.style.opacity = '0.8'
+    message.className = 'darshan-standby-message'
+    message.textContent = 'No content assigned'
 
+    container.appendChild(artwork)
     container.appendChild(logo)
     container.appendChild(message)
 

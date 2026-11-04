@@ -13,8 +13,11 @@ Status: **PRE-QA DEVELOPMENT VERIFICATION IN PROGRESS; not release-approved.**
 The document/video/boundary/security-recovery upgrade has passed focused and
 component automated checks/builds plus two current Linux Electron runs. The earlier live
 requirements 1-18 run passed 1-17 but found that
-the no-Schedule/no-default path does not show the required standard company
-image (BR-102/DEF-04/R-38). Physical-player security recovery,
+the no-Schedule/no-default path did not show the required standard company
+image (BR-102/DEF-04/R-38). The current redesign branch adds packaged DARSHAN
+standby artwork for that case, with rendered browser evidence in
+`evidence/product-ui-player-playback-chrome-developer-verification-2026-11-04.md`;
+physical-player acceptance is still open. Physical-player security recovery,
 all-player deployment verification, capacity, soak and final release evidence
 remain QA/release gates.
 

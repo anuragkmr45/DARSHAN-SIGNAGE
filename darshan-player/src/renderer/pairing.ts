@@ -136,6 +136,7 @@ class PairingScreen {
 
   private render(status: PlayerStatus): void {
     this.currentStatus = status
+    document.body.dataset['playerState'] = status.state
     this.renderPairingState(status)
     this.renderRecoveryState(status)
     this.renderConnectivity(status)
