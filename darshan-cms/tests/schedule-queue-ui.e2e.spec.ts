@@ -17,13 +17,14 @@ const requestItem = {
   screens: [{ id: "00000000-0000-4000-8000-000000000503", name: "Lobby screen" }],
 };
 
-async function setup(page: Page, grants: TestCapability[], options: { listFails?: boolean; summaryFailsAfterSearch?: boolean; snapshotFails?: boolean; published?: boolean; initialStatus?: "APPROVED"; secondRequest?: boolean; holdPreflight?: boolean; targetMode?: "group" | "mixed"; groupFails?: boolean; approveFails?: boolean; approveCommitsBeforeFailure?: boolean; publishFails?: boolean; takeDownFails?: boolean } = {}) {
+async function setup(page: Page, grants: TestCapability[], options: { listFails?: boolean; summaryFailsAfterSearch?: boolean; snapshotFails?: boolean; published?: boolean; initialStatus?: "APPROVED"; secondRequest?: boolean; holdPreflight?: boolean; targetMode?: "group" | "mixed"; groupFails?: boolean; approveFails?: boolean; approveCommitsBeforeFailure?: boolean; publishFails?: boolean; takeDownFails?: boolean; cancelFails?: boolean; cancelCommitsBeforeFailure?: boolean } = {}) {
   let listFails = Boolean(options.listFails);
   let snapshotFails = Boolean(options.snapshotFails);
   let groupFails = Boolean(options.groupFails);
   let approveFails = Boolean(options.approveFails);
   let publishFails = Boolean(options.publishFails);
   let takeDownFails = Boolean(options.takeDownFails);
+  let cancelFails = Boolean(options.cancelFails);
   let currentStatus = options.initialStatus ?? (options.published ? "PUBLISHED" : "PENDING");
   let releasePreflight: (() => void) | undefined;
   const requests: string[] = [];
@@ -50,7 +51,7 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
       if (options.summaryFailsAfterSearch && url.searchParams.get("q")) return json({ error: { message: "Unavailable" } }, 503);
       const first = (status: string) => Number(currentStatus === status);
       const second = (status: string) => Number(Boolean(options.secondRequest && status === "APPROVED"));
-      return json({ counts: { pending: first("PENDING"), approved: first("APPROVED") + second("APPROVED"), rejected: 0, published: first("PUBLISHED"), taken_down: first("TAKEN_DOWN"), expired: 0 } });
+      return json({ counts: { pending: first("PENDING"), approved: first("APPROVED") + second("APPROVED"), rejected: 0, cancelled: first("CANCELLED"), published: first("PUBLISHED"), taken_down: first("TAKEN_DOWN"), expired: 0 } });
     }
     if (path === "/api/v1/schedule-requests" && method === "GET") {
       if (listFails) return json({ error: { message: "Unavailable" } }, 503);
@@ -84,6 +85,14 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
       currentStatus = "PUBLISHED";
       return json({ id: requestItem.id, status: currentStatus });
     }
+    if (path === `/api/v1/schedule-requests/${requestItem.id}/cancel` && method === "POST") {
+      if (cancelFails) {
+        if (options.cancelCommitsBeforeFailure) currentStatus = "CANCELLED";
+        return json({ error: { message: "Service unavailable" } }, 503);
+      }
+      currentStatus = "CANCELLED";
+      return json({ id: requestItem.id, status: currentStatus, reservation_summary: { state: "CANCELLED" } });
+    }
     if (path === `/api/v1/schedule-requests/${requestItem.id}/take-down` && method === "POST") {
       if (takeDownFails) return json({ error: { message: "Service unavailable" } }, 503);
       currentStatus = "TAKEN_DOWN";
@@ -99,8 +108,60 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
       : json({ snapshot: { schedule: { id: requestItem.schedule.id, items: [] } }, publish: null, media_urls: {}, media_assets: {} });
     return json({});
   });
-  return { requests, restoreList: () => { listFails = false; }, restoreSnapshot: () => { snapshotFails = false; }, restoreGroup: () => { groupFails = false; }, restoreApproval: () => { approveFails = false; }, restorePublish: () => { publishFails = false; }, restoreTakeDown: () => { takeDownFails = false; }, releasePreflight: () => releasePreflight?.() };
+  return { requests, restoreList: () => { listFails = false; }, restoreSnapshot: () => { snapshotFails = false; }, restoreGroup: () => { groupFails = false; }, restoreApproval: () => { approveFails = false; }, restorePublish: () => { publishFails = false; }, restoreTakeDown: () => { takeDownFails = false; }, restoreCancel: () => { cancelFails = false; }, releasePreflight: () => releasePreflight?.() };
 }
+
+test("pending request can be withdrawn only with update permission and a confirmation", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "update", subject: "ScheduleRequest" }]);
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("button", { name: "Cancel Request" }).click();
+  const dialog = page.getByRole("dialog", { name: "Cancel request" });
+  await expect(dialog.getByText("held screen time", { exact: false })).toBeVisible();
+  await dialog.getByRole("button", { name: "Keep request" }).click();
+  expect(state.requests.filter(request => request.endsWith("/cancel") && request.startsWith("POST "))).toHaveLength(0);
+  await page.getByRole("button", { name: "Cancel Request" }).click();
+  await dialog.getByRole("button", { name: "Cancel request" }).click();
+  await expect(page.getByRole("tab", { name: "Pending 0" })).toBeVisible();
+  await page.getByRole("tab", { name: "Cancelled 1" }).click();
+  await expect(page.getByRole("button", { name: "Open Morning briefing request details" })).toBeVisible();
+  expect(state.requests.filter(request => request.endsWith("/cancel") && request.startsWith("POST "))).toHaveLength(1);
+});
+
+test("approved request remains available in Cancelled history after withdrawal", async ({ page }) => {
+  await setup(page, [...reader, { action: "update", subject: "ScheduleRequest" }], { initialStatus: "APPROVED" });
+  await page.goto("/schedule");
+  await page.getByRole("tab", { name: "Approved 1" }).click();
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Cancel Request" }).click();
+  await page.getByRole("dialog", { name: "Cancel request" }).getByRole("button", { name: "Cancel request" }).click();
+  await page.getByRole("tab", { name: "Cancelled 1" }).click();
+  await expect(page.getByRole("button", { name: "Open Morning briefing request details" })).toBeVisible();
+});
+
+test("cancel uncertainty requires a reload and does not automatically send a second write", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "update", subject: "ScheduleRequest" }], { cancelFails: true, cancelCommitsBeforeFailure: true });
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("button", { name: "Cancel Request" }).click();
+  await page.getByRole("dialog", { name: "Cancel request" }).getByRole("button", { name: "Cancel request" }).click();
+  await expect(page.getByText("The server may have completed the action.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Reload request" }).last().click();
+  await expect(page.getByRole("button", { name: "Cancel Request" })).toHaveCount(0);
+  expect(state.requests.filter(request => request.endsWith("/cancel") && request.startsWith("POST "))).toHaveLength(1);
+});
+
+test("a changed search hides old rows before the debounced result arrives", async ({ page }) => {
+  await setup(page, [...reader, { action: "update", subject: "ScheduleRequest" }]);
+  await page.goto("/schedule");
+  const row = page.getByRole("button", { name: "Open Morning briefing request details" });
+  await row.waitFor();
+  await page.getByLabel("Search schedule requests").fill("missing");
+  await expect(page.getByRole("status").getByText("Updating requests…")).toBeVisible();
+  await expect(row).toHaveCount(0);
+  await expect(page.getByText("No requests found")).toBeVisible();
+});
 
 test("read-only queue hides the incomplete creator action and direct URL explains access", async ({ page }) => {
   const state = await setup(page, reader);
@@ -125,6 +186,7 @@ test("list failure stays an error until Retry and a row opens from the keyboard"
   await row.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Close request details" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel Request" })).toHaveCount(0);
 });
 
 test("failed counts after a search do not reuse the previous filter totals", async ({ page }) => {
@@ -300,10 +362,10 @@ test("date filters use the displayed local day and reject reversed ranges", asyn
   await page.goto("/schedule");
   await page.getByRole("button", { name: "Filters" }).click();
   await page.getByLabel("From").fill("2026-11-05");
-  await page.getByLabel("To").fill("2026-11-04");
+  await page.getByLabel("To", { exact: true }).fill("2026-11-04");
   await expect(page.getByText("The From date must be on or before the To date.")).toBeVisible();
   await expect(page.getByText("Correct the date range to load requests.")).toBeVisible();
-  await page.getByLabel("To").fill("2026-11-06");
+  await page.getByLabel("To", { exact: true }).fill("2026-11-06");
   const expectedStart = await page.evaluate(() => new Date("2026-11-05T00:00:00.000").toISOString());
   await expect.poll(() => state.requests.find((request) => request.startsWith("GET /api/v1/schedule-requests?") && new URL(request, origin).searchParams.get("date_from") === expectedStart)).toBeTruthy();
 });

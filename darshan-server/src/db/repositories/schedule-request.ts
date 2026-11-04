@@ -103,7 +103,7 @@ export class ScheduleRequestRepository {
   }) {
     const db = getDatabase();
     if (options?.requested_by_ids && options.requested_by_ids.length === 0) {
-      return { pending: 0, approved: 0, rejected: 0, published: 0, taken_down: 0, expired: 0 };
+      return { pending: 0, approved: 0, rejected: 0, cancelled: 0, published: 0, taken_down: 0, expired: 0 };
     }
     const conditions = this.buildConditions(options ?? {});
     const rows = await db
@@ -120,6 +120,7 @@ export class ScheduleRequestRepository {
       pending: counts.get('PENDING') ?? 0,
       approved: counts.get('APPROVED') ?? 0,
       rejected: counts.get('REJECTED') ?? 0,
+      cancelled: counts.get('CANCELLED') ?? 0,
       published: counts.get('PUBLISHED') ?? 0,
       taken_down: counts.get('TAKEN_DOWN') ?? 0,
       expired: counts.get('EXPIRED') ?? 0,

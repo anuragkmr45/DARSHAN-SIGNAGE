@@ -1849,6 +1849,7 @@ export interface ScheduleRequestStatusSummary {
     pending: number;
     approved: number;
     rejected: number;
+    cancelled: number;
     published: number;
     taken_down: number;
     expired: number;

@@ -42,7 +42,7 @@ interface RequestDetailDrawerProps {
   onClose: () => void;
 }
 
-type ActionType = "approve" | "reject" | "approve_publish" | "take_down" | "aspect_override" | "approve_publish_aspect_override";
+type ActionType = "approve" | "reject" | "approve_publish" | "cancel_request" | "take_down" | "aspect_override" | "approve_publish_aspect_override";
 
 type LayoutSlot = {
   id: string;
@@ -133,8 +133,10 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
 
   const canApprove = can("approve", "ScheduleRequest") || can("manage", "ScheduleRequest");
   const canPublish = can("publish", "ScheduleRequest") || can("manage", "Schedule");
+  const canCancel = can("update", "ScheduleRequest");
   const allowApprove = !isAuthzLoading && canApprove;
   const allowPublish = !isAuthzLoading && canPublish;
+  const allowCancel = !isAuthzLoading && canCancel;
   const allowTakeDown = !isAuthzLoading && canPublish;
 
   const mediaItems = useMemo(() => currentRequest.media ?? [], [currentRequest.media]);
@@ -250,6 +252,26 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
     },
   });
 
+  const cancelMutation = useMutation({
+    retry: false,
+    mutationFn: scheduleRequestsApi.cancel,
+    onSuccess: (data, id) => {
+      setActionFailure(null);
+      setCurrentRequest((previous) => previous.id !== id ? previous : ({
+        ...previous,
+        status: data.status ?? "CANCELLED",
+        reservation_summary: data.reservation_summary ?? previous.reservation_summary ?? null,
+      }));
+      void invalidateList();
+      closeActionDialog();
+      toast({ title: "Request cancelled", description: "The request can no longer be published. Its held screen time was released." });
+    },
+    onError: (error) => {
+      reportActionFailure(error);
+      toast({ title: "Cancel failed", description: error instanceof Error ? error.message : "Unable to cancel request.", variant: "destructive" });
+    },
+  });
+
   const publishMutation = useMutation({
     retry: false,
     mutationFn: ({ id, issueHash, reason }: { id: string; issueHash?: string; reason?: string }) => scheduleRequestsApi.publish(
@@ -344,12 +366,14 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
     statusUpper === "EXPIRED" || Boolean(currentRequest.schedule_time_status?.is_expired);
   const showPublishOnly = !isExpiredRequest && statusUpper === "APPROVED";
   const showActions = !isExpiredRequest && (statusUpper === "PENDING" || statusUpper === "APPROVED");
+  const showCancelAction = statusUpper === "PENDING" || statusUpper === "APPROVED";
   const showTakeDownAction = statusUpper === "PUBLISHED";
 
   const isMutating =
     preflightPending ||
     approveMutation.isPending ||
     rejectMutation.isPending ||
+    cancelMutation.isPending ||
     publishMutation.isPending ||
     approvePublishMutation.isPending ||
     takeDownMutation.isPending;
@@ -364,6 +388,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
     }
     if (actionDialog === "reject") {
       rejectMutation.mutate({ id: currentRequest.id, comment });
+    }
+    if (actionDialog === "cancel_request") {
+      cancelMutation.mutate(currentRequest.id);
     }
     if (actionDialog === "approve_publish") {
       void handleApproveAndPublish(comment);
@@ -510,6 +537,11 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
               </>
             )}
           </div>
+        )}
+        {showCancelAction && allowCancel && (
+          <Button size="sm" variant="outline" className="mt-2 text-destructive" onClick={() => setActionDialog("cancel_request")} disabled={actionsBlocked}>
+            <XCircle className="mr-2 h-4 w-4" />Cancel Request
+          </Button>
         )}
         {showTakeDownAction && (
           <div className="mt-2 flex flex-wrap gap-2">
@@ -1014,6 +1046,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
             <DialogTitle>
               {actionDialog === "approve" && "Approve request"}
               {actionDialog === "reject" && "Reject request"}
+              {actionDialog === "cancel_request" && "Cancel request"}
               {actionDialog === "approve_publish" && "Approve & publish"}
               {actionDialog === "approve_publish_aspect_override" && "Approve & confirm letterboxing"}
               {actionDialog === "take_down" && "Take down published schedule"}
@@ -1022,7 +1055,9 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              {actionDialog === "take_down"
+              {actionDialog === "cancel_request"
+                ? "Cancel this pending or approved request? It cannot be published after cancellation, and its held screen time will be released."
+                : actionDialog === "take_down"
                 ? "This published schedule will be removed from all targeted screens. If another published schedule still applies, it will become active automatically; otherwise the screen falls back to default media."
                 : actionDialog === "aspect_override" || actionDialog === "approve_publish_aspect_override"
                   ? `${displayPreflight?.issues.length ?? 0} target presentation/display combination(s) will letterbox. Review the predicted unused area and explicitly confirm this current preflight result.`
@@ -1037,7 +1072,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                 ))}
               </div>
             ) : null}
-            <label htmlFor="schedule-review-comment" className="text-sm text-muted-foreground">
+            {actionDialog !== "cancel_request" && <><label htmlFor="schedule-review-comment" className="text-sm text-muted-foreground">
               {actionDialog === "take_down" ? "Reason (optional)" : actionDialog === "aspect_override" || actionDialog === "approve_publish_aspect_override" ? "Confirmation reason (optional)" : "Comment (optional)"}
             </label>
             <Textarea
@@ -1052,7 +1087,7 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                   : "Add a note for this action"
               }
               rows={4}
-            />
+            /></>}
             {actionFailure ? <div role="alert" className="space-y-2 text-sm text-destructive">
               <p>{actionFailure.message}</p>
               <p>The server may have completed the action. Reload the request before trying again.</p>
@@ -1061,10 +1096,10 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={closeActionDialog} disabled={isMutating}>
-              Cancel
+              {actionDialog === "cancel_request" ? "Keep request" : "Cancel"}
             </Button>
             <Button onClick={handleActionConfirm} disabled={isMutating || Boolean(actionFailure)}>
-              {isMutating ? "Processing..." : "Confirm"}
+              {isMutating ? "Processing..." : actionDialog === "cancel_request" ? "Cancel request" : "Confirm"}
             </Button>
           </DialogFooter>
         </DialogContent>

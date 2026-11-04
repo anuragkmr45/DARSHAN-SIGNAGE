@@ -29,7 +29,7 @@ async function seedRequest(params: {
   startAt: Date;
   endAt: Date;
   createdAt: Date;
-  status?: 'PENDING' | 'APPROVED';
+  status?: 'PENDING' | 'APPROVED' | 'CANCELLED';
   notes?: string;
 }) {
   const db = getDatabase();
@@ -135,10 +135,36 @@ describe('Schedule request filters', () => {
 
     expect(summaryResponse.statusCode).toBe(200);
     const summaryBody = JSON.parse(summaryResponse.body) as {
-      counts: { pending: number; approved: number; rejected: number; published: number; taken_down: number; expired: number };
+      counts: { pending: number; approved: number; rejected: number; cancelled: number; published: number; taken_down: number; expired: number };
     };
     expect(summaryBody.counts.pending).toBe(1);
     expect(summaryBody.counts.approved).toBe(0);
+  });
+
+  it('lists cancelled requests and counts them in the same filtered history', async () => {
+    const db = getDatabase();
+    await db.delete(schema.scheduleRequests);
+    await db.delete(schema.schedules);
+    const cancelled = await seedRequest({
+      name: 'Cancelled QA briefing',
+      startAt: new Date('2026-12-01T09:00:00.000Z'),
+      endAt: new Date('2026-12-01T10:00:00.000Z'),
+      createdAt: new Date('2026-11-04T08:00:00.000Z'),
+      status: 'CANCELLED',
+    });
+    await seedRequest({
+      name: 'Another briefing',
+      startAt: new Date('2026-12-02T09:00:00.000Z'),
+      endAt: new Date('2026-12-02T10:00:00.000Z'),
+      createdAt: new Date('2026-11-04T09:00:00.000Z'),
+    });
+
+    const list = await server.inject({ method: 'GET', url: '/api/v1/schedule-requests?status=CANCELLED&q=Cancelled%20QA', headers: { authorization: `Bearer ${token}` } });
+    expect(list.statusCode).toBe(200);
+    expect(JSON.parse(list.body).items.map((item: { id: string }) => item.id)).toEqual([cancelled.requestId]);
+    const summary = await server.inject({ method: 'GET', url: '/api/v1/schedule-requests/status-summary?q=Cancelled%20QA', headers: { authorization: `Bearer ${token}` } });
+    expect(summary.statusCode).toBe(200);
+    expect(JSON.parse(summary.body).counts).toMatchObject({ cancelled: 1, pending: 0 });
   });
 
   it('filters schedule requests by overlapping schedule window and sorts by schedule start date', async () => {

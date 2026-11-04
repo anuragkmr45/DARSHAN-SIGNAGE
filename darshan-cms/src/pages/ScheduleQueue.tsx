@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Plus, Calendar, Clock, Zap, Copy } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,7 @@ const STATUS_TABS = [
   { key: "pending", label: "Pending", apiStatus: "PENDING" },
   { key: "approved", label: "Approved", apiStatus: "APPROVED" },
   { key: "rejected", label: "Rejected", apiStatus: "REJECTED" },
+  { key: "cancelled", label: "Cancelled", apiStatus: "CANCELLED" },
   { key: "published", label: "Published", apiStatus: "PUBLISHED" },
   { key: "taken_down", label: "Taken Down", apiStatus: "TAKEN_DOWN" },
   { key: "expired", label: "Expired", apiStatus: "EXPIRED" },
@@ -108,12 +109,14 @@ export default function ScheduleQueue() {
     pending: 1,
     approved: 1,
     rejected: 1,
+    cancelled: 1,
     published: 1,
     taken_down: 1,
     expired: 1,
   });
   const [tabTotals, setTabTotals] = useState<Partial<Record<TabKey, number>>>({});
   const debouncedSearchQuery = useDebounce(searchQuery, 350);
+  const searchSettling = searchQuery !== debouncedSearchQuery;
   const dateFromIso = useMemo(() => toStartOfDayIso(dateFrom), [dateFrom]);
   const dateToIso = useMemo(() => toEndOfDayIso(dateTo), [dateTo]);
   const sharedFilters = useMemo(
@@ -154,7 +157,7 @@ export default function ScheduleQueue() {
   const activeConfig = STATUS_TABS.find((tab) => tab.key === activeTab)!;
   const activePage = pageByStatus[activeTab];
 
-  const { data, isLoading, isFetching, isError, refetch: refetchRequests } = useQuery({
+  const { data, isLoading, isFetching, isError, isPlaceholderData, refetch: refetchRequests } = useQuery({
     queryKey: queryKeys.scheduleRequests({
       page: activePage,
       limit: PAGE_SIZE,
@@ -179,7 +182,7 @@ export default function ScheduleQueue() {
         sort_direction: sortDirection,
       }),
     enabled: !invalidDateRange,
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 
@@ -188,10 +191,15 @@ export default function ScheduleQueue() {
   }, [activeTab]);
 
   useEffect(() => {
+    setSelectedRequest(null);
+  }, [searchQuery]);
+
+  useEffect(() => {
     setPageByStatus({
       pending: 1,
       approved: 1,
       rejected: 1,
+      cancelled: 1,
       published: 1,
       taken_down: 1,
       expired: 1,
@@ -208,11 +216,11 @@ export default function ScheduleQueue() {
   const requests = useMemo(() => (Array.isArray(data?.items) ? data.items : []), [data]);
 
   useEffect(() => {
-    if (!selectedRequest || !data?.items || isFetching) return;
+    if (!selectedRequest || !data?.items || isFetching || isPlaceholderData || searchSettling) return;
     const current = data.items.find((item) => item.id === selectedRequest.id);
     if (!current) setSelectedRequest(null);
     else if (current !== selectedRequest) setSelectedRequest(current);
-  }, [data?.items, isFetching, selectedRequest]);
+  }, [data?.items, isFetching, isPlaceholderData, searchSettling, selectedRequest]);
 
   const directScreens = selectedRequest?.screens ?? [];
   const targetGroups = selectedRequest?.screen_groups ?? [];
@@ -367,7 +375,7 @@ export default function ScheduleQueue() {
               <TabsTrigger key={tab.key} value={tab.key} className="shrink-0">
                 <span>{tab.label}</span>
                 <Badge variant="secondary" className="ml-2 shrink-0">
-                  {summaryQuery.data?.counts?.[tab.key] ?? tabTotals[tab.key] ?? "—"}
+                  {searchSettling ? "—" : summaryQuery.data?.counts?.[tab.key] ?? tabTotals[tab.key] ?? "—"}
                 </Badge>
               </TabsTrigger>
             ))}
@@ -487,6 +495,8 @@ export default function ScheduleQueue() {
             )}
                 {invalidDateRange ? (
                   <p className="py-10 text-center text-sm text-muted-foreground">Correct the date range to load requests.</p>
+                ) : searchSettling || isPlaceholderData ? (
+                  <div role="status" className="py-10 text-center text-sm text-muted-foreground">Updating requests…</div>
                 ) : isLoading ? (
                   <div className="flex justify-center py-12">
                     <LoadingIndicator label="Loading schedule requests..." />

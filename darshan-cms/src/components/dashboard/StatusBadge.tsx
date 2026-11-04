@@ -11,6 +11,7 @@ export type Status =
   | "live" 
   | "expired" 
   | "rejected"
+  | "cancelled"
   | "failed"
   | "online"
   | "offline"
@@ -34,6 +35,7 @@ const statusConfig: Record<Status, { label: string; variant: "default" | "second
   live: { label: "Live", variant: "default", className: "bg-success text-success-foreground" },
   expired: { label: "Expired", variant: "secondary" },
   rejected: { label: "Rejected", variant: "destructive" },
+  cancelled: { label: "Cancelled", variant: "secondary" },
   failed: { label: "Failed", variant: "destructive" },
   online: { label: "Online", variant: "default", className: "bg-success text-success-foreground" },
   offline: { label: "Offline", variant: "outline", className: "border-destructive/40 text-destructive" },
