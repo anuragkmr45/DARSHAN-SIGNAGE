@@ -416,7 +416,7 @@ test.describe("Owned content response contract", () => {
 
     await login(page);
     await page.goto("/users");
-    await expect(page.getByRole("heading", { name: "Users Management" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Delete", exact: true }).click();
 
     const dialog = page.getByRole("alertdialog", { name: "Delete User" });

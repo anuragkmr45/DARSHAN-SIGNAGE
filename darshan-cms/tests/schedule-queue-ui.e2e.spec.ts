@@ -294,7 +294,7 @@ test("approve then publish failure does not repeat approval and can publish from
   await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
   await page.getByRole("button", { name: "Approve & Publish" }).click();
   await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(page.getByText("Approval was saved, but publishing failed.", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Notifications (F8)").getByText("Approval was saved, but publishing failed.", { exact: false })).toBeVisible();
   await page.waitForTimeout(1300);
   expect(state.requests.filter((request) => request.endsWith("/approve") && request.startsWith("POST "))).toHaveLength(1);
   expect(state.requests.filter((request) => request.endsWith("/publish") && request.startsWith("POST "))).toHaveLength(1);

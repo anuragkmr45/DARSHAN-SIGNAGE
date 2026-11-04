@@ -1,3 +1,4 @@
+import { installDarkSiteAppearance } from "./helpers/siteAppearance";
 import { expect, test, type Page } from "@playwright/test";
 import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, testAuthorization } from "./helpers/selfAuthorization";
 
@@ -109,7 +110,7 @@ test("proof list fits phone, tablet, desktop, and dark phone", async ({ page }, 
     await page.screenshot({ path: testInfo.outputPath(`proof-of-play-${width}.png`) });
   }
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.evaluate(() => window.localStorage.setItem("theme", "dark"));
+  await installDarkSiteAppearance(page);
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByText("52 records · showing 50 on this page")).toBeVisible();

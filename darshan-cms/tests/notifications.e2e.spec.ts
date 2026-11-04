@@ -1,3 +1,4 @@
+import { installDarkSiteAppearance } from "./helpers/siteAppearance";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { OPERATOR_TEST_ROLE_ID, testAuthorization } from "./helpers/selfAuthorization";
 
@@ -175,7 +176,7 @@ test("notification list stays usable at phone, tablet, and desktop widths", asyn
     await page.screenshot({ path: testInfo.outputPath(`notifications-${width}.png`) });
   }
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.evaluate(() => window.localStorage.setItem("theme", "dark"));
+  await installDarkSiteAppearance(page);
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();

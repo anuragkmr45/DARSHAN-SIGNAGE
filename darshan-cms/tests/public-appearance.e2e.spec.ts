@@ -81,18 +81,21 @@ test("forest sidebar keeps links readable and marks the current route", async ({
   await page.route("**/api/v1/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     const json = (body: unknown) => route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
-    if (path === "/api/v1/settings/public-appearance") return json({ theme_mode: "light", accent_preset: "emerald", app_name: "DARSHAN CMS" });
+    if (path === "/api/v1/settings/public-appearance") return json({ theme_mode: "light", accent_preset: "emerald", app_name: "North Campus Displays", favicon_url: "/north-campus.ico" });
     if (path === "/api/v1/auth/me") return json(user);
     if (path === "/api/v1/auth/authorization") return json({
       version: 1, user_id: user.id, role: { id: user.role_id, name: user.role },
       department_id: null, department_ids: [], capabilities: adminCapabilities,
     });
-    if (path === "/api/v1/settings/appearance") return json({ theme_mode: "light", accent_preset: "emerald", sidebar_mode: "expanded" });
-    if (path === "/api/v1/settings/branding") return json({ app_name: "DARSHAN CMS", logo_url: null, icon_url: null, favicon_url: null });
+    if (path === "/api/v1/settings/appearance") return json({});
+    if (path === "/api/v1/settings/branding") return json({ app_name: " ", favicon_url: "javascript:alert(1)" });
     if (path === "/api/v1/notifications/unread-count") return json({ unread_total: 0 });
     return json({ items: [], pagination: { page: 1, limit: 100, total: 0 } });
   });
   await page.goto("/screens");
+  await expect(page.locator("html")).toHaveAttribute("data-accent", "emerald");
+  await expect(page).toHaveTitle("North Campus Displays");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/north-campus.ico");
   const screens = page.getByRole("link", { name: "Screens", exact: true });
   const dashboard = page.getByRole("link", { name: "Dashboard", exact: true });
   await expect(screens).toHaveAttribute("data-active", "true");

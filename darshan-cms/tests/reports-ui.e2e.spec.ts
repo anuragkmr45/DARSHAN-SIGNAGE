@@ -1,3 +1,4 @@
+import { installDarkSiteAppearance } from "./helpers/siteAppearance";
 import { expect, test, type Page } from "@playwright/test";
 import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, testAuthorization, type TestCapability } from "./helpers/selfAuthorization";
 
@@ -119,7 +120,7 @@ test("full access shows correct PoP outcome and responsive report views", async 
   await page.getByRole("tab", { name: "Audit Logs" }).click();
   await expect(page.getByText("7 logs")).toBeVisible();
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.evaluate(() => window.localStorage.setItem("theme", "dark"));
+  await installDarkSiteAppearance(page);
   await page.reload();
   await page.getByRole("tab", { name: "Audit Logs" }).click();
   await expect(page.getByRole("tab", { name: "Audit Logs" })).toHaveAttribute("aria-selected", "true");

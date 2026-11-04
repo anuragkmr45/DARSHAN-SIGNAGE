@@ -1,3 +1,4 @@
+import { installDarkSiteAppearance } from "./helpers/siteAppearance";
 import { expect, test, type Page } from "@playwright/test";
 import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, testAuthorization } from "./helpers/selfAuthorization";
 
@@ -137,7 +138,7 @@ test("endpoint list fits phone, tablet, desktop, and dark phone", async ({ page 
     await page.screenshot({ path: testInfo.outputPath(`webhooks-${width}.png`) });
   }
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.evaluate(() => window.localStorage.setItem("theme", "dark"));
+  await installDarkSiteAppearance(page);
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByRole("region", { name: "Site status" })).toBeVisible();

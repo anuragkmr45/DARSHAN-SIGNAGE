@@ -1,3 +1,4 @@
+import { installDarkSiteAppearance } from "./helpers/siteAppearance";
 import { expect, test, type Page } from "@playwright/test";
 import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, testAuthorization } from "./helpers/selfAuthorization";
 
@@ -121,7 +122,7 @@ test("API key list fits phone, tablet, desktop, and dark phone", async ({ page }
     await page.screenshot({ path: `../qa-artifacts/evidence/product-ui-api-keys-policy/api-keys-${width}.png` });
   }
   await page.setViewportSize({ width: 390, height: 900 });
-  await page.evaluate(() => window.localStorage.setItem("theme", "dark"));
+  await installDarkSiteAppearance(page);
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(page.getByRole("region", { name: "Site integration" })).toBeVisible();

@@ -1,3 +1,4 @@
+import { installDarkSiteAppearance } from "./helpers/siteAppearance";
 import { expect, test } from "@playwright/test";
 
 const installConfig = async (page: import("@playwright/test").Page) => {
@@ -39,7 +40,7 @@ test("public entry offers one honest sign-in path at phone, tablet and desktop w
     await page.screenshot({ path: testInfo.outputPath(`sign-in-${width}.png`), fullPage: true });
   }
 
-  await page.addInitScript(() => window.localStorage.setItem("theme", "dark"));
+  await installDarkSiteAppearance(page);
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto("/login");
   await expect(page.locator("html")).toHaveClass(/dark/);
