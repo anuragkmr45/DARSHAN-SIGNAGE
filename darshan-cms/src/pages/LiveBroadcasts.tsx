@@ -52,6 +52,7 @@ export default function LiveBroadcasts() {
   const [search, setSearch] = useState(""), [page, setPage] = useState(1), [activeOnly, setActiveOnly] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null), [formVersion, setFormVersion] = useState(0);
   const [scheduling, setScheduling] = useState(false);
+  const [resumeScheduleAfterSource, setResumeScheduleAfterSource] = useState(false);
   const [presenterOccurrenceId, setPresenterOccurrenceId] = useState<string | null>(null);
   const canSchedule = can("create", "Schedule") && can("create", "ScheduleItem") && can("create", "ScheduleRequest") &&
     canRead && can("read", "Schedule") && can("read", "Presentation") && can("read", "Media") && can("read", "Screen");
@@ -71,11 +72,22 @@ export default function LiveBroadcasts() {
   useEffect(() => { if (list.data && !list.isPlaceholderData && page > totalPages) setPage(totalPages); }, [list.data, list.isPlaceholderData, page, totalPages]);
   const handleSearch = useCallback((value: string) => { setSearch(value); setPage(1); }, []);
   const refresh = () => { if (canRead) void list.refetch(); };
-  const close = (refreshList = false) => { setSelection(null); if (refreshList) refresh(); };
+  const close = (refreshList = false) => {
+    const resume = resumeScheduleAfterSource && selection?.mode === "create" && !refreshList && canOpenSchedule;
+    setSelection(null); setResumeScheduleAfterSource(false);
+    if (refreshList) refresh();
+    if (resume) setScheduling(true);
+  };
   const saved = (source: LiveSession) => {
+    const resume = resumeScheduleAfterSource && canOpenSchedule;
     queryClient.setQueryData(queryKeys.liveSession(source.id, actor?.id), source);
     void queryClient.invalidateQueries({ queryKey: queryKeys.liveSessions });
-    setSelection(null); toast({ title: "Live source saved", description: source.name });
+    void queryClient.invalidateQueries({ queryKey: ["live-authoring-sources", actor?.id] });
+    setSelection(null); setResumeScheduleAfterSource(false);
+    if (resume) {
+      setScheduling(true);
+      toast({ title: "Live source created", description: "Choose it in your live event draft." });
+    } else toast({ title: "Live source saved", description: source.name });
   };
   const save = useMutation({ retry: false, mutationFn: ({ values, baseline }: { values: LiveSourceValues; baseline: LiveSession | null }) =>
     baseline ? liveSessionsApi.update(baseline.id, liveSourceUpdatePayload(baseline, values)) : liveSessionsApi.create(liveSourceCreatePayload(values)), onSuccess: saved });
@@ -115,7 +127,9 @@ export default function LiveBroadcasts() {
     <Dialog open={Boolean(selection)} onOpenChange={value => { if (!value && !pending) close(); }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl"><DialogHeader>
         <DialogTitle>{selection?.mode === "create" ? "Create live source" : selection?.mode === "delete" ? "Delete live source" : selection?.mode === "edit" ? "Edit live source" : "Live source details"}</DialogTitle>
-        <DialogDescription>Manage the source's presenter and permitted capture options.</DialogDescription></DialogHeader>
+        <DialogDescription>{resumeScheduleAfterSource && selection?.mode === "create"
+          ? "Assign a presenter and capture permissions. Your live event draft will reopen when you finish."
+          : "Manage the source's presenter and permitted capture options."}</DialogDescription></DialogHeader>
         {selection?.mode === "create" ? <LiveSourceForm key={`create:${formVersion}`} source={null} actor={actor} editable={canCreate} pending={pending} canReadDirectory={canReadDirectory}
           presenters={presenters.data ?? []} directoryLoading={presenters.isFetching} directoryFailed={presenters.isError} onRefreshDirectory={() => void presenters.refetch()}
           onSubmit={async (values, baseline) => { await save.mutateAsync({ values, baseline }); }} onClose={close} />
@@ -129,6 +143,7 @@ export default function LiveBroadcasts() {
       </DialogContent>
     </Dialog>
     {scheduling && actor?.id && canSchedule && <LiveScheduleWizard key={actor.id} actorId={actor.id} canReadGroups={can("read", "ScreenGroup")}
+      onCreateSource={canCreate ? () => { setResumeScheduleAfterSource(true); setScheduling(false); open({ mode: "create" }); } : undefined}
       onClose={() => setScheduling(false)} onSubmitted={requestId => { setScheduling(false); toast({ title: "Live event submitted", description: `Open Schedule Queue to review request ***${requestId.slice(-8)}.` }); }} />}
     {presenterOccurrenceId && actor?.id && <LivePresenterPanel key={`${actor.id}:${presenterOccurrenceId}`} actorId={actor.id} occurrenceId={presenterOccurrenceId}
       onClose={() => setPresenterOccurrenceId(null)} />}

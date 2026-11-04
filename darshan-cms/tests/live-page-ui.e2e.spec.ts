@@ -22,8 +22,9 @@ const author: TestCapability[] = [
   { action: "create", subject: "ScheduleRequest" },
 ];
 
-async function setup(page: Page, grants: TestCapability[], options: { failList?: boolean; occurrenceTotal?: number } = {}) {
+async function setup(page: Page, grants: TestCapability[], options: { failList?: boolean; occurrenceTotal?: number; emptySources?: boolean; sourceWriteFails?: boolean } = {}) {
   let failList = Boolean(options.failList);
+  const sources = options.emptySources ? [] : [source];
   const requests: string[] = [];
   await page.context().addCookies([
     { name: "access_token", value: "live-ui-qa-session", url: origin, httpOnly: true, sameSite: "Lax" },
@@ -55,8 +56,15 @@ async function setup(page: Page, grants: TestCapability[], options: { failList?:
       from: url.searchParams.get("from"), until: url.searchParams.get("until") });
     if (path === "/api/v1/live-sessions" && method === "GET") return failList
       ? json({ error: { message: "Unavailable" } }, 503)
-      : json({ items: [source], pagination: { page: 1, limit: 9, total: 1, pages: 1 } });
-    if (path === `/api/v1/live-sessions/${sourceId}` && method === "GET") return json(source);
+      : json({ items: sources, pagination: { page: 1, limit: Number(url.searchParams.get("limit") ?? 9), total: sources.length, pages: 1 } });
+    if (path === "/api/v1/live-sessions" && method === "POST") {
+      if (options.sourceWriteFails) return json({ error: { message: "Response unavailable" } }, 503);
+      const input = JSON.parse(route.request().postData() ?? "{}");
+      const created = { ...source, ...input, id: "00000000-0000-4000-8000-000000000707", revision: 1 };
+      sources.push(created);
+      return json(created, 201);
+    }
+    if (path.startsWith("/api/v1/live-sessions/") && method === "GET") return json(sources.find(item => path.endsWith(item.id)) ?? source);
     if (path === "/api/v1/presentations") return json({ items: [], total: 0, page: 1, limit: 100 });
     return json({});
   });
@@ -109,4 +117,65 @@ test("multi-page runtime navigation wraps within a phone viewport", async ({ pag
   expect(controls).not.toBeNull();
   expect(controls!.x + controls!.width).toBeLessThanOrEqual(390);
   await page.screenshot({ path: "../qa-artifacts/evidence/product-ui-live-page/live-runtime-pagination-390.png", fullPage: true });
+});
+
+test("an empty source step creates a source and returns to the same event draft", async ({ page }) => {
+  const state = await setup(page, author, { emptySources: true });
+  await page.goto("/live-broadcasts");
+  await page.getByRole("button", { name: "Schedule live event" }).click();
+  await expect(page.getByText("No enabled live sources are available.")).toBeVisible();
+  await expect(page.getByText("Webpages use their frozen preview image.")).toHaveCount(0);
+  await page.getByRole("dialog").getByRole("button", { name: "Create live source" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Create live source" })).toBeVisible();
+  await page.getByRole("dialog").getByLabel("Source name").fill("QA assembly source");
+  await page.getByRole("dialog").getByRole("button", { name: "Create live source" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Schedule live event" })).toBeVisible();
+  await expect(page.getByLabel("Live source", { exact: true }).locator("option", { hasText: "QA assembly source" })).toHaveCount(1);
+  expect(state.requests.filter(request => request === "POST /api/v1/live-sessions")).toHaveLength(1);
+});
+
+test("cancelling source creation returns to the draft with its existing choice", async ({ page }) => {
+  const state = await setup(page, author);
+  await page.goto("/live-broadcasts");
+  await page.getByRole("button", { name: "Schedule live event" }).click();
+  await page.getByLabel("Live source", { exact: true }).selectOption(sourceId);
+  await page.getByRole("dialog").getByRole("button", { name: "Create live source" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Schedule live event" })).toBeVisible();
+  await expect(page.getByLabel("Live source", { exact: true })).toHaveValue(sourceId);
+  expect(state.requests.filter(request => request === "POST /api/v1/live-sessions")).toHaveLength(0);
+});
+
+test("an uncertain source write returns to the library for verification", async ({ page }) => {
+  const state = await setup(page, author, { emptySources: true, sourceWriteFails: true });
+  await page.goto("/live-broadcasts");
+  await page.getByRole("button", { name: "Schedule live event" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Create live source" }).click();
+  await page.getByRole("dialog").getByLabel("Source name").fill("Uncertain QA source");
+  await page.getByRole("dialog").getByRole("button", { name: "Create live source" }).click();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Close and refresh list" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Close and refresh list" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Live source library" })).toBeVisible();
+  expect(state.requests.filter(request => request === "POST /api/v1/live-sessions")).toHaveLength(1);
+});
+
+test("live wizard keeps Back and Next visible while step content scrolls on compact screens", async ({ page }) => {
+  await setup(page, author);
+  for (const viewport of [{ width: 390, height: 844 }, { width: 640, height: 360 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/live-broadcasts");
+    await page.getByRole("button", { name: "Schedule live event" }).click();
+    const dialog = page.getByRole("dialog");
+    const next = dialog.getByRole("button", { name: "Next", exact: true });
+    const close = dialog.getByRole("button", { name: "Save draft and close" });
+    await dialog.getByText("Choose an image, document or video presentation.", { exact: false }).scrollIntoViewIfNeeded();
+    for (const action of [next, close]) {
+      const box = await action.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
+    }
+    await page.screenshot({ path: `../qa-artifacts/evidence/product-ui-live-page/live-wizard-${viewport.width}x${viewport.height}.png`, fullPage: true });
+  }
 });

@@ -44,16 +44,18 @@ const errorText = (error: unknown) => {
     ? `${message} Unsupported screen IDs: ${ids.join(", ")}.` : message;
 };
 
-export function LiveScheduleWizard({ actorId, canReadGroups, onClose, onSubmitted }: {
-  actorId: string; canReadGroups: boolean; onClose: () => void; onSubmitted: (requestId: string) => void;
+export function LiveScheduleWizard({ actorId, canReadGroups, onClose, onCreateSource, onSubmitted }: {
+  actorId: string; canReadGroups: boolean; onClose: () => void; onCreateSource?: () => void; onSubmitted: (requestId: string) => void;
 }) {
   const client = useQueryClient(), [journal, setJournal] = useState(() => loadJournal(actorId));
   const [step, setStep] = useState(0), [error, setError] = useState<string | null>(null), [busy, setBusy] = useState<string | null>(null);
   const [review, setReview] = useState<LiveDraftReview | null>(null), [preview, setPreview] = useState<LiveFallbackPreview | null>(null), [accepted, setAccepted] = useState(false);
   const [editableSaved, setEditableSaved] = useState<boolean | null>(null), [retired, setRetired] = useState(false), [resetConfirmation, setResetConfirmation] = useState(false);
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const inFlight = useRef(false), active = useRef(true), form = journal.form;
+  const inFlight = useRef(false), active = useRef(true), contentRef = useRef<HTMLDivElement>(null), form = journal.form;
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  useEffect(() => { contentRef.current?.scrollTo({ top: 0 }); }, [step]);
+  useEffect(() => { if (error) contentRef.current?.scrollTo({ top: 0 }); }, [error]);
   const save = (next: LiveDraftJournal) => {
     // Write retry identity synchronously BEFORE sending a mutation. If browser
     // storage is unavailable, leave the server untouched and show the error.
@@ -147,9 +149,10 @@ export function LiveScheduleWizard({ actorId, canReadGroups, onClose, onSubmitte
       ...(values.endAt !== undefined ? { end_at: instantFromLocalInput(values.endAt) } : {}), ...(values.priority !== undefined ? { priority: values.priority } : {}) }); }
     catch (failure) { setError(errorText(failure)); }
   };
-  return <Dialog open onOpenChange={value => { if (!value && !inFlight.current) onClose(); }}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
+  return <Dialog open onOpenChange={value => { if (!value && !inFlight.current) onClose(); }}><DialogContent className="flex max-h-[92vh] flex-col overflow-hidden sm:max-w-5xl">
     <DialogHeader><DialogTitle>Schedule live event</DialogTitle><DialogDescription>Schedule full-screen live playback with a prepared offline fallback in the DARSHAN desktop player.</DialogDescription></DialogHeader>
-    <ol className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">{["Source and fallback", "Screens", "Window", "Review"].map((label, index) => <li key={label} className={`rounded-lg border px-3 py-2 ${step === index ? "border-primary font-semibold" : "text-muted-foreground"}`} aria-current={step === index ? "step" : undefined}>{index + 1}. {label}</li>)}</ol>
+    <ol className="grid shrink-0 grid-cols-2 gap-2 text-sm sm:grid-cols-4">{["Source and fallback", "Screens", "Window", "Review"].map((label, index) => <li key={label} className={`rounded-lg border px-3 py-2 ${step === index ? "border-primary font-semibold" : "text-muted-foreground"}`} aria-current={step === index ? "step" : undefined}>{index + 1}. {label}</li>)}</ol>
+    <div ref={contentRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
     {(journal.draft_revision > 0 || unresolved) && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"><span>{editableSaved === false ? "Your current permissions allow submitting this review but do not allow editing the saved schedule item. Re-open the same review or start a new draft." : unresolved ? "A server change is not yet confirmed. Retry the same request or reload the saved draft before editing." : `Saved draft revision ${journal.draft_revision}. Reloading replaces this form with its latest saved values.`}</span>
       <Button size="sm" variant="outline" onClick={reload} disabled={Boolean(busy)}>Reload saved draft</Button></div>}
     {resetConfirmation && <div className="space-y-3 rounded-lg border p-4 text-sm" role="alert"><p>Start a new draft? The previous saved schedule and any request history are retained. This replaces the draft saved in this browser tab.</p>
@@ -161,13 +164,19 @@ export function LiveScheduleWizard({ actorId, canReadGroups, onClose, onSubmitte
     {step === 0 && <div className="space-y-5">
       <div className="space-y-2"><Label htmlFor="live-draft-source">Live source</Label><select id="live-draft-source" className="h-10 w-full rounded border bg-background px-3 text-sm" value={form.live_session_id} disabled={locked || sources.isFetching}
         onChange={event => update({ live_session_id: event.target.value })}><option value="">Choose an enabled source</option>{sources.data?.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
+        <p className="text-sm text-muted-foreground">A live source assigns the presenter and allowed audio for this event.</p>
+        {sources.isLoading && <p role="status" className="text-sm">Loading enabled sources…</p>}
+        {!sources.isLoading && !sources.isError && sources.data?.length === 0 && <p role="status" className="text-sm">No enabled live sources are available.</p>}
         {sources.isError && <Button variant="outline" onClick={() => void sources.refetch()}>Retry loading sources</Button>}
+        {onCreateSource && !sources.isError && <Button variant="outline" size="sm" onClick={onCreateSource} disabled={Boolean(busy) || unresolved}>
+          Create live source</Button>}
+        {!onCreateSource && !sources.isLoading && !sources.isError && sources.data?.length === 0 && <p className="text-sm text-muted-foreground">Ask an authorized operator to create one before scheduling.</p>}
         {source.isError && <p role="alert" className="text-sm text-destructive">The selected source is unavailable. Choose another source or refresh.</p>}
         {source.data && <p className="text-sm text-muted-foreground">Presenter ***{source.data.presenter_user_id.slice(-8)} · Microphone {source.data.microphone ? "allowed" : "off"} · Captured audio {source.data.screen_share_audio ? "allowed" : "off"}. These permissions are reviewed before publication.</p>}</div>
       <div className="space-y-2"><Label htmlFor="live-draft-fallback">Required fallback presentation</Label><select id="live-draft-fallback" className="h-10 w-full rounded border bg-background px-3 text-sm" value={form.presentation_id} disabled={locked || presentations.isFetching}
         onChange={event => update({ presentation_id: event.target.value, preparation_id: "" })}><option value="">Choose a fallback presentation</option>{presentations.data?.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select>
         {presentations.isError && <Button variant="outline" onClick={() => void presentations.refetch()}>Retry loading fallback presentations</Button>}
-        <p className="text-sm text-muted-foreground">Use an existing image, document or video presentation. Webpages use their frozen preview image. The live stream fills the screen; the fallback keeps its own approved layout.</p></div>
+        <p className="text-sm text-muted-foreground">Choose an image, document or video presentation. It appears if the live stream is unavailable and keeps its approved layout.</p></div>
       <div className="flex flex-wrap items-center gap-3"><Button variant="outline" disabled={locked || !form.presentation_id || ["PENDING", "PROCESSING"].includes(preparation.data?.state ?? "")} onClick={prepare}>
         {busy === "prepare" ? "Preparing…" : preparation.data?.state === "FAILED" ? "Retry failed preparation" : "Prepare immutable fallback"}</Button>
         <span role="status" className="text-sm">{preparation.isError ? "Preparation needs refreshing" : preparation.data?.state ?? "Not prepared"}</span>
@@ -192,7 +201,8 @@ export function LiveScheduleWizard({ actorId, canReadGroups, onClose, onSubmitte
         notes={journal.notes} accepted={accepted} onAcceptedChange={setAccepted}
         onNotesChange={notes => { try { save({ ...journal, notes }); } catch { setError("The browser could not save the approval notes."); } }} />
     </div>}
-    <div className="flex flex-wrap justify-between gap-2 border-t pt-4"><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => { setStep(Math.max(0, step - 1)); setAccepted(false); }} disabled={locked || step === 0}>Back</Button>
+    </div>
+    <div className="flex shrink-0 flex-wrap justify-between gap-2 border-t pt-4"><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => { setStep(Math.max(0, step - 1)); setAccepted(false); }} disabled={locked || step === 0}>Back</Button>
       <Button variant="outline" onClick={() => setResetConfirmation(true)} disabled={Boolean(busy) || unresolved && !retired}>New draft</Button></div>
       <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => { if (!inFlight.current) onClose(); }} disabled={Boolean(busy)}>Save draft and close</Button>
         {journal.pending_submit ? <Button onClick={submit} disabled={Boolean(busy) || retired}>Retry same submission</Button> : journal.pending_review ? <Button onClick={reviewDraft} disabled={Boolean(busy) || retired}>Retry same review</Button>

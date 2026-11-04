@@ -62,9 +62,9 @@ Fallback preparation copies the final approved playback bytes into a separate
 content-addressed namespace before approval. Referencing a storage-object ID
 alone is insufficient: existing processing jobs can replace bytes at their
 ordinary delivery keys. Image and native PDF fallback may use verified source
-bytes; converted PDF/video use the verified final representation. Webpage
-fallback freezes the approved screenshot as an offline image, without cookies
-or a live URL. Internal VOD HLS is prepared as an explicit local MP4 rendition
+bytes; converted PDF/video use the verified final representation. Webpage Media
+was retired before first production deployment and is not an available fallback
+for this release. Internal VOD HLS is prepared as an explicit local MP4 rendition
 before approval; FFmpeg receives private local segments and no network access.
 The resulting MP4 revision, rather than mutable HLS segments, is approved.
 
