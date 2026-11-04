@@ -266,6 +266,7 @@ test.describe("Dashboard online screens modal", () => {
     await page.getByRole("button", { name: /online screens/i }).click();
 
     await expect(page.getByRole("dialog", { name: "Online Screens Details" })).toBeVisible();
+    await expect(page.getByText(/Online Screens your account can view/)).toBeVisible();
     await expect(page.getByTestId("online-screens-grid")).toHaveClass(/xl:grid-cols-3/);
     await expect(page.getByTestId("online-screen-card")).toHaveCount(2);
 

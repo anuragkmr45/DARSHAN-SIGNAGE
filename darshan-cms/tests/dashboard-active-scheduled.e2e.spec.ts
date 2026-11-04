@@ -365,6 +365,8 @@ test.describe("Dashboard active scheduled modal", () => {
       expect(horizontalOverflow, `dashboard horizontal overflow at ${width}px`).toBe(false);
       await page.screenshot({ path: testInfo.outputPath(`dashboard-${width}.png`), fullPage: true });
     }
+    await page.getByRole("button", { name: /Total Screens/i }).click();
+    await expect(page.getByText(/Screens your account can view/)).toBeVisible();
   });
 
   test("deletes only permitted media through the recoverable route", async ({ page }) => {
@@ -486,6 +488,7 @@ test.describe("Dashboard active scheduled modal", () => {
     await page.getByText("Active Scheduled").click();
 
     await expect(page.getByRole("dialog", { name: "Active Scheduled" })).toBeVisible();
+    await expect(page.getByText(/timeline for Screens your account can view/)).toBeVisible();
     await expect(page.getByTestId("active-scheduled-modal-rows")).toBeVisible();
     await expect(page.getByTestId("active-scheduled-row")).toHaveCount(2);
     await expect(page.getByText("Lobby Loop")).toBeVisible();

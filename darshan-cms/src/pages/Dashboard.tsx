@@ -394,14 +394,14 @@ export default function Dashboard() {
         id: "total-screens",
         title: "Total Screens",
         value: isMetricsLoading ? "…" : isMetricsError ? "Unavailable" : String(totalsMetrics.screens ?? screensMetrics.total ?? 0),
-        subtitle: "Registered devices",
+        subtitle: "Registered devices across the site",
         icon: Monitor,
       },
       {
         id: "online-screens",
         title: "Online Screens",
         value: isMetricsLoading ? "…" : isMetricsError ? "Unavailable" : String(screensMetrics.online_last_5m ?? screensMetrics.online ?? 0),
-        subtitle: "Active heartbeat in last 5m",
+        subtitle: "Site-wide heartbeat in last 5m",
         icon: Activity,
         variant: "success" as const,
       },
@@ -426,7 +426,7 @@ export default function Dashboard() {
             : hasMetricNumber(overview?.schedules?.active_screens_now)
               ? String(overview?.schedules?.active_screens_now)
               : "Unavailable",
-        subtitle: "Active schedule assignments now",
+        subtitle: "Site-wide schedule assignments now",
         icon: Calendar,
       },
     ];

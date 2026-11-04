@@ -40,7 +40,7 @@ async function issueOperatorTokenWithSession() {
   return token.token;
 }
 
-async function issueLimitedScreenTokenWithSession(allowedScreenId: string) {
+async function issueLimitedScreenTokenWithSession(allowedScreenId: string, allowedGroupId?: string) {
   const db = getDatabase();
   const roleId = randomUUID();
   const userId = randomUUID();
@@ -56,6 +56,7 @@ async function issueLimitedScreenTokenWithSession(allowedScreenId: string) {
           subject: 'Screen',
           conditions: { id: allowedScreenId },
         },
+        ...(allowedGroupId ? [{ action: 'read', subject: 'ScreenGroup', conditions: { id: allowedGroupId } }] : []),
       ],
     },
     is_system: false,
@@ -273,6 +274,8 @@ describe('screens namespace realtime updates', () => {
     const db = getDatabase();
     const allowedScreenId = randomUUID();
     const unauthorizedScreenId = randomUUID();
+    const allowedGroupId = randomUUID();
+    const unauthorizedGroupId = randomUUID();
 
     await db.insert(schema.screens).values([
       {
@@ -285,6 +288,15 @@ describe('screens namespace realtime updates', () => {
         name: 'Scoped Unauthorized Screen',
         status: 'ACTIVE',
       },
+    ]);
+    await db.insert(schema.screenGroups).values([
+      { id: allowedGroupId, name: 'Socket group visible only with grant' },
+      { id: unauthorizedGroupId, name: 'Socket group denied' },
+    ]);
+    await db.insert(schema.screenGroupMembers).values([
+      { group_id: allowedGroupId, screen_id: allowedScreenId },
+      { group_id: allowedGroupId, screen_id: unauthorizedScreenId },
+      { group_id: unauthorizedGroupId, screen_id: unauthorizedScreenId },
     ]);
     const limitedToken = await issueLimitedScreenTokenWithSession(allowedScreenId);
 
@@ -311,6 +323,17 @@ describe('screens namespace realtime updates', () => {
     const syncedIds = syncResult.screens.map((screen: any) => screen.id);
     expect(syncedIds).toContain(allowedScreenId);
     expect(syncedIds).not.toContain(unauthorizedScreenId);
+    expect(syncResult.groups).toEqual([]);
+
+    socket.disconnect();
+    const groupToken = await issueLimitedScreenTokenWithSession(allowedScreenId, allowedGroupId);
+    socket = createClient(`${baseUrl}/screens`, {
+      transports: ['websocket'], auth: { token: groupToken }, reconnection: false, forceNew: true,
+    });
+    await waitForSocketConnect(socket);
+    const groupedSync = await emitWithAck<any>(socket, 'screens:sync', undefined);
+    expect(groupedSync.groups.map((group: { id: string }) => group.id)).toEqual([allowedGroupId]);
+    expect(groupedSync.groups[0].screen_ids).toEqual([allowedScreenId]);
   });
 
   it('does not join unauthorized screen rooms for explicit screenIds', async () => {

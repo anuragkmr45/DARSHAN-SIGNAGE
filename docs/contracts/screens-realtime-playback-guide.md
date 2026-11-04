@@ -3,6 +3,8 @@
 ## Summary
 Use `GET /api/v1/screens/overview` as the dashboard bootstrap and `/screens` Socket.IO as the live delta channel.
 
+CMS reads require a current session and `read Screen` for each returned Screen. `GET /screens/overview`, `GET /screens/schedule-timeline`, and `GET /screens/aspect-ratios` exclude Screen records outside the actor's current grant. Overview Group rows require `read ScreenGroup` on that Group and include only Screen members the actor may read. A caller without Screen read access receives `403`. Socket `screens:sync` with no IDs applies the same Screen and Group filtering. Dashboard KPI counts from `/metrics/overview` remain site-wide and may exceed the accessible detail rows; CMS labels that distinction.
+
 Implemented behavior:
 - REST bootstrap is still source-of-truth
 - realtime is additive and read-only
@@ -373,7 +375,7 @@ Ack without ids:
 }
 ```
 
-When no `screenIds` are sent, the server returns the full `screens/overview` payload shape.
+When no `screenIds` are sent, the server returns the `screens/overview` payload shape scoped to the socket actor's readable Screen and Screen Group records. Explicit IDs return only readable Screens. Realtime is a notification/refresh aid; REST remains authoritative.
 
 ### Server events
 

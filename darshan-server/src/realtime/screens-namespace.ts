@@ -14,7 +14,6 @@ import {
 import {
   buildScreenPlaybackStateById,
   buildScreensOverviewPayload,
-  summarizeGroupPlayback,
 } from '@/screens/playback';
 import { classifySocketAuthRejectReason, resolveSocketAuthToken } from '@/realtime/chat-namespace';
 import {
@@ -44,6 +43,7 @@ const screensSubscribeRateLimiter = new SocketEventRateLimiter(20, 1);
 const screensSyncRateLimiter = new SocketEventRateLimiter(30, 1);
 type ScreenRecord = typeof schema.screens.$inferSelect;
 type ScreenSocketAuthz = {
+  ability: AppAbility;
   allowedRows: ScreenRecord[];
   allowedIds: Set<string>;
   hasUnconditionalScreenRead: boolean;
@@ -129,6 +129,7 @@ async function resolveScreenSocketAuthz(
   const allowedRows = rows.filter((screen) => canReadScreen(ability, screen));
 
   return {
+    ability,
     allowedRows,
     allowedIds: new Set(allowedRows.map((screen) => screen.id)),
     hasUnconditionalScreenRead: hasUnconditionalScreenRead(ability),
@@ -170,42 +171,6 @@ function respondScreenSocketError(
     recordRealtimeSocketServerEvent(SCREENS_NAMESPACE, 'screens:error');
     socket.emit('screens:error', response);
   }
-}
-
-async function buildAuthorizedScreensOverviewPayload(
-  authorizedRows: ScreenRecord[],
-  db: ReturnType<typeof getDatabase>
-) {
-  const screenIds = authorizedRows.map((screen) => screen.id);
-  const screenSummaries = (
-    await Promise.all(screenIds.map((screenId) => buildScreenPlaybackStateById(screenId, { db })))
-  ).filter(Boolean);
-  const screenSummaryMap = new Map(screenSummaries.map((summary: any) => [summary.id, summary]));
-
-  const memberRows =
-    screenIds.length > 0
-      ? await db
-          .select()
-          .from(schema.screenGroupMembers)
-          .where(inArray(schema.screenGroupMembers.screen_id, screenIds as any))
-      : [];
-  const membersByGroup = memberRows.reduce((acc, row) => {
-    const list = acc.get(row.group_id) || [];
-    list.push(row.screen_id);
-    acc.set(row.group_id, list);
-    return acc;
-  }, new Map<string, string[]>());
-  const groupIds = Array.from(membersByGroup.keys());
-  const groups =
-    groupIds.length > 0
-      ? await db.select().from(schema.screenGroups).where(inArray(schema.screenGroups.id, groupIds as any))
-      : [];
-
-  return {
-    server_time: new Date().toISOString(),
-    screens: screenSummaries,
-    groups: groups.map((group) => summarizeGroupPlayback(group, membersByGroup.get(group.id) || [], screenSummaryMap)),
-  };
 }
 
 export async function setupScreensNamespace(fastify: FastifyInstance) {
@@ -421,9 +386,16 @@ export async function setupScreensNamespace(fastify: FastifyInstance) {
         }
 
         if (ids.length === 0) {
-          const overview = canUseGlobalScreenRoom(authz)
-            ? await buildScreensOverviewPayload({ db })
-            : await buildAuthorizedScreensOverviewPayload(authz.allowedRows, db);
+          const groupRows = authz.ability.can('read', 'ScreenGroup')
+            ? await db.select().from(schema.screenGroups)
+            : [];
+          const groups = groupRows.filter((group) =>
+            authz.ability.can('read', subject('ScreenGroup', group) as never));
+          const overview = await buildScreensOverviewPayload({
+            db,
+            screens: authz.allowedRows,
+            groups,
+          });
           if (ack) {
             ack(overview);
           } else {

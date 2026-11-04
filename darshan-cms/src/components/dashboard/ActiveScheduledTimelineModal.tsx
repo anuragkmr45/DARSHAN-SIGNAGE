@@ -124,7 +124,7 @@ export function ActiveScheduledTimelineModal({ open, onOpenChange }: ActiveSched
           <DialogHeader>
             <DialogTitle>Active Scheduled</DialogTitle>
             <DialogDescription>
-              24-hour operational timeline for screens that are actively scheduled right now.
+              24-hour timeline for Screens your account can view that are actively scheduled now. The site-wide count on Dashboard may be higher.
             </DialogDescription>
           </DialogHeader>
 

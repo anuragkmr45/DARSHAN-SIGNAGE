@@ -202,3 +202,5 @@ results remain `Not Tested`. The separate local Firefox retry was dropped;
 Firefox was not verified or added to the BQ-027 release support matrix.
 
 The [Screen detail permission developer record](evidence/product-ui-screen-detail-permissions-developer-verification-2026-11-04.md) covers record-scoped detail reads and writes, the view-only CMS inspector, a fixture screenshot, and focused local regression. Real role actors and a physical player remain QA work.
+
+The [Screen aggregate scope developer record](evidence/product-ui-screen-aggregate-scope-developer-verification-2026-11-04.md) covers the Dashboard's accessible drill-down rows, Group membership filtering and no-ID socket sync. It keeps site-wide KPI semantics explicit and leaves matched-build role withdrawal and large-fleet QA open.

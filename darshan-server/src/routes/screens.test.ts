@@ -412,6 +412,8 @@ describe('Screens routes realtime playback bootstrap', () => {
     const db = getDatabase();
     const allowedId = randomUUID();
     const deniedId = randomUUID();
+    const allowedGroupId = randomUUID();
+    const deniedGroupId = randomUUID();
     const roleId = randomUUID();
     const userId = randomUUID();
     const roleName = `SCREEN_DETAIL_SCOPED_${roleId}`;
@@ -420,10 +422,20 @@ describe('Screens routes realtime playback bootstrap', () => {
       { id: allowedId, name: 'Scoped detail allowed' },
       { id: deniedId, name: 'Scoped detail denied' },
     ]);
+    await db.insert(schema.screenGroups).values([
+      { id: allowedGroupId, name: 'Scoped group allowed' },
+      { id: deniedGroupId, name: 'Scoped group denied' },
+    ]);
+    await db.insert(schema.screenGroupMembers).values([
+      { screen_id: allowedId, group_id: allowedGroupId },
+      { screen_id: deniedId, group_id: allowedGroupId },
+      { screen_id: deniedId, group_id: deniedGroupId },
+    ]);
     await db.insert(schema.roles).values({ id: roleId, name: roleName, is_system: false,
       permissions: { grants: [
         { action: 'read', subject: 'Screen', conditions: { id: allowedId } },
         { action: 'update', subject: 'Screen', conditions: { id: allowedId } },
+        { action: 'read', subject: 'ScreenGroup', conditions: { id: allowedGroupId } },
       ] } });
     await db.insert(schema.users).values({ id: userId, email, password_hash: 'test-only-unused',
       first_name: 'Scoped', last_name: 'Reader', role_id: roleId, is_active: true });
@@ -434,6 +446,27 @@ describe('Screens routes realtime playback bootstrap', () => {
     const permitted = await server.inject({ method: 'GET', url: `/api/v1/screens/${allowedId}`, headers });
     expect(permitted.statusCode).toBe(200);
     expect(JSON.parse(permitted.body)).toMatchObject({ id: allowedId, can_update: true });
+
+    const aspectResponse = await server.inject({ method: 'GET', url: '/api/v1/screens/aspect-ratios', headers });
+    expect(aspectResponse.statusCode).toBe(200);
+    expect(JSON.parse(aspectResponse.body).items.map((screen: { id: string }) => screen.id)).toEqual([allowedId]);
+    const overviewResponse = await server.inject({ method: 'GET', url: '/api/v1/screens/overview', headers });
+    expect(overviewResponse.statusCode).toBe(200);
+    const overview = JSON.parse(overviewResponse.body);
+    expect(overview.screens.map((screen: { id: string }) => screen.id)).toEqual([allowedId]);
+    expect(overview.groups.map((group: { id: string }) => group.id)).toEqual([allowedGroupId]);
+    expect(overview.groups[0].screen_ids).toEqual([allowedId]);
+    const timelineResponse = await server.inject({ method: 'GET',
+      url: `/api/v1/screens/schedule-timeline?window_start=${encodeURIComponent(new Date().toISOString())}&window_hours=24`, headers });
+    expect(timelineResponse.statusCode).toBe(200);
+    expect(JSON.parse(timelineResponse.body).screens.map((screen: { id: string }) => screen.id)).toEqual([allowedId]);
+    await db.update(schema.roles).set({ permissions: { grants: [
+      { action: 'read', subject: 'Screen', conditions: { id: allowedId } },
+      { action: 'update', subject: 'Screen', conditions: { id: allowedId } },
+    ] } }).where(eq(schema.roles.id, roleId));
+    const screenOnlyOverview = await server.inject({ method: 'GET', url: '/api/v1/screens/overview', headers });
+    expect(screenOnlyOverview.statusCode).toBe(200);
+    expect(JSON.parse(screenOnlyOverview.body).groups).toEqual([]);
 
     for (const path of ['', '/status', '/heartbeats', '/commands/recent', '/media-cache-reports/recent',
       '/delivery-status', '/display-state']) {
@@ -462,6 +495,14 @@ describe('Screens routes realtime playback bootstrap', () => {
       payload: { name: 'Scoped detail updated' } });
     expect(update.statusCode).toBe(200);
     expect(JSON.parse(update.body).name).toBe('Scoped detail updated');
+    await db.update(schema.roles).set({ permissions: { grants: [
+      { action: 'update', subject: 'Screen', conditions: { id: allowedId } },
+    ] } }).where(eq(schema.roles.id, roleId));
+    for (const path of ['/api/v1/screens/aspect-ratios', '/api/v1/screens/overview',
+      `/api/v1/screens/schedule-timeline?window_start=${encodeURIComponent(new Date().toISOString())}&window_hours=24`]) {
+      const response = await server.inject({ method: 'GET', url: path, headers });
+      expect(response.statusCode, path).toBe(403);
+    }
   });
 
   it('returns server_time and playback in screens overview while preserving existing fields', async () => {

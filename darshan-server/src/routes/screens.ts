@@ -176,6 +176,20 @@ export async function screenRoutes(fastify: FastifyInstance) {
     return update(context);
   });
 
+  const loadAccessibleAggregateRows = (payload: Pick<JWTPayload, 'sub' | 'jti'>, includeGroups = false) =>
+    withCurrentMutationAuthorization(payload, async context => {
+      if (!context.ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
+      const screenRows = await context.executor.select().from(schema.screens);
+      const screens = screenRows.filter((screen) =>
+        context.ability.can('read', subject('Screen', screen) as never));
+      const groupRows = includeGroups && context.ability.can('read', 'ScreenGroup')
+        ? await context.executor.select().from(schema.screenGroups)
+        : [];
+      const groups = groupRows.filter((group) =>
+        context.ability.can('read', subject('ScreenGroup', group) as never));
+      return { screens, groups };
+    }, { userLock: 'share' });
+
   const getGroupIdsForScreen = async (screenId: string): Promise<string[]> => {
     const members = await db
       .select({ group_id: schema.screenGroupMembers.group_id })
@@ -449,13 +463,13 @@ export async function screenRoutes(fastify: FastifyInstance) {
         if (!token) throw AppError.unauthorized('Missing authorization header');
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const query = aspectRatiosQuerySchema.parse(request.query);
+        const { screens: accessibleScreens } = await loadAccessibleAggregateRows(payload);
+        const accessibleIds = new Set(accessibleScreens.map((screen) => screen.id));
         const screens = await screenRepo.listAspectRatios({ search: query.search });
         const configuredOnly = query.configured_only === 'true';
         const resolvedItems = screens
+          .filter((screen) => accessibleIds.has(screen.id))
           .map((s) => {
             const aspectRatio = resolveAspectRatio(s);
             return {
@@ -502,11 +516,12 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
         const query = overviewQuerySchema.parse(request.query);
         const includeMedia = query.include_media?.toLowerCase() === 'true';
         const includePreview = query.include_preview?.toLowerCase() === 'true';
         const onlineOnly = query.online_only?.toLowerCase() === 'true';
+        const { screens, groups } = await loadAccessibleAggregateRows(payload, !onlineOnly);
 
         return reply.send(
           await buildScreensOverviewPayload({
@@ -514,6 +529,8 @@ export async function screenRoutes(fastify: FastifyInstance) {
             includeMedia,
             includePreview,
             onlineOnly,
+            screens,
+            groups,
           })
         );
       } catch (error) {
@@ -539,8 +556,9 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
         const query = scheduleTimelineQuerySchema.parse(request.query);
+        const { screens } = await loadAccessibleAggregateRows(payload);
 
         return reply.send(
           await buildScreenScheduleTimelinePayload({
@@ -548,6 +566,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
             windowStart: new Date(query.window_start),
             windowHours: query.window_hours,
             onlyActiveNow: query.only_active_now?.toLowerCase() === 'true',
+            screens,
           })
         );
       } catch (error) {

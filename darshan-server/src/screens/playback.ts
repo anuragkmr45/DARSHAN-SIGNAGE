@@ -1399,19 +1399,24 @@ export async function buildScreensOverviewPayload(options: {
   includeMedia?: boolean;
   includePreview?: boolean;
   onlineOnly?: boolean;
+  screens?: ScreenRecord[];
+  groups?: ScreenGroupRecord[];
 }) {
   const db = options.db ?? getDatabase();
   const serverTime = new Date();
   const onlineThreshold = new Date(serverTime.getTime() - HEARTBEAT_STALE_MS);
   const reservationRepo = createScheduleReservationRepository();
   await reservationRepo.expireStaleHolds(serverTime, db);
-  const screens = options.onlineOnly
-    ? await db
+  const screens = options.screens
+    ? options.screens.filter((screen) => !options.onlineOnly ||
+        (screen.status === 'ACTIVE' && Boolean(screen.last_heartbeat_at && screen.last_heartbeat_at >= onlineThreshold)))
+    : options.onlineOnly
+      ? await db
         .select()
         .from(schema.screens)
         .where(and(eq(schema.screens.status, 'ACTIVE'), gte(schema.screens.last_heartbeat_at, onlineThreshold)))
-    : await db.select().from(schema.screens);
-  const groups = options.onlineOnly ? [] : await db.select().from(schema.screenGroups);
+      : await db.select().from(schema.screens);
+  const groups = options.onlineOnly ? [] : options.groups ?? await db.select().from(schema.screenGroups);
   const screenIds = screens.map((screen) => screen.id);
   const [proofOfPlayMap, recoveryStateMap, groupIdsByScreenId, latestPublishByScreenId, activeEmergencies] = await Promise.all([
     getLastProofOfPlayMap(screenIds, db),
@@ -1612,17 +1617,21 @@ export async function buildScreenScheduleTimelinePayload(options: {
   windowStart: Date;
   windowHours: number;
   onlyActiveNow?: boolean;
+  screens?: ScreenRecord[];
 }) {
   const db = options.db ?? getDatabase();
   const now = options.now ?? new Date();
   const windowStart = options.windowStart;
   const windowEnd = new Date(windowStart.getTime() + options.windowHours * 60 * 60 * 1000);
-  const screens = options.onlyActiveNow
-    ? await db
+  const screens = options.screens
+    ? options.screens.filter((screen) => !options.onlyActiveNow ||
+        (screen.status === 'ACTIVE' && screen.current_schedule_id !== null))
+    : options.onlyActiveNow
+      ? await db
         .select()
         .from(schema.screens)
         .where(and(eq(schema.screens.status, 'ACTIVE'), isNotNull(schema.screens.current_schedule_id)))
-    : await db.select().from(schema.screens);
+      : await db.select().from(schema.screens);
   const proofOfPlayMap = await getLastProofOfPlayMap(screens.map((screen) => screen.id), db);
   const windowStartMs = windowStart.getTime();
   const windowEndMs = windowEnd.getTime();

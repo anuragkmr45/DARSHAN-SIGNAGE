@@ -204,7 +204,7 @@ export function AllScreensDetailsModal({ open, onOpenChange }: AllScreensDetails
           <DialogHeader>
             <DialogTitle>All Screens</DialogTitle>
             <DialogDescription>
-              Fleet-wide view of every registered screen with live playback context, health state, and latest preview.
+              Screens your account can view, with current playback context, health, and latest preview. The site-wide count on Dashboard may be higher.
             </DialogDescription>
           </DialogHeader>
 

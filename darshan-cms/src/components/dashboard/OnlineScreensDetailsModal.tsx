@@ -226,7 +226,7 @@ export function OnlineScreensDetailsModal({ open, onOpenChange }: OnlineScreensD
           <DialogHeader>
             <DialogTitle>Online Screens Details</DialogTitle>
             <DialogDescription>
-              Live operational view of online screens with mirrored playback and latest captured preview metadata.
+              Online Screens your account can view, with current playback and latest preview. The site-wide count on Dashboard may be higher.
             </DialogDescription>
           </DialogHeader>
 
