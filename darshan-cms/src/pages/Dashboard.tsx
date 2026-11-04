@@ -647,7 +647,7 @@ export default function Dashboard() {
               <div className="py-3">
                 <p className="text-xs text-muted-foreground">Alert state</p>
                 <div className="mt-1 flex items-center gap-2">
-                  <Badge variant="outline" className={observabilityOverview?.alerts ? getMachineStatusTone(observabilityOverview.alerts.status) : "border-slate-400 text-slate-700"}>
+                  <Badge variant="outline" className={getMachineStatusTone(observabilityOverview?.alerts?.status)}>
                     {isObservabilityLoading ? "Loading..." : observabilityOverview?.alerts?.status ?? "unknown"}
                   </Badge>
                   <span className="text-sm font-medium">{observabilityAvailable ? `${observabilityOverview?.alerts?.firing ?? 0} firing` : "Alert count unavailable"}</span>

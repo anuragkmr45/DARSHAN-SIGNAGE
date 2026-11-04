@@ -943,18 +943,18 @@ const Settings = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="rounded-lg border bg-black text-slate-100 p-4 max-h-[420px] overflow-auto space-y-3">
+              <div className="max-h-[420px] space-y-3 overflow-auto rounded-lg border border-border bg-card p-4">
                 {recentLogs.map((log) => (
                   <div key={log.id} className="text-xs font-mono">
-                    <div className="flex flex-wrap items-center gap-2 text-slate-400">
+                    <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
                       <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
-                      <Badge variant="outline" className="border-slate-600 text-slate-200">{log.level}</Badge>
+                      <Badge variant="outline" className="border-input text-foreground">{log.level}</Badge>
                       <span>{log.logger}</span>
                     </div>
-                    <p className="mt-1 text-sm text-slate-50">{log.message}</p>
+                    <p className="mt-1 text-sm text-foreground">{log.message}</p>
                   </div>
                 ))}
-                {recentLogsQuery.isSuccess && recentLogs.length === 0 ? <p className="text-sm text-slate-400">No logs available.</p> : null}
+                {recentLogsQuery.isSuccess && recentLogs.length === 0 ? <p className="text-sm text-muted-foreground">No logs available.</p> : null}
               </div>
             </CardContent>
           </Card>

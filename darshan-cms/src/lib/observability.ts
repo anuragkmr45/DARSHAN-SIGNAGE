@@ -29,26 +29,26 @@ export const getMachineStatusTone = (
 ) => {
   switch (status) {
     case "healthy":
-      return "border-emerald-500 text-emerald-700";
+      return "status-outline-success";
     case "degraded":
-      return "border-amber-500 text-amber-700";
+      return "status-outline-warning";
     case "critical":
-      return "border-red-500 text-red-700";
+      return "status-outline-error";
     case "unconfigured":
-      return "border-slate-400 text-slate-700";
+      return "status-outline-info";
     default:
-      return "border-slate-400 text-slate-700";
+      return "border-input text-muted-foreground";
   }
 };
 
 export const getServiceStatusTone = (status?: "up" | "down" | "unknown") => {
   switch (status) {
     case "up":
-      return "text-emerald-700";
+      return "status-text-success";
     case "down":
-      return "text-red-700";
+      return "status-text-error";
     default:
-      return "text-slate-600";
+      return "text-muted-foreground";
   }
 };
 

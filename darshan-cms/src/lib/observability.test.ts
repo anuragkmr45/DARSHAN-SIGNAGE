@@ -21,10 +21,14 @@ describe("observability helpers", () => {
   });
 
   it("maps machine and service tones", () => {
-    expect(getMachineStatusTone("healthy")).toContain("emerald");
-    expect(getMachineStatusTone("critical")).toContain("red");
-    expect(getServiceStatusTone("up")).toContain("emerald");
-    expect(getServiceStatusTone("down")).toContain("red");
+    expect(getMachineStatusTone("healthy")).toBe("status-outline-success");
+    expect(getMachineStatusTone("degraded")).toBe("status-outline-warning");
+    expect(getMachineStatusTone("critical")).toBe("status-outline-error");
+    expect(getMachineStatusTone("unconfigured")).toBe("status-outline-info");
+    expect(getMachineStatusTone()).toBe("border-input text-muted-foreground");
+    expect(getServiceStatusTone("up")).toBe("status-text-success");
+    expect(getServiceStatusTone("down")).toBe("status-text-error");
+    expect(getServiceStatusTone("unknown")).toBe("text-muted-foreground");
   });
 
   it("maps machine roles to operator labels", () => {

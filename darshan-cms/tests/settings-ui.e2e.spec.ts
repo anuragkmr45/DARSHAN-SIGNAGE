@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { ADMIN_TEST_ROLE_ID, ADMIN_TEST_USER_ID, testAuthorization, type TestCapability } from "./helpers/selfAuthorization";
+import { installDarkSiteAppearance } from "./helpers/siteAppearance";
 
 const origin = "http://127.0.0.1:5173";
 const actor = { id: ADMIN_TEST_USER_ID, email: "settings@example.invalid", role_id: ADMIN_TEST_ROLE_ID, role: "CUSTOM", department_id: null };
@@ -135,6 +136,28 @@ test("failed settings load offers Retry instead of showing empty defaults", asyn
   state.restoreGeneral();
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByLabel("Company name")).toHaveValue("DARSHAN");
+});
+
+test("recent logs use readable site surfaces in dark and light modes", async ({ page }) => {
+  await setup(page, [{ action: "read", subject: "OrgSettings" }]);
+  await page.route("**/api/v1/settings/logs**", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ items: [{ id: "log-1", timestamp: "2026-11-04T10:00:00Z", level: "info", logger: "server", message: "Service ready" }] }),
+  }));
+  await installDarkSiteAppearance(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/settings");
+  await page.getByRole("navigation", { name: "Settings categories" }).getByRole("button", { name: /Advanced/ }).click();
+  const message = page.getByText("Service ready");
+  await expect(message).toBeVisible();
+  const panel = message.locator("../..");
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(panel).toHaveCSS("background-color", "rgb(29, 33, 29)");
+  await expect(message).toHaveCSS("color", "rgb(242, 245, 238)");
+  await page.screenshot({ path: "../qa-artifacts/evidence/product-ui-settings/logs-dark-390.png", fullPage: true });
+  await page.locator("html").evaluate((element) => element.classList.remove("dark"));
+  await expect(panel).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(message).toHaveCSS("color", "rgb(27, 31, 27)");
 });
 
 test("settings tabs and branding remain within phone, tablet and desktop widths", async ({ page }) => {
