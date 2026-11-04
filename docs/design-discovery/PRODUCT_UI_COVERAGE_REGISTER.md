@@ -98,11 +98,11 @@ The page requires `read Media`; the server remains authoritative for record-leve
 | --- | --- | --- | --- |
 | M01 | All, Images, Videos, Documents | Media list REST filter and server total. Each type keeps its own page; changing type does not reuse another type's placeholder page. | Filter/page fixture browser; real large-library pagination pending. |
 | M02 | Asset gallery and status | Current Media list fields; show name, original format, ownership/creator, size, preparation state and reason where supplied. | Populated 390/820/1440 and dark phone captures; long text and all accents pending. |
-| M03 | Preview | Explicit keyboard-operable action; fetch fresh Media detail and show image/video/document or unavailable state. | PDF page navigation, retired webpage, and keyboard fixture browser; real Media URLs pending. |
-| M04 | Upload Media | `create Media` UI gate; file picker, type validation, display name, progress, presigned upload and preparation workflow. | Invalid/valid selection fixture browser and existing upload helper tests; real large-file upload pending. |
+| M03 | Preview | Explicit keyboard-operable action; fetch fresh Media detail and show image/video/document or unavailable state. | Fixture browser plus matched-service QA image preview and existing five-page PDF navigation; video, failure and expired URLs pending. |
+| M04 | Upload Media | `create Media` UI gate; file picker, type validation, display name, progress, presigned upload and preparation workflow. | Invalid/valid selection fixture browser, upload helper tests and matched-service 22,533-byte PNG upload to Ready; large files and other formats pending. |
 | M05 | Copy URL | Uses current list URL and browser clipboard, with success/failure feedback. | Code traced; browser clipboard and expiring URL QA pending. |
-| M06 | Delete | Server-provided per-record permission; confirmation and reference blockers; hides record while retaining bytes. | Existing ownership fixture browser; real referenced/unreferenced deletion pending. |
-| M07 | Deleted Media and restore | `manage Media` UI gate; deleted list REST, paging, retry, restore action and feedback. | Custom-role server route and CMS fixture tests; real object restore pending. |
+| M06 | Delete | Server-provided per-record permission; confirmation and reference blockers; hides record while retaining bytes. | Ownership fixture browser and matched-service unreferenced QA image soft-delete; referenced blocker pending. |
+| M07 | Deleted Media and restore | `manage Media` UI gate; deleted list REST, paging, retry, restore action and feedback. | Custom-role server route, CMS fixture tests and matched-service deleted list/restore/reappearing image; retained-byte/hash comparison pending. |
 | M08 | Loading, failed, retry, empty, stale refresh | Distinct list and deleted-sheet states; a failed request is never shown as an empty library. | Failure/retry fixture browser; disconnected/stale real service pending. |
 
 ## Layouts list controls and states
