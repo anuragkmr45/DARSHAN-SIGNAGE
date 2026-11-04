@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { createBrowserRouter, Outlet, RouterProvider } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { GlobalLoader } from "@/components/common/GlobalLoader";
 import { ProductionSecurityBoundary } from "@/components/security/ProductionSecurityBoundary";
@@ -21,16 +21,24 @@ const queryClient = new QueryClient({
   },
 });
 
-const AppRoutes = () => (
-  <BrowserRouter>
+const AppRouterFrame = () => (
+  <>
     <GlobalLoader />
-    <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/login" element={<Auth />} />
-      <Route path="/activate" element={<ActivateInvitation />} />
-      <Route
-        path="/*"
-        element={
+    <Outlet />
+  </>
+);
+
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <AppRouterFrame />,
+    children: [
+      { index: true, element: <Home /> },
+      { path: "login", element: <Auth /> },
+      { path: "activate", element: <ActivateInvitation /> },
+      {
+        path: "*",
+        element: (
           <Suspense
             fallback={
               <div aria-busy="true" className="flex min-h-screen items-center justify-center text-sm text-muted-foreground" role="status">
@@ -40,11 +48,13 @@ const AppRoutes = () => (
           >
             <AuthenticatedAppShell />
           </Suspense>
-        }
-      />
-    </Routes>
-  </BrowserRouter>
-);
+        ),
+      },
+    ],
+  },
+]);
+
+const AppRoutes = () => <RouterProvider router={router} />;
 
 const App = () => (
   <QueryClientProvider client={queryClient}>

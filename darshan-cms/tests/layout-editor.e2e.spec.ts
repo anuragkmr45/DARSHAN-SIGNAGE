@@ -32,7 +32,15 @@ async function installLayoutApi(page: Page) {
       const payload = route.request().postDataJSON() as Record<string, unknown>;
       saved.push(payload);
       body = { id: "layout-created", ...payload };
-    } else if (path === "/api/v1/layouts") body = { items: [], pagination: { page: 1, limit: 9, total: 0 } };
+    } else if (path === "/api/v1/layouts") body = {
+      items: saved.map((payload) => ({
+        id: "layout-created",
+        ...payload,
+        created_at: "2026-11-04T00:00:00.000Z",
+        updated_at: "2026-11-04T00:00:00.000Z",
+      })),
+      pagination: { page: 1, limit: 9, total: saved.length },
+    };
     else if (path === "/api/v1/notifications/unread-count") body = { unread_total: 0 };
     await route.fulfill({ status: path === "/api/v1/layouts" && method === "POST" ? 201 : 200, contentType: "application/json", body: JSON.stringify(body) });
   });
@@ -144,4 +152,77 @@ test("layout editor moves and resizes with a mouse gesture, with one undo step p
   await expect(page.getByLabel(/Height \(/)).toHaveValue("0.4");
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByLabel(/Width \(/)).toHaveValue("0.3");
+});
+
+test("layout editor keeps unsaved work across sidebar navigation and leaves only after confirmation", async ({ page }) => {
+  const saved = await installLayoutApi(page);
+  await signIn(page);
+  await page.goto("/layouts/new");
+  await page.getByLabel("Name *").fill("Navigation guard test");
+  await page.getByRole("button", { name: "Add Slot" }).click();
+
+  await page.getByRole("link", { name: "Screens" }).click();
+  await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Stay" }).click();
+  await expect(page).toHaveURL(/\/layouts\/new$/);
+  await expect(page.getByLabel("Name *")).toHaveValue("Navigation guard test");
+  await expect(page.getByText("Slots (1)")).toBeVisible();
+
+  await page.getByRole("link", { name: "Screens" }).click();
+  await page.getByRole("button", { name: "Leave" }).click();
+  await expect(page).toHaveURL(/\/screens$/);
+  expect(saved).toHaveLength(0);
+});
+
+test("layout editor protects browser Back and permits navigation after a successful save", async ({ page }) => {
+  const saved = await installLayoutApi(page);
+  await signIn(page);
+  await page.getByRole("link", { name: "Layouts" }).click();
+  await page.getByRole("button", { name: "New Layout" }).click();
+  await page.getByLabel("Name *").fill("Browser Back test");
+  await page.getByRole("button", { name: "Add Slot" }).click();
+
+  await page.goBack();
+  await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Stay" }).click();
+  await expect(page).toHaveURL(/\/layouts\/new$/);
+  await expect(page.getByLabel("Name *")).toHaveValue("Browser Back test");
+
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page).toHaveURL(/\/layouts$/);
+  expect(saved).toHaveLength(1);
+  await expect(page.getByRole("row").filter({ hasText: "Browser Back test" })).toBeVisible();
+});
+
+test("layout editor does not expose an empty edit form when loading fails, and can retry", async ({ page }) => {
+  await installLayoutApi(page);
+  let failLoad = true;
+  await page.route("**/api/v1/layouts/layout-retry", async (route) => {
+    await route.fulfill({
+      status: failLoad ? 503 : 200,
+      contentType: "application/json",
+      body: JSON.stringify(failLoad
+        ? { error: "Layout temporarily unavailable" }
+        : { id: "layout-retry", name: "Recovered layout", aspect_ratio: "16:9", spec: { slots: [{ id: "slot-1", x: 0, y: 0, w: 0.3, h: 0.3 }] } }),
+    });
+  });
+  await signIn(page);
+  await page.goto("/layouts/layout-retry");
+  await expect(page.getByRole("heading", { name: "Layout unavailable" })).toBeVisible();
+  await expect(page.getByLabel("Name *")).toHaveCount(0);
+  failLoad = false;
+  await page.getByRole("button", { name: "Retry loading" }).click();
+  await expect(page.getByLabel("Name *")).toHaveValue("Recovered layout");
+  await expect(page.getByText("Slots (1)")).toBeVisible();
+});
+
+test("logging out from a dirty layout still ends the authenticated session", async ({ page }) => {
+  await installLayoutApi(page);
+  await signIn(page);
+  await page.goto("/layouts/new");
+  await page.getByLabel("Name *").fill("Unsigned layout");
+  await page.getByRole("button", { name: /Admin User admin@darshan.local/ }).click();
+  await page.getByRole("menuitem", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/login/);
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
 });

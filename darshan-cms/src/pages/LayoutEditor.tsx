@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { useBlocker, useNavigate, useParams, useLocation } from "react-router-dom";
 import { ArrowLeft, Copy, Grid3X3, Move, Plus, Save, Trash2, Undo2, Redo2, MousePointer2, Pencil, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/collapsible";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useSafeMutation } from "@/hooks/useSafeMutation";
 import { screensApi } from "@/api/domains/screens";
@@ -66,6 +66,7 @@ const LayoutEditor = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const canvasRef = useRef<HTMLDivElement>(null);
   const canvasViewportRef = useRef<HTMLDivElement>(null);
   const [canvasViewportWidth, setCanvasViewportWidth] = useState(320);
@@ -87,8 +88,14 @@ const LayoutEditor = () => {
   const [slotHistory, setSlotHistory] = useState<{ past: LayoutSlot[][]; future: LayoutSlot[][] }>({ past: [], future: [] });
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
-  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
+  const allowSavedNavigationRef = useRef(false);
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    isDirty &&
+    !allowSavedNavigationRef.current &&
+    (currentLocation.pathname !== nextLocation.pathname ||
+      currentLocation.search !== nextLocation.search ||
+      currentLocation.hash !== nextLocation.hash),
+  );
   const [showGrid, setShowGrid] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [gridStep, setGridStep] = useState<number>(0.1);
@@ -317,11 +324,16 @@ const LayoutEditor = () => {
         id: isEditMode ? id : undefined,
         payload,
       });
+      await queryClient.invalidateQueries({ queryKey: ["layouts"] });
+      if (isEditMode) {
+        await queryClient.invalidateQueries({ queryKey: ["layout", id] });
+      }
       toast({
         title: isEditMode ? "Layout updated" : "Layout created",
         description: `"${name}" has been saved successfully.`,
       });
       setIsDirty(false);
+      allowSavedNavigationRef.current = true;
       if (returnTo && !isEditMode) {
         navigate(returnTo);
       } else {
@@ -333,19 +345,7 @@ const LayoutEditor = () => {
   };
 
   const handleCancel = () => {
-    if (isDirty) {
-      setPendingNavigation(defaultReturnPath);
-      setShowUnsavedDialog(true);
-    } else {
-      navigate(defaultReturnPath);
-    }
-  };
-
-  const confirmNavigation = () => {
-    setShowUnsavedDialog(false);
-    if (pendingNavigation) {
-      navigate(pendingNavigation);
-    }
+    navigate(defaultReturnPath);
   };
 
   const handleAddSlot = () => {
@@ -582,7 +582,7 @@ const LayoutEditor = () => {
         search: debouncedSearchTerm || undefined,
         configured_only: true,
       }),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
   });
 
   const aspectRatioOptions = useMemo<ScreenAspectRatio[]>(() => {
@@ -592,6 +592,22 @@ const LayoutEditor = () => {
     }
     return resolved;
   }, [aspectRatioResponse, isSearchActive]);
+
+  if (isEditMode && !layoutQuery.data) {
+    if (layoutQuery.isError) {
+      return (
+        <div className="mx-auto max-w-xl space-y-4 rounded-xl border bg-card p-6">
+          <h1 className="text-xl font-semibold">Layout unavailable</h1>
+          <p className="text-sm text-muted-foreground">The layout could not be loaded. Retry before making changes.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => void layoutQuery.refetch()}>Retry loading</Button>
+            <Button variant="outline" onClick={handleCancel}>Back to layouts</Button>
+          </div>
+        </div>
+      );
+    }
+    return <div role="status" className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">Loading layout…</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -1127,13 +1143,13 @@ const LayoutEditor = () => {
 
       {/* Unsaved Changes Dialog */}
       <ConfirmDialog
-        open={showUnsavedDialog}
+        open={blocker.state === "blocked"}
         title="Unsaved changes"
         description="You have unsaved changes. Are you sure you want to leave without saving?"
         confirmLabel="Leave"
         cancelLabel="Stay"
-        onConfirm={confirmNavigation}
-        onCancel={() => setShowUnsavedDialog(false)}
+        onConfirm={() => blocker.proceed?.()}
+        onCancel={() => blocker.reset?.()}
       />
     </div>
   );

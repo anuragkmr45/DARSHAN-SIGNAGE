@@ -20,6 +20,8 @@ An operator enters a name and aspect ratio, adds or draws slots, adjusts their p
 
 The browser routes in these tests return fixtures. They do not prove a real database save, player presentation, permissions, or interrupted-session recovery.
 
+Follow-up: [the real-service developer verification](product-ui-layout-editor-real-service-developer-verification-2026-11-04.md) records a later packet that added internal navigation protection and completed an isolated backend create/list/reopen/delete journey. The remaining items below describe the original prototype boundary; use the follow-up for current status.
+
 ## Remaining QA
 
 - Save and reopen a Layout against isolated real services; compare database geometry and authored preview.
