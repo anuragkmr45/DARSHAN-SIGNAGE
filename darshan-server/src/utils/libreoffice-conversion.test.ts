@@ -15,4 +15,14 @@ describe('LibreOffice document conversion', () => {
     expect(getLibreOfficeOutputPath('/tmp/doc-convert-123/quarterly report.docx', '/tmp/doc-convert-123'))
       .toBe('/tmp/doc-convert-123/quarterly report.pdf');
   });
+
+  it('selects the Writer HTML import only for report PDF rendering', () => {
+    const args = buildLibreOfficeConversionArgs('/tmp/report.html', '/tmp', '/tmp/report-profile', {
+      inputFilter: 'HTML (StarWriter)',
+      outputFilter: 'pdf:writer_pdf_Export',
+    });
+    expect(args).toContain('--infilter=HTML (StarWriter)');
+    expect(args.slice(args.indexOf('--convert-to'), args.indexOf('--convert-to') + 2))
+      .toEqual(['--convert-to', 'pdf:writer_pdf_Export']);
+  });
 });

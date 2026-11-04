@@ -96,7 +96,7 @@ describe('Reports PDF exports', () => {
     const text = await readPdfText(new Uint8Array(response.rawPayload));
     expect(text).toContain('Emergency Status');
     expect(text).toContain('Recent Proof of Play');
-    expect(text).toContain('Outcome unknown');
+    expect(text).toMatch(/Outcome\s+unknown/);
   });
 
   it('allows a Report-only role to export and denies a role without report access', async () => {
@@ -164,5 +164,11 @@ describe('Reports PDF exports', () => {
     expect(response.headers['content-disposition']).toContain('.pdf');
     expect(response.body.startsWith('%PDF')).toBe(true);
     expect(response.body.length).toBeGreaterThan(500);
+    const auditDocument = await getDocument({ data: new Uint8Array(response.rawPayload), useSystemFonts: true }).promise;
+    const firstPage = await (await auditDocument.getPage(1)).getTextContent();
+    const firstPageText = firstPage.items.map((item) => 'str' in item ? item.str : '').join(' ');
+    expect(firstPageText).toContain('Audit Logs');
+    expect(firstPageText).toContain('Screen updated');
+    expect(firstPageText).toContain('SCREEN_UPDATE');
   });
 });

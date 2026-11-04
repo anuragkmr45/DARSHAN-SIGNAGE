@@ -32,9 +32,12 @@ export async function renderPdfDocument(html: string): Promise<Buffer> {
   try {
     // LibreOffice's HTML import does not honor the browser CSS table rules.
     // Explicit HTML table attributes keep report rows legible in PDF exports.
-    const printableHtml = html.replaceAll('<table>', '<table border="1" cellspacing="0" cellpadding="6" width="100%">');
+    const printableHtml = html.replaceAll('<table>', '<table border="1" cellspacing="0" cellpadding="4" width="100%">');
     await writeFile(inputPath, printableHtml, { encoding: 'utf8', mode: 0o600 });
-    await execFileAsync(executable, buildLibreOfficeConversionArgs(inputPath, directory, join(directory, 'profile')), {
+    await execFileAsync(executable, buildLibreOfficeConversionArgs(inputPath, directory, join(directory, 'profile'), {
+      inputFilter: 'HTML (StarWriter)',
+      outputFilter: 'pdf:writer_pdf_Export',
+    }), {
       timeout: PDF_TIMEOUT_MS,
       killSignal: 'SIGKILL',
       maxBuffer: 1024 * 1024,

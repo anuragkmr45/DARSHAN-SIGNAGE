@@ -3,15 +3,21 @@ import { pathToFileURL } from 'node:url';
 
 export const LIBREOFFICE_CONVERSION_TIMEOUT_MS = 120_000;
 
-export function buildLibreOfficeConversionArgs(inputPath: string, outputDir: string, profileDir: string): string[] {
+export function buildLibreOfficeConversionArgs(
+  inputPath: string,
+  outputDir: string,
+  profileDir: string,
+  options: { inputFilter?: string; outputFilter?: string } = {},
+): string[] {
   return [
     '--headless',
     '--nologo',
     '--nodefault',
     '--nofirststartwizard',
     `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+    ...(options.inputFilter ? [`--infilter=${options.inputFilter}`] : []),
     '--convert-to',
-    'pdf',
+    options.outputFilter ?? 'pdf',
     '--outdir',
     outputDir,
     inputPath,

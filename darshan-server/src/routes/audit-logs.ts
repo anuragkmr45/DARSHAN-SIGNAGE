@@ -30,6 +30,28 @@ function formatDateTime(value?: Date | string | null) {
   return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 }
 
+function formatAuditResource(value?: string | null) {
+  if (!value?.trim()) return 'Record';
+  const words = value.trim().replace(/([a-z\d])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1).toLowerCase();
+}
+
+function formatAuditEvent(action?: string | null, resourceType?: string | null) {
+  if (!action?.trim()) return 'Recorded event';
+  const parts = action.trim().split(/[_\s-]+/).filter(Boolean);
+  const verbs: Record<string, string> = {
+    CREATE: 'created', CREATED: 'created', UPDATE: 'updated', UPDATED: 'updated',
+    EDIT: 'edited', DELETE: 'deleted', DELETED: 'deleted', RESTORE: 'restored',
+    REVOKE: 'revoked', TRIGGER: 'triggered', CLEAR: 'cleared', START: 'started',
+    STOP: 'stopped', BAN: 'banned', UNBAN: 'unbanned', MUTE: 'muted', UNMUTE: 'unmuted',
+  };
+  const verb = verbs[parts.at(-1)?.toUpperCase() ?? ''];
+  if (!verb) return formatAuditResource(action);
+  const subject = parts.length > 1 ? parts.slice(0, -1).join('_') : resourceType;
+  const label = /^(LIVE_SESSION|LIVE_RUN)$/i.test(subject ?? '') ? 'Live broadcast' : formatAuditResource(subject);
+  return `${label} ${verb}`;
+}
+
 type AuditLogRow = typeof schema.auditLogs.$inferSelect;
 
 async function serializeAuditLogs(logs: AuditLogRow[]) {
@@ -164,6 +186,7 @@ export async function auditLogRoutes(fastify: FastifyInstance) {
           startDate: query.start_date ? new Date(query.start_date) : undefined,
           endDate: query.end_date ? new Date(query.end_date) : undefined,
         });
+        const records = await serializeAuditLogs(items);
         const generatedAt = new Date();
 
         const html = `<!doctype html>
@@ -172,16 +195,18 @@ export async function auditLogRoutes(fastify: FastifyInstance) {
     <meta charset="utf-8" />
     <title>Audit Logs</title>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; font-size: 12px; margin: 0; }
+      body { font-family: "Liberation Sans", Arial, sans-serif; color: #1b1f1b; font-size: 11px; margin: 0; }
       h1, h2, p { margin: 0; }
-      .header { margin-bottom: 20px; }
-      .subtitle { color: #6b7280; margin-top: 4px; }
-      .filters { margin-top: 12px; }
-      .pill { display: inline-block; border: 1px solid #d1d5db; border-radius: 999px; padding: 2px 8px; font-size: 10px; margin-right: 6px; margin-top: 6px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-      th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
-      th { background: #f9fafb; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
-      .empty { color: #6b7280; margin-top: 14px; }
+      h1 { font-size: 22px; }
+      .header { margin-bottom: 18px; }
+      .subtitle, .meta { color: #5a5f5a; }
+      .subtitle { margin-top: 5px; }
+      .filters { margin-top: 13px; line-height: 1.5; }
+      .count { margin: 12px 0 8px; font-weight: bold; }
+      .entry { border-top: 1px solid #cbd2ca; padding: 10px 0; page-break-inside: avoid; }
+      .entry h2 { font-size: 13px; margin-bottom: 5px; }
+      .entry p { margin-top: 3px; line-height: 1.4; }
+      .empty { color: #5a5f5a; margin-top: 14px; }
     </style>
   </head>
   <body>
@@ -189,44 +214,26 @@ export async function auditLogRoutes(fastify: FastifyInstance) {
       <h1>Audit Logs</h1>
       <p class="subtitle">Generated ${escapeHtml(formatDateTime(generatedAt))}</p>
       <div class="filters">
-        <span class="pill">Resource: ${escapeHtml(query.resource_type || 'Any')}</span>
-        <span class="pill">Action: ${escapeHtml(query.action || 'Any')}</span>
-        <span class="pill">User: ${escapeHtml(query.user_id || 'Any')}</span>
-        <span class="pill">Start: ${escapeHtml(formatDateTime(query.start_date || null))}</span>
-        <span class="pill">End: ${escapeHtml(formatDateTime(query.end_date || null))}</span>
+        <p>Resource: ${escapeHtml(query.resource_type || 'Any')} &nbsp; Action code: ${escapeHtml(query.action || 'Any')} &nbsp; User: ${escapeHtml(query.user_id || 'Any')}</p>
+        <p>From: ${escapeHtml(formatDateTime(query.start_date || null))} &nbsp; To: ${escapeHtml(formatDateTime(query.end_date || null))}</p>
       </div>
     </div>
     ${
-      items.length
+      records.length
         ? `
-          <table>
-            <thead>
-              <tr>
-                <th>Action</th>
-                <th>Resource</th>
-                <th>Resource ID</th>
-                <th>User</th>
-                <th>IP</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${items
-                .map(
-                  (log) => `
-                    <tr>
-                      <td>${escapeHtml(log.action)}</td>
-                      <td>${escapeHtml(log.entity_type)}</td>
-                      <td>${escapeHtml(log.entity_id || '—')}</td>
-                      <td>${escapeHtml(log.user_id || 'system')}</td>
-                      <td>${escapeHtml(log.ip_address || '—')}</td>
-                      <td>${escapeHtml(formatDateTime(log.created_at))}</td>
-                    </tr>
-                  `
-                )
-                .join('')}
-            </tbody>
-          </table>
+          <p class="count">${records.length} ${records.length === 1 ? 'event' : 'events'}</p>
+          ${records.map((log) => {
+            const actorName = [log.user?.first_name, log.user?.last_name].filter(Boolean).join(' ').trim();
+            const actor = actorName || log.user?.email || (log.user_id ? 'Former or unavailable user' : 'System');
+            return `
+              <div class="entry">
+                <h2>${escapeHtml(formatAuditEvent(log.action, log.resource_type))}</h2>
+                <p>When: ${escapeHtml(formatDateTime(log.created_at))} &nbsp; Actor: ${escapeHtml(actor)}</p>
+                <p>Resource: ${escapeHtml(formatAuditResource(log.resource_type))} &nbsp; ID: ${escapeHtml(log.resource_id || '—')}</p>
+                <p class="meta">Action code: ${escapeHtml(log.action || '—')} &nbsp; Actor ID: ${escapeHtml(log.user_id || '—')} &nbsp; IP: ${escapeHtml(log.ip_address || '—')}</p>
+              </div>
+            `;
+          }).join('')}
         `
         : '<p class="empty">No logs found for the selected filters.</p>'
     }
