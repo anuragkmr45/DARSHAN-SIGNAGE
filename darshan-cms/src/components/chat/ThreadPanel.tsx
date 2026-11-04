@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { ArrowLeft, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ interface ThreadPanelProps {
   onOpenChange: (open: boolean) => void;
   conversationId?: string;
   threadRootId?: string;
+  focusReplyId?: string | null;
   rootMessage?: ChatMessage;
   currentUserId?: string;
   canMutate?: boolean;
@@ -39,6 +40,7 @@ export function ThreadPanel({
   onOpenChange,
   conversationId,
   threadRootId,
+  focusReplyId,
   rootMessage,
   currentUserId,
   canMutate = true,
@@ -57,13 +59,21 @@ export function ThreadPanel({
   const alsoToChannel = channelChoices[draftKey] ?? false;
   const setDraft = (value: string) => setDrafts((current) => ({ ...current, [draftKey]: value }));
   const setAlsoToChannel = (value: boolean) => setChannelChoices((current) => ({ ...current, [draftKey]: value }));
-  const threadQuery = useChatThread(conversationId, threadRootId);
+  const threadQuery = useChatThread(conversationId, threadRootId, { aroundMessageId: focusReplyId ?? undefined });
+  const focusedReplyRef = useRef<HTMLDivElement | null>(null);
+  const scrolledFocusRef = useRef<string | null>(null);
   const resolvedRootMessage = threadQuery.data?.pages?.[0]?.rootMessage ?? rootMessage;
-  const canReply = canMutate && !threadQuery.isLoading && !threadQuery.isError;
+  const canReply = canMutate && !threadQuery.isLoading && !(threadQuery.isError && !threadQuery.data);
   const orderedReplies = useMemo(
     () => [...threadQuery.items].sort((a, b) => b.seq - a.seq),
     [threadQuery.items],
   );
+  useEffect(() => {
+    const focusKey = `${conversationId ?? ""}:${threadRootId ?? ""}:${focusReplyId ?? ""}`;
+    if (!open || !focusReplyId || !focusedReplyRef.current || scrolledFocusRef.current === focusKey) return;
+    focusedReplyRef.current.scrollIntoView({ block: "center" });
+    scrolledFocusRef.current = focusKey;
+  }, [conversationId, focusReplyId, open, orderedReplies, threadRootId]);
   const replyMediaIds = useMemo(() => Array.from(new Set([
     ...(resolvedRootMessage ? [resolvedRootMessage] : []),
     ...threadQuery.items,
@@ -145,7 +155,7 @@ export function ThreadPanel({
                     size="sm"
                     variant="outline"
                     onClick={() => void threadQuery.fetchNewer()}
-                    disabled={threadQuery.isLoading || threadQuery.isError || threadQuery.isFetchingNewer}
+                    disabled={threadQuery.isLoading || threadQuery.isError || threadQuery.isFetching || threadQuery.isFetchingNewer}
                     aria-label="Check for new thread replies"
                   >
                     {threadQuery.isFetchingNewer ? "Checking..." : "Check for new"}
@@ -153,11 +163,14 @@ export function ThreadPanel({
                   {threadQuery.isUpToDate && (
                     <span className="text-xs text-muted-foreground">Up to date</span>
                   )}
+                  {threadQuery.newerLoadError && (
+                    <span role="alert" className="text-xs text-destructive">Couldn’t check for new replies. Try again.</span>
+                  )}
                 </div>
               </div>
               {threadQuery.isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading thread...</p>
-              ) : threadQuery.isError ? (
+              ) : threadQuery.isError && !threadQuery.data ? (
                 <div role="alert" className="space-y-2 rounded-lg border p-3 text-sm">
                   <p>Couldn’t load this thread. Your reply draft is still here.</p>
                   <Button size="sm" variant="outline" onClick={() => void threadQuery.refetch()}>Retry thread</Button>
@@ -167,8 +180,10 @@ export function ThreadPanel({
               ) : (
                 <div className="space-y-2">
                   {orderedReplies.map((message) => (
+                    <div key={message.id} ref={message.id === focusReplyId ? focusedReplyRef : undefined}
+                      className={message.id === focusReplyId ? "rounded-lg ring-2 ring-primary/60" : undefined}
+                      aria-label={message.id === focusReplyId ? "Selected thread reply" : undefined}>
                     <MessageItem
-                      key={message.id}
                       message={message}
                       currentUserId={currentUserId}
                       canMutate={canMutate}
@@ -176,7 +191,19 @@ export function ThreadPanel({
                       onMentionClick={onMentionClick}
                       attachmentMediaById={resolvedAttachmentMediaById}
                     />
+                    </div>
                   ))}
+                  {threadQuery.hasOlder && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void threadQuery.fetchOlder()}
+                      disabled={threadQuery.isFetchingOlder}
+                      aria-label="Load earlier thread replies"
+                    >
+                      {threadQuery.isFetchingOlder ? "Loading earlier..." : threadQuery.olderLoadError ? "Retry earlier replies" : "Load earlier replies"}
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

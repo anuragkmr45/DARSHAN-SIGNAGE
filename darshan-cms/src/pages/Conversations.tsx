@@ -186,7 +186,7 @@ const buildContextualSharePath = (
 ) => {
   const trimmedBasePath = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
   if (threadRootId) {
-    return `${trimmedBasePath}/thread/${encodeURIComponent(threadRootId)}`;
+    return `${trimmedBasePath}/thread/${encodeURIComponent(threadRootId)}${focusMessageId ? `?focusReplyId=${encodeURIComponent(focusMessageId)}` : ""}`;
   }
   if (focusMessageId) {
     return `${trimmedBasePath}?focusMessageId=${encodeURIComponent(focusMessageId)}`;
@@ -256,6 +256,7 @@ export default function Conversations() {
   const routeConversationId = params.conversationId;
   const threadRootId = params.threadRootId;
   const focusMessageId = searchParams.get("focusMessageId");
+  const focusReplyId = searchParams.get("focusReplyId");
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
   const prevLatestSeqRef = useRef(0);
   const didInitialScrollRef = useRef(false);
@@ -275,6 +276,7 @@ export default function Conversations() {
   );
   const messagesQuery = useChatMessages(selectedConversation?.id, {
     limit: MESSAGES_LIMIT,
+    aroundMessageId: focusMessageId ?? undefined,
   });
   const fetchNewerMessages = messagesQuery.fetchNewer;
   const isFetchingNewerMessages = messagesQuery.isFetchingNewer;
@@ -794,7 +796,7 @@ export default function Conversations() {
 
     try {
       const response = await createShareLink.mutateAsync(selectedConversation.id);
-      const shareUrl = buildShareLinkUrl(response, threadRootId, focusMessageId);
+      const shareUrl = buildShareLinkUrl(response, threadRootId, threadRootId ? focusReplyId : focusMessageId);
 
       try {
         await navigator.clipboard.writeText(shareUrl);
@@ -964,8 +966,15 @@ export default function Conversations() {
                 pendingMessages={pendingUiMessages.filter((item) => item.conversationId === selectedConversation.id)}
                 attachmentMediaById={attachmentMediaById}
                 isLoading={messagesQuery.isLoading}
-                canFetchNewer={!isFetchingNewerMessages}
+                isError={messagesQuery.isError}
+                onRetry={() => { void messagesQuery.refetch(); }}
+                hasOlder={messagesQuery.hasOlder}
+                isFetchingOlder={messagesQuery.isFetchingOlder}
+                olderLoadError={messagesQuery.olderLoadError}
+                onFetchOlder={() => { void messagesQuery.fetchOlder(); }}
+                canFetchNewer={!isFetchingNewerMessages && !messagesQuery.isFetching}
                 isFetchingNewer={isFetchingNewerMessages}
+                newerLoadError={messagesQuery.newerLoadError}
                 isUpToDate={messagesQuery.isUpToDate}
                 focusMessageId={focusMessageId}
                 newMessagesFromSeq={newMessagesFromSeq}
@@ -1075,6 +1084,7 @@ export default function Conversations() {
         }}
         conversationId={selectedConversation?.id}
         threadRootId={threadRootId}
+        focusReplyId={focusReplyId}
         rootMessage={threadRootMessage}
         currentUserId={currentUserId}
         canMutate={!composerDisabled}

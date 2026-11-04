@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   InfiniteData,
   useInfiniteQuery,
@@ -27,8 +27,10 @@ import type {
 import {
   clampChatCursorLimit,
   flattenMessagePages,
+  getFirstSeenSeq,
   getLastSeenSeq,
   appendMessageInInfiniteData,
+  appendMessagesInInfiniteData,
   patchMessageInInfiniteData,
   normalizeDeletedMessagePatch,
 } from "@/hooks/chat/cursorUtils";
@@ -40,10 +42,13 @@ export const chatQueryKeys = {
   members: (conversationId?: string) => ["chat", "members", conversationId] as const,
   pins: (conversationId?: string) => ["chat", "pins", conversationId] as const,
   bookmarks: (conversationId?: string) => ["chat", "bookmarks", conversationId] as const,
-  messages: (conversationId?: string) => ["chat", "messages", conversationId] as const,
+  messages: (conversationId?: string, focusMessageId?: string) => focusMessageId
+    ? ["chat", "messages", conversationId, "focus", focusMessageId] as const
+    : ["chat", "messages", conversationId] as const,
   messagesCursor: (conversationId?: string) => ["chat", "messages-cursor", conversationId] as const,
-  thread: (conversationId?: string, threadRootId?: string) =>
-    ["chat", "thread", conversationId, threadRootId] as const,
+  thread: (conversationId?: string, threadRootId?: string, focusReplyId?: string) => focusReplyId
+    ? ["chat", "thread", conversationId, threadRootId, "focus", focusReplyId] as const
+    : ["chat", "thread", conversationId, threadRootId] as const,
   threadCursor: (conversationId?: string, threadRootId?: string) =>
     ["chat", "thread-cursor", conversationId, threadRootId] as const,
 };
@@ -123,110 +128,149 @@ export const useChatUserDirectory = (enabled = true) =>
     },
   });
 
-export const useChatMessages = (conversationId?: string, params?: ChatCursorParams) => {
+type ChatHistoryCursor = { latest: true } | { beforeSeq: number } | { aroundMessageId: string };
+type ChatPage = ChatListMessagesResponse | ChatThreadResponse;
+const MAX_CATCH_UP_PAGES = 20;
+
+const useChatHistory = <T extends ChatPage>(options: {
+  identity: string;
+  enabled: boolean;
+  queryKey: readonly unknown[];
+  cursorKey: readonly unknown[];
+  limit: number;
+  initialCursor: ChatHistoryCursor;
+  list: (params: ChatCursorParams & { signal?: AbortSignal }) => Promise<T>;
+}) => {
   const queryClient = useQueryClient();
-  const limit = clampChatCursorLimit(params?.limit);
-  const initialAfterSeq = params?.afterSeq ?? 0;
+  const { identity, enabled, queryKey, cursorKey, limit, initialCursor, list } = options;
+  const [newerState, setNewerState] = useState<{ identity: string; fetching: boolean; lastFetchCount: number; upToDate: boolean; error: boolean }>({
+    identity: "", fetching: false, lastFetchCount: 0, upToDate: false, error: false,
+  });
+  const activeCatchUp = useRef<{ identity: string; controller: AbortController; promise: Promise<void> } | null>(null);
 
   const query = useInfiniteQuery({
-    queryKey: chatQueryKeys.messages(conversationId),
-    enabled: Boolean(conversationId),
-    initialPageParam: initialAfterSeq,
-    queryFn: ({ pageParam, signal }) =>
-      chatApi.listMessages(conversationId!, {
-        afterSeq: Number(pageParam ?? 0),
-        limit,
-        signal,
-      }),
-    getNextPageParam: (lastPage) => {
-      if (!lastPage.items?.length) return undefined;
-      return getLastSeenSeq(lastPage.items);
+    queryKey,
+    enabled,
+    refetchInterval: 60_000,
+    initialPageParam: initialCursor,
+    queryFn: ({ pageParam, signal }) => list({ ...pageParam, limit, signal }),
+    getNextPageParam: (lastPage): ChatHistoryCursor | undefined => {
+      if (!lastPage.hasOlder || !lastPage.items?.length) return undefined;
+      return { beforeSeq: getFirstSeenSeq(lastPage.items) };
     },
   });
 
   const items = useMemo(() => flattenMessagePages(query.data?.pages), [query.data?.pages]);
   const latestSeq = useMemo(() => getLastSeenSeq(items), [items]);
-  const lastFetchCount = query.data?.pages?.[query.data.pages.length - 1]?.items?.length ?? 0;
-  const isUpToDate = query.isSuccess && !query.isFetching && lastFetchCount === 0;
-  const fetchNextPage = query.fetchNextPage;
+  const currentNewerState = newerState.identity === identity ? newerState : null;
+  const lastFetchCount = currentNewerState?.lastFetchCount ?? 0;
 
   useEffect(() => {
-    if (!conversationId) return;
-    queryClient.setQueryData(chatQueryKeys.messagesCursor(conversationId), {
-      lastSeenSeq: latestSeq,
-      lastFetchCount,
-    });
-  }, [conversationId, lastFetchCount, latestSeq, queryClient]);
+    if (!enabled) return;
+    queryClient.setQueryData(cursorKey, { lastSeenSeq: latestSeq, lastFetchCount });
+  }, [cursorKey, enabled, lastFetchCount, latestSeq, queryClient]);
 
-  const fetchNewer = useCallback(
-    () => fetchNextPage({ pageParam: latestSeq }),
-    [fetchNextPage, latestSeq],
-  );
+  useEffect(() => () => {
+    if (activeCatchUp.current?.identity === identity) activeCatchUp.current.controller.abort();
+  }, [identity]);
+
+  const fetchNewer = useCallback(async () => {
+    if (!enabled || query.isFetching) return;
+    if (activeCatchUp.current?.identity === identity) return activeCatchUp.current.promise;
+    const controller = new AbortController();
+    const promise = (async () => {
+      setNewerState({ identity, fetching: true, lastFetchCount: 0, upToDate: false, error: false });
+      const cached = queryClient.getQueryData<InfiniteData<T>>(queryKey);
+      if (!cached?.pages.length) {
+        await query.refetch();
+        return;
+      }
+      let cursor = getLastSeenSeq(flattenMessagePages(cached.pages));
+      let fetched = 0;
+      let upToDate = false;
+      for (let pageIndex = 0; pageIndex < MAX_CATCH_UP_PAGES; pageIndex += 1) {
+        const response = await list({ afterSeq: cursor, limit, signal: controller.signal });
+        if (controller.signal.aborted) return;
+        const nextCursor = getLastSeenSeq(response.items);
+        if (response.items.length === 0) {
+          upToDate = true;
+          break;
+        }
+        if (nextCursor <= cursor) throw new Error("Chat catch-up did not advance its cursor.");
+        queryClient.setQueryData<InfiniteData<T>>(queryKey, (current) =>
+          appendMessagesInInfiniteData(current, response.items));
+        fetched += response.items.length;
+        cursor = nextCursor;
+        if (response.items.length < limit) {
+          upToDate = true;
+          break;
+        }
+      }
+      setNewerState({ identity, fetching: false, lastFetchCount: fetched, upToDate, error: false });
+    })();
+    activeCatchUp.current = { identity, controller, promise };
+    try {
+      await promise;
+    } catch {
+      if (!controller.signal.aborted) {
+        setNewerState({ identity, fetching: false, lastFetchCount: 0, upToDate: false, error: true });
+      }
+    } finally {
+      if (activeCatchUp.current?.controller === controller) activeCatchUp.current = null;
+      if (!controller.signal.aborted) {
+        setNewerState((state) => state.identity === identity ? { ...state, fetching: false } : state);
+      }
+    }
+  }, [enabled, identity, limit, list, query, queryClient, queryKey]);
 
   return {
     ...query,
     items,
     latestSeq,
+    fetchOlder: query.fetchNextPage,
+    isFetchingOlder: query.isFetchingNextPage,
+    hasOlder: query.hasNextPage,
+    olderLoadError: query.isFetchNextPageError,
     fetchNewer,
-    isFetchingNewer: query.isFetchingNextPage,
-    isUpToDate,
+    isFetchingNewer: currentNewerState?.fetching ?? false,
+    newerLoadError: currentNewerState?.error ?? false,
+    isUpToDate: Boolean(currentNewerState?.upToDate && query.isSuccess && !query.isFetching),
     lastFetchCount,
   };
 };
 
-export const useChatThread = (
-  conversationId?: string,
-  threadRootId?: string,
-  params?: ChatCursorParams,
-) => {
-  const queryClient = useQueryClient();
-  const limit = clampChatCursorLimit(params?.limit);
-  const initialAfterSeq = params?.afterSeq ?? 0;
-
-  const query = useInfiniteQuery({
-    queryKey: chatQueryKeys.thread(conversationId, threadRootId),
-    enabled: Boolean(conversationId && threadRootId),
-    initialPageParam: initialAfterSeq,
-    queryFn: ({ pageParam, signal }) =>
-      chatApi.listThread(conversationId!, threadRootId!, {
-        afterSeq: Number(pageParam ?? 0),
-        limit,
-        signal,
-      }),
-    getNextPageParam: (lastPage) => {
-      if (!lastPage.items?.length) return undefined;
-      return getLastSeenSeq(lastPage.items);
-    },
+export const useChatMessages = (conversationId?: string, params?: ChatCursorParams) => {
+  const focusMessageId = params?.aroundMessageId;
+  const queryKey = useMemo(() => chatQueryKeys.messages(conversationId, focusMessageId), [conversationId, focusMessageId]);
+  const cursorKey = useMemo(() => chatQueryKeys.messagesCursor(conversationId), [conversationId]);
+  const list = useCallback((cursor: ChatCursorParams & { signal?: AbortSignal }) =>
+    chatApi.listMessages(conversationId!, cursor), [conversationId]);
+  return useChatHistory({
+    identity: `${conversationId ?? ""}:${focusMessageId ?? "latest"}`,
+    enabled: Boolean(conversationId),
+    queryKey,
+    cursorKey,
+    limit: clampChatCursorLimit(params?.limit),
+    initialCursor: focusMessageId ? { aroundMessageId: focusMessageId } : { latest: true },
+    list,
   });
+};
 
-  const items = useMemo(() => flattenMessagePages(query.data?.pages), [query.data?.pages]);
-  const latestSeq = useMemo(() => getLastSeenSeq(items), [items]);
-  const lastFetchCount = query.data?.pages?.[query.data.pages.length - 1]?.items?.length ?? 0;
-  const isUpToDate = query.isSuccess && !query.isFetching && lastFetchCount === 0;
-  const fetchNextPage = query.fetchNextPage;
-
-  useEffect(() => {
-    if (!conversationId || !threadRootId) return;
-    queryClient.setQueryData(chatQueryKeys.threadCursor(conversationId, threadRootId), {
-      lastSeenSeq: latestSeq,
-      lastFetchCount,
-    });
-  }, [conversationId, lastFetchCount, latestSeq, queryClient, threadRootId]);
-
-  const fetchNewer = useCallback(
-    () => fetchNextPage({ pageParam: latestSeq }),
-    [fetchNextPage, latestSeq],
-  );
-
-  return {
-    ...query,
-    items,
-    latestSeq,
-    fetchNewer,
-    isFetchingNewer: query.isFetchingNextPage,
-    isUpToDate,
-    lastFetchCount,
-  };
+export const useChatThread = (conversationId?: string, threadRootId?: string, params?: ChatCursorParams) => {
+  const focusReplyId = params?.aroundMessageId;
+  const queryKey = useMemo(() => chatQueryKeys.thread(conversationId, threadRootId, focusReplyId), [conversationId, threadRootId, focusReplyId]);
+  const cursorKey = useMemo(() => chatQueryKeys.threadCursor(conversationId, threadRootId), [conversationId, threadRootId]);
+  const list = useCallback((cursor: ChatCursorParams & { signal?: AbortSignal }) =>
+    chatApi.listThread(conversationId!, threadRootId!, cursor), [conversationId, threadRootId]);
+  return useChatHistory({
+    identity: `${conversationId ?? ""}:${threadRootId ?? ""}:${focusReplyId ?? "latest"}`,
+    enabled: Boolean(conversationId && threadRootId),
+    queryKey,
+    cursorKey,
+    limit: clampChatCursorLimit(params?.limit),
+    initialCursor: focusReplyId ? { aroundMessageId: focusReplyId } : { latest: true },
+    list,
+  });
 };
 
 const patchMessageCaches = (

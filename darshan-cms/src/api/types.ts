@@ -2133,12 +2133,14 @@ export interface ChatListConversationsResponse {
 
 export interface ChatListMessagesResponse {
   items: ChatMessage[];
+  hasOlder?: boolean;
 }
 
 export interface ChatThreadResponse {
   threadRootId: string;
   rootMessage?: ChatMessage;
   items: ChatMessage[];
+  hasOlder?: boolean;
 }
 
 export interface ChatSendMessageResponse {

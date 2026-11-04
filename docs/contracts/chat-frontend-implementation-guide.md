@@ -170,11 +170,13 @@ Behavior:
 - Includes `FORUM_OPEN` even if not explicit member.
 
 ## 4.4 List Messages
-`GET /api/v1/chat/conversations/:id/messages?afterSeq=&limit=`
+`GET /api/v1/chat/conversations/:id/messages?latest=true&limit=`
 
 Query:
-- `afterSeq` int >= 0 (default 0)
+- Choose at most one cursor: `latest=true`, `beforeSeq` (positive int), `aroundMessageId` (message UUID), or `afterSeq` (int >= 0). Omit all cursors for the legacy `afterSeq=0` behavior.
 - `limit` int <= 100 (default 50)
+
+`latest` starts at the newest messages. `beforeSeq` returns older messages strictly before that sequence. `aroundMessageId` returns a page ending at the named visible message, for an old-message link. These pages are returned in ascending sequence order and include `hasOlder`; load another page with `beforeSeq` set to the first returned sequence. An unauthorized or non-main-timeline anchor returns 404. `afterSeq` remains the forward, exclusive cursor for reconnect and existing clients; its response has no `hasOlder` claim.
 
 Response `200`:
 ```json
@@ -196,7 +198,8 @@ Response `200`:
       "attachments": [],
       "reactions": []
     }
-  ]
+  ],
+  "hasOlder": true
 }
 ```
 
@@ -208,13 +211,17 @@ Tombstone behavior:
   - `reactions: []`
 
 ## 4.5 List Thread
-`GET /api/v1/chat/conversations/:id/thread/:parentMessageId?afterSeq=&limit=`
+`GET /api/v1/chat/conversations/:id/thread/:parentMessageId?latest=true&limit=`
+
+Thread replies use the same mutually exclusive cursors, ordering and `hasOlder` rule. `aroundMessageId` must name a reply in this canonical thread. A direct reply link uses `/chat/:id/thread/:rootId?focusReplyId=:replyId`.
 
 Response `200`:
 ```json
 {
   "threadRootId": "uuid",
-  "items": [/* same shape as list messages */]
+  "rootMessage": { "id": "uuid", "body_text": "Parent message" },
+  "items": [/* same shape as list messages */],
+  "hasOlder": true
 }
 ```
 
@@ -680,7 +687,7 @@ Recommended FE gating:
 
 Implement screens/components:
 1. Conversation list (DM/group/forum) with unread and last message preview.
-2. Conversation view with infinite message list by `afterSeq`.
+2. Conversation view starts at `latest=true`, loads older messages with `beforeSeq`, and uses `afterSeq` for new-message catch-up.
 3. Composer with text + attachment picker (media IDs only).
 4. Thread panel (parent + replies).
 5. Reactions picker + counts.
@@ -760,8 +767,8 @@ curl -X POST "$API/chat/messages/$MID/reactions" \
 
 React Query keys (recommended):
 - `['chat', 'conversations']`
-- `['chat', 'messages', conversationId, afterSeq]`
-- `['chat', 'thread', conversationId, threadRootId, afterSeq]`
+- `['chat', 'messages', conversationId]` (optional focused-message suffix)
+- `['chat', 'thread', conversationId, threadRootId]` (optional focused-reply suffix)
 - `['notifications', page, readFilter]`
 
 Guidance:

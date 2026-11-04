@@ -1,5 +1,18 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { clearChatTypingTimeouts } from "@/hooks/chat/useChatRealtime";
+import { QueryClient } from "@tanstack/react-query";
+import { clearChatTypingTimeouts, getLastSeenSeqFromCache } from "@/hooks/chat/useChatRealtime";
+import { chatQueryKeys } from "@/hooks/chat/useChatQueries";
+import type { ChatListMessagesResponse } from "@/api/types";
+
+test("reconnect uses the normal timeline cursor even when a focused link has a later message", () => {
+  const client = new QueryClient();
+  const page = (seq: number): ChatListMessagesResponse => ({ items: [{ id: `message-${seq}`, seq }] as ChatListMessagesResponse["items"] });
+  client.setQueryData(chatQueryKeys.messages("room-1"), { pages: [page(120)], pageParams: [{ latest: true }] });
+  client.setQueryData(chatQueryKeys.messages("room-1", "message-200"), { pages: [page(200)], pageParams: [{ aroundMessageId: "message-200" }] });
+  expect(getLastSeenSeqFromCache(client, "room-1")).toBe(120);
+  client.removeQueries({ queryKey: chatQueryKeys.messages("room-1"), exact: true });
+  expect(getLastSeenSeqFromCache(client, "room-1")).toBe(200);
+});
 
 describe("useChatRealtime typing timer cleanup", () => {
   beforeEach(() => {

@@ -27,6 +27,9 @@ import type {
 
 export interface ChatCursorParams {
   afterSeq?: number;
+  beforeSeq?: number;
+  latest?: boolean;
+  aroundMessageId?: string;
   limit?: number;
 }
 
@@ -91,10 +94,18 @@ export const normalizeCursorParams = (params?: ChatCursorParams) => {
     ? Math.floor(parsedLimit)
     : DEFAULT_CURSOR_LIMIT;
 
-  return {
-    afterSeq: normalizeAfterSeq(params?.afterSeq),
-    limit: Math.min(MAX_CURSOR_LIMIT, normalizedLimit),
-  };
+  const limit = Math.min(MAX_CURSOR_LIMIT, normalizedLimit);
+  const selectedCursors = [params?.afterSeq !== undefined, params?.beforeSeq !== undefined, params?.latest === true, Boolean(params?.aroundMessageId)].filter(Boolean);
+  if (selectedCursors.length > 1) throw new Error("Choose only one chat message cursor.");
+  if (params?.latest) return { latest: true, limit };
+  if (params?.aroundMessageId) return { aroundMessageId: params.aroundMessageId, limit };
+  if (params?.beforeSeq !== undefined) {
+    if (!Number.isSafeInteger(params.beforeSeq) || params.beforeSeq <= 0) {
+      throw new Error("beforeSeq must be a positive safe integer.");
+    }
+    return { beforeSeq: params.beforeSeq, limit };
+  }
+  return { afterSeq: normalizeAfterSeq(params?.afterSeq), limit };
 };
 
 export const normalizeChatError = (error: unknown): ChatNormalizedError => {

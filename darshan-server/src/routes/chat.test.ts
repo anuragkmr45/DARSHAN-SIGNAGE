@@ -1678,6 +1678,84 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     });
   });
 
+  it('opens latest main and thread pages and walks older messages without gaps', async () => {
+    const created = await server.inject({
+      method: 'POST',
+      url: '/api/v1/chat/conversations',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { type: 'GROUP_CLOSED', title: 'Cursor Paging Group' },
+    });
+    expect(created.statusCode).toBe(HTTP_STATUS.OK);
+    const conversationId = JSON.parse(created.body).conversation.id as string;
+    const send = async (text: string, replyTo?: string) => {
+      const response = await server.inject({
+        method: 'POST',
+        url: `/api/v1/chat/conversations/${conversationId}/messages`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { text, ...(replyTo ? { replyTo } : {}) },
+      });
+      expect(response.statusCode).toBe(HTTP_STATUS.OK);
+      return JSON.parse(response.body).message as { id: string; seq: number };
+    };
+    const main = [await send('main-1')];
+    for (let index = 2; index <= 5; index += 1) main.push(await send(`main-${index}`));
+    const replies = [await send('reply-1', main[0].id)];
+    replies.push(await send('reply-2', main[0].id));
+    replies.push(await send('reply-3', main[0].id));
+    const get = (suffix: string) => server.inject({
+      method: 'GET',
+      url: `/api/v1/chat/conversations/${conversationId}/${suffix}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    const latestMain = await get('messages?latest=true&limit=2');
+    expect(latestMain.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(latestMain.body)).toMatchObject({
+      hasOlder: true,
+      items: [{ id: main[3].id }, { id: main[4].id }],
+    });
+    const olderMain = await get(`messages?beforeSeq=${main[3].seq}&limit=2`);
+    expect(olderMain.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(olderMain.body)).toMatchObject({
+      hasOlder: true,
+      items: [{ id: main[1].id }, { id: main[2].id }],
+    });
+    const oldestMain = await get(`messages?beforeSeq=${main[1].seq}&limit=2`);
+    expect(JSON.parse(oldestMain.body)).toMatchObject({ hasOlder: false, items: [{ id: main[0].id }] });
+    const forwardMain = await get(`messages?afterSeq=${main[2].seq}&limit=2`);
+    expect(JSON.parse(forwardMain.body)).toMatchObject({ items: [{ id: main[3].id }, { id: main[4].id }] });
+    expect(JSON.parse(forwardMain.body)).not.toHaveProperty('hasOlder');
+    const anchoredMain = await get(`messages?aroundMessageId=${main[2].id}&limit=2`);
+    expect(JSON.parse(anchoredMain.body)).toMatchObject({
+      hasOlder: true,
+      items: [{ id: main[1].id }, { id: main[2].id }],
+    });
+    expect((await get(`messages?aroundMessageId=${replies[0].id}`)).statusCode).toBe(HTTP_STATUS.NOT_FOUND);
+
+    const latestThread = await get(`thread/${main[0].id}?latest=true&limit=2`);
+    expect(latestThread.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(latestThread.body)).toMatchObject({
+      threadRootId: main[0].id,
+      rootMessage: { id: main[0].id },
+      hasOlder: true,
+      items: [{ id: replies[1].id }, { id: replies[2].id }],
+    });
+    const olderThread = await get(`thread/${main[0].id}?beforeSeq=${replies[1].seq}&limit=2`);
+    expect(JSON.parse(olderThread.body)).toMatchObject({
+      hasOlder: false,
+      items: [{ id: replies[0].id }],
+    });
+    const anchoredThread = await get(`thread/${main[0].id}?aroundMessageId=${replies[1].id}&limit=2`);
+    expect(JSON.parse(anchoredThread.body)).toMatchObject({
+      hasOlder: false,
+      items: [{ id: replies[0].id }, { id: replies[1].id }],
+    });
+
+    expect((await get('messages?latest=true&afterSeq=0')).statusCode).toBe(HTTP_STATUS.UNPROCESSABLE_CONTENT);
+    expect((await get('messages?beforeSeq=0')).statusCode).toBe(HTTP_STATUS.UNPROCESSABLE_CONTENT);
+    expect((await get(`messages?latest=true&aroundMessageId=${main[0].id}`)).statusCode).toBe(HTTP_STATUS.UNPROCESSABLE_CONTENT);
+  });
+
   it('supports pin/unpin and bookmark CRUD', async () => {
     const createConversation = await server.inject({
       method: 'POST',

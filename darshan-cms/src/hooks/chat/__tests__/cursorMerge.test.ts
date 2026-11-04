@@ -3,6 +3,7 @@ import { normalizeCursorParams } from "@/api/domains/chat";
 import type { ChatListMessagesResponse, ChatMessage } from "@/api/types";
 import {
   appendMessageInInfiniteData,
+  appendMessagesInInfiniteData,
   clampChatCursorLimit,
   getLastSeenSeq,
   mergeChatMessages,
@@ -104,6 +105,14 @@ describe("cursor defaults + limit clamping", () => {
     expect(clampChatCursorLimit(undefined)).toBe(50);
     expect(normalizeCursorParams({}).limit).toBe(50);
   });
+
+  test("latest and exclusive older cursors do not mix with forward catch-up", () => {
+    expect(normalizeCursorParams({ latest: true, limit: 20 })).toEqual({ latest: true, limit: 20 });
+    expect(normalizeCursorParams({ beforeSeq: 75, limit: 20 })).toEqual({ beforeSeq: 75, limit: 20 });
+    expect(normalizeCursorParams({ aroundMessageId: "message-id", limit: 20 })).toEqual({ aroundMessageId: "message-id", limit: 20 });
+    expect(() => normalizeCursorParams({ latest: true, afterSeq: 0 })).toThrow();
+    expect(() => normalizeCursorParams({ beforeSeq: 0 })).toThrow();
+  });
 });
 
 describe("reconnect catch-up + ws patch helpers", () => {
@@ -130,6 +139,22 @@ describe("reconnect catch-up + ws patch helpers", () => {
     expect(deleted?.body_text).toBeNull();
     expect(deleted?.attachments).toEqual([]);
     expect(deleted?.reactions).toEqual([]);
+  });
+
+  test("realtime and catch-up append keep older pages and cursor parameters intact", () => {
+    const data: InfiniteData<ChatListMessagesResponse, { latest: true } | { beforeSeq: number }> = {
+      pages: [
+        { items: [makeMessage(51), makeMessage(52)], hasOlder: true },
+        { items: [makeMessage(49), makeMessage(50)], hasOlder: true },
+      ],
+      pageParams: [{ latest: true }, { beforeSeq: 51 }],
+    };
+    const afterCatchUp = appendMessagesInInfiniteData(data, [makeMessage(53), makeMessage(54)]);
+    expect(afterCatchUp?.pages.map((page) => page.items.map((message) => message.seq))).toEqual([[51, 52, 53, 54], [49, 50]]);
+    expect(afterCatchUp?.pageParams).toEqual(data.pageParams);
+    const updatedOlder = appendMessageInInfiniteData(afterCatchUp, makeMessage(50, { body_text: "edited old message" }));
+    expect(updatedOlder?.pages[1].items.find((message) => message.seq === 50)?.body_text).toBe("edited old message");
+    expect(updatedOlder?.pages[0].items.map((message) => message.seq)).toEqual([51, 52, 53, 54]);
   });
 
   test("delete mutation patch normalizes partial response into a tombstone", () => {

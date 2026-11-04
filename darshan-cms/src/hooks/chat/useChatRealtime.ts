@@ -19,6 +19,7 @@ import type {
 import { chatQueryKeys } from "@/hooks/chat/useChatQueries";
 import {
   appendMessageInInfiniteData,
+  appendMessagesInInfiniteData,
   flattenMessagePages,
   getLastSeenSeq,
   patchMessageInInfiniteData,
@@ -33,7 +34,11 @@ interface UseChatRealtimeOptions {
   onActiveConversationRejected?: (conversationId: string) => void;
 }
 
-const getLastSeenSeqFromCache = (queryClient: ReturnType<typeof useQueryClient>, conversationId: string) => {
+export const getLastSeenSeqFromCache = (queryClient: ReturnType<typeof useQueryClient>, conversationId: string) => {
+  // The ordinary timeline owns reconnect continuity. A focused deep-link
+  // cache can contain a later isolated message while that timeline has a gap.
+  const timeline = queryClient.getQueryData<InfiniteData<ChatListMessagesResponse>>(chatQueryKeys.messages(conversationId));
+  if (timeline) return getLastSeenSeq(flattenMessagePages(timeline.pages));
   const entries = queryClient.getQueriesData({
     queryKey: ["chat", "messages", conversationId],
   });
@@ -106,6 +111,51 @@ export const useChatRealtime = ({
     const socket = connectChatSocket(authToken);
     if (!socket) return;
     const typingTimeouts = typingTimeoutRef.current;
+    let disposed = false;
+    const activeSyncs = new Map<string, Promise<void>>();
+
+    const syncMainFrom = (conversationId: string, startSeq: number) => {
+      const existing = activeSyncs.get(conversationId);
+      if (existing) return existing;
+      const run = (async () => {
+        let cursor = startSeq;
+        let fetched = 0;
+        let reachedHead = false;
+        for (let pageIndex = 0; pageIndex < 20 && !disposed; pageIndex += 1) {
+          const response = await chatApi.listMessages(conversationId, { afterSeq: cursor, limit: 50 });
+          if (disposed) return;
+          if (response.items.length === 0) {
+            reachedHead = true;
+            break;
+          }
+          const nextSeq = getLastSeenSeq(response.items);
+          if (nextSeq <= cursor) throw new Error("Chat reconnect cursor did not advance.");
+          queryClient.setQueriesData(
+            { queryKey: ["chat", "messages", conversationId] },
+            (current: InfiniteData<ChatListMessagesResponse> | undefined) =>
+              appendMessagesInInfiniteData(current, response.items),
+          );
+          fetched += response.items.length;
+          cursor = nextSeq;
+          if (response.items.length < 50) {
+            reachedHead = true;
+            break;
+          }
+        }
+        if (disposed) return;
+        queryClient.setQueryData(chatQueryKeys.messagesCursor(conversationId), {
+          lastSeenSeq: cursor,
+          lastFetchCount: fetched,
+        });
+        if (!reachedHead) void queryClient.invalidateQueries({ queryKey: chatQueryKeys.messages(conversationId) });
+        void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
+      })();
+      activeSyncs.set(conversationId, run);
+      void run.finally(() => {
+        if (activeSyncs.get(conversationId) === run) activeSyncs.delete(conversationId);
+      }).catch(() => {});
+      return run;
+    };
 
     const subscribe = () => {
       if (subscriptionIds.length === 0) return;
@@ -123,6 +173,16 @@ export const useChatRealtime = ({
       void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
       if (activeConversationId) {
         void queryClient.invalidateQueries({ queryKey: chatQueryKeys.resolveConversation(activeConversationId) });
+        // Socket.IO reports a recovered connection through `connect`; do not
+        // rely on a separate manager-level `reconnect` event reaching Socket.
+        const hasHistory = queryClient.getQueriesData({ queryKey: ["chat", "messages", activeConversationId] })
+          .some(([, value]) => Boolean(value));
+        if (hasHistory) {
+          void syncMainFrom(activeConversationId, getLastSeenSeqFromCache(queryClient, activeConversationId)).catch(() => {
+            if (!disposed) void queryClient.invalidateQueries({ queryKey: chatQueryKeys.messages(activeConversationId) });
+          });
+        }
+        void queryClient.invalidateQueries({ queryKey: ["chat", "thread", activeConversationId] });
       }
       subscribe();
     };
@@ -133,6 +193,13 @@ export const useChatRealtime = ({
       // message, including attachment rows that are absent from the event.
       const inMainTimeline = includeInMainTimeline(payload.message);
       const rootId = payload.message.thread_root_id;
+      const priorMainSeq = inMainTimeline ? getLastSeenSeqFromCache(queryClient, payload.conversationId) : 0;
+      const hasMainCache = Boolean(queryClient.getQueryData(chatQueryKeys.messages(payload.conversationId)));
+      if (inMainTimeline && hasMainCache && payload.message.seq > priorMainSeq + 1) {
+        void syncMainFrom(payload.conversationId, priorMainSeq).catch(() => {
+          if (!disposed) void queryClient.invalidateQueries({ queryKey: chatQueryKeys.messages(payload.conversationId) });
+        });
+      }
       const afterSeq = Math.max(0, (payload.message.seq ?? 1) - 1);
       const loadMessage = inMainTimeline
         ? chatApi.listMessages(payload.conversationId, { afterSeq, limit: 1 })
@@ -141,6 +208,7 @@ export const useChatRealtime = ({
           : null;
       if (!loadMessage) return;
       void loadMessage.then((response) => {
+        if (disposed) return;
         const message = response.items.find((item) => item.id === payload.message.id);
         if (!message) throw new Error('Announced chat message is not available through REST');
         if (inMainTimeline) {
@@ -166,6 +234,7 @@ export const useChatRealtime = ({
         );
         void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
       }).catch(() => {
+        if (disposed) return;
         void queryClient.invalidateQueries({ queryKey: ["chat", "messages", payload.conversationId] });
         if (rootId) void queryClient.invalidateQueries({ queryKey: ["chat", "thread", payload.conversationId, rootId] });
       });
@@ -303,28 +372,10 @@ export const useChatRealtime = ({
       if (!activeConversationId) return;
 
       const lastSeenSeq = getLastSeenSeqFromCache(queryClient, activeConversationId);
-      chatApi
-        .listMessages(activeConversationId, { afterSeq: lastSeenSeq, limit: 50 })
-        .then((response) => {
-          queryClient.setQueriesData(
-            { queryKey: ["chat", "messages", activeConversationId] },
-            (current: InfiniteData<ChatListMessagesResponse> | undefined) => {
-              let next = current;
-              response.items.forEach((message) => {
-                next = appendMessageInInfiniteData(next, message);
-              });
-              return next;
-            },
-          );
-          queryClient.setQueryData(chatQueryKeys.messagesCursor(activeConversationId), {
-            lastSeenSeq: Math.max(lastSeenSeq, ...response.items.map((item) => item.seq)),
-            lastFetchCount: response.items.length,
-          });
-          void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
-        })
-        .catch(() => {
-          void queryClient.invalidateQueries({ queryKey: ["chat", "messages", activeConversationId] });
-        });
+      void syncMainFrom(activeConversationId, lastSeenSeq).catch(() => {
+        if (!disposed) void queryClient.invalidateQueries({ queryKey: chatQueryKeys.messages(activeConversationId) });
+      });
+      void queryClient.invalidateQueries({ queryKey: ["chat", "thread", activeConversationId] });
     };
 
     socket.on("connect", onConnect);
@@ -343,6 +394,7 @@ export const useChatRealtime = ({
     else socket.connect();
 
     return () => {
+      disposed = true;
       clearChatTypingTimeouts(typingTimeouts);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);

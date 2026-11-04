@@ -16,9 +16,39 @@ const rooms = [
   { id: "room-b", type: "GROUP_CLOSED", state: "ACTIVE", title: "Planning room", last_seq: 1, unread_count: 0, viewer_is_member: true, last_message: { id: "root-room-b", seq: 1, body_text: "Welcome to planning" } },
 ];
 
-async function installChatFixture(page: Page, options: { chatAdmin?: boolean; rejectRemoval?: boolean; rootOutsideTimeline?: boolean; rootDeleted?: boolean; threadFailsInitially?: boolean } = {}) {
-  const conversations = rooms.map((room) => ({ ...room, viewer_role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER" }));
+async function installChatFixture(page: Page, options: { chatAdmin?: boolean; rejectRemoval?: boolean; rootOutsideTimeline?: boolean; rootDeleted?: boolean; threadFailsInitially?: boolean; longHistory?: boolean } = {}) {
+  const conversations = rooms.map((room) => ({
+    ...room,
+    last_seq: options.longHistory && room.id === "room-a" ? 240 : room.last_seq,
+    viewer_role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER",
+  }));
   let threadReads = 0;
+  let longMainCount = 120;
+  const longMainMessage = (seq: number) => ({
+    id: seq === 1 ? "root-room-a" : `main-${seq}`, conversation_id: "room-a", seq,
+    sender_id: user.id, body_text: `Main message ${seq}`,
+    created_at: new Date(Date.UTC(2026, 10, 3, 1, 0, seq)).toISOString(), attachments: [], reactions: [],
+  });
+  const longReply = (index: number) => ({
+    id: `reply-${index}`, conversation_id: "room-a", seq: 120 + index,
+    sender_id: user.id, body_text: `Thread reply ${index}`,
+    thread_root_id: "root-room-a", reply_to_message_id: "root-room-a",
+    created_at: new Date(Date.UTC(2026, 10, 3, 2, 0, index)).toISOString(), attachments: [], reactions: [],
+  });
+  const pageHistory = <T extends { seq: number }>(items: T[], requestUrl: URL) => {
+    const limit = Number(requestUrl.searchParams.get("limit") || 50);
+    const beforeSeq = requestUrl.searchParams.get("beforeSeq");
+    const afterSeq = requestUrl.searchParams.get("afterSeq");
+    const aroundMessageId = requestUrl.searchParams.get("aroundMessageId");
+    if (requestUrl.searchParams.get("latest") === "true" || beforeSeq || aroundMessageId) {
+      const anchor = aroundMessageId && items.find((item) => "id" in item && item.id === aroundMessageId);
+      const eligible = beforeSeq
+        ? items.filter((item) => item.seq < Number(beforeSeq))
+        : anchor ? items.filter((item) => item.seq <= anchor.seq) : items;
+      return { items: eligible.slice(-limit), hasOlder: eligible.length > limit };
+    }
+    return { items: items.filter((item) => item.seq > Number(afterSeq || 0)).slice(0, limit) };
+  };
   const members = [
     { user_id: user.id, role: "CHAT_ADMIN", is_system: false, is_active: true, email: user.email, first_name: "Chat", last_name: "Reader" },
     { user_id: "44444444-4444-4444-8444-444444444444", role: "MEMBER", is_system: false, is_active: true, email: "peer@example.invalid", first_name: "Room", last_name: "Peer" },
@@ -38,7 +68,8 @@ async function installChatFixture(page: Page, options: { chatAdmin?: boolean; re
     } }),
   }));
   await page.route("**/api/v1/**", (route) => {
-    const path = new URL(route.request().url()).pathname;
+    const requestUrl = new URL(route.request().url());
+    const path = requestUrl.pathname;
     const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/api/v1/auth/me") return json(user);
     if (path === "/api/v1/auth/authorization") return json(testAuthorization(user, [
@@ -81,6 +112,9 @@ async function installChatFixture(page: Page, options: { chatAdmin?: boolean; re
       return json({ conversation, viewer: { is_member: true, role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER" } });
     }
     const messagesRoom = path.match(/^\/api\/v1\/chat\/conversations\/(room-[ab])\/messages$/)?.[1];
+    if (messagesRoom && options.longHistory && messagesRoom === "room-a") {
+      return json(pageHistory(Array.from({ length: longMainCount }, (_value, index) => longMainMessage(index + 1)), requestUrl));
+    }
     if (messagesRoom) return json({ items: options.rootOutsideTimeline && messagesRoom === "room-a" ? [] : [{
       id: `root-${messagesRoom}`, conversation_id: messagesRoom, seq: 1,
       sender_id: user.id, body_text: `Welcome to ${messagesRoom}`,
@@ -89,6 +123,10 @@ async function installChatFixture(page: Page, options: { chatAdmin?: boolean; re
     if (/\/thread\//.test(path)) {
       threadReads += 1;
       if (options.threadFailsInitially && threadReads <= 2) return json({ error: { code: "TEMPORARY", message: "Thread unavailable" } }, 503);
+      if (options.longHistory) return json({
+        threadRootId: "root-room-a", rootMessage: longMainMessage(1),
+        ...pageHistory(Array.from({ length: 120 }, (_value, index) => longReply(index + 1)), requestUrl),
+      });
       return json({
         threadRootId: "root-room-a",
         rootMessage: options.rootDeleted ? {
@@ -108,6 +146,7 @@ async function installChatFixture(page: Page, options: { chatAdmin?: boolean; re
     if (/\/pins$|\/bookmarks$/.test(path)) return json({ items: [] });
     return json({});
   });
+  return { addMainMessages: (count: number) => { longMainCount += count; } };
 }
 
 test("chat admin reviews members and confirms removal while system and self controls stay protected", async ({ page }, testInfo) => {
@@ -290,6 +329,42 @@ test("a verifying upload survives a chat switch and cannot be sent before it is 
   mediaReady = true;
   await expect(page.getByText("Pending Attachments")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+});
+
+test("long chats and threads open at the latest page, load older, and catch up without duplicates", async ({ page }) => {
+  const fixture = await installChatFixture(page, { longHistory: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/chat/room-a");
+  await expect(page.getByText("Main message 120", { exact: true })).toBeVisible();
+  await expect(page.getByText("Main message 1", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Load earlier messages" }).click();
+  await expect(page.getByText("Main message 70", { exact: true })).toBeVisible();
+  await expect(page.getByText("Main message 70", { exact: true })).toHaveCount(1);
+
+  fixture.addMainMessages(55);
+  await page.getByRole("button", { name: "Check for new messages" }).first().click();
+  await expect(page.getByText("Main message 175", { exact: true })).toBeVisible();
+  await expect(page.getByText("Main message 120", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("Main message 70", { exact: true })).toHaveCount(1);
+
+  await page.goto("/chat/room-a/thread/root-room-a");
+  const thread = page.getByRole("dialog", { name: "Thread" });
+  await expect(thread.getByText("Thread reply 120", { exact: true })).toBeVisible();
+  await expect(thread.getByText("Thread reply 1", { exact: true })).toHaveCount(0);
+  await thread.getByRole("button", { name: "Load earlier thread replies" }).click();
+  await expect(thread.getByText("Thread reply 70", { exact: true })).toBeVisible();
+  await expect(thread.getByText("Thread reply 70", { exact: true })).toHaveCount(1);
+
+  await page.goto("/chat/room-a?focusMessageId=main-4");
+  await expect(page.getByText("Main message 4", { exact: true })).toBeVisible();
+  await expect(page.getByText("Main message 120", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("This message is earlier in the conversation.")).toHaveCount(0);
+
+  await page.goto("/chat/room-a/thread/root-room-a?focusReplyId=reply-4");
+  const focusedThread = page.getByRole("dialog", { name: "Thread" });
+  await expect(focusedThread.getByText("Thread reply 4", { exact: true })).toBeVisible();
+  await expect(focusedThread.getByLabel("Selected thread reply")).toContainText("Thread reply 4");
+  await expect(focusedThread.getByText("Thread reply 120", { exact: true })).toHaveCount(0);
 });
 
 test("an old thread deep link shows its parent even when the main message page omits it", async ({ page }, testInfo) => {

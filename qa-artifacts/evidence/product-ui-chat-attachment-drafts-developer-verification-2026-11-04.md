@@ -18,5 +18,5 @@ An unsent attachment belongs to the conversation where it was selected or upload
 ## Remaining checks
 
 - Run two real signed-in operators with actual MinIO uploads and delayed conversion/verification. Switch chats and phone list while an upload is in flight, then verify one attachment on the intended conversation only. Check revoked membership, browser refresh, network interruption and a failed file with a real backend.
-- Main and thread message history still starts at `afterSeq=0`; long-conversation latest/history pagination is a separate open issue.
+- At the time of this attachment-draft packet, message history started at `afterSeq=0`. The later [chat-history packet](product-ui-chat-history-developer-verification-2026-11-04.md) adds latest/older/anchored pagination; independent matched-service QA remains open.
 - Run independent screen-reader, keyboard, mobile safe-area, Safari/Android, and permissions checks on the frozen candidate.

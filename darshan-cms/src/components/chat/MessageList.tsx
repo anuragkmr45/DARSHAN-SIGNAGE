@@ -20,8 +20,15 @@ interface MessageListProps {
   pendingMessages?: ChatPendingUiMessage[];
   attachmentMediaById?: Record<string, MediaAsset>;
   isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
+  hasOlder?: boolean;
+  isFetchingOlder?: boolean;
+  olderLoadError?: boolean;
+  onFetchOlder?: () => void;
   canFetchNewer?: boolean;
   isFetchingNewer?: boolean;
+  newerLoadError?: boolean;
   isUpToDate?: boolean;
   onFetchNewer?: () => void;
   onRetryPendingMessage?: (localId: string) => void;
@@ -54,8 +61,15 @@ export function MessageList({
   pendingMessages = [],
   attachmentMediaById = {},
   isLoading = false,
+  isError = false,
+  onRetry,
+  hasOlder = false,
+  isFetchingOlder = false,
+  olderLoadError = false,
+  onFetchOlder,
   canFetchNewer = true,
   isFetchingNewer = false,
+  newerLoadError = false,
   isUpToDate = false,
   onFetchNewer,
   onRetryPendingMessage,
@@ -127,22 +141,35 @@ export function MessageList({
     return <div className="p-4 text-sm text-muted-foreground">Loading messages...</div>;
   }
 
+  if (isError && sortedMessages.length === 0) {
+    return (
+      <div role="alert" className="m-3 space-y-2 rounded-lg border p-3 text-sm">
+        <p>Couldn’t load messages. Your draft is still here.</p>
+        <Button size="sm" variant="outline" onClick={onRetry}>Retry messages</Button>
+      </div>
+    );
+  }
+
   if (visibleMessages.length === 0 && sortedPendingMessages.length === 0) {
     return <div className="p-4 text-sm text-muted-foreground">No messages yet.</div>;
   }
 
   return (
     <div className="space-y-3 p-3">
-      {(hasLocalOlder || canFetchNewer) && (
+      {(hasLocalOlder || hasOlder || canFetchNewer) && (
         <div className="flex flex-wrap items-center justify-center gap-2">
-          {hasLocalOlder && (
+          {(hasLocalOlder || hasOlder) && (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setVisibleCount((prev) => prev + WINDOW_SIZE)}
-              aria-label="Show more loaded messages"
+              onClick={() => {
+                setVisibleCount((prev) => prev + WINDOW_SIZE);
+                if (!hasLocalOlder) onFetchOlder?.();
+              }}
+              disabled={isFetchingOlder}
+              aria-label="Load earlier messages"
             >
-              Show more loaded messages
+              {isFetchingOlder ? "Loading earlier..." : olderLoadError ? "Retry earlier messages" : "Load earlier messages"}
             </Button>
           )}
           <Button
@@ -155,16 +182,18 @@ export function MessageList({
             {isFetchingNewer ? "Checking..." : "Check for new messages"}
           </Button>
           {isUpToDate && <span className="text-xs text-muted-foreground">Up to date</span>}
+          {newerLoadError && <span role="alert" className="text-xs text-destructive">Couldn’t check for new messages. Try again.</span>}
         </div>
       )}
 
       {focusMessageId && focusNotLoaded && !focusCalloutDismissed && (
         <div className="rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-xs text-primary">
-          <p>Message not loaded. Older-pagination support is required to fetch earlier messages.</p>
+          <p>{hasOlder || hasLocalOlder ? "This message is earlier in the conversation." : "This message is not available in the loaded conversation."}</p>
           <div className="mt-2 flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={onFetchNewer} aria-label="Check for new messages">
-              Check for new messages
-            </Button>
+            {(hasOlder || hasLocalOlder) && <Button size="sm" variant="outline" onClick={() => {
+              setVisibleCount((prev) => prev + WINDOW_SIZE);
+              if (!hasLocalOlder) onFetchOlder?.();
+            }}>Load earlier messages</Button>}
             <Button size="sm" variant="ghost" onClick={() => setFocusCalloutDismissed(true)} aria-label="Dismiss focus warning">
               Dismiss
             </Button>

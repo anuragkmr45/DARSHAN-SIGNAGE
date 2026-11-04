@@ -95,7 +95,7 @@ export default function Notifications() {
 
     const conversationPath = `/chat/${encodeURIComponent(data.conversationId)}`;
     const target = data.threadRootId
-      ? `${conversationPath}/thread/${encodeURIComponent(data.threadRootId)}`
+      ? `${conversationPath}/thread/${encodeURIComponent(data.threadRootId)}${data.messageId ? `?focusReplyId=${encodeURIComponent(data.messageId)}` : ""}`
       : data.messageId
       ? `${conversationPath}?focusMessageId=${encodeURIComponent(data.messageId)}`
       : conversationPath;

@@ -5,6 +5,8 @@ import {
   gt,
   inArray,
   isNull,
+  lt,
+  lte,
   ne,
   or,
   sql,
@@ -424,16 +426,21 @@ export class ChatRepository {
 
   async listMessages(
     conversationId: string,
-    options: { afterSeq?: number; limit?: number; threadRootId?: string }
+    options: { afterSeq?: number; beforeSeq?: number; latest?: boolean; throughSeq?: number; limit?: number; threadRootId?: string }
   ) {
     const db = getDatabase();
     const afterSeq = options.afterSeq ?? 0;
     const limit = options.limit ?? 50;
+    const newestFirst = options.latest === true || options.beforeSeq !== undefined || options.throughSeq !== undefined;
 
-    const conditions = [
-      eq(schema.chatMessages.conversation_id, conversationId),
-      gt(schema.chatMessages.seq, afterSeq),
-    ];
+    const conditions = [eq(schema.chatMessages.conversation_id, conversationId)];
+    if (options.beforeSeq !== undefined) {
+      conditions.push(lt(schema.chatMessages.seq, options.beforeSeq));
+    } else if (options.throughSeq !== undefined) {
+      conditions.push(lte(schema.chatMessages.seq, options.throughSeq));
+    } else if (!newestFirst) {
+      conditions.push(gt(schema.chatMessages.seq, afterSeq));
+    }
     if (options.threadRootId) {
       conditions.push(eq(schema.chatMessages.thread_root_id, options.threadRootId));
     } else {
@@ -445,12 +452,14 @@ export class ChatRepository {
       );
     }
 
-    const items = await db
+    const rows = await db
       .select()
       .from(schema.chatMessages)
       .where(and(...conditions))
-      .orderBy(schema.chatMessages.seq)
-      .limit(limit);
+      .orderBy(newestFirst ? desc(schema.chatMessages.seq) : schema.chatMessages.seq)
+      .limit(newestFirst ? limit + 1 : limit);
+    const hasOlder = newestFirst ? rows.length > limit : undefined;
+    const items = newestFirst ? rows.slice(0, limit).reverse() : rows;
 
     const messageIds = items.map((i) => i.id);
     const attachments = messageIds.length
@@ -480,7 +489,7 @@ export class ChatRepository {
       reactMap.set(reaction.message_id, list);
     }
 
-    return items.map((item) => {
+    const detailedItems = items.map((item) => {
       if (item.deleted_at) {
         return {
           ...item,
@@ -497,6 +506,7 @@ export class ChatRepository {
         reactions: reactMap.get(item.id) || [],
       };
     });
+    return hasOlder === undefined ? { items: detailedItems } : { items: detailedItems, hasOlder };
   }
 
   async sendMessageTx(input: {

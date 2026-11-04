@@ -93,7 +93,7 @@ test("notification totals, older pages, and non-chat read action use server data
   await page.getByRole("button", { name: "Mark all read" }).click();
   await expect(page.getByRole("tab", { name: "Unread (0)" })).toBeVisible();
   await page.getByRole("article").filter({ hasText: "New thread reply" }).getByRole("button", { name: "Open conversation" }).click();
-  await expect(page).toHaveURL(/\/chat\/conv-thread\/thread\/root-55/);
+  await expect(page).toHaveURL(/\/chat\/conv-thread\/thread\/root-55\?focusReplyId=reply-55$/);
 });
 
 test("failed list remains an error until Retry succeeds", async ({ page, context }) => {

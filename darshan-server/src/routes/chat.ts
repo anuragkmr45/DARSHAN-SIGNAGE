@@ -60,9 +60,15 @@ const createConversationSchema = z.object({
 });
 
 const listMessagesQuerySchema = z.object({
-  afterSeq: z.coerce.number().int().min(0).default(0),
+  afterSeq: z.coerce.number().int().min(0).optional(),
+  beforeSeq: z.coerce.number().int().positive().optional(),
+  latest: z.literal('true').optional(),
+  aroundMessageId: z.string().uuid().optional(),
   limit: z.coerce.number().int().positive().max(100).default(50),
-});
+}).refine(
+  (query) => [query.afterSeq !== undefined, query.beforeSeq !== undefined, Boolean(query.latest), Boolean(query.aroundMessageId)].filter(Boolean).length <= 1,
+  { message: 'Choose only one message cursor: afterSeq, beforeSeq, latest, or aroundMessageId' }
+);
 
 const sendMessageSchema = z
   .object({
@@ -614,11 +620,23 @@ export async function chatRoutes(fastify: FastifyInstance) {
         await getConversationForAccess(conversationId, payload.sub, payload.role);
         const moderation = await chatRepo.getModeration(conversationId, payload.sub);
         assertNotBanned(moderation);
-        const items = await chatRepo.listMessages(conversationId, {
+        let throughSeq: number | undefined;
+        if (query.aroundMessageId) {
+          const anchor = await chatRepo.getMessageById(query.aroundMessageId);
+          if (!anchor || anchor.conversation_id !== conversationId ||
+            (anchor.thread_root_id && !anchor.also_to_channel)) {
+            throw AppError.notFound('Message not found in this conversation');
+          }
+          throughSeq = anchor.seq;
+        }
+        const result = await chatRepo.listMessages(conversationId, {
           afterSeq: query.afterSeq,
+          beforeSeq: query.beforeSeq,
+          latest: query.latest === 'true',
+          throughSeq,
           limit: query.limit,
         });
-        return reply.send({ items });
+        return reply.send(result);
       } catch (error) {
         logger.error(error, 'List messages error');
         return respondWithError(reply, error);
@@ -647,12 +665,23 @@ export async function chatRoutes(fastify: FastifyInstance) {
         if (!rootMessage || rootMessage.conversation_id !== conversationId) {
           throw AppError.notFound('Thread root message not found');
         }
-        const items = await chatRepo.listMessages(conversationId, {
+        let throughSeq: number | undefined;
+        if (query.aroundMessageId) {
+          const anchor = await chatRepo.getMessageById(query.aroundMessageId);
+          if (!anchor || anchor.conversation_id !== conversationId || anchor.thread_root_id !== threadRootId) {
+            throw AppError.notFound('Reply not found in this thread');
+          }
+          throughSeq = anchor.seq;
+        }
+        const result = await chatRepo.listMessages(conversationId, {
           afterSeq: query.afterSeq,
+          beforeSeq: query.beforeSeq,
+          latest: query.latest === 'true',
+          throughSeq,
           limit: query.limit,
           threadRootId,
         });
-        return reply.send({ items, threadRootId, rootMessage });
+        return reply.send({ ...result, threadRootId, rootMessage });
       } catch (error) {
         logger.error(error, 'List thread error');
         return respondWithError(reply, error);

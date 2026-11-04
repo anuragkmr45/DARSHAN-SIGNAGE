@@ -69,6 +69,11 @@ export const getLastSeenSeq = (messages: ChatMessage[]) => {
   return messages.reduce((max, message) => (message.seq > max ? message.seq : max), 0);
 };
 
+export const getFirstSeenSeq = (messages: ChatMessage[]) => {
+  if (messages.length === 0) return 0;
+  return messages.reduce((min, message) => (message.seq < min ? message.seq : min), messages[0].seq);
+};
+
 const patchMessageList = (
   list: ChatMessage[],
   messageId: string,
@@ -90,24 +95,30 @@ export const patchMessageInInfiniteData = (
   };
 };
 
+export const appendMessagesInInfiniteData = <T extends { items: ChatMessage[] }>(
+  data: InfiniteData<T> | undefined,
+  incoming: ChatMessage[],
+): InfiniteData<T> | undefined => {
+  if (!data?.pages.length || incoming.length === 0) return data;
+  const pages = [...data.pages];
+  for (const message of incoming) {
+    let found = false;
+    pages.forEach((page, index) => {
+      if (!page.items.some((item) => item.id === message.id)) return;
+      found = true;
+      pages[index] = { ...page, items: mergeChatMessages(page.items, [message]) };
+    });
+    if (!found) {
+      pages[0] = { ...pages[0], items: mergeChatMessages(pages[0].items, [message]) };
+    }
+  }
+  return { ...data, pages };
+};
+
 export const appendMessageInInfiniteData = <T extends { items: ChatMessage[] }>(
   data: InfiniteData<T> | undefined,
   message: ChatMessage,
-): InfiniteData<T> | undefined => {
-  if (!data) return data;
-
-  const existing = flattenMessagePages(data.pages as Array<{ items: ChatMessage[] }>);
-  const merged = mergeChatMessages(existing, [message]);
-
-  const sourcePage = data.pages[data.pages.length - 1] ?? data.pages[0];
-  if (!sourcePage) return data;
-
-  return {
-    ...data,
-    pages: [{ ...sourcePage, items: merged }],
-    pageParams: [data.pageParams[0] ?? 0],
-  };
-};
+): InfiniteData<T> | undefined => appendMessagesInInfiniteData(data, [message]);
 
 export const tombstonePatch = (deletedAt?: string): Partial<ChatMessage> => ({
   deleted_at: deletedAt ?? new Date().toISOString(),
