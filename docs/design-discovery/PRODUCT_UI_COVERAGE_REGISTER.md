@@ -57,7 +57,7 @@ This is the first individual-control pass. It follows `Dashboard.tsx` into its f
 
 | ID | Control or state | Permission and data source | Expected side effect | Responsive treatment and evidence |
 | --- | --- | --- | --- | --- |
-| D01 | New Request | Dashboard route; Schedule route then checks its own gate. | Navigate to `/schedule/new`. | Visible at 390/820/1440; Dashboard browser. |
+| D01 | New Request | Dashboard route; complete `canCreateScheduleFlow` grant set shared with Schedule Queue and creator. | Navigate to `/schedule/new` only for an actor able to complete the wizard. | Visible for a creator at 390/820/1440; hidden for a Dashboard-only reader in browser regression. |
 | D02 | Schedule Report | Dashboard route; `reportsApi.getScheduleActivity`. | Open report dialog and fetch selected window. | Wraps beside New Request on phone; Dashboard browser. |
 | D03 | Total Screens summary | Dashboard route; site-wide Metrics API, then record-scoped Screens overview API. | Open a dialog containing only readable Screens; explain why its rows may be fewer than the KPI. | One of four segmented controls; fixture browser and scoped route test. |
 | D04 | Online Screens summary | Dashboard route; site-wide Metrics API, then record-scoped Screens overview/realtime hints. | Open Online Screens the actor may read; explain site-wide KPI distinction. | Same segmented control; fixture browser and scoped route test. |

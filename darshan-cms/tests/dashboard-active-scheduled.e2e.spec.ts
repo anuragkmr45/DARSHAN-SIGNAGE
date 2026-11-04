@@ -351,6 +351,14 @@ const installApiMocks = async (page: Page, overrides?: {
 };
 
 test.describe("Dashboard active scheduled modal", () => {
+  test("hides New Request for a Dashboard-only reader", async ({ page }) => {
+    await installApiMocks(page, { capabilities: [{ action: "read", subject: "Dashboard" }] });
+    await login(page);
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New Request" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Schedule Report" })).toBeVisible();
+  });
+
   test("keeps the fleet summary and publishing action usable at desktop, tablet and phone widths", async ({ page }, testInfo) => {
     await installApiMocks(page);
     await login(page);

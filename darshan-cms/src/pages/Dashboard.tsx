@@ -43,6 +43,7 @@ import { getMachineStatusTone, getServiceStatusTone } from "@/lib/observability"
 import { resolveMediaDisplayName } from "@/lib/media";
 import { useGrafanaAvailability } from "@/hooks/useGrafanaAvailability";
 import { useAuthorization } from "@/hooks/useAuthorization";
+import { canCreateScheduleFlow } from "@/lib/scheduleAccess";
 
 const formatBytes = (bytes?: number | null) => {
   if (bytes === undefined || bytes === null) return "—";
@@ -91,6 +92,7 @@ export default function Dashboard() {
   const user = useAppSelector((state) => state.auth.user);
   const { can } = useAuthorization();
   const canReadMedia = can("read", "Media");
+  const canCreateRequest = canCreateScheduleFlow(can);
   const isAuthenticated = Boolean(authToken || user);
 
   const {
@@ -531,9 +533,9 @@ export default function Dashboard() {
           <Button variant="outline" onClick={() => setScheduleReportOpen(true)}>
             <Calendar className="mr-2 h-4 w-4" /> Schedule Report
           </Button>
-          <Button onClick={() => navigate("/schedule/new")}>
+          {canCreateRequest && <Button onClick={() => navigate("/schedule/new")}>
             <Plus className="mr-2 h-4 w-4" /> New Request
-          </Button>
+          </Button>}
         </div>
       </header>
 
