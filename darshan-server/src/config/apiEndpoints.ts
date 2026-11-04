@@ -245,6 +245,7 @@ export const apiEndpoints = {
     branding: withBase('/settings/branding'),
     security: withBase('/settings/security'),
     appearance: withBase('/settings/appearance'),
+    publicAppearance: withBase('/settings/public-appearance'),
     backups: withBase('/settings/backups'),
     backupById: withBase('/settings/backups/:id'),
     backupRun: withBase('/settings/backups/run'),

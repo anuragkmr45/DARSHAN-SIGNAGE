@@ -1,3 +1,4 @@
+import { SiteBrand } from "@/components/appearance/SiteBrand";
 import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Eye, EyeOff, Monitor, Radio } from "lucide-react";
@@ -78,8 +79,7 @@ const Auth = () => {
     <div className="min-h-svh bg-background text-foreground">
       <header className="border-b border-border/70">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-4 sm:px-8">
-          <img src="/darshan-mark.svg" alt="" className="h-9 w-9" />
-          <span className="text-sm font-semibold tracking-wide">DARSHAN</span>
+          <SiteBrand />
           <span className="ml-auto text-xs text-muted-foreground">Display operations</span>
         </div>
       </header>

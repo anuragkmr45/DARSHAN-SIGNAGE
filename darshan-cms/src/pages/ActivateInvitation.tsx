@@ -1,3 +1,4 @@
+import { SiteBrand } from "@/components/appearance/SiteBrand";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2 } from "lucide-react";
@@ -49,7 +50,7 @@ export default function ActivateInvitation() {
   };
 
   return <div className="min-h-svh bg-background text-foreground">
-    <header className="border-b border-border/70"><div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-4 sm:px-8"><img src="/darshan-mark.svg" alt="" className="h-9 w-9" /><span className="text-sm font-semibold tracking-wide">DARSHAN</span><span className="ml-auto text-xs text-muted-foreground">Display operations</span></div></header>
+    <header className="border-b border-border/70"><div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-4 sm:px-8"><SiteBrand /><span className="ml-auto text-xs text-muted-foreground">Display operations</span></div></header>
     <main className="mx-auto flex min-h-[calc(100svh-74px)] max-w-lg items-center px-5 py-10 sm:px-8"><div className="w-full space-y-6">
       {complete ? <section className="rounded-xl border bg-card p-6 shadow-sm sm:p-8"><CheckCircle2 aria-hidden="true" className="h-7 w-7 text-emerald-600" /><h1 className="mt-4 text-2xl font-semibold">Account activated</h1><p className="mt-2 text-sm text-muted-foreground">Your password is ready. Sign in with the email address used for the invitation.</p><Button asChild className="mt-6 w-full"><Link to="/login">Go to Sign In</Link></Button></section> : <section className="rounded-xl border bg-card p-6 shadow-sm sm:p-8"><h1 className="text-2xl font-semibold">Activate your account</h1><p className="mt-2 text-sm text-muted-foreground">Enter the invitation code provided by your site administrator, then choose your password.</p>
         <form className="mt-6 space-y-4" onSubmit={submit} onChange={() => setError(null)}>

@@ -349,6 +349,37 @@ export async function settingsRoutes(fastify: FastifyInstance) {
   };
 
   fastify.get(
+    apiEndpoints.settings.publicAppearance,
+    {
+      schema: {
+        description: 'Public site appearance and approved branding',
+        tags: ['Settings'],
+      },
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const [appearance, branding] = await Promise.all([
+          getSettingsSection(APPEARANCE_SETTINGS_KEY),
+          getSettingsSection(BRANDING_SETTINGS_KEY),
+        ]);
+        const publicBranding = await serializeBranding(branding);
+        reply.header('Cache-Control', 'no-store');
+        return reply.send({
+          theme_mode: appearance.theme_mode,
+          accent_preset: appearance.accent_preset,
+          app_name: publicBranding.app_name,
+          logo_url: publicBranding.logo_url,
+          icon_url: publicBranding.icon_url,
+          favicon_url: publicBranding.favicon_url,
+        });
+      } catch (error) {
+        logger.error(error, 'Get public appearance error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
+  fastify.get(
     apiEndpoints.settings.list,
     {
       schema: {

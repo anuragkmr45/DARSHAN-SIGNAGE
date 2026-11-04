@@ -4,6 +4,7 @@ import { PersistGate } from "redux-persist/integration/react";
 import App from "./App.tsx";
 import { store, persistor } from "./store/store";
 import { loadCmsRuntimeConfig } from "./config/runtimeConfig";
+import { applyInitialPublicAppearance, loadPublicAppearance, type PublicAppearance } from "./config/publicAppearance";
 import "./index.css";
 
 const PRELOAD_RETRY_KEY = "darshan:cms:preload-retry";
@@ -38,18 +39,22 @@ window.addEventListener("vite:preloadError", (event) => {
   }
 });
 
-const renderApp = () => {
+const renderApp = (initialAppearance: PublicAppearance) => {
   createRoot(document.getElementById("root")!).render(
     <Provider store={store}>
       <PersistGate loading={null} persistor={persistor}>
-        <App />
+        <App initialAppearance={initialAppearance} />
       </PersistGate>
     </Provider>,
   );
 };
 
 loadCmsRuntimeConfig()
-  .then(renderApp)
+  .then(async () => {
+    const appearance = await loadPublicAppearance();
+    applyInitialPublicAppearance(appearance);
+    renderApp(appearance);
+  })
   .catch((error) => {
     const message = error instanceof Error ? error.message : "Unknown runtime config error";
     console.error("CMS runtime config failed to load", { message });

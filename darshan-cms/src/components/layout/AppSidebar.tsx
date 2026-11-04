@@ -13,7 +13,7 @@ import {
   Radio,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -141,6 +141,7 @@ const navSections: NavSection[] = [
 
 export function AppSidebar() {
   const { state } = useSidebar();
+  const location = useLocation();
   const isCollapsed = state === "collapsed";
   const { can, isLoading: isAuthzLoading } = useAuthorization();
   const user = useAppSelector((appState) => appState.auth.user);
@@ -175,21 +176,15 @@ export function AppSidebar() {
         <div
           className={`mx-2 mt-2 flex items-center border-b border-sidebar-border px-2 py-3 sm:px-3 ${isCollapsed ? "justify-center" : "gap-3"}`}
         >
-          {branding?.logo_url ? (
-            <img
-              src={branding.logo_url}
-              alt={branding.app_name}
-              className="h-8 w-8 object-contain"
-            />
-          ) : (
-            <img src="/darshan-mark.svg" alt="" className="h-8 w-8" />
-          )}
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white p-1">
+            <img src={branding?.logo_url || "/darshan-mark.svg"} alt="" className="h-full w-full object-contain" />
+          </span>
           {!isCollapsed && (
             <div className="flex min-w-0 flex-col">
               <span className="truncate text-sm font-semibold text-sidebar-foreground">
                 {branding?.app_name ?? "DARSHAN"}
               </span>
-              <span className="truncate text-xs text-sidebar-foreground/60">{user?.role ?? "User"}</span>
+              <span className="truncate text-xs text-[hsl(var(--sidebar-muted))]">{user?.role ?? "User"}</span>
             </div>
           )}
         </div>
@@ -197,44 +192,40 @@ export function AppSidebar() {
         {visibleNavSections.map((section) => (
           <SidebarGroup key={section.label} className={cn(isCollapsed && "px-2")}>
             {!isCollapsed ? (
-              <SidebarGroupLabel className="text-[0.68rem] font-medium text-sidebar-foreground/60">
+              <SidebarGroupLabel className="text-xs font-medium text-[hsl(var(--sidebar-muted))]">
                 {section.label}
               </SidebarGroupLabel>
             ) : null}
             <SidebarGroupContent>
               <SidebarMenu className="space-y-1">
-                {section.items.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild tooltip={item.title}>
+                {section.items.map((item) => {
+                  const isActive = location.pathname === item.url
+                    || location.pathname.startsWith(`${item.url}/`)
+                    || (item.url === "/chat" && location.pathname.startsWith("/conversations"));
+                  return <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild tooltip={item.title} isActive={isActive}>
                       <NavLink
                         to={item.url}
                         end={item.url === "/"}
-                        className={({ isActive }) =>
-                          cn(
-                            "group relative flex min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150",
-                            isActive
-                              ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                              : "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
-                          )
-                        }
-                      >
-                        {({ isActive }) => (
-                          <>
-                            <item.icon
-                              className={cn(
-                                "h-4 w-4 shrink-0 transition-colors",
-                                isActive
-                                  ? "text-sidebar-primary"
-                                  : "text-sidebar-foreground/70",
-                              )}
-                            />
-                            <span className="truncate">{item.title}</span>
-                          </>
+                        className={cn(
+                          "group relative flex min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors duration-150",
+                          isActive
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                            : "text-[hsl(var(--sidebar-muted))] hover:!bg-[hsl(var(--sidebar-raised))] hover:!text-sidebar-foreground",
                         )}
+                      >
+                        <item.icon
+                          className={cn(
+                            "h-4 w-4 shrink-0 transition-colors",
+                            isActive ? "text-sidebar-primary" : "text-[hsl(var(--sidebar-muted))]",
+                          )}
+                          aria-hidden="true"
+                        />
+                        <span className="truncate">{item.title}</span>
                       </NavLink>
                     </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                  </SidebarMenuItem>;
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

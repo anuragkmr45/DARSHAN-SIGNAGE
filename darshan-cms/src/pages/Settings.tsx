@@ -79,7 +79,7 @@ const sidebarModes = [
 const accentPresets = [
   { value: "crimson", label: "Crimson" },
   { value: "blue", label: "Blue" },
-  { value: "emerald", label: "Emerald" },
+  { value: "emerald", label: "Forest" },
   { value: "amber", label: "Amber" },
   { value: "slate", label: "Slate" },
 ] as const;
@@ -325,7 +325,7 @@ const Settings = () => {
   });
   const [appearance, setAppearance] = useState({
     theme_mode: "light" as const,
-    accent_preset: "crimson" as const,
+    accent_preset: "emerald" as const,
     sidebar_mode: "expanded" as const,
   });
   const [backups, setBackups] = useState<BackupSettings>({

@@ -5,6 +5,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, Outlet, RouterProvider } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SiteAppearanceProvider } from "@/components/appearance/SiteAppearanceProvider";
+import type { PublicAppearance } from "@/config/publicAppearance";
 import { GlobalLoader } from "@/components/common/GlobalLoader";
 import { ProductionSecurityBoundary } from "@/components/security/ProductionSecurityBoundary";
 import { AuthSessionBootstrap } from "@/components/auth/AuthSessionBootstrap";
@@ -56,7 +58,8 @@ const router = createBrowserRouter([
 
 const AppRoutes = () => <RouterProvider router={router} />;
 
-const App = () => (
+const App = ({ initialAppearance }: { initialAppearance: PublicAppearance }) => (
+  <SiteAppearanceProvider initialAppearance={initialAppearance}>
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <TooltipProvider>
@@ -70,6 +73,7 @@ const App = () => (
       </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>
+  </SiteAppearanceProvider>
 );
 
 export default App;

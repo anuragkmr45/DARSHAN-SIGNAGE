@@ -57,6 +57,22 @@ describe('Settings routes - dimension-wise default media', () => {
     await closeTestServer(server);
   });
 
+  it('serves only public appearance and branding fields without an operator session', async () => {
+    const response = await server.inject({ method: 'GET', url: '/api/v1/settings/public-appearance' });
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    expect(response.headers['cache-control']).toBe('no-store');
+    const body = JSON.parse(response.body);
+    expect(Object.keys(body).sort()).toEqual([
+      'accent_preset', 'app_name', 'favicon_url', 'icon_url', 'logo_url', 'theme_mode',
+    ]);
+    expect(['light', 'dark', 'system']).toContain(body.theme_mode);
+    expect(['crimson', 'blue', 'emerald', 'amber', 'slate']).toContain(body.accent_preset);
+    expect(typeof body.app_name).toBe('string');
+
+    const privateResponse = await server.inject({ method: 'GET', url: '/api/v1/settings/appearance' });
+    expect(privateResponse.statusCode).toBe(HTTP_STATUS.UNAUTHORIZED);
+  });
+
   it('stores and returns default media variants with embedded media details', async () => {
     const db = getDatabase();
     const globalMediaId = randomUUID();

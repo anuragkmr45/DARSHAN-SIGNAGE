@@ -1,3 +1,4 @@
+import { SiteBrand } from "@/components/appearance/SiteBrand";
 import { ArrowRight, CalendarDays, Monitor, Radio } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,7 @@ const Home = () => {
     <div className="min-h-svh bg-background text-foreground">
       <header className="border-b border-border/70">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-4 sm:px-8">
-          <img src="/darshan-mark.svg" alt="" className="h-9 w-9" />
-          <span className="text-sm font-semibold tracking-wide">DARSHAN</span>
+          <SiteBrand />
           <span className="ml-auto text-xs text-muted-foreground">Display operations</span>
         </div>
       </header>

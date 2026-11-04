@@ -40,7 +40,7 @@ export const securitySettingsSchema = z.object({
 
 export const appearanceSettingsSchema = z.object({
   theme_mode: z.enum(['light', 'dark', 'system']).default('light'),
-  accent_preset: z.enum(['crimson', 'blue', 'emerald', 'amber', 'slate']).default('crimson'),
+  accent_preset: z.enum(['crimson', 'blue', 'emerald', 'amber', 'slate']).default('emerald'),
   sidebar_mode: z.enum(['expanded', 'collapsed', 'auto']).default('expanded'),
 });
 
