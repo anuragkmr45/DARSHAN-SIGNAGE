@@ -6,6 +6,7 @@ import {
   getScreenHeartbeatIndicator,
   getScreenPlaybackHeadline,
   getScreenPlaybackSourceLabel,
+  getDashboardPlaybackSourceLabel,
   getScreenIndicatorBadgeClassName,
   maskCertificateSerial,
   matchesScreenGroupSearch,
@@ -68,6 +69,8 @@ describe("screen helpers", () => {
     };
 
     expect(getScreenPlaybackSourceLabel(screen.playback?.source, { hasPublish: true })).toBe("Standby");
+    expect(getDashboardPlaybackSourceLabel(screen.playback?.source)).toBe("No playback reported");
+    expect(getDashboardPlaybackSourceLabel("HEARTBEAT")).toBe("Player report");
     expect(getScreenPlaybackHeadline(screen)).toBe("Schedule: Morning Loop");
     expect(getScreenPlaybackHeadline({ ...screen, active_items: [], upcoming_items: [{ id: "item-next" }] as ScreenOverviewItem["upcoming_items"] })).toBe("Upcoming: Morning Loop");
     expect(getScreenPlaybackHeadline({ ...screen, active_items: [], upcoming_items: [] })).toBe("No active playback");

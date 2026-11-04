@@ -54,6 +54,20 @@ export function getScreenPlaybackSourceLabel(
   }
 }
 
+export function getDashboardPlaybackSourceLabel(source?: string | null): string {
+  switch (source) {
+    case "HEARTBEAT": return "Player report";
+    case "SCHEDULE": return "Schedule";
+    case "EMERGENCY": return "Emergency";
+    case "DEFAULT": return "Default";
+    case "UNKNOWN":
+    case undefined:
+    case null:
+    case "": return "No playback reported";
+    default: return humanizeEnumValue(source);
+  }
+}
+
 export function getScreenPlaybackHeadline(
   screen: Pick<ScreenOverviewItem, "status" | "publish" | "playback" | "active_items" | "upcoming_items">,
 ): string {

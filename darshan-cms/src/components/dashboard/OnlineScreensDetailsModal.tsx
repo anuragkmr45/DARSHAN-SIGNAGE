@@ -19,6 +19,7 @@ import type { ScreenOverviewItem, ScreenSnapshot, ScreenStateUpdateEvent, Screen
 import { useScreensRealtime } from "@/hooks/screens/useScreensRealtime";
 import { ScreenDetailsModal } from "@/components/screens/ScreenDetailsModal";
 import { LiveScreenMirror } from "@/components/dashboard/LiveScreenMirror";
+import { getDashboardPlaybackSourceLabel } from "@/lib/screens";
 
 interface OnlineScreensDetailsModalProps {
   open: boolean;
@@ -30,21 +31,6 @@ const formatRelativeTime = (value?: string | null) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
   return formatDistanceToNow(date, { addSuffix: true });
-};
-
-const sourceLabel = (source?: string | null) => {
-  switch (source) {
-    case "HEARTBEAT":
-      return "Heartbeat";
-    case "SCHEDULE":
-      return "Schedule";
-    case "EMERGENCY":
-      return "Emergency";
-    case "DEFAULT":
-      return "Default";
-    default:
-      return source || "Unknown";
-  }
 };
 
 function PreviewCard({
@@ -86,7 +72,7 @@ function PreviewCard({
         />
 
         <div className="absolute left-3 top-3 flex gap-2">
-          <Badge variant="secondary">{sourceLabel(screen.playback?.source)}</Badge>
+          <Badge variant="secondary">{getDashboardPlaybackSourceLabel(screen.playback?.source)}</Badge>
           {preview?.stale ? <Badge variant="destructive">Stale preview</Badge> : null}
         </div>
       </div>

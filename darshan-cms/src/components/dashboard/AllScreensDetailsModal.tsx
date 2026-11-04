@@ -18,6 +18,7 @@ import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { screensApi } from "@/api/domains/screens";
 import type { ScreenOverviewItem } from "@/api/types";
+import { getDashboardPlaybackSourceLabel } from "@/lib/screens";
 
 interface AllScreensDetailsModalProps {
   open: boolean;
@@ -31,21 +32,6 @@ const formatRelativeTime = (value?: string | null) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
   return formatDistanceToNow(date, { addSuffix: true });
-};
-
-const sourceLabel = (source?: string | null) => {
-  switch (source) {
-    case "HEARTBEAT":
-      return "Heartbeat";
-    case "SCHEDULE":
-      return "Schedule";
-    case "EMERGENCY":
-      return "Emergency";
-    case "DEFAULT":
-      return "Default";
-    default:
-      return source || "Unknown";
-  }
 };
 
 const toCssAspectRatio = (value?: string | null) => {
@@ -64,11 +50,20 @@ function ScreenSummaryCard({
     screen.playback?.current_media?.name ||
     screen.playback?.current_media?.filename ||
     (screen.playback?.current_media_id ? `Media ${screen.playback.current_media_id}` : "No active media");
-  const currentScheduleName =
-    screen.publish?.schedule_name ||
-    screen.current_schedule_id ||
-    screen.playback?.current_schedule_id ||
-    "No active schedule";
+  const publishedScheduleName = screen.publish?.schedule_name || "Unnamed schedule";
+  const scheduleContext = screen.active_items?.length
+    ? `Current schedule: ${publishedScheduleName}`
+    : screen.upcoming_items?.length
+      ? `Upcoming schedule: ${publishedScheduleName}`
+      : screen.publish
+        ? `Latest published schedule: ${publishedScheduleName}`
+        : "No current or upcoming schedule";
+  const hasBooking = Boolean(screen.active_items?.length || screen.upcoming_items?.length);
+  const bookingLabel = !hasBooking
+    ? "No current or upcoming booking"
+    : screen.booked_until
+      ? `Scheduled through ${formatRelativeTime(screen.booked_until)}`
+      : "Schedule end unavailable";
 
   return (
     <Card className="overflow-hidden" data-testid="all-screen-card">
@@ -93,8 +88,8 @@ function ScreenSummaryCard({
 
         <div className="absolute left-3 top-3 flex flex-wrap gap-2">
           <StatusBadge status={screen.health_state} />
-          <Badge variant="secondary">{sourceLabel(screen.playback?.source)}</Badge>
-          {!screen.is_active ? <Badge variant="outline">Inactive</Badge> : null}
+          <Badge variant="secondary">{getDashboardPlaybackSourceLabel(screen.playback?.source)}</Badge>
+          {screen.status === "INACTIVE" ? <Badge variant="outline">Inactive</Badge> : null}
           {screen.preview?.stale ? <Badge variant="destructive">Preview stale</Badge> : null}
         </div>
       </div>
@@ -119,7 +114,7 @@ function ScreenSummaryCard({
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
           <LayoutTemplate className="h-4 w-4" />
-          <span className="truncate">{currentScheduleName}</span>
+          <span className="truncate">{scheduleContext}</span>
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
           <Clock3 className="h-4 w-4" />
@@ -131,7 +126,7 @@ function ScreenSummaryCard({
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
           <CalendarClock className="h-4 w-4" />
-          <span>Booked until {formatRelativeTime(screen.booked_until)}</span>
+          <span>{bookingLabel}</span>
         </div>
         <div className="flex items-center gap-2 text-muted-foreground">
           <MapPin className="h-4 w-4" />

@@ -259,6 +259,43 @@ const installApiMocks = async (page: Page) => {
 };
 
 test.describe("Dashboard online screens modal", () => {
+  test("does not call an active Screen inactive or show an ended booking as current", async ({ page }) => {
+    await installApiMocks(page);
+    await page.route("**/api/v1/screens/overview**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        server_time: "2026-03-12T12:00:00.000Z",
+        screens: [{
+          id: "screen-history", name: "History Screen", status: "ACTIVE", health_state: "ONLINE",
+          last_heartbeat_at: "2026-03-12T11:59:30.000Z",
+          publish: { publish_id: "publish-history", schedule_name: "Yesterday's event" },
+          active_items: [], upcoming_items: [], booked_until: "2026-03-11T12:00:00.000Z",
+          playback: { source: "UNKNOWN", current_media_id: null }, preview: null,
+        }],
+        groups: [], now_playing: [], stats: { total_screens: 1, active_screens: 1, offline_screens: 0, total_groups: 0 },
+      }),
+    }));
+    await login(page);
+
+    await page.getByRole("button", { name: /online screens/i }).click();
+    const onlineDialog = page.getByRole("dialog", { name: "Online Screens Details" });
+    await expect(onlineDialog.getByTestId("online-screen-card")).toHaveCount(1);
+    await expect(onlineDialog.getByText("No playback reported")).toBeVisible();
+    await expect(onlineDialog.getByText("UNKNOWN", { exact: true })).toHaveCount(0);
+    await onlineDialog.getByRole("button", { name: "Close" }).click();
+
+    await page.getByRole("button", { name: /total screens/i }).click();
+    const allDialog = page.getByRole("dialog", { name: "All Screens" });
+    const card = allDialog.getByTestId("all-screen-card");
+    await expect(card).toHaveCount(1);
+    await expect(card.getByText("No playback reported")).toBeVisible();
+    await expect(card.getByText("Inactive", { exact: true })).toHaveCount(0);
+    await expect(card.getByText("Latest published schedule: Yesterday's event")).toBeVisible();
+    await expect(card.getByText("No current or upcoming booking")).toBeVisible();
+    await expect(card.getByText("Booked until Never")).toHaveCount(0);
+  });
+
   test("shows only online screens with latest preview and actual media", async ({ page }) => {
     await installApiMocks(page);
     await login(page);
