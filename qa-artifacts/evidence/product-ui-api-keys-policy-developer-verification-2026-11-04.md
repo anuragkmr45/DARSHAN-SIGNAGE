@@ -16,6 +16,10 @@ Rendered fixture captures: [phone](product-ui-api-keys-policy/api-keys-390.png),
 
 ## Remaining validation
 
-The browser uses fixture data. Confirm the disabled issuance and retained-record Revoke in a real running CMS/API. A future API-key design must specify consumer route scope, credential presentation, storage, audit, expiration, rotation and revocation before enabling issuance. List pagination beyond 100, screen reader and permission withdrawal remain open.
+The earlier browser suite uses fixture data. A future API-key design must specify consumer route scope, credential presentation, storage, audit, expiration, rotation and revocation before enabling issuance. List pagination beyond 100, screen reader and permission withdrawal remain open.
 
-The isolated CMS at `https://localhost:18445` was checked through an administrator browser session on 2026-11-04. Its `/api-keys` page had no Create or Rotate control. This confirms the current CMS presentation only; the paired API container is an older pinned build, so retained-record Revoke and current backend policy still require a matched-build runtime check.
+The isolated CMS at `https://localhost:18445` was checked through an administrator browser session on 2026-11-04. Its `/api-keys` page had no Create or Rotate control. The paired API container was an older pinned build; the matched-build check below provided current backend evidence.
+
+The matched-build temporary CMS/API check also showed no Create or Rotate control with an administrator account. The current-source focused server suite passed the authenticated create/rotate `409 API_KEY_AUTH_UNAVAILABLE` cases against the fresh 65-migration test database.
+
+In that same matched-build environment, a retained-key fixture was added directly to the isolated test database. The CMS listed it as Stored; cancelling Revoke left it Stored; confirming Revoke changed it to Revoked. Read-only database inspection confirmed `is_revoked = true`, and the fixture was removed from the test database. This verifies the real CMS-to-API revoke path for an administrator. Permission withdrawal, network failure and large-list behavior remain open.
