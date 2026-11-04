@@ -503,6 +503,10 @@ test.describe("admin stabilization surfaces", () => {
       state,
     });
 
+    await page.goto("/dashboard");
+    await expect(page.getByRole("link", { name: "API Keys", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Webhooks", exact: true })).toHaveCount(0);
+
     await page.goto("/api-keys");
     await expect(page.getByText("Primary key")).toBeVisible();
     await expect(page.getByText("API keys cannot authenticate requests in this release.", { exact: false })).toBeVisible();

@@ -132,8 +132,11 @@ const navSections: NavSection[] = [
         icon: Settings,
         moduleKey: "settings",
       },
-      { title: "API Keys", url: "/api-keys", icon: Settings, permissions: [{ action: "read", subject: "ApiKey" }] },
-      { title: "Webhooks", url: "/webhooks", icon: Settings, permissions: [{ action: "read", subject: "Webhook" }] },
+      // API Keys and Webhooks are intentionally hidden from navigation until
+      // their production contracts are enabled. Keep their routes available
+      // so the features can be re-enabled without removing implementation.
+      // { title: "API Keys", url: "/api-keys", icon: Settings, permissions: [{ action: "read", subject: "ApiKey" }] },
+      // { title: "Webhooks", url: "/webhooks", icon: Settings, permissions: [{ action: "read", subject: "Webhook" }] },
       { title: "Proof of Play", url: "/proof-of-play", icon: FileBarChart, permissions: [{ action: "read", subject: "ProofOfPlay" }] },
     ],
   },
