@@ -1,5 +1,7 @@
 # DARSHAN Redesign QA Checklist
 
+This file is a historical first-pass checklist from the earlier plum design. Current cream-and-forest work and open release checks are tracked in [the master QA checklist](../../qa-artifacts/04_MASTER_TEST_CHECKLIST.md), [the coverage register](PRODUCT_UI_COVERAGE_REGISTER.md), and dated developer evidence. Earlier test counts and blockers below describe that earlier run.
+
 ## Automated Checks
 
 | Check | Status | Notes |

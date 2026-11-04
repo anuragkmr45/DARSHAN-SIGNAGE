@@ -1,21 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" role="img" aria-label="DARSHAN standby artwork">
   <defs>
     <linearGradient id="frame" x1="123" y1="58" x2="482" y2="319" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#9dd9d1"/>
-      <stop offset="1" stop-color="#3f7e83"/>
+      <stop stop-color="#DEE7C7"/>
+      <stop offset="1" stop-color="#344D3F"/>
     </linearGradient>
     <linearGradient id="window" x1="178" y1="120" x2="426" y2="292" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1c3b44"/>
-      <stop offset="1" stop-color="#0e202d"/>
+      <stop stop-color="#344D3F"/>
+      <stop offset="1" stop-color="#213B2A"/>
     </linearGradient>
   </defs>
-  <path d="M80 338h440" stroke="#2f5c65" stroke-width="2" stroke-linecap="round"/>
-  <rect x="115" y="58" width="370" height="250" rx="33" fill="#10232f" stroke="url(#frame)" stroke-width="4"/>
+  <path d="M80 338h440" stroke="#8A9088" stroke-width="2" stroke-linecap="round"/>
+  <rect x="115" y="58" width="370" height="250" rx="33" fill="#253C32" stroke="url(#frame)" stroke-width="4"/>
   <rect x="133" y="76" width="334" height="214" rx="20" fill="url(#window)"/>
-  <path d="M168 259h264" stroke="#3a6970" stroke-width="2" stroke-linecap="round"/>
-  <path d="M168 120h92M168 140h62" stroke="#78b9b3" stroke-width="8" stroke-linecap="round" opacity=".72"/>
-  <rect x="292" y="114" width="135" height="116" rx="16" fill="#224c54" stroke="#83c4bf" stroke-width="2"/>
-  <path d="M318 199l29-35 20 22 17-17 19 30z" fill="#a6dcd2" opacity=".9"/>
-  <circle cx="320" cy="142" r="10" fill="#a6dcd2"/>
-  <path d="M250 308v29m100-29v29M214 339h172" stroke="#76aba9" stroke-width="7" stroke-linecap="round"/>
+  <path d="M168 259h264" stroke="#8D9C8E" stroke-width="2" stroke-linecap="round"/>
+  <path d="M168 120h92M168 140h62" stroke="#DEE7C7" stroke-width="8" stroke-linecap="round" opacity=".72"/>
+  <rect x="292" y="114" width="135" height="116" rx="16" fill="#344D3F" stroke="#DEE7C7" stroke-width="2"/>
+  <path d="M318 199l29-35 20 22 17-17 19 30z" fill="#F8F8F3" opacity=".9"/>
+  <circle cx="320" cy="142" r="10" fill="#F8F8F3"/>
+  <path d="M250 308v29m100-29v29M214 339h172" stroke="#8D9C8E" stroke-width="7" stroke-linecap="round"/>
 </svg>

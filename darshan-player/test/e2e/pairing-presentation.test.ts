@@ -197,6 +197,7 @@ describe('Pairing presentation browser regression', () => {
     session = new CdpSession(socket)
     await session.command('Page.enable')
     await session.command('Runtime.enable')
+    await session.command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] })
 
     const initialStatus = { state: 'PAIRED_RUNTIME', mode: 'default', online: true }
     await session.command('Page.addScriptToEvaluateOnNewDocument', {
@@ -366,10 +367,24 @@ describe('Pairing presentation browser regression', () => {
       })()`)
       expect(layout.visible, `pairing layout at ${width}x${height}: ${JSON.stringify(layout.outOfBounds)}`).to.equal(true)
       expect(layout).to.include({
-        surface: 'rgb(17, 21, 27)',
+        surface: 'rgb(248, 248, 243)',
         operatorControlHidden: true,
       })
+      if (width === 1440 || width === 390) {
+        const screenshot = await session.command('Page.captureScreenshot', { format: 'png' })
+        const evidencePath = path.resolve(__dirname,
+          `../../../qa-artifacts/evidence/product-ui-player-prototype/production-pairing-forest-${width}.png`)
+        await fs.promises.writeFile(evidencePath, Buffer.from(screenshot.data as string, 'base64'))
+      }
     }
+
+    await session.command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] })
+    const darkPairing = await evaluate(session, `(() => ({
+      surface: getComputedStyle(document.getElementById('pairing-screen')).backgroundColor,
+      otp: getComputedStyle(document.getElementById('pairing-code')).color,
+    }))()`)
+    expect(darkPairing).to.deep.equal({ surface: 'rgb(23, 34, 28)', otp: 'rgb(222, 231, 199)' })
+    await session.command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] })
 
     await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 4, status: {
       state: 'RECOVERY_REQUIRED', mode: 'empty', online: false,
@@ -384,6 +399,7 @@ describe('Pairing presentation browser regression', () => {
         fullScreen: rect.width === innerWidth && rect.height === innerHeight,
         reason: document.getElementById('recovery-reason').textContent,
         controlsHidden: getComputedStyle(document.getElementById('recovery-retry')).display === 'none',
+        surface: getComputedStyle(element).backgroundColor,
       }
     })()`)
     expect(recovery).to.deep.equal({
@@ -392,6 +408,7 @@ describe('Pairing presentation browser regression', () => {
       fullScreen: true,
       reason: 'Device credentials require administrator attention',
       controlsHidden: true,
+      surface: 'rgb(248, 248, 243)',
     })
 
     // Operational labels must not cover normal production media, including
@@ -430,6 +447,8 @@ describe('Pairing presentation browser regression', () => {
         expect(standby).to.deep.equal({
           name: 'DARSHAN', message: 'No content assigned', unavailable: false,
         })
+        expect(await evaluate(session, "getComputedStyle(document.querySelector('.darshan-standby')).backgroundColor"))
+          .to.equal('rgb(248, 248, 243)')
         const screenshot = await session.command('Page.captureScreenshot', { format: 'png' })
         const evidencePath = path.resolve(__dirname,
           '../../../qa-artifacts/evidence/product-ui-player-prototype/production-playback-no-overlays.png')
@@ -457,6 +476,15 @@ describe('Pairing presentation browser regression', () => {
         await session.command('Emulation.setDeviceMetricsOverride', {
           width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
         })
+        await session.command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] })
+        expect(await evaluate(session,
+          "getComputedStyle(document.querySelector('.darshan-standby')).backgroundColor"))
+          .to.equal('rgb(23, 34, 28)')
+        const darkScreenshot = await session.command('Page.captureScreenshot', { format: 'png' })
+        const darkPath = path.resolve(__dirname,
+          '../../../qa-artifacts/evidence/product-ui-player-prototype/production-standby-dark-1440.png')
+        await fs.promises.writeFile(darkPath, Buffer.from(darkScreenshot.data as string, 'base64'))
+        await session.command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] })
       }
     }
 
@@ -502,5 +530,22 @@ describe('Pairing presentation browser regression', () => {
     const lockPath = path.resolve(__dirname,
       '../../../qa-artifacts/evidence/product-ui-player-prototype/production-security-lock.png')
     await fs.promises.writeFile(lockPath, Buffer.from(lockScreenshot.data as string, 'base64'))
+
+    // The live receiver keeps video black while its own unavailable state uses
+    // the fixed Forest palette. No media connection is needed for this style check.
+    const liveReceiverUrl = pathToFileURL(path.resolve(__dirname, '../../dist/renderer/live-receiver.html')).toString()
+    await session.command('Page.navigate', { url: liveReceiverUrl })
+    await waitFor(session, "document.getElementById('live-unavailable') !== null", 'live receiver document')
+    const lightUnavailable = await evaluate(session, `(() => ({
+      unavailable: getComputedStyle(document.getElementById('live-unavailable')).backgroundColor,
+      videoStage: getComputedStyle(document.body).backgroundColor,
+    }))()`)
+    expect(lightUnavailable).to.deep.equal({
+      unavailable: 'rgb(248, 248, 243)', videoStage: 'rgb(16, 16, 16)',
+    })
+    await session.command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] })
+    expect(await evaluate(session,
+      "getComputedStyle(document.getElementById('live-unavailable')).backgroundColor"))
+      .to.equal('rgb(23, 34, 28)')
   })
 })

@@ -414,3 +414,129 @@ body[data-runtime-mode='qa'] .pairing-field:nth-child(2) {
 @media (prefers-reduced-motion: reduce) {
   .pairing-button { transition: none; }
 }
+
+/* Approved fixed Forest palette for player-owned states. Playback pixels are untouched. */
+:root {
+  color-scheme: light dark;
+  --player-page: #F8F8F3;
+  --player-panel: #FFFFFF;
+  --player-ink: #1B1F1B;
+  --player-secondary: #5A5F5A;
+  --player-muted: #6D726D;
+  --player-border: #8A9088;
+  --player-line: #E5E5E0;
+  --player-brand: #253C32;
+  --player-action: #344D3F;
+  --player-action-hover: #213B2A;
+  --player-on-action: #FAFFFF;
+  --player-focus: #344D3F;
+  --player-error: #78352B;
+  --player-success: #213B2A;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --player-page: #17221C;
+    --player-panel: #24322A;
+    --player-ink: #F3F6EF;
+    --player-secondary: #D0D9D1;
+    --player-muted: #CBD5CB;
+    --player-border: #8D9C8E;
+    --player-line: #536357;
+    --player-brand: #DEE7C7;
+    --player-action: #DEE7C7;
+    --player-action-hover: #F3F6DF;
+    --player-on-action: #213B2A;
+    --player-focus: #DEE7C7;
+    --player-error: #F8C9BD;
+    --player-success: #C7E9C0;
+  }
+}
+
+.darshan-standby,
+.darshan-default-unavailable,
+#pairing-screen,
+#security-lock-overlay,
+#recovery-overlay {
+  background: var(--player-page);
+  color: var(--player-ink);
+}
+
+.darshan-standby-name,
+.darshan-default-unavailable h1,
+.pairing-title,
+.pairing-hostname span,
+.pairing-static,
+.pairing-input,
+.recovery-title,
+.recovery-reason,
+.security-lock-card h1,
+.security-lock-meta strong {
+  color: var(--player-ink);
+}
+
+.darshan-standby-message,
+.darshan-default-unavailable p,
+.pairing-instructions,
+.pairing-hostname,
+.pairing-code-meta,
+.pairing-status,
+.pairing-meta,
+.network-diagnostics li,
+.recovery-guidance,
+.recovery-meta,
+.security-lock-card p,
+.security-lock-guidance,
+.security-lock-meta {
+  color: var(--player-secondary);
+}
+
+.pairing-field label,
+.network-diagnostics h3 {
+  color: var(--player-muted);
+}
+
+.pairing-code {
+  border: 1px solid var(--player-border);
+  background: var(--player-panel);
+  color: var(--player-brand);
+}
+
+.pairing-logo, .pairing-code-label { color: var(--player-brand); }
+
+.pairing-form {
+  border-top-color: var(--player-line);
+  border-bottom-color: var(--player-line);
+}
+.pairing-field + .pairing-field { border-left-color: var(--player-line); }
+
+.pairing-button {
+  border: 1px solid var(--player-action);
+  background: var(--player-action);
+  color: var(--player-on-action);
+}
+.pairing-button:hover {
+  border-color: var(--player-action-hover);
+  background: var(--player-action-hover);
+}
+.pairing-button.secondary {
+  border-color: var(--player-border);
+  background: var(--player-panel);
+  color: var(--player-ink);
+}
+.pairing-button.secondary:hover { background: var(--player-page); }
+.pairing-button:focus-visible,
+.pairing-input:focus-visible { outline-color: var(--player-focus); }
+.pairing-status.error { color: var(--player-error); }
+.pairing-status.success { color: var(--player-success); }
+
+.security-lock-eyebrow { color: var(--player-error); }
+.security-lock-meta {
+  border-color: var(--player-border);
+  background: var(--player-panel);
+}
+#connectivity-banner {
+  border-color: var(--player-border);
+  background: var(--player-panel);
+  color: var(--player-ink);
+}
