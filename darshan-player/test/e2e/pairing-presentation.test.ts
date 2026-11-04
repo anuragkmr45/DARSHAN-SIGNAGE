@@ -504,7 +504,47 @@ describe('Pairing presentation browser regression', () => {
     await evaluate(session,
       "window.__darshanE2E.emitDefaultMedia({ source: 'NONE', media_id: null, media: null })")
 
+    // Missing site configuration is setup, not an OTP. The host remains visible
+    // even though the code and expiry controls have no meaning in this state.
+    await session.command('Emulation.setDeviceMetricsOverride', {
+      width: 390, height: 844, deviceScaleFactor: 1, mobile: false,
+    })
     await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 8, status: {
+      state: 'BOOT', mode: 'offline', online: false,
+      error: 'Configuration required: apiBase is missing'
+    } })`)
+    const setupRequired = await evaluate(session, `(() => {
+      const root = document.getElementById('pairing-screen');
+      const hidden = (id) => document.getElementById(id).getClientRects().length === 0;
+      const hostname = document.getElementById('pairing-hostname');
+      return {
+        title: document.getElementById('pairing-title').textContent,
+        instructions: document.getElementById('pairing-instructions').textContent,
+        codeHidden: hidden('pairing-code'),
+        expiryHidden: hidden('pairing-expiry'),
+        hostnameVisible: hostname.getBoundingClientRect().width > 0,
+        status: document.getElementById('pairing-status').textContent,
+        fits: root.scrollWidth <= innerWidth && root.scrollHeight <= innerHeight,
+      }
+    })()`)
+    expect(setupRequired).to.deep.equal({
+      title: 'Player setup required',
+      instructions: 'Ask your DARSHAN administrator to correct this player’s configuration, then restart it.',
+      codeHidden: true,
+      expiryHidden: true,
+      hostnameVisible: true,
+      status: 'Configuration required: apiBase is missing',
+      fits: true,
+    })
+    const setupScreenshot = await session.command('Page.captureScreenshot', { format: 'png' })
+    const setupPath = path.resolve(__dirname,
+      '../../../qa-artifacts/evidence/product-ui-player-prototype/production-configuration-required-390.png')
+    await fs.promises.writeFile(setupPath, Buffer.from(setupScreenshot.data as string, 'base64'))
+    await session.command('Emulation.setDeviceMetricsOverride', {
+      width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+    })
+
+    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 9, status: {
       state: 'PAIRED_RUNTIME', mode: 'emergency', online: true, backendAvailable: true,
       contentEpoch: 'emergency-e2e'
     } })`)
@@ -612,7 +652,7 @@ describe('Pairing presentation browser regression', () => {
       features: [{ name: 'prefers-color-scheme', value: 'light' }],
     })
 
-    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 9, status: {
+    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 10, status: {
       state: 'PAIRED_RUNTIME', mode: 'offline', online: false,
       securityLock: { locked: true, reason: 'Backend validation expired' }
     } })`)
@@ -627,7 +667,7 @@ describe('Pairing presentation browser regression', () => {
       '../../../qa-artifacts/evidence/product-ui-player-prototype/production-security-lock.png')
     await fs.promises.writeFile(lockPath, Buffer.from(lockScreenshot.data as string, 'base64'))
 
-    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 10, status: {
+    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 11, status: {
       state: 'PAIRED_RUNTIME', mode: 'empty', online: true,
       contentUnavailableReason: 'Approved content could not be loaded'
     } })`)

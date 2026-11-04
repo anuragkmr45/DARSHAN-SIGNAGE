@@ -415,6 +415,17 @@ body[data-runtime-mode='qa'] .pairing-field:nth-child(2) {
   .pairing-button { transition: none; }
 }
 
+/* A missing configuration is a setup state, never a pairing code. Keep the
+   hostname visible so support staff can identify the affected machine. */
+#pairing-screen[data-configuration-required='true'] .pairing-code-label,
+#pairing-screen[data-configuration-required='true'] .pairing-code,
+#pairing-screen[data-configuration-required='true'] .pairing-code-meta {
+  display: none;
+}
+#pairing-screen[data-configuration-required='true'] .pairing-hostname {
+  margin-bottom: 0;
+}
+
 /* Approved fixed Forest palette for player-owned states. Playback pixels are untouched. */
 :root {
   color-scheme: light dark;

@@ -4,6 +4,8 @@ import './types'
 
 class PairingScreen {
   private pairingCodeElement: HTMLElement | null = null
+  private pairingTitleElement: HTMLElement | null = null
+  private pairingInstructionsElement: HTMLElement | null = null
   private pairingExpiryElement: HTMLElement | null = null
   private hostnameElement: HTMLElement | null = null
   private refreshButton: HTMLButtonElement | null = null
@@ -50,6 +52,8 @@ class PairingScreen {
 
   private initializeElements(): void {
     this.pairingScreenElement = document.getElementById('pairing-screen')
+    this.pairingTitleElement = document.getElementById('pairing-title')
+    this.pairingInstructionsElement = document.getElementById('pairing-instructions')
     this.pairingCodeElement = document.getElementById('pairing-code')
     this.pairingExpiryElement = document.getElementById('pairing-expiry')
     this.hostnameElement = document.getElementById('pairing-hostname')
@@ -205,13 +209,24 @@ class PairingScreen {
       showConfigurationRequired || ['PAIRING_PENDING', 'PAIRING_CONFIRMED', 'PAIRING_COMPLETING'].includes(status.state)
 
     this.pairingScreenElement?.classList.toggle('hidden', !showPairing)
+    if (this.pairingScreenElement) {
+      this.pairingScreenElement.dataset['configurationRequired'] = String(showConfigurationRequired)
+    }
+    if (this.pairingTitleElement) {
+      this.pairingTitleElement.textContent = showConfigurationRequired ? 'Player setup required' : 'Connect this screen'
+    }
+    if (this.pairingInstructionsElement) {
+      this.pairingInstructionsElement.textContent = showConfigurationRequired
+        ? 'Ask your DARSHAN administrator to correct this player’s configuration, then restart it.'
+        : 'In DARSHAN CMS, open Screens, choose Pair Device, and enter this code.'
+    }
 
     if (!showPairing) {
       return
     }
 
     if (showConfigurationRequired) {
-      this.updatePairingCode('CONFIG')
+      this.updatePairingCode('------')
       this.setPairingCountdown(undefined)
       this.showStatus(status.error || 'Backend IP configuration is required before pairing.', 'error')
       if (this.refreshButton) {

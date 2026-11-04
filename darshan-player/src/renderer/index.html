@@ -735,8 +735,8 @@
     <div id="pairing-screen" class="hidden" data-density="FULL">
       <div class="pairing-main">
         <div class="pairing-logo">DARSHAN</div>
-        <h1 class="pairing-title">Connect this screen</h1>
-        <p class="pairing-instructions">
+        <h1 class="pairing-title" id="pairing-title">Connect this screen</h1>
+        <p class="pairing-instructions" id="pairing-instructions">
           In DARSHAN CMS, open Screens, choose Pair Device, and enter this code.
         </p>
 
@@ -753,7 +753,7 @@
         <div class="pairing-actions" data-kiosk-priority="p3">
           <button class="pairing-button operator-control" id="pairing-complete" disabled>Retry Provisioning</button>
         </div>
-        <div class="pairing-status" id="pairing-status"></div>
+        <div class="pairing-status" id="pairing-status" role="status"></div>
 
         <div class="pairing-form" data-kiosk-priority="p3">
           <div class="pairing-field operator-only-field">
