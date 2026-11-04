@@ -16,13 +16,14 @@ const rooms = [
   { id: "room-b", type: "GROUP_CLOSED", state: "ACTIVE", title: "Planning room", last_seq: 1, unread_count: 0, viewer_is_member: true, last_message: { id: "root-room-b", seq: 1, body_text: "Welcome to planning" } },
 ];
 
-async function installChatFixture(page: Page, options: { chatAdmin?: boolean; rejectRemoval?: boolean; rootOutsideTimeline?: boolean; rootDeleted?: boolean; threadFailsInitially?: boolean; longHistory?: boolean } = {}) {
+async function installChatFixture(page: Page, options: { chatAdmin?: boolean; rejectRemoval?: boolean; rootOutsideTimeline?: boolean; rootDeleted?: boolean; threadFailsInitially?: boolean; longHistory?: boolean; sendFails?: boolean } = {}) {
   const conversations = rooms.map((room) => ({
     ...room,
     last_seq: options.longHistory && room.id === "room-a" ? 240 : room.last_seq,
     viewer_role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER",
   }));
   let threadReads = 0;
+  let sendWrites = 0;
   let longMainCount = 120;
   const longMainMessage = (seq: number) => ({
     id: seq === 1 ? "root-room-a" : `main-${seq}`, conversation_id: "room-a", seq,
@@ -112,6 +113,12 @@ async function installChatFixture(page: Page, options: { chatAdmin?: boolean; re
       return json({ conversation, viewer: { is_member: true, role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER" } });
     }
     const messagesRoom = path.match(/^\/api\/v1\/chat\/conversations\/(room-[ab])\/messages$/)?.[1];
+    if (messagesRoom && route.request().method() === "POST") {
+      sendWrites += 1;
+      if (options.sendFails) {
+        return json({ error: { code: "TEMPORARY", message: "Message delivery could not be confirmed." } }, 503);
+      }
+    }
     if (messagesRoom && options.longHistory && messagesRoom === "room-a") {
       return json(pageHistory(Array.from({ length: longMainCount }, (_value, index) => longMainMessage(index + 1)), requestUrl));
     }
@@ -146,8 +153,26 @@ async function installChatFixture(page: Page, options: { chatAdmin?: boolean; re
     if (/\/pins$|\/bookmarks$/.test(path)) return json({ items: [] });
     return json({});
   });
-  return { addMainMessages: (count: number) => { longMainCount += count; } };
+  return {
+    addMainMessages: (count: number) => { longMainCount += count; },
+    getSendWrites: () => sendWrites,
+  };
 }
+
+test("an uncertain send response is not retried automatically", async ({ page }) => {
+  const fixture = await installChatFixture(page, { sendFails: true });
+  await page.goto("/chat/room-a");
+  await page.getByLabel("Message composer").fill("Send this message once");
+  await page.getByRole("button", { name: "Send message" }).click();
+
+  await expect(page.getByRole("main").getByText("Message delivery could not be confirmed.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+  await page.waitForTimeout(2_500);
+  expect(fixture.getSendWrites()).toBe(1);
+
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect.poll(() => fixture.getSendWrites()).toBe(2);
+});
 
 test("chat admin reviews members and confirms removal while system and self controls stay protected", async ({ page }, testInfo) => {
   await installChatFixture(page, { chatAdmin: true });

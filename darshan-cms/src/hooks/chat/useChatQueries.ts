@@ -295,6 +295,10 @@ export const useSendChatMessage = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // A send may have committed even when its response is lost. Automatic mutation
+    // retries can therefore create a second message because the API has no
+    // idempotency key. Keep the failed pending item visible for an explicit retry.
+    retry: false,
     mutationFn: (payload: SendChatMessageInput) => chatApi.sendMessage(payload),
     onSuccess: (response, payload) => {
       const responseAttachments = Array.isArray(response.message.attachments) ? response.message.attachments : [];
