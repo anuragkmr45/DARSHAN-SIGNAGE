@@ -27,6 +27,8 @@
 - `POST /api/v1/chat/messages/:id/reactions`
 - `POST /api/v1/chat/conversations/:id/read`
 
+The thread read returns `threadRootId`, cursor-paged reply `items`, and `rootMessage`. The root is independent of the reply cursor, so a deep link can display its parent even when the main conversation page does not contain that message. It includes the same attachment/reaction shape and deleted-message redaction as the message list. Clients may treat `rootMessage` as optional when talking to an older server.
+
 ## Security and lifecycle notes
 - All `/chat/*` routes enforce JWT + session/JTI revocation checks.
 - Senders can attach only readable `READY` media in their current ownership scope, with a limit of ten per message. File bookmarks use the same check. A user moved to another department cannot keep attaching media from the former department. Missing or deleted media cannot be attached.

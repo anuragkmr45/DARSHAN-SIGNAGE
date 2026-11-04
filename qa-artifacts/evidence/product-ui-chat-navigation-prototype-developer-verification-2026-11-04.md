@@ -27,5 +27,7 @@ All API responses in this browser suite are fixtures. They validate the client w
 
 - Switching conversations during attachment upload removes that Composer instance. In-progress attachment drafts and upload progress are not preserved; test and implement a safe transfer or cancellation policy.
 - An old thread deep link may not show its root message if the root is outside the current main-message window; the thread endpoint currently returns replies and root ID only.
+
+Follow-up: [thread-context developer verification](product-ui-chat-thread-context-developer-verification-2026-11-04.md) records the later server and CMS correction for the deep-link root. The bullet above describes the original prototype limit.
 - Run real-service multi-account chat, notification, membership, moderation, archive/restore, attachment formats, disconnected/reconnect, and permissions journeys through the CMS.
 - Check both themes, five accents, mobile keyboard and safe areas, text zoom, reduced motion, and physical Safari/Android behavior.

@@ -62,6 +62,21 @@ export class ChatRepository {
     return message || null;
   }
 
+  async getMessageWithDetails(id: string) {
+    const message = await this.getMessageById(id);
+    if (!message) return null;
+    if (message.deleted_at) {
+      return { ...message, body_text: null, body_rich: null, attachments: [], reactions: [] };
+    }
+
+    const db = getDatabase();
+    const [attachments, reactions] = await Promise.all([
+      db.select().from(schema.chatAttachments).where(eq(schema.chatAttachments.message_id, id)),
+      db.select().from(schema.chatReactions).where(eq(schema.chatReactions.message_id, id)),
+    ]);
+    return { ...message, attachments, reactions };
+  }
+
   async getConversationForMessage(messageId: string) {
     const db = getDatabase();
     const [row] = await db

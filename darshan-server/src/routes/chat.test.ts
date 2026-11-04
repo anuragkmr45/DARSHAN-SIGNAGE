@@ -1605,6 +1605,79 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     expect(channelItemsAfter.some((item) => item.id === visibleReplyId)).toBe(true);
   });
 
+  it('returns the authorized thread root outside the reply cursor and redacts it after deletion', async () => {
+    const created = await server.inject({
+      method: 'POST',
+      url: '/api/v1/chat/conversations',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { type: 'GROUP_CLOSED', title: 'Old Thread Context Group' },
+    });
+    expect(created.statusCode).toBe(HTTP_STATUS.OK);
+    const conversationId = JSON.parse(created.body).conversation.id as string;
+
+    const root = await server.inject({
+      method: 'POST',
+      url: `/api/v1/chat/conversations/${conversationId}/messages`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { text: 'Older parent message' },
+    });
+    expect(root.statusCode).toBe(HTTP_STATUS.OK);
+    const rootId = JSON.parse(root.body).message.id as string;
+    const db = getDatabase();
+    const mediaId = randomUUID();
+    await db.insert(schema.media).values({
+      id: mediaId,
+      name: 'Old Thread Context Attachment',
+      type: 'IMAGE',
+      status: 'READY',
+      created_by: testUser.id,
+    });
+    await db.insert(schema.chatAttachments).values({ message_id: rootId, media_asset_id: mediaId });
+    await db.insert(schema.chatReactions).values({ message_id: rootId, user_id: testUser.id, emoji: ':wave:' });
+
+    const reply = await server.inject({
+      method: 'POST',
+      url: `/api/v1/chat/conversations/${conversationId}/messages`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { text: 'Later reply', replyTo: rootId },
+    });
+    expect(reply.statusCode).toBe(HTTP_STATUS.OK);
+    const replyId = JSON.parse(reply.body).message.id as string;
+
+    const oldThread = await server.inject({
+      method: 'GET',
+      url: `/api/v1/chat/conversations/${conversationId}/thread/${replyId}?afterSeq=9999&limit=20`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(oldThread.statusCode).toBe(HTTP_STATUS.OK);
+    const oldThreadBody = JSON.parse(oldThread.body);
+    expect(oldThreadBody.items).toEqual([]);
+    expect(oldThreadBody.threadRootId).toBe(rootId);
+    expect(oldThreadBody.rootMessage).toMatchObject({ id: rootId, body_text: 'Older parent message' });
+    expect(oldThreadBody.rootMessage.attachments).toEqual([expect.objectContaining({ media_asset_id: mediaId })]);
+    expect(oldThreadBody.rootMessage.reactions).toEqual([expect.objectContaining({ emoji: ':wave:' })]);
+
+    const deleted = await server.inject({
+      method: 'DELETE',
+      url: `/api/v1/chat/messages/${rootId}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(deleted.statusCode).toBe(HTTP_STATUS.OK);
+    const afterDelete = await server.inject({
+      method: 'GET',
+      url: `/api/v1/chat/conversations/${conversationId}/thread/${replyId}?afterSeq=9999&limit=20`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(afterDelete.statusCode).toBe(HTTP_STATUS.OK);
+    expect(JSON.parse(afterDelete.body).rootMessage).toMatchObject({
+      id: rootId,
+      body_text: null,
+      body_rich: null,
+      attachments: [],
+      reactions: [],
+    });
+  });
+
   it('supports pin/unpin and bookmark CRUD', async () => {
     const createConversation = await server.inject({
       method: 'POST',

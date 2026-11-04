@@ -643,12 +643,16 @@ export async function chatRoutes(fastify: FastifyInstance) {
           throw AppError.notFound('Parent message not found');
         }
         const threadRootId = parentMessage.thread_root_id || parentMessage.id;
+        const rootMessage = await chatRepo.getMessageWithDetails(threadRootId);
+        if (!rootMessage || rootMessage.conversation_id !== conversationId) {
+          throw AppError.notFound('Thread root message not found');
+        }
         const items = await chatRepo.listMessages(conversationId, {
           afterSeq: query.afterSeq,
           limit: query.limit,
           threadRootId,
         });
-        return reply.send({ items, threadRootId });
+        return reply.send({ items, threadRootId, rootMessage });
       } catch (error) {
         logger.error(error, 'List thread error');
         return respondWithError(reply, error);

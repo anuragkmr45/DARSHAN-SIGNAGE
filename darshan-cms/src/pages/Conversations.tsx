@@ -333,7 +333,7 @@ export default function Conversations() {
   });
 
   const threadRootMessage = threadRootId
-    ? messages.find((message) => message.id === threadRootId || message.thread_root_id === threadRootId)
+    ? messages.find((message) => message.id === threadRootId)
     : undefined;
 
   useEffect(() => {

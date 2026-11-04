@@ -179,8 +179,9 @@ export function MessageItem({
               media?.media_url ||
               (typeof attachment === "object" ? attachment.media_url || undefined : undefined);
             const attachmentLabel =
-              resolveMediaDisplayName(media) ||
-              (typeof attachment === "object" ? attachment.filename || "Attachment" : attachmentId || "Attachment");
+              (typeof attachment === "object" ? attachment.filename : undefined) ||
+              (media ? resolveMediaDisplayName(media) : undefined) ||
+              attachmentId || "Attachment";
 
             return (
               <div

@@ -58,15 +58,20 @@ export function ThreadPanel({
   const setDraft = (value: string) => setDrafts((current) => ({ ...current, [draftKey]: value }));
   const setAlsoToChannel = (value: boolean) => setChannelChoices((current) => ({ ...current, [draftKey]: value }));
   const threadQuery = useChatThread(conversationId, threadRootId);
+  const resolvedRootMessage = threadQuery.data?.pages?.[0]?.rootMessage ?? rootMessage;
+  const canReply = canMutate && !threadQuery.isLoading && !threadQuery.isError;
   const orderedReplies = useMemo(
     () => [...threadQuery.items].sort((a, b) => b.seq - a.seq),
     [threadQuery.items],
   );
-  const replyMediaIds = useMemo(() => Array.from(new Set(threadQuery.items.flatMap((message) =>
+  const replyMediaIds = useMemo(() => Array.from(new Set([
+    ...(resolvedRootMessage ? [resolvedRootMessage] : []),
+    ...threadQuery.items,
+  ].flatMap((message) =>
     (message.attachments ?? []).map((attachment) => typeof attachment === "string"
       ? attachment
       : attachment.media_asset_id || attachment.media_id || attachment.mediaId).filter((id): id is string => Boolean(id))
-  ))), [threadQuery.items]);
+  ))), [resolvedRootMessage, threadQuery.items]);
   const replyMediaQueries = useQueries({
     queries: replyMediaIds.map((mediaId) => ({
       queryKey: ["media", "chat", conversationId, mediaId],
@@ -86,7 +91,7 @@ export function ThreadPanel({
   }, [attachmentMediaById, replyMediaIds, replyMediaQueries]);
 
   const submit = async () => {
-    if (!threadRootId || !draft.trim() || !canMutate) return;
+    if (!threadRootId || !draft.trim() || !canReply) return;
     try {
       await onReplySubmit({ text: draft.trim(), replyTo: threadRootId, alsoToChannel });
       setDraft("");
@@ -118,11 +123,11 @@ export function ThreadPanel({
             />
           )}
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3">
-            {rootMessage && (
+            {resolvedRootMessage && (
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Parent Message</p>
                 <MessageItem
-                  message={rootMessage}
+                  message={resolvedRootMessage}
                   currentUserId={currentUserId}
                   canMutate={canMutate}
                   mentionDisplayById={mentionDisplayById}
@@ -140,7 +145,7 @@ export function ThreadPanel({
                     size="sm"
                     variant="outline"
                     onClick={() => void threadQuery.fetchNewer()}
-                    disabled={threadQuery.isFetchingNewer}
+                    disabled={threadQuery.isLoading || threadQuery.isError || threadQuery.isFetchingNewer}
                     aria-label="Check for new thread replies"
                   >
                     {threadQuery.isFetchingNewer ? "Checking..." : "Check for new"}
@@ -152,6 +157,11 @@ export function ThreadPanel({
               </div>
               {threadQuery.isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading thread...</p>
+              ) : threadQuery.isError ? (
+                <div role="alert" className="space-y-2 rounded-lg border p-3 text-sm">
+                  <p>Couldn’t load this thread. Your reply draft is still here.</p>
+                  <Button size="sm" variant="outline" onClick={() => void threadQuery.refetch()}>Retry thread</Button>
+                </div>
               ) : orderedReplies.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No replies yet.</p>
               ) : (
@@ -188,7 +198,7 @@ export function ThreadPanel({
                 }
               }}
               placeholder="Reply in thread..."
-              disabled={!canMutate}
+              disabled={!canReply}
               aria-label="Thread reply composer"
             />
             <div className="mt-2 flex items-center justify-between gap-3">
@@ -196,12 +206,12 @@ export function ThreadPanel({
                 <Checkbox
                   checked={alsoToChannel}
                   onCheckedChange={(checked) => setAlsoToChannel(Boolean(checked))}
-                  disabled={!canMutate || !threadRootId}
+                  disabled={!canReply || !threadRootId}
                   aria-label="Also send thread reply to main chat"
                 />
                 Also send to main chat
               </label>
-              <Button onClick={() => void submit()} disabled={!canMutate || !draft.trim()} aria-label="Send thread reply">
+              <Button onClick={() => void submit()} disabled={!canReply || !draft.trim()} aria-label="Send thread reply">
                 <Send className="mr-1 h-4 w-4" />
                 Reply
               </Button>

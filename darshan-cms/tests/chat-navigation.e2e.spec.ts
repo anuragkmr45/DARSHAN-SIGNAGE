@@ -16,8 +16,9 @@ const rooms = [
   { id: "room-b", type: "GROUP_CLOSED", state: "ACTIVE", title: "Planning room", last_seq: 1, unread_count: 0, viewer_is_member: true, last_message: { id: "root-room-b", seq: 1, body_text: "Welcome to planning" } },
 ];
 
-async function installChatFixture(page: Page, options: { chatAdmin?: boolean; rejectRemoval?: boolean } = {}) {
+async function installChatFixture(page: Page, options: { chatAdmin?: boolean; rejectRemoval?: boolean; rootOutsideTimeline?: boolean; rootDeleted?: boolean; threadFailsInitially?: boolean } = {}) {
   const conversations = rooms.map((room) => ({ ...room, viewer_role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER" }));
+  let threadReads = 0;
   const members = [
     { user_id: user.id, role: "CHAT_ADMIN", is_system: false, is_active: true, email: user.email, first_name: "Chat", last_name: "Reader" },
     { user_id: "44444444-4444-4444-8444-444444444444", role: "MEMBER", is_system: false, is_active: true, email: "peer@example.invalid", first_name: "Room", last_name: "Peer" },
@@ -73,12 +74,30 @@ async function installChatFixture(page: Page, options: { chatAdmin?: boolean; re
       return json({ conversation, viewer: { is_member: true, role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER" } });
     }
     const messagesRoom = path.match(/^\/api\/v1\/chat\/conversations\/(room-[ab])\/messages$/)?.[1];
-    if (messagesRoom) return json({ items: [{
+    if (messagesRoom) return json({ items: options.rootOutsideTimeline && messagesRoom === "room-a" ? [] : [{
       id: `root-${messagesRoom}`, conversation_id: messagesRoom, seq: 1,
       sender_id: user.id, body_text: `Welcome to ${messagesRoom}`,
       created_at: "2026-11-03T01:00:00Z", attachments: [], reactions: [],
     }] });
-    if (/\/thread\//.test(path)) return json({ items: [] });
+    if (/\/thread\//.test(path)) {
+      threadReads += 1;
+      if (options.threadFailsInitially && threadReads <= 2) return json({ error: { code: "TEMPORARY", message: "Thread unavailable" } }, 503);
+      return json({
+        threadRootId: "root-room-a",
+        rootMessage: options.rootDeleted ? {
+          id: "root-room-a", conversation_id: "room-a", seq: 1,
+          sender_id: user.id, body_text: null, deleted_at: "2026-11-04T01:00:00Z",
+          created_at: "2026-11-03T01:00:00Z", attachments: [], reactions: [],
+        } : options.rootOutsideTimeline ? {
+          id: "root-room-a", conversation_id: "room-a", seq: 1,
+          sender_id: user.id, body_text: "Older parent outside the current message page",
+          created_at: "2026-11-03T01:00:00Z",
+          attachments: [{ media_asset_id: "media-old", filename: "Old plan.pdf", content_type: "application/pdf" }],
+          reactions: [],
+        } : undefined,
+        items: [],
+      });
+    }
     if (/\/pins$|\/bookmarks$/.test(path)) return json({ items: [] });
     return json({});
   });
@@ -191,6 +210,41 @@ test("phone chat follows list, conversation and thread routes without losing tex
   await expect(page).toHaveURL(/\/chat\/room-a$/);
   await page.getByRole("button", { name: "Reply in thread" }).first().click();
   await expect(page.getByLabel("Thread reply composer")).toHaveValue("Unsent thread draft");
+});
+
+test("an old thread deep link shows its parent even when the main message page omits it", async ({ page }, testInfo) => {
+  await installChatFixture(page, { rootOutsideTimeline: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/chat/room-a/thread/root-room-a");
+  const thread = page.getByRole("dialog", { name: "Thread" });
+  await expect(thread).toBeVisible();
+  await expect(thread.getByText("Parent Message")).toBeVisible();
+  await expect(thread.getByText("Older parent outside the current message page")).toBeVisible();
+  await expect(thread.getByText("Old plan.pdf").first()).toBeVisible();
+  await expect(thread.getByText("No replies yet.")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("old-thread-parent-390.png"), fullPage: true });
+});
+
+test("a failed thread read shows Retry without claiming there are no replies", async ({ page }) => {
+  await installChatFixture(page, { rootOutsideTimeline: true, threadFailsInitially: true });
+  await page.goto("/chat/room-a/thread/root-room-a");
+  const thread = page.getByRole("dialog", { name: "Thread" });
+  await expect(thread.getByRole("alert")).toContainText("Couldn’t load this thread");
+  await expect(thread.getByText("No replies yet.")).toHaveCount(0);
+  await expect(thread.getByText("Up to date")).toHaveCount(0);
+  await expect(thread.getByLabel("Thread reply composer")).toBeDisabled();
+  await thread.getByRole("button", { name: "Retry thread" }).click();
+  await expect(thread.getByText("Older parent outside the current message page")).toBeVisible();
+  await expect(thread.getByText("No replies yet.")).toBeVisible();
+  await expect(thread.getByLabel("Thread reply composer")).toBeEnabled();
+});
+
+test("the thread uses the server's deleted parent over a stale main-timeline copy", async ({ page }) => {
+  await installChatFixture(page, { rootDeleted: true });
+  await page.goto("/chat/room-a/thread/root-room-a");
+  const thread = page.getByRole("dialog", { name: "Thread" });
+  await expect(thread.getByText("This message was deleted.")).toBeVisible();
+  await expect(thread.getByText("Welcome to room-a")).toHaveCount(0);
 });
 
 test("desktop chat keeps the list and conversation visible together", async ({ page }, testInfo) => {

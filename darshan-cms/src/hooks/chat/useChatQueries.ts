@@ -147,7 +147,7 @@ export const useChatMessages = (conversationId?: string, params?: ChatCursorPara
   const items = useMemo(() => flattenMessagePages(query.data?.pages), [query.data?.pages]);
   const latestSeq = useMemo(() => getLastSeenSeq(items), [items]);
   const lastFetchCount = query.data?.pages?.[query.data.pages.length - 1]?.items?.length ?? 0;
-  const isUpToDate = !query.isLoading && !query.isFetching && lastFetchCount === 0;
+  const isUpToDate = query.isSuccess && !query.isFetching && lastFetchCount === 0;
   const fetchNextPage = query.fetchNextPage;
 
   useEffect(() => {
@@ -202,7 +202,7 @@ export const useChatThread = (
   const items = useMemo(() => flattenMessagePages(query.data?.pages), [query.data?.pages]);
   const latestSeq = useMemo(() => getLastSeenSeq(items), [items]);
   const lastFetchCount = query.data?.pages?.[query.data.pages.length - 1]?.items?.length ?? 0;
-  const isUpToDate = !query.isLoading && !query.isFetching && lastFetchCount === 0;
+  const isUpToDate = query.isSuccess && !query.isFetching && lastFetchCount === 0;
   const fetchNextPage = query.fetchNextPage;
 
   useEffect(() => {

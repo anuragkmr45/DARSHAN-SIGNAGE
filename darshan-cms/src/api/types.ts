@@ -2137,6 +2137,7 @@ export interface ChatListMessagesResponse {
 
 export interface ChatThreadResponse {
   threadRootId: string;
+  rootMessage?: ChatMessage;
   items: ChatMessage[];
 }
 
