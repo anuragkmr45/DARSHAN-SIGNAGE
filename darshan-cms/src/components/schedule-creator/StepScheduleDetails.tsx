@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { type ScheduleQuickPresetId } from "@/lib/scheduleQuickPresets";
+import { browserScheduleTimeZone, normalizeScheduleTimeZone } from "@/lib/scheduleTimeZone";
 
 interface StepScheduleDetailsProps {
   fixedInputTimezone?: string;
@@ -72,7 +73,7 @@ export function StepScheduleDetails({
   onApplyQuickPreset,
   onUpdate,
 }: StepScheduleDetailsProps) {
-  const currentTimezone = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const currentTimezone = normalizeScheduleTimeZone(timezone || browserScheduleTimeZone());
   const timezoneOptions = Array.from(
     new Set([
       currentTimezone,

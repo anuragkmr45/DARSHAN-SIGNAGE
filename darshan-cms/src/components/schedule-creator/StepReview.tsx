@@ -19,6 +19,7 @@ import { MediaPreview } from "@/components/common/MediaPreview";
 import { AspectFrame } from "@/components/common/AspectFrame";
 import type { ScheduleWizardState, SlotMedia } from "@/pages/ScheduleCreator";
 import { resolveSlotMediaPreviewOptions, resolveVideoLoopLabel } from "@/lib/scheduleCreatorState";
+import { browserScheduleTimeZone, normalizeScheduleTimeZone } from "@/lib/scheduleTimeZone";
 
 interface StepReviewProps {
   state: ScheduleWizardState;
@@ -230,7 +231,7 @@ export function StepReview({ state, approvalNotes, onUpdateNotes, validationErro
   });
   const screenNames = new Map((screensData?.items ?? []).map((screen) => [screen.id, screen.name]));
   const groupNames = new Map((groupsData?.items ?? []).map((group) => [group.id, group.name]));
-  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const browserTimezone = browserScheduleTimeZone();
 
   const priorityLabel = ["Normal", "High", "Urgent"][priority] || "Normal";
 
@@ -278,7 +279,7 @@ export function StepReview({ state, approvalNotes, onUpdateNotes, validationErro
           <div className="min-w-0 space-y-1 break-words text-sm">
             <p className="font-medium">{scheduleName || "Unnamed schedule"}</p>
             <p>{formatDateTime(startAt)} → {formatDateTime(endAt)}</p>
-            <p className="text-muted-foreground">Times entered in browser time ({browserTimezone}). Recorded audit timezone: {timezone || "UTC"}.</p>
+            <p className="text-muted-foreground">Times entered in browser time ({browserTimezone}). Recorded audit timezone: {normalizeScheduleTimeZone(timezone)}.</p>
             <p className="text-muted-foreground">Priority: {priorityLabel}</p>
             {scheduleDescription ? <p className="text-muted-foreground">{scheduleDescription}</p> : null}
           </div>

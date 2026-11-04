@@ -17,6 +17,7 @@ import { preparedLivePreview } from "@/lib/liveFallbackPreview";
 import { instantFromLocalInput, liveDraftReviewPayload, liveDraftStorageKey, localDateTime, newLiveDraftJournal, restoreLiveDraftJournal, serializeLiveDraftJournal,
   type LiveDraftForm, type LiveDraftJournal } from "@/lib/liveScheduleDraft";
 import { createUuid } from "@/lib/uuid";
+import { browserScheduleTimeZone } from "@/lib/scheduleTimeZone";
 
 async function allSources(): Promise<LiveSession[]> {
   const rows = new Map<string, LiveSession>(); let page = 1, pages = 1;
@@ -51,7 +52,7 @@ export function LiveScheduleWizard({ actorId, canReadGroups, onClose, onCreateSo
   const [step, setStep] = useState(0), [error, setError] = useState<string | null>(null), [busy, setBusy] = useState<string | null>(null);
   const [review, setReview] = useState<LiveDraftReview | null>(null), [preview, setPreview] = useState<LiveFallbackPreview | null>(null), [accepted, setAccepted] = useState(false);
   const [editableSaved, setEditableSaved] = useState<boolean | null>(null), [retired, setRetired] = useState(false), [resetConfirmation, setResetConfirmation] = useState(false);
-  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const browserTimezone = browserScheduleTimeZone();
   const inFlight = useRef(false), active = useRef(true), contentRef = useRef<HTMLDivElement>(null), form = journal.form;
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   useEffect(() => { contentRef.current?.scrollTo({ top: 0 }); }, [step]);
@@ -191,10 +192,14 @@ export function LiveScheduleWizard({ actorId, canReadGroups, onClose, onCreateSo
     {step === 2 && <fieldset disabled={locked}><StepScheduleDetails scheduleName={form.name} scheduleDescription={form.description} timezone={browserTimezone} fixedInputTimezone={browserTimezone}
       startAt={localDateTime(form.start_at)} endAt={localDateTime(form.end_at)} priority={form.priority} hasSelectedTargets={Boolean(form.screen_ids.length || form.screen_group_ids.length)}
       onUpdate={updateDetails} /></fieldset>}
-    {step === 3 && review && preview && <div className="space-y-4"><div className="grid gap-3 rounded-lg border p-4 text-sm sm:grid-cols-2">
-      <p><strong>{form.name}</strong><br />{new Date(review.items[0].start_at).toLocaleString()} to {new Date(review.items[0].end_at).toLocaleString()}</p>
-      <p>{review.items[0].screen_ids.length} distinct approved screens · Presenter ***{review.items[0].presenter_user_id.slice(-8)}<br />Microphone {review.items[0].microphone ? "allowed" : "off"} · Captured audio {review.items[0].screen_share_audio ? "allowed" : "off"}</p>
-      <details className="sm:col-span-2"><summary className="cursor-pointer">Review concrete screen IDs and group references</summary><p className="mt-2 break-all font-mono text-xs">Screens: {review.items[0].screen_ids.join(", ")}<br />Groups: {review.items[0].screen_group_ids.join(", ") || "None"}</p></details></div>
+    {step === 3 && review && preview && <div className="space-y-4"><section aria-label="Live event review summary" className="grid gap-3 rounded-lg border p-4 text-sm sm:grid-cols-2">
+      <div><p className="text-muted-foreground">Event</p><p className="break-words font-semibold">{form.name}</p></div>
+      <div><p className="text-muted-foreground">Live source</p><p className="break-words">{source.data?.id === review.items[0].live_session_id ? source.data.name : `Source ***${review.items[0].live_session_id.slice(-8)}`}</p></div>
+      <div className="sm:col-span-2"><p className="text-muted-foreground">Offline fallback</p><p className="break-words">{presentations.data?.find(item => item.id === preview.presentation_id)?.name ?? `Presentation ***${preview.presentation_id.slice(-8)}`}</p></div>
+      <div className="sm:col-span-2"><p className="text-muted-foreground">Scheduled window</p><p>Starts <time dateTime={review.items[0].start_at}>{new Date(review.items[0].start_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: browserTimezone })}</time></p><p>Ends <time dateTime={review.items[0].end_at}>{new Date(review.items[0].end_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: browserTimezone })}</time></p><p>Time zone: {browserTimezone}</p></div>
+      <div><p className="text-muted-foreground">Audience</p><p>{review.items[0].screen_ids.length} distinct approved {review.items[0].screen_ids.length === 1 ? "screen" : "screens"}</p></div>
+      <div><p className="text-muted-foreground">Presenter and audio</p><p>Presenter ***{review.items[0].presenter_user_id.slice(-8)}<br />Microphone {review.items[0].microphone ? "allowed" : "off"} · Captured audio {review.items[0].screen_share_audio ? "allowed" : "off"}</p></div>
+      <details className="sm:col-span-2"><summary className="cursor-pointer">Review concrete screen IDs and group references</summary><p className="mt-2 break-all font-mono text-xs">Screens: {review.items[0].screen_ids.join(", ")}<br />Groups: {review.items[0].screen_group_ids.join(", ") || "None"}</p></details></section>
       <PreparedLiveFallbackPreview preview={preview} onRefresh={refreshPreview} refreshing={busy === "preview"} />
       <p className="text-sm text-muted-foreground">Submission checks screen and broadcast capacity again. A changed source, fallback, audience or window requires a fresh review. Submission requests approval; it does not start broadcasting.</p>
       <LiveDraftReviewConsent busy={Boolean(busy)} unresolved={unresolved} needsSavedLoad={needsSavedLoad} editableSaved={editableSaved}

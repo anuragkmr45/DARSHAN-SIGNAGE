@@ -20,6 +20,7 @@ import type {
 import { resolveQuickPresetRange, type ScheduleQuickPresetId } from "@/lib/scheduleQuickPresets";
 import { buildPresentationSlotPayloads, normalizeRestoredSlotMedia } from "@/lib/scheduleCreatorState";
 import { canCreateScheduleFlow } from "@/lib/scheduleAccess";
+import { browserScheduleTimeZone } from "@/lib/scheduleTimeZone";
 import { useAuthorization } from "@/hooks/useAuthorization";
 
 import { StepLayoutSelect } from "@/components/schedule-creator/StepLayoutSelect";
@@ -111,7 +112,7 @@ const initialState: ScheduleWizardState = {
   scheduleItemSyncScheduleId: null,
   scheduleName: "",
   scheduleDescription: "",
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  timezone: browserScheduleTimeZone(),
   startAt: "",
   endAt: "",
   priority: 0,

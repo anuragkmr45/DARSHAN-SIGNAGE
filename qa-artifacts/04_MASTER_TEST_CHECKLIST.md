@@ -198,6 +198,13 @@ Source-page browser observations are separate. Repeat through the actual CMS
 publishing and ordinary-player workflow; all checkboxes above remain open.
 See [publication evidence](evidence/live-publication-authorization-developer-verification-2026-11-03.md).
 
+The 2026-11-04 redesign developer pass completed a real isolated CMS author
+Review → Submit → Queue Cancel journey and verified the Screen and live
+reservations released in PostgreSQL. The [page evidence](evidence/product-ui-live-page-developer-verification-2026-11-04.md)
+records the immutable cancelled QA fixture and the corrected source, fallback,
+audience and timezone summary. This does not close any unchecked human `LIVE-01..20`
+row, approval/publication, or player-delivery gate.
+
 ## Runtime and authoring developer checkpoint — 2026-11-03
 
 The packet is **implemented in source, default OFF, and locally developer-verified**. It is not beta acceptance or release approval. The earlier presenter-preflight increment passed 37/37 PostgreSQL/Fastify runtime cases and 31/31 focused CMS API/controller/panel cases; the later rebuilt real CMS → packaged-player repeat and final regression are recorded in the [dated developer ledger](evidence/live-broadcast-developer-verification-2026-11-03.md). [Runtime/authoring evidence](evidence/live-runtime-authoring-developer-verification-2026-11-03.md) retains its original source/build scope; an older SFU/prototype result cannot validate a later build. All `LIVE-01..20` remain **Not Tested** and QA-owned execution/result/defect/sign-off fields remain unchanged.

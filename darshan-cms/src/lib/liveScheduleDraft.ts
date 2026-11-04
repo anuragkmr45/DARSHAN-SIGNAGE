@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createUuid } from "@/lib/uuid";
 import type { LiveDraftReviewPayload } from "@/api/liveTypes";
+import { browserScheduleTimeZone } from "@/lib/scheduleTimeZone";
 
 const uuid = z.string().uuid();
 export const liveDraftFormSchema = z.object({ name: z.string(), description: z.string(), timezone: z.string(),
@@ -10,7 +11,7 @@ export interface LiveDraftForm {
   name: string; description: string; timezone: string; live_session_id: string; presentation_id: string; preparation_id: string;
   start_at: string; end_at: string; priority: number; screen_ids: string[]; screen_group_ids: string[];
 }
-export const emptyLiveDraftForm = (): LiveDraftForm => ({ name: "", description: "", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+export const emptyLiveDraftForm = (): LiveDraftForm => ({ name: "", description: "", timezone: browserScheduleTimeZone(),
   live_session_id: "", presentation_id: "", preparation_id: "", start_at: "", end_at: "", priority: 0, screen_ids: [], screen_group_ids: [] });
 export const liveDraftStorageKey = (actorId: string) => `darshan:live-authoring:v1:${actorId}`;
 const pendingReviewSchema = liveDraftFormSchema.extend({ request_id: uuid, expected_revision: z.number().int().nonnegative() });
