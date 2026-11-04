@@ -205,6 +205,7 @@ describe('Pairing presentation browser regression', () => {
         (() => {
           const presentationListeners = [];
           const playbackListeners = [];
+          const mediaListeners = [];
           const defaultMediaListeners = [];
           const initialStatus = ${JSON.stringify(initialStatus)};
           const noOp = () => undefined;
@@ -218,7 +219,7 @@ describe('Pairing presentation browser regression', () => {
             },
             getPlayerPresentation: async () => ({ revision: 1, status: initialStatus }),
             onPlaybackUpdate(listener) { playbackListeners.push(listener); },
-            onMediaChange: noOp,
+            onMediaChange(listener) { mediaListeners.push(listener); },
             onEmergencyOverride: noOp,
             onPlayerStatus: noOp,
             getDefaultMedia: async () => ({ source: 'NONE', aspect_ratio: null, media_id: null, media: null }),
@@ -243,6 +244,7 @@ describe('Pairing presentation browser regression', () => {
           window.__darshanE2E = {
             emitPresentation(value) { presentationListeners.forEach((listener) => listener(value)); },
             emitPlayback(value) { playbackListeners.forEach((listener) => listener(value)); },
+            emitMedia(value) { mediaListeners.forEach((listener) => listener(value)); },
             emitDefaultMedia(value) { defaultMediaListeners.forEach((listener) => listener(value)); },
           };
         })();
@@ -503,7 +505,8 @@ describe('Pairing presentation browser regression', () => {
       "window.__darshanE2E.emitDefaultMedia({ source: 'NONE', media_id: null, media: null })")
 
     await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 8, status: {
-      state: 'PAIRED_RUNTIME', mode: 'emergency', online: true, backendAvailable: true
+      state: 'PAIRED_RUNTIME', mode: 'emergency', online: true, backendAvailable: true,
+      contentEpoch: 'emergency-e2e'
     } })`)
     const emergencyBanner = await evaluate(session,
       "getComputedStyle(document.getElementById('mode-banner')).display !== 'none' && document.getElementById('mode-banner').textContent === 'EMERGENCY'")
@@ -521,6 +524,92 @@ describe('Pairing presentation browser regression', () => {
     })()`)
     expect(qaDiagnostics).to.deep.equal({
       visible: true, surface: 'rgb(255, 255, 255)', emergency: 'rgb(248, 231, 226)',
+    })
+
+    // Exercise native emergency content through the same renderer IPC path used
+    // by the packaged player. The message must remain prominent and flat.
+    for (const severity of ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'UNRECOGNIZED']) {
+      const expected = severity === 'UNRECOGNIZED' ? 'HIGH' : severity
+      await evaluate(session, `window.__darshanE2E.emitMedia({
+        contentEpoch: 'emergency-e2e',
+        item: {
+          id: 'emergency-message', type: 'message', displayMs: 10000,
+          fit: 'contain', muted: false,
+          meta: { severity: ${JSON.stringify(severity)}, message: 'Follow the marked exit immediately.' }
+        }
+      })`)
+      await waitFor(session,
+        `document.querySelector('.player-emergency-heading')?.textContent === '${expected} EMERGENCY'`,
+        `${expected} native emergency message`)
+      const appearance = await evaluate(session, `(() => {
+        const message = document.querySelector('.player-emergency');
+        const heading = message.querySelector('.player-emergency-heading');
+        return {
+          background: getComputedStyle(message).backgroundImage,
+          surface: getComputedStyle(message).backgroundColor,
+          heading: heading.textContent,
+          alert: message.getAttribute('role'),
+        }
+      })()`)
+      expect(appearance).to.deep.equal({
+        background: 'none',
+        surface: ({
+          LOW: 'rgb(30, 58, 95)', MEDIUM: 'rgb(92, 60, 17)',
+          HIGH: 'rgb(100, 40, 32)', CRITICAL: 'rgb(74, 23, 23)',
+        } as Record<string, string>)[expected],
+        heading: `${expected} EMERGENCY`,
+        alert: 'alert',
+      })
+    }
+
+    await session.command('Emulation.setDeviceMetricsOverride', {
+      width: 390, height: 844, deviceScaleFactor: 1, mobile: false,
+    })
+    await session.command('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: 'dark' }],
+    })
+    await evaluate(session, `window.__darshanE2E.emitMedia({
+      contentEpoch: 'emergency-e2e',
+      item: {
+        id: 'emergency-long', type: 'message', displayMs: 10000,
+        fit: 'contain', muted: false,
+        meta: {
+          severity: 'CRITICAL',
+          message: 'Evacuate using the marked east exit. Do not use the lifts. Follow onsite staff instructions and proceed to the assembly point outside the building.'
+        }
+      }
+    })`)
+    await waitFor(session,
+      "document.querySelector('.player-emergency-heading')?.textContent === 'CRITICAL EMERGENCY' && document.querySelector('.player-emergency-copy')?.style.fontSize !== ''",
+      'narrow critical emergency text fitting')
+    const narrowEmergency = await evaluate(session, `(() => {
+      const surface = document.querySelector('.player-emergency');
+      const copy = surface.querySelector('.player-emergency-copy');
+      const bounds = copy.getBoundingClientRect();
+      return {
+        background: getComputedStyle(surface).backgroundImage,
+        text: getComputedStyle(copy).color,
+        withinViewport: bounds.left >= 0 && bounds.right <= innerWidth &&
+          bounds.top >= 0 && bounds.bottom <= innerHeight,
+        fitted: copy.scrollHeight <= copy.clientHeight && copy.scrollWidth <= copy.clientWidth,
+        onlyCurrent: document.querySelectorAll('.player-emergency').length === 1,
+        duplicateBadgeHidden: getComputedStyle(document.getElementById('mode-banner')).display === 'none',
+      }
+    })()`)
+    expect(narrowEmergency).to.deep.equal({
+      background: 'none', text: 'rgb(255, 255, 255)',
+      withinViewport: true, fitted: true,
+      onlyCurrent: true, duplicateBadgeHidden: true,
+    })
+    const emergencyScreenshot = await session.command('Page.captureScreenshot', { format: 'png' })
+    const emergencyPath = path.resolve(__dirname,
+      '../../../qa-artifacts/evidence/product-ui-player-prototype/production-emergency-critical-dark-390.png')
+    await fs.promises.writeFile(emergencyPath, Buffer.from(emergencyScreenshot.data as string, 'base64'))
+    await session.command('Emulation.setDeviceMetricsOverride', {
+      width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+    })
+    await session.command('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: 'light' }],
     })
 
     await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 9, status: {

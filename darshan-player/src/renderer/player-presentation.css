@@ -604,6 +604,59 @@ body[data-runtime-mode='qa'] .pairing-field:nth-child(2) {
   #mode-banner.emergency { background: #4B2B28; color: #F8C9BD; }
   #mode-banner.offline { background: #4A3924; color: #F6D7A7; }
 }
+/* Native emergency text is a player-owned safety surface. Severity stays legible at distance. */
+.player-emergency--low { --emergency-surface: #1E3A5F; --emergency-accent: #93C5FD; }
+.player-emergency--medium { --emergency-surface: #5C3C11; --emergency-accent: #FCD34D; }
+.player-emergency--high { --emergency-surface: #642820; --emergency-accent: #FDA48D; }
+.player-emergency--critical { --emergency-surface: #4A1717; --emergency-accent: #FFB4A8; }
+
+.player-emergency {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: center;
+  gap: clamp(8px, 2vmin, 28px);
+  padding: clamp(16px, 6vmin, 96px);
+  overflow: hidden;
+  border-top: clamp(8px, 1.2vmin, 18px) solid var(--emergency-accent);
+  background: var(--emergency-surface);
+  color: #FFFFFF;
+  text-align: center;
+}
+/* The native message already identifies the emergency; the status pill would
+   cover its heading on a portrait or compact screen. */
+body:has(#playback-container > .player-emergency) #mode-banner.emergency {
+  display: none;
+}
+.player-emergency-heading {
+  color: var(--emergency-accent);
+  font-size: clamp(16px, 3vmin, 42px);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+.player-emergency-copy {
+  max-width: 96%;
+  max-height: 100%;
+  overflow: hidden;
+  font-size: 72px;
+  line-height: 1.12;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+.player-emergency-footer {
+  font-size: clamp(12px, 2vmin, 28px);
+  color: #FFFFFF;
+}
+.player-emergency-media-copy {
+  background: var(--emergency-surface);
+  color: #FFFFFF;
+  border-top: solid var(--emergency-accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation: none; border-top-color: var(--player-brand); }
 }

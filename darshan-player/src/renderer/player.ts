@@ -404,8 +404,11 @@ class Player {
     const renderAbortController = item.type === 'video' ? new AbortController() : undefined
     this.topLevelRenderAbortController = renderAbortController
     this.log('info', 'Playing media', { itemId: item.id, type: item.type })
-    const transitionDurationMs =
-      this.pendingTransition?.nextId === item.id ? this.pendingTransition.durationMs : undefined
+    // Emergency text must replace the prior frame immediately; a decorative
+    // crossfade can briefly show two conflicting safety instructions.
+    const transitionDurationMs = item.type === 'message' || typeof item.meta?.['emergency_message'] === 'string'
+      ? 0
+      : this.pendingTransition?.nextId === item.id ? this.pendingTransition.durationMs : undefined
     this.pendingTransition = undefined
 
     try {
@@ -577,60 +580,23 @@ class Player {
   }
 
   private renderEmergencyMessage(item: TimelineItem): HTMLElement {
-    const severity = String(item.meta?.['severity'] ?? 'HIGH').toUpperCase()
-    const colors: Record<string, [string, string]> = {
-      LOW: ['#1d4ed8', '#0f172a'],
-      MEDIUM: ['#d97706', '#451a03'],
-      HIGH: ['#dc2626', '#450a0a'],
-      CRITICAL: ['#991b1b', '#000000'],
-    }
-    const [accent, background] = colors[severity] ?? colors['HIGH']!
+    const severity = this.emergencySeverity(item)
     const container = document.createElement('section')
+    container.className = `player-emergency player-emergency--${severity.toLowerCase()}`
     container.setAttribute('role', 'alert')
     container.setAttribute('aria-live', 'assertive')
-    Object.assign(container.style, {
-      position: 'absolute',
-      inset: '0',
-      width: '100%',
-      height: '100%',
-      display: 'grid',
-      gridTemplateRows: 'auto minmax(0, 1fr) auto',
-      alignItems: 'center',
-      justifyItems: 'center',
-      gap: 'clamp(8px, 2vmin, 28px)',
-      padding: 'clamp(16px, 6vmin, 96px)',
-      overflow: 'hidden',
-      textAlign: 'center',
-      color: '#ffffff',
-      background: `radial-gradient(circle at 50% 20%, ${accent}, ${background} 72%)`,
-    })
 
     const heading = document.createElement('div')
+    heading.className = 'player-emergency-heading'
     heading.textContent = `${severity} EMERGENCY`
-    Object.assign(heading.style, {
-      fontSize: 'clamp(16px, 3vmin, 42px)',
-      fontWeight: '800',
-      letterSpacing: '0.12em',
-    })
 
     const message = document.createElement('div')
+    message.className = 'player-emergency-copy'
     message.textContent = String(item.meta?.['message'] ?? 'Emergency alert')
-    Object.assign(message.style, {
-      maxWidth: '96%',
-      maxHeight: '100%',
-      overflow: 'hidden',
-      fontSize: '72px',
-      lineHeight: '1.12',
-      fontWeight: '750',
-      overflowWrap: 'anywhere',
-    })
 
     const footer = document.createElement('div')
+    footer.className = 'player-emergency-footer'
     footer.textContent = 'Follow onsite safety instructions immediately'
-    Object.assign(footer.style, {
-      fontSize: 'clamp(12px, 2vmin, 28px)',
-      opacity: '0.88',
-    })
 
     container.append(heading, message, footer)
     this.deferStyleCommit(() => {
@@ -644,10 +610,15 @@ class Player {
     return container
   }
 
-  private wrapEmergencyMedia(media: HTMLElement, item: TimelineItem): HTMLElement {
+  private emergencySeverity(item: TimelineItem): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
     const severity = String(item.meta?.['severity'] ?? 'HIGH').toUpperCase()
-    const accent = severity === 'CRITICAL' ? '#991b1b' : severity === 'HIGH' ? '#dc2626' : severity === 'MEDIUM' ? '#d97706' : '#1d4ed8'
+    return severity === 'LOW' || severity === 'MEDIUM' || severity === 'CRITICAL' ? severity : 'HIGH'
+  }
+
+  private wrapEmergencyMedia(media: HTMLElement, item: TimelineItem): HTMLElement {
+    const severity = this.emergencySeverity(item)
     const wrapper = document.createElement('section')
+    wrapper.className = `player-emergency-media player-emergency--${severity.toLowerCase()}`
     wrapper.setAttribute('role', 'alert')
     Object.assign(wrapper.style, {
       position: 'absolute',
@@ -660,6 +631,7 @@ class Player {
     wrapper.appendChild(media)
 
     const overlay = document.createElement('div')
+    overlay.className = 'player-emergency-media-copy'
     Object.assign(overlay.style, {
       position: 'absolute',
       left: '0',
@@ -669,9 +641,7 @@ class Player {
       maxHeight: '42%',
       overflow: 'hidden',
       padding: 'clamp(12px, 3vmin, 48px)',
-      color: '#ffffff',
-      background: `linear-gradient(90deg, ${accent}f2, #000000e8)`,
-      borderTop: 'clamp(3px, 0.6vmin, 10px) solid #ffffff',
+      borderTopWidth: 'clamp(3px, 0.6vmin, 10px)',
       fontSize: 'clamp(18px, 4vmin, 64px)',
       fontWeight: '800',
       lineHeight: '1.12',
@@ -1055,6 +1025,8 @@ class Player {
       if (typeof (previous as DisposableMediaNode).__darshanCleanup === 'function') {
         this.disposeScheduledElement(previous)
         this.currentElement = undefined
+      } else if (safeFadeMs === 0) {
+        this.disposeScheduledElement(previous)
       } else {
         prepareElementForFadeOut(previous, safeFadeMs)
         setTimeout(() => {
