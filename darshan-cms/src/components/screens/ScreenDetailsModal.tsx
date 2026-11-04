@@ -42,6 +42,7 @@ import { screensApi } from "@/api/domains/screens";
 import { queryKeys } from "@/api/queryKeys";
 import type { ScreenPlaybackItemSummary } from "@/api/types";
 import { useSafeMutation } from "@/hooks/useSafeMutation";
+import { useAuthorization } from "@/hooks/useAuthorization";
 import { toast } from "sonner";
 import { ApiError } from "@/api/apiClient";
 import { getPlaybackTimingLabel, getServerClockOffsetMs, getServerNowFromOffset, isHeartbeatStale } from "@/hooks/screens/screensRealtimeUtils";
@@ -172,6 +173,7 @@ export function ScreenDetailsModal({
   pendingEmergency = false,
 }: ScreenDetailsModalProps) {
   const queryClient = useQueryClient();
+  const { can } = useAuthorization();
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: "", location: "" });
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
@@ -286,6 +288,10 @@ export function ScreenDetailsModal({
   }, "Unable to update the preferred display.");
 
   const screen = screenQuery.data;
+  const canUpdateScreen = can("update", "Screen") && screen?.can_update === true;
+  useEffect(() => {
+    if (!canUpdateScreen) setIsEditing(false);
+  }, [canUpdateScreen]);
   const screenStatusDetails = statusQuery.data;
   const nowPlaying = nowPlayingQuery.data;
   const screenStatus = nowPlaying?.status || screen?.status || "UNKNOWN";
@@ -470,7 +476,8 @@ export function ScreenDetailsModal({
               </DialogDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-              {isEditing ? (
+              {screen && !canUpdateScreen ? <Badge variant="outline">View only</Badge> : null}
+              {isEditing && canUpdateScreen ? (
                 <>
                   <Button size="sm" variant="outline" onClick={() => setIsEditing(false)}>
                     <X className="h-3 w-3 mr-1" />
@@ -485,7 +492,7 @@ export function ScreenDetailsModal({
                     {updateScreen.isPending ? "Saving..." : "Save"}
                   </Button>
                 </>
-              ) : (
+              ) : canUpdateScreen ? (
                 <Button
                   size="sm"
                   variant="outline"
@@ -495,7 +502,7 @@ export function ScreenDetailsModal({
                   <Edit2 className="h-3 w-3 mr-1" />
                   Edit
                 </Button>
-              )}
+              ) : null}
             </div>
           </div>
         </DialogHeader>
@@ -685,7 +692,7 @@ export function ScreenDetailsModal({
                         {displayProfile.selection.fallback_reason || "Placement is not verified"}. The player may currently be using its primary output.
                       </p>
                     ) : null}
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    {canUpdateScreen ? <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <Label htmlFor="preferred-display" className="shrink-0">Preferred output</Label>
                       <select
                         id="preferred-display"
@@ -707,7 +714,7 @@ export function ScreenDetailsModal({
                           </option>
                         ))}
                       </select>
-                    </div>
+                    </div> : null}
                     <p className="text-xs text-muted-foreground">Scale {activeOutput?.scale_factor ?? "N/A"}; rotation {activeOutput?.rotation_degrees ?? "N/A"}°; observed {formatDateTime(displayState.observed_at)}.</p>
                   </>
                 )}
@@ -1357,7 +1364,7 @@ export function ScreenDetailsModal({
                       <Label className="text-muted-foreground">Latest preview</Label>
                       <p className="text-sm">{formatDateTime(latestPreview?.captured_at)}</p>
                     </div>
-                    <Button
+                    {canUpdateScreen ? <Button
                       variant="outline"
                       size="sm"
                       onClick={() => triggerScreenshot.mutate()}
@@ -1365,7 +1372,7 @@ export function ScreenDetailsModal({
                     >
                       <RefreshCcw className={`h-3 w-3 mr-1 ${isTakingSnapshot ? "animate-spin" : ""}`} />
                       {isTakingSnapshot ? "Capturing..." : "Take Snapshot"}
-                    </Button>
+                    </Button> : null}
                   </div>
 
                   {latestPreview?.screenshot_url ? (

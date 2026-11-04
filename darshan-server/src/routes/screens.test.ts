@@ -408,6 +408,62 @@ describe('Screens routes realtime playback bootstrap', () => {
     expect(denied.statusCode).toBe(403);
   });
 
+  it('uses the selected Screen record for detail reads and writes', async () => {
+    const db = getDatabase();
+    const allowedId = randomUUID();
+    const deniedId = randomUUID();
+    const roleId = randomUUID();
+    const userId = randomUUID();
+    const roleName = `SCREEN_DETAIL_SCOPED_${roleId}`;
+    const email = `screen-detail-${userId}@example.test`;
+    await db.insert(schema.screens).values([
+      { id: allowedId, name: 'Scoped detail allowed' },
+      { id: deniedId, name: 'Scoped detail denied' },
+    ]);
+    await db.insert(schema.roles).values({ id: roleId, name: roleName, is_system: false,
+      permissions: { grants: [
+        { action: 'read', subject: 'Screen', conditions: { id: allowedId } },
+        { action: 'update', subject: 'Screen', conditions: { id: allowedId } },
+      ] } });
+    await db.insert(schema.users).values({ id: userId, email, password_hash: 'test-only-unused',
+      first_name: 'Scoped', last_name: 'Reader', role_id: roleId, is_active: true });
+    const access = await generateAccessToken(userId, email, roleId, roleName);
+    await createSessionRepository().create({ user_id: userId, access_jti: access.jti, expires_at: access.expiresAt });
+    const headers = { authorization: `Bearer ${access.token}` };
+
+    const permitted = await server.inject({ method: 'GET', url: `/api/v1/screens/${allowedId}`, headers });
+    expect(permitted.statusCode).toBe(200);
+    expect(JSON.parse(permitted.body)).toMatchObject({ id: allowedId, can_update: true });
+
+    for (const path of ['', '/status', '/heartbeats', '/commands/recent', '/media-cache-reports/recent',
+      '/delivery-status', '/display-state']) {
+      const response = await server.inject({ method: 'GET', url: `/api/v1/screens/${deniedId}${path}`, headers });
+      expect(response.statusCode, `GET ${path || '/:id'}`).toBe(403);
+    }
+
+    const deniedWrites = [
+      { method: 'PATCH' as const, path: '', payload: { name: 'Unauthorized rename' } },
+      { method: 'PUT' as const, path: '/display-selection', payload: { mode: 'PRIMARY' } },
+      { method: 'POST' as const, path: '/screenshot-settings', payload: { enabled: true, interval_seconds: 60 } },
+      { method: 'POST' as const, path: '/screenshot', payload: { reason: 'authorization-test' } },
+    ];
+    for (const { method, path, payload } of deniedWrites) {
+      const response = await server.inject({ method, url: `/api/v1/screens/${deniedId}${path}`, headers,
+        payload });
+      expect(response.statusCode, `${method} ${path || '/:id'}`).toBe(403);
+    }
+    const [denied] = await db.select().from(schema.screens).where(eq(schema.screens.id, deniedId));
+    expect(denied.name).toBe('Scoped detail denied');
+    expect(denied.screenshot_enabled).toBe(false);
+    expect(await db.select().from(schema.deviceCommands).where(eq(schema.deviceCommands.screen_id, deniedId))).toHaveLength(0);
+    expect(await db.select().from(schema.screenDisplayStates).where(eq(schema.screenDisplayStates.screen_id, deniedId))).toHaveLength(0);
+
+    const update = await server.inject({ method: 'PATCH', url: `/api/v1/screens/${allowedId}`, headers,
+      payload: { name: 'Scoped detail updated' } });
+    expect(update.statusCode).toBe(200);
+    expect(JSON.parse(update.body).name).toBe('Scoped detail updated');
+  });
+
   it('returns server_time and playback in screens overview while preserving existing fields', async () => {
     const db = getDatabase();
     const screenId = randomUUID();

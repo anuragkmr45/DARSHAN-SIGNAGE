@@ -771,6 +771,8 @@ export interface PresentationSlotsResponse {
 
 export interface Screen {
   id: string;
+  /** Server-evaluated permission for this Screen record; absent means read-only. */
+  can_update?: boolean;
   name: string;
   location?: string | null;
   aspect_ratio?: string | null;

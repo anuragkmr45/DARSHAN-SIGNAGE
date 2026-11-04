@@ -200,3 +200,5 @@ The [master checklist](04_MASTER_TEST_CHECKLIST.md) now spells out independent
 physical display/audio, measured 10×25 and isolated restore gates. All 20 CSV
 results remain `Not Tested`. The separate local Firefox retry was dropped;
 Firefox was not verified or added to the BQ-027 release support matrix.
+
+The [Screen detail permission developer record](evidence/product-ui-screen-detail-permissions-developer-verification-2026-11-04.md) covers record-scoped detail reads and writes, the view-only CMS inspector, a fixture screenshot, and focused local regression. Real role actors and a physical player remain QA work.

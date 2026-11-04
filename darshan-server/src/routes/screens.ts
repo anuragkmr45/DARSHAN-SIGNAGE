@@ -1,4 +1,4 @@
-import { readAuthorizedScreen } from '@/services/screen-read-authorization';
+import { readAuthorizedScreen, readAuthorizedScreenAccess } from '@/services/screen-read-authorization';
 import { hydrateLiveFallbackItems } from '@/services/live-fallback-delivery';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -22,7 +22,7 @@ import {
   buildResolvedMediaMap,
   buildResolvedMediaRepresentation,
 } from '@/utils/resolved-media';
-import { createDeviceCommand, listRecentDeviceCommands } from '@/services/command-lifecycle-service';
+import { createDeviceCommandsInTransaction, listRecentDeviceCommands } from '@/services/command-lifecycle-service';
 import { listRecentMediaCacheReports } from '@/services/media-cache-report-service';
 import { KNOWN_ASPECT_RATIOS, getAspectRatioName, resolveAspectRatio } from '@/utils/aspect-ratio';
 import {
@@ -49,6 +49,9 @@ import { displaySelectionSchema } from '@/utils/display-profile';
 import { subject } from '@casl/ability';
 import { assertTargetCanBeDeleted, lockScreenTargetReferences } from '@/services/screen-deletion-guard';
 import { sendDeviceNotification } from '@/realtime/device-gateway';
+import { withCurrentMutationAuthorization, type MutationAuthorizationContext } from '@/auth/mutation-authorization';
+import type { JWTPayload } from '@/auth/jwt';
+import type { DatabaseTransaction } from '@/db';
 
 const logger = createLogger('screen-routes');
 const { OK } = HTTP_STATUS;
@@ -158,6 +161,20 @@ export async function screenRoutes(fastify: FastifyInstance) {
   const screenRepo = createScreenRepository();
   const db = getDatabase();
   await setupScreensNamespace(fastify);
+
+  const withAuthorizedScreenUpdate = <T>(
+    payload: Pick<JWTPayload, 'sub' | 'jti'>,
+    screenId: string,
+    update: (context: MutationAuthorizationContext) => Promise<T>,
+    screenLock: 'update' | 'key share' = 'update',
+  ) => withCurrentMutationAuthorization(payload, async context => {
+    if (!context.ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
+    const [screen] = await context.executor.select().from(schema.screens)
+      .where(eq(schema.screens.id, screenId)).for(screenLock);
+    if (!screen) throw AppError.notFound('Screen not found');
+    if (!context.ability.can('update', subject('Screen', screen) as never)) throw AppError.forbidden('Forbidden');
+    return update(context);
+  });
 
   const getGroupIdsForScreen = async (screenId: string): Promise<string[]> => {
     const members = await db
@@ -557,15 +574,8 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        await readAuthorizedScreen(request, screenId);
 
         const query = recentCommandsQuerySchema.parse(request.query ?? {});
         const commands = await listRecentDeviceCommands(screenId, query.limit);
@@ -636,15 +646,8 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        await readAuthorizedScreen(request, screenId);
 
         const query = mediaCacheReportsQuerySchema.parse(request.query ?? {});
         const reports = await listRecentMediaCacheReports(screenId, query.limit);
@@ -701,15 +704,8 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        await readAuthorizedScreen(request, screenId);
 
         const query = deliveryStatusQuerySchema.parse(request.query ?? {});
         const recentCommands = await listRecentDeviceCommands(screenId, query.limit);
@@ -905,13 +901,8 @@ export async function screenRoutes(fastify: FastifyInstance) {
       try {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
-        const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('read', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const screenId = (request.params as any).id;
-        const [screen] = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
-        if (!screen) throw AppError.notFound('Screen not found');
+        await readAuthorizedScreen(request, screenId);
         return reply.send(serializeDisplayState(await getScreenDisplayState(screenId)));
       } catch (error) {
         logger.error(error, 'Get screen display state error');
@@ -934,27 +925,26 @@ export async function screenRoutes(fastify: FastifyInstance) {
         const token = extractTokenFromHeader(request.headers.authorization);
         if (!token) throw AppError.unauthorized('Missing authorization header');
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const screenId = (request.params as any).id;
-        const [screen] = await db.select({ id: schema.screens.id }).from(schema.screens).where(eq(schema.screens.id, screenId)).limit(1);
-        if (!screen) throw AppError.notFound('Screen not found');
-
         const selection = displaySelectionSchema.parse(request.body);
-        const state = await updateDisplaySelection(screenId, selection);
-        const command = await createDeviceCommand({
-          screenId,
-          type: 'SET_ACTIVE_DISPLAY',
-          createdBy: payload.sub,
-          idempotencyKey: `display-selection:${screenId}:${state.selection_version}`,
-          payload: {
-            selection: state.desired_selection,
-            selection_version: state.selection_version,
-            profile_revision: state.profile_revision,
-            reason: 'DISPLAY_SELECTION_CHANGED',
-          },
-        });
+        // Heartbeats write display state before projecting non-key geometry to
+        // screens. KEY SHARE prevents deletion without deadlocking that order.
+        const { state, command } = await withAuthorizedScreenUpdate(payload, screenId, async context => {
+          const state = await updateDisplaySelection(screenId, selection, context.executor);
+          const [command] = await createDeviceCommandsInTransaction(context.executor as DatabaseTransaction, [{
+            screenId,
+            type: 'SET_ACTIVE_DISPLAY',
+            createdBy: payload.sub,
+            idempotencyKey: `display-selection:${screenId}:${state.selection_version}`,
+            payload: {
+              selection: state.desired_selection,
+              selection_version: state.selection_version,
+              profile_revision: state.profile_revision,
+              reason: 'DISPLAY_SELECTION_CHANGED',
+            },
+          }]);
+          return { state, command };
+        }, 'key share');
         emitScreensRefreshRequired(fastify, { reason: 'DISPLAY_SELECTION', screen_ids: [screenId] });
         return reply.send({
           ...serializeDisplayState(state),
@@ -980,7 +970,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
       try {
 
 
-        const screen = await readAuthorizedScreen(request, (request.params as any).id);
+        const { screen, can_update } = await readAuthorizedScreenAccess(request, (request.params as any).id);
         const summary = await buildScreenPlaybackState(screen, { db });
         if (!summary) {
           throw AppError.notFound('Screen not found');
@@ -988,6 +978,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
 
         return reply.send({
           id: summary.id,
+          can_update,
           name: summary.name,
           location: (summary as any).location ?? null,
           aspect_ratio: (summary as any).aspect_ratio ?? null,
@@ -1140,13 +1131,8 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
-
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        await readAuthorizedScreen(request, screenId);
 
         const query = listHeartbeatsQuerySchema.parse(request.query);
         if (query.start_at && query.end_at) {
@@ -1232,15 +1218,7 @@ export async function screenRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
-
         const data = screenshotSettingsSchema.parse(request.body);
         const enabled = typeof data.enabled === 'boolean' ? data.enabled : true;
         const intervalSeconds = typeof data.interval_seconds === 'number' ? data.interval_seconds : null;
@@ -1248,16 +1226,18 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.badRequest('interval_seconds is required when enabled');
         }
 
-        const updated = await screenRepo.update(screenId, {
-          screenshot_interval_seconds: intervalSeconds,
-          screenshot_enabled: enabled,
-        } as any);
-
-        const command = await createDeviceCommand({
-          screenId,
-          type: 'SET_SCREENSHOT_INTERVAL',
-          payload: { interval_seconds: intervalSeconds, enabled, reason: 'SCREENSHOT_POLICY' },
-          createdBy: payload.sub,
+        const { updated, command } = await withAuthorizedScreenUpdate(payload, screenId, async context => {
+          const updated = await screenRepo.update(screenId, {
+            screenshot_interval_seconds: intervalSeconds,
+            screenshot_enabled: enabled,
+          } as any, context.executor);
+          const [command] = await createDeviceCommandsInTransaction(context.executor as DatabaseTransaction, [{
+            screenId,
+            type: 'SET_SCREENSHOT_INTERVAL',
+            payload: { interval_seconds: intervalSeconds, enabled, reason: 'SCREENSHOT_POLICY' },
+            createdBy: payload.sub,
+          }]);
+          return { updated, command };
         });
 
         return reply.send({
@@ -1291,22 +1271,16 @@ export async function screenRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-        if (!ability.can('update', 'Screen')) throw AppError.forbidden('Forbidden');
-
         const screenId = (request.params as any).id;
-        const screen = await screenRepo.findById(screenId);
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
-
         const data = screenshotTriggerSchema.parse(request.body);
-
-        const command = await createDeviceCommand({
-          screenId,
-          type: 'TAKE_SCREENSHOT',
-          payload: { reason: data.reason ?? 'SCREENSHOT' },
-          createdBy: payload.sub,
+        const command = await withAuthorizedScreenUpdate(payload, screenId, async context => {
+          const [command] = await createDeviceCommandsInTransaction(context.executor as DatabaseTransaction, [{
+            screenId,
+            type: 'TAKE_SCREENSHOT',
+            payload: { reason: data.reason ?? 'SCREENSHOT' },
+            createdBy: payload.sub,
+          }]);
+          return command;
         });
 
         return reply.send({
@@ -1578,18 +1552,10 @@ export async function screenRoutes(fastify: FastifyInstance) {
         }
 
         const payload = await verifyAccessToken(token);
-        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
-
-        if (!ability.can('update', 'Screen')) {
-          throw AppError.forbidden('Forbidden');
-        }
-
         const data = createScreenSchema.partial().parse(request.body);
-        const screen = await screenRepo.update((request.params as any).id, data);
-
-        if (!screen) {
-          throw AppError.notFound('Screen not found');
-        }
+        const screen = await withAuthorizedScreenUpdate(payload, (request.params as any).id, context =>
+          screenRepo.update((request.params as any).id, data, context.executor));
+        if (!screen) throw AppError.notFound('Screen not found');
 
         return reply.send({
           id: screen.id,

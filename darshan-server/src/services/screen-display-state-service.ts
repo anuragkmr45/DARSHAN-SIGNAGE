@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { getDatabase, schema } from '@/db';
+import { getDatabase, schema, type DbExecutor } from '@/db';
 import { AppError } from '@/utils/app-error';
 import {
   DisplayProfileV1,
@@ -16,8 +16,8 @@ export type DisplayProfileWriteResult =
 
 const defaultSelection = { mode: 'PRIMARY', preferred_key: null } as const;
 
-async function ensureState(screenId: string) {
-  const db = getDatabase();
+async function ensureState(screenId: string, executor?: DbExecutor) {
+  const db = executor ?? getDatabase();
   await db
     .insert(schema.screenDisplayStates)
     .values({ screen_id: screenId, desired_selection: defaultSelection })
@@ -112,9 +112,9 @@ export async function recordDisplayProfile(screenId: string, profile: DisplayPro
   return { applied: true, state };
 }
 
-export async function updateDisplaySelection(screenId: string, selection: DisplaySelection) {
-  const db = getDatabase();
-  const current = await ensureState(screenId);
+export async function updateDisplaySelection(screenId: string, selection: DisplaySelection, executor?: DbExecutor) {
+  const db = executor ?? getDatabase();
+  const current = await ensureState(screenId, db);
   if (selection.mode === 'PINNED' && selection.expected_profile_revision !== current.profile_revision) {
     throw AppError.conflict('The display inventory changed. Refresh the screen and choose the output again.', {
       code: 'DISPLAY_PROFILE_STALE',

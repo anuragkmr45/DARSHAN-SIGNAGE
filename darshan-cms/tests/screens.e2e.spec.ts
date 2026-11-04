@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 type ScreenRecord = {
   id: string;
+  can_update?: boolean;
   name: string;
   location?: string | null;
   status: string;
@@ -42,6 +43,7 @@ type MockState = {
   fleetSummaryUnavailable?: boolean;
   orphanPairingDeviceId?: string;
   capabilities?: Array<{ action: string; subject: string }>;
+  displayProfile?: boolean;
 };
 
 const adminUser = {
@@ -307,7 +309,7 @@ const installApiMocks = async (page: Page, state: MockState) => {
         status: screen ? 200 : 404,
         contentType: "application/json",
         body: JSON.stringify(
-          screen ?? {
+          screen ? { ...screen, can_update: screen.can_update ?? true } : {
             error: { message: "Screen not found" },
           },
         ),
@@ -339,6 +341,17 @@ const installApiMocks = async (page: Page, state: MockState) => {
           },
         }),
       });
+    }
+
+    if (/^\/api\/v1\/screens\/[^/]+\/display-state$/.test(pathname) && method === "GET") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        screen_id: pathname.split("/")[4], desired_selection: { mode: "PRIMARY", preferred_key: null },
+        selection_version: 0, active_display_key: null, placement: "UNVERIFIED", profile_revision: 1,
+        observed_at: null, profile: state.displayProfile ? {
+          selection: { mode: "PRIMARY", fallback_used: false, fallback_reason: null },
+          output: null, inventory: [], viewport: null,
+        } : null,
+      }) });
     }
 
     if (/^\/api\/v1\/screens\/[^/]+\/now-playing$/.test(pathname) && method === "GET") {
@@ -714,6 +727,28 @@ test.describe("Screens operator flow", () => {
       }).toBeLessThan(3);
       await inspector.getByRole("button", { name: "Close" }).click();
     }
+  });
+
+  test("keeps Screen details readable while hiding writes for a read-only record", async ({ page }, testInfo) => {
+    const state: MockState = {
+      screens: [{ id: "screen-read-only", name: "Read only display", status: "ACTIVE", can_update: false }],
+      groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {}, displayProfile: true,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await page.getByRole("button", { name: "Details" }).click();
+    const inspector = page.getByRole("dialog", { name: /Read only display/i });
+    await expect(inspector).toBeVisible();
+    await expect(inspector.getByText("View only")).toBeVisible();
+    await expect(inspector.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+    await inspector.getByRole("tab", { name: "Overview" }).click();
+    await expect(inspector.getByText("Display authority")).toBeVisible();
+    await expect(inspector.getByLabel("Preferred display output")).toHaveCount(0);
+    await inspector.getByRole("tab", { name: "Snapshot" }).click();
+    await expect(inspector.getByRole("button", { name: "Take Snapshot" })).toHaveCount(0);
+    await expect(inspector.getByText("Latest preview")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("screen-detail-view-only.png") });
   });
 
   test("keeps secondary management compact and pages through every Screen Group", async ({ page }) => {

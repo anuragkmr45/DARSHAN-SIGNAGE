@@ -24,6 +24,7 @@ screen_display_states (authoritative observed + desired state)
 - The main process supplies the pairing payload and heartbeat profile. The renderer only reports its measured viewport/density through the preload IPC bridge; it does not select a display or read `window.screen`.
 - `darshan-server/src/services/screen-display-state-service.ts` is the server owner of desired selection, observed profile ordering, profile revisions, and legacy `screens` geometry projection.
 - The CMS reads state from `GET /api/v1/screens/:id/display-state` and writes an operator selection to `PUT /api/v1/screens/:id/display-selection`.
+- Screen detail reads require `read Screen` on the selected record. Its `GET /screens/:id` response includes `can_update` for that record, so CMS hides Edit, preferred-output selection, and Take Snapshot for a view-only operator. Display selection, screenshot policy/capture, and Screen edits recheck the selected record and current session in their write transaction; a general Screen grant alone cannot edit a different Screen.
 
 ## Profile, identity, and ordering
 
@@ -56,8 +57,8 @@ screen_display_states (authoritative observed + desired state)
 
 | Endpoint | Contract |
 |---|---|
-| `GET /screens/:id/display-state` | Desired selection, selection/profile revisions, observed profile, placement, and active output. |
-| `PUT /screens/:id/display-selection` | `PRIMARY`, or `PINNED` with display key and expected revision. Queues an idempotent `SET_ACTIVE_DISPLAY` command. |
+| `GET /screens/:id/display-state` | Record-authorized desired selection, selection/profile revisions, observed profile, placement, and active output. |
+| `PUT /screens/:id/display-selection` | Record-authorized `PRIMARY`, or `PINNED` with display key and expected revision. Desired state and its idempotent `SET_ACTIVE_DISPLAY` command commit together. |
 | `GET /device/:id/desired-state` | Player recovery path for desired selection/version plus normal desired state. |
 | heartbeat / pairing request | Accept optional `display_profile_v1`; pairing completion and heartbeat persist it. |
 | `POST /schedules/display-preflight` | Returns target IDs, aspect mismatch issues, usable area fraction, source profile revision, and issue hash. |
