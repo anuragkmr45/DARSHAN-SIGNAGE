@@ -49,7 +49,7 @@ The route gate is the UI navigation guard, not a substitute for the server's act
 | E05 | Sign In submit | Public; Auth login API. | Disable while pending, install returned identity, and navigate to a sanitized return path or Dashboard. | Full-width primary action; cookie browser case; real-service sign-in pending. |
 | E06 | Validation, rejection and rate-limit feedback | Public; local email/password checks and Auth API status/retry time. | Explain failure inline, retain credentials, show the server's lockout duration when supplied, and allow retry. | Alert remains beside form at phone and desktop widths; entry browser cases. |
 | E07 | Account help and Back | Public; static text and `/` route. | Point to site administrator for access help or return to introduction. | Secondary text/link below form; rendered captures. |
-| E08 | Invalid runtime configuration | Public; production security boundary. | Block login before any API request and explain configuration failure. | Existing auth-cookie browser case; real deployment review pending. |
+| E08 | Invalid runtime configuration | Public; production security boundary. | Block login before any API request and explain configuration failure. | Auth-cookie browser case and cream/Forest startup-error presentation; real deployment review pending. |
 
 ## Dashboard controls and states
 

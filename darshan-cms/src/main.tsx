@@ -60,6 +60,13 @@ loadCmsRuntimeConfig()
     console.error("CMS runtime config failed to load", { message });
     const alert = document.createElement("div");
     alert.setAttribute("role", "alert");
-    alert.textContent = "CMS configuration could not be loaded. Contact your administrator.";
+    alert.className = "mx-auto mt-[15vh] max-w-xl rounded-xl border border-border bg-card p-6 text-foreground sm:p-8";
+    const title = document.createElement("h1");
+    title.className = "text-2xl font-semibold";
+    title.textContent = "Workspace unavailable";
+    const guidance = document.createElement("p");
+    guidance.className = "mt-3 text-sm leading-6 text-muted-foreground";
+    guidance.textContent = "CMS configuration could not be loaded. Contact your administrator.";
+    alert.append(title, guidance);
     document.getElementById("root")?.replaceChildren(alert);
   });

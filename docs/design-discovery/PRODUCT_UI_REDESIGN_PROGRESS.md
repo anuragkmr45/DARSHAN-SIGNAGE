@@ -224,3 +224,8 @@ The user approved applying the cream-and-forest direction to the full CMS and pl
 ## Approved palette: player-owned states — 2026-11-04
 
 The player renderer now uses a fixed Forest palette for pairing, recovery, security lock, standby, missing default content and the live receiver's unavailable state. It follows the host light/dark preference for these player-owned screens; it does not fetch CMS appearance settings. The normal playback container and live video pixels retain their black stage and authored media content. The locally packaged standby artwork now uses Forest tones. The player build, 542 unit tests and real Chromium pairing/recovery/standby/lock browser journey passed. Chromium covered 1440, 820, 390 and 640×360 layout, explicit light and dark pairing surfaces and no routine production overlays. [Developer evidence](../../qa-artifacts/evidence/product-ui-player-forest-developer-verification-2026-11-04.md) separates these checks from packaged Ubuntu/Windows and physical-display QA.
+
+
+## CMS exceptional states — 2026-11-04
+
+The production inspection lock and invalid-runtime-configuration message now use the approved quiet CMS materials and readable action hierarchy. The lock's security behavior and trigger rules are unchanged. A temporary **local-only** production build with its existing lockdown flag enabled showed the real lock after F12 in Chromium at 1280×800: cream canvas, white bounded panel, Forest reload action and no horizontal overflow. The standard local build was restored afterward without editing `.env`. The invalid-configuration browser test and CMS build passed. [Developer evidence](../../qa-artifacts/evidence/product-ui-exceptional-states-developer-verification-2026-11-04.md) records the boundary.

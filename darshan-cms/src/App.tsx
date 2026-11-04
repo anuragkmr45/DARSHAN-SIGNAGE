@@ -60,19 +60,19 @@ const AppRoutes = () => <RouterProvider router={router} />;
 
 const App = ({ initialAppearance }: { initialAppearance: PublicAppearance }) => (
   <SiteAppearanceProvider initialAppearance={initialAppearance}>
-  <QueryClientProvider client={queryClient}>
-    <ThemeProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <ProductionSecurityBoundary queryClient={queryClient}>
-          <AuthSessionBootstrap>
-            <AppRoutes />
-          </AuthSessionBootstrap>
-        </ProductionSecurityBoundary>
-      </TooltipProvider>
-    </ThemeProvider>
-  </QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <ProductionSecurityBoundary queryClient={queryClient}>
+            <AuthSessionBootstrap>
+              <AppRoutes />
+            </AuthSessionBootstrap>
+          </ProductionSecurityBoundary>
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   </SiteAppearanceProvider>
 );
 

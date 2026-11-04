@@ -31,45 +31,33 @@ type LockScreenProps = {
 };
 
 const LockScreen = ({ trigger }: LockScreenProps) => (
-  <div className="fixed inset-0 z-[9999] flex items-center justify-center overflow-hidden bg-slate-950 text-slate-50">
-    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.18),transparent_35%),radial-gradient(circle_at_bottom,rgba(239,68,68,0.18),transparent_30%)]" />
-    <div className="relative mx-6 w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-900/90 p-10 shadow-2xl backdrop-blur">
-      <div className="mb-8 flex items-center gap-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/15 text-red-300">
-          <ShieldAlert className="h-7 w-7" />
+  <div className="fixed inset-0 z-[9999] flex items-center justify-center overflow-auto bg-background p-5 text-foreground">
+    <section aria-labelledby="production-lock-title" className="w-full max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-10">
+      <div className="flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+          <ShieldAlert aria-hidden="true" className="h-6 w-6" />
         </div>
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-red-300/80">Production Lock</p>
-          <h1 className="text-3xl font-semibold text-white">Inspection tools are blocked on this system</h1>
+          <p className="text-xs font-semibold uppercase tracking-wide text-destructive">Production lock</p>
+          <h1 id="production-lock-title" className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+            Inspection tools are blocked on this system
+          </h1>
         </div>
       </div>
 
-      <div className="space-y-4 text-sm leading-7 text-slate-300">
-        <p>
-          Developer tools, inspection shortcuts, and the browser context menu are disabled in the
-          production CMS environment.
-        </p>
-        <p>
-          Close any open inspection tools and reload this page to continue. This event may be
-          recorded for audit review.
-        </p>
+      <div className="mt-6 space-y-3 text-sm leading-6 text-muted-foreground">
+        <p>Developer tools, inspection shortcuts, and the browser context menu are disabled in the production CMS environment.</p>
+        <p>Close any open inspection tools and reload this page to continue. This event may be recorded for audit review.</p>
       </div>
 
-      <div className="mt-8 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-950/70 px-5 py-4 text-sm text-slate-300">
-        <div>
-          <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Detected trigger</div>
-          <div className="mt-1 font-medium text-slate-100">{trigger}</div>
-        </div>
-        <Button
-          type="button"
-          className="gap-2 bg-red-500 text-white hover:bg-red-400"
-          onClick={() => window.location.reload()}
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Reload Page
+      <div className="mt-7 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-5 text-sm">
+        <p className="text-muted-foreground">Detected trigger: <strong className="font-medium text-foreground">{trigger}</strong></p>
+        <Button type="button" className="gap-2" onClick={() => window.location.reload()}>
+          <RefreshCcw aria-hidden="true" className="h-4 w-4" />
+          Reload page
         </Button>
       </div>
-    </div>
+    </section>
   </div>
 );
 
