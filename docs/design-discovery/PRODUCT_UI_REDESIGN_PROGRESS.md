@@ -240,3 +240,8 @@ Screen list health, inspector delivery/observability badges, warning cards and h
 
 
 The shared status badge now uses pale semantic surfaces for Pending, Approved, Published, Live, Online, Offline, Failed and related states, independent of customer accent. A real Screen recovery badge was checked against the computed error token; the CMS build, focused lint, one targeted Screen browser case and 12 Dashboard browser cases passed. Shared badge visual behavior on every mounted route remains part of the full route audit.
+
+
+## Cross-route semantic notices and overlay material — 2026-11-04
+
+Pairing, user-role warnings, Media upload feedback, chat attachment/status notices and Schedule target health now reuse light/dark semantic tokens. File-type badges rely on their icon and text label instead of decorative rainbow colors. Dialogs, alert dialogs, sheets and drawers share one forest-tinted scrim; routine loading panels no longer blur the content underneath. Four representative CMS browser journeys passed across chat member confirmation, Media upload sheet, Schedule detail at three widths and Screen pairing. A follow-up browser check confirmed the real chat dialog scrim responds to light/dark mode without blur. The CMS build, bundle budget and focused lint passed (one pre-existing Fast Refresh warning in StepScreenSelect). Full route and assistive-technology review remains open.

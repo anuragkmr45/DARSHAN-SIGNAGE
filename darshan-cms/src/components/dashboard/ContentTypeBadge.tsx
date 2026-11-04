@@ -18,16 +18,16 @@ interface ContentTypeBadgeProps {
   className?: string;
 }
 
-const typeConfig: Record<ContentType, { label: string; icon: typeof FileImage; color: string }> = {
-  image: { label: "Image", icon: FileImage, color: "text-blue-600" },
-  video: { label: "Video", icon: FileVideo, color: "text-purple-600" },
-  pdf: { label: "PDF", icon: FileText, color: "text-red-600" },
-  docx: { label: "DOCX", icon: FileText, color: "text-blue-700" },
-  pptx: { label: "PPTX", icon: FileSpreadsheet, color: "text-orange-600" },
-  csv: { label: "CSV", icon: FileSpreadsheet, color: "text-green-600" },
-  link: { label: "Link", icon: Link2, color: "text-cyan-600" },
-  html: { label: "HTML", icon: File, color: "text-gray-600" },
-  document: { label: "Document", icon: FileText, color: "text-gray-700" },
+const typeConfig: Record<ContentType, { label: string; icon: typeof FileImage }> = {
+  image: { label: "Image", icon: FileImage },
+  video: { label: "Video", icon: FileVideo },
+  pdf: { label: "PDF", icon: FileText },
+  docx: { label: "DOCX", icon: FileText },
+  pptx: { label: "PPTX", icon: FileSpreadsheet },
+  csv: { label: "CSV", icon: FileSpreadsheet },
+  link: { label: "Link", icon: Link2 },
+  html: { label: "HTML", icon: File },
+  document: { label: "Document", icon: FileText },
 };
 
 export function ContentTypeBadge({ type, className }: ContentTypeBadgeProps) {
@@ -39,7 +39,7 @@ export function ContentTypeBadge({ type, className }: ContentTypeBadgeProps) {
       variant="outline"
       className={cn("gap-1", className)}
     >
-      <Icon className={cn("h-3 w-3", config.color)} />
+      <Icon className="h-3 w-3 text-muted-foreground" />
       {config.label}
     </Badge>
   );

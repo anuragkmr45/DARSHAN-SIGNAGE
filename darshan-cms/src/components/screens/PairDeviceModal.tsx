@@ -236,7 +236,7 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
                 {recovery?.recovery ? (
                   <div className="space-y-2 text-sm">
                     <div className="flex items-center gap-2">
-                      <ShieldAlert className="h-4 w-4 text-amber-600" />
+                      <ShieldAlert className="h-4 w-4 status-text-warning" />
                       <span className="font-medium">{recovery.recovery.auth_state || "UNKNOWN"}</span>
                     </div>
                     <p className="text-muted-foreground">{recovery.recovery.reason || "No recovery diagnostics available."}</p>
@@ -256,7 +256,7 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
                   </div>
                 ) : null}
                 {activeRecovery ? (
-                  <Badge variant="outline" className="w-fit border-amber-500 text-amber-700">
+                  <Badge variant="outline" className="w-fit status-outline-warning">
                     Recovery pending until {formatDateTime(activeRecovery.expires_at)}
                   </Badge>
                 ) : null}
@@ -278,7 +278,7 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
                         className="min-w-0 flex-1 text-center text-base font-mono font-bold tracking-wider"
                       />
                       <Button variant="outline" size="icon" className="shrink-0" onClick={handleCopyCode}>
-                        {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                        {copied ? <Check className="h-4 w-4 status-text-success" /> : <Copy className="h-4 w-4" />}
                       </Button>
                       <Button
                         variant="outline"

@@ -18,7 +18,7 @@ export function LoadingIndicator({ label = "Loading...", fullScreen = false, cla
   if (!fullScreen) return content;
 
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/80 px-4 backdrop-blur-sm">
+    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/90 px-4">
       <div className="rounded-md border bg-card px-4 py-3 shadow-sm">{content}</div>
     </div>
   );

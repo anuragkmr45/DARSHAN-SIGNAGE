@@ -538,7 +538,7 @@ export function Composer({
                 </div>
                 <Progress value={item.progress} className="h-1.5 mt-2" />
                 {item.didCompress && typeof item.originalSize === "number" && typeof item.finalSize === "number" && (
-                  <p className="mt-1 text-[11px] text-emerald-700">
+                  <p className="mt-1 text-[11px] status-text-success">
                     Compressed: {formatUploadMb(item.originalSize)} {"->"} {formatUploadMb(item.finalSize)}
                   </p>
                 )}
@@ -557,7 +557,7 @@ export function Composer({
       )}
 
       {disabled && disabledReason && (
-        <div className="rounded-md border border-dashed border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+        <div className="rounded-md border border-dashed status-tone-warning px-3 py-2 text-xs status-text-warning">
           {disabledReason}
         </div>
       )}

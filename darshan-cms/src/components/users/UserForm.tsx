@@ -292,7 +292,7 @@ export function UserForm({ user, onSubmit, onCancel, isLoading }: UserFormProps)
                 />
             ) : null}
             {canPickDepartment && !isOperatorRole && Boolean(user?.additional_department_ids?.length) ? (
-                <p className="text-sm text-amber-700" role="alert">
+                <p className="text-sm status-text-warning" role="alert">
                     Saving a non-operator role will remove this user’s additional department assignments and end their sessions.
                 </p>
             ) : null}

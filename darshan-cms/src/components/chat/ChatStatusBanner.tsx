@@ -15,12 +15,12 @@ const modeMeta: Record<
   READ_ONLY: {
     icon: Lock,
     title: "Conversation is archived (read-only).",
-    tone: "border-amber-500/50 bg-amber-500/10 text-amber-700",
+    tone: "status-tone-warning",
   },
   MUTED: {
     icon: AlertTriangle,
     title: "You are muted in this conversation.",
-    tone: "border-amber-500/50 bg-amber-500/10 text-amber-700",
+    tone: "status-tone-warning",
   },
   BANNED: {
     icon: Ban,

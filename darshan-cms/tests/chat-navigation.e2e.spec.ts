@@ -155,6 +155,21 @@ test("chat admin reviews members and confirms removal while system and self cont
   await page.goto("/chat/room-b");
   await page.getByRole("button", { name: "Details" }).click();
   const details = page.getByRole("dialog", { name: "Conversation Details" });
+  const scrim = page.locator(".app-scrim").first();
+  await expect(scrim).toBeVisible();
+  const scrimAppearance = await scrim.evaluate((element) => {
+    const root = document.documentElement;
+    const originalDark = root.classList.contains("dark");
+    root.classList.remove("dark");
+    const light = getComputedStyle(element).backgroundColor;
+    root.classList.add("dark");
+    const dark = getComputedStyle(element).backgroundColor;
+    root.classList.toggle("dark", originalDark);
+    return { light, dark, blur: getComputedStyle(element).backdropFilter };
+  });
+  expect(scrimAppearance.blur).toBe("none");
+  expect(scrimAppearance.light).not.toBe("rgba(0, 0, 0, 0)");
+  expect(scrimAppearance.dark).not.toBe(scrimAppearance.light);
   await details.getByRole("tab", { name: "Members" }).click();
   await expect(details.getByText("Room Peer")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("chat-members-before-removal.png"), fullPage: true });

@@ -156,14 +156,15 @@ export function PairingHealthPanel({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
             {totalFindings > 0 || pairingStatusUnavailable ? (
-              <ShieldAlert className="h-4 w-4 text-amber-600" />
+              <ShieldAlert className="h-4 w-4 status-text-warning" />
             ) : orphanQuery.isLoading ? (
               <RefreshCcw className="h-4 w-4 text-muted-foreground" />
             ) : (
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <ShieldCheck className="h-4 w-4 status-text-success" />
             )}
             <h2 className="text-sm font-medium">Pairing health</h2>
-            <Badge variant={totalFindings > 0 || pairingStatusUnavailable ? "destructive" : "secondary"}>
+            <Badge variant={totalFindings > 0 || pairingStatusUnavailable ? "outline" : "secondary"}
+              className={totalFindings > 0 || pairingStatusUnavailable ? "status-tone-error" : undefined}>
               {orphanQuery.isLoading ? "checking" : pairingStatusUnavailable ? "unavailable" : totalFindings > 0 ? `${totalFindings} findings` : "No pairing findings"}
             </Badge>
         </div>
@@ -198,9 +199,9 @@ export function PairingHealthPanel({
         </div>
 
       {visibleScreenCount === 0 && totalOrphans > 0 ? (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+        <div className="rounded-md border status-tone-warning p-3 text-sm">
           <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 status-text-warning" />
             <p>
               No screens are visible in this list, but orphan device state exists. Ask an administrator to review stale
               pairing state or pair the player again.
@@ -235,7 +236,7 @@ export function PairingHealthPanel({
       {duplicateConflicts.length > 0 ? (
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <Copy className="h-4 w-4 text-amber-600" />
+            <Copy className="h-4 w-4 status-text-warning" />
             Duplicate identity conflicts
           </div>
           <div className="max-h-80 divide-y overflow-auto rounded-md border">
@@ -244,7 +245,7 @@ export function PairingHealthPanel({
                 <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={conflict.severity === "BLOCK" ? "destructive" : "outline"}>
+                      <Badge variant="outline" className={conflict.severity === "BLOCK" ? "status-tone-error" : "status-tone-warning"}>
                         {conflict.severity}
                       </Badge>
                       <Badge variant="secondary">{conflict.activeSessionCount} active sessions</Badge>

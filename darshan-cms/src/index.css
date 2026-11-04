@@ -164,3 +164,8 @@
   .status-text-error { color: hsl(var(--status-error-fg)); }
   .status-text-info { color: hsl(var(--status-info-fg)); }
 }
+
+@layer utilities {
+  .app-scrim { background-color: hsl(var(--overlay) / 0.5); }
+  .dark .app-scrim { background-color: hsl(var(--overlay) / 0.72); }
+}

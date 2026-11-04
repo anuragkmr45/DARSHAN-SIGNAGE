@@ -528,7 +528,7 @@ export default function MediaLibrary() {
                   </Badge>
                 )}
                 {item.status_reason ? (
-                  <div className="text-xs text-amber-700">
+                  <div className="text-xs status-text-warning">
                     Reason: {item.status_reason}
                   </div>
                 ) : null}
@@ -619,7 +619,7 @@ export default function MediaLibrary() {
                 </div>
                 <div>Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB</div>
                 {uploadResult?.didCompress && (
-                  <div className="text-xs text-emerald-700">
+                  <div className="text-xs status-text-success">
                     Compressed: {(uploadResult.originalSize / 1024 / 1024).toFixed(2)} MB {"->"}{" "}
                     {(uploadResult.finalSize / 1024 / 1024).toFixed(2)} MB
                   </div>

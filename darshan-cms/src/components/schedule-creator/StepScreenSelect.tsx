@@ -261,11 +261,11 @@ export function StepScreenSelect({
   const getStatusColor = (status: string) => {
     switch (status) {
       case "ACTIVE":
-        return "text-green-500";
+        return "status-text-success";
       case "OFFLINE":
-        return "text-red-500";
+        return "status-text-error";
       default:
-        return "text-yellow-500";
+        return "status-text-warning";
     }
   };
 
@@ -544,7 +544,7 @@ export function StepScreenSelect({
                               <Monitor className="h-3 w-3" />
                               <span>{screenCount} screens</span>
                             </div>
-                            <div className="flex items-center gap-1 text-xs text-green-600">
+                            <div className="flex items-center gap-1 text-xs status-text-success">
                               <Circle className="h-2 w-2 fill-current" />
                               <span>{activeCount} active</span>
                             </div>

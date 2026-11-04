@@ -457,7 +457,7 @@ export function AttachmentPicker({
                         {item.didCompress &&
                           typeof item.originalSize === "number" &&
                           typeof item.finalSize === "number" && (
-                            <p className="text-xs text-emerald-700">
+                            <p className="text-xs status-text-success">
                               Compressed: {formatUploadMb(item.originalSize)} {"->"} {formatUploadMb(item.finalSize)}
                             </p>
                           )}
