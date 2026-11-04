@@ -25,10 +25,10 @@ describe('live runtime occurrence controls', () => {
     const disabled = renderCard({ ...props, occurrence: { ...row(), enabled: false, can_manage: true }, mayManage: true });
     expect(disabled).toContain('Re-enable occurrence'); expect(disabled).not.toContain('Disable and stop');
   });
-  it('shows an explicit UTC reporting window and page controls only for effective current grants', () => {
+  it('shows an explicit UTC reporting window only for effective current grants and does not show a pager before results', () => {
     const render = () => renderToStaticMarkup(createElement(QueryClientProvider, { client: new QueryClient() }, createElement(LiveRuntimeOccurrences, { actorId: 'actor', onPresent: vi.fn() })));
     auth.grants.clear(); expect(render()).toBe(''); auth.grants.add('publish:LiveBroadcast');
-    const markup = render(); expect(markup).toContain('Window from (UTC)'); expect(markup).toContain('exclusive'); expect(markup).toContain('Previous live page'); expect(markup).toContain('Next live page'); expect(markup).toContain('never joins or subscribes');
+    const markup = render(); expect(markup).toContain('Window from (UTC)'); expect(markup).toContain('exclusive'); expect(markup).not.toContain('Previous live page'); expect(markup).not.toContain('Next live page'); expect(markup).toContain('never joins or subscribes');
     auth.grants.clear();
   });
 });

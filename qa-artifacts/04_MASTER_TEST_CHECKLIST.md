@@ -98,6 +98,8 @@ Business source and code answer can disagree. Mark observed behavior separately 
 
 ## Live broadcast implementation delta — 2026-11-03
 
+- [ ] In the current CMS build, sign in as a complete live Schedule author, a source-only creator, a read-only operator and a denied user. Verify the primary Schedule action, secondary source creation, source View/Edit/Delete grants, disabled-source filter, search/paging, stale-filter and error/Retry states. Run at phone, tablet and desktop widths with keyboard and 200% text zoom. Confirm a stale dialog, lost write response, revoked permission and server blocker never show a false success. The fixture-backed Live page packet is developer evidence only; do this against real services before acceptance.
+
 - [ ] `LIVE-01..06`: real CMS author/hold/approve/request/direct-publish and
   presenter start/stop flows; current custom roles/departments, frozen audience,
   same-size member change, 25/26 targets, 10/11 overlaps, duplicate starts/tabs.

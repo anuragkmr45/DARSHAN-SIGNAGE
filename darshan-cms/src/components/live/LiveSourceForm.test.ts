@@ -32,7 +32,7 @@ describe("live source operator components (server render)", () => {
   it("uses per-record server permissions even when the role permits general updates/deletes", () => {
     const markup = renderToStaticMarkup(createElement(LiveSourceCard, { source, canUpdate: true, canDelete: true, actorId: actor.id,
       onView: vi.fn(), onEdit: vi.fn(), onDelete: vi.fn() }));
-    expect(markup).toContain("View source"); expect(markup).not.toContain('aria-label="Edit Hall source"'); expect(markup).not.toContain('aria-label="Delete Hall source"');
+    expect(markup).toContain('aria-label="View Hall source"'); expect(markup).not.toContain('aria-label="Edit Hall source"'); expect(markup).not.toContain('aria-label="Delete Hall source"');
     expect(markup).toContain("Enabled"); expect(markup).not.toContain(">Available<");
   });
   it("renders safe readable blocker categories without a raw backend payload", () => {

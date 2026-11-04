@@ -129,7 +129,9 @@ export function LiveRuntimeOccurrences({ actorId, onPresent }: { actorId: string
     {locked && <p className="text-sm">Pending administrative actions remain visible, including rows that leave the current page. Resolve them before changing the reporting window.</p>}
     {!window ? !error && <p role="status">Loading authenticated backend time…</p> : query.isLoading ? <p role="status">Loading current live occurrences…</p> : rows.length ? <div className="grid gap-4 xl:grid-cols-2">{rows.map(row => <LiveRuntimeOccurrenceCard key={`${actorId}:${row.id}`} occurrence={row} actorId={actorId} mayPublish={can('publish', 'LiveBroadcast')} mayManage={can('manage', 'LiveBroadcast')}
       onPresent={onPresent} onChanged={() => void query.refetch()} onPending={onPending} />)}</div> : !query.isError && <p>No active published live occurrences were found in this window.</p>}
-    <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={locked || page <= 1 || query.isFetching} onClick={() => setPage(value => value - 1)}>Previous live page</Button>
-      <span className="text-sm">Page {page} of {pages} · {query.data?.total ?? 0} matching occurrences</span><Button variant="outline" disabled={locked || page >= pages || query.isFetching} onClick={() => setPage(value => value + 1)}>Next live page</Button></div>
+    {query.data && (query.data.total > 25 || page > 1) && <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="w-full text-sm">Page {page} of {pages} · {query.data.total} matching occurrences</span>
+      <Button variant="outline" disabled={locked || page <= 1 || query.isFetching} onClick={() => setPage(value => value - 1)}>Previous live page</Button>
+      <Button variant="outline" disabled={locked || page >= pages || query.isFetching} onClick={() => setPage(value => value + 1)}>Next live page</Button></div>}
   </section>;
 }

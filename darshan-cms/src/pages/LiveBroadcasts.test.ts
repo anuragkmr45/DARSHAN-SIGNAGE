@@ -37,14 +37,21 @@ describe("live broadcast page permissions and query intent (server render)", () 
   it("exposes scheduling to a custom operator with the complete authoring grants", () => {
     for (const grant of ["read:LiveBroadcast", "read:Schedule", "read:Presentation", "read:Media", "read:Screen", "create:Schedule", "create:ScheduleItem", "create:ScheduleRequest"]) fixture.grants.add(grant);
     const markup = renderToStaticMarkup(createElement(LiveBroadcasts));
-    expect(markup).toMatch(/<button\b[^>]*>Schedule live event<\/button>/); expect(markup).not.toContain("New live source");
+    expect(markup).toMatch(/<button\b[^>]*bg-primary[^>]*>[\s\S]*?Schedule live event<\/button>/); expect(markup).not.toContain("New live source");
     expect(markup).not.toContain("Required fallback presentation");
+  });
+  it("makes scheduling primary when the operator can also create reusable sources", () => {
+    for (const grant of ["read:LiveBroadcast", "create:LiveBroadcast", "read:Schedule", "read:Presentation", "read:Media", "read:Screen", "create:Schedule", "create:ScheduleItem", "create:ScheduleRequest"]) fixture.grants.add(grant);
+    const markup = renderToStaticMarkup(createElement(LiveBroadcasts));
+    expect(markup).toMatch(/<button\b[^>]*bg-primary[^>]*>[\s\S]*?Schedule live event<\/button>/);
+    expect(markup).toMatch(/<button\b[^>]*>New live source<\/button>/);
+    expect(markup).toContain("Live source library");
   });
   it("does not offer scheduling when an essential schedule or fallback-media read grant is missing", () => {
     const grants = ["read:LiveBroadcast", "read:Schedule", "read:Presentation", "read:Media", "read:Screen", "create:Schedule", "create:ScheduleItem", "create:ScheduleRequest"];
     for (const missing of ["read:Schedule", "read:Media"]) {
       fixture.grants = new Set(grants.filter(grant => grant !== missing));
-      expect(renderToStaticMarkup(createElement(LiveBroadcasts))).not.toMatch(/<button\b[^>]*>Schedule live event<\/button>/);
+      expect(renderToStaticMarkup(createElement(LiveBroadcasts))).not.toMatch(/<button\b[^>]*>[\s\S]*?Schedule live event<\/button>/);
     }
   });
 });

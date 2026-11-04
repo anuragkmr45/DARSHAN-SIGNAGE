@@ -55,6 +55,7 @@ export default function LiveBroadcasts() {
   const [presenterOccurrenceId, setPresenterOccurrenceId] = useState<string | null>(null);
   const canSchedule = can("create", "Schedule") && can("create", "ScheduleItem") && can("create", "ScheduleRequest") &&
     canRead && can("read", "Schedule") && can("read", "Presentation") && can("read", "Media") && can("read", "Screen");
+  const canOpenSchedule = canSchedule && Boolean(actor?.id);
   const params = { actorId: actor?.id, page, limit: PAGE_SIZE, search, activeOnly };
   const list = useQuery({ queryKey: queryKeys.liveSessionsList(params),
     queryFn: () => liveSessionsApi.list({ page, limit: PAGE_SIZE, search: search || undefined, active_only: activeOnly || undefined }),
@@ -65,7 +66,7 @@ export default function LiveBroadcasts() {
   const presenters = useQuery({ queryKey: queryKeys.livePresenters(actor?.id), queryFn: loadLivePresenters,
     enabled: Boolean(selection && selection.mode !== "view" && selection.mode !== "delete" && canReadDirectory),
     retry: false, staleTime: 0, refetchOnWindowFocus: false });
-  const sources = useMemo(() => list.data?.items ?? [], [list.data]);
+  const sources = useMemo(() => list.isPlaceholderData || list.isError ? [] : list.data?.items ?? [], [list.data, list.isError, list.isPlaceholderData]);
   const totalPages = Math.max(1, list.data?.pagination.pages ?? 1);
   useEffect(() => { if (list.data && !list.isPlaceholderData && page > totalPages) setPage(totalPages); }, [list.data, list.isPlaceholderData, page, totalPages]);
   const handleSearch = useCallback((value: string) => { setSearch(value); setPage(1); }, []);
@@ -91,21 +92,26 @@ export default function LiveBroadcasts() {
   const reload = async () => { const result = await detail.refetch(); if (result.isError) throw result.error; setFormVersion(value => value + 1); };
   const source = detail.data;
   const editable = selection?.mode === "create" ? canCreate : selection?.mode === "edit" && canUpdate && source?.permissions?.can_update === true;
-  return <div className="space-y-6"><PageHeader title="Live broadcasts" description="Schedule live events, manage reusable sources and control approved broadcasts."
-    actionLabel={canCreate ? "New live source" : undefined} actionIcon={<Plus className="h-4 w-4" />} onAction={canCreate ? () => open({ mode: "create" }) : undefined}
-    trailingContent={<>{canSchedule && actor?.id && <Button variant="outline" onClick={() => setScheduling(true)}>Schedule live event</Button>}
-      {canRead && <Button variant="outline" onClick={refresh} disabled={list.isFetching} aria-label="Refresh live sources"><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>}</>} />
+  return <div className="space-y-8"><PageHeader title="Live broadcasts" description="Schedule a live event, then manage its published window and reusable sources."
+    actionLabel={canOpenSchedule ? "Schedule live event" : canCreate ? "New live source" : undefined} actionIcon={<Plus className="h-4 w-4" />}
+    onAction={canOpenSchedule ? () => setScheduling(true) : canCreate ? () => open({ mode: "create" }) : undefined} />
     {actor?.id && <LiveRuntimeOccurrences actorId={actor.id} onPresent={setPresenterOccurrenceId} />}
+    <section className="space-y-4" aria-label="Live source library"><div className="flex flex-wrap items-end justify-between gap-3 border-b pb-3"><div><h2 className="text-lg font-semibold">Live source library</h2>
+      <p className="text-sm text-muted-foreground">Reusable presenter and capture permissions for scheduled events.</p></div>
+      <div className="flex flex-wrap gap-2">{canOpenSchedule && canCreate && <Button variant="outline" onClick={() => open({ mode: "create" })}>New live source</Button>}
+        {canRead && <Button variant="outline" onClick={refresh} disabled={list.isFetching} aria-label="Refresh live sources"><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>}</div></div>
     {canRead ? <><div className="flex flex-wrap items-center gap-4"><div className="w-full sm:max-w-sm"><SearchBar placeholder="Search live sources…" initialValue={search} onSearch={handleSearch} /></div>
       <Label className="flex items-center gap-2"><input type="checkbox" checked={activeOnly} onChange={event => { setActiveOnly(event.target.checked); setPage(1); }} />Enabled sources only</Label>
-      <span className="text-sm text-muted-foreground" role="status">{list.isFetching ? "Refreshing…" : `${list.data?.pagination.total ?? 0} sources`}</span></div>
-      {list.isError && <LiveSourceErrorNotice error={liveSourceError(list.error, "load")} />}
-      {list.isLoading ? <LoadingIndicator label="Loading live sources…" /> : sources.length ? <>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{sources.map(item => <LiveSourceCard key={item.id} source={item} actorId={actor?.id} canUpdate={canUpdate} canDelete={canDelete}
+      <span className="text-sm text-muted-foreground" role="status">{list.isPlaceholderData ? "Updating sources…" : list.isFetching ? "Refreshing…" : list.isError ? "Source list unavailable" : `${list.data?.pagination.total ?? 0} sources`}</span></div>
+      {list.isError && <div role="alert" className="space-y-2"><LiveSourceErrorNotice error={liveSourceError(list.error, "load")} />
+        <Button variant="outline" size="sm" onClick={() => void list.refetch()}>Retry live sources</Button></div>}
+      {list.isLoading || list.isPlaceholderData ? <LoadingIndicator label={list.isPlaceholderData ? "Updating live sources…" : "Loading live sources…"} /> : sources.length ? <>
+        <div className="divide-y rounded-xl border bg-card">{sources.map(item => <LiveSourceCard key={item.id} source={item} actorId={actor?.id} canUpdate={canUpdate} canDelete={canDelete}
           onView={() => open({ id: item.id, mode: "view" })} onEdit={() => open({ id: item.id, mode: "edit" })} onDelete={() => open({ id: item.id, mode: "delete" })} />)}</div>
-        <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} /></>
+        {totalPages > 1 && <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} />}</>
         : !list.isError && <EmptyState title="No live sources found" description={canCreate ? "Create a source or adjust your filters." : "Adjust your filters or ask an authorized author to create a source."} />}
-    </> : <p className="rounded-lg border p-4 text-sm text-muted-foreground">Your current access does not allow listing existing sources.</p>}
+    </> : <p className="text-sm text-muted-foreground">Your current access does not allow listing existing sources.</p>}
+    </section>
     <Dialog open={Boolean(selection)} onOpenChange={value => { if (!value && !pending) close(); }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl"><DialogHeader>
         <DialogTitle>{selection?.mode === "create" ? "Create live source" : selection?.mode === "delete" ? "Delete live source" : selection?.mode === "edit" ? "Edit live source" : "Live source details"}</DialogTitle>
