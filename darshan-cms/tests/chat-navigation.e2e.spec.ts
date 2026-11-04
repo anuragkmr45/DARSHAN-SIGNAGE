@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import { OPERATOR_TEST_ROLE_ID, testAuthorization } from "./helpers/selfAuthorization";
 
 const origin = "http://127.0.0.1:5173";
@@ -48,6 +48,13 @@ async function installChatFixture(page: Page, options: { chatAdmin?: boolean; re
     if (path === "/api/v1/roles") return json({ items: [{ id: OPERATOR_TEST_ROLE_ID, name: "OPERATOR", permissions: { inherits: [], grants: [{ action: "read", subject: "Conversation" }] } }], page: 1, limit: 100, total: 1 });
     if (path === "/api/v1/users") return json({ items: [user], page: 1, limit: 100, total: 1 });
     if (path === "/api/v1/notifications/unread-count") return json({ unread_total: 0 });
+    if (path === "/api/v1/media" && route.request().method() === "GET") return json({
+      items: [{
+        id: "qa-document", name: "QA plan", filename: "QA plan.pdf", type: "DOCUMENT",
+        content_type: "application/pdf", status: "READY", size: 1024, media_url: null,
+      }],
+      page: 1, limit: 100, total: 1,
+    });
     if (path === "/api/v1/chat/messages/root-room-a" && route.request().method() === "PATCH") {
       return json({ error: { code: "EDIT_REJECTED", message: "Message could not be saved." } }, 500);
     }
@@ -210,6 +217,79 @@ test("phone chat follows list, conversation and thread routes without losing tex
   await expect(page).toHaveURL(/\/chat\/room-a$/);
   await page.getByRole("button", { name: "Reply in thread" }).first().click();
   await expect(page.getByLabel("Thread reply composer")).toHaveValue("Unsent thread draft");
+});
+
+test("an unsent attachment stays with its conversation across desktop and phone navigation", async ({ page }) => {
+  await installChatFixture(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/chat/room-a");
+
+  await page.getByRole("button", { name: "Attach files" }).click();
+  const picker = page.getByRole("dialog", { name: "Add Attachments" });
+  await expect(picker.getByText("QA plan", { exact: true }).first()).toBeVisible();
+  await picker.getByRole("button", { name: "Add" }).click();
+  await picker.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByText("Pending Attachments")).toBeVisible();
+  await expect(page.getByText("QA plan", { exact: true }).filter({ visible: true }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: /Planning room/ }).click();
+  await expect(page.getByLabel("Message composer")).toBeVisible();
+  await expect(page.getByText("Pending Attachments")).toBeHidden();
+  await page.getByRole("button", { name: /Operations room/ }).click();
+  await expect(page.getByText("QA plan", { exact: true }).filter({ visible: true }).first()).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Chats" }).click();
+  await page.getByRole("button", { name: /Operations room/ }).click();
+  await expect(page.getByText("QA plan", { exact: true }).filter({ visible: true }).first()).toBeVisible();
+});
+
+test("a verifying upload survives a chat switch and cannot be sent before it is ready", async ({ page }) => {
+  await installChatFixture(page);
+  let mediaReady = false;
+  const media = (status: "PROCESSING" | "READY") => ({
+    id: "qa-upload-media", name: "QA upload", filename: "QA upload.pdf", type: "DOCUMENT",
+    content_type: "application/pdf", status, size: 12, media_url: null,
+  });
+  const json = (route: Route, body: unknown) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+  await page.route("**/api/v1/media/upload-policy", (route) => json(route, {
+    max_bytes: 10_000_000, max_mb: 10, multipart_threshold_bytes: 5_000_000,
+    part_size_bytes: 5_000_000, multipart_concurrency: 3, allowed_mime_types: ["application/pdf"],
+  }));
+  await page.route("**/api/v1/media/uploads", (route) => json(route, {
+    session_id: "qa-upload-session", media_id: "qa-upload-media", state: "ACTIVE", strategy: "single",
+    expires_at: "2099-01-01T00:00:00Z", part_size: null, part_count: 1, uploaded_parts: [],
+    upload_url: `${origin}/qa-upload-storage`, media: null,
+  }));
+  await page.route("**/qa-upload-storage", (route) => route.fulfill({ status: 200, headers: { ETag: '"qa-upload"' } }));
+  await page.route("**/api/v1/media/uploads/qa-upload-session/complete", (route) => json(route, {
+    session_id: "qa-upload-session", media_id: "qa-upload-media", state: "COMPLETED", strategy: "single",
+    expires_at: "2099-01-01T00:00:00Z", part_size: null, part_count: 1, uploaded_parts: [],
+    media: media("PROCESSING"),
+  }));
+  await page.route("**/api/v1/media/qa-upload-media", (route) => json(route, media(mediaReady ? "READY" : "PROCESSING")));
+
+  await page.goto("/chat/room-a");
+  await page.getByRole("button", { name: "Attach files" }).click();
+  const picker = page.getByRole("dialog", { name: "Add Attachments" });
+  await picker.getByRole("tab", { name: "Upload New" }).click();
+  await picker.locator('input[type="file"]').setInputFiles({
+    name: "QA upload.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\nQA\n"),
+  });
+  await expect(picker.getByText("processing", { exact: true })).toBeVisible();
+  await picker.getByRole("button", { name: "Close" }).click();
+  await page.getByLabel("Message composer").fill("Wait for verified attachment");
+  await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
+
+  await page.getByRole("button", { name: /Planning room/ }).click();
+  await page.getByRole("button", { name: /Operations room/ }).click();
+  await expect(page.getByLabel("Message composer")).toHaveValue("Wait for verified attachment");
+  await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
+
+  mediaReady = true;
+  await expect(page.getByText("Pending Attachments")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
 });
 
 test("an old thread deep link shows its parent even when the main message page omits it", async ({ page }, testInfo) => {

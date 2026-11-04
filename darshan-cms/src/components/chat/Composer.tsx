@@ -25,6 +25,8 @@ import { resolveMediaDisplayName } from "@/lib/media";
 interface ComposerProps {
   draftText?: string;
   onDraftChange?: (text: string) => void;
+  active?: boolean;
+  onStagingChange?: (hasStaging: boolean) => void;
   disabled?: boolean;
   disabledReason?: string;
   isSending?: boolean;
@@ -43,6 +45,8 @@ const isMediaReady = (status?: string) => status === "READY";
 export function Composer({
   draftText,
   onDraftChange,
+  active = true,
+  onStagingChange,
   disabled = false,
   disabledReason,
   isSending = false,
@@ -65,6 +69,7 @@ export function Composer({
   const [isDragOver, setIsDragOver] = useState(false);
   const [attachments, setAttachments] = useState<ChatPendingAttachment[]>([]);
   const [uploadItems, setUploadItems] = useState<ComposerUploadItem[]>([]);
+  const [pickerHasStaging, setPickerHasStaging] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStart, setMentionStart] = useState<number | null>(null);
@@ -79,10 +84,22 @@ export function Composer({
     };
   }, []);
 
+  useEffect(() => {
+    if (!active) setOpenPicker(false);
+  }, [active]);
+
   const isUploading = useMemo(
-    () => uploadItems.some((item) => item.status === "uploading" || item.status === "queued"),
-    [uploadItems],
+    () => pickerHasStaging || uploadItems.some((item) =>
+      item.status === "queued" || item.status === "uploading" || item.status === "processing",
+    ),
+    [pickerHasStaging, uploadItems],
   );
+  const hasFailedUpload = uploadItems.some((item) => item.status === "failed");
+
+  const hasStaging = attachments.length > 0 || isUploading || hasFailedUpload;
+  useEffect(() => {
+    onStagingChange?.(hasStaging);
+  }, [hasStaging, onStagingChange]);
 
   const unresolvedAttachmentIds = useMemo(
     () =>
@@ -176,6 +193,7 @@ export function Composer({
   };
 
   const addAttachments = (items: ChatPendingAttachment[]) => {
+    if (items.length > 0) onStagingChange?.(true);
     setAttachments((prev) => {
       const next = [...prev];
       items.forEach((item) => {
@@ -199,6 +217,7 @@ export function Composer({
       }
 
       const localId = buildLocalId();
+      onStagingChange?.(true);
       const localPreviewUrl = createLocalPreviewUrl(file);
       if (localPreviewUrl) objectUrlsRef.current[localId] = localPreviewUrl;
 
@@ -392,6 +411,7 @@ export function Composer({
   const clearUploads = () => {
     setUploadItems((prev) => {
       prev.forEach((item) => {
+        if (item.status === "uploading" || item.status === "queued" || item.status === "processing") return;
         if (!item.previewUrl?.startsWith("blob:")) return;
         URL.revokeObjectURL(item.previewUrl);
         delete objectUrlsRef.current[item.localId];
@@ -408,7 +428,7 @@ export function Composer({
   const handleSend = async () => {
     const trimmed = content.trim();
     if (!trimmed && attachments.length === 0) return;
-    if (isUploading) return;
+    if (isUploading || hasFailedUpload) return;
 
     const specialMentionError = (() => {
       const policy = mentionPolicy;
@@ -506,7 +526,7 @@ export function Composer({
             <h4 className="text-xs font-semibold uppercase text-muted-foreground">Uploads</h4>
             <Button variant="ghost" size="sm" onClick={clearUploads}>
               <Trash2 className="h-3.5 w-3.5 mr-1" />
-              Clear finished
+              Clear finished or failed
             </Button>
           </div>
           <div className="space-y-2 max-h-36 overflow-auto pr-1">
@@ -587,7 +607,7 @@ export function Composer({
           window.setTimeout(closeMention, 120);
         }}
         disabled={disabled || isSending}
-        aria-label="Message composer"
+        aria-label={active ? "Message composer" : "Stored draft input"}
       />
 
       {mentionOpen && mentionUsers.length > 0 && (
@@ -629,11 +649,11 @@ export function Composer({
         <Button
           type="button"
           onClick={() => void handleSend()}
-          disabled={disabled || isSending || isUploading || (!content.trim() && attachments.length === 0)}
+          disabled={disabled || isSending || isUploading || hasFailedUpload || (!content.trim() && attachments.length === 0)}
           aria-label="Send message"
         >
           <Send className="h-4 w-4 mr-2" />
-          {isSending ? "Sending..." : isUploading ? "Uploading..." : "Send"}
+          {isSending ? "Sending..." : isUploading ? "Waiting for attachments..." : hasFailedUpload ? "Clear failed upload" : "Send"}
         </Button>
       </div>
 
@@ -641,6 +661,10 @@ export function Composer({
         open={openPicker}
         onOpenChange={setOpenPicker}
         onAddAttachments={addAttachments}
+        onUploadStagingChange={(hasStaging) => {
+          setPickerHasStaging(hasStaging);
+          if (hasStaging) onStagingChange?.(true);
+        }}
       />
     </div>
   );

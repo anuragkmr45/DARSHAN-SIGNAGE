@@ -20,5 +20,6 @@ If the thread read fails, the panel shows an error and Retry. It does not claim 
 
 - The browser tests use fixtures; the database test calls the real Fastify route. A matched-build CMS/API journey with independent operators, permission withdrawal, network loss and media access still needs to run.
 - Switching conversations still loses an in-progress attachment upload because the Composer instance unmounts. Define and test an upload transfer or cancellation contract before full Chat acceptance.
+- Follow-up: [attachment-draft developer verification](product-ui-chat-attachment-drafts-developer-verification-2026-11-04.md) records the later CMS correction and fixture browser tests; real-service upload and access-loss checks remain open.
 - Main and thread message queries currently start from `afterSeq=0` and page forward; a conversation with more than one page needs a separate latest-message/history pagination review. The parent response fixes thread context, not that broader history behavior.
 - Verify the alias route, keyboard/screen-reader behavior, themes and accents, Safari/Android, and narrow-screen safe areas during the full communication regression.

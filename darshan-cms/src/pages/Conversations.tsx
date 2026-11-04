@@ -239,6 +239,7 @@ export default function Conversations() {
   const [shareLinkFallback, setShareLinkFallback] = useState<string | null>(null);
   const [isCompactChatLayout, setIsCompactChatLayout] = useState(() => window.matchMedia("(max-width: 1023px)").matches);
   const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
+  const [stagedComposerIds, setStagedComposerIds] = useState<string[]>([]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 1023px)");
@@ -249,6 +250,7 @@ export default function Conversations() {
 
   useEffect(() => {
     setComposerDrafts({});
+    setStagedComposerIds([]);
   }, [currentUserId]);
 
   const routeConversationId = params.conversationId;
@@ -266,6 +268,10 @@ export default function Conversations() {
   const selectedConversation = useMemo(
     () => resolveConversationFromRoute(listConversation, resolveConversationQuery.data),
     [listConversation, resolveConversationQuery.data],
+  );
+  const composerIds = useMemo(
+    () => Array.from(new Set([...stagedComposerIds, ...(selectedConversation ? [selectedConversation.id] : [])])),
+    [stagedComposerIds, selectedConversation],
   );
   const messagesQuery = useChatMessages(selectedConversation?.id, {
     limit: MESSAGES_LIMIT,
@@ -308,6 +314,14 @@ export default function Conversations() {
 
   const handleActiveConversationRejected = useCallback(() => {
     setPendingUiMessages([]);
+    if (routeConversationId) {
+      setStagedComposerIds((ids) => ids.filter((id) => id !== routeConversationId));
+      setComposerDrafts((drafts) => {
+        const next = { ...drafts };
+        delete next[routeConversationId];
+        return next;
+      });
+    }
     setSettingsOpen(false);
     setInviteOpen(false);
     setChatStatus({
@@ -322,7 +336,7 @@ export default function Conversations() {
       description: "Access removed / banned / not a member",
       variant: "destructive",
     });
-  }, [navigate, setSearchParams, toast]);
+  }, [navigate, routeConversationId, setSearchParams, toast]);
 
   const activeConversationId = selectedConversation?.id;
   const subscriptionIds = useMemo(() => conversations.slice(0, 10).map((item) => item.id), [conversations]);
@@ -345,6 +359,23 @@ export default function Conversations() {
 
   const resolveConversationError =
     resolveConversationQuery.error instanceof ApiError ? resolveConversationQuery.error : null;
+  const accessRevoked = Boolean(resolveConversationError && (
+    resolveConversationError.code === "CHAT_BANNED" ||
+    resolveConversationError.code === "FORBIDDEN" ||
+    resolveConversationError.code === "NOT_FOUND" ||
+    resolveConversationError.status === 403 ||
+    resolveConversationError.status === 404
+  ));
+  useEffect(() => {
+    if (!accessRevoked || !routeConversationId) return;
+    setStagedComposerIds((ids) => ids.filter((id) => id !== routeConversationId));
+    setComposerDrafts((drafts) => {
+      if (!(routeConversationId in drafts)) return drafts;
+      const next = { ...drafts };
+      delete next[routeConversationId];
+      return next;
+    });
+  }, [accessRevoked, routeConversationId]);
   const routeAccessState = useMemo(() => {
     if (!routeConversationId) return null;
     if (resolveConversationQuery.isLoading) {
@@ -1003,22 +1034,37 @@ export default function Conversations() {
               userDisplayById={mentionDisplayById}
             />
 
-            <div className="sticky bottom-0 z-10 border-t bg-card p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-              <Composer
-                key={selectedConversation.id}
-                draftText={composerDrafts[selectedConversation.id] ?? ""}
-                onDraftChange={(next) => setComposerDrafts((drafts) => ({ ...drafts, [selectedConversation.id]: next }))}
-                disabled={composerDisabled}
-                disabledReason={effectiveStatus?.message}
-                isSending={sendMessage.isPending}
-                mentionPolicy={conversationSettings.mention_policy}
-                isAdminMentionAllowed={Boolean(canManage)}
-                onTyping={emitTyping}
-                onSend={handleSend}
-              />
-            </div>
           </>
         )}
+        {composerIds.map((conversationId) => {
+          if (accessRevoked && conversationId === routeConversationId) return null;
+          const active = conversationId === selectedConversation?.id && !routeAccessState;
+          return (
+            <div
+              key={conversationId}
+              hidden={!active}
+              className="sticky bottom-0 z-10 border-t bg-card p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+            >
+              <Composer
+                key={`${currentUserId ?? "anonymous"}:${conversationId}`}
+                active={active}
+                draftText={composerDrafts[conversationId] ?? ""}
+                onDraftChange={(next) => setComposerDrafts((drafts) => ({ ...drafts, [conversationId]: next }))}
+                onStagingChange={(hasStaging) => setStagedComposerIds((ids) => {
+                  if (hasStaging) return ids.includes(conversationId) ? ids : [...ids, conversationId];
+                  return ids.includes(conversationId) ? ids.filter((id) => id !== conversationId) : ids;
+                })}
+                disabled={!active || composerDisabled}
+                disabledReason={active ? effectiveStatus?.message : undefined}
+                isSending={active && sendMessage.isPending}
+                mentionPolicy={active ? conversationSettings.mention_policy : undefined}
+                isAdminMentionAllowed={active && Boolean(canManage)}
+                onTyping={active ? emitTyping : undefined}
+                onSend={active ? handleSend : async () => { throw new Error("Conversation is not active"); }}
+              />
+            </div>
+          );
+        })}
       </div>
 
       <ThreadPanel

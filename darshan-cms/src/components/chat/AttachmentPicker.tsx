@@ -29,6 +29,7 @@ interface AttachmentPickerProps {
   initialTab?: "existing" | "upload";
   onOpenChange: (open: boolean) => void;
   onAddAttachments: (attachments: ChatPendingAttachment[]) => void;
+  onUploadStagingChange?: (hasStaging: boolean) => void;
 }
 
 const toPendingAttachment = (media: MediaAsset): ChatPendingAttachment => ({
@@ -57,6 +58,7 @@ export function AttachmentPicker({
   initialTab = "existing",
   onOpenChange,
   onAddAttachments,
+  onUploadStagingChange,
 }: AttachmentPickerProps) {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
@@ -65,6 +67,13 @@ export function AttachmentPicker({
   const [uploadItems, setUploadItems] = useState<ComposerUploadItem[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const objectUrlsRef = useRef<Record<string, string>>({});
+  const hasStaging = uploadItems.some((item) =>
+    item.status === "queued" || item.status === "uploading" || item.status === "processing",
+  );
+
+  useEffect(() => {
+    onUploadStagingChange?.(hasStaging);
+  }, [hasStaging, onUploadStagingChange]);
 
   const typeFilter = (mediaType === "all" ? undefined : mediaType.toUpperCase()) as MediaType | undefined;
 
@@ -116,6 +125,7 @@ export function AttachmentPicker({
       }
 
       const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      onUploadStagingChange?.(true);
       const localPreviewUrl = createLocalPreviewUrl(file);
       if (localPreviewUrl) objectUrlsRef.current[localId] = localPreviewUrl;
 
