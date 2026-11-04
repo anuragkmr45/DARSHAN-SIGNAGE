@@ -20,6 +20,7 @@ import type { AuditLog } from "@/api/types";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { EmptyState } from "@/components/common/EmptyState";
 import { LoadingIndicator } from "@/components/common/LoadingIndicator";
+import { formatAuditAction, formatAuditResource } from "@/lib/auditPresentation";
 
 const AUDIT_LOGS_PAGE_SIZE = 5;
 
@@ -64,10 +65,14 @@ const errorMessage = (failure: unknown) => failure instanceof ApiError ? failure
 function AuditLogCard({ log }: { log: AuditLog }) {
   const actorName = [log.user?.first_name, log.user?.last_name].filter(Boolean).join(" ").trim();
   const actorLabel = actorName || log.user?.email || log.user_id || "system";
+  const actionLabel = formatAuditAction(log.action, log.resource_type);
+  const resourceLabel = formatAuditResource(log.resource_type);
+  const showResourceLabel = !actionLabel.toLowerCase().startsWith(resourceLabel.toLowerCase());
   const changesValue =
     log.changes && Object.keys(log.changes).length > 0 ? JSON.stringify(log.changes, null, 2) : "—";
 
   const detailFields = [
+    { label: "Action code", value: log.action, mono: true },
     { label: "Log ID", value: log.id, mono: true },
     { label: "Resource type", value: log.resource_type },
     { label: "Resource ID", value: log.resource_id, mono: true },
@@ -92,8 +97,8 @@ function AuditLogCard({ log }: { log: AuditLog }) {
         <div className="flex flex-1 flex-wrap items-start justify-between gap-3 pr-4 text-left">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{log.action ?? "ACTION"}</Badge>
-              <Badge variant="outline">{formatAuditField(log.resource_type)}</Badge>
+              <p className="font-medium">{actionLabel}</p>
+              {showResourceLabel && <Badge variant="outline">{resourceLabel}</Badge>}
             </div>
             <div>
               <p className="font-medium">{actorLabel}</p>
@@ -324,7 +329,7 @@ export default function Reports() {
       {canReadAuditLogs && <TabsContent value="audit" className="mt-5 space-y-5">
         <section aria-labelledby="audit-heading" className="space-y-4">
           <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 id="audit-heading" className="text-lg font-semibold">Audit Logs</h2><p className="mt-1 text-sm text-muted-foreground">Review who changed a resource and when.</p></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => void auditLogsQuery.refetch()} disabled={auditLogsQuery.isFetching}><RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" />Refresh</Button><Button variant="outline" size="sm" onClick={() => void handleExportLogsPdf()} disabled={isExportingLogsPdf}><Download aria-hidden="true" className="mr-2 h-4 w-4" />{isExportingLogsPdf ? "Exporting…" : "Logs PDF"}</Button></div></div>
-          <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1"><Label htmlFor="audit-resource">Resource type</Label><Input id="audit-resource" placeholder="e.g. Screen" value={resourceFilter} onChange={(event) => setResourceFilter(event.target.value)} /></div><div className="space-y-1"><Label htmlFor="audit-action">Action</Label><Input id="audit-action" placeholder="e.g. UPDATE" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)} /></div></div>
+          <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1"><Label htmlFor="audit-resource">Resource type</Label><Input id="audit-resource" placeholder="e.g. Screen" value={resourceFilter} onChange={(event) => setResourceFilter(event.target.value)} /></div><div className="space-y-1"><Label htmlFor="audit-action">Action code (exact match)</Label><Input id="audit-action" placeholder="e.g. SCREEN_UPDATE" value={actionFilter} onChange={(event) => setActionFilter(event.target.value)} /></div></div>
           <p className="text-sm text-muted-foreground" aria-live="polite">{auditLogsQuery.isLoading ? "Loading logs…" : `${auditLogsTotal} ${auditLogsTotal === 1 ? "log" : "logs"}`}{auditLogsQuery.isFetching && !auditLogsQuery.isLoading ? " · Updating" : ""}</p>
           {auditLogsQuery.isLoading ? <div className="space-y-3">{auditPlaceholder}</div> : auditLogsQuery.isError && !auditLogsQuery.data ? <EmptyState title="Could not load audit logs" description={errorMessage(auditLogsQuery.error)} actionLabel="Retry" onAction={() => void auditLogsQuery.refetch()} /> : auditLogs.length === 0 ? <EmptyState title="No logs match these filters" description="Try another resource or action." /> : <Accordion type="single" collapsible className="border-t">{auditLogs.map((log) => <AuditLogCard key={log.id} log={log} />)}</Accordion>}
           {auditLogsQuery.isError && auditLogsQuery.data && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh audit logs. Showing the last loaded page. <Button variant="outline" size="sm" onClick={() => void auditLogsQuery.refetch()}>Retry</Button></div>}

@@ -76,9 +76,13 @@ test("Audit-only role can inspect, filter, page, and export logs without report 
   await page.goto("/reports");
   await expect(page.getByRole("heading", { name: "Audit Logs" })).toBeVisible();
   await expect(page.getByText("7 logs")).toBeVisible();
+  await expect(page.getByText("Screen updated").first()).toBeVisible();
+  await page.getByRole("button", { name: /Screen updated/ }).first().click();
+  await expect(page.getByText("Action code", { exact: true })).toBeVisible();
+  await expect(page.getByText("SCREEN_UPDATE", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Go to next page" }).click();
   await expect(page.getByText("Showing 6–7 of 7")).toBeVisible();
-  await page.getByLabel("Action").fill("DELETE");
+  await page.getByLabel("Action code (exact match)").fill("DELETE");
   await expect(page.getByText("No logs match these filters")).toBeVisible();
   await page.getByLabel("Resource type").fill("Screen");
   const exportRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/v1/audit-logs/export");
