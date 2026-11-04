@@ -148,3 +148,19 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Status colors are independent of the customer accent and work in both themes. */
+@layer utilities {
+  .status-tone-success { background-color: hsl(var(--status-success-bg)); color: hsl(var(--status-success-fg)); border-color: hsl(var(--status-success-fg) / 0.35); }
+  .status-tone-warning { background-color: hsl(var(--status-warning-bg)); color: hsl(var(--status-warning-fg)); border-color: hsl(var(--status-warning-fg) / 0.35); }
+  .status-tone-error { background-color: hsl(var(--status-error-bg)); color: hsl(var(--status-error-fg)); border-color: hsl(var(--status-error-fg) / 0.35); }
+  .status-tone-info { background-color: hsl(var(--status-info-bg)); color: hsl(var(--status-info-fg)); border-color: hsl(var(--status-info-fg) / 0.35); }
+  .status-outline-success { border-color: hsl(var(--status-success-fg)); color: hsl(var(--status-success-fg)); }
+  .status-outline-warning { border-color: hsl(var(--status-warning-fg)); color: hsl(var(--status-warning-fg)); }
+  .status-outline-error { border-color: hsl(var(--status-error-fg)); color: hsl(var(--status-error-fg)); }
+  .status-outline-info { border-color: hsl(var(--status-info-fg)); color: hsl(var(--status-info-fg)); }
+  .status-text-success { color: hsl(var(--status-success-fg)); }
+  .status-text-warning { color: hsl(var(--status-warning-fg)); }
+  .status-text-error { color: hsl(var(--status-error-fg)); }
+  .status-text-info { color: hsl(var(--status-info-fg)); }
+}

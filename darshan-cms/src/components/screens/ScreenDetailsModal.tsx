@@ -104,9 +104,9 @@ const getRealtimeConnectionLabel = (value?: string) => {
 };
 
 const getRealtimeConnectionBadgeClass = (value?: string) => {
-  if (value === "WSS_HEALTHY") return "border-emerald-500 text-emerald-700";
-  if (value === "REST_FALLBACK") return "border-amber-500 text-amber-700";
-  return "border-red-500 text-red-700";
+  if (value === "WSS_HEALTHY") return "status-outline-success";
+  if (value === "REST_FALLBACK") return "status-outline-warning";
+  return "status-outline-error";
 };
 
 function TelemetryField({
@@ -127,26 +127,26 @@ function TelemetryField({
 function getDeliveryBadgeClass(status?: string | null) {
   const normalized = status?.toUpperCase();
   if (normalized === "ACKED_SUCCESS" || normalized === "COMPLETED" || normalized === "DISPATCHED") {
-    return "border-emerald-500 text-emerald-700";
+    return "status-outline-success";
   }
   if (["ACKED_FAILURE", "FAILED", "DEAD_LETTER", "EXPIRED", "CANCELLED"].includes(normalized || "")) {
-    return "border-red-500 text-red-700";
+    return "status-outline-error";
   }
   if (normalized === "LEASED" || normalized === "SENT" || normalized === "PROCESSING" || normalized === "DISPATCHING") {
-    return "border-blue-500 text-blue-700";
+    return "status-outline-info";
   }
-  return "border-amber-500 text-amber-700";
+  return "status-outline-warning";
 }
 
 function getFailureSeverityBadgeClass(severity?: string | null) {
   const normalized = severity?.toUpperCase();
   if (normalized === "CRITICAL" || normalized === "ERROR") {
-    return "border-red-500 text-red-700";
+    return "status-outline-error";
   }
   if (normalized === "WARN") {
-    return "border-amber-500 text-amber-700";
+    return "status-outline-warning";
   }
-  return "border-blue-500 text-blue-700";
+  return "status-outline-info";
 }
 
 function DeliveryMetric({
@@ -545,8 +545,8 @@ export function ScreenDetailsModal({
 
             <TabsContent value="overview" className="space-y-4">
               {(pendingEmergency || playback?.source === "EMERGENCY") && (
-                <Card className="border-red-200 bg-red-50 p-4">
-                  <div className="flex items-center gap-2 text-red-700">
+                <Card className="status-tone-error p-4">
+                  <div className="flex items-center gap-2 status-text-error">
                     <Flame className="h-4 w-4" />
                     <div>
                       <p className="font-semibold">Emergency content is active</p>
@@ -557,9 +557,9 @@ export function ScreenDetailsModal({
               )}
 
               {nowPlayingError?.status === 500 && nowPlaying ? (
-                <Card className="border-amber-200 bg-amber-50 p-4">
+                <Card className="status-tone-warning p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2 text-amber-800">
+                    <div className="flex items-center gap-2 status-text-warning">
                       <AlertTriangle className="h-4 w-4" />
                       <p className="text-sm">Live playback refresh failed. Showing the last known state.</p>
                     </div>
@@ -621,7 +621,7 @@ export function ScreenDetailsModal({
                         </Badge>
                       ) : null}
                       {activePairing?.mode === "RECOVERY" ? (
-                        <Badge variant="outline" className="border-amber-500 text-amber-700">
+                        <Badge variant="outline" className="status-outline-warning">
                           Recovery pending
                         </Badge>
                       ) : null}
@@ -671,7 +671,7 @@ export function ScreenDetailsModal({
                     <h3 className="font-semibold">Display authority</h3>
                     <p className="text-sm text-muted-foreground">Choose the output the player should use. Changes are delivered as a device command.</p>
                   </div>
-                  <Badge variant="outline" className={displayState?.placement === "VERIFIED" ? "border-emerald-500 text-emerald-700" : "border-amber-500 text-amber-700"}>
+                  <Badge variant="outline" className={displayState?.placement === "VERIFIED" ? "status-outline-success" : "status-outline-warning"}>
                     {displayState?.placement || "UNVERIFIED"}
                   </Badge>
                 </div>
@@ -688,7 +688,7 @@ export function ScreenDetailsModal({
                       <TelemetryField label="Renderer viewport" value={displayProfile.viewport ? `${displayProfile.viewport.width_css_px} × ${displayProfile.viewport.height_css_px} CSS px · ${displayProfile.viewport.density}${displayProfile.viewport.conformant ? "" : " · UNFIT"}` : "Not reported"} />
                     </div>
                     {displayProfile.selection.fallback_used || displayState.placement !== "VERIFIED" ? (
-                      <p className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+                      <p className="rounded border status-tone-warning p-2 text-sm status-text-warning">
                         {displayProfile.selection.fallback_reason || "Placement is not verified"}. The player may currently be using its primary output.
                       </p>
                     ) : null}
@@ -961,9 +961,9 @@ export function ScreenDetailsModal({
                     <Skeleton className="h-48 w-full" />
                   </div>
                 ) : deliveryStatusQuery.error ? (
-                  <Card className="border-amber-200 bg-amber-50 p-4">
+                  <Card className="status-tone-warning p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex items-center gap-2 text-amber-800">
+                      <div className="flex items-center gap-2 status-text-warning">
                         <AlertTriangle className="h-4 w-4" />
                         <p className="text-sm">Delivery status is unavailable.</p>
                       </div>
@@ -1087,12 +1087,12 @@ export function ScreenDetailsModal({
                                   </div>
                                   <p className="mt-2 font-mono text-xs text-muted-foreground break-all">{command.id}</p>
                                   {command.last_error ? (
-                                    <p className="mt-1 flex items-center gap-1 text-red-700">
+                                    <p className="mt-1 flex items-center gap-1 status-text-error">
                                       <XCircle className="h-3 w-3" />
                                       {command.last_error}
                                     </p>
                                   ) : command.lifecycle_status === "ACKED_SUCCESS" ? (
-                                    <p className="mt-1 flex items-center gap-1 text-emerald-700">
+                                    <p className="mt-1 flex items-center gap-1 status-text-success">
                                       <CheckCircle2 className="h-3 w-3" />
                                       ACK received
                                     </p>
@@ -1133,7 +1133,7 @@ export function ScreenDetailsModal({
                             <Skeleton className="h-16 w-full" />
                           </div>
                         ) : mediaCacheReportsQuery.error ? (
-                          <div className="flex items-center gap-2 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                          <div className="flex items-center gap-2 rounded border status-tone-warning p-3 text-sm status-text-warning">
                             <AlertTriangle className="h-4 w-4" />
                             Media/cache status is unavailable.
                           </div>
@@ -1151,7 +1151,7 @@ export function ScreenDetailsModal({
                                       {report.source ? <Badge variant="outline">{report.source}</Badge> : null}
                                     </div>
                                     {report.message ? (
-                                      <p className="mt-2 text-red-700">{report.message}</p>
+                                      <p className="mt-2 status-text-error">{report.message}</p>
                                     ) : null}
                                     <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                                       {report.media_id || report.cache_key || "No media id"}
@@ -1181,7 +1181,7 @@ export function ScreenDetailsModal({
                     <Card className="p-4 space-y-3">
                       <div className="flex items-center justify-between gap-3">
                         <h3 className="font-semibold">Notification outbox</h3>
-                        <Badge variant="outline" className={deliveryStatus.outbox.failed > 0 ? "border-red-500 text-red-700" : "border-emerald-500 text-emerald-700"}>
+                        <Badge variant="outline" className={deliveryStatus.outbox.failed > 0 ? "status-outline-error" : "status-outline-success"}>
                           {deliveryStatus.outbox.failed > 0 ? `${deliveryStatus.outbox.failed} failed` : `${deliveryStatus.outbox.dispatched} dispatched`}
                         </Badge>
                       </div>

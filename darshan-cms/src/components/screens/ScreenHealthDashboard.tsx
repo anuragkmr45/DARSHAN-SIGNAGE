@@ -105,7 +105,7 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card className="p-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-700">
+            <div className="rounded-lg status-tone-success p-2">
               <Activity className="h-5 w-5" />
             </div>
             <div>
@@ -117,7 +117,7 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
 
         <Card className="p-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-sky-500/10 p-2 text-sky-700">
+            <div className="rounded-lg status-tone-info p-2">
               <Server className="h-5 w-5" />
             </div>
             <div>
@@ -133,7 +133,7 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
 
         <Card className="p-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-amber-500/10 p-2 text-amber-700">
+            <div className="rounded-lg status-tone-warning p-2">
               <HardDrive className="h-5 w-5" />
             </div>
             <div>
@@ -149,7 +149,7 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
 
         <Card className="p-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-orange-500/10 p-2 text-orange-700">
+            <div className="rounded-lg status-tone-warning p-2">
               <Wifi className="h-5 w-5" />
             </div>
             <div>
@@ -268,7 +268,7 @@ export function ScreenHealthDashboard({ screenId, screenName }: ScreenHealthDash
           </div>
 
           {summary.screen.health_reason ? (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+            <div className="rounded-lg border status-tone-warning p-3 text-sm">
               <p className="font-medium">Current health reason</p>
               <p className="mt-1 text-muted-foreground">{summary.screen.health_reason}</p>
             </div>

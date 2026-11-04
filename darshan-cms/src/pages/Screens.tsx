@@ -491,14 +491,14 @@ export default function Screens() {
                           <div
                             className={`rounded-md p-2 ${
                               isEmergency
-                                ? "bg-red-500/10 text-red-600"
+                                ? "status-tone-error"
                                 : healthRank === 0 || healthRank === 1
-                                  ? "bg-red-500/10 text-red-600"
+                                  ? "status-tone-error"
                                   : isOffline
-                                    ? "bg-red-500/10 text-red-600"
+                                    ? "status-tone-error"
                                     : health_state === "ONLINE"
-                                      ? "bg-green-500/10 text-green-600"
-                                      : "bg-yellow-500/10 text-yellow-600"
+                                      ? "status-tone-success"
+                                      : "status-tone-warning"
                             }`}
                           >
                             {isEmergency ? <Flame className="h-5 w-5" /> : <Monitor className="h-5 w-5" />}
@@ -530,7 +530,7 @@ export default function Screens() {
                           </Badge>
                         ) : null}
                         {active_pairing?.mode === "RECOVERY" && (
-                          <Badge variant="outline" className="border-amber-500 text-amber-700">
+                          <Badge variant="outline" className="status-outline-warning">
                             Recovery pending
                           </Badge>
                         )}
@@ -884,9 +884,9 @@ export default function Screens() {
             {((deleteTarget.active_items?.length ?? 0) > 0 ||
               (deleteTarget.upcoming_items?.length ?? 0) > 0 ||
               Boolean(deleteTarget.booked_until)) && (
-              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <div className="rounded-md border status-tone-warning p-3 text-sm">
                 <div className="flex items-start gap-2">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" />
+                  <AlertTriangle className="mt-0.5 h-4 w-4 status-text-warning" />
                   <div className="space-y-1">
                     <p className="font-medium text-foreground">This screen currently has schedule targeting.</p>
                     <p className="text-muted-foreground">Remove current and upcoming schedule targeting before deleting this screen.</p>

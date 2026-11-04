@@ -232,3 +232,8 @@ The production inspection lock and invalid-runtime-configuration message now use
 
 
 The follow-up renderer packet styles the actual scheduled-content unavailable overlay, unsupported-media placeholder, fallback slide, and QA diagnostics with the same offline Forest tokens. It replaces the old plum diagnostics material and gives status badges readable semantic foreground/background pairs. A real Chromium lifecycle case showed the controlled unavailable state and QA/emergency badges, and 42 focused renderer units passed. Built-in emergency message typography and severity presentation still need a dedicated visual/safety pass; that work remains open.
+
+
+## Screen semantic status palette — 2026-11-04
+
+Screen list health, inspector delivery/observability badges, warning cards and hardware metric icons now use semantic success, warning, error and information tokens shared across light/dark themes. These states keep their text labels and do not follow the site's action accent. The CMS build and bundle budget, focused lint and all 20 Screens browser cases passed. The fixture run regenerated the 390px offline fleet capture. [Developer evidence](../../qa-artifacts/evidence/product-ui-screen-semantic-palette-developer-verification-2026-11-04.md) separates these checks from real-service and physical-player QA.
