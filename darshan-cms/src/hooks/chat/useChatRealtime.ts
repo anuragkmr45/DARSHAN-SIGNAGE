@@ -201,6 +201,9 @@ export const useChatRealtime = ({
     };
 
     const onConversationUpdated = (payload: ChatConversationUpdatedEvent) => {
+      if (payload.patch.membersChanged) {
+        void queryClient.invalidateQueries({ queryKey: chatQueryKeys.members(payload.conversationId) });
+      }
       queryClient.setQueryData(chatQueryKeys.conversations, (current: { items?: unknown[] } | undefined) => {
         if (!current?.items) return current;
         return {

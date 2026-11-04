@@ -14,6 +14,7 @@
 
 ## Membership
 - `POST /api/v1/chat/conversations/:id/invite`
+- `GET /api/v1/chat/conversations/:id/members` (chat admins only; active group/forum members, no password or token fields)
 - `POST /api/v1/chat/conversations/:id/members/remove`
 
 ## Messages

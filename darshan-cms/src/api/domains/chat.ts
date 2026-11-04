@@ -4,6 +4,7 @@ import type {
   ChatBookmark,
   ChatBookmarksListResponse,
   ChatConversationResponse,
+  ChatConversationMember,
   ChatResolveResponse,
   ChatShareLinkResponse,
   ChatInvitePolicy,
@@ -275,6 +276,12 @@ export const chatApi = {
       path: endpoints.chat.removeMember(conversationId),
       method: "POST",
       body: { userId },
+    }),
+
+  listMembers: (conversationId: string) =>
+    apiClient.request<{ items: ChatConversationMember[] }>({
+      path: endpoints.chat.listMembers(conversationId),
+      method: "GET",
     }),
 
   updateConversation: (conversationId: string, payload: UpdateChatConversationInput) =>

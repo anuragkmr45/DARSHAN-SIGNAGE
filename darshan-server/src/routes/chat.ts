@@ -1347,6 +1347,43 @@ export async function chatRoutes(fastify: FastifyInstance) {
     }
   );
 
+  fastify.get<{ Params: { id: string } }>(
+    apiEndpoints.chat.listMembers,
+    { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
+    async (request, reply) => {
+      try {
+        const { payload } = await authenticate(request);
+        const conversationId = request.params.id;
+        const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
+        if (conversation.type === 'DM') throw AppError.forbidden('DM membership cannot be managed');
+        if (!(await chatRepo.isConversationAdmin(conversationId, payload.sub, payload.role))) {
+          throw AppError.forbidden('Only chat admins can view the member roster');
+        }
+        const items = await db.select({
+          user_id: schema.chatMembers.user_id,
+          role: schema.chatMembers.role,
+          is_system: schema.chatMembers.is_system,
+          email: schema.users.email,
+          first_name: schema.users.first_name,
+          last_name: schema.users.last_name,
+          is_active: schema.users.is_active,
+        }).from(schema.chatMembers)
+          .innerJoin(schema.users, eq(schema.chatMembers.user_id, schema.users.id))
+          .where(and(eq(schema.chatMembers.conversation_id, conversationId), isNull(schema.chatMembers.left_at)))
+          .orderBy(schema.users.email);
+        return reply.send({ items: items.map((item) => ({
+          ...item,
+          email: item.is_active ? item.email : null,
+          first_name: item.is_active ? item.first_name : null,
+          last_name: item.is_active ? item.last_name : null,
+        })) });
+      } catch (error) {
+        logger.error(error, 'List conversation members error');
+        return respondWithError(reply, error);
+      }
+    }
+  );
+
   fastify.post<{ Params: { id: string }; Body: typeof removeMemberSchema._type }>(
     apiEndpoints.chat.removeMember,
     { preHandler: chatAuthPreHandler, schema: { tags: ['Chat'], security: [{ bearerAuth: [] }] } },
@@ -1357,9 +1394,18 @@ export async function chatRoutes(fastify: FastifyInstance) {
         const conversationId = (request.params as any).id;
         const conversation = await getConversationForAccess(conversationId, payload.sub, payload.role);
         assertConversationWritable(conversation);
-        if (conversation.type === 'DM') throw AppError.forbidden('Cannot remove DM participants');
+        if (conversation.type !== 'GROUP_CLOSED') {
+          throw AppError.forbidden('Membership removal is available only for closed groups');
+        }
         const canAdmin = await chatRepo.isConversationAdmin(conversationId, payload.sub, payload.role);
         if (!canAdmin) throw AppError.forbidden('Only chat admins can remove members');
+        const targetMember = await chatRepo.getMember(conversationId, data.userId);
+        if (!targetMember) throw AppError.notFound('Member not found');
+        if (targetMember.is_system) throw AppError.forbidden('System member cannot be removed');
+        if (targetMember.role === 'OWNER') throw AppError.forbidden('Conversation owner cannot be removed without ownership transfer');
+        if (await chatRepo.hasGlobalConversationManagement(data.userId)) {
+          throw AppError.conflict('This user has site-wide Conversation access. Change their role grant to revoke access.');
+        }
         await chatRepo.removeMember(conversationId, data.userId);
         await appendAudit(request, payload.sub, 'CHAT_MEMBER_REMOVE', 'ChatConversation', conversationId);
         emitChatEvent(fastify, conversationId, 'chat:conversation:updated', {

@@ -37,6 +37,7 @@ export const chatQueryKeys = {
   conversations: ["chat", "conversations"] as const,
   resolveConversation: (conversationId?: string) => ["chat", "resolve-conversation", conversationId] as const,
   usersDirectory: ["chat", "users-directory"] as const,
+  members: (conversationId?: string) => ["chat", "members", conversationId] as const,
   pins: (conversationId?: string) => ["chat", "pins", conversationId] as const,
   bookmarks: (conversationId?: string) => ["chat", "bookmarks", conversationId] as const,
   messages: (conversationId?: string) => ["chat", "messages", conversationId] as const,
@@ -453,8 +454,9 @@ export const useInviteChatMembers = () => {
   return useMutation({
     mutationFn: ({ conversationId, userIds }: { conversationId: string; userIds: string[] }) =>
       chatApi.inviteMembers(conversationId, userIds),
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
+      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.members(variables.conversationId) });
     },
   });
 };
@@ -464,11 +466,21 @@ export const useRemoveChatMember = () => {
   return useMutation({
     mutationFn: ({ conversationId, userId }: { conversationId: string; userId: string }) =>
       chatApi.removeMember(conversationId, userId),
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations });
+      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.members(variables.conversationId) });
     },
   });
 };
+
+export const useChatMembers = (conversationId?: string, enabled = true) =>
+  useQuery({
+    queryKey: chatQueryKeys.members(conversationId),
+    queryFn: () => chatApi.listMembers(conversationId!),
+    enabled: enabled && Boolean(conversationId),
+    staleTime: 10_000,
+    retry: false,
+  });
 
 export const useUpdateConversationSettings = () => {
   const queryClient = useQueryClient();

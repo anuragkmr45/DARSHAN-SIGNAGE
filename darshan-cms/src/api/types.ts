@@ -1954,7 +1954,17 @@ export type ChatInvitePolicy =
   | "ANY_MEMBER_CAN_INVITE"
   | "ADMINS_ONLY_CAN_INVITE"
   | "INVITES_DISABLED";
-export type ChatViewerRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER" | null;
+export type ChatViewerRole = "OWNER" | "CHAT_ADMIN" | "MOD" | "MEMBER" | null;
+
+export interface ChatConversationMember {
+  user_id: string;
+  role: Exclude<ChatViewerRole, null>;
+  is_system: boolean;
+  is_active: boolean;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+}
 export type ChatMentionAudience = "everyone" | "channel" | "here";
 export type ChatMentionRule = "ANY_MEMBER" | "ADMINS_ONLY" | "DISABLED";
 export type ChatEditDeletePolicy = "OWN" | "ADMINS_ONLY" | "DISABLED";
@@ -2217,6 +2227,7 @@ export interface ChatConversationUpdatedEvent {
   conversationId: string;
   patch: Partial<ChatConversationListItem> & {
     settings?: ChatConversationSettings;
+    membersChanged?: boolean;
   };
 }
 

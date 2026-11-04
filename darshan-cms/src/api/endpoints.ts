@@ -46,6 +46,7 @@ export const endpoints = {
     listBookmarks: (conversationId: string) => `/chat/conversations/${conversationId}/bookmarks`,
     read: (conversationId: string) => `/chat/conversations/${conversationId}/read`,
     invite: (conversationId: string) => `/chat/conversations/${conversationId}/invite`,
+    listMembers: (conversationId: string) => `/chat/conversations/${conversationId}/members`,
     removeMember: (conversationId: string) => `/chat/conversations/${conversationId}/members/remove`,
     updateConversation: (conversationId: string) => `/chat/conversations/${conversationId}`,
     archiveConversation: (conversationId: string) => `/chat/conversations/${conversationId}/archive`,

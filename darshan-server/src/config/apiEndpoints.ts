@@ -276,6 +276,7 @@ export const apiEndpoints = {
     restoreConversation: withBase('/chat/conversations/:id/restore'),
     restoreMessage: withBase('/chat/messages/:id/restore'),
     inviteMembers: withBase('/chat/conversations/:id/invite'),
+    listMembers: withBase('/chat/conversations/:id/members'),
     removeMember: withBase('/chat/conversations/:id/members/remove'),
     listMessages: withBase('/chat/conversations/:id/messages'),
     attachmentMedia: withBase('/chat/conversations/:id/attachments/:mediaId'),

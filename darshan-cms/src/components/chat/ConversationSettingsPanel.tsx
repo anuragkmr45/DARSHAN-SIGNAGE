@@ -3,6 +3,7 @@ import { AlertTriangle } from "lucide-react";
 import type {
   ChatBookmark,
   ChatConversationListItem,
+  ChatConversationMember,
   ChatConversationSettings,
   ChatEditDeletePolicy,
   ChatInvitePolicy,
@@ -24,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   Select,
   SelectContent,
@@ -57,6 +59,13 @@ interface ConversationSettingsPanelProps {
   bookmarks?: ChatBookmark[];
   bookmarksLoading?: boolean;
   bookmarkMediaById?: Record<string, MediaAsset>;
+  members?: ChatConversationMember[];
+  membersLoading?: boolean;
+  membersError?: string | null;
+  memberRemovalPending?: boolean;
+  currentUserId?: string;
+  onRefreshMembers?: () => void;
+  onRemoveMember?: (userId: string) => Promise<void> | void;
   onOpenChange: (open: boolean) => void;
   onSave: (payload: {
     title?: string | null;
@@ -93,6 +102,13 @@ export function ConversationSettingsPanel({
   bookmarks = [],
   bookmarksLoading = false,
   bookmarkMediaById = {},
+  members = [],
+  membersLoading = false,
+  membersError = null,
+  memberRemovalPending = false,
+  currentUserId,
+  onRefreshMembers,
+  onRemoveMember,
   onOpenChange,
   onSave,
   onArchive,
@@ -111,6 +127,10 @@ export function ConversationSettingsPanel({
   const [mentionPolicy, setMentionPolicy] = useState<ChatMentionPolicy>(DEFAULT_SETTINGS.mention_policy);
   const [editPolicy, setEditPolicy] = useState<ChatEditDeletePolicy>("OWN");
   const [deletePolicy, setDeletePolicy] = useState<ChatEditDeletePolicy>("OWN");
+  const [removeTarget, setRemoveTarget] = useState<ChatConversationMember | null>(null);
+
+  useEffect(() => { setRemoveTarget(null); }, [conversation?.id]);
+  useEffect(() => { if (!open) setRemoveTarget(null); }, [open]);
 
   useEffect(() => {
     if (!conversation) return;
@@ -148,12 +168,16 @@ export function ConversationSettingsPanel({
     </div>
   );
 
+  const memberName = (member: ChatConversationMember) =>
+    `${member.first_name || ""} ${member.last_name || ""}`.trim() || member.email || "Former user";
+
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full max-w-[460px] overflow-y-auto">
         <SheetHeader>
           <SheetTitle>Conversation Details</SheetTitle>
-          <SheetDescription>Manage settings, pins, and bookmarks.</SheetDescription>
+          <SheetDescription>Settings, members, pins, and bookmarks.</SheetDescription>
         </SheetHeader>
 
         {!conversation ? (
@@ -162,6 +186,7 @@ export function ConversationSettingsPanel({
           <Tabs value={tab} onValueChange={setTab} className="mt-4">
             <TabsList className="w-full">
               <TabsTrigger value="settings" className="flex-1">Settings</TabsTrigger>
+              {conversation.type !== "DM" && canManage && <TabsTrigger value="members" className="flex-1">Members</TabsTrigger>}
               <TabsTrigger value="pins" className="flex-1">Pins</TabsTrigger>
               <TabsTrigger value="bookmarks" className="flex-1">Bookmarks</TabsTrigger>
             </TabsList>
@@ -305,6 +330,28 @@ export function ConversationSettingsPanel({
               )}
             </TabsContent>
 
+            {conversation.type !== "DM" && canManage && <TabsContent value="members" className="space-y-3">
+              {conversation.type === "FORUM_OPEN" && <p className="text-sm text-muted-foreground">This forum is open to authorized site users. Removing a membership would not revoke access; ask a site administrator to moderate a participant.</p>}
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">{conversation.type === "FORUM_OPEN" ? "Recorded forum members." : "People with access to this conversation."}</p>
+                <Button variant="ghost" size="sm" onClick={onRefreshMembers} disabled={membersLoading}>Refresh</Button>
+              </div>
+              {membersLoading && <p role="status" className="text-sm text-muted-foreground">Loading members…</p>}
+              {membersError && <p role="alert" className="text-sm text-destructive">{membersError}</p>}
+              {!membersLoading && !membersError && members.length === 0 && <p className="text-sm text-muted-foreground">{conversation.type === "FORUM_OPEN" ? "No recorded members." : "No members found."}</p>}
+              <div className="divide-y rounded-lg border">
+                {members.map((member) => <div key={member.user_id} className="flex items-center justify-between gap-3 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{memberName(member)}{member.user_id === currentUserId ? " (you)" : ""}</p>
+                    {member.email && memberName(member) !== member.email && <p className="truncate text-xs text-muted-foreground">{member.email}</p>}
+                    <p className="text-xs text-muted-foreground">{member.is_system ? "Site administrator" : member.role === "OWNER" ? "Owner" : member.role === "CHAT_ADMIN" ? "Chat admin" : member.role === "MOD" ? "Moderator" : "Member"}</p>
+                  </div>
+                  {conversation.type === "GROUP_CLOSED" && !member.is_system && member.role !== "OWNER" && member.user_id !== currentUserId && <Button variant="outline" size="sm" onClick={() => setRemoveTarget(member)} aria-label={`Remove ${memberName(member)}`} disabled={memberRemovalPending || isArchived}>Remove</Button>}
+                </div>)}
+              </div>
+              {isArchived && <p className="text-xs text-muted-foreground">Unarchive this conversation before changing its members.</p>}
+            </TabsContent>}
+
             <TabsContent value="pins">
               <PinsPanel
                 pins={pins}
@@ -334,5 +381,18 @@ export function ConversationSettingsPanel({
         )}
       </SheetContent>
     </Sheet>
+    <ConfirmDialog
+      open={Boolean(removeTarget)}
+      title="Remove member?"
+      description={`${removeTarget ? memberName(removeTarget) : "This member"} will lose access to this conversation and its shared files. Past messages stay in the conversation.`}
+      confirmLabel="Remove member"
+      isLoading={memberRemovalPending}
+      onCancel={() => setRemoveTarget(null)}
+      onConfirm={() => {
+        if (!removeTarget || !onRemoveMember) return;
+        void Promise.resolve(onRemoveMember(removeTarget.user_id)).then(() => setRemoveTarget(null)).catch(() => {});
+      }}
+    />
+    </>
   );
 }

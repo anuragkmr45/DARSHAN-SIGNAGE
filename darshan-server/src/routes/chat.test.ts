@@ -114,6 +114,114 @@ describe('Chat Routes - lifecycle and tombstone safety', () => {
     await closeTestServer(server);
   });
 
+  it('lists only active group members for chat admins and reflects removal', async () => {
+    const db = getDatabase();
+    const conversationId = randomUUID();
+    const peerId = randomUUID();
+    const operatorRole = await ensureRole(`CHAT_MEMBER_${randomUUID().slice(0, 8)}`);
+    const peerEmail = `chat-member-${peerId}@example.invalid`;
+    await db.insert(schema.users).values({
+      id: peerId,
+      email: peerEmail,
+      password_hash: await hashPassword('Password123!'),
+      role_id: operatorRole.id,
+      first_name: 'Chat',
+      last_name: 'Peer',
+      is_active: true,
+    });
+    await db.insert(schema.chatConversations).values({
+      id: conversationId,
+      type: 'GROUP_CLOSED',
+      created_by: testUser.id,
+      state: 'ACTIVE',
+      invite_policy: 'ANY_MEMBER_CAN_INVITE',
+      title: 'Member roster test',
+      metadata: {},
+    });
+    await db.insert(schema.chatMembers).values([
+      { conversation_id: conversationId, user_id: testUser.id, role: 'OWNER', is_system: false },
+      { conversation_id: conversationId, user_id: peerId, role: 'MEMBER', is_system: false },
+    ]);
+    const peerToken = await issueTokenForUser({
+      id: peerId, email: peerEmail, roleId: operatorRole.id, roleName: operatorRole.name,
+    });
+    const url = `/api/v1/chat/conversations/${conversationId}/members`;
+    const denied = await server.inject({ method: 'GET', url, headers: { authorization: `Bearer ${peerToken}` } });
+    expect(denied.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const ownerRoster = await server.inject({ method: 'GET', url, headers: { authorization: `Bearer ${adminToken}` } });
+    expect(ownerRoster.statusCode).toBe(HTTP_STATUS.OK);
+    expect(ownerRoster.json().items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ user_id: peerId, email: peerEmail, first_name: 'Chat', role: 'MEMBER', is_system: false }),
+    ]));
+    expect(JSON.stringify(ownerRoster.json())).not.toContain('password_hash');
+
+    const ownerRemoval = await server.inject({
+      method: 'POST', url: `${url}/remove`,
+      headers: { authorization: `Bearer ${adminToken}` }, payload: { userId: testUser.id },
+    });
+    expect(ownerRemoval.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+
+    const removed = await server.inject({
+      method: 'POST', url: `${url}/remove`,
+      headers: { authorization: `Bearer ${adminToken}` }, payload: { userId: peerId },
+    });
+    expect(removed.statusCode).toBe(HTTP_STATUS.OK);
+    const after = await server.inject({ method: 'GET', url, headers: { authorization: `Bearer ${adminToken}` } });
+    expect(after.statusCode).toBe(HTTP_STATUS.OK);
+    expect(after.json().items.some((member: { user_id: string }) => member.user_id === peerId)).toBe(false);
+
+    await db.update(schema.chatMembers).set({ left_at: null, is_system: true })
+      .where(and(eq(schema.chatMembers.conversation_id, conversationId), eq(schema.chatMembers.user_id, peerId)));
+    const protectedRemoval = await server.inject({
+      method: 'POST', url: `${url}/remove`,
+      headers: { authorization: `Bearer ${adminToken}` }, payload: { userId: peerId },
+    });
+    expect(protectedRemoval.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+    const stillPresent = await server.inject({ method: 'GET', url, headers: { authorization: `Bearer ${adminToken}` } });
+    expect(stillPresent.json().items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ user_id: peerId, is_system: true }),
+    ]));
+
+    const managerId = randomUUID();
+    const managerRole = await ensureRole(`CHAT_GLOBAL_${randomUUID().slice(0, 8)}`);
+    await db.update(schema.roles).set({ permissions: { grants: [{ action: 'manage', subject: 'Conversation' }] } })
+      .where(eq(schema.roles.id, managerRole.id));
+    await db.insert(schema.users).values({
+      id: managerId,
+      email: `chat-global-${managerId}@example.invalid`,
+      password_hash: await hashPassword('Password123!'),
+      role_id: managerRole.id,
+      is_active: true,
+    });
+    await db.insert(schema.chatMembers).values({
+      conversation_id: conversationId, user_id: managerId, role: 'MEMBER', is_system: false,
+    });
+    const globalRemoval = await server.inject({
+      method: 'POST', url: `${url}/remove`,
+      headers: { authorization: `Bearer ${adminToken}` }, payload: { userId: managerId },
+    });
+    expect(globalRemoval.statusCode).toBe(HTTP_STATUS.CONFLICT);
+    expect(await db.select({ id: schema.chatMembers.id }).from(schema.chatMembers).where(and(
+      eq(schema.chatMembers.conversation_id, conversationId), eq(schema.chatMembers.user_id, managerId),
+      sql`${schema.chatMembers.left_at} IS NULL`,
+    ))).toHaveLength(1);
+
+    const forumId = randomUUID();
+    await db.insert(schema.chatConversations).values({
+      id: forumId, type: 'FORUM_OPEN', created_by: testUser.id, state: 'ACTIVE',
+      invite_policy: 'ANY_MEMBER_CAN_INVITE', title: 'Open forum roster test', metadata: {},
+    });
+    await db.insert(schema.chatMembers).values([
+      { conversation_id: forumId, user_id: testUser.id, role: 'OWNER', is_system: false },
+      { conversation_id: forumId, user_id: peerId, role: 'MEMBER', is_system: false },
+    ]);
+    const forumRemoval = await server.inject({
+      method: 'POST', url: `/api/v1/chat/conversations/${forumId}/members/remove`,
+      headers: { authorization: `Bearer ${adminToken}` }, payload: { userId: peerId },
+    });
+    expect(forumRemoval.statusCode).toBe(HTTP_STATUS.FORBIDDEN);
+  });
+
   it('blocks mutating operations when conversation is archived but allows read/list', async () => {
     const db = getDatabase();
     const conversationId = randomUUID();

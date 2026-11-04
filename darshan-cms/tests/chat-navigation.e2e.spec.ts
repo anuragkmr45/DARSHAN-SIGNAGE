@@ -16,8 +16,14 @@ const rooms = [
   { id: "room-b", type: "GROUP_CLOSED", state: "ACTIVE", title: "Planning room", last_seq: 1, unread_count: 0, viewer_is_member: true, last_message: { id: "root-room-b", seq: 1, body_text: "Welcome to planning" } },
 ];
 
-async function installChatFixture(page: Page) {
-  const conversations = rooms.map((room) => ({ ...room }));
+async function installChatFixture(page: Page, options: { chatAdmin?: boolean; rejectRemoval?: boolean } = {}) {
+  const conversations = rooms.map((room) => ({ ...room, viewer_role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER" }));
+  const members = [
+    { user_id: user.id, role: "CHAT_ADMIN", is_system: false, is_active: true, email: user.email, first_name: "Chat", last_name: "Reader" },
+    { user_id: "44444444-4444-4444-8444-444444444444", role: "MEMBER", is_system: false, is_active: true, email: "peer@example.invalid", first_name: "Room", last_name: "Peer" },
+    { user_id: "55555555-5555-4555-8555-555555555555", role: "CHAT_ADMIN", is_system: true, is_active: true, email: "admin@example.invalid", first_name: "Site", last_name: "Admin" },
+    { user_id: "66666666-6666-4666-8666-666666666666", role: "OWNER", is_system: false, is_active: true, email: "owner@example.invalid", first_name: "Room", last_name: "Owner" },
+  ];
   await page.context().addCookies([
     { name: "access_token", value: "qa-session", url: origin, httpOnly: true, sameSite: "Lax" },
     { name: "csrf_token", value: "qa-csrf", url: origin, sameSite: "Lax" },
@@ -45,6 +51,16 @@ async function installChatFixture(page: Page) {
       return json({ error: { code: "EDIT_REJECTED", message: "Message could not be saved." } }, 500);
     }
     if (path === "/api/v1/chat/conversations") return json({ items: conversations });
+    if (/^\/api\/v1\/chat\/conversations\/room-[ab]\/members$/.test(path) && route.request().method() === "GET") {
+      return options.chatAdmin ? json({ items: members }) : json({ error: { code: "FORBIDDEN", message: "Forbidden" } }, 403);
+    }
+    if (path === "/api/v1/chat/conversations/room-b/members/remove" && route.request().method() === "POST") {
+      if (options.rejectRemoval) return json({ error: { code: "FORBIDDEN", message: "Permission changed" } }, 403);
+      const { userId } = route.request().postDataJSON() as { userId: string };
+      const index = members.findIndex((member) => member.user_id === userId);
+      if (index !== -1) members.splice(index, 1);
+      return json({ success: true });
+    }
     const readRoom = path.match(/^\/api\/v1\/chat\/conversations\/(room-[ab])\/read$/)?.[1];
     if (readRoom && route.request().method() === "POST") {
       const conversation = conversations.find((item) => item.id === readRoom);
@@ -54,7 +70,7 @@ async function installChatFixture(page: Page) {
     const roomId = path.match(/^\/api\/v1\/chat\/conversations\/(room-[ab])$/)?.[1];
     if (roomId) {
       const conversation = conversations.find((item) => item.id === roomId);
-      return json({ conversation, viewer: { is_member: true, role: "MEMBER" } });
+      return json({ conversation, viewer: { is_member: true, role: options.chatAdmin ? "CHAT_ADMIN" : "MEMBER" } });
     }
     const messagesRoom = path.match(/^\/api\/v1\/chat\/conversations\/(room-[ab])\/messages$/)?.[1];
     if (messagesRoom) return json({ items: [{
@@ -67,6 +83,64 @@ async function installChatFixture(page: Page) {
     return json({});
   });
 }
+
+test("chat admin reviews members and confirms removal while system and self controls stay protected", async ({ page }, testInfo) => {
+  await installChatFixture(page, { chatAdmin: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/chat/room-b");
+  await page.getByRole("button", { name: "Details" }).click();
+  const details = page.getByRole("dialog", { name: "Conversation Details" });
+  await details.getByRole("tab", { name: "Members" }).click();
+  await expect(details.getByText("Room Peer")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("chat-members-before-removal.png"), fullPage: true });
+  await expect(details.getByRole("button", { name: "Remove Chat Reader" })).toHaveCount(0);
+  await expect(details.getByRole("button", { name: "Remove Site Admin" })).toHaveCount(0);
+  await expect(details.getByRole("button", { name: "Remove Room Owner" })).toHaveCount(0);
+  await details.getByRole("button", { name: "Remove Room Peer" }).click();
+  await expect(page.getByRole("dialog", { name: "Remove member?" })).toBeVisible();
+  await page.getByRole("dialog", { name: "Remove member?" }).getByRole("button", { name: "Remove member" }).click();
+  await expect(details.getByText("Room Peer")).toHaveCount(0);
+});
+
+test("chat admin keeps removal confirmation open when server denies a stale action", async ({ page }) => {
+  await installChatFixture(page, { chatAdmin: true, rejectRemoval: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/chat/room-b");
+  await page.getByRole("button", { name: "Details" }).click();
+  await page.getByRole("dialog", { name: "Conversation Details" }).getByRole("tab", { name: "Members" }).click();
+  await page.getByRole("button", { name: "Remove Room Peer" }).click();
+  await page.getByRole("dialog", { name: "Remove member?" }).getByRole("button", { name: "Remove member" }).click();
+  await expect(page.getByRole("dialog", { name: "Remove member?" })).toBeVisible();
+  await expect(page.getByText("Room Peer", { exact: true })).toBeVisible();
+});
+
+test("open forum roster explains that membership removal cannot revoke access", async ({ page }) => {
+  await installChatFixture(page, { chatAdmin: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/chat/room-a");
+  await page.getByRole("button", { name: "Details" }).click();
+  const details = page.getByRole("dialog", { name: "Conversation Details" });
+  await details.getByRole("tab", { name: "Members" }).click();
+  await expect(details.getByText("Recorded forum members.")).toBeVisible();
+  await expect(details.getByText(/Removing a membership would not revoke access/)).toBeVisible();
+  await expect(details.getByRole("button", { name: "Remove Room Peer" })).toHaveCount(0);
+});
+
+test("phone chat member roster stays within the viewport", async ({ page }, testInfo) => {
+  await installChatFixture(page, { chatAdmin: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/chat/room-b");
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Details" }).click();
+  const details = page.getByRole("dialog", { name: "Conversation Details" });
+  await details.getByRole("tab", { name: "Members" }).click();
+  await expect(details.getByRole("button", { name: "Remove Room Peer" })).toBeVisible();
+  const box = await details.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeLessThan(2);
+  expect(box!.width).toBeGreaterThan(380);
+  await page.screenshot({ path: testInfo.outputPath("phone-chat-members.png"), fullPage: true });
+});
 
 test("phone chat follows list, conversation and thread routes without losing text drafts", async ({ page }, testInfo) => {
   await installChatFixture(page);

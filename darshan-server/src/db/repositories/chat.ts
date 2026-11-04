@@ -26,7 +26,7 @@ function normalizeDmPair(a: string, b: string) {
 }
 
 export class ChatRepository {
-  private async hasGlobalConversationManagement(userId: string): Promise<boolean> {
+  async hasGlobalConversationManagement(userId: string): Promise<boolean> {
     const db = getDatabase();
     const [user] = await db
       .select({
@@ -984,23 +984,22 @@ export class ChatRepository {
 
   async removeMember(conversationId: string, userId: string) {
     const db = getDatabase();
-    const [member] = await db
-      .select()
-      .from(schema.chatMembers)
-      .where(
-        and(
-          eq(schema.chatMembers.conversation_id, conversationId),
-          eq(schema.chatMembers.user_id, userId),
-          isNull(schema.chatMembers.left_at)
-        )
-      );
-    if (!member) throw AppError.notFound('Member not found');
-    if (member.is_system) throw AppError.forbidden('System member cannot be removed');
-
-    await db
+    const [removed] = await db
       .update(schema.chatMembers)
       .set({ left_at: new Date() })
-      .where(eq(schema.chatMembers.id, member.id));
+      .where(and(
+        eq(schema.chatMembers.conversation_id, conversationId),
+        eq(schema.chatMembers.user_id, userId),
+        eq(schema.chatMembers.is_system, false),
+        ne(schema.chatMembers.role, 'OWNER'),
+        isNull(schema.chatMembers.left_at),
+      ))
+      .returning({ id: schema.chatMembers.id });
+    if (removed) return;
+    const member = await this.getMember(conversationId, userId);
+    if (member?.is_system) throw AppError.forbidden('System member cannot be removed');
+    if (member?.role === 'OWNER') throw AppError.forbidden('Conversation owner cannot be removed without ownership transfer');
+    throw AppError.notFound('Member not found');
   }
 
   async updateConversation(

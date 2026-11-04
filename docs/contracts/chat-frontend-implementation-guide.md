@@ -341,7 +341,12 @@ Response `200`:
 { "success": true }
 ```
 
-## 4.12 Remove Member
+## 4.12 List Members
+`GET /api/v1/chat/conversations/:id/members`
+
+Available to a chat owner, chat admin, moderator, or actor with global Conversation management. The roster contains active group/forum members only, with `user_id`, `role`, `is_system`, `is_active`, and minimal display identity. Inactive user identity fields are null. DMs and ordinary members cannot use this management endpoint. The CMS uses the roster to present a named, confirmed removal action; the server remains authoritative if membership or permission changed after loading.
+
+## 4.13 Remove Member
 `POST /api/v1/chat/conversations/:id/members/remove`
 
 Request:
@@ -356,8 +361,11 @@ Response `200`:
 
 Notes:
 - Cannot remove `is_system=true` members.
+- Conversation owners cannot be removed until a separate ownership-transfer flow exists.
+- Removal is only for closed groups. Open forums remain readable after membership removal, so they require moderation to block a user.
+- A user with global `manage Conversation` cannot be removed as a way to revoke their access; change that role grant first.
 
-## 4.13 Update Conversation Metadata/Policy
+## 4.14 Update Conversation Metadata/Policy
 `PATCH /api/v1/chat/conversations/:id`
 
 Request:
@@ -376,7 +384,7 @@ Response `200`:
 { "conversation": { "id": "uuid", "title": "New title" } }
 ```
 
-## 4.14 Archive/Unarchive
+## 4.15 Archive/Unarchive
 - `POST /api/v1/chat/conversations/:id/archive`
 - `POST /api/v1/chat/conversations/:id/unarchive`
 
@@ -390,7 +398,7 @@ or
 { "conversation": { "id": "uuid", "state": "ACTIVE" } }
 ```
 
-## 4.15 Hard Delete (Vanish)
+## 4.16 Hard Delete (Vanish)
 `DELETE /api/v1/chat/conversations/:id`
 
 Auth:
@@ -406,7 +414,7 @@ Effects:
 - Marks conversation `DELETED`.
 - Enqueues media cleanup job when attachment media exists.
 
-## 4.16 Moderation
+## 4.17 Moderation
 `POST /api/v1/chat/conversations/:id/moderation`
 
 Request:

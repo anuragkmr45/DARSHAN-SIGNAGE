@@ -123,6 +123,8 @@ Resolution: RESOLVED for release scope. Test integration administration UI, its 
 
 Release update, 2026-11-01: SSO management is removed from routing for the air-gapped first release; former SSO endpoints must return 404. API-key and explicit webhook Test administration remain in scope. Local email/password sign-in and recovery remain required. This supersedes the earlier SSO-management portion of this resolution.
 
+Product clarification, 2026-11-04: Hide API-key creation and rotation until API-key request authentication and scope design are complete. Existing records may still be reviewed and revoked. User invitations use a manually shared one-time activation code; no email is sent. The CMS and API changes are developer-verified, with real actor handoff still in the master checklist.
+
 Release update, 2026-11-04: the user chose **hide API-key creation until designed** because issued keys have no request-authentication consumer. The CMS may list and revoke retained records, but must not offer creation or rotation; the API must reject either write without changing records. Explicit webhook Test administration remains in scope. This supersedes the API-key creation/rotation portion of the 2026-11-01 update.
 
 ### BQ-006: General Requests Workboard

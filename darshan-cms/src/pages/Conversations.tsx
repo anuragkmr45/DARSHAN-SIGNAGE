@@ -53,6 +53,8 @@ import {
   useDeleteConversation,
   useEditChatMessage,
   useInviteChatMembers,
+  useChatMembers,
+  useRemoveChatMember,
   useMarkRead,
   useModerateConversation,
   usePinMessage,
@@ -287,6 +289,7 @@ export default function Conversations() {
   const createDm = useCreateDm();
   const createConversation = useCreateChatConversation();
   const inviteMembers = useInviteChatMembers();
+  const removeChatMember = useRemoveChatMember();
   const updateSettings = useUpdateConversationSettings();
   const archiveConversation = useArchiveConversation();
   const unarchiveConversation = useUnarchiveConversation();
@@ -531,8 +534,10 @@ export default function Conversations() {
   const canShowModeration = Boolean(canModerate && selectedConversation?.type !== "DM");
   const canManage =
     canModerate ||
-    selectedConversation?.viewer_role === "ADMIN" ||
-    selectedConversation?.viewer_role === "OWNER";
+    selectedConversation?.viewer_role === "CHAT_ADMIN" ||
+    selectedConversation?.viewer_role === "OWNER" ||
+    selectedConversation?.viewer_role === "MOD";
+  const membersQuery = useChatMembers(selectedConversation?.id, settingsOpen && Boolean(canManage) && selectedConversation?.type !== "DM");
   const canInvite =
     selectedConversation?.type === "GROUP_CLOSED" &&
     selectedConversation.invite_policy !== "INVITES_DISABLED" &&
@@ -1051,6 +1056,22 @@ export default function Conversations() {
         bookmarks={bookmarksQuery.data?.items ?? []}
         bookmarksLoading={bookmarksQuery.isLoading}
         bookmarkMediaById={attachmentMediaById}
+        members={membersQuery.data?.items ?? []}
+        membersLoading={membersQuery.isFetching}
+        membersError={membersQuery.isError ? "Could not load members. Refresh to try again." : null}
+        memberRemovalPending={removeChatMember.isPending}
+        currentUserId={currentUserId}
+        onRefreshMembers={() => { void membersQuery.refetch(); }}
+        onRemoveMember={async (userId) => {
+          if (!selectedConversation?.id) return;
+          try {
+            await removeChatMember.mutateAsync({ conversationId: selectedConversation.id, userId });
+            toast({ title: "Member removed", description: "Their conversation access has ended." });
+          } catch (error) {
+            applyChatError(error);
+            throw error;
+          }
+        }}
         onSave={async (payload) => {
           if (!selectedConversation?.id) return;
           try {
