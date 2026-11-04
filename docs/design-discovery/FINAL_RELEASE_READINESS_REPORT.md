@@ -1,5 +1,9 @@
 # Final Redesign Release Readiness Report
 
+> **Superseded:** This 2026-06-18 visual-only report is historical and must not
+> be used for the current candidate. The authoritative 2026-11-04 developer
+> boundary is [PRODUCT_UI_RELEASE_CANDIDATE_REPORT_2026-11-04.md](PRODUCT_UI_RELEASE_CANDIDATE_REPORT_2026-11-04.md).
+
 Date: 2026-06-18
 
 ## Executive Summary

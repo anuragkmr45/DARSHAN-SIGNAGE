@@ -1,5 +1,9 @@
 # Final Route QA
 
+> **Superseded:** This 2026-06-18 authentication-blocked note is historical.
+> Current route results and exact-artifact smoke status are in
+> [PRODUCT_UI_RELEASE_CANDIDATE_REPORT_2026-11-04.md](PRODUCT_UI_RELEASE_CANDIDATE_REPORT_2026-11-04.md).
+
 Date: 2026-06-18
 
 ## Environment

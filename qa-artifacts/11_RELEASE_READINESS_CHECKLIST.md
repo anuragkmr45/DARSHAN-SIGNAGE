@@ -29,11 +29,22 @@ Electron runtime passes are recorded in
 `evidence/playback-recovery-developer-verification-2026-10-21.md`. This is
 developer evidence, not an independent QA or release pass.
 
+**Product UI frozen developer candidate (2026-11-04):** code commit
+`add5b0ed1ddd2a15f10e269bd5745f2f0e2b01fe` passed the production CMS build
+and bundle budget, 287/287 CMS units and the one-worker broad browser boundary
+(186 passed, five environment-dependent Chat cases skipped, zero failed).
+Schedule Queue Preview and Chat response-uncertain automatic retry were the
+only confirmed P1 audit defects and are fixed in `e4c3c0e` and `add5b0e`.
+Artifact hashes and the exact isolated smoke boundary are recorded in
+`docs/design-discovery/PRODUCT_UI_RELEASE_CANDIDATE_REPORT_2026-11-04.md`.
+This paragraph fills the developer field only; every unchecked human/environment
+row below remains open and blocks a production Go decision.
+
 ## Current Targeted Feature Evidence
 
 - [ ] **Groups 1–4 candidate gate:** Screen/Group deletion blocker and connected-player five-second runtime evidence, SSO absence/local login and private egress checks, recoverable Media/chat delete/restore including object hashes, 30-day Data VM backup capacity, and the five-VM load/recovery measurements in `evidence/groups-1-4-release-gates-2026-11-01.md` must all pass against frozen artifacts before merging or releasing the packet. Developer focused tests alone are not sign-off.
 - [ ] **Data VM loss risk:** Same-VM backups do not meet the ≤24-hour RPO for VM/disk loss. Record explicit owner acceptance or add independent storage before release. Never mark universal disaster recovery passed.
-- [ ] **Chat/notifications gate:** Execute `FUN-09..10`, `CONC-04` and `CHAT-01..08` on the frozen candidate in three independently signed-in browser profiles across two departments. Record allowed and denied member/media access, CMS membership removal and immediate withdrawal, moderation/archive, staged attachment switching and verification, long-history pagination and exact old-message/reply links, notification/cursor race, API/WSS recovery and source-of-truth DB/API/UI comparison. The CMS member-removal, attachment-draft and chat-history controls have local developer coverage; independent real-service proof is still required. See `evidence/chat-notifications-developer-verification-2026-11-03.md`, `evidence/product-ui-chat-attachment-drafts-developer-verification-2026-11-04.md` and `evidence/product-ui-chat-history-developer-verification-2026-11-04.md`.
+- [ ] **Chat/notifications gate:** Execute `FUN-09..10`, `CONC-04` and `CHAT-01..08` on the frozen candidate in three independently signed-in browser profiles across two departments. Record allowed and denied member/media access, CMS membership removal and immediate withdrawal, moderation/archive, staged attachment switching and verification, long-history pagination and exact old-message/reply links, response loss after a committed send, notification/cursor race, API/WSS recovery and source-of-truth DB/API/UI comparison. The CMS member-removal, attachment-draft, chat-history and one-POST uncertain-send controls have local developer coverage; independent real-service proof is still required. See `evidence/chat-notifications-developer-verification-2026-11-03.md`, `evidence/product-ui-chat-attachment-drafts-developer-verification-2026-11-04.md`, `evidence/product-ui-chat-history-developer-verification-2026-11-04.md` and `evidence/product-ui-chat-send-retry-developer-verification-2026-11-04.md`.
 - [ ] **API-key issuance hold:** On the frozen CMS/API candidate, confirm Create and Rotate are absent even for a grant-bearing administrator, direct authenticated requests return `409 API_KEY_AUTH_UNAVAILABLE` without changing records, retained keys list without hashes/secrets, and authorized Revoke succeeds. Developer evidence: `evidence/product-ui-api-keys-policy-developer-verification-2026-11-04.md`.
 
 - [x] Disposable Linux CMS/API/Electron flow demonstrated independent PDF pages, video Loop On/Off, multiple items, simultaneous slots, corrupt-media advance, schedule hard stop, cached offline restart/recovery, take-down and page-aware PoP persistence.
@@ -50,7 +61,7 @@ developer evidence, not an independent QA or release pass.
 - [x] Live built-API/worker/Chromium developer flow exercised requirements 1-17 successfully, including real webpage capture, denied redirect reachability, retained failed-refresh preview and rendered preview fallback. This is partial developer evidence only.
 - [x] Requirements 19-24 focused player/CMS/server automation, complete player unit/integration/fault/performance suites, component builds and static QA traceability passed at the recorded working-tree baseline. This does not replace independent QA.
 - [x] Requirements 19-24 developer runtime gate passed twice with the real Linux Electron player: selected/invalid PDF pages, corrupt-video progression/retry cancellation, 41/18 ms hard stops and 120,144/120,146 ms secure lock/fresh-authority recovery. Independent QA remains open.
-- [ ] **BLOCKER — BR-102 / DEF-04 / R-38:** the no-Schedule/no-default path must show the approved standard company fallback image. Current runtime returns `NONE` and renders a text-only `No content assigned yet` card.
+- [x] **Developer correction — BR-102 / DEF-04 / R-38:** the no-Schedule/no-default path now renders bundled DARSHAN standby artwork, while a configured but unusable source remains **Content unavailable**. Built-Chromium verification covered light/dark and 1440/820/390 widths without fabricated Media playback. Exact packaged and physical-display acceptance remains open below.
 - [ ] `RET-01..03`, `DEF-01..03` and `FUN-06` require independent QA on the frozen candidate: webpage creation/reference denial and inert historical rows, packaged player unavailable state, and Reports/Audit Logs PDF content and layout after the LibreOffice change.
 
 ## Build And Environment
@@ -91,7 +102,7 @@ developer evidence, not an independent QA or release pass.
 - [ ] Secure recovery meets BR-107: locked heartbeat only reports reachability/starts one recovery; identity validation, forced fresh snapshot, current-content sync/check and authority apply precede unlock; invalid identity re-pairs, snapshot failure remains locked with bounded retry, and stale authority never resumes. `PLAYER-03..04`, `PLAYER-16`; R-05/R-42.
 - [ ] New site configuration contains no `WEBPAGE_*` or Playwright Chromium settings; the backend image contains no Playwright browser runtime, and old preview jobs/routes cannot run. `RET-01..03`; R-35/R-36.
 - [ ] Default priority `0..100`, deterministic tie-break, direct-Screen precedence, legacy zero, edit preservation and two-writer stale conflict pass on the frozen database/CMS/player build. `FUN-06`, `DEF-01..03`; R-37.
-- [ ] The approved standard company fallback asset is versioned in the release, resolves when no Schedule/default is eligible, renders online/offline on packaged physical players and survives restart/cache damage as specified. `DEF-04`, `PLAYER-05`; R-38.
+- [ ] The bundled DARSHAN standby asset is present in the exact Ubuntu and Windows release packages, resolves only when no Schedule/default is eligible, renders online/offline on physical players, creates no proof-of-play, and survives restart/cache damage. A missing/corrupt assigned source must remain **Content unavailable**, never silently become standby. `DEF-04`, `PLAYER-05`; R-38.
 - [ ] General Requests old URLs/OpenAPI/CMS/client/report/webhook surfaces are absent and legacy rows are not exposed; Schedule Requests still pass smoke. `AUTHZ-06`; R-18/R-34.
 - [ ] Human policies remaining for BQ-013/015/016/017/018/019 and BQ-020 Media/chat recycle behavior are answered or accepted as explicit limits. BQ-014 availability/delivery semantics are closed by BR-038/061 but still require the execution evidence above; BQ-011/012 are closed by BR-097..101. A remaining TBD affecting recovery, capacity or critical playback cannot be silently converted to Pass.
 

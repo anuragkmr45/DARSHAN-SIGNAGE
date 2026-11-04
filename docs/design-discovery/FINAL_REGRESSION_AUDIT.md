@@ -1,5 +1,9 @@
 # Final Regression Audit
 
+> **Superseded:** This 2026-06-18 presentation-only audit is historical. Use
+> [PRODUCT_UI_RELEASE_CANDIDATE_REPORT_2026-11-04.md](PRODUCT_UI_RELEASE_CANDIDATE_REPORT_2026-11-04.md)
+> for the frozen implementation and regression boundary.
+
 Date: 2026-06-18
 
 ## Summary

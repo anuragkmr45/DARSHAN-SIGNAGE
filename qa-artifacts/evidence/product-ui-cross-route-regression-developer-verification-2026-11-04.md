@@ -19,3 +19,7 @@ Branch: `codex/darshan-product-ui-redesign-20261103`. This is fixture-backed dev
 ## Still open
 
 Exercise the saved public appearance and private Settings responses together against a matched deployed server; check customer branding URLs, all route/control states, keyboard and screen-reader behavior, text zoom, packaged Ubuntu/Windows player, physical display and independent human QA. The browser suite cannot establish those outcomes.
+
+## Frozen release-candidate follow-up
+
+After the Schedule Queue Preview and Chat uncertain-send P1 fixes, the one final broad run executed all 191 configured cases with one Chromium worker: **186 passed, five environment-dependent Chat cases skipped, zero failed** in 11.1 minutes. Both new P1 regressions passed inside that run. The frozen CMS also passed its production build/bundle budget and **287/287** units. See `docs/design-discovery/PRODUCT_UI_RELEASE_CANDIDATE_REPORT_2026-11-04.md` for commit/artifact identities and the exact-artifact smoke boundary.
