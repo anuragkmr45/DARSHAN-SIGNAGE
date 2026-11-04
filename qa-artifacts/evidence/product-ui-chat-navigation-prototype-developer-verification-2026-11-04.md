@@ -30,5 +30,6 @@ All API responses in this browser suite are fixtures. They validate the client w
 
 Follow-up: [thread-context developer verification](product-ui-chat-thread-context-developer-verification-2026-11-04.md) records the later server and CMS correction for the deep-link root. The bullet above describes the original prototype limit.
 Follow-up: [attachment-draft developer verification](product-ui-chat-attachment-drafts-developer-verification-2026-11-04.md) records the later staged-Composer correction. The original bullet remains as a record of the prototype limit.
+Follow-up on 2026-11-04: a new fixture browser case directly loaded `/conversations`, `/conversations/room-a`, and `/conversations/room-a/thread/root-room-a` at 390px and passed. The thread case included an older parent outside the current message page. This closes the browser alias check only; production proxy deep-link reload and real membership remain QA.
 - Run real-service multi-account chat, notification, membership, moderation, archive/restore, attachment formats, disconnected/reconnect, and permissions journeys through the CMS.
 - Check both themes, five accents, mobile keyboard and safe areas, text zoom, reduced motion, and physical Safari/Android behavior.

@@ -395,6 +395,19 @@ test("an old thread deep link shows its parent even when the main message page o
   await page.screenshot({ path: testInfo.outputPath("old-thread-parent-390.png"), fullPage: true });
 });
 
+test("legacy conversation links open the list, room, and thread on direct load", async ({ page }) => {
+  await installChatFixture(page, { rootOutsideTimeline: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/conversations");
+  await expect(page.getByLabel("Search conversations")).toBeVisible();
+  await page.goto("/conversations/room-a");
+  await expect(page.getByLabel("Message composer")).toBeVisible();
+  await page.goto("/conversations/room-a/thread/root-room-a");
+  const thread = page.getByRole("dialog", { name: "Thread" });
+  await expect(thread).toBeVisible();
+  await expect(thread.getByText("Older parent outside the current message page")).toBeVisible();
+});
+
 test("a failed thread read shows Retry without claiming there are no replies", async ({ page }) => {
   await installChatFixture(page, { rootOutsideTimeline: true, threadFailsInitially: true });
   await page.goto("/chat/room-a/thread/root-room-a");
