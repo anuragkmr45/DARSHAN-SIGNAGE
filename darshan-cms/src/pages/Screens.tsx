@@ -476,9 +476,11 @@ export default function Screens() {
                         ? "Default fallback is active"
                         : isOffline
                           ? "Screen offline"
-                          : !publish
-                            ? "No active playback right now"
-                            : "Awaiting scheduled playback");
+                          : active_items?.length
+                            ? "Awaiting player playback report"
+                            : upcoming_items?.length
+                              ? "Next schedule window is upcoming"
+                              : "No current or upcoming schedule");
                   const healthBadge = health_state || status || "offline";
                   const healthRank = HEALTH_PRIORITY[health_state || ""] ?? 99;
                   const hasUnknownPlayback = (isOffline || health_state === "STALE" || health_state === "ERROR" || health_state === "RECOVERY_REQUIRED")

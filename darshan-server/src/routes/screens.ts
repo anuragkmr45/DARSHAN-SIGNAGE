@@ -30,6 +30,7 @@ import {
   buildScreenHealthStateMap,
   buildScheduleItemSummaries,
   buildScreenPlaybackState,
+  buildTimeline,
   buildScreensFleetSummary,
   buildScreenScheduleTimelinePayload,
   buildScreensOverviewPayload,
@@ -209,27 +210,6 @@ export async function screenRoutes(fastify: FastifyInstance) {
   };
 
   const filterItemsForScreen = filterPublishedItemsForScreen;
-
-  const buildTimeline = (items: any[]) => {
-    const now = new Date();
-    const activeItems = items
-      .filter((i) => {
-        const start = new Date(i.start_at);
-        const end = new Date(i.end_at);
-        return start <= now && end > now;
-      })
-      .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
-
-    const upcomingItems = items
-      .filter((i) => new Date(i.start_at) > now)
-      .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
-
-    const bookedUntil = items.length
-      ? new Date(Math.max(...items.map((i) => new Date(i.end_at).getTime()))).toISOString()
-      : null;
-
-    return { activeItems, upcomingItems, bookedUntil };
-  };
 
   const serializeResolvedDefaultMedia = async (
     resolvedDefaultMedia: Awaited<ReturnType<typeof resolveDefaultMediaForScreen>>,

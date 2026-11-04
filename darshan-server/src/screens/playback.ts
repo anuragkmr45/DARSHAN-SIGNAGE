@@ -607,8 +607,9 @@ export function buildTimeline(items: any[], now = new Date()) {
     .filter((item) => new Date(item.start_at) > now)
     .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
 
-  const bookedUntil = items.length
-    ? new Date(Math.max(...items.map((item) => new Date(item.end_at).getTime()))).toISOString()
+  const currentAndUpcomingItems = [...activeItems, ...upcomingItems];
+  const bookedUntil = currentAndUpcomingItems.length
+    ? new Date(Math.max(...currentAndUpcomingItems.map((item) => new Date(item.end_at).getTime()))).toISOString()
     : null;
 
   return { activeItems, upcomingItems, bookedUntil };

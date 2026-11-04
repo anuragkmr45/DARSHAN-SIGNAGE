@@ -1071,6 +1071,64 @@ describe('Screens routes realtime playback bootstrap', () => {
     expect(body.booked_until).toBe(upcomingEnd);
   });
 
+  it('does not report a past publish as a current booking', async () => {
+    const db = getDatabase();
+    const screenId = randomUUID();
+    const mediaId = randomUUID();
+    const scheduleId = randomUUID();
+    const snapshotId = randomUUID();
+    const publishId = randomUUID();
+    const itemId = randomUUID();
+    const end = new Date(Date.now() - 60 * 60 * 1000);
+    const start = new Date(end.getTime() - 60 * 60 * 1000);
+
+    await db.insert(schema.screens).values({ id: screenId, name: 'Ended booking Screen', status: 'ACTIVE' });
+    await db.insert(schema.media).values({
+      id: mediaId, name: 'Ended booking Media', type: 'IMAGE', status: 'READY', created_by: testUser.id,
+    });
+    await db.insert(schema.schedules).values({
+      id: scheduleId, name: 'Ended booking Schedule', start_at: start, end_at: end,
+      is_active: true, created_by: testUser.id,
+    });
+    await db.insert(schema.scheduleSnapshots).values({
+      id: snapshotId,
+      schedule_id: scheduleId,
+      payload: buildScheduleSnapshotPayload({
+        itemId, mediaId, scheduleId, screenId,
+        startAt: start.toISOString(), endAt: end.toISOString(),
+      }),
+    });
+    await db.insert(schema.publishes).values({
+      id: publishId, schedule_id: scheduleId, snapshot_id: snapshotId, published_by: testUser.id,
+    });
+    await db.insert(schema.publishTargets).values({ publish_id: publishId, screen_id: screenId });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/screens/${screenId}/availability`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(response.statusCode).toBe(HTTP_STATUS.OK);
+    const body = JSON.parse(response.body) as any;
+    expect(body.is_available_now).toBe(true);
+    expect(body.current_items).toEqual([]);
+    expect(body.upcoming_items).toEqual([]);
+    expect(body.booked_until).toBeNull();
+    expect(body.publish?.publish_id).toBe(publishId);
+
+    const nowPlayingResponse = await server.inject({
+      method: 'GET',
+      url: `/api/v1/screens/${screenId}/now-playing`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(nowPlayingResponse.statusCode).toBe(HTTP_STATUS.OK);
+    const nowPlaying = JSON.parse(nowPlayingResponse.body) as any;
+    expect(nowPlaying.active_items).toEqual([]);
+    expect(nowPlaying.upcoming_items).toEqual([]);
+    expect(nowPlaying.booked_until).toBeNull();
+    expect(nowPlaying.publish?.publish_id).toBe(publishId);
+  });
+
   it('returns latest screenshot preview data in overview, now-playing, and snapshot responses', async () => {
     const db = getDatabase();
     const screenId = randomUUID();

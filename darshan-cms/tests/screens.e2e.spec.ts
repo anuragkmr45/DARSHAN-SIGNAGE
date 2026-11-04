@@ -21,6 +21,8 @@ type ScreenRecord = {
   last_heartbeat_at?: string | null;
   active_items?: unknown[];
   upcoming_items?: unknown[];
+  publish?: { schedule_name?: string };
+  playback?: { source?: string };
 };
 
 type MockState = {
@@ -44,6 +46,8 @@ type MockState = {
   orphanPairingDeviceId?: string;
   capabilities?: Array<{ action: string; subject: string }>;
   displayProfile?: boolean;
+  nowPlayingOverride?: Record<string, unknown>;
+  availabilityOverride?: Record<string, unknown>;
 };
 
 const adminUser = {
@@ -376,6 +380,7 @@ const installApiMocks = async (page: Page, state: MockState) => {
             current_media_id: null,
           },
           preview: null,
+          ...state.nowPlayingOverride,
         }),
       });
     }
@@ -391,6 +396,7 @@ const installApiMocks = async (page: Page, state: MockState) => {
           current_items: [],
           next_item_summary: null,
           publish: null,
+          ...state.availabilityOverride,
         }),
       });
     }
@@ -727,6 +733,78 @@ test.describe("Screens operator flow", () => {
       }).toBeLessThan(3);
       await inspector.getByRole("button", { name: "Close" }).click();
     }
+  });
+
+  test("does not present an ended publish as current playback or a booking", async ({ page }) => {
+    const state: MockState = {
+      screens: [{
+        id: "screen-ended", name: "Ended display", status: "ACTIVE", health_state: "ONLINE",
+        publish: { schedule_name: "Yesterday's event" }, playback: { source: "UNKNOWN" },
+        active_items: [], upcoming_items: [],
+      }],
+      groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+      nowPlayingOverride: {
+        current_schedule: { id: "schedule-ended", name: "Yesterday's event" },
+        booked_until: "2026-03-11T12:00:00.000Z",
+      },
+      availabilityOverride: {
+        booked_until: "2026-03-11T12:00:00.000Z",
+        publish: { publish_id: "publish-ended", schedule_name: "Yesterday's event" },
+      },
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    const row = page.getByRole("list", { name: "Screens" }).getByRole("listitem");
+    await expect(row.getByText("No active playback", { exact: true })).toBeVisible();
+    await expect(row.getByText("No current or upcoming schedule")).toBeVisible();
+    await expect(row.getByText("Awaiting scheduled playback")).toHaveCount(0);
+    await page.getByRole("button", { name: "Details" }).click();
+    const inspector = page.getByRole("dialog", { name: /Ended display/i });
+    await expect(inspector.getByText("Latest published schedule")).toBeVisible();
+    await expect(inspector.getByText("No current or upcoming booking")).toBeVisible();
+    await expect(inspector.getByText("3/11/2026", { exact: false })).toHaveCount(0);
+    await inspector.getByRole("tab", { name: "Now Playing" }).click();
+    await expect(inspector.getByRole("heading", { name: "Playback now" })).toBeVisible();
+    await expect(inspector.getByText("No active playback window")).toBeVisible();
+    await expect(inspector.getByText("Latest published schedule")).toBeVisible();
+    await expect(inspector.getByText("Yesterday's event")).toBeVisible();
+    await inspector.getByRole("tab", { name: "Status" }).click();
+    await expect(inspector.getByText("No current or upcoming booking")).toBeVisible();
+  });
+
+  test("shows an upcoming-only publish as future rather than current playback", async ({ page }) => {
+    const state: MockState = {
+      screens: [{
+        id: "screen-upcoming", name: "Upcoming display", status: "ACTIVE", health_state: "ONLINE",
+        publish: { schedule_name: "Tomorrow's event" }, playback: { source: "UNKNOWN" },
+        active_items: [], upcoming_items: [{ id: "item-next" }],
+      }],
+      groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+      nowPlayingOverride: {
+        current_schedule: { id: "schedule-next", name: "Tomorrow's event" },
+        upcoming_item_summaries: [{ item_id: "item-next", start_at: "2026-03-13T11:00:00.000Z", end_at: "2026-03-13T12:00:00.000Z", media: [] }],
+        booked_until: "2026-03-13T12:00:00.000Z",
+      },
+      availabilityOverride: {
+        booked_until: "2026-03-13T12:00:00.000Z",
+        next_item_summary: { item_id: "item-next", start_at: "2026-03-13T11:00:00.000Z", end_at: "2026-03-13T12:00:00.000Z", media: [] },
+        publish: { publish_id: "publish-next", schedule_name: "Tomorrow's event" },
+      },
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    const row = page.getByRole("list", { name: "Screens" }).getByRole("listitem");
+    await expect(row.getByText("Upcoming: Tomorrow's event")).toBeVisible();
+    await expect(row.getByText("Next schedule window is upcoming")).toBeVisible();
+    await page.getByRole("button", { name: "Details" }).click();
+    const inspector = page.getByRole("dialog", { name: /Upcoming display/i });
+    await expect(inspector.getByText("Scheduled through")).toBeVisible();
+    await expect(inspector.getByText("No current or upcoming booking")).toHaveCount(0);
+    await inspector.getByRole("tab", { name: "Now Playing" }).click();
+    await expect(inspector.getByText("No active playback window")).toBeVisible();
+    await expect(inspector.getByText("Latest published schedule")).toBeVisible();
   });
 
   test("keeps Screen details readable while hiding writes for a read-only record", async ({ page }, testInfo) => {

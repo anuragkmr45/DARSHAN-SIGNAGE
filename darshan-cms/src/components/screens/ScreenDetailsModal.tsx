@@ -313,6 +313,12 @@ export function ScreenDetailsModal({
   const timingLabel = getPlaybackTimingLabel(playback?.started_at, playback?.ends_at, serverNowMs);
   const nowPlayingError = nowPlayingQuery.error instanceof ApiError ? nowPlayingQuery.error : null;
   const availability = availabilityQuery.data;
+  const hasScheduledBooking = Boolean(
+    availability?.current_item_summaries?.length ||
+    availability?.current_items?.length ||
+    availability?.next_item_summary ||
+    availability?.upcoming_items?.length,
+  );
   const snapshot = snapshotQuery.data;
   // Delivery diagnostics may be absent while a backend is being upgraded. Do
   // not let an incomplete optional diagnostics response take down the whole
@@ -731,12 +737,12 @@ export function ScreenDetailsModal({
                       </p>
                     </div>
                     <div>
-                      <Label className="text-muted-foreground">Booked until</Label>
-                      <p>{formatDateTime(availability.booked_until)}</p>
+                      <Label className="text-muted-foreground">Scheduled through</Label>
+                      <p>{hasScheduledBooking ? formatDateTime(availability.booked_until) : "No current or upcoming booking"}</p>
                     </div>
                     <div>
-                      <Label className="text-muted-foreground">Published schedule</Label>
-                      <p>{availability.publish?.schedule_name || "No active published schedule"}</p>
+                      <Label className="text-muted-foreground">Latest published schedule</Label>
+                      <p>{availability.publish?.schedule_name || "None"}</p>
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Current items</Label>
@@ -792,8 +798,8 @@ export function ScreenDetailsModal({
                         <p className="text-sm">{formatDateTime(nowPlaying.last_heartbeat_at)}</p>
                       </div>
                       <div>
-                        <Label className="text-muted-foreground">Booked until</Label>
-                        <p className="text-sm">{formatDateTime(nowPlaying.booked_until)}</p>
+                        <Label className="text-muted-foreground">Scheduled through</Label>
+                        <p className="text-sm">{activeItemSummaries.length || upcomingItemSummaries.length ? formatDateTime(nowPlaying.booked_until) : "No current or upcoming booking"}</p>
                       </div>
                       {playback?.heartbeat_received_at && (
                         <div>
@@ -1205,7 +1211,7 @@ export function ScreenDetailsModal({
                   <Card className="p-4 space-y-3">
                     <div className="flex items-center gap-2">
                       <RadioTower className="h-4 w-4 text-primary" />
-                      <h3 className="font-semibold">Live playback</h3>
+                      <h3 className="font-semibold">Playback now</h3>
                     </div>
                     <div className="space-y-2">
                       <div>
@@ -1227,9 +1233,9 @@ export function ScreenDetailsModal({
                           <p className="text-sm">{timingLabel || "No active playback window"}</p>
                         </div>
                         <div>
-                          <Label className="text-muted-foreground">Current schedule</Label>
+                          <Label className="text-muted-foreground">Latest published schedule</Label>
                           <p className="text-sm">
-                            {nowPlaying.current_schedule?.name || "No schedule currently active"}
+                            {nowPlaying.current_schedule?.name || "None"}
                           </p>
                         </div>
                       </div>

@@ -62,12 +62,15 @@ describe("screen helpers", () => {
       status: "ACTIVE",
       publish: { schedule_name: "Morning Loop" },
       playback: { source: "UNKNOWN" },
+      active_items: [{ id: "item-current" }] as ScreenOverviewItem["active_items"],
       health_state: "ONLINE",
       auth_diagnostics: { state: "VALID", reason: "Device credentials are valid." },
     };
 
     expect(getScreenPlaybackSourceLabel(screen.playback?.source, { hasPublish: true })).toBe("Standby");
     expect(getScreenPlaybackHeadline(screen)).toBe("Schedule: Morning Loop");
+    expect(getScreenPlaybackHeadline({ ...screen, active_items: [], upcoming_items: [{ id: "item-next" }] as ScreenOverviewItem["upcoming_items"] })).toBe("Upcoming: Morning Loop");
+    expect(getScreenPlaybackHeadline({ ...screen, active_items: [], upcoming_items: [] })).toBe("No active playback");
     expect(getScreenAuthIndicator(screen.auth_diagnostics)).toEqual({ label: "Auth OK", tone: "ok" });
     expect(getScreenHeartbeatIndicator(screen, false)).toEqual({ label: "Heartbeat OK", tone: "ok" });
     expect(getScreenIndicatorBadgeClassName("warning")).toContain("amber");

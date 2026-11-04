@@ -55,7 +55,7 @@ export function getScreenPlaybackSourceLabel(
 }
 
 export function getScreenPlaybackHeadline(
-  screen: Pick<ScreenOverviewItem, "status" | "publish" | "playback">,
+  screen: Pick<ScreenOverviewItem, "status" | "publish" | "playback" | "active_items" | "upcoming_items">,
 ): string {
   const currentMediaName =
     screen.playback?.current_media?.name ||
@@ -79,9 +79,13 @@ export function getScreenPlaybackHeadline(
     case undefined:
     case null:
     case "":
-      return screen.publish?.schedule_name
-        ? `Schedule: ${screen.publish.schedule_name}`
-        : (screen.status === "OFFLINE" ? "Screen offline" : "No active playback");
+      if (screen.active_items?.length) {
+        return screen.publish?.schedule_name ? `Schedule: ${screen.publish.schedule_name}` : "Scheduled content";
+      }
+      if (screen.upcoming_items?.length) {
+        return screen.publish?.schedule_name ? `Upcoming: ${screen.publish.schedule_name}` : "Upcoming schedule";
+      }
+      return screen.status === "OFFLINE" ? "Screen offline" : "No active playback";
     default:
       return screen.publish?.schedule_name || "Playback active";
   }

@@ -27,6 +27,7 @@
 - If no active reservation exists, device snapshot selects nearest upcoming `PUBLISHED` reservation.
 - Snapshot publish metadata includes deterministic selection information.
 - Screen availability/now-playing endpoints align with reservation-backed selection.
+- `booked_until` names the last end of a current or upcoming item; an ended publish retained for history returns `null` when no current or upcoming item remains. Its publish metadata may still identify the latest publish, but CMS must not call it the current schedule or claim playback is pending.
 - Publish queues deduplicated `REFRESH` device commands for affected screens.
 - Emergency trigger and clear queue `REFRESH` device commands for affected screens.
 - A device already running the player updates without restart after the next command poll cycle.
