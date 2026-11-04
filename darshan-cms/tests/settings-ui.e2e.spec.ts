@@ -104,6 +104,26 @@ test("branding upload rejects a PDF before requesting an upload session", async 
   await page.getByRole("tab", { name: "Branding" }).click();
   await page.locator('input[type="file"]').first().setInputFiles({ name: "report.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-test") });
   await expect(page.getByText("Branding assets must be JPEG, PNG, or WEBP images.", { exact: true })).toBeVisible();
+  const notification = page.locator('[data-state="open"].destructive');
+  await expect(notification).toBeVisible();
+  await expect(notification.getByRole("button", { name: "Dismiss notification" })).toBeVisible();
+  const notificationSurfaces = await notification.evaluate((element) => {
+    const root = document.documentElement;
+    const originalDark = root.classList.contains("dark");
+    const originalTransition = element.style.transition;
+    element.style.transition = "none";
+    root.classList.remove("dark");
+    const light = getComputedStyle(element).backgroundColor;
+    root.classList.add("dark");
+    const dark = getComputedStyle(element).backgroundColor;
+    root.classList.toggle("dark", originalDark);
+    element.style.transition = originalTransition;
+    return { light, dark };
+  });
+  expect(notificationSurfaces.light).not.toBe("rgba(0, 0, 0, 0)");
+  expect(notificationSurfaces.dark).not.toBe(notificationSurfaces.light);
+  await notification.getByRole("button", { name: "Dismiss notification" }).click();
+  await expect(notification).toHaveCount(0);
   expect(state.requests.some((request) => request.includes("/api/v1/media/upload"))).toBe(false);
 });
 
