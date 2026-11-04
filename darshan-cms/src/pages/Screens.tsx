@@ -60,6 +60,7 @@ import {
 } from "@/lib/screens";
 
 const PAGE_SIZE = 9;
+type HealthFilter = "ALL" | "ONLINE" | "OFFLINE" | "STALE" | "ERROR" | "RECOVERY_REQUIRED";
 
 const HEALTH_PRIORITY: Record<string, number> = {
   RECOVERY_REQUIRED: 0,
@@ -90,6 +91,7 @@ export default function Screens() {
   const canRecoverScreen = canCreateScreen && canGenerateRecovery;
   const canRevokePairing = can("manage", "DevicePairing") || canDeleteScreen || can("manage", "all");
   const [search, setSearch] = useState("");
+  const [healthFilter, setHealthFilter] = useState<HealthFilter>("ALL");
   const [isPairModalOpen, setIsPairModalOpen] = useState(false);
   const [pairingView, setPairingView] = useState<"active" | "history">("active");
   const [pairingPage, setPairingPage] = useState(1);
@@ -125,10 +127,11 @@ export default function Screens() {
         page,
         limit: PAGE_SIZE,
         q: normalizedSearch,
+        health: healthFilter === "ALL" ? undefined : healthFilter,
         includeSummary: true,
         includeMedia: true,
       }),
-    [page, normalizedSearch],
+    [page, normalizedSearch, healthFilter],
   );
   const screenGroupsListQueryKey = useMemo(
     () =>
@@ -148,6 +151,7 @@ export default function Screens() {
         page,
         limit: PAGE_SIZE,
         q: normalizedSearch,
+        health: healthFilter === "ALL" ? undefined : healthFilter,
         include_media: true,
       }),
   });
@@ -264,6 +268,7 @@ export default function Screens() {
       recovery: summary?.recovery ?? 0,
       stale: summary?.stale ?? 0,
       offline: summary?.offline ?? 0,
+      error: summary?.error ?? 0,
     };
   }, [screensSummaryQuery.data]);
 
@@ -304,6 +309,8 @@ export default function Screens() {
     1,
     Math.ceil((screenGroupsQuery.data?.pagination?.total ?? 0) / (screenGroupsQuery.data?.pagination?.limit ?? PAGE_SIZE)),
   );
+  const screenResultCount = screensQuery.data?.pagination?.total ?? screens.length;
+  const groupResultCount = screenGroupsQuery.data?.pagination?.total ?? screenGroups.length;
 
   useEffect(() => {
     if (screensQuery.data && page > totalPages) {
@@ -338,25 +345,39 @@ export default function Screens() {
         }
       />
 
-      <section aria-label="Screen status summary" className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border pb-4 text-sm">
-        {!screensSummaryQuery.data ? (
-          <span role="status" className="text-muted-foreground">{screensSummaryQuery.isError ? "Fleet status unavailable" : "Checking fleet status…"}</span>
-        ) : (
-          <>
-            <span><strong className="font-semibold tabular-nums">{stats.total}</strong> total</span>
-            <span className="text-success"><strong className="font-semibold tabular-nums">{stats.online}</strong> online</span>
-            <span className={stats.offline > 0 ? "text-destructive" : "text-muted-foreground"}><strong className="font-semibold tabular-nums">{stats.offline}</strong> offline</span>
-            <span className={stats.recovery > 0 ? "text-warning" : "text-muted-foreground"}><strong className="font-semibold tabular-nums">{stats.recovery}</strong> need recovery</span>
-            <span className={stats.stale > 0 ? "text-warning" : "text-muted-foreground"}><strong className="font-semibold tabular-nums">{stats.stale}</strong> stale</span>
-          </>
-        )}
+      <section aria-label="Screen status summary" className="space-y-2 border-b border-border pb-4 text-sm">
+        <p className="text-xs text-muted-foreground">Fleet totals · choose a health state to filter the Screen list</p>
+        {!screensSummaryQuery.data && <span role="status" className="text-muted-foreground">{screensSummaryQuery.isError ? "Fleet counts unavailable; filters still work." : "Checking fleet counts…"}</span>}
+        {screensSummaryQuery.isError && <Button size="sm" variant="outline" onClick={() => void screensSummaryQuery.refetch()} disabled={screensSummaryQuery.isFetching}>Retry fleet counts</Button>}
+        {screensSummaryQuery.data && screensSummaryQuery.isError && <span className="text-muted-foreground">Counts may be out of date.</span>}
+        <div role="group" aria-label="Filter Screens by health" className="flex flex-wrap gap-2">
+          {([
+            ["ALL", "All", "total"],
+            ["ONLINE", "Online", "online"],
+            ["OFFLINE", "Offline", "offline"],
+            ["STALE", "Stale", "stale"],
+            ["RECOVERY_REQUIRED", "Needs recovery", "recovery"],
+            ["ERROR", "Error", "error"],
+          ] as const).map(([filter, label, count]) => (
+            <Button
+              key={filter}
+              type="button"
+              size="sm"
+              variant={healthFilter === filter ? "secondary" : "ghost"}
+              aria-pressed={healthFilter === filter}
+              onClick={() => { setHealthFilter(filter); setPage(1); setSelectedScreenId(null); }}
+            >
+              {label}{screensSummaryQuery.data ? <span className="ml-1 tabular-nums text-muted-foreground">{stats[count]}</span> : null}
+            </Button>
+          ))}
+        </div>
       </section>
 
       {canReadPairings ? (
         <PairingHealthPanel
           canView={canReadPairings}
           canRevoke={canRevokePairing}
-          visibleScreenCount={screensQuery.data?.pagination?.total ?? screens.length}
+          visibleScreenCount={screensSummaryQuery.data?.total ?? (healthFilter === "ALL" && !normalizedSearch ? screensQuery.data?.pagination?.total : undefined)}
         />
       ) : null}
 
@@ -372,8 +393,8 @@ export default function Screens() {
             {screensQuery.isFetching || screenGroupsQuery.isFetching
               ? "Refreshing screens…"
               : canReadGroups
-                ? `${screensQuery.data?.pagination?.total ?? screens.length} screens, ${screenGroupsQuery.data?.pagination?.total ?? screenGroups.length} groups`
-                : `${screensQuery.data?.pagination?.total ?? screens.length} screens`}
+                ? `${screenResultCount} ${screenResultCount === 1 ? "Screen" : "Screens"}, ${groupResultCount} ${groupResultCount === 1 ? "Group" : "Groups"}`
+                : `${screenResultCount} ${screenResultCount === 1 ? "Screen" : "Screens"}`}
           </div>
       </div>
 
@@ -407,9 +428,11 @@ export default function Screens() {
             <EmptyState
               title="No screens found"
               description={
-                search
-                  ? "No screen cards match the current search."
-                  : "Try pairing a device from the player first."
+                search && healthFilter !== "ALL"
+                  ? "No Screens match this search and health filter."
+                  : search
+                    ? "No Screens match this search."
+                  : healthFilter !== "ALL" ? "No Screens currently match this health filter." : "Pair a device from the player to add the first Screen."
               }
             />
           ) : (
@@ -458,6 +481,8 @@ export default function Screens() {
                             : "Awaiting scheduled playback");
                   const healthBadge = health_state || status || "offline";
                   const healthRank = HEALTH_PRIORITY[health_state || ""] ?? 99;
+                  const hasUnknownPlayback = (isOffline || health_state === "STALE" || health_state === "ERROR" || health_state === "RECOVERY_REQUIRED")
+                    && (playbackSourceLabel === "Idle" || playbackSourceLabel === "Standby");
 
                   return (
                     <article key={id} role="listitem" className="space-y-3 p-4 hover:bg-muted/40">
@@ -488,7 +513,7 @@ export default function Screens() {
 
                       <div className="flex flex-wrap gap-2">
                         {isEmergency && <Badge variant="destructive">Emergency</Badge>}
-                        {!isEmergency && (
+                        {!isEmergency && !hasUnknownPlayback && (
                           <Badge variant="outline">{playbackSourceLabel}</Badge>
                         )}
                         {authIndicator ? (
@@ -509,7 +534,7 @@ export default function Screens() {
                             Recovery pending
                           </Badge>
                         )}
-                        {heartbeatIndicator ? (
+                        {heartbeatIndicator && heartbeatIndicator.label.toLowerCase() !== String(healthBadge).toLowerCase() ? (
                           <Badge
                             variant="outline"
                             className={getScreenIndicatorBadgeClassName(heartbeatIndicator.tone)}
@@ -590,7 +615,7 @@ export default function Screens() {
                   );
                 })}
               </div>
-              <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} />
+              {totalPages > 1 && <PageNavigation currentPage={page} totalPages={totalPages} onPageChange={setPage} />}
             </div>
           )}
         </div>
@@ -612,7 +637,7 @@ export default function Screens() {
                 Screen Groups
                 <span className="text-xs font-normal text-muted-foreground">
                   {!canReadGroups ? "List unavailable" : screenGroupsQuery.isError ? "Unavailable" : screenGroupsQuery.data
-                    ? String(screenGroupsQuery.data.pagination.total) + " groups"
+                    ? `${screenGroupsQuery.data.pagination.total} ${screenGroupsQuery.data.pagination.total === 1 ? "group" : "groups"}`
                     : "Checking…"}
                 </span>
                 <ChevronDown className={groupsOpen ? "h-4 w-4 rotate-180 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />

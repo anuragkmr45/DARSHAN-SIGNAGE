@@ -95,7 +95,7 @@ export function PairingHealthPanel({
 }: {
   canView: boolean;
   canRevoke: boolean;
-  visibleScreenCount: number;
+  visibleScreenCount?: number;
 }) {
   const queryClient = useQueryClient();
   const [revokeTarget, setRevokeTarget] = useState<OrphanRow | null>(null);
@@ -164,7 +164,7 @@ export function PairingHealthPanel({
             )}
             <h2 className="text-sm font-medium">Pairing health</h2>
             <Badge variant={totalFindings > 0 || pairingStatusUnavailable ? "destructive" : "secondary"}>
-              {orphanQuery.isLoading ? "checking" : pairingStatusUnavailable ? "unavailable" : totalFindings > 0 ? `${totalFindings} findings` : "healthy"}
+              {orphanQuery.isLoading ? "checking" : pairingStatusUnavailable ? "unavailable" : totalFindings > 0 ? `${totalFindings} findings` : "No pairing findings"}
             </Badge>
         </div>
         <Button size="sm" variant="ghost" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>

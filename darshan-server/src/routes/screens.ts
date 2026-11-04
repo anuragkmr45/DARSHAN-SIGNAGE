@@ -27,6 +27,7 @@ import { listRecentMediaCacheReports } from '@/services/media-cache-report-servi
 import { KNOWN_ASPECT_RATIOS, getAspectRatioName, resolveAspectRatio } from '@/utils/aspect-ratio';
 import {
   buildScreenRecoveryStateMap,
+  buildScreenHealthStateMap,
   buildScheduleItemSummaries,
   buildScreenPlaybackState,
   buildScreensFleetSummary,
@@ -61,6 +62,7 @@ const listScreensQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
   status: z.enum(['ACTIVE', 'INACTIVE', 'OFFLINE']).optional(),
+  health: z.enum(['ONLINE', 'OFFLINE', 'STALE', 'ERROR', 'RECOVERY_REQUIRED']).optional(),
   q: z.string().trim().optional(),
   include_summary: z.enum(['true', 'false']).optional(),
   include_media: z.enum(['true', 'false']).optional(),
@@ -294,15 +296,20 @@ export async function screenRoutes(fastify: FastifyInstance) {
         if (!ability.can('read', 'Screen') && !ability.can('update', 'Screen')) {
           throw AppError.forbidden('Forbidden');
         }
+        const query = listScreensQuerySchema.parse(request.query);
         const screenRows = await db.select().from(schema.screens);
-        const accessibleScreenIds = screenRows
+        const accessibleScreens = screenRows
           .filter((screen) =>
             (ability as any).can('read', subject('Screen', screen)) ||
             (ability as any).can('update', subject('Screen', screen))
-          )
+          );
+        const healthStates = query.health
+          ? await buildScreenHealthStateMap(accessibleScreens, { db })
+          : null;
+        const accessibleScreenIds = accessibleScreens
+          .filter((screen) => !query.health || healthStates?.get(screen.id) === query.health)
           .map((screen) => screen.id);
 
-        const query = listScreensQuerySchema.parse(request.query);
         const result = await screenRepo.list({
           page: query.page,
           limit: query.limit,
@@ -391,8 +398,17 @@ export async function screenRoutes(fastify: FastifyInstance) {
           throw AppError.unauthorized('Missing authorization header');
         }
 
-        await verifyAccessToken(token);
-        return reply.send(await buildScreensFleetSummary({ db }));
+        const payload = await verifyAccessToken(token);
+        const ability = await defineAbilityFor(payload.role_id, payload.sub, payload.department_id);
+        if (!ability.can('read', 'Screen') && !ability.can('update', 'Screen')) {
+          throw AppError.forbidden('Forbidden');
+        }
+        const screenRows = await db.select().from(schema.screens);
+        const accessibleScreens = screenRows.filter((screen) =>
+          (ability as any).can('read', subject('Screen', screen)) ||
+          (ability as any).can('update', subject('Screen', screen))
+        );
+        return reply.send(await buildScreensFleetSummary({ db, screens: accessibleScreens }));
       } catch (error) {
         logger.error(error, 'Get screens summary error');
         return respondWithError(reply, error);

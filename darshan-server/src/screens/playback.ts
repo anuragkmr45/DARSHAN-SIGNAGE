@@ -1484,15 +1484,12 @@ export async function buildScreensOverviewPayload(options: {
 export async function buildScreensFleetSummary(options: {
   db?: ReturnType<typeof getDatabase>;
   now?: Date;
+  screens?: ScreenRecord[];
 } = {}): Promise<ScreenFleetSummary> {
   const db = options.db ?? getDatabase();
   const now = options.now ?? new Date();
-  const screens = await db.select().from(schema.screens);
-  const recoveryStateMap = await buildScreenRecoveryStateMap(
-    screens.map((screen) => screen.id),
-    db,
-    now
-  );
+  const screens = options.screens ?? await db.select().from(schema.screens);
+  const healthStates = await buildScreenHealthStateMap(screens, { db, now });
 
   const summary: ScreenFleetSummary = {
     server_time: now.toISOString(),
@@ -1505,22 +1502,7 @@ export async function buildScreensFleetSummary(options: {
   };
 
   for (const screen of screens) {
-    const recoveryState = recoveryStateMap.get(screen.id);
-    const health = deriveHealthState({
-      screen,
-      authDiagnostics:
-        recoveryState?.auth_diagnostics ?? {
-          state: 'MISSING_CERTIFICATE',
-          reason: 'No device certificate exists for this screen.',
-          latest_certificate_expires_at: null,
-          latest_certificate_revoked_at: null,
-          latest_certificate_serial: null,
-        },
-      activePairing: recoveryState?.active_pairing ?? null,
-      now,
-    });
-
-    switch (health.health_state) {
+    switch (healthStates.get(screen.id)) {
       case 'ONLINE':
         summary.online += 1;
         break;
@@ -1542,6 +1524,31 @@ export async function buildScreensFleetSummary(options: {
   }
 
   return summary;
+}
+
+export async function buildScreenHealthStateMap(
+  screens: ScreenRecord[],
+  options: { db?: ReturnType<typeof getDatabase>; now?: Date } = {}
+): Promise<Map<string, ScreenHealthState>> {
+  const db = options.db ?? getDatabase();
+  const now = options.now ?? new Date();
+  const recoveryStateMap = await buildScreenRecoveryStateMap(screens.map((screen) => screen.id), db, now);
+  return new Map(screens.map((screen) => {
+    const recoveryState = recoveryStateMap.get(screen.id);
+    const health = deriveHealthState({
+      screen,
+      authDiagnostics: recoveryState?.auth_diagnostics ?? {
+        state: 'MISSING_CERTIFICATE',
+        reason: 'No device certificate exists for this screen.',
+        latest_certificate_expires_at: null,
+        latest_certificate_revoked_at: null,
+        latest_certificate_serial: null,
+      },
+      activePairing: recoveryState?.active_pairing ?? null,
+      now,
+    });
+    return [screen.id, health.health_state];
+  }));
 }
 
 export async function buildScreenPlaybackStateById(

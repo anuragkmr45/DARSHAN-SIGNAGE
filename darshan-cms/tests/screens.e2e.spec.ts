@@ -39,6 +39,7 @@ type MockState = {
   grafanaEmbed?: boolean;
   grafanaAuthenticated?: boolean;
   pairingHealthUnavailable?: boolean;
+  fleetSummaryUnavailable?: boolean;
   orphanPairingDeviceId?: string;
   capabilities?: Array<{ action: string; subject: string }>;
 };
@@ -197,6 +198,9 @@ const installApiMocks = async (page: Page, state: MockState) => {
     // The screens workspace uses paginated summary endpoints. Keep these
     // fixtures aligned with the production client.
     if (pathname === "/api/v1/screens/summary" && method === "GET") {
+      if (state.fleetSummaryUnavailable) {
+        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
+      }
       return route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -216,7 +220,10 @@ const installApiMocks = async (page: Page, state: MockState) => {
       const pageNum = Number(searchParams.get("page") || 1);
       const limit = Number(searchParams.get("limit") || 100);
       const search = (searchParams.get("q") || "").toLowerCase();
-      const matchingScreens = state.screens.filter((screen) => !search || screen.name.toLowerCase().includes(search));
+      const health = searchParams.get("health");
+      const matchingScreens = state.screens.filter((screen) =>
+        (!search || screen.name.toLowerCase().includes(search)) && (!health || screen.health_state === health)
+      );
       return route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -602,6 +609,59 @@ const installApiMocks = async (page: Page, state: MockState) => {
 };
 
 test.describe("Screens operator flow", () => {
+  test("keeps health filters usable when fleet counts fail and retries counts", async ({ page }) => {
+    const state: MockState = {
+      screens: [{ id: "retry-screen", name: "Retry Screen", status: "OFFLINE", health_state: "OFFLINE" }],
+      groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+      fleetSummaryUnavailable: true,
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    await expect(page.getByText("Fleet counts unavailable; filters still work.")).toBeVisible();
+    const filters = page.getByRole("group", { name: "Filter Screens by health" });
+    await filters.getByRole("button", { name: "Offline", exact: true }).click();
+    await expect(page.getByText("Retry Screen", { exact: true })).toBeVisible();
+    state.fleetSummaryUnavailable = false;
+    await page.getByRole("button", { name: "Retry fleet counts" }).click();
+    await expect(filters.getByRole("button", { name: "Offline 1" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("filters the full Screen fleet before paging and keeps group results independent", async ({ page }) => {
+    const state: MockState = {
+      screens: Array.from({ length: 11 }, (_, index) => ({
+        id: `screen-health-${index + 1}`,
+        name: `Health Screen ${String(index + 1).padStart(2, "0")}`,
+        status: index === 10 ? "OFFLINE" : "ACTIVE",
+        health_state: index === 10 ? "OFFLINE" : "ONLINE",
+        active_items: [], upcoming_items: [],
+      })),
+      groups: [{ id: "health-group", name: "Lobby Group", screen_ids: [] }],
+      pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},
+    };
+    await installApiMocks(page, state);
+    await login(page);
+    await openScreensPage(page);
+    const filters = page.getByRole("group", { name: "Filter Screens by health" });
+    await expect(filters.getByRole("button", { name: "All 11" })).toHaveAttribute("aria-pressed", "true");
+    await filters.getByRole("button", { name: "Offline 1" }).click();
+    await expect(filters.getByRole("button", { name: "Offline 1" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("list", { name: "Screens" }).getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByText("Health Screen 11", { exact: true })).toBeVisible();
+    await expect(page.getByText("Health Screen 01", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("1 Screen, 1 Group")).toBeVisible();
+    const offlineRow = page.getByRole("list", { name: "Screens" }).getByRole("listitem");
+    await expect(offlineRow.getByText("Idle", { exact: true })).toHaveCount(0);
+    await expect(offlineRow.getByText("Offline", { exact: true })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /Screen Groups/ })).toContainText("1 group");
+    await expect(page.getByText("Page 2 of 2")).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+    await page.screenshot({ path: "../qa-artifacts/evidence/product-ui-core-prototypes/screens-health-offline-390.png", fullPage: true });
+    await filters.getByRole("button", { name: "Needs recovery 0" }).click();
+    await expect(page.getByText("No Screens currently match this health filter.")).toBeVisible();
+  });
+
   test("shows unavailable pairing health instead of a false healthy state", async ({ page }) => {
     const state: MockState = {
       screens: [], groups: [], pairings: [], recoveryByDeviceId: {}, confirmModeByCode: {},

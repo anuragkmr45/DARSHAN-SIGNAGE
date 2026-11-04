@@ -6,6 +6,7 @@ export const queryKeys = {
     page?: number;
     limit?: number;
     status?: string;
+    health?: string;
     q?: string;
     includeSummary?: boolean;
     includeMedia?: boolean;
@@ -17,6 +18,7 @@ export const queryKeys = {
       filters?.page ?? 1,
       filters?.limit ?? 20,
       filters?.status ?? null,
+      filters?.health ?? null,
       filters?.q ?? null,
       Boolean(filters?.includeSummary),
       Boolean(filters?.includeMedia),

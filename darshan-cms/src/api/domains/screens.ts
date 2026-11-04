@@ -36,6 +36,7 @@ export const screensApi = {
   listSummaries: (
     params?: PaginationParams & {
       status?: string;
+      health?: "ONLINE" | "OFFLINE" | "STALE" | "ERROR" | "RECOVERY_REQUIRED";
       q?: string;
       include_media?: boolean;
       include_preview?: boolean;

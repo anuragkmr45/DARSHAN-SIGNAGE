@@ -358,6 +358,56 @@ describe('Screens routes realtime playback bootstrap', () => {
     expect(after.recovery - before.recovery).toBe(1);
   });
 
+  it('filters health before pagination and scopes fleet counts to readable Screen records', async () => {
+    const db = getDatabase();
+    const marker = randomUUID();
+    const offlineId = randomUUID();
+    const onlineId = randomUUID();
+    const now = new Date();
+    await db.insert(schema.screens).values([
+      { id: offlineId, name: `Health filter ${marker} offline`, status: 'OFFLINE', last_heartbeat_at: now,
+        created_at: new Date(now.getTime() - 60_000) },
+      { id: onlineId, name: `Health filter ${marker} online`, status: 'ACTIVE', last_heartbeat_at: now,
+        created_at: now },
+    ]);
+    await db.insert(schema.deviceCertificates).values([
+      { screen_id: offlineId, serial: `health-${offlineId}`, certificate_pem: 'offline-cert', expires_at: new Date(now.getTime() + 60_000) },
+      { screen_id: onlineId, serial: `health-${onlineId}`, certificate_pem: 'online-cert', expires_at: new Date(now.getTime() + 60_000) },
+    ]);
+    const filtered = await server.inject({ method: 'GET',
+      url: `/api/v1/screens?include_summary=true&health=OFFLINE&q=${marker}&page=1&limit=1`,
+      headers: { authorization: `Bearer ${adminToken}` } });
+    expect(filtered.statusCode).toBe(200);
+    expect(JSON.parse(filtered.body)).toMatchObject({ items: [{ id: offlineId, health_state: 'OFFLINE' }],
+      pagination: { page: 1, limit: 1, total: 1 } });
+    const invalid = await server.inject({ method: 'GET', url: `/api/v1/screens?health=UNKNOWN&q=${marker}`,
+      headers: { authorization: `Bearer ${adminToken}` } });
+    expect(invalid.statusCode).toBe(422);
+
+    const roleId = randomUUID();
+    const roleName = `SCREEN_HEALTH_SCOPED_${roleId}`;
+    await db.insert(schema.roles).values({ id: roleId, name: roleName, is_system: false,
+      permissions: { grants: [{ action: 'read', subject: 'Screen', conditions: { id: offlineId } }] } });
+    const access = await generateAccessToken(testUser.id, testUser.email, roleId, roleName);
+    await createSessionRepository().create({ user_id: testUser.id, access_jti: access.jti, expires_at: access.expiresAt });
+    const headers = { authorization: `Bearer ${access.token}` };
+    const summary = await server.inject({ method: 'GET', url: '/api/v1/screens/summary', headers });
+    expect(summary.statusCode).toBe(200);
+    expect(JSON.parse(summary.body)).toMatchObject({ total: 1, offline: 1, online: 0, recovery: 0 });
+    const scoped = await server.inject({ method: 'GET', url: `/api/v1/screens?include_summary=true&q=${marker}`, headers });
+    expect(JSON.parse(scoped.body)).toMatchObject({ pagination: { total: 1 }, items: [{ id: offlineId }] });
+
+    const noReadRoleId = randomUUID();
+    const noReadRoleName = `SCREEN_HEALTH_NO_READ_${noReadRoleId}`;
+    await db.insert(schema.roles).values({ id: noReadRoleId, name: noReadRoleName, is_system: false,
+      permissions: { grants: [{ action: 'read', subject: 'Dashboard' }] } });
+    const noReadAccess = await generateAccessToken(testUser.id, testUser.email, noReadRoleId, noReadRoleName);
+    await createSessionRepository().create({ user_id: testUser.id, access_jti: noReadAccess.jti, expires_at: noReadAccess.expiresAt });
+    const denied = await server.inject({ method: 'GET', url: '/api/v1/screens/summary',
+      headers: { authorization: `Bearer ${noReadAccess.token}` } });
+    expect(denied.statusCode).toBe(403);
+  });
+
   it('returns server_time and playback in screens overview while preserving existing fields', async () => {
     const db = getDatabase();
     const screenId = randomUUID();
