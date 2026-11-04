@@ -370,7 +370,7 @@ class Player {
       const element = document.createElement('div')
       element.id = 'content-unavailable-overlay'
       element.textContent = 'Content unavailable'
-      Object.assign(element.style, { position: 'absolute', inset: '0', display: 'grid', placeItems: 'center', background: '#101010', color: '#fff', fontSize: '28px', zIndex: '2500' })
+      Object.assign(element.style, { position: 'absolute', inset: '0', display: 'grid', placeItems: 'center', zIndex: '2500' })
       document.body.appendChild(element)
       this.contentUnavailableOverlay = element
     }
@@ -891,8 +891,6 @@ class Player {
     element.style.justifyContent = 'center'
     element.style.width = '100%'
     element.style.height = '100%'
-    element.style.backgroundColor = '#000'
-    element.style.color = '#fff'
     return element
   }
 
@@ -1748,6 +1746,7 @@ class Player {
     const name = typeof item.meta?.['name'] === 'string' ? String(item.meta?.['name']) : item.mediaId || item.id
 
     const container = document.createElement('div')
+    container.className = 'player-media-placeholder'
     container.style.display = 'flex'
     container.style.flexDirection = 'column'
     container.style.alignItems = 'center'
@@ -1756,10 +1755,7 @@ class Player {
     container.style.height = '100%'
     container.style.padding = '18px'
     container.style.gap = '10px'
-    container.style.background = 'linear-gradient(180deg, rgba(27,31,38,0.95), rgba(15,18,24,0.98))'
-    container.style.color = '#fff'
     container.style.textAlign = 'center'
-    container.style.border = '1px solid rgba(255,255,255,0.12)'
 
     const badge = document.createElement('div')
     badge.textContent = kind

@@ -510,11 +510,18 @@ describe('Pairing presentation browser regression', () => {
     expect(emergencyBanner).to.equal(true)
     const qaDiagnostics = await evaluate(session, `(() => {
       document.body.dataset.runtimeMode = 'qa'
-      const visible = getComputedStyle(document.getElementById('status-overlay')).display !== 'none'
+      const status = document.getElementById('status-overlay')
+      const result = {
+        visible: getComputedStyle(status).display !== 'none',
+        surface: getComputedStyle(status).backgroundColor,
+        emergency: getComputedStyle(document.getElementById('mode-banner')).backgroundColor,
+      }
       document.body.dataset.runtimeMode = 'production'
-      return visible
+      return result
     })()`)
-    expect(qaDiagnostics).to.equal(true)
+    expect(qaDiagnostics).to.deep.equal({
+      visible: true, surface: 'rgb(255, 255, 255)', emergency: 'rgb(248, 231, 226)',
+    })
 
     await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 9, status: {
       state: 'PAIRED_RUNTIME', mode: 'offline', online: false,
@@ -530,6 +537,17 @@ describe('Pairing presentation browser regression', () => {
     const lockPath = path.resolve(__dirname,
       '../../../qa-artifacts/evidence/product-ui-player-prototype/production-security-lock.png')
     await fs.promises.writeFile(lockPath, Buffer.from(lockScreenshot.data as string, 'base64'))
+
+    await evaluate(session, `window.__darshanE2E.emitPresentation({ revision: 10, status: {
+      state: 'PAIRED_RUNTIME', mode: 'empty', online: true,
+      contentUnavailableReason: 'Approved content could not be loaded'
+    } })`)
+    await waitFor(session,
+      "getComputedStyle(document.getElementById('content-unavailable-overlay')).display === 'grid'",
+      'controlled unavailable screen')
+    expect(await evaluate(session,
+      "getComputedStyle(document.getElementById('content-unavailable-overlay')).backgroundColor"))
+      .to.equal('rgb(248, 248, 243)')
 
     // The live receiver keeps video black while its own unavailable state uses
     // the fixed Forest palette. No media connection is needed for this style check.

@@ -540,3 +540,70 @@ body[data-runtime-mode='qa'] .pairing-field:nth-child(2) {
   background: var(--player-panel);
   color: var(--player-ink);
 }
+
+
+/* Controlled failures are player text, not authored media. */
+#content-unavailable-overlay,
+.content-unavailable,
+.player-media-placeholder {
+  background: var(--player-page);
+  color: var(--player-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, sans-serif;
+  font-size: clamp(24px, 4vw, 48px);
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: center;
+}
+
+#content-unavailable-overlay { padding: clamp(24px, 5vw, 64px); }
+.player-media-placeholder {
+  border: 1px solid var(--player-border);
+  font-size: inherit;
+}
+
+.fallback-slide {
+  padding: clamp(24px, 5vw, 64px);
+  background: var(--player-page);
+  color: var(--player-ink);
+}
+.fallback-message {
+  max-width: min(720px, 100%);
+  font-size: clamp(18px, 3vw, 32px);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+#status-overlay,
+#diagnostics-overlay {
+  border: 1px solid var(--player-border);
+  background: var(--player-panel);
+  color: var(--player-ink);
+  backdrop-filter: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+#diagnostics-overlay { max-width: calc(100vw - 40px); }
+.diagnostics-title { color: var(--player-brand); }
+.diagnostics-row { border-bottom-color: var(--player-line); }
+.diagnostics-label { color: var(--player-secondary); }
+.diagnostics-value { color: var(--player-ink); overflow-wrap: anywhere; }
+
+.status-pill.online,
+#mode-banner.default { background: #E3EAD9; color: #213B2A; }
+.status-pill.offline,
+#mode-banner.emergency { background: #F8E7E2; color: #78352B; }
+#mode-banner.offline { background: #F6E8D4; color: #6B4A1E; }
+#mode-banner:not(.emergency):not(.default):not(.offline) {
+  border-color: var(--player-border);
+  background: var(--player-panel);
+  color: var(--player-ink);
+}
+@media (prefers-color-scheme: dark) {
+  .status-pill.online,
+  #mode-banner.default { background: #294532; color: #C7E9C0; }
+  .status-pill.offline,
+  #mode-banner.emergency { background: #4B2B28; color: #F8C9BD; }
+  #mode-banner.offline { background: #4A3924; color: #F6D7A7; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-top-color: var(--player-brand); }
+}
