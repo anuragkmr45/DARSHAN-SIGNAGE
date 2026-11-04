@@ -40,6 +40,24 @@ const priorityOptions = [
   { value: "2", label: "Urgent", description: "Highest priority level" },
 ];
 
+function scheduleDurationLabel(startAt: string, endAt: string): string {
+  const elapsedMs = new Date(endAt).getTime() - new Date(startAt).getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return "Invalid range";
+  if (elapsedMs > 0 && elapsedMs < 60_000) return "Less than a minute";
+
+  let minutes = Math.floor(elapsedMs / 60_000);
+  const days = Math.floor(minutes / (24 * 60));
+  minutes %= 24 * 60;
+  const hours = Math.floor(minutes / 60);
+  minutes %= 60;
+  const parts = [
+    days && `${days} ${days === 1 ? "day" : "days"}`,
+    hours && `${hours} ${hours === 1 ? "hour" : "hours"}`,
+    minutes && `${minutes} ${minutes === 1 ? "minute" : "minutes"}`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "0 minutes";
+}
+
 export function StepScheduleDetails({
   fixedInputTimezone,
   scheduleName,
@@ -220,25 +238,7 @@ export function StepScheduleDetails({
             {startAt && endAt && (
               <div className="p-3 bg-muted/50 rounded-lg">
                 <p className="text-sm font-medium">Duration</p>
-                <p className="text-sm text-muted-foreground">
-                  {(() => {
-                    const start = new Date(startAt);
-                    const end = new Date(endAt);
-                    const diffMs = end.getTime() - start.getTime();
-                    if (diffMs < 0) return "Invalid range";
-                    const hours = Math.floor(diffMs / (1000 * 60 * 60));
-                    const minutes = Math.floor(diffMs / (1000 * 60));
-                    const days = Math.floor(hours / 24);
-                    const remainingHours = hours % 24;
-                    if (days > 0) {
-                      return `${days} day(s)${remainingHours > 0 ? `, ${remainingHours} hour(s)` : ""}`;
-                    }
-                    if (hours === 0) {
-                      return `${minutes} minute(s)`;
-                    }
-                    return `${hours} hour(s)`;
-                  })()}
-                </p>
+                <p className="text-sm text-muted-foreground" aria-live="polite">{scheduleDurationLabel(startAt, endAt)}</p>
               </div>
             )}
           </Card>

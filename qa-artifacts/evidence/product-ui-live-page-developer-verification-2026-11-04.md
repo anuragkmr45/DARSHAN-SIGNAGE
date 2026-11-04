@@ -45,7 +45,13 @@ One preliminary test run stopped at a browser selector that matched both the mod
 
 ## Remaining acceptance work
 
-- Complete the four-step Schedule wizard in the real CMS, including fallback preparation, author review, Submit, approval and publication; verify actor permissions and an expired or changed draft.
+- Complete author Review, Submit, approval and publication in the real CMS; verify actor permissions and an expired or changed draft. Source selection, READY fallback preparation, screen target selection and the Window step were checked through the running CMS as described below.
 - Exercise source create, edit, disable and delete with additional actors, stale revision, concurrent operator and response loss; verify the server's blocker categories and no duplicate write. The local admin happy path alone does not close this item.
 - Exercise runtime reporting-window pagination, presenter capture/Stop and administrative disable/re-enable with actual backend authority, then observe the packaged player frame, audio, fallback and emergency behavior.
 - Run the independent `LIVE-01..20` matrix, representative cross-VM media/network and load checks, keyboard/screen reader, 200% zoom, dark/accent themes and physical displays. Fixture screenshots do not close those gates.
+
+## Live Window duration correction and real check, 2026-11-04
+
+The running CMS on the existing isolated stack reached step 3 at 390 CSS pixels after selecting an enabled source, preparing the existing image fallback to READY, and selecting the QA player screen. A 10:00–11:30 local window displayed **“1 hour(s)”**, omitting the remaining 30 minutes. The shared Schedule Details component now shows every nonzero day, hour and minute part with singular/plural wording, checks invalid dates, and announces duration updates politely. This affects ordinary Schedule and Live Event authoring display only; server window authority is unchanged.
+
+After rebuilding the CMS, the same real browser journey displayed **“1 hour, 30 minutes”** with no dialog overflow. The draft was closed without Review, Submit or publication. [The dialog-only 390px capture](product-ui-live-page/live-window-duration-real-390.png) contains no account credentials. Focused rendered-component cases passed **3/3** for partial hours, day/hour/minute ranges and invalid windows. The full CMS unit suite passed **43 files, 276/276**; the production build and bundle budget passed; focused Live page plus Scheduling/Emergency browser regression passed **10/10** with one worker. Those fixture browser runs refreshed the three tracked Live page viewport captures. This is developer verification, not approval or live playback evidence.

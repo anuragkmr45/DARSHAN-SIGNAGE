@@ -215,7 +215,7 @@ The schedule action needs all grants used by its wizard; source creation needs `
 
 | ID | Control or state | Permission and data source | Expected result and evidence |
 | --- | --- | --- | --- |
-| L01 | Schedule live event | Complete Schedule/Item/Request create and relevant read grants; Live Schedule wizard APIs. | Primary action when available; opens the four-step wizard. Real CMS first-step and phone draft return checked; fallback preparation, review and submit pending. |
+| L01 | Schedule live event | Complete Schedule/Item/Request create and relevant read grants; Live Schedule wizard APIs. | Primary action when available; opens the four-step wizard. Real CMS reached Source, Screens and Window at 390px, prepared a READY fallback, selected a screen and displayed the full 90-minute duration. Review, submit, approval and publish remain pending. |
 | L02 | New live source and draft handoff | `create LiveBroadcast`; Live Session POST. | Secondary to scheduling when both allowed; wizard can open source creation without stacking dialogs and returns to the saved draft after success/cancel. Real CMS create and cancel paths checked; uncertain-response fixture check passed. |
 | L03 | Published occurrences, window and controls | Live Authority epoch and occurrences REST; `read/publish/manage LiveBroadcast` plus record policy. | Shows backend window, refresh, presenter and administrative actions. Existing code traced; full action/error/authority/physical playback browser QA pending. |
 | L04 | Source Search, Enabled filter, page and Refresh | `read LiveBroadcast`; paginated Live Session GET. | Current-query rows only, labeled updating, no stale filtered rows. Filter/paging and stale-response browser QA pending. |
