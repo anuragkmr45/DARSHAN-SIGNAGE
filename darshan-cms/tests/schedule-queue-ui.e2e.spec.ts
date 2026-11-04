@@ -16,8 +16,16 @@ const requestItem = {
   schedule: { id: "00000000-0000-4000-8000-000000000502", name: "Morning briefing", start_at: "2026-11-04T09:00:00Z", end_at: "2026-11-04T10:00:00Z" },
   screens: [{ id: "00000000-0000-4000-8000-000000000503", name: "Lobby screen" }],
 };
+const previewMedia = {
+  id: "00000000-0000-4000-8000-000000000509",
+  filename: "queue-preview.png",
+  name: "Queue preview image",
+  type: "IMAGE",
+  status: "READY",
+  source_content_type: "image/png",
+};
 
-async function setup(page: Page, grants: TestCapability[], options: { listFails?: boolean; summaryFailsAfterSearch?: boolean; snapshotFails?: boolean; published?: boolean; initialStatus?: "APPROVED"; secondRequest?: boolean; holdPreflight?: boolean; targetMode?: "group" | "mixed"; groupFails?: boolean; approveFails?: boolean; approveCommitsBeforeFailure?: boolean; publishFails?: boolean; takeDownFails?: boolean; cancelFails?: boolean; cancelCommitsBeforeFailure?: boolean } = {}) {
+async function setup(page: Page, grants: TestCapability[], options: { listFails?: boolean; summaryFailsAfterSearch?: boolean; snapshotFails?: boolean; published?: boolean; initialStatus?: "APPROVED"; secondRequest?: boolean; holdPreflight?: boolean; targetMode?: "group" | "mixed"; groupFails?: boolean; approveFails?: boolean; approveCommitsBeforeFailure?: boolean; publishFails?: boolean; takeDownFails?: boolean; cancelFails?: boolean; cancelCommitsBeforeFailure?: boolean; mediaPreview?: boolean; mediaPreviewFails?: boolean } = {}) {
   let listFails = Boolean(options.listFails);
   let snapshotFails = Boolean(options.snapshotFails);
   let groupFails = Boolean(options.groupFails);
@@ -25,6 +33,7 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
   let publishFails = Boolean(options.publishFails);
   let takeDownFails = Boolean(options.takeDownFails);
   let cancelFails = Boolean(options.cancelFails);
+  let mediaPreviewFails = Boolean(options.mediaPreviewFails);
   let currentStatus = options.initialStatus ?? (options.published ? "PUBLISHED" : "PENDING");
   let releasePreflight: (() => void) | undefined;
   const requests: string[] = [];
@@ -60,6 +69,7 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
       const group = { id: "00000000-0000-4000-8000-000000000504", name: "East wing" };
       const items: Record<string, unknown>[] = status === currentStatus && !q
         ? [{ ...requestItem, status: currentStatus,
+          ...(options.mediaPreview ? { media: [previewMedia] } : {}),
           screens: options.targetMode === "group" ? [] : options.targetMode === "mixed"
             ? [...requestItem.screens, { id: "00000000-0000-4000-8000-000000000505", name: "Reception screen" }] : requestItem.screens,
           screen_groups: options.targetMode ? [group] : [],
@@ -67,7 +77,17 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
       if (options.secondRequest && status === "APPROVED" && !q) items.push({ ...requestItem, id: "00000000-0000-4000-8000-000000000508", status: "APPROVED", schedule: { ...requestItem.schedule, name: "Evening briefing" } });
       return json({ items, pagination: { page: 1, limit: 10, total: items.length } });
     }
-    if (path === `/api/v1/schedule-requests/${requestItem.id}` && method === "GET") return json({ ...requestItem, status: currentStatus });
+    if (path === `/api/v1/schedule-requests/${requestItem.id}` && method === "GET") return json({
+      ...requestItem,
+      status: currentStatus,
+      ...(options.mediaPreview ? { media: [previewMedia] } : {}),
+    });
+    if (path === `/api/v1/media/${previewMedia.id}` && method === "GET") return mediaPreviewFails
+      ? json({ error: { message: "Preview service unavailable" } }, 503)
+      : json({
+        ...previewMedia,
+        media_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='18'%3E%3Crect width='32' height='18' fill='%23344D3F'/%3E%3C/svg%3E",
+      });
     if (path === "/api/v1/schedules/display-preflight" && method === "POST") {
       if (options.holdPreflight) await new Promise<void>((resolve) => { releasePreflight = resolve; });
       return json({ compatible: true, issues: [] });
@@ -108,8 +128,37 @@ async function setup(page: Page, grants: TestCapability[], options: { listFails?
       : json({ snapshot: { schedule: { id: requestItem.schedule.id, items: [] } }, publish: null, media_urls: {}, media_assets: {} });
     return json({});
   });
-  return { requests, restoreList: () => { listFails = false; }, restoreSnapshot: () => { snapshotFails = false; }, restoreGroup: () => { groupFails = false; }, restoreApproval: () => { approveFails = false; }, restorePublish: () => { publishFails = false; }, restoreTakeDown: () => { takeDownFails = false; }, restoreCancel: () => { cancelFails = false; }, releasePreflight: () => releasePreflight?.() };
+  return { requests, restoreList: () => { listFails = false; }, restoreSnapshot: () => { snapshotFails = false; }, restoreGroup: () => { groupFails = false; }, restoreApproval: () => { approveFails = false; }, restorePublish: () => { publishFails = false; }, restoreTakeDown: () => { takeDownFails = false; }, restoreCancel: () => { cancelFails = false; }, restoreMediaPreview: () => { mediaPreviewFails = false; }, releasePreflight: () => releasePreflight?.() };
 }
+
+test("request media Preview resolves the authorized media URL on demand", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "read", subject: "Media" }], { mediaPreview: true });
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Preview" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Queue preview image" });
+  await expect(dialog.getByRole("img", { name: "Queue preview image" })).toBeVisible();
+  expect(state.requests).toContain(`GET /api/v1/media/${previewMedia.id}`);
+});
+
+test("failed request media Preview explains the error and can be retried", async ({ page }) => {
+  const state = await setup(page, [...reader, { action: "read", subject: "Media" }], {
+    mediaPreview: true,
+    mediaPreviewFails: true,
+  });
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "Open Morning briefing request details" }).click();
+  await page.getByRole("tab", { name: "Media" }).click();
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByText("Preview unavailable", { exact: true })).toBeVisible();
+
+  state.restoreMediaPreview();
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByRole("dialog", { name: "Queue preview image" }).getByRole("img", { name: "Queue preview image" })).toBeVisible();
+  expect(state.requests.filter((request) => request === `GET /api/v1/media/${previewMedia.id}`)).toHaveLength(2);
+});
 
 test("pending request can be withdrawn only with update permission and a confirmation", async ({ page }) => {
   const state = await setup(page, [...reader, { action: "update", subject: "ScheduleRequest" }]);

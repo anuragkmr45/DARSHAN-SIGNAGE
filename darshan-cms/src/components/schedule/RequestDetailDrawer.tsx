@@ -26,6 +26,7 @@ import { ContentTypeBadge, type ContentType } from "@/components/dashboard/Conte
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
 import { useAuthorization } from "@/hooks/useAuthorization";
 import { useToast } from "@/hooks/use-toast";
+import { mediaApi } from "@/api/domains/media";
 import { scheduleRequestsApi } from "@/api/domains/scheduleRequests";
 import { schedulesApi } from "@/api/domains/schedules";
 import type { DisplayPreflightResponse, MediaAsset, PresentationSlot, ScheduleRequestListItem } from "@/api/types";
@@ -191,6 +192,15 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
 
   const invalidateList = () =>
     queryClient.invalidateQueries({ queryKey: ["schedule-requests"] });
+  const previewMutation = useMutation({
+    retry: false,
+    mutationFn: (media: MediaAsset) => media.media_url ? Promise.resolve(media) : mediaApi.getById(media.id),
+    onSuccess: (media) => setPreviewMedia(media),
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Unable to load this media preview.";
+      toast({ title: "Preview unavailable", description: message, variant: "destructive" });
+    },
+  });
   const reportActionFailure = (error: unknown) => { setActionFailure(requestActionFailure(error, hasLive)); };
   const closeActionDialog = () => { setActionDialog(null); setActionComment(""); };
   const reloadRequest = async () => {
@@ -765,9 +775,14 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
                             </p>
                           )}
                         </div>
-                        <Button size="sm" variant="outline" onClick={() => setPreviewMedia(media)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={previewMutation.isPending}
+                          onClick={() => previewMutation.mutate(media)}
+                        >
                           <Eye className="h-4 w-4 mr-2" />
-                          Preview
+                          {previewMutation.isPending && previewMutation.variables?.id === media.id ? "Loading…" : "Preview"}
                         </Button>
                       </div>
                     </CardContent>
@@ -1111,15 +1126,12 @@ export function RequestDetailDrawer({ request, onClose }: RequestDetailDrawerPro
             <DialogTitle>{resolveMediaDisplayName(previewMedia) || "Media preview"}</DialogTitle>
           </DialogHeader>
           {previewMedia?.media_url ? (
-            previewMedia.media_url && previewMedia.type === "VIDEO" ? (
-              <video src={previewMedia.media_url} className="w-full max-h-[480px]" controls preload="metadata" />
-            ) : (
-              <img
-                src={previewMedia.media_url}
-                alt={resolveMediaDisplayName(previewMedia) || "Media"}
-                className="w-full max-h-[480px] object-contain"
-              />
-            )
+            <MediaPreview
+              media={previewMedia}
+              alt={resolveMediaDisplayName(previewMedia) || "Media"}
+              className="max-h-[480px] min-h-64 w-full object-contain"
+              fit="contain"
+            />
           ) : (
             <div className="rounded-md border bg-muted/40 p-6 text-sm text-muted-foreground">
               No preview available for this media asset.
