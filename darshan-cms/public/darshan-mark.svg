@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
   <title id="title">DARSHAN</title>
-  <rect x="4" y="8" width="56" height="44" rx="11" fill="#24364d"/>
-  <path d="M14 32c5.5-7 11.5-10.5 18-10.5S44.5 25 50 32c-5.5 7-11.5 10.5-18 10.5S19.5 39 14 32Z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
-  <circle cx="32" cy="32" r="5" fill="#fff"/>
-  <path d="M24 58h16" stroke="#24364d" stroke-width="3" stroke-linecap="round"/>
+  <rect x="4" y="8" width="56" height="44" rx="11" fill="#253C32"/>
+  <path d="M14 30c5.5-7 11.5-10.5 18-10.5S44.5 23 50 30c-5.5 7-11.5 10.5-18 10.5S19.5 37 14 30Z" fill="none" stroke="#FAFFFF" stroke-width="3" stroke-linejoin="round"/>
+  <circle cx="32" cy="30" r="5" fill="#DEE7C7"/>
+  <path d="M24 58h16" stroke="#253C32" stroke-width="3" stroke-linecap="round"/>
 </svg>

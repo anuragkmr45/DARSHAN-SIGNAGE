@@ -251,3 +251,7 @@ The shared CMS toast now uses a restrained floating surface, a pale semantic err
 ## Player setup state
 
 The invalid-configuration BOOT status already reached the pairing renderer through the main-process presentation snapshot, but the renderer labeled it as a pairing task and showed a fake CONFIG code. It now presents “Player setup required,” the administrator/restart instruction, the detected hostname and the validation reason, while hiding code and expiry controls. The built Chromium journey checked the 390px production view and subsequent emergency state; the player build passed. [Developer evidence](../../qa-artifacts/evidence/product-ui-player-setup-developer-verification-2026-11-04.md) records the boundary. Packaged startup failure and physical display remain QA.
+
+## Default product marks
+
+The default CMS SVG/favicon and the player installer/window icon now share a flat Forest eye mark, replacing the old blue/teal materials. The player PNGs at 16, 32, 64, 128, 256 and 512 pixels were rasterized from its SVG; the CMS fallback ICO contains its matching 64px PNG. The 512px and 16px player assets and CMS fallback mark were inspected. The CMS production build contains the exact SVG and ICO. Customer-supplied logo and favicon settings still take precedence; packaging on Ubuntu/Windows and app-switcher review remain QA. [Developer evidence](../../qa-artifacts/evidence/product-ui-brand-icons-developer-verification-2026-11-04.md).
