@@ -237,3 +237,6 @@ The follow-up renderer packet styles the actual scheduled-content unavailable ov
 ## Screen semantic status palette — 2026-11-04
 
 Screen list health, inspector delivery/observability badges, warning cards and hardware metric icons now use semantic success, warning, error and information tokens shared across light/dark themes. These states keep their text labels and do not follow the site's action accent. The CMS build and bundle budget, focused lint and all 20 Screens browser cases passed. The fixture run regenerated the 390px offline fleet capture. [Developer evidence](../../qa-artifacts/evidence/product-ui-screen-semantic-palette-developer-verification-2026-11-04.md) separates these checks from real-service and physical-player QA.
+
+
+The shared status badge now uses pale semantic surfaces for Pending, Approved, Published, Live, Online, Offline, Failed and related states, independent of customer accent. A real Screen recovery badge was checked against the computed error token; the CMS build, focused lint, one targeted Screen browser case and 12 Dashboard browser cases passed. Shared badge visual behavior on every mounted route remains part of the full route audit.

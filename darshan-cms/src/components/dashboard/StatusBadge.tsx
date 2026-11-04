@@ -25,28 +25,24 @@ interface StatusBadgeProps {
   className?: string;
 }
 
-const statusConfig: Record<Status, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className?: string }> = {
-  pending: { label: "Pending", variant: "outline", className: "border-warning text-warning" },
-  in_review: { label: "In Review", variant: "outline", className: "border-info text-info" },
-  changes_requested: { label: "Changes Requested", variant: "outline", className: "border-warning text-warning" },
-  approved: { label: "Approved", variant: "outline", className: "border-success text-success" },
-  scheduled: { label: "Scheduled", variant: "outline", className: "border-info text-info" },
-  published: { label: "Published", variant: "default", className: "bg-primary text-primary-foreground" },
-  live: { label: "Live", variant: "default", className: "bg-success text-success-foreground" },
+const statusConfig: Record<Status, { label: string; variant: "outline" | "secondary"; className?: string }> = {
+  pending: { label: "Pending", variant: "outline", className: "status-tone-warning" },
+  in_review: { label: "In Review", variant: "outline", className: "status-tone-info" },
+  changes_requested: { label: "Changes Requested", variant: "outline", className: "status-tone-warning" },
+  approved: { label: "Approved", variant: "outline", className: "status-tone-success" },
+  scheduled: { label: "Scheduled", variant: "outline", className: "status-tone-info" },
+  published: { label: "Published", variant: "outline", className: "status-tone-info" },
+  live: { label: "Live", variant: "outline", className: "status-tone-success" },
   expired: { label: "Expired", variant: "secondary" },
-  rejected: { label: "Rejected", variant: "destructive" },
+  rejected: { label: "Rejected", variant: "outline", className: "status-tone-error" },
   cancelled: { label: "Cancelled", variant: "secondary" },
-  failed: { label: "Failed", variant: "destructive" },
-  online: { label: "Online", variant: "default", className: "bg-success text-success-foreground" },
-  offline: { label: "Offline", variant: "outline", className: "border-destructive/40 text-destructive" },
-  maintenance: { label: "Maintenance", variant: "outline", className: "border-warning text-warning" },
-  stale: { label: "Stale", variant: "outline", className: "border-warning text-warning" },
-  error: { label: "Error", variant: "destructive" },
-  recovery_required: {
-    label: "Recovery Required",
-    variant: "outline",
-    className: "border-red-500 text-red-700",
-  },
+  failed: { label: "Failed", variant: "outline", className: "status-tone-error" },
+  online: { label: "Online", variant: "outline", className: "status-tone-success" },
+  offline: { label: "Offline", variant: "outline", className: "status-tone-error" },
+  maintenance: { label: "Maintenance", variant: "outline", className: "status-tone-warning" },
+  stale: { label: "Stale", variant: "outline", className: "status-tone-warning" },
+  error: { label: "Error", variant: "outline", className: "status-tone-error" },
+  recovery_required: { label: "Recovery Required", variant: "outline", className: "status-tone-error" },
 };
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {

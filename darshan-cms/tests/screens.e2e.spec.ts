@@ -1006,6 +1006,16 @@ test.describe("Screens operator flow", () => {
     await expect(page.getByRole("button", { name: "Pair Device" }).first()).toBeVisible();
     await expect(page.getByText("Lobby Screen")).toBeVisible();
     await expect(page.getByText("Recovery Required")).toBeVisible();
+    const recoveryBadge = page.locator(".status-tone-error").filter({ hasText: "Recovery Required" }).first();
+    await expect(recoveryBadge).toBeVisible();
+    expect(await recoveryBadge.evaluate((element) => {
+      const reference = document.createElement("span");
+      reference.style.backgroundColor = "hsl(var(--status-error-bg))";
+      document.body.append(reference);
+      const expected = getComputedStyle(reference).backgroundColor;
+      reference.remove();
+      return getComputedStyle(element).backgroundColor === expected;
+    })).toBe(true);
     await expect(page.getByText("Certificate expired")).toBeVisible();
     await expect(page.getByText(/Recovery pending/)).toBeVisible();
 
