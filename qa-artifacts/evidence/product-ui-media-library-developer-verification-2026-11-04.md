@@ -24,6 +24,10 @@ In the signed-in CMS at `https://localhost:18443/media`, the isolated QA account
 
 The existing five-page QA PDF also opened from the active Media list and advanced from page one to page two in its preview dialog. This proves the current preview and page controls for that stored fixture, not conversion of a fresh document. An initial upload attempt used a nonexistent fixture path and did not submit a valid file; the retry used a path verified on disk. This was test setup error, not an observed product failure.
 
+The same running list exposed a failed legacy WEBPAGE item showing raw `WEBPAGE_CAPTURE_FAILED` to operators. The CMS now explains that the retired item cannot be prepared for playback, with its exact code behind a Technical details disclosure. The updated CMS was frozen as build `dbbb05ad-82a6-441b-a974-0ed2594ac610` and activated in the isolated Docker QA container, retaining the previous container for rollback. After reload, the real row showed the plain-language sentence; opening Technical details revealed the original code, and closing it hid the code again. Known document/video/upload failure codes now have corresponding explanations, while unknown code-shaped reasons use a safe generic sentence. Human-readable legacy reasons remain intact.
+
+For this wording packet, the CMS build and bundle budget, 287/287 unit tests, focused lint, and all seven Media Library browser cases passed. This is local developer verification; it does not cover every processing failure or independent operator comprehension.
+
 ## Build and limits
 
 - CMS production build and bundle budget: passed; entry JavaScript 207.0 KiB (66.4 KiB gzip).

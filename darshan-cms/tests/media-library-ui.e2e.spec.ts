@@ -11,7 +11,7 @@ const poster = (color: string) => `data:image/svg+xml,${encodeURIComponent(`<svg
 const assets = [
   { id: "image-1", name: "Atrium welcome", filename: "atrium.png", type: "IMAGE", content_type: "image/png", status: "READY", media_url: poster("#a6c5bd"), size: 1_048_576 },
   { id: "document-1", name: "Safety briefing", filename: "safety.pdf", type: "DOCUMENT", content_type: "application/pdf", status: "PROCESSING", media_url: null, page_count: 4 },
-  { id: "video-1", name: "Launch reel", filename: "launch.mp4", type: "VIDEO", content_type: "video/mp4", status: "FAILED", status_reason: "Video conversion failed", media_url: null },
+  { id: "video-1", name: "Launch reel", filename: "launch.mp4", type: "VIDEO", content_type: "video/mp4", status: "FAILED", status_reason: "VIDEO_TRANSCODE_FAILED", media_url: null },
   ...Array.from({ length: 12 }, (_value, index) => ({
     id: `image-${index + 2}`, name: `Gallery image ${index + 2}`, filename: `gallery-${index + 2}.png`,
     type: "IMAGE", content_type: "image/png", status: "READY", media_url: poster(index % 2 ? "#c8b4c0" : "#bac9dd"), size: 512_000,
@@ -95,6 +95,16 @@ test("read-only Media role does not see upload or deleted-media actions", async 
   await expect(page.getByRole("group", { name: "Atrium welcome" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Upload Media" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Deleted Media" })).toHaveCount(0);
+});
+
+test("failed media explains the problem and keeps its code in technical details", async ({ page }) => {
+  await setup(page);
+  await page.goto("/media");
+  const item = page.getByRole("group", { name: "Launch reel" });
+  await expect(item.getByText("The video could not be prepared for screen playback.")).toBeVisible();
+  await expect(item.getByText("VIDEO_TRANSCODE_FAILED")).not.toBeVisible();
+  await item.getByText("Technical details").click();
+  await expect(item.getByText("VIDEO_TRANSCODE_FAILED")).toBeVisible();
 });
 
 test("upload sheet rejects unsupported files and keeps a valid selection editable", async ({ page }) => {

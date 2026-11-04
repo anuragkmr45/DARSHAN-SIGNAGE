@@ -26,7 +26,7 @@ import {
   type UploadMediaResult,
 } from "@/lib/mediaUploadFlow";
 import { mapMediaDeleteError } from "@/lib/mediaDeleteErrors";
-import { deriveDisplayNameFromFilename, isPdfLikeMedia, resolveMediaDisplayName, resolveMediaSourceFormat } from "@/lib/media";
+import { deriveDisplayNameFromFilename, describeMediaStatusReason, isPdfLikeMedia, resolveMediaDisplayName, resolveMediaSourceFormat } from "@/lib/media";
 import { canDeleteMediaRecord, getContentCreatorLabel, getContentOwnershipLabel } from "@/lib/access";
 import { PageNavigation } from "@/components/common/PageNavigation";
 import { MediaPreview } from "@/components/common/MediaPreview";
@@ -529,7 +529,13 @@ export default function MediaLibrary() {
                 )}
                 {item.status_reason ? (
                   <div className="text-xs status-text-warning">
-                    Reason: {item.status_reason}
+                    <span>{describeMediaStatusReason(item.status_reason).message}</span>
+                    {describeMediaStatusReason(item.status_reason).isTechnicalCode ? (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer">Technical details</summary>
+                        <code className="break-all">{item.status_reason}</code>
+                      </details>
+                    ) : null}
                   </div>
                 ) : null}
                 {resolveLibraryMediaType(item) === "DOCUMENT" ? (
