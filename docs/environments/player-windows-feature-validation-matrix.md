@@ -25,7 +25,7 @@
 | Image playback | `src/renderer/player.ts`, `src/renderer/default-media-player.ts` | Renderer/unit coverage exists, not Windows-native | Validate slideshow/image playback on Windows | Manual Windows validation required |
 | Video playback | `src/renderer/player.ts`, `src/renderer/default-media-player.ts` | No Windows codec/runtime test reviewed | Validate autoplay, looping, and codec behavior on Windows | Manual Windows validation required |
 | PDF playback | `src/renderer/player.ts`, renderer media flow | No Windows-native coverage reviewed | Validate PDF display/performance on Windows | Manual Windows validation required |
-| Webpage playback | `src/renderer/webpage-playback.ts`, `src/main/index.ts` | No Windows-native coverage reviewed | Validate `webview` load, lockdown, failure recovery, and navigation restrictions | Manual Windows validation required |
+| Retired webpage handling | `src/common/media-compat.ts`, `src/renderer/player.ts`, `src/main/services/snapshot-manager.ts` | Unit coverage rejects retired webpage/URL items and prevents source or old-preview fetches | Confirm an old item shows controlled `Content unavailable` without a source/preview network request | Static pass + automated coverage + manual Windows validation required |
 | Screenshot capture and upload | `src/main/services/screenshot-service.ts` | `test/unit/services/screenshot-service.test.ts` exists, not Windows-native | Validate capturePage path, saved files, upload flow | Static pass + manual Windows validation required |
 | Log collection | `src/main/services/operator-tools.ts`, `src/common/platform-paths.ts` | No Windows-native coverage reviewed | Run `collect-logs` and inspect archive contents/paths | Manual Windows validation required |
 | Cache clear | `src/main/services/operator-tools.ts`, cache services | No Windows-native coverage reviewed | Run `clear-cache` and confirm only intended runtime data is removed | Manual Windows validation required |
@@ -44,7 +44,7 @@ Do not declare Windows fully signed off until these rows are manually executed o
 - first launch / config-required state
 - pairing
 - kiosk behavior
-- image/video/PDF/webpage playback
+- image/video/PDF playback and retired-webpage fail-closed handling
 - screenshot capture
 - log collection
 - autostart

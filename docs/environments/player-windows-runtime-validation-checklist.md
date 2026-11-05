@@ -23,7 +23,7 @@ Commands:
 
 ```powershell
 cd darshan-player
-npm install
+npm ci
 npm run clean
 npm run build
 npm run package:win
@@ -210,7 +210,7 @@ Use this minimal record for each execution:
 | Image playback |  |  |
 | Video playback |  |  |
 | PDF playback |  |  |
-| Webpage playback |  |  |
+| Retired webpage handling |  | Confirm controlled unavailable state and no source/preview network request |
 | Screenshot capture |  |  |
 | Log collection |  |  |
 | Autostart |  |  |

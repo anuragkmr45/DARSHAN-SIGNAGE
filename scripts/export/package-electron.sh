@@ -64,6 +64,27 @@ case "$TARGET_PLATFORM" in
     ;;
 esac
 
+case "$TARGET_PLATFORM" in
+  linux)
+    CONFIG_INSTALL_PATH="/etc/darshan/player/config.json"
+    TRANSPORT_CA_PATH="/etc/darshan/transport-ca.crt"
+    CONFIG_SELECTOR_GUIDANCE="The player automatically loads this OS site-config path. If an operator chooses a different path, set \`DARSHAN_PLAYER_CONFIG_FILE\` explicitly in the launch environment."
+    LAUNCH_GUIDANCE="Launch \`darshan-player\` from the logged-in Ubuntu desktop session. The Ubuntu package uses XDG desktop autostart, not a systemd service."
+    ;;
+  windows)
+    CONFIG_INSTALL_PATH='C:\ProgramData\DARSHAN\config.json'
+    TRANSPORT_CA_PATH='C:\\ProgramData\\DARSHAN\\transport-ca.crt'
+    CONFIG_SELECTOR_GUIDANCE="The player automatically loads this OS site-config path. If an operator chooses a different path, set \`DARSHAN_PLAYER_CONFIG_FILE\` explicitly in the launch environment."
+    LAUNCH_GUIDANCE="Launch DARSHAN Player from the logged-in Windows desktop session. The Windows package uses the Electron login-item autostart path."
+    ;;
+  macos)
+    CONFIG_INSTALL_PATH="<absolute-path-to-site-config.json>"
+    TRANSPORT_CA_PATH="<absolute-path-to-transport-ca.crt>"
+    CONFIG_SELECTOR_GUIDANCE="Set \`DARSHAN_PLAYER_CONFIG_FILE\` to the approved absolute site-config path before launch."
+    LAUNCH_GUIDANCE="Set \`DARSHAN_PLAYER_CONFIG_FILE\` to the approved absolute site-config path, then launch DARSHAN Player from a logged-in macOS desktop session."
+    ;;
+esac
+
 if [[ "$TARGET_PLATFORM" != "$HOST_PLATFORM" ]]; then
   echo "Electron platform '$TARGET_PLATFORM' is not supported on build host '$HOST_PLATFORM'. Use a native builder for that target." >&2
   exit 1
@@ -159,9 +180,12 @@ cat > "$OUTPUT_DIR/config.example.json" <<EOF
     "runtime": {
       "mode": "production"
     },
+    "livePlayback": {
+      "enabled": false
+    },
     "transportTls": {
       "enabled": true,
-      "caPath": "/etc/darshan/transport-ca.crt",
+      "caPath": "$TRANSPORT_CA_PATH",
       "strictCertificateValidation": true
     }
   }
@@ -182,14 +206,14 @@ for artifact in "${FOUND_ARTIFACTS[@]}"; do
   printf -- '- `%s`\n' "darshan-player-${RELEASE_ID}-${TARGET_PLATFORM}-${PACKAGE_ARCH}.${artifact_extension}" >> "$OUTPUT_DIR/README.md"
 done
 
-cat >> "$OUTPUT_DIR/README.md" <<'EOF'
+cat >> "$OUTPUT_DIR/README.md" <<EOF
 
 ## Operator steps
 
-1. Install the packaged artifact that matches this folder's `ELECTRON_PACKAGE_ARCH`.
-2. Copy `config.example.json` to `/etc/darshan/player/config.json` and replace the site/host placeholders.
-3. Set `DARSHAN_PLAYER_CONFIG_FILE=/etc/darshan/player/config.json` in the player launch environment and install the transport CA at the configured `transportTls.caPath`.
-4. Launch `darshan-player` from the logged-in Ubuntu desktop session. The current Ubuntu package uses XDG desktop autostart, not a systemd service.
+1. Install the packaged artifact that matches this folder's \`ELECTRON_PACKAGE_ARCH\`.
+2. Copy \`config.example.json\` to \`$CONFIG_INSTALL_PATH\` and replace the site/host placeholders.
+3. $CONFIG_SELECTOR_GUIDANCE Install the transport CA at the configured \`transportTls.caPath\`.
+4. $LAUNCH_GUIDANCE
 5. Pair the device and verify it appears in the CMS.
 EOF
 

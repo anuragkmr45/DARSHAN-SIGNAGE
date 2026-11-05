@@ -40,10 +40,10 @@ Audited buckets:
    - `package.json`
    - `src/main/index.ts`
    - `src/main/services/autostart.ts`
-   - `src/renderer/webpage-playback.ts`
+   - `src/common/media-compat.ts`
    - `src/main/services/screenshot-service.ts`
    Why it matters:
-   - the code is structured for Windows support, but there is no audit evidence here for NSIS install, packaged-mode startup, login-item autostart, kiosk enforcement, webview stability, or screenshot capture on a real Windows machine
+   - the code is structured for Windows support, but there is no audit evidence here for NSIS install, packaged-mode startup, login-item autostart, kiosk enforcement, native media behavior, or screenshot capture on a real Windows machine
    Required before Windows release:
    - run the checklist in `player-windows-runtime-validation-checklist.md` on Windows 10/11 x64
 
@@ -112,7 +112,7 @@ Audited buckets:
 | Pairing service (`src/main/services/pairing-service.ts`) | Windows-safe but untested | Network and cert flows look platform-neutral |
 | HTTP/WebSocket clients | Windows-safe | No Linux assumptions observed |
 | Cache/log/POP/schedule/snapshot/command services | Windows-safe | Filesystem and network based; no Linux-only hard dependency observed |
-| Renderer playback (`src/renderer/*`) | Windows-safe but untested | Core DOM logic is cross-platform; webview/video/PDF behavior still needs native runtime validation |
+| Renderer playback (`src/renderer/*`) | Windows-safe but untested | Core DOM logic is cross-platform; image/video/PDF behavior and retired-webpage fail-closed handling still need native runtime validation |
 | Legacy shell scripts/systemd unit | Linux-only and legacy | Not part of the supported Windows workflow |
 
 ## File Classification Appendix
@@ -152,7 +152,7 @@ Audited buckets:
 | --- | --- | --- |
 | `src/main/cli-runner.ts` | Windows-safe but untested | CLI bootstrap is Node/Electron based |
 | `src/main/cli.ts` | Windows-safe | Parsing coverage exists |
-| `src/main/index.ts` | Windows-safe but untested | Electron windowing/kiosk/webview policy; native Windows validation still required |
+| `src/main/index.ts` | Windows-safe but untested | Electron windowing and kiosk policy; native Windows validation still required |
 | `src/main/runtime-mode.ts` | Windows-safe | Automated coverage exists |
 
 ### `src/main/services/`
@@ -208,8 +208,6 @@ Audited buckets:
 | `src/renderer/pairing.ts` | Windows-safe but untested | Renderer flow is platform-neutral; native packaging mode still needs validation |
 | `src/renderer/player.ts` | Windows-safe but untested | Layout and playback orchestration need native Windows validation |
 | `src/renderer/types.ts` | Windows-safe | Types only |
-| `src/renderer/webpage-playback.js` | Windows-safe but untested | Tracked JS companion; Windows webview runtime still needs validation |
-| `src/renderer/webpage-playback.ts` | Windows-safe but untested | Uses `<webview>`; needs native Windows validation |
 
 ### `scripts/`
 
@@ -284,7 +282,8 @@ Audited buckets:
   - first launch with missing backend config
   - packaged-mode CLI (`doctor`, `collect-logs`, `clear-cache`, pairing commands)
   - `qa` and `production` kiosk behavior
-  - image, video, PDF, webpage playback
+  - image, video, and PDF playback
+  - retired webpage/URL items fail closed as `Content unavailable` without loading their source or old preview
   - screenshot capture/upload
   - login-item autostart after sign-in/reboot
 - If any Windows blocker appears during native validation, add a focused remediation issue before shipping Windows broadly.
