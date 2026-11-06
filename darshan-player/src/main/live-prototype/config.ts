@@ -65,7 +65,8 @@ export function loadLivePrototypeConfig(configPath: string): LivePrototypeConfig
     throw new Error('Invalid prototype config')
   }
   if (typeof value['authority_url'] !== 'string' || typeof value['renewal_token'] !== 'string' ||
-      value['renewal_token'].length < 16 || value['renewal_token'].length > 4096 || /[\r\n\x00]/.test(value['renewal_token']) ||
+      value['renewal_token'].length < 16 || value['renewal_token'].length > 4096 ||
+      /[\r\n]/.test(value['renewal_token']) || value['renewal_token'].includes(String.fromCharCode(0)) ||
       !/^[A-Za-z0-9_-]{1,80}$/.test(String(value['receiver_session_id'] || ''))) throw new Error('Invalid prototype config')
   const authority = new URL(value['authority_url'])
   if (!['http:', 'https:'].includes(authority.protocol) || !isLoopback(authority.hostname) ||

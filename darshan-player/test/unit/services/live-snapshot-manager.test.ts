@@ -5,7 +5,10 @@ const sinon = require('sinon')
 const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils')
 const { LIVE_IDS, liveFixture } = require('../../helpers/live-fixtures')
 function clearLiveModules() {
-  for (const key of Object.keys(require.cache)) if (key.includes('/src/main/services/') || key.includes('/src/common/')) delete require.cache[key]
+  for (const key of Object.keys(require.cache)) {
+    const normalizedKey = key.replace(/\\/g, '/')
+    if (normalizedKey.includes('/src/main/services/') || normalizedKey.includes('/src/common/')) delete require.cache[key]
+  }
 }
 function deferred() {
   let resolve

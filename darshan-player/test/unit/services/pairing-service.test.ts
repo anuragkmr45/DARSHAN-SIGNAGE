@@ -142,7 +142,9 @@ describe('PairingService', () => {
       expect(error.message).to.equal('response lost')
     }
     const credentialPath = path.join(path.dirname(getConfigManager().getConfigPath()), 'pairing-credential')
-    expect(fs.statSync(credentialPath).mode & 0o777).to.equal(0o600)
+    const credentialStat = fs.statSync(credentialPath)
+    expect(credentialStat.isFile()).to.equal(true)
+    if (process.platform !== 'win32') expect(credentialStat.mode & 0o777).to.equal(0o600)
     await pairingService.requestPairingCode()
     expect(captured[0].pairing_credential).to.equal(captured[1].pairing_credential)
     expect(getDeviceStateStore().getState().deviceId).to.equal(deviceId)
@@ -153,11 +155,13 @@ describe('PairingService', () => {
     const { PairingCredentialStore } = require('../../../src/main/services/pairing-credential-store')
     const target = path.join(tempDir, 'unrelated-file')
     const link = path.join(tempDir, 'pairing-credential')
-    fs.writeFileSync(target, 'a'.repeat(64), { mode: 0o644 })
+    const original = Buffer.from('a'.repeat(64))
+    fs.writeFileSync(target, original, { mode: 0o644 })
     fs.symlinkSync(target, link)
 
     expect(() => new PairingCredentialStore(link).read()).to.throw(/not a regular file/)
-    expect(fs.statSync(target).mode & 0o777).to.equal(0o644)
+    expect(fs.readFileSync(target)).to.deep.equal(original)
+    if (process.platform !== 'win32') expect(fs.statSync(target).mode & 0o777).to.equal(0o644)
   })
 
   it('retries a timed-out renewal with the same request ID and keeps the device ID', async () => {

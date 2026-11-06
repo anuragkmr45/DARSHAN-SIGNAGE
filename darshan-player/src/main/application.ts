@@ -857,7 +857,8 @@ function setupIPCHandlers(): void {
     try {
       const { getPlaybackProgressStore } = await import('./services/playback-progress-store.js')
       if (!getContentOwner().accepts(event.sender.id, input?.['contentEpoch'])) return
-      const { contentEpoch: _epoch, ...progress } = input!
+      const progress = { ...input! }
+      delete progress['contentEpoch']
       await getPlaybackProgressStore().record(progress)
     } catch (error) {
       logger.warn({ error }, 'Failed to persist playback progress update from renderer')

@@ -599,14 +599,31 @@ class Player {
     footer.textContent = 'Follow onsite safety instructions immediately'
 
     container.append(heading, message, footer)
-    this.deferStyleCommit(() => {
-      let size = Math.min(72, Math.max(18, Math.floor(container.clientHeight * 0.12)))
-      message.style.fontSize = `${size}px`
-      while (size > 12 && (message.scrollHeight > message.clientHeight || message.scrollWidth > message.clientWidth)) {
-        size -= 2
-        message.style.fontSize = `${size}px`
+    const fitMessage = (): void => {
+      if (!container.isConnected || message.clientWidth <= 0 || message.clientHeight <= 0) return
+      const minimumSize = 10
+      let low = minimumSize
+      let high = Math.min(72, Math.max(18, Math.floor(container.clientHeight * 0.12)))
+      let fittedSize = minimumSize
+
+      while (low <= high) {
+        const candidate = Math.floor((low + high) / 2)
+        message.style.fontSize = `${candidate}px`
+        if (message.scrollHeight <= message.clientHeight && message.scrollWidth <= message.clientWidth) {
+          fittedSize = candidate
+          low = candidate + 1
+        } else {
+          high = candidate - 1
+        }
       }
-    })
+
+      message.style.fontSize = `${fittedSize}px`
+    }
+    const scheduleFit = (): void => this.deferStyleCommit(fitMessage)
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleFit) : undefined
+    resizeObserver?.observe(container)
+    ;(container as DisposableMediaNode).__darshanCleanup = () => resizeObserver?.disconnect()
+    scheduleFit()
     return container
   }
 

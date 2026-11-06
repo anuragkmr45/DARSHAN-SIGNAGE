@@ -343,7 +343,12 @@ describe('Approved immutable cache assets', () => {
     const { CacheManager } = require('../../../src/main/services/cache/cache-manager')
     new CacheManager()
     expect(fs.existsSync(dead.directory)).to.equal(false)
-    for (const directory of [alive.directory, recent.directory, wrongMode.directory, unknown, linked]) expect(fs.existsSync(directory)).to.equal(true)
+    const preserved = [alive.directory, recent.directory, unknown, linked]
+    // Windows does not implement POSIX ownership/mode semantics. chmod(0755)
+    // therefore cannot make an otherwise owned stage uncertain there.
+    if (process.platform === 'win32') expect(fs.existsSync(wrongMode.directory)).to.equal(false)
+    else preserved.push(wrongMode.directory)
+    for (const directory of preserved) expect(fs.existsSync(directory)).to.equal(true)
     expect(fs.readFileSync(path.join(unknown, 'keep.txt')).toString()).to.equal('keep')
   })
 

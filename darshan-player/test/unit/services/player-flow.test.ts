@@ -2,7 +2,7 @@ const { expect } = require('chai')
 const fs = require('fs')
 const path = require('path')
 const sinon = require('sinon')
-const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils.ts')
+const { createTempDir, cleanupTempDir, waitFor } = require('../../helpers/test-utils.ts')
 
 describe('Player Flow', () => {
   let tempDir: string
@@ -38,7 +38,8 @@ describe('Player Flow', () => {
     fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify(testConfig, null, 2))
 
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })
@@ -50,7 +51,8 @@ describe('Player Flow', () => {
     delete process.env.HEXMON_CONFIG_PATH
 
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })
@@ -919,7 +921,11 @@ describe('Player Flow', () => {
       }),
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await waitFor(
+      () => submitPairingStub.calledOnce && playerFlow.getState() === 'PAIRED_RUNTIME',
+      5000,
+      10
+    )
 
     expect(fetchStatusStub.called).to.equal(true)
     expect(submitPairingStub.calledOnce).to.equal(true)

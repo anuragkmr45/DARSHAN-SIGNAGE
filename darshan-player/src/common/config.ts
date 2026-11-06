@@ -8,7 +8,13 @@ import * as net from 'net'
 import { EventEmitter } from 'events'
 import type { AppConfig, RuntimeMode } from './types'
 import { importLegacyLinuxRuntimeState, resolveRuntimePaths, type RuntimePaths } from './platform-paths'
-import { buildRedactedPlayerConfigSummary, loadPlayerFileConfig, type PlayerConfigFileDiagnostics } from './file-config'
+import {
+  buildRedactedPlayerConfigSummary,
+  loadPlayerFileConfig,
+  resolvePlayerConfigFileSelector,
+  resolvePlayerProfileSelector,
+  type PlayerConfigFileDiagnostics,
+} from './file-config'
 import { DEFAULT_SECURE_OFFLINE_PLAYBACK_CONFIG, normalizeSecureOfflinePlaybackConfig } from './offline-security-policy'
 
 const RUNTIME_MODES: RuntimeMode[] = ['dev', 'qa', 'production']
@@ -100,6 +106,7 @@ export class ConfigManager {
   private readonly defaults: AppConfig
   private readonly runtimePaths: RuntimePaths
   private readonly fileConfigDiagnostics: PlayerConfigFileDiagnostics
+  private readonly playerConfigLoadError?: string
   private readonly emitter = new EventEmitter()
 
   constructor(configPath?: string) {
@@ -123,9 +130,38 @@ export class ConfigManager {
         'HEXMON_RUNTIME_ROOT'
       )
     )
-    const fileConfig = loadPlayerFileConfig(process.env, { allowDefaultPath: !hasExplicitRuntimeConfig })
-    this.fileConfigDiagnostics = fileConfig.diagnostics
-    this.config = this.loadConfig(fileConfig.config)
+    try {
+      const fileConfig = loadPlayerFileConfig(process.env, { allowDefaultPath: !hasExplicitRuntimeConfig })
+      this.fileConfigDiagnostics = fileConfig.diagnostics
+      this.config = this.loadConfig(fileConfig.config)
+    } catch (error) {
+      this.playerConfigLoadError = error instanceof Error ? error.message : 'Player configuration could not be loaded'
+
+      let selector: ReturnType<typeof resolvePlayerConfigFileSelector> = { configured: true }
+      let profile: ReturnType<typeof resolvePlayerProfileSelector> = { name: 'production', source: 'default' }
+      try {
+        selector = resolvePlayerConfigFileSelector(process.env, { allowDefaultPath: !hasExplicitRuntimeConfig })
+      } catch {
+        // Conflicting selectors are already represented by playerConfigLoadError.
+      }
+      try {
+        profile = resolvePlayerProfileSelector(process.env)
+      } catch {
+        // Conflicting profiles are already represented by playerConfigLoadError.
+      }
+
+      this.fileConfigDiagnostics = {
+        configFile: {
+          configured: selector.configured,
+          loaded: false,
+          source: selector.source,
+          path: selector.path,
+        },
+        profile,
+        mappedConfigKeys: [],
+      }
+      this.config = this.loadConfig()
+    }
   }
 
   private getDefaultConfigPath(): string {
@@ -922,6 +958,10 @@ export class ConfigManager {
     const errors: string[] = []
     const runtimeMode = this.config.runtime.mode
     const requireExplicitBackend = runtimeMode === 'qa' || runtimeMode === 'production'
+
+    if (this.playerConfigLoadError) {
+      errors.push(this.playerConfigLoadError)
+    }
 
     if (!this.config.apiBase) {
       errors.push(

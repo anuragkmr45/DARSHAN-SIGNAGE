@@ -268,6 +268,26 @@ describe('player file config loader', () => {
     expect(() => loadPlayerFileConfig()).to.throw(/Invalid player config JSON/)
   })
 
+  it('keeps malformed selected config in a controlled invalid runtime state', () => {
+    const siteConfigPath = path.join(tempDir, 'malformed-player-config.json')
+    fs.writeFileSync(siteConfigPath, '{"player":')
+    process.env.DARSHAN_PLAYER_CONFIG_FILE = siteConfigPath
+
+    const { getConfigManager } = require('../../../src/common/config')
+    const configManager = getConfigManager()
+    const validation = configManager.validateConfig()
+    const diagnostics = configManager.getFileConfigDiagnostics()
+
+    expect(validation.valid).to.equal(false)
+    expect(validation.errors.some((message) => message.includes('Invalid player config JSON'))).to.equal(true)
+    expect(diagnostics.configFile).to.include({
+      configured: true,
+      loaded: false,
+      source: 'DARSHAN_PLAYER_CONFIG_FILE',
+      path: siteConfigPath,
+    })
+  })
+
   it('rejects unknown keys and secret-looking keys', () => {
     const unknownConfigPath = path.join(tempDir, 'unknown.json')
     writeJson(unknownConfigPath, { player: { backend: { baseUrl: 'http://ok.local:3000' }, unknown: true } })

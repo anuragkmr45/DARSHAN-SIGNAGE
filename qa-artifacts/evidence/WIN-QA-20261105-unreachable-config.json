@@ -1,0 +1,27 @@
+{
+  "player": {
+    "environment": {
+      "name": "windows-player-qa-20261105",
+      "deploymentId": "windows-player-qa-20261105",
+      "expectedServerId": "windows-player-qa-20261105",
+      "releaseId": "windows-player-qa-20261105",
+      "sourceCommit": "c89bd28a7a323a224f0ce377cec744d4aff8d5a3",
+      "compatibilityGeneration": 1
+    },
+    "backend": {
+      "baseUrl": "https://192.168.29.64:1",
+      "socketIoUrl": "wss://192.168.29.64:1/socket.io"
+    },
+    "runtime": {
+      "mode": "production"
+    },
+    "transportTls": {
+      "enabled": true,
+      "caPath": "C:\\ProgramData\\DARSHAN\\transport-ca.crt",
+      "strictCertificateValidation": true
+    },
+    "diagnostics": {
+      "showEnvironmentIdentity": true
+    }
+  }
+}

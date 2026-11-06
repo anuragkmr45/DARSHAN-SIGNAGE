@@ -4,7 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils')
 const { liveFixture, LIVE_IDS } = require('../../helpers/live-fixtures')
-function clearModules() { for (const key of Object.keys(require.cache)) if (key.includes('/src/main/services/') || key.includes('/src/common/')) delete require.cache[key] }
+function clearModules() { for (const key of Object.keys(require.cache)) { const normalizedKey = key.replace(/\\/g, '/'); if (normalizedKey.includes('/src/main/services/') || normalizedKey.includes('/src/common/')) delete require.cache[key] } }
 describe('Ordinary PlayerFlow LIVE integration fences', () => {
   let dir, sandbox, flow, owner, engine, window, clock, originalConfigPaths
   beforeEach(() => {

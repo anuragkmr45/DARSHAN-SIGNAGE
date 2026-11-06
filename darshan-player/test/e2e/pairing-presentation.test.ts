@@ -152,16 +152,35 @@ describe('Pairing presentation browser regression', () => {
   let browserDiagnostics = ''
 
   afterEach(async () => {
+    const activeBrowser = browser
     session?.close()
     session = undefined
     if (debugPort !== undefined) {
       await closeBrowser(debugPort).catch(() => undefined)
       debugPort = undefined
     }
+    if (activeBrowser && activeBrowser.exitCode === null) {
+      await Promise.race([
+        new Promise<void>((resolve) => activeBrowser.once('exit', () => resolve())),
+        sleep(5000),
+      ])
+    }
+    if (activeBrowser && activeBrowser.exitCode === null) {
+      activeBrowser.kill()
+      await Promise.race([
+        new Promise<void>((resolve) => activeBrowser.once('exit', () => resolve())),
+        sleep(2000),
+      ])
+    }
     browser = undefined
     browserDiagnostics = ''
     if (profileDir) {
-      await fs.promises.rm(profileDir, { recursive: true, force: true })
+      await fs.promises.rm(profileDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      })
       profileDir = undefined
     }
   })

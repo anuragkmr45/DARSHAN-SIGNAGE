@@ -650,8 +650,11 @@ body:has(#playback-container > .player-emergency) #mode-banner.emergency {
   letter-spacing: 0.12em;
 }
 .player-emergency-copy {
+  width: 96%;
   max-width: 96%;
   max-height: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
   font-size: 72px;
   line-height: 1.12;

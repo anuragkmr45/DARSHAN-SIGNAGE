@@ -13,12 +13,23 @@ describe('logger URL redaction', () => {
     logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'darshan-logger-redaction-'))
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     process.env.NODE_ENV = previousNodeEnv
     const { destroyAllLoggers } = require('../../../src/common/logger')
-    destroyAllLoggers()
-    fs.rmSync(logDir, { recursive: true, force: true })
-    delete require.cache[require.resolve('../../../src/common/logger')]
+    await destroyAllLoggers()
+    try {
+      // Windows can briefly retain the synchronous Pino destination handle after
+      // destroyAllLoggers(). Retry the recursive removal instead of leaking this
+      // test's production NODE_ENV and cached logger into the rest of the suite.
+      fs.rmSync(logDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      })
+    } finally {
+      delete require.cache[require.resolve('../../../src/common/logger')]
+    }
   })
 
   function readLogs() {

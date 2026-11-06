@@ -6,31 +6,34 @@ import { loadTransportCertificateAuthority } from './transport-tls'
 
 export type LiveTlsProbe = (host: string, port: number, ca: Buffer, signal: AbortSignal) => Promise<string>
 export const probeLiveTlsLeaf: LiveTlsProbe = (host, port, ca, signal) => new Promise((resolve, reject) => {
+  if (signal.aborted) {
+    reject(new Error('Live gateway TLS verification failed'))
+    return
+  }
   let complete = false
-  let timer: NodeJS.Timeout | undefined
-  let socket: tls.TLSSocket | undefined
+  const resources: { timer?: NodeJS.Timeout; socket?: tls.TLSSocket } = {}
   const finish = (fingerprint?: string): void => {
     if (complete) return
     complete = true
-    if (timer) clearTimeout(timer)
+    if (resources.timer) clearTimeout(resources.timer)
     signal.removeEventListener('abort', aborted)
-    socket?.destroy()
+    resources.socket?.destroy()
     if (fingerprint) resolve(fingerprint)
     else reject(new Error('Live gateway TLS verification failed'))
   }
   const aborted = (): void => finish()
-  if (signal.aborted) { finish(); return }
   signal.addEventListener('abort', aborted, { once: true })
-  timer = setTimeout(aborted, 1500)
+  resources.timer = setTimeout(aborted, 1500)
   // Leave certificate-chain, critical extension, validity, hostname/IP and
   // intermediate validation entirely to Node's standard TLS implementation.
-  socket = tls.connect({ host, port, ca, rejectUnauthorized: true, minVersion: 'TLSv1.2',
+  const socket = tls.connect({ host, port, ca, rejectUnauthorized: true, minVersion: 'TLSv1.2',
     ...(net.isIP(host) ? {} : { servername: host }) }, () => {
-    if (!socket?.authorized) { finish(); return }
+    if (!socket.authorized) { finish(); return }
     const raw = socket.getPeerCertificate().raw
     if (!raw?.length) { finish(); return }
     finish(createHash('sha256').update(raw).digest('hex'))
   })
+  resources.socket = socket
   socket.once('error', aborted)
   socket.once('close', aborted)
 })

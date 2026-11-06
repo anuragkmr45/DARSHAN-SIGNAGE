@@ -19,7 +19,7 @@ describe('Live prototype private configuration', () => {
   }
   it('requires one explicit configuration argument', () => {
     expect(parseLivePrototypeArgument(['electron', '.'])).to.equal(undefined)
-    expect(parseLivePrototypeArgument(['--live-prototype', '/tmp/private.json'])).to.equal('/tmp/private.json')
+    expect(parseLivePrototypeArgument(['--live-prototype', '/tmp/private.json'])).to.equal(path.resolve('/tmp/private.json'))
     expect(() => parseLivePrototypeArgument(['--live-prototype'])).to.throw()
     expect(() => parseLivePrototypeArgument(['--live-prototype=a', '--live-prototype=b'])).to.throw()
   })

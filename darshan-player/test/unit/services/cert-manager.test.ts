@@ -10,7 +10,8 @@ describe('Certificate Manager', () => {
 
   function clearRuntimeModuleCache() {
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })

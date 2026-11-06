@@ -10,11 +10,10 @@ export type AuthorityRequest = (reconnect: boolean) => Promise<AuthorityResponse
 export function createAuthorityRequest(config: LivePrototypeConfig): AuthorityRequest {
   return (reconnect) => new Promise((resolve, reject) => {
     let complete = false
-    let deadline: NodeJS.Timeout | undefined
     const finish = (value?: AuthorityResponse): void => {
       if (complete) return
       complete = true
-      if (deadline) clearTimeout(deadline)
+      clearTimeout(deadline)
       if (value) resolve(value)
       else reject(new Error('Authority unavailable'))
     }
@@ -42,7 +41,7 @@ export function createAuthorityRequest(config: LivePrototypeConfig): AuthorityRe
     })
     // Socket timeout alone is inactivity-based; a dribbling response must not
     // monopolize the single-flight renewal indefinitely.
-    deadline = setTimeout(() => { finish(); request.destroy() }, 1500)
+    const deadline = setTimeout(() => { finish(); request.destroy() }, 1500)
     request.on('timeout', () => { finish(); request.destroy() })
     request.on('error', () => finish())
     request.on('close', () => finish())

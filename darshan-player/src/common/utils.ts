@@ -32,7 +32,7 @@ export function calculateBufferHash(buffer: Buffer): string {
  * Atomic file write using temp → rename pattern
  */
 export async function atomicWrite(filePath: string, data: Buffer | string): Promise<void> {
-  const tempPath = `${filePath}.tmp.${Date.now()}`
+  const tempPath = `${filePath}.tmp.${process.pid}.${crypto.randomUUID()}`
   const dir = path.dirname(filePath)
 
   // Ensure directory exists
@@ -44,8 +44,26 @@ export async function atomicWrite(filePath: string, data: Buffer | string): Prom
     // Write to temp file
     fs.writeFileSync(tempPath, data, { mode: 0o644 })
 
-    // Atomic rename
-    fs.renameSync(tempPath, filePath)
+    // Atomic replacement. Windows security scanners and indexers can retain a
+    // destination handle for a few milliseconds and surface EPERM/EACCES/EBUSY.
+    // Keep the temporary file private to this write and retry only those
+    // transient Windows errors without falling back to a non-atomic unlink.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        fs.renameSync(tempPath, filePath)
+        break
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (
+          process.platform !== 'win32' ||
+          !['EPERM', 'EACCES', 'EBUSY'].includes(code || '') ||
+          attempt >= 5
+        ) {
+          throw error
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)))
+      }
+    }
   } catch (error) {
     // Cleanup temp file on error
     if (fs.existsSync(tempPath)) {

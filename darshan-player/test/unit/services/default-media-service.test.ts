@@ -1,6 +1,7 @@
 const { expect } = require('chai')
 const fs = require('fs')
 const path = require('path')
+const { pathToFileURL } = require('url')
 const sinon = require('sinon')
 const { createTempDir, cleanupTempDir } = require('../../helpers/test-utils.ts')
 
@@ -41,7 +42,8 @@ describe('Default Media Service', () => {
     fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify(testConfig, null, 2))
 
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })
@@ -53,7 +55,8 @@ describe('Default Media Service', () => {
     delete process.env.HEXMON_CONFIG_PATH
 
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })
@@ -102,7 +105,7 @@ describe('Default Media Service', () => {
     expect(result.aspect_ratio).to.equal('16:9')
     expect(result.media_id).to.equal('media-16-9')
     expect(result.media.local_path).to.equal(cachedPath)
-    expect(result.media.local_url).to.equal(`file://${cachedPath}`)
+    expect(result.media.local_url).to.equal(pathToFileURL(cachedPath).toString())
     expect(changedSpy.calledOnce).to.equal(true)
     expect(service.getCurrent().media_id).to.equal('media-16-9')
   })
@@ -146,7 +149,7 @@ describe('Default Media Service', () => {
 
     expect(service.getCurrent().media_id).to.equal('media-global')
     expect(service.getCurrent().media.local_path).to.equal(cachedMediaPath)
-    expect(service.getCurrent().media.local_url).to.equal(`file://${cachedMediaPath}`)
+    expect(service.getCurrent().media.local_url).to.equal(pathToFileURL(cachedMediaPath).toString())
 
     const result = await service.refreshNow('poll')
 

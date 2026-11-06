@@ -99,6 +99,7 @@ function safeMessage(message: string | undefined): string | undefined {
 
 export class Logger {
   private logger: pino.Logger
+  private destination?: ReturnType<typeof pino.destination>
   private logDir: string
   private currentLogFile: string
   private rotationTimer?: NodeJS.Timeout
@@ -145,14 +146,12 @@ export class Logger {
       // In packaged Electron, the app can exit very early during startup
       // (for example when another player instance already owns the lock).
       // Synchronous writes avoid SonicBoom flushing before the destination is ready.
-      this.logger = pino(
-        pinoConfig,
-        pino.destination({
-          dest: this.currentLogFile,
-          sync: true,
-          mkdir: true,
-        })
-      )
+      this.destination = pino.destination({
+        dest: this.currentLogFile,
+        sync: true,
+        mkdir: true,
+      })
+      this.logger = pino(pinoConfig, this.destination)
     }
 
     // Setup log rotation
@@ -298,9 +297,23 @@ export class Logger {
     return this.currentLogFile
   }
 
-  public destroy(): void {
+  public async destroy(): Promise<void> {
     if (this.rotationTimer) {
       clearInterval(this.rotationTimer)
+    }
+
+    if (this.destination) {
+      // Synchronous file destinations keep a Windows file handle open until the
+      // SonicBoom stream is explicitly closed. Flush before destroying it so
+      // shutdown and test cleanup can safely remove or rotate the log directory.
+      const destination = this.destination
+      destination.flushSync()
+      await new Promise<void>((resolve, reject) => {
+        destination.once('close', resolve)
+        destination.once('error', reject)
+        destination.destroy()
+      })
+      this.destination = undefined
     }
   }
 }
@@ -316,9 +329,7 @@ export function getLogger(name: string, logDir?: string): Logger {
   return loggers.get(key)!
 }
 
-export function destroyAllLoggers(): void {
-  for (const logger of loggers.values()) {
-    logger.destroy()
-  }
+export async function destroyAllLoggers(): Promise<void> {
+  await Promise.all(Array.from(loggers.values(), (logger) => logger.destroy()))
   loggers.clear()
 }

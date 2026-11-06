@@ -14,7 +14,8 @@ describe('Playback Engine', () => {
     process.env.DARSHAN_RUNTIME_ROOT = tempDir
 
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services/playback') || key.includes('src/main/services/snapshot-manager') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services/playback') || normalizedKey.includes('src/main/services/snapshot-manager') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })
@@ -30,7 +31,8 @@ describe('Playback Engine', () => {
     cleanupTempDir(tempDir)
 
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services/playback') || key.includes('src/main/services/snapshot-manager') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services/playback') || normalizedKey.includes('src/main/services/snapshot-manager') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })

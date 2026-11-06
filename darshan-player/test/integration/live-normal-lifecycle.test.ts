@@ -7,7 +7,7 @@ const { performance } = require('perf_hooks')
 const { createTempDir, cleanupTempDir } = require('../helpers/test-utils')
 const { liveFixture, LIVE_IDS } = require('../helpers/live-fixtures')
 const RUN = '01234567-1234-4234-8234-123456789abc'
-function clearModules() { for (const key of Object.keys(require.cache)) if (key.includes('/src/main/services/') || key.includes('/src/common/')) delete require.cache[key] }
+function clearModules() { for (const key of Object.keys(require.cache)) { const normalizedKey = key.replace(/\\/g, '/'); if (normalizedKey.includes('/src/main/services/') || normalizedKey.includes('/src/common/')) delete require.cache[key] } }
 async function until(predicate, limit = 5000) { const end = performance.now() + limit; while (!predicate()) { if (performance.now() >= end) throw new Error('Timed out waiting for normal LIVE integration state'); await new Promise(resolve => setTimeout(resolve, 20)) } }
 describe('Normal LIVE snapshot/cache/authority ownership integration', function () {
   this.timeout(10000)

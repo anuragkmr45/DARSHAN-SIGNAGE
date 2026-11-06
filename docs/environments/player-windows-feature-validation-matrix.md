@@ -35,6 +35,27 @@
 | Linux shell scripts | `scripts/*.sh`, `scripts/darshan-player.service` | N/A | Not applicable to Windows | Legacy Linux-only |
 | Linux legacy import | `src/common/platform-paths.ts` | `test/unit/common/platform-paths.test.ts` | Confirm it does not run on Windows | Static pass + automated coverage |
 
+## Native Windows execution — 2026-11-05 (in progress)
+
+The focused native run is recorded in `qa-artifacts/evidence/windows-player-native-runtime-validation-2026-11-05.md`.
+
+- Native build and x64 NSIS packaging: **pass**.
+- Initial install, visible pairing UI, strict TLS, single-instance behavior, pending-pair restart and automatic OTP renewal: **pass**.
+- Missing site config controlled UI: **pass**.
+- Malformed selected config controlled UI: **fail in the initial package (P1), pass after approved rebuilt install**; the installed player stayed open on the controlled setup-required state with no device identity or invented backend.
+- Frozen dependency install, Windows-safe npm test discovery, build, lint, and the six-test native integration suite: **pass after remediation**.
+- Final native unit suite as a standard user: **529 pass / 9 pending / 5 privilege-blocked**. The former suite-order failure passed in this full run.
+- Native Administrator symlink gate: **5/5 pass** after two Windows-invalid POSIX mode-bit assertions were made platform-correct; Docker also passes the same five cases as supplemental evidence.
+- Native fault injection: **22/22 pass**. Performance: **8/8 pass**. Renderer browser regression: **1/1 pass after fixing portrait emergency text overflow and Windows profile cleanup**.
+- Installed operator tooling: **doctor, pairing-status and collect-logs pass**. The eight-file support bundle passed the secret scan. Pre-pair/no-content clear-cache passed with identity/config/log preservation; cached-content removal and online redownload remain deferred until post-pairing. Doctor's operator-only display inventory is empty despite the verified 1920×1080 GUI and is recorded as deferred P2 diagnostics debt.
+- Registered Start Menu launch, an exact 79-file temporary program copy launched from a path containing spaces, and production F12/Ctrl+Shift+I blocking: **pass**, with exactly one player window and no DevTools surface. The ordinary installed player was restored and the temporary duplicate removed. Windows-key injection is blocked by the automation safety policy.
+- Packaged QA runtime: **bounded pass**. Installed doctor reported mode `qa`; the isolated real window remained controlled and F12/Ctrl+Shift+I opened no DevTools. Production mode and the same pending Device ID were restored afterward.
+- Production Alt+F4 and Ctrl+R blocking: **pass**, preserving the same window and Device ID. Right-click remains tool-observability blocked; the failed action was not converted into a pass. Windows-key injection remains prohibited.
+- Autostart/uninstall preflight: **pass** for one exact current-user Run/startup entry and one current-user uninstall registration. Actual sign-in/reboot, repair/reinstall and uninstall/reinstall remain approval-gated lifecycle tests.
+- Pre-pair backend outage/recovery: **pass** using the isolated `WIN-QA-20261105-` closed-port fixture with strict TLS still enabled. The installed player held one coherent recovery window without issuing an identity, then restored the ordinary waiting state and same Device ID when relaunched normally.
+- Real CMS browser entry: **partial pass after approved scoped trust import**. The verified QA CA exists once in Current User Root and zero times in Local Machine Root. Direct user sign-in in native Edge reached the authenticated dashboard and Screens page with zero visible screens, and the Pair Device dialog opened. Before any submission, the CMS redirected the tab to login and raised a false-positive `devtools viewport heuristic` production lock; the lock was not bypassed. The P1 baseline-delta remediation passes 4/4 focused tests, the full 291/291 CMS unit suite, full lint with zero errors and the exact production-lock build/bundle gate locally. A Docker-served native Edge smoke with the same startup banner remained unlocked; native F12 reinjection was tool-blocked and is not claimed. Authorized QA packaging/deployment and real-browser reverification remain required.
+- CMS pairing and all post-pairing playback/evidence journeys: **blocked at CMS submission**. Server-authoritative generation 55 expiry, automatic generation 56 issuance, changed code, stable hostname and stable redacted Device ID are verified; old-code rejection and latest-code approval are not.
+
 ## Recommended Release Gate
 
 Do not declare Windows fully signed off until these rows are manually executed on a Windows machine and recorded:

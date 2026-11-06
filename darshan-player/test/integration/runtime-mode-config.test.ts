@@ -63,7 +63,8 @@ describe('Runtime mode configuration integration', () => {
     }
 
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/common') || key.includes('src/main/runtime-mode')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/common') || normalizedKey.includes('src/main/runtime-mode')) {
         delete require.cache[key]
       }
     })

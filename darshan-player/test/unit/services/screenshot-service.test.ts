@@ -38,7 +38,8 @@ describe('Screenshot Service', () => {
     fs.writeFileSync(process.env.HEXMON_CONFIG_PATH, JSON.stringify(testConfig, null, 2))
 
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })
@@ -57,7 +58,8 @@ describe('Screenshot Service', () => {
 
     cleanupTempDir(tempDir)
     Object.keys(require.cache).forEach((key) => {
-      if (key.includes('src/main/services') || key.includes('src/common')) {
+      const normalizedKey = key.replace(/\\/g, '/')
+      if (normalizedKey.includes('src/main/services') || normalizedKey.includes('src/common')) {
         delete require.cache[key]
       }
     })

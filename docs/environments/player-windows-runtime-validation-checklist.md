@@ -195,6 +195,46 @@ Expected result:
 
 ## Record Sheet
 
+### Native run — 2026-11-05 (in progress)
+
+Detailed evidence: `qa-artifacts/evidence/windows-player-native-runtime-validation-2026-11-05.md`.
+
+| Step | Result | Notes |
+| --- | --- | --- |
+| Build/package | PASS | Node 20 x64 build and unsigned x64 NSIS package completed |
+| Install | PASS | Exact approved initial package installed per user |
+| First launch | PASS | Visible fullscreen forest pairing surface; strict API/TLS succeeded |
+| Runtime paths | PASS | ProgramData site files plus per-user AppData runtime state |
+| CLI tools | PARTIAL PASS | Installed `doctor`, `pairing-status` and `collect-logs` exit 0 with Windows paths; eight-file support bundle passed the secret scan. Pre-pair/no-content `clear-cache` passed with identity/config/log preservation; paired cached-content removal/redownload remains open. Empty operator-only display inventory is deferred P2. |
+| Pairing | IN PROGRESS | Pending restart passed. Server-authoritative generation 55 expired unconfirmed and generation 56 appeared with a different code while hostname and redacted Device ID stayed stable. Authenticated CMS dashboard/Screens/Pair Device loaded, but the CMS production inspection lock redirected Edge to login before old-code rejection or latest-code approval. No screen was created. |
+| Kiosk `qa` | PARTIAL PASS | Isolated packaged fixture confirmed mode `qa`, one controlled locked window, and F12/Ctrl+Shift+I blocking; physical cursor/mouse/Alt+Tab and playback remain open. Production mode and the same pending Device ID were restored. |
+| Kiosk `production` | PARTIAL PASS | Fullscreen, registered Start Menu/single-instance behavior, exact program launch from a path containing spaces, and F12/Ctrl+Shift+I/Alt+F4/Ctrl+R blocking passed. Right-click input was not proven because the automation action failed; Windows-key injection is prohibited; physical cursor/mouse/Alt+Tab checks remain open. |
+| Image playback | NOT RUN |  |
+| Video playback | NOT RUN |  |
+| PDF playback | NOT RUN |  |
+| Retired webpage handling | NOT RUN |  |
+| Screenshot capture | NOT RUN |  |
+| Log collection | NOT RUN |  |
+| Autostart | PARTIAL PASS | Exactly one current-user Run/startup command targets the hash-verified installed executable. Actual sign-out/sign-in and reboot require immediate approval. |
+| Upgrade | BLOCKED | No older approved package is available |
+| Uninstall | NOT RUN | Current-user uninstall registration and unsigned uninstaller hash are verified; actual uninstall/reinstall is reserved for end-of-run lifecycle validation and requires action-time approval. |
+
+Observed failure journeys:
+
+- Missing ProgramData config: **PASS**, controlled setup-required screen.
+- Malformed selected config: **FAIL (P1)** in the initial package; **PASS** after approved rebuilt installation of SHA-256 `fbaaa365…ca0b`.
+- Automated Windows gate: **PARTIAL PASS**. Frozen pnpm install, build, lint, Windows-safe test discovery, and integration (6/6) pass. The final standard-user unit suite records 529 passing, 9 intentionally pending, and 5 failing; every failure stops at Windows symlink-creation privilege before exercising its assertion, while the former suite-order case passes in the full run.
+- Native Administrator gate: the five symlink-hardening cases pass 5/5 after correcting two POSIX mode-bit expectations that are not meaningful on Windows. The Docker run remains supplemental.
+- Additional gates: fault injection 22/22, performance 8/8, and the renderer browser regression 1/1 pass. A reproduced portrait emergency overflow and Windows browser-profile cleanup race were fixed before the current package was built.
+- Installed operator tools: `doctor`, `pairing-status` and `collect-logs` exit 0. The temporary eight-file bundle contained no private-key marker, JWT, credentialed URL, bearer value, cookie/password/token assignment, full GUID or secret-bearing filename. The live AppData log also contained no fatal/error entry, Linux-only runtime failure marker or scanned secret shape. Pre-pair/no-content `clear-cache` removed/recreated only the empty media target while preserving the Device ID, config, logs and absent request/PoP queues; paired cache removal/redownload remains open. Doctor's empty operator-only display inventory is deferred P2 diagnostics debt.
+- Start Menu, spaced-path and production input policy: registered app launch preserved exactly one coherent player window; a complete hash-matched temporary program copy launched visibly from a path containing spaces and the installed player was restored after cleanup; F12 and Ctrl+Shift+I opened no DevTools. Windows-key injection is safety-blocked, and physical mouse/cursor/Alt+Tab behavior remains open.
+- QA runtime policy: an isolated packaged fixture was confirmed as mode `qa` by installed doctor, presented one controlled recovery window, and blocked F12/Ctrl+Shift+I without opening DevTools. Its generated runtime was secret-scanned and removed before restoring production mode and the same pending Device ID.
+- Additional production input: Alt+F4 and Ctrl+R preserved the same player window and Device ID. An accessibility-targeted right-click returned an unknown action outcome, so mouse/context-menu blocking remains unproven rather than passed.
+- Lifecycle registration: one exact current-user Run/startup command targets the installed player, and one current-user uninstall record targets the unsigned hash-recorded uninstaller. Sign-in/reboot and actual repair/uninstall/reinstall remain approval-gated.
+- Pre-uninstall baseline: captured installed-program, per-user runtime and ProgramData file counts/bytes plus ProgramData hashes without reading or hashing pending-pairing credential content, ready for the later retention comparison.
+- Pre-pair backend outage/recovery: an isolated `WIN-QA-20261105-` fixture used the same QA host on a deliberately closed port with strict TLS retained. One controlled `Fresh Pairing Required` window persisted across bounded retry, no isolated identity was issued, and normal relaunch restored the same ordinary Device ID and pairing state.
+- CMS browser entry: **PARTIAL PASS / BLOCKED AT SUBMISSION** after explicit approval of the exact Current User Root import. Matching trust count is one for Current User and zero for Local Machine. Direct user sign-in reached the real dashboard, zero-screen Screens page and Pair Device dialog. Before any form submission, the tab redirected to login and raised the false-positive `devtools viewport heuristic` production lock. The lock was not bypassed and no screen was created. The P1 baseline-delta fix passes 4/4 focused tests, the full 291/291 CMS unit suite, full lint with zero errors and the exact production-lock CMS build/bundle gate locally. A Docker-served native Edge smoke with the same browser banner remained unlocked; the helper could not deliver a verifiable F12 reinjection, so that is not claimed. CMS-only deployment is authorized, but `192.168.29.64:22` refuses connections and no alternate SSH port/key is available; reachable deployment transport remains required.
+
 Use this minimal record for each execution:
 
 | Step | Result | Notes |
