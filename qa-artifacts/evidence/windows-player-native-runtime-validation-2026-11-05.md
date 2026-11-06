@@ -281,6 +281,8 @@ local Docker config while the visible player remained available.
 | `collect-logs` | exit 0; eight files, 565,868 bytes, zero reparse points and no unsafe filenames | PASS |
 | required bundle secret scan | zero private-key or certificate PEM markers, JWTs, credentialed URLs, bearer values, cookie assignments or password/token assignments | PASS |
 | operational identifier review | the sanitized player log contained 126 UUID-shaped values, including 40 occurrences of the current device ID; safe field labels included device, item, media, publish, schedule and snapshot identifiers | DEGRADED BUT ACCEPTABLE / P2 |
+| paired `clear-cache` removal | pre-state 4 files / 308,607 bytes; command exit 0; media cache became 0 files / 0 bytes while device identity, all three certificate hashes, logs, request queue, proof-of-play spool and screenshots were preserved; command output contained zero private-key markers, JWT shapes or full UUIDs | PASS |
+| online redownload after restart | QA kiosk policy reproducibly blocked Alt+F4 as intended; the five verified exact-path processes were terminated, then the installed executable was relaunched with the same isolated runtime. It reused pairing without an OTP, reported ONLINE / DEFAULT MEDIA, and restored 4 files / 308,607 bytes. A post-restart `pairing-status` exited 0 with paired-local true, valid current identity, matching last-validated device, certificate/private-key files present and zero private-key/JWT shapes in captured output. | PASS |
 
 The repository evidence policy requires full device identifiers to be redacted
 before sharing. The bundle was therefore treated as internal-only and deleted
@@ -294,6 +296,6 @@ the documented manual review gate worked as intended.
 
 1. Fresh approval is required before installing the rebuilt P1 candidate and repeating the exact outage/recovery journey.
 2. Direct user login in the real local CMS browser is still required for visible tab-by-tab CMS verification and the two-session convergence journey; credentials will not be automated.
-3. Large/missing/corrupt image/video/PDF, audio/mute/loop-off, restart-during-video/PDF, missing emergency media, group/site default priority, operator clear-cache after paired content, deletion/re-pairing and the final integrated regression remain open.
+3. Large/missing/corrupt image/video/PDF, audio/mute/loop-off, restart-during-video/PDF, missing emergency media, group/site default priority, deletion/re-pairing and the final integrated regression remain open.
 4. Sign-out, reboot, repair/reinstall and uninstall/reinstall remain approval-gated. True upgrade remains blocked unless an older approved package is supplied.
 5. Remote Ubuntu deployment and production TLS remain **NOT VERIFIED** non-blocking follow-ups.
