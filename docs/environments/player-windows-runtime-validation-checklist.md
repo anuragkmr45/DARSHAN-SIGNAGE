@@ -257,6 +257,7 @@ TLS remain **NOT VERIFIED** and are non-blocking follow-ups.
 | Conflict behavior | PASS | Overlapping dedicated publish returned HTTP 409 with `SCREEN_TIME_WINDOW_CONFLICT`; no forced conflicting publication. |
 | Offline/recovery | FAIL → FIX PENDING INSTALL | Cached default and pairing survived a >5-minute CMS-gateway outage; CMS changed to STALE and recovered automatically with queued work flushed. The installed player badge remained `ONLINE`, confirmed P1. Source fix/tests/build/package pass; rebuilt installer awaits explicit approval and real recheck. |
 | Targeted emergency | PASS | Screen-only CRITICAL takeover was visible; Now Playing and screenshot evidence matched; restart retained takeover; clear while disconnected reconciled to default after reconnect without stale replay. |
+| Paired CLI tools | PASS / P2 DEFERRED | Installed `doctor`, `pairing-status` and `collect-logs` exited 0 and confirmed QA/win32, backend reachability, paired identity, matching validation and certificate/key presence. Required secret scan passed. The sanitized log retained full operational UUIDs, including the device ID, so the bundle was treated as internal-only and deleted after review. |
 | Rebuilt P1 installer | APPROVAL REQUIRED | Unsigned `DARSHAN-Player Setup 1.0.0.exe`, 105,359,666 bytes, SHA-256 `5973a8e726fcf210587ae3880d8f81ceb41cbd813ac986406b557c8f2c52dece`. Do not install without fresh explicit approval. |
 
 Use this minimal record for each execution:

@@ -72,6 +72,7 @@ are **NOT VERIFIED** non-blocking follow-ups.
 - Overlapping schedule publication: **PASS**; rejected with `SCREEN_TIME_WINDOW_CONFLICT` and no forced conflicting publication.
 - Bounded CMS-gateway outage and recovery: **PASS** for cached playback, pairing preservation, stale backend health, queue flush and automatic heartbeat recovery. The installed player incorrectly kept its visible `ONLINE` badge during the outage: **FAIL (P1)**.
 - Targeted CRITICAL emergency: **PASS** for visible takeover, CMS/Now Playing correlation, screenshot upload, restart persistence, clear while disconnected, no stale replay after reconnect, and default recovery.
+- Paired installed operator tools: `doctor`, `pairing-status` and `collect-logs` **PASS** for exit status, Windows/QA runtime paths, paired identity/certificate presence and local-backend reachability. The eight-file support bundle contained none of the prohibited secret/certificate material, but its sanitized log retained full operational UUIDs including the current device ID; the bundle is internal-only, was deleted after review, and this is recorded as deferred P2 evidence-redaction debt.
 - P1 visible-backend-state remediation: focused new tests **2/2 pass**; broader affected tests **35 pass** with three unrelated Windows hard-link privilege cases excluded; lint has zero errors and build passes. Rebuilt unsigned NSIS SHA-256 `5973a8e726fcf210587ae3880d8f81ceb41cbd813ac986406b557c8f2c52dece`, 105,359,666 bytes, awaits explicit installation approval and real outage reverification.
 
 ## Recommended Release Gate

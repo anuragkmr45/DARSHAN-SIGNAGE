@@ -268,6 +268,28 @@ the fix.
 | Disconnect and clear | CMS gateway stopped; player retained cached emergency; API cleared the dedicated emergency while disconnected and reported zero active emergencies | PASS |
 | Reconnect reconciliation | gateway restored healthy; player removed the stale takeover, returned to DEFAULT MEDIA, stayed paired, and CMS health returned ONLINE with a 22-second heartbeat age | PASS |
 
+### Paired installed operator tools
+
+The exact installed executable was invoked with the isolated runtime root and
+local Docker config while the visible player remained available.
+
+| Case | Evidence | Result |
+| --- | --- | --- |
+| `doctor` | exit 0; runtime `qa`; platform `win32`; config/cache present; paired identity true; local API reachable | PASS |
+| `pairing-status` | exit 0; paired locally; device ID present; last validated ID matched; certificate and private-key files present; local deployment identity present | PASS |
+| direct CLI output secret scan | zero private-key markers, JWT shapes, credentialed URLs or full UUIDs in the captured doctor/pairing-status output | PASS |
+| `collect-logs` | exit 0; eight files, 565,868 bytes, zero reparse points and no unsafe filenames | PASS |
+| required bundle secret scan | zero private-key or certificate PEM markers, JWTs, credentialed URLs, bearer values, cookie assignments or password/token assignments | PASS |
+| operational identifier review | the sanitized player log contained 126 UUID-shaped values, including 40 occurrences of the current device ID; safe field labels included device, item, media, publish, schedule and snapshot identifiers | DEGRADED BUT ACCEPTABLE / P2 |
+
+The repository evidence policy requires full device identifiers to be redacted
+before sharing. The bundle was therefore treated as internal-only and deleted
+from the Windows temporary directory immediately after review. It is fully
+regenerable with `collect-logs`. No bundle content or raw identifier was added
+to evidence or chat. This is deferred P2 evidence-redaction debt rather than a
+P0/P1 runtime defect because no credential/certificate secret was present and
+the documented manual review gate worked as intended.
+
 ### Remaining approval and coverage gates
 
 1. Fresh approval is required before installing the rebuilt P1 candidate and repeating the exact outage/recovery journey.
