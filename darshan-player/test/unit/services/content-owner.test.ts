@@ -16,6 +16,12 @@ describe('Exclusive renderer content ownership', () => {
     owner.advance('live-fallback')
     expect(owner.accepts(7, epoch)).to.equal(false)
   })
+  it('keeps the epoch stable when the readiness gate reattaches the same renderer', () => {
+    const epoch = owner.advance('ordinary')
+    expect(owner.attach(window)).to.equal(false)
+    expect(owner.getEpoch()).to.equal(epoch)
+    expect(owner.accepts(7, epoch)).to.equal(true)
+  })
   it('mutes and fences all old reports before requesting disposal, requiring exact sender and request ACK', async () => {
     const old = owner.advance('live-fallback')
     const waiting = owner.disposeRenderer(window)

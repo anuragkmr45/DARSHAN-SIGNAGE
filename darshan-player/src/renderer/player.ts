@@ -15,9 +15,11 @@ import {
 } from '../common/types'
 import './types'
 import { DefaultMediaPlayer } from './default-media-player'
+import { shouldSynchronizeDefaultMedia } from './default-media-helpers'
 import { checkMediaCompatibility, CompatResult } from '../common/media-compat'
 import { createPdfPlaybackElement } from './pdf-playback'
 import { DeferredPlaybackGate } from './deferred-playback-gate'
+import { synchronizeCurrentPlayback } from './renderer-playback-handshake'
 import {
   resolveFailedSingleItemRetryPosition,
   resolveScheduledResumePosition,
@@ -161,15 +163,18 @@ class Player {
       this.log('warn', 'Failed to load default media config', { error: error.message })
     })
 
-    this.refreshDefaultMedia('initial').catch((error) => {
-      this.log('warn', 'Initial default media fetch failed', { error: error.message })
-    })
-
     if (window.darshan && window.darshan.onDefaultMediaChanged) {
       window.darshan.onDefaultMediaChanged((data: any) => {
         this.defaultMediaPlayer?.setMedia(data as DefaultMediaResponse)
       })
     }
+
+    // Arm the change stream before asking main for a refresh. A fast startup
+    // refresh can otherwise publish the assigned media before the renderer is
+    // listening and leave the visible fallback on the unassigned standby.
+    this.refreshDefaultMedia('initial').catch((error) => {
+      this.log('warn', 'Initial default media fetch failed', { error: error.message })
+    })
   }
 
   /**
@@ -196,11 +201,18 @@ class Player {
     // Listen for media playback events
     if (window.darshan && window.darshan.onMediaChange) {
       window.darshan.onMediaChange((data: any) => {
-        if (typeof data?.contentEpoch !== 'string' || data.contentEpoch !== this.latestStatus?.contentEpoch) return
+        if (typeof data?.contentEpoch !== 'string' || data.contentEpoch !== this.latestStatus?.contentEpoch) {
+          this.log('warn', 'Ignored playback event outside the current content epoch', {
+            hasEventEpoch: typeof data?.contentEpoch === 'string',
+            hasPresentation: Boolean(this.latestStatus),
+            matchesPresentation: typeof data?.contentEpoch === 'string' && data.contentEpoch === this.latestStatus?.contentEpoch,
+          })
+          return
+        }
         this.log('debug', 'Received play-media event', data)
         if (!this.canRenderScheduledContent()) {
           const currentSource = this.latestStatus ? resolvePlayerContentSource(this.latestStatus) : 'none'
-          if (currentSource !== 'none' && data?.item) {
+          if (data?.item) {
             this.deferredPlayback.defer(
               {
                 item: data.item,
@@ -212,9 +224,11 @@ class Player {
               this.latestPresentationRevision,
             )
           }
-          this.log('debug', 'Ignoring playback event while lifecycle blocks content', {
+          this.log('warn', 'Ignoring playback event while lifecycle blocks content', {
             state: this.latestStatus?.state,
-            deferred: currentSource !== 'none' && Boolean(data?.item),
+            mode: this.latestStatus?.mode,
+            source: currentSource,
+            deferred: Boolean(data?.item),
           })
           return
         }
@@ -265,14 +279,16 @@ class Player {
       window.darshan.onPlayerPresentation((presentation) => this.applyPresentation(presentation))
     }
 
-    if (window.darshan && window.darshan.getPlayerPresentation) {
-      window.darshan
-        .getPlayerPresentation()
-        .then((presentation) => this.applyPresentation(presentation))
-        .catch(() => {
-          // ignore initial status failures
-        })
-    }
+    void synchronizeCurrentPlayback(
+      window.darshan,
+      (presentation) => this.applyPresentation(presentation),
+    ).then((restored) => {
+      this.log(restored ? 'info' : 'warn', 'Initial current playback synchronization completed', { restored })
+    }).catch((error: unknown) => {
+      this.log('warn', 'Initial current playback synchronization failed', {
+        error: error instanceof Error ? error.message : 'Unknown synchronization error',
+      })
+    })
   }
 
   private applyPresentation(presentation: PlayerPresentationSnapshot): void {
@@ -280,6 +296,8 @@ class Player {
       return
     }
 
+    const previousStatus = this.latestStatus
+    const previousSource = previousStatus ? resolvePlayerContentSource(previousStatus) : undefined
     if (this.latestStatus?.contentEpoch !== presentation.status.contentEpoch) {
       this.deferredPlayback.clear()
       this.clearScheduledPlayback('content-epoch-changed')
@@ -287,9 +305,30 @@ class Player {
     }
     this.latestPresentationRevision = presentation.revision
     this.latestStatus = presentation.status
+    this.log('debug', 'Applying player presentation', {
+      revision: presentation.revision,
+      state: presentation.status.state,
+      mode: presentation.status.mode,
+      source: resolvePlayerContentSource(presentation.status),
+      online: presentation.status.online,
+      livePhase: presentation.status.live?.phase,
+      liveFallbackReady: presentation.status.live?.fallbackReady,
+    })
     this.updateStatusOverlay(presentation.status)
     this.updateContentSource(presentation.status)
     const source = resolvePlayerContentSource(presentation.status)
+    if (
+      shouldSynchronizeDefaultMedia(
+        previousSource,
+        source,
+        previousStatus?.online,
+        presentation.status.online
+      )
+    ) {
+      void this.refreshDefaultMedia('presentation-synchronize', false).catch((error) => {
+        this.log('warn', 'Default media presentation synchronization failed', { error: error.message })
+      })
+    }
     const deferred = this.deferredPlayback.resolve(presentation.revision, source)
     if (deferred) {
       this.ignoreFallbackStatusUntil = Date.now() + Player.FALLBACK_STATUS_GUARD_MS
@@ -306,12 +345,12 @@ class Player {
     }
   }
 
-  private async refreshDefaultMedia(reason: string): Promise<void> {
+  private async refreshDefaultMedia(reason: string, refresh = true): Promise<void> {
     if (!window.darshan || !window.darshan.getDefaultMedia) {
       return
     }
 
-    const data = await window.darshan.getDefaultMedia({ refresh: true })
+    const data = await window.darshan.getDefaultMedia({ refresh })
     this.defaultMediaPlayer?.setMedia(data as DefaultMediaResponse)
     this.log('debug', 'Default media refreshed', { reason })
   }

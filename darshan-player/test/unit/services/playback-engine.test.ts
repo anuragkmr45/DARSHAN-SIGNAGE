@@ -116,6 +116,7 @@ describe('Playback Engine', () => {
     engine.initialize({ webContents: { send } })
     engine.currentPlaylistItemCount = 1
     engine.currentScheduleId = 'schedule-1'
+    engine.currentRenderToken = 'render-token-1'
     engine.currentItem = {
       id: 'only-video',
       type: 'video',
@@ -129,6 +130,7 @@ describe('Playback Engine', () => {
     expect(engine.restoreCurrentItemInRenderer()).to.equal(true)
     expect(send.calledWith('media-change', sinon.match({
       scheduleId: 'schedule-1',
+      renderToken: 'render-token-1',
       restored: true,
       singleItemFrame: true,
     }))).to.equal(true)

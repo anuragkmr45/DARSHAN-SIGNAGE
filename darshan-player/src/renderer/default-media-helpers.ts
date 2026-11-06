@@ -1,5 +1,21 @@
 import type { DefaultMediaItem } from '../common/types'
 
+export function shouldSynchronizeDefaultMedia(
+  previousSource: 'schedule' | 'default' | 'none' | undefined,
+  currentSource: 'schedule' | 'default' | 'none',
+  previousOnline: boolean | undefined,
+  currentOnline: boolean | undefined
+): boolean {
+  if (currentSource !== 'default') {
+    return false
+  }
+
+  return (
+    previousSource !== 'default' ||
+    (previousOnline === false && currentOnline === true)
+  )
+}
+
 export function resolveDefaultMediaSource(media: DefaultMediaItem): string | undefined {
   if (media.type === 'WEBPAGE') return undefined
   return media.local_url || media.fallback_media_url || media.media_url

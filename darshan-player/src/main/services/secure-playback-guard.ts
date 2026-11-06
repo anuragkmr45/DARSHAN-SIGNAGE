@@ -83,10 +83,9 @@ export class SecurePlaybackGuard extends EventEmitter {
   }
 
   markBackendFailure(source: string, error?: unknown): void {
-    if (!this.evaluateRaw().enabled) {
-      return
-    }
-
+    // Availability is useful to the player UI even when the secure offline
+    // playback policy is disabled. Keep recording the outage boundary while
+    // leaving the standard policy unlocked so cached content can continue.
     if (!this.firstBackendFailureAtMs) {
       this.firstBackendFailureAtMs = this.now()
     }

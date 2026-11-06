@@ -30,11 +30,13 @@ export class DefaultMediaPlayer {
   private retryAttempt = 0
   private debugEnabled = false
   private onRefreshRequested?: (reason: string) => void
+  private onLog?: DefaultMediaPlayerOptions['onLog']
   private lastMediaKey?: string
 
   constructor(container: HTMLElement, options: DefaultMediaPlayerOptions = {}) {
     this.container = container
     this.onRefreshRequested = options.onRefreshRequested
+    this.onLog = options.onLog
     this.debugEnabled = options.debugOverlay === true
 
     this.content = document.createElement('div')
@@ -161,6 +163,9 @@ export class DefaultMediaPlayer {
     }
 
     img.onerror = () => {
+      if (img.parentElement !== this.content) {
+        return
+      }
       this.handlePlaybackError('image-error')
     }
 
@@ -188,6 +193,9 @@ export class DefaultMediaPlayer {
     }
 
     video.onerror = () => {
+      if (video.parentElement !== this.content) {
+        return
+      }
       this.handlePlaybackError('video-error')
     }
 
@@ -199,7 +207,16 @@ export class DefaultMediaPlayer {
       const source = resolveDefaultMediaSource(media)
       const pdf = createPdfPlaybackElement(source)
       pdf.addEventListener('darshan-pdf-rendered', () => this.markHealthy(), { once: true })
-      pdf.addEventListener('darshan-pdf-error', () => this.handlePlaybackError('pdf-error'), { once: true })
+      pdf.addEventListener(
+        'darshan-pdf-error',
+        () => {
+          if (pdf.parentElement !== this.content) {
+            return
+          }
+          this.handlePlaybackError('pdf-error')
+        },
+        { once: true }
+      )
       return pdf
     }
 
@@ -239,14 +256,7 @@ export class DefaultMediaPlayer {
 
   private renderIdle(): void {
     if (this.current.media_id || (this.current.source && this.current.source !== 'NONE')) {
-      const unavailable = document.createElement('div')
-      unavailable.className = 'darshan-default-unavailable'
-      const title = document.createElement('h1')
-      title.textContent = 'Content unavailable'
-      const guidance = document.createElement('p')
-      guidance.textContent = 'The assigned default content could not be loaded. Contact your DARSHAN administrator.'
-      unavailable.append(title, guidance)
-      this.content.appendChild(unavailable)
+      this.content.appendChild(this.createUnavailableElement())
       this.hideStatus()
       return
     }
@@ -313,8 +323,29 @@ export class DefaultMediaPlayer {
   }
 
   private handlePlaybackError(reason: string): void {
+    this.onLog?.('warn', 'Default media renderer playback failed', {
+      reason,
+      assigned: Boolean(this.current.media_id || (this.current.source && this.current.source !== 'NONE')),
+      hasMedia: Boolean(this.current.media),
+    })
+    this.clearContent()
+    this.content.appendChild(this.createUnavailableElement())
     this.showStatus('Reconnecting...')
     this.scheduleRefresh(reason)
+  }
+
+  private createUnavailableElement(): HTMLElement {
+    const unavailable = document.createElement('div')
+    unavailable.className = 'darshan-default-unavailable'
+
+    const title = document.createElement('h1')
+    title.textContent = 'Content unavailable'
+
+    const guidance = document.createElement('p')
+    guidance.textContent = 'The assigned default content could not be loaded. Contact your DARSHAN administrator.'
+
+    unavailable.append(title, guidance)
+    return unavailable
   }
 
   private scheduleRefresh(reason: string): void {

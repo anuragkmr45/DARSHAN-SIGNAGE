@@ -728,6 +728,14 @@ function setupIPCHandlers(): void {
     return getPlayerFlow().getPresentationSnapshot()
   })
 
+  ipcMain.handle('restore-current-playback', (event: Electron.IpcMainInvokeEvent) => {
+    const window = mainWindow
+    if (!window || window.isDestroyed() || event.sender.id !== window.webContents.id) {
+      return false
+    }
+    return getPlaybackEngine().restoreCurrentItemInRenderer()
+  })
+
   ipcMain.handle('default-media:get', async (_event: any, options?: { refresh?: boolean }) => {
     const { getDefaultMediaService } = await import('./services/settings/default-media-service.js')
     return await getDefaultMediaService().getDefaultMedia(options)

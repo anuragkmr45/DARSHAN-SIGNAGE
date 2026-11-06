@@ -148,11 +148,13 @@ export class PlayerFlow extends EventEmitter {
 
   /** Rebind long-lived services after the renderer window is recreated. */
   attachWindow(mainWindow: BrowserWindow): void {
-    this.liveCoordinator?.suspend('RENDERER_REATTACHED')
     this.mainWindow = mainWindow
     this.rendererDisposalFailed = false
-    getContentOwner().attach(mainWindow)
-    getContentOwner().advance(['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(this.state) ? 'ordinary' : 'blocked')
+    const rendererChanged = getContentOwner().attach(mainWindow)
+    if (rendererChanged) {
+      this.liveCoordinator?.suspend('RENDERER_REATTACHED')
+      getContentOwner().advance(['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(this.state) ? 'ordinary' : 'blocked')
+    }
     this.initializeLivePlayback()
 
     const playbackEngine = getPlaybackEngine()
@@ -162,9 +164,10 @@ export class PlayerFlow extends EventEmitter {
     mainWindow.webContents.setAudioMuted(false)
     this.updateStatus({})
 
-    // `loadFile()` has completed before reattachment, so renderer listeners
-    // are registered. Restore the in-flight timeline item immediately rather
-    // than showing a blank/default surface until the next scheduler boundary.
+    // Best-effort restoration for an already-ready reattachment. A newly
+    // loaded renderer also requests the current item after it applies the
+    // lifecycle presentation, because `loadFile()` can resolve before its
+    // media listener has registered.
     if (
       this.playbackReady &&
       ['PAIRED_RUNTIME', 'OFFLINE_USING_LAST_VALID_PAIRING', 'SOFT_RECOVERY'].includes(this.status.state)
@@ -285,17 +288,18 @@ export class PlayerFlow extends EventEmitter {
   reportLiveReceiver(senderId: number, value: unknown): boolean { return this.liveView?.report(senderId, value) ?? false }
   /** Call synchronously before window/display/power lifecycle changes. */
   interruptLive(reason: string): void {
-    this.fallbackRevision += 1
-    this.liveCoordinator?.suspend(reason)
-    if (this.liveCoordinator?.isOwningContent()) {
-      if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.mainWindow.webContents.isDestroyed()) {
-        this.mainWindow.webContents.setAudioMuted(true)
-      }
-      getContentOwner().advance('blocked')
-      getPlaybackEngine().stop()
-      this.playbackReady = false
-      this.updateStatus({ currentMediaId: undefined })
+    if (!this.liveCoordinator?.isOwningContent()) {
+      return
     }
+    this.fallbackRevision += 1
+    this.liveCoordinator.suspend(reason)
+    if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.mainWindow.webContents.isDestroyed()) {
+      this.mainWindow.webContents.setAudioMuted(true)
+    }
+    getContentOwner().advance('blocked')
+    getPlaybackEngine().stop()
+    this.playbackReady = false
+    this.updateStatus({ currentMediaId: undefined })
   }
   resumeLive(): void { this.refreshPlaybackStatusFromCurrentState(); this.liveCoordinator?.wake() }
   /** Called before HTTP/WS clients switch endpoints or trust configuration. */
@@ -772,6 +776,19 @@ export class PlayerFlow extends EventEmitter {
     }
 
     this.securePlaybackLockActive = false
+
+    // A standard-policy player is allowed to keep cached playback running,
+    // but it must not advertise live backend connectivity after a fully
+    // failed heartbeat/request cycle. The guard also tracks availability when
+    // locking is disabled, and clears this timestamp on authenticated success.
+    if (status.firstBackendFailureAt) {
+      this.updateStatus({
+        online: false,
+        backendAvailable: false,
+        securityLock: this.toPlayerSecurityLockStatus(status),
+      })
+      return
+    }
 
     this.updateStatus({
       securityLock: this.toPlayerSecurityLockStatus(status),

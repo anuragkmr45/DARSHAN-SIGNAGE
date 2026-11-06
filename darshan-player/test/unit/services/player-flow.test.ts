@@ -301,6 +301,47 @@ describe('Player Flow', () => {
     await playerFlow.stop()
   })
 
+  it('shows backend offline during a standard-policy outage while keeping cached playback eligible', async () => {
+    const { getPlayerFlow } = require('../../../src/main/services/player-flow')
+    const { getDeviceStateStore } = require('../../../src/main/services/device-state-store')
+    const { getPairingService } = require('../../../src/main/services/pairing-service')
+    const { getSecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
+
+    await getDeviceStateStore().clearIdentity()
+    await getDeviceStateStore().update({
+      deviceId: '11111111-1111-4111-8111-111111111111',
+      fingerprint: 'fingerprint-1',
+    })
+    const pairingService = getPairingService()
+    sandbox.stub(pairingService, 'getStoredIdentityHealth').returns({ health: 'complete', issues: [] })
+    sandbox.stub(pairingService, 'hasTrustworthyDeviceId').returns(true)
+    sandbox.stub(pairingService, 'fetchScreenshotPolicy').resolves({ enabled: false, interval_seconds: null })
+    const stubs = createCompleteBootstrapStubs()
+    sandbox.stub(stubs.snapshotManager, 'getCurrentPlaylist').returns({
+      mode: 'normal',
+      items: [],
+      scheduleId: 'sched-1',
+    })
+
+    const playerFlow = getPlayerFlow()
+    await playerFlow.start()
+    expect(playerFlow.getStatus().online).to.equal(true)
+
+    const guard = getSecurePlaybackGuard()
+    guard.markBackendFailure('unit-network-outage', new Error('network unavailable'))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(guard.getStatus().locked).to.equal(false)
+    expect(playerFlow.getStatus().online).to.equal(false)
+    expect(playerFlow.getStatus().backendAvailable).to.equal(false)
+
+    guard.markBackendSuccess('unit-network-recovery')
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(playerFlow.getStatus().online).to.equal(true)
+    expect(playerFlow.getStatus().backendAvailable).to.equal(true)
+    await playerFlow.stop()
+  })
+
   it('keeps a locked player stopped until identity and fresh authority are validated', async () => {
     const configured = JSON.parse(fs.readFileSync(process.env.HEXMON_CONFIG_PATH, 'utf8'))
     configured.security = {

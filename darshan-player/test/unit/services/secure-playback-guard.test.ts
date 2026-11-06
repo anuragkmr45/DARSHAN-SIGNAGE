@@ -25,17 +25,25 @@ describe('secure playback guard', () => {
     }
   })
 
-  it('does not lock playback when secure mode is disabled', () => {
+  it('tracks backend availability without locking playback when secure mode is disabled', () => {
     const { SecurePlaybackGuard } = require('../../../src/main/services/secure-playback-guard')
     const guard = new SecurePlaybackGuard({
       now: () => Date.parse('2026-06-19T10:00:00.000Z'),
       configProvider: () => makeConfig({ offlinePlaybackPolicy: 'standard' }),
     })
 
+    const changes = []
+    guard.on('changed', (status) => changes.push(status))
+
     guard.markBackendFailure('unit')
 
     expect(guard.getStatus().enabled).to.equal(false)
     expect(guard.getStatus().locked).to.equal(false)
+    expect(guard.getStatus().firstBackendFailureAt).to.equal('2026-06-19T10:00:00.000Z')
+    expect(changes.some((status) => Boolean(status.firstBackendFailureAt))).to.equal(true)
+
+    guard.markBackendSuccess('unit-recovery')
+    expect(guard.getStatus().firstBackendFailureAt).to.equal(undefined)
   })
 
   it('locks when the authenticated lease expires and unlocks on backend success', () => {

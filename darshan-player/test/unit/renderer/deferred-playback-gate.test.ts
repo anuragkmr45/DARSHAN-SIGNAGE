@@ -31,4 +31,13 @@ describe('DeferredPlaybackGate', () => {
     gate.clear()
     expect(gate.resolve(4, 'schedule')).to.equal(undefined)
   })
+
+  it('holds a boot-time item until a newer authoritative schedule revision', () => {
+    const gate = new DeferredPlaybackGate()
+    const item = { id: 'startup-video' }
+
+    gate.defer(item, 20)
+    expect(gate.resolve(20, 'none')).to.equal(undefined)
+    expect(gate.resolve(21, 'schedule')).to.equal(item)
+  })
 })

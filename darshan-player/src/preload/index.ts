@@ -48,6 +48,7 @@ export interface DarshanAPI {
   getHealth: () => Promise<HealthStatus>
   getPlayerStatus: () => Promise<unknown>
   getPlayerPresentation: () => Promise<PlayerPresentationSnapshot>
+  restoreCurrentPlayback: () => Promise<boolean>
 
   // Default media
   getDefaultMedia: (options?: { refresh?: boolean }) => Promise<DefaultMediaResponse>
@@ -165,6 +166,10 @@ const darshanApi: DarshanAPI = {
 
   getPlayerPresentation: async (): Promise<PlayerPresentationSnapshot> => {
     return await ipcRenderer.invoke('get-player-presentation')
+  },
+
+  restoreCurrentPlayback: async (): Promise<boolean> => {
+    return await ipcRenderer.invoke('restore-current-playback')
   },
 
   // Default media

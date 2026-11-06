@@ -12,10 +12,11 @@ export class ContentOwner extends EventEmitter {
   private pending?: { request: RendererDisposal; senderId: number; resolve: (accepted: boolean) => void; timer: NodeJS.Timeout }
   getEpoch(): string { return this.epoch }
   getOwner(): RendererContentOwner { return this.owner }
-  attach(window: BrowserWindow): void {
-    if (this.senderId === window.webContents.id) return
+  attach(window: BrowserWindow): boolean {
+    if (this.senderId === window.webContents.id) return false
     this.senderId = window.webContents.id
     this.advance('blocked')
+    return true
   }
   advance(owner: RendererContentOwner): string {
     const old = this.epoch

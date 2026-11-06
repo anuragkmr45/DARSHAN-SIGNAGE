@@ -47,6 +47,21 @@ describe('Ordinary PlayerFlow LIVE integration fences', () => {
     expect(flow.getStatus().contentUnavailableReason).to.equal('EMERGENCY_CONTENT_UNAVAILABLE')
     expect(engine.start.called).to.equal(false)
   })
+  it('does not invalidate the content epoch when startup readiness reattaches the same window', () => {
+    const epoch = owner.getEpoch()
+    const suspend = sandbox.spy(flow.liveCoordinator, 'suspend')
+    flow.attachWindow(window)
+    expect(owner.getEpoch()).to.equal(epoch)
+    expect(suspend.called).to.equal(false)
+    expect(flow.getStatus().mode).to.not.equal('live')
+  })
+  it('does not publish a LIVE suspension for ordinary renderer navigation', () => {
+    const suspend = sandbox.spy(flow.liveCoordinator, 'suspend')
+    flow.handlePlaylistUpdate({ mode: 'normal', items: [{ id: 'ordinary-image', type: 'image' }] })
+    flow.interruptLive('RENDERER_NAVIGATION')
+    expect(suspend.called).to.equal(false)
+    expect(flow.getStatus().mode).to.equal('normal')
+  })
   it('keeps a failed disposal muted, reloads the renderer and does not reveal fallback from old DOM', async () => {
     clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     window.webContents.setAudioMuted.resetHistory()

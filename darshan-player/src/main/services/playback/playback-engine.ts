@@ -494,6 +494,7 @@ export class PlaybackEngine extends EventEmitter {
       contentEpoch: getContentOwner().getEpoch(),
       item: this.currentItem,
       scheduleId: this.currentScheduleId,
+      renderToken: this.currentRenderToken,
       restored: true,
       singleItemFrame: this.currentPlaylistItemCount === 1,
     })
