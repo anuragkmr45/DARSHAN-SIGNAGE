@@ -45,4 +45,23 @@ Production build artifact before official packaging:
 
 ## Deployment status
 
-The operator authorized SSH access and CMS-only deployment. A read-only preflight to `192.168.29.64:22` was actively refused, and no approved local SSH key was present. No remote command, transfer, backup, service change, or deployment occurred. Deployment and the real pairing journey remain pending a reachable SSH endpoint and approved authentication path.
+The operator authorized SSH access and CMS-only deployment. A read-only preflight to `192.168.29.64:22` was actively refused during SSH key exchange, and no approved local SSH key was present. No remote command, transfer, backup, service change, or deployment occurred. Deployment and the real pairing journey remain pending a reachable SSH endpoint and approved authentication path.
+
+## Official CMS-only deployment package
+
+The repository's official clean-tree CMS exporter completed from fix commit `a85ffb6051a9d4018700fc0eb236ee4bfac899db` with production lockdown enabled.
+
+- Release ID: `windows-player-qa-20261105-cms-a85ffb6`
+- Source tree recorded clean: **yes**
+- Build: **PASS**, 2,599 modules and bundle budget pass
+- Container runtime: `nginx:1.27-alpine`
+- Container image digest: `sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10`
+- Package files: 135 including `SHA256SUMS.txt`
+- Package bytes before archive: 26,018,416
+- Generated checksum verification: **PASS** for every manifest-covered package file
+- Archive read verification: **PASS**
+- Archive: `out/windows-player-qa-20261105-cms-a85ffb6/windows-player-qa-20261105-cms-a85ffb6.tar.gz`
+- Archive bytes: 22,247,094
+- Archive SHA-256: `db48f2c85328b7ae39226ea377d2c6cffa47388e951c84a95a3ebc07aea04333`
+
+The dependency install reported 30 total npm advisories. A production-dependency-only audit reported 16 advisories (4 moderate, 12 high, 0 critical). These packages are compiled into the static browser build rather than installed as a Node service on the QA host, but the advisories remain recorded release risk; dependency upgrades are outside this focused viewport-lock fix and were not applied silently.
