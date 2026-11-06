@@ -191,3 +191,87 @@ The issue reproduced twice in Edge at 390×844. The remediated browser regressio
 4. No CMS mutation was submitted and the dashboard remained at zero screens before the lock activated.
 
 The CMS false-lock remediation and its deployment-package provenance are committed separately. This verified player hardening packet is preserved in this scoped commit; integrated QA pairing and post-pairing validation remain pending until the authorized CMS deployment transport is reachable.
+
+## 2026-11-06 authorized local Docker continuation
+
+This section supersedes the earlier Ubuntu/SSH blocker for functional testing.
+The user authorized the isolated Docker target `win-qa-20261105-local` at
+`http://localhost:18444`, deployment/server identity
+`windows-player-qa-20261105-local`, release
+`windows-player-qa-20261105-local-36f2fc3`, and fixture prefix
+`WIN-QA-20261105-LOCAL-`. Remote Ubuntu deployment and production TLS are
+**NOT VERIFIED** non-blocking follow-up items; this run does not claim either.
+
+### Pairing, CMS, content and delivery
+
+- The isolated installed-player runtime renewed its OTP without changing device identity. The old OTP was rejected and the latest OTP was approved.
+- Exactly one dedicated screen was created. Relaunch reused the signed device credentials and pairing state without requesting another OTP.
+- Four READY media fixtures were created: landscape image, portrait image, looping MP4 and a five-page PDF. A five-item presentation selected PDF pages 1 and 2.
+- A short screen-targeted schedule delivered successfully, played visibly, produced 25 completed proof-of-play rows covering all four media names, and returned to the screen-specific default afterward.
+- Screenshot capture completed on Windows. The latest command had no error; Now Playing and Snapshot previews both exposed an uploaded screenshot URL and capture time.
+- Safe correlation fingerprints: screen `dca3ae1d9143`, original presentation `879d3797df21`, original schedule `66922ea347af`, original publish `032c498bca90`, original snapshot `c2449a5a9488`.
+
+### Future, group and conflict journeys
+
+| Case | Evidence | Result |
+| --- | --- | --- |
+| Dedicated group | fingerprint `7346a51cd5e4`; exactly one member | PASS |
+| Future group schedule | schedule fingerprint `ff4ff6cb1431`; publish fingerprint `67e4ecde9e05`; one resolved screen; all publish targets `SUCCESS` | PASS |
+| Future state | group availability returned zero current items and one upcoming item about 119 minutes before start; player remained on default content | PASS |
+| Conflict | schedule fingerprint `a5a9149f99ec`; publish returned HTTP 409 and `SCREEN_TIME_WINDOW_CONFLICT` | PASS |
+
+### Bounded offline/recovery journey and confirmed P1
+
+Only the isolated `win-qa-20261105-local-cms` gateway was stopped; API,
+worker, PostgreSQL, MinIO and Valkey remained available internally. No Windows
+firewall or OS security setting changed.
+
+- Cached default content stayed visible and pairing was retained.
+- Backend calls and heartbeats failed safely with bounded retries; the queued heartbeat was retained.
+- CMS health changed to STALE after the documented five-minute threshold (observed heartbeat age 334 seconds), then returned ONLINE automatically after gateway restoration.
+- Queued work flushed after reconnection and current fallback was recalculated without manual reset.
+- The installed packaged player kept displaying `ONLINE` for the full outage despite all backend calls failing and CMS health being STALE. This was reproduced and classified **P1** because the visible connectivity state was materially wrong.
+
+Root cause: standard offline policy returned early from the secure playback
+guard and therefore never propagated backend failure/recovery boundaries to the
+visible player status. The fix keeps cached playback unlocked under standard
+policy but records availability and updates `online`/`backendAvailable` until
+an authenticated success clears the outage.
+
+Verification before reinstall:
+
+- focused new outage/recovery coverage: 2 passing;
+- broader affected secure-guard/player-flow coverage: 35 passing after excluding three unrelated Windows hard-link privilege cases;
+- lint: zero errors (existing warnings only);
+- production build: pass;
+- Windows NSIS packaging: pass.
+
+Fresh rebuilt candidate awaiting explicit installation approval:
+
+- path: `darshan-player/build/DARSHAN-Player Setup 1.0.0.exe`;
+- size: 105,359,666 bytes;
+- SHA-256: `5973a8e726fcf210587ae3880d8f81ceb41cbd813ac986406b557c8f2c52dece`;
+- signing: unsigned QA build.
+
+The earlier installer approval does not cover this binary. It has not been
+installed, and the exact outage/recovery journey has not yet been rerun against
+the fix.
+
+### Targeted emergency and recovery
+
+| Case | Evidence | Result |
+| --- | --- | --- |
+| Trigger scope | emergency fingerprint `691d02015248`; CRITICAL; `target_all=false`; one direct screen and zero groups | PASS |
+| Visible takeover | packaged player replaced default content with the dedicated CRITICAL message; CMS Now Playing matched | PASS |
+| Screenshot | command completed with no error; two preview surfaces had uploaded screenshot URLs and capture time `2026-11-06T06:56:48.896Z` | PASS |
+| Restart active emergency | installed player was closed, relaunched with the same isolated runtime, and immediately restored the same takeover without another OTP | PASS |
+| Disconnect and clear | CMS gateway stopped; player retained cached emergency; API cleared the dedicated emergency while disconnected and reported zero active emergencies | PASS |
+| Reconnect reconciliation | gateway restored healthy; player removed the stale takeover, returned to DEFAULT MEDIA, stayed paired, and CMS health returned ONLINE with a 22-second heartbeat age | PASS |
+
+### Remaining approval and coverage gates
+
+1. Fresh approval is required before installing the rebuilt P1 candidate and repeating the exact outage/recovery journey.
+2. Direct user login in the real local CMS browser is still required for visible tab-by-tab CMS verification and the two-session convergence journey; credentials will not be automated.
+3. Large/missing/corrupt image/video/PDF, audio/mute/loop-off, restart-during-video/PDF, missing emergency media, group/site default priority, operator clear-cache after paired content, deletion/re-pairing and the final integrated regression remain open.
+4. Sign-out, reboot, repair/reinstall and uninstall/reinstall remain approval-gated. True upgrade remains blocked unless an older approved package is supplied.
+5. Remote Ubuntu deployment and production TLS remain **NOT VERIFIED** non-blocking follow-ups.

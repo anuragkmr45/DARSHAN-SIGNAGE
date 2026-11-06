@@ -235,6 +235,30 @@ Observed failure journeys:
 - Pre-pair backend outage/recovery: an isolated `WIN-QA-20261105-` fixture used the same QA host on a deliberately closed port with strict TLS retained. One controlled `Fresh Pairing Required` window persisted across bounded retry, no isolated identity was issued, and normal relaunch restored the same ordinary Device ID and pairing state.
 - CMS browser entry: **PARTIAL PASS / BLOCKED AT SUBMISSION** after explicit approval of the exact Current User Root import. Matching trust count is one for Current User and zero for Local Machine. Direct user sign-in reached the real dashboard, zero-screen Screens page and Pair Device dialog. Before any form submission, the tab redirected to login and raised the false-positive `devtools viewport heuristic` production lock. The lock was not bypassed and no screen was created. The P1 baseline-delta fix passes 4/4 focused tests, the full 291/291 CMS unit suite, full lint with zero errors and the exact production-lock CMS build/bundle gate locally. A Docker-served native Edge smoke with the same browser banner remained unlocked; the helper could not deliver a verifiable F12 reinjection, so that is not claimed. CMS-only deployment is authorized, but port 22 plus seven narrowly scoped common SSH alternatives on `192.168.29.64` are unreachable; no local SSH key or agent is available. The operator must provide/enable the actual endpoint and approved local key path before deployment.
 
+### Authorized local Docker continuation — 2026-11-06
+
+This continuation uses `win-qa-20261105-local` at
+`http://localhost:18444` with identity
+`windows-player-qa-20261105-local`, release
+`windows-player-qa-20261105-local-36f2fc3`, and only
+`WIN-QA-20261105-LOCAL-` fixtures. It replaces the unavailable Ubuntu target
+for functional validation in this run. Remote Ubuntu deployment and production
+TLS remain **NOT VERIFIED** and are non-blocking follow-ups.
+
+| Step | Result | Notes |
+| --- | --- | --- |
+| Pairing | PASS | Old OTP rejected; renewed OTP retained the device identity; latest approval produced exactly one Windows screen; relaunch reused signed credentials without a new OTP. |
+| CMS screen/telemetry | PASS (API), UI OPEN | Screen is ACTIVE/ONLINE with fresh heartbeats, Windows OS identity and intact pairing. Real CMS browser tab inspection and two-session convergence still require direct user login. |
+| Image/video/PDF playback | PASS (CORE JOURNEY) | Landscape and portrait images, looping MP4 and selected pages 1–2 of a five-page PDF were published and recorded in completed proof-of-play. Remaining large/invalid/audio/loop-off/restart-during-media cases are open. |
+| Default/schedule fallback | PASS | Default media displayed with no active schedule, a short schedule replaced it, and default returned after schedule end. |
+| Publish/delivery/PoP | PASS | Dedicated schedule resolved one screen; delivery succeeded; 25 completed proof rows contained all four dedicated media names. |
+| Screenshot capture | PASS | Windows screenshot commands completed and two CMS preview surfaces exposed a current uploaded screenshot URL and capture timestamp. |
+| Future/group schedule | PASS | One-screen dedicated group, one resolved screen, successful delivery targets, one upcoming item, zero current items and no early playback. |
+| Conflict behavior | PASS | Overlapping dedicated publish returned HTTP 409 with `SCREEN_TIME_WINDOW_CONFLICT`; no forced conflicting publication. |
+| Offline/recovery | FAIL → FIX PENDING INSTALL | Cached default and pairing survived a >5-minute CMS-gateway outage; CMS changed to STALE and recovered automatically with queued work flushed. The installed player badge remained `ONLINE`, confirmed P1. Source fix/tests/build/package pass; rebuilt installer awaits explicit approval and real recheck. |
+| Targeted emergency | PASS | Screen-only CRITICAL takeover was visible; Now Playing and screenshot evidence matched; restart retained takeover; clear while disconnected reconciled to default after reconnect without stale replay. |
+| Rebuilt P1 installer | APPROVAL REQUIRED | Unsigned `DARSHAN-Player Setup 1.0.0.exe`, 105,359,666 bytes, SHA-256 `5973a8e726fcf210587ae3880d8f81ceb41cbd813ac986406b557c8f2c52dece`. Do not install without fresh explicit approval. |
+
 Use this minimal record for each execution:
 
 | Step | Result | Notes |

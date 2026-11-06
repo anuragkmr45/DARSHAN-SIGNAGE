@@ -56,6 +56,24 @@ The focused native run is recorded in `qa-artifacts/evidence/windows-player-nati
 - Real CMS browser entry: **partial pass after approved scoped trust import**. The verified QA CA exists once in Current User Root and zero times in Local Machine Root. Direct user sign-in in native Edge reached the authenticated dashboard and Screens page with zero visible screens, and the Pair Device dialog opened. Before any submission, the CMS redirected the tab to login and raised a false-positive `devtools viewport heuristic` production lock; the lock was not bypassed. The P1 baseline-delta remediation passes 4/4 focused tests, the full 291/291 CMS unit suite, full lint with zero errors and the exact production-lock build/bundle gate locally. A Docker-served native Edge smoke with the same startup banner remained unlocked; native F12 reinjection was tool-blocked and is not claimed. Authorized QA packaging/deployment and real-browser reverification remain required.
 - CMS pairing and all post-pairing playback/evidence journeys: **blocked at CMS submission**. Server-authoritative generation 55 expiry, automatic generation 56 issuance, changed code, stable hostname and stable redacted Device ID are verified; old-code rejection and latest-code approval are not.
 
+### Local Docker continuation — 2026-11-06
+
+The user-authorized `win-qa-20261105-local` target supersedes the unavailable
+Ubuntu deployment for this run. Functional CMS/API/player evidence uses
+`http://localhost:18444`, deployment identity
+`windows-player-qa-20261105-local`, release
+`windows-player-qa-20261105-local-36f2fc3`, and only
+`WIN-QA-20261105-LOCAL-` fixtures. Remote Ubuntu deployment and production TLS
+are **NOT VERIFIED** non-blocking follow-ups.
+
+- Pairing, signed credential persistence, one-screen identity, Windows OS and fresh heartbeat telemetry: **PASS**.
+- Default media, scheduled image/portrait/video/PDF playback, delivery acknowledgement, proof-of-play and screenshot command/upload: **PASS**.
+- Future group-targeted publication: **PASS**; one group member resolved to one screen, delivery targets succeeded, the upcoming item was reported and it did not play early.
+- Overlapping schedule publication: **PASS**; rejected with `SCREEN_TIME_WINDOW_CONFLICT` and no forced conflicting publication.
+- Bounded CMS-gateway outage and recovery: **PASS** for cached playback, pairing preservation, stale backend health, queue flush and automatic heartbeat recovery. The installed player incorrectly kept its visible `ONLINE` badge during the outage: **FAIL (P1)**.
+- Targeted CRITICAL emergency: **PASS** for visible takeover, CMS/Now Playing correlation, screenshot upload, restart persistence, clear while disconnected, no stale replay after reconnect, and default recovery.
+- P1 visible-backend-state remediation: focused new tests **2/2 pass**; broader affected tests **35 pass** with three unrelated Windows hard-link privilege cases excluded; lint has zero errors and build passes. Rebuilt unsigned NSIS SHA-256 `5973a8e726fcf210587ae3880d8f81ceb41cbd813ac986406b557c8f2c52dece`, 105,359,666 bytes, awaits explicit installation approval and real outage reverification.
+
 ## Recommended Release Gate
 
 Do not declare Windows fully signed off until these rows are manually executed on a Windows machine and recorded:
