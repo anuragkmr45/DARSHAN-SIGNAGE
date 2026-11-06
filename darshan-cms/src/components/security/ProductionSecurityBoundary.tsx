@@ -4,19 +4,17 @@ import { ShieldAlert, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { disconnectAllRealtimeSockets } from "@/lib/realtimeSockets";
 import { securityApi } from "@/api/domains/security";
+import {
+  isLikelyDevtoolsViewportJump,
+  lowerViewportBaseline,
+  readViewportDelta,
+  type ViewportDelta,
+} from "./productionSecurityViewport";
 
-const DEVTOOLS_THRESHOLD_PX = 160;
 const DEVTOOLS_CHECK_INTERVAL_MS = 1200;
 
 const isProductionLockdownEnabled =
   import.meta.env.PROD && import.meta.env.VITE_ENABLE_PRODUCTION_LOCKDOWN !== "false";
-
-const isLikelyDevtoolsOpen = () => {
-  if (typeof window === "undefined") return false;
-  const widthDelta = Math.abs(window.outerWidth - window.innerWidth);
-  const heightDelta = Math.abs(window.outerHeight - window.innerHeight);
-  return widthDelta > DEVTOOLS_THRESHOLD_PX || heightDelta > DEVTOOLS_THRESHOLD_PX;
-};
 
 const isBlockedShortcut = (event: KeyboardEvent) => {
   const key = event.key.toLowerCase();
@@ -74,6 +72,7 @@ export const ProductionSecurityBoundary = ({
     trigger: "security policy",
   });
   const reportedRef = useRef(false);
+  const viewportBaselineRef = useRef<ViewportDelta | null>(null);
 
   useEffect(() => {
     if (!isProductionLockdownEnabled || lockState.locked) return;
@@ -122,20 +121,32 @@ export const ProductionSecurityBoundary = ({
       handleSecurityTrigger("context menu");
     };
 
+    const inspectViewport = (trigger: string) => {
+      const current = readViewportDelta(window);
+      const baseline = viewportBaselineRef.current;
+      if (!baseline) {
+        viewportBaselineRef.current = current;
+        return;
+      }
+      if (isLikelyDevtoolsViewportJump(baseline, current)) {
+        handleSecurityTrigger(trigger);
+        return;
+      }
+      viewportBaselineRef.current = lowerViewportBaseline(baseline, current);
+    };
+
     const handleResize = () => {
-      if (!isLikelyDevtoolsOpen()) return;
-      handleSecurityTrigger("devtools viewport heuristic");
+      inspectViewport("devtools viewport heuristic");
     };
 
     const intervalId = window.setInterval(() => {
-      if (!isLikelyDevtoolsOpen()) return;
-      handleSecurityTrigger("devtools polling heuristic");
+      inspectViewport("devtools polling heuristic");
     }, DEVTOOLS_CHECK_INTERVAL_MS);
 
     window.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("contextmenu", handleContextMenu, true);
     window.addEventListener("resize", handleResize, true);
-    handleResize();
+    viewportBaselineRef.current = readViewportDelta(window);
 
     return () => {
       window.clearInterval(intervalId);
