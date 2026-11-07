@@ -807,10 +807,27 @@ to evidence or chat. This is deferred P2 evidence-redaction debt rather than a
 P0/P1 runtime defect because no credential/certificate secret was present and
 the documented manual review gate worked as intended.
 
+### Final automated regression rerun
+
+On 2026-11-07, after the final installed PDF and re-pair journeys, the complete
+standard-user unit run reported 552 passing, 9 pending and 7 failing. Six
+failures are the previously characterized Windows host prerequisites: five
+tests require symlink creation privilege and one test requires an `openssl`
+executable on the host. The seventh was the scheduled screenshot-upload case
+timing out only in full-suite order; the exact case passed independently in
+2.3 seconds and confirmed that an upload failure leaves the runtime active.
+This is suite-order timing debt rather than a reproduced player-runtime defect.
+
+The separately executed final gates passed: integration 6/6, performance 8/8,
+fault injection 22/22, production build, and lint with zero errors (377
+pre-existing warnings). The visible packaged player remained ONLINE with `No
+content assigned` after the run. No source or evidence fixture was changed by
+the tests.
+
 ### Remaining approval and coverage gates
 
 1. The final image-layer/recovery-reconciliation package is installed and verified: unsigned SHA-256 `af0a1fd625a6c3e7a7454cc6765017f986e4e7bbbd6bbcc3b8dbc68826ef7845`, 105,360,901 bytes. The exact page-3 journey passed visible playback, delivery, one-slot telemetry, non-black CMS snapshot, default handoff, Completed PoP and a paired installed-process restart. No further installer approval is pending unless source changes create a different package hash or size.
 2. Direct user login to the local CMS completed. The dedicated installed-video request completed authenticated create, approve and publish to only the QA screen; delivery, Now Playing and screenshot evidence pass. The remaining tab-by-tab and two-session convergence checks stay open.
-3. Missing/corrupt image/video runtime fallback, physical audible-output confirmation, missing emergency media, group/site default priority and the final integrated regression remain open. Revocation and fresh re-pair now pass; deletion was correctly refused while an audit-preserved schedule reference exists. Large-image, corrupt/encrypted-PDF ingest, one-page/selected-page PDF, mute/loop-off and loop-on semantics now have evidence above.
+3. Missing/corrupt image/video runtime fallback, physical audible-output confirmation, missing emergency media and group/site default priority remain open. The final automated regression gates are recorded above. Revocation and fresh re-pair pass. The old revoked record remains correctly protected until the retained schedule's 18:00 +05:30 parent window ends; permitted deletion of the new unreferenced online QA record is prepared in the CMS and awaits the required action-time confirmation. Large-image, corrupt/encrypted-PDF ingest, one-page/selected-page PDF, mute/loop-off and loop-on semantics now have evidence above.
 4. Same-package repair and complete uninstall/reinstall now pass on the exact final installer with pairing persistence and one-screen identity preserved. The stale Run entry during the uninstalled interval is deferred P2 cleanup debt. Sign-out/reboot remains authorized but unexecuted; true upgrade remains blocked unless an older approved package is supplied.
 5. Remote Ubuntu deployment and production TLS remain **NOT VERIFIED** non-blocking follow-ups.
