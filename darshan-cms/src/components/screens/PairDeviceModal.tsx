@@ -70,7 +70,7 @@ export function PairDeviceModal({ open, onOpenChange, recoveryScreen = null }: P
       devicePairingApi.confirm(payload),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["device-pairings"] });
-      queryClient.invalidateQueries({ queryKey: queryKeys.screensOverview({ includeMedia: true }) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.screens });
       queryClient.invalidateQueries({ queryKey: ["device-pairing", "recovery", recoveryScreen?.id] });
       const message =
         data?.recovery?.mode === "RECOVERY"

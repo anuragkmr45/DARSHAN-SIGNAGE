@@ -824,6 +824,26 @@ pre-existing warnings). The visible packaged player remained ONLINE with `No
 content assigned` after the run. No source or evidence fixture was changed by
 the tests.
 
+### CMS pairing fleet-summary correction
+
+After the fresh re-pair, the live Screens list showed both the new ONLINE
+record and the old revoked audit-preserved record, but the fleet filters still
+showed the pre-pair `All 1 / Online 0 / Needs recovery 1` counts. Source review
+confirmed a cache invalidation defect: successful pairing refreshed only the
+overview query, while the Screens page reads its counters from the separate
+`screens/summary` query.
+
+The pairing-success path now invalidates the complete Screens query family.
+The focused browser regression proves the summary endpoint is requested again
+after first-time pairing. The full Screens operator suite passes 22/22 against
+the existing Chrome installation, the CMS production build and bundle-budget
+gate pass, and lint reports zero errors (three pre-existing warnings). The
+rebuilt CMS files were deployed to the bind-mounted
+`win-qa-20261105-local-cms` container and that container restarted. A final
+visible counter refresh remains to be recorded because the always-on-top
+player prevented the browser-control safety layer from confidently binding the
+Edge URL; no player or CMS record was mutated during that interrupted check.
+
 ### Remaining approval and coverage gates
 
 1. The final image-layer/recovery-reconciliation package is installed and verified: unsigned SHA-256 `af0a1fd625a6c3e7a7454cc6765017f986e4e7bbbd6bbcc3b8dbc68826ef7845`, 105,360,901 bytes. The exact page-3 journey passed visible playback, delivery, one-slot telemetry, non-black CMS snapshot, default handoff, Completed PoP and a paired installed-process restart. No further installer approval is pending unless source changes create a different package hash or size.

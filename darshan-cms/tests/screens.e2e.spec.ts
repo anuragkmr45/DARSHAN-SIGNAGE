@@ -48,6 +48,7 @@ type MockState = {
   displayProfile?: boolean;
   nowPlayingOverride?: Record<string, unknown>;
   availabilityOverride?: Record<string, unknown>;
+  summaryRequests?: number;
 };
 
 const adminUser = {
@@ -125,6 +126,15 @@ const openScreensPage = async (page: Page) => {
 };
 
 const installApiMocks = async (page: Page, state: MockState) => {
+  await page.addInitScript(() => {
+    window.__DARSHAN_CMS_RUNTIME_CONFIG__ = {
+      cms: {
+        environment: { name: "test", deploymentId: "screens-e2e", cmsId: "cms-test" },
+        api: { baseUrl: window.location.origin },
+        realtime: { socketBaseUrl: window.location.origin, socketTransports: ["websocket"] },
+      },
+    };
+  });
   await page.route("**/grafana/api/health", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -204,6 +214,7 @@ const installApiMocks = async (page: Page, state: MockState) => {
     // The screens workspace uses paginated summary endpoints. Keep these
     // fixtures aligned with the production client.
     if (pathname === "/api/v1/screens/summary" && method === "GET") {
+      if (typeof state.summaryRequests === "number") state.summaryRequests += 1;
       if (state.fleetSummaryUnavailable) {
         return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Unavailable" }) });
       }
@@ -1206,12 +1217,15 @@ test.describe("Screens operator flow", () => {
       confirmModeByCode: {
         PAIR123: "PAIRING",
       },
+      summaryRequests: 0,
     };
 
     await installApiMocks(page, state);
     await login(page);
 
     await openScreensPage(page);
+    await expect.poll(() => state.summaryRequests).toBeGreaterThan(0);
+    const summaryRequestsBeforePairing = state.summaryRequests ?? 0;
     await page.getByRole("button", { name: "Pair Device" }).first().click();
     await expect(page.getByRole("dialog", { name: /Pair Device/i })).toBeVisible();
 
@@ -1221,6 +1235,7 @@ test.describe("Screens operator flow", () => {
     await page.getByRole("button", { name: /Confirm Pairing \/ Recovery/i }).click();
 
     await expect(page.getByRole("dialog", { name: /Pair Device/i })).toBeHidden();
+    await expect.poll(() => state.summaryRequests ?? 0).toBeGreaterThan(summaryRequestsBeforePairing);
   });
 
   test("shows only current OTPs by default and keeps superseded codes in history", async ({ page }) => {
