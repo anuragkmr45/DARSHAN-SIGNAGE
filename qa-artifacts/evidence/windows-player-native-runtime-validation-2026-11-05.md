@@ -890,3 +890,16 @@ online screen suffix `1421` and protected revoked audit screen `4bcc`.
 - Safety decision: safe only for the isolated `win-qa-20261105-local` QA environment when launched with the verified local site profile. Not approved for broader beta QA or production shipment.
 
 WINDOWS_PLAYER_CANDIDATE_BLOCKED
+
+## Final gate continuation — 2026-11-07
+
+- The current-user persistent selector was corrected to the verified nested local site profile at `out/WIN-QA-20261105-local-docker/player-site-config.json`; its CMS and socket endpoints are `http://localhost:18444` and `ws://localhost:18444/socket.io`. The runtime-root selector remains the isolated QA runtime.
+- The installed player remained a single four-process tree. Its log recorded pairing completion, heartbeat startup, snapshot-manager startup and `PAIRED_RUNTIME` against the local Docker CMS. All six local Docker services were running; CMS returned HTTP 200.
+- The focused default-media/player-flow regression passed 52/52. This covers fallback selection and teardown, offline cached default behavior, empty default behavior, mode transitions and emergency-message flow at code/runtime-test level.
+- The focused live-normal lifecycle, approved-asset and cache/corruption group recorded 63 passes. Its three failures were all Windows host symlink-creation `EPERM` prerequisites; the missing/corrupt pin, repair and lifecycle cases themselves passed.
+- A validated Administrator helper was prepared to back up the retired ProgramData profile and install only the verified local profile. Windows UAC consent was triggered but had not been accepted at evidence-write time, so the administrator-owned profile, sign-out and reboot/autostart proof remain open.
+- No claim is made for physical audible output, whole-machine sleep, physical cursor/Alt+Tab, or multi-monitor placement. Only one display is available and those checks require human/physical observation.
+- Two independent authenticated CMS sessions and visible packaged-player journeys for missing/corrupt image/video, missing emergency media, and group-versus-site default priority remain release gates; the passing focused automated coverage does not replace those visible integration proofs.
+- True upgrade still requires an older approved installer. Remote Ubuntu deployment and production TLS remain explicitly **NOT VERIFIED** non-blocking follow-ups for this isolated local run.
+
+The release decision remains blocked pending Administrator consent and the remaining visible/physical gates above; it is not honest to convert the candidate to ship-ready solely from automated coverage.
