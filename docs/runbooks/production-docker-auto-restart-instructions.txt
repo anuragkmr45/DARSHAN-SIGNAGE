@@ -1,0 +1,91 @@
+DARSHAN PRODUCTION DOCKER AUTO-RESTART INSTRUCTIONS
+===================================================
+
+1. MACHINES THAT REQUIRE DOCKER AUTO-START
+
+Enable Docker automatic startup on every active Ubuntu production VM:
+
+- Data VM
+- Media VM, if used
+- Valkey VM
+- Backend/server VM
+- CMS VM
+- Observability VM
+
+Do not automatically start application services on the isolated recovery VM.
+Windows kiosk machines do not need Docker. They run only the installed DARSHAN Player.
+
+The production Compose files already configure application containers with:
+
+  restart: unless-stopped
+
+No application code change is required for normal restart recovery.
+
+
+2. ONE-TIME SETUP ON EACH ACTIVE PRODUCTION VM
+
+Before installing the signed production role .tgz file, run:
+
+  sudo systemctl enable --now docker
+
+Verify the setting:
+
+  systemctl is-enabled docker
+  systemctl is-active docker
+
+Both commands should report a successful state: enabled and active.
+
+
+3. SIGNED .TGZ DEPLOYMENT AND RESTART BEHAVIOR
+
+Deploy the correct signed role .tgz file to its VM by following the source-free
+production bundle deployment runbook. After verification and installation, run
+the role's start command once:
+
+  ./start.sh
+
+After this one-time setup, a normal VM reboot follows this sequence:
+
+1. Ubuntu starts.
+2. Docker Engine starts automatically.
+3. The DARSHAN containers start automatically because they use
+   restart: unless-stopped.
+4. No .env.production update is required.
+
+Important: if an operator deliberately runs the role's stop command, the
+containers remain stopped until ./start.sh is run again.
+
+
+4. WHERE TO UPDATE PRODUCTION CONFIGURATION
+
+Keep production values in the central bundle configuration in the DARSHAN
+repository/build environment. Generate new signed role .tgz files and deploy
+the affected roles from there.
+
+Do not maintain separate hand-edited .env.production values on individual VMs.
+
+Rebuild and redeploy the affected signed role bundles when any of these change:
+
+- VM private IP address
+- Hostname
+- Service port
+- TLS certificate or certificate identity
+- Password or other secret
+- Release configuration
+
+A normal Docker restart, container restart, or VM reboot does not require an
+environment-file update.
+
+
+5. FINAL RESTART CHECK
+
+Run this check on a staging or approved production maintenance window:
+
+1. Confirm all role health checks pass.
+2. Reboot one active VM.
+3. Confirm Docker is active after boot.
+4. Confirm the role containers are running.
+5. Run the role's health-check.sh command.
+6. Confirm the CMS, API, media, and player functions that depend on that role.
+7. Repeat for each active production VM.
+
